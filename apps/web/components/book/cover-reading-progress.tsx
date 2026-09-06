@@ -37,17 +37,17 @@ export function CoverReadingProgress({
       data-resource-progress={!isBookshelf ? 'true' : undefined}
       data-resource-progress-state={!isBookshelf ? (state.finished ? 'finished' : 'reading') : undefined}
       aria-hidden="true"
-      className="pointer-events-none absolute inset-x-2 bottom-1.5 z-10 block h-[2px] rounded-full bg-[#8B837B]/30"
+      className="pointer-events-none absolute inset-x-2 bottom-1.5 z-10 block h-[2px] rounded-full bg-[color:color-mix(in_srgb,var(--visual-color-app-divider-strong)_30%,transparent)]"
     >
       <span
-        className="block h-full rounded-full bg-[#FF4F2A]"
+        className="block h-full rounded-full bg-[var(--visual-color-app-brand-accent)]"
         style={{ width: `${state.value}%` }}
       />
       {state.finished ? (
         <span
           data-bookshelf-progress-complete={isBookshelf ? 'true' : undefined}
           data-resource-progress-complete={!isBookshelf ? 'true' : undefined}
-          className="absolute right-0 top-1/2 flex h-[11px] w-[11px] -translate-y-1/2 items-center justify-center rounded-full bg-[#FF4F2A] text-white"
+          className="absolute right-0 top-1/2 flex h-[11px] w-[11px] -translate-y-1/2 items-center justify-center rounded-full bg-[var(--visual-color-app-brand-accent)] text-white"
         >
           <Check size={7} strokeWidth={3} />
         </span>

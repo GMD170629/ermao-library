@@ -251,9 +251,6 @@ class KtorReaderBootstrapGateway internal constructor(
             require(snapshotSchema == READER_SERVER_SCHEMA_VERSION.toLong())
             progressMapper.decodeSnapshot(snapshot, resource.id)
         }.getOrNull() }
-        if (!exactSourceFormat.acceptsMimeType(primaryAsset.mimeType)) {
-            return ReaderBootstrapResult.Failure("READER_PUBLICATION_ASSET_INVALID", false)
-        }
         val displayTitle = resource.title.ifBlank { book.title }
         val pdfAccess = if (exactSourceFormat == ReaderSourceFormat.Pdf) {
             ReaderPdfAccess(primaryAsset.url, primaryAsset.sizeBytes)
@@ -300,7 +297,9 @@ class KtorReaderBootstrapGateway internal constructor(
                         resourceId = asset.resourceId,
                         title = asset.title.ifBlank { displayTitle },
                         apiPath = asset.url,
-                        mimeType = asset.mimeType.trim().lowercase().substringBefore(';'),
+                        mimeType = asset.mimeType?.trim()?.lowercase()?.substringBefore(';')
+                            ?.takeIf(String::isNotBlank)
+                            ?: "application/octet-stream",
                         sizeBytes = asset.sizeBytes,
                         durationMillis = asset.durationMs,
                         discNumber = asset.discNumber,
@@ -428,7 +427,7 @@ private data class ReaderBootstrapAssetWire(
     val resourceId: String,
     val sourceNodeId: String,
     val role: String,
-    val mimeType: String,
+    val mimeType: String? = null,
     val sizeBytes: Long,
     val durationMs: Long? = null,
     val discNumber: Int? = null,

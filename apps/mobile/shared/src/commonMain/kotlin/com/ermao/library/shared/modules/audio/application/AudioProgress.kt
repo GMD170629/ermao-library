@@ -88,7 +88,12 @@ class AudioProgressWriter(
                 totalProgression = totalProgression,
                 currentHref = locatorHref,
                 chapter = if (chapterId != null || chapterIndex != null || chapterTitle != null) {
-                    ReaderChapterPresentation(href = locatorHref, title = chapterTitle, index = chapterIndex)
+                    ReaderChapterPresentation(
+                        navigationKey = chapterId,
+                        href = locatorHref,
+                        title = chapterTitle,
+                        index = chapterIndex,
+                    )
                 } else {
                     null
                 },

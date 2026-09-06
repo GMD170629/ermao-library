@@ -110,7 +110,7 @@ val syncReaderTestAssets by tasks.registering(Sync::class) {
     }
     from(
         rootProject.layout.projectDirectory.dir(
-            "../../packages/reader-contracts/fixtures/reader-safety-v1",
+            "../../packages/reader-contracts/fixtures/reader-safety-v2",
         ),
     ) {
         into("reader-safety-conformance")
@@ -130,6 +130,7 @@ dependencies {
     implementation(project(":shared"))
     implementation(project(":mobiCore"))
     implementation(project(":archiveCore"))
+    implementation(project(":chapterCore"))
     implementation(project(":pdfiumNative"))
 
     coreLibraryDesugaring(libs.desugar.jdk.libs)

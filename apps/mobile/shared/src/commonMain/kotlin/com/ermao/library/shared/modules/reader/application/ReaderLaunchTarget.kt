@@ -4,11 +4,12 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 
 /** Uses server navigation fields only; a display index or percentage is never a locator. */
-fun readingUnitLaunchTarget(readerType: String, href: String?, pageNumber: Int?): ReaderNavigationTarget {
+fun readingUnitLaunchTarget(readerType: String, href: String?, pageNumber: Int?, navigationKey: String? = null): ReaderNavigationTarget {
     val validHref = href?.takeIf { it.isNotBlank() && it.length <= 8192 }
     val pageIndex = pageNumber?.takeIf { it > 0 }?.minus(1)
     return when (readerType.lowercase()) {
-        "reflowable" -> validHref?.let(ReaderNavigationTarget::Reflowable)
+        "reflowable" -> navigationKey?.takeIf { it.isNotBlank() && it.length <= 256 }
+            ?.let(ReaderNavigationTarget::Chapter)
         "pdf" -> pageIndex?.let(ReaderNavigationTarget::Pdf)
         "comic" -> if (pageIndex != null && validHref != null) ReaderNavigationTarget.Comic(pageIndex, validHref) else null
         else -> null
@@ -25,6 +26,7 @@ fun decodeReaderLaunchTarget(payload: String?): ReaderNavigationTarget? {
     return try {
         val target = Json.decodeFromString(ReaderNavigationTarget.serializer(), payload)
         when (target) {
+            is ReaderNavigationTarget.Chapter -> target.takeIf { it.navigationKey.isNotBlank() && it.navigationKey.length <= 256 }
             is ReaderNavigationTarget.Reflowable -> target.takeIf { it.href.isNotBlank() && it.href.length <= 8192 }
             is ReaderNavigationTarget.Pdf -> target.takeIf { it.pageIndex >= 0 }
             is ReaderNavigationTarget.Comic -> target.takeIf {

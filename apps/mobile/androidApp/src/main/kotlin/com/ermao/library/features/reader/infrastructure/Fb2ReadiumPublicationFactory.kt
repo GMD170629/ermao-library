@@ -59,10 +59,13 @@ internal class Fb2ReadiumPublicationFactory {
         )
     }
 
-    private fun navigationLink(entry: Fb2NavigationEntry): Link = Link(
-        href = requireNotNull(Url(entry.href)),
-        mediaType = MediaType.XHTML,
-        title = entry.title,
-        children = entry.children.map(::navigationLink),
-    )
+    private fun navigationLink(entry: Fb2NavigationEntry): Link {
+        val link = Link(
+            href = requireNotNull(Url(entry.href ?: "#")),
+            mediaType = MediaType.XHTML,
+            title = entry.title,
+            children = entry.children.map(::navigationLink),
+        )
+        return link.addProperties(mapOf("shuku:navigationKey" to entry.navigationKey))
+    }
 }

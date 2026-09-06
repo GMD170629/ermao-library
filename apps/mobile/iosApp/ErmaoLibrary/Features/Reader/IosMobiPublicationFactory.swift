@@ -11,11 +11,10 @@ enum IosMobiPublicationError: Error, Equatable, Sendable {
     case invalidTextEncoding
     case invalidTableOfContents
     case missingReadingOrder
-    case unsupportedMediaType(String)
 }
 
 enum IosMobiPublicationIdentity {
-    static let normalizationIdentifier = "ermao-mobi-core-v1+shuku-locator-dom-v3"
+    static let normalizationIdentifier = "ermao-mobi-core-v1+shuku-locator-dom-v4"
 }
 
 struct IosMobiPublicationResult {
@@ -98,13 +97,13 @@ struct IosMobiPublicationFactory: Sendable {
             guard knownPaths.insert(href).inserted else {
                 throw IosMobiPublicationError.duplicateResourcePath(href)
             }
-            guard MediaType(coreResource.mediaType) != nil else {
-                throw IosMobiPublicationError.unsupportedMediaType(coreResource.mediaType)
-            }
             let descriptor = IosMobiResourceDescriptor(
                 index: index,
                 href: href,
-                mediaType: coreResource.mediaType,
+                mediaType: Self.normalizedMediaType(
+                    category: coreResource.category,
+                    rawMediaType: coreResource.mediaType
+                ),
                 category: coreResource.category,
                 decodedLength: coreResource.decodedLength
             )
@@ -125,6 +124,7 @@ struct IosMobiPublicationFactory: Sendable {
         let lifetime = IosMobiPublicationLifetime(book: book)
         let container = try IosMobiLazyContainer(
             descriptors: descriptors,
+            readingOrderIndices: Set(readingOrderDescriptors.map(\.index)),
             lifetime: lifetime,
             securityAdapter: securityAdapter
         )
@@ -206,9 +206,7 @@ struct IosMobiPublicationFactory: Sendable {
         _ descriptor: IosMobiResourceDescriptor,
         relation: LinkRelation? = nil
     ) throws -> Link {
-        guard let mediaType = MediaType(descriptor.mediaType) else {
-            throw IosMobiPublicationError.unsupportedMediaType(descriptor.mediaType)
-        }
+        let mediaType = MediaType(descriptor.mediaType) ?? MediaType("application/octet-stream")
         return Link(
             href: descriptor.href,
             mediaType: mediaType,
@@ -216,32 +214,24 @@ struct IosMobiPublicationFactory: Sendable {
         )
     }
 
+    private static func normalizedMediaType(
+        category: IosMobiResourceCategory,
+        rawMediaType: String?
+    ) -> String {
+        let base = rawMediaType?
+            .split(separator: ";", maxSplits: 1, omittingEmptySubsequences: true)
+            .first
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            ?? ""
+        if !base.isEmpty, MediaType(base) != nil { return base }
+        return category == .markup ? "text/html" : "application/octet-stream"
+    }
+
     private func makeTableOfContents(
         entries: [IosMobiTocInfo],
         resources: [Int: IosMobiResourceDescriptor]
     ) throws -> [Link] {
-        var childrenByParent: [Int?: [Int]] = [:]
-        for (index, entry) in entries.enumerated() {
-            if let parent = entry.parentIndex {
-                guard parent >= 0, parent < entries.count, parent != index else {
-                    throw IosMobiPublicationError.invalidTableOfContents
-                }
-            }
-            childrenByParent[entry.parentIndex, default: []].append(index)
-        }
-
-        var visiting: Set<Int> = []
-        var visited: Set<Int> = []
-        func makeNode(_ index: Int) throws -> Link {
-            guard visiting.insert(index).inserted else {
-                throw IosMobiPublicationError.invalidTableOfContents
-            }
-            defer {
-                visiting.remove(index)
-                visited.insert(index)
-            }
-            let entry = entries[index]
-            let children = try childrenByParent[index, default: []].map(makeNode)
+        let mobiNodes = try entries.map { entry -> IosChapterCoreMobiNode in
             let targetResource = entry.targetResourceIndex.flatMap { resources[$0] }
             if entry.targetResourceIndex != nil, targetResource == nil {
                 throw IosMobiPublicationError.invalidTableOfContents
@@ -251,24 +241,38 @@ struct IosMobiPublicationFactory: Sendable {
                     path: $0.href,
                     fragment: entry.fragment
                 )
-            } ?? children.first?.href
-            guard let targetHREF else {
-                throw IosMobiPublicationError.invalidTableOfContents
+            }
+            return IosChapterCoreMobiNode(
+                parentIndex: entry.parentIndex,
+                title: entry.title ?? "",
+                href: targetHREF
+            )
+        }
+        let projection = try IosChapterCore.parseMobi(nodes: mobiNodes)
+        let childrenByParent = projection.entries.indices.reduce(into: [Int?: [Int]]()) { result, index in
+            result[projection.entries[index].parentIndex, default: []].append(index)
+        }
+
+        func makeNode(_ index: Int) -> Link {
+            let entry = projection.entries[index]
+            let children = childrenByParent[index, default: []].map(makeNode)
+            let targetHREF = entry.href ?? ""
+            let bareHREF = targetHREF.split(separator: "#", maxSplits: 1).first.map(String.init) ?? targetHREF
+            let normalizedHREF = bareHREF.hasPrefix("./") ? String(bareHREF.dropFirst(2)) : bareHREF
+            let targetResource = targetHREF.isEmpty ? nil : resources.values.first { descriptor in
+                descriptor.href == bareHREF || descriptor.href == normalizedHREF
             }
             return Link(
                 href: targetHREF,
                 mediaType: targetResource.flatMap { MediaType($0.mediaType) }
-                    ?? children.first?.mediaType,
-                title: entry.title?.trimmingCharacters(in: .whitespacesAndNewlines),
+                    ?? MediaType("text/html"),
+                title: entry.title,
+                properties: Properties(["shuku:navigationKey": .string(entry.key)]),
                 children: children
             )
         }
 
-        let roots = try childrenByParent[nil, default: []].map(makeNode)
-        guard visited.count == entries.count else {
-            throw IosMobiPublicationError.invalidTableOfContents
-        }
-        return roots
+        return childrenByParent[nil, default: []].map(makeNode)
     }
 
     private static func isValidSourceIdentity(_ value: String) -> Bool {

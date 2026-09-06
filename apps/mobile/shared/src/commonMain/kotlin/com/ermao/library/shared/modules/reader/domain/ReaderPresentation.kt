@@ -20,6 +20,7 @@ data class ReaderChapterUnit(
     val href: String?,
     val sortOrder: Int,
     val readingOrderPosition: Int? = null,
+    val navigationKey: String? = null,
 ) {
     init {
         require(readingOrderPosition == null || readingOrderPosition >= 1)
@@ -60,44 +61,20 @@ fun resolveReflowableTotalProgressionFromNavigation(
     return ((unitIndex + withinResource) / orderedResourceHrefs.size).coerceIn(0.0, 1.0)
 }
 
-data class ReaderChapterListMetadata(
-    val page: Int = 1,
-    val pageSize: Int,
-    val currentIndex: Int? = null,
-) {
-    init {
-        require(page >= 1 && pageSize >= 1)
-        require(currentIndex == null || currentIndex >= 0)
-    }
-}
-
 fun resolveReaderChapterStates(
     units: List<ReaderChapterUnit>,
-    currentHref: String?,
     currentSortOrder: Int?,
     progressPercent: Double,
-    metadata: ReaderChapterListMetadata = ReaderChapterListMetadata(pageSize = maxOf(1, units.size)),
 ): List<ReaderChapterState> {
     require(progressPercent.isFinite() && progressPercent in 0.0..100.0)
-    if (progressPercent >= 100) return List(units.size) { ReaderChapterState.Read }
-    val normalizedCurrent = currentHref?.let(::normalizeReaderChapterHref)?.takeIf(String::isNotEmpty)
-    val exactMatches = normalizedCurrent?.let { target ->
-        units.indices.filter { index ->
-            units[index].href?.let(::normalizeReaderChapterHref) == target
-        }
-    }.orEmpty()
-    val activeIndex = exactMatches.singleOrNull()
-    val activeSortOrder = activeIndex?.let { units[it].sortOrder } ?: currentSortOrder
-    val pageOffset = (metadata.page - 1) * metadata.pageSize
-    return units.mapIndexed { index, unit ->
-        val globalIndex = pageOffset + index
+    require(currentSortOrder == null || currentSortOrder >= 0)
+    return units.map { unit ->
+        if (unit.href == null) return@map ReaderChapterState.Unread
         when {
-            metadata.currentIndex != null && globalIndex == metadata.currentIndex -> ReaderChapterState.Current
-            metadata.currentIndex != null && globalIndex < metadata.currentIndex -> ReaderChapterState.Read
-            metadata.currentIndex != null -> ReaderChapterState.Unread
-            activeIndex == index -> ReaderChapterState.Current
-            activeIndex == null && activeSortOrder != null && unit.sortOrder == activeSortOrder -> ReaderChapterState.Current
-            activeSortOrder != null && unit.sortOrder < activeSortOrder -> ReaderChapterState.Read
+            progressPercent >= 100.0 -> ReaderChapterState.Read
+            currentSortOrder == null -> ReaderChapterState.Unread
+            unit.sortOrder == currentSortOrder -> ReaderChapterState.Current
+            unit.sortOrder < currentSortOrder -> ReaderChapterState.Read
             else -> ReaderChapterState.Unread
         }
     }
@@ -108,31 +85,19 @@ fun resolveReaderChapterStatesFromPresentation(
     presentation: ReaderPositionPresentation,
 ): List<ReaderChapterState> {
     require(presentation.displayPercent.isFinite() && presentation.displayPercent in 0.0..100.0)
-    if (presentation.displayPercent >= 100.0) return List(units.size) { ReaderChapterState.Read }
-    val chapterIndex = presentation.chapter?.index
-        ?.takeIf { it in units.indices }
-    if (chapterIndex != null) {
-        return units.mapIndexed { index, _ ->
-            when {
-                index == chapterIndex -> ReaderChapterState.Current
-                index < chapterIndex -> ReaderChapterState.Read
-                else -> ReaderChapterState.Unread
-            }
+    val currentSortOrder = presentation.chapter?.navigationKey
+        ?.takeIf(String::isNotBlank)
+        ?.let { navigationKey ->
+            units
+                .filter { it.href != null && it.navigationKey == navigationKey }
+                .singleOrNull()
+                ?.sortOrder
         }
-    }
     return resolveReaderChapterStates(
         units = units,
-        currentHref = presentation.chapter?.href ?: presentation.currentHref,
-        currentSortOrder = null,
         progressPercent = presentation.displayPercent,
+        currentSortOrder = currentSortOrder,
     )
-}
-
-private fun normalizeReaderChapterHref(value: String): String {
-    val normalized = value.trim().replace('\\', '/').removePrefix("./")
-    val parts = normalized.split('#', limit = 2)
-    val path = parts[0].lowercase()
-    return if (parts.size == 2) "$path#${parts[1]}" else path
 }
 
 private fun normalizeReaderProgressResourceHref(value: String): String =

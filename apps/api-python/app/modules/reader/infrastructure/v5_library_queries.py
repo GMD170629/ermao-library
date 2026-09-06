@@ -22,9 +22,11 @@ from app.modules.reader.infrastructure.persistence.models import (
     ReaderResourceProgressV5,
     ReaderResourceReadingStatusV5,
 )
+from app.modules.reader.infrastructure.v5_repository import decode_stored_presentation
 
 
 def _presentation_view(row: ReaderResourceProgressV5) -> ReaderV5PresentationView:
+    chapter = decode_stored_presentation(row.presentation_json).chapter
     return ReaderV5PresentationView(
         resource_id=row.resource_id,
         display_percent=float(row.display_percent),
@@ -33,6 +35,7 @@ def _presentation_view(row: ReaderResourceProgressV5) -> ReaderV5PresentationVie
         chapter_href=row.chapter_href,
         chapter_title=row.chapter_title,
         chapter_index=row.chapter_index,
+        chapter_navigation_key=chapter.navigation_key if chapter is not None else None,
         page_number=row.page_number,
         page_total=row.page_total,
         playback_position_millis=row.playback_position_millis,

@@ -86,7 +86,7 @@ class EnsurePublicationNavigation:
         return EnsurePublicationNavigationResult(
             outcome=EnsurePublicationNavigationOutcome.GENERATED,
             asset_id=source.asset_id,
-            chapter_count=len(entries),
+            chapter_count=sum(entry.href is not None for entry in entries),
         )
 
     def _lookup(

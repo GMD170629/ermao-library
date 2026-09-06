@@ -5,7 +5,11 @@ import com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName
 import com.ermao.library.shared.modules.reader.domain.ReaderSafetyFacade
 import com.ermao.library.shared.modules.reader.domain.ReaderSafetyMarkupResult
 import com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyDecisionContext
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyFormat
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyResourceRole
 import com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId
+import com.ermao.library.shared.modules.reader.domain.evaluateReaderSafety
 import java.io.File
 import java.security.MessageDigest
 import kotlinx.serialization.json.Json
@@ -16,6 +20,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -30,7 +35,11 @@ data class AndroidSafetyAdapterProbeResult(
 )
 
 fun interface AndroidSafetyAdapterProbe {
-    fun evaluate(evaluator: String, source: String): AndroidSafetyAdapterProbeResult
+    fun evaluate(
+        evaluator: String,
+        source: String,
+        configuredRuleId: String,
+    ): AndroidSafetyAdapterProbeResult
 }
 
 /** Report adapter that executes generated facts plus native production probes where required. */
@@ -79,7 +88,7 @@ class ReaderSafetyConformanceRunner private constructor(
                 val probe = if (
                     consumer == "ANDROID" && evaluator in ANDROID_PLATFORM_PROBE_EVALUATORS
                 ) {
-                    requireNotNull(androidAdapterProbe).evaluate(evaluator, source)
+                    requireNotNull(androidAdapterProbe).evaluate(evaluator, source, suiteCase.string("ruleId"))
                 } else {
                     null
                 }
@@ -107,14 +116,30 @@ class ReaderSafetyConformanceRunner private constructor(
         report.array("results").forEach { element ->
             val actual = element.jsonObject
             val expected = requireNotNull(expectedById[actual.string("caseId")])
-            require(actual.string("terminalRuleId") == expected.string("terminalRuleId"))
-            require(actual.string("action") == expected.string("action"))
-            require(actual.nullableString("errorCode") == expected.nullableString("errorCode"))
-            require(actual.array("orderedRuleEvents") == expected.array("orderedRuleEvents"))
+            require(actual.string("terminalRuleId") == expected.string("terminalRuleId")) {
+                "terminalRuleId mismatch for ${actual.string("caseId")}: " +
+                    "actual=${actual.string("terminalRuleId")}, expected=${expected.string("terminalRuleId")}"
+            }
+            require(actual.string("action") == expected.string("action")) {
+                "action mismatch for ${actual.string("caseId")}: " +
+                    "actual=${actual.string("action")}, expected=${expected.string("action")}"
+            }
+            require(actual.nullableString("errorCode") == expected.nullableString("errorCode")) {
+                "errorCode mismatch for ${actual.string("caseId")}: " +
+                    "actual=${actual.nullableString("errorCode")}, expected=${expected.nullableString("errorCode")}"
+            }
+            require(actual.array("orderedRuleEvents") == expected.array("orderedRuleEvents")) {
+                "events mismatch for ${actual.string("caseId")}: " +
+                    "actual=${actual.array("orderedRuleEvents")}, expected=${expected.array("orderedRuleEvents")}"
+            }
             require(
                 actual.nullableString("semanticProjectionSha256") ==
                     expected.nullableString("semanticProjectionSha256"),
-            )
+            ) {
+                "semantic projection mismatch for ${actual.string("caseId")}: " +
+                    "actual=${actual.nullableString("semanticProjectionSha256")}, " +
+                    "expected=${expected.nullableString("semanticProjectionSha256")}"
+            }
         }
     }
 
@@ -149,6 +174,7 @@ class ReaderSafetyConformanceRunner private constructor(
         val decision = when {
             androidProbe != null -> decisionFromAndroidProbe(ruleId, androidProbe)
             evaluator in MARKUP_EVALUATORS -> evaluateMarkupCase(evaluator, ruleId, source)
+            evaluator == "POLICY_DECISION" -> evaluatePolicyDecision(ruleId, source)
             else -> evaluateFactCase(evaluator, ruleId, source)
         }
         return buildJsonObject {
@@ -260,6 +286,31 @@ class ReaderSafetyConformanceRunner private constructor(
         }
     }
 
+    private fun evaluatePolicyDecision(
+        configuredRuleId: ReaderSafetyRuleId,
+        source: String,
+    ): ActualDecision {
+        val context = json.parseToJsonElement(source).jsonObject
+        val decisions = evaluateReaderSafety(
+            ReaderSafetyDecisionContext(
+                format = ReaderSafetyFormat.valueOf(context.string("format")),
+                resourceRole = ReaderSafetyResourceRole.valueOf(context.string("resourceRole")),
+                facts = context.array("facts").map { it.jsonPrimitive.content },
+                enforcementAvailable = context.boolean("enforcementAvailable"),
+                canIsolate = context.boolean("canIsolate"),
+            ),
+        )
+        val decision = decisions.firstOrNull { it.ruleId == configuredRuleId }
+            ?: error("Policy decision did not produce ${configuredRuleId.wireValue}")
+        return ActualDecision(
+            ruleId = configuredRuleId,
+            action = decision.action.name,
+            errorCode = decision.errorCode?.name,
+            event = "${configuredRuleId.wireValue}:${decision.action.name}",
+            semanticProjection = null,
+        )
+    }
+
     private fun evaluateFactCase(
         evaluator: String,
         ruleId: ReaderSafetyRuleId,
@@ -268,10 +319,14 @@ class ReaderSafetyConformanceRunner private constructor(
         val values = if ('=' in source) facts(source) else emptyMap()
         val detected: Boolean
         when (evaluator) {
-            "ARCHIVE_STRUCTURE" -> detected = archiveIsUnsafe(
-                source,
-                ReaderSafetyPolicy.reflowableProfile.archiveFatalFindings,
-            )
+            "ARCHIVE_STRUCTURE" -> {
+                val findings = archiveFindings(source)
+                detected = if (ruleId == ReaderSafetyRuleId.EPUB_RESOURCE_INTEGRITY) {
+                    findings.any { it in ReaderSafetyPolicy.reflowableProfile.archiveIntegrityFindings }
+                } else {
+                    findings.any { it in ReaderSafetyPolicy.reflowableProfile.archiveFatalFindings }
+                }
+            }
             "ORIGINAL_BYTES" -> {
                 detected = integerFact(values, "sizeBytes") >
                     ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.ORIGINAL_MAX_BYTES)
@@ -310,9 +365,11 @@ class ReaderSafetyConformanceRunner private constructor(
                         values["revision"]?.lowercase() == "weak" &&
                             ReaderSafetyPolicy.pdfProfile.requireStrongRevision
                         )
-            "COMIC_PAGE_MIME" -> detected =
-                values["manifest"] in ReaderSafetyPolicy.comicProfile.allowedPageMimeTypes &&
-                    values["response"] != values["manifest"]
+            "COMIC_PAGE_MIME" -> {
+                // Metadata mismatches are only a boundary fixture.  A real page
+                // decoder result is evaluated through POLICY_DECISION.
+                return allowedDecision(ruleId, "BOUNDARY_ALLOW", source)
+            }
             "COMIC_PAGE_COUNT" -> detected = integerFact(values, "pageCount") >
                 ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.COMIC_PAGE_MAX_COUNT)
             "COMIC_PAGE_DECODE" -> detected =
@@ -323,9 +380,7 @@ class ReaderSafetyConformanceRunner private constructor(
                 ReaderSafetyPolicy.comicProfile.manifestRevisionRequired &&
                     values["manifestRevision"] != values["requestRevision"]
             "AUDIO_CONTAINER_MIME" -> detected =
-                ReaderSafetyPolicy.audioProfile.containerMimeTypes[values["extension"]?.lowercase()] != null &&
-                    ReaderSafetyPolicy.audioProfile.containerMimeTypes[values["extension"]?.lowercase()] !=
-                    values["mime"]?.lowercase()
+                false
             "AUDIO_CODEC" -> detected =
                 ReaderSafetyPolicy.audioProfile.codecDecision == "ENGINE_CAPABILITY" &&
                     values["codec"] == "unsupported"
@@ -349,11 +404,10 @@ class ReaderSafetyConformanceRunner private constructor(
                         "font-obfuscation-allowed",
                     )
                 }
+                return allowedDecision(ruleId, "BOUNDARY_ALLOW", source)
             }
             "EXACT_FORMAT_MIME" -> {
-                val formatPolicy = ReaderSafetyPolicy.formatPolicy(values.getValue("format"))
-                val mime = values.getValue("mime").substringBefore(';').trim().lowercase()
-                detected = formatPolicy == null || mime !in formatPolicy.acceptedMimeTypes
+                return allowedDecision(ruleId, "BOUNDARY_ALLOW", source)
             }
             "BINARY_RESOURCE_BYTES" -> detected = integerFact(values, "resourceBytes") >
                 ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.BINARY_RESOURCE_MAX_BYTES)
@@ -384,10 +438,8 @@ class ReaderSafetyConformanceRunner private constructor(
                     compressedBytes *
                     ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.ARCHIVE_COMPRESSION_RATIO_MAX)
             }
-            "FB2_IMAGE_BUDGET" -> detected =
-                values["mime"]?.lowercase() !in
-                    ReaderSafetyPolicy.reflowableProfile.embeddedImageExtensionsByMimeType ||
-                    integerFact(values, "encodedBytes") >
+            "FB2_IMAGE_BUDGET" -> {
+                detected = integerFact(values, "encodedBytes") >
                     ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.FB2_ENCODED_IMAGE_MAX_BYTES) ||
                     integerFact(values, "decodedBytes") >
                     ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.FB2_DECODED_IMAGE_MAX_BYTES) ||
@@ -395,6 +447,8 @@ class ReaderSafetyConformanceRunner private constructor(
                     ReaderSafetyPolicy.budget(
                         ReaderSafetyBudgetName.FB2_DECODED_IMAGES_TOTAL_MAX_BYTES,
                     )
+                if (!detected) return allowedDecision(ruleId, "BOUNDARY_ALLOW", source)
+            }
             "TXT_MEMORY_BYTES" -> detected = integerFact(values, "textBytes") >
                 ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.TXT_MEMORY_MAX_BYTES)
             "TXT_CHUNK_CHARACTERS" -> {
@@ -409,10 +463,14 @@ class ReaderSafetyConformanceRunner private constructor(
                     ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.PDF_CANVAS_MAX_DIMENSION) ||
                     integerFact(values, "pixels") >
                     ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.PDF_RENDER_MAX_PIXELS)
-            "COMIC_ARCHIVE_STRUCTURE" -> detected = archiveIsUnsafe(
-                source,
-                ReaderSafetyPolicy.comicProfile.archiveFatalFindings,
-            )
+            "COMIC_ARCHIVE_STRUCTURE" -> {
+                val findings = archiveFindings(source)
+                detected = if (ruleId == ReaderSafetyRuleId.COMIC_RESOURCE_INTEGRITY) {
+                    findings.any { it in ReaderSafetyPolicy.comicProfile.archiveIntegrityFindings }
+                } else {
+                    findings.any { it in ReaderSafetyPolicy.comicProfile.archiveFatalFindings }
+                }
+            }
             "COMIC_ARCHIVE_BUDGET" -> {
                 val compressedBytes = integerFact(values, "compressedBytes")
                 val expandedBytes = integerFact(values, "expandedBytes")
@@ -450,7 +508,7 @@ class ReaderSafetyConformanceRunner private constructor(
     private fun integerFact(values: Map<String, String>, name: String): Long =
         requireNotNull(values[name]).toLong()
 
-    private fun archiveIsUnsafe(source: String, fatalFindings: List<String>): Boolean {
+    private fun archiveFindings(source: String): Set<String> {
         val findings = mutableSetOf<String>()
         val canonical = mutableSetOf<String>()
         source.split('|').forEach { entry ->
@@ -474,7 +532,7 @@ class ReaderSafetyConformanceRunner private constructor(
             val normalized = parts.joinToString("/").lowercase()
             if (!canonical.add(normalized)) findings += "DUPLICATE_CANONICAL_ENTRY"
         }
-        return findings.any { it in fatalFindings }
+        return findings
     }
 
     private fun readObject(name: String): JsonObject =
@@ -489,6 +547,7 @@ class ReaderSafetyConformanceRunner private constructor(
     private fun JsonObject.string(name: String): String = requireNotNull(this[name]).jsonPrimitive.content
     private fun JsonObject.nullableString(name: String): String? = this[name]?.jsonPrimitive?.contentOrNull
     private fun JsonObject.int(name: String): Int = requireNotNull(this[name]).jsonPrimitive.int
+    private fun JsonObject.boolean(name: String): Boolean = requireNotNull(this[name]).jsonPrimitive.boolean
 
     companion object {
         val ANDROID_PLATFORM_PROBE_EVALUATORS = setOf(

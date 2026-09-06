@@ -47,9 +47,6 @@ private fun ReaderBootstrap.toAudioPublication(): AudioBootstrapResult {
         return AudioBootstrapResult.Failure("AUDIO_DURATION_INVALID", false)
     }
     val audioAssets = assets.map { asset ->
-        if (!resource.sourceFormat.acceptsMimeType(asset.mimeType)) {
-            return AudioBootstrapResult.Failure("AUDIO_MIME_MISMATCH", false)
-        }
         AudioAsset(
             assetId = asset.assetId,
             resourceId = asset.resourceId,

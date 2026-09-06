@@ -55,5 +55,6 @@ be exposed.
 - New metadata mutation paths must use the explicit preparation port; relying on ORM dirty
   tracking is a correctness defect because typed bulk updates are intentionally invisible
   to ORM observers.
-- Queue workers require owner/lease CAS semantics and recover only expired claims, enabling
-  safe multi-process operation and restart.
+- Metadata preparation intents use owner/lease/CAS semantics and recover only expired
+  claims. The LibraryImportTask queue follows the single-consumer ContinueImport
+  contract in ADR 0018 and does not inherit lease-based queue control.

@@ -1935,6 +1935,7 @@ def list_library_reading_units(
                         "mediaType": unit.media_type,
                         "previewUrl": unit.preview_url,
                         "level": unit.level,
+                        "navigationKey": unit.navigation_key,
                         "durationMs": unit.duration_ms,
                         "discNumber": unit.disc_number,
                         "trackNumber": unit.track_number,
@@ -1955,6 +1956,7 @@ def list_library_reading_units(
                 "currentChapterIndex": result.current_chapter_index,
                 "currentChapterTitle": result.current_chapter_title,
                 "currentChapterSortOrder": result.current_chapter_sort_order,
+                "chapterCount": result.chapter_count,
                 "currentPageNumber": result.current_page_number,
                 "progress": result.progress,
             }

@@ -53,6 +53,7 @@ import {
   type ShelfView
 } from '../../features/shelves/public';
 import { isSettingsItemActive, settingsGroups, settingsItemAllowed } from '../../features/settings/center/settings-secondary-nav';
+import { visualTokens } from '../../generated/visual-tokens';
 import {
   AppSessionProvider,
   clearCachedAppSession,
@@ -74,7 +75,7 @@ const libraryNavItems = [
 ];
 
 const shellSurfaces = {
-  app: { background: '#FBFAF8', colorScheme: 'light', statusBarStyle: 'black-translucent' },
+  app: { background: visualTokens.colors.app.canvas, colorScheme: 'light', statusBarStyle: 'black-translucent' },
   reader: { background: '#FDF6EA', colorScheme: 'light', statusBarStyle: 'black-translucent' },
   login: { background: '#F8FAFC', colorScheme: 'light', statusBarStyle: 'black-translucent' },
   setup: { background: '#E8DCC7', colorScheme: 'light', statusBarStyle: 'black-translucent' },
@@ -708,7 +709,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   if (isProtectedPage && (sessionStatus === 'checking' || sessionStatus === 'redirecting')) {
     return (
       <div
-        className="flex min-h-[100dvh] items-center justify-center px-6 text-sm text-[#77736F]"
+        className="flex min-h-[100dvh] items-center justify-center px-6 text-sm text-[var(--visual-color-app-text-secondary)]"
         style={{ backgroundColor: shellSurface.background }}
         role="status"
         aria-live="polite"
@@ -730,9 +731,9 @@ export function AppShell({ children }: { children: ReactNode }) {
     <AppSessionProvider value={appSession}>
     <MobileNavigationProvider open={mobileDrawerOpen} openDrawer={openMobileDrawer}>
     <div className="shuku-app-shell min-h-screen bg-[var(--shuku-bg)] text-[var(--shuku-text)] [--shuku-sidebar-width:clamp(236px,16vw,264px)]">
-      <aside className="fixed inset-y-0 left-0 z-20 hidden w-[var(--shuku-sidebar-width)] flex-col border-r border-black/[0.04] bg-[#F3F0EC]/95 px-4 pb-5 pt-7 backdrop-blur-xl lg:flex">
+      <aside className="fixed inset-y-0 left-0 z-20 hidden w-[var(--shuku-sidebar-width)] flex-col border-r border-black/[0.04] bg-[color:color-mix(in_srgb,var(--visual-color-app-navigation)_95%,transparent)] px-4 pb-5 pt-7 backdrop-blur-xl lg:flex">
         <Link href="/" className="flex shrink-0 items-center gap-3 px-3">
-          <span className="h-9 w-9 overflow-hidden rounded-[9px] bg-[#F7F1E8] shadow-sm">
+          <span className="h-9 w-9 overflow-hidden rounded-[9px] bg-[var(--visual-color-app-surface)] shadow-sm">
             <Image src={withBasePath('/icons/icon-192.png')} alt="" width={36} height={36} className="h-full w-full object-cover" priority />
           </span>
           <span className="min-w-0">
@@ -744,7 +745,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <nav aria-label={i18nAttribute("返回主导航")} className="mt-8 space-y-1">
             <Link
               href="/"
-              className="flex min-h-11 items-center gap-3 rounded-xl px-3 text-[15px] font-medium text-[#34312E] transition hover:bg-black/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]"
+              className="flex min-h-11 items-center gap-3 rounded-xl px-3 text-[15px] font-medium text-[var(--visual-color-app-text-primary)] transition hover:bg-black/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--visual-color-app-focus-ring)]"
             >
               <ArrowLeft size={20} strokeWidth={1.75} />
               <I18nText>返回阅读</I18nText></Link>
@@ -752,7 +753,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         ) : null}
 
         {!isSettingsMode ? <form ref={searchFormRef} onSubmit={submitLibrarySearch} className="relative mt-8">
-          <div className="flex h-11 items-center gap-2.5 rounded-xl bg-black/[0.045] px-3 text-[#77736F] transition focus-within:bg-white focus-within:shadow-sm">
+          <div className="flex h-11 items-center gap-2.5 rounded-xl bg-[var(--visual-color-app-surface)] px-3 text-[var(--visual-color-app-text-secondary)] transition focus-within:bg-[var(--visual-color-app-surface)] focus-within:shadow-sm">
             <Search size={17} className="shrink-0" strokeWidth={1.8} />
             <input
               ref={searchInputRef}
@@ -763,18 +764,18 @@ export function AppShell({ children }: { children: ReactNode }) {
                 setSearchFocused(true);
               }}
               onKeyDown={handleSearchKeyDown}
-              className="min-w-0 flex-1 bg-transparent text-sm text-[#2A2927] outline-none placeholder:text-[#8C8883]"
+              className="min-w-0 flex-1 bg-transparent text-sm text-[var(--visual-color-app-text-primary)] outline-none placeholder:text-[var(--visual-color-app-text-tertiary)]"
               placeholder={i18nAttribute("搜索图书")}
               aria-label={i18nAttribute("搜索本地书库")}
               autoComplete="off"
               data-testid="top-search-input"
             />
-            <kbd className="shrink-0 text-[11px] text-[#9A9691]">⌘K</kbd>
+            <kbd className="shrink-0 text-[11px] text-[var(--visual-color-app-text-tertiary)]">⌘K</kbd>
           </div>
           {searchFocused && librarySearch.trim() ? (
-            <div data-testid="top-search-dropdown" className="absolute left-0 top-[calc(100%+8px)] z-40 w-full overflow-hidden rounded-2xl border border-black/[0.07] bg-white shadow-[0_18px_55px_rgba(53,43,35,0.16)]">
+            <div data-testid="top-search-dropdown" className="absolute left-0 top-[calc(100%+8px)] z-40 w-full overflow-hidden rounded-2xl border border-black/[0.07] bg-[var(--visual-color-app-surface-raised)] shadow-[0_18px_55px_rgba(53,43,35,0.16)]">
               <div className="max-h-[360px] overflow-y-auto py-2">
-                {searchLoading ? <div className="px-4 py-5 text-sm text-[#77736F]"><I18nText>正在搜索书库...</I18nText></div> : null}
+                {searchLoading ? <div className="px-4 py-5 text-sm text-[var(--visual-color-app-text-secondary)]"><I18nText>正在搜索书库...</I18nText></div> : null}
                 {!searchLoading && searchBooks.map((book, index) => (
                   <button
                     key={book.id}
@@ -788,17 +789,17 @@ export function AppShell({ children }: { children: ReactNode }) {
                     }}
                     className={cn(
                       'flex w-full items-center gap-3 px-3 py-2.5 text-left outline-none transition',
-                      searchActiveIndex === index ? 'bg-[#FDE9E2]' : 'hover:bg-[#F7F4F0] focus:bg-[#F7F4F0]'
+                      searchActiveIndex === index ? 'bg-[var(--visual-color-app-accent-soft)]' : 'hover:bg-[var(--visual-color-app-navigation)] focus:bg-[var(--visual-color-app-navigation)]'
                     )}
                   >
                     <Cover book={book} size="small" className="h-14 w-10 shrink-0 rounded-md shadow-sm" small />
                     <span data-i18n-skip className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-[#252321]">{book.title}</span>
-                      <span className="mt-1 block truncate text-xs text-[#817C76]">{book.author?.trim() || i18nAttribute("未知作者")}</span>
+                      <span className="block truncate text-sm font-medium text-[var(--visual-color-app-text-primary)]">{book.title}</span>
+                      <span className="mt-1 block truncate text-xs text-[var(--visual-color-app-text-secondary)]">{book.author?.trim() || i18nAttribute("未知作者")}</span>
                     </span>
                   </button>
                 ))}
-                {!searchLoading && searchBooks.length === 0 ? <div className="px-4 py-5 text-sm text-[#77736F]"><I18nText>书库中没有匹配读物</I18nText></div> : null}
+                {!searchLoading && searchBooks.length === 0 ? <div className="px-4 py-5 text-sm text-[var(--visual-color-app-text-secondary)]"><I18nText>书库中没有匹配读物</I18nText></div> : null}
               </div>
               <button
                 type="button"
@@ -807,12 +808,12 @@ export function AppShell({ children }: { children: ReactNode }) {
                 onMouseEnter={() => setSearchActiveIndex(searchBooks.length)}
                 onClick={openLibrarySearch}
                 className={cn(
-                  'flex w-full items-center justify-between gap-3 border-t border-black/[0.06] px-4 py-3 text-left text-sm font-medium text-[#EF4D2F] outline-none transition',
-                  searchActiveIndex === searchBooks.length ? 'bg-[#FDE9E2]' : 'bg-white hover:bg-[#FFF5F1] focus:bg-[#FFF5F1]'
+                  'flex w-full items-center justify-between gap-3 border-t border-black/[0.06] px-4 py-3 text-left text-sm font-medium text-[var(--visual-color-app-action-accent)] outline-none transition',
+                  searchActiveIndex === searchBooks.length ? 'bg-[var(--visual-color-app-accent-soft)]' : 'bg-[var(--visual-color-app-surface-raised)] hover:bg-[var(--visual-color-app-accent-softer)] focus:bg-[var(--visual-color-app-accent-softer)]'
                 )}
               >
                 <span className="truncate">{i18nAttribute('查看“{value0}”的全部结果', { value0: librarySearch.trim() })}</span>
-                <span className="shrink-0 text-xs text-[#A29D97]">{searchTotal} <I18nText>本</I18nText></span>
+                <span className="shrink-0 text-xs text-[var(--visual-color-app-text-tertiary)]">{searchTotal} <I18nText>本</I18nText></span>
               </button>
             </div>
           ) : null}
@@ -827,7 +828,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   if (!items.length) return null;
                   return (
                     <section key={group.key} aria-label={group.label ? i18nAttribute(group.label) : undefined}>
-                      {group.label ? <div className="mb-2 px-3 text-xs font-semibold tracking-[0.08em] text-[#938D86]">{i18nAttribute(group.label)}</div> : null}
+                      {group.label ? <div className="mb-2 px-3 text-xs font-semibold tracking-[0.08em] text-[var(--visual-color-app-text-tertiary)]">{i18nAttribute(group.label)}</div> : null}
                       <div className="space-y-1">
                         {items.map(({ href, icon: Icon, label }) => {
                           const active = isSettingsItemActive(pathname, href);
@@ -840,8 +841,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                               aria-current={active ? 'page' : undefined}
                               data-pending-navigation={selected && !active ? 'true' : undefined}
                               className={cn(
-                                'flex min-h-11 items-center gap-3 rounded-xl px-3 text-[15px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]',
-                                selected ? 'bg-[#F9DED4] text-[#EF4D2F]' : 'text-[#34312E] hover:bg-black/[0.04]'
+                                'flex min-h-11 items-center gap-3 rounded-xl px-3 text-[15px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--visual-color-app-focus-ring)]',
+                                selected ? 'bg-[var(--visual-color-app-accent-soft)] text-[var(--visual-color-app-brand-accent)]' : 'text-[var(--visual-color-app-text-primary)] hover:bg-black/[0.04]'
                               )}
                             >
                               <Icon size={20} strokeWidth={1.75} />
@@ -862,7 +863,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 href={href}
                 className={cn(
                   'flex min-h-11 items-center gap-3 rounded-xl px-3 text-[15px] font-medium transition',
-                  isActive(pathname, currentSearch, href) ? 'bg-[#F9DED4] text-[#EF4D2F]' : 'text-[#34312E] hover:bg-black/[0.04]'
+                  isActive(pathname, currentSearch, href) ? 'bg-[var(--visual-color-app-accent-soft)] text-[var(--visual-color-app-brand-accent)]' : 'text-[var(--visual-color-app-text-primary)] hover:bg-black/[0.04]'
                 )}
               >
                 <Icon size={20} strokeWidth={1.8} />
@@ -872,7 +873,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </nav>
 
           <section className="mt-7">
-            <div className="mb-2 px-3 text-[13px] text-[#8A857F]"><I18nText>书库</I18nText></div>
+            <div className="mb-2 px-3 text-[13px] text-[var(--visual-color-app-text-tertiary)]"><I18nText>书库</I18nText></div>
             <nav className="space-y-1">
               {visibleLibraryNavItems.map(({ href, icon: Icon, label, translate, libraryId }) => (
                 <Link
@@ -881,7 +882,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   data-library-id={libraryId ?? undefined}
                   className={cn(
                     'flex min-h-11 items-center gap-3 rounded-xl px-3 text-[15px] font-medium transition',
-                    isActive(pathname, currentSearch, href) ? 'bg-[#F9DED4] text-[#EF4D2F]' : 'text-[#34312E] hover:bg-black/[0.04]'
+                    isActive(pathname, currentSearch, href) ? 'bg-[var(--visual-color-app-accent-soft)] text-[var(--visual-color-app-brand-accent)]' : 'text-[var(--visual-color-app-text-primary)] hover:bg-black/[0.04]'
                   )}
                 >
                   <Icon size={20} strokeWidth={1.75} />
@@ -892,7 +893,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </section>
 
           <section className="mt-7">
-            <div className="mb-2 px-3 text-[13px] text-[#8A857F]"><I18nText>我的书架</I18nText></div>
+            <div className="mb-2 px-3 text-[13px] text-[var(--visual-color-app-text-tertiary)]"><I18nText>我的书架</I18nText></div>
             <nav className="space-y-1">
               {visibleShelves.map((shelf) => {
                 const href = `/shelves?shelf=${encodeURIComponent(shelf.id)}`;
@@ -903,7 +904,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     data-shelf-kind={shelf.kind}
                     className={cn(
                       'flex min-h-11 items-center gap-3 rounded-xl px-3 text-[15px] font-medium transition',
-                      isActive(pathname, currentSearch, href) ? 'bg-[#F9DED4] text-[#EF4D2F]' : 'text-[#34312E] hover:bg-black/[0.04]'
+                      isActive(pathname, currentSearch, href) ? 'bg-[var(--visual-color-app-accent-soft)] text-[var(--visual-color-app-brand-accent)]' : 'text-[var(--visual-color-app-text-primary)] hover:bg-black/[0.04]'
                     )}
                   >
                     {shelf.kind === 'COLLECTION'
@@ -917,7 +918,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 href="/shelves?create=1"
                 className={cn(
                   'flex min-h-11 items-center gap-3 rounded-xl px-3 text-[15px] transition',
-                  isActive(pathname, currentSearch, '/shelves?create=1') ? 'bg-[#F9DED4] text-[#EF4D2F]' : 'text-[#77736F] hover:bg-black/[0.04]'
+                  isActive(pathname, currentSearch, '/shelves?create=1') ? 'bg-[var(--visual-color-app-accent-soft)] text-[var(--visual-color-app-brand-accent)]' : 'text-[var(--visual-color-app-text-secondary)] hover:bg-black/[0.04]'
                 )}
               >
                 <Plus size={20} strokeWidth={1.7} />
@@ -931,8 +932,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           aria-label={i18nAttribute("进入账户与设置")}
           title={user?.email || i18nAttribute("账户与设置")}
           className={cn(
-            'mt-3 flex min-h-[72px] w-full shrink-0 items-center gap-3 border-t border-black/[0.07] px-1 pt-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]',
-            pathname.startsWith('/settings') ? 'text-[#D94A2E]' : 'text-[#302D29]'
+            'mt-3 flex min-h-[72px] w-full shrink-0 items-center gap-3 border-t border-black/[0.07] px-1 pt-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--visual-color-app-focus-ring)]',
+            pathname.startsWith('/settings') ? 'text-[var(--visual-color-app-brand-accent)]' : 'text-[var(--visual-color-app-text-primary)]'
           )}
         >
           <Image
@@ -948,9 +949,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm font-semibold">{user?.name || i18nAttribute("二毛")}</span>
-            <span className="mt-0.5 block truncate text-xs text-[#8A847E]"><I18nText>账户与设置</I18nText></span>
+            <span className="mt-0.5 block truncate text-xs text-[var(--visual-color-app-text-tertiary)]"><I18nText>账户与设置</I18nText></span>
           </span>
-          <ChevronRight size={20} strokeWidth={1.7} className="shrink-0 text-[#77716B]" aria-hidden="true" />
+          <ChevronRight size={20} strokeWidth={1.7} className="shrink-0 text-[var(--visual-color-app-text-secondary)]" aria-hidden="true" />
         </Link>
       </aside>
 
@@ -981,7 +982,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           ref={drawerPanelRef}
           id={MOBILE_NAVIGATION_DRAWER_ID}
           data-testid="mobile-navigation"
-          className="shuku-mobile-drawer-panel absolute inset-y-0 left-0 flex w-[min(82vw,320px)] touch-pan-y flex-col border-r border-black/[0.055] bg-[#F3F0EC] px-4 shadow-[22px_0_60px_rgba(41,31,25,0.20)]"
+           className="shuku-mobile-drawer-panel absolute inset-y-0 left-0 flex w-[min(82vw,320px)] touch-pan-y flex-col border-r border-black/[0.055] bg-[var(--visual-color-app-navigation)] px-4 shadow-[22px_0_60px_rgba(41,31,25,0.20)]"
           role="dialog"
           aria-modal="true"
           aria-label={i18nAttribute("主导航")}
@@ -990,15 +991,15 @@ export function AppShell({ children }: { children: ReactNode }) {
           onPointerCancel={() => { drawerSwipeStartRef.current = null; }}
         >
           <header className="flex shrink-0 items-center gap-3 px-1">
-            <span className="h-11 w-11 shrink-0 overflow-hidden rounded-[11px] bg-[#F7F1E8] shadow-sm">
+            <span className="h-11 w-11 shrink-0 overflow-hidden rounded-[11px] bg-[var(--visual-color-app-surface)] shadow-sm">
               <Image src={withBasePath('/icons/icon-192.png')} alt="" width={44} height={44} className="h-full w-full object-cover" priority />
             </span>
-            <span className="min-w-0 flex-1 truncate text-[18px] font-semibold tracking-[-0.02em] text-[#292724]">{PRODUCT_NAME}</span>
+            <span className="min-w-0 flex-1 truncate text-[18px] font-semibold tracking-[-0.02em] text-[var(--visual-color-app-text-primary)]">{PRODUCT_NAME}</span>
             <button
               ref={drawerCloseButtonRef}
               type="button"
               onClick={() => closeMobileDrawer(true)}
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[13px] border border-black/[0.075] bg-white/45 text-[#5D5751] transition duration-200 hover:bg-white/80 hover:text-[#272421] active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[13px] border border-black/[0.075] bg-[color:color-mix(in_srgb,var(--visual-color-app-surface-raised)_45%,transparent)] text-[var(--visual-color-app-text-secondary)] transition duration-200 hover:bg-[color:color-mix(in_srgb,var(--visual-color-app-surface-raised)_80%,transparent)] hover:text-[var(--visual-color-app-text-primary)] active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--visual-color-app-focus-ring)]"
               aria-label={i18nAttribute("关闭导航菜单")}
             >
               <X size={22} strokeWidth={1.7} aria-hidden="true" />
@@ -1006,13 +1007,13 @@ export function AppShell({ children }: { children: ReactNode }) {
           </header>
 
           <form onSubmit={submitMobileDrawerSearch} className="mt-6 shrink-0">
-            <label className="flex min-h-12 items-center gap-3 rounded-[14px] border border-black/[0.075] bg-white/45 px-3.5 text-[#77716B] transition focus-within:border-[#F0AA96] focus-within:bg-white focus-within:ring-2 focus-within:ring-[#F8D3C7]">
+            <label className="flex min-h-12 items-center gap-3 rounded-[14px] border border-black/[0.075] bg-[var(--visual-color-app-surface)] px-3.5 text-[var(--visual-color-app-text-secondary)] transition focus-within:border-[var(--visual-color-app-focus-ring)] focus-within:bg-[var(--visual-color-app-surface)] focus-within:ring-2 focus-within:ring-[var(--visual-color-app-focus-ring)]">
               <Search size={19} strokeWidth={1.75} className="shrink-0" aria-hidden="true" />
               <input
                 ref={mobileSearchInputRef}
                 value={librarySearch}
                 onChange={(event) => setLibrarySearch(event.target.value)}
-                className="min-w-0 flex-1 bg-transparent text-[15px] text-[#2A2927] outline-none placeholder:text-[#8C8883]"
+                className="min-w-0 flex-1 bg-transparent text-[15px] text-[var(--visual-color-app-text-primary)] outline-none placeholder:text-[var(--visual-color-app-text-tertiary)]"
                 placeholder={i18nAttribute("搜索图书")}
                 aria-label={i18nAttribute("搜索图书")}
                 autoComplete="off"
@@ -1029,8 +1030,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                   onClick={(event) => handleMobileDrawerLink(event, href)}
                   aria-current={isActive(pathname, currentSearch, href) ? 'page' : undefined}
                   className={cn(
-                    'flex min-h-12 items-center gap-3 rounded-[14px] px-3.5 text-[15px] font-medium transition duration-200 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]',
-                    isActive(pathname, currentSearch, href) ? 'bg-[#F9DED4] text-[#E94B2D]' : 'text-[#34312E] hover:bg-black/[0.045]'
+                    'flex min-h-12 items-center gap-3 rounded-[14px] px-3.5 text-[15px] font-medium transition duration-200 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--visual-color-app-focus-ring)]',
+                    isActive(pathname, currentSearch, href) ? 'bg-[var(--visual-color-app-accent-soft)] text-[var(--visual-color-app-brand-accent)]' : 'text-[var(--visual-color-app-text-primary)] hover:bg-black/[0.045]'
                   )}
                 >
                   <Icon size={21} strokeWidth={1.75} aria-hidden="true" />
@@ -1040,7 +1041,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </nav>
 
             <section className="mt-6">
-              <div className="mb-2 px-3.5 text-[13px] font-medium text-[#8A857F]"><I18nText>书库</I18nText></div>
+              <div className="mb-2 px-3.5 text-[13px] font-medium text-[var(--visual-color-app-text-tertiary)]"><I18nText>书库</I18nText></div>
               <nav aria-label={i18nAttribute("书库")} className="space-y-1">
                 {visibleLibraryNavItems.map(({ href, icon: Icon, label, translate, libraryId }) => (
                   <Link
@@ -1050,8 +1051,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                     onClick={(event) => handleMobileDrawerLink(event, href)}
                     aria-current={isActive(pathname, currentSearch, href) ? 'page' : undefined}
                     className={cn(
-                      'flex min-h-12 items-center gap-3 rounded-[14px] px-3.5 text-[15px] font-medium transition duration-200 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]',
-                      isActive(pathname, currentSearch, href) ? 'bg-[#F9DED4] text-[#E94B2D]' : 'text-[#34312E] hover:bg-black/[0.045]'
+                      'flex min-h-12 items-center gap-3 rounded-[14px] px-3.5 text-[15px] font-medium transition duration-200 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--visual-color-app-focus-ring)]',
+                      isActive(pathname, currentSearch, href) ? 'bg-[var(--visual-color-app-accent-soft)] text-[var(--visual-color-app-brand-accent)]' : 'text-[var(--visual-color-app-text-primary)] hover:bg-black/[0.045]'
                     )}
                   >
                     <Icon size={21} strokeWidth={1.75} aria-hidden="true" />
@@ -1062,7 +1063,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </section>
 
             <section className="mt-6 border-t border-black/[0.065] pt-5">
-              <div className="mb-2 px-3.5 text-[13px] font-medium text-[#8A857F]"><I18nText>我的书架</I18nText></div>
+              <div className="mb-2 px-3.5 text-[13px] font-medium text-[var(--visual-color-app-text-tertiary)]"><I18nText>我的书架</I18nText></div>
               <nav aria-label={i18nAttribute("我的书架")} className="space-y-1">
                 {visibleShelves.map((shelf) => {
                   const href = `/shelves?shelf=${encodeURIComponent(shelf.id)}`;
@@ -1074,8 +1075,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                       onClick={(event) => handleMobileDrawerLink(event, href)}
                       aria-current={isActive(pathname, currentSearch, href) ? 'page' : undefined}
                       className={cn(
-                        'flex min-h-12 items-center gap-3 rounded-[14px] px-3.5 text-[15px] font-medium transition duration-200 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]',
-                        isActive(pathname, currentSearch, href) ? 'bg-[#F9DED4] text-[#E94B2D]' : 'text-[#34312E] hover:bg-black/[0.045]'
+                        'flex min-h-12 items-center gap-3 rounded-[14px] px-3.5 text-[15px] font-medium transition duration-200 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--visual-color-app-focus-ring)]',
+                        isActive(pathname, currentSearch, href) ? 'bg-[var(--visual-color-app-accent-soft)] text-[var(--visual-color-app-brand-accent)]' : 'text-[var(--visual-color-app-text-primary)] hover:bg-black/[0.045]'
                       )}
                     >
                       {shelf.kind === 'COLLECTION'
@@ -1088,7 +1089,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Link
                   href="/shelves?create=1"
                   onClick={(event) => handleMobileDrawerLink(event, '/shelves?create=1')}
-                  className="flex min-h-12 items-center gap-3 rounded-[14px] px-3.5 text-[15px] text-[#69635D] transition duration-200 hover:bg-black/[0.045] active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]"
+                  className="flex min-h-12 items-center gap-3 rounded-[14px] px-3.5 text-[15px] text-[var(--visual-color-app-text-secondary)] transition duration-200 hover:bg-black/[0.045] active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--visual-color-app-focus-ring)]"
                 >
                   <Plus size={21} strokeWidth={1.75} aria-hidden="true" />
                   <I18nText>新建书架</I18nText></Link>
@@ -1101,8 +1102,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             onClick={(event) => handleMobileDrawerLink(event, '/settings')}
             aria-current={pathname.startsWith('/settings') ? 'page' : undefined}
             className={cn(
-              'mt-3 flex min-h-[72px] shrink-0 items-center gap-3 border-t border-black/[0.07] px-1 pt-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]',
-              pathname.startsWith('/settings') ? 'text-[#D94A2E]' : 'text-[#302D29]'
+              'mt-3 flex min-h-[72px] shrink-0 items-center gap-3 border-t border-black/[0.07] px-1 pt-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--visual-color-app-focus-ring)]',
+              pathname.startsWith('/settings') ? 'text-[var(--visual-color-app-brand-accent)]' : 'text-[var(--visual-color-app-text-primary)]'
             )}
           >
             <Image
@@ -1117,9 +1118,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-semibold">{user?.name || i18nAttribute("二毛")}</span>
-              <span className="mt-0.5 block truncate text-xs text-[#8A847E]"><I18nText>账户与设置</I18nText></span>
+              <span className="mt-0.5 block truncate text-xs text-[var(--visual-color-app-text-tertiary)]"><I18nText>账户与设置</I18nText></span>
             </span>
-            <ChevronRight size={20} strokeWidth={1.7} className="shrink-0 text-[#77716B]" aria-hidden="true" />
+            <ChevronRight size={20} strokeWidth={1.7} className="shrink-0 text-[var(--visual-color-app-text-secondary)]" aria-hidden="true" />
           </Link>
         </aside>
       </div>

@@ -268,24 +268,29 @@ fun LogsScreen(
     modifier: Modifier = Modifier,
 ) {
     var manageOpen by remember { mutableStateOf(false) }
+    val query = state.snapshot?.query
+    var search by remember(query) { mutableStateOf(query?.search.orEmpty()) }
+    var level by remember(query) { mutableStateOf(query?.level) }
     AdministrativePage(
         AdministrativeCopy.SystemLogs, locale, onBack, modifier,
         toolbarActions = { TextButton({ manageOpen = true }) { Text(AdministrativeCopy.ManageLogCapacity.text(locale)) } },
+        tabs = {
+            if (state.snapshot != null) {
+                WarmSettingsFilterBar(
+                    options = listOf(
+                        WarmSettingsFilterOption<LogLevel?>(null, AdministrativeCopy.All.text(locale)),
+                    ) + LogLevel.entries.map { item ->
+                        WarmSettingsFilterOption<LogLevel?>(item, item.copy().text(locale))
+                    },
+                    selected = level,
+                    onSelect = { level = it },
+                    modifier = Modifier.testTag("administrative-log-filters"),
+                )
+            }
+        },
     ) {
         PageStateContent(state, locale, onRetry) { snapshot ->
-            var search by remember(snapshot.query) { mutableStateOf(snapshot.query.search) }
-            var level by remember(snapshot.query) { mutableStateOf(snapshot.query.level) }
             AdministrativeTextField(search, { search = it }, AdministrativeCopy.SearchLogs, locale, textAlign = TextAlign.Start)
-            WarmSettingsFilterBar(
-                options = listOf(
-                    WarmSettingsFilterOption<LogLevel?>(null, AdministrativeCopy.All.text(locale)),
-                ) + LogLevel.entries.map { item ->
-                    WarmSettingsFilterOption<LogLevel?>(item, item.copy().text(locale))
-                },
-                selected = level,
-                onSelect = { level = it },
-                modifier = Modifier.testTag("administrative-log-filters"),
-            )
             Text("${snapshot.usedMegabytes} MB / ${snapshot.capacityMegabytes} MB", Modifier.padding(16.dp))
             val filteredRecords = snapshot.records.filter { record ->
                 (search.isBlank() || record.summary.contains(search, true) || record.target.orEmpty().contains(search, true)) && (level == null || record.level == level)

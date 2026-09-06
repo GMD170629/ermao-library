@@ -7,10 +7,28 @@ from threading import RLock
 from time import monotonic
 from typing import Generic, TypeVar
 
-from app.modules.publications.domain.model import PublicationResourceTooLargeError
+from app.contracts.reader_safety_policy_generated import (
+    ReaderSafetyBudgetName,
+    ReaderSafetyRuleId,
+    reader_safety_budget,
+)
+from app.modules.publications.application.safety_policy import (
+    publication_resource_limit,
+)
 
 SnapshotKey = tuple[str, int, int] | tuple[str, int, int, str, str | None]
 V = TypeVar("V")
+
+
+def publication_snapshot_weight(source_bytes: int) -> int:
+    """Reserve the existing generated source-to-parser memory estimate."""
+    return max(
+        1,
+        source_bytes
+        * reader_safety_budget(
+            ReaderSafetyBudgetName.PARSER_SNAPSHOT_SOURCE_WEIGHT_MULTIPLIER
+        ),
+    )
 
 
 class PublicationSnapshotCache(Generic[V]):
@@ -18,7 +36,9 @@ class PublicationSnapshotCache(Generic[V]):
         self,
         *,
         maximum_entries: int = 8,
-        maximum_weight: int = 128 * 1024 * 1024,
+        maximum_weight: int = reader_safety_budget(
+            ReaderSafetyBudgetName.PARSER_SNAPSHOT_MEMORY_MAX_BYTES
+        ),
         dispose: Callable[[V], None] = lambda _value: None,
         clock: Callable[[], float] = monotonic,
     ) -> None:
@@ -40,8 +60,9 @@ class PublicationSnapshotCache(Generic[V]):
         if weight < 1:
             raise ValueError("Publication snapshot weight must be positive")
         if weight > self._maximum_weight:
-            raise PublicationResourceTooLargeError(
-                "Publication parser memory limit exceeded"
+            raise publication_resource_limit(
+                ReaderSafetyRuleId.COMMON_PARSER_SNAPSHOT_MEMORY,
+                "Publication parser memory limit exceeded",
             )
         with self._lock:
             now = self._clock()

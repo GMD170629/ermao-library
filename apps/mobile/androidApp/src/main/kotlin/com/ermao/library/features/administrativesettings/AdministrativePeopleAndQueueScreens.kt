@@ -43,8 +43,13 @@ fun KindleQueueScreen(
     var filter by remember { mutableStateOf(QueueFilter.All) }
     var deleteTask by remember { mutableStateOf<KindleTask?>(null) }
     var selectedTask by remember { mutableStateOf<KindleTask?>(null) }
-    AdministrativePage(AdministrativeCopy.KindleQueue, locale, onBack, modifier) {
-        QueueFilterRow(filter, { filter = it }, locale)
+    AdministrativePage(
+        title = AdministrativeCopy.KindleQueue,
+        locale = locale,
+        onBack = onBack,
+        modifier = modifier,
+        tabs = { QueueFilterRow(filter, { filter = it }, locale) },
+    ) {
         PageStateContent(state, locale, onRetry) { snapshot ->
             val tasks = snapshot.tasks.filter {
                 when (filter) {
@@ -57,7 +62,7 @@ fun KindleQueueScreen(
                 WarmSettingsEmptyState(
                     title = AdministrativeCopy.Empty.text(locale),
                     message = when (filter) {
-                        QueueFilter.All -> AdministrativeCopy.Empty.text(locale)
+                        QueueFilter.All -> null
                         QueueFilter.Running -> AdministrativeCopy.Running.text(locale)
                         QueueFilter.Failed -> AdministrativeCopy.Failed.text(locale)
                     },
@@ -194,18 +199,20 @@ fun UsersScreen(
                 Icon(WarmSettingsIcons.Users, AdministrativeCopy.AddUser.text(locale))
             }
         },
+        tabs = {
+            WarmSettingsFilterBar(
+                options = listOf(
+                    WarmSettingsFilterOption(null, AdministrativeCopy.All.text(locale)),
+                    WarmSettingsFilterOption(true, AdministrativeCopy.Enabled.text(locale)),
+                    WarmSettingsFilterOption(false, AdministrativeCopy.Disabled.text(locale)),
+                ),
+                selected = enabledFilter,
+                onSelect = { enabledFilter = it },
+                modifier = Modifier.testTag("administrative-user-filters"),
+            )
+        },
     ) {
         AdministrativeTextField(search, { search = it }, AdministrativeCopy.Search, locale, textAlign = TextAlign.Start)
-        WarmSettingsFilterBar(
-            options = listOf(
-                WarmSettingsFilterOption(null, AdministrativeCopy.All.text(locale)),
-                WarmSettingsFilterOption(true, AdministrativeCopy.Enabled.text(locale)),
-                WarmSettingsFilterOption(false, AdministrativeCopy.Disabled.text(locale)),
-            ),
-            selected = enabledFilter,
-            onSelect = { enabledFilter = it },
-            modifier = Modifier.testTag("administrative-user-filters"),
-        )
         PageStateContent(state, locale, onRetry) { snapshot ->
             val filteredUsers = snapshot.users.filter { user ->
                 (search.isBlank() || user.displayName.contains(search, true) || user.email.contains(search, true)) &&

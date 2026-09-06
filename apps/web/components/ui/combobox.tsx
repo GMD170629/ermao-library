@@ -160,7 +160,7 @@ export function Combobox({
         }}
         onKeyDown={onKeyDown}
         className={cn(
-          'h-11 w-full min-w-0 rounded-xl border border-black/[0.09] bg-white px-3 pr-10 text-sm text-[#34302D] outline-none transition placeholder:text-[#AAA29B] focus:border-[#EFAE9B] focus:ring-2 focus:ring-[#F9D8CE] disabled:cursor-not-allowed disabled:opacity-50',
+          'h-11 w-full min-w-0 rounded-xl border border-black/[0.09] bg-[var(--visual-color-app-surface)] px-3 pr-10 text-sm text-[var(--visual-color-app-text-primary)] outline-none transition placeholder:text-[var(--visual-color-app-text-tertiary)] focus:border-[var(--visual-color-app-focus-ring)] focus:ring-2 focus:ring-[var(--visual-color-app-focus-ring)] disabled:cursor-not-allowed disabled:opacity-50',
           inputClassName
         )}
       />
@@ -174,7 +174,7 @@ export function Combobox({
           setOpen((current) => !current);
           inputRef.current?.focus();
         }}
-        className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-[#77706A] outline-none disabled:opacity-50"
+        className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-[var(--visual-color-app-text-secondary)] outline-none disabled:opacity-50"
       >
         <ChevronDown size={16} className={cn('transition', open && 'rotate-180')} />
       </button>
@@ -189,10 +189,10 @@ export function Combobox({
             width: menuPosition.width,
             maxHeight: menuPosition.maxHeight
           }}
-          className="fixed z-[120] overflow-auto overscroll-contain rounded-2xl border border-[#DED8D1] bg-white p-1.5 text-[#4F4B47] shadow-xl shadow-stone-200/60"
+          className="fixed z-[120] overflow-auto overscroll-contain rounded-2xl border border-[var(--visual-color-app-divider-strong)] bg-[var(--visual-color-app-surface-raised)] p-1.5 text-[var(--visual-color-app-text-primary)] shadow-xl shadow-stone-200/60"
         >
           {status ? (
-            <div role="status" className="px-3 py-2 text-xs leading-5 text-[#8A837D]">
+            <div role="status" className="px-3 py-2 text-xs leading-5 text-[var(--visual-color-app-text-tertiary)]">
               {status}
             </div>
           ) : null}
@@ -211,8 +211,8 @@ export function Combobox({
                 onClick={() => selectOption(option)}
                 className={cn(
                   'flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm outline-none transition disabled:cursor-not-allowed disabled:opacity-40',
-                  active ? 'bg-[#FFF0EA] text-[#D94322]' : 'text-[#6F6A65] hover:bg-[#F5F2EE]',
-                  selected && 'text-[#D94322]'
+                  active ? 'bg-[var(--visual-color-app-accent-soft)] text-[var(--visual-color-app-brand-accent)]' : 'text-[var(--visual-color-app-text-secondary)] hover:bg-[var(--visual-color-app-navigation)]',
+                  selected && 'text-[var(--visual-color-app-brand-accent)]'
                 )}
               >
                 <span data-i18n-skip={option.translate === false ? '' : undefined} className="truncate">
@@ -222,7 +222,7 @@ export function Combobox({
               </button>
             );
           }) : status ? null : (
-            <div className="px-3 py-3 text-xs leading-5 text-[#8A837D]"><I18nText>没有匹配选项，可继续使用当前输入值</I18nText></div>
+            <div className="px-3 py-3 text-xs leading-5 text-[var(--visual-color-app-text-tertiary)]"><I18nText>没有匹配选项，可继续使用当前输入值</I18nText></div>
           )}
         </div>,
         document.body

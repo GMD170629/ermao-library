@@ -259,17 +259,19 @@ fun BookGridItem(
         Text(
             text = book.title,
             style = theme.typography.callout,
-            maxLines = 1,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = theme.spacing.one),
         )
-        Text(
-            text = book.author,
-            color = theme.colors.textSecondary,
-            style = theme.typography.caption,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        book.author.takeIf { it.isNotBlank() }?.let { author ->
+            Text(
+                text = author,
+                color = theme.colors.textSecondary,
+                style = theme.typography.caption,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         book.progressPercent?.takeIf { it in 1..100 }?.let { progress ->
             CoverProgress(
                 progressPercent = progress,
@@ -309,13 +311,15 @@ fun BookListItem(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                text = book.author,
-                color = theme.colors.textSecondary,
-                style = theme.typography.callout,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            book.author.takeIf { it.isNotBlank() }?.let { author ->
+                Text(
+                    text = author,
+                    color = theme.colors.textSecondary,
+                    style = theme.typography.callout,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             book.progressPercent?.takeIf { it in 1..100 }?.let { progress ->
                 ReadingProgress(progressPercent = progress)
             }

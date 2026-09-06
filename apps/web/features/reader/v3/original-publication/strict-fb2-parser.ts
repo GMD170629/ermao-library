@@ -1,21 +1,39 @@
 import {
   READER_SAFETY_BUDGETS,
-  READER_SAFETY_PROFILES,
   READER_SAFETY_RULE_IDS,
   type ReaderSafetyRuleId
 } from '@shuku/reader-core';
-import { rejectReaderSafety } from '../security/reader-safety-policy';
+import {
+  preflightReflowableXml,
+  rejectReaderSafety
+} from '../security/reader-safety-policy';
+import type { ChapterXmlEvent } from './chapter-core';
 
 export type StrictFb2ChapterSource = Readonly<{
   title: string | null;
   paragraphs: readonly string[];
   text: string;
+  events: readonly ChapterXmlEvent[];
+  resourceHref?: string;
+  sourceStart?: number;
+}>;
+
+export type StrictFb2BodyFragment = Readonly<{
+  title: string | null;
+  paragraphs: readonly string[];
+  text: string;
+  events: readonly ChapterXmlEvent[];
+  href: string;
+  sourceStart: number;
 }>;
 
 export type StrictFb2Document = Readonly<{
   title: string | null;
   language: string | null;
   chapters: readonly StrictFb2ChapterSource[];
+  sections: readonly StrictFb2ChapterSource[];
+  bodyFragments: readonly StrictFb2BodyFragment[];
+  events: readonly ChapterXmlEvent[];
   blockedResources: readonly Readonly<{
     id: string | null;
     ruleId: ReaderSafetyRuleId;
@@ -50,10 +68,14 @@ type SectionAccumulator = {
   titleParts: string[];
   paragraphs: string[];
   textParts: string[];
+  events: ChapterXmlEvent[];
+  sourceStart?: number;
+  resourceHref?: string;
 };
 
 type BodyAccumulator = {
-  loose: SectionAccumulator;
+  looseRuns: SectionAccumulator[];
+  currentLoose: SectionAccumulator;
   sections: SectionAccumulator[];
   sectionDepth: number;
   currentSection: SectionAccumulator | null;
@@ -74,6 +96,10 @@ type BinaryAccumulator = {
   mediaType: string | null;
   encodedParts: string[];
 };
+
+function emptySectionAccumulator(): SectionAccumulator {
+  return { titleParts: [], paragraphs: [], textParts: [], events: [] };
+}
 
 const XML_NAMESPACE = 'http://www.w3.org/XML/1998/namespace';
 const XMLNS_NAMESPACE = 'http://www.w3.org/2000/xmlns/';
@@ -226,7 +252,14 @@ function materialize(accumulator: SectionAccumulator): StrictFb2ChapterSource | 
   const text = normalized(accumulator.textParts);
   if (!text) return null;
   const title = normalized(accumulator.titleParts) || null;
-  return { title, paragraphs: accumulator.paragraphs, text };
+  return {
+    title,
+    paragraphs: accumulator.paragraphs,
+    text,
+    events: accumulator.events,
+    ...(accumulator.resourceHref ? { resourceHref: accumulator.resourceHref } : {}),
+    ...(accumulator.sourceStart === undefined ? {} : { sourceStart: accumulator.sourceStart })
+  };
 }
 
 function decodedBase64Length(value: string): number | null {
@@ -243,9 +276,10 @@ export function parseStrictFb2(
   limits: ParserLimits = DEFAULT_LIMITS,
   imageLimits: ImageLimits = DEFAULT_IMAGE_LIMITS
 ): StrictFb2Document {
-  if (/<!DOCTYPE|<!ENTITY/i.test(source)) {
-    rejectReaderSafety(READER_SAFETY_RULE_IDS.REFLOWABLE_REJECT_XML_ENTITY);
-  }
+  source = preflightReflowableXml(
+    source,
+    READER_SAFETY_BUDGETS.reflowableMarkupMaxBytes
+  );
   if (limits.maxDepth < 1 || limits.maxNodes < 1 || limits.maxTextChars < 1) {
     rejectReaderSafety(READER_SAFETY_RULE_IDS.FB2_STRUCTURE_BUDGET);
   }
@@ -258,6 +292,7 @@ export function parseStrictFb2(
   const captures: Capture[] = [];
   const bodies: BodyAccumulator[] = [];
   let currentBody: BodyAccumulator | null = null;
+  let topSectionCount = 0;
   let bookTitle: string | null = null;
   let language: string | null = null;
   let rootSeen = false;
@@ -266,6 +301,7 @@ export function parseStrictFb2(
   let textChars = 0;
   let decodedImagesTotalBytes = 0;
   let currentBinary: BinaryAccumulator | null = null;
+  const events: ChapterXmlEvent[] = [];
   const blockedResources: Array<Readonly<{
     id: string | null;
     ruleId: ReaderSafetyRuleId;
@@ -291,7 +327,11 @@ export function parseStrictFb2(
       rejectReaderSafety(READER_SAFETY_RULE_IDS.FB2_STRUCTURE_BUDGET);
     }
     for (const capture of captures) capture.parts.push(value);
-    const target = currentBody?.currentSection ?? currentBody?.loose;
+    const event: ChapterXmlEvent = { kind: 'text', text: value };
+    events.push(event);
+    const target = currentBody?.currentSection ?? currentBody?.currentLoose;
+    target?.events.push(event);
+    if (target && target.sourceStart === undefined) target.sourceStart = nodeCount;
     target?.textParts.push(value);
   };
 
@@ -315,6 +355,7 @@ export function parseStrictFb2(
       if (local !== 'FictionBook') throw new Error('PUBLICATION_STRUCTURE_INVALID');
       rootSeen = true;
     }
+    const sourceOrdinal = nodeCount;
     nodeCount += 1;
     if (nodeCount > limits.maxNodes) rejectReaderSafety(READER_SAFETY_RULE_IDS.FB2_STRUCTURE_BUDGET);
     const namespaces = namespacesForElement(stack.at(-1)?.namespaces, qName, attributes);
@@ -338,32 +379,61 @@ export function parseStrictFb2(
       };
     }
 
+    let targetHref: string | undefined;
     if (local === 'body') {
       if (currentBody) throw new Error('PUBLICATION_MARKUP_INVALID');
       currentBody = {
-        loose: { titleParts: [], paragraphs: [], textParts: [] },
+        looseRuns: [],
+        currentLoose: emptySectionAccumulator(),
         sections: [],
         sectionDepth: 0,
         currentSection: null
       };
     } else if (local === 'section' && currentBody) {
       if (currentBody.sectionDepth === 0) {
-        currentBody.currentSection = { titleParts: [], paragraphs: [], textParts: [] };
+        if (
+          currentBody.currentLoose.textParts.length > 0
+          || currentBody.currentLoose.paragraphs.length > 0
+          || currentBody.currentLoose.titleParts.length > 0
+        ) currentBody.looseRuns.push(currentBody.currentLoose);
+        topSectionCount += 1;
+        const resourceHref = `fb2/section-${String(topSectionCount).padStart(4, '0')}.xhtml`;
+        currentBody.currentSection = {
+          ...emptySectionAccumulator(),
+          sourceStart: sourceOrdinal,
+          resourceHref
+        };
+        targetHref = `${resourceHref}#chapter-node-${sourceOrdinal}`;
+        currentBody.currentLoose = emptySectionAccumulator();
+      } else {
+        const topSection = currentBody.currentSection;
+        targetHref = topSection?.resourceHref
+          ? `${topSection.resourceHref}#chapter-node-${sourceOrdinal}`
+          : undefined;
       }
       currentBody.sectionDepth += 1;
     }
+
+    const event: ChapterXmlEvent = {
+      kind: 'start',
+      name: local,
+      attributes: attributes.map((attribute) => ({ name: attribute.qName, value: attribute.value })),
+      ...(targetHref ? { targetHref } : {})
+    };
+    events.push(event);
+    if (local !== 'body') (currentBody?.currentSection ?? currentBody?.currentLoose)?.events.push(event);
 
     if (local === 'book-title' && bookTitle === null) {
       captures.push({ depth, parts: [], finish: (value) => { bookTitle = value || null; } });
     } else if (local === 'lang' && language === null) {
       captures.push({ depth, parts: [], finish: (value) => { language = value || null; } });
     } else if (local === 'title' && currentBody) {
-      const target = currentBody.currentSection ?? currentBody.loose;
+      const target = currentBody.currentSection ?? currentBody.currentLoose;
       if (target.titleParts.length === 0) {
         captures.push({ depth, parts: [], finish: (value) => { if (value) target.titleParts.push(value); } });
       }
     } else if (local === 'p' && currentBody) {
-      const target = currentBody.currentSection ?? currentBody.loose;
+      const target = currentBody.currentSection ?? currentBody.currentLoose;
       captures.push({ depth, parts: [], finish: (value) => { if (value) target.paragraphs.push(value); } });
     }
 
@@ -373,6 +443,9 @@ export function parseStrictFb2(
   const closeElement = (qName: string) => {
     const current = stack.at(-1);
     if (!current || current.qName !== qName) throw new Error('PUBLICATION_MARKUP_INVALID');
+    const event: ChapterXmlEvent = { kind: 'end', name: current.local };
+    events.push(event);
+    if (current.local !== 'body') (currentBody?.currentSection ?? currentBody?.currentLoose)?.events.push(event);
     finishCaptures(stack.length);
     if (current.local === 'binary') {
       if (!currentBinary || currentBinary.depth !== stack.length) {
@@ -380,16 +453,10 @@ export function parseStrictFb2(
       }
       const encoded = currentBinary.encodedParts.join('');
       const decodedBytes = decodedBase64Length(encoded);
-      const supportedMediaType = currentBinary.mediaType !== null
-        && Object.prototype.hasOwnProperty.call(
-          READER_SAFETY_PROFILES.reflowable.embeddedImageExtensionsByMimeType,
-          currentBinary.mediaType
-        );
       const exceedsBudget = encoded.length > imageLimits.maxEncodedBytes
         || decodedBytes === null
         || decodedBytes > imageLimits.maxDecodedBytes
-        || decodedImagesTotalBytes + decodedBytes > imageLimits.maxDecodedTotalBytes
-        || !supportedMediaType;
+        || decodedImagesTotalBytes + decodedBytes > imageLimits.maxDecodedTotalBytes;
       if (exceedsBudget) {
         blockedResources.push({
           id: currentBinary.id,
@@ -407,9 +474,15 @@ export function parseStrictFb2(
         if (!section) throw new Error('PUBLICATION_MARKUP_INVALID');
         currentBody.sections.push(section);
         currentBody.currentSection = null;
+        currentBody.currentLoose = emptySectionAccumulator();
       }
     } else if (current.local === 'body') {
       if (!currentBody || currentBody.sectionDepth !== 0) throw new Error('PUBLICATION_MARKUP_INVALID');
+      if (
+        currentBody.currentLoose.textParts.length > 0
+        || currentBody.currentLoose.paragraphs.length > 0
+        || currentBody.currentLoose.titleParts.length > 0
+      ) currentBody.looseRuns.push(currentBody.currentLoose);
       bodies.push(currentBody);
       currentBody = null;
     }
@@ -447,7 +520,7 @@ export function parseStrictFb2(
       continue;
     }
     if (source.startsWith('<!', opening)) {
-      rejectReaderSafety(READER_SAFETY_RULE_IDS.REFLOWABLE_REJECT_XML_ENTITY);
+      throw new Error('PUBLICATION_MARKUP_INVALID');
     }
     const end = source.indexOf('>', opening + 1);
     if (end < 0) throw new Error('PUBLICATION_MARKUP_INVALID');
@@ -466,11 +539,43 @@ export function parseStrictFb2(
   if (!rootSeen || !rootClosed || stack.length > 0 || currentBody || captures.length > 0 || bodies.length === 0) {
     throw new Error('PUBLICATION_STRUCTURE_INVALID');
   }
-  const chapters = bodies.flatMap((body) => {
-    const loose = materialize(body.loose);
-    const sections = body.sections.map(materialize).filter((item): item is StrictFb2ChapterSource => item !== null);
-    return loose ? [loose, ...sections] : sections;
+  const sections = bodies.flatMap((body) => body.sections
+    .map(materialize)
+    .filter((item): item is StrictFb2ChapterSource => item !== null));
+  const bodyFragments = bodies.flatMap((body, bodyIndex) => body.looseRuns
+    .map(materialize)
+    .filter((item): item is StrictFb2ChapterSource => item !== null)
+    .map((item, runIndex): StrictFb2BodyFragment => ({
+      title: item.title,
+      paragraphs: item.paragraphs,
+      text: item.text,
+      events: item.events,
+      href: `fb2/body-${bodyIndex + 1}-part-${runIndex + 1}.xhtml`,
+      sourceStart: item.sourceStart ?? Number.MAX_SAFE_INTEGER
+    })));
+  const chapters = bodies.flatMap((body, bodyIndex) => {
+    const loose = bodyFragments.filter((fragment) => fragment.href.startsWith(
+      `fb2/body-${bodyIndex + 1}-`
+    )).map((fragment): StrictFb2ChapterSource => ({
+      title: fragment.title,
+      paragraphs: fragment.paragraphs,
+      text: fragment.text,
+      events: fragment.events,
+      sourceStart: fragment.sourceStart,
+      resourceHref: fragment.href
+    }));
+    const bodySections = body.sections.map(materialize)
+      .filter((item): item is StrictFb2ChapterSource => item !== null);
+    return [...loose, ...bodySections];
   });
   if (chapters.length === 0) throw new Error('PUBLICATION_STRUCTURE_INVALID');
-  return { title: bookTitle, language, chapters, blockedResources };
+  return {
+    title: bookTitle,
+    language,
+    chapters,
+    sections,
+    bodyFragments,
+    events,
+    blockedResources
+  };
 }

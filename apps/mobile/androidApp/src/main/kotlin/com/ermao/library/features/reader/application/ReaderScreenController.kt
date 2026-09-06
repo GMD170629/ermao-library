@@ -53,6 +53,8 @@ internal interface ReaderScreenController {
     val morphology: ReaderMorphology
     val capabilities: ReaderCapabilities
     val currentLocation: StateFlow<ReaderLocation?>
+    /** Native locator-derived TOC selection, independent of persisted progress. */
+    val currentNavigationEntryId: StateFlow<String?>? get() = null
     /** Renderer-owned display progress when it cannot be inferred from the exact locator. */
     val presentationProgress: StateFlow<Double?>? get() = null
     val preferences: StateFlow<ReaderPreferences>
@@ -133,17 +135,16 @@ internal interface ReaderScreenController {
     suspend fun close()
 }
 
-private const val NAVIGATION_VERIFICATION_TIMEOUT_MILLIS = 3_000L
+internal const val NAVIGATION_VERIFICATION_TIMEOUT_MILLIS = 3_000L
 
 internal fun resolveAdjacentChapters(
     entries: List<ReaderTocEntry>,
-    currentLocation: ReaderLocation?,
+    currentEntryId: String?,
 ): ReaderAdjacentChapters {
-    if (currentLocation == null) return ReaderAdjacentChapters()
-    val ordered = flattenTableOfContents(entries)
-    val currentIndex = ordered.indexOfLast { currentLocation.matches(it.entry.target) }
+    if (currentEntryId == null) return ReaderAdjacentChapters()
+    val ordered = flattenTableOfContents(entries).filter { it.entry.target !is ReaderNavigationTargetInvalid }
+    val currentIndex = ordered.indexOfFirst { it.entry.id == currentEntryId }
         .takeIf { it >= 0 }
-        ?: resolveChapterIndexByProgression(ordered, currentLocation)
         ?: return ReaderAdjacentChapters()
     return ReaderAdjacentChapters(
         previous = ordered.getOrNull(currentIndex - 1)?.entry,
@@ -156,19 +157,6 @@ internal fun flattenTableOfContents(entries: List<ReaderTocEntry>, depth: Int = 
         add(ReaderTocNode(entry, depth))
         addAll(flattenTableOfContents(entry.children, depth + 1))
     }
-}
-
-private fun resolveChapterIndexByProgression(
-    entries: List<ReaderTocNode>,
-    currentLocation: ReaderLocation,
-): Int? {
-    val current = (currentLocation as? com.ermao.library.shared.modules.reader.ReflowReaderLocation)
-        ?.totalProgression ?: return null
-    return entries.indexOfLast { node ->
-        val start = (node.entry.location as? com.ermao.library.shared.modules.reader.ReflowReaderLocation)
-            ?.totalProgression
-        start != null && start <= current
-    }.takeIf { it >= 0 }
 }
 
 private fun ReaderLocation.matches(target: ReaderNavigationTarget): Boolean {
@@ -189,5 +177,6 @@ private fun ReaderLocation.matches(target: ReaderNavigationTarget): Boolean {
         location.pageIndex == target.pageIndex && location.resourceHref == target.resourceHref
     } == true
     is ReaderNavigationTargetInvalid -> false
+    is com.ermao.library.shared.modules.reader.ReaderNavigationTargetChapter -> false
     }
 }

@@ -1,0 +1,401 @@
+{
+  "schema": "ermao.chapter-fixture",
+  "version": 1,
+  "cases": [
+    {
+      "id": "txt-normalize-and-no-preface-entry",
+      "format": "txt",
+      "input": "Preface\r\nChapter\tI\r\nFirst body\r\nChapter 2: Second\r\nSecond body",
+      "expected": {
+        "normalizedText": "Preface\nChapter\tI\nFirst body\nChapter 2: Second\nSecond body",
+        "entries": [
+          {
+            "index": 0,
+            "parentIndex": -1,
+            "key": "chapter-0",
+            "navigable": true,
+            "title": "Chapter\tI",
+            "href": "text/chapter-0001.xhtml#heading-000001",
+            "sourceStart": 8,
+            "sourceEnd": 29,
+            "contentStart": 18
+          },
+          {
+            "index": 1,
+            "parentIndex": -1,
+            "key": "chapter-1",
+            "navigable": true,
+            "title": "Chapter 2: Second",
+            "href": "text/chapter-0002.xhtml#heading-000001",
+            "sourceStart": 29,
+            "sourceEnd": 58,
+            "contentStart": 47
+          }
+        ]
+      }
+    },
+    {
+      "id": "txt-no-heading-keeps-normalized-text",
+      "format": "txt",
+      "input": "No headings\r\nare present",
+      "expected": {
+        "normalizedText": "No headings\nare present",
+        "entries": []
+      }
+    },
+    {
+      "id": "epub-nav-authored-tree",
+      "format": "epub-nav",
+      "events": [
+        {
+          "kind": "start",
+          "name": "nav",
+          "attributes": [
+            {
+              "name": "type",
+              "value": "toc"
+            }
+          ]
+        },
+        {
+          "kind": "start",
+          "name": "ol"
+        },
+        {
+          "kind": "start",
+          "name": "li"
+        },
+        {
+          "kind": "start",
+          "name": "a",
+          "targetHref": "OEBPS/ch1.xhtml"
+        },
+        {
+          "kind": "text",
+          "text": "Chapter One"
+        },
+        {
+          "kind": "end",
+          "name": "a"
+        },
+        {
+          "kind": "end",
+          "name": "li"
+        },
+        {
+          "kind": "end",
+          "name": "ol"
+        },
+        {
+          "kind": "end",
+          "name": "nav"
+        }
+      ],
+      "expected": {
+        "entries": [
+          {
+            "index": 0,
+            "parentIndex": -1,
+            "key": "chapter-0",
+            "navigable": true,
+            "title": "Chapter One",
+            "href": "OEBPS/ch1.xhtml",
+            "sourceStart": 2,
+            "sourceEnd": 0,
+            "contentStart": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "ncx-navpoint-tree",
+      "format": "epub-ncx",
+      "events": [
+        {
+          "kind": "start",
+          "name": "navPoint"
+        },
+        {
+          "kind": "start",
+          "name": "navLabel"
+        },
+        {
+          "kind": "start",
+          "name": "text"
+        },
+        {
+          "kind": "text",
+          "text": "Root"
+        },
+        {
+          "kind": "end",
+          "name": "text"
+        },
+        {
+          "kind": "end",
+          "name": "navLabel"
+        },
+        {
+          "kind": "start",
+          "name": "content",
+          "targetHref": "OEBPS/root.xhtml"
+        },
+        {
+          "kind": "end",
+          "name": "content"
+        },
+        {
+          "kind": "end",
+          "name": "navPoint"
+        }
+      ],
+      "expected": {
+        "entries": [
+          {
+            "index": 0,
+            "parentIndex": -1,
+            "key": "chapter-0",
+            "navigable": true,
+            "title": "Root",
+            "href": "OEBPS/root.xhtml",
+            "sourceStart": 0,
+            "sourceEnd": 0,
+            "contentStart": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "fb2-section-groups-and-promotion",
+      "format": "fb2",
+      "events": [
+        {
+          "kind": "start",
+          "name": "FictionBook"
+        },
+        {
+          "kind": "start",
+          "name": "section",
+          "targetHref": "fb2/section-0001.xhtml#chapter-node-1"
+        },
+        {
+          "kind": "start",
+          "name": "title"
+        },
+        {
+          "kind": "text",
+          "text": "Part"
+        },
+        {
+          "kind": "text",
+          "text": " One"
+        },
+        {
+          "kind": "end",
+          "name": "title"
+        },
+        {
+          "kind": "start",
+          "name": "p"
+        },
+        {
+          "kind": "text",
+          "text": "Body"
+        },
+        {
+          "kind": "end",
+          "name": "p"
+        },
+        {
+          "kind": "start",
+          "name": "section"
+        },
+        {
+          "kind": "start",
+          "name": "title"
+        },
+        {
+          "kind": "text",
+          "text": "Child"
+        },
+        {
+          "kind": "end",
+          "name": "title"
+        },
+        {
+          "kind": "start",
+          "name": "p"
+        },
+        {
+          "kind": "text",
+          "text": "Child body"
+        },
+        {
+          "kind": "end",
+          "name": "p"
+        },
+        {
+          "kind": "end",
+          "name": "section"
+        },
+        {
+          "kind": "start",
+          "name": "section"
+        },
+        {
+          "kind": "start",
+          "name": "title"
+        },
+        {
+          "kind": "text",
+          "text": "Empty"
+        },
+        {
+          "kind": "end",
+          "name": "title"
+        },
+        {
+          "kind": "start",
+          "name": "p"
+        },
+        {
+          "kind": "end",
+          "name": "p"
+        },
+        {
+          "kind": "end",
+          "name": "section"
+        },
+        {
+          "kind": "start",
+          "name": "section"
+        },
+        {
+          "kind": "start",
+          "name": "title"
+        },
+        {
+          "kind": "text",
+          "text": "Image"
+        },
+        {
+          "kind": "end",
+          "name": "title"
+        },
+        {
+          "kind": "start",
+          "name": "image",
+          "attributes": [
+            {
+              "name": "href",
+              "value": "#img"
+            }
+          ]
+        },
+        {
+          "kind": "end",
+          "name": "image"
+        },
+        {
+          "kind": "end",
+          "name": "section"
+        },
+        {
+          "kind": "end",
+          "name": "section"
+        },
+        {
+          "kind": "end",
+          "name": "FictionBook"
+        }
+      ],
+      "expected": {
+        "entries": [
+          {
+            "index": 0,
+            "parentIndex": -1,
+            "key": "chapter-0",
+            "navigable": true,
+            "title": "Part One",
+            "href": "fb2/section-0001.xhtml#chapter-node-1",
+            "sourceStart": 1,
+            "sourceEnd": 0,
+            "contentStart": 0
+          },
+          {
+            "index": 1,
+            "parentIndex": 0,
+            "key": "chapter-1",
+            "navigable": false,
+            "title": "Child",
+            "sourceStart": 4,
+            "sourceEnd": 0,
+            "contentStart": 0
+          },
+          {
+            "index": 2,
+            "parentIndex": 0,
+            "key": "chapter-2",
+            "navigable": false,
+            "title": "Image",
+            "sourceStart": 10,
+            "sourceEnd": 0,
+            "contentStart": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "mobi-parent-index-and-group",
+      "format": "mobi",
+      "nodes": [
+        {
+          "parentIndex": -1,
+          "title": "Root",
+          "targetHref": "root.xhtml"
+        },
+        {
+          "parentIndex": 0,
+          "title": "",
+          "targetHref": null
+        },
+        {
+          "parentIndex": 1,
+          "title": "Child",
+          "targetHref": "child.xhtml"
+        },
+        {
+          "parentIndex": -1,
+          "title": "Dropped",
+          "targetHref": null
+        }
+      ],
+      "expected": {
+        "entries": [
+          {
+            "index": 0,
+            "parentIndex": -1,
+            "key": "chapter-0",
+            "navigable": true,
+            "title": "Root",
+            "href": "root.xhtml",
+            "sourceStart": 0,
+            "sourceEnd": 0,
+            "contentStart": 0
+          },
+          {
+            "index": 1,
+            "parentIndex": 0,
+            "key": "chapter-1",
+            "navigable": true,
+            "title": "Child",
+            "href": "child.xhtml",
+            "sourceStart": 2,
+            "sourceEnd": 0,
+            "contentStart": 0
+          }
+        ]
+      }
+    }
+  ]
+}

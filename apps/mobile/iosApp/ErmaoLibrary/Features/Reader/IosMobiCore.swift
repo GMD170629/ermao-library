@@ -71,7 +71,7 @@ struct IosMobiResourceInfo: Equatable, Sendable {
     let sourceUID: UInt64
     let decodedLength: UInt64
     let sourceName: String
-    let mediaType: String
+    let mediaType: String?
 }
 
 struct IosMobiTocInfo: Equatable, Sendable {
@@ -179,18 +179,18 @@ actor IosMobiBook {
                       capacity,
                       required
                   )
-              }),
-              let mediaType = try Self.copyString({ buffer, capacity, required in
-                  ermao_mobi_copy_resource_media_type(
-                      currentHandle,
-                      resourceIndex,
-                      buffer,
-                      capacity,
-                      required
-                  )
               })
         else {
             throw IosMobiCoreError(ERMAO_MOBI_INTERNAL)
+        }
+        let mediaType = try Self.copyString { buffer, capacity, required in
+            ermao_mobi_copy_resource_media_type(
+                currentHandle,
+                resourceIndex,
+                buffer,
+                capacity,
+                required
+            )
         }
         return IosMobiResourceInfo(
             category: category,

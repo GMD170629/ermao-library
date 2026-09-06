@@ -1,0 +1,46 @@
+
+enum class ReaderSafetyResourceRole { PUBLICATION, CONTROL_DOCUMENT, READING_ORDER, OPTIONAL_RESOURCE }
+
+data class ReaderSafetyDecisionContext(
+    val format: ReaderSafetyFormat,
+    val resourceRole: ReaderSafetyResourceRole,
+    val facts: List<String>,
+    val enforcementAvailable: Boolean,
+    val canIsolate: Boolean,
+)
+
+data class ReaderSafetyDecision(
+    val action: ReaderSafetyAction,
+    val scope: String,
+    val classification: String?,
+    val ruleId: ReaderSafetyRuleId?,
+    val errorCode: ReaderSafetyErrorCode?,
+)
+
+fun evaluateReaderSafety(context: ReaderSafetyDecisionContext): List<ReaderSafetyDecision> {
+    if (!context.enforcementAvailable) return listOf(
+        ReaderSafetyDecision(ReaderSafetyAction.REJECT_PUBLICATION, "PUBLICATION", "IMPLEMENTATION",
+            null, ReaderSafetyErrorCode.PLATFORM_POLICY_ALGORITHM_UNSUPPORTED),
+    )
+    val knownFacts = ReaderSafetyPolicy.rules.values.map { it.trigger }.toSet()
+    if (context.facts.any { it !in knownFacts }) return listOf(
+        ReaderSafetyDecision(ReaderSafetyAction.REJECT_PUBLICATION, "PUBLICATION", "IMPLEMENTATION",
+            null, ReaderSafetyErrorCode.ENGINE_POLICY_ALGORITHM_UNSUPPORTED),
+    )
+    val decisions = ReaderSafetyPolicy.rules.values.filter {
+        it.trigger in context.facts && context.format in it.formats
+    }.map { rule ->
+        var action = rule.action
+        var scope = rule.scope
+        if (context.canIsolate && rule.isolatedAction != rule.action) {
+            action = rule.isolatedAction
+            scope = "RESOURCE"
+        } else if (context.resourceRole == ReaderSafetyResourceRole.OPTIONAL_RESOURCE && rule.optionalResourceAction != rule.action) {
+            action = rule.optionalResourceAction
+            scope = "RESOURCE"
+        }
+        val error = if (action == ReaderSafetyAction.ALLOW || action == ReaderSafetyAction.SANITIZE) null else rule.errorCode
+        ReaderSafetyDecision(action, scope, rule.classification, rule.id, error)
+    }
+    return decisions.ifEmpty { listOf(ReaderSafetyDecision(ReaderSafetyAction.ALLOW, "PUBLICATION", null, null, null)) }
+}

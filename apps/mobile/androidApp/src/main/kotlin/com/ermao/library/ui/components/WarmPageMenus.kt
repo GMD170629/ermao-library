@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -44,6 +46,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
@@ -65,6 +68,9 @@ data class WarmPageMenuAction<T>(
     val value: T,
     val label: String,
     val leadingIcon: ImageVector? = null,
+    val enabled: Boolean = true,
+    val destructive: Boolean = false,
+    val testTag: String? = null,
 )
 
 data class WarmPageFloatingMenuAction<T>(
@@ -121,7 +127,7 @@ fun <T> WarmPageFloatingActionMenu(
             contentAlignment = Alignment.TopStart,
         ) {
             val density = LocalDensity.current
-            val menuWidth = maxWidth.coerceAtMost(224.dp)
+            val menuWidth = maxWidth.coerceAtMost(theme.components.menu.maximumWidth)
             val menuListHeight = (regularActions.size * 48 + 4).dp
                 .coerceAtMost((maxHeight - 132.dp).coerceAtLeast(48.dp))
             val estimatedHeight = 72.dp + menuListHeight +
@@ -146,7 +152,7 @@ fun <T> WarmPageFloatingActionMenu(
                         indication = null,
                         onClick = {},
                     ),
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(theme.radii.task),
                 color = theme.colors.surfaceRaised.copy(alpha = 0.90f),
                 contentColor = theme.colors.textPrimary,
                 border = BorderStroke(1.dp, theme.colors.divider.copy(alpha = 0.72f)),
@@ -156,7 +162,7 @@ fun <T> WarmPageFloatingActionMenu(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                            .padding(horizontal = theme.components.menu.itemHorizontalPadding, vertical = theme.spacing.oneAndHalf),
                     ) {
                         header()
                     }
@@ -199,9 +205,9 @@ private fun <T> WarmPageFloatingActionRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 48.dp)
+            .heightIn(min = theme.components.menu.itemMinimumHeight)
             .clickable(enabled = action.enabled) { onSelect(action.value) }
-            .padding(horizontal = 14.dp, vertical = theme.spacing.half),
+            .padding(horizontal = theme.components.menu.itemHorizontalPadding, vertical = theme.spacing.half),
         horizontalArrangement = Arrangement.spacedBy(theme.spacing.one),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -216,49 +222,31 @@ private fun <T> WarmPageFloatingActionRow(
             imageVector = action.icon,
             contentDescription = null,
             tint = foreground,
-            modifier = Modifier.size(20.dp),
+            modifier = Modifier.size(theme.components.menu.iconSlotSize),
         )
     }
 }
 
 @Composable
 fun <T> WarmPageActionMenu(
-    title: String,
     expanded: Boolean,
     actions: List<WarmPageMenuAction<T>>,
     onSelect: (T) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    title: String? = null,
 ) {
-    val theme = WarmPageThemeValues
-    DropdownMenu(
-        expanded = expanded,
-        onDismissRequest = onDismiss,
-        modifier = modifier,
-        containerColor = theme.colors.surfaceRaised,
-        tonalElevation = theme.spacing.none,
-    ) {
-        Text(
-            text = title,
-            style = theme.typography.caption,
-            color = theme.colors.textSecondary,
-            modifier = Modifier.padding(
-                horizontal = theme.components.menu.titleHorizontalPadding,
-                vertical = theme.components.menu.titleVerticalPadding,
-            ),
-        )
+    WarmPagePopup(expanded, onDismiss, modifier, title) {
+        val hasLeadingSlot = actions.any { it.leadingIcon != null }
         actions.forEach { action ->
-            DropdownMenuItem(
-                text = { Text(text = action.label, style = theme.typography.body) },
+            WarmPageMenuItem(
+                label = action.label,
                 onClick = { onSelect(action.value) },
-                leadingIcon = action.leadingIcon?.let { icon ->
-                    { Icon(imageVector = icon, contentDescription = null) }
-                },
-                colors = MenuDefaults.itemColors(
-                    textColor = theme.colors.textPrimary,
-                    leadingIconColor = theme.colors.textSecondary,
-                ),
-                modifier = Modifier.heightIn(min = theme.components.menu.itemMinimumHeight),
+                leadingIcon = action.leadingIcon,
+                hasLeadingSlot = hasLeadingSlot,
+                enabled = action.enabled,
+                destructive = action.destructive,
+                modifier = action.testTag?.let { Modifier.testTag(it) } ?: Modifier,
             )
         }
     }
@@ -266,63 +254,25 @@ fun <T> WarmPageActionMenu(
 
 @Composable
 fun <T> WarmPageSingleChoiceMenu(
-    title: String,
     expanded: Boolean,
     options: List<WarmPageMenuOption<T>>,
     selected: T,
     onSelect: (T) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    title: String? = null,
     dismissLabel: String? = null,
 ) {
     val theme = WarmPageThemeValues
-    DropdownMenu(
-        expanded = expanded,
-        onDismissRequest = onDismiss,
-        modifier = modifier,
-        containerColor = theme.colors.surfaceRaised,
-        tonalElevation = theme.spacing.none,
-    ) {
-        Text(
-            text = title,
-            style = theme.typography.caption,
-            color = theme.colors.textSecondary,
-            modifier = Modifier.padding(
-                horizontal = theme.components.menu.titleHorizontalPadding,
-                vertical = theme.components.menu.titleVerticalPadding,
-            ),
-        )
+    WarmPagePopup(expanded, onDismiss, modifier, title) {
+        val hasLeadingSlot = options.any { it.leadingIcon != null }
         options.forEach { option ->
-            val isSelected = option.value == selected
-            DropdownMenuItem(
-                text = { Text(text = option.label, style = theme.typography.body) },
+            WarmPageMenuItem(
+                label = option.label,
                 onClick = { onSelect(option.value) },
-                leadingIcon = option.leadingIcon?.let { icon ->
-                    { Icon(imageVector = icon, contentDescription = null) }
-                },
-                trailingIcon = if (isSelected) {
-                    {
-                        Icon(
-                            imageVector = Icons.Filled.Check,
-                            contentDescription = null,
-                            tint = theme.colors.brandAccent,
-                        )
-                    }
-                } else {
-                    null
-                },
-                colors = MenuDefaults.itemColors(
-                    textColor = theme.colors.textPrimary,
-                    leadingIconColor = theme.colors.textSecondary,
-                    trailingIconColor = theme.colors.brandAccent,
-                    disabledTextColor = theme.colors.textTertiary,
-                ),
-                modifier = Modifier
-                    .heightIn(min = theme.components.menu.itemMinimumHeight)
-                    .semantics {
-                        this.selected = isSelected
-                        role = Role.RadioButton
-                    },
+                leadingIcon = option.leadingIcon,
+                hasLeadingSlot = hasLeadingSlot,
+                selected = option.value == selected,
             )
         }
         dismissLabel?.let { label ->
@@ -330,12 +280,98 @@ fun <T> WarmPageSingleChoiceMenu(
                 thickness = theme.components.dividerThickness,
                 color = theme.colors.divider,
             )
-            DropdownMenuItem(
-                text = { Text(text = label, style = theme.typography.body) },
-                onClick = onDismiss,
-                colors = MenuDefaults.itemColors(textColor = theme.colors.textPrimary),
-                modifier = Modifier.heightIn(min = theme.components.menu.itemMinimumHeight),
-            )
+            WarmPageMenuItem(label = label, onClick = onDismiss)
         }
     }
+}
+
+/** Native popup shell and branded content have one owner for both action and choice menus. */
+@Composable
+fun WarmPagePopup(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+    title: String? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val theme = WarmPageThemeValues
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+        modifier = modifier.widthIn(max = theme.components.menu.maximumWidth),
+        shape = RoundedCornerShape(theme.radii.task),
+        containerColor = theme.colors.surfaceRaised,
+        tonalElevation = theme.spacing.none,
+    ) {
+        title?.let { label ->
+            Text(
+                text = label,
+                style = theme.typography.caption,
+                color = theme.colors.textSecondary,
+                modifier = Modifier.padding(
+                    horizontal = theme.components.menu.titleHorizontalPadding,
+                    vertical = theme.components.menu.titleVerticalPadding,
+                ),
+            )
+        }
+        content()
+    }
+}
+
+@Composable
+fun WarmPageMenuItem(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    leadingIcon: ImageVector? = null,
+    hasLeadingSlot: Boolean = false,
+    selected: Boolean? = null,
+    enabled: Boolean = true,
+    destructive: Boolean = false,
+) {
+    val theme = WarmPageThemeValues
+    val foreground = when {
+        destructive -> androidx.compose.material3.MaterialTheme.colorScheme.error
+        selected == true -> theme.colors.brandAccent
+        else -> theme.colors.textPrimary
+    }
+    val selectionModifier = if (selected == null) Modifier else Modifier.semantics {
+        this.selected = selected
+        role = Role.RadioButton
+    }
+    DropdownMenuItem(
+        text = {
+            Text(label, style = theme.typography.body, modifier = Modifier.fillMaxWidth())
+        },
+        onClick = onClick,
+        enabled = enabled,
+        leadingIcon = if (hasLeadingSlot) {
+            {
+                Box(Modifier.size(theme.components.menu.iconSlotSize), contentAlignment = Alignment.Center) {
+                    leadingIcon?.let { Icon(it, contentDescription = null, modifier = Modifier.fillMaxSize()) }
+                }
+            }
+        } else null,
+        trailingIcon = if (selected != null) {
+            {
+                Box(Modifier.size(theme.components.menu.iconSlotSize), contentAlignment = Alignment.Center) {
+                    if (selected) {
+                        Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.fillMaxSize())
+                    }
+                }
+            }
+        } else null,
+        colors = MenuDefaults.itemColors(
+            textColor = foreground,
+            leadingIconColor = if (destructive || selected == true) foreground else theme.colors.textSecondary,
+            trailingIconColor = theme.colors.brandAccent,
+            disabledTextColor = theme.colors.textTertiary,
+            disabledLeadingIconColor = theme.colors.textTertiary,
+            disabledTrailingIconColor = theme.colors.textTertiary,
+        ),
+        contentPadding = PaddingValues(horizontal = theme.components.menu.itemHorizontalPadding),
+        modifier = modifier
+            .heightIn(min = theme.components.menu.itemMinimumHeight)
+            .then(selectionModifier),
+    )
 }

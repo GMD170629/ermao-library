@@ -1,9 +1,7 @@
 import {
   READER_SAFETY_BUDGETS,
-  READER_SAFETY_FORMATS,
   READER_SAFETY_RULE_IDS,
   READER_SAFETY_RULES,
-  readerSafetyAcceptsMimeType,
   type PdfReaderErrorCode,
   type ReaderSafetyRuleId
 } from '@shuku/reader-core';
@@ -189,9 +187,6 @@ export class PdfRangeByteSource {
       throw new PdfRangeError('NETWORK_UNAVAILABLE', 'PDF 网络请求失败', { cause });
     }
     if (!response.ok) throw await readerResourceFailure(response, 'pdf');
-    if (!readerSafetyAcceptsMimeType(READER_SAFETY_FORMATS.PDF, response.headers.get('Content-Type') ?? '')) {
-      rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_EXACT_FORMAT_MIME);
-    }
     if (!identityEncoded(response)) {
       throw pdfRangePolicyError('PDF 响应的内容编码无效');
     }
@@ -278,10 +273,6 @@ export class PdfRangeByteSource {
     if (response.status === 200) rejection = pdfRangePolicyError('服务器未返回 PDF Range 响应');
     else if (response.status === 416) rejection = pdfRangePolicyError('服务器拒绝了 PDF 字节区间');
     else if (response.status !== 206) throw await readerResourceFailure(response, 'pdf');
-    else if (!readerSafetyAcceptsMimeType(READER_SAFETY_FORMATS.PDF, response.headers.get('Content-Type') ?? '')) {
-      await response.body?.cancel();
-      rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_EXACT_FORMAT_MIME);
-    }
     else if (!identityEncoded(response)) {
       rejection = pdfRangePolicyError('PDF Range 的内容编码无效');
     }

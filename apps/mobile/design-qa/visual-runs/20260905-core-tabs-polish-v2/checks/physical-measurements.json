@@ -1,0 +1,279 @@
+{
+  "apkSha256": "d905267a8db41ba174f6bde5874b668204bb671cdf684e5043b625982ca339bd",
+  "installedApkMatches": true,
+  "density": 3.5,
+  "navigation": {
+    "01-home": {
+      "pillPx": [
+        14,
+        2933,
+        346,
+        3130
+      ],
+      "paintedIconAndLabelPx": [
+        134,
+        2966,
+        225,
+        3099
+      ],
+      "paintedTopBottomGapDp": [
+        9.428571428571429,
+        8.857142857142858
+      ],
+      "bottomEdgeRgb": [
+        243,
+        241,
+        238
+      ],
+      "navigationRgb": [
+        243,
+        241,
+        238
+      ]
+    },
+    "21-library": {
+      "pillPx": [
+        374,
+        2933,
+        706,
+        3130
+      ],
+      "paintedIconAndLabelPx": [
+        494,
+        2961,
+        586,
+        3099
+      ],
+      "paintedTopBottomGapDp": [
+        8.0,
+        8.857142857142858
+      ],
+      "bottomEdgeRgb": [
+        243,
+        241,
+        238
+      ],
+      "navigationRgb": [
+        243,
+        241,
+        238
+      ]
+    },
+    "20-shelves": {
+      "pillPx": [
+        734,
+        2933,
+        1066,
+        3130
+      ],
+      "paintedIconAndLabelPx": [
+        854,
+        2961,
+        946,
+        3099
+      ],
+      "paintedTopBottomGapDp": [
+        8.0,
+        8.857142857142858
+      ],
+      "bottomEdgeRgb": [
+        243,
+        241,
+        238
+      ],
+      "navigationRgb": [
+        243,
+        241,
+        238
+      ]
+    },
+    "14-me": {
+      "pillPx": [
+        1094,
+        2933,
+        1426,
+        3130
+      ],
+      "paintedIconAndLabelPx": [
+        1214,
+        2968,
+        1305,
+        3099
+      ],
+      "paintedTopBottomGapDp": [
+        10.0,
+        8.857142857142858
+      ],
+      "bottomEdgeRgb": [
+        243,
+        241,
+        238
+      ],
+      "navigationRgb": [
+        243,
+        241,
+        238
+      ]
+    }
+  },
+  "menus": {
+    "10-cover-menu": {
+      "whiteShellSlicePx": [
+        200,
+        1100,
+        984,
+        1101
+      ],
+      "widthDp": 224.0
+    },
+    "11-directory-menu": {
+      "whiteShellSlicePx": [
+        642,
+        720,
+        1426,
+        721
+      ],
+      "widthDp": 224.0
+    },
+    "13-resource-menu": {
+      "whiteShellSlicePx": [
+        600,
+        1950,
+        1384,
+        1951
+      ],
+      "widthDp": 224.0
+    },
+    "23-book-menu": {
+      "whiteShellSlicePx": [
+        406,
+        1500,
+        1190,
+        1501
+      ],
+      "widthDp": 224.0
+    },
+    "08-sort-menu": {
+      "whiteShellSlicePx": [
+        940,
+        920,
+        1384,
+        921
+      ],
+      "widthDp": 126.85714285714286
+    }
+  },
+  "baselineBottomEdgeRgb": [
+    254,
+    254,
+    253
+  ],
+  "rootHeroBeforePx": [
+    552,
+    417,
+    888,
+    921
+  ],
+  "rootHeroAfterPx": [
+    552,
+    417,
+    888,
+    921
+  ],
+  "firstChildTitleBeforePx": [
+    56,
+    2607,
+    405,
+    2856
+  ],
+  "firstChildTitleAfterPx": [
+    56,
+    2397,
+    405,
+    2646
+  ],
+  "toolbarIconPx": {
+    "选择目录": [
+      936,
+      459,
+      1020,
+      543
+    ],
+    "列表": [
+      1076,
+      459,
+      1160,
+      543
+    ],
+    "内容排序": [
+      1258,
+      459,
+      1342,
+      543
+    ]
+  },
+  "queueTabLabelsPx": {
+    "15-queue-all": {
+      "全部": [
+        191,
+        409,
+        289,
+        480
+      ],
+      "进行中": [
+        647,
+        409,
+        794,
+        480
+      ],
+      "失败": [
+        1151,
+        409,
+        1249,
+        480
+      ]
+    },
+    "16-queue-running": {
+      "全部": [
+        191,
+        409,
+        289,
+        480
+      ],
+      "进行中": [
+        647,
+        409,
+        794,
+        480
+      ],
+      "失败": [
+        1151,
+        409,
+        1249,
+        480
+      ]
+    },
+    "17-queue-failed": {
+      "全部": [
+        191,
+        409,
+        289,
+        480
+      ],
+      "进行中": [
+        647,
+        409,
+        794,
+        480
+      ],
+      "失败": [
+        1151,
+        409,
+        1249,
+        480
+      ]
+    }
+  },
+  "contentBottomPx": 2915,
+  "measurementNote": "Unaltered PNG pixels and UI XML. Painted glyph gap includes glyph whitespace; layout tests verify touch targets. Menu width is measured on empty shell scanlines, excluding shadow. XML for ModalBottomSheet is not used for pixel layout because platform accessibility clips bounds differently from the rendered window."
+}

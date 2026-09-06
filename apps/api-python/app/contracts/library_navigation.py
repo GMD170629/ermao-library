@@ -11,7 +11,7 @@ class LibraryNavigationEntry:
     id: str
     asset_id: str
     title: str
-    href: str
+    href: str | None
     media_type: str | None
     sort_order: int
     metadata_json: str
@@ -39,3 +39,8 @@ class LibraryNavigationProjection(Protocol):
     def invalidate(self, *, resource_id: str) -> None: ...
 
     def invalidate_asset(self, *, resource_id: str, asset_id: str) -> None: ...
+
+
+def navigation_entry_id(resource_id: str, navigation_key: str) -> str:
+    """Namespace a parser-owned key for Library storage."""
+    return f"{resource_id}:{navigation_key}"

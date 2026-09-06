@@ -59,6 +59,7 @@ export type ReaderLocation = ReflowableLocation | ComicLocation | PdfLocation;
 export type ReaderOpaqueLocator = Readonly<Record<string, unknown>>;
 
 export type ReaderChapterPresentation = Readonly<{
+  navigationKey: string | null;
   href: string | null;
   title: string | null;
   index: number | null;

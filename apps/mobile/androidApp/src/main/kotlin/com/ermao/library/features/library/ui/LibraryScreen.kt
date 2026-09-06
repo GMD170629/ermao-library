@@ -268,7 +268,8 @@ private fun LibraryContextRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = theme.components.page.compactGutter),
+                .padding(horizontal = theme.components.page.compactGutter)
+                .padding(vertical = theme.spacing.one),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {

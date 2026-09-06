@@ -33,6 +33,7 @@ class ReaderV5PresentationView:
     playback_duration_millis: int | None
     captured_at: datetime
     updated_at: datetime
+    chapter_navigation_key: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

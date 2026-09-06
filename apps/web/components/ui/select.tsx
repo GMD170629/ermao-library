@@ -32,29 +32,29 @@ type SelectProps<TValue extends string> = {
 };
 
 const triggerTone = {
-  light: 'border-[#ded8d1] bg-white text-[#4f4b47] hover:border-[#f2b7a6] hover:bg-[#fffaf8]',
-  blue: 'border-[#f4c7b9] bg-white text-[#4f4b47] hover:border-[#ed9d86] hover:bg-[#fff5f1]',
+  light: 'border-[var(--visual-color-app-divider-strong)] bg-[var(--visual-color-app-surface)] text-[var(--visual-color-app-text-primary)] hover:border-[var(--visual-color-app-focus-ring)] hover:bg-[var(--visual-color-app-accent-softer)]',
+  blue: 'border-[var(--visual-color-app-focus-ring)] bg-[var(--visual-color-app-surface)] text-[var(--visual-color-app-text-primary)] hover:border-[var(--visual-color-app-focus-ring)] hover:bg-[var(--visual-color-app-accent-softer)]',
   dark: 'border-slate-700 bg-slate-900 text-slate-100 hover:border-slate-500 hover:bg-slate-800',
   setup: 'border-[#B08B6E]/55 bg-[#E8DCC7] text-[#606C38] hover:border-[#C66B3D] hover:bg-[#F2E8D5]/70'
 };
 
 const menuTone = {
-  light: 'border-[#ded8d1] bg-white text-[#4f4b47] shadow-xl shadow-stone-200/60',
-  blue: 'border-[#f4c7b9] bg-white text-[#4f4b47] shadow-xl shadow-orange-100/60',
+  light: 'border-[var(--visual-color-app-divider-strong)] bg-[var(--visual-color-app-surface-raised)] text-[var(--visual-color-app-text-primary)] shadow-xl shadow-stone-200/60',
+  blue: 'border-[var(--visual-color-app-focus-ring)] bg-[var(--visual-color-app-surface-raised)] text-[var(--visual-color-app-text-primary)] shadow-xl shadow-orange-100/60',
   dark: 'border-slate-700 bg-slate-900 text-slate-100 shadow-xl shadow-black/30',
   setup: 'border-[#B08B6E]/45 bg-[#E8DCC7] text-[#606C38] shadow-xl shadow-[#606C38]/15'
 };
 
 const optionTone = {
   light: {
-    active: 'bg-[#fff0ea] text-[#d94322]',
-    idle: 'text-[#6f6a65] hover:bg-[#f5f2ee]',
-    selected: 'text-[#d94322]'
+    active: 'bg-[var(--visual-color-app-accent-soft)] text-[var(--visual-color-app-brand-accent)]',
+    idle: 'text-[var(--visual-color-app-text-secondary)] hover:bg-[var(--visual-color-app-navigation)]',
+    selected: 'text-[var(--visual-color-app-brand-accent)]'
   },
   blue: {
-    active: 'bg-[#fff0ea] text-[#d94322]',
-    idle: 'text-[#6f6a65] hover:bg-[#fff5f1]',
-    selected: 'text-[#d94322]'
+    active: 'bg-[var(--visual-color-app-accent-soft)] text-[var(--visual-color-app-brand-accent)]',
+    idle: 'text-[var(--visual-color-app-text-secondary)] hover:bg-[var(--visual-color-app-accent-softer)]',
+    selected: 'text-[var(--visual-color-app-brand-accent)]'
   },
   dark: {
     active: 'bg-slate-800 text-white',
@@ -69,8 +69,8 @@ const optionTone = {
 };
 
 const groupTone = {
-  light: 'bg-white/95 text-[#9A928B]',
-  blue: 'bg-white/95 text-[#A07D72]',
+  light: 'bg-[color:color-mix(in_srgb,var(--visual-color-app-surface-raised)_95%,transparent)] text-[var(--visual-color-app-text-tertiary)]',
+  blue: 'bg-[color:color-mix(in_srgb,var(--visual-color-app-surface-raised)_95%,transparent)] text-[var(--visual-color-app-text-tertiary)]',
   dark: 'bg-slate-900/95 text-slate-500',
   setup: 'bg-[#E8DCC7]/95 text-[#606C38]/65'
 };
@@ -212,7 +212,7 @@ export function Select<TValue extends string>({
         onClick={() => setOpen((next) => !next)}
         onKeyDown={onKeyDown}
         className={cn(
-          'inline-flex w-full items-center justify-between gap-3 rounded-[12px] border font-medium outline-none transition focus:border-[#ed9d86] focus:ring-4 focus:ring-[#ffe4dc] disabled:cursor-not-allowed disabled:opacity-50',
+          'inline-flex w-full items-center justify-between gap-3 rounded-[12px] border font-medium outline-none transition focus:border-[var(--visual-color-app-focus-ring)] focus:ring-4 focus:ring-[var(--visual-color-app-focus-ring)] disabled:cursor-not-allowed disabled:opacity-50',
           size === 'sm' ? 'h-9 px-3 text-xs' : 'h-11 px-4 text-sm',
           triggerTone[tone],
           triggerClassName

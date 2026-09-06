@@ -271,7 +271,6 @@
     <string name="work_metadata_page_count">Pages</string>
     <string name="work_metadata_source">Metadata source</string>
     <string name="work_metadata_file_path">File path</string>
-    <string name="work_metadata_missing">—</string>
     <plurals name="work_metadata_page_count_value"><item quantity="one">%d page</item><item quantity="other">%d pages</item></plurals>
     <string name="work_reading_progress">Reading progress</string>
     <string name="work_reading_position">At %1$s</string>
@@ -411,7 +410,6 @@
     <string name="reader_bookmarks">Bookmarks</string>
     <string name="reader_annotations">Highlights</string>
     <string name="reader_annotations_empty">No annotations yet.</string>
-    <string name="reader_annotations_empty_hint">Highlights and notes will appear here when annotation support is available.</string>
     <string name="reader_bookmarks_empty">No bookmarks yet.</string>
     <string name="reader_bookmarks_empty_hint">Save your current location to return here quickly.</string>
     <string name="reader_bookmark_count">%1$d bookmarks</string>
@@ -426,8 +424,6 @@
     <string name="reader_comic_page">Page %1$d</string>
     <string name="reader_pdf_page">Page %1$d</string>
     <string name="reader_progress_remaining_percent">%1$d%% remaining</string>
-    <string name="reader_font_mapping">PingFang uses Source Han Sans; Songti uses Source Han Serif; Kaiti uses LXGW WenKai.</string>
-    <string name="reader_negative_spacing_retained">Saved negative spacing is retained but unsupported. Effective spacing is 0.</string>
     <string name="reader_advanced_settings">Advanced settings</string>
     <string name="reader_done">Done</string>
     <string name="reader_contents_title">Table of contents</string>
@@ -562,6 +558,9 @@
     <string name="work_contents_list">List</string>
     <string name="work_contents_file">File</string>
     <string name="work_contents_source_directory">Source directory %1$d</string>
+    <string name="work_contents_path_title">Choose directory</string>
+    <string name="work_contents_current_directory">Current directory</string>
+    <string name="work_contents_sort">Sort content</string>
     <string name="work_contents_loading">Loading the source directory…</string>
     <string name="work_contents_error_title">Couldn’t load book contents</string>
     <string name="work_contents_error_message">The source directory couldn’t be loaded (%1$s).</string>
@@ -657,8 +656,6 @@
     <string name="reader_error_security">The publication security policy blocked active content.</string>
     <string name="reader_error_pdf_engine_limit">The PDF engine reached its loading step limit.</string>
     <string name="reader_error_read">The reader could not read the requested book resource.</string>
-    <string name="reader_setting_saved_value">Saved current value: %1$s</string>
-    <string name="reader_setting_unavailable_short">This setting is temporarily unavailable.</string>
     <string name="reader_preferences_save_failed">Could not save reading settings on this device. Try again.</string>
     <string name="reader_preferences_engine_failed">Unable to apply the reading settings. Try again.</string>
     <string name="reader_setting_always_on">Always on</string>
@@ -668,4 +665,7 @@
     <string name="reader_setting_temporarily_unavailable">Temporarily unavailable</string>
     <string name="reader_advanced_collapsed">Collapsed</string>
     <string name="reader_advanced_expanded">Expanded</string>
+    <string name="audio_chapters_title">Chapters</string>
+    <string name="audio_chapters_empty">No explicit chapters</string>
+    <string name="audio_chapter_current">Current chapter</string>
 </resources>

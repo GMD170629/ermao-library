@@ -81,7 +81,7 @@ const position = {
     displayPercent: 25,
     totalProgression: 0.25,
     currentHref: 'chapter.xhtml',
-    chapter: { href: 'chapter.xhtml', title: 'Chapter', index: 0 },
+    chapter: { navigationKey: null, href: 'chapter.xhtml', title: 'Chapter', index: 0 },
     page: null,
     playback: null
   }

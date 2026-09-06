@@ -82,14 +82,12 @@ export function ResourceDetailView({ resource, detail, loading, error, requested
   const tracks = detail?.units.filter((unit) => unit.unitType === 'track') ?? [];
   const chapterStates = resolveChapterReadingStates(
     chapters.map((unit) => ({ href: unit.href ?? undefined, sortOrder: unit.sortOrder })),
-    detail?.currentHref,
     detail?.currentChapterSortOrder,
-    detail?.progress ?? resource.progress,
-    { page, pageSize: detail?.page.pageSize ?? 50, total: detail?.page.total ?? 0, currentIndex: detail?.currentChapterIndex }
+    detail?.progress ?? resource.progress
   );
   const kind = resource.readerType === 'reflowable' ? 'chapter' : resource.readerType === 'audio' ? 'track' : 'page';
   const heading = kind === 'chapter' ? t('章节') : kind === 'track' ? t('音轨') : t('页面');
-  const countLabel = kind === 'chapter' ? t('共 {value0} 章', { value0: detail?.page.total ?? 0 }) : kind === 'track' ? t('共 {value0} 条音轨', { value0: detail?.page.total ?? 0 }) : t('共 {value0} 页', { value0: detail?.page.total ?? 0 });
+  const countLabel = kind === 'chapter' ? t('共 {value0} 章', { value0: detail?.chapterCount ?? 0 }) : kind === 'track' ? t('共 {value0} 条音轨', { value0: detail?.page.total ?? 0 }) : t('共 {value0} 页', { value0: detail?.page.total ?? 0 });
   const openResource = () => resource.readerType === 'audio' ? onPlayAudio() : router.push(readerHref);
 
   return <section className="mt-6 border-t border-stone-200 pt-7" aria-busy={loading || undefined}>

@@ -165,7 +165,7 @@ class KtorDownloadsGateway(
                 }
                 val contract = validateResponse(response.status.value,
                     response.headers[HttpHeaders.ContentLength], response.headers[HttpHeaders.ContentRange],
-                    response.headers[HttpHeaders.ContentType], source.mimeType, source.totalBytes, resumeFromBytes,
+                    source.totalBytes, resumeFromBytes,
                 ) ?: run {
                     response.bodyAsChannel().cancel(null)
                     throw DownloadProtocolException("Download response does not match the original asset contract")
@@ -204,14 +204,10 @@ class KtorDownloadsGateway(
         statusCode: Int,
         contentLength: String?,
         contentRange: String?,
-        contentType: String?,
-        expectedMimeType: String,
         expectedTotalBytes: Long,
         resumeFromBytes: Long,
     ): ResponseContract? {
         val declaredLength = contentLength?.toLongOrNull()?.takeIf { it > 0 } ?: return null
-        val normalizedContentType = contentType?.substringBefore(';')?.trim()?.lowercase() ?: return null
-        if (normalizedContentType != expectedMimeType.lowercase()) return null
         if (resumeFromBytes == 0L) {
             return ResponseContract(declaredLength).takeIf {
                 statusCode == 200 && declaredLength == expectedTotalBytes && contentRange == null
@@ -239,11 +235,15 @@ class KtorDownloadsGateway(
         val primary = assets.firstOrNull { it.role.equals("PRIMARY", true) } ?: assets.first()
         val format = requireNotNull(primary.sourceFormat).lowercase()
         fun source(asset: com.ermao.library.shared.modules.library.domain.Asset): DownloadSource {
-            val mime = requireNotNull(asset.mimeType).substringBefore(';').lowercase()
-            val sourceFormat = requireNotNull(
+            val mime = asset.mimeType
+                ?.substringBefore(';')
+                ?.trim()
+                ?.lowercase()
+                ?.takeIf(String::isNotBlank)
+                ?: "application/octet-stream"
+            requireNotNull(
                 ReaderSourceFormat.fromWireValue(requireNotNull(asset.sourceFormat)),
             ) { "DOWNLOAD_ASSET_FORMAT_INVALID" }
-            require(sourceFormat.acceptsMimeType(mime)) { "DOWNLOAD_ASSET_MEDIA_TYPE_INVALID" }
             return DownloadSource(requireNotNull(asset.url), mime, asset.sizeBytes, asset.mtimeMillis)
         }
         val pages = if (format == "image_dir") assets.filter { it.role.equals("PAGE", true) }.mapIndexed { index, asset ->

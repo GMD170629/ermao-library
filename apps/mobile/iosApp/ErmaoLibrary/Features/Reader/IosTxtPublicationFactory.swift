@@ -18,11 +18,11 @@ struct IosTxtPublicationFactory: Sendable {
         guard let decoded = IosStrictTxtDecoder.decode(data)
         else { throw IosTxtPublicationError.invalidEncoding }
 
-        // Chapter boundaries, hrefs, block IDs, escaping and CSS are owned by KMP.
-        let normalized = try ErmaoShared.TxtPublicationNormalizer().normalize(
-            decodedText: decoded,
-            publicationTitle: managed.displayTitle
-        )
+        let parsed = try IosChapterCore.parseTXT(decoded)
+        guard !parsed.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw IosTxtPublicationError.invalidEncoding
+        }
+        let normalized = try IosTxtResources.make(parsed: parsed, title: managed.displayTitle)
         var resources: [String: Data] = [:]
         var readingOrder: [Link] = []
         for resource in normalized.resources {
@@ -31,20 +31,28 @@ struct IosTxtPublicationFactory: Sendable {
                 Link(href: resource.href, mediaType: .xhtml, title: resource.title)
             )
         }
-        resources[normalized.stylesheetHref] = Data(normalized.stylesheet.utf8)
+        resources["text/reader.css"] = Data(IosTxtResources.stylesheet.utf8)
+        let toc = normalized.toc.map { entry in
+            Link(
+                href: entry.href,
+                mediaType: .xhtml,
+                title: entry.title,
+                properties: Properties(["shuku:navigationKey": .string(entry.navigationKey)])
+            )
+        }
         let container = try IosTxtContainer(resources: resources)
         return Publication(
             manifest: Manifest(
                 metadata: Metadata(
                     identifier: "urn:shuku:txt:\(managed.resourceID)",
                     conformsTo: [.epub],
-                    title: normalized.title,
+                    title: managed.displayTitle,
                     layout: .reflowable,
                     readingProgression: .ltr
                 ),
                 readingOrder: readingOrder,
-                resources: [Link(href: normalized.stylesheetHref, mediaType: .css)],
-                tableOfContents: readingOrder
+                resources: [Link(href: "text/reader.css", mediaType: .css)],
+                tableOfContents: toc
             ),
             container: container,
             servicesBuilder: PublicationServicesBuilder(
@@ -59,6 +67,82 @@ struct IosTxtPublicationFactory: Sendable {
         )
     }
 
+}
+
+private struct IosTxtResources {
+    struct Resource {
+        let href: String
+        let title: String
+        let xhtml: String
+    }
+
+    struct Toc {
+        let href: String
+        let title: String
+        let navigationKey: String
+    }
+
+    let resources: [Resource]
+    let toc: [Toc]
+    static let stylesheet = """
+html { color-scheme: light dark; }
+body { margin: 0; padding: 1rem; line-height: 1.6; overflow-wrap: anywhere; }
+h1 { font-size: 1.35em; margin: 1.5em 0 1em; }
+p { margin: 0 0 1em; white-space: normal; }
+"""
+
+    static func make(parsed: IosChapterCoreResult, title: String) throws -> IosTxtResources {
+        let entries = parsed.entries
+        if entries.isEmpty {
+            return IosTxtResources(
+                resources: [Resource(href: "text/body.xhtml", title: title,
+                                     xhtml: ErmaoShared.PublicKt.renderTxtXhtml(title: title, bodyText: parsed.text))],
+                toc: []
+            )
+        }
+        let bytes = Array(parsed.text.utf8)
+        var output: [Resource] = []
+        let firstStart = entries[0].sourceStart
+        if firstStart > 0 {
+            output.append(Resource(href: "text/frontmatter.xhtml", title: title,
+                                   xhtml: ErmaoShared.PublicKt.renderTxtXhtml(
+                                       title: title,
+                                       bodyText: try Self.slice(bytes, 0, firstStart)
+                                   )))
+        }
+        for entry in entries {
+            guard let href = entry.href else {
+                throw IosTxtPublicationError.invalidEncoding
+            }
+            output.append(Resource(
+                href: href.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? href,
+                title: entry.title,
+                xhtml: ErmaoShared.PublicKt.renderTxtXhtml(
+                    title: entry.title,
+                    bodyText: try Self.slice(bytes, entry.contentStart, entry.sourceEnd)
+                )
+            ))
+        }
+        return IosTxtResources(
+            resources: output,
+            toc: try entries.map { entry in
+                guard let href = entry.href else { throw IosTxtPublicationError.invalidEncoding }
+                return Toc(href: href, title: entry.title, navigationKey: entry.key)
+            }
+        )
+    }
+
+    private static func slice(_ bytes: [UInt8], _ start: UInt64, _ end: UInt64) throws -> String {
+        guard start <= end, end <= UInt64(bytes.count), start <= UInt64(Int.max) else {
+            throw IosTxtPublicationError.invalidEncoding
+        }
+        let lower = Int(start)
+        let upper = Int(end)
+        guard let value = String(data: Data(bytes[lower ..< upper]), encoding: .utf8) else {
+            throw IosTxtPublicationError.invalidEncoding
+        }
+        return value
+    }
 }
 
 enum IosStrictTxtDecoder {

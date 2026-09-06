@@ -80,8 +80,10 @@ class ReaderFb2InstrumentedTest {
                 .also { reference -> scenario.onActivity { reference.set(checkNotNull(it.controllerForTesting)) } }
                 .get()
             val tableOfContents = runBlocking { controller.loadTableOfContents() }
+            assertEquals(listOf("第一章 Chapter One", "注释 Notes"), tableOfContents.map { it.title })
+            assertEquals(listOf("chapter-0", "chapter-2"), tableOfContents.map { it.id })
+            assertEquals(listOf("chapter-1"), tableOfContents.first().children.map { it.id })
             scenario.onActivity { activity ->
-                assertTrue(tableOfContents.size >= 2)
                 assertTrue(checkNotNull(activity.controllerForTesting).goTo(tableOfContents.last().location))
             }
             waitUntil(scenario, "second FB2 chapter") {

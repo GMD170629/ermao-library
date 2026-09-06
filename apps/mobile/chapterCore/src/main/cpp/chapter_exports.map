@@ -1,0 +1,6 @@
+ERMAO_CHAPTER_JNI_1 {
+    global:
+        Java_com_ermao_library_chapter_infrastructure_ChapterCoreNative_*;
+    local:
+        *;
+};

@@ -41,6 +41,7 @@ test('audio adapter captures a standard Locator with the bootstrap asset URL', (
   assert.equal(locator.locations.position, 3);
   assert.equal(locator.locations.time, 120.5);
   assert.equal(position.presentation.currentHref, '/api/assets/asset-3');
+  assert.equal(position.presentation.chapter?.navigationKey, 'chapter-3');
 });
 
 test('audio adapter restores by Locator position and time, independent of presentation percent', () => {

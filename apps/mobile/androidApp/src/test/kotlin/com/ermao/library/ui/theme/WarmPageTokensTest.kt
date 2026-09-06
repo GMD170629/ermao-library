@@ -10,7 +10,8 @@ class WarmPageTokensTest {
         assertEquals(Color(0xFFFBFAF8), AppLightColors.canvas)
         assertEquals(Color(0xFF17191D), AppLightColors.textPrimary)
         assertEquals(Color(0xFFFF4F2A), AppLightColors.brandAccent)
-        assertEquals(Color(0xFFC83B23), AppLightColors.actionAccent)
+        assertEquals(Color(0xFFFF4F2A), AppLightColors.actionAccent)
+        assertEquals(Color(0xFFF3F1EE), AppLightColors.navigation)
     }
 
     @Test

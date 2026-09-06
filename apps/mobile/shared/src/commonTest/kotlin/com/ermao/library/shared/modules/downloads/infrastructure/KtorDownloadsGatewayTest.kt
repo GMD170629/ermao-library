@@ -74,7 +74,7 @@ class KtorDownloadsGatewayTest {
     }
 
     @Test
-    fun bootstrapRejectsGenericBinaryMimeEvenForKnownOriginalFormat() = runBlocking {
+    fun bootstrapRetainsUnknownMimeForActualReaderCapabilityDetection() = runBlocking {
         val gateway = gateway {
             respond(
                 BOOTSTRAP.replace("application/epub+zip", "application/octet-stream"),
@@ -83,12 +83,30 @@ class KtorDownloadsGatewayTest {
             )
         }
 
-        assertIs<DownloadBootstrapResult.Failure>(gateway.load(context, "resource"))
+        val descriptor = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "resource"))
+            .bootstrap.descriptor
+        assertEquals("application/octet-stream", descriptor.source.mimeType)
         Unit
     }
 
     @Test
-    fun bootstrapRejectsAssetMimeThatDoesNotMatchItsExactSourceFormat() = runBlocking {
+    fun bootstrapUsesGenericBinaryHintWhenMimeMetadataIsBlank() = runBlocking {
+        val gateway = gateway {
+            respond(
+                BOOTSTRAP.replace("\"mimeType\":\"application/epub+zip\"", "\"mimeType\":\"\""),
+                HttpStatusCode.OK,
+                headersOf(HttpHeaders.ContentType, "application/json"),
+            )
+        }
+
+        val descriptor = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "resource"))
+            .bootstrap.descriptor
+        assertEquals("application/octet-stream", descriptor.source.mimeType)
+        Unit
+    }
+
+    @Test
+    fun bootstrapMapsByDeclaredSourceFormatWithoutMimeAdmission() = runBlocking {
         val gateway = gateway {
             respond(
                 BOOTSTRAP.replace("\"sourceFormat\":\"epub\"", "\"sourceFormat\":\"fb2\""),
@@ -97,20 +115,19 @@ class KtorDownloadsGatewayTest {
             )
         }
 
-        assertIs<DownloadBootstrapResult.Failure>(gateway.load(context, "resource"))
+        val descriptor = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "resource"))
+            .bootstrap.descriptor
+        assertEquals("fb2", descriptor.format)
         Unit
     }
 
     @Test
-    fun genericBinaryMimeDoesNotBypassOriginalFormatOrSafePathChecks() = runBlocking {
-        val unsupportedFormat = BOOTSTRAP
-            .replace("\"format\":\"epub\"", "\"format\":\"exe\"")
-            .replace("application/epub+zip", "application/octet-stream")
+    fun metadataFormatMismatchDoesNotBypassSafePathChecks() = runBlocking {
+        val unsupportedFormat = BOOTSTRAP.replace("\"format\":\"epub\"", "\"format\":\"exe\"")
         val unsafePath = BOOTSTRAP
-            .replace("application/epub+zip", "application/octet-stream")
             .replace("/api/assets/asset", "https://evil.example/asset")
 
-        assertIs<DownloadBootstrapResult.Failure>(gateway { respond(unsupportedFormat) }.load(context, "resource"))
+        assertIs<DownloadBootstrapResult.Success>(gateway { respond(unsupportedFormat) }.load(context, "resource"))
         assertIs<DownloadBootstrapResult.Failure>(gateway { respond(unsafePath) }.load(context, "resource"))
         Unit
     }

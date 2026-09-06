@@ -1,0 +1,278 @@
+{
+  "apkSha256": "008fd098f9d9fadde8ddb16ac017d53d5735e2f99f62bc46b97414cb1b6a60d4",
+  "installedApkMatches": true,
+  "device": {
+    "serial": "9e896bbc",
+    "physicalPixels": [
+      1440,
+      3200
+    ],
+    "density": 3.5,
+    "fontScale": 1.0,
+    "locale": "zh-CN",
+    "orientation": "portrait"
+  },
+  "unitTests": {
+    "tests": 204,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "pixels": {
+    "canvas": "#FBFAF8",
+    "actionAccent": "#FF4F2A",
+    "navigation": "#F3F1EE",
+    "accentSoft": "#FCE6DF",
+    "surface": "#FFFDFA",
+    "surfaceRaised": "#FFFFFF"
+  },
+  "directoryHeroPx": [
+    552,
+    417,
+    888,
+    921
+  ],
+  "directoryFirstTitlePx": [
+    56,
+    2607,
+    405,
+    2856
+  ],
+  "directorySecondTitlePx": [
+    517,
+    2607,
+    866,
+    2772
+  ],
+  "visibleContentBottomPx": 2916,
+  "detailBackPx": [
+    56,
+    207,
+    140,
+    291
+  ],
+  "settingsBackPx": [
+    56,
+    207,
+    140,
+    291
+  ],
+  "menuLabelBoundsBeforeSelection": {
+    "最近入库": [
+      1034,
+      522,
+      1258,
+      603
+    ],
+    "最近阅读": [
+      1034,
+      690,
+      1258,
+      771
+    ],
+    "书名": [
+      1034,
+      858,
+      1258,
+      939
+    ],
+    "作者": [
+      1034,
+      1026,
+      1258,
+      1107
+    ]
+  },
+  "menuLabelBoundsAfterSelection": {
+    "最近入库": [
+      1034,
+      522,
+      1258,
+      603
+    ],
+    "最近阅读": [
+      1034,
+      690,
+      1258,
+      771
+    ],
+    "书名": [
+      1034,
+      858,
+      1258,
+      939
+    ],
+    "作者": [
+      1034,
+      1026,
+      1258,
+      1107
+    ]
+  },
+  "passwordHiddenFieldPx": [
+    56,
+    585,
+    1384,
+    809
+  ],
+  "passwordVisibleFieldPx": [
+    56,
+    585,
+    1384,
+    809
+  ],
+  "passwordHiddenIconPx": [
+    1258,
+    669,
+    1342,
+    753
+  ],
+  "passwordVisibleIconPx": [
+    1258,
+    669,
+    1342,
+    753
+  ],
+  "smtpLabelsPx": {
+    "SMTP 主机": [
+      112,
+      810,
+      356,
+      881
+    ],
+    "端口": [
+      112,
+      978,
+      210,
+      1049
+    ],
+    "发件邮箱": [
+      112,
+      1806,
+      308,
+      1877
+    ],
+    "用户名": [
+      112,
+      2072,
+      259,
+      2143
+    ],
+    "显示名称": [
+      112,
+      2240,
+      308,
+      2311
+    ],
+    "密码": [
+      112,
+      2604,
+      210,
+      2675
+    ]
+  },
+  "encryptionLabels": {
+    "30-encryption-first": {
+      "无": [
+        254,
+        1378,
+        303,
+        1449
+      ],
+      "STARTTLS": [
+        602,
+        1385,
+        838,
+        1442
+      ],
+      "TLS": [
+        1119,
+        1385,
+        1205,
+        1442
+      ]
+    },
+    "31-encryption-last": {
+      "无": [
+        254,
+        1378,
+        303,
+        1449
+      ],
+      "STARTTLS": [
+        602,
+        1385,
+        838,
+        1442
+      ],
+      "TLS": [
+        1119,
+        1385,
+        1205,
+        1442
+      ]
+    },
+    "32-encryption-middle": {
+      "无": [
+        254,
+        1378,
+        303,
+        1449
+      ],
+      "STARTTLS": [
+        602,
+        1385,
+        838,
+        1442
+      ],
+      "TLS": [
+        1119,
+        1385,
+        1205,
+        1442
+      ]
+    }
+  },
+  "tabSelectedFillPx": {
+    "17-home-stable": {
+      "bounds": [
+        14,
+        2955,
+        346,
+        3110
+      ],
+      "startInsetPx": 14,
+      "endInsetPx": 14
+    },
+    "04-library-stable": {
+      "bounds": [
+        374,
+        2955,
+        706,
+        3110
+      ],
+      "startInsetPx": 14,
+      "endInsetPx": 14
+    },
+    "19-shelves": {
+      "bounds": [
+        734,
+        2955,
+        1066,
+        3110
+      ],
+      "startInsetPx": 14,
+      "endInsetPx": 14
+    },
+    "20-me": {
+      "bounds": [
+        1094,
+        2955,
+        1426,
+        3110
+      ],
+      "startInsetPx": 14,
+      "endInsetPx": 14
+    }
+  }
+}

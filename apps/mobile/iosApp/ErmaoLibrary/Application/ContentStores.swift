@@ -1138,7 +1138,8 @@ private extension BookDetailContent {
         let states = ErmaoShared.PublicKt.resolveReaderChapterStatesFromPresentation(
             units: chapters.map { ErmaoShared.ReaderChapterUnit(
                 href: $0.href, sortOrder: Int32($0.sortOrder),
-                readingOrderPosition: $0.readingOrderPosition.map { KotlinInt(int: Int32($0)) }
+                readingOrderPosition: $0.readingOrderPosition.map { KotlinInt(int: Int32($0)) },
+                navigationKey: $0.navigationKey
             ) },
             presentation: update.presentation
         )
@@ -1147,7 +1148,7 @@ private extension BookDetailContent {
             return BookChapter(
                 id: chapter.id, title: chapter.title,
                 progress: state == .current ? percent : nil,
-                isCurrent: state == .current, href: chapter.href, sortOrder: chapter.sortOrder,
+                isCurrent: state == .current, navigationKey: chapter.navigationKey, href: chapter.href, sortOrder: chapter.sortOrder,
                 readingOrderPosition: chapter.readingOrderPosition, state: state
             )
         }

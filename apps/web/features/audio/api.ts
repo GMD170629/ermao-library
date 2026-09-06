@@ -1,6 +1,5 @@
 import {
   READER_SAFETY_BUDGETS,
-  READER_SAFETY_PROFILES,
   READER_SAFETY_RULE_IDS,
   type ReaderPositionReport
 } from '@shuku/reader-core';
@@ -34,8 +33,6 @@ function safeNonNegativeInteger(value: unknown): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
-const AUDIO_MIME_TYPES = new Set<string>(Object.values(READER_SAFETY_PROFILES.audio.containerMimeTypes));
-
 function audioAssetUrl(value: unknown, assetId: string): string {
   const raw = stringValue(value, `/api/assets/${encodeURIComponent(assetId)}`).trim();
   if (!raw.startsWith('/') || raw.startsWith('//') || !raw.split('?', 1)[0]?.includes('/api/')) {
@@ -49,9 +46,7 @@ function normalizeTrack(value: unknown, index: number): AudioTrack | null {
   const assetId = stringValue(item.id ?? item.assetId).trim();
   if (!assetId) return null;
   const mimeType = stringValue(item.mimeType).split(';', 1)[0]?.trim().toLowerCase() ?? '';
-  if (!AUDIO_MIME_TYPES.has(mimeType)) {
-    rejectReaderSafety(READER_SAFETY_RULE_IDS.AUDIO_CONTAINER_MIME);
-  }
+  // MIME metadata is an adapter hint. The playback engine owns codec support.
   const durationMs = safeNonNegativeInteger(item.durationMs);
   if (durationMs === null) rejectReaderSafety(READER_SAFETY_RULE_IDS.AUDIO_TRACK_AND_CHAPTER_BOUNDS);
   const sizeBytes = item.sizeBytes === undefined ? null : safeNonNegativeInteger(item.sizeBytes);

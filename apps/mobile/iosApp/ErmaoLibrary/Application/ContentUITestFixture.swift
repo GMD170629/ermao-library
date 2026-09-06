@@ -368,6 +368,7 @@ private struct FixtureContentClient: ContentClient {
             pageSize: pageSize,
             total: 2,
             totalPages: 1,
+            chapterCount: 2,
             currentHref: "chapter-1.xhtml",
             currentChapterSortOrder: 1,
             currentPageNumber: nil,

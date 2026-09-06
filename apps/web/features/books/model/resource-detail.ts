@@ -1,5 +1,4 @@
 import type { ReadableResourceView } from '../../../types/book';
-import { chapterDeepLinkHref } from '../ebook-chapter-navigation';
 
 export const RESOURCE_DETAIL_LIST_PAGE_SIZE = 50;
 export const RESOURCE_DETAIL_PREVIEW_PAGE_SIZE = 24;
@@ -14,6 +13,7 @@ type ResourceDetailUnitBase = Readonly<{
 
 export type ResourceChapterDetailUnit = ResourceDetailUnitBase & Readonly<{
   unitType: 'chapter';
+  navigationKey: string | null;
   href: string | null;
   level: number | null;
 }>;
@@ -34,6 +34,7 @@ export type ResourceTrackDetailUnit = ResourceDetailUnitBase & Readonly<{
 export type ResourceDetailUnit = ResourceChapterDetailUnit | ResourcePageDetailUnit | ResourceTrackDetailUnit;
 
 export type ResourceDetailPage = Readonly<{
+  chapterCount: number | null;
   units: ResourceDetailUnit[];
   page: Readonly<{
     page: number;
@@ -70,8 +71,9 @@ export function resourceDetailItemHref(
 ): string | null {
   if (!resource.readable) return null;
   if (unit.unitType === 'chapter') {
-    const href = chapterDeepLinkHref(resource.format, unit.href);
-    return href ? `/reader/${encodeURIComponent(resource.id)}?href=${encodeURIComponent(href)}` : null;
+    return unit.href && unit.navigationKey
+      ? `/reader/${encodeURIComponent(resource.id)}?chapterKey=${encodeURIComponent(unit.navigationKey)}`
+      : null;
   }
   if (unit.unitType === 'page') {
     return `/reader/${encodeURIComponent(resource.id)}?page=${encodeURIComponent(String(unit.pageNumber))}`;

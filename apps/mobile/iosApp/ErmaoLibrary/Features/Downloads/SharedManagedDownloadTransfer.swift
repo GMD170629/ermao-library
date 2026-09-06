@@ -308,8 +308,7 @@ private final class SharedPageSetSinkSession: NSObject, DownloadBundleByteSinkSe
         guard index >= 0, index < Int(self.request.memberCount),
               !request.assetId.isEmpty,
               request.expectedBytes > 0,
-              request.expectedBytes <= ErmaoShared.PublicKt.readerSafetyComicPageMaxBytes(),
-              Set(ErmaoShared.PublicKt.readerSafetyAllowedComicPageMimeTypes()).contains(request.mimeType)
+              request.expectedBytes <= ErmaoShared.PublicKt.readerSafetyComicPageMaxBytes()
         else { throw ManagedDownloadTransferError.invalidResponse }
         let duplicate = lock.withLock { committedMembers[index] != nil || closed }
         guard !duplicate else { throw ManagedDownloadTransferError.invalidResponse }
@@ -347,7 +346,7 @@ private final class SharedPageSetSinkSession: NSObject, DownloadBundleByteSinkSe
             for member in ordered {
                 let fileURL = stagingDirectory.appendingPathComponent(member.fileName)
                 guard fileSize(fileURL) == member.sizeBytes,
-                      detectImageMime(fileURL) == member.mimeType else {
+                      detectImageMime(fileURL) != nil else {
                     throw ManagedDownloadTransferError.invalidResponse
                 }
             }
@@ -390,10 +389,10 @@ private func stableMemberName(_ value: String) -> String {
 }
 
 private func extensionForMime(_ mimeType: String) throws -> String {
-    guard let value = ErmaoShared.PublicKt.readerSafetyComicPageExtensionForMimeType(mediaType: mimeType) else {
-        throw ManagedDownloadTransferError.invalidResponse
+    if let value = ErmaoShared.PublicKt.readerSafetyComicPageExtensionForMimeType(mediaType: mimeType) {
+        return value.hasPrefix(".") ? String(value.dropFirst()) : value
     }
-    return value.hasPrefix(".") ? String(value.dropFirst()) : value
+    return "img"
 }
 
 private func fileSize(_ url: URL) -> Int64? {

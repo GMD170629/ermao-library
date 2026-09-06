@@ -133,6 +133,119 @@ typealias ReaderSafetyMarkupAccepted =
 typealias ReaderSafetyMarkupRejected =
     com.ermao.library.shared.modules.reader.domain.ReaderSafetyMarkupResult.Rejected
 
+/** Applies the generated XML preparation contract to a reading-order resource in memory. */
+fun readerSafetyPrepareXmlMarkup(
+    markup: String,
+    sourceByteCount: Long = -1L,
+): ReaderSafetyMarkupResult = ReaderSafetyFacade().prepareXmlMarkup(markup, sourceByteCount)
+
+/** Applies the generated XML preparation contract to an EPUB/FB2 control document in memory. */
+fun readerSafetyPrepareXmlControlDocument(
+    markup: String,
+    sourceByteCount: Long = -1L,
+): ReaderSafetyMarkupResult = ReaderSafetyFacade().prepareXmlControlDocument(markup, sourceByteCount)
+
+/** Returns package document references extracted from a safely prepared EPUB container.xml. */
+fun readerSafetyContainerRootFilePaths(
+    markup: String,
+    sourceByteCount: Long = -1L,
+): List<String> = ReaderSafetyFacade().requireContainerRootFilePaths(markup, sourceByteCount)
+
+data class ReaderSafetyDecisionProjection(
+    val ruleId: String?,
+    val action: String,
+    val scope: String,
+    val classification: String?,
+    val errorCode: String?,
+)
+
+fun readerSafetyPolicyVersion(): Int =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.policyVersion
+
+fun readerSafetyPolicyDigest(): String =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.policyDigest
+
+fun readerSafetyRuleAction(ruleId: String): String =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.rule(
+        requireNotNull(com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId.entries
+            .firstOrNull { it.wireValue == ruleId }) { "Unknown Reader safety rule: $ruleId" },
+    ).action.name
+
+fun readerSafetyRuleActionOrNull(ruleId: String): String? =
+    runCatching { readerSafetyRuleAction(ruleId) }.getOrNull()
+
+fun readerSafetyRuleErrorCode(ruleId: String): String? =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.rule(
+        requireNotNull(com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId.entries
+            .firstOrNull { it.wireValue == ruleId }) { "Unknown Reader safety rule: $ruleId" },
+    ).errorCode?.name
+
+fun readerSafetyEvaluateDecision(
+    format: String,
+    resourceRole: String,
+    facts: List<String>,
+    enforcementAvailable: Boolean,
+    canIsolate: Boolean,
+): ReaderSafetyDecisionProjection {
+    val decision = com.ermao.library.shared.modules.reader.domain.evaluateReaderSafety(
+        com.ermao.library.shared.modules.reader.domain.ReaderSafetyDecisionContext(
+            format = com.ermao.library.shared.modules.reader.domain.ReaderSafetyFormat.valueOf(format),
+            resourceRole = com.ermao.library.shared.modules.reader.domain.ReaderSafetyResourceRole.valueOf(resourceRole),
+            facts = facts,
+            enforcementAvailable = enforcementAvailable,
+            canIsolate = canIsolate,
+        ),
+    ).first()
+    return ReaderSafetyDecisionProjection(
+        ruleId = decision.ruleId?.wireValue,
+        action = decision.action.name,
+        scope = decision.scope,
+        classification = decision.classification,
+        errorCode = decision.errorCode?.name,
+    )
+}
+
+/**
+ * Evaluates one generated rule using its contract-owned trigger. Platform adapters use this
+ * when they have detected a concrete fact but must not duplicate the generated trigger string.
+ */
+fun readerSafetyEvaluateRuleDecision(
+    format: String,
+    resourceRole: String,
+    ruleId: String,
+    enforcementAvailable: Boolean,
+    canIsolate: Boolean,
+): ReaderSafetyDecisionProjection {
+    val generatedRule = com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.rule(
+        requireNotNull(com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId.entries
+            .firstOrNull { it.wireValue == ruleId }) { "Unknown Reader safety rule: $ruleId" },
+    )
+    val decision = com.ermao.library.shared.modules.reader.domain.evaluateReaderSafety(
+        com.ermao.library.shared.modules.reader.domain.ReaderSafetyDecisionContext(
+            format = com.ermao.library.shared.modules.reader.domain.ReaderSafetyFormat.valueOf(format),
+            resourceRole = com.ermao.library.shared.modules.reader.domain.ReaderSafetyResourceRole.valueOf(resourceRole),
+            facts = listOf(generatedRule.trigger),
+            enforcementAvailable = enforcementAvailable,
+            canIsolate = canIsolate,
+        ),
+    ).first { it.ruleId == generatedRule.id }
+    return ReaderSafetyDecisionProjection(
+        ruleId = decision.ruleId?.wireValue,
+        action = decision.action.name,
+        scope = decision.scope,
+        classification = decision.classification,
+        errorCode = decision.errorCode?.name,
+    )
+}
+
+/** Returns whether an authored user-navigation URL may be handed to the host browser. */
+fun readerAllowsAuthoredUserNavigation(value: String): Boolean =
+    ReaderSafetyFacade().allowsAuthoredUserNavigation(value)
+
+/** Stable generated rule target for platform XML preparation capability failures. */
+fun readerSafetyPrepareXmlRuleId(): String =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId.REFLOWABLE_PREPARE_XML.wireValue
+
 fun readerSafetyOriginalMaxBytes(): Long =
     com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.budget(
         com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName.ORIGINAL_MAX_BYTES,
@@ -154,6 +267,11 @@ fun readerSafetyBinaryResourceFailure(): ReaderSafetyFailure =
 fun readerSafetyReflowableMarkupMaxBytes(): Long =
     com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.budget(
         com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName.REFLOWABLE_MARKUP_MAX_BYTES,
+    )
+
+fun readerSafetyXmlControlDocumentMaxBytes(): Long =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.budget(
+        com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName.XML_CONTROL_DOCUMENT_MAX_BYTES,
     )
 
 fun readerSafetyReflowableMarkupMaxBytesFailure(): ReaderSafetyFailure =
@@ -187,8 +305,19 @@ fun readerSafetyEpubArchiveCompressionRatioMax(): Long =
 fun readerSafetyEpubArchiveFatalFindings(): List<String> =
     com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.reflowableProfile.archiveFatalFindings
 
+fun readerSafetyEpubArchiveIntegrityFindings(): List<String> =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.reflowableProfile.archiveIntegrityFindings
+
 fun readerSafetyEpubArchiveStructureFailure(): ReaderSafetyFailure =
     readerSafetyFailure(com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId.EPUB_ARCHIVE_STRUCTURE)
+
+fun readerSafetyEpubArchiveIntegrityFailure(): ReaderSafetyFailure =
+    readerSafetyFailure(com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId.EPUB_RESOURCE_INTEGRITY)
+
+fun readerSafetyOptionalResourceFailure(): ReaderSafetyFailure =
+    readerSafetyFailure(
+        com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId.REFLOWABLE_OPTIONAL_RESOURCE_FAILURE,
+    )
 
 fun readerSafetyEpubArchiveEntryCountFailure(): ReaderSafetyFailure =
     readerSafetyFailure(com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId.EPUB_ARCHIVE_ENTRY_MAX_COUNT)
@@ -207,6 +336,21 @@ fun readerSafetyFb2TextMaxBytes(): Long =
         com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName.FB2_TEXT_MAX_BYTES,
     )
 
+fun readerSafetyFb2MaxDepth(): Long =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.budget(
+        com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName.FB2_MAX_DEPTH,
+    )
+
+fun readerSafetyFb2MaxNodes(): Long =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.budget(
+        com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName.FB2_MAX_NODES,
+    )
+
+fun readerSafetyFb2TextMaxCharacters(): Long =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.budget(
+        com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName.FB2_TEXT_MAX_CHARACTERS,
+    )
+
 /**
  * Bounds the source buffer used by platform FB2 adapters before they materialize the XML text.
  * The budget and rejection outcome remain owned by the generated FB2 structure rule.
@@ -223,6 +367,11 @@ fun readerSafetyFb2TextBudgetFailure(sourceByteCount: Long): ReaderSafetyFailure
 fun readerSafetyFb2DecodedImageMaxBytes(): Long =
     com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.budget(
         com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName.FB2_DECODED_IMAGE_MAX_BYTES,
+    )
+
+fun readerSafetyFb2EncodedImageMaxBytes(): Long =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.budget(
+        com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName.FB2_ENCODED_IMAGE_MAX_BYTES,
     )
 
 fun readerSafetyFb2DecodedImagesTotalMaxBytes(): Long =
@@ -250,10 +399,21 @@ fun readerSafetyComicExpandedMaxBytes(): Long =
         com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName.COMIC_EXPANDED_MAX_BYTES,
     )
 
+fun readerSafetyComicCompressionRatioMax(): Long =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.budget(
+        com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName.COMIC_COMPRESSION_RATIO_MAX,
+    )
+
 fun readerSafetyComicArchiveStructureFailure(): ReaderSafetyFailure =
     readerSafetyFailure(
         com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId.COMIC_ARCHIVE_STRUCTURE,
     )
+
+fun readerSafetyComicArchiveFatalFindings(): List<String> =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.comicProfile.archiveFatalFindings
+
+fun readerSafetyComicArchiveIntegrityFindings(): List<String> =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.comicProfile.archiveIntegrityFindings
 
 fun readerSafetyComicPageCountFailure(): ReaderSafetyFailure =
     readerSafetyFailure(
@@ -270,6 +430,11 @@ fun readerSafetyComicPageBytesFailure(): ReaderSafetyFailure =
         com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId.COMIC_PAGE_MAX_BYTES,
     )
 
+fun readerSafetyComicPageDecodeFailure(): ReaderSafetyFailure =
+    readerSafetyFailure(
+        com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId.COMIC_PAGE_DECODE_FAILURE,
+    )
+
 /** Maps archive-core detector outcomes to the generated policy owner. */
 fun readerSafetyComicArchiveDetectorFailure(stableCode: String): ReaderSafetyFailure? =
     when (stableCode.trim().uppercase()) {
@@ -284,6 +449,7 @@ fun readerSafetyComicArchiveDetectorFailure(stableCode: String): ReaderSafetyFai
         "ARCHIVE_PAGE_COUNT_EXCEEDED",
         "ARCHIVE_ENTRY_LIMIT_EXCEEDED",
         -> readerSafetyComicPageCountFailure()
+        "ARCHIVE_PAGE_LIMIT_EXCEEDED" -> readerSafetyComicPageBytesFailure()
         "ARCHIVE_EXPANDED_LIMIT_EXCEEDED",
         "ARCHIVE_COMPRESSION_RATIO_EXCEEDED",
         -> readerSafetyComicArchiveBudgetFailure()
@@ -305,6 +471,36 @@ fun readerSafetyPdfCanvasMaxDimension(): Long =
         com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName.PDF_CANVAS_MAX_DIMENSION,
     )
 
+fun readerSafetyTxtMemoryMaxBytes(): Long =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.budget(
+        com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName.TXT_MEMORY_MAX_BYTES,
+    )
+
+fun readerSafetyTxtChunkMaxCharacters(): Long =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.budget(
+        com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName.TXT_CHUNK_MAX_CHARACTERS,
+    )
+
+fun readerSafetyAudioMetadataMaxBytes(): Long =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.budget(
+        com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName.AUDIO_METADATA_MAX_BYTES,
+    )
+
+fun readerSafetyAudioArtworkMaxBytes(): Long =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.budget(
+        com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName.AUDIO_ARTWORK_MAX_BYTES,
+    )
+
+fun readerSafetyAudioContainerMimeForExtension(extension: String): String? =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.audioProfile.containerMimeTypes[
+        extension.trim().lowercase()
+    ]
+
+fun readerSafetyFormatAcceptsMime(format: String, mime: String): Boolean =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.formatPolicy(format)
+        ?.acceptedMimeTypes
+        ?.contains(mime.trim().lowercase().substringBefore(';')) == true
+
 fun readerSafetyComicPageMimeType(extension: String): String? =
     com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.comicPageMimeType(extension)
 
@@ -316,6 +512,39 @@ fun readerSafetyFb2EmbeddedImageExtension(mediaType: String): String? =
 
 fun readerSafetyReadingOrderMarkupMimeTypes(): List<String> =
     com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.reflowableProfile.readingOrderMarkupMimeTypes
+
+fun readerSafetyAllowedFontObfuscationAlgorithms(): List<String> =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.reflowableProfile.allowedFontObfuscationAlgorithms
+
+fun readerSafetyPdfBlockedActions(): List<String> =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.pdfProfile.blockedActions
+
+fun readerSafetyPdfRequireFinitePageGeometry(): Boolean =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.pdfProfile.requireFinitePageGeometry
+
+fun readerSafetyPdfRequireIdentityContentEncoding(): Boolean =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.pdfProfile.requireIdentityContentEncoding
+
+fun readerSafetyPdfRequireStrongRevision(): Boolean =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.pdfProfile.requireStrongRevision
+
+fun readerSafetyPdfAllowWholeResponseFallback(): Boolean =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.pdfProfile.allowWholeResponseFallback
+
+fun readerSafetyComicSinglePageDecodeFailureAction(): String =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.comicProfile.singlePageDecodeFailureAction.name
+
+fun readerSafetyComicManifestRevisionRequired(): Boolean =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.comicProfile.manifestRevisionRequired
+
+fun readerSafetyAudioCodecDecision(): String =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.audioProfile.codecDecision
+
+fun readerSafetyAudioBlockedRedirectSchemes(): List<String> =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.audioProfile.blockedRedirectSchemes
+
+fun readerSafetyAudioRequireFiniteNonNegativeDuration(): Boolean =
+    com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy.audioProfile.requireFiniteNonNegativeDuration
 
 fun readerSafetyRequiredReadingOrderMarkupFailure(): ReaderSafetyFailure =
     readerSafetyFailure(
@@ -379,9 +608,9 @@ typealias ReaderFormat = com.ermao.library.shared.modules.reader.domain.ReaderFo
 typealias ReaderSourceFormat = com.ermao.library.shared.modules.reader.domain.ReaderSourceFormat
 typealias ReaderEngineCapability = com.ermao.library.shared.modules.reader.domain.ReaderEngineCapability
 typealias ReaderEngineCapabilityRegistry = com.ermao.library.shared.modules.reader.domain.ReaderEngineCapabilityRegistry
-typealias TxtPublicationNormalizer = com.ermao.library.shared.modules.reader.domain.TxtPublicationNormalizer
-typealias NormalizedTxtPublication = com.ermao.library.shared.modules.reader.domain.NormalizedTxtPublication
 typealias NormalizedTxtResource = com.ermao.library.shared.modules.reader.domain.NormalizedTxtResource
+fun renderTxtXhtml(title: String, bodyText: String): String =
+    com.ermao.library.shared.modules.reader.domain.renderTxtXhtml(title, bodyText)
 typealias ReaderLocation = com.ermao.library.shared.modules.reader.domain.ReaderLocation
 typealias ReaderPreferences = com.ermao.library.shared.modules.reader.domain.ReaderPreferences
 typealias ReaderAppearancePreferences = com.ermao.library.shared.modules.reader.domain.ReaderAppearancePreferences
@@ -434,7 +663,6 @@ typealias ReaderPositionPresentationSnapshot =
     com.ermao.library.shared.modules.reader.domain.ReaderPositionPresentationSnapshot
 typealias ReaderChapterUnit = com.ermao.library.shared.modules.reader.domain.ReaderChapterUnit
 typealias ReaderChapterState = com.ermao.library.shared.modules.reader.domain.ReaderChapterState
-typealias ReaderChapterListMetadata = com.ermao.library.shared.modules.reader.domain.ReaderChapterListMetadata
 typealias ReaderLocalProgressIdentity = com.ermao.library.shared.modules.reader.domain.ReaderLocalProgressIdentity
 typealias ReaderProgressSyncTarget = com.ermao.library.shared.modules.reader.domain.ReaderProgressSyncTarget
 typealias ReaderSyncNamespace = com.ermao.library.shared.modules.reader.domain.ReaderSyncNamespace
@@ -531,6 +759,8 @@ fun matchesReaderNavigationHref(currentHref: String, expectedHref: String, fragm
 typealias ReaderNavigationResult = com.ermao.library.shared.modules.reader.application.ReaderNavigationResult
 typealias ReaderNavigationTargetReflowable =
     com.ermao.library.shared.modules.reader.application.ReaderNavigationTarget.Reflowable
+typealias ReaderNavigationTargetChapter =
+    com.ermao.library.shared.modules.reader.application.ReaderNavigationTarget.Chapter
 typealias ReaderNavigationTargetPdf =
     com.ermao.library.shared.modules.reader.application.ReaderNavigationTarget.Pdf
 typealias ReaderNavigationTargetComic =
@@ -629,16 +859,12 @@ fun createReaderServerProfile(
 
 fun resolveReaderChapterStates(
     units: List<ReaderChapterUnit>,
-    currentHref: String?,
     currentSortOrder: Int?,
     progressPercent: Double,
-    metadata: ReaderChapterListMetadata,
 ): List<ReaderChapterState> = com.ermao.library.shared.modules.reader.domain.resolveReaderChapterStates(
     units,
-    currentHref,
     currentSortOrder,
     progressPercent,
-    metadata,
 )
 
 fun resolveReaderChapterStatesFromPresentation(
@@ -662,8 +888,19 @@ fun resolveReflowableTotalProgressionFromNavigation(
     totalProgression,
 )
 
-fun readingUnitLaunchTarget(readerType: String, href: String?, pageNumber: Int?): ReaderNavigationTarget =
-    com.ermao.library.shared.modules.reader.application.readingUnitLaunchTarget(readerType, href, pageNumber)
+fun readingUnitLaunchTarget(readerType: String, href: String?, pageNumber: Int?, navigationKey: String? = null): ReaderNavigationTarget =
+    com.ermao.library.shared.modules.reader.application.readingUnitLaunchTarget(readerType, href, pageNumber, navigationKey)
+
+typealias ReaderNavigationEntry = com.ermao.library.shared.modules.reader.domain.ReaderNavigationEntry
+
+fun resolveCurrentReaderNavigationEntryId(
+    entries: List<ReaderNavigationEntry>,
+    currentHref: String?,
+    fragments: Set<String>,
+    cssSelector: String?,
+): String? = com.ermao.library.shared.modules.reader.domain.resolveCurrentReaderNavigationEntryId(
+    entries, currentHref, fragments, cssSelector,
+)
 
 fun encodeReaderLaunchTarget(target: ReaderNavigationTarget): String =
     com.ermao.library.shared.modules.reader.application.encodeReaderLaunchTarget(target)

@@ -14,7 +14,6 @@ import com.ermao.library.shared.modules.reader.domain.PdfReaderErrorCode
 import com.ermao.library.shared.modules.reader.domain.RemoteByteRangeReaderSource
 import com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName
 import com.ermao.library.shared.modules.reader.domain.ReaderSafetyFacade
-import com.ermao.library.shared.modules.reader.domain.ReaderSafetyFormat
 import com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId
 import com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
@@ -49,11 +48,6 @@ class KtorPdfRangeServerPort internal constructor(
                 response.header(HttpHeaders.AcceptRanges)?.split(',')
                     ?.map(String::trim)?.any { it.equals("bytes", ignoreCase = true) } != true ->
                     probePolicyFailure(PdfReaderErrorCode.RangeUnsupported)
-                !acceptsPdfMimeType(response.header(HttpHeaders.ContentType)) ->
-                    probePolicyFailure(
-                        PdfReaderErrorCode.RangeInvalid,
-                        ReaderSafetyRuleId.COMMON_EXACT_FORMAT_MIME,
-                    )
                 !hasIdentityContentEncoding(response.header(HttpHeaders.ContentEncoding)) ->
                     probePolicyFailure(PdfReaderErrorCode.RangeInvalid)
                 response.header(HttpHeaders.ContentLength)?.toLongOrNull() != source.expectedSizeBytes ->
@@ -142,12 +136,9 @@ class KtorPdfRangeServerPort internal constructor(
         }
         val expectedLength = (range.endExclusive - range.begin).toInt()
         val expectedContentRange = "bytes ${range.begin}-${range.endExclusive - 1}/${source.expectedSizeBytes}"
-        if (!acceptsPdfMimeType(response.header(HttpHeaders.ContentType))) {
-            return readPolicyFailure(
-                PdfReaderErrorCode.RangeInvalid,
-                ReaderSafetyRuleId.COMMON_EXACT_FORMAT_MIME,
-            )
-        }
+        // MIME metadata is an adapter hint. PDFium decides whether the actual
+        // bytes are supported; this transport still validates their identity
+        // and exact range before returning any content to the engine.
         if (!hasIdentityContentEncoding(response.header(HttpHeaders.ContentEncoding)) ||
             response.header(HttpHeaders.ContentRange) != expectedContentRange ||
             response.header(HttpHeaders.ContentLength)?.toIntOrNull() != expectedLength
@@ -197,11 +188,6 @@ class KtorPdfRangeServerPort internal constructor(
         recoverable = false,
         safetyFailure = ReaderSafetyFacade().failureFor(ruleId),
     )
-
-    private fun acceptsPdfMimeType(value: String?): Boolean {
-        val normalized = value?.trim()?.lowercase()?.substringBefore(';') ?: return false
-        return normalized in ReaderSafetyPolicy.formats.getValue(ReaderSafetyFormat.PDF).acceptedMimeTypes
-    }
 
     private fun hasIdentityContentEncoding(value: String?): Boolean =
         value.isNullOrBlank() || value.trim().equals("identity", ignoreCase = true)

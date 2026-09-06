@@ -15,7 +15,7 @@ class ReaderSafetyConformanceReportTest {
         val report = runner.generate("KMP", "kmp-android-host/shared-facade")
 
         runner.verifyAgainstManifest(report)
-        assertEquals(30, report.getValue("results").jsonArray.size)
+        assertEquals(48, report.getValue("results").jsonArray.size)
         assertEquals(0, report.getValue("omissions").jsonArray.size)
         runner.write(
             report,
@@ -45,7 +45,7 @@ class ReaderSafetyConformanceReportTest {
         val report = runner.generate("KMP", "json-loader-contract-test")
 
         runner.verifyAgainstManifest(report)
-        assertEquals(30, report.getValue("results").jsonArray.size)
+        assertEquals(48, report.getValue("results").jsonArray.size)
         assertEquals(0, report.getValue("omissions").jsonArray.size)
     }
 }

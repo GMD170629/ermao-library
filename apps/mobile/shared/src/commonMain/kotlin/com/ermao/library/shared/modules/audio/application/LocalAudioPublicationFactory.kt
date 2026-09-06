@@ -3,7 +3,6 @@ package com.ermao.library.shared.modules.audio.application
 import com.ermao.library.shared.modules.audio.domain.AudioAsset
 import com.ermao.library.shared.modules.audio.domain.AudioPublication
 import com.ermao.library.shared.modules.audio.domain.AudioResource
-import com.ermao.library.shared.modules.reader.ReaderFormat
 import com.ermao.library.shared.modules.reader.ReaderSourceFormat
 import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
 
@@ -21,9 +20,9 @@ class LocalAudioPublicationFactory {
         sizeBytes: Long,
         durationMillis: Long,
     ): AudioPublication {
-        val sourceFormat = ReaderSourceFormat.entries.firstOrNull { format ->
-            format.readerFormat == ReaderFormat.Audio && format.acceptsMimeType(mimeType)
-        } ?: ReaderSourceFormat.Audio
+        // The declared MIME is retained as decoder input metadata. It does not select or
+        // reject a source format; the actual audio engine owns capability detection.
+        val sourceFormat = ReaderSourceFormat.Audio
         val resource = AudioResource(
             resourceId = resourceId,
             title = resourceTitle,

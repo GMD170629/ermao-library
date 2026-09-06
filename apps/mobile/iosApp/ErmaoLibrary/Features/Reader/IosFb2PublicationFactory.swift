@@ -95,10 +95,7 @@ struct IosFb2PublicationFactory: Sendable {
             for image in try decoder.embeddedImages() {
                 guard let content = Data(base64Encoded: image.encoded),
                       Int64(content.count) <= maximumImageBytes,
-                      Int64(content.count) <= maximumTotalImageBytes - totalSize,
-                      let fileExtension = ErmaoShared.PublicKt.readerSafetyFb2EmbeddedImageExtension(
-                          mediaType: image.mediaType
-                      )
+                      Int64(content.count) <= maximumTotalImageBytes - totalSize
                 else {
                     // FB2.IMAGE_BUDGET is BLOCK_RESOURCE: one bad image must not reject the book.
                     continue
@@ -106,6 +103,9 @@ struct IosFb2PublicationFactory: Sendable {
                 totalSize += Int64(content.count)
                 let digest = SHA256.hash(data: Data(image.identifier.utf8)).prefix(10)
                     .map { String(format: "%02x", $0) }.joined()
+                let fileExtension = ErmaoShared.PublicKt.readerSafetyFb2EmbeddedImageExtension(
+                    mediaType: image.mediaType
+                ) ?? ""
                 let href = "fb2/images/\(digest)\(fileExtension)"
                 images[href] = content
                 links.append(ErmaoShared.Fb2ImageLink(
@@ -114,8 +114,14 @@ struct IosFb2PublicationFactory: Sendable {
                     mediaType: image.mediaType
                 ))
             }
+            let document = try decoder.finish(fallbackTitle: fallbackTitle, images: links)
+            let projection = try IosChapterCore.parseXML(
+                format: UInt32(ERMAO_CHAPTER_FB2),
+                events: delegate.chapterEvents
+            )
+            let navigation = try Self.navigationEntries(projection.entries)
             return IosParsedFb2Source(
-                document: try decoder.finish(fallbackTitle: fallbackTitle, images: links),
+                document: document.withTableOfContents(entries: navigation),
                 images: images
             )
         } catch {
@@ -128,7 +134,31 @@ struct IosFb2PublicationFactory: Sendable {
     }
 
     private static func navigationLink(_ entry: ErmaoShared.Fb2NavigationEntry) -> Link {
-        Link(href: entry.href, mediaType: .xhtml, title: entry.title, children: entry.children.map(navigationLink))
+        Link(
+            href: entry.href ?? "",
+            mediaType: .xhtml,
+            title: entry.title,
+            properties: Properties(["shuku:navigationKey": .string(entry.navigationKey)]),
+            children: entry.children.map(navigationLink)
+        )
+    }
+
+    private static func navigationEntries(_ entries: [IosChapterCoreEntry]) throws -> [ErmaoShared.Fb2NavigationEntry] {
+        var childrenByParent: [Int: [Int]] = [:]
+        for (index, entry) in entries.enumerated() {
+            childrenByParent[entry.parentIndex ?? -1, default: []].append(index)
+        }
+        func make(_ index: Int) throws -> ErmaoShared.Fb2NavigationEntry {
+            let entry = entries[index]
+            let children = try childrenByParent[index, default: []].map(make)
+            return ErmaoShared.Fb2NavigationEntry(
+                href: entry.href,
+                title: entry.title,
+                children: children,
+                navigationKey: entry.key
+            )
+        }
+        return try childrenByParent[-1, default: []].map(make)
     }
 
 }
@@ -141,18 +171,53 @@ struct IosParsedFb2Source {
 private final class IosFb2Parser: NSObject, XMLParserDelegate {
     private let decoder: ErmaoShared.Fb2PublicationDecoder
     private(set) var failure: Error?
+    private(set) var chapterEvents: [IosChapterCoreXmlEvent] = []
+    private var sourceOrdinal: UInt64 = 0
+    private var bodyDepth = 0
+    private var topSectionCount = 0
+    private var sectionHrefs: [String] = []
 
     init(decoder: ErmaoShared.Fb2PublicationDecoder) { self.decoder = decoder }
 
     func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?,
                 qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]) {
         record(parser) {
-            try decoder.startElement(name: elementName, attributes: attributeDict)
+            let name = elementName.split(separator: ":").last.map(String.init) ?? elementName
+            let ordinal = sourceOrdinal
+            sourceOrdinal += 1
+            if name == "body" { bodyDepth += 1 }
+            let targetHref: String?
+            if name == "section", bodyDepth > 0 {
+                let href = sectionHrefs.last ?? {
+                    topSectionCount += 1
+                    return "fb2/section-\(String(format: "%04d", topSectionCount)).xhtml"
+                }()
+                sectionHrefs.append(href)
+                targetHref = "\(href)#chapter-node-\(ordinal)"
+            } else {
+                targetHref = nil
+            }
+            let attributes = attributeDict.reduce(into: [String: String]()) { result, item in
+                result[item.key.split(separator: ":").last.map(String.init) ?? item.key] = item.value
+            }
+            try decoder.startElement(name: name, attributes: attributes, sourceStart: Int64(ordinal))
+            chapterEvents.append(IosChapterCoreXmlEvent(
+                kind: 1,
+                name: name,
+                text: nil,
+                attributes: attributes.map { IosChapterCoreXmlAttribute(name: $0.key, value: $0.value) },
+                href: targetHref
+            ))
         }
     }
 
     func parser(_ parser: XMLParser, foundCharacters string: String) {
-        record(parser) { try decoder.text(value: string) }
+        record(parser) {
+            try decoder.text(value: string)
+            if !string.isEmpty {
+                chapterEvents.append(IosChapterCoreXmlEvent(kind: 2, name: nil, text: string, attributes: [], href: nil))
+            }
+        }
     }
 
     func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
@@ -161,11 +226,22 @@ private final class IosFb2Parser: NSObject, XMLParserDelegate {
             parser.abortParsing()
             return
         }
-        record(parser) { try decoder.text(value: text) }
+        record(parser) {
+            try decoder.text(value: text)
+            if !text.isEmpty {
+                chapterEvents.append(IosChapterCoreXmlEvent(kind: 2, name: nil, text: text, attributes: [], href: nil))
+            }
+        }
     }
 
     func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
-        record(parser) { try decoder.endElement(name: elementName) }
+        record(parser) {
+            let name = elementName.split(separator: ":").last.map(String.init) ?? elementName
+            try decoder.endElement(name: name)
+            chapterEvents.append(IosChapterCoreXmlEvent(kind: 3, name: name, text: nil, attributes: [], href: nil))
+            if name == "section", !sectionHrefs.isEmpty { sectionHrefs.removeLast() }
+            if name == "body" { bodyDepth -= 1 }
+        }
     }
 
     func parser(_ parser: XMLParser, parseErrorOccurred parseError: Error) {

@@ -21,8 +21,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -48,7 +46,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.style.TextOverflow
 import kotlin.math.roundToInt
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
@@ -84,6 +81,8 @@ import com.ermao.library.shared.modules.workmanagement.WorkManagementErrorKind
 import com.ermao.library.shared.modules.workmanagement.managementCandidateValue
 import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.ui.theme.WarmPageThemeValues
+import com.ermao.library.ui.components.WarmPagePopup
+import com.ermao.library.ui.components.WarmPageMenuItem
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -164,20 +163,22 @@ fun ManagementAnchor(
         .semantics { customActions = listOf(CustomAccessibilityAction(label) { open(); true }) }
     val density = LocalDensity.current
     val availableWidth = with(density) { LocalWindowInfo.current.containerSize.width.toDp() }
-    val menuWidth = 280.dp.coerceAtMost((availableWidth - 32.dp).coerceAtLeast(0.dp))
+    val menuWidth = WarmPageThemeValues.components.menu.maximumWidth
+        .coerceAtMost((availableWidth - 32.dp).coerceAtLeast(0.dp))
     val menu: @Composable () -> Unit = {
         if (controller != null && controller.anchor === anchor && state != null) {
-            DropdownMenu(
+            WarmPagePopup(
                 expanded = state.phase == ManagementPhase.Menu && (controller.session.menuItems.isNotEmpty() || menuExtras != null),
-                onDismissRequest = { if (controller.session.current.phase == ManagementPhase.Menu) controller.session.close() },
+                onDismiss = { if (controller.session.current.phase == ManagementPhase.Menu) controller.session.close() },
                 modifier = Modifier.width(menuWidth).testTag("management-menu"),
+                title = target.title,
             ) {
                 menuExtras?.invoke(controller.session::close)
-                Text(target.title, Modifier.padding(WarmPageThemeValues.spacing.two),
-                    style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 controller.session.menuItems.forEach { item ->
-                    DropdownMenuItem(text = { Text(actionLabel(item.action, state.copy(menuContext = resolvedContext)),
-                        color = if (item.action == ManagementAction.Delete) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface) },
+                    WarmPageMenuItem(
+                        label = actionLabel(item.action, state.copy(menuContext = resolvedContext)),
+                        destructive = item.action == ManagementAction.Delete,
+                        hasLeadingSlot = menuExtras != null,
                         enabled = item.enabled,
                         onClick = { controller.perform { select(item.action) } })
                 }

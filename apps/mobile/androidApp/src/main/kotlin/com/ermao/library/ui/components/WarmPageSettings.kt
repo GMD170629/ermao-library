@@ -1,7 +1,6 @@
 package com.ermao.library.ui.components
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -18,26 +17,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBackIos
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
@@ -94,87 +86,25 @@ fun WarmSettingsScaffold(
     val resolvedTopBarColor = topBarContainerColor ?: resolvedContainerColor
     val navigationAction = navigation ?: onBack?.let {
         WarmPageNavigationAction(
-            icon = Icons.AutoMirrored.Rounded.ArrowBackIos,
+            icon = Icons.AutoMirrored.Filled.ArrowBack,
             label = navigationContentDescription ?: stringResource(R.string.navigate_back),
             onClick = it,
         )
     }
 
-    if (role == WarmSettingsScaffoldRole.Root) {
-        WarmPageScaffold(
-            role = WarmPageTopBarRole.Root,
-            title = title,
-            modifier = modifier,
-            navigation = navigationAction,
-            actionContent = actions,
-            snackbarHost = snackbarHost,
-            containerColor = resolvedContainerColor,
-            topBarContainerColor = resolvedTopBarColor,
-        ) { contentPadding ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .testTag("settings-page"),
-            ) {
-                content(contentPadding)
-            }
-        }
-        return
-    }
-
-    val topBarColors = TopAppBarDefaults.topAppBarColors(
-        containerColor = resolvedTopBarColor,
-        scrolledContainerColor = theme.colors.surface,
-        navigationIconContentColor = theme.colors.textPrimary,
-        titleContentColor = theme.colors.textPrimary,
-        actionIconContentColor = theme.colors.textPrimary,
-    )
-
-    Scaffold(
-        modifier = modifier,
-        containerColor = resolvedContainerColor,
-        contentColor = theme.colors.textPrimary,
-        topBar = {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                TopAppBar(
-                    title = {
-                        Text(
-                            text = title,
-                            style = theme.typography.sectionTitle,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.testTag("settings-page-title"),
-                        )
-                    },
-                    navigationIcon = {
-                        navigationAction?.let { action ->
-                            IconButton(
-                                onClick = action.onClick,
-                                modifier = Modifier.testTag("settings-back"),
-                            ) {
-                                Icon(
-                                    imageVector = action.icon,
-                                    contentDescription = action.label,
-                                )
-                            }
-                        }
-                    },
-                    actions = actions,
-                    colors = topBarColors,
-                )
-                tabs?.let { tabContent ->
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = resolvedTopBarColor,
-                        contentColor = theme.colors.textPrimary,
-                        tonalElevation = 0.dp,
-                    ) {
-                        tabContent()
-                    }
-                }
-            }
+    WarmPageScaffold(
+        role = when (role) {
+            WarmSettingsScaffoldRole.Root -> WarmPageTopBarRole.Root
+            WarmSettingsScaffoldRole.Detail -> WarmPageTopBarRole.Detail
         },
+        title = title,
+        modifier = modifier,
+        navigation = navigationAction,
+        actionContent = actions,
+        topBarBottom = tabs,
         snackbarHost = snackbarHost,
+        containerColor = resolvedContainerColor,
+        topBarContainerColor = resolvedTopBarColor,
     ) { contentPadding ->
         Box(
             modifier = Modifier
@@ -396,7 +326,7 @@ data class WarmSettingsChoice<T>(
     val enabled: Boolean = true,
 )
 
-/** Horizontally scrollable filter controls with a consistent 48dp touch target. */
+/** Settings list filters use the same fixed, equal-width tabs as settings subpages. */
 @Composable
 fun <T> WarmSettingsFilterBar(
     options: List<WarmSettingsFilterOption<T>>,
@@ -405,32 +335,19 @@ fun <T> WarmSettingsFilterBar(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    val theme = WarmPageThemeValues
-    Row(
+    if (options.isEmpty()) return
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = theme.components.settings.horizontalInset)
             .testTag("settings-filter-bar"),
-        horizontalArrangement = Arrangement.spacedBy(theme.spacing.one),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        options.forEach { option ->
-            FilterChip(
-                selected = selected == option.value,
-                onClick = { onSelect(option.value) },
-                enabled = enabled && option.enabled,
-                label = {
-                    Text(
-                        text = option.label,
-                        style = theme.typography.label,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                },
-                modifier = Modifier.heightIn(min = theme.components.controls.minimumTouchTarget),
-            )
-        }
+        SettingsTabRow(
+            selectedIndex = options.indexOfFirst { it.value == selected }.coerceAtLeast(0),
+            tabs = options.map { it.label },
+            onSelect = { onSelect(options[it].value) },
+            enabled = enabled,
+            enabledForTab = { options[it].enabled },
+        )
     }
 }
 

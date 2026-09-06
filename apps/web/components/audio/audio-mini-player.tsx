@@ -2,6 +2,7 @@
 
 import {
   ArrowLeft,
+  BookOpen,
   Check,
   Clock3,
   Headphones,
@@ -33,9 +34,10 @@ import { useI18n as useAttributeI18n } from '@/i18n/provider';
 const hiddenPrefixes = ['/login', '/setup', '/forgot-password', '/reset-password', '/offline'];
 const sleepOptions = [15, 30, 45, 60] as const;
 const chaptersPanelId = 'audio-mini-player-chapters';
+const tracksPanelId = 'audio-mini-player-tracks';
 const settingsPanelId = 'audio-mini-player-settings';
 
-type MiniPlayerPanel = 'chapters' | 'settings' | null;
+type MiniPlayerPanel = 'chapters' | 'tracks' | 'settings' | null;
 
 export function AudioMiniPlayer() {
   const { t: i18nAttribute } = useAttributeI18n();
@@ -50,6 +52,7 @@ export function AudioMiniPlayer() {
   const [clock, setClock] = useState(() => Date.now());
   const rootRef = useRef<HTMLElement>(null);
   const chaptersButtonRef = useRef<HTMLButtonElement>(null);
+  const tracksButtonRef = useRef<HTMLButtonElement>(null);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
   const visible = Boolean(bootstrap || pendingSummary) && !hiddenPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(prefix));
 
@@ -73,7 +76,11 @@ export function AudioMiniPlayer() {
     };
     const closeFromKeyboard = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
-      const trigger = openPanel === 'chapters' ? chaptersButtonRef.current : settingsButtonRef.current;
+      const trigger = openPanel === 'chapters'
+        ? chaptersButtonRef.current
+        : openPanel === 'tracks'
+          ? tracksButtonRef.current
+          : settingsButtonRef.current;
       setOpenPanel(null);
       window.requestAnimationFrame(() => trigger?.focus());
     };
@@ -92,23 +99,24 @@ export function AudioMiniPlayer() {
     return () => window.clearInterval(timer);
   }, [player.sleepTimerEndsAt, player.sleepTimerMode]);
 
+  const trackItems = !bootstrap
+    ? []
+    : bootstrap.tracks.map((track, index) => ({
+        id: track.assetId,
+        title: track.title,
+        durationMs: track.durationMs,
+        active: index === player.trackIndex,
+        play: () => player.selectTrack(index, true)
+      }));
   const chapterItems = !bootstrap
     ? []
-    : bootstrap.chapters.length > 0
-      ? bootstrap.chapters.map((chapter) => ({
-          id: chapter.id,
-          title: chapter.title,
-          durationMs: Math.max(0, chapter.endMs - chapter.startMs),
-          active: chapter.id === player.chapter?.id,
-          play: () => player.selectChapter(chapter.id, true)
-        }))
-      : bootstrap.tracks.map((track, index) => ({
-          id: track.assetId,
-          title: track.title,
-          durationMs: track.durationMs,
-          active: index === player.trackIndex,
-          play: () => player.selectTrack(index, true)
-        }));
+    : bootstrap.chapters.map((chapter) => ({
+        id: chapter.id,
+        title: chapter.title,
+        durationMs: Math.max(0, chapter.endMs - chapter.startMs),
+        active: chapter.id === player.chapter?.id,
+        play: () => player.selectChapter(chapter.id, true)
+      }));
 
   if (!visible) return null;
 
@@ -190,17 +198,19 @@ export function AudioMiniPlayer() {
       aria-label={i18nAttribute("有声书迷你播放器")}
       data-testid="audio-mini-player"
     >
-      {openPanel === 'chapters' ? (
+      {openPanel === 'chapters' || openPanel === 'tracks' ? (
         <section
-          id={chaptersPanelId}
+          id={openPanel === 'chapters' ? chaptersPanelId : tracksPanelId}
           className="shuku-audio-mini-panel flex flex-col overflow-hidden rounded-[20px] border border-black/[0.08] bg-[#FFFEFC]/[0.98] shadow-[0_18px_55px_rgba(54,43,35,0.20)] backdrop-blur-xl"
           role="region"
-          aria-label={bootstrap.chapters.length > 0 ? i18nAttribute("章节列表") : i18nAttribute("音轨列表")}
+          aria-label={i18nAttribute(openPanel === 'chapters' ? "章节列表" : "音轨列表")}
         >
           <header className="flex items-end justify-between gap-4 border-b border-black/[0.07] px-4 py-3.5">
             <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-[#292724]">{bootstrap.chapters.length > 0 ? i18nAttribute("章节") : i18nAttribute("音轨")}</h2>
-              <p className="mt-0.5 text-xs text-[#817B74]"><I18nText>共 </I18nText>{chapterItems.length} {bootstrap.chapters.length > 0 ? i18nAttribute("章") : i18nAttribute("轨")} · {durationLabel}</p>
+              <h2 className="text-sm font-semibold text-[#292724]">{i18nAttribute(openPanel === 'chapters' ? "章节" : "音轨")}</h2>
+              <p className="mt-0.5 text-xs text-[#817B74]">
+                {i18nAttribute(openPanel === 'chapters' ? "共 {value0} 章" : "共 {value0} 条音轨", { value0: openPanel === 'chapters' ? chapterItems.length : trackItems.length })} · {durationLabel}
+              </p>
             </div>
             <button type="button" onClick={() => setOpenPanel(null)} className="flex min-h-11 min-w-11 items-center justify-center rounded-full text-[#77716B] hover:bg-black/[0.05]" aria-label={i18nAttribute("关闭章节列表")}>
               <X size={17} />
@@ -219,7 +229,11 @@ export function AudioMiniPlayer() {
             </div>
           ) : null}
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2">
-            {chapterItems.map((item, index) => (
+            {(openPanel === 'chapters' ? chapterItems : trackItems).length === 0 ? (
+              <p className="px-2.5 py-8 text-center text-sm text-[#817B74]">
+                {i18nAttribute(openPanel === 'chapters' ? "暂无可定位章节" : "暂无可播放音轨")}
+              </p>
+            ) : (openPanel === 'chapters' ? chapterItems : trackItems).map((item, index) => (
               <button
                 key={item.id}
                 type="button"
@@ -343,16 +357,28 @@ export function AudioMiniPlayer() {
 
           <div className="flex shrink-0 items-center justify-end gap-0.5 md:order-3 md:justify-self-end md:border-l md:border-black/[0.07] md:pl-2">
             <button
+              ref={tracksButtonRef}
+              type="button"
+              onClick={() => togglePanel('tracks')}
+              className={cn('flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-xl px-2 text-[#5F5953] transition duration-200 hover:bg-black/[0.05] active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EF4D2F]/50', openPanel === 'tracks' && 'bg-[#FCE9E2] text-[#C8452B]')}
+              aria-label={i18nAttribute("打开音轨列表")}
+              aria-expanded={openPanel === 'tracks'}
+              aria-controls={tracksPanelId}
+            >
+              <ListMusic size={18} aria-hidden="true" />
+              <span className="hidden text-xs font-medium xl:inline"><I18nText>音轨</I18nText></span>
+            </button>
+            <button
               ref={chaptersButtonRef}
               type="button"
               onClick={() => togglePanel('chapters')}
               className={cn('flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-xl px-2 text-[#5F5953] transition duration-200 hover:bg-black/[0.05] active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EF4D2F]/50', openPanel === 'chapters' && 'bg-[#FCE9E2] text-[#C8452B]')}
-              aria-label={bootstrap.chapters.length > 0 ? i18nAttribute("打开章节列表") : i18nAttribute("打开音轨列表")}
+              aria-label={i18nAttribute("打开章节列表")}
               aria-expanded={openPanel === 'chapters'}
               aria-controls={chaptersPanelId}
             >
-              <ListMusic size={18} aria-hidden="true" />
-              <span className="hidden text-xs font-medium xl:inline">{bootstrap.chapters.length > 0 ? i18nAttribute("章节") : i18nAttribute("音轨")}</span>
+              <BookOpen size={18} aria-hidden="true" />
+              <span className="hidden text-xs font-medium xl:inline"><I18nText>章节</I18nText></span>
             </button>
             <button
               ref={settingsButtonRef}

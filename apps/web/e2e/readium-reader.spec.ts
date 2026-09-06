@@ -20,14 +20,14 @@ type EpubFixtureItem = Readonly<{ href: string; title: string; body: string }>;
 async function createEpub(items: readonly EpubFixtureItem[] = [
   { href: 'chapter1.xhtml', title: '第一章', body: chapterOne },
   { href: 'chapter2.xhtml', title: '第二章', body: chapterTwo }
-], language: string | null = 'zh-CN'): Promise<Uint8Array> {
+], language: string | null = 'zh-CN', includeToc = true): Promise<Uint8Array> {
   const writer = new ZipWriter(new Uint8ArrayWriter());
   await writer.add('mimetype', new TextReader('application/epub+zip'), { level: 0 });
   await writer.add('META-INF/container.xml', new TextReader('<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'));
   const manifest = items.map((item, index) => `<item id="item-${index}" href="${item.href}" media-type="application/xhtml+xml"/>`).join('');
   const spine = items.map((_item, index) => `<itemref idref="item-${index}"/>`).join('');
   await writer.add('content.opf', new TextReader(`<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Readium E2E</dc:title>${language ? `<dc:language>${language}</dc:language>` : ''}</metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>${manifest}</manifest><spine>${spine}</spine></package>`));
-  await writer.add('nav.xhtml', new TextReader(`<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>目录</title></head><body><nav epub:type="toc"><ol>${items.map((item) => `<li><a href="${item.href}">${item.title}</a></li>`).join('')}</ol></nav></body></html>`));
+  await writer.add('nav.xhtml', new TextReader(`<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>目录</title></head><body><nav epub:type="toc"><ol>${includeToc ? items.map((item) => `<li><a href="${item.href}">${item.title}</a></li>`).join('') : ''}</ol></nav></body></html>`));
   for (const item of items) await writer.add(item.href, new TextReader(item.body));
   return writer.close();
 }
@@ -137,6 +137,43 @@ async function visibleReadiumFrame(page: Page) {
   const shell = page.locator('[data-reader-shell="v3"]'); await expect(shell).toBeVisible();
   const frame = shell.locator('iframe:visible').first(); await expect(frame).toBeVisible(); return frame;
 }
+
+test('shared chapter key opens the same chapter and reports its identity', async ({ page }) => {
+  await page.setViewportSize({ width: 411, height: 914 });
+  const writes = await installReaderRoutes(page);
+  await page.goto('/reader/epub-resource?chapterKey=chapter-1');
+  const frame = await visibleReadiumFrame(page);
+  await expect(frame.contentFrame().getByText('第二章正文。')).toBeVisible();
+  await expect.poll(() => writes.some((write) => {
+    if (!write || typeof write !== 'object' || !('position' in write)) return false;
+    const serialized = JSON.stringify(write.position);
+    return serialized.includes('"navigationKey":"chapter-1"');
+  })).toBe(true);
+  await page.locator('[data-reader-shell="v3"] > div.relative').dispatchEvent('click', {
+    clientX: 205, clientY: 320
+  });
+  await page.getByRole('button', { name: '目录', exact: true }).click();
+  const panel = page.locator('[data-reader-panel-surface="true"]');
+  await expect(panel.getByRole('button', { name: /第二章/ })).toHaveAttribute('aria-current', 'location');
+  await expect(panel.getByRole('button', { name: /第一章/ })).not.toHaveAttribute('aria-current', 'location');
+});
+
+test('empty authored TOC preserves readable body without synthesizing chapters', async ({ page }) => {
+  await page.setViewportSize({ width: 411, height: 914 });
+  const writes: unknown[] = [];
+  const epub = await createEpub(undefined, 'zh-CN', false);
+  await page.route('**/api/**', (route) => fulfillApi(route, null, 0, writes, epub));
+  await page.goto('/reader/epub-resource');
+  const frame = await visibleReadiumFrame(page);
+  await expect(frame.contentFrame().getByText('第一章 Readium 验收')).toBeVisible();
+  await page.locator('[data-reader-shell="v3"] > div.relative').dispatchEvent('click', {
+    clientX: 205, clientY: 320
+  });
+  await page.getByRole('button', { name: '目录', exact: true }).click();
+  const panel = page.locator('[data-reader-panel-surface="true"]');
+  await expect(panel.getByText('暂无可跳转章节')).toBeVisible();
+  await expect(panel.getByRole('button', { name: '第一章', exact: true })).toHaveCount(0);
+});
 
 test('captures the 411x914 Web mobile Reader parity states with a populated EPUB directory', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 411, height: 914 });

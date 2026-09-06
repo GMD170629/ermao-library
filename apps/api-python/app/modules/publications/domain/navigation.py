@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from urllib.parse import urlsplit, urlunsplit
 
+from app.contracts.library_navigation import navigation_entry_id
 from app.modules.publications.domain.model import (
     NormalizedPublication,
     PublicationTocEntry,
@@ -23,7 +23,7 @@ class PublicationNavigationEntry:
     id: str
     navigation_key: str
     title: str
-    href: str
+    href: str | None
     media_type: str | None
     sort_order: int
     level: int
@@ -34,12 +34,6 @@ class PublicationNavigationEntry:
 def _href_without_fragment(href: str) -> str:
     split = urlsplit(href)
     return urlunsplit((split.scheme, split.netloc, split.path, split.query, ""))
-
-
-def _navigation_key(resource_id: str, href: str, path: tuple[int, ...]) -> str:
-    path_key = ".".join(str(part) for part in path)
-    digest = hashlib.sha256(f"{resource_id}\0{href}\0{path_key}".encode()).hexdigest()
-    return f"pubnav_{digest[:32]}"
 
 
 def flatten_publication_navigation(
@@ -65,20 +59,23 @@ def flatten_publication_navigation(
     ) -> None:
         for child_index, entry in enumerate(entries):
             path = (*parent, child_index)
-            navigation_key = _navigation_key(resource_id, entry.href, path)
+            navigation_key = entry.navigation_key
+            resource_href = _href_without_fragment(entry.href) if entry.href else None
             flattened.append(
                 PublicationNavigationEntry(
-                    id=navigation_key,
+                    id=navigation_entry_id(resource_id, navigation_key),
                     navigation_key=navigation_key,
                     title=entry.title,
                     href=entry.href,
-                    media_type=media_types.get(_href_without_fragment(entry.href)),
+                    media_type=media_types.get(resource_href)
+                    if resource_href
+                    else None,
                     sort_order=len(flattened),
                     level=len(path) - 1,
                     path=path,
-                    reading_order_position=reading_order_positions.get(
-                        _href_without_fragment(entry.href)
-                    ),
+                    reading_order_position=reading_order_positions.get(resource_href)
+                    if resource_href
+                    else None,
                 )
             )
             visit(entry.children, path)

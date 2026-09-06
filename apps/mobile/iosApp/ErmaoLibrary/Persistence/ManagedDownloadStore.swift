@@ -214,7 +214,6 @@ actor ManagedDownloadStore: CompletedDownloadProviding {
         let maximumPageCount = ErmaoShared.PublicKt.readerSafetyComicPageMaxCount()
         let maximumPageBytes = ErmaoShared.PublicKt.readerSafetyComicPageMaxBytes()
         let maximumExpandedBytes = ErmaoShared.PublicKt.readerSafetyComicExpandedMaxBytes()
-        let allowedMimeTypes = Set(ErmaoShared.PublicKt.readerSafetyAllowedComicPageMimeTypes())
         guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory), isDirectory.boolValue,
               let data = try? Data(contentsOf: directory.appendingPathComponent("bundle.json")),
               Int64(data.count) <= ErmaoShared.PublicKt.readerSafetyComicManifestMaxBytes(),
@@ -233,12 +232,11 @@ actor ManagedDownloadStore: CompletedDownloadProviding {
             guard member.sizeBytes > 0, member.sizeBytes <= maximumPageBytes,
                   member.sizeBytes <= maximumExpandedBytes - verifiedTotalBytes,
                   !member.fileName.isEmpty, !member.fileName.hasPrefix("."),
-                  !member.fileName.contains("/"), !member.fileName.contains("\\"),
-                  allowedMimeTypes.contains(member.mimeType) else { return nil }
+                  !member.fileName.contains("/"), !member.fileName.contains("\\") else { return nil }
             let file = directory.appendingPathComponent(member.fileName).standardizedFileURL
             guard file.deletingLastPathComponent() == directory.standardizedFileURL,
                   fileSize(at: file) == member.sizeBytes,
-                  managedDownloadImageMime(at: file) == member.mimeType else { return nil }
+                  managedDownloadImageMime(at: file) != nil else { return nil }
             verifiedTotalBytes += member.sizeBytes
         }
         return verifiedTotalBytes == manifest.totalBytes ? manifest.totalBytes : nil

@@ -218,6 +218,7 @@ data class ResourceReadingUnitsPage(
     val pageSize: Int,
     val total: Int,
     val totalPages: Int,
+    val chapterCount: Int? = null,
     val currentHref: String?,
     val currentChapterIndex: Int?,
     val currentChapterTitle: String?,

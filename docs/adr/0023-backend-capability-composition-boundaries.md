@@ -5,10 +5,10 @@
 
 ## Context
 
-Backup, Library/Publications, Auth, System, and OPDS still share behavior through
-private ORM modules, presentation helpers, and composition-root functions.  The
-HTTP contracts are stable, but those imports make the same use case impossible
-to reuse safely from HTTP, workers, and maintenance processes.
+The backend has independent capabilities for Library, Publications, Auth, System,
+Backup and OPDS. Their application contracts must remain reusable from HTTP,
+workers and maintenance processes without exposing ORM implementation details or
+presentation helpers.
 
 ## Decision
 
@@ -36,7 +36,7 @@ queries, mapping, persistence, or transaction behavior.
 - Capability ORM changes require updating only the owning adapter and its
   contract tests.
 - HTTP, worker, and CLI entry points invoke the same application use cases.
-- Architecture tests detect new private imports and layer violations globally;
-  the migration debt list is exact and shrinks to zero for P1-03/P1-04.
+- Architecture tests detect new private imports and layer violations globally; a
+  capability may expose only its stable public ports and contracts.
 - External HTTP/OPDS contracts, SQLite schema, and backup format version remain
   unchanged by this refactor.

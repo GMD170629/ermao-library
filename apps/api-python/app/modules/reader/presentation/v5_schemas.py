@@ -91,6 +91,7 @@ def _compact_json(value: object) -> bytes:
 
 
 class ReaderV5Chapter(ReaderV5WireModel):
+    navigation_key: str | None = Field(alias="navigationKey", max_length=256)
     href: str | None = Field(max_length=8192)
     title: str | None = Field(max_length=4096)
     index: StrictInt | None = Field(ge=0)

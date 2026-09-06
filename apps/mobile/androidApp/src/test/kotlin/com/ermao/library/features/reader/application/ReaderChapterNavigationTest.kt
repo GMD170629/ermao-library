@@ -14,7 +14,7 @@ class ReaderChapterNavigationTest {
 
     @Test
     fun resolvesAdjacentChaptersInDisplayedDepthFirstOrder() {
-        val adjacent = resolveAdjacentChapters(chapters, location("two.xhtml", 0.5))
+        val adjacent = resolveAdjacentChapters(chapters, "two.xhtml")
 
         assertEquals("one.xhtml", adjacent.previous?.id)
         assertEquals("three.xhtml", adjacent.next?.id)
@@ -22,8 +22,8 @@ class ReaderChapterNavigationTest {
 
     @Test
     fun exposesFirstAndLastChapterBoundariesWithoutLooping() {
-        val first = resolveAdjacentChapters(chapters, location("one.xhtml", 0.1))
-        val last = resolveAdjacentChapters(chapters, location("three.xhtml", 0.9))
+        val first = resolveAdjacentChapters(chapters, "one.xhtml")
+        val last = resolveAdjacentChapters(chapters, "three.xhtml")
 
         assertNull(first.previous)
         assertEquals("two.xhtml", first.next?.id)
@@ -32,14 +32,24 @@ class ReaderChapterNavigationTest {
     }
 
     @Test
-    fun fallsBackToChapterStartProgressionWhenTheCurrentHrefIsUnavailable() {
+    fun unknownChapterDoesNotGuessFromProgression() {
         val adjacent = resolveAdjacentChapters(
             chapters,
-            ReflowReaderLocation(progression = 0.4, totalProgression = 0.5),
+            null,
         )
 
-        assertEquals("one.xhtml", adjacent.previous?.id)
-        assertEquals("three.xhtml", adjacent.next?.id)
+        assertNull(adjacent.previous)
+        assertNull(adjacent.next)
+    }
+
+    @Test
+    fun skipsGroupsButPreservesTheirChildren() {
+        val group = chapter("group", 0.0, listOf(chapter("one.xhtml", 0.0)))
+            .copy(target = com.ermao.library.shared.modules.reader.ReaderNavigationTargetInvalid())
+        val adjacent = resolveAdjacentChapters(listOf(group, chapter("two.xhtml", 0.5)), "one.xhtml")
+        assertNull(adjacent.previous)
+        assertEquals("two.xhtml", adjacent.next?.id)
+        assertNull(resolveAdjacentChapters(listOf(group), "group").next)
     }
 
     private fun chapter(

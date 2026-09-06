@@ -10,7 +10,6 @@ import com.ermao.library.shared.modules.downloads.DownloadBundleByteSinkSession
 import com.ermao.library.shared.modules.downloads.DownloadBundleMemberSinkRequest
 import com.ermao.library.shared.modules.downloads.DownloadBundleSinkRequest
 import com.ermao.library.shared.modules.downloads.DownloadSinkRequest
-import com.ermao.library.shared.modules.reader.readerSafetyAllowedComicPageMimeTypes
 import com.ermao.library.shared.modules.reader.readerSafetyComicExpandedMaxBytes
 import com.ermao.library.shared.modules.reader.readerSafetyComicManifestMaxBytes
 import com.ermao.library.shared.modules.reader.readerSafetyComicPageMaxBytes
@@ -158,15 +157,12 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
             (expectedBytes != null && manifest.totalBytes != expectedBytes) ||
             manifest.members.map { it.sequenceIndex } != manifest.members.indices.toList() ||
             manifest.members.map { it.fileName }.distinct().size != manifest.members.size ||
-            manifest.members.any {
-                it.sizeBytes !in 1..readerSafetyComicPageMaxBytes() ||
-                    it.mimeType !in readerSafetyAllowedComicPageMimeTypes()
-            } ||
+            manifest.members.any { it.sizeBytes !in 1..readerSafetyComicPageMaxBytes() } ||
             manifest.members.sumOf { it.sizeBytes } != manifest.totalBytes) return false
         return manifest.members.all { member ->
             val page = File(file, member.fileName)
             member.fileName == page.name && page.canonicalFile.parentFile == file.canonicalFile &&
-                page.isFile && page.length() == member.sizeBytes && detectImageMime(page) == member.mimeType
+                page.isFile && page.length() == member.sizeBytes && detectImageMime(page) != null
         }
     }
 
@@ -233,7 +229,6 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
             check(!closed) { "Download bundle is closed" }
             require(request.sequenceIndex in 0 until this@BundleSession.request.memberCount)
             require(request.sequenceIndex !in committedMembers) { "Download bundle member is duplicated" }
-            require(request.mimeType in readerSafetyAllowedComicPageMimeTypes())
             require(request.expectedBytes <= readerSafetyComicPageMaxBytes())
             val extension = extensionForMimeType(request.mimeType)
             val stableName = request.sequenceIndex.toString().padStart(6, '0') + "-" +
@@ -273,7 +268,7 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
             members.forEach { member ->
                 val file = File(stagingDirectory, member.fileName)
                 require(file.isFile && file.length() == member.sizeBytes) { "Download bundle member is invalid" }
-                require(detectImageMime(file) == member.mimeType) { "Download bundle member MIME is invalid" }
+                require(detectImageMime(file) != null) { "Download bundle member bytes are not a supported image" }
             }
             val manifest = BundleManifest(
                 contractVersion = DOWNLOAD_BUNDLE_CONTRACT_VERSION,
@@ -353,9 +348,7 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
             sha256("$resourceId:$assetId") + "-" + sha256(taskId).take(16)
 
         fun extensionForMimeType(mimeType: String): String =
-            requireNotNull(readerSafetyComicPageExtensionForMimeType(mimeType)) {
-                "Unsupported bundle member MIME type"
-            }.removePrefix(".")
+            readerSafetyComicPageExtensionForMimeType(mimeType)?.removePrefix(".") ?: "img"
 
         fun detectImageMime(file: File): String? {
             val bytes = ByteArray(16)

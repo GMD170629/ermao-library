@@ -18,6 +18,7 @@ import com.ermao.library.shared.modules.reader.ReaderComicPage
 import com.ermao.library.shared.modules.reader.ReaderError
 import com.ermao.library.shared.modules.reader.ReaderErrorCode
 import com.ermao.library.shared.modules.reader.ReaderLocation
+import com.ermao.library.shared.modules.reader.ReaderSafetyException
 import com.ermao.library.shared.modules.reader.ReaderPreferences
 import com.ermao.library.shared.modules.reader.ReaderProgressPresentationUpdate
 import com.ermao.library.shared.modules.reader.ReaderProgressSnapshotV5
@@ -192,6 +193,17 @@ internal class ReadiumComicSession(
             throw error
         } catch (error: FileNotFoundException) {
             throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ResourceMissing), cause = error)
+        } catch (error: ReaderSafetyException) {
+            throw ReaderOpenFailure(
+                ReaderError(
+                    code = readerErrorCodeForFailure(error.failure.errorCode, recoverable = false),
+                    safeContext = mapOf(
+                        "ruleId" to error.failure.ruleId,
+                        "errorCode" to error.failure.errorCode,
+                    ),
+                ),
+                cause = error,
+            )
         } catch (error: ArchiveCoreException) {
             val safetyFailure = readerSafetyComicArchiveDetectorFailure(error.stableCode)
             throw ReaderOpenFailure(

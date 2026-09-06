@@ -1,0 +1,256 @@
+{
+  "targetVersion": "core-tabs-polish-v1",
+  "visualStatus": "PASS",
+  "allEngineeringGatesPassed": false,
+  "sourceHead": "9a4901edba41fab786bd28ff92144ff802ddfab3",
+  "workingTreeDirty": true,
+  "apkSha256": "008fd098f9d9fadde8ddb16ac017d53d5735e2f99f62bc46b97414cb1b6a60d4",
+  "apkCopyName": "android-core-polish-1.2.0-debug.apk",
+  "contractVersion": "1.2.0",
+  "device": {
+    "serial": "9e896bbc",
+    "physicalPixels": [
+      1440,
+      3200
+    ],
+    "density": 3.5,
+    "fontScale": 1.0,
+    "locale": "zh-CN",
+    "orientation": "portrait"
+  },
+  "sourceFiles": {
+    "apps/mobile/androidApp/src/androidTest/kotlin/com/ermao/library/features/downloads/ui/DownloadScreensTest.kt": "96b13916ddf7b6c91ae789e78451c55c81721ee9e3dd2d7f9104fc7115646ed7",
+    "apps/mobile/androidApp/src/androidTest/kotlin/com/ermao/library/features/home/ui/HomeScreenTest.kt": "00488c6e89e47bcd912f981f9395b3e1a2a5fde4a6735a0c61d817bd0dd99945",
+    "apps/mobile/androidApp/src/androidTest/kotlin/com/ermao/library/ui/components/SettingsComponentsTest.kt": "71b359b413cbb6552ebe8cc186aba8fee859f01ab149a0bf6750d47525768e88",
+    "apps/mobile/androidApp/src/androidTest/kotlin/com/ermao/library/ui/components/WarmPageMenusTest.kt": "d3f39e819262d4294effdf3d497818002d1b3d50f4142677a51ff74dd5a409c8",
+    "apps/mobile/androidApp/src/androidTest/kotlin/com/ermao/library/ui/components/WarmPageScaffoldTest.kt": "e24c07065bdcd7aafb7bbcd8582cc9c9f7dec81aa923b0d794b9fee66aeeab40",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/administrativesettings/AdministrativeCoreScreens.kt": "e015ecc4f4d0fc063b31d8d42476c882d98a732384d271f5b6a9ea8487d1ce54",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/administrativesettings/AdministrativeSettingsCopy.kt": "31b8e9b2cc8c889751aa19a0bc312a90c1cadbfb30a3324b12d00f8e25712a58",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/content/ui/ContentComponents.kt": "2147ea0590dd08f570213ddec3d50479d5330578f6a3925f3d2d6729809d8513",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/home/ui/HomeScreen.kt": "c6a3dd91644fe3bba65b6b661dfcba6352fca1c234345668c3e6f0d14b3400e4",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/library/ui/LibraryScreen.kt": "ffd08d73fec4332bf93222b54e4090bdd3abf78070075054f828012bc7bf9788",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/library/ui/WorkDetailScreen.kt": "d8d6f6bf6f7ff41e8fd83045cc35091d80f57131459dbd613c0346c6fae1c18d",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/workmanagement/BookManagement.kt": "5084754a35ba3eb3290359a42f9733532a817040045a0efeb55314ab03dedb84",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/ui/components/SettingsControls.kt": "d9c79310d7d3568abbe4a1be42bd7bf3418dc56df438f11488c0e57d02b7651b",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/ui/components/WarmPageInputs.kt": "76d6661efd773f9128b67f3d28abccc5422594567c69fff25f5d330acbbe002e",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/ui/components/WarmPageMenus.kt": "b9b2e0ec1fdaa5f8070bf96f613981337c19a6c2e84e1c7318a132b251172b96",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/ui/components/WarmPageNavigation.kt": "0a03a10dc62cfb11a1a201b5544868c2b848e48f423cc1e1042eb68fbc922f98",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/ui/components/WarmPageScaffolds.kt": "bdca5f075299ffd2f32787998a65acf27db55493577766034ba07658ef3b12a7",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/ui/components/WarmPageSettings.kt": "2c3c77a1b09cfeba6ce996603e58b9c22a5c1e839941cc2615cf9ee575099566",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/ui/theme/WarmPageComponentMetrics.kt": "2ac7855cdf1b0227560d520e654ee0872de78e41ae0d63fe24b129265cc79fa4",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/ui/theme/WarmPageTokens.kt": "61fb09100d5772602f3900cdaa576e342d296654c4aa62630185370e28baa91f",
+    "apps/mobile/androidApp/src/main/res/values-zh-rCN/strings.xml": "24ac31e31341ebd677a8f663ae0d08474be906aada91686bc99994ba7a2f5fb5",
+    "apps/mobile/androidApp/src/main/res/values/strings.xml": "424cc0b88b4bf7c79f693e9f5d0bc00327f8472ef517fc8866c7bb3bf0b7d868",
+    "apps/mobile/androidApp/src/test/kotlin/com/ermao/library/features/library/ui/WorkDetailLayoutTest.kt": "bb057b7cc2d5a9e1d576b38e6a0146324674384ba5543bdd416085f1169b86c3",
+    "apps/mobile/androidApp/src/test/kotlin/com/ermao/library/ui/theme/WarmPageComponentMetricsTest.kt": "28681854f4e3d757ddd792eaa5680b3740c0c06f26be9d2fad6aa98ceb74468e",
+    "apps/mobile/androidApp/src/test/kotlin/com/ermao/library/ui/theme/WarmPageTokensTest.kt": "278f5336e91cbedad763d8c807caac98fc94a3130331c622e3fc2e9363365bb4",
+    "apps/mobile/buildSrc/src/main/java/com/ermao/buildlogic/VisualTokenGenerator.java": "292413f1254da3035f187bd742f1aefb9afc1ded874047fe2c5bedc659d1c4bd",
+    "apps/web/components/book/cover-reading-progress.tsx": "0a546c370a398523d9b2945b5d97ee7c4ebefc0c49ebdf73795f5bcc6cc878a8",
+    "apps/web/components/layout/app-shell.tsx": "277d9a5de776772bd1989d79861bdd681a07420a1d8c832aac95519ca2747c30",
+    "apps/web/components/ui/button.tsx": "e107f1a8550c04a7394cab28df83a7b0e5a366aeef7942627ce2f56292760ce5",
+    "apps/web/components/ui/combobox.tsx": "01e1bd433feaaa2c478d4fd58c36d557da8c175d13c221104fedc4af0ad2ae66",
+    "apps/web/components/ui/progress.tsx": "b9cfa9b39eaa1fe50cefeb5aea379dc31a2f07fe3468fe79ab1acf725d32a9dd",
+    "apps/web/components/ui/select.tsx": "e788516c1522c9fca7dbe288e472d4e2bb585a534a5f33d3262a4d63128e30fb",
+    "apps/web/features/books/book-detail-page.tsx": "1679b57b6d59237d19c480f0bf7f94882fc0124e880e57a356266cf0ae3fcb86",
+    "apps/web/generated/visual-tokens.css": "f860bfc7d7df608f3a32094d6b4fdb169a4abada0b1fbb532a3b2428a7840e69",
+    "apps/web/generated/visual-tokens.ts": "c742f61fda26aa3dc7de5791022aec39151b2da46e6aaa584e844b65fd814002",
+    "docs/mobile-app-phase-4-visual-master.md": "d99904b7c0ce168c6bd5f48109d729adda5d7c850e426472eaaa1087d3dd6340",
+    "packages/design-contracts/README.md": "42ab83baee6d093fe7cac3947514c1522190a6077ea2d9c82d14900571b72483",
+    "packages/design-contracts/visual-tokens.json": "6c227fd3b5f91064d9b3ea97736cd6ad70ec1ff64e1e2f14f271d35fd30d31cb"
+  },
+  "preexistingUnrelatedChangesExcluded": [
+    ".gitignore",
+    "apps/mobile/androidApp/src/androidTest/kotlin/com/ermao/library/features/reader/presentation/ReaderScreenContentsInstrumentedTest.kt",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/reader/presentation/ReaderScreen.kt",
+    "apps/web/features/reader/reader-shell.tsx",
+    "apps/web/i18n/messages/en-US.json",
+    "apps/web/i18n/messages/zh-CN.json",
+    "docs/python-backend-runtime.md",
+    "scripts/dev-test-windows.ps1"
+  ],
+  "mixedChangeNote": "The two Android strings.xml files already contained unrelated Reader deletions; only work_metadata_missing was removed by this task.",
+  "primaryAndFlowCaptures": [
+    {
+      "label": "首页 · 多条最近阅读",
+      "path": "final/17-home-stable.png",
+      "sha256": "9f9f9d4a3f58b2f4cd5f77795d88e9c601e5e9ba69ddcfa03eebab20783da3bf"
+    },
+    {
+      "label": "书库 · 三列网格",
+      "path": "final/04-library-stable.png",
+      "sha256": "1246041de829c442aa7d6965c59d20280d223a12706a2b829a64040928185e1b"
+    },
+    {
+      "label": "书架",
+      "path": "final/19-shelves.png",
+      "sha256": "8477713111521650e9e0f511264a2aac56c5feb4c9b9ffb1adfbbd408c144090"
+    },
+    {
+      "label": "我的",
+      "path": "final/20-me.png",
+      "sha256": "04c0807c121ecf946769deb9d828208155b8c0448afbff7dfea953440224efc2"
+    },
+    {
+      "label": "目录详情 · 首屏",
+      "path": "final/12-directory.png",
+      "sha256": "f67d3fbe6a15145280c7336153c733073720af5566da393e910b4888718ba63f"
+    },
+    {
+      "label": "单资源详情",
+      "path": "final/18-resource.png",
+      "sha256": "47c41859c3e77b3bd6793787a0c759c4330fda0a58c83067f6c7289284a29a9c"
+    },
+    {
+      "label": "目录内资源",
+      "path": "final/37-nested-resource.png",
+      "sha256": "df884ddf2990a55f9464196b8e33bf41ed32ed82a8ec035b8b8dfde1f4057483"
+    },
+    {
+      "label": "目录内容 · 三行标题",
+      "path": "final/35-directory-contents.png",
+      "sha256": "c95745abc3b8c446a230ed494ffbe786465bf0472730e0444b169a9679cc2e73"
+    },
+    {
+      "label": "书库操作菜单",
+      "path": "final/05-library-menu.png",
+      "sha256": "7aecbe5cb166369a7e594baad53a2667a4f037842efb058e3b8b8eaa084f430b"
+    },
+    {
+      "label": "排序 · 首项选中",
+      "path": "final/06-library-sort.png",
+      "sha256": "223036f4edfcdedfdcd600c0c53e282e96b6213211d0a664ecbad747b3fffa1c"
+    },
+    {
+      "label": "排序 · 中间项选中",
+      "path": "final/09-library-sort-middle.png",
+      "sha256": "7989c934e5f163004124e1ef2e45866bc83b75d54c4aca456915326f0dbd502a"
+    },
+    {
+      "label": "视图选择",
+      "path": "final/10-library-view-menu.png",
+      "sha256": "5fc622ef7f68b5d9e370ce9301e74ea46dcb926267f40c1b61c47c1986dd3f90"
+    },
+    {
+      "label": "书库列表",
+      "path": "final/11-library-list.png",
+      "sha256": "8f743dbac3f4fce15547974adea106eee640a3708753f394593924973d697e97"
+    },
+    {
+      "label": "目录排序",
+      "path": "final/15-directory-sort.png",
+      "sha256": "6f95c0d303e75bfdf9b3bdb77f3689049e1d27f0a01a4396e88f998a00efd6f1"
+    },
+    {
+      "label": "目录列表",
+      "path": "final/16-directory-list.png",
+      "sha256": "ca09c4d0580a84d8b33f66d993c4bc80b054e22f579d0fd844d2e6c4a9bd01e9"
+    },
+    {
+      "label": "目录操作菜单",
+      "path": "final/36-directory-actions.png",
+      "sha256": "460d2cb880c7c24372843a2ddd9d9522bb068c546d34ac91ea14dc6c80a65e12"
+    },
+    {
+      "label": "密码 · 空值",
+      "path": "final/22-password-empty.png",
+      "sha256": "63062d6bc83ce1aafc5c94b3a30546c91a474bdd8b12bda5cfe804e1c9c98cb4"
+    },
+    {
+      "label": "密码 · 聚焦 / 隐藏",
+      "path": "final/23-password-focused.png",
+      "sha256": "35fe796f03b79c92df3693fc41004054f3a776e9e3e1ea3e3ac14723660e3420"
+    },
+    {
+      "label": "密码 · 显示",
+      "path": "final/24-password-visible.png",
+      "sha256": "65cba39f354c57708b521a8c35584016786237b39b9ab144397ad063dd11eb4a"
+    },
+    {
+      "label": "Kindle · 未设置",
+      "path": "final/26-kindle.png",
+      "sha256": "4db1ee1ccb0bc7648ec698f7113f311513f6a0d5f7431f0649b5dc8cfd50e7e5"
+    },
+    {
+      "label": "Kindle · 保存可用（未提交）",
+      "path": "final/27-kindle-save-enabled.png",
+      "sha256": "597a70046d1dab647f1ebc7343e9cda9fa4dbaa2dbf536f567f2510be0a1b42c"
+    },
+    {
+      "label": "SMTP · 分组与对齐",
+      "path": "final/29-smtp.png",
+      "sha256": "998ee65effa8c1ab12e6613d6c41c08115023e94c37f8e10dc623568f9f251cc"
+    },
+    {
+      "label": "加密 · 首项",
+      "path": "final/30-encryption-first.png",
+      "sha256": "12fe01548afbd5e0b119a3b603777ae3ee61648d87a87231ac699a0d9578d130"
+    },
+    {
+      "label": "加密 · 末项",
+      "path": "final/31-encryption-last.png",
+      "sha256": "59800cbcec507751487f8184da7f17860cb550ee291f8526a702d5f8e41f54ae"
+    },
+    {
+      "label": "加密 · 中间项",
+      "path": "final/32-encryption-middle.png",
+      "sha256": "04e48adf9bf663c4e47c4afc10a0551e4c264b682a08c4dd467668905849e930"
+    },
+    {
+      "label": "SMTP · 表单末尾",
+      "path": "final/33-smtp-bottom.png",
+      "sha256": "149d423f55d3ddd5871b390132973ed9075fad8f2dc5e047a49fb51d60409bd2"
+    },
+    {
+      "label": "搜索 · 有值 / 聚焦",
+      "path": "final/39-library-search.png",
+      "sha256": "405bcd4f6762f88c911303d22ad6ee718f414f9c71c8e03e69e21b467a98f4c8"
+    },
+    {
+      "label": "搜索 · 清空恢复",
+      "path": "final/40-search-cleared.png",
+      "sha256": "0c5aaaac1e0d47eaa92b9e276824b90ed0b1fcad6350bf4cd1671f8e7312c224"
+    }
+  ],
+  "tests": {
+    "androidUnit": 204,
+    "androidDevice": 19,
+    "webPassed": 421,
+    "webTotal": 422,
+    "androidLintExistingErrors": 46
+  },
+  "baseline": {
+    "apkSha256": "5b1c0b17e54ffe9cf1d776ec14b5dfff08a1f70e80a152271f7980fa864f071f",
+    "captures": "baseline/ and ../android-core-tabs-audit/"
+  },
+  "comparison": {
+    "blocksAndOrder": "same",
+    "fold": "better",
+    "identityScale": "better",
+    "densityAndGrid": "better",
+    "surfaceRoles": "better",
+    "typography": "better",
+    "actionHierarchy": "same",
+    "appShell": "better",
+    "directConsumers": "same or better; no unexplained regressions"
+  },
+  "iterations": [
+    {
+      "name": "baseline",
+      "status": "comparison baseline; not target acceptance"
+    },
+    {
+      "name": "candidate-1",
+      "status": "not promoted",
+      "openIssue": "Blank directory creator row kept child titles too low; single-item Home verified."
+    },
+    {
+      "name": "final",
+      "status": "PASS",
+      "resolution": "Removed blank creator and metadata items; final installed APK captured and independently reviewed."
+    }
+  ],
+  "excludedEvidence": [
+    "final/03-library-menu.png",
+    "baseline zero-byte focused password captures"
+  ]
+}

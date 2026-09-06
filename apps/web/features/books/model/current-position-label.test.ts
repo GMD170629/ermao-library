@@ -19,6 +19,7 @@ const translate = (source: string, values?: Record<string, string | number>) => 
 
 test('shows the exact Publication chapter title instead of estimating from percent', () => {
   const detail = {
+    chapterCount: 12,
     units: [],
     page: { page: 1, pageSize: 120, total: 7, totalPages: 1 },
     currentHref: 'text/part0008_split_000.html',

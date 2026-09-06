@@ -10,6 +10,8 @@ protocol IosReaderControlSession: ObservableObject {
     /// a control is implemented by the native reader.
     var controlCapabilities: ErmaoShared.ReaderCapabilities { get }
     var controlReady: Bool { get }
+    /// True only when the native renderer has emitted a location usable for TOC positioning.
+    var controlNavigationReady: Bool { get }
     var activeControlPanel: IosReaderPanel? { get set }
     var controlsVisible: Bool { get set }
     var displayTitle: String { get }
@@ -18,6 +20,9 @@ protocol IosReaderControlSession: ObservableObject {
     var controlPosition: String { get }
     var preferences: IosReaderPreferences { get }
     var controlContents: [IosReaderTocEntry] { get }
+    /// The renderer's current navigation entry, when the format exposes one.
+    /// This is read-only so the sheet cannot manufacture selection state.
+    var currentNavigationEntryID: String? { get }
     var controlAdjacentChapters: IosReaderAdjacentChapters { get }
     var bookmarks: [IosReaderBookmarkRecord] { get }
     var bookmarkSyncPending: Bool { get }
@@ -51,6 +56,8 @@ enum IosReaderPanel: String, Identifiable {
 
 extension IosReaderControlSession {
     var chapterTitle: String? { nil }
+    var controlNavigationReady: Bool { controlReady }
+    var currentNavigationEntryID: String? { nil }
     var bookmarks: [IosReaderBookmarkRecord] { [] }
     var controlAdjacentChapters: IosReaderAdjacentChapters { IosReaderAdjacentChapters() }
     var bookmarkSyncPending: Bool { false }
@@ -121,48 +128,46 @@ struct IosReaderAdjacentChapters: Equatable, Sendable {
     }
 }
 
+func resolveIosReaderNavigationEntryID(
+    entries: [IosReaderTocEntry],
+    currentHref: String?,
+    fragments: Set<String> = [],
+    cssSelector: String? = nil
+) -> String? {
+    guard let currentHref else { return nil }
+    let navigationEntries = entries.compactMap { entry -> ErmaoShared.ReaderNavigationEntry? in
+        guard let href = entry.href else { return nil }
+        return ErmaoShared.ReaderNavigationEntry(id: entry.id, href: href, depth: Int32(entry.depth))
+    }
+    return ErmaoShared.PublicKt.resolveCurrentReaderNavigationEntryId(
+        entries: navigationEntries,
+        currentHref: currentHref,
+        fragments: fragments,
+        cssSelector: cssSelector
+    )
+}
+
 func resolveIosReaderAdjacentChapters(
     entries: [IosReaderTocEntry],
     currentHref: String?,
     fragments: Set<String> = [],
-    cssSelector: String? = nil,
-    currentTitle: String? = nil
+    cssSelector: String? = nil
 ) -> IosReaderAdjacentChapters {
-    guard !entries.isEmpty else { return IosReaderAdjacentChapters() }
-    let titled = currentTitle.flatMap { title in
-        entries.indices.filter { entries[$0].title == title }.only
-    }
-    let anchored = currentHref.flatMap { href in
-        entries.indices.filter { index in
-            guard let expected = entries[index].href else { return false }
-            return ErmaoShared.PublicKt.matchesReaderNavigationHref(
-                currentHref: href,
-                expectedHref: expected,
-                fragments: fragments,
-                cssSelector: cssSelector
-            )
-        }.last
-    }
-    let sameResource = currentHref.flatMap { href in
-        entries.indices.filter { index in
-            entries[index].href?.substringBeforeFragment == href.substringBeforeFragment
-        }.only
-    }
-    guard let currentIndex = titled ?? anchored ?? sameResource else {
+    let navigable = entries.filter { $0.href?.isEmpty == false }
+    guard !navigable.isEmpty else { return IosReaderAdjacentChapters() }
+    guard let currentID = resolveIosReaderNavigationEntryID(
+        entries: entries,
+        currentHref: currentHref,
+        fragments: fragments,
+        cssSelector: cssSelector
+    ),
+    let currentIndex = navigable.firstIndex(where: { $0.id == currentID }) else {
         return IosReaderAdjacentChapters()
     }
     return IosReaderAdjacentChapters(
-        previous: entries.indices.contains(currentIndex - 1) ? entries[currentIndex - 1] : nil,
-        next: entries.indices.contains(currentIndex + 1) ? entries[currentIndex + 1] : nil
+        previous: navigable.indices.contains(currentIndex - 1) ? navigable[currentIndex - 1] : nil,
+        next: navigable.indices.contains(currentIndex + 1) ? navigable[currentIndex + 1] : nil
     )
-}
-
-private extension Collection {
-    var only: Element? { count == 1 ? first : nil }
-}
-
-private extension String {
-    var substringBeforeFragment: String { split(separator: "#", maxSplits: 1).first.map(String.init) ?? self }
 }
 
 /// One owned writer coalesces slider changes while retaining the final requested value.

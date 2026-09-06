@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, replace
 from typing import Protocol
 
@@ -37,6 +36,7 @@ class ResourceDetailResource:
     current_position: int | None
     current_chapter_index: int | None = None
     current_chapter_title: str | None = None
+    current_chapter_navigation_key: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +63,7 @@ class ResourceDetailItem:
     disc_number: int | None = None
     track_number: int | None = None
     metadata_json: str | None = None
+    navigation_key: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +93,7 @@ class ResourceDetailPage:
     current_chapter_index: int | None
     current_chapter_title: str | None
     current_chapter_sort_order: int | None
+    chapter_count: int | None = None
 
 
 class ResourceDetailNotFoundError(Exception):
@@ -121,13 +123,14 @@ class ResourceDetailQueries(Protocol):
 
     def resolve_pdf_page_count(self, *, resource_id: str) -> int | None: ...
 
+    def count_chapters(self, *, resource_id: str, asset_id: str) -> int: ...
+
     def resolve_current_chapter(
         self,
         *,
         resource_id: str,
         asset_id: str,
-        current_href: str | None,
-        current_position: int | None,
+        navigation_key: str,
     ) -> ResourceCurrentChapter | None: ...
 
 
@@ -138,19 +141,6 @@ class ResourceNavigationEnsurer(Protocol):
         resource_id: str,
         context: ResourceDetailAccessScope,
     ) -> str: ...
-
-
-def _navigation_level(metadata_json: str | None) -> int | None:
-    if not metadata_json:
-        return None
-    try:
-        value = json.loads(metadata_json)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return None
-    if not isinstance(value, dict):
-        return None
-    level = value.get("level")
-    return int(level) if isinstance(level, int) and level >= 0 else None
 
 
 class ListResourceDetails:
@@ -188,6 +178,7 @@ class ListResourceDetails:
         offset = (normalized_page - 1) * normalized_size
         source_format = resource.format.strip().upper()
         current_chapter: ResourceCurrentChapter | None = None
+        chapter_count: int | None = None
 
         if source_format in REFLOWABLE_FORMATS:
             asset_id = self._navigation.ensure(
@@ -201,16 +192,14 @@ class ListResourceDetails:
                 limit=normalized_size,
                 offset=offset,
             )
-            units = tuple(
-                replace(unit, level=_navigation_level(unit.metadata_json))
-                for unit in units
+            chapter_count = self._queries.count_chapters(
+                resource_id=resource_id, asset_id=asset_id
             )
-            if resource.current_chapter_index is not None:
-                current_chapter = ResourceCurrentChapter(
-                    index=resource.current_chapter_index,
-                    title=resource.current_chapter_title,
-                    sort_order=resource.current_chapter_index,
-                    href=resource.current_href,
+            if resource.current_chapter_navigation_key is not None:
+                current_chapter = self._queries.resolve_current_chapter(
+                    resource_id=resource_id,
+                    asset_id=asset_id,
+                    navigation_key=resource.current_chapter_navigation_key,
                 )
         elif source_format in {"CBZ", "ZIP", "CBR", "RAR"}:
             units, total = self._queries.list_navigation_units(
@@ -289,6 +278,7 @@ class ListResourceDetails:
             units, total = (), 0
 
         return ResourceDetailPage(
+            chapter_count=chapter_count,
             book_id=book_id,
             resource_id=resource_id,
             units=units,

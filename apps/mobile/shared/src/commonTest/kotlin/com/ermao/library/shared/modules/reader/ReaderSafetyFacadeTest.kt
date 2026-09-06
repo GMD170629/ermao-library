@@ -1,7 +1,9 @@
 package com.ermao.library.shared.modules.reader
 
 import com.ermao.library.shared.modules.reader.domain.ReaderSafetyFacade
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName
 import com.ermao.library.shared.modules.reader.domain.ReaderSafetyMarkupResult
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy
 import com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -36,25 +38,83 @@ class ReaderSafetyFacadeTest {
     }
 
     @Test
-    fun rejectsCustomEntitiesWithGeneratedRuleAndStableErrorCode() {
-        val rejected = assertIs<ReaderSafetyMarkupResult.Rejected>(facade.sanitizeMarkup(
-            "<!DOCTYPE html [<!ENTITY x SYSTEM \"file:///tmp/secret\">]><html><head></head><body>&x;</body></html>",
+    fun literalizesExternalEntityWithoutRejectingReadableMarkup() {
+        val accepted = assertIs<ReaderSafetyMarkupResult.Accepted>(facade.sanitizeMarkup(
+            "<!DOCTYPE book [<!ENTITY x SYSTEM \"file:///tmp/secret\">]><html><head></head><body>&x;</body></html>",
         ))
 
-        assertEquals("REFLOWABLE.REJECT_XML_ENTITY", rejected.failure.ruleId)
-        assertEquals("PUBLICATION_SECURITY_REJECTED", rejected.failure.errorCode)
+        assertTrue(accepted.value.changed)
+        assertFalse(accepted.value.markup.contains("<!DOCTYPE"))
+        assertTrue(accepted.value.parserMarkup.contains("&#38;x;"))
     }
 
     @Test
-    fun rejectsBareDoctypeAndUnknownNamedEntity() {
-        listOf(
-            "<!DOCTYPE html><html><head></head><body>text</body></html>",
-            """<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html><head></head><body>&custom;</body></html>""",
-        ).forEach { markup ->
-            val rejected = assertIs<ReaderSafetyMarkupResult.Rejected>(facade.sanitizeMarkup(markup))
-            assertEquals("REFLOWABLE.REJECT_XML_ENTITY", rejected.failure.ruleId)
-            assertEquals("PUBLICATION_SECURITY_REJECTED", rejected.failure.errorCode)
-        }
+    fun acceptsArbitraryDoctypeAndExpandsBoundedPlainTextEntityAsText() {
+        val accepted = assertIs<ReaderSafetyMarkupResult.Accepted>(facade.sanitizeMarkup(
+            """<!DOCTYPE novel [<!ENTITY title "A <b>safe</b> title">]><html><head></head><body>&title;</body></html>""",
+        ))
+
+        assertFalse(accepted.value.markup.contains("<!DOCTYPE"))
+        assertTrue(accepted.value.markup.contains("&lt;b&gt;safe&lt;/b&gt;"))
+        assertFalse(accepted.value.parserMarkup.contains("<b>safe</b>"))
+    }
+
+    @Test
+    fun literalizesUnknownAndCyclicEntitiesAndLeavesCommentsAndCdataUntouched() {
+        val accepted = assertIs<ReaderSafetyMarkupResult.Accepted>(facade.sanitizeMarkup(
+            """<!DOCTYPE novel [<!ENTITY a "&b;"><!ENTITY b "&a;">]><html><head></head><body><!-- &unknown; --><![CDATA[&unknown;]]>&unknown;&a;</body></html>""",
+        ))
+
+        assertTrue(accepted.value.markup.contains("<!-- &unknown; -->"))
+        assertTrue(accepted.value.markup.contains("<![CDATA[&unknown;]]>"))
+        assertTrue(accepted.value.parserMarkup.contains("&#38;unknown;"))
+        assertTrue(accepted.value.parserMarkup.contains("&#38;a;"))
+    }
+
+    @Test
+    fun repeatedEntityReferencesStayBoundedAndPreserveTheClosingTags() {
+        val source = "<!DOCTYPE novel [<!ENTITY title \"Readable title\">]>" +
+            "<html><body>" + "&title;".repeat(50_000) + "</body></html>"
+
+        val accepted = assertIs<ReaderSafetyMarkupResult.Accepted>(facade.prepareXmlMarkup(source))
+        val outputBytes = accepted.value.markup.encodeToByteArray().size.toLong()
+        val sourceBytes = source.encodeToByteArray().size.toLong()
+        val maximumBytes = ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.REFLOWABLE_MARKUP_MAX_BYTES)
+
+        assertTrue(accepted.value.markup.endsWith("</body></html>"))
+        assertTrue(outputBytes <= sourceBytes + maximumBytes)
+    }
+
+    @Test
+    fun noSemicolonAmpersandsAreEscapedWithoutDroppingTheDocumentTail() {
+        val source = "<html><body>" + "&".repeat(100_000) + "</body></html>"
+
+        val accepted = assertIs<ReaderSafetyMarkupResult.Accepted>(facade.prepareXmlMarkup(source))
+
+        assertTrue(accepted.value.markup.contains("&amp;"))
+        assertTrue(accepted.value.parserMarkup.contains("&#38;"))
+        assertTrue(accepted.value.markup.endsWith("</body></html>"))
+    }
+
+    @Test
+    fun extractsContainerRootfileReferencesAfterSafePreparation() {
+        val source = """
+            <!DOCTYPE container [
+              <!-- <rootfile full-path="fake/comment.opf"/> -->
+              <!ENTITY ignored "<rootfile full-path='fake/entity.opf'/>">
+            ]>
+            <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+              <rootfiles>
+                <!-- <rootfile full-path="fake/nav.opf"/> -->
+                <rootfile full-path="OPS/package&amp;one&#x2E;opf" media-type="application/oebps-package+xml"/>
+              </rootfiles>
+            </container>
+        """.trimIndent()
+
+        assertEquals(
+            listOf("OPS/package&one.opf"),
+            facade.requireContainerRootFilePaths(source),
+        )
     }
 
     @Test
@@ -69,6 +129,14 @@ class ReaderSafetyFacadeTest {
         assertTrue(accepted.value.markup.contains("srcset=\"local.png 1x\""))
         assertFalse(accepted.value.markup.contains("javascript:"))
         assertFalse(accepted.value.markup.contains("example.test/remote.png"))
+    }
+
+    @Test
+    fun authoredNavigationBridgeKeepsUnknownSchemesAndRejectsOnlyGeneratedBlacklist() {
+        assertTrue(readerAllowsAuthoredUserNavigation("future-reader:chapter"))
+        assertFalse(readerAllowsAuthoredUserNavigation("javascript:alert(1)"))
+        assertFalse(readerAllowsAuthoredUserNavigation("file:///tmp/book"))
+        assertFalse(readerAllowsAuthoredUserNavigation("data:text/plain,book"))
     }
 
     @Test
@@ -96,6 +164,10 @@ class ReaderSafetyFacadeTest {
         assertEquals(
             facade.failureFor(ReaderSafetyRuleId.COMIC_ARCHIVE_BUDGET),
             readerSafetyComicArchiveDetectorFailure("ARCHIVE_COMPRESSION_RATIO_EXCEEDED"),
+        )
+        assertEquals(
+            facade.failureFor(ReaderSafetyRuleId.COMIC_PAGE_MAX_BYTES),
+            readerSafetyComicArchiveDetectorFailure("ARCHIVE_PAGE_LIMIT_EXCEEDED"),
         )
         assertNull(readerSafetyComicArchiveDetectorFailure("ARCHIVE_OPEN_FAILED"))
     }

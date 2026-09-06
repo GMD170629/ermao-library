@@ -23,8 +23,8 @@ from app.contracts.reader_safety_policy_generated import (
     reader_safety_budget,
 )
 from app.modules.publications.application.safety_policy import (
+    publication_native_parser_implementation_failure,
     publication_parser_limit,
-    publication_security_rejection,
 )
 from app.modules.publications.domain.model import (
     PublicationMarkupError,
@@ -32,6 +32,12 @@ from app.modules.publications.domain.model import (
 from app.modules.publications.domain.security import (
     WEB_SECURITY_PROFILE,
     PublicationSecurityProfile,
+)
+from app.modules.publications.infrastructure.xml_policy import (
+    XmlPolicyDecodeError,
+    XmlPolicyExpansionLimitError,
+    XmlPolicyPreparationError,
+    prepare_xml,
 )
 
 MAXIMUM_MARKUP_BYTES = reader_safety_budget(
@@ -54,26 +60,8 @@ _LOCATOR_BLOCKS = frozenset(
         "th",
     }
 )
-_XML_DECLARATION = re.compile(r"<\?xml\b[^?]*\?>", re.IGNORECASE)
-_XML_ENCODING = re.compile(
-    r"encoding\s*=\s*([\"'])(?P<encoding>[^\"']+)\1", re.IGNORECASE
-)
 _HEAD_OPEN = re.compile(r"<(?:[A-Za-z_][\w.-]*:)?head\b[^>]*>", re.IGNORECASE)
 _HEAD_CLOSE = re.compile(r"</(?:[A-Za-z_][\w.-]*:)?head\s*>", re.IGNORECASE)
-_NON_MARKUP = re.compile(r"<!--.*?-->|<!\[CDATA\[.*?\]\]>|<\?.*?\?>", re.DOTALL)
-_DOCTYPE_OPEN = re.compile(r"<!DOCTYPE\b", re.IGNORECASE)
-_DOCTYPE_DECLARATION = re.compile(r"<!DOCTYPE\b[^>]*>", re.IGNORECASE | re.DOTALL)
-_ENTITY_OPEN = re.compile(r"<!ENTITY\b", re.IGNORECASE)
-_PUBLIC_DOCTYPE = re.compile(
-    r"""<!DOCTYPE\s+(?P<name>[A-Za-z][\w.-]*)\s+PUBLIC\s+
-    (?P<public_quote>[\"'])(?P<public_id>[^\"']+)(?P=public_quote)\s+
-    (?P<system_quote>[\"'])(?P<system_id>[^\"']+)(?P=system_quote)\s*>""",
-    re.IGNORECASE | re.VERBOSE,
-)
-_NAMED_ENTITY_REFERENCE = re.compile(r"&(?P<name>[A-Za-z][A-Za-z0-9]+);")
-_STANDARD_XHTML_ENTITY_CODEPOINTS = dict(
-    READER_SAFETY_REFLOWABLE_PROFILE.named_entity_codepoints
-)
 _SPACE = re.compile(r"\s+")
 _CSS_URL = re.compile(
     r"url\(\s*(?:(?P<quote>[\"'])(?P<quoted>.*?)(?P=quote)|(?P<bare>(?:[^()]|\([^()]*\))*))\s*\)",
@@ -109,120 +97,6 @@ def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1].rsplit(":", 1)[-1].lower()
 
 
-def _decode_markup(content: bytes) -> str:
-    if not content:
-        raise PublicationMarkupError("publication markup is empty")
-    if len(content) > MAXIMUM_MARKUP_BYTES:
-        raise publication_parser_limit(
-            ReaderSafetyRuleId.REFLOWABLE_MARKUP_MAX_BYTES,
-            "publication markup exceeds the size limit",
-        )
-    try:
-        if content.startswith((b"\xff\xfe", b"\xfe\xff")):
-            decoded = content.decode("utf-16", errors="strict")
-        elif content.startswith(b"\xef\xbb\xbf"):
-            decoded = content.decode("utf-8-sig", errors="strict")
-        else:
-            prefix = content[:512].decode("ascii", errors="ignore")
-            declaration = _XML_DECLARATION.search(prefix)
-            encoding_match = (
-                _XML_ENCODING.search(declaration.group(0)) if declaration else None
-            )
-            encoding = (
-                encoding_match.group("encoding").lower().replace("_", "-")
-                if encoding_match
-                else "utf-8"
-            )
-            if encoding not in {"utf-8", "utf8"}:
-                raise PublicationMarkupError(
-                    "publication markup encoding is unsupported"
-                )
-            decoded = content.decode("utf-8", errors="strict")
-    except UnicodeDecodeError as error:
-        raise PublicationMarkupError(
-            "publication markup encoding is invalid"
-        ) from error
-    return decoded
-
-
-def _validate_markup_declarations(markup: str) -> None:
-    lexical_markup = _NON_MARKUP.sub(lambda match: " " * len(match.group(0)), markup)
-    if _ENTITY_OPEN.search(lexical_markup):
-        raise publication_security_rejection(
-            ReaderSafetyRuleId.REFLOWABLE_REJECT_XML_ENTITY,
-            "publication markup declares a custom entity",
-        )
-
-    for reference in _NAMED_ENTITY_REFERENCE.finditer(lexical_markup):
-        name = reference.group("name")
-        if name not in _STANDARD_XHTML_ENTITY_CODEPOINTS:
-            raise publication_security_rejection(
-                ReaderSafetyRuleId.REFLOWABLE_REJECT_XML_ENTITY,
-                "publication markup references a custom entity",
-            )
-
-    doctype_opens = list(_DOCTYPE_OPEN.finditer(lexical_markup))
-    if not doctype_opens:
-        return
-    declarations = list(_DOCTYPE_DECLARATION.finditer(lexical_markup))
-    if len(doctype_opens) != 1 or len(declarations) != 1:
-        raise publication_security_rejection(
-            ReaderSafetyRuleId.REFLOWABLE_REJECT_XML_ENTITY,
-            "publication markup contains an invalid document type",
-        )
-
-    declaration = declarations[0]
-    if declaration.start() != doctype_opens[0].start():
-        raise publication_security_rejection(
-            ReaderSafetyRuleId.REFLOWABLE_REJECT_XML_ENTITY,
-            "publication markup contains an invalid document type",
-        )
-    match = _PUBLIC_DOCTYPE.fullmatch(declaration.group(0))
-    allowed = {
-        (entry.name.lower(), entry.public_id, entry.system_id)
-        for entry in READER_SAFETY_REFLOWABLE_PROFILE.safe_doctypes
-    }
-    identity = (
-        (
-            match.group("name").lower(),
-            match.group("public_id"),
-            match.group("system_id"),
-        )
-        if match is not None
-        else None
-    )
-    if identity not in allowed:
-        raise publication_security_rejection(
-            ReaderSafetyRuleId.REFLOWABLE_REJECT_XML_ENTITY,
-            "publication markup document type is not allowed",
-        )
-    if lexical_markup[: declaration.start()].strip():
-        raise publication_security_rejection(
-            ReaderSafetyRuleId.REFLOWABLE_REJECT_XML_ENTITY,
-            "publication markup document type is misplaced",
-        )
-
-
-def _replace_standard_entity_references(markup: str) -> str:
-    """Create a parser-only copy with fixed XHTML entities encoded numerically."""
-
-    def replace_in_markup(segment: str) -> str:
-        def replace(match: re.Match[str]) -> str:
-            codepoint = _STANDARD_XHTML_ENTITY_CODEPOINTS.get(match.group("name"))
-            return f"&#x{codepoint:X};" if codepoint is not None else match.group(0)
-
-        return _NAMED_ENTITY_REFERENCE.sub(replace, segment)
-
-    parts: list[str] = []
-    previous_end = 0
-    for non_markup in _NON_MARKUP.finditer(markup):
-        parts.append(replace_in_markup(markup[previous_end : non_markup.start()]))
-        parts.append(non_markup.group(0))
-        previous_end = non_markup.end()
-    parts.append(replace_in_markup(markup[previous_end:]))
-    return "".join(parts)
-
-
 def validate_xhtml(content: bytes) -> tuple[str, ElementTree.Element]:
     """Decode and validate one XHTML resource without rewriting its body."""
 
@@ -245,18 +119,60 @@ def parse_safe_markup_root(content: bytes) -> tuple[str, ElementTree.Element]:
     when optional XHTML document structure such as ``head`` is absent.
     """
 
-    markup = _decode_markup(content)
-    _validate_markup_declarations(markup)
+    if not content:
+        raise PublicationMarkupError("publication markup is empty")
+    if len(content) > MAXIMUM_MARKUP_BYTES:
+        raise publication_parser_limit(
+            ReaderSafetyRuleId.REFLOWABLE_MARKUP_MAX_BYTES,
+            "publication markup exceeds the size limit",
+        )
     try:
-        root = ElementTree.fromstring(_replace_standard_entity_references(markup))
-    except ElementTree.ParseError as error:
+        projection = prepare_xml(content, expansion_limit_bytes=MAXIMUM_MARKUP_BYTES)
+        root = ElementTree.fromstring(projection.parser_source)
+    except (ElementTree.ParseError, UnicodeDecodeError) as error:
         raise PublicationMarkupError("publication XHTML is not well formed") from error
+    except XmlPolicyExpansionLimitError as error:
+        raise publication_parser_limit(
+            ReaderSafetyRuleId.REFLOWABLE_MARKUP_MAX_BYTES,
+            "publication XML entity expansion exceeds the size limit",
+        ) from error
+    except XmlPolicyDecodeError as error:
+        raise PublicationMarkupError("publication XML encoding is invalid") from error
+    except XmlPolicyPreparationError as error:
+        raise publication_native_parser_implementation_failure(
+            ReaderSafetyRuleId.REFLOWABLE_PREPARE_XML,
+            parser="reader-xml-policy",
+            operation="prepare",
+            reason="generated XML preparation defense is unavailable",
+        ) from error
     _sanitize_markup_tree(root)
-    return markup, root
+    return projection.source, root
 
 
 def _attribute_local_name(name: str) -> str:
     return name.rsplit("}", 1)[-1].rsplit(":", 1)[-1].lower()
+
+
+def sanitize_markup_resource(content: bytes) -> bytes:
+    """Return the shared protected tree as an in-memory resource projection."""
+    _source, root = parse_safe_markup_root(content)
+    return ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def sanitize_css_resource(content: bytes) -> bytes:
+    """Apply the same authored CSS policy used for inline styles."""
+    if len(content) > MAXIMUM_MARKUP_BYTES:
+        raise publication_parser_limit(
+            ReaderSafetyRuleId.REFLOWABLE_MARKUP_MAX_BYTES,
+            "publication stylesheet exceeds the size limit",
+        )
+    try:
+        source = content.decode("utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise PublicationMarkupError(
+            "publication stylesheet encoding is invalid"
+        ) from error
+    return _sanitize_css_text(source).encode("utf-8")
 
 
 def _attribute_policy_name(name: str) -> str:
@@ -290,9 +206,10 @@ def _is_remote_or_blocked_reference(value: str, *, user_navigation: bool) -> boo
         return True
     if scheme in READER_SAFETY_REFLOWABLE_PROFILE.remote_subresource_schemes:
         return not user_navigation
-    if scheme and user_navigation:
-        return scheme not in READER_SAFETY_REFLOWABLE_PROFILE.user_navigation_schemes
-    return bool(scheme)
+    # The policy owns an explicit risk blacklist.  An unlisted scheme is not
+    # itself a rejection; renderer/network isolation remains the platform
+    # defense for schemes whose semantics are unknown to this adapter.
+    return False
 
 
 def _decode_css_for_detection(value: str) -> str:
@@ -630,5 +547,7 @@ __all__ = [
     "decorate_markup_head",
     "locator_dom_projection",
     "locator_dom_projection_hash",
+    "sanitize_css_resource",
+    "sanitize_markup_resource",
     "validate_xhtml",
 ]

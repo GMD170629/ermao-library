@@ -1,6 +1,6 @@
-# 手机端有声书播放器 Phase 0/1 设计与工程基线
+# 移动端有声书播放器
 
-状态：Phase 0/1 工程实现完成，真机验收待执行。本文冻结移动端实现所需的状态、交互与验收语义；现有
+当前包含原生播放器、共享音频会话和进度实现，完整真机验收仍待补齐。状态与交互使用下述约定；
 `docs/assets/mobile-app-hifi-v1/audio-now-playing-v1.png` 仍是视觉事实来源。
 本文不建立新的服务端协议，也不替代 Reader Safety 机器合同。
 
@@ -74,4 +74,4 @@ Compact 下 mini player 与四项 Tab 控件位于同一个应用自有底部容
 
 每个平台保存设备、系统版本、构建号和语言，至少覆盖：默认 A07、mini player、章节
 Sheet、睡眠 Sheet、buffering、可重试错误、codec 不支持、重新认证、Light/Dark、最大字体、
-锁屏/通知。Phase 0 的证据不应宣称后台连续播放；Phase 1 必须使用实体 Android 和实体 iPhone。
+锁屏/通知。后台连续播放需要独立运行证据；Android 和 iOS 均使用物理设备。

@@ -79,8 +79,9 @@ internal class CbzReadiumPublicationFactory {
             .lowercase(Locale.ROOT)
             .takeIf(String::isNotEmpty)
             ?.let { ".$it" }
-        val mediaType = extension?.let(::readerSafetyComicPageMimeType)
-            ?: return@mapNotNull null
+        // The extension only supplies an adapter hint.  The actual image decoder owns
+        // capability; unfamiliar metadata must still reach it as a generic image.
+        val mediaType = extension?.let(::readerSafetyComicPageMimeType) ?: "image/*"
         ReaderComicPage(
             pageIndex = page.index,
             resourceHref = "pages/${page.index}",

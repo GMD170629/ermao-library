@@ -22,7 +22,8 @@
       "chapter": {
         "href": "audio/chapter-03.m4b",
         "title": "第三章",
-        "index": 2
+        "index": 2,
+        "navigationKey": null
       },
       "page": null,
       "playback": {

@@ -222,15 +222,7 @@ scripts/              本地开发、验证、发布和统一运行脚本
 
 ## 更多文档
 
+- [项目文档索引](docs/README.md)
 - [Python API 与 Worker](apps/api-python/README.md)
-- [业务代码分层与重构策略](docs/business-code-layering-and-refactoring.md)
-- [移动 App 第一阶段：Web → App 功能基线](docs/mobile-app-phase-1-web-to-app-functional-baseline.md)
-- [移动 App 第二阶段：4 Tab 信息架构与导航规范](docs/mobile-app-phase-2-information-architecture.md)
-- [移动 App 第三阶段：关键 User Flow 与 Wireframe 视觉锚点](docs/mobile-app-phase-3-user-flows-and-wireframes.md)
-- [移动 App 第四阶段：方向 A“暖白书页”视觉规范 v1](docs/mobile-app-phase-4-visual-master.md)
-- [移动 App 第五阶段：1:1 高保真视觉锚点](docs/mobile-app-phase-5-high-fidelity-anchors.md)
-- [移动 App 第六阶段：服务器与认证高保真闭环](docs/mobile-app-phase-6-server-auth-high-fidelity.md)
-- [移动 App 第七阶段：书库发现流高保真闭环](docs/mobile-app-phase-7-library-discovery-high-fidelity.md)
-- [移动 App 全局开发规范：原生体验与设计还原](docs/mobile-app-development-global-guidelines.md)
 - [fnOS 模板与本地构建](deploy/fnos/README.md)
 - [版本说明](release-notes/README.md)

@@ -54,7 +54,7 @@ internal class RemoteComicReadiumPublicationFactory(
         val readingOrder = source.pages.mapIndexed { index, page ->
             Link(
                 href = requireNotNull(Url(page.resourceHref)),
-                mediaType = requireNotNull(MediaType(page.mediaType)),
+                mediaType = MediaType(page.mediaType) ?: requireNotNull(MediaType("image/*")),
                 title = (page.pageIndex + 1).toString(),
                 rels = if (index == 0) setOf("cover") else emptySet(),
             )

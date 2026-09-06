@@ -13,7 +13,7 @@ import sys
 import zipfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from xml.etree import ElementTree
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
@@ -31,16 +31,32 @@ from app.contracts.reader_safety_policy_generated import (
     READER_SAFETY_REFLOWABLE_PROFILE,
     ReaderSafetyAction,
     ReaderSafetyBudgetName,
+    ReaderSafetyDecisionContext,
+    ReaderSafetyFormat,
+    ReaderSafetyResourceRole,
     ReaderSafetyRuleId,
+    evaluate_reader_safety,
     reader_safety_budget,
-    reader_safety_format_policy,
     reader_safety_rule,
 )
-from app.modules.publications.domain.model import PublicationSecurityError
-from app.modules.publications.infrastructure.epub_adapter import _verify_entry_contents
+from app.infrastructure.archive_integrity import (
+    UnsafeArchivePathError,
+    normalize_archive_path,
+)
+from app.modules.publications.domain.model import (
+    PublicationResourceBlockedError,
+    PublicationResourceTooLargeError,
+    PublicationSecurityError,
+)
+from app.modules.publications.infrastructure.epub_adapter import (
+    _read_archive_resource,
+)
 from app.modules.publications.infrastructure.locator_dom import parse_safe_markup_root
+from app.modules.publications.infrastructure.snapshot_cache import (
+    PublicationSnapshotCache,
+)
 
-FIXTURE_ROOT = REPOSITORY_ROOT / "packages/reader-contracts/fixtures/reader-safety-v1"
+FIXTURE_ROOT = REPOSITORY_ROOT / "packages/reader-contracts/fixtures/reader-safety-v2"
 MANIFEST_PATH = FIXTURE_ROOT / "manifest.json"
 SUITE_PATH = FIXTURE_ROOT / "conformance-suite.json"
 _VOID_ELEMENTS = frozenset(
@@ -221,38 +237,23 @@ def _evaluate_markup(
     return _generated_decision(rule_id, semantic_projection=projection)
 
 
-def _archive_is_unsafe(source: str, fatal_findings: Sequence[str]) -> bool:
+def _archive_findings(source: str) -> set[str]:
     canonical: set[str] = set()
     findings: set[str] = set()
     for entry in source.split("|"):
-        if "\\" in entry:
-            findings.add("BACKSLASH_PATH")
-        if "\x00" in entry:
-            findings.add("NUL_PATH")
-        path = PurePosixPath(entry)
-        if path.is_absolute():
-            findings.add("ABSOLUTE_PATH")
-        if any(part in {".", ".."} for part in entry.split("/")):
-            findings.add("DOT_SEGMENT")
-        normalized_parts: list[str] = []
-        escaped = False
-        for part in entry.split("/"):
-            if part in {"", "."}:
-                continue
-            if part == "..":
-                if not normalized_parts:
-                    escaped = True
-                else:
-                    normalized_parts.pop()
-            else:
-                normalized_parts.append(part)
-        if escaped:
-            findings.add("PATH_ESCAPE")
-        normalized = "/".join(normalized_parts).casefold()
+        try:
+            normalized = normalize_archive_path(entry)
+        except UnsafeArchivePathError as error:
+            findings.add(error.problem.value)
+            continue
         if normalized in canonical:
             findings.add("DUPLICATE_CANONICAL_ENTRY")
         canonical.add(normalized)
-    return bool(findings & set(fatal_findings))
+    return findings
+
+
+def _archive_is_unsafe(source: str, fatal_findings: Sequence[str]) -> bool:
+    return bool(_archive_findings(source) & set(fatal_findings))
 
 
 def _evaluate_fact(
@@ -261,31 +262,66 @@ def _evaluate_fact(
     source: str,
 ) -> ActualDecision:
     facts = _facts(source) if "=" in source else {}
-    if evaluator == "ARCHIVE_STRUCTURE":
-        detected = _archive_is_unsafe(
-            source,
-            READER_SAFETY_REFLOWABLE_PROFILE.archive_fatal_findings,
+    if evaluator == "PARSER_SNAPSHOT_MEMORY":
+        cache: PublicationSnapshotCache[str] = PublicationSnapshotCache()
+        loaded = False
+
+        def load_snapshot() -> str:
+            nonlocal loaded
+            loaded = True
+            return "snapshot"
+
+        try:
+            cache.get(
+                ("synthetic", 1, 1), load_snapshot, _integer_fact(facts, "weightBytes")
+            )
+        except PublicationResourceTooLargeError as failure:
+            if loaded or failure.rule_id != rule_id.value:
+                raise AssertionError(
+                    "snapshot memory guard did not run before loading"
+                ) from failure
+            return _generated_decision(rule_id)
+        finally:
+            cache.close()
+        if not loaded:
+            raise AssertionError("in-budget snapshot was not loaded")
+        return _allowed_decision(
+            rule_id, event="BOUNDARY_ALLOW", semantic_projection=source
         )
+    elif evaluator == "ARCHIVE_STRUCTURE":
+        findings = _archive_findings(source)
+        if rule_id is ReaderSafetyRuleId.EPUB_RESOURCE_INTEGRITY:
+            detected = bool(
+                findings
+                & set(READER_SAFETY_REFLOWABLE_PROFILE.archive_integrity_findings)
+            )
+        else:
+            detected = bool(
+                findings & set(READER_SAFETY_REFLOWABLE_PROFILE.archive_fatal_findings)
+            )
     elif evaluator == "EPUB_ARCHIVE_CRC":
         prefix, separator, encoded = source.partition(":")
         if prefix != "base64" or not separator:
-            raise ValueError("EPUB CRC fixture must contain a base64 archive")
+            raise ValueError("EPUB archive CRC fixture must be base64 encoded")
         try:
-            with zipfile.ZipFile(
-                io.BytesIO(base64.b64decode(encoded, validate=True))
-            ) as archive:
-                _verify_entry_contents(
-                    archive,
-                    {info.filename: info for info in archive.infolist()},
-                )
-        except PublicationSecurityError as error:
-            actual_rule = ReaderSafetyRuleId(error.rule_id)
-            if actual_rule is not rule_id:
+            archive_bytes = base64.b64decode(encoded, validate=True)
+        except ValueError as error:
+            raise ValueError("EPUB archive CRC fixture is not valid base64") from error
+        try:
+            with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+                entries = archive.infolist()
+                if len(entries) != 1:
+                    raise AssertionError(
+                        "EPUB archive CRC fixture must contain one resource"
+                    )
+                _read_archive_resource(archive, entries[0], required=False)
+        except PublicationResourceBlockedError as error:
+            if error.rule_id != rule_id.value:
                 raise AssertionError(
-                    "backend CRC preflight emitted the wrong rule"
+                    f"optional CRC failure produced {error.rule_id}, expected {rule_id.value}"
                 ) from error
-            return _generated_decision(actual_rule)
-        raise AssertionError("backend EPUB preflight accepted a corrupted unused entry")
+            return _generated_decision(rule_id)
+        raise AssertionError("corrupt optional EPUB resource was not blocked")
     elif evaluator == "ORIGINAL_BYTES":
         detected = _integer_fact(facts, "sizeBytes") > reader_safety_budget(
             ReaderSafetyBudgetName.ORIGINAL_MAX_BYTES
@@ -339,11 +375,12 @@ def _evaluate_fact(
             )
         )
     elif evaluator == "COMIC_PAGE_MIME":
-        manifest_mime = facts["manifest"].casefold()
-        response_mime = facts["response"].casefold()
-        detected = (
-            manifest_mime in READER_SAFETY_COMIC_PROFILE.allowed_page_mime_types
-            and response_mime != manifest_mime
+        # A manifest/transport MIME disagreement is metadata only.  The
+        # production decoder reports an actual failure through POLICY_DECISION.
+        return _allowed_decision(
+            rule_id,
+            event="BOUNDARY_ALLOW",
+            semantic_projection=source,
         )
     elif evaluator == "COMIC_PAGE_COUNT":
         detected = _integer_fact(facts, "pageCount") > reader_safety_budget(
@@ -361,11 +398,12 @@ def _evaluate_fact(
             and facts["manifestRevision"] != facts["requestRevision"]
         )
     elif evaluator == "AUDIO_CONTAINER_MIME":
-        expected_mime = READER_SAFETY_AUDIO_PROFILE.container_mime_types.get(
-            facts["extension"].casefold()
-        )
-        detected = (
-            expected_mime is not None and expected_mime != facts["mime"].casefold()
+        # Container metadata does not establish decoder unreadability.  An
+        # actual engine failure is represented by a generated policy context.
+        return _allowed_decision(
+            rule_id,
+            event="BOUNDARY_ALLOW",
+            semantic_projection=source,
         )
     elif evaluator == "AUDIO_CODEC":
         detected = (
@@ -382,23 +420,29 @@ def _evaluate_fact(
                 math.isfinite(value) and value >= 0 for value in (duration, start, end)
             )
     elif evaluator == "DRM_ALGORITHM":
-        algorithm = facts["algorithm"]
-        detected = (
-            algorithm
-            not in READER_SAFETY_REFLOWABLE_PROFILE.allowed_font_obfuscation_algorithms
-        )
-        if not detected:
+        # Font obfuscation metadata is a capability hint, not proof of DRM
+        # failure.  The decoder's actual DRM result uses POLICY_DECISION.
+        if (
+            facts["algorithm"]
+            in READER_SAFETY_REFLOWABLE_PROFILE.allowed_font_obfuscation_algorithms
+        ):
             return _allowed_decision(
                 rule_id,
                 event="ALLOW_FONT_OBFUSCATION",
                 semantic_projection="font-obfuscation-allowed",
             )
+        return _allowed_decision(
+            rule_id,
+            event="BOUNDARY_ALLOW",
+            semantic_projection=source,
+        )
     elif evaluator == "EXACT_FORMAT_MIME":
-        format_policy = reader_safety_format_policy(facts["format"])
-        normalized_mime = facts["mime"].partition(";")[0].strip().casefold()
-        detected = (
-            format_policy is None
-            or normalized_mime not in format_policy.accepted_mime_types
+        # A declared MIME mismatch does not establish that the decoder cannot
+        # read the original bytes; the parser result is the policy fact.
+        return _allowed_decision(
+            rule_id,
+            event="BOUNDARY_ALLOW",
+            semantic_projection=source,
         )
     elif evaluator == "BINARY_RESOURCE_BYTES":
         detected = _integer_fact(facts, "resourceBytes") > reader_safety_budget(
@@ -407,12 +451,7 @@ def _evaluate_fact(
     elif evaluator == "OPTIONAL_RESOURCE":
         detected = facts["required"] == "false" and facts["available"] == "false"
     elif evaluator == "REQUIRED_READING_ORDER_MARKUP":
-        detected = _integer_fact(facts, "readingOrderCount") > 0 and (
-            _integer_fact(facts, "markupCount")
-            < _integer_fact(facts, "readingOrderCount")
-            or facts["mime"].casefold()
-            not in READER_SAFETY_REFLOWABLE_PROFILE.reading_order_markup_mime_types
-        )
+        detected = facts.get("parser") == "failed"
     elif evaluator == "XML_CONTROL_DOCUMENT_BYTES":
         detected = _integer_fact(facts, "controlDocumentBytes") > reader_safety_budget(
             ReaderSafetyBudgetName.XML_CONTROL_DOCUMENT_MAX_BYTES
@@ -442,9 +481,7 @@ def _evaluate_fact(
         )
     elif evaluator == "FB2_IMAGE_BUDGET":
         detected = (
-            facts["mime"].casefold()
-            not in READER_SAFETY_REFLOWABLE_PROFILE.embedded_image_extensions_by_mime_type
-            or _integer_fact(facts, "encodedBytes")
+            _integer_fact(facts, "encodedBytes")
             > reader_safety_budget(ReaderSafetyBudgetName.FB2_ENCODED_IMAGE_MAX_BYTES)
             or _integer_fact(facts, "decodedBytes")
             > reader_safety_budget(ReaderSafetyBudgetName.FB2_DECODED_IMAGE_MAX_BYTES)
@@ -514,10 +551,65 @@ def _evaluate_fact(
     else:
         raise ValueError(f"unsupported backend conformance evaluator: {evaluator}")
     if not detected:
-        raise AssertionError(
-            f"{evaluator} fixture did not trigger its production policy fact"
+        return _allowed_decision(
+            rule_id, event="BOUNDARY_ALLOW", semantic_projection=source
         )
     return _generated_decision(rule_id)
+
+
+def _evaluate_policy_decision(
+    rule_id: ReaderSafetyRuleId,
+    source: str,
+) -> ActualDecision:
+    try:
+        raw_context = json.loads(source)
+    except json.JSONDecodeError as error:
+        raise ValueError("policy decision fixture is not JSON") from error
+    if not isinstance(raw_context, dict):
+        raise TypeError("policy decision fixture must be an object")
+    raw_facts = raw_context.get("facts")
+    if not isinstance(raw_facts, list) or not all(
+        isinstance(fact, str) for fact in raw_facts
+    ):
+        raise TypeError("policy decision facts must be an array of strings")
+    format_value = raw_context.get("format")
+    role_value = raw_context.get("resourceRole")
+    enforcement_available = raw_context.get("enforcementAvailable")
+    can_isolate = raw_context.get("canIsolate")
+    if not isinstance(format_value, str) or not isinstance(role_value, str):
+        raise TypeError("policy decision format and resourceRole must be strings")
+    if not isinstance(enforcement_available, bool) or not isinstance(can_isolate, bool):
+        raise TypeError(
+            "policy decision enforcementAvailable and canIsolate must be booleans"
+        )
+    try:
+        context = ReaderSafetyDecisionContext(
+            format=ReaderSafetyFormat(format_value.strip().upper()),
+            resource_role=ReaderSafetyResourceRole(role_value.strip().upper()),
+            facts=tuple(raw_facts),
+            enforcement_available=enforcement_available,
+            can_isolate=can_isolate,
+        )
+    except ValueError as error:
+        raise ValueError(
+            "policy decision context contains an unknown enum value"
+        ) from error
+    decisions = evaluate_reader_safety(context)
+    decision = next(
+        (candidate for candidate in decisions if candidate.rule_id is rule_id),
+        None,
+    )
+    if decision is None:
+        raise AssertionError(f"generated policy decision did not emit {rule_id.value}")
+    return ActualDecision(
+        rule_id=rule_id,
+        action=decision.action.value,
+        error_code=(
+            decision.error_code.value if decision.error_code is not None else None
+        ),
+        event=f"{rule_id.value}:{decision.action.value}",
+        semantic_projection=None,
+    )
 
 
 def _evaluate_case(
@@ -543,11 +635,12 @@ def _evaluate_case(
         raise ValueError(f"Reader safety fixture input hash differs for {case_id}")
 
     rule_id = ReaderSafetyRuleId(rule_value)
-    decision = (
-        _evaluate_markup(evaluator, rule_id, source)
-        if evaluator in _MARKUP_EVALUATORS
-        else _evaluate_fact(evaluator, rule_id, source)
-    )
+    if evaluator in _MARKUP_EVALUATORS:
+        decision = _evaluate_markup(evaluator, rule_id, source)
+    elif evaluator == "POLICY_DECISION":
+        decision = _evaluate_policy_decision(rule_id, source)
+    else:
+        decision = _evaluate_fact(evaluator, rule_id, source)
     return {
         "caseId": case_id,
         "inputSha256": input_sha256,

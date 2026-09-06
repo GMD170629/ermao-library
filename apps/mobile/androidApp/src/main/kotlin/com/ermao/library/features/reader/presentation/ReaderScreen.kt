@@ -41,6 +41,8 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
@@ -74,6 +76,11 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SheetValue
+import androidx.compose.material3.BottomSheetScaffold
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.rememberBottomSheetScaffoldState
+import androidx.compose.material3.rememberStandardBottomSheetState
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
@@ -84,6 +91,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -95,6 +104,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -169,6 +179,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -193,6 +204,8 @@ internal fun ReaderScreen(
         ?: remember { mutableStateOf(ReaderPreferences()) }
     val currentLocation by controller?.currentLocation?.collectAsStateWithLifecycle()
         ?: remember { mutableStateOf<ReaderLocation?>(null) }
+    val currentNavigationEntryId by controller?.currentNavigationEntryId?.collectAsStateWithLifecycle()
+        ?: remember { mutableStateOf<String?>(null) }
     val presentationProgress by controller?.presentationProgress?.collectAsStateWithLifecycle()
         ?: remember { mutableStateOf<Double?>(null) }
     val contentError by controller?.contentError?.collectAsStateWithLifecycle()
@@ -216,11 +229,11 @@ internal fun ReaderScreen(
     val panelFocus = remember { ReaderPanel.entries.associateWith { FocusRequester() } }
     val morphology = controller?.morphology ?: ReaderMorphology.Reflowable
     var adjacentChapters by remember(controller) { mutableStateOf(ReaderAdjacentChapters()) }
-    LaunchedEffect(controller, currentLocation, controlsVisible) {
+    LaunchedEffect(controller, currentNavigationEntryId, controlsVisible) {
         val activeController = controller
         adjacentChapters = if (controlsVisible && activeController?.morphology == ReaderMorphology.Reflowable) {
             try {
-                resolveAdjacentChapters(activeController.loadTableOfContents(), currentLocation)
+                resolveAdjacentChapters(activeController.loadTableOfContents(), currentNavigationEntryId)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
@@ -399,12 +412,14 @@ internal fun ReaderScreen(
                     bookmarks = bookmarks,
                     panel = panel,
                     onDismissPanel = { panel = null },
-                    panelContent = {
+                    panelContent = { positioningReady ->
                         when (panel) {
                             ReaderPanel.Contents -> ReaderContentsPanel(
                                 state = contentsState,
                                 morphology = morphology,
                                 currentLocation = currentLocation,
+                                currentEntryId = currentNavigationEntryId,
+                                positioningReady = positioningReady,
                                 pendingEntryId = pendingNavigationId,
                                 navigationFailed = navigationFailed,
                                 onRetry = requestContents,
@@ -613,7 +628,7 @@ private fun ReaderControlOverlay(
     bookmarks: List<ReaderBookmark>,
     panel: ReaderPanel?,
     onDismissPanel: () -> Unit,
-    panelContent: @Composable () -> Unit,
+    panelContent: @Composable (Boolean) -> Unit,
     onToggleBookmark: () -> Unit,
     panelFocus: Map<ReaderPanel, FocusRequester>,
     onClose: () -> Unit,
@@ -693,7 +708,7 @@ private fun ReaderControlOverlay(
             onSeek,
             onNavigateChapter,
             panelFocus,
-            Modifier.align(Alignment.BottomCenter),
+            Modifier.fillMaxSize(),
         )
     }
 }
@@ -707,7 +722,7 @@ private fun ReaderBottomConsole(
     preferences: ReaderPreferences,
     adjacentChapters: ReaderAdjacentChapters,
     panel: ReaderPanel?,
-    panelContent: @Composable () -> Unit,
+    panelContent: @Composable (Boolean) -> Unit,
     onPanel: (ReaderPanel) -> Unit,
     onSeek: (Double) -> Boolean,
     onNavigateChapter: (ReaderTocEntry) -> Unit,
@@ -764,111 +779,131 @@ private fun ReaderBottomConsole(
     val leftEnabled = controller != null && (!reflowable || leftChapter != null)
     val rightEnabled = controller != null && (!reflowable || rightChapter != null)
 
-    BoxWithConstraints(
-        modifier
-            .navigationBarsPadding()
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-    ) {
-        val targetHeight = panel?.let(::readerPanelSurfaceHeight) ?: READER_HOME_CONTENT_HEIGHT
-        val maxReaderSurfaceHeight =
-            (maxHeight - GeneratedDesignTokens.ReaderControls.TopClearance.dp).coerceAtLeast(READER_NAVIGATION_HEIGHT)
-        val boundedHeight = targetHeight.coerceAtMost(maxReaderSurfaceHeight)
-        Surface(
+    val navigationTabs: @Composable () -> Unit = {
+        Row(
             Modifier
                 .fillMaxWidth()
-                .height(boundedHeight)
-                .testTag(if (panel == null) READER_HOME_CONSOLE_TEST_TAG else READER_SHEET_TEST_TAG),
-            color = colors.canvas,
-            contentColor = colors.textPrimary,
-            shape = RoundedCornerShape(readerConsoleOuterRadius()),
-            border = BorderStroke(1.dp, colors.divider),
-            shadowElevation = 6.dp,
+                .height(READER_NAVIGATION_HEIGHT)
+                .padding(horizontal = 4.dp, vertical = 2.dp),
         ) {
-            Column(Modifier.fillMaxSize()) {
-                if (panel != null) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
-                            .testTag(READER_PANEL_WORKSPACE_TEST_TAG),
-                    ) {
-                        panelContent()
-                    }
-                } else {
-                    Row(
-                            Modifier
-                                .fillMaxWidth()
-                            .height(READER_HOME_PROGRESS_HEIGHT)
-                            .padding(horizontal = 8.dp, vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        IconButton(onClick = goLeft, enabled = leftEnabled) {
-                            Icon(Icons.Default.ChevronLeft, stringResource(leftDescription))
-                        }
-                        ReaderSlider(
-                            value = sliderProgress,
-                            onValueChange = { dragging = true; sliderProgress = it },
-                            onValueChangeFinished = {
-                                dragging = false
-                                val origin = totalProgression
-                                if (origin != null && onSeek(sliderProgress.toDouble())) {
-                                    pendingSeekOrigin = origin
-                                } else {
-                                    sliderProgress = origin?.toFloat() ?: 0f
-                                    pendingSeekOrigin = null
-                                }
-                            },
-                            enabled = seekEnabled,
-                            modifier = Modifier
-                                .weight(1f)
-                                .semantics { contentDescription = progressDescription }
-                                .testTag(READER_PROGRESS_TEST_TAG),
-                        )
-                        IconButton(onClick = goRight, enabled = rightEnabled) {
-                            Icon(Icons.Default.ChevronRight, stringResource(rightDescription))
-                        }
-                    }
-                }
-                HorizontalDivider(color = colors.divider)
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(READER_NAVIGATION_HEIGHT)
-                        .padding(horizontal = 4.dp, vertical = 2.dp),
-                ) {
-                    ReaderNavAction(
-                        Icons.AutoMirrored.Outlined.FormatListBulleted,
-                        R.string.reader_table_of_contents,
-                        READER_CONTENTS_TEST_TAG,
-                        focusRequester = panelFocus.getValue(ReaderPanel.Contents),
-                        selected = panel == ReaderPanel.Contents,
-                    ) { onPanel(ReaderPanel.Contents) }
-                    ReaderNavAction(
-                        Icons.Outlined.EditNote,
-                        R.string.reader_notes,
-                        "reader-notes",
-                        focusRequester = panelFocus.getValue(ReaderPanel.Bookmarks),
-                        selected = panel == ReaderPanel.Bookmarks,
-                    ) { onPanel(ReaderPanel.Bookmarks) }
-                    ReaderNavAction(
-                        Icons.Outlined.Palette,
-                        R.string.reader_appearance,
-                        "reader-appearance",
-                        focusRequester = panelFocus.getValue(ReaderPanel.Appearance),
-                        enabled = controller?.capabilities?.supportsTheme == true,
-                        selected = panel == ReaderPanel.Appearance,
-                    ) { onPanel(ReaderPanel.Appearance) }
-                    ReaderNavAction(
-                        Icons.Outlined.Settings,
-                        R.string.reader_settings,
-                        READER_SETTINGS_TEST_TAG,
-                        focusRequester = panelFocus.getValue(ReaderPanel.Settings),
-                        selected = panel == ReaderPanel.Settings,
-                        contentDescriptionResource = R.string.reader_settings_accessibility,
-                    ) { onPanel(ReaderPanel.Settings) }
-                }
-            }
+            ReaderNavAction(
+                Icons.AutoMirrored.Outlined.FormatListBulleted,
+                R.string.reader_table_of_contents,
+                READER_CONTENTS_TEST_TAG,
+                focusRequester = panelFocus.getValue(ReaderPanel.Contents),
+                selected = panel == ReaderPanel.Contents,
+            ) { onPanel(ReaderPanel.Contents) }
+            ReaderNavAction(
+                Icons.Outlined.EditNote,
+                R.string.reader_notes,
+                "reader-notes",
+                focusRequester = panelFocus.getValue(ReaderPanel.Bookmarks),
+                selected = panel == ReaderPanel.Bookmarks,
+            ) { onPanel(ReaderPanel.Bookmarks) }
+            ReaderNavAction(
+                Icons.Outlined.Palette,
+                R.string.reader_appearance,
+                "reader-appearance",
+                focusRequester = panelFocus.getValue(ReaderPanel.Appearance),
+                enabled = controller?.capabilities?.supportsTheme == true,
+                selected = panel == ReaderPanel.Appearance,
+            ) { onPanel(ReaderPanel.Appearance) }
+            ReaderNavAction(
+                Icons.Outlined.Settings,
+                R.string.reader_settings,
+                READER_SETTINGS_TEST_TAG,
+                focusRequester = panelFocus.getValue(ReaderPanel.Settings),
+                selected = panel == ReaderPanel.Settings,
+                contentDescriptionResource = R.string.reader_settings_accessibility,
+            ) { onPanel(ReaderPanel.Settings) }
         }
+    }
+
+    val hasPanel by rememberUpdatedState(panel != null)
+    val sheetState = rememberStandardBottomSheetState(
+        confirmValueChange = { target -> target != SheetValue.Expanded || hasPanel },
+    )
+    val scaffoldState = rememberBottomSheetScaffoldState(bottomSheetState = sheetState)
+    LaunchedEffect(panel != null) {
+        if (panel == null) sheetState.partialExpand()
+    }
+    BoxWithConstraints(modifier.statusBarsPadding().navigationBarsPadding()) {
+        val compactHeight = READER_HOME_CONTENT_HEIGHT + 1.dp + READER_ANDROID_TOUCH_TARGET
+        val peekHeight = if (panel == null) compactHeight else maxHeight / 2
+        BottomSheetScaffold(
+            modifier = Modifier.fillMaxSize(),
+            scaffoldState = scaffoldState,
+            sheetPeekHeight = peekHeight,
+            sheetSwipeEnabled = panel != null,
+            sheetContainerColor = colors.surface,
+            sheetContentColor = colors.textPrimary,
+            containerColor = Color.Transparent,
+            sheetDragHandle = {
+                BottomSheetDefaults.DragHandle(Modifier.height(READER_ANDROID_TOUCH_TARGET))
+            },
+            sheetContent = {
+                Layout(
+                    modifier = Modifier.fillMaxWidth().fillMaxHeight().testTag(READER_SHEET_TEST_TAG),
+                    content = {
+                        Column(Modifier.fillMaxWidth()) {
+                            if (panel != null) {
+                                Box(Modifier.fillMaxWidth().weight(1f).testTag(READER_PANEL_WORKSPACE_TEST_TAG)) {
+                                    panelContent(sheetState.currentValue == sheetState.targetValue)
+                                }
+                            } else {
+                                Spacer(Modifier.weight(1f))
+                            }
+                            if (panel == null) {
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .height(READER_HOME_PROGRESS_HEIGHT)
+                                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    IconButton(onClick = goLeft, enabled = leftEnabled) {
+                                        Icon(Icons.Default.ChevronLeft, stringResource(leftDescription))
+                                    }
+                                    ReaderSlider(
+                                        value = sliderProgress,
+                                        onValueChange = { dragging = true; sliderProgress = it },
+                                        onValueChangeFinished = {
+                                            dragging = false
+                                            val origin = totalProgression
+                                            if (origin != null && onSeek(sliderProgress.toDouble())) {
+                                                pendingSeekOrigin = origin
+                                            } else {
+                                                sliderProgress = origin?.toFloat() ?: 0f
+                                                pendingSeekOrigin = null
+                                            }
+                                        },
+                                        enabled = seekEnabled,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .semantics { contentDescription = progressDescription }
+                                            .testTag(READER_PROGRESS_TEST_TAG),
+                                    )
+                                    IconButton(onClick = goRight, enabled = rightEnabled) {
+                                        Icon(Icons.Default.ChevronRight, stringResource(rightDescription))
+                                    }
+                                }
+                            }
+                            HorizontalDivider(color = colors.divider)
+                            navigationTabs()
+                        }
+                    },
+                ) { measurables, constraints ->
+                    // Read the native drag offset during measurement, not after layout.
+                    // The sheet and its fixed footer therefore use the same frame's position.
+                    val offset = if (sheetState.hasPartiallyExpandedState) sheetState.requireOffset().roundToInt() else 0
+                    val visibleHeight = (constraints.maxHeight - offset).coerceIn(0, constraints.maxHeight)
+                    val content = measurables.single().measure(
+                        constraints.copy(minHeight = visibleHeight, maxHeight = visibleHeight),
+                    )
+                    layout(constraints.maxWidth, constraints.maxHeight) { content.placeRelative(0, 0) }
+                }
+            },
+        ) { }
     }
 }
 
@@ -1378,6 +1413,14 @@ private fun readerViewportIsWide(): Boolean {
     }
 }
 
+private val READER_ACTIONABLE_AVAILABILITY_REASONS = setOf(
+    "scrollingMode",
+    "requiresDoubleSpread",
+    "optimizationDisabled",
+    "publisherStylesActive",
+    "verticalWritingMode",
+)
+
 @Composable
 private fun ReaderCatalogSetting(
     setting: ReaderSettingDefinition,
@@ -1391,11 +1434,10 @@ private fun ReaderCatalogSetting(
     val label = if (chinese) setting.chinese else setting.english
     val value = setting.value(preferences)
     val available = state.availability == ReaderControlAvailability.Available
-    val unavailableReason = state.reasonId?.let(
-        com.ermao.library.shared.modules.reader.ReaderSettingsCatalog.availabilityReasons::get,
-    )
-    val unavailableMessage = unavailableReason?.let { if (chinese) it.chinese else it.english }
-        ?: stringResource(R.string.reader_setting_unavailable_short)
+    val unavailableMessage = state.reasonId
+        ?.takeIf { it in READER_ACTIONABLE_AVAILABILITY_REASONS }
+        ?.let(com.ermao.library.shared.modules.reader.ReaderSettingsCatalog.availabilityReasons::get)
+        ?.let { if (chinese) it.chinese else it.english }
     fun change(value: String) {
         var updated = setting.change(preferences, value)
         if (setting.id == "theme") updated = updated.copy(appearance = updated.appearance.copy(themeMode = ReaderThemeMode.Manual))
@@ -1443,9 +1485,7 @@ private fun ReaderCatalogSetting(
                 value.toDouble(),
                 available,
                 ::change,
-                unavailableMessage.takeIf {
-                    !available && !(setting.id.endsWith("PageWidth") && state.reasonId == "notImplemented")
-                },
+                unavailableMessage,
             )
             else -> {
                 if (setting.id == "theme") {
@@ -1475,22 +1515,21 @@ private fun ReaderCatalogSetting(
                         onChange = ::change,
                         modifier = Modifier.testTag("reader-setting-control-${setting.id}"),
                     )
-                }
-                if (setting.options.none {
-                        it.value == value ||
-                            it.value.toDoubleOrNull()?.let { number -> number == value.toDoubleOrNull() } == true
-                    }) {
-                    WarmSettingsInlineMessage(
-                        message = stringResource(R.string.reader_setting_saved_value, value),
-                    )
+                    if (setting.options.none {
+                            it.value == value ||
+                                it.value.toDoubleOrNull()?.let { number -> number == value.toDoubleOrNull() } == true
+                        }) {
+                        Text(
+                            value,
+                            Modifier.padding(start = 48.dp),
+                            style = theme.typography.caption,
+                            color = theme.colors.textSecondary,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
-        }
-        if (setting.id == "letterSpacing" && !negativeLetterSpacingEnabled) {
-            WarmSettingsInlineMessage(stringResource(R.string.reader_negative_spacing_retained))
-        }
-        if (setting.id == "fontFamily") {
-            WarmSettingsInlineMessage(stringResource(R.string.reader_font_mapping))
         }
     }
 }
@@ -2049,11 +2088,6 @@ private fun ReaderAnnotationsEmptyPanel(modifier: Modifier = Modifier) {
         ) {
             Icon(Icons.AutoMirrored.Outlined.Notes, null, tint = WarmPageThemeValues.colors.textSecondary)
             Text(stringResource(R.string.reader_annotations_empty), style = MaterialTheme.typography.titleSmall)
-            Text(
-                stringResource(R.string.reader_annotations_empty_hint),
-                style = MaterialTheme.typography.bodySmall,
-                color = WarmPageThemeValues.colors.textSecondary,
-            )
         }
     }
 }
@@ -2063,6 +2097,8 @@ private fun ReaderContentsPanel(
     state: ReaderContentsLoadState,
     morphology: ReaderMorphology,
     currentLocation: ReaderLocation?,
+    currentEntryId: String?,
+    positioningReady: Boolean,
     pendingEntryId: String?,
     navigationFailed: Boolean,
     onDismiss: () -> Unit,
@@ -2071,7 +2107,23 @@ private fun ReaderContentsPanel(
 ) {
     val readyState = state as? ReaderContentsLoadState.Ready
     val currentEntry = readyState?.entries?.firstOrNull {
-        readerContentsEntrySelected(currentLocation, it.entry.location)
+        if (morphology == ReaderMorphology.Reflowable) it.entry.id == currentEntryId
+        else readerContentsEntrySelected(currentLocation, it.entry.location)
+    }
+    val listState = rememberLazyListState()
+    var positioned by remember { mutableStateOf(false) }
+    LaunchedEffect(readyState, currentEntryId, currentLocation != null, positioningReady) {
+        if (positioned || readyState == null || !positioningReady || currentLocation == null) return@LaunchedEffect
+        positioned = true
+        if (morphology != ReaderMorphology.Reflowable) return@LaunchedEffect
+        val index = readyState.entries.indexOfFirst { it.entry.id == currentEntryId }
+        if (index < 0) return@LaunchedEffect
+        snapshotFlow { listState.layoutInfo.viewportEndOffset > 0 }.first { it }
+        listState.scrollToItem(index + 1 + if (navigationFailed) 1 else 0)
+        withFrameNanos { }
+        val layout = listState.layoutInfo
+        val row = layout.visibleItemsInfo.firstOrNull { it.key == currentEntryId } ?: return@LaunchedEffect
+        listState.scrollBy(row.offset - (layout.viewportStartOffset + layout.viewportEndOffset - row.size) / 2f)
     }
     val subtitle = when {
         morphology == ReaderMorphology.Reflowable && currentEntry != null -> {
@@ -2138,8 +2190,8 @@ private fun ReaderContentsPanel(
             }
             is ReaderContentsLoadState.Ready -> {
                 LazyColumn(
-                    Modifier.fillMaxWidth().weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    Modifier.fillMaxWidth().weight(1f).testTag(READER_CONTENTS_LIST_TEST_TAG),
+                    state = listState,
                 ) {
                 if (navigationFailed) {
                     item(key = "navigation-failed") {
@@ -2197,45 +2249,28 @@ private fun ReaderContentsPanel(
                     }
                 }
                 if (morphology == ReaderMorphology.Reflowable) {
-                    itemsIndexed(
-                        state.entries,
-                        key = { index, entry -> "${entry.entry.id}:$index" },
-                    ) { index, entry ->
-                        val selected = readerContentsEntrySelected(currentLocation, entry.entry.location)
-                        Surface(
-                            color = if (selected) WarmPageThemeValues.colors.actionAccent else WarmPageThemeValues.colors.surfaceRaised,
-                            shape = RoundedCornerShape(WarmPageThemeValues.radii.control),
-                            border = BorderStroke(1.dp, if (selected) WarmPageThemeValues.colors.actionAccent else WarmPageThemeValues.colors.divider),
+                    itemsIndexed(state.entries, key = { _, node -> node.entry.id }) { _, node ->
+                        val isCurrent = node.entry.id == currentEntryId
+                        val colors = WarmPageThemeValues.colors
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .background(if (isCurrent) colors.actionAccent.copy(alpha = 0.12f) else Color.Transparent)
+                                .selectable(selected = isCurrent, enabled = pendingEntryId == null && node.entry.target !is com.ermao.library.shared.modules.reader.ReaderNavigationTargetInvalid, role = Role.Button) { onSelect(node.entry) }
+                                .testTag("reader-toc:${node.entry.id}")
+                                .heightIn(min = 48.dp)
+                                .padding(start = (node.depth * 16).dp, top = 8.dp, end = 8.dp, bottom = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            TextButton(
-                                { onSelect(entry.entry) },
-                                Modifier.fillMaxWidth(),
-                                enabled = pendingEntryId == null,
-                                shape = RoundedCornerShape(WarmPageThemeValues.radii.control),
-                                colors = ButtonDefaults.textButtonColors(
-                                    contentColor = if (selected) WarmPageThemeValues.colors.onAction else WarmPageThemeValues.colors.textPrimary,
-                                ),
-                            ) {
-                                Row(
-                                    Modifier.fillMaxWidth().padding(start = (entry.depth * 12).dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(
-                                        (index + 1).toString(),
-                                        Modifier.width(36.dp),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = if (selected) WarmPageThemeValues.colors.onAction.copy(alpha = 0.75f) else WarmPageThemeValues.colors.textTertiary,
-                                    )
-                                    Text(
-                                        entry.entry.title,
-                                        Modifier.weight(1f),
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    if (pendingEntryId == entry.entry.id) {
-                                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                                    }
-                                }
+                            Text(
+                                node.entry.title,
+                                Modifier.weight(1f),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isCurrent) colors.actionAccent else colors.textPrimary,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            if (pendingEntryId == node.entry.id) {
+                                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                             }
                         }
                     }
@@ -2256,7 +2291,6 @@ private sealed interface ReaderContentsLoadState {
 }
 
 private fun readerContentsEntrySelected(current: ReaderLocation?, entry: ReaderLocation): Boolean = when {
-    current is ReflowReaderLocation && entry is ReflowReaderLocation -> current.resourceKey == entry.resourceKey
     current is ComicReaderLocation && entry is ComicReaderLocation ->
         current.resourceHref == entry.resourceHref && current.pageIndex == entry.pageIndex
     current is PdfReaderLocation && entry is PdfReaderLocation -> current.pageIndex == entry.pageIndex
@@ -2486,6 +2520,7 @@ internal const val READER_READY_TEST_TAG = "reader-ready"
 internal const val READER_PREVIOUS_TEST_TAG = "reader-previous"
 internal const val READER_NEXT_TEST_TAG = "reader-next"
 internal const val READER_CONTENTS_TEST_TAG = "reader-contents"
+internal const val READER_CONTENTS_LIST_TEST_TAG = "reader-contents-list"
 internal const val READER_CONTENTS_LOADING_TEST_TAG = "reader-contents-loading"
 internal const val READER_SETTINGS_TEST_TAG = "reader-settings"
 internal const val READER_PROGRESS_TEST_TAG = "reader-progress"
@@ -2494,14 +2529,11 @@ internal const val READER_LINE_HEIGHT_TEST_TAG = "reader-line-height"
 internal const val READER_PREFERENCES_SCROLL_TEST_TAG = "reader-preferences-scroll"
 internal const val READER_SHEET_TEST_TAG = "reader-sheet"
 internal const val READER_PANEL_WORKSPACE_TEST_TAG = "reader-panel-workspace"
-internal const val READER_HOME_CONSOLE_TEST_TAG = "reader-home-console"
 private const val PROGRESS_SEEK_FEEDBACK_TIMEOUT_MILLIS = 4_000L
 private const val SYSTEM_BAR_LIGHT_SURFACE_LUMINANCE = 0.5f
 private val READER_WIDE_VIEWPORT_MIN_WIDTH = 640.dp
 
 private val READER_HOME_CONTENT_HEIGHT = GeneratedDesignTokens.ReaderControls.HomeContentHeight.dp
-private val READER_CONSOLE_VERTICAL_INSET =
-    (GeneratedDesignTokens.ReaderControls.HomeHeight - GeneratedDesignTokens.ReaderControls.HomeContentHeight).dp
 private val READER_HOME_PROGRESS_HEIGHT =
     (GeneratedDesignTokens.ReaderControls.HomeContentHeight - GeneratedDesignTokens.ReaderControls.NavigationHeight).dp
 private val READER_NAVIGATION_HEIGHT = GeneratedDesignTokens.ReaderControls.NavigationHeight.dp
@@ -2509,16 +2541,6 @@ private val READER_COMPACT_CONTROL_HEIGHT = GeneratedDesignTokens.ReaderControls
 private val READER_ANDROID_TOUCH_TARGET = GeneratedDesignTokens.Accessibility.MinimumTouchTarget.Android.dp
 private val READER_THEME_SWATCH_TOUCH_TARGET = READER_ANDROID_TOUCH_TARGET
 private val READER_THEME_SWATCH_SIZE = GeneratedDesignTokens.ReaderControls.ThemeSwatchSize.dp
-
-private fun readerPanelSurfaceHeight(panel: ReaderPanel): androidx.compose.ui.unit.Dp = (when (panel) {
-    ReaderPanel.Contents -> GeneratedDesignTokens.ReaderControls.TocPanelHeight.dp
-    ReaderPanel.Bookmarks -> GeneratedDesignTokens.ReaderControls.NotesPanelHeight.dp
-    ReaderPanel.Appearance -> GeneratedDesignTokens.ReaderControls.AppearancePanelHeight.dp
-    ReaderPanel.Settings -> GeneratedDesignTokens.ReaderControls.SettingsPanelHeight.dp
-}) - READER_CONSOLE_VERTICAL_INSET
-
-private fun readerConsoleOuterRadius(): androidx.compose.ui.unit.Dp =
-    GeneratedDesignTokens.ReaderControls.OuterRadius.dp
 
 private fun readerConsoleContentInset(): androidx.compose.ui.unit.Dp =
     GeneratedDesignTokens.ReaderControls.ContentInset.dp

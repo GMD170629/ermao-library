@@ -1,6 +1,5 @@
 package com.ermao.library.shared.modules.downloads.domain
 
-import com.ermao.library.shared.modules.reader.readerSafetyAllowedComicPageMimeTypes
 import com.ermao.library.shared.modules.reader.readerSafetyComicExpandedMaxBytes
 import com.ermao.library.shared.modules.reader.readerSafetyComicPageMaxBytes
 import com.ermao.library.shared.modules.reader.readerSafetyComicPageMaxCount
@@ -104,7 +103,8 @@ data class DownloadDescriptor(
                 require(members.map(DownloadBundleMember::assetId).distinct().size == members.size)
                 var expandedBytes = 0L
                 members.forEach { member ->
-                    require(member.source.mimeType in readerSafetyAllowedComicPageMimeTypes())
+                    // MIME is metadata. The image decoder validates the returned bytes;
+                    // unfamiliar declarations must not prevent the page from downloading.
                     require(member.source.totalBytes <= readerSafetyComicPageMaxBytes())
                     require(member.source.totalBytes <= readerSafetyComicExpandedMaxBytes() - expandedBytes)
                     expandedBytes += member.source.totalBytes

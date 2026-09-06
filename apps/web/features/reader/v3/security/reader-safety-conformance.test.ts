@@ -6,7 +6,7 @@ import { generateWebReaderSafetyConformanceReport } from '../../../../scripts/ge
 
 const FIXTURE_ROOT = path.resolve(
   import.meta.dirname,
-  '../../../../../../packages/reader-contracts/fixtures/reader-safety-v1'
+  '../../../../../../packages/reader-contracts/fixtures/reader-safety-v2'
 );
 
 async function loadJson(name: string): Promise<unknown> {
@@ -26,7 +26,11 @@ function objectValue(value: unknown): object {
 function expectedCases(value: unknown): ReadonlyMap<string, object> {
   const cases = Reflect.get(objectValue(value), 'cases');
   assert.ok(Array.isArray(cases));
-  return new Map(cases.map((candidate: unknown) => {
+  return new Map(cases.filter((candidate: unknown) => {
+    const consumers = Reflect.get(objectValue(candidate), 'requiredConsumers');
+    assert.ok(Array.isArray(consumers));
+    return consumers.includes('WEB');
+  }).map((candidate: unknown) => {
     const candidateObject = objectValue(candidate);
     const caseId = Reflect.get(candidateObject, 'id');
     const expected = Reflect.get(candidateObject, 'expected');
@@ -43,7 +47,8 @@ test('Web conformance report executes the production preflight facade', async ()
   const report = await generateWebReaderSafetyConformanceReport(suite, manifest, 'web-test');
 
   assert.equal(report.consumer, 'WEB');
-  assert.equal(report.results.length, 48);
+  assert.equal(report.engine, 'web-test/chromium+webkit');
+  assert.equal(report.results.length, expected.size);
   assert.deepEqual(report.omissions, []);
   for (const result of report.results) {
     const expectedResult = expected.get(result.caseId);

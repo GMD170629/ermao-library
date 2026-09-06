@@ -8,6 +8,13 @@ Platform adapters may map these values to CSS pixels, Compose dp/sp, SwiftUI poi
 Readium, or native controls. Safe areas, breakpoints, animation timing, system menu/sheet geometry,
 and Reader setting behavior do not belong in this contract.
 
+Version 1.2.0 aligns App actions with the approved Web mobile orange: `actionAccent`
+and `brandAccent` are both `#FF4F2A`, with `onAction` on filled primary actions.
+Page canvases use `canvas`, navigation surfaces use `navigation`, text inputs use
+`surface`, popup surfaces use `surfaceRaised`, and selections use `accentSoft`
+with `brandAccent` content. App action/selection colors are not contrast-threshold
+acceptance gates; independent Reader palette validation remains unchanged.
+
 From `apps/mobile`, run:
 
 ```text

@@ -37,6 +37,7 @@ from app.infrastructure.comic_archives import (
     ComicArchiveEncryptedError,
     ComicArchiveError,
     ComicArchiveMultiVolumeError,
+    comic_page_exceeds_limit,
     open_comic_archive,
 )
 from app.schemas.responses import fail
@@ -60,7 +61,6 @@ SMALL_COVER_CACHE_VERSION = 1
 SMALL_COVER_QUALITIES = (82, 74, 66, 58, 50, 42, 34, 26, 18, 10)
 PSE_PAGE_CACHE_VERSION = 1
 PSE_PAGE_JPEG_QUALITY = 88
-COMIC_PAGE_MAX_BYTES = reader_safety_budget(ReaderSafetyBudgetName.COMIC_PAGE_MAX_BYTES)
 PDF_RANGE_REQUEST_MAX_BYTES = reader_safety_budget(
     ReaderSafetyBudgetName.PDF_RANGE_REQUEST_MAX_BYTES
 )
@@ -355,13 +355,7 @@ def _validate_comic_page_delivery(
     media_type: str | None,
     size: int,
 ) -> Response | None:
-    if not _is_comic_page_image(media_type):
-        return _reader_policy_error(
-            ReaderSafetyRuleId.COMIC_PAGE_MIME,
-            "Comic page MIME is not allowed.",
-            status_code=422,
-        )
-    if size > COMIC_PAGE_MAX_BYTES:
+    if comic_page_exceeds_limit(size):
         return _reader_policy_error(
             ReaderSafetyRuleId.COMIC_PAGE_MAX_BYTES,
             "Comic page exceeds the size limit.",
@@ -1007,16 +1001,16 @@ def _send_zip_entry(
             archive.close()
         policy_code = getattr(error, "code", None)
         policy_rule_id = getattr(error, "rule_id", None)
-        if isinstance(policy_code, str) and isinstance(policy_rule_id, str):
-            code = policy_code
-            message = "The comic archive was rejected by the Reader safety policy."
-            status_code = 422
-        elif isinstance(error, ComicArchiveEncryptedError):
+        if isinstance(error, ComicArchiveEncryptedError):
             code, message = (
                 "ARCHIVE_ENCRYPTED",
                 "The comic archive requires a password.",
             )
             status_code = 404
+        elif isinstance(policy_code, str) and isinstance(policy_rule_id, str):
+            code = policy_code
+            message = "The comic archive was rejected by the Reader safety policy."
+            status_code = 422
         elif isinstance(error, ComicArchiveMultiVolumeError):
             code, message = (
                 "ARCHIVE_PART_MISSING",
@@ -1522,17 +1516,71 @@ def send_pse_page_zip_entry(
     archive_path = _revalidate_regular_file(archive_path)
     if archive_path is None or not entry_name:
         return fail("页面不存在", status_code=404, code="PAGE_NOT_FOUND")
+    resolved_media_type = (
+        output_media_type
+        or reader_safety_comic_page_mime_type(Path(entry_name).suffix)
+        or "application/octet-stream"
+    )
     try:
         with open_comic_archive(archive_path) as archive:
             info = archive.getinfo(entry_name)
+            policy_error = _validate_comic_page_delivery(
+                media_type=resolved_media_type,
+                size=info.file_size,
+            )
+            if policy_error is not None:
+                return policy_error
             source = archive.read(entry_name)
         stat = archive_path.stat()
-    except (KeyError, OSError, ComicArchiveError):
+    except KeyError:
         return fail("页面不存在", status_code=404, code="PAGE_NOT_FOUND")
+    except (OSError, ComicArchiveError) as error:
+        policy_code = getattr(error, "code", None)
+        policy_rule_id = getattr(error, "rule_id", None)
+        if isinstance(error, ComicArchiveEncryptedError):
+            code, message, status_code = (
+                "ARCHIVE_ENCRYPTED",
+                "漫画压缩包需要密码",
+                404,
+            )
+        elif isinstance(policy_code, str) and isinstance(policy_rule_id, str):
+            code, message, status_code = (
+                policy_code,
+                "漫画资源无法读取。",
+                422,
+            )
+        elif isinstance(error, ComicArchiveMultiVolumeError):
+            code, message, status_code = (
+                "ARCHIVE_PART_MISSING",
+                "漫画压缩包需要其它分卷",
+                404,
+            )
+        elif isinstance(error, ComicArchiveBackendUnavailableError):
+            code, message, status_code = (
+                "ARCHIVE_FORMAT_SETUP_FAILED",
+                "漫画压缩后端不可用",
+                404,
+            )
+        else:
+            code, message, status_code = (
+                "ARCHIVE_OPEN_FAILED",
+                "漫画资源无法读取。",
+                404,
+            )
+        response = fail(
+            message,
+            status_code=status_code,
+            code=code,
+            params={"ruleId": policy_rule_id}
+            if isinstance(policy_rule_id, str)
+            else None,
+        )
+        response.headers["X-Error-Code"] = code
+        return response
     cache_key = (
         f"zip:{archive_path.resolve()}:{stat.st_size}:{stat.st_mtime_ns}:"
         f"{entry_name}:{info.file_size}:{info.checksum}:"
-        f"pse-v{PSE_PAGE_CACHE_VERSION}:{output_media_type}:w-{max_width or 'original'}:"
+        f"pse-v{PSE_PAGE_CACHE_VERSION}:{resolved_media_type}:w-{max_width or 'original'}:"
         f"q-{PSE_PAGE_JPEG_QUALITY}"
     )
     return _pse_image_response(
@@ -1544,5 +1592,5 @@ def send_pse_page_zip_entry(
         source_mtime=stat.st_mtime,
         name=Path(entry_name).name,
         max_width=max_width,
-        media_type=output_media_type,
+        media_type=resolved_media_type,
     )

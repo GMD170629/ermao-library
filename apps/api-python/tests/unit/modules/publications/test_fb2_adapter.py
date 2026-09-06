@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from app.modules.publications.application.ports import PublicationSource
 from app.modules.publications.domain.model import (
     PublicationCorruptError,
     PublicationParserLimitError,
+    PublicationResourceBlockedError,
     PublicationResourceNotFoundError,
 )
 from app.modules.publications.infrastructure import fb2_adapter as fb2_adapter_module
@@ -48,6 +50,48 @@ def _source(path: Path) -> PublicationSource:
     )
 
 
+def test_fb2_mixed_body_order_and_untitled_sections_do_not_create_extra_chapters(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "mixed.fb2"
+    path.write_text(
+        "<FictionBook><body><p>Before</p>"
+        "<section><p>Untitled before</p><section><title><p>Nested</p></title>"
+        "<p>Nested body</p></section><p>Untitled after</p></section>"
+        "<p>Between</p><section><title><p>Last</p></title><p>Last body</p></section>"
+        "<p>After</p></body></FictionBook>",
+        encoding="utf-8",
+    )
+    source = _source(path)
+    adapter = Fb2PublicationAdapter(tmp_path)
+    publication = adapter.open(source)
+    assert [entry.title for entry in publication.toc] == ["Nested", "Last"]
+    assert [entry.navigation_key for entry in publication.toc] == [
+        "chapter-0",
+        "chapter-1",
+    ]
+    markup = "".join(
+        adapter.read_resource(source, link.href).content.decode()
+        for link in publication.reading_order
+    )
+    markers = [
+        ">Before<",
+        ">Untitled before<",
+        ">Nested body<",
+        ">Untitled after<",
+        ">Between<",
+        ">Last body<",
+        ">After<",
+    ]
+    assert [markup.index(marker) for marker in markers] == sorted(
+        markup.index(marker) for marker in markers
+    )
+    for entry in publication.toc:
+        assert entry.href is not None
+        href, _, anchor = entry.href.partition("#")
+        assert f'id="{anchor}"' in adapter.read_resource(source, href).content.decode()
+
+
 def test_fb2_adapter_builds_nested_toc_and_safe_virtual_resources(
     tmp_path: Path,
 ) -> None:
@@ -78,7 +122,7 @@ def test_fb2_adapter_builds_nested_toc_and_safe_virtual_resources(
     assert publication.author == "测试 作者"
     assert publication.language == "zh-CN"
     assert publication.revision.parser == "shuku-fb2-parser-v1"
-    assert publication.revision.normalization == "shuku-fb2-publication-v2"
+    assert publication.revision.normalization == "shuku-fb2-publication-v3"
     assert [entry.title for entry in publication.toc] == ["第一部", "注释"]
     assert [entry.title for entry in publication.toc[0].children] == ["第二章"]
     assert [link.href for link in publication.reading_order] == [
@@ -91,7 +135,7 @@ def test_fb2_adapter_builds_nested_toc_and_safe_virtual_resources(
     assert "开篇 &amp; 正文" in markup
     assert 'data-shuku-security-profile="web-v2"' in markup
     assert "<em>重点</em>" in markup
-    assert 'href="section-0002.xhtml#fb2-node-' in markup
+    assert 'href="section-0002.xhtml#chapter-node-' in markup
     assert 'src="images/' in markup
     image = next(
         link for link in publication.resources if link.media_type == "image/png"
@@ -99,7 +143,7 @@ def test_fb2_adapter_builds_nested_toc_and_safe_virtual_resources(
     assert adapter.read_resource(source, image.href).content.startswith(b"\x89PNG")
 
 
-def test_fb2_adapter_rejects_active_xml_and_unindexed_resources(
+def test_fb2_adapter_literalizes_external_xml_and_rejects_unindexed_resources(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "unsafe.fb2"
@@ -110,8 +154,10 @@ def test_fb2_adapter_rejects_active_xml_and_unindexed_resources(
     )
     adapter = Fb2PublicationAdapter(tmp_path)
 
-    with pytest.raises(PublicationCorruptError):
-        adapter.open(_source(path))
+    source = _source(path)
+    publication = adapter.open(source)
+    markup = adapter.read_resource(source, publication.reading_order[0].href)
+    assert "&amp;leak;" in markup.content.decode()
 
     path.write_text(
         "<FictionBook><body><section><title><p>正文</p></title></section></body></FictionBook>",
@@ -145,7 +191,7 @@ def test_fb2_adapter_repairs_legacy_l_href_bound_as_xlink(
     ).content.decode()
 
     assert publication.title == "Legacy links"
-    assert 'href="section-0001.xhtml#fb2-node-' in markup
+    assert 'href="section-0001.xhtml#chapter-node-' in markup
 
 
 def test_fb2_adapter_still_rejects_unbound_non_link_prefix(
@@ -180,6 +226,7 @@ def test_fb2_image_budget_blocks_only_the_oversized_optional_resource(
 </FictionBook>""",
         encoding="utf-8",
     )
+    original_hash = hashlib.sha256(path.read_bytes()).hexdigest()
     adapter = Fb2PublicationAdapter(tmp_path)
     source = _source(path)
 
@@ -189,10 +236,13 @@ def test_fb2_image_budget_blocks_only_the_oversized_optional_resource(
     ).content.decode()
 
     assert "Still readable" in markup
-    assert "<img" not in markup
-    assert all(
-        not link.media_type.startswith("image/") for link in publication.resources
-    )
+    assert '<img src="images/' in markup
+    image = next(link for link in publication.resources if "images/" in link.href)
+    with pytest.raises(PublicationResourceBlockedError) as failure:
+        adapter.read_resource(source, image.href)
+    assert failure.value.rule_id == "FB2.IMAGE_BUDGET"
+    assert failure.value.code == "PUBLICATION_RESOURCE_BLOCKED"
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == original_hash
 
 
 def test_fb2_structure_budget_failure_carries_generated_rule_id(
@@ -211,3 +261,66 @@ def test_fb2_structure_budget_failure_carries_generated_rule_id(
 
     assert failure.value.code == "PUBLICATION_PARSER_LIMIT"
     assert failure.value.rule_id == "FB2.STRUCTURE_BUDGET"
+
+
+@pytest.mark.parametrize("media_type", ["image/future-format", ""])
+def test_fb2_unknown_image_metadata_reaches_resource_decoder(
+    tmp_path: Path,
+    media_type: str,
+) -> None:
+    path = tmp_path / "unknown-image.fb2"
+    original = (
+        '<FictionBook xmlns:l="http://www.w3.org/1999/xlink">'
+        '<body><section><p>Readable</p><image l:href="#image"/></section></body>'
+        f'<binary id="image" content-type="{media_type}">aGVsbG8=</binary>'
+        "</FictionBook>"
+    ).encode()
+    path.write_bytes(original)
+    adapter = Fb2PublicationAdapter(tmp_path)
+    source = _source(path)
+    publication = adapter.open(source)
+    resource = next(link for link in publication.resources if "images/" in link.href)
+    assert adapter.read_resource(source, resource.href).content == b"hello"
+    assert (
+        "<img"
+        in adapter.read_resource(
+            source, publication.reading_order[0].href
+        ).content.decode()
+    )
+    assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    "binary",
+    [
+        '<binary id="image" content-type="image/png">invalid!</binary>',
+        (
+            '<binary id="image" content-type="image/png">aGVsbG8=</binary>'
+            '<binary id="image" content-type="image/future-format">d29ybGQ=</binary>'
+        ),
+    ],
+)
+def test_fb2_corrupt_optional_binary_does_not_reject_body(
+    tmp_path: Path,
+    binary: str,
+) -> None:
+    path = tmp_path / "corrupt-image.fb2"
+    path.write_text(
+        "<FictionBook><body><section><p>Still readable</p></section></body>"
+        + binary
+        + "</FictionBook>",
+        encoding="utf-8",
+    )
+    adapter = Fb2PublicationAdapter(tmp_path)
+    source = _source(path)
+    publication = adapter.open(source)
+    assert (
+        "Still readable"
+        in adapter.read_resource(
+            source, publication.reading_order[0].href
+        ).content.decode()
+    )
+    resource = next(link for link in publication.resources if "images/" in link.href)
+    with pytest.raises(PublicationResourceBlockedError) as failure:
+        adapter.read_resource(source, resource.href)
+    assert failure.value.rule_id == "REFLOWABLE.OPTIONAL_RESOURCE_FAILURE"

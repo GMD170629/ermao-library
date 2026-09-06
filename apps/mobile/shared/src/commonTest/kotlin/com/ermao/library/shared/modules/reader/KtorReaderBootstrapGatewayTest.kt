@@ -213,7 +213,7 @@ class KtorReaderBootstrapGatewayTest {
     }
 
     @Test
-    fun rejectsUnsupportedAndMismatchedAssets() = runBlocking {
+    fun mapsSourceFormatAndKeepsUnknownMimeForActualReaderCapabilityDetection() = runBlocking {
         val fb2 = VALID_BOOTSTRAP
             .replace("\"sourceFormat\":\"epub\"", "\"sourceFormat\":\"fb2\"")
             .replace("\"format\":\"EPUB\"", "\"format\":\"FB2\"")
@@ -221,14 +221,19 @@ class KtorReaderBootstrapGatewayTest {
         val fb2Content = assertIs<Content>(gateway(fb2).load(request())).value
         assertEquals("fb2", fb2Content.resource.sourceFormat.wireValue)
 
-        val mismatched = VALID_BOOTSTRAP.replace(
+        val unknownMime = VALID_BOOTSTRAP.replace(
             "\"mimeType\":\"application/epub+zip\"",
-            "\"mimeType\":\"application/x-mobipocket-ebook\"",
+            "\"mimeType\":\"application/octet-stream\"",
         )
-        assertEquals(
-            "READER_PUBLICATION_ASSET_INVALID",
-            assertIs<Failure>(gateway(mismatched).load(request())).failureCode,
+        val unknownMimeContent = assertIs<Content>(gateway(unknownMime).load(request())).value
+        assertEquals("application/octet-stream", unknownMimeContent.assets.single().mimeType)
+
+        val missingMime = VALID_BOOTSTRAP.replace(
+            "\"mimeType\":\"application/epub+zip\",",
+            "",
         )
+        val missingMimeContent = assertIs<Content>(gateway(missingMime).load(request())).value
+        assertEquals("application/octet-stream", missingMimeContent.assets.single().mimeType)
     }
 
     private fun pdfBootstrap(): String = VALID_BOOTSTRAP

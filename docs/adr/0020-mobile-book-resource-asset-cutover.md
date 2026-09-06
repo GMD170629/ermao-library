@@ -1,120 +1,46 @@
-# ADR 0020：Mobile Book / ReadableResource / ResourceAsset 一次性切换
+# ADR 0020：Mobile Book / ReadableResource / ResourceAsset 身份与协议
 
-- 状态：Accepted（实现与真机验收进行中）
-- 日期：2026-08-23
-- 依据：ADR 0006、0011、0014、0015、0016、0018、0019
-- 类型：Mobile-only、破坏性本地契约切换
+- 状态：Accepted
+- 类型：Mobile 公共身份、兼容握手和本地下载边界
 
-## 1. 背景
+## 决策
 
-ADR 0019 已将后端、API、Web 与 Reader 服务切换为 Book、ReadableResource 和
-ResourceAsset，同时明确把 Mobile 排除在该批次之外。服务端不提供 Work、Version、
-Volume、File 兼容路由或旧 ID 映射，因此旧 Mobile 虽能通过 protocol v2 握手，却会在
-书库、详情、Reader、进度、书签、书架和下载流程中延迟失败。
-
-本 ADR 完成 ADR 0019 要求的 Mobile 独立切换。它不恢复旧接口，不引入双读、双写或
-客户端运行时转换层。
-
-## 2. 唯一 Mobile 身份
-
-Mobile 生产代码只使用以下身份：
+Mobile 生产代码与 [ADR 0019](0019-book-readable-resource-system-cutover.md) 共享唯一
+身份：
 
 ```text
-Book(bookId)
-  └─ ReadableResource(resourceId)
-       └─ ResourceAsset(assetId)
+Book(bookId) → ReadableResource(resourceId) → ResourceAsset(assetId)
 ```
 
-- 删除 Mobile 的 Version 层；
-- Work 改为 Book，Volume 改为 Resource，File 改为 Asset；
-- Reader、进度、书签和阅读状态的 owner 是 `resourceId`；
-- 音频位置与媒体传输使用 `assetId`；
-- 本地精确进度身份为
-  `serverIdentity + userId + clientId + bookId + resourceId`；
-- 私有下载命名空间仍为
-  `serverIdentity + userId + authorizationVersion`。
+Reader、进度和书签的内容 owner 是 `resourceId`；媒体、音频和原始文件传输使用
+`assetId`。书架、详情、metadata、Kindle、备份、OPDS 和下载均使用当前 Book/Resource/Asset
+contract，不维护 Work/Version/Volume/File 转换层。
 
-Mobile 只调用 ADR 0019 的 Book/Resource/Asset HTTP 契约，包括：
+兼容握手由 `apps/api-python/app/modules/mobile/domain/compatibility.py` 唯一生成：
 
-```text
-GET /api/books
-GET /api/books/{bookId}
-GET /api/books/{bookId}/resources
-GET /api/resources/{resourceId}
-GET /api/resources/{resourceId}/assets
-GET /api/assets/{assetId}
-GET /api/resources/{resourceId}/asset
-GET|PUT /api/reader/v4/resources/{resourceId}/...
-```
+- `protocol.version = 3`，`minimumSupportedClientVersion = 3`；
+- `readerSchemaVersion = 5`，`librarySchemaVersion = 1`；
+- `readerV5`、`mediaRange`、`managedOfflineDownloads` 和 `bookResourceAsset` 能力必须
+  与实际服务端能力一致；`bookDetailManagement` 是能力字段，不是绕过资源授权的全局开关。
 
-书架、Kindle、详情管理与 metadata 请求同样使用当前 Book/Resource/Asset 路由和请求体。
+Mobile 必须在进入业务 Shell 前验证握手，旧 protocol/client 直接失败。当前 Reader 路径
+使用 `/api/reader/v5/resources/{resourceId}/...`，Library/Media 路径使用
+`/api/books`、`/api/resources` 和 `/api/assets`；不注册旧身份兼容路由。
 
-## 3. 兼容性握手
+本地 Downloads 是完整原始文件的唯一设备 owner。KMP `DownloadResourceRuntime` 统一任务
+创建、去重、鉴权传输、校验和完成登记；平台 adapter 负责 app-private staging、原子发布、
+生命周期和文件清理。Reader 只观察或打开同一合格工件，不复制文件、不拼第二套下载流程，
+也不持久化派生 EPUB、ZIP 或解包目录。下载 artifact 由授权 namespace、resource/asset identity
+和版本/长度隔离；账号或授权 namespace 变化时按现有安全边界清理。
 
-Mobile 切换建立一个不可与旧客户端混用的新握手代际：
+## 当前证据
 
-- `protocol.version = 3`；
-- `protocol.minimumSupportedClientVersion = 3`；
-- `readerSchemaVersion = 4`；
-- `librarySchemaVersion = 1`；
-- `capabilities.bookResourceAsset = true`；
-- `capabilities.bookDetailManagement = true`；该历史详情管理依据已于 2026-08-26 废弃，当前动作范围以 Web Work Detail 实现和权限过滤为准；
-- `capabilities.managedOfflineDownloads = true`。
+KMP server and Reader repositories use v5 paths and `ReaderPositionReport`; the backend
+compatibility contract and `apps/mobile/shared` tests pin protocol 3/schema 5. Native Android
+and iOS wrappers own platform navigation and file handling; shared application code owns the
+download workflow.
 
-客户端必须同时验证 protocol、Reader schema、Library schema 与
-`bookResourceAsset`。v2 客户端在进入 App Shell 前失败为 `CLIENT_UPDATE_REQUIRED` 或
-`UNSUPPORTED_PROTOCOL_VERSION`，不得延迟到业务接口 404。
+## 后果
 
-`managedOfflineDownloads=true` 表示服务端提供经过授权的 Asset/Resource 媒体与 Range
-能力；设备下载清单、临时文件、完整性校验、原子发布、清理和离线 Reader handoff 仍完全
-由 Mobile 所有。它不表示服务端维护设备下载 manifest 或下载任务。
-
-## 4. 本地数据处理
-
-当前流式阅读迁移不改变 Book/Resource/Asset 身份、进度含义或书签合同。
-保留用户主动下载、本地导入、书签、精确进度及待同步变更。已有下载清单在原位置
-验证并升级结构，不重复复制原文件，不清空损坏清单来伪装成功。
-
-旧自动在线副本与未完成临时文件只有在元数据能确认其来源时才能清理；来源不明的
-文件必须保留。用户显式退出账号时仍按既有授权边界清除该账号私有数据。
-凭据、服务器 profile 和账户偏好不受本次阅读迁移影响。
-
-## 5. 保留的下载边界
-
-移动端 completed 下载继续保留。设备拥有 managed-download manifest 与 app-private
-内容目录，命名空间为 `serverIdentity + userId + authorizationVersion`。该清单不是服务端
-页面快照，也不提供独立授权；明确 logout、身份或授权 namespace 变化时必须清理。下载
-与 Reader 访问遵守以下边界：
-
-1. 从 Library Resource/Asset 公开合同取得原文件下载描述，不启动 Reader；
-2. 只接受 `/api/assets/{assetId}` 或 `/api/resources/{resourceId}/asset`；
-3. 流式写入 app-private staging；
-4. 校验声明长度、实际长度、MIME/格式和非空响应；
-5. 原子发布后，将 completed 任务与文件引用在同一 catalog 记录中原子登记；发布后中断可通过实际文件恢复登记；
-6. 取消、截断、越界、重定向异常和空间不足不得留下可读 completed 工件；
-7. 在线 Reader 只使用 Publication、漫画分页或 PDF Range；离线入口通过 Downloads 公开接口读取同一 namespace 的已验证工件，既不复制原文件，也不补下载。
-
-只有通过完整性和格式验证并已原子发布的工件可以标记为 completed。partial、取消、长度
-不符、格式不符、缺失或发布失败的文件均不可读。弱 ETag 不得充当 `If-Range` 验证器；在
-续传前必须核对原文件版本、实际 partial 长度及 Range 响应；版本变化创建独立任务，保留已有 completed 文件。
-
-Download Center 是 completed 本地下载、活动任务和失败任务的唯一发现入口，按 Book
-组织并可搜索本地 Book、作者与 Resource 元数据。Library 不提供 downloaded-only 筛选，
-不得通过网络 Library 列表推断设备清单。
-
-Shared KMP 的 `DownloadResourceRuntime` 是唯一下载业务入口，拥有任务创建、去重、暂停恢复、重试、鉴权传输、校验和完成登记。
-单项、批量与下载中心都调用同一入口；IMAGE_DIR 的各页复用同一传输机制，仅资源组织不同。Android/iOS 拥有 app-private 文件、staging、原子 manifest 持久化、平台
-生命周期协调、原生导航和破坏性确认。后台继续下载只有在 Cookie、base path、TLS、进程
-终止和锁屏行为通过对应物理设备验收后才能作为发布能力。
-
-IMAGE_DIR 将原图作为有序页面集原子保存，不合成 ZIP、EPUB 或其他派生出版物。
-
-## 6. 后果与验收
-
-- Mobile 与 protocol v2 服务端不兼容；旧客户端与 protocol v3 服务端不兼容；
-- 流式阅读迁移必须保留主动下载与既有精确阅读状态；
-- 测试 fixture 不得继续出现生产 `/api/works`、`/versions`、`/volumes`、`/files` 路由；
-- Android 最终验收必须构建 APK、对精确物理设备执行保留数据 replace-install、冷启动并
-  验证真实 Book → Resource → Asset → Reader/下载流程；
-- iOS 最终验收只允许 `iosArm64`/`iphoneos` 与物理 iPhone/iPad，不使用 Simulator；
-- 无物理设备、签名或解锁条件时，只能报告对应运行时门禁待完成，不能用编译结果替代。
+Mobile 与旧协议不兼容是显式握手结果，而不是延迟到业务 404。没有物理设备、签名或解锁
+条件时只能记录运行时验收待完成，不能用编译或模拟器结果宣称设备行为已通过。

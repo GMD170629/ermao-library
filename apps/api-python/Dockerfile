@@ -10,11 +10,16 @@ RUN cmake -S /src/mobi-core -B /build/mobi-core \
       -DERMAO_MOBI_BUILD_FUZZER=OFF \
   && cmake --build /build/mobi-core --config Release --target ermao_mobi_core_shared
 
+COPY packages/reader-core/native/chapters /src/chapters
+RUN cmake -S /src/chapters -B /build/chapters -DBUILD_TESTING=OFF \
+  && cmake --build /build/chapters --config Release --target ermao_chapters_shared
+
 FROM python:3.11.15-slim-bookworm AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
   PYTHONUNBUFFERED=1 \
-  ERMAO_MOBI_CORE_LIBRARY=/usr/local/lib/libermao_mobi_core.so
+  ERMAO_MOBI_CORE_LIBRARY=/usr/local/lib/libermao_mobi_core.so \
+  ERMAO_CHAPTER_CORE_LIBRARY=/usr/local/lib/libermao_chapters.so
 
 WORKDIR /app/apps/api-python
 
@@ -25,6 +30,8 @@ RUN apt-get update \
 COPY apps/api-python/pyproject.toml apps/api-python/uv.lock ./
 COPY apps/api-python/app ./app
 COPY --from=mobi-core-builder /build/mobi-core/libermao_mobi_core.so /usr/local/lib/libermao_mobi_core.so
+COPY --from=mobi-core-builder /build/chapters/libermao_chapters.so /usr/local/lib/libermao_chapters.so
+COPY --from=mobi-core-builder /src/chapters /usr/share/shuku/source/chapters
 COPY --from=mobi-core-builder /src/mobi-core/LICENSE /usr/share/licenses/shuku-mobi-core/LICENSE
 COPY --from=mobi-core-builder /src/mobi-core/UPSTREAM.md /usr/share/licenses/shuku-mobi-core/UPSTREAM.md
 COPY --from=mobi-core-builder /src/mobi-core /usr/share/shuku/source/mobi-core

@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 3,
+  "normalization": "shuku-epub-locator-dom-v4",
+  "policyId": "shuku.reader-safety",
+  "policyVersion": 4,
+  "policyDigest": "edfc4aeef6a2f40316dcf38b5727559921ecd7af68da79f349718e2021d108f5",
+  "readingOrder": [
+    {
+      "href": "OPS/chapter.xhtml",
+      "mediaType": "application/xhtml+xml",
+      "elements": [
+        {
+          "path": "/body[1]",
+          "localName": "body"
+        },
+        {
+          "path": "/body[1]/h1[1]",
+          "localName": "h1",
+          "id": "chapter-title",
+          "text": "天地玄黄"
+        }
+      ]
+    }
+  ]
+}

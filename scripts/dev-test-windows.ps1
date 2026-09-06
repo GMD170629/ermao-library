@@ -58,6 +58,11 @@ foreach ($requiredFile in @($PythonExecutable, $NodeExecutable, $CorepackExecuta
     }
 }
 
+& $PythonExecutable -c "import sqlalchemy, uvicorn"
+if ($LASTEXITCODE -ne 0) {
+    throw "Windows Python is unavailable; the previous service was not stopped. See docs/python-backend-runtime.md for environment setup."
+}
+
 New-Item -ItemType Directory -Path $RuntimeDirectory -Force | Out-Null
 New-Item -ItemType Directory -Path $env:STORAGE_ROOT -Force | Out-Null
 

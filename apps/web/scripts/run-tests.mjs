@@ -28,7 +28,9 @@ if (tests.length === 0) {
 }
 
 const command = process.platform === "win32" ? "tsx.cmd" : "tsx";
-const result = spawnSync(command, ["--test", ...tests], {
+// The pinned Readium SDK exposes ESM import entries only. Node 22 can load
+// these entries from tsx's mixed-module tests without replacing SDK modules.
+const result = spawnSync(command, ["--conditions=import", "--test", ...tests], {
   stdio: "inherit",
   shell: process.platform === "win32",
 });

@@ -66,6 +66,7 @@ data class ReadingUnitsPage(
     val pageSize: Int,
     val total: Int,
     val totalPages: Int,
+    val chapterCount: Int? = null,
 )
 
 data class ReadingUnit(

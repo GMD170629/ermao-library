@@ -192,21 +192,11 @@ actor SharedContentClient: ContentClient {
             )
         )
         let value: ErmaoShared.ResourceReadingUnitsPage = try contentValue(result)
-        let currentSortOrder = value.currentChapterSortOrder?.intValue
-        let currentIndex = value.currentChapterIndex?.intValue
+        let states = chapterStates(value)
         let chapters = value.units.enumerated().compactMap { index, unit -> BookChapter? in
             guard unit.unitType.lowercased() == "chapter" else { return nil }
             let sortOrder = Int(unit.sortOrder)
-            let state: ChapterReadingState
-            if sortOrder == currentSortOrder || index == currentIndex {
-                state = .current
-            } else if let currentSortOrder, sortOrder < currentSortOrder {
-                state = .read
-            } else if let currentIndex, index < currentIndex {
-                state = .read
-            } else {
-                state = .unread
-            }
+            let state = states[index]
             return BookChapter(
                 id: unit.id,
                 title: unit.title ?? String(
@@ -216,6 +206,7 @@ actor SharedContentClient: ContentClient {
                 ),
                 progress: state == .current ? value.progress : nil,
                 isCurrent: state == .current,
+                navigationKey: unit.metadata.navigationKey,
                 href: unit.href,
                 sortOrder: sortOrder,
                 readingOrderPosition: unit.metadata.readingOrderPosition?.intValue,
@@ -230,6 +221,18 @@ actor SharedContentClient: ContentClient {
             total: Int(value.total),
             totalPages: Int(value.totalPages)
         )
+    }
+
+    private func chapterStates(_ page: ErmaoShared.ResourceReadingUnitsPage) -> [ChapterReadingState] {
+        ErmaoShared.PublicKt.resolveReaderChapterStates(
+            units: page.units.map { ErmaoShared.ReaderChapterUnit(
+                href: $0.href, sortOrder: $0.sortOrder,
+                readingOrderPosition: $0.metadata.readingOrderPosition,
+                navigationKey: $0.metadata.navigationKey
+            ) },
+            currentSortOrder: page.currentChapterSortOrder,
+            progressPercent: page.progress
+        ).map { $0 == .current ? .current : ($0 == .read ? .read : .unread) }
     }
 
     func fetchResourceDetail(
@@ -250,22 +253,17 @@ actor SharedContentClient: ContentClient {
         )
         let value: ErmaoShared.ResourceReadingUnitsPage = try contentValue(result)
         let currentSortOrder = value.currentChapterSortOrder?.intValue
-        let currentIndex = value.currentChapterIndex?.intValue
+        let states = chapterStates(value)
         let units = value.units.enumerated().map { index, unit in
             let sortOrder = Int(unit.sortOrder)
             let chapterState: ChapterReadingState? = if unit.unitType.lowercased() != "chapter" {
                 nil
-            } else if sortOrder == currentSortOrder || index == currentIndex {
-                .current
-            } else if let currentSortOrder, sortOrder < currentSortOrder {
-                .read
-            } else if let currentIndex, index < currentIndex {
-                .read
             } else {
-                .unread
+                states[index]
             }
             return BookResourceDetailUnit(
                 id: unit.id,
+                navigationKey: unit.metadata.navigationKey,
                 title: unit.title ?? "",
                 unitType: unit.unitType,
                 assetID: unit.assetId,
@@ -287,6 +285,7 @@ actor SharedContentClient: ContentClient {
             pageSize: Int(value.pageSize),
             total: Int(value.total),
             totalPages: Int(value.totalPages),
+            chapterCount: value.chapterCount?.intValue,
             currentHref: value.currentHref,
             currentChapterSortOrder: currentSortOrder,
             currentPageNumber: value.currentPageNumber?.intValue,

@@ -18,6 +18,40 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardOptions
 import com.ermao.library.ui.theme.WarmPageThemeValues
 
+/** One visual owner for search and form fields; callers retain their own input behavior. */
+internal object WarmPageTextFieldDefaults {
+    val shape: RoundedCornerShape
+        @Composable get() = RoundedCornerShape(WarmPageThemeValues.radii.control)
+
+    @Composable
+    fun colors() = with(WarmPageThemeValues.colors) {
+        OutlinedTextFieldDefaults.colors(
+            focusedTextColor = textPrimary,
+            unfocusedTextColor = textPrimary,
+            disabledTextColor = textTertiary,
+            focusedContainerColor = surface,
+            unfocusedContainerColor = surface,
+            disabledContainerColor = surface,
+            cursorColor = actionAccent,
+            focusedBorderColor = actionAccent,
+            unfocusedBorderColor = divider,
+            disabledBorderColor = divider,
+            focusedLabelColor = actionAccent,
+            unfocusedLabelColor = textSecondary,
+            disabledLabelColor = textTertiary,
+            focusedLeadingIconColor = textSecondary,
+            unfocusedLeadingIconColor = textSecondary,
+            disabledLeadingIconColor = textTertiary,
+            focusedTrailingIconColor = textSecondary,
+            unfocusedTrailingIconColor = textSecondary,
+            disabledTrailingIconColor = textTertiary,
+            focusedPlaceholderColor = textSecondary,
+            unfocusedPlaceholderColor = textSecondary,
+            disabledPlaceholderColor = textTertiary,
+        )
+    }
+}
+
 @Composable
 fun WarmPageSearchField(
     value: String,
@@ -34,19 +68,17 @@ fun WarmPageSearchField(
         onValueChange = onValueChange,
         enabled = enabled,
         singleLine = true,
-        textStyle = theme.typography.body.copy(color = theme.colors.textPrimary),
+        textStyle = theme.typography.body,
         placeholder = {
             Text(
                 text = placeholder,
                 style = theme.typography.callout,
-                color = theme.colors.textSecondary,
             )
         },
         leadingIcon = {
             Icon(
                 imageVector = Icons.Outlined.Search,
                 contentDescription = null,
-                tint = theme.colors.textSecondary,
                 modifier = Modifier.size(theme.components.controls.iconSize),
             )
         },
@@ -56,32 +88,15 @@ fun WarmPageSearchField(
                     Icon(
                         imageVector = Icons.Filled.Close,
                         contentDescription = clearLabel,
-                        tint = theme.colors.textSecondary,
+                        modifier = Modifier.size(theme.components.controls.iconSize),
                     )
                 }
             }
         } else {
             null
         },
-        shape = RoundedCornerShape(theme.radii.control),
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedTextColor = theme.colors.textPrimary,
-            unfocusedTextColor = theme.colors.textPrimary,
-            disabledTextColor = theme.colors.textTertiary,
-            focusedContainerColor = theme.colors.surface,
-            unfocusedContainerColor = theme.colors.surface,
-            disabledContainerColor = theme.colors.canvas,
-            cursorColor = theme.colors.actionAccent,
-            focusedBorderColor = theme.colors.actionAccent,
-            unfocusedBorderColor = theme.colors.divider,
-            disabledBorderColor = theme.colors.divider,
-            focusedLeadingIconColor = theme.colors.textSecondary,
-            unfocusedLeadingIconColor = theme.colors.textSecondary,
-            focusedTrailingIconColor = theme.colors.textSecondary,
-            unfocusedTrailingIconColor = theme.colors.textSecondary,
-            focusedPlaceholderColor = theme.colors.textSecondary,
-            unfocusedPlaceholderColor = theme.colors.textSecondary,
-        ),
+        shape = WarmPageTextFieldDefaults.shape,
+        colors = WarmPageTextFieldDefaults.colors(),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
         modifier = modifier
             .fillMaxWidth()

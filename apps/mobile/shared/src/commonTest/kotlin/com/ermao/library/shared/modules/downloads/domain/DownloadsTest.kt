@@ -111,7 +111,10 @@ class DownloadsTest {
             members = members,
         )
 
-        assertFailsWith<IllegalArgumentException> { descriptorFor(listOf(page(0, "image/svg+xml"))) }
+        assertEquals(
+            "image/svg+xml",
+            descriptorFor(listOf(page(0, "image/svg+xml"))).members.single().source.mimeType,
+        )
         assertFailsWith<IllegalArgumentException> {
             descriptorFor(listOf(page(0, bytes = readerSafetyComicPageMaxBytes() + 1)))
         }

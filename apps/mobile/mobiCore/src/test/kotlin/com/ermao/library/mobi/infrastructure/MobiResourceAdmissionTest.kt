@@ -39,6 +39,26 @@ class MobiResourceAdmissionTest {
         assertEquals(readerSafetyReflowableMarkupMaxBytesFailure(), failure.failure)
     }
 
+    @Test
+    fun unknownOrMissingMimeUsesDecoderCategoryHintInsteadOfAdmissionRejection() {
+        val unknown = MobiCoreResourceInfo(
+            category = MobiCoreResourceCategory.Markup,
+            sourceUid = 1L,
+            decodedLength = 1L,
+            sourceName = "chapter",
+            mediaType = "application/future-reader",
+        )
+        val binary = unknown.copy(
+            category = MobiCoreResourceCategory.Asset,
+            sourceUid = 2L,
+            sourceName = "image",
+            mediaType = "",
+        )
+
+        assertEquals(requireNotNull(MediaType("application/future-reader")), mobiResourceMediaType(unknown))
+        assertEquals(requireNotNull(MediaType("application/octet-stream")), mobiResourceMediaType(binary))
+    }
+
     private fun descriptor(index: Int, mediaType: MediaType, bytes: Long) =
         MobiResourceDescriptor(index, "resource-$index", mediaType, bytes)
 }

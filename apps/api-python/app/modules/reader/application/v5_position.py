@@ -42,7 +42,12 @@ def _compact_json(value: object, *, sort_keys: bool = False) -> str:
 def _chapter_json(value: ReaderV5ChapterDto | None) -> dict[str, object] | None:
     if value is None:
         return None
-    return {"href": value.href, "title": value.title, "index": value.index}
+    return {
+        "href": value.href,
+        "title": value.title,
+        "index": value.index,
+        "navigationKey": value.navigation_key,
+    }
 
 
 def _page_json(value: ReaderV5PageDto | None) -> dict[str, object] | None:

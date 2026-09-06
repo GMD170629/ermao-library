@@ -1,4 +1,4 @@
-import { comicImageSizing } from './comic-model';
+import { comicImageSizing, comicSafetyPlaceholderMessage } from './comic-model';
 import type { ComicTrackPage } from './comic-track';
 import { normalizeLocale } from '../../../../i18n/config';
 import { translateMessage } from '../../../../i18n/messages';
@@ -164,7 +164,10 @@ export class ComicContinuousController {
         this.renderFailure(
           slot,
           page.pageIndex,
-          translateMessage(normalizeLocale(this.document.documentElement.lang), '漫画页面因安全策略无法显示。'),
+          translateMessage(
+            normalizeLocale(this.document.documentElement.lang),
+            comicSafetyPlaceholderMessage(page.safetyError.code)
+          ),
           false
         );
         slot.element.dataset.readerSafetyRuleId = page.safetyError.ruleId;

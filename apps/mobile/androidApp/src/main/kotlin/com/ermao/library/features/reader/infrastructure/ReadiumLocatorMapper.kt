@@ -3,10 +3,20 @@ package com.ermao.library.features.reader.infrastructure
 import com.ermao.library.shared.modules.reader.ReaderLocation
 import com.ermao.library.shared.modules.reader.ReflowReaderLocation
 import com.ermao.library.shared.modules.reader.ReaderOpaqueLocator
+import com.ermao.library.shared.modules.reader.ReaderNavigationTarget
+import com.ermao.library.shared.modules.reader.ReaderNavigationTargetReflowable
+import org.readium.r2.shared.publication.Link
+import org.readium.r2.shared.util.Url
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
 
 internal class ReadiumLocatorMapper {
+    /** Keep authored anchors in the SDK locator for launch and TOC navigation. */
+    fun navigationLocator(target: ReaderNavigationTarget, publication: Publication): Locator? {
+        val href = (target as? ReaderNavigationTargetReflowable)?.href?.let { Url(it) } ?: return null
+        return publication.locatorFromLink(Link(href = href))
+    }
+
     /** Serializes the SDK Locator as-is; no text projection or location repair. */
     fun opaqueLocator(locator: Locator): ReaderOpaqueLocator =
         ReaderOpaqueLocator.parse(locator.toJSON().toString())

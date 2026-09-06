@@ -10,20 +10,21 @@ import com.ermao.library.shared.modules.reader.readerSafetyEpubArchiveEntryMaxBy
 import com.ermao.library.shared.modules.reader.readerSafetyEpubArchiveEntryMaxCount
 import com.ermao.library.shared.modules.reader.readerSafetyEpubArchiveExpandedBytesFailure
 import com.ermao.library.shared.modules.reader.readerSafetyEpubArchiveExpandedMaxBytes
+import com.ermao.library.shared.modules.reader.readerSafetyEpubArchiveIntegrityFailure
 import com.ermao.library.shared.modules.reader.readerSafetyEpubArchiveStructureFailure
 import java.io.File
-import java.io.RandomAccessFile
 import java.nio.file.Files
 import kotlinx.coroutines.test.runTest
 import org.apache.commons.compress.archivers.zip.ZipArchiveEntry
 import org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream
 import org.junit.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import kotlin.test.fail
 
 class AndroidEpubArchiveSafetyPreflightTest {
     @Test
-    fun `accepts a bounded archive and verifies every entry CRC`() = runTest {
+    fun `accepts a bounded archive without eagerly reading resource bytes`() = runTest {
         withArchive(
             "mimetype" to "application/epub+zip",
             "META-INF/container.xml" to "<container/>",
@@ -34,31 +35,69 @@ class AndroidEpubArchiveSafetyPreflightTest {
     }
 
     @Test
-    fun `rejects path escape duplicate symlink encryption overlap and CRC facts with generated structure rule`() = runTest {
+    fun `classifies fatal paths and archive integrity with their generated rules`() = runTest {
         val structureFailure = readerSafetyEpubArchiveStructureFailure()
+        val integrityFailure = readerSafetyEpubArchiveIntegrityFailure()
         val safe = facts(path = "OPS/chapter.xhtml")
-        val cases = listOf(
+        for (entries in listOf(
             listOf(facts(path = "../chapter.xhtml")),
-            listOf(safe, safe.copy(localHeaderOffset = 128, dataOffset = 160)),
             listOf(facts(path = "OPS/link", isSymbolicLink = true)),
-            listOf(facts(path = "OPS/secret", isEncrypted = true)),
-            listOf(
-                facts(path = "OPS/a", localHeaderOffset = 0, dataOffset = 30, compressedSize = 50),
-                facts(path = "OPS/b", localHeaderOffset = 70, dataOffset = 100),
-            ),
-        )
-        for (entries in cases) {
+        )) {
             assertSafetyFailure(structureFailure) {
                 AndroidEpubArchiveSafetyPreflight.verifyMetadata(entries, archiveLength = 1_024)
             }
         }
 
-        withArchive("OPS/chapter.xhtml" to "CRC-protected content") { archive ->
-            corruptCentralDirectoryCrc(archive)
-            assertSafetyFailure(structureFailure) {
-                AndroidEpubArchiveSafetyPreflight.verify(archive)
-            }
-        }
+        val duplicate = AndroidEpubArchiveSafetyPreflight.verifyMetadata(
+            listOf(safe, safe.copy(path = "OPS/./chapter.xhtml")),
+            archiveLength = 1_024,
+        )
+        assertEquals(integrityFailure, duplicate.quarantinedResources["OPS/chapter.xhtml"])
+
+        val overlap = AndroidEpubArchiveSafetyPreflight.verifyMetadata(
+            listOf(
+                facts(path = "OPS/a", localHeaderOffset = 0, dataOffset = 30, compressedSize = 50),
+                facts(path = "OPS/b", localHeaderOffset = 70, dataOffset = 100),
+            ),
+            archiveLength = 1_024,
+        )
+        assertEquals(integrityFailure, overlap.quarantinedResources["OPS/a"])
+        assertEquals(integrityFailure, overlap.quarantinedResources["OPS/b"])
+        AndroidEpubArchiveSafetyPreflight.verifyMetadata(
+            listOf(facts(path = "OPS\\chapter.xhtml", isEncrypted = true)),
+            archiveLength = 1_024,
+        )
+        AndroidEpubArchiveSafetyPreflight.verifyMetadata(
+            listOf(facts(path = "OPS/./single.xhtml")),
+            archiveLength = 1_024,
+        )
+        AndroidEpubArchiveSafetyPreflight.verifyMetadata(
+            listOf(facts(path = "OPS/chapter.xhtml", uncompressedSize = 0L, compressedSize = 0L)),
+            archiveLength = 1_024,
+        )
+    }
+
+    @Test
+    fun `does not treat checksum metadata as a whole publication rejection`() = runTest {
+        AndroidEpubArchiveSafetyPreflight.verifyMetadata(
+            listOf(facts(path = "OPS/optional.xhtml")),
+            archiveLength = 1_024,
+        )
+    }
+
+    @Test
+    fun `normalizes backslash paths for duplicate detection and path escape`() = runTest {
+        val integrityFailure = readerSafetyEpubArchiveIntegrityFailure()
+        val result = AndroidEpubArchiveSafetyPreflight.verifyMetadata(
+            listOf(facts(path = "OPS\\chapter.xhtml"), facts(path = "OPS/chapter.xhtml")),
+            archiveLength = 1_024,
+        )
+        assertEquals(integrityFailure, result.quarantinedResources["OPS/chapter.xhtml"])
+        val normalized = AndroidEpubArchiveSafetyPreflight.verifyMetadata(
+            listOf(facts(path = "OPS\\..\\chapter.xhtml")),
+            archiveLength = 1_024,
+        )
+        assertTrue(normalized.expectedResources.containsKey("chapter.xhtml"))
     }
 
     @Test
@@ -140,22 +179,6 @@ class AndroidEpubArchiveSafetyPreflightTest {
         }
     }
 
-    private fun corruptCentralDirectoryCrc(file: File) {
-        RandomAccessFile(file, "rw").use { randomAccess ->
-            val bytes = ByteArray(file.length().toInt())
-            randomAccess.readFully(bytes)
-            val directory = bytes.indexOfSignature(CENTRAL_DIRECTORY_SIGNATURE)
-            check(directory >= 0) { "Central directory was not written" }
-            randomAccess.seek((directory + CENTRAL_DIRECTORY_CRC_OFFSET).toLong())
-            randomAccess.writeInt(0)
-        }
-    }
-
-    private fun ByteArray.indexOfSignature(signature: ByteArray): Int =
-        indices.firstOrNull { start ->
-            start <= size - signature.size && signature.indices.all { offset -> this[start + offset] == signature[offset] }
-        } ?: -1
-
     private fun facts(
         path: String = "OPS/chapter.xhtml",
         isSymbolicLink: Boolean = false,
@@ -174,8 +197,4 @@ class AndroidEpubArchiveSafetyPreflightTest {
         dataOffset = dataOffset,
     )
 
-    private companion object {
-        val CENTRAL_DIRECTORY_SIGNATURE = byteArrayOf(0x50, 0x4B, 0x01, 0x02)
-        const val CENTRAL_DIRECTORY_CRC_OFFSET = 16
-    }
 }

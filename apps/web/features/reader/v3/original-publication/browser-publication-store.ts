@@ -1,8 +1,6 @@
 import {
   READER_SAFETY_BUDGETS,
   READER_SAFETY_RULE_IDS,
-  readerSafetyAcceptsMimeType,
-  readerSafetyFormatPolicy,
   type ReaderOriginalResource
 } from '@shuku/reader-core';
 import { withBasePath } from '../../../../lib/base-path';
@@ -70,12 +68,6 @@ function assertDescriptor(descriptor: OriginalPublicationDescriptor, origin: str
   }
   if (!Number.isSafeInteger(descriptor.mtimeMs) || descriptor.mtimeMs < 0) {
     throw new OriginalPublicationStoreError('ORIGINAL_VERSION_INVALID');
-  }
-  const formatPolicy = readerSafetyFormatPolicy(descriptor.sourceFormat);
-  if (!formatPolicy
-    || formatPolicy.morphology !== 'REFLOWABLE'
-    || !readerSafetyAcceptsMimeType(formatPolicy, descriptor.mimeType)) {
-    rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_EXACT_FORMAT_MIME);
   }
   const url = new URL(descriptor.downloadUrl, origin);
   const apiPath = new URL(withBasePath('/api/'), origin).pathname;
@@ -178,9 +170,6 @@ async function downloadAndPublish(
   }
   if (response.headers.get('X-Asset-Version') !== descriptor.assetVersion) {
     throw new OriginalPublicationStoreError('ORIGINAL_VERSION_CHANGED');
-  }
-  if (normalizedMime(response.headers.get('Content-Type') ?? '') !== normalizedMime(descriptor.mimeType)) {
-    rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_EXACT_FORMAT_MIME);
   }
   let loadedBytes = 0;
   const meter = new TransformStream<Uint8Array, Uint8Array>({

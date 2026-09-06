@@ -3,12 +3,15 @@ import {
   READER_SAFETY_RULES,
   readerSafetyRule,
   type ReaderSafetyAction,
+  type ReaderSafetyClassification,
   type ReaderSafetyErrorCode,
   type ReaderSafetyImplementationFailureCode,
   type ReaderSafetyRuleId
 } from './reader-safety-policy.generated';
 
 export class ReaderSafetyPolicyError extends Error {
+  readonly classification: ReaderSafetyClassification;
+  readonly scope: 'RESOURCE' | 'PUBLICATION';
   constructor(
     readonly code: ReaderSafetyErrorCode,
     readonly ruleId: ReaderSafetyRuleId,
@@ -17,6 +20,8 @@ export class ReaderSafetyPolicyError extends Error {
   ) {
     super(code, options);
     this.name = 'ReaderSafetyPolicyError';
+    this.classification = readerSafetyRule(ruleId).classification;
+    this.scope = action === 'REJECT_PUBLICATION' ? 'PUBLICATION' : 'RESOURCE';
   }
 }
 
@@ -24,9 +29,13 @@ export type ReaderSafetyFailure = Readonly<{
   code: ReaderSafetyErrorCode;
   ruleId: ReaderSafetyRuleId;
   action: Extract<ReaderSafetyAction, 'BLOCK_RESOURCE' | 'REJECT_PUBLICATION'>;
+  classification: ReaderSafetyClassification;
+  scope: 'RESOURCE' | 'PUBLICATION';
 }>;
 
 export class ReaderSafetyImplementationError extends Error {
+  readonly classification = 'IMPLEMENTATION';
+  readonly scope = 'PUBLICATION';
   constructor(
     readonly code: ReaderSafetyImplementationFailureCode,
     readonly ruleId: ReaderSafetyRuleId,
@@ -74,7 +83,11 @@ export function readerSafetyFailure(ruleId: ReaderSafetyRuleId): ReaderSafetyFai
   if ((rule.action !== 'REJECT_PUBLICATION' && rule.action !== 'BLOCK_RESOURCE') || !rule.errorCode) {
     throw new Error('PLATFORM_POLICY_BINDING_INVALID');
   }
-  return { code: rule.errorCode, ruleId, action: rule.action };
+  return {
+    code: rule.errorCode, ruleId, action: rule.action,
+    classification: rule.classification,
+    scope: rule.action === 'REJECT_PUBLICATION' ? 'PUBLICATION' : 'RESOURCE'
+  };
 }
 
 export function rejectReaderSafety(ruleId: ReaderSafetyRuleId, options?: ErrorOptions): never {

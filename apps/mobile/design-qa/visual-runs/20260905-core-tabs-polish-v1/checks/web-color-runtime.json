@@ -1,0 +1,16 @@
+{
+  "surface": "Unauthenticated Web login; no authenticated core-page visual acceptance",
+  "viewportCssPx": [
+    411,
+    914
+  ],
+  "primaryButton": {
+    "backgroundColor": "rgb(255, 79, 42)",
+    "color": "rgb(255, 255, 255)",
+    "borderRadius": "12px",
+    "widthCssPx": 298,
+    "heightCssPx": 48
+  },
+  "evidence": "web-login-mobile.png",
+  "evidenceSha256": "ccf7952108b60ed455b9470ab3acd8fe706907187fbd2debb7ed21f26d03fbd0"
+}

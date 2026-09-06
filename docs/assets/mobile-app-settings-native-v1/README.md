@@ -1,153 +1,28 @@
-# Mobile Native Settings v1
+# 移动端原生设置
 
-Status: **product scope approved on 2026-08-12; iOS control system superseded on 2026-09-03**.
+此目录图片是设置页的构图参考，不是当前界面的截图或验收证明。控件实现和功能入口以当前代码为准；图片中的旧 Work／Version／Volume 管理动作与中间管理索引页不适用。
 
-This package expands the Mobile settings scope to provide native functional
-equivalents for the Web settings capabilities. The user-approved scope takes
-precedence over the earlier Web-only placement for these capabilities.
+## 当前入口
 
-Topology amendment (2026-08-20): ADR 0017 retires duplicate Work merge and all
-other Work/Version/Volume structural mutations. Any such control visible in an
-older board is historical composition evidence only and is not an enabled route
-or acceptance requirement.
+KMP 的 `settingscenter/domain/SettingsCenterCatalog.kt` 定义设置入口与权限投影；`personalsettings` 和 `administrativesettings` 提供类型化应用契约与网络适配器。
+Android 的 `features` 与 iOS 的 `Features/AdministrativeSettings` 使用原生页面、表单和对话框实现操作，不以 Web 设置页替代。
 
-## Non-negotiable constraints
+当前设置能力包含账户、语言、Kindle／邮件、用户与访问范围、书库来源与导入、整理与元数据、OPDS、备份、健康检查与日志。可见入口依赖服务端授权，不能因为参考图上有按钮就启用对应操作。稳定端点和字段由当前 repository 适配器维护，本页不复制 API 清单。
 
-- Every destination is an App-native page, Sheet, Menu, Dialog, or System UI.
-- Settings must not open a server-rendered page, `WebView`, `WKWebView`, custom
-  browser, or system browser.
-- The current server row is identity-only and has no chevron or management
-  action.
-- API paths, authorization, validation, conflict behavior, cancellation, and
-  destructive-result semantics remain equivalent to the Web capability.
-- iOS and Android use their native navigation and controls. Pixel-identical
-  platform chrome is not required.
-- Light, Dark, large text, `zh-CN`, and `en-US` use semantic tokens; colors are
-  not sampled from these images.
+## 图片用途
 
-## Design boards
-
-| Board | Destinations and key states |
+| 图片 | 构图主题 |
 | --- | --- |
-| `01-account-core.png` | Me root, profile, account and security, logout confirmation |
-| `02-language-email-kindle.png` | Language, Kindle preferences, SMTP configuration/test |
-| `03-kindle-queue-users.png` | Kindle queue, user list, user editor, password reset |
-| `04-library-imports.png` | Library sources, server directory picker, import tasks, import preferences |
-| `05-organize-metadata.png` | Organize queue/candidates, operation history/undo, provider pipelines; duplicate Work merge is retired by the topology amendment |
-| `06-opds-data-tab-order.png` | OPDS, backup/download/restore/delete, work-detail order |
-| `07-health-logs-about.png` | Health run/restart, logs/filter/export/capacity, About/releases |
-| `08-recognition-categories-provider.png` | Recognition policy, category governance, provider configuration/test |
-| `09-management-source-access.png` | Historical management-index composition only; source editor/delete and user scope picker remain current |
+| `01-account-core.png` | 账户、资料、安全与退出 |
+| `02-language-email-kindle.png` | 语言、邮件与 Kindle |
+| `03-kindle-queue-users.png` | 发送队列与用户 |
+| `04-library-imports.png` | 来源目录与导入 |
+| `05-organize-metadata.png` | 整理与元数据 |
+| `06-opds-data-tab-order.png` | OPDS、备份与详情设置 |
+| `07-health-logs-about.png` | 健康、日志与关于 |
+| `08-recognition-categories-provider.png` | 识别、分类与来源配置 |
+| `09-management-source-access.png` | 来源编辑和访问范围 |
 
-The boards freeze functional scope and state placement. The old iOS row geometry
-and the management intermediate page are superseded: iOS uses the shared
-`Settings*` controls, `insetGrouped` lists, 54-point rows, a fixed 28-point icon
-slot, and direct system-management destinations from `tab.me`.
+原生控件、颜色、字号与行度量复用当前组件及生成视觉 token，不从图中采样。表单明确保存，破坏性操作使用对象明确的确认；请求支持取消和过期结果拒绝。系统选择器与分享界面拥有文件／照片交互。
 
-## Route tree and authorization
-
-```text
-tab.me
-├── account.profile                                      authenticated
-├── account.security                                     authenticated
-├── preferences.language                                 authenticated
-├── settings.email-kindle
-│   ├── settings.kindle                                  authenticated
-│   └── settings.smtp                                    canManageSystem
-├── settings.kindle-queue                                authenticated, own tasks
-├── settings.users                                       isAdmin
-│   │   ├── settings.user.create                         isAdmin
-│   │   ├── settings.user.edit                           isAdmin
-│   │   ├── settings.user.scope                          isAdmin
-│   │   └── settings.user.password                       isAdmin, Sheet
-├── settings.library-sources-and-import                   canManageSystem
-│   │   ├── settings.library-source.create               canManageSystem
-│   │   ├── settings.library-source.edit                 canManageSystem
-│   │   └── settings.server-directory                    canManageSystem, Sheet
-│   ├── settings.import-tasks                            canManageSystem
-│   │   ├── settings.import-task                         canManageSystem
-│   │   └── settings.import-scans                        canManageSystem
-│   ├── settings.import-preferences                      canManageSystem
-│   └── settings.library-scan                            canManageSystem
-├── settings.smart-organization                          canManageSystem
-│   ├── settings.organize-queue                          canManageSystem
-│   │   └── settings.recognition-candidates              canManageSystem, Sheet
-│   ├── settings.organize-runs                           canManageSystem
-│   ├── settings.recognition-policy                      canManageSystem
-│   ├── settings.library-operations                      canManageSystem
-│   ├── settings.categories                              canManageSystem
-│   │   ├── settings.category-rename                     canManageSystem, Sheet
-│   │   └── settings.category-merge                      canManageSystem, Sheet
-│   ├── settings.metadata-providers                      canManageSystem
-│   │   ├── settings.metadata-provider                   canManageSystem
-│   │   └── settings.provider-pipeline                    canManageSystem
-├── settings.opds                                        canManageSystem
-├── settings.data-backups                                canManageSystem
-│   │   └── settings.backup-restore                      canManageSystem, Dialog+Sheet
-│   └── settings.work-detail-order                       canManageSystem
-├── settings.health                                      canManageSystem
-├── settings.logs                                        canManageSystem
-└── about.app                                            authenticated
-```
-
-An authorization change immediately removes unavailable routes and rejects
-their in-flight results. A `401` uses the existing full-screen reauthentication
-flow. A `403` keeps the native stack intact, removes protected data, and returns
-to the nearest still-authorized parent.
-
-## API equivalence matrix
-
-| Native capability | Real server operations |
-| --- | --- |
-| Profile/security/language/about | `/api/auth/account/*`, `/api/auth/preferences`, `/api/mobile/compatibility` |
-| Kindle settings | `GET/PUT /api/kindle-settings` |
-| Kindle queue | `GET/POST /api/kindle-send-tasks`, cancel/retry/delete task operations |
-| SMTP | `GET/PUT /api/email-settings`, `POST /api/email-settings/smtp-test` |
-| Users and scopes | `GET/POST /api/admin/users`, `GET/PATCH/DELETE /api/admin/users/{id}`, `PUT /api/admin/users/{id}/password`, library-root query |
-| Library sources | `GET/POST /api/libraries`, `PATCH/DELETE /api/libraries/{id}`, and `GET /api/libraries/tree` |
-| Directory scan | `POST /api/import-tasks/scan-directory` plus returned operation status/cancel contract |
-| Import tasks | list/read/logs/retry/delete, clear and rescan operations under `/api/import-tasks` |
-| Import preferences | `GET/PATCH /api/system-settings` using the existing import-preference keys |
-| Automatic library scan | `GET/PUT /api/system-settings/library-scan` |
-| Organize queue | organize jobs/pending/runs, recognize and delete job operations |
-| Recognition policy | `GET/PUT /api/organize/policy`, `GET /api/metadata/opf-sync/status` |
-| Library operations | `GET /api/library/operations`, operation undo; no Work/Version/Volume structural merge |
-| Categories | list/rename/delete/merge under `/api/library/categories` |
-| Metadata providers | provider list/read/update/test and media-kind pipeline update |
-| OPDS | `GET/PUT /api/system-settings/opds` |
-| Backups | list/read/create/download/restore/delete under `/api/backups` |
-| Work-detail order | `GET/PUT /api/system-settings` key `workDetail.tabOrder` |
-| Health | health runs/read/event polling and safe import-queue restart operation polling |
-| Logs | management-event query/clear and system log-capacity read/update |
-
-Stable Mobile repositories expose typed intent methods rather than paths or raw
-JSON. Server-localized `message` values never control UI branches.
-
-## Native interaction contract
-
-- Persistent forms use **Save**; immediate switches reflect server success and
-  roll back on failure.
-- Search/filter drafts use a Sheet and **Apply** when more than one field is
-  involved. Queue status refreshes through cancellable polling.
-- Photo input uses the system photo picker. Backup download/export uses the
-  system file/share UI without navigating to a browser.
-- Metadata-facet delete/merge, backup restore, queue restart, account disable, password reset, and
-  logout use an object-specific native confirmation. Backup restore additionally
-  requires the `RESTORE` confirmation literal.
-- Passwords, SMTP credentials, and provider secrets are never echoed back,
-  cached in view state after submission, logged, or included in diagnostics.
-- Lists have loading, empty, cached/stale where applicable, inline retry, partial
-  failure, pagination, cancellation, and permission-loss states.
-
-## Acceptance
-
-- No Mobile source contains a settings Web URL builder or settings browser
-  callback.
-- Every route above has a native iOS and Android destination and a real typed
-  repository operation for each enabled control.
-- Visibility and resource authorization are tested for authenticated, admin,
-  and system-manager actors.
-- Destructive operations verify cancel, confirm, error, stale result, and
-  success state.
-- UI evidence covers both platforms, both locales, Light/Dark, large text, and
-  the relevant dialogs/sheets. iOS evidence uses a physical device only.
+验收覆盖两端物理设备、zh-CN／en-US、深浅色、大字体、权限失效、取消、错误与成功状态。具体执行入口见[手工验收](../../manual-acceptance.md)。

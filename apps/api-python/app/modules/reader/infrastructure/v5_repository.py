@@ -43,7 +43,7 @@ from app.modules.reader.infrastructure.resource_catalog_repository import (
 )
 
 
-def _presentation_from_json(presentation_json: str) -> ReaderV5PresentationDto:
+def decode_stored_presentation(presentation_json: str) -> ReaderV5PresentationDto:
     """Decode only the known, separately stored presentation projection.
 
     Locator bytes are stored in a separate column and are never passed through
@@ -59,6 +59,7 @@ def _presentation_from_json(presentation_json: str) -> ReaderV5PresentationDto:
         None
         if raw_chapter is None
         else ReaderV5ChapterDto(
+            navigation_key=raw_chapter["navigationKey"],
             href=raw_chapter["href"],
             title=raw_chapter["title"],
             index=raw_chapter["index"],
@@ -92,7 +93,7 @@ def _presentation_from_json(presentation_json: str) -> ReaderV5PresentationDto:
 def _position_dto(*, presentation_json: str, locator_json: str) -> ReaderV5PositionDto:
     return ReaderV5PositionDto(
         locator=OpaqueLocator.from_serialized(locator_json),
-        presentation=_presentation_from_json(presentation_json),
+        presentation=decode_stored_presentation(presentation_json),
     )
 
 

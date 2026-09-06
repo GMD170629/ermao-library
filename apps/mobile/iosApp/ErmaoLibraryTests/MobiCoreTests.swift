@@ -61,7 +61,7 @@ final class MobiCoreTests: XCTestCase {
             let resourceIndex = try await book.readingOrderResourceIndex(at: 0)
             let resource = try await book.resource(at: resourceIndex)
             XCTAssertFalse(resource.sourceName.isEmpty, fixture.name)
-            XCTAssertFalse(resource.mediaType.isEmpty, fixture.name)
+            XCTAssertFalse(resource.mediaType?.isEmpty ?? true, fixture.name)
             let firstChunk = try await book.readResource(
                 at: resourceIndex,
                 offset: 0,
@@ -187,7 +187,7 @@ final class MobiCoreTests: XCTestCase {
             lines.append(
                 "resource\t\(resourceIndex)\t\(resource.category.rawValue)\t" +
                     "\(resource.sourceUID)\t\(resource.decodedLength)\t\(digest)\t" +
-                    "\(resource.sourceName.hexEncoded)\t\(resource.mediaType.hexEncoded)"
+                    "\(resource.sourceName.hexEncoded)\t\(nullableHex(resource.mediaType))"
             )
         }
         for position in 0 ..< info.readingOrderCount {

@@ -121,6 +121,7 @@ data class ReadingUnitContent(
     val progressPercent: Int? = null,
     val positionLabel: String? = null,
     val href: String? = null,
+    val navigationKey: String? = null,
     val sortOrder: Int = 0,
     val readingOrderPosition: Int? = null,
     val readingState: ChapterReadingState = ChapterReadingState.Unread,

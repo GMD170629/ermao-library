@@ -380,9 +380,51 @@ private final class IosReaderBookmarkRemote: @unchecked Sendable {
 
 struct IosReaderTocEntry: Identifiable, Equatable, Sendable {
     let id: String
+    let navigationKey: String?
     let title: String
     let href: String?
     let depth: Int
+
+    init(
+        id: String,
+        navigationKey: String? = nil,
+        title: String,
+        href: String?,
+        depth: Int
+    ) {
+        self.id = id
+        self.navigationKey = navigationKey
+        self.title = title
+        self.href = href
+        self.depth = depth
+    }
+}
+
+func iosReaderTableOfContents(_ links: [Link]) throws -> [IosReaderTocEntry] {
+    var entries: [IosReaderTocEntry] = []
+    var usedKeys: Set<String> = []
+    func append(_ links: [Link], depth: Int) throws {
+        for link in links {
+            guard let navigationKey = link.properties["shuku:navigationKey"]?.string,
+                  !navigationKey.isEmpty,
+                  usedKeys.insert(navigationKey).inserted,
+                  let title = link.title,
+                  !title.isEmpty
+            else {
+                throw IosReaderFailure(code: .engineError)
+            }
+            entries.append(IosReaderTocEntry(
+                id: navigationKey,
+                navigationKey: navigationKey,
+                title: title,
+                href: link.href.isEmpty ? nil : link.href,
+                depth: depth
+            ))
+            try append(link.children, depth: depth + 1)
+        }
+    }
+    try append(links, depth: 0)
+    return entries
 }
 
 enum IosReaderSessionPhase: Equatable, Sendable {
@@ -430,7 +472,6 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     private let namespaceKey: String
     private let bookID: String
     private let publishProgressUpdate: @MainActor (ErmaoShared.ReaderProgressPresentationUpdate) -> Void
-    private let canonicalNavigation: [IosReaderTocEntry]
     private var publication: Publication?
     private(set) var supportsTextDirectionPreferences = true
     private var openedPublication: IosOpenedReadiumPublication?
@@ -447,7 +488,6 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         resourceID: String,
         displayTitle: String,
         sourceFormat: ErmaoShared.ReaderSourceFormat = .epub,
-        canonicalNavigation: [IosReaderTocEntry] = [],
         preferences: IosReaderPreferences = IosReaderPreferences(),
         managedStore: IosManagedPublicationStore,
         progressStore: any ErmaoShared.ReaderPositionSyncingStore,
@@ -468,7 +508,6 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         self.resourceID = resourceID
         self.displayTitle = displayTitle
         self.sourceFormat = sourceFormat
-        self.canonicalNavigation = canonicalNavigation
         self.preferences = preferences
         self.managedStore = managedStore
         self.progressStore = progressStore
@@ -510,17 +549,41 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
             let publication = openedPublication.publication
             supportsTextDirectionPreferences = publication.metadata.layout != .fixed
             self.openedPublication = openedPublication
+            let navigation = try mergedNavigation()
+            try openedPublication.checkForSafetyFailure()
             let saved = try? await progressStore.load(resourceId: resourceID)
             let initial: Locator?
             if let initialTarget {
-                guard let target = initialTarget as? ErmaoShared.ReaderNavigationTargetReflowable,
-                      RelativeURL(string: target.href) != nil,
-                      let locator = await publication.locate(Link(href: target.href))
-                else { throw IosReaderFailure(code: .locationRestoreFailed) }
-                initial = locator
+                if let target = initialTarget as? ErmaoShared.ReaderNavigationTargetChapter {
+                    let matches = navigation.filter {
+                        $0.navigationKey == target.navigationKey &&
+                            $0.href?.isEmpty == false
+                    }
+                    guard matches.count == 1, let href = matches.first?.href,
+                          RelativeURL(string: href) != nil,
+                          let locator = await publication.locate(Link(href: href))
+                    else {
+                        try openedPublication.checkForSafetyFailure()
+                        throw IosReaderFailure(code: .locationRestoreFailed)
+                    }
+                    initial = locator
+                } else {
+                    guard let target = initialTarget as? ErmaoShared.ReaderNavigationTargetReflowable,
+                          RelativeURL(string: target.href) != nil
+                    else { throw IosReaderFailure(code: .locationRestoreFailed) }
+                    guard let locator = await publication.locate(Link(href: target.href)) else {
+                        try openedPublication.checkForSafetyFailure()
+                        throw IosReaderFailure(code: .locationRestoreFailed)
+                    }
+                    initial = locator
+                }
             } else {
                 initial = await restore(local: saved, remote: remoteSnapshot)
             }
+            // Readium may have lazily consumed OPF, navigation, or the first reading-order
+            // resource while locating the launch position. Recover the typed safety result before
+            // an SDK error is flattened into a generic navigation failure.
+            try openedPublication.checkForSafetyFailure()
             let navigator = try makeIosReflowableNavigator(
                 publication: publication,
                 preferences: preferences.readium(
@@ -529,6 +592,8 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
                 ),
                 location: initial
             )
+            // Navigator construction can perform the first content read on a background queue.
+            try openedPublication.checkForSafetyFailure()
             self.publication = publication
             installControlNavigator(navigator)
             submittedControlPreferences = preferences.readium(
@@ -538,7 +603,8 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
             progressCoordination?.noticeHandler = { [weak self] snapshot in
                 self?.setRemoteProgress(snapshot)
             }
-            tableOfContents = await mergedNavigation(publication: publication)
+            tableOfContents = navigation
+            try openedPublication.checkForSafetyFailure()
             phase = .reading
             pendingLaunchTargetPayload = nil
             startBookmarkSynchronization()
@@ -560,6 +626,26 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         openedPublication = nil
         publication = nil
         phase = .failed(failure.code)
+    }
+
+    /// Readium reports lazy resource failures through navigator callbacks. Recover the typed
+    /// safety result kept by the publication session before exposing a generic SDK error.
+    @discardableResult
+    private func consumeSafetyFailure(defaultCode: IosReaderFailureCode) -> Bool {
+        do {
+            try openedPublication?.checkForSafetyFailure()
+            return false
+        } catch let error as IosPublicationSecurityError {
+            let failure = IosReaderFailure.security(error)
+            presentationError = failure.code
+            phase = .failed(failure.code)
+            return true
+        } catch {
+            let failure = IosReaderFailure(code: defaultCode, underlyingError: error as NSError)
+            presentationError = failure.code
+            phase = .failed(failure.code)
+            return true
+        }
     }
 
     func goPrevious() async {
@@ -773,7 +859,10 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         if await navigationHrefMatches(canonicalHref) { return true }
         beginUserNavigation()
         pendingLaunchTargetPayload = ErmaoShared.PublicKt.encodeReaderLaunchTarget(target: ErmaoShared.ReaderNavigationTargetReflowable(href: canonicalHref))
-        guard await navigator?.go(to: link, options: navigationOptions) == true else { return false }
+        guard await navigator?.go(to: link, options: navigationOptions) == true else {
+            _ = consumeSafetyFailure(defaultCode: .readFailed)
+            return false
+        }
         for _ in 0 ..< 30 {
             if await navigationHrefMatches(canonicalHref) {
                 pendingLaunchTargetPayload = nil
@@ -781,16 +870,26 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
             }
             try? await Task.sleep(for: .milliseconds(50))
         }
+        _ = consumeSafetyFailure(defaultCode: .readFailed)
         return false
     }
 
     func goToProgression(_ progression: Double) async -> Bool {
         await navigationQueue.enqueue { [weak self] in
-            guard let self, let publication = self.publication, let navigator = self.navigator,
-                  let locator = await publication.locate(progression: progression)
-            else { return false }
+            guard let self, let publication = self.publication, let navigator = self.navigator else {
+                return false
+            }
+            guard let locator = await publication.locate(progression: progression) else {
+                _ = self.consumeSafetyFailure(defaultCode: .readFailed)
+                return false
+            }
+            if self.consumeSafetyFailure(defaultCode: .readFailed) { return false }
             self.beginUserNavigation()
-            return await navigator.go(to: locator, options: self.navigationOptions)
+            guard await navigator.go(to: locator, options: self.navigationOptions) else {
+                _ = self.consumeSafetyFailure(defaultCode: .readFailed)
+                return false
+            }
+            return true
         }
     }
 
@@ -1003,25 +1102,9 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         try? await persistCurrentLocation()
     }
 
-    private func mergedNavigation(publication: Publication) async -> [IosReaderTocEntry] {
-        let publicationLinks: [Link]
-        switch await publication.tableOfContents() {
-        case let .success(links): publicationLinks = links
-        case .failure: publicationLinks = []
-        }
-        let navigationLinks = publicationLinks.isEmpty ? publication.readingOrder : publicationLinks
-        let publicationEntries = navigationLinks.enumerated().map { index, link in
-            let title = link.title?.trimmingCharacters(in: .whitespacesAndNewlines)
-            return IosReaderTocEntry(
-                id: "publication:\(index)",
-                title: title?.isEmpty == false ? title ?? String(index + 1) : String(index + 1),
-                href: String(describing: link.href),
-                depth: 0
-            )
-        }
-        guard !canonicalNavigation.isEmpty else { return publicationEntries }
-        let canonicalHrefs = Set(canonicalNavigation.map(\.href))
-        return canonicalNavigation + publicationEntries.filter { !canonicalHrefs.contains($0.href) }
+    private func mergedNavigation() throws -> [IosReaderTocEntry] {
+        let navigationLinks = openedPublication?.canonicalTableOfContents ?? []
+        return try iosReaderTableOfContents(navigationLinks)
     }
 
     private func restore(
@@ -1184,12 +1267,12 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     private func reflectLocation(_ locator: Locator) {
         progress = resolvedTotalProgression(locator)
             ?? progress
-        chapterTitle = locator.title
+        chapterTitle = currentChapter(for: locator)?.title
     }
 
     private func resolvedTotalProgression(_ locator: Locator) -> Double? {
         ErmaoShared.PublicKt.resolveReflowableTotalProgressionFromNavigation(
-            orderedResourceHrefs: canonicalNavigation.map { $0.href ?? "" },
+            orderedResourceHrefs: publication?.readingOrder.map(\.href) ?? [],
             resourceHref: locator.href.normalized.string,
             resourceProgression: locator.locations.progression.map(KotlinDouble.init(double:)),
             totalProgression: locator.locations.totalProgression.map(KotlinDouble.init(double:))
@@ -1263,22 +1346,31 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         ))
     }
 
+    private func currentChapter(for locator: Locator) -> IosReaderTocEntry? {
+        guard let key = resolveIosReaderNavigationEntryID(
+            entries: tableOfContents,
+            currentHref: locator.href.normalized.string,
+            fragments: Set(locator.locations.fragments),
+            cssSelector: locator.locations["cssSelector"]?.string
+        ) else { return nil }
+        return tableOfContents.first { $0.id == key }
+    }
+
     private func makePosition(from locator: Locator) throws -> ErmaoShared.ReaderPositionLocalState {
         guard publication != nil else { throw IosReaderFailure(code: .persistenceFailed) }
         let totalProgression = min(1, max(0, self.progress))
-        let chapterIndex = canonicalNavigation.firstIndex(where: { entry in
-            guard let href = entry.href else { return false }
-            return locator.href.normalized.string == href
-        })
+        let chapter = currentChapter(for: locator)
+        let chapterIndex = chapter.flatMap { current in tableOfContents.firstIndex { $0.id == current.id } }
         let presentation = ErmaoShared.ReaderPositionPresentation(
             displayPercent: totalProgression * 100,
             totalProgression: totalProgression,
             currentHref: locator.href.normalized.string,
-            chapter: ErmaoShared.ReaderChapterPresentation(
-                href: locator.href.normalized.string,
-                title: locator.title ?? chapterTitle,
-                index: chapterIndex.map { KotlinInt(int: Int32($0)) }
-            ),
+            chapter: chapter.map { current in ErmaoShared.ReaderChapterPresentation(
+                href: current.href,
+                title: current.title,
+                index: chapterIndex.map { KotlinInt(int: Int32($0)) },
+                navigationKey: current.navigationKey
+            ) },
             page: nil,
             playback: nil
         )
@@ -1322,15 +1414,17 @@ extension IosReflowableReaderSession: EPUBNavigatorDelegate {
     }
 
     func navigator(_ navigator: Navigator, didFailToLoadResourceAt href: RelativeURL, withError error: ReadError) {
+        guard !consumeSafetyFailure(defaultCode: .readFailed) else { return }
         presentationError = presentationError ?? .readFailed
     }
 
     func navigator(_ navigator: Navigator, presentError error: NavigatorError) {
+        guard !consumeSafetyFailure(defaultCode: .engineError) else { return }
         presentationError = presentationError ?? .engineError
     }
 
     func navigator(_ navigator: Navigator, presentExternalURL url: URL) {
-        guard ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return }
+        guard ErmaoShared.PublicKt.readerAllowsAuthoredUserNavigation(value: url.absoluteString) else { return }
         UIApplication.shared.open(url)
     }
 

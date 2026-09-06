@@ -18,16 +18,6 @@ from app.modules.reader.application.v5_library_queries import (
     ReaderV5PresentationView,
     ReaderV5StatusView,
 )
-from app.modules.reader.domain.progress import (
-    normalize_reader_href,
-    number_or_none,
-    progress_location,
-    progress_navigation,
-    progress_percent_with_navigation,
-    raw_progress_percent,
-    reader_unit_index,
-    reader_unit_index_at_position,
-)
 from app.modules.reader.domain.resource_progress import (
     ResourceReadingState,
     choose_continue_resource_id,
@@ -48,12 +38,4 @@ __all__ = [
     "SaveExternalProgressCommand",
     "choose_continue_resource_id",
     "completed_for_available_resources",
-    "normalize_reader_href",
-    "number_or_none",
-    "progress_location",
-    "progress_navigation",
-    "progress_percent_with_navigation",
-    "raw_progress_percent",
-    "reader_unit_index",
-    "reader_unit_index_at_position",
 ]

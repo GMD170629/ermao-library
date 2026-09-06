@@ -92,6 +92,37 @@ class HomeScreenTest {
     }
 
     @Test
+    fun oneRecentReadingBookUsesTheListSectionPresentation() {
+        var openedBookId: String? = null
+        compose.setContent {
+            WarmPageTheme {
+                HomeScreen(
+                    state = HomeUiState(
+                        isLoading = false,
+                        content = HomeContent(
+                            continueReading = null,
+                            recentReading = listOf(book("only-recent", "Only recent", progress = 24)),
+                            recentAdded = emptyList(),
+                        ),
+                    ),
+                    repository = StubContentRepository,
+                    context = contentRequestContext(),
+                    onOpenBook = { openedBookId = it },
+                    onContinueReading = {},
+                    onOpenLibrary = {},
+                    onRetry = {},
+                    onRefresh = {},
+                    lastReadClock = FixedHomeTestClock,
+                )
+            }
+        }
+
+        compose.onNodeWithTag("home-recent-reading-list").assertIsDisplayed()
+        compose.onNodeWithTag("book-only-recent").assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals("only-recent", openedBookId) }
+    }
+
+    @Test
     fun defaultFontContinueCardCompactsDuplicateMetadataAndNeverShowsWireTimestamp() {
         val longTitle = "A Deliberately Long Work Title That Needs Two Lines"
         val wireTimestamp = "2026-08-15T13:47:38.286000Z"

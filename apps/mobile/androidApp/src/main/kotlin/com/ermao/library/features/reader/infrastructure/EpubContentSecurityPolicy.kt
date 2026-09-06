@@ -7,19 +7,31 @@ import com.ermao.library.shared.modules.reader.ReaderSafetyMarkupRejected
 import com.ermao.library.shared.modules.reader.ReaderSanitizedMarkup
 import com.ermao.library.shared.modules.reader.ReaderSafetyException
 import com.ermao.library.shared.modules.reader.ReaderSafetyPolicy
+import com.ermao.library.shared.modules.reader.ReaderSafetyImplementationException
+import com.ermao.library.shared.modules.reader.ReaderSafetyRuleId
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyResourceRole
+import com.ermao.library.shared.modules.reader.readerSafetyEpubArchiveIntegrityFailure
+import com.ermao.library.shared.modules.reader.readerSafetyOptionalResourceFailure
 import com.ermao.library.shared.modules.reader.readerSafetySanitizedElementSelectors
+import com.ermao.library.shared.modules.reader.readerSafetyEvaluateRuleDecision
+import com.ermao.library.shared.modules.reader.readerSafetyContainerRootFilePaths
 import java.io.StringReader
+import java.nio.charset.Charset
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
 import java.text.Normalizer
+import java.util.Collections
 import javax.xml.parsers.DocumentBuilderFactory
 import javax.xml.parsers.ParserConfigurationException
 import org.readium.r2.shared.util.Try
+import org.readium.r2.shared.util.asset.Asset
+import org.readium.r2.shared.util.asset.ContainerAsset
 import org.readium.r2.shared.util.data.Container
 import org.readium.r2.shared.util.data.ReadError
 import org.readium.r2.shared.util.resource.Resource
 import org.readium.r2.shared.util.resource.TransformingContainer
 import org.readium.r2.shared.util.resource.TransformingResource
+import org.readium.r2.shared.util.resource.mediaType
 import org.xml.sax.InputSource
 import org.w3c.dom.Element
 import org.w3c.dom.Node
@@ -58,6 +70,76 @@ internal object EpubContentSecurityPolicy {
     fun apply(container: Container<Resource>, onFailure: ((Exception) -> Unit)? = null): Container<Resource> =
         transformMarkup(container, ::decorateHtml, onFailure)
 
+    /**
+     * Protects the container before Readium parses its OPF/NCX/container documents. The
+     * publication opener must receive this asset; an onCreatePublication callback observes the
+     * container after those documents have already been parsed.
+     */
+    fun protectAsset(
+        asset: Asset,
+        onFailure: (Exception, ReaderSafetyResourceRole) -> Unit,
+        archiveSafety: AndroidEpubArchiveSafetyPreflight.AndroidEpubArchiveSafetyResult? = null,
+        resourceRoles: ArchiveResourceRoleResolver = ArchiveResourceRoleResolver(),
+    ): Asset {
+        val containerAsset = asset as? ContainerAsset
+            ?: throw ReaderSafetyImplementationException(
+                ReaderSafetyFacade().engineFailureFor(ReaderSafetyRuleId.REFLOWABLE_PREPARE_XML),
+            )
+        return ContainerAsset(
+            containerAsset.format,
+            transformXmlResources(containerAsset.container, onFailure, archiveSafety, resourceRoles),
+        )
+    }
+
+    /**
+     * Tracks explicit control-document and manifest reading-order facts. A parser access by
+     * itself is not evidence that a resource is required: NCX, nav, cover and font resources
+     * may be inspected while opening and remain isolatable optional resources.
+     */
+    internal class ArchiveResourceRoleResolver {
+        private val controlPaths = Collections.synchronizedSet(
+            mutableSetOf("META-INF/container.xml"),
+        )
+        private val readingOrderPaths = Collections.synchronizedSet(mutableSetOf<String>())
+        private val observedPaths = Collections.synchronizedSet(mutableSetOf<String>())
+
+        fun observeParserAccess(path: String) {
+            AndroidEpubArchiveSafetyPreflight.canonicalPath(path)?.let(observedPaths::add)
+        }
+
+        fun markControlDocument(path: String) {
+            AndroidEpubArchiveSafetyPreflight.canonicalPath(path)?.let(controlPaths::add)
+        }
+
+        /** Adds package documents named by the protected container.xml control document. */
+        fun markContainerRootFiles(markup: String, sourceByteCount: Long = -1L) {
+            readerSafetyContainerRootFilePaths(markup, sourceByteCount)
+                .forEach(::markControlDocument)
+        }
+
+        fun markReadingOrder(paths: Iterable<String>) {
+            paths.mapNotNull(AndroidEpubArchiveSafetyPreflight::canonicalPath)
+                .filter(String::isNotEmpty)
+                .forEach(readingOrderPaths::add)
+        }
+
+        fun wasObserved(path: String): Boolean =
+            AndroidEpubArchiveSafetyPreflight.canonicalPath(path)?.let(observedPaths::contains) == true
+
+        fun observedAny(paths: Iterable<String>): Boolean = paths.any(::wasObserved)
+
+        fun roleFor(path: String): ReaderSafetyResourceRole {
+            val canonical = AndroidEpubArchiveSafetyPreflight.canonicalPath(path)
+            return when {
+                canonical != null && readingOrderPaths.contains(canonical) ->
+                    ReaderSafetyResourceRole.READING_ORDER
+                canonical != null && controlPaths.contains(canonical) ->
+                    ReaderSafetyResourceRole.CONTROL_DOCUMENT
+                else -> ReaderSafetyResourceRole.OPTIONAL_RESOURCE
+            }
+        }
+    }
+
     fun applyMobi(container: Container<Resource>): Container<Resource> =
         transformMarkup(container, ::decorateMobiHtml)
 
@@ -75,6 +157,8 @@ internal object EpubContentSecurityPolicy {
                 TransformingResource(resource) { bytes ->
                     try {
                         Try.success(decorate(bytes))
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
                     } catch (error: Exception) {
                         onFailure?.invoke(error)
                         Try.failure(ReadError.Decoding(error))
@@ -84,6 +168,153 @@ internal object EpubContentSecurityPolicy {
                 resource
             }
         }
+
+    private fun transformXmlResources(
+        container: Container<Resource>,
+        onFailure: (Exception, ReaderSafetyResourceRole) -> Unit,
+        archiveSafety: AndroidEpubArchiveSafetyPreflight.AndroidEpubArchiveSafetyResult?,
+        resourceRoles: ArchiveResourceRoleResolver,
+    ): Container<Resource> = TransformingContainer(container) { url, resource ->
+        resourceRoles.observeParserAccess(url.path ?: "")
+        val checkedResource = if (archiveSafety == null) {
+            resource
+        } else {
+            TransformingResource(resource) { bytes ->
+                try {
+                    verifyArchiveResource(archiveSafety, url.path ?: "", bytes, resourceRoles)
+                    Try.success(bytes)
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    onFailure(error, resourceRoles.roleFor(url.path ?: ""))
+                    Try.failure(ReadError.Decoding(error))
+                }
+            }
+        }
+        TransformingResource(checkedResource) { bytes ->
+            try {
+                val mediaType = checkedResource.properties().getOrNull()?.mediaType?.toString()?.lowercase()
+                Try.success(prepareResourceBytes(bytes, mediaType, url.path ?: "", resourceRoles))
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                onFailure(error, resourceRoles.roleFor(url.path ?: ""))
+                Try.failure(ReadError.Decoding(error))
+            }
+        }
+    }
+
+    private suspend fun verifyArchiveResource(
+        archiveSafety: AndroidEpubArchiveSafetyPreflight.AndroidEpubArchiveSafetyResult,
+        path: String,
+        bytes: ByteArray,
+        resourceRoles: ArchiveResourceRoleResolver,
+    ) {
+        archiveSafety.quarantineFor(path)?.let { failure ->
+            throw ReaderSafetyException(resourceIntegrityFailureFor(failure, resourceRoles.roleFor(path)))
+        }
+        val expected = archiveSafety.expectedFor(path) ?: return
+        try {
+            AndroidEpubArchiveSafetyPreflight.verifyResourceBytes(expected, bytes)
+        } catch (error: ReaderSafetyException) {
+            if (error.failure.ruleId == readerSafetyOptionalResourceFailure().ruleId) {
+                throw ReaderSafetyException(
+                    resourceIntegrityFailureFor(
+                        readerSafetyEpubArchiveIntegrityFailure(),
+                        resourceRoles.roleFor(path),
+                    ),
+                )
+            }
+            throw error
+        }
+    }
+
+    private fun resourceIntegrityFailureFor(
+        failure: com.ermao.library.shared.modules.reader.ReaderSafetyFailure,
+        role: ReaderSafetyResourceRole,
+    ): com.ermao.library.shared.modules.reader.ReaderSafetyFailure {
+        if (failure.ruleId != readerSafetyEpubArchiveIntegrityFailure().ruleId) return failure
+        val decision = readerSafetyEvaluateRuleDecision(
+            format = "EPUB",
+            resourceRole = role.name,
+            ruleId = readerSafetyEpubArchiveIntegrityFailure().ruleId,
+            enforcementAvailable = true,
+            canIsolate = false,
+        )
+        return if (decision.action == "BLOCK_RESOURCE") {
+            readerSafetyOptionalResourceFailure()
+        } else {
+            failure
+        }
+    }
+
+    private fun prepareResourceBytes(
+        bytes: ByteArray,
+        mediaType: String?,
+        path: String,
+        resourceRoles: ArchiveResourceRoleResolver,
+    ): ByteArray {
+        val text = runCatching { bytes.decodeToString(throwOnInvalidSequence = true) }
+            .getOrNull()
+            ?: decodeXmlText(bytes)
+            ?: if (mediaType in TEXTUAL_MEDIA_TYPES) {
+                throw ReaderSafetyImplementationException(
+                    ReaderSafetyFacade().engineFailureFor(ReaderSafetyRuleId.REFLOWABLE_PREPARE_XML),
+                )
+            } else {
+                return bytes
+            }
+        val leading = text.trimStart('\uFEFF', ' ', '\t', '\r', '\n')
+        if (!leading.startsWith("<") && mediaType !in TEXTUAL_MEDIA_TYPES) return bytes
+        val facade = ReaderSafetyFacade()
+        val root = facade.rootElementName(text)
+        return when {
+            mediaType == "text/css" -> when (val result = facade.sanitizeCss(text, bytes.size.toLong())) {
+                is com.ermao.library.shared.modules.reader.ReaderSafetyMarkupAccepted ->
+                    result.value.markup.toByteArray(Charsets.UTF_8)
+                is com.ermao.library.shared.modules.reader.ReaderSafetyMarkupRejected ->
+                    throw ReaderSafetyException(result.failure)
+            }
+            root == "html" || mediaType == "application/xhtml+xml" || mediaType == "text/html" ->
+                decorateHtml(bytes)
+            root == "svg" || mediaType == "image/svg+xml" -> when (val result = facade.sanitizeMarkup(text, bytes.size.toLong())) {
+                is com.ermao.library.shared.modules.reader.ReaderSafetyMarkupAccepted ->
+                    result.value.markup.toByteArray(Charsets.UTF_8)
+                is com.ermao.library.shared.modules.reader.ReaderSafetyMarkupRejected ->
+                    throw ReaderSafetyException(result.failure)
+            }
+            else -> when (val result = facade.prepareXmlControlDocument(text, bytes.size.toLong())) {
+                is com.ermao.library.shared.modules.reader.ReaderSafetyMarkupAccepted ->
+                    result.value.parserMarkup.toByteArray(Charsets.UTF_8).also {
+                        if (AndroidEpubArchiveSafetyPreflight.canonicalPath(path) == "META-INF/container.xml") {
+                            resourceRoles.markContainerRootFiles(text, bytes.size.toLong())
+                        }
+                    }
+                is com.ermao.library.shared.modules.reader.ReaderSafetyMarkupRejected ->
+                    throw ReaderSafetyException(result.failure)
+            }
+        }
+    }
+
+    private fun decodeXmlText(bytes: ByteArray): String? = try {
+        when {
+            bytes.startsWith(UTF_8_BOM) -> strictDecode(bytes, Charsets.UTF_8, UTF_8_BOM.size)
+            bytes.startsWith(UTF_16_LE_BOM) -> strictDecode(bytes, Charsets.UTF_16LE, UTF_16_LE_BOM.size)
+            bytes.startsWith(UTF_16_BE_BOM) -> strictDecode(bytes, Charsets.UTF_16BE, UTF_16_BE_BOM.size)
+            else -> {
+                val prefix = bytes.copyOfRange(0, minOf(bytes.size, 512)).toString(Charsets.US_ASCII)
+                val encoding = XML_DECLARATION.find(prefix)
+                    ?.let { XML_ENCODING.find(it.value)?.groups?.get("encoding")?.value }
+                    ?.lowercase()
+                    ?.replace('_', '-')
+                    ?: "utf-8"
+                val charset = Charset.forName(encoding)
+                strictDecode(bytes, charset, 0)
+            }
+        }
+    } catch (_: IllegalArgumentException) {
+        null
+    }
 
     internal fun decorateHtml(bytes: ByteArray): ByteArray {
         val validated = decodeAndValidate(bytes)
@@ -280,6 +511,9 @@ internal object EpubContentSecurityPolicy {
     )
     private val HEAD_OPEN = Regex("<(?:[A-Za-z_][\\w.-]*:)?head\\b[^>]*>", RegexOption.IGNORE_CASE)
     private val HEAD_CLOSE = Regex("</(?:[A-Za-z_][\\w.-]*:)?head\\s*>", RegexOption.IGNORE_CASE)
+    private val TEXTUAL_MEDIA_TYPES = setOf(
+        "application/xhtml+xml", "text/html", "application/xml", "text/xml", "image/svg+xml", "text/css",
+    )
     private val META_TAG = Regex("<(?:[A-Za-z_][\\w.-]*:)?meta\\b[^>]*(?:/\\s*)?>", RegexOption.IGNORE_CASE)
     private val NAME = Regex(
         "\\bname\\s*=\\s*['\"](?<value>[^'\"]+)['\"]",

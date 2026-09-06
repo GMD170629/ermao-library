@@ -1,62 +1,42 @@
 # ADR 0014: Parser-authoritative Reader opening
 
-- Status: Accepted
-- Date: 2026-08-15
-- Scope: Authoritative Reader-opening eligibility and startup-conflict handling
-
-Supersession note (2026-08-31): ADR 0025 replaces the online reflowable delivery
-statements below with download-then-read. ADR 0026 establishes that the actual
-parser remains authoritative for readability, while the generated safety policy
-is authoritative for security findings and budgets. A parser/SDK limitation is
-an `ENGINE_*` or `PLATFORM_*` result, never a private safety rule or fallback.
-
-## Context
-
-Reader bootstrap is the online authorization and content-access entry point. It
-also supplies EPUB navigation, remote comic pages, PDF title hints, and optional
-progress. Clients had incorrectly turned its diagnostic fingerprint, artifact
-version, declared byte length, comic page list, PDF page count, and progress state
-into gates for opening an already downloaded file. A valid local publication could
-therefore become unreadable even though the native parser could open it.
+Status: Accepted; safety decisions are owned by [ADR 0026](0026-versioned-reader-safety-policy-contract.md),
+delivery by [ADR 0025](0025-reflowable-original-download-before-reading.md) and
+progress by [ADR 0028](0028-reader-v5-opaque-position-report.md).
 
 ## Decision
 
-Every authenticated online entry still requests Reader v4 bootstrap. Bootstrap
-content access remains mandatory when bytes are not already local: remote comics
-require their manifest and page API; remote PDF requires usable bounded Range
-access; reflowable content requires manifest, positions and chapter resources.
+Reader v5 opens an authorized `bookId + resourceId + assetId` from the verified
+original. The format-specific parser or engine is authoritative for whether that
+original can be read. Transfer integrity, exact asset version and storage length
+are still required before an artifact is published. Once that artifact is
+verified, server fingerprints, diagnostic versions, page-count hints and
+presentation percentages do not become a second parser gate.
 
-A completed local artifact is selected only by server/user/authorization namespace and
-`bookId + resourceId + assetId`.
-The native parser is authoritative for whether it can be read:
+Reflowable resources are downloaded in complete original form and parsed locally;
+comic resources use their bounded manifest/page contract; PDF uses its selected
+PDFium or web delivery adapter. A local or downloaded artifact is never repaired
+by packaging a derived EPUB, ZIP or unpacked directory. The active safety policy
+must run at the publication/container boundary, and an unavailable parser or
+platform defense is an `ENGINE_*` or `PLATFORM_*` outcome rather than a private
+content rule or fallback.
 
-- EPUB uses Bootstrap navigation when available, locally retained navigation when the
-  network request is unavailable,
-  and fills gaps from the publication TOC.
-- A local CBZ/ZIP is security-checked and indexed from its actual entries. Remote
-  comics use only the Bootstrap page API and never synthesize a local archive.
-- A local or fully downloaded PDF uses its parsed page count. Bootstrap page titles
-  are optional index-based hints.
+Progress, bookmarks and settings initialize best-effort after content selection.
+Missing progress may start at the beginning; an SDK-invalid saved Locator is an
+explicit `LOCATION_RESTORE_FAILED` result and is not silently rewritten. Progress
+persistence failure cannot prevent opening or closing the Reader. [ADR 0028] owns
+opaque Locator synchronization and validation.
 
-Content fingerprints, artifact versions, declared byte counts, and server/local
-page-count equality remain diagnostics. They do not gate opening. Progress,
-bookmarks, preferences, and synchronization initialize best-effort after content;
-invalid progress starts at the beginning, and persistence failures never block the
-Reader or its close action. Startup progress conflicts are resolved deterministically
-without a blocking dialog.
+## Current evidence
 
-Online retry refreshes authorized metadata and repeats only the requested chapter,
-page or bounded PDF range. Invalid or oversized responses fail explicitly. Reader
-contains no file acquisition/repair path. A damaged explicit offline download is
-managed in Downloads; its existing completed artifact remains until a new transfer
-has passed validation and atomic publication. Local imports remain user-owned.
+The public surface is `apps/api-python/app/modules/reader/presentation/v5.py` and
+the Web adapter validates `/api/reader/v5`. Native and Web adapters invoke their
+format engines through the shared safety contract; no Reader path invokes a
+legacy importer or derived-publication repair path.
 
 ## Consequences
 
-- Server metadata can evolve without taking a readable local book away from its user.
-- A Bootstrap failure prevents remote-only reading but not an already downloaded
-  publication.
-- Navigation caches are scoped by server identity, user, Book, and ReadableResource; they are hints,
-  never a substitute for parser safety checks.
-- Download completion may still verify transfer integrity before publication. That
-  transfer check is distinct from later Reader-entry eligibility.
+Changing server metadata cannot make a readable local original unavailable.
+Remote-only content still requires its authorized delivery endpoint, and an
+actual parser, integrity, capacity or platform failure remains visible with its
+stable error category.

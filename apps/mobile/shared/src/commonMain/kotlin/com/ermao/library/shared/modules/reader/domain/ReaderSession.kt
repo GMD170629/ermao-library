@@ -101,7 +101,7 @@ private fun readerErrorCodeForSafetyFailure(code: String): ReaderErrorCode? =
         when (safetyCode) {
             ReaderSafetyErrorCode.PUBLICATION_CORRUPT -> ReaderErrorCode.ParseFailed
             ReaderSafetyErrorCode.PUBLICATION_DRM_UNSUPPORTED -> ReaderErrorCode.DrmProtected
-            ReaderSafetyErrorCode.PUBLICATION_MIME_MISMATCH -> ReaderErrorCode.CorruptFile
+            ReaderSafetyErrorCode.PUBLICATION_MIME_MISMATCH -> ReaderErrorCode.UnsupportedFormat
             ReaderSafetyErrorCode.PUBLICATION_PARSER_LIMIT -> ReaderErrorCode.OutOfMemoryRisk
             ReaderSafetyErrorCode.PUBLICATION_RESOURCE_BLOCKED -> ReaderErrorCode.ResourceMissing
             ReaderSafetyErrorCode.PUBLICATION_SECURITY_REJECTED -> ReaderErrorCode.SecurityRejected
@@ -113,6 +113,8 @@ private fun readerErrorCodeForSafetyFailure(code: String): ReaderErrorCode? =
             ReaderSafetyErrorCode.COMIC_PAGE_BLOCKED,
             -> ReaderErrorCode.ComicPageDecodeFailed
             ReaderSafetyErrorCode.COMIC_RESOURCE_CHANGED -> ReaderErrorCode.PublicationChanged
+            ReaderSafetyErrorCode.COMIC_RESOURCE_CORRUPT -> ReaderErrorCode.ComicArchiveCorrupt
+            ReaderSafetyErrorCode.COMIC_RESOURCE_LIMIT -> ReaderErrorCode.ComicOutOfMemoryRisk
             ReaderSafetyErrorCode.COMIC_SECURITY_REJECTED -> ReaderErrorCode.ComicArchiveCorrupt
             ReaderSafetyErrorCode.AUDIO_DURATION_INVALID,
             ReaderSafetyErrorCode.AUDIO_METADATA_LIMIT,

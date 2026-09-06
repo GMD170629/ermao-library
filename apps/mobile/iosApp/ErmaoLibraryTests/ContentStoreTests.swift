@@ -1218,6 +1218,7 @@ private actor DetailBrowserContentClient: ContentClient {
             pageSize: chapterPage.pageSize,
             total: chapterPage.total,
             totalPages: chapterPage.totalPages,
+            chapterCount: chapterPage.total,
             currentHref: chapterPage.chapters.first(where: \.isCurrent)?.href,
             currentChapterSortOrder: chapterPage.chapters.first(where: \.isCurrent)?.sortOrder,
             currentPageNumber: nil,

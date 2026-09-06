@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -78,15 +80,15 @@ fun <T> WarmPageNavigationSuite(
             selectedContainerColor = theme.colors.accentSoft,
             unselectedIconColor = theme.colors.textSecondary,
             unselectedTextColor = theme.colors.textSecondary,
-            unselectedContainerColor = theme.colors.surface,
+            unselectedContainerColor = theme.colors.navigation,
         ),
     )
     val suiteColors = NavigationSuiteDefaults.colors(
-        navigationBarContainerColor = theme.colors.surface,
+        navigationBarContainerColor = theme.colors.navigation,
         navigationBarContentColor = theme.colors.textPrimary,
-        navigationRailContainerColor = theme.colors.surface,
+        navigationRailContainerColor = theme.colors.navigation,
         navigationRailContentColor = theme.colors.textPrimary,
-        navigationDrawerContainerColor = theme.colors.surface,
+        navigationDrawerContainerColor = theme.colors.navigation,
         navigationDrawerContentColor = theme.colors.textPrimary,
     )
     if (!showNavigationChrome) {
@@ -147,7 +149,7 @@ fun <T> WarmPageNavigationSuite(
                             }
                             Surface(
                                 modifier = Modifier.fillMaxWidth(),
-                                color = theme.colors.surface,
+                                color = theme.colors.navigation,
                                 contentColor = theme.colors.textPrimary,
                                 shape = RectangleShape,
                                 tonalElevation = 0.dp,
@@ -178,6 +180,9 @@ private fun <T> WarmPageCompactNavigation(
     val theme = WarmPageThemeValues
     Scaffold(
         modifier = Modifier.fillMaxSize(),
+        // Each destination's top app bar owns the status-bar inset. This shell only
+        // reserves its bottom bar; its padding is consumed before nesting a page Scaffold.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         containerColor = theme.colors.canvas,
         contentColor = theme.colors.textPrimary,
         bottomBar = {
@@ -185,7 +190,7 @@ private fun <T> WarmPageCompactNavigation(
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("bottom-navigation-shell"),
-                color = theme.colors.surface,
+                color = theme.colors.navigation,
                 contentColor = theme.colors.textPrimary,
                 shape = RectangleShape,
                 tonalElevation = 0.dp,
@@ -215,11 +220,12 @@ private fun <T> WarmPageCompactNavigation(
                                         onClick = { onSelect(item.id) },
                                         role = Role.Tab,
                                     )
-                                    .padding(horizontal = 4.dp, vertical = 6.dp)
+                                    .padding(horizontal = theme.spacing.half, vertical = theme.spacing.half)
                                     .background(
                                         color = if (isSelected) theme.colors.accentSoft else Color.Transparent,
-                                        shape = RoundedCornerShape(16.dp),
-                                    ),
+                                        shape = RoundedCornerShape(theme.radii.task),
+                                    )
+                                    .padding(vertical = theme.spacing.oneAndHalf / 2),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
                                 val contentColor = if (isSelected) {
@@ -249,7 +255,8 @@ private fun <T> WarmPageCompactNavigation(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(contentPadding),
+                .padding(contentPadding)
+                .consumeWindowInsets(contentPadding),
         ) {
             content()
         }

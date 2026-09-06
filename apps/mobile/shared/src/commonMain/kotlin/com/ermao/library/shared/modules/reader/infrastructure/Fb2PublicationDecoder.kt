@@ -9,7 +9,12 @@ import com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId
 data class Fb2EmbeddedImage(val identifier: String, val mediaType: String, val encoded: String)
 data class Fb2ImageLink(val identifier: String, val href: String, val mediaType: String)
 data class Fb2TextResource(val href: String, val title: String, val xhtml: String)
-data class Fb2NavigationEntry(val href: String, val title: String, val children: List<Fb2NavigationEntry>)
+data class Fb2NavigationEntry(
+    val href: String?,
+    val title: String,
+    val children: List<Fb2NavigationEntry>,
+    val navigationKey: String,
+)
 data class Fb2PublicationDocument(
     val title: String,
     val language: String?,
@@ -18,7 +23,10 @@ data class Fb2PublicationDocument(
     val images: List<Fb2ImageLink>,
     val stylesheetHref: String = "fb2/reader.css",
     val stylesheet: String = FB2_STYLESHEET,
-)
+) {
+    fun withTableOfContents(entries: List<Fb2NavigationEntry>): Fb2PublicationDocument =
+        copy(tableOfContents = entries)
+}
 
 class Fb2XmlPolicy {
     /** An ISO-8859-1 byte-preserving probe, never a decoding of publication text. */
@@ -48,15 +56,24 @@ class Fb2PublicationDecoder {
     private var textByteCount = 0L
 
     @Throws(IllegalArgumentException::class)
-    fun startElement(name: String, attributes: Map<String, String>) {
+    /**
+     * [sourceStart] is an optional copy of the zero-based start-element ordinal from
+     * the XML adapter. The decoder owns the ordinal so direct callers and ChapterCore
+     * see the same address space; a supplied value is accepted only when it agrees.
+     */
+    fun startElement(name: String, attributes: Map<String, String>, sourceStart: Long = -1L) {
         val maxDepth = ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.FB2_MAX_DEPTH)
         val maxNodes = ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.FB2_MAX_NODES)
         if (stack.size.toLong() >= maxDepth || elementCount >= maxNodes) {
             ReaderSafetyFacade().reject(ReaderSafetyRuleId.FB2_STRUCTURE_BUDGET)
         }
+        require(sourceStart == -1L || sourceStart == elementCount) {
+            "FB2 source ordinal does not match the XML event stream"
+        }
+        val assignedSourceStart = elementCount
         elementCount += 1
         if (stack.isEmpty()) require(root == null && name == "FictionBook") { "FB2 root is invalid" }
-        val element = Fb2Element(name, attributes.toMap())
+        val element = Fb2Element(name, attributes.toMap(), assignedSourceStart)
         stack.lastOrNull()?.content?.add(element) ?: run { root = element }
         stack += element
     }
@@ -89,7 +106,7 @@ class Fb2PublicationDecoder {
         return completedRoot().children("binary").mapNotNull { element ->
             val identifier = element.attribute("id").orEmpty().trim()
             val mediaType = element.attribute("content-type").orEmpty().trim().lowercase()
-            if (identifier.isEmpty() || ReaderSafetyPolicy.fb2EmbeddedImageExtension(mediaType) == null) {
+            if (identifier.isEmpty()) {
                 return@mapNotNull null
             }
             require(seen.add(identifier)) { "FB2 binary identifier is duplicated" }
@@ -118,26 +135,26 @@ class Fb2PublicationDecoder {
             "FB2 images were not validated"
         }
         require(images.all { image ->
-            val extension = ReaderSafetyPolicy.fb2EmbeddedImageExtension(image.mediaType)
-                ?: return@all false
+            val extension = ReaderSafetyPolicy.fb2EmbeddedImageExtension(image.mediaType).orEmpty()
             Regex("fb2/images/[a-f0-9]{20}${Regex.escape(extension)}").matches(image.href)
         }) {
             "FB2 image path is invalid"
         }
         val renderer = Fb2Renderer(imageHrefs)
-        val sections = renderer.sections(document, title)
-        require(sections.isNotEmpty()) { "FB2 reading order is empty" }
+        val resources = renderer.resources(document, title)
+        require(resources.isNotEmpty()) { "FB2 reading order is empty" }
         return Fb2PublicationDocument(
             title = title,
             language = language,
-            resources = sections.map { section ->
-                Fb2TextResource(section.href, section.title, """<?xml version="1.0" encoding="utf-8"?>
+            resources = resources.map { resource ->
+                Fb2TextResource(resource.href, resource.title, """<?xml version="1.0" encoding="utf-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="${(language ?: "und").fb2Escaped()}">
-<head><meta charset="utf-8"/><title>${section.title.fb2Escaped()}</title>
+<head><meta charset="utf-8"/><title>${resource.title.fb2Escaped()}</title>
 <link rel="stylesheet" type="text/css" href="reader.css"/></head>
-<body>${renderer.render(section, 1)}</body></html>""")
+<body>${renderer.render(resource)}</body></html>""")
             },
-            tableOfContents = sections.map(Fb2Section::navigation),
+            // ChapterCore is the only owner of chapter selection and TOC projection.
+            tableOfContents = emptyList(),
             images = images.toList(),
         )
     }
@@ -150,7 +167,11 @@ class Fb2PublicationDecoder {
 
 private sealed interface Fb2Content
 private class Fb2Text(val value: StringBuilder) : Fb2Content
-private class Fb2Element(val name: String, val attributes: Map<String, String>) : Fb2Content {
+private class Fb2Element(
+    val name: String,
+    val attributes: Map<String, String>,
+    val sourceStart: Long = -1L,
+) : Fb2Content {
     val content = mutableListOf<Fb2Content>()
     fun children(name: String): List<Fb2Element> = content.filterIsInstance<Fb2Element>().filter { it.name == name }
     fun attribute(name: String): String? = attributes.entries.firstOrNull { it.key.substringAfterLast(':') == name }?.value
@@ -176,57 +197,119 @@ private data class Fb2Section(
     val anchor: String,
     val title: String,
     val children: List<Fb2Section>,
-) {
-    fun navigation(): Fb2NavigationEntry = Fb2NavigationEntry("$href#$anchor", title, children.map(Fb2Section::navigation))
-}
+)
+
+private data class Fb2Resource(
+    val href: String,
+    val title: String,
+    val root: Fb2Element,
+    val section: Fb2Section?,
+)
 
 private class Fb2Renderer(private val imageHrefs: Map<String, String>) {
     private val anchors = mutableMapOf<Fb2Element, String>()
     private val targets = mutableMapOf<String, String>()
     private var sectionCount = 0
 
-    private fun anchor(element: Fb2Element, href: String): String = anchors.getOrPut(element) {
-        if (anchors.size.toLong() >= ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.FB2_MAX_NODES)) {
-            ReaderSafetyFacade().reject(ReaderSafetyRuleId.FB2_STRUCTURE_BUDGET)
-        }
-        val anchor = "fb2-node-${(anchors.size + 1).toString().padStart(6, '0')}"
-        element.attribute("id")?.trim()?.takeIf(String::isNotEmpty)?.let { identifier ->
-            require(identifier !in targets) { "FB2 identifier is duplicated" }
-            targets[identifier] = "$href#$anchor"
-        }
-        anchor
+    private fun anchor(element: Fb2Element): String = anchors.getOrPut(element) {
+        require(element.sourceStart >= 0L) { "FB2 source element has no ordinal" }
+        "chapter-node-${element.sourceStart}"
     }
 
-    fun sections(root: Fb2Element, title: String): List<Fb2Section> = buildList {
-        root.children("body").forEach { body ->
-            body.children("section").ifEmpty { listOf(body) }.forEach { element ->
-                val href = "fb2/section-${(size + 1).toString().padStart(4, '0')}.xhtml"
-                add(section(element, href, "$title ${size + 1}"))
-                element.descendants().filter { it.attribute("id") != null }.forEach { anchor(it, href) }
+    private fun registerTargets(element: Fb2Element, href: String) {
+        element.descendants().forEach { descendant ->
+            descendant.attribute("id")?.trim()?.takeIf(String::isNotEmpty)?.let { identifier ->
+                val target = "$href#${anchor(descendant)}"
+                val previous = targets[identifier]
+                require(previous == null || previous == target) { "FB2 identifier is duplicated" }
+                targets[identifier] = target
             }
         }
     }
 
-    private fun section(element: Fb2Element, href: String, fallback: String): Fb2Section {
-        sectionCount += 1
-        if (sectionCount.toLong() > ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.FB2_MAX_NODES)) {
-            ReaderSafetyFacade().reject(ReaderSafetyRuleId.FB2_STRUCTURE_BUDGET)
+    fun resources(root: Fb2Element, title: String): List<Fb2Resource> = buildList {
+        root.children("body").forEachIndexed { bodyIndex, body ->
+            var loose = Fb2Element("body", emptyMap())
+            var partIndex = 0
+
+            fun flushLoose() {
+                if (!hasContent(loose)) return
+                partIndex += 1
+                val href = "fb2/body-${bodyIndex + 1}-part-$partIndex.xhtml"
+                registerTargets(loose, href)
+                add(Fb2Resource(href, title, loose, null))
+                loose = Fb2Element("body", emptyMap())
+            }
+
+            body.content.forEach { content ->
+                if (content is Fb2Element && content.name == "section") {
+                    flushLoose()
+                    sectionCount += 1
+                    if (sectionCount.toLong() > ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.FB2_MAX_NODES)) {
+                        ReaderSafetyFacade().reject(ReaderSafetyRuleId.FB2_STRUCTURE_BUDGET)
+                    }
+                    val href = "fb2/section-${sectionCount.toString().padStart(4, '0')}.xhtml"
+                    val section = section(content, href)
+                    registerTargets(content, href)
+                    add(Fb2Resource(href, section.title.ifEmpty { title }, content, section))
+                } else {
+                    loose.content += content
+                }
+            }
+            flushLoose()
         }
-        val anchor = anchor(element, href)
-        val title = element.children("title").firstOrNull()?.normalizedText()?.takeIf(String::isNotEmpty) ?: fallback
-        return Fb2Section(element, href, anchor, title, element.children("section").mapIndexed { index, child ->
-            section(child, href, "$title ${index + 1}")
+    }
+
+    private fun hasContent(element: Fb2Element): Boolean = element.content.any { content ->
+        when (content) {
+            is Fb2Element -> true
+            is Fb2Text -> content.value.any { !it.isWhitespace() }
+        }
+    }
+
+    private fun section(element: Fb2Element, href: String): Fb2Section {
+        val title = element.children("title").firstOrNull()?.normalizedText().orEmpty()
+        return Fb2Section(element, href, anchor(element), title, element.children("section").map { child ->
+            section(child, href)
         })
     }
 
-    fun render(section: Fb2Section, depth: Int): String = buildString {
+    fun render(resource: Fb2Resource): String = resource.section?.let { renderSection(it, 1) }
+        ?: "<section>${renderContent(resource.root.content, emptyList(), 1)}</section>"
+
+    private fun renderSection(section: Fb2Section, depth: Int): String = buildString {
         val heading = depth.coerceAtMost(6)
-        append("<section id=\"${section.anchor}\"><h$heading>${section.title.fb2Escaped()}</h$heading>")
-        section.element.content.filterIsInstance<Fb2Element>()
-            .filter { it.name !in setOf("title", "section") }.forEach { append(renderElement(it)) }
-        section.children.forEach { append(render(it, depth + 1)) }
+        append("<section id=\"${section.anchor}\">")
+        if (section.title.isNotEmpty()) append("<h$heading>${section.title.fb2Escaped()}</h$heading>")
+        append(renderContent(section.element.content, section.children, depth))
         append("</section>")
     }
+
+    private fun renderContent(content: List<Fb2Content>, children: List<Fb2Section>, depth: Int): String =
+        buildString {
+            var afterTitle = false
+            content.forEach { value ->
+                when (value) {
+                    is Fb2Text -> {
+                        val text = value.value.toString()
+                        if (!(afterTitle && text.all(Char::isWhitespace))) append(text.fb2Escaped())
+                        afterTitle = false
+                    }
+                    is Fb2Element -> when {
+                        value.name == "title" -> afterTitle = true
+                        value.name == "section" -> {
+                            afterTitle = false
+                            val child = children.firstOrNull { it.element === value }
+                            if (child != null) append(renderSection(child, depth + 1))
+                        }
+                        else -> {
+                            afterTitle = false
+                            append(renderElement(value))
+                        }
+                    }
+                }
+            }
+        }
 
     private fun renderElement(element: Fb2Element): String {
         val name = element.name
@@ -245,7 +328,8 @@ private class Fb2Renderer(private val imageHrefs: Map<String, String>) {
             return "<a href=\"${target.removePrefix("fb2/").fb2Escaped()}\">$content</a>"
         }
         val tag = ELEMENT_TAGS[name] ?: return content
-        val id = anchors[element]?.let { " id=\"$it\"" }.orEmpty()
+        val id = element.attribute("id")?.trim()?.takeIf(String::isNotEmpty)
+            ?.let { " id=\"${anchor(element)}\"" }.orEmpty()
         val style = if (name == "stanza") " class=\"stanza\"" else ""
         return "<$tag$id$style>$content</$tag>"
     }

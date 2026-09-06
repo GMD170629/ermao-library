@@ -2,24 +2,21 @@
 
 from __future__ import annotations
 
+import json
 from importlib import import_module
 from pathlib import Path
 from typing import Protocol, cast
 
 from sqlalchemy import (
-    Integer,
-    and_,
-    case,
     false,
     func,
-    or_,
     select,
     true,
 )
-from sqlalchemy import cast as sql_cast
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.contracts.library_navigation import navigation_entry_id
 from app.models import (
     Library,
     LibraryReadableResource,
@@ -121,6 +118,9 @@ class SqlAlchemyResourceDetailQueries:
             current_position=current_position,
             current_chapter_index=current_chapter_index,
             current_chapter_title=current_chapter_title,
+            current_chapter_navigation_key=progress.chapter_navigation_key
+            if progress is not None
+            else None,
         )
 
     def list_navigation_units(
@@ -158,21 +158,23 @@ class SqlAlchemyResourceDetailQueries:
             or 0
         )
         return (
-            tuple(
-                ResourceDetailItem(
-                    id=row.id,
-                    unit_type=row.unit_type,
-                    title=row.title,
-                    sort_order=row.sort_order,
-                    asset_id=row.asset_id,
-                    href=row.href,
-                    media_type=row.media_type,
-                    duration_ms=row.duration_ms,
-                    metadata_json=row.metadata_json,
-                )
-                for row in rows
-            ),
+            tuple(_navigation_detail_item(row) for row in rows),
             total,
+        )
+
+    def count_chapters(self, *, resource_id: str, asset_id: str) -> int:
+        return int(
+            self._db.scalar(
+                select(func.count())
+                .select_from(ReadableResourceNavigationUnit)
+                .where(
+                    ReadableResourceNavigationUnit.resource_id == resource_id,
+                    ReadableResourceNavigationUnit.asset_id == asset_id,
+                    ReadableResourceNavigationUnit.unit_type == "chapter",
+                    ReadableResourceNavigationUnit.href != "",
+                )
+            )
+            or 0
         )
 
     def list_assets(self, *, resource_id: str) -> tuple[ResourceAssetDetail, ...]:
@@ -284,91 +286,51 @@ class SqlAlchemyResourceDetailQueries:
         *,
         resource_id: str,
         asset_id: str,
-        current_href: str | None,
-        current_position: int | None,
+        navigation_key: str,
     ) -> ResourceCurrentChapter | None:
-        base_predicate = (
-            ReadableResourceNavigationUnit.resource_id == resource_id,
-            ReadableResourceNavigationUnit.asset_id == asset_id,
-            func.lower(ReadableResourceNavigationUnit.unit_type) == "chapter",
+        row = self._db.scalar(
+            select(ReadableResourceNavigationUnit).where(
+                ReadableResourceNavigationUnit.resource_id == resource_id,
+                ReadableResourceNavigationUnit.asset_id == asset_id,
+                ReadableResourceNavigationUnit.unit_type == "chapter",
+                ReadableResourceNavigationUnit.id
+                == navigation_entry_id(resource_id, navigation_key),
+                ReadableResourceNavigationUnit.href != "",
+            )
         )
-        row: ReadableResourceNavigationUnit | None = None
-        if current_href:
-            href_rows = self._db.scalars(
-                select(ReadableResourceNavigationUnit)
-                .where(
-                    *base_predicate,
-                    func.lower(ReadableResourceNavigationUnit.href)
-                    == current_href.casefold(),
-                )
-                .order_by(
-                    ReadableResourceNavigationUnit.sort_order.asc(),
-                    ReadableResourceNavigationUnit.id.asc(),
-                )
-                .limit(2)
-            ).all()
-            if len(href_rows) == 1:
-                row = href_rows[0]
+        return (
+            None
+            if row is None
+            else ResourceCurrentChapter(
+                index=row.sort_order,
+                title=row.title,
+                sort_order=row.sort_order,
+                href=row.href,
+            )
+        )
 
-        if row is None and current_position is not None:
-            safe_metadata = case(
-                (
-                    func.json_valid(ReadableResourceNavigationUnit.metadata_json) == 1,
-                    ReadableResourceNavigationUnit.metadata_json,
-                ),
-                else_="{}",
-            )
-            position_expression = sql_cast(
-                func.json_extract(safe_metadata, "$.readingOrderPosition"),
-                Integer,
-            )
-            nearest_position = self._db.scalar(
-                select(func.max(position_expression)).where(
-                    *base_predicate,
-                    position_expression <= current_position,
-                )
-            )
-            if nearest_position is not None:
-                position_rows = self._db.scalars(
-                    select(ReadableResourceNavigationUnit)
-                    .where(
-                        *base_predicate,
-                        position_expression == nearest_position,
-                    )
-                    .order_by(
-                        ReadableResourceNavigationUnit.sort_order.asc(),
-                        ReadableResourceNavigationUnit.id.asc(),
-                    )
-                    .limit(2)
-                ).all()
-                if len(position_rows) == 1:
-                    row = position_rows[0]
 
-        if row is None:
-            return None
-        chapter_index = int(
-            self._db.scalar(
-                select(func.count())
-                .select_from(ReadableResourceNavigationUnit)
-                .where(
-                    *base_predicate,
-                    or_(
-                        ReadableResourceNavigationUnit.sort_order < row.sort_order,
-                        and_(
-                            ReadableResourceNavigationUnit.sort_order == row.sort_order,
-                            ReadableResourceNavigationUnit.id < row.id,
-                        ),
-                    ),
-                )
-            )
-            or 0
-        )
-        return ResourceCurrentChapter(
-            index=chapter_index,
-            title=row.title,
-            sort_order=row.sort_order,
-            href=row.href,
-        )
+def _navigation_detail_item(row: ReadableResourceNavigationUnit) -> ResourceDetailItem:
+    metadata: object = json.loads(row.metadata_json or "{}")
+    if not isinstance(metadata, dict):
+        raise TypeError("Navigation metadata is not an object")
+    level = metadata.get("level")
+    navigation_key = metadata.get("navigationKey")
+    return ResourceDetailItem(
+        id=row.id,
+        unit_type=row.unit_type,
+        title=row.title,
+        sort_order=row.sort_order,
+        asset_id=row.asset_id,
+        href=row.href or None,
+        media_type=row.media_type,
+        duration_ms=row.duration_ms,
+        metadata_json=row.metadata_json,
+        level=level
+        if isinstance(level, int) and not isinstance(level, bool) and level >= 0
+        else None,
+        navigation_key=navigation_key if isinstance(navigation_key, str) else None,
+    )
 
 
 __all__ = ["SqlAlchemyResourceDetailQueries"]

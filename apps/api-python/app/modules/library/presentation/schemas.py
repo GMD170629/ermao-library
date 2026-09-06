@@ -541,6 +541,7 @@ class ResourceBatchPayload(HttpContractModel):
 class ReadingUnitView(HttpContractModel):
     id: str
     title: str
+    navigation_key: str | None = Field(default=None, alias="navigationKey")
     href: str | None = None
     sort_order: int = Field(alias="sortOrder")
     unit_type: str = Field(alias="unitType")
@@ -563,6 +564,7 @@ class ReadingUnitsPage(HttpContractModel):
 
 
 class ReadingUnitsPayload(HttpContractModel):
+    chapter_count: int | None = Field(default=None, alias="chapterCount")
     book_id: str = Field(alias="bookId")
     resource_id: str = Field(alias="resourceId")
     units: list[ReadingUnitView]

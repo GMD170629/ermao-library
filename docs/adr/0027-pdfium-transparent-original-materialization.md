@@ -3,7 +3,7 @@
 - 状态：采用；物理设备流程验收待完成
 - 日期：2026-09-01
 - 范围：Android、iOS、KMP Reader、原生 PDFium wrapper 与共享 Downloads
-- 修订：ADR 0024、ADR 0025 中“原生 PDF 始终仅使用 Range、不会创建完整下载”的部分
+- 补充：ADR 0025 中原生 PDF 的 Range 与完整原件路由
 
 ## 决策
 

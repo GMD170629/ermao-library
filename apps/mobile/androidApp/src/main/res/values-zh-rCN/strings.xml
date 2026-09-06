@@ -262,7 +262,6 @@
     <string name="work_metadata_page_count">页数</string>
     <string name="work_metadata_source">元数据信息来源</string>
     <string name="work_metadata_file_path">文件路径</string>
-    <string name="work_metadata_missing">—</string>
     <plurals name="work_metadata_page_count_value"><item quantity="other">%d 页</item></plurals>
     <string name="work_reading_progress">阅读进度</string>
     <string name="work_reading_position">读至 %1$s</string>
@@ -402,7 +401,6 @@
     <string name="reader_bookmarks">书签</string>
     <string name="reader_annotations">标注</string>
     <string name="reader_annotations_empty">还没有标注</string>
-    <string name="reader_annotations_empty_hint">启用标注支持后，划线和批注会显示在这里。</string>
     <string name="reader_bookmarks_empty">还没有书签</string>
     <string name="reader_bookmarks_empty_hint">保存当前位置后，可从这里快速返回</string>
     <string name="reader_bookmark_count">%1$d 个书签</string>
@@ -417,8 +415,6 @@
     <string name="reader_comic_page">第 %1$d 页</string>
     <string name="reader_pdf_page">第 %1$d 页</string>
     <string name="reader_progress_remaining_percent">剩余 %1$d%%</string>
-    <string name="reader_font_mapping">苹方使用思源黑体；宋体使用思源宋体；楷体使用霞鹜文楷。</string>
-    <string name="reader_negative_spacing_retained">已保存的负字间距仍保留，但暂不支持；当前生效值为 0。</string>
     <string name="reader_advanced_settings">高级设置</string>
     <string name="reader_done">完成</string>
     <string name="reader_contents_title">目录</string>
@@ -550,6 +546,9 @@
     <string name="work_contents_list">列表</string>
     <string name="work_contents_file">文件</string>
     <string name="work_contents_source_directory">来源目录 %1$d</string>
+    <string name="work_contents_path_title">选择目录</string>
+    <string name="work_contents_current_directory">当前目录</string>
+    <string name="work_contents_sort">内容排序</string>
     <string name="work_contents_loading">正在加载来源目录…</string>
     <string name="work_contents_error_title">图书内容加载失败</string>
     <string name="work_contents_error_message">来源目录加载失败（%1$s）。</string>
@@ -643,8 +642,6 @@
     <string name="reader_error_security">出版物安全策略阻止了活动内容。</string>
     <string name="reader_error_pdf_engine_limit">PDF 引擎达到加载步骤上限。</string>
     <string name="reader_error_read">阅读器无法读取所请求的图书资源。</string>
-    <string name="reader_setting_saved_value">已保存的当前值：%1$s</string>
-    <string name="reader_setting_unavailable_short">此设置当前暂不可用。</string>
     <string name="reader_preferences_save_failed">无法保存此设备的阅读设置，请重试。</string>
     <string name="reader_preferences_engine_failed">无法应用阅读设置，请重试。</string>
     <string name="reader_setting_always_on">始终开启</string>
@@ -654,4 +651,7 @@
     <string name="reader_setting_temporarily_unavailable">暂不可用</string>
     <string name="reader_advanced_collapsed">已收起</string>
     <string name="reader_advanced_expanded">已展开</string>
+    <string name="audio_chapters_title">章节</string>
+    <string name="audio_chapters_empty">暂无章节</string>
+    <string name="audio_chapter_current">当前章节</string>
 </resources>

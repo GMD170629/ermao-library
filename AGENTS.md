@@ -351,6 +351,13 @@ Hidden commits, fire-and-forget promises, and untracked background tasks are pro
 
 #### Reader safety policy contract
 
+This is a household NAS reader. Keep safety implementation proportional: reuse
+the existing parsers, platform defenses and small shared blacklist sanitizers.
+Do not add a general policy framework, production rule-event histories or
+publication-graph failure reclassification solely for reporting completeness.
+Prefer tests of readable output and absence of dangerous side effects. Preserve
+the existing capacity limits and never add admission checks for unfamiliar content.
+
 `packages/reader-contracts/reader-safety-policy.json` is the sole semantic owner
 for Reader content filtering, format/MIME admission, resource budgets, bounded
 PDF/comic delivery, audio metadata safety, rule actions and safety error codes.
@@ -359,6 +366,18 @@ Kotlin, Python and native C bindings are build artifacts and must never be edite
 iOS consumes the KMP binding through `ErmaoShared` and must not maintain a Swift
 policy catalog.
 
+- Content safety defaults to ALLOW and uses explicit risk blacklists. Unknown
+  declarations, entity names, tags, URI schemes, formats or MIME metadata do not
+  imply danger. Existing capacity limits retain their exact values. Sanitize
+  recoverable hazards in memory, isolate optional resource failures, and reject a
+  publication for security only when a concrete risk cannot be isolated. Report
+  actual capability, integrity, resource-limit and implementation failures in
+  their own generated categories.
+- Native ContainerAsset protection must precede PublicationOpener.open; control
+  XML and body markup use appropriate processors behind the same protected
+  container. Each open owns and disposes its safety error session. Cached opens,
+  retry and lazy resource rereads never bypass current checks. iOS adapter/device
+  execution is required and cannot be replaced with a KMP report.
 - Add or change a safety rule in the machine contract first. Update its schema,
   versioned conformance fixtures and expected rule events in the same change,
   increment `policyVersion` for every semantic change, regenerate all bindings,

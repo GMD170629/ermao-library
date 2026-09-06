@@ -40,43 +40,11 @@ sealed interface ReaderSafetyMarkupResult {
  */
 class ReaderSafetyFacade {
     fun sanitizeMarkup(markup: String, sourceByteCount: Long = -1L): ReaderSafetyMarkupResult {
-        if (markup.isEmpty() || markup.isBlank()) {
-            return rejected(
-                ReaderSafetyRuleId.REFLOWABLE_REQUIRED_READING_ORDER_MARKUP,
-            )
+        val prepared = when (val result = prepareXmlMarkup(markup, sourceByteCount)) {
+            is ReaderSafetyMarkupResult.Accepted -> result.value
+            is ReaderSafetyMarkupResult.Rejected -> return result
         }
-        val measuredBytes = if (sourceByteCount >= 0) {
-            maxOf(sourceByteCount, markup.encodeToByteArray().size.toLong())
-        } else {
-            markup.encodeToByteArray().size.toLong()
-        }
-        if (measuredBytes > budget("reflowableMarkupMaxBytes")) {
-            return rejected(
-                ReaderSafetyRuleId.REFLOWABLE_MARKUP_MAX_BYTES,
-            )
-        }
-
-        val lexicalMarkup = maskNonMarkup(markup)
-        if (ENTITY_OPEN.containsMatchIn(lexicalMarkup)) {
-            return rejected(
-                ReaderSafetyRuleId.REFLOWABLE_REJECT_XML_ENTITY,
-            )
-        }
-        if (NAMED_ENTITY_REFERENCE.findAll(lexicalMarkup).any { match ->
-                match.groups["name"]?.value !in ReaderSafetyPolicy.reflowableProfile.namedEntityCodepoints
-            }
-        ) {
-            return rejected(
-                ReaderSafetyRuleId.REFLOWABLE_REJECT_XML_ENTITY,
-            )
-        }
-        if (!validateDoctype(lexicalMarkup)) {
-            return rejected(
-                ReaderSafetyRuleId.REFLOWABLE_REJECT_XML_ENTITY,
-            )
-        }
-
-        var sanitized = markup
+        var sanitized = prepared.markup
         sanitized = sanitizeElements(sanitized, ReaderSafetyPolicy.reflowableProfile.sanitizedElements)
         sanitized = sanitizeElements(sanitized, ReaderSafetyPolicy.reflowableProfile.svgSanitizedElements)
         sanitized = sanitizeMetaElements(sanitized)
@@ -86,9 +54,111 @@ class ReaderSafetyFacade {
             ReaderSanitizedMarkup(
                 markup = sanitized,
                 parserMarkup = replaceGeneratedEntitiesForParsing(sanitized),
-                changed = sanitized != markup,
+                changed = prepared.changed || sanitized != prepared.markup,
             ),
         )
+    }
+
+    /**
+     * Prepares a reflowable reading-order resource for an XML parser. This is deliberately
+     * separate from the HTML sanitizer: the parser copy may remove DTD dependencies and
+     * literalize entity references while the verified publication remains untouched.
+     */
+    fun prepareXmlMarkup(markup: String, sourceByteCount: Long = -1L): ReaderSafetyMarkupResult =
+        prepareXml(
+            markup = markup,
+            sourceByteCount = sourceByteCount,
+            maximumBytes = budget("reflowableMarkupMaxBytes"),
+            sizeRule = ReaderSafetyRuleId.REFLOWABLE_MARKUP_MAX_BYTES,
+        )
+
+    /** Prepares a bounded EPUB/FB2 XML control document such as OPF, NCX, or container.xml. */
+    fun prepareXmlControlDocument(
+        markup: String,
+        sourceByteCount: Long = -1L,
+    ): ReaderSafetyMarkupResult = prepareXml(
+        markup = markup,
+        sourceByteCount = sourceByteCount,
+        maximumBytes = budget("xmlControlDocumentMaxBytes"),
+        sizeRule = ReaderSafetyRuleId.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES,
+    )
+
+    /** Returns the first real element after lexical comments, CDATA, PIs and DTDs are masked. */
+    fun rootElementName(markup: String): String? {
+        val prepared = when (val result = prepareXmlMarkup(markup)) {
+            is ReaderSafetyMarkupResult.Accepted -> result.value.markup
+            is ReaderSafetyMarkupResult.Rejected -> return null
+        }
+        return ROOT_ELEMENT.find(NON_MARKUP.replace(prepared) { " ".repeat(it.value.length) })
+            ?.groups?.get("name")?.value?.lowercase()
+    }
+
+    /** Applies the generated CSS sanitizer to a standalone stylesheet in memory. */
+    fun sanitizeCss(css: String, sourceByteCount: Long = -1L): ReaderSafetyMarkupResult {
+        val wrapped = "<style>$css</style>"
+        return when (val result = sanitizeMarkup(wrapped, sourceByteCount)) {
+            is ReaderSafetyMarkupResult.Rejected -> result
+            is ReaderSafetyMarkupResult.Accepted -> {
+                val body = STYLE_ELEMENT.find(result.value.markup)
+                    ?.groups?.get("body")?.value
+                    ?: return ReaderSafetyMarkupResult.Rejected(failureFor(ReaderSafetyRuleId.REFLOWABLE_SANITIZE_CSS))
+                ReaderSafetyMarkupResult.Accepted(
+                    ReaderSanitizedMarkup(
+                        markup = body,
+                        parserMarkup = body,
+                        changed = body != css,
+                    ),
+                )
+            }
+        }
+    }
+
+    /** Classifies an authored user-navigation URL using the generated URI policy. */
+    fun allowsAuthoredUserNavigation(value: String): Boolean = !isUnsafeUserNavigation(value)
+
+    fun requirePreparedXmlMarkup(markup: String, sourceByteCount: Long = -1L): ReaderSanitizedMarkup =
+        when (val result = prepareXmlMarkup(markup, sourceByteCount)) {
+            is ReaderSafetyMarkupResult.Accepted -> result.value
+            is ReaderSafetyMarkupResult.Rejected -> throw ReaderSafetyException(result.failure)
+        }
+
+    fun requirePreparedXmlControlDocument(
+        markup: String,
+        sourceByteCount: Long = -1L,
+    ): ReaderSanitizedMarkup = when (val result = prepareXmlControlDocument(markup, sourceByteCount)) {
+        is ReaderSafetyMarkupResult.Accepted -> result.value
+        is ReaderSafetyMarkupResult.Rejected -> throw ReaderSafetyException(result.failure)
+    }
+
+    /**
+     * Extracts EPUB package document references from a safely prepared container.xml.
+     *
+     * This is reference extraction only. XML well-formedness and readability remain the native
+     * publication parser's responsibility after [requirePreparedXmlControlDocument] has removed
+     * parser dependencies and literalized unsafe entity references.
+     */
+    fun requireContainerRootFilePaths(
+        markup: String,
+        sourceByteCount: Long = -1L,
+    ): List<String> {
+        val prepared = requirePreparedXmlControlDocument(markup, sourceByteCount).parserMarkup
+        val masked = maskNonMarkup(prepared)
+        return ROOTFILE_TAG.findAll(masked).mapNotNull { match ->
+            val tag = prepared.substring(match.range)
+            ATTRIBUTE.findAll(tag)
+                .firstOrNull { attribute ->
+                    attribute.groups["name"]?.value?.substringAfterLast(':')
+                        ?.equals("full-path", ignoreCase = true) == true
+                }
+                ?.let { attribute ->
+                    attribute.groups["double"]?.value
+                        ?: attribute.groups["single"]?.value
+                        ?: attribute.groups["bare"]?.value
+                }
+                ?.let(::decodeXmlAttributeValue)
+                ?.trim()
+                ?.takeIf(String::isNotEmpty)
+        }.toList()
     }
 
     fun requireSanitizedMarkup(markup: String, sourceByteCount: Long = -1L): ReaderSanitizedMarkup =
@@ -133,27 +203,33 @@ class ReaderSafetyFacade {
     private fun rejected(rule: ReaderSafetyRuleId): ReaderSafetyMarkupResult.Rejected =
         ReaderSafetyMarkupResult.Rejected(failureFor(rule))
 
-    private fun validateDoctype(lexicalMarkup: String): Boolean {
-        val matches = DOCTYPE_DECLARATION.findAll(lexicalMarkup).toList()
-        val opens = DOCTYPE_OPEN.findAll(lexicalMarkup).toList()
-        if (opens.isEmpty()) return true
-        if (opens.size != 1 || matches.size != 1 || opens.single().range.first != matches.single().range.first) {
-            return false
+    private fun prepareXml(
+        markup: String,
+        sourceByteCount: Long,
+        maximumBytes: Long,
+        sizeRule: ReaderSafetyRuleId,
+    ): ReaderSafetyMarkupResult {
+        if (markup.isEmpty() || markup.isBlank()) {
+            return rejected(ReaderSafetyRuleId.REFLOWABLE_REQUIRED_READING_ORDER_MARKUP)
         }
-        val declaration = matches.single().value
-        if ('[' in declaration || ']' in declaration) return false
-        val prefix = lexicalMarkup.substring(0, matches.single().range.first)
-            .replace(XML_DECLARATION, "")
-            .trim()
-        if (prefix.isNotEmpty()) return false
-        val parsed = SAFE_DOCTYPE.matchEntire(declaration.trim()) ?: return false
-        val publicId = parsed.groups["public"]?.value
-        val systemId = parsed.groups["system"]?.value
-        if (publicId == null || systemId == null) return false
-        return ReaderSafetyPolicy.reflowableProfile.safeDoctypes.any {
-            it.publicId.equals(publicId, ignoreCase = false) &&
-                it.systemId.equals(systemId, ignoreCase = false)
+        val measuredBytes = if (sourceByteCount >= 0) {
+            maxOf(sourceByteCount, markup.encodeToByteArray().size.toLong())
+        } else {
+            markup.encodeToByteArray().size.toLong()
         }
+        if (measuredBytes > maximumBytes) return rejected(sizeRule)
+
+        val preparation = XmlControlPreprocessor(
+            namedEntityCodepoints = ReaderSafetyPolicy.reflowableProfile.namedEntityCodepoints,
+            maximumExpansionBytes = maximumBytes,
+        ).prepare(markup)
+        return ReaderSafetyMarkupResult.Accepted(
+            ReaderSanitizedMarkup(
+                markup = preparation.markup,
+                parserMarkup = replaceGeneratedEntitiesForParsing(preparation.markup),
+                changed = preparation.changed,
+            ),
+        )
     }
 
     private fun sanitizeAttributes(markup: String): String {
@@ -252,7 +328,9 @@ class ReaderSafetyFacade {
         val candidate = value.trim()
         if (candidate.isEmpty() || candidate.startsWith('#')) return false
         if (candidate.startsWith("//")) return true
-        return authoredScheme(candidate) != null
+        val scheme = authoredScheme(candidate) ?: return false
+        val profile = ReaderSafetyPolicy.reflowableProfile
+        return scheme in profile.blockedAuthorSchemes || scheme in profile.remoteSubresourceSchemes
     }
 
     private fun isUnsafeUserNavigation(value: String): Boolean {
@@ -260,7 +338,7 @@ class ReaderSafetyFacade {
         if (candidate.isEmpty() || candidate.startsWith('#')) return false
         if (candidate.startsWith("//")) return true
         val scheme = authoredScheme(candidate) ?: return false
-        return scheme !in ReaderSafetyPolicy.reflowableProfile.userNavigationSchemes
+        return scheme in ReaderSafetyPolicy.reflowableProfile.blockedAuthorSchemes
     }
 
     private fun authoredScheme(value: String): String? {
@@ -384,6 +462,27 @@ class ReaderSafetyFacade {
         return ReaderSafetyPolicy.budget(name)
     }
 
+    private fun decodeXmlAttributeValue(value: String): String = XML_ATTRIBUTE_ENTITY.replace(value) { match ->
+        val token = match.value.removePrefix("&").removeSuffix(";")
+        val codePoint = when {
+            token.startsWith("#x", ignoreCase = true) -> token.substring(2).toIntOrNull(16)
+            token.startsWith('#') -> token.substring(1).toIntOrNull()
+            else -> ReaderSafetyPolicy.reflowableProfile.namedEntityCodepoints[token]
+        } ?: return@replace match.value
+        if (codePoint !in 0..0x10FFFF || codePoint in 0xD800..0xDFFF) {
+            return@replace match.value
+        }
+        if (codePoint <= 0xFFFF) {
+            codePoint.toChar().toString()
+        } else {
+            val adjusted = codePoint - 0x10000
+            buildString {
+                append((0xD800 + (adjusted shr 10)).toChar())
+                append((0xDC00 + (adjusted and 0x3FF)).toChar())
+            }
+        }
+    }
+
     private fun sanitizeMetaElements(markup: String): String = META_ELEMENT.replace(markup) { match ->
         val httpEquiv = ATTRIBUTE.findAll(match.value).firstOrNull { attribute ->
             attribute.groups["name"]?.value.equals("http-equiv", ignoreCase = true)
@@ -446,17 +545,387 @@ class ReaderSafetyFacade {
         val NON_MARKUP = Regex(
             "(?s)<!--.*?-->|<!\\[CDATA\\[.*?]]>|<\\?.*?\\?>",
         )
-        val DOCTYPE_OPEN = Regex("<!DOCTYPE\\b", RegexOption.IGNORE_CASE)
-        val DOCTYPE_DECLARATION = Regex(
-            "(?is)<!DOCTYPE\\b[^>]*>",
-            RegexOption.IGNORE_CASE,
+        val ROOT_ELEMENT = Regex("<\\s*(?!/)(?:[A-Za-z_][\\w.-]*:)?(?<name>[A-Za-z][\\w.-]*)\\b")
+        val ROOTFILE_TAG = Regex(
+            "(?is)<\\s*(?:[A-Za-z_][\\w.-]*:)?rootfile\\b[^>]*>",
         )
-        val ENTITY_OPEN = Regex("<!ENTITY\\b", RegexOption.IGNORE_CASE)
-        val SAFE_DOCTYPE = Regex(
-            """(?is)<!DOCTYPE\s+html\s*(?:PUBLIC\s+[\"'](?<public>[^\"']+)[\"']\s+[\"'](?<system>[^\"']+)[\"'])?\s*>""",
-        )
-        val XML_DECLARATION = Regex("<\\?xml\\b[^?]*\\?>", RegexOption.IGNORE_CASE)
+        val XML_ATTRIBUTE_ENTITY = Regex("&(?:#x[0-9A-Fa-f]+|#[0-9]+|[A-Za-z][A-Za-z0-9]+);")
     }
+}
+
+private data class PreparedXml(
+    val markup: String,
+    val changed: Boolean,
+)
+
+private data class XmlEntityDeclaration(
+    val value: String?,
+    val external: Boolean,
+    val parameter: Boolean,
+)
+
+/**
+ * XML control preparation is intentionally a small lexical pass. It does not become an XML
+ * parser, and it never attempts to decide whether the document is readable. The native parser
+ * remains authoritative for well-formedness and structure after this in-memory dependency
+ * removal pass.
+ */
+private class XmlControlPreprocessor(
+    private val namedEntityCodepoints: Map<String, Int>,
+    private val maximumExpansionBytes: Long,
+) {
+    private val declarations = mutableMapOf<String, XmlEntityDeclaration>()
+    private data class MemoizedEntity(
+        val value: String,
+        val byteCount: Long,
+    )
+
+    private val resolvedEntities = mutableMapOf<String, MemoizedEntity>()
+    private var resolvedEntityBytes = 0L
+
+    fun prepare(source: String): PreparedXml {
+        val withoutDeclarations = removeDeclarations(source)
+        val expanded = replaceReferences(withoutDeclarations)
+        return PreparedXml(
+            markup = expanded.markup,
+            changed = expanded.markup != source,
+        )
+    }
+
+    private fun removeDeclarations(source: String): String {
+        val output = StringBuilder(source.length)
+        var cursor = 0
+        while (cursor < source.length) {
+            val specialEnd = specialMarkupEnd(source, cursor)
+            if (specialEnd != null) {
+                output.append(source, cursor, specialEnd)
+                cursor = specialEnd
+                continue
+            }
+            if (startsWithIgnoreCase(source, cursor, "<!DOCTYPE") &&
+                isNameBoundary(source, cursor + "<!DOCTYPE".length)
+            ) {
+                val end = declarationEnd(source, cursor)
+                if (end < 0) {
+                    // A malformed dependency cannot be handed to the parser. The parser will
+                    // still decide readability for the remaining body, when one exists.
+                    cursor = source.length
+                } else {
+                    collectEntityDeclarations(source.substring(cursor, end))
+                    cursor = end
+                }
+                continue
+            }
+            if (startsWithIgnoreCase(source, cursor, "<!ENTITY") &&
+                isNameBoundary(source, cursor + "<!ENTITY".length)
+            ) {
+                val end = declarationEnd(source, cursor)
+                cursor = if (end < 0) source.length else end
+                continue
+            }
+            output.append(source[cursor])
+            cursor += 1
+        }
+        return output.toString()
+    }
+
+    private fun collectEntityDeclarations(doctype: String) {
+        val subsetStart = doctype.indexOf('[')
+        val subsetEnd = doctype.lastIndexOf(']')
+        if (subsetStart < 0 || subsetEnd <= subsetStart) return
+        val subset = doctype.substring(subsetStart + 1, subsetEnd)
+        var cursor = 0
+        while (cursor < subset.length) {
+            val specialEnd = specialMarkupEnd(subset, cursor)
+            if (specialEnd != null) {
+                cursor = specialEnd
+                continue
+            }
+            if (!startsWithIgnoreCase(subset, cursor, "<!ENTITY") ||
+                !isNameBoundary(subset, cursor + "<!ENTITY".length)
+            ) {
+                cursor += 1
+                continue
+            }
+            val end = declarationEnd(subset, cursor)
+            if (end < 0) break
+            parseEntityDeclaration(subset.substring(cursor, end))
+            cursor = end
+        }
+    }
+
+    private fun parseEntityDeclaration(declaration: String) {
+        var cursor = "<!ENTITY".length
+        cursor = skipWhitespace(declaration, cursor)
+        var parameter = false
+        if (declaration.getOrNull(cursor) == '%') {
+            parameter = true
+            cursor = skipWhitespace(declaration, cursor + 1)
+        }
+        val nameStart = cursor
+        while (declaration.getOrNull(cursor)?.isXmlNameCharacter() == true) cursor += 1
+        if (cursor == nameStart) return
+        val name = declaration.substring(nameStart, cursor)
+        val remainder = declaration.substring(cursor).trim()
+        val external = remainder.startsWith("SYSTEM", ignoreCase = true) ||
+            remainder.startsWith("PUBLIC", ignoreCase = true)
+        val value = if (!external) quotedValue(remainder) else null
+        declarations[name] = XmlEntityDeclaration(value, external, parameter)
+    }
+
+    private data class ReferenceReplacement(
+        val markup: String,
+    )
+
+    private fun replaceReferences(source: String): ReferenceReplacement {
+        val output = StringBuilder(source.length)
+        var outputBytes = 0L
+        var sourceBytesRemaining = source.encodeToByteArray().size.toLong()
+
+        fun appendOriginal(value: String) {
+            output.append(value)
+            val bytes = value.encodeToByteArray().size.toLong()
+            outputBytes += bytes
+            sourceBytesRemaining -= bytes
+        }
+
+        fun appendReference(rawReference: String, replacement: String, fallback: String) {
+            val rawBytes = rawReference.encodeToByteArray().size.toLong()
+            sourceBytesRemaining -= rawBytes
+            val replacementBytes = replacement.encodeToByteArray().size.toLong()
+            // Keep the unprocessed original text inside the role's existing budget. If an
+            // expansion cannot fit, preserve the whole authored reference as escaped text.
+            if (outputBytes + replacementBytes + sourceBytesRemaining <= maximumExpansionBytes) {
+                output.append(replacement)
+                outputBytes += replacementBytes
+                return
+            }
+            output.append(fallback)
+            outputBytes += fallback.encodeToByteArray().size.toLong()
+        }
+
+        var cursor = 0
+        while (cursor < source.length) {
+            val specialEnd = specialMarkupEnd(source, cursor)
+            if (specialEnd != null) {
+                appendOriginal(source.substring(cursor, specialEnd))
+                cursor = specialEnd
+                continue
+            }
+            if (source[cursor] != '&') {
+                appendOriginal(source[cursor].toString())
+                cursor += 1
+                continue
+            }
+            val semicolon = source.indexOf(';', cursor + 1)
+            val reference = semicolon.takeIf { it > cursor + 1 }
+            if (reference == null) {
+                appendReference("&", "&amp;", "&amp;")
+                cursor += 1
+                continue
+            }
+            val name = source.substring(cursor + 1, reference)
+            val rawReference = source.substring(cursor, reference + 1)
+            if (name.startsWith('#') || name in namedEntityCodepoints) {
+                appendReference(rawReference, rawReference, rawReference)
+            } else {
+                val declaration = declarations[name]
+                if (declaration == null || declaration.external || declaration.parameter) {
+                    val literal = literalReference(name)
+                    appendReference(rawReference, literal, literal)
+                } else {
+                    val expanded = expandInternalEntity(name)
+                    val literal = literalReference(name)
+                    appendReference(rawReference, expanded ?: literal, literal)
+                }
+            }
+            cursor = reference + 1
+        }
+        return ReferenceReplacement(output.toString())
+    }
+
+    /**
+     * Expands a plain internal text entity without recursive calls. The explicit frame stack
+     * keeps a hostile declaration chain from consuming the platform call stack. A replacement
+     * which would exceed the role's existing byte budget is literalized by the caller.
+     */
+    private fun expandInternalEntity(rootName: String): String? {
+        val root = declarations[rootName] ?: return null
+        if (root.external || root.parameter || root.value == null) return null
+        resolvedEntities[rootName]?.let { return it.value }
+
+        data class Frame(
+            val entityName: String,
+            val text: String,
+            var cursor: Int,
+            val outputStart: Int,
+            val outputStartBytes: Long,
+            var memoizable: Boolean,
+        )
+
+        val frames = ArrayDeque<Frame>()
+        val activeNames = mutableSetOf(rootName)
+        val output = StringBuilder(root.value.length)
+        var outputBytes = 0L
+        frames.addLast(
+            Frame(
+                entityName = rootName,
+                text = root.value,
+                cursor = 0,
+                outputStart = 0,
+                outputStartBytes = 0L,
+                memoizable = true,
+            ),
+        )
+        while (frames.isNotEmpty()) {
+            val frame = frames.last()
+            if (frame.cursor >= frame.text.length) {
+                frames.removeLast()
+                activeNames.remove(frame.entityName)
+                val parent = frames.lastOrNull()
+                if (parent != null && !frame.memoizable) parent.memoizable = false
+                if (frame.memoizable) {
+                    val valueBytes = outputBytes - frame.outputStartBytes
+                    if (valueBytes > 0 && valueBytes <= maximumExpansionBytes - resolvedEntityBytes) {
+                        val value = output.substring(frame.outputStart)
+                        resolvedEntities[frame.entityName] = MemoizedEntity(value, valueBytes)
+                        resolvedEntityBytes += valueBytes
+                    }
+                }
+                continue
+            }
+            val character = frame.text[frame.cursor]
+            if (character != '&') {
+                outputBytes += appendEscapedLiteral(output, character)
+                frame.cursor += 1
+                if (outputBytes > maximumExpansionBytes) return null
+                continue
+            }
+            val semicolon = frame.text.indexOf(';', frame.cursor + 1)
+            val reference = semicolon.takeIf { it > frame.cursor + 1 }
+            if (reference == null) {
+                outputBytes += appendEscapedLiteral(output, '&')
+                frame.cursor += 1
+                if (outputBytes > maximumExpansionBytes) return null
+                continue
+            }
+            val nestedName = frame.text.substring(frame.cursor + 1, reference)
+            val literalReferenceText = frame.text.substring(frame.cursor, reference + 1)
+            frame.cursor = reference + 1
+            when {
+                nestedName.startsWith('#') || nestedName in namedEntityCodepoints -> {
+                    output.append(literalReferenceText)
+                    outputBytes += literalReferenceText.encodeToByteArray().size.toLong()
+                }
+                nestedName in activeNames -> {
+                    frame.memoizable = false
+                    val literal = literalReference(nestedName)
+                    output.append(literal)
+                    outputBytes += literal.encodeToByteArray().size.toLong()
+                }
+                else -> {
+                    val memoized = resolvedEntities[nestedName]
+                    if (memoized != null) {
+                        output.append(memoized.value)
+                        outputBytes += memoized.byteCount
+                    } else {
+                        val declaration = declarations[nestedName]
+                        if (declaration == null || declaration.external || declaration.parameter || declaration.value == null) {
+                            val literal = literalReference(nestedName)
+                            output.append(literal)
+                            outputBytes += literal.encodeToByteArray().size.toLong()
+                        } else {
+                            activeNames.add(nestedName)
+                            frames.addLast(
+                                Frame(
+                                    entityName = nestedName,
+                                    text = declaration.value,
+                                    cursor = 0,
+                                    outputStart = output.length,
+                                    outputStartBytes = outputBytes,
+                                    memoizable = true,
+                                ),
+                            )
+                        }
+                    }
+                }
+            }
+            if (outputBytes > maximumExpansionBytes) return null
+        }
+        return output.toString()
+    }
+
+    private fun appendEscapedLiteral(output: StringBuilder, character: Char): Long {
+        val escaped = when (character) {
+            '&' -> "&amp;"
+            '<' -> "&lt;"
+            '>' -> "&gt;"
+            '"' -> "&quot;"
+            '\'' -> "&apos;"
+            else -> character.toString()
+        }
+        output.append(escaped)
+        return escaped.encodeToByteArray().size.toLong()
+    }
+
+    private fun declarationEnd(source: String, start: Int): Int {
+        var quote: Char? = null
+        var subsetDepth = 0
+        var cursor = start
+        while (cursor < source.length) {
+            val specialEnd = specialMarkupEnd(source, cursor)
+            if (specialEnd != null && cursor != start) {
+                cursor = specialEnd
+                continue
+            }
+            val character = source[cursor]
+            if (quote != null) {
+                if (character == quote) quote = null
+            } else when (character) {
+                '\'', '"' -> quote = character
+                '[' -> subsetDepth += 1
+                ']' -> if (subsetDepth > 0) subsetDepth -= 1
+                '>' -> if (subsetDepth == 0) return cursor + 1
+            }
+            cursor += 1
+        }
+        return -1
+    }
+
+    private fun quotedValue(value: String): String? {
+        val quote = value.firstOrNull { it == '\'' || it == '"' } ?: return null
+        val start = value.indexOf(quote)
+        val end = value.indexOf(quote, start + 1)
+        return end.takeIf { it > start }?.let { value.substring(start + 1, it) }
+    }
+
+    private fun specialMarkupEnd(source: String, start: Int): Int? {
+        val endMarker = when {
+            source.startsWith("<!--", start) -> "-->"
+            source.startsWith("<![CDATA[", start) -> "]]" + ">"
+            source.startsWith("<?", start) -> "?>"
+            else -> return null
+        }
+        val end = source.indexOf(endMarker, start + endMarker.length)
+        return if (end < 0) source.length else end + endMarker.length
+    }
+
+    private fun literalReference(name: String): String = "&amp;$name;"
+
+    private fun skipWhitespace(source: String, start: Int): Int {
+        var cursor = start
+        while (source.getOrNull(cursor)?.isWhitespace() == true) cursor += 1
+        return cursor
+    }
+
+    private fun startsWithIgnoreCase(source: String, start: Int, prefix: String): Boolean =
+        source.regionMatches(start, prefix, 0, prefix.length, ignoreCase = true)
+
+    private fun isNameBoundary(source: String, index: Int): Boolean =
+        source.getOrNull(index)?.isXmlNameCharacter() != true
+
+    private fun Char.isXmlNameCharacter(): Boolean = isLetterOrDigit() || this == '_' || this == ':' || this == '-' || this == '.'
+
 }
 
 class ReaderSafetyException(

@@ -1,0 +1,1582 @@
+{
+  "$schema": "../../schemas/reader-safety-fixture-manifest-v1.schema.json",
+  "schemaVersion": 1,
+  "policyId": "shuku.reader-safety",
+  "policyVersion": 4,
+  "policyDigest": "edfc4aeef6a2f40316dcf38b5727559921ecd7af68da79f349718e2021d108f5",
+  "cases": [
+    {
+      "id": "safe-xhtml-11-http",
+      "format": "EPUB",
+      "input": "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.1//EN\" \"http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd\"><html/>",
+      "inputSha256": "74182dc97a3d9d399f8002fdd6e6975951956f905883aed8e5f355ef49a63855",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "ALLOW",
+        "terminalRuleId": "REFLOWABLE.SAFE_STANDARD_DOCTYPE",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "REFLOWABLE.SAFE_STANDARD_DOCTYPE:ALLOW"
+        ],
+        "semanticProjection": "html",
+        "semanticProjectionSha256": "e5e239560bc125a20ff2ac1fea50915bc198dd4f5b5256ec447a8a71e00132b3"
+      }
+    },
+    {
+      "id": "safe-xhtml-11-https",
+      "format": "EPUB",
+      "input": "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.1//EN\" \"https://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd\"><html/>",
+      "inputSha256": "8f7bb620257599d2b5f137bb53cd87d9d6f64eadb3fad95e19ce02502d356de6",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "ALLOW",
+        "terminalRuleId": "REFLOWABLE.SAFE_STANDARD_DOCTYPE",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "REFLOWABLE.SAFE_STANDARD_DOCTYPE:ALLOW"
+        ],
+        "semanticProjection": "html",
+        "semanticProjectionSha256": "e5e239560bc125a20ff2ac1fea50915bc198dd4f5b5256ec447a8a71e00132b3"
+      }
+    },
+    {
+      "id": "safe-xhtml-named-entities",
+      "format": "EPUB",
+      "input": "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.1//EN\" \"http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd\"><html><body>&nbsp;&copy;</body></html>",
+      "inputSha256": "ac9006f176b50504916f160005d87b7d79b4db37637102531b2809949b0604ef",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "ALLOW",
+        "terminalRuleId": "REFLOWABLE.SAFE_STANDARD_DOCTYPE",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "REFLOWABLE.SAFE_STANDARD_DOCTYPE:ALLOW"
+        ],
+        "semanticProjection": "html",
+        "semanticProjectionSha256": "e5e239560bc125a20ff2ac1fea50915bc198dd4f5b5256ec447a8a71e00132b3"
+      }
+    },
+    {
+      "id": "xml-internal-entity",
+      "format": "EPUB",
+      "input": "<!DOCTYPE html [<!ENTITY x \"boom\">]><html>&x;</html>",
+      "inputSha256": "2991e397cfb850e49f0a6ec18f7e8b955709003a20ed8e68ab77315961afff3b",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "SANITIZE",
+        "terminalRuleId": "REFLOWABLE.PREPARE_XML",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "REFLOWABLE.PREPARE_XML:SANITIZE"
+        ],
+        "semanticProjection": "html",
+        "semanticProjectionSha256": "e5e239560bc125a20ff2ac1fea50915bc198dd4f5b5256ec447a8a71e00132b3"
+      }
+    },
+    {
+      "id": "xml-external-entity",
+      "format": "FB2",
+      "input": "<!DOCTYPE html [<!ENTITY x SYSTEM \"file:///etc/passwd\">]><html>&x;</html>",
+      "inputSha256": "25f06917d0402c7fbb764e806790409d5e194a15725b80b401002fc5e88fe421",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "SANITIZE",
+        "terminalRuleId": "REFLOWABLE.PREPARE_XML",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "REFLOWABLE.PREPARE_XML:SANITIZE"
+        ],
+        "semanticProjection": "html",
+        "semanticProjectionSha256": "e5e239560bc125a20ff2ac1fea50915bc198dd4f5b5256ec447a8a71e00132b3"
+      }
+    },
+    {
+      "id": "markup-active-elements",
+      "format": "EPUB",
+      "input": "<body><script>x()</script><iframe src=\"x\"/><p onclick=\"x()\">safe</p></body>",
+      "inputSha256": "a4ff0c49b39f642d79e3910413f5fec16427ff83a49477180a80928d7408581e",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "SANITIZE",
+        "terminalRuleId": "REFLOWABLE.SANITIZE_MARKUP",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "REFLOWABLE.SANITIZE_MARKUP:SANITIZE"
+        ],
+        "semanticProjection": "<body><p>safe</p></body>",
+        "semanticProjectionSha256": "2f7aacd2bce47b9bbb3d4b1b198914d883a64047703bb42742f2df10598dc848"
+      }
+    },
+    {
+      "id": "author-dangerous-uri",
+      "format": "EPUB",
+      "input": "<img src=\"javascript:x()\"><a href=\"https://example.com\">open</a>",
+      "inputSha256": "fbccd98d792331f1733e1ce2f3809809c26b2437d40329eb63cceed60ee994c1",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "SANITIZE",
+        "terminalRuleId": "REFLOWABLE.SANITIZE_URI",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "REFLOWABLE.SANITIZE_URI:SANITIZE"
+        ],
+        "semanticProjection": "<img><a href=\"https://example.com\">open</a>",
+        "semanticProjectionSha256": "750b27efd3477d0348e38bc67c780a857b0424dc1d33afb4b406dd58f71285ea"
+      }
+    },
+    {
+      "id": "css-active-content",
+      "format": "EPUB",
+      "input": "@import url(https://example.com/x.css);p{behavior:url(x);color:red}",
+      "inputSha256": "6feb2eb50fe589ddde75ed11f3f97b56f0803bb4893ea5459ec2e8de39f2e3ee",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "SANITIZE",
+        "terminalRuleId": "REFLOWABLE.SANITIZE_CSS",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "REFLOWABLE.SANITIZE_CSS:SANITIZE"
+        ],
+        "semanticProjection": "p{color:red}",
+        "semanticProjectionSha256": "a746c5fae9f9c946fd3013bac516fc90f1e563605da4756d2e21640eb64f17ae"
+      }
+    },
+    {
+      "id": "svg-active-content",
+      "format": "EPUB",
+      "input": "<svg><foreignObject><script>x()</script></foreignObject><path/></svg>",
+      "inputSha256": "2692601d39f545fe424344c4a7b0571190d7ba2ecaa3b87f51116cd520c192e6",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "SANITIZE",
+        "terminalRuleId": "REFLOWABLE.SANITIZE_SVG",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "REFLOWABLE.SANITIZE_SVG:SANITIZE"
+        ],
+        "semanticProjection": "<svg><path/></svg>",
+        "semanticProjectionSha256": "8289355179e04b91e22fb941db5a2ea37c8e468fed25e45d2654022d58a43353"
+      }
+    },
+    {
+      "id": "archive-path-escape",
+      "format": "EPUB",
+      "input": "../chapter.xhtml",
+      "inputSha256": "65fbf0a2a04b73e83bda328fb486f91c41e39b864afa87a76ee9f6697cd7051c",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "EPUB.ARCHIVE_STRUCTURE",
+        "errorCode": "PUBLICATION_SECURITY_REJECTED",
+        "orderedRuleEvents": [
+          "EPUB.ARCHIVE_STRUCTURE:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "archive-duplicate",
+      "format": "EPUB",
+      "input": "OPS/a.xhtml|OPS/./a.xhtml",
+      "inputSha256": "398b036d3cc11a465aa88a4b2ec2740a7f8fded7e0948cc10fdefe854ed4d458",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "EPUB.RESOURCE_INTEGRITY",
+        "errorCode": "PUBLICATION_CORRUPT",
+        "orderedRuleEvents": [
+          "EPUB.RESOURCE_INTEGRITY:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "archive-unused-entry-crc-mismatch",
+      "format": "EPUB",
+      "input": "base64:UEsDBBQAAAAAAAAAIVAYJCWcGAAAABgAAAAKAAAAdW51c2VkLmJpbnRudXNlZC1lbnRyeS1jcmMtcGF5bG9hZFBLAQIUABQAAAAAAAAAIVAYJCWcGAAAABgAAAAKAAAAAAAAAAAAAACAAQAAAAB1bnVzZWQuYmluUEsFBgAAAAABAAEAOAAAAEAAAAAAAA==",
+      "inputSha256": "39e77b4e0e2cf56b199a8e68b5b44a4f4da461b3fc58b6e711465c48e14cd2c9",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "BLOCK_RESOURCE",
+        "terminalRuleId": "REFLOWABLE.OPTIONAL_RESOURCE_FAILURE",
+        "errorCode": "PUBLICATION_RESOURCE_BLOCKED",
+        "orderedRuleEvents": [
+          "REFLOWABLE.OPTIONAL_RESOURCE_FAILURE:BLOCK_RESOURCE"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "original-at-limit",
+      "format": "EPUB",
+      "input": "sizeBytes=2147483648",
+      "inputSha256": "fd135700f5868dd613227941c09b3de7225dbd5dee83e27eb6c6eb3027128b11",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": false,
+        "action": "ALLOW",
+        "terminalRuleId": "COMMON.ORIGINAL_MAX_BYTES",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "COMMON.ORIGINAL_MAX_BYTES:BOUNDARY_ALLOW"
+        ],
+        "semanticProjection": "sizeBytes=2147483648",
+        "semanticProjectionSha256": "fd135700f5868dd613227941c09b3de7225dbd5dee83e27eb6c6eb3027128b11"
+      }
+    },
+    {
+      "id": "original-over-limit",
+      "format": "EPUB",
+      "input": "sizeBytes=2147483649",
+      "inputSha256": "b922265b9d7075ce28284cedc273fc6b5dc80fbc2537241d15ade1c13e984ead",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "COMMON.ORIGINAL_MAX_BYTES",
+        "errorCode": "PUBLICATION_TOO_LARGE",
+        "orderedRuleEvents": [
+          "COMMON.ORIGINAL_MAX_BYTES:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "fb2-node-over-limit",
+      "format": "FB2",
+      "input": "depth=128;nodes=500001;textChars=1",
+      "inputSha256": "7aed817ff5d8397011bd387396883f514fdcd06d137eb5cd7b40be23e44b7a67",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "FB2.STRUCTURE_BUDGET",
+        "errorCode": "PUBLICATION_PARSER_LIMIT",
+        "orderedRuleEvents": [
+          "FB2.STRUCTURE_BUDGET:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "pdf-active-actions",
+      "format": "PDF",
+      "input": "actions=JAVASCRIPT,XFA,LAUNCH",
+      "inputSha256": "5097c2af6dcdeeff9a54f5e9615fdc2c9b70b076acdcd9b028c8f5edd7a2ad62",
+      "requiredConsumers": [
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "SANITIZE",
+        "terminalRuleId": "PDF.DISABLE_ACTIVE_CONTENT",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "PDF.DISABLE_ACTIVE_CONTENT:SANITIZE"
+        ],
+        "semanticProjection": "",
+        "semanticProjectionSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "pdf-page-over-limit",
+      "format": "PDF",
+      "input": "pageCount=20001;width=612;height=792",
+      "inputSha256": "79d34415c357d45c16ca209ecdb2777e644dfe0699cb2c318664e3eb805a83e0",
+      "requiredConsumers": [
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "PDF.PAGE_GEOMETRY",
+        "errorCode": "PDF_PAGE_LIMIT",
+        "orderedRuleEvents": [
+          "PDF.PAGE_GEOMETRY:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "pdf-invalid-range",
+      "format": "PDF",
+      "input": "status=200;encoding=gzip;revision=weak",
+      "inputSha256": "fc05ff4ccb9835330711683336b1eb520a284877d7ff73cb326e5e7bf182f9a7",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "PDF.RANGE_PROTOCOL",
+        "errorCode": "PDF_RANGE_INVALID",
+        "orderedRuleEvents": [
+          "PDF.RANGE_PROTOCOL:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "comic-mime-mismatch",
+      "format": "CBZ",
+      "input": "manifest=image/png;response=image/svg+xml",
+      "inputSha256": "881bb035297798178b51ac660d2dc2b50d6f3bc0b907ea93e7944947f3374655",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": false,
+        "action": "ALLOW",
+        "terminalRuleId": "COMIC.PAGE_MIME",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "COMIC.PAGE_MIME:BOUNDARY_ALLOW"
+        ],
+        "semanticProjection": "manifest=image/png;response=image/svg+xml",
+        "semanticProjectionSha256": "881bb035297798178b51ac660d2dc2b50d6f3bc0b907ea93e7944947f3374655"
+      }
+    },
+    {
+      "id": "comic-page-count-over-limit",
+      "format": "IMAGE_DIR",
+      "input": "pageCount=10001",
+      "inputSha256": "e2da4de9a3bee08e1dbb801947a7a33acf7dd59492cb893908098d664b4f88cb",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "COMIC.PAGE_MAX_COUNT",
+        "errorCode": "COMIC_RESOURCE_LIMIT",
+        "orderedRuleEvents": [
+          "COMIC.PAGE_MAX_COUNT:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "comic-page-decode-failure",
+      "format": "IMAGE_DIR",
+      "input": "pageIndex=7;decoder=failed",
+      "inputSha256": "bd9f130d1dba1d0ba3dee465eef2868103a4558fd6804c49f62b6aa71fc633c4",
+      "requiredConsumers": [
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "BLOCK_RESOURCE",
+        "terminalRuleId": "COMIC.PAGE_DECODE_FAILURE",
+        "errorCode": "COMIC_PAGE_BLOCKED",
+        "orderedRuleEvents": [
+          "COMIC.PAGE_DECODE_FAILURE:BLOCK_RESOURCE"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "comic-revision-mismatch",
+      "format": "CBR",
+      "input": "manifestRevision=a;requestRevision=b",
+      "inputSha256": "47a079aa5f8d35785d1a5b0ca4ab2a6c31ae58ed685edc93953fc5b3f435f3c4",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "COMIC.MANIFEST_REVISION",
+        "errorCode": "COMIC_RESOURCE_CHANGED",
+        "orderedRuleEvents": [
+          "COMIC.MANIFEST_REVISION:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "audio-mime-mismatch",
+      "format": "AUDIO",
+      "input": "extension=.mp3;mime=audio/ogg",
+      "inputSha256": "f420a8be0b3d003d50dd5bb2bfa2b7112c10fc63ce04fa1d146e120f33b5fb49",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": false,
+        "action": "ALLOW",
+        "terminalRuleId": "AUDIO.CONTAINER_MIME",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "AUDIO.CONTAINER_MIME:BOUNDARY_ALLOW"
+        ],
+        "semanticProjection": "extension=.mp3;mime=audio/ogg",
+        "semanticProjectionSha256": "f420a8be0b3d003d50dd5bb2bfa2b7112c10fc63ce04fa1d146e120f33b5fb49"
+      }
+    },
+    {
+      "id": "audio-codec-unsupported",
+      "format": "AUDIO",
+      "input": "extension=.ogg;mime=audio/ogg;codec=unsupported",
+      "inputSha256": "bd94954c1cbcc8cc0a5dc014dde9b757b1bee537f607e9c64d2a532bd66576bc",
+      "requiredConsumers": [
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "BLOCK_RESOURCE",
+        "terminalRuleId": "AUDIO.ENGINE_CODEC",
+        "errorCode": "ENGINE_CODEC_UNSUPPORTED",
+        "orderedRuleEvents": [
+          "AUDIO.ENGINE_CODEC:BLOCK_RESOURCE"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "audio-invalid-chapter",
+      "format": "AUDIOBOOK_DIR",
+      "input": "durationMs=1000;chapterStartMs=900;chapterEndMs=1100",
+      "inputSha256": "f066fa80966e88e57b4281fce6b33be805ff4ecf5dc2c41730e88938a458b9b7",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "AUDIO.TRACK_AND_CHAPTER_BOUNDS",
+        "errorCode": "AUDIO_DURATION_INVALID",
+        "orderedRuleEvents": [
+          "AUDIO.TRACK_AND_CHAPTER_BOUNDS:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "epub-font-obfuscation",
+      "format": "EPUB",
+      "input": "algorithm=http://www.idpf.org/2008/embedding",
+      "inputSha256": "bdd20bec55006cc7b80b1cd0c5747cf5b17611c6ca455809e24cf203e51c382c",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": false,
+        "action": "ALLOW",
+        "terminalRuleId": "COMMON.DRM_REJECTED",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "COMMON.DRM_REJECTED:ALLOW_FONT_OBFUSCATION"
+        ],
+        "semanticProjection": "font-obfuscation-allowed",
+        "semanticProjectionSha256": "5d88bb9de689c49a336b148148e7e560c2a872caec56f582b6554347bbbb56ee"
+      }
+    },
+    {
+      "id": "epub-drm-rejected",
+      "format": "EPUB",
+      "input": "algorithm=http://example.com/drm",
+      "inputSha256": "f704e9fe0e1155d3c8c636c76058576b05801de886f8f34a4bd9ec66e28e5875",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": false,
+        "action": "ALLOW",
+        "terminalRuleId": "COMMON.DRM_REJECTED",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "COMMON.DRM_REJECTED:BOUNDARY_ALLOW"
+        ],
+        "semanticProjection": "algorithm=http://example.com/drm",
+        "semanticProjectionSha256": "f704e9fe0e1155d3c8c636c76058576b05801de886f8f34a4bd9ec66e28e5875"
+      }
+    },
+    {
+      "id": "format-mime-mismatch",
+      "format": "EPUB",
+      "input": "format=EPUB;mime=application/pdf",
+      "inputSha256": "644e1cc90aec09ed35764408263c9088b959a8c5790e557539ff4dc13e010552",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": false,
+        "action": "ALLOW",
+        "terminalRuleId": "COMMON.EXACT_FORMAT_MIME",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "COMMON.EXACT_FORMAT_MIME:BOUNDARY_ALLOW"
+        ],
+        "semanticProjection": "format=EPUB;mime=application/pdf",
+        "semanticProjectionSha256": "644e1cc90aec09ed35764408263c9088b959a8c5790e557539ff4dc13e010552"
+      }
+    },
+    {
+      "id": "binary-resource-over-limit",
+      "format": "EPUB",
+      "input": "resourceBytes=268435457",
+      "inputSha256": "dff6f50e03ca7624265cefd64da1a5ba341c5608cbb7883b3647257aaaae354e",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "BLOCK_RESOURCE",
+        "terminalRuleId": "COMMON.BINARY_RESOURCE_MAX_BYTES",
+        "errorCode": "PUBLICATION_RESOURCE_BLOCKED",
+        "orderedRuleEvents": [
+          "COMMON.BINARY_RESOURCE_MAX_BYTES:BLOCK_RESOURCE"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "optional-resource-missing",
+      "format": "EPUB",
+      "input": "required=false;available=false",
+      "inputSha256": "38541121cc985ffa852a11cf045fa8336f4e4326b5533fa580798072d6deaa59",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "BLOCK_RESOURCE",
+        "terminalRuleId": "REFLOWABLE.OPTIONAL_RESOURCE_FAILURE",
+        "errorCode": "PUBLICATION_RESOURCE_BLOCKED",
+        "orderedRuleEvents": [
+          "REFLOWABLE.OPTIONAL_RESOURCE_FAILURE:BLOCK_RESOURCE"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "required-reading-order-markup-missing",
+      "format": "EPUB",
+      "input": "readingOrderCount=1;markupCount=0;mime=application/octet-stream;parser=failed",
+      "inputSha256": "dbc3751e2b60a45f2c91d3071526d978902791ce26d4b6cfca07407d9e6944de",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "REFLOWABLE.REQUIRED_READING_ORDER_MARKUP",
+        "errorCode": "PUBLICATION_CORRUPT",
+        "orderedRuleEvents": [
+          "REFLOWABLE.REQUIRED_READING_ORDER_MARKUP:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "xml-control-document-over-limit",
+      "format": "EPUB",
+      "input": "controlDocumentBytes=16777217",
+      "inputSha256": "ee32bdf41910de452e85122119c21f2a52911a058151b3b30b0cc84b6edf75eb",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "REFLOWABLE.XML_CONTROL_DOCUMENT_MAX_BYTES",
+        "errorCode": "PUBLICATION_PARSER_LIMIT",
+        "orderedRuleEvents": [
+          "REFLOWABLE.XML_CONTROL_DOCUMENT_MAX_BYTES:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "reflowable-markup-over-limit",
+      "format": "EPUB",
+      "input": "markupBytes=67108865",
+      "inputSha256": "fd925ae7d3dbf2529f33e16fc2a9e8b9650bfaf83724f4eacd9fdad133af7724",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "REFLOWABLE.MARKUP_MAX_BYTES",
+        "errorCode": "PUBLICATION_PARSER_LIMIT",
+        "orderedRuleEvents": [
+          "REFLOWABLE.MARKUP_MAX_BYTES:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "epub-entry-count-over-limit",
+      "format": "EPUB",
+      "input": "entryCount=10001",
+      "inputSha256": "b89286ed9c8b9c68bd1fdaadf57d01115901ace1829277685d137aaa3774ff7d",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "EPUB.ARCHIVE_ENTRY_MAX_COUNT",
+        "errorCode": "PUBLICATION_PARSER_LIMIT",
+        "orderedRuleEvents": [
+          "EPUB.ARCHIVE_ENTRY_MAX_COUNT:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "epub-expanded-over-limit",
+      "format": "EPUB",
+      "input": "expandedBytes=2147483649",
+      "inputSha256": "3908411836c89bfd29f71756f46dda86862ff8a0f082053ea1ece77d1d86caf8",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "EPUB.ARCHIVE_EXPANDED_MAX_BYTES",
+        "errorCode": "PUBLICATION_PARSER_LIMIT",
+        "orderedRuleEvents": [
+          "EPUB.ARCHIVE_EXPANDED_MAX_BYTES:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "epub-entry-over-limit",
+      "format": "EPUB",
+      "input": "entryBytes=268435457",
+      "inputSha256": "407fded2ed07c6da6f2c81099d6738895d021afa556be9d763f4b4e39424a1e0",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "EPUB.ARCHIVE_ENTRY_MAX_BYTES",
+        "errorCode": "PUBLICATION_PARSER_LIMIT",
+        "orderedRuleEvents": [
+          "EPUB.ARCHIVE_ENTRY_MAX_BYTES:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "epub-compression-ratio-over-limit",
+      "format": "EPUB",
+      "input": "compressedBytes=1;expandedBytes=201",
+      "inputSha256": "9864376a31a7e5dd292215d3de704a859faae8e0d37eeac3acd693be3d12a02e",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "EPUB.ARCHIVE_COMPRESSION_RATIO",
+        "errorCode": "PUBLICATION_PARSER_LIMIT",
+        "orderedRuleEvents": [
+          "EPUB.ARCHIVE_COMPRESSION_RATIO:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "fb2-encoded-image-over-limit",
+      "format": "FB2",
+      "input": "encodedBytes=29360129;decodedBytes=1;decodedTotalBytes=1;mime=image/jpeg",
+      "inputSha256": "cae26ae762c2beb58d7f533c7e09c3d229c8a25fd0e9934d532fc2707497d8fe",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "BLOCK_RESOURCE",
+        "terminalRuleId": "FB2.IMAGE_BUDGET",
+        "errorCode": "PUBLICATION_RESOURCE_BLOCKED",
+        "orderedRuleEvents": [
+          "FB2.IMAGE_BUDGET:BLOCK_RESOURCE"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "txt-memory-over-limit",
+      "format": "TXT",
+      "input": "textBytes=67108865",
+      "inputSha256": "7e3939a4a232e4b77d303ab042c9917e5e25cc6bff99adf4f0fc690698c1b0ed",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "TXT.MEMORY_BUDGET",
+        "errorCode": "PUBLICATION_PARSER_LIMIT",
+        "orderedRuleEvents": [
+          "TXT.MEMORY_BUDGET:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "txt-chunk-at-limit",
+      "format": "TXT",
+      "input": "chunkCharacters=65536",
+      "inputSha256": "8323076e721ae00aa5fd939247146c16a2c004176e86305f3bbe02a99a69e57a",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "ALLOW",
+        "terminalRuleId": "TXT.BOUNDED_CHUNK",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "TXT.BOUNDED_CHUNK:ALLOW"
+        ],
+        "semanticProjection": "chunkCharacters=65536",
+        "semanticProjectionSha256": "8323076e721ae00aa5fd939247146c16a2c004176e86305f3bbe02a99a69e57a"
+      }
+    },
+    {
+      "id": "pdf-render-over-limit",
+      "format": "PDF",
+      "input": "width=4096;height=4096;pixels=16777216",
+      "inputSha256": "1a0e0e25987837803b6068102a6bc7a8d26468e097ad641d13c8f3f5415316ba",
+      "requiredConsumers": [
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "BLOCK_RESOURCE",
+        "terminalRuleId": "PDF.RENDER_BUDGET",
+        "errorCode": "PDF_RENDER_LIMIT",
+        "orderedRuleEvents": [
+          "PDF.RENDER_BUDGET:BLOCK_RESOURCE"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "comic-archive-path-escape",
+      "format": "CBZ",
+      "input": "../page.jpg",
+      "inputSha256": "78afc37839fe31635e204624c62f3eb4849632103819c837deb4e1369859e248",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "COMIC.ARCHIVE_STRUCTURE",
+        "errorCode": "COMIC_SECURITY_REJECTED",
+        "orderedRuleEvents": [
+          "COMIC.ARCHIVE_STRUCTURE:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "comic-archive-budget-over-limit",
+      "format": "CBZ",
+      "input": "expandedBytes=2147483649;compressedBytes=1",
+      "inputSha256": "4279f5f1913fa4ed1bb0a29a3e04a7f65c950a032016f41f81cc49ca9efb3f94",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "COMIC.ARCHIVE_BUDGET",
+        "errorCode": "COMIC_RESOURCE_LIMIT",
+        "orderedRuleEvents": [
+          "COMIC.ARCHIVE_BUDGET:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "comic-page-over-limit",
+      "format": "CBZ",
+      "input": "pageBytes=33554433",
+      "inputSha256": "a43de3c3f4581608b37d19b5ebef2765d6c3170fe3fd7bc846643481f4c97c80",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "BLOCK_RESOURCE",
+        "terminalRuleId": "COMIC.PAGE_MAX_BYTES",
+        "errorCode": "COMIC_PAGE_BLOCKED",
+        "orderedRuleEvents": [
+          "COMIC.PAGE_MAX_BYTES:BLOCK_RESOURCE"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "comic-manifest-over-limit",
+      "format": "CBZ",
+      "input": "manifestBytes=2097153",
+      "inputSha256": "1efb1731b2766aab19482b65d787b7ebdbb6b33e118bfc9b9c72883da4ed1cbb",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "COMIC.MANIFEST_MAX_BYTES",
+        "errorCode": "COMIC_RESOURCE_LIMIT",
+        "orderedRuleEvents": [
+          "COMIC.MANIFEST_MAX_BYTES:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "audio-original-over-limit",
+      "format": "AUDIO",
+      "input": "sizeBytes=2147483649",
+      "inputSha256": "b922265b9d7075ce28284cedc273fc6b5dc80fbc2537241d15ade1c13e984ead",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "AUDIO.ORIGINAL_MAX_BYTES",
+        "errorCode": "PUBLICATION_TOO_LARGE",
+        "orderedRuleEvents": [
+          "AUDIO.ORIGINAL_MAX_BYTES:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "audio-metadata-over-limit",
+      "format": "AUDIO",
+      "input": "metadataBytes=1048577;artworkBytes=1",
+      "inputSha256": "ad3a02709da2c02b12eaf9ee8af76e0e16f66b04a8ab9ee2118c3f9df55299ae",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "BLOCK_RESOURCE",
+        "terminalRuleId": "AUDIO.METADATA_BUDGET",
+        "errorCode": "AUDIO_METADATA_LIMIT",
+        "orderedRuleEvents": [
+          "AUDIO.METADATA_BUDGET:BLOCK_RESOURCE"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "audio-blocked-redirect",
+      "format": "AUDIO",
+      "input": "scheme=file",
+      "inputSha256": "57c8c0078ffb283a8d39d387c690913eb1205717dd71c621dbd5ac966ea3a40d",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "AUDIO.REDIRECT_POLICY",
+        "errorCode": "AUDIO_SECURITY_REJECTED",
+        "orderedRuleEvents": [
+          "AUDIO.REDIRECT_POLICY:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "safe-ncx-doctype",
+      "format": "EPUB",
+      "input": "<!DOCTYPE ncx PUBLIC \"-//NISO//DTD ncx 2005-1//EN\" \"http://www.daisy.org/z3986/2005/ncx-2005-1.dtd\"><ncx/>",
+      "inputSha256": "52b957b679515ad59a17c7fae1b2897c98cefb991427807115a8ddd3c891dbeb",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "SANITIZE",
+        "terminalRuleId": "REFLOWABLE.PREPARE_XML",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "REFLOWABLE.PREPARE_XML:SANITIZE"
+        ],
+        "semanticProjection": "ncx",
+        "semanticProjectionSha256": "929de65c3ce28a74df5157d4c1d655287201e0ea90210381741838d5a59ca37d"
+      }
+    },
+    {
+      "id": "safe-unknown-doctype",
+      "format": "EPUB",
+      "input": "<!DOCTYPE custom SYSTEM \"https://example.invalid/unfamiliar.dtd\"><custom/>",
+      "inputSha256": "b2b515f3da9bee09d0e07b373ecbdd01901c515267e11013930a23ad901646d2",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "SANITIZE",
+        "terminalRuleId": "REFLOWABLE.PREPARE_XML",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "REFLOWABLE.PREPARE_XML:SANITIZE"
+        ],
+        "semanticProjection": "custom",
+        "semanticProjectionSha256": "6cdfd271da635d491e37a2b4a1044b306e6e9e039aeadee95bb355efadf8cb33"
+      }
+    },
+    {
+      "id": "safe-html5-doctype",
+      "format": "EPUB",
+      "input": "<!DOCTYPE html><html/>",
+      "inputSha256": "9e312a3770460df1000b2333ca5bddc5d3160baf70d23c5d7cd58240a79d54d0",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "SANITIZE",
+        "terminalRuleId": "REFLOWABLE.PREPARE_XML",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "REFLOWABLE.PREPARE_XML:SANITIZE"
+        ],
+        "semanticProjection": "html",
+        "semanticProjectionSha256": "e5e239560bc125a20ff2ac1fea50915bc198dd4f5b5256ec447a8a71e00132b3"
+      }
+    },
+    {
+      "id": "safe-no-doctype",
+      "format": "EPUB",
+      "input": "<html/>",
+      "inputSha256": "8397912ada2760dca34d1adb644cf54fc5c8d05d0ad56b4a6f99096b03ac8431",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "SANITIZE",
+        "terminalRuleId": "REFLOWABLE.PREPARE_XML",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "REFLOWABLE.PREPARE_XML:SANITIZE"
+        ],
+        "semanticProjection": "html",
+        "semanticProjectionSha256": "e5e239560bc125a20ff2ac1fea50915bc198dd4f5b5256ec447a8a71e00132b3"
+      }
+    },
+    {
+      "id": "safe-internal-text-entity",
+      "format": "EPUB",
+      "input": "<!DOCTYPE html [<!ENTITY greeting \"Hello\">]><html><body>&greeting;</body></html>",
+      "inputSha256": "dbddc0186d3e37a6a8fb3289d52ace740d087d1cc3ec8c6154d5d82ced7a2448",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "SANITIZE",
+        "terminalRuleId": "REFLOWABLE.PREPARE_XML",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "REFLOWABLE.PREPARE_XML:SANITIZE"
+        ],
+        "semanticProjection": "html",
+        "semanticProjectionSha256": "e5e239560bc125a20ff2ac1fea50915bc198dd4f5b5256ec447a8a71e00132b3"
+      }
+    },
+    {
+      "id": "safe-unknown-entity",
+      "format": "EPUB",
+      "input": "<html><body>&unfamiliar;</body></html>",
+      "inputSha256": "6ac4af658bc4162eeac9a919802c52e41a4a212ca297212c26a36c00f8d05315",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "SANITIZE",
+        "terminalRuleId": "REFLOWABLE.PREPARE_XML",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "REFLOWABLE.PREPARE_XML:SANITIZE"
+        ],
+        "semanticProjection": "html",
+        "semanticProjectionSha256": "e5e239560bc125a20ff2ac1fea50915bc198dd4f5b5256ec447a8a71e00132b3"
+      }
+    },
+    {
+      "id": "safe-recursive-entity",
+      "format": "EPUB",
+      "input": "<!DOCTYPE html [<!ENTITY cycle \"&cycle;\">]><html><body>&cycle;</body></html>",
+      "inputSha256": "d4b0680c7506641af754cef705e1ac87f76adbee261a245e0316faf56d3eb952",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "SANITIZE",
+        "terminalRuleId": "REFLOWABLE.PREPARE_XML",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "REFLOWABLE.PREPARE_XML:SANITIZE"
+        ],
+        "semanticProjection": "html",
+        "semanticProjectionSha256": "e5e239560bc125a20ff2ac1fea50915bc198dd4f5b5256ec447a8a71e00132b3"
+      }
+    },
+    {
+      "id": "safe-masked-declaration",
+      "format": "EPUB",
+      "input": "<html><!-- <!ENTITY x SYSTEM \"file:///not-read\"> --><![CDATA[<!DOCTYPE custom>]]></html>",
+      "inputSha256": "3b584435ee2aa77e483bf211e49d45b16f5f954c23ac8d52d7b9ec0f3e17c03f",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "SANITIZE",
+        "terminalRuleId": "REFLOWABLE.PREPARE_XML",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "REFLOWABLE.PREPARE_XML:SANITIZE"
+        ],
+        "semanticProjection": "html",
+        "semanticProjectionSha256": "e5e239560bc125a20ff2ac1fea50915bc198dd4f5b5256ec447a8a71e00132b3"
+      }
+    },
+    {
+      "id": "xml-unisolatable-access",
+      "format": "EPUB",
+      "input": "{\"format\":\"EPUB\",\"resourceRole\":\"PUBLICATION\",\"facts\":[\"XML_EXTERNAL_ACCESS_CANNOT_BE_ISOLATED\"],\"enforcementAvailable\":true,\"canIsolate\":false}",
+      "inputSha256": "24a0f09331d4494e2d70d437dfc4554a1dc00dcd308e18e8927b4b69c7b571bc",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "REFLOWABLE.REJECT_XML_ENTITY",
+        "errorCode": "PUBLICATION_SECURITY_REJECTED",
+        "orderedRuleEvents": [
+          "REFLOWABLE.REJECT_XML_ENTITY:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "epub-required-resource-corrupt",
+      "format": "EPUB",
+      "input": "{\"format\":\"EPUB\",\"resourceRole\":\"READING_ORDER\",\"facts\":[\"EPUB_RESOURCE_INTEGRITY_DETECTED\"],\"enforcementAvailable\":true,\"canIsolate\":false}",
+      "inputSha256": "cfac1d90528f3dcf7001d97021aee146ddf74355165c3401e5c51f02e17cded1",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "EPUB.RESOURCE_INTEGRITY",
+        "errorCode": "PUBLICATION_CORRUPT",
+        "orderedRuleEvents": [
+          "EPUB.RESOURCE_INTEGRITY:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "comic-required-resource-corrupt",
+      "format": "CBZ",
+      "input": "{\"format\":\"CBZ\",\"resourceRole\":\"READING_ORDER\",\"facts\":[\"COMIC_RESOURCE_INTEGRITY_DETECTED\"],\"enforcementAvailable\":true,\"canIsolate\":false}",
+      "inputSha256": "9a3d139ede3e3752f273949d996d3cd41bb79b994f3be809a1e14fead8681637",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "COMIC.RESOURCE_INTEGRITY",
+        "errorCode": "COMIC_RESOURCE_CORRUPT",
+        "orderedRuleEvents": [
+          "COMIC.RESOURCE_INTEGRITY:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "actual-parser-unsupported",
+      "format": "EPUB",
+      "input": "{\"format\":\"EPUB\",\"resourceRole\":\"PUBLICATION\",\"facts\":[\"COMMON_EXACT_FORMAT_MIME_DETECTED\"],\"enforcementAvailable\":true,\"canIsolate\":false}",
+      "inputSha256": "8daac71ecd4241c0a642f397cf3e870e1a969749f3f53992fbc2386d2448db97",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "COMMON.EXACT_FORMAT_MIME",
+        "errorCode": "PUBLICATION_MIME_MISMATCH",
+        "orderedRuleEvents": [
+          "COMMON.EXACT_FORMAT_MIME:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "actual-decryption-unsupported",
+      "format": "EPUB",
+      "input": "{\"format\":\"EPUB\",\"resourceRole\":\"PUBLICATION\",\"facts\":[\"COMMON_DRM_REJECTED_DETECTED\"],\"enforcementAvailable\":true,\"canIsolate\":false}",
+      "inputSha256": "106d6d3328b9da04f1803bb8fed8f4967481859518cd4e387372719e4f110f3d",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "COMMON.DRM_REJECTED",
+        "errorCode": "PUBLICATION_DRM_UNSUPPORTED",
+        "orderedRuleEvents": [
+          "COMMON.DRM_REJECTED:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "actual-comic-decoder-unsupported",
+      "format": "CBZ",
+      "input": "{\"format\":\"CBZ\",\"resourceRole\":\"PUBLICATION\",\"facts\":[\"COMIC_PAGE_MIME_DETECTED\"],\"enforcementAvailable\":true,\"canIsolate\":false}",
+      "inputSha256": "1553a395fa249bf6715ae9191e66bd15dc787c07f4c5d5b57f3ed01998be2684",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "BLOCK_RESOURCE",
+        "terminalRuleId": "COMIC.PAGE_MIME",
+        "errorCode": "COMIC_MIME_MISMATCH",
+        "orderedRuleEvents": [
+          "COMIC.PAGE_MIME:BLOCK_RESOURCE"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "actual-audio-container-unsupported",
+      "format": "AUDIO",
+      "input": "{\"format\":\"AUDIO\",\"resourceRole\":\"PUBLICATION\",\"facts\":[\"AUDIO_CONTAINER_MIME_DETECTED\"],\"enforcementAvailable\":true,\"canIsolate\":false}",
+      "inputSha256": "ac820dcf6d0308930d81587042ce4cf9e97b7047d9cf91e6ef94871d867d1cb7",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "AUDIO.CONTAINER_MIME",
+        "errorCode": "AUDIO_MIME_MISMATCH",
+        "orderedRuleEvents": [
+          "AUDIO.CONTAINER_MIME:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "unknown-uri-preserved",
+      "format": "EPUB",
+      "input": "<img src=\"future-resource:cover\"><a href=\"future-reader:chapter\">open</a><img src=\"javascript:x()\">",
+      "inputSha256": "e58a7af588e91389025ded12e59121add9a3e791b76c976a7865f3376fa9ecc0",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "SANITIZE",
+        "terminalRuleId": "REFLOWABLE.SANITIZE_URI",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "REFLOWABLE.SANITIZE_URI:SANITIZE"
+        ],
+        "semanticProjection": "<img src=\"future-resource:cover\"><a href=\"future-reader:chapter\">open</a><img>",
+        "semanticProjectionSha256": "484a1ece9a0f543cd0df070afb6a8d5b7badbc678624a16b30b5b4b53fbcbcc7"
+      }
+    },
+    {
+      "id": "unknown-element-preserved",
+      "format": "EPUB",
+      "input": "<future-reader-widget data-kind=\"unknown\">Readable</future-reader-widget><script>run()</script>",
+      "inputSha256": "07b4567b5e8184c9323f0f57b1b61b2eb41c8aa2934785790903c078312bdf56",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "SANITIZE",
+        "terminalRuleId": "REFLOWABLE.SANITIZE_MARKUP",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "REFLOWABLE.SANITIZE_MARKUP:SANITIZE"
+        ],
+        "semanticProjection": "<future-reader-widget data-kind=\"unknown\">Readable</future-reader-widget>",
+        "semanticProjectionSha256": "a4d95dde4bd2da92a9abb097ef95bac6cb6e33652f03c112cdbdaac7e89f1ff9"
+      }
+    },
+    {
+      "id": "fb2-unfamiliar-image-mime",
+      "format": "FB2",
+      "input": "encodedBytes=4;decodedBytes=1;decodedTotalBytes=1;mime=image/future-format",
+      "inputSha256": "9596370b0d50b5cd08762a445dde3f49e567ce15be40176efb977bbaa8e9ca3f",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "expected": {
+        "triggered": false,
+        "action": "ALLOW",
+        "terminalRuleId": "FB2.IMAGE_BUDGET",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "FB2.IMAGE_BUDGET:BOUNDARY_ALLOW"
+        ],
+        "semanticProjection": "encodedBytes=4;decodedBytes=1;decodedTotalBytes=1;mime=image/future-format",
+        "semanticProjectionSha256": "9596370b0d50b5cd08762a445dde3f49e567ce15be40176efb977bbaa8e9ca3f"
+      }
+    },
+    {
+      "id": "parser-snapshot-memory-below-limit",
+      "format": "FB2",
+      "input": "weightBytes=134217727",
+      "inputSha256": "6bea8083880beca0c79922c3cd8affff30d66b38065e166908e503d5211d0df9",
+      "requiredConsumers": [
+        "BACKEND"
+      ],
+      "expected": {
+        "triggered": false,
+        "action": "ALLOW",
+        "terminalRuleId": "COMMON.PARSER_SNAPSHOT_MEMORY",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "COMMON.PARSER_SNAPSHOT_MEMORY:BOUNDARY_ALLOW"
+        ],
+        "semanticProjection": "weightBytes=134217727",
+        "semanticProjectionSha256": "6bea8083880beca0c79922c3cd8affff30d66b38065e166908e503d5211d0df9"
+      }
+    },
+    {
+      "id": "parser-snapshot-memory-at-limit",
+      "format": "FB2",
+      "input": "weightBytes=134217728",
+      "inputSha256": "b40b83d1ea40565751256d0b6f65f850eb3fa1cbb210f3b50ade6d9bad2fb144",
+      "requiredConsumers": [
+        "BACKEND"
+      ],
+      "expected": {
+        "triggered": false,
+        "action": "ALLOW",
+        "terminalRuleId": "COMMON.PARSER_SNAPSHOT_MEMORY",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "COMMON.PARSER_SNAPSHOT_MEMORY:BOUNDARY_ALLOW"
+        ],
+        "semanticProjection": "weightBytes=134217728",
+        "semanticProjectionSha256": "b40b83d1ea40565751256d0b6f65f850eb3fa1cbb210f3b50ade6d9bad2fb144"
+      }
+    },
+    {
+      "id": "parser-snapshot-memory-over-limit",
+      "format": "FB2",
+      "input": "weightBytes=134217729",
+      "inputSha256": "d048b19caf61dc1d0782729dcfa4968b291ca5b8589a33558b779e2facca18ba",
+      "requiredConsumers": [
+        "BACKEND"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "COMMON.PARSER_SNAPSHOT_MEMORY",
+        "errorCode": "PUBLICATION_TOO_LARGE",
+        "orderedRuleEvents": [
+          "COMMON.PARSER_SNAPSHOT_MEMORY:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    }
+  ]
+}

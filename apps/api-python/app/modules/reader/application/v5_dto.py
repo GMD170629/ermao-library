@@ -69,8 +69,12 @@ class ReaderV5ChapterDto:
     href: str | None
     title: str | None
     index: int | None
+    navigation_key: str | None = None
 
     def __post_init__(self) -> None:
+        _require_optional_text(
+            self.navigation_key, name="chapter.navigationKey", max_length=256
+        )
         _require_optional_text(self.href, name="chapter.href", max_length=8192)
         _require_optional_text(self.title, name="chapter.title", max_length=4096)
         _require_optional_nonnegative_int(self.index, name="chapter.index")

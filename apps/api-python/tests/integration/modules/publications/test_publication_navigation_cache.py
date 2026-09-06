@@ -221,9 +221,14 @@ def test_first_access_generates_and_same_asset_uses_marker(
             (
                 PublicationTocEntry(
                     href="Text/one.xhtml",
+                    navigation_key="chapter-0",
                     title="第一章",
                     children=(
-                        PublicationTocEntry(href="Text/two.xhtml", title="第二章"),
+                        PublicationTocEntry(
+                            navigation_key="chapter-1",
+                            href="Text/two.xhtml",
+                            title="第二章",
+                        ),
                     ),
                 ),
             )
@@ -271,6 +276,48 @@ def test_empty_toc_is_successfully_cached(
     assert db_session.get(LibraryResourceAssetNavigation, asset.id).chapter_count == 0
 
 
+def test_group_remains_in_navigation_but_does_not_inflate_chapter_count(
+    db_session: Session,
+    tmp_path: Path,
+) -> None:
+    resource, asset = _seed_resource(db_session, tmp_path / "groups.epub")
+    adapter = _Adapter(
+        _publication(
+            (
+                PublicationTocEntry(
+                    href=None,
+                    title="Part",
+                    navigation_key="chapter-0",
+                    children=(
+                        PublicationTocEntry(
+                            href="Text/one.xhtml#one",
+                            title="One",
+                            navigation_key="chapter-1",
+                        ),
+                    ),
+                ),
+            )
+        )
+    )
+    result = _ensure(db_session, adapter).execute(
+        resource_id=resource.id, access_scope=_ADMIN
+    )
+    assert result.chapter_count == 1
+    db_session.expire_all()
+    rows = db_session.scalars(
+        select(ReadableResourceNavigationUnit)
+        .where(
+            ReadableResourceNavigationUnit.resource_id == resource.id,
+        )
+        .order_by(ReadableResourceNavigationUnit.sort_order)
+    ).all()
+    assert [(row.id, row.href) for row in rows] == [
+        (f"{resource.id}:chapter-0", ""),
+        (f"{resource.id}:chapter-1", "Text/one.xhtml#one"),
+    ]
+    assert db_session.get(LibraryResourceAssetNavigation, asset.id).chapter_count == 1
+
+
 def test_same_asset_ignores_revision_fields(
     db_session: Session,
     tmp_path: Path,
@@ -278,7 +325,11 @@ def test_same_asset_ignores_revision_fields(
     resource, _asset = _seed_resource(db_session, tmp_path / "same.epub")
     adapter = _Adapter(
         _publication(
-            (PublicationTocEntry(href="Text/one.xhtml", title="第一章"),),
+            (
+                PublicationTocEntry(
+                    navigation_key="chapter-0", href="Text/one.xhtml", title="第一章"
+                ),
+            ),
             source_size_bytes=1,
             source_mtime_ms=1,
         )
@@ -286,7 +337,11 @@ def test_same_asset_ignores_revision_fields(
     ensure = _ensure(db_session, adapter)
     ensure.execute(resource_id=resource.id, access_scope=_ADMIN)
     adapter.publication = _publication(
-        (PublicationTocEntry(href="Text/two.xhtml", title="不同章节"),),
+        (
+            PublicationTocEntry(
+                navigation_key="chapter-0", href="Text/two.xhtml", title="不同章节"
+            ),
+        ),
         source_size_bytes=999,
         source_mtime_ms=999,
     )
@@ -328,7 +383,13 @@ def test_asset_replacement_regenerates_for_new_asset(
 ) -> None:
     resource, old_asset = _seed_resource(db_session, tmp_path / "replace.epub")
     adapter = _Adapter(
-        _publication((PublicationTocEntry(href="Text/one.xhtml", title="旧目录"),))
+        _publication(
+            (
+                PublicationTocEntry(
+                    navigation_key="chapter-0", href="Text/one.xhtml", title="旧目录"
+                ),
+            )
+        )
     )
     ensure = _ensure(db_session, adapter)
     ensure.execute(resource_id=resource.id, access_scope=_ADMIN)
@@ -357,7 +418,11 @@ def test_asset_replacement_regenerates_for_new_asset(
     )
     db_session.commit()
     adapter.publication = _publication(
-        (PublicationTocEntry(href="Text/two.xhtml", title="新目录"),)
+        (
+            PublicationTocEntry(
+                navigation_key="chapter-0", href="Text/two.xhtml", title="新目录"
+            ),
+        )
     )
 
     result = ensure.execute(resource_id=resource.id, access_scope=_ADMIN)

@@ -13,6 +13,34 @@ test('strict FB2 parsing preserves metadata, sections and text', () => {
   assert.deepEqual(parsed.blockedResources, []);
 });
 
+test('strict FB2 parsing preserves loose body runs and emits canonical section targets', () => {
+  const parsed = parseStrictFb2(
+    '<FictionBook><body><p>Before</p><section><title><p>One</p></title><p>Inside</p>'
+      + '<section><title><p>Nested</p></title><p>Child</p></section></section>'
+      + '<p>After</p></body></FictionBook>'
+  );
+
+  assert.equal(parsed.sections.length, 1);
+  assert.equal(parsed.bodyFragments.length, 2);
+  assert.deepEqual(parsed.bodyFragments.map((fragment) => fragment.href), [
+    'fb2/body-1-part-1.xhtml',
+    'fb2/body-1-part-2.xhtml'
+  ]);
+  const sectionStarts = parsed.events.filter((event) => event.kind === 'start' && event.name === 'section');
+  assert.deepEqual(sectionStarts.map((event) => event.targetHref), [
+    'fb2/section-0001.xhtml#chapter-node-3',
+    'fb2/section-0001.xhtml#chapter-node-7'
+  ]);
+  assert.equal(parsed.sections[0]?.events[0], sectionStarts[0]);
+  assert.equal(parsed.sections[0]?.events.at(-1)?.kind, 'end');
+  assert.equal(parsed.bodyFragments[0]?.events[0], parsed.events.find(
+    (event) => event.kind === 'start' && event.name === 'p'
+  ));
+  assert.equal(parsed.sections[0]?.events.some(
+    (event) => event.kind === 'start' && (event.name === 'book-title' || event.name === 'binary')
+  ), false);
+});
+
 test('strict FB2 parsing blocks only an embedded image that exceeds generated budgets', () => {
   const parsed = parseStrictFb2(
     '<FictionBook><body><section><p>Readable text</p></section></body>'
@@ -28,10 +56,26 @@ test('strict FB2 parsing blocks only an embedded image that exceeds generated bu
   }]);
 });
 
-test('strict FB2 parsing fails closed for malformed, entity and parser-budget inputs', () => {
+test('strict FB2 parsing preserves an unfamiliar image MIME for the decoder boundary', () => {
+  const parsed = parseStrictFb2(
+    '<FictionBook><body><section><p>Readable text</p></section></body>'
+      + '<binary id="future-image" content-type="image/future-format">QUJD</binary></FictionBook>'
+  );
+
+  assert.equal(parsed.chapters[0]?.text, 'Readable text');
+  assert.deepEqual(parsed.blockedResources, []);
+});
+
+test('strict FB2 parsing accepts bounded internal text entities and literalizes unresolved references', () => {
+  const parsed = parseStrictFb2(
+    '<!DOCTYPE FictionBook [<!ENTITY greeting "boom">]><FictionBook><body><p>&greeting; &external;</p></body></FictionBook>'
+  );
+  assert.equal(parsed.chapters[0]?.text, 'boom &external;');
+});
+
+test('strict FB2 parsing fails closed for malformed and parser-budget inputs', () => {
   for (const source of [
     '<FictionBook><body><section></body></FictionBook>',
-    '<!DOCTYPE FictionBook [<!ENTITY x "boom">]><FictionBook><body><p>&x;</p></body></FictionBook>',
     '<FictionBook><body><p>&broken</p></body></FictionBook>',
     '<bad:FictionBook><body><p>text</p></body></bad:FictionBook>',
     '<FictionBook><body bad:attr="x"><p>text</p></body></FictionBook>',

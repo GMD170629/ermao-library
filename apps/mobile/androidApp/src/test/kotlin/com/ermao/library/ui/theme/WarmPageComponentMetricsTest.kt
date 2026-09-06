@@ -19,6 +19,8 @@ class WarmPageComponentMetricsTest {
         assertEquals(48.dp, metrics.controls.searchMinimumHeight)
         assertEquals(48.dp, metrics.controls.segmentedMinimumHeight)
         assertEquals(48.dp, metrics.menu.itemMinimumHeight)
+        assertEquals(12.dp, metrics.menu.itemHorizontalPadding)
+        assertEquals(24.dp, metrics.menu.iconSlotSize)
         assertEquals(54.dp, metrics.settings.rowMinimumHeight)
         assertEquals(16.dp, metrics.settings.horizontalInset)
         assertEquals(8.dp, metrics.settings.verticalInset)
@@ -54,6 +56,7 @@ class WarmPageComponentMetricsTest {
         val metrics = WarmPageComponentMetricTokens.workDetail
 
         assertEquals(120.dp, metrics.heroCoverWidth)
+        assertEquals(96.dp, metrics.directoryHeroCoverWidth)
         assertEquals(84.dp, metrics.horizontalVolumeWidth)
         assertEquals(56.dp, metrics.chapterRowMinimumHeight)
         assertEquals(24.dp, metrics.statusBadgeMinimumHeight)

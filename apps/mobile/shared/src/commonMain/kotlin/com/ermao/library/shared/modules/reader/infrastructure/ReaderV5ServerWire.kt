@@ -108,6 +108,7 @@ class ReaderV5ServerWireMapper(
     }
 
     private fun encodeChapter(chapter: ReaderChapterPresentation): JsonObject = buildJsonObject {
+        if (chapter.navigationKey != null) put("navigationKey", chapter.navigationKey) else put("navigationKey", JsonNull)
         if (chapter.href != null) put("href", chapter.href) else put("href", JsonNull)
         if (chapter.title != null) put("title", chapter.title) else put("title", JsonNull)
         if (chapter.index != null) put("index", chapter.index) else put("index", JsonNull)
@@ -150,8 +151,9 @@ class ReaderV5ServerWireMapper(
     }
 
     private fun decodeChapter(root: JsonObject): ReaderChapterPresentation {
-        requireKeys(root, setOf("href", "title", "index"))
+        requireKeys(root, setOf("href", "title", "index", "navigationKey"))
         return ReaderChapterPresentation(
+            navigationKey = root.requiredNullableString("navigationKey"),
             href = root.requiredNullableString("href"),
             title = root.requiredNullableString("title"),
             index = root.requiredNullableInt("index"),

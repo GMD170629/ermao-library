@@ -30,7 +30,6 @@ import {
   normalizeResumeTarget,
   pendingSeekAfterAssignment,
   targetForAbsolutePosition,
-  unsupportedAudioMimeType,
   type AudioLoadIntent
 } from './audio-model';
 import type {
@@ -152,7 +151,7 @@ export function audioPositionReport(
       displayPercent: Math.max(0, Math.min(100, displayPercent)),
       totalProgression: Math.max(0, Math.min(1, displayPercent / 100)),
       currentHref: track.url,
-      chapter: chapter ? { href: track.url, title: chapter.title, index: chapterIndex >= 0 ? chapterIndex : null } : null,
+      chapter: chapter ? { navigationKey: chapter.id, href: track.url, title: chapter.title, index: chapterIndex >= 0 ? chapterIndex : null } : null,
       page: null,
       playback: { positionMillis: Math.max(0, Math.round(positionMs)), durationMillis: Math.max(0, Math.round(track.durationMs)) }
     }
@@ -270,30 +269,6 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const index = Math.max(0, Math.min(bootstrap.tracks.length - 1, trackIndex));
     const track = bootstrap.tracks[index];
     const nextPosition = clamp(positionMs, 0, Math.max(0, track.durationMs));
-    const unsupportedMime = unsupportedAudioMimeType(track.mimeType, track.codec, (mime) => audio.canPlayType(mime));
-    if (unsupportedMime) {
-      const safetyError = readerSafetyFailure(READER_SAFETY_RULE_IDS.AUDIO_ENGINE_CODEC);
-      if (!audio.paused) suppressedPauseEventsRef.current += 1;
-      audio.pause();
-      audio.removeAttribute('src');
-      audio.load();
-      trackIndexRef.current = index;
-      pendingSeekRef.current = null;
-      pendingAutoplayRef.current = false;
-      const chapter = chapterAt(bootstrap.chapters, track.assetId, nextPosition);
-      updateState({
-        lifecycle: 'error',
-        trackIndex: index,
-        track,
-        chapter,
-        positionMs: nextPosition,
-        durationMs: track.durationMs,
-        absolutePositionMs: absolutePositionForTrack(bootstrap.tracks, index, nextPosition),
-        error: `当前浏览器不支持这个音频格式（${audioFormatLabel(track)}）`,
-        safetyError
-      });
-      return;
-    }
     if (!audio.paused) suppressedPauseEventsRef.current += 1;
     audio.pause();
     trackIndexRef.current = index;
@@ -496,7 +471,10 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
           message,
           request.summary,
           reason instanceof ReaderSafetyPolicyError
-            ? { code: reason.code, ruleId: reason.ruleId, action: reason.action }
+            ? {
+                code: reason.code, ruleId: reason.ruleId, action: reason.action,
+                classification: reason.classification, scope: reason.scope
+              }
             : null
         ));
       }
@@ -930,7 +908,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const bootstrap = bootstrapRef.current;
     const audio = audioRef.current;
     const nextTrack = bootstrap ? nextAudioTrackForMetadataPreload(bootstrap.tracks, state.trackIndex) : null;
-    if (!nextTrack || !audio || unsupportedAudioMimeType(nextTrack.mimeType, nextTrack.codec, (mime) => audio.canPlayType(mime))) return undefined;
+    if (!nextTrack || !audio) return undefined;
     const controller = new AbortController();
     nextTrackPreloadAbortRef.current = controller;
     // A HEAD request primes authenticated file metadata without downloading

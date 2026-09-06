@@ -2,7 +2,7 @@
 
 Status: Accepted
 Date: 2026-09-04
-Supersedes: ADR 0011 progress-location, validation, synchronization and persistence decisions
+Replaces the former Reader v4 progress-location, validation, synchronization and persistence contract.
 
 ## Context
 

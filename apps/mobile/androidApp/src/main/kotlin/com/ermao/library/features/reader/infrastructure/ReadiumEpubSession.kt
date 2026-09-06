@@ -16,11 +16,16 @@ import com.ermao.library.shared.modules.reader.ReaderErrorCode
 import com.ermao.library.shared.modules.reader.ReaderSafetyException
 import com.ermao.library.shared.modules.reader.ReaderSafetyImplementationException
 import com.ermao.library.shared.modules.reader.readerSafetyDrmFailure
+import com.ermao.library.shared.modules.reader.readerSafetyEpubArchiveIntegrityFailure
 import com.ermao.library.shared.modules.reader.readerErrorCodeForFailure
 import com.ermao.library.shared.modules.reader.ReaderLocation
 import com.ermao.library.shared.modules.reader.ReaderNavigationTarget
+import com.ermao.library.shared.modules.reader.ReaderNavigationTargetChapter
 import com.ermao.library.shared.modules.reader.ReaderNavigationTargetInvalid
 import com.ermao.library.shared.modules.reader.ReaderNavigationTargetReflowable
+import com.ermao.library.shared.modules.reader.ReaderNavigationCompleted
+import com.ermao.library.shared.modules.reader.ReaderNavigationRejected
+import com.ermao.library.shared.modules.reader.ReaderNavigationResult
 import com.ermao.library.shared.modules.reader.ReaderPreferences
 import com.ermao.library.shared.modules.reader.ReaderReadingMode
 import com.ermao.library.shared.modules.reader.ReaderWritingMode
@@ -37,6 +42,7 @@ import com.ermao.library.shared.modules.reader.ReaderPositionLocalState
 import com.ermao.library.shared.modules.reader.ReaderPositionSyncingStore
 import com.ermao.library.shared.modules.reader.ReaderTocEntry
 import com.ermao.library.shared.modules.reader.ReflowReaderLocation
+import com.ermao.library.shared.modules.reader.matchesReaderNavigationHref
 import java.io.FileNotFoundException
 import java.math.BigDecimal
 import java.util.logging.Level
@@ -70,6 +76,7 @@ import org.readium.r2.shared.publication.services.isRestricted
 import org.readium.r2.shared.publication.services.positions
 import org.readium.r2.shared.publication.services.search.search
 import org.readium.r2.shared.util.asset.AssetRetriever
+import org.readium.r2.shared.util.asset.ContainerAsset
 import org.readium.r2.shared.util.getOrElse
 import org.readium.r2.streamer.PublicationOpener
 import com.ermao.library.mobi.infrastructure.MobiPublicationErrorKind
@@ -124,6 +131,8 @@ internal class ReadiumEpubSession(
         private set
     private val _currentLocation = MutableStateFlow<ReaderLocation?>(null)
     override val currentLocation: StateFlow<ReaderLocation?> = _currentLocation.asStateFlow()
+    private val _currentNavigationEntryId = MutableStateFlow<String?>(null)
+    override val currentNavigationEntryId: StateFlow<String?> = _currentNavigationEntryId.asStateFlow()
     private val _presentationProgress = MutableStateFlow<Double?>(null)
     override val presentationProgress: StateFlow<Double?> = _presentationProgress.asStateFlow()
 
@@ -144,6 +153,7 @@ internal class ReadiumEpubSession(
     private val viewportNavigationMutex = Mutex()
     private val contentsMutex = Mutex()
     private var publication: Publication? = null
+    private var protectedEpubAsset: ContainerAsset? = null
     private var mobiPublication: MobiReadiumPublication? = null
     private var navigator: EpubNavigatorFragment? = null
     private var publicationPositionIndex = ReadiumPublicationPositionIndex.Empty
@@ -154,6 +164,7 @@ internal class ReadiumEpubSession(
     private var remoteTarget: ReaderProgressSnapshotV5? = null
     private var suppressNextPreferenceLocation = false
     private var currentPageUnreadable = false
+    private var openingSafetyFailureSink: ReaderSafetyFailureSink? = null
     private var prepared = false
     private var contentsLoaded = false
     override var tableOfContents: List<ReaderTocEntry> = emptyList()
@@ -234,7 +245,7 @@ internal class ReadiumEpubSession(
                 throw ReaderOpenFailure(ReaderError(code), cause = error)
             }
         } else {
-            try {
+            val archiveSafety = try {
                 AndroidEpubArchiveSafetyPreflight.verify(file)
             } catch (error: ReaderSafetyException) {
                 throw readerOpenFailure(error)
@@ -247,18 +258,55 @@ internal class ReadiumEpubSession(
                     diagnostic = ReadiumOpeningDiagnostic.AssetRetrieval(error),
                 )
             }
-            readium.publicationOpener.open(
-                asset = asset,
+            val safetyFailureSink = ReaderSafetyFailureSink()
+            openingSafetyFailureSink = safetyFailureSink
+            val resourceRoles = EpubContentSecurityPolicy.ArchiveResourceRoleResolver()
+            val protectedAsset = try {
+                EpubContentSecurityPolicy.protectAsset(
+                    asset = asset,
+                    onFailure = { error, role -> safetyFailureSink.record(error, role) },
+                    archiveSafety = archiveSafety,
+                    resourceRoles = resourceRoles,
+                )
+            } catch (error: ReaderSafetyException) {
+                throw readerOpenFailure(error)
+            } catch (error: ReaderSafetyImplementationException) {
+                throw readerOpenFailure(error)
+            }
+            protectedEpubAsset = protectedAsset as? ContainerAsset
+            safetyFailureSink.throwIfPresent()
+            val openedPublication = readium.publicationOpener.open(
+                asset = protectedAsset,
                 allowUserInteraction = false,
                 onCreatePublication = {
-                    container = EpubContentSecurityPolicy.apply(container)
+                    val parsedManifest = this.manifest
+                    resourceRoles.markReadingOrder(
+                        parsedManifest.readingOrder.mapNotNull { link -> link.url().path },
+                    )
                 },
             ).getOrElse { error ->
+                safetyFailureSink.throwIfPresent()
+                // A protected resource that was actually touched before the SDK
+                // failed to build a Publication is required by that opening path,
+                // even when it was not yet present in the manifest reading order.
+                // Optional NCX/nav/cover/font failures leave the SDK open and never
+                // reach this boundary.
+                if (archiveSafety.quarantinedResources.keys.any { path ->
+                        resourceRoles.wasObserved(path) &&
+                            resourceRoles.roleFor(path) !=
+                            com.ermao.library.shared.modules.reader.domain.ReaderSafetyResourceRole.OPTIONAL_RESOURCE
+                    }) {
+                    throw readerOpenFailure(
+                        ReaderSafetyException(readerSafetyEpubArchiveIntegrityFailure())
+                    )
+                }
                 throw ReaderOpenFailure(
                     ReaderError(ReaderErrorCode.ParseFailed),
                     diagnostic = ReadiumOpeningDiagnostic.PublicationOpening(error),
                 )
             }
+            safetyFailureSink.throwIfPresent()
+            openedPublication
         }
     }
 
@@ -290,6 +338,7 @@ internal class ReadiumEpubSession(
         check(!prepared) { "Reader session is already prepared" }
         prepared = true
         val openedPublication = openLocalPublication()
+        openingSafetyFailureSink?.throwIfPresent()
         if (openedPublication.isRestricted) {
             openedPublication.close()
             throw readerOpenFailure(ReaderSafetyException(readerSafetyDrmFailure()))
@@ -317,9 +366,11 @@ internal class ReadiumEpubSession(
         bookmarkCoordinator.load()
 
         val explicitLocator = initialTarget?.let { target ->
-            val href = (target as? ReaderNavigationTargetReflowable)?.href
-            val link = href?.let { Url(it) }?.let { Link(href = it) }
-            link?.let { openedPublication.locatorFromLink(it) }
+            val resolvedTarget = when (target) {
+                is ReaderNavigationTargetChapter -> resolveChapterTarget(target, openedPublication)
+                else -> target
+            }
+            locatorMapper.navigationLocator(resolvedTarget, openedPublication)
                 ?: throw ReaderOpenFailure(ReaderError(ReaderErrorCode.LocationRestoreFailed))
         }
         val localPosition = if (
@@ -404,6 +455,7 @@ internal class ReadiumEpubSession(
         locationJob = scope.launch {
             checkNotNull(navigator).currentLocator.collectLatest { locator ->
                 lastObservedLocator = locator
+                updateCurrentNavigationEntry(locator)
                 val mapped = locatorMapper.toDomain(locator)
                 val eventReport = positionReport(locator)
                 _currentLocation.value = mapped
@@ -573,6 +625,52 @@ internal class ReadiumEpubSession(
         return navigator?.go(target, animated = navigationAnimationsEnabled()) ?: false
     }
 
+    override suspend fun navigateTo(entry: ReaderTocEntry): ReaderNavigationResult {
+        val navigationTarget = entry.target
+        val target = navigationTarget as? ReaderNavigationTargetReflowable
+            ?: return if (navigationTarget is ReaderNavigationTargetInvalid) {
+                ReaderNavigationRejected(navigationTarget.reasonCode)
+            } else {
+                ReaderNavigationRejected("READER_NAVIGATION_REJECTED")
+            }
+        val openedPublication = publication ?: return ReaderNavigationRejected("READER_NAVIGATION_REJECTED")
+        val activeNavigator = navigator ?: return ReaderNavigationRejected("READER_NAVIGATION_REJECTED")
+        val targetHref = target.href
+        val targetLocator = locatorMapper.navigationLocator(target, openedPublication)
+            ?: return ReaderNavigationRejected("READER_NAVIGATION_REJECTED")
+
+        if (matchesReaderNavigationHref(
+                currentHref = activeNavigator.currentLocator.value.href.toString(),
+                expectedHref = targetHref,
+                fragments = activeNavigator.currentLocator.value.locations.fragments.toSet(),
+                cssSelector = activeNavigator.currentLocator.value.locations["cssSelector"] as? String,
+            )
+        ) {
+            return ReaderNavigationCompleted(moved = false)
+        }
+        suppressNextPreferenceLocation = false
+        dismissResumeNotice()
+        requestedNavigationTarget = ReaderNavigationTargetReflowable(targetHref)
+        if (!activeNavigator.go(targetLocator, animated = navigationAnimationsEnabled())) {
+            return ReaderNavigationRejected("READER_NAVIGATION_REJECTED")
+        }
+        val verified = withTimeoutOrNull(com.ermao.library.features.reader.application.NAVIGATION_VERIFICATION_TIMEOUT_MILLIS) {
+            activeNavigator.currentLocator.first { locator ->
+                matchesReaderNavigationHref(
+                    currentHref = locator.href.toString(),
+                    expectedHref = targetHref,
+                    fragments = locator.locations.fragments.toSet(),
+                    cssSelector = locator.locations["cssSelector"] as? String,
+                )
+            }
+        }
+        return if (verified != null) {
+            ReaderNavigationCompleted(moved = true)
+        } else {
+            ReaderNavigationRejected("READER_NAVIGATION_VERIFICATION_FAILED")
+        }
+    }
+
     override fun goToTotalProgression(totalProgression: Double): Boolean {
         suppressNextPreferenceLocation = false
         dismissResumeNotice()
@@ -590,7 +688,12 @@ internal class ReadiumEpubSession(
         }
         tableOfContents = loaded
         contentsLoaded = true
+        lastObservedLocator?.let(::updateCurrentNavigationEntry)
         loaded
+    }
+
+    private fun updateCurrentNavigationEntry(locator: Locator) {
+        _currentNavigationEntryId.value = currentReadiumChapter(tableOfContents, locator)?.id
     }
 
     override fun dismissResumeNotice() {
@@ -727,6 +830,8 @@ internal class ReadiumEpubSession(
         mobiPublication = null
         publicationPositionIndex = ReadiumPublicationPositionIndex.Empty
         remoteTarget = null
+        openingSafetyFailureSink?.clear()
+        openingSafetyFailureSink = null
     }
 
     private fun bookmarkId(resourceKey: String, progression: Double): String {
@@ -776,6 +881,7 @@ internal class ReadiumEpubSession(
     }
 
     private suspend fun isUnreadablePage(location: ReflowReaderLocation): Boolean {
+        openingSafetyFailureSink?.throwIfPresent()
         val openedPublication = publication ?: return false
         val target = location.resourceKey?.substringBefore('#') ?: return false
         val link = openedPublication.readingOrder.firstOrNull {
@@ -816,14 +922,12 @@ internal class ReadiumEpubSession(
             publicationPositionIndex.totalProgression(locator)
                 ?: resourceProgression
             ).coerceIn(0.0, 1.0)
-        val chapter = tableOfContents.firstOrNull { entry ->
-            val entryHref = (entry.location as? ReflowReaderLocation)?.resourceKey
-            entryHref?.substringBefore('#') == href.substringBefore('#')
-        }?.let { entry ->
+        val chapter = currentReadiumChapter(tableOfContents, locator)?.let { entry ->
             ReaderChapterPresentation(
-                href = (entry.location as? ReflowReaderLocation)?.resourceKey,
+                href = (entry.target as? ReaderNavigationTargetReflowable)?.href,
                 title = entry.title,
                 index = entry.index,
+                navigationKey = entry.id,
             )
         }
         return ReaderPositionReport(
@@ -839,20 +943,34 @@ internal class ReadiumEpubSession(
         )
     }
 
-    private fun buildTableOfContents(openedPublication: Publication): List<ReaderTocEntry> {
-        return openedPublication.tableOfContents
-            .ifEmpty { openedPublication.readingOrder }
-            .mapIndexedNotNull { index, link ->
-                val locator = openedPublication.locatorFromLink(link) ?: return@mapIndexedNotNull null
-                val href = locator.href.toString()
-                ReaderTocEntry(
-                    title = link.title?.takeIf(String::isNotBlank) ?: (index + 1).toString(),
-                    location = locatorMapper.toDomain(locator),
-                    id = href,
-                    index = index,
-                    target = ReaderNavigationTargetReflowable(href),
-                )
-            }
+    private suspend fun buildTableOfContents(openedPublication: Publication): List<ReaderTocEntry> {
+        // For an EPUB, read nav/NCX from the same protected container that was
+        // handed to PublicationOpener. Readium's processed TOC is not a stable
+        // source for chapter-core identity because it may promote or rewrite
+        // structural nodes. Synthetic TXT/FB2/MOBI publications have no asset
+        // here and keep their factory-owned authored links.
+        val links = if (protectedEpubAsset != null) {
+            EpubChapterProjection.project(requireNotNull(protectedEpubAsset))
+        } else {
+            openedPublication.tableOfContents
+        }
+        return mapReadiumTocEntries(links) { link ->
+            openedPublication.locatorFromLink(link)?.let(locatorMapper::toDomain)
+        }
+    }
+
+    private suspend fun resolveChapterTarget(
+        target: ReaderNavigationTargetChapter,
+        openedPublication: Publication,
+    ): ReaderNavigationTargetReflowable {
+        val matches = com.ermao.library.features.reader.application.flattenTableOfContents(
+            buildTableOfContents(openedPublication),
+        ).map { it.entry }
+            .filter { it.id == target.navigationKey }
+            .mapNotNull { it.target as? ReaderNavigationTargetReflowable }
+        val match = matches.singleOrNull()
+            ?: throw ReaderOpenFailure(ReaderError(ReaderErrorCode.LocationRestoreFailed))
+        return match
     }
 
     private companion object {
@@ -868,6 +986,76 @@ internal class ReadiumEpubSession(
             "data-shuku-resource-error=\"RESOURCE_UNREADABLE\"".encodeToByteArray()
     }
 
+}
+
+/** Matches the Web Readium chapter projection: a same-resource TOC entry is usable
+ * only when its authored fragment is uniquely evidenced by the current locator. */
+private fun currentReadiumChapter(entries: List<ReaderTocEntry>, locator: Locator): ReaderTocEntry? {
+    val flattened = com.ermao.library.features.reader.application.flattenTableOfContents(entries)
+    val candidates = flattened.mapNotNull { node ->
+        val target = node.entry.target as? ReaderNavigationTargetReflowable ?: return@mapNotNull null
+        com.ermao.library.shared.modules.reader.ReaderNavigationEntry(node.entry.id, target.href, node.depth)
+    }
+    val key = com.ermao.library.shared.modules.reader.resolveCurrentReaderNavigationEntryId(
+        entries = candidates,
+        currentHref = locator.href.toString(),
+        fragments = locator.locations.fragments.toSet(),
+        cssSelector = locator.locations["cssSelector"] as? String,
+    ) ?: return null
+    return flattened.singleOrNull { it.entry.id == key }?.entry
+}
+
+/** Keeps the chapter-core navigation tree intact while projecting it into the
+ * renderer-neutral model. Structural entries remain in place with an Invalid
+ * target; their children are never promoted or re-keyed. */
+internal fun mapReadiumTocEntries(
+    links: List<Link>,
+    resolveLocation: (Link) -> ReflowReaderLocation?,
+): List<ReaderTocEntry> {
+    val usedIds = linkedSetOf<String>()
+
+    fun map(items: List<Link>): List<ReaderTocEntry> = buildList {
+        items.forEach { link ->
+            // Keep the authored Link href, including its fragment. Readium's
+            // Locator projection may carry the fragment separately in
+            // locations.fragments, so deriving the target from the projected
+            // resource key can silently turn an anchored TOC entry into a
+            // resource-only entry.
+            val href = link.href.toString().takeIf { it.substringBefore('#').isNotBlank() }
+            val rawNavigationKey = link.properties.otherProperties["shuku:navigationKey"]
+                ?.toString()
+                ?.takeIf(String::isNotBlank)
+            val id = requireNotNull(rawNavigationKey) {
+                "Chapter-core TOC link is missing shuku:navigationKey"
+            }
+            require(usedIds.add(id)) { "Duplicate chapter-core TOC key: $id" }
+            require(id.startsWith("chapter-")) { "Chapter-core TOC key is invalid: $id" }
+            val location = href?.let { resolveLocation(link) }
+            val entryIndex = rawNavigationKey
+                .removePrefix("chapter-")
+                .toIntOrNull()
+                ?: error("Chapter-core TOC key has no numeric index: $rawNavigationKey")
+            val children = map(link.children)
+            val title = link.title?.takeIf(String::isNotBlank)
+                ?: error("Chapter-core TOC link has a blank title: $id")
+            add(
+                ReaderTocEntry(
+                    title = title,
+                    location = location ?: ReflowReaderLocation(progression = 0.0),
+                    children = children,
+                    id = id,
+                    index = entryIndex,
+                    target = if (href != null) {
+                        ReaderNavigationTargetReflowable(href)
+                    } else {
+                        ReaderNavigationTargetInvalid()
+                    },
+                ),
+            )
+        }
+    }
+
+    return map(links)
 }
 
 private fun ByteArray.containsSequence(needle: ByteArray): Boolean {

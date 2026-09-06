@@ -1,7 +1,7 @@
 {
   "$schema": "./schemas/visual-tokens.schema.json",
   "schemaVersion": 3,
-  "contractVersion": "1.1.0",
+  "contractVersion": "1.2.0",
   "appearance": {
     "app": "lightOnly"
   },
@@ -18,7 +18,7 @@
       "dividerStrong": "#D8D1C9",
       "brandAccent": "#FF4F2A",
       "brandHover": "#E94320",
-      "actionAccent": "#C83B23",
+      "actionAccent": "#FF4F2A",
       "accentSoft": "#FCE6DF",
       "accentSofter": "#FFF3EE",
       "focusRing": "#FF9B7E",

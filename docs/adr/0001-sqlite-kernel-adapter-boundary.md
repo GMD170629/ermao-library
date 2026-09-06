@@ -1,31 +1,32 @@
 # ADR 0001: SQLite kernel adapter boundary
 
-## Status
-
-Accepted.
+Status: Accepted
 
 ## Decision
 
-Runtime business persistence uses SQLAlchemy ORM models and typed expression
-APIs. SQLite-specific operations that have no ORM equivalent are isolated to:
+Application persistence uses SQLAlchemy mapped models and typed SQLAlchemy
+expression APIs. SQLite-specific work is confined to the database adapters:
 
-- `app/db/sqlite.py` for connection initialization PRAGMAs;
-- `app/db/runner.py` for `user_version`, migration inspection and the SQLite
-  online backup API;
-- `app/db/timestamp_triggers.py` for timestamp-normalization trigger DDL.
+- `apps/api-python/app/db/sqlite.py` owns connection PRAGMAs and SQLite engine setup;
+- `apps/api-python/app/db/runner.py` owns Alembic inspection, schema prestart checks
+  and the supported linear upgrade operation;
+- `apps/api-python/app/db/alembic/versions/` owns immutable schema operations through
+  SQLAlchemy/Alembic schema objects.
 
-These modules may use the SQLite DBAPI or dialect SQL only for the operations
-listed above. They must not contain business queries or capability state
-changes. Historical Alembic revisions remain immutable and are not runtime
-application code.
+Capability code must not use the SQLite DBAPI, raw cursors, textual SQL or runtime
+schema reflection. Database-kernel adapters must not contain business queries or
+capability state changes. New exceptions require focused ADR and architecture-test
+coverage.
+
+## Current evidence
+
+`app/db/sqlite.py` contains the connection PRAGMAs; `app/db/runner.py` performs
+schema verification and upgrades; backup is an independent `backup` capability.
+`tests/test_capability_architecture.py` guards the boundary. The runtime revision chain currently ends at
+`0009_reader_v5_opaque_progress`.
 
 ## Consequences
 
-Architecture tests reject textual SQL, raw cursors and runtime schema
-reflection in capability code. New SQLite exceptions require a separate ADR,
-focused database tests and an exact architecture-test allowlist change.
-
-The timestamp triggers can be removed only after every supported writer uses
-typed timestamp values and external/raw writers are no longer part of the
-database contract. Online backup and connection PRAGMAs remain database-kernel
-responsibilities.
+SQLite tuning, backup and schema inspection remain explicit infrastructure
+responsibilities. Business persistence stays portable at the application boundary,
+while the small set of unavoidable SQLite operations remains visible and testable.

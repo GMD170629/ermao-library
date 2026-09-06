@@ -1,9 +1,13 @@
 package com.ermao.library.features.reader.infrastructure
 
+import com.ermao.library.shared.modules.reader.ReaderSafetyException
+import com.ermao.library.shared.modules.reader.ReaderSafetyFailure
 import com.ermao.library.shared.modules.reader.ReaderComicPage
-import com.ermao.library.shared.modules.reader.readerSafetyAllowedComicPageMimeTypes
+import com.ermao.library.shared.modules.reader.readerSafetyComicArchiveStructureFailure
 import com.ermao.library.shared.modules.reader.readerSafetyComicExpandedMaxBytes
 import com.ermao.library.shared.modules.reader.readerSafetyComicManifestMaxBytes
+import com.ermao.library.shared.modules.reader.readerSafetyComicPageBytesFailure
+import com.ermao.library.shared.modules.reader.readerSafetyComicPageDecodeFailure
 import com.ermao.library.shared.modules.reader.readerSafetyComicPageMaxBytes
 import com.ermao.library.shared.modules.reader.readerSafetyComicPageMaxCount
 import com.ermao.library.shared.modules.reader.readerSafetyComicPageMimeType
@@ -65,7 +69,7 @@ internal class ImageDirectoryReadiumPublicationFactory {
         val readingOrder = bundle.members.mapIndexed { index, member ->
             Link(
                 href = requireNotNull(Url("pages/${member.sequenceIndex}")),
-                mediaType = requireNotNull(MediaType(member.mimeType)),
+                mediaType = MediaType(member.mimeType) ?: requireNotNull(MediaType("image/*")),
                 title = (member.sequenceIndex + 1).toString(),
                 rels = if (index == 0) setOf("cover") else emptySet(),
             )
@@ -110,22 +114,38 @@ internal class ImageDirectoryReadiumPublicationFactory {
         require(manifest.members.sumOf(BundleMember::sizeBytes) == manifest.totalBytes)
         require(manifest.totalBytes in 1..readerSafetyComicExpandedMaxBytes())
         val rootPath = directory.canonicalFile.toPath()
+        var firstQuarantinedFailure: ReaderSafetyFailure? = null
         val readableMembers = manifest.members.mapNotNull { member ->
-            require(member.assetId.isNotBlank())
-            require(member.fileName.isSafeFileName())
-            val file = File(directory, member.fileName)
-            val filePath = file.canonicalFile.toPath()
-            require(filePath.parent == rootPath && !Files.isSymbolicLink(filePath))
-            if (member.mimeType !in readerSafetyAllowedComicPageMimeTypes() ||
-                member.sizeBytes !in 1..readerSafetyComicPageMaxBytes() ||
-                !file.isFile || file.length() != member.sizeBytes ||
-                detectImageMime(file) != member.mimeType
-            ) {
+            if (member.assetId.isBlank() || !member.fileName.isSafeFileName()) {
+                firstQuarantinedFailure = firstQuarantinedFailure ?: readerSafetyComicArchiveStructureFailure()
                 return@mapNotNull null
             }
-            member
+            val file = File(directory, member.fileName)
+            val filePath = runCatching { file.canonicalFile.toPath() }.getOrNull()
+            if (filePath == null || filePath.parent != rootPath || Files.isSymbolicLink(filePath)) {
+                firstQuarantinedFailure = firstQuarantinedFailure ?: readerSafetyComicArchiveStructureFailure()
+                return@mapNotNull null
+            }
+            if (member.sizeBytes !in 1..readerSafetyComicPageMaxBytes()) {
+                firstQuarantinedFailure = firstQuarantinedFailure ?: readerSafetyComicPageBytesFailure()
+                return@mapNotNull null
+            }
+            if (!file.isFile || file.length() != member.sizeBytes) {
+                firstQuarantinedFailure = firstQuarantinedFailure ?: readerSafetyComicPageDecodeFailure()
+                return@mapNotNull null
+            }
+            val detectedMime = runCatching { detectImageMime(file) }.getOrNull()
+            if (detectedMime == null) {
+                firstQuarantinedFailure = firstQuarantinedFailure ?: readerSafetyComicPageDecodeFailure()
+                return@mapNotNull null
+            }
+            // The manifest MIME is metadata. Keep the page when its bytes are a readable
+            // image and carry the decoder's detected type into the Readium publication.
+            member.copy(mimeType = detectedMime)
         }
-        require(readableMembers.isNotEmpty()) { "IMAGE_DIR contains no readable pages" }
+        if (readableMembers.isEmpty()) {
+            throw ReaderSafetyException(firstQuarantinedFailure ?: readerSafetyComicPageDecodeFailure())
+        }
         return manifest.copy(members = readableMembers)
     }
 

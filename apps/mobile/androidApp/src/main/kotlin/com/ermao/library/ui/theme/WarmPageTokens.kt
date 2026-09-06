@@ -20,6 +20,7 @@ data class WarmPageColors(
     val actionAccent: Color,
     val accentSoft: Color,
     val onAction: Color,
+    val navigation: Color = surface,
 )
 
 @Immutable
@@ -49,6 +50,7 @@ data class WarmPageRadii(
 
 internal val AppLightColors = WarmPageColors(
     canvas = colorOf(GeneratedDesignTokens.App.Canvas),
+    navigation = colorOf(GeneratedDesignTokens.App.Navigation),
     surface = colorOf(GeneratedDesignTokens.App.Surface),
     surfaceRaised = colorOf(GeneratedDesignTokens.App.SurfaceRaised),
     textPrimary = colorOf(GeneratedDesignTokens.App.TextPrimary),
@@ -143,6 +145,7 @@ private fun readerPalette(
     onAccent: String,
 ) = WarmPageColors(
     canvas = colorOf(canvas),
+    navigation = colorOf(surface),
     surface = colorOf(surface),
     surfaceRaised = colorOf(surfaceRaised),
     textPrimary = colorOf(textPrimary),

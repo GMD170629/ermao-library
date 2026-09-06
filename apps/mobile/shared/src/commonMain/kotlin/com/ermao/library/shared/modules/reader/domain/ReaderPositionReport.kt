@@ -48,6 +48,7 @@ data class ReaderChapterPresentation(
     val href: String?,
     val title: String?,
     val index: Int?,
+    val navigationKey: String? = null,
 ) {
     init {
         require(href == null || href.length <= MAXIMUM_HREF_LENGTH)

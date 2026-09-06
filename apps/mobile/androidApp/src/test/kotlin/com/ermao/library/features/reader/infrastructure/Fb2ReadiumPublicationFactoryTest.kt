@@ -34,7 +34,7 @@ class Fb2ReadiumPublicationFactoryTest {
             assertEquals(expected.getValue(resource.href).jsonPrimitive.content,
                 resource.xhtml.substringAfter("<body>").substringBefore("</body>"))
         }
-        assertEquals("fb2/section-0001.xhtml#fb2-node-000002",
+        assertEquals("fb2/section-0001.xhtml#chapter-node-20",
             parsed.document.tableOfContents.first().children.single().href)
         assertEquals(setOf("fb2/images/498cc84b29cb560e15b4.png"), parsed.images.keys)
         assertContentEquals(original, file.readBytes())
@@ -97,6 +97,16 @@ class Fb2ReadiumPublicationFactoryTest {
     fun passesEmbeddedBytesToTheImageDecoderWithoutSignatureValidation() {
         withSource("<FictionBook><body><p>text</p></body><binary id='image' content-type='image/png'>SGVsbG8=</binary></FictionBook>".toByteArray()) { file ->
             assertContentEquals("Hello".toByteArray(), Fb2SourceParser.read(file, "Book").images.values.single())
+        }
+    }
+
+    @Test
+    fun passesUnfamiliarImageMimeBytesToTheImageDecoderWithoutAnExtension() {
+        withSource("<FictionBook><body><p>text</p></body><binary id='image' content-type='image/future-format'>SGVsbG8=</binary></FictionBook>".toByteArray()) { file ->
+            val parsed = Fb2SourceParser.read(file, "Book")
+            assertContentEquals("Hello".toByteArray(), parsed.images.values.single())
+            assertEquals(setOf("fb2/images/6105d6cc76af400325e9"), parsed.images.keys)
+            assertEquals("image/future-format", parsed.document.images.single().mediaType)
         }
     }
 

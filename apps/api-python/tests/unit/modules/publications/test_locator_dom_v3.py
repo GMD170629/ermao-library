@@ -6,15 +6,7 @@ from xml.etree import ElementTree
 
 import pytest
 
-from app.contracts.reader_safety_policy_generated import (
-    READER_SAFETY_REFLOWABLE_PROFILE,
-    ReaderSafetyDoctype,
-    ReaderSafetyRuleId,
-)
-from app.modules.publications.domain.model import (
-    PublicationCorruptError,
-    PublicationSecurityError,
-)
+from app.modules.publications.domain.model import PublicationCorruptError
 from app.modules.publications.infrastructure.locator_dom import (
     WEB_SECURITY_PROFILE,
     decorate_markup_head,
@@ -25,7 +17,7 @@ from app.modules.publications.infrastructure.locator_dom import (
 
 _ROOT = Path(__file__).parents[6]
 _FIXTURE_ROOT = (
-    _ROOT / "packages" / "reader-contracts" / "fixtures" / "normalization-v3"
+    _ROOT / "packages" / "reader-contracts" / "fixtures" / "normalization-v4"
 )
 
 
@@ -35,10 +27,12 @@ def _local_name(tag: str) -> str:
 
 def test_projection_matches_policy_bound_cross_language_fixture() -> None:
     markup = _FIXTURE_ROOT.joinpath("chapter.xhtml").read_bytes()
-    expected = json.loads(_FIXTURE_ROOT.joinpath("projection.json").read_text())
+    expected = json.loads(
+        _FIXTURE_ROOT.joinpath("projection.json").read_text(encoding="utf-8")
+    )
 
     projection = locator_dom_projection(
-        normalization="shuku-epub-locator-dom-v3",
+        normalization="shuku-epub-locator-dom-v4",
         resources=(("OPS/chapter.xhtml", "application/xhtml+xml", markup),),
     )
 
@@ -54,13 +48,13 @@ def test_security_decoration_sanitizes_body_in_memory_and_preserves_projection()
 ):
     markup = _FIXTURE_ROOT.joinpath("chapter.xhtml").read_bytes()
     before = locator_dom_projection(
-        normalization="shuku-epub-locator-dom-v3",
+        normalization="shuku-epub-locator-dom-v4",
         resources=(("OPS/chapter.xhtml", "application/xhtml+xml", markup),),
     )
 
     decorated = decorate_markup_head(markup, WEB_SECURITY_PROFILE)
     after = locator_dom_projection(
-        normalization="shuku-epub-locator-dom-v3",
+        normalization="shuku-epub-locator-dom-v4",
         resources=(("OPS/chapter.xhtml", "application/xhtml+xml", decorated),),
     )
 
@@ -101,24 +95,31 @@ def test_security_decoration_does_not_treat_comment_or_cdata_as_declarations() -
     )
 
 
-@pytest.mark.parametrize("doctype", READER_SAFETY_REFLOWABLE_PROFILE.safe_doctypes)
-def test_every_generated_standard_xhtml_doctype_is_accepted(
-    doctype: ReaderSafetyDoctype,
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "<!DOCTYPE html>",
+        '<!DOCTYPE html SYSTEM "https://example.invalid/xhtml.dtd">',
+        '<!DOCTYPE html PUBLIC "-//Example//DTD XHTML//EN" "urn:example:xhtml">',
+        '<!DOCTYPE html [<!ENTITY plain "Readable">]>',
+    ],
+)
+def test_arbitrary_well_formed_xhtml_doctypes_are_accepted(
+    declaration: str,
 ) -> None:
-    declaration = (
-        f'<!DOCTYPE {doctype.name} PUBLIC "{doctype.public_id}" "{doctype.system_id}">'
-    )
+    entity_reference = "&plain;" if "<!ENTITY plain" in declaration else "&unknown;"
+    expected_entity = "Readable" if entity_reference == "&plain;" else "&unknown;"
     markup = f"""<?xml version="1.0"?>
 {declaration}
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head><title>Standard EPUB</title></head>
-<body><h1 id="chapter">Chapter&nbsp;One &copy;</h1></body>
+<body><h1 id="chapter">Chapter&nbsp;One &copy; {entity_reference}</h1></body>
 </html>""".encode()
 
     _decoded, root = validate_xhtml(markup)
 
     assert root.tag == "{http://www.w3.org/1999/xhtml}html"
-    assert "Chapter\N{NO-BREAK SPACE}One \N{COPYRIGHT SIGN}" in "".join(root.itertext())
+    assert f"Chapter\u00a0One \u00a9 {expected_entity}" in "".join(root.itertext())
 
 
 @pytest.mark.parametrize(
@@ -126,31 +127,24 @@ def test_every_generated_standard_xhtml_doctype_is_accepted(
     [
         b"<html><head></head><body><p>not closed</p>",
         b"<html><body><p>missing head</p></body></html>",
-        b"<html><head></head><body>&external;</body></html>",
-        (
-            b"<!DOCTYPE html [<!ENTITY external SYSTEM 'file:///etc/passwd'>]>"
-            b"<html><head></head><body>&external;</body></html>"
-        ),
-        (
-            b"<!DOCTYPE html SYSTEM 'https://attacker.invalid/book.dtd'>"
-            b"<html><head></head><body><p>Body</p></body></html>"
-        ),
     ],
 )
-def test_invalid_or_unsafe_xhtml_is_rejected_without_blank_fallback(
+def test_malformed_or_incomplete_xhtml_is_rejected_without_blank_fallback(
     markup: bytes,
 ) -> None:
     with pytest.raises(PublicationCorruptError):
         validate_xhtml(markup)
 
 
-def test_custom_entity_rejection_carries_generated_rule_id() -> None:
-    markup = b"<html><head></head><body>&external;</body></html>"
+def test_external_and_unknown_entities_are_literalized_in_memory() -> None:
+    markup = (
+        b'<!DOCTYPE html [<!ENTITY external SYSTEM "file:///etc/passwd">]>'
+        b"<html><head></head><body>&external; &unknown;</body></html>"
+    )
 
-    with pytest.raises(PublicationSecurityError) as caught:
-        validate_xhtml(markup)
+    _decoded, root = validate_xhtml(markup)
 
-    assert caught.value.rule_id == ReaderSafetyRuleId.REFLOWABLE_REJECT_XML_ENTITY.value
+    assert "&external; &unknown;" in "".join(root.itertext())
 
 
 def test_generated_uri_and_css_profiles_preserve_navigation_and_safe_declarations() -> (

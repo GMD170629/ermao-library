@@ -247,7 +247,7 @@ async function openBook(blob: Blob, filename: string): Promise<MobiOpenResult> {
         assertStatus(ccall('ermao_mobi_get_toc_info', 'number', ['number', 'number', 'number'], [bookPointer, index, tocInfo]));
         const parentIndex = getValue(tocInfo + 4, 'i32') >>> 0;
         toc.push({
-          title: copyString('ermao_mobi_copy_toc_title', [bookPointer, index]) ?? `Section ${index + 1}`,
+          title: copyString('ermao_mobi_copy_toc_title', [bookPointer, index]) ?? '',
           resourceIndex: getValue(tocInfo + 8, 'i32') >>> 0,
           fragment: copyString('ermao_mobi_copy_toc_fragment', [bookPointer, index]),
           parentIndex: parentIndex === INDEX_NONE ? null : parentIndex

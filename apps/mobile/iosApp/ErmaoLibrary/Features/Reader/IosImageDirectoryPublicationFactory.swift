@@ -53,7 +53,6 @@ struct IosImageDirectoryBundle: Sendable {
         let root = directory.standardizedFileURL.resolvingSymlinksInPath()
         let unresolvedRoot = directory.standardizedFileURL
         let maximumPageBytes = ErmaoShared.PublicKt.readerSafetyComicPageMaxBytes()
-        let allowedMimeTypes = Set(ErmaoShared.PublicKt.readerSafetyAllowedComicPageMimeTypes())
         var mapped: [Member] = []
         for member in manifest.members {
             guard !member.assetId.isEmpty,
@@ -66,9 +65,8 @@ struct IosImageDirectoryBundle: Sendable {
                 throw IosReaderFailure(code: .corruptFile)
             }
             guard member.sizeBytes > 0 else { throw IosReaderFailure(code: .corruptFile) }
-            guard member.sizeBytes <= maximumPageBytes,
-                  allowedMimeTypes.contains(member.mimeType) else {
-                // Page byte and MIME findings are BLOCK_RESOURCE decisions.
+            guard member.sizeBytes <= maximumPageBytes else {
+                // Page byte findings are BLOCK_RESOURCE decisions.
                 continue
             }
             let fileValues = try unresolvedFileURL.resourceValues(
@@ -83,11 +81,13 @@ struct IosImageDirectoryBundle: Sendable {
             guard fileURL.deletingLastPathComponent() == root else {
                 throw IosReaderFailure(code: .corruptFile)
             }
-            guard Self.detectImageMime(fileURL) == member.mimeType else { continue }
+            // The declared MIME is metadata.  Preserve the page when the actual
+            // decoder probe recognizes its bytes, even if the declaration is new.
+            guard let detectedMime = Self.detectImageMime(fileURL) else { continue }
             mapped.append(Member(
                 assetID: member.assetId,
                 sequenceIndex: mapped.count,
-                mimeType: member.mimeType,
+                mimeType: detectedMime,
                 sizeBytes: member.sizeBytes,
                 fileURL: fileURL
             ))

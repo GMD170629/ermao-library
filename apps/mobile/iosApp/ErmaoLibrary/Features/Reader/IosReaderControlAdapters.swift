@@ -16,15 +16,24 @@ func makeIosReflowableNavigator(publication: Publication, preferences: EPUBPrefe
 extension IosReflowableReaderSession: IosReaderControlSession {
     var controlMorphology: ErmaoShared.ReaderMorphology { .reflowable }
     var controlReady: Bool { navigator != nil && (phase == .reading || phase == .background) }
+    var controlNavigationReady: Bool { controlReady && navigator?.currentLocation != nil }
     var controlContents: [IosReaderTocEntry] { tableOfContents }
+    var currentNavigationEntryID: String? {
+        let location = navigator?.currentLocation
+        return resolveIosReaderNavigationEntryID(
+            entries: tableOfContents,
+            currentHref: location?.href.normalized.string,
+            fragments: Set(location?.locations.fragments ?? []),
+            cssSelector: location?.locations["cssSelector"]?.string
+        )
+    }
     var controlAdjacentChapters: IosReaderAdjacentChapters {
         let location = navigator?.currentLocation
         return resolveIosReaderAdjacentChapters(
             entries: tableOfContents,
             currentHref: location?.href.normalized.string,
             fragments: Set(location?.locations.fragments ?? []),
-            cssSelector: location?.locations["cssSelector"]?.string,
-            currentTitle: chapterTitle
+            cssSelector: location?.locations["cssSelector"]?.string
         )
     }
     var controlPosition: String {
@@ -86,6 +95,7 @@ extension IosComicReaderSession: IosReaderControlSession {
         )
     }
     var controlReady: Bool { navigator != nil && (phase == .reading || phase == .background) }
+    var currentNavigationEntryID: String? { pageIndex >= 0 && pageIndex < pages.count ? String(pageIndex) : nil }
     var controlPosition: String { pageLabel }
     var controlContents: [IosReaderTocEntry] {
         pages.map { page in
@@ -104,6 +114,9 @@ extension IosComicReaderSession: IosReaderControlSession {
 extension IosPdfReaderSession: IosReaderControlSession {
     var controlMorphology: ErmaoShared.ReaderMorphology { .pdf }
     var controlReady: Bool { navigator != nil && (phase == .reading || phase == .background) }
+    var currentNavigationEntryID: String? {
+        pageIndex >= 0 && pageIndex < tableOfContents.count ? "pdf:\(pageIndex)" : nil
+    }
     var controlPosition: String { pageLabel }
     var controlContents: [IosReaderTocEntry] { tableOfContents }
     func isEnabled(_ control: ErmaoShared.ReaderControl) -> Bool { platformControlEnabled(control) }

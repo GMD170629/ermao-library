@@ -33,6 +33,36 @@ import kotlin.test.assertIs
 
 class KtorPdfRangeServerPortTest {
     @Test
+    fun unknownOrMissingMimeMetadataReachesTheDecoderThroughVerifiedRanges() = runBlocking {
+        val expectedBytes = byteArrayOf(4, 5, 6, 7)
+        for (mime in listOf(null, "application/x-future-pdf", "application/octet-stream")) {
+            val requests = mutableListOf<String>()
+            val gateway = port { request ->
+                requests += request.method.value
+                val headers = mutableListOf(
+                    HttpHeaders.ETag to listOf(STRONG_ETAG),
+                )
+                if (mime != null) headers += HttpHeaders.ContentType to listOf(mime)
+                if (request.method.value == "HEAD") {
+                    headers += HttpHeaders.AcceptRanges to listOf("bytes")
+                    headers += HttpHeaders.ContentLength to listOf(FILE_SIZE.toString())
+                    respond(byteArrayOf(), HttpStatusCode.OK, headersOf(*headers.toTypedArray()))
+                } else {
+                    assertEquals("bytes=4-7", request.headers[HttpHeaders.Range])
+                    assertEquals(STRONG_ETAG, request.headers[HttpHeaders.IfRange])
+                    headers += HttpHeaders.ContentRange to listOf("bytes 4-7/$FILE_SIZE")
+                    headers += HttpHeaders.ContentLength to listOf(expectedBytes.size.toString())
+                    respond(expectedBytes, HttpStatusCode.PartialContent, headersOf(*headers.toTypedArray()))
+                }
+            }
+            assertIs<PdfRangeProbeResult.Available>(gateway.probe(source()))
+            val content = assertIs<PdfRangeReadResult.Content>(gateway.read(source(), PdfByteRange(4, 8)))
+            assertContentEquals(expectedBytes, content.bytes)
+            assertEquals(listOf("HEAD", "GET"), requests)
+        }
+    }
+
+    @Test
     fun validatesHeadAndReadsOnlyAnExactPartialResponse() = runBlocking {
         val requestedBytes = byteArrayOf(4, 5, 6, 7)
         val port = port { request ->

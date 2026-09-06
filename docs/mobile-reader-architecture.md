@@ -39,7 +39,7 @@ opaque JSON objects. Other capabilities use only Reader public APIs.
 
 Reader v5 retains these Publication diagnostics:
 
-- original source file SHA-256;
+- source revision metadata (size and modification time in the backend Publication revision);
 - parser identifier which generated the Publication content structure;
 - normalization identifier which generated stable reading order, hrefs, and DOM.
 
@@ -49,14 +49,10 @@ ownership or validation. Progress is
 owned by the server-authorized `bookId + resourceId`; an asset, parser, or
 normalization change does not create a new progress slot or block restoration.
 
-For EPUB, MOBI-family, and TXT, matching content identity means that every client
-uses the same source-format parser contract and produces compatible engine
-Locators. Runtime DOM need not be byte-identical. The
-production identifiers are:
-
-- EPUB: `epub-package:1 / shuku-epub-locator-dom-v2`;
-- MOBI family: pinned libmobi parser / `ermao-mobi-core-v1+shuku-locator-dom-v2`;
-- TXT: `shuku-txt-parser-v1 / shuku-txt-publication-v2`.
+Parser and normalization identifiers are diagnostics defined by the current
+format adapters and generated contracts. Chapter structure, target hrefs and
+identity follow [Unified chapter parsing](reader-chapter-consistency.md); this
+page does not maintain a second catalog of version strings.
 
 The original library file is immutable and is the only persisted Reader artifact.
 Reader bootstrap, download, cache and recovery never create a derived EPUB, ZIP or
@@ -93,7 +89,7 @@ fields are never used to calculate presentation.
 
 ## 5. Reader v5 server contract
 
-First-party clients use only:
+First-party Reader state APIs use v5:
 
 ```text
 GET /api/reader/v5/resources/{resourceId}/bootstrap
@@ -103,7 +99,9 @@ GET|PUT /api/reader/v5/resources/{resourceId}/reading-status
 GET|PUT /api/reader/v5/resources/{resourceId}/bookmarks
 ```
 
-Reader v1–v4 routes return `410 Gone`. Mobile compatibility advertises
+The v5 router also exposes publication and comic delivery endpoints; this list
+covers bootstrap and state synchronization, not media delivery. Reader v4 routes
+return `410 Gone`; v1–v3 routers are not mounted. Mobile compatibility advertises
 `readerV5=true` and schema version 5.
 
 The progress request contains:
@@ -120,7 +118,7 @@ The progress request contains:
       "displayPercent": 99,
       "totalProgression": 0.99,
       "currentHref": "OEBPS/Text/backcover.xhtml",
-      "chapter": {"href": "OEBPS/Text/backcover.xhtml", "title": "封底", "index": 19},
+      "chapter": {"navigationKey": "chapter-19", "href": "OEBPS/Text/backcover.xhtml", "title": "封底", "index": 19},
       "page": null,
       "playback": null
     }
@@ -204,20 +202,9 @@ diagnostics and never create a second persisted reading representation.
 
 Android uses Readium Kotlin Toolkit 3.3.0. iOS pins official Readium Swift Toolkit 3.9.0 to revision `de07026e9f825a5791f27a7ac4cd6bb1a784ab8d`. Both serialize the complete public Readium Locator directly into the opaque v5 field. They add no engine/platform/version wrapper and do not project Locator anchors into shared domain fields.
 
-The approved iOS baseline is **3.9.0** (authorized 2026-08-28), including upstream
-[HTML/CSS resource cache invalidation fix #781](https://github.com/readium/swift-toolkit/pull/781).
-This supersedes earlier instructions freezing iOS at 3.8.0; Android and Web pins
-are unchanged. Do not downgrade to 3.8.x to avoid migration or build errors.
-Further SDK changes require explicit authorization and a corresponding update to
-the project revision, SwiftPM lock, locator diagnostic version, this policy and
-`apps/mobile/iosApp/verify_readium.py`. The same check runs in the Xcode build and
-Mobile CI. Official SDK source remains unmodified: no private APIs, copied cache
-patches, preference reflow validation, Navigator replacement or layout compensation.
-Old locator SDK version metadata remains restorable and is not a rejection rule.
-Upgrade acceptance must exercise font changes and scroll/paged mode across newly
-loaded, preloaded and revisited chapters on a physical iOS device; compilation
-alone does not close a rendering defect.
-Evidence and outstanding paths: [iOS 3.9.0 upgrade record](testing/ios-readium-3.9.0-2026-08-28.md).
+`apps/mobile/iosApp/verify_readium.py` checks the iOS revision and lock.
+SDK source remains unmodified; use public APIs and verify preference changes,
+preloaded/revisited chapters and rendering on a physical iOS device.
 
 Web uses Readium TS. Its version-locked same-origin iframe bridge is isolated
 behind the adapter and emits the public location-change Locator as one object;
@@ -275,18 +262,11 @@ download task, pause or resume state. Cancellation aborts and deletes the incomp
 entry; a later attempt starts at zero. Cold opening still requires fresh authorization
 and Reader metadata. See ADR 0025.
 
-FB2 uses `shuku-fb2-parser-v1 / shuku-fb2-publication-v1` on every client.
-The native platform XML parsers feed a shared bounded mixed-content decoder.
-It preserves the server's `fb2/section-NNNN.xhtml` resources, six-digit
-`fb2-node-NNNNNN` anchors, nested TOC, inline formatting, tables, poems,
-embedded images and internal note/return links. The server body golden in
-`test-data/library/fb2/reader-contract-bodies.json` is verified by Android,
-iOS and backend tests. FB2 binary resources use the actual Base64 decoder and
-explicit size budgets and stay in memory. Image signatures are not checked before
-the final image decoder. DTD/entity isolation remains; namespace acceptance is
-determined by the platform XML parser, without a second namespace validator.
-The documented `l:href`/`xmlns:xlink` repair only affects parser input, never the
-original file. This replaces the earlier MIME-signature and extra-prefix policy.
+FB2 adapters retain mixed content, nested navigation, inline formatting,
+images and internal links in memory. Chapter targets and body partitioning follow
+the [shared chapter core](reader-chapter-consistency.md), with cross-binding
+fixtures under `packages/reader-contracts/fixtures`. XML and Base64 decoding
+remain adapter responsibilities under the generated safety policy.
 
 Every reflowable native Publication uses its parser-specific local positions service.
 The Web local adapters generate the same stable reading-order href and locator contract.
@@ -346,7 +326,7 @@ Automated contracts must cover:
 - presentation disagreement never causing Locator rejection or server recomputation;
 - identical book/resource progress surviving Publication fingerprint changes;
 - PDF, comic and audio Locator plus presentation snapshots;
-- v1–v4 `410 Gone` and first-party v5-only paths;
+- v4 `410 Gone`, absence of v1–v3 routers and first-party v5-only paths;
 - process-death recovery for pending state and fresh session reconstruction from bootstrap.
 - Nav-to-NCX fallback, invalid navigation-node filtering, and body failure independence;
 - source bytes remaining unchanged and no Reader derivative directory being created;
@@ -382,13 +362,44 @@ generated decisions and declared platform defenses; it never carries a private
 allowlist, threshold or fallback parser. Unavailable enforcement is an explicit
 `ENGINE_*` or `PLATFORM_*` conformance failure. The contract is bundled and its
 canonical digest is checked by CI; Reader bootstrap does not negotiate it.
+Schema v2 / Policy v4 defaults to content ALLOW with concrete risk blacklists.
+Format/MIME maps describe adapter capabilities; existing capacity budgets are
+unchanged. Generated outcomes distinguish security, capability, integrity,
+resource limits and missing implementation defenses. Unknown authored values
+are not security failures. Control XML is preprocessed through a protected
+ContainerAsset before PublicationOpener.open; later body and resource reads use
+the same container. Optional damage is isolated. The open owns its error session
+and disposes it on close, cancellation or account switch. Cache reopening and
+retry never bypass current checks. Normalization v4 is diagnostic only and does
+not migrate or reset opaque Reader v5 progress. iOS must execute its actual
+adapter tests on a physical device; KMP reports cannot fill that obligation.
+
 
 The Reader shell remains native and owns lifecycle, accessibility, back/close,
 navigation controls, table of contents, and preferences. Readium internals are
 engine implementation details and never become an unrestricted application
 bridge.
 
-## 13. Unified reader settings (2026-08-28)
+Mobile TOC selection uses the shared `resolveCurrentReaderNavigationEntryId`
+navigation matcher with native locator href, fragments and selector. An exact
+anchor wins over a resource target; a child wins over its parent for the same
+target. Ambiguous or absent matches have no selected item. This ID is transient
+presentation state and never changes the opaque v5 position contract.
+Each TOC opening centers that same ID once after navigation data is ready.
+Manual scrolling and sheet resizing do not repeat the positioning. Android keeps
+`LazyColumn`; iOS keeps `List` with `ScrollViewReader`. Both show continuous rows,
+16 logical units of indentation per depth and control-label typography, preserving
+authored titles and system font scaling. Native bottom sheets own partial/full
+expansion and nested scrolling for contents, bookmarks, appearance and settings;
+the Reader does not implement custom sheet gestures. Android uses one persistent
+Material3 `BottomSheetScaffold` for both the compact controls and selected panels;
+its four tabs stay visible, with progress in the compact state and panel content
+replacing progress after selection. Closing a panel restores progress. The visible
+content height reads
+the native offset during measurement so the footer stays fixed during dragging,
+without feeding global layout coordinates back into composition.
+
+## 13. Unified reader settings
 
 `packages/reader-contracts/reader-settings.json` is the only settings catalog.
 Its ordered sections, stable IDs, Chinese/English labels, options, numeric
@@ -466,12 +477,8 @@ do not promise identical glyph metrics across platforms. SDK sources remain
 unmodified and versions follow the approved baseline in section 10 (iOS 3.9.0);
 no private API or layout compensation is added.
 
-The pinned iOS PDF SDK exposes `fit`, but explicitly ignores width fit in its
-paginated mode. This path stays disabled instead of changing reading mode or
-claiming it works. Absolute zoom uses the existing public PDF/scroll view;
-comic command animation uses public Navigator go options. Other comic layout,
-negative spacing, smart optimization and fixed-layout capabilities without a
-usable public interface remain disabled.
+Platform capability resolvers keep unsupported settings visible but unavailable;
+UI must distinguish stored preferences from effective engine behavior.
 
 Compilation is not proof of rendering effectiveness. Verification must include
 the generated-contract check, platform tests and the relevant real-reader path.
@@ -511,7 +518,7 @@ Chapter, page and href state comes directly from presentation. Neither the
 backend nor the detail UI derives it from Locator fields.
 
 
-## 15. Parser authority and failure preservation (2026-08-28)
+## 15. Parser authority and failure preservation
 
 The actual format parser/decoder decides whether bytes can be read. Application
 prechecks must not reject NUL, strip trailing NUL, sniff PDF/image signatures, or
@@ -521,8 +528,10 @@ result. Storage owns containment, account isolation and atomic publication, not
 format parsing. SDK versions follow the approved baseline in section 10; SDK
 sources remain unmodified. Historical 3.8.0 acceptance records are not current pins.
 
-Original bytes, in-memory TXT/FB2/MOBI Publications, existing chapter boundaries,
-and native preference submission are preserved. Reflowable reading requires the
+Original bytes, in-memory TXT/FB2/MOBI Publications and native preference submission
+are preserved. Chapter boundaries and identity follow
+[Unified chapter parsing](reader-chapter-consistency.md); client-specific chapter
+rules and reading-order fallbacks are removed for fresh installations. Reflowable reading requires the
 verified complete original, but no conversion artifact, persisted unpacked publication,
 synthetic chapter or typography validation is permitted.
 Authentication and root/path ownership remain their existing capability
@@ -537,8 +546,9 @@ HTTP status/code compatibility remains owned by
 generated into KMP. Content security semantics are owned by
 `reader-safety-policy.json`. Older NUL errors are receive-only compatibility, not rules.
 
-All chapter security decorators must now consume the generated policy and report
-their conformance fixtures. CSP, XML parser flags, scheme handlers, PDFium and
+Chapter security decorators consume the generated policy. Verification checks
+readable output and absence of dangerous side effects; production code does not
+collect rule-event histories solely for conformance reporting. CSP, XML parser flags, scheme handlers, PDFium and
 WebView/WKWebView isolation remain implementation mechanisms, not semantic rule
 owners. A fixed iOS decoder or SDK limitation remains unaccepted until physical-
 device conformance demonstrates the required generated action. Historical

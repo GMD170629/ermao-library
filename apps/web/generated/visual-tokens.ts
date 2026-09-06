@@ -1,4 +1,4 @@
-// Generated from packages/design-contracts/visual-tokens.json v1.1.0 sha256:f8674510b4bce8bed1df9f47a4d77244e45dca090d6924cc724bfacffff23a98. Do not edit.
+// Generated from packages/design-contracts/visual-tokens.json v1.2.0 sha256:6c227fd3b5f91064d9b3ea97736cd6ad70ec1ff64e1e2f14f271d35fd30d31cb. Do not edit.
 export const visualTokens = {
     "accessibility": {
         "minimumTouchTarget": {
@@ -14,7 +14,7 @@ export const visualTokens = {
         "app": {
             "accentSoft": "#FCE6DF",
             "accentSofter": "#FFF3EE",
-            "actionAccent": "#C83B23",
+            "actionAccent": "#FF4F2A",
             "brandAccent": "#FF4F2A",
             "brandHover": "#E94320",
             "canvas": "#FBFAF8",
@@ -81,7 +81,7 @@ export const visualTokens = {
             "verticalInset": 8
         }
     },
-    "contractVersion": "1.1.0",
+    "contractVersion": "1.2.0",
     "radii": {
         "control": 12,
         "coverCompact": 8,

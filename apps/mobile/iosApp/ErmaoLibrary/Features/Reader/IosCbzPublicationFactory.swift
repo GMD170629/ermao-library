@@ -181,6 +181,11 @@ private final class IosArchiveComicContainer: Container, @unchecked Sendable {
             do {
                 let bytes = try core.readPage(at: page.pageIndex)
                 return .success(bytes)
+            } catch let failure as IosArchiveCoreFailure {
+                // Preserve archive-core's stable detector outcome through the Readium resource
+                // boundary. In particular, a lazy page-size violation must use the generated
+                // COMIC.PAGE_MAX_BYTES rule rather than becoming a generic decoding failure.
+                return .failure(.decoding(iosArchiveReaderFailure(failure)))
             } catch {
                 return .failure(.decoding(error))
             }

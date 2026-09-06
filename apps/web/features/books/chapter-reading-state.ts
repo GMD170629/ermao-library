@@ -1,56 +1,25 @@
-import { resolveActiveEpubNavigationIndex } from '../reader/v3/epub-navigation';
-
-export type ChapterReadingUnit = {
-  href?: string;
-  sortOrder: number;
-};
-
+export type ChapterReadingUnit = { href?: string | null; sortOrder: number };
 export type ChapterReadingState = 'current' | 'read' | 'unread';
 
-export type ChapterReadingListMeta = {
-  page?: number;
-  pageSize?: number;
-  total?: number;
-  currentIndex?: number | null;
-};
+/** Only the core's matching key/index pair is an exact local chapter projection. */
+export function chapterPresentationSortOrder(chapter: {
+  navigationKey: string | null; index: number | null;
+} | null | undefined): number | null {
+  if (chapter?.index == null || chapter.navigationKey !== `chapter-${chapter.index}`) return null;
+  return Number.isSafeInteger(chapter.index) && chapter.index >= 0 ? chapter.index : null;
+}
 
-/**
- * Resolves chapter rows without treating every anchor in a shared XHTML file
- * as the current chapter. The exact TOC href wins; stored sort order is only a
- * fallback for an exact server projection on paginated lists. Overall percent,
- * spine section and chapter count are never used to infer a chapter.
- */
+/** The server resolves the shared chapter key to the resource's exact preorder. */
 export function resolveChapterReadingStates(
   units: readonly ChapterReadingUnit[],
-  currentHref: string | null | undefined,
   currentSortOrder: number | null | undefined,
-  progress: number,
-  listMeta?: ChapterReadingListMeta
+  progress: number
 ): ChapterReadingState[] {
-  const activeIndex = resolveActiveEpubNavigationIndex(units, currentHref, null);
-  const activeSortOrder = activeIndex === null ? currentSortOrder : units[activeIndex]?.sortOrder;
-  const page = listMeta?.page ?? 1;
-  const pageSize = listMeta?.pageSize ?? units.length;
-  const pageOffset = Math.max(0, (page - 1) * pageSize);
-  const exactGlobalIndex = listMeta?.currentIndex ?? null;
-
-  return units.map((unit, index) => {
-    // Completion is stronger than the transient current-position marker: the
-    // final chapter is both the last location and a fully read chapter.
+  return units.map((unit) => {
+    if (!unit.href) return 'unread';
     if (progress >= 100) return 'read';
-
-    if (exactGlobalIndex !== null) {
-      const globalIndex = pageOffset + index;
-      if (globalIndex === exactGlobalIndex) return 'current';
-      if (globalIndex < exactGlobalIndex) return 'read';
-      return 'unread';
-    }
-
-    const isCurrent = activeIndex === null
-      ? activeSortOrder !== null && activeSortOrder !== undefined && unit.sortOrder === activeSortOrder
-      : index === activeIndex;
-    if (isCurrent) return 'current';
-    if (activeSortOrder !== null && activeSortOrder !== undefined && unit.sortOrder < activeSortOrder) return 'read';
-    return 'unread';
+    if (currentSortOrder == null) return 'unread';
+    if (unit.sortOrder === currentSortOrder) return 'current';
+    return unit.sortOrder < currentSortOrder ? 'read' : 'unread';
   });
 }

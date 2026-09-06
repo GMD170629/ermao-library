@@ -1,0 +1,872 @@
+{
+  "$schema": "../../schemas/reader-safety-conformance-suite-v2.schema.json",
+  "schemaVersion": 1,
+  "policyId": "shuku.reader-safety",
+  "policyVersion": 4,
+  "policyDigest": "edfc4aeef6a2f40316dcf38b5727559921ecd7af68da79f349718e2021d108f5",
+  "fixtureManifest": "manifest.json",
+  "cases": [
+    {
+      "id": "safe-xhtml-11-http",
+      "ruleId": "REFLOWABLE.SAFE_STANDARD_DOCTYPE",
+      "evaluator": "REFLOWABLE_MARKUP",
+      "semanticProjection": "ROOT_LOCAL_NAME",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "safe-xhtml-11-https",
+      "ruleId": "REFLOWABLE.SAFE_STANDARD_DOCTYPE",
+      "evaluator": "REFLOWABLE_MARKUP",
+      "semanticProjection": "ROOT_LOCAL_NAME",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "safe-xhtml-named-entities",
+      "ruleId": "REFLOWABLE.SAFE_STANDARD_DOCTYPE",
+      "evaluator": "REFLOWABLE_NAMED_ENTITIES",
+      "semanticProjection": "ROOT_LOCAL_NAME",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "xml-internal-entity",
+      "ruleId": "REFLOWABLE.PREPARE_XML",
+      "evaluator": "REFLOWABLE_MARKUP",
+      "semanticProjection": "ROOT_LOCAL_NAME",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "xml-external-entity",
+      "ruleId": "REFLOWABLE.PREPARE_XML",
+      "evaluator": "REFLOWABLE_MARKUP",
+      "semanticProjection": "ROOT_LOCAL_NAME",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "markup-active-elements",
+      "ruleId": "REFLOWABLE.SANITIZE_MARKUP",
+      "evaluator": "REFLOWABLE_MARKUP_SANITIZE",
+      "semanticProjection": "SANITIZED_MARKUP",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "author-dangerous-uri",
+      "ruleId": "REFLOWABLE.SANITIZE_URI",
+      "evaluator": "REFLOWABLE_URI",
+      "semanticProjection": "SANITIZED_MARKUP",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "css-active-content",
+      "ruleId": "REFLOWABLE.SANITIZE_CSS",
+      "evaluator": "REFLOWABLE_CSS",
+      "semanticProjection": "SANITIZED_TEXT",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "svg-active-content",
+      "ruleId": "REFLOWABLE.SANITIZE_SVG",
+      "evaluator": "REFLOWABLE_SVG",
+      "semanticProjection": "SANITIZED_MARKUP",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "archive-path-escape",
+      "ruleId": "EPUB.ARCHIVE_STRUCTURE",
+      "evaluator": "ARCHIVE_STRUCTURE",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "archive-duplicate",
+      "ruleId": "EPUB.RESOURCE_INTEGRITY",
+      "evaluator": "ARCHIVE_STRUCTURE",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "archive-unused-entry-crc-mismatch",
+      "ruleId": "REFLOWABLE.OPTIONAL_RESOURCE_FAILURE",
+      "evaluator": "EPUB_ARCHIVE_CRC",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "original-at-limit",
+      "ruleId": "COMMON.ORIGINAL_MAX_BYTES",
+      "evaluator": "ORIGINAL_BYTES",
+      "semanticProjection": "INPUT",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "original-over-limit",
+      "ruleId": "COMMON.ORIGINAL_MAX_BYTES",
+      "evaluator": "ORIGINAL_BYTES",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "fb2-node-over-limit",
+      "ruleId": "FB2.STRUCTURE_BUDGET",
+      "evaluator": "FB2_STRUCTURE",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "pdf-active-actions",
+      "ruleId": "PDF.DISABLE_ACTIVE_CONTENT",
+      "evaluator": "PDF_ACTIVE_ACTIONS",
+      "semanticProjection": "SANITIZED_TEXT",
+      "consumers": [
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "pdf-page-over-limit",
+      "ruleId": "PDF.PAGE_GEOMETRY",
+      "evaluator": "PDF_PAGE_GEOMETRY",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "pdf-invalid-range",
+      "ruleId": "PDF.RANGE_PROTOCOL",
+      "evaluator": "PDF_RANGE_PROTOCOL",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "comic-mime-mismatch",
+      "ruleId": "COMIC.PAGE_MIME",
+      "evaluator": "COMIC_PAGE_MIME",
+      "semanticProjection": "INPUT",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "comic-page-count-over-limit",
+      "ruleId": "COMIC.PAGE_MAX_COUNT",
+      "evaluator": "COMIC_PAGE_COUNT",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "comic-page-decode-failure",
+      "ruleId": "COMIC.PAGE_DECODE_FAILURE",
+      "evaluator": "COMIC_PAGE_DECODE",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "comic-revision-mismatch",
+      "ruleId": "COMIC.MANIFEST_REVISION",
+      "evaluator": "COMIC_REVISION",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "audio-mime-mismatch",
+      "ruleId": "AUDIO.CONTAINER_MIME",
+      "evaluator": "AUDIO_CONTAINER_MIME",
+      "semanticProjection": "INPUT",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "audio-codec-unsupported",
+      "ruleId": "AUDIO.ENGINE_CODEC",
+      "evaluator": "AUDIO_CODEC",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "audio-invalid-chapter",
+      "ruleId": "AUDIO.TRACK_AND_CHAPTER_BOUNDS",
+      "evaluator": "AUDIO_CHAPTER_BOUNDS",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "epub-font-obfuscation",
+      "ruleId": "COMMON.DRM_REJECTED",
+      "evaluator": "DRM_ALGORITHM",
+      "semanticProjection": "FONT_OBFUSCATION",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "epub-drm-rejected",
+      "ruleId": "COMMON.DRM_REJECTED",
+      "evaluator": "DRM_ALGORITHM",
+      "semanticProjection": "INPUT",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "format-mime-mismatch",
+      "ruleId": "COMMON.EXACT_FORMAT_MIME",
+      "evaluator": "EXACT_FORMAT_MIME",
+      "semanticProjection": "INPUT",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "binary-resource-over-limit",
+      "ruleId": "COMMON.BINARY_RESOURCE_MAX_BYTES",
+      "evaluator": "BINARY_RESOURCE_BYTES",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "optional-resource-missing",
+      "ruleId": "REFLOWABLE.OPTIONAL_RESOURCE_FAILURE",
+      "evaluator": "OPTIONAL_RESOURCE",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "required-reading-order-markup-missing",
+      "ruleId": "REFLOWABLE.REQUIRED_READING_ORDER_MARKUP",
+      "evaluator": "REQUIRED_READING_ORDER_MARKUP",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "xml-control-document-over-limit",
+      "ruleId": "REFLOWABLE.XML_CONTROL_DOCUMENT_MAX_BYTES",
+      "evaluator": "XML_CONTROL_DOCUMENT_BYTES",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "reflowable-markup-over-limit",
+      "ruleId": "REFLOWABLE.MARKUP_MAX_BYTES",
+      "evaluator": "REFLOWABLE_MARKUP_BYTES",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "epub-entry-count-over-limit",
+      "ruleId": "EPUB.ARCHIVE_ENTRY_MAX_COUNT",
+      "evaluator": "EPUB_ARCHIVE_ENTRY_COUNT",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "epub-expanded-over-limit",
+      "ruleId": "EPUB.ARCHIVE_EXPANDED_MAX_BYTES",
+      "evaluator": "EPUB_ARCHIVE_EXPANDED_BYTES",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "epub-entry-over-limit",
+      "ruleId": "EPUB.ARCHIVE_ENTRY_MAX_BYTES",
+      "evaluator": "EPUB_ARCHIVE_ENTRY_BYTES",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "epub-compression-ratio-over-limit",
+      "ruleId": "EPUB.ARCHIVE_COMPRESSION_RATIO",
+      "evaluator": "EPUB_ARCHIVE_COMPRESSION_RATIO",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "fb2-encoded-image-over-limit",
+      "ruleId": "FB2.IMAGE_BUDGET",
+      "evaluator": "FB2_IMAGE_BUDGET",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "txt-memory-over-limit",
+      "ruleId": "TXT.MEMORY_BUDGET",
+      "evaluator": "TXT_MEMORY_BYTES",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "txt-chunk-at-limit",
+      "ruleId": "TXT.BOUNDED_CHUNK",
+      "evaluator": "TXT_CHUNK_CHARACTERS",
+      "semanticProjection": "INPUT",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "pdf-render-over-limit",
+      "ruleId": "PDF.RENDER_BUDGET",
+      "evaluator": "PDF_RENDER_BUDGET",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "comic-archive-path-escape",
+      "ruleId": "COMIC.ARCHIVE_STRUCTURE",
+      "evaluator": "COMIC_ARCHIVE_STRUCTURE",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "comic-archive-budget-over-limit",
+      "ruleId": "COMIC.ARCHIVE_BUDGET",
+      "evaluator": "COMIC_ARCHIVE_BUDGET",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "comic-page-over-limit",
+      "ruleId": "COMIC.PAGE_MAX_BYTES",
+      "evaluator": "COMIC_PAGE_BYTES",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "comic-manifest-over-limit",
+      "ruleId": "COMIC.MANIFEST_MAX_BYTES",
+      "evaluator": "COMIC_MANIFEST_BYTES",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "audio-original-over-limit",
+      "ruleId": "AUDIO.ORIGINAL_MAX_BYTES",
+      "evaluator": "AUDIO_ORIGINAL_BYTES",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "audio-metadata-over-limit",
+      "ruleId": "AUDIO.METADATA_BUDGET",
+      "evaluator": "AUDIO_METADATA_BUDGET",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "audio-blocked-redirect",
+      "ruleId": "AUDIO.REDIRECT_POLICY",
+      "evaluator": "AUDIO_REDIRECT_POLICY",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "safe-ncx-doctype",
+      "ruleId": "REFLOWABLE.PREPARE_XML",
+      "evaluator": "REFLOWABLE_MARKUP",
+      "semanticProjection": "ROOT_LOCAL_NAME",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "safe-unknown-doctype",
+      "ruleId": "REFLOWABLE.PREPARE_XML",
+      "evaluator": "REFLOWABLE_MARKUP",
+      "semanticProjection": "ROOT_LOCAL_NAME",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "safe-html5-doctype",
+      "ruleId": "REFLOWABLE.PREPARE_XML",
+      "evaluator": "REFLOWABLE_MARKUP",
+      "semanticProjection": "ROOT_LOCAL_NAME",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "safe-no-doctype",
+      "ruleId": "REFLOWABLE.PREPARE_XML",
+      "evaluator": "REFLOWABLE_MARKUP",
+      "semanticProjection": "ROOT_LOCAL_NAME",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "safe-internal-text-entity",
+      "ruleId": "REFLOWABLE.PREPARE_XML",
+      "evaluator": "REFLOWABLE_MARKUP",
+      "semanticProjection": "ROOT_LOCAL_NAME",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "safe-unknown-entity",
+      "ruleId": "REFLOWABLE.PREPARE_XML",
+      "evaluator": "REFLOWABLE_MARKUP",
+      "semanticProjection": "ROOT_LOCAL_NAME",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "safe-recursive-entity",
+      "ruleId": "REFLOWABLE.PREPARE_XML",
+      "evaluator": "REFLOWABLE_MARKUP",
+      "semanticProjection": "ROOT_LOCAL_NAME",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "safe-masked-declaration",
+      "ruleId": "REFLOWABLE.PREPARE_XML",
+      "evaluator": "REFLOWABLE_MARKUP",
+      "semanticProjection": "ROOT_LOCAL_NAME",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "xml-unisolatable-access",
+      "ruleId": "REFLOWABLE.REJECT_XML_ENTITY",
+      "evaluator": "POLICY_DECISION",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "epub-required-resource-corrupt",
+      "ruleId": "EPUB.RESOURCE_INTEGRITY",
+      "evaluator": "POLICY_DECISION",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "comic-required-resource-corrupt",
+      "ruleId": "COMIC.RESOURCE_INTEGRITY",
+      "evaluator": "POLICY_DECISION",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "actual-parser-unsupported",
+      "ruleId": "COMMON.EXACT_FORMAT_MIME",
+      "evaluator": "POLICY_DECISION",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "actual-decryption-unsupported",
+      "ruleId": "COMMON.DRM_REJECTED",
+      "evaluator": "POLICY_DECISION",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "actual-comic-decoder-unsupported",
+      "ruleId": "COMIC.PAGE_MIME",
+      "evaluator": "POLICY_DECISION",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "actual-audio-container-unsupported",
+      "ruleId": "AUDIO.CONTAINER_MIME",
+      "evaluator": "POLICY_DECISION",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "unknown-uri-preserved",
+      "ruleId": "REFLOWABLE.SANITIZE_URI",
+      "evaluator": "REFLOWABLE_URI",
+      "semanticProjection": "SANITIZED_MARKUP",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "unknown-element-preserved",
+      "ruleId": "REFLOWABLE.SANITIZE_MARKUP",
+      "evaluator": "REFLOWABLE_MARKUP_SANITIZE",
+      "semanticProjection": "SANITIZED_MARKUP",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "fb2-unfamiliar-image-mime",
+      "ruleId": "FB2.IMAGE_BUDGET",
+      "evaluator": "FB2_IMAGE_BUDGET",
+      "semanticProjection": "INPUT",
+      "consumers": [
+        "BACKEND",
+        "WEB",
+        "KMP",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "parser-snapshot-memory-below-limit",
+      "ruleId": "COMMON.PARSER_SNAPSHOT_MEMORY",
+      "evaluator": "PARSER_SNAPSHOT_MEMORY",
+      "semanticProjection": "INPUT",
+      "consumers": [
+        "BACKEND"
+      ]
+    },
+    {
+      "id": "parser-snapshot-memory-at-limit",
+      "ruleId": "COMMON.PARSER_SNAPSHOT_MEMORY",
+      "evaluator": "PARSER_SNAPSHOT_MEMORY",
+      "semanticProjection": "INPUT",
+      "consumers": [
+        "BACKEND"
+      ]
+    },
+    {
+      "id": "parser-snapshot-memory-over-limit",
+      "ruleId": "COMMON.PARSER_SNAPSHOT_MEMORY",
+      "evaluator": "PARSER_SNAPSHOT_MEMORY",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND"
+      ]
+    }
+  ]
+}

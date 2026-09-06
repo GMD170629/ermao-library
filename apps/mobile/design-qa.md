@@ -1,6 +1,6 @@
 # Content Discovery Design QA
 
-Latest Shelves implementation (2026-08-27): [row catalog v2 report](../../docs/testing/mobile-shelves-2026-08-27.md). Signed iPhone build/install and a live empty-state capture exist; non-empty cover/collection comparisons, complete interaction tests and Android physical-device acceptance remain pending. This update does not replace the earlier content-discovery evidence below. Shelves final result: blocked.
+Latest Shelves implementation (2026-08-27): [current row catalog](../../docs/mobile-shelves-row-layout.md). Signed iPhone build/install and a live empty-state capture exist; non-empty cover/collection comparisons, complete interaction tests and Android physical-device acceptance remain pending. This update does not replace the earlier content-discovery evidence below. Shelves final result: blocked.
 
 Latest Work Detail refinement (2026-08-25): `design-qa/visual-runs/20260825-work-detail-emby-refinement-v1/report.md`. The selected iOS physical-device visual target passed; the matching Android implementation compiles and is awaiting physical-device runtime evidence.
 

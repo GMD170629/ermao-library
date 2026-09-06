@@ -1,13 +1,13 @@
 package com.ermao.library.mobi.infrastructure
 
+import com.ermao.library.chapter.infrastructure.ChapterCore
+import com.ermao.library.chapter.infrastructure.ChapterCoreMobiNode
 import com.ermao.library.shared.modules.reader.ReaderSafetyException
 import com.ermao.library.shared.modules.reader.readerSafetyBinaryResourceMaxBytes
 import com.ermao.library.shared.modules.reader.readerSafetyDrmFailure
 import com.ermao.library.shared.modules.reader.readerSafetyOriginalMaxBytes
-import com.ermao.library.shared.modules.reader.readerSafetyReadingOrderMarkupMimeTypes
 import com.ermao.library.shared.modules.reader.readerSafetyReflowableMarkupMaxBytes
 import com.ermao.library.shared.modules.reader.readerSafetyReflowableMarkupMaxBytesFailure
-import com.ermao.library.shared.modules.reader.readerSafetyRequiredReadingOrderMarkupFailure
 import org.readium.r2.streamer.parser.epub.EpubPositionsService
 
 import java.io.File
@@ -32,7 +32,7 @@ import org.readium.r2.shared.util.resource.Resource
 import org.readium.r2.shared.util.resource.SingleResourceContainer
 
 const val MOBI_PUBLICATION_NORMALIZATION_IDENTIFIER =
-    "ermao-mobi-core-v1+shuku-locator-dom-v3"
+    "ermao-mobi-core-v1+shuku-locator-dom-v4"
 
 /**
  * Creates a Readium reflowable Publication backed by one live `MobiCoreBook`.
@@ -60,9 +60,7 @@ class MobiReadiumPublicationFactory {
                 MobiResourceDescriptor(
                     index = index,
                     href = exactVirtualHref(resource.sourceName),
-                    mediaType = requireNotNull(MediaType(resource.mediaType)) {
-                        "Unsupported MOBI resource media type: ${resource.mediaType}"
-                    },
+                    mediaType = mobiResourceMediaType(resource),
                     decodedLength = resource.decodedLength,
                 ).also { descriptor -> require(descriptor.decodedLength >= 0L) }
             }
@@ -76,10 +74,6 @@ class MobiReadiumPublicationFactory {
             }
             require(readingIndices.toSet().size == readingIndices.size) {
                 "MOBI reading order contains a duplicate resource"
-            }
-            val readingOrderMarkupMimeTypes = readerSafetyReadingOrderMarkupMimeTypes().toSet()
-            if (readingIndices.any { descriptors[it].mediaType.toString() !in readingOrderMarkupMimeTypes }) {
-                throw ReaderSafetyException(readerSafetyRequiredReadingOrderMarkupFailure())
             }
             info.coverResourceIndex?.let { coverIndex ->
                 require(coverIndex in descriptors.indices) { "MOBI cover references an unknown resource" }
@@ -178,20 +172,15 @@ class MobiReadiumPublicationFactory {
         resourcesByIndex: Map<Int, MobiLazyResource>,
     ): List<Link> {
         val entries = List(tocCount, book::toc)
-        entries.forEachIndexed { index, entry ->
-            require(entry.parentIndex == null || entry.parentIndex in 0 until index) {
-                "MOBI TOC parent must precede its child"
-            }
+        entries.forEach { entry ->
             require(entry.targetResourceIndex == null || entry.targetResourceIndex in resourcesByIndex) {
                 "MOBI TOC references an unknown resource"
             }
         }
-        val children = entries.indices.groupBy { entries[it].parentIndex }
-
-        fun build(index: Int): Link? {
-            val entry = entries[index]
-            val target = entry.targetResourceIndex?.let(resourcesByIndex::get) ?: return null
-            val href = requireNotNull(Url(target.descriptor.href)).let { resourceUrl ->
+        val nodes = entries.map { entry ->
+            val target = entry.targetResourceIndex?.let(resourcesByIndex::get)
+            val href = target?.let { resource ->
+                val resourceUrl = requireNotNull(Url(resource.descriptor.href))
                 entry.fragment
                     ?.takeIf(String::isNotBlank)
                     ?.also { fragment ->
@@ -200,17 +189,39 @@ class MobiReadiumPublicationFactory {
                         }
                     }
                     ?.let(resourceUrl::addFragment)
-                    ?: resourceUrl
+                    ?.toString()
+                    ?: resourceUrl.toString()
             }
-            return Link(
+            ChapterCoreMobiNode(
+                parentIndex = entry.parentIndex,
+                title = entry.title.orEmpty(),
                 href = href,
-                mediaType = target.descriptor.mediaType,
-                title = entry.title?.takeIf(String::isNotBlank) ?: target.descriptor.href,
-                children = children[index].orEmpty().mapNotNull(::build),
             )
         }
-
-        return children[null].orEmpty().mapNotNull(::build)
+        val result = ChapterCore.fromMobi(nodes)
+        val byHref = resourcesByIndex.values.associateBy { it.descriptor.href }
+        fun build(index: Int): Link {
+            val entry = result.entries[index]
+            val children = result.entries.mapIndexedNotNull { childIndex, child ->
+                childIndex.takeIf { child.parentIndex == index }?.let(::build)
+            }
+            val href = entry.href ?: "#"
+            val target = entry.href?.let { targetHref ->
+                byHref[targetHref.substringBefore('#')]
+                    ?: byHref[targetHref.substringBefore('#').removePrefix("./")]
+            }
+            val mediaType = target?.descriptor?.mediaType ?: children.firstOrNull()?.mediaType
+                ?: MediaType.XHTML
+            return Link(
+                href = requireNotNull(Url(href)),
+                mediaType = mediaType,
+                title = entry.title,
+                children = children,
+            ).addProperties(mapOf("shuku:navigationKey" to entry.key))
+        }
+        return result.entries.indices
+            .filter { result.entries[it].parentIndex == null }
+            .map(::build)
     }
 
     private fun exactVirtualHref(value: String): String {
@@ -287,6 +298,19 @@ internal data class MobiResourceDescriptor(
     val mediaType: MediaType,
     val decodedLength: Long,
 )
+
+/**
+ * MIME metadata selects a Readium presentation hint; the native decoder owns capability.
+ * Missing or unfamiliar metadata therefore falls back to the resource category instead of
+ * rejecting an otherwise decodable MOBI publication.
+ */
+internal fun mobiResourceMediaType(resource: MobiCoreResourceInfo): MediaType =
+    MediaType(resource.mediaType) ?: when (resource.category) {
+        MobiCoreResourceCategory.Markup,
+        MobiCoreResourceCategory.Flow,
+        -> MediaType.XHTML
+        MobiCoreResourceCategory.Asset -> requireNotNull(MediaType("application/octet-stream"))
+    }
 
 /** Applies generated REJECT/BLOCK_RESOURCE actions without reading or rewriting resource bytes. */
 internal fun applyMobiResourceBudgets(

@@ -28,19 +28,17 @@ See [Library Root Layout](library-root-layout.md).
 
 ## Schema revisions
 
-Alembic uses a linear revision chain. The current head is
-`0008_foreign_key_lookup_indexes`; it follows the immutable revisions from
-`0001_library_topology_baseline` through the active scan queue, media cleanup, audio title,
-asset navigation, missing-entry policy, source-node lookup indexes, and complete foreign-key
-lookup index coverage. Startup behavior is intentionally narrow:
+Alembic uses a linear revision chain under `app/db/alembic/versions`.
+The current head is `0009_reader_v5_opaque_progress`; schema ownership and upgrade
+behavior live in `app/db/runner.py`. Startup behavior is intentionally narrow:
 
 - an empty database is created at the current head;
 - a database already stamped at the current head is accepted;
 - a database stamped at a known ancestor is upgraded to the current head;
 - any populated unversioned database or unknown revision is rejected.
 
-There is no implicit repair for unversioned or unknown schemas. `app/db/seed.py` inserts only
-current baseline settings and built-in metadata providers.
+There is no implicit repair for unversioned or unknown schemas. `app/db/seed.py` inserts
+baseline settings, the persistent server identity and built-in metadata providers.
 
 The API and worker both pass `verify_current_schema` before serving work. Run the same
 prestart path manually with:
@@ -63,6 +61,34 @@ import worker, Next.js development server, and unified port-3000 gateway. It use
 `apps/api-python/.venv-windows`, stores runtime state and per-process logs under
 `.tmp/windows-dev`, and restarts a previous instance that it launched. Press `Ctrl+C` in the
 launcher window to stop all four processes. The launcher never invokes WSL.
+
+### Windows Python environment / Windows Python 环境
+
+基础 Python 放在 `.runtime-windows/python`，依赖放在
+`apps/api-python/.venv-windows`。虚拟环境仍依赖基础解释器，不能只复制
+`Scripts/python.exe`。安装环境是独立的一次性操作，先停止开发服务，再从仓库根目录
+执行以下命令。uv 路径按本机安装调整；运行时目录不提交到 Git。
+
+```powershell
+$projectRoot = (Get-Location).Path
+$uv = Join-Path $projectRoot '.runtime-windows\uv.exe'
+$api = Join-Path $projectRoot 'apps\api-python'
+$pythonVersion = (Get-Content (Join-Path $api '.python-version') -Raw).Trim()
+$pythonRoot = Join-Path $projectRoot '.runtime-windows\python'
+$basePython = Join-Path $pythonRoot "cpython-$pythonVersion-windows-x86_64-none\python.exe"
+$env:UV_PROJECT_ENVIRONMENT = Join-Path $api '.venv-windows'
+& $uv python install $pythonVersion --install-dir $pythonRoot --no-bin --no-registry
+if ($LASTEXITCODE) { throw 'Python installation failed' }
+& $uv venv --clear $env:UV_PROJECT_ENVIRONMENT --python $basePython
+if ($LASTEXITCODE) { throw 'Virtual environment creation failed' }
+& $uv sync --project $api --extra dev --locked --python $basePython --link-mode copy
+if ($LASTEXITCODE) { throw 'Dependency installation failed' }
+& "$api\.venv-windows\Scripts\python.exe" -c "import sys, sqlalchemy, uvicorn; print(sys.base_prefix)"
+Remove-Item Env:UV_PROJECT_ENVIRONMENT
+```
+
+移动仓库或删除基础解释器后需重建环境。启动入口会先检查 Python
+依赖，再停止旧服务。Windows 启动验收应包含资源管理器实际双击。
 
 ## Verification
 

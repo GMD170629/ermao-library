@@ -210,7 +210,6 @@ data class ReaderComicPage(
         require(pageIndex >= 0)
         require(resourceHref.isNotBlank() && !resourceHref.startsWith('/') && '\\' !in resourceHref)
         require(resourceHref.split('/').none { it.isBlank() || it == "." || it == ".." })
-        require(mediaType in ReaderSafetyPolicy.comicProfile.allowedPageMimeTypes)
         require(width == null || width > 0)
         require(height == null || height > 0)
         require(title == null || title.isNotBlank())

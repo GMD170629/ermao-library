@@ -3,6 +3,7 @@ import SwiftUI
 
 private enum AudioPresentation: String, Identifiable {
     case chapters
+    case tracks
     case sleep
 
     var id: String { rawValue }
@@ -226,6 +227,8 @@ struct AudioNowPlayingView: View {
                 switch value {
                 case .chapters:
                     AudioChaptersSheet(runtime: runtime)
+                case .tracks:
+                    AudioTracksSheet(runtime: runtime)
                 case .sleep:
                     AudioSleepTimerSheet(runtime: runtime)
                 }
@@ -374,6 +377,8 @@ struct AudioNowPlayingView: View {
                     .frame(maxWidth: .infinity)
                 chaptersButton
                     .frame(maxWidth: .infinity)
+                tracksButton
+                    .frame(maxWidth: .infinity)
                 sleepButton
                     .frame(maxWidth: .infinity)
                 worksButton
@@ -417,8 +422,21 @@ struct AudioNowPlayingView: View {
                 title: "audio.action.chapters"
             )
         }
-        .disabled(runtime.snapshot.bootstrap?.chapters.isEmpty != false && runtime.snapshot.bootstrap?.tracks.isEmpty != false)
+        .disabled(runtime.snapshot.bootstrap == nil)
         .accessibilityLabel(Text("audio.action.chapters"))
+    }
+
+    private var tracksButton: some View {
+        Button {
+            presentation = .tracks
+        } label: {
+            AudioSecondaryControlLabel(
+                systemImage: "music.note.list",
+                title: "audio.sheet.tracks"
+            )
+        }
+        .disabled(runtime.snapshot.bootstrap?.tracks.isEmpty != false)
+        .accessibilityLabel(Text("audio.sheet.tracks"))
     }
 
     private var sleepButton: some View {
@@ -594,21 +612,11 @@ struct AudioChaptersSheet: View {
 
     private enum Entry {
         case chapter(AudioChapter)
-        case track(AudioTrack)
 
         var id: String {
             switch self {
             case .chapter(let chapter):
                 "chapter:\(chapter.assetID):\(chapter.id)"
-            case .track(let track):
-                "track:\(track.assetID)"
-            }
-        }
-
-        var assetID: String {
-            switch self {
-            case .chapter(let chapter): chapter.assetID
-            case .track(let track): track.assetID
             }
         }
     }
@@ -638,11 +646,9 @@ struct AudioChaptersSheet: View {
         NavigationStack {
             Group {
             if itemCount == 0 {
-                ContentUnavailableView(
-                    "audio.sheet.empty.title",
-                    systemImage: "list.number",
-                    description: Text("audio.sheet.empty.message")
-                )
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityLabel(Text("audio.sheet.chapters"))
             } else {
                 ScrollViewReader { proxy in
                     List {
@@ -662,7 +668,7 @@ struct AudioChaptersSheet: View {
                 }
             }
             }
-            .navigationTitle("audio.sheet.chapters.title")
+            .navigationTitle("audio.sheet.chapters")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -708,20 +714,6 @@ struct AudioChaptersSheet: View {
                     title: chapter.title,
                     subtitle: chapterDuration(chapter),
                     selected: chapter.id == runtime.snapshot.chapter?.id
-                )
-            }
-            .buttonStyle(.plain)
-            .disabled(isLoading)
-
-            case .track(let track):
-            Button {
-                runtime.selectAsset(track.assetID)
-                dismiss()
-            } label: {
-                audioRow(
-                    title: track.title,
-                    subtitle: formatDuration(track.durationMillis),
-                    selected: runtime.snapshot.track?.assetID == track.assetID
                 )
             }
             .buttonStyle(.plain)
@@ -802,11 +794,7 @@ struct AudioChaptersSheet: View {
 
     private static func makeEntries(from bootstrap: AudioBootstrap?) -> [Entry] {
         guard let bootstrap else { return [] }
-        let chaptersByAsset = Dictionary(grouping: bootstrap.chapters, by: \.assetID)
-        return bootstrap.tracks.flatMap { track in
-            let chapters = chaptersByAsset[track.assetID] ?? []
-            return chapters.isEmpty ? [.track(track)] : chapters.map(Entry.chapter)
-        }
+        return bootstrap.chapters.map(Entry.chapter)
     }
 
     private static func currentIndex(
@@ -823,15 +811,100 @@ struct AudioChaptersSheet: View {
             return exactIndex
         }
 
-        guard let currentAssetID = snapshot.track?.assetID else {
-            return entries.indices.contains(snapshot.trackIndex) ? snapshot.trackIndex : entries.indices.first
-        }
-        return entries.firstIndex(where: { $0.assetID == currentAssetID })
+        return nil
     }
 
     private func chapterDuration(_ chapter: AudioChapter) -> String? {
         let duration = chapter.endMillis - chapter.startMillis
         return duration > 0 ? formatDuration(duration) : nil
+    }
+
+    private func formatDuration(_ milliseconds: Int64) -> String {
+        let seconds = max(0, milliseconds) / 1_000
+        return "\(seconds / 60):\(String(format: "%02d", seconds % 60))"
+    }
+}
+
+struct AudioTracksSheet: View {
+    @ObservedObject var runtime: AudioPlaybackRuntime
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.appTheme) private var theme
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let tracks = runtime.snapshot.bootstrap?.tracks, !tracks.isEmpty {
+                    List {
+                        ForEach(Array(tracks.enumerated()), id: \.element.assetID) { index, track in
+                            Button {
+                                runtime.selectAsset(track.assetID)
+                                dismiss()
+                            } label: {
+                                audioRow(
+                                    index: index + 1,
+                                    title: track.title,
+                                    subtitle: formatDuration(track.durationMillis),
+                                    selected: runtime.snapshot.track?.assetID == track.assetID
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isLoading)
+                        }
+                    }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                } else {
+                    ContentUnavailableView(
+                        "audio.sheet.empty.title",
+                        systemImage: "music.note.list",
+                        description: Text("audio.sheet.empty.message")
+                    )
+                }
+            }
+            .navigationTitle("audio.sheet.tracks")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("common.done") { dismiss() }
+                }
+            }
+            .tint(theme.textPrimary)
+        }
+        .background(theme.canvas.ignoresSafeArea())
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private var isLoading: Bool {
+        runtime.snapshot.lifecycle == .loading || runtime.snapshot.lifecycle == .buffering
+    }
+
+    private func audioRow(index: Int, title: String, subtitle: String?, selected: Bool) -> some View {
+        HStack(spacing: .space1) {
+            Text("\(index)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(selected ? theme.brandAccent : theme.textSecondary)
+                .frame(width: 24, alignment: .trailing)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .foregroundStyle(theme.textPrimary)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(2)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(theme.textSecondary)
+                }
+            }
+            Spacer(minLength: .space1)
+            if selected {
+                Image(systemName: "checkmark")
+                    .foregroundStyle(theme.brandAccent)
+                    .accessibilityHidden(true)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     private func formatDuration(_ milliseconds: Int64) -> String {

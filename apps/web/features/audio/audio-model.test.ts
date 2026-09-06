@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { normalizeAudioBootstrap } from './api';
-import { absolutePositionForTrack, beginAudioResourceSwitch, failAudioResourceSwitch, mergeAudioLoadIntent, orderedTracks, targetForAbsolutePosition, unsupportedAudioMimeType } from './audio-model';
+import { absolutePositionForTrack, beginAudioResourceSwitch, failAudioResourceSwitch, mergeAudioLoadIntent, orderedTracks, targetForAbsolutePosition } from './audio-model';
 import type { AudioPlaybackState } from './types';
 
 const payload = {
@@ -61,6 +61,13 @@ test('normalizes the resource-first Reader v5 audio bootstrap', () => {
   assert.equal(bootstrap.totalDurationMs, 30_000);
 });
 
+test('keeps tracks without explicit chapters in the track queue', () => {
+  const bootstrap = normalizeAudioBootstrap(payload, 'resource-1');
+
+  assert.deepEqual(bootstrap.tracks.map((track) => track.assetId), ['asset-1', 'asset-2']);
+  assert.deepEqual(bootstrap.chapters.map((chapter) => chapter.assetId), ['asset-1']);
+});
+
 test('maps between track and absolute time', () => {
   const tracks = normalizeAudioBootstrap(payload, 'resource-1').tracks;
   assert.equal(absolutePositionForTrack(tracks, 1, 5_000), 15_000);
@@ -87,24 +94,19 @@ test('a later track click replaces a pending chapter target and preserves autopl
   );
 });
 
-test('checks known codecs with a codec-qualified MIME type', () => {
-  const checked: string[] = [];
-  const unsupported = unsupportedAudioMimeType('audio/ogg', 'opus', (value) => {
-    checked.push(value);
-    return '';
-  });
-  assert.equal(unsupported, 'audio/ogg; codecs="opus"');
-  assert.deepEqual(checked, ['audio/ogg; codecs="opus"']);
-});
-
-test('lets the media element decide unknown codec support', () => {
-  let checks = 0;
-  const unsupported = unsupportedAudioMimeType('audio/x-ape', 'ape', () => {
-    checks += 1;
-    return '';
-  });
-  assert.equal(unsupported, null);
-  assert.equal(checks, 0);
+test('unknown MIME and codec metadata reach the playback engine without admission rejection', () => {
+  const unknown = {
+    ...payload,
+    data: {
+      ...payload.data,
+      assets: payload.data.assets.map((asset) => ({ ...asset, mimeType: 'application/x-unfamiliar-audio', codec: 'future-codec' }))
+    }
+  };
+  const bootstrap = normalizeAudioBootstrap(unknown, 'resource-1');
+  assert.equal(bootstrap.tracks.length, payload.data.assets.length);
+  assert.equal(bootstrap.tracks[0]?.mimeType, 'application/x-unfamiliar-audio');
+  assert.equal(bootstrap.tracks[0]?.codec, 'future-codec');
+  assert.equal(bootstrap.tracks[0]?.url, '/api/assets/asset-1');
 });
 
 test('resource switching keeps the previous playback until the request commits or fails', () => {

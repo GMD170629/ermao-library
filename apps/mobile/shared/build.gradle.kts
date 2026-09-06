@@ -60,7 +60,7 @@ tasks.withType<Test>().configureEach {
     systemProperty(
         "readerSafetyFixtureRoot",
         rootProject.layout.projectDirectory.dir(
-            "../../packages/reader-contracts/fixtures/reader-safety-v1",
+            "../../packages/reader-contracts/fixtures/reader-safety-v2",
         ).asFile.absolutePath,
     )
     systemProperty(

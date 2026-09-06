@@ -1,0 +1,74 @@
+
+
+class ReaderSafetyResourceRole(StrEnum):
+    PUBLICATION = "PUBLICATION"
+    CONTROL_DOCUMENT = "CONTROL_DOCUMENT"
+    READING_ORDER = "READING_ORDER"
+    OPTIONAL_RESOURCE = "OPTIONAL_RESOURCE"
+
+
+@dataclass(frozen=True, slots=True)
+class ReaderSafetyDecisionContext:
+    format: ReaderSafetyFormat
+    resource_role: ReaderSafetyResourceRole
+    facts: tuple[str, ...]
+    enforcement_available: bool
+    can_isolate: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ReaderSafetyDecision:
+    action: ReaderSafetyAction
+    scope: str
+    classification: str | None
+    rule_id: ReaderSafetyRuleId | None
+    error_code: ReaderSafetyErrorCode | None
+
+
+def evaluate_reader_safety(
+    context: ReaderSafetyDecisionContext,
+) -> tuple[ReaderSafetyDecision, ...]:
+    if not context.enforcement_available:
+        return (
+            ReaderSafetyDecision(
+                ReaderSafetyAction.REJECT_PUBLICATION,
+                "PUBLICATION",
+                "IMPLEMENTATION",
+                None,
+                ReaderSafetyErrorCode.PLATFORM_POLICY_ALGORITHM_UNSUPPORTED,
+            ),
+        )
+    known_facts = {rule.trigger for rule in READER_SAFETY_RULES.values()}
+    if not set(context.facts) <= known_facts:
+        return (
+            ReaderSafetyDecision(
+                ReaderSafetyAction.REJECT_PUBLICATION,
+                "PUBLICATION",
+                "IMPLEMENTATION",
+                None,
+                ReaderSafetyErrorCode.ENGINE_POLICY_ALGORITHM_UNSUPPORTED,
+            ),
+        )
+    decisions: list[ReaderSafetyDecision] = []
+    for rule in READER_SAFETY_RULES.values():
+        if rule.trigger not in context.facts or context.format not in rule.formats:
+            continue
+        action, scope = rule.action, rule.scope
+        if context.can_isolate and rule.isolated_action != rule.action:
+            action, scope = rule.isolated_action, "RESOURCE"
+        elif (
+            context.resource_role is ReaderSafetyResourceRole.OPTIONAL_RESOURCE
+            and rule.optional_resource_action != rule.action
+        ):
+            action, scope = rule.optional_resource_action, "RESOURCE"
+        error = (
+            None
+            if action in (ReaderSafetyAction.ALLOW, ReaderSafetyAction.SANITIZE)
+            else rule.error_code
+        )
+        decisions.append(
+            ReaderSafetyDecision(action, scope, rule.classification, rule.id, error)
+        )
+    return tuple(decisions) or (
+        ReaderSafetyDecision(ReaderSafetyAction.ALLOW, "PUBLICATION", None, None, None),
+    )

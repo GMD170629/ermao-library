@@ -9,12 +9,15 @@ import {
   type ReaderCapabilities,
   type ReaderCommand,
   type ReaderCommandAck,
+  type ReaderNavigationEntry,
   type ReaderOpaqueLocator,
   type ReaderPreferences,
   type ReaderPositionReport,
   type ReflowableLocation
 } from '@shuku/reader-core';
 import { ReaderAdapterBase } from './adapter-base';
+import { currentReadiumChapter } from './readium-chapter-selection';
+import { resolveRequestedChapterHref } from '../publication-direct-target';
 import { openReadiumPublication } from './readium-publication';
 import type { ReaderAdapterInputHandler, ReaderInteractiveAdapter, ReaderInteractionPolicy } from './reader-interaction';
 import {
@@ -62,6 +65,7 @@ export type ReadiumAdapterOptions = {
   publicationBlob: Blob;
   publicationTitle: string;
   initialHref?: string | null;
+  initialChapterKey?: string;
   onInputIntent?: ReaderAdapterInputHandler;
   onEndOfResource?: () => boolean | Promise<boolean>;
 };
@@ -145,6 +149,7 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
     reportsLocation: boolean;
   } | null = null;
   private positions: Locator[] = [];
+  private navigation: ReaderNavigationEntry[] = [];
   private startLocator: Locator | null = null;
   private locationOperation: OperationToken | null = null;
   private presentationOperation: OperationToken | null = null;
@@ -165,6 +170,7 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
 
   async open(context: ReaderAdapterOpenContext) {
     const generation = this.beginSession(context.sessionId, context.operation);
+    this.navigation = [];
     this.locationOperation = context.operation;
     if (context.source.kind !== 'reflowable') throw new Error('READIUM_SOURCE_INVALID');
     this.source = context.source;
@@ -183,6 +189,9 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
     this.closePublication = opened.close;
     this.assertActive(generation, context.signal);
     this.positions = opened.positions;
+    // Publication metadata is stable for this open. Position callbacks only
+    // look up the current chapter; they must never rebuild the complete TOC.
+    this.navigation = readiumNavigationEntries(opened.publication);
     const handlePointer: EpubNavigatorListeners['tap'] = (event) => this.onPointer(event);
     const listeners: EpubNavigatorListeners = {
       frameLoaded: (window) => this.onFrameLoaded(window),
@@ -210,9 +219,11 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
         requestedRestoreLocator = null;
       }
     }
-    const requestedHref = context.initialLocation?.kind === 'reflowable'
+    const chapterHref = resolveRequestedChapterHref(this.navigation, this.options.initialChapterKey);
+    if (this.options.initialChapterKey && !chapterHref) throw new Error(LOCATION_RESTORE_FAILED);
+    const requestedHref = chapterHref ?? (context.initialLocation?.kind === 'reflowable'
       ? context.initialLocation.href
-      : null;
+      : null);
     const startupTargets = resolveReadiumStartupTargets(
       opened.publication.readingOrder.items,
       opened.positions,
@@ -254,8 +265,7 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
       false,
       requestedRestoreLocator === null
     );
-    const navigation = readiumNavigationEntries(opened.publication);
-    if (navigation.length > 0) this.emit({ type: 'navigation-changed', items: navigation }, context.operation);
+    this.emit({ type: 'navigation-changed', items: this.navigation }, context.operation);
     this.emit({
       type: 'ready',
       capabilities: capabilities(this.navigator),
@@ -490,14 +500,12 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
     return true;
   }
 
-  private positionReport(value: Locator): ReaderPositionReport {
-    const totalProgression = readiumTotalProgression(value, this.positions);
+  private positionReport(value: Locator, totalProgression: number): ReaderPositionReport {
     const serialized = value.serialize();
     const href = typeof serialized.href === 'string' ? serialized.href : null;
-    const navigation = this.navigator ? readiumNavigationEntries(this.navigator.publication) : [];
     const chapter = href
-      ? navigation.find((item) => item.href && samePublicationResource(item.href, href))
-      : undefined;
+      ? currentReadiumChapter(this.navigation, href, value.locations.fragments ?? [])
+      : null;
     return {
       // This is the exact object returned by Readium's public serialize().
       locator: serialized,
@@ -505,7 +513,7 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
         displayPercent: Math.max(0, Math.min(100, totalProgression * 100)),
         totalProgression: Math.max(0, Math.min(1, totalProgression)),
         currentHref: href,
-        chapter: chapter ? { href: chapter.href ?? null, title: chapter.label ?? null, index: chapter.index ?? null } : null,
+        chapter: chapter ? { navigationKey: chapter.navigationKey ?? null, href: chapter.href ?? null, title: chapter.label ?? null, index: chapter.index ?? null } : null,
         page: null,
         playback: null
       }
@@ -532,7 +540,7 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
     if (this.hasUnreadablePage()) return null;
     const totalProgression = readiumTotalProgression(value, this.positions);
     this.latestLocator = value;
-    this.latestPosition = this.positionReport(value);
+    this.latestPosition = this.positionReport(value, totalProgression);
     return totalProgression * 100;
   }
 
@@ -761,6 +769,7 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
     this.viewportObserver = null;
     const navigator = this.navigator;
     this.navigator = null;
+    this.navigation = [];
     this.closePublication?.();
     this.closePublication = null;
     this.options.container.replaceChildren();

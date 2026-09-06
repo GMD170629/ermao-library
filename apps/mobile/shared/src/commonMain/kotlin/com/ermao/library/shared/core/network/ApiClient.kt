@@ -493,7 +493,7 @@ class ApiClient internal constructor(
     internal suspend fun loadAuthenticatedBinary(
         apiPath: String,
         maximumBytes: Int,
-        allowedMimeTypes: Set<String>,
+        allowedMimeTypes: Set<String>? = null,
         requestHeaders: Map<String, String> = emptyMap(),
         expectedResponseHeaders: Map<String, String> = emptyMap(),
         errorCodeStatuses: Map<String, Set<Int>> = emptyMap(),
@@ -503,7 +503,9 @@ class ApiClient internal constructor(
             require(apiPath.startsWith("/api/")) { "Binary path must start with /api/" }
             require(!apiPath.contains('#') && !apiPath.contains('?')) { "Binary path must not contain a query or fragment" }
             require(maximumBytes > 0) { "Binary size limit must be positive" }
-            require(allowedMimeTypes.isNotEmpty()) { "At least one binary MIME type is required" }
+            require(allowedMimeTypes == null || allowedMimeTypes.isNotEmpty()) {
+                "At least one binary MIME type is required when MIME validation is requested"
+            }
             return client.prepareGet(buildRequestUrl(apiPath, queryParameters)) {
                 requestHeaders.forEach { (key, value) -> headers.append(key, value) }
             }.execute { response ->
@@ -528,8 +530,9 @@ class ApiClient internal constructor(
                 ?.substringBefore(';')
                 ?.trim()
                 ?.lowercase()
-                ?: return@execute redirectFailure("BINARY_CONTENT_TYPE_MISSING")
-            if (mimeType !in allowedMimeTypes) {
+                ?.takeIf(String::isNotEmpty)
+                ?: "application/octet-stream"
+            if (allowedMimeTypes != null && mimeType !in allowedMimeTypes) {
                 return@execute redirectFailure("BINARY_CONTENT_TYPE_INVALID")
             }
             val declaredLength = response.headers[HttpHeaders.ContentLength]

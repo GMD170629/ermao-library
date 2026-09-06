@@ -65,5 +65,6 @@ if(ERMAO_ARCHIVE_BUILD_TESTS AND NOT ANDROID)
             "${CMAKE_CURRENT_SOURCE_DIR}/../../../../test-data/library/comics/reader-pages.cbr"
             "${CMAKE_CURRENT_SOURCE_DIR}/../../../../test-data/library/comics/reader-pages.rar"
             "${CMAKE_CURRENT_SOURCE_DIR}/../../../../test-data/library/comics/reader-pages.cbz"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/good-plus-symlink.zip"
     )
 endif()

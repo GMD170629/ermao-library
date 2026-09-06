@@ -14,7 +14,7 @@ const position = {
     displayPercent: 99,
     totalProgression: 0.99,
     currentHref: 'OPS/chapter.xhtml',
-    chapter: { href: 'OPS/chapter.xhtml', title: 'Chapter 1', index: 0 },
+    chapter: { navigationKey: null, href: 'OPS/chapter.xhtml', title: 'Chapter 1', index: 0 },
     page: null,
     playback: null
   }
@@ -70,7 +70,7 @@ test('does not derive navigation from presentation when the opaque locator is em
       displayPercent: 99,
       totalProgression: 0.99,
       currentHref: 'OPS/chapter.xhtml',
-      chapter: { href: 'OPS/chapter.xhtml', title: 'Chapter 1', index: 0 },
+      chapter: { navigationKey: null, href: 'OPS/chapter.xhtml', title: 'Chapter 1', index: 0 },
       page: null,
       playback: null
     }

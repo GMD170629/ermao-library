@@ -491,7 +491,7 @@ function mapResourceDetailUnit(value: unknown): ResourceDetailUnit | null {
   };
   if (unitType === 'chapter') {
     const level = nullableInteger(item.level);
-    return { ...base, unitType, href: nullableString(item.href), level: level !== null && level >= 0 ? level : null } satisfies ResourceChapterDetailUnit;
+    return { ...base, unitType, navigationKey: nullableString(item.navigationKey), href: nullableString(item.href), level: level !== null && level >= 0 ? level : null } satisfies ResourceChapterDetailUnit;
   }
   if (unitType === 'page') {
     const pageNumber = nullableInteger(item.pageNumber);
@@ -533,6 +533,7 @@ export async function fetchResourceDetail(
     currentChapterIndex: nullableNumber(data.currentChapterIndex),
     currentChapterTitle: nullableString(data.currentChapterTitle),
     currentChapterSortOrder: nullableNumber(data.currentChapterSortOrder),
+    chapterCount: nullableNumber(data.chapterCount),
     currentPageNumber: nullableNumber(data.currentPageNumber),
     progress: Math.max(0, Math.min(100, finiteNumber(data.progress)))
   };

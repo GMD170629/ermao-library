@@ -572,6 +572,7 @@ def test_reading_units_are_scoped_to_one_book_resource(client, db_session) -> No
         "discNumber": None,
         "trackNumber": None,
         "metadataJson": '{"chapter": 1}',
+        "navigationKey": None,
     }
     assert data["page"] == {"page": 1, "pageSize": 50, "total": 1, "totalPages": 1}
 
@@ -584,7 +585,7 @@ def test_reading_units_project_exact_current_chapter_for_read_states(
     db_session.add_all(
         [
             ReadableResourceNavigationUnit(
-                id=f"chapter-state-{index}",
+                id=f"detail-resource-01:chapter-{index}",
                 resource_id="detail-resource-01",
                 asset_id="detail-resource-01-asset",
                 unit_type="chapter",
@@ -592,7 +593,12 @@ def test_reading_units_project_exact_current_chapter_for_read_states(
                 href=f"OEBPS/Text/chapter-{index + 1}.xhtml",
                 media_type="application/xhtml+xml",
                 sort_order=index,
-                metadata_json=json.dumps({"readingOrderPosition": index + 1}),
+                metadata_json=json.dumps(
+                    {
+                        "readingOrderPosition": index + 1,
+                        "navigationKey": f"chapter-{index}",
+                    }
+                ),
             )
             for index in range(5)
         ]
@@ -607,7 +613,7 @@ def test_reading_units_project_exact_current_chapter_for_read_states(
         presentation_json=(
             '{"displayPercent":1,"totalProgression":0.01,'
             '"currentHref":"OEBPS/Text/chapter-4.xhtml",'
-            '"chapter":{"href":"OEBPS/Text/chapter-4.xhtml",'
+            '"chapter":{"navigationKey":"chapter-3","href":"OEBPS/Text/chapter-4.xhtml",'
             '"title":"Chapter 4","index":3},"page":null,"playback":null}'
         ),
         display_percent=1,
@@ -639,7 +645,7 @@ def test_reading_units_project_exact_current_chapter_for_read_states(
     progress.presentation_json = (
         '{"displayPercent":1,"totalProgression":0.01,'
         '"currentHref":"OEBPS/Text/split-resource.xhtml",'
-        '"chapter":{"href":"OEBPS/Text/chapter-4.xhtml",'
+        '"chapter":{"navigationKey":"chapter-3","href":"OEBPS/Text/chapter-4.xhtml",'
         '"title":"Chapter 4","index":3},"page":null,"playback":null}'
     )
     db_session.commit()
@@ -673,6 +679,35 @@ def test_reading_units_project_exact_current_chapter_for_read_states(
     # bytes or replace the explicitly reported chapter.
     assert ambiguous_data["currentChapterIndex"] == 3
     assert ambiguous_data["currentChapterTitle"] == "Chapter 4"
+
+
+def test_reading_units_preserve_group_and_shared_key_on_http_boundary(
+    client, db_session
+) -> None:
+    _login(client, db_session, email="chapter-group@example.com")
+    _add_book(db_session, resource_count=1)
+    db_session.add(
+        ReadableResourceNavigationUnit(
+            id="detail-resource-01:chapter-0",
+            resource_id="detail-resource-01",
+            asset_id="detail-resource-01-asset",
+            unit_type="chapter",
+            title="Part",
+            href="",
+            sort_order=0,
+            metadata_json=json.dumps({"navigationKey": "chapter-0", "level": 0}),
+        )
+    )
+    db_session.commit()
+    response = client.get(
+        "/api/books/detail-book/resources/detail-resource-01/reading-units"
+    )
+    assert response.status_code == 200
+    group = response.json()["data"]["units"][0]
+    assert response.json()["data"]["chapterCount"] == 0
+    assert group["href"] is None
+    assert group["navigationKey"] == "chapter-0"
+    assert group["title"] == "Part"
 
 
 def test_resource_details_preserve_member_scope_and_anti_enumeration(

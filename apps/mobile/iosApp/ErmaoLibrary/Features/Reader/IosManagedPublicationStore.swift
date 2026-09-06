@@ -15,7 +15,7 @@ struct IosManagedPublication: Sendable, Equatable {
 
 actor IosManagedPublicationStore {
     static let parserVersion = "epub-package:1"
-    static let normalizationVersion = "shuku-epub-locator-dom-v3"
+    static let normalizationVersion = "shuku-epub-locator-dom-v4"
     static let maximumPublicationBytes = ErmaoShared.ReaderAdmission.shared.maximumPublicationBytes
 
     private var completedPublication: IosManagedPublication?

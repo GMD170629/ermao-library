@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import mimetypes
 import posixpath
-import re
 import stat
 import zipfile
 from dataclasses import dataclass
@@ -17,12 +16,20 @@ from app.contracts.reader_safety_policy_generated import (
     ReaderSafetyRuleId,
     reader_safety_budget,
 )
+from app.infrastructure.archive_integrity import (
+    UnsafeArchivePathError,
+    normalize_archive_path,
+    zip_entry_data_span,
+)
 from app.modules.publications.application.ports import (
     PublicationAdapter,
     PublicationSource,
 )
 from app.modules.publications.application.safety_policy import (
+    publication_integrity_failure,
     publication_native_parser_implementation_failure,
+    publication_native_parser_rejection,
+    publication_optional_resource_failure,
     publication_parser_limit,
     publication_resource_limit,
     publication_security_rejection,
@@ -34,14 +41,22 @@ from app.modules.publications.domain.model import (
     PublicationMarkupError,
     PublicationReadError,
     PublicationResource,
+    PublicationResourceBlockedError,
     PublicationResourceNotFoundError,
     PublicationRevision,
-    PublicationSecurityError,
     PublicationStructureError,
     PublicationTocEntry,
     PublicationUnsupportedError,
 )
-from app.modules.publications.infrastructure.locator_dom import parse_safe_markup_root
+from app.modules.publications.infrastructure.chapter_core import (
+    ChapterCore,
+    xml_chapter_events,
+)
+from app.modules.publications.infrastructure.locator_dom import (
+    parse_safe_markup_root,
+    sanitize_css_resource,
+    sanitize_markup_resource,
+)
 from app.modules.publications.infrastructure.snapshot_cache import (
     PublicationSnapshotCache,
 )
@@ -49,9 +64,15 @@ from app.modules.publications.infrastructure.source_files import (
     resolve_publication_source,
     select_publication_source_root,
 )
+from app.modules.publications.infrastructure.xml_policy import (
+    XmlPolicyDecodeError,
+    XmlPolicyExpansionLimitError,
+    XmlPolicyPreparationError,
+    parse_xml,
+)
 
 EPUB_PARSER_IDENTIFIER = "epub-package:1"
-EPUB_NORMALIZATION_IDENTIFIER = "shuku-epub-locator-dom-v3"
+EPUB_NORMALIZATION_IDENTIFIER = "shuku-epub-locator-dom-v4"
 MAX_ARCHIVE_ENTRIES = reader_safety_budget(
     ReaderSafetyBudgetName.ARCHIVE_ENTRY_MAX_COUNT
 )
@@ -71,20 +92,6 @@ MAX_XML_CONTROL_DOCUMENT_BYTES = reader_safety_budget(
     ReaderSafetyBudgetName.XML_CONTROL_DOCUMENT_MAX_BYTES
 )
 MAX_EPUB_SOURCE_BYTES = reader_safety_budget(ReaderSafetyBudgetName.ORIGINAL_MAX_BYTES)
-_XML_NON_MARKUP = re.compile(
-    rb"<!--.*?-->|<!\[CDATA\[.*?\]\]>|<\?.*?\?>",
-    re.DOTALL,
-)
-_XML_DOCTYPE_OPEN = re.compile(rb"<!DOCTYPE\b", re.IGNORECASE)
-_XML_DOCTYPE = re.compile(rb"<!DOCTYPE\b[^>]*>", re.IGNORECASE | re.DOTALL)
-_XML_ENTITY_OPEN = re.compile(rb"<!ENTITY\b", re.IGNORECASE)
-_SAFE_NCX_DOCTYPE = re.compile(
-    rb"""<!DOCTYPE\s+ncx\s+PUBLIC\s+
-    (?P<public_quote>[\"'])-//NISO//DTD\s+ncx\s+2005-1//EN(?P=public_quote)\s+
-    (?P<system_quote>[\"'])https?://www\.daisy\.org/z3986/2005/ncx-2005-1\.dtd
-    (?P=system_quote)\s*>""",
-    re.IGNORECASE | re.VERBOSE,
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +101,14 @@ class _IndexedEpub:
     publication: NormalizedPublication
     entries_by_href: dict[str, str]
     media_types_by_href: dict[str, str]
+    required_hrefs: frozenset[str]
+    integrity_hrefs: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class _ValidatedArchive:
+    entries: dict[str, zipfile.ZipInfo]
+    integrity_hrefs: frozenset[str]
 
 
 def _xml_root(content: bytes) -> ElementTree.Element:
@@ -102,30 +117,28 @@ def _xml_root(content: bytes) -> ElementTree.Element:
             ReaderSafetyRuleId.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES,
             "publication XML control document exceeds the size limit",
         )
-    lexical = _XML_NON_MARKUP.sub(lambda match: b" " * len(match.group(0)), content)
-    if _XML_ENTITY_OPEN.search(lexical):
-        raise publication_security_rejection(
-            ReaderSafetyRuleId.REFLOWABLE_REJECT_XML_ENTITY,
-            "publication XML declares a custom entity",
-        )
-    doctype_opens = list(_XML_DOCTYPE_OPEN.finditer(lexical))
-    if doctype_opens:
-        declarations = list(_XML_DOCTYPE.finditer(lexical))
-        if (
-            len(doctype_opens) != 1
-            or len(declarations) != 1
-            or declarations[0].start() != doctype_opens[0].start()
-            or _SAFE_NCX_DOCTYPE.fullmatch(declarations[0].group(0)) is None
-            or lexical[: declarations[0].start()].strip()
-        ):
-            raise publication_security_rejection(
-                ReaderSafetyRuleId.REFLOWABLE_REJECT_XML_ENTITY,
-                "publication XML document type is not allowed",
-            )
     try:
-        return ElementTree.fromstring(content)
-    except ElementTree.ParseError as error:
+        _projection, root = parse_xml(
+            content,
+            expansion_limit_bytes=MAX_XML_CONTROL_DOCUMENT_BYTES,
+        )
+        return root
+    except (ElementTree.ParseError, UnicodeDecodeError) as error:
         raise PublicationMarkupError("publication XML is invalid") from error
+    except XmlPolicyExpansionLimitError as error:
+        raise publication_parser_limit(
+            ReaderSafetyRuleId.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES,
+            "publication XML entity expansion exceeds the size limit",
+        ) from error
+    except XmlPolicyDecodeError as error:
+        raise PublicationMarkupError("publication XML encoding is invalid") from error
+    except XmlPolicyPreparationError as error:
+        raise publication_native_parser_implementation_failure(
+            ReaderSafetyRuleId.REFLOWABLE_PREPARE_XML,
+            parser="reader-xml-policy",
+            operation="prepare",
+            reason="generated XML preparation defense is unavailable",
+        ) from error
 
 
 def _local_name(tag: str) -> str:
@@ -139,8 +152,14 @@ def _canonical_href(base: str, href: str) -> str:
             ReaderSafetyRuleId.EPUB_ARCHIVE_STRUCTURE,
             "publication href must be local",
         )
-    decoded = unquote(split.path)
-    if "\\" in decoded or decoded.startswith("/"):
+    decoded = unquote(split.path).replace("\\", "/")
+    if (
+        "\x00" in decoded
+        or decoded.startswith("/")
+        or len(decoded) >= 3
+        and decoded[1] == ":"
+        and decoded[2] == "/"
+    ):
         raise publication_security_rejection(
             ReaderSafetyRuleId.EPUB_ARCHIVE_STRUCTURE,
             "publication href escapes its archive",
@@ -156,19 +175,17 @@ def _canonical_href(base: str, href: str) -> str:
 
 
 def _entry_key(href: str) -> str:
-    path = unquote(urlsplit(href).path)
-    normalized = posixpath.normpath(path)
-    if (
-        not normalized
-        or normalized in {".", ".."}
-        or normalized.startswith(("../", "/"))
-        or "\\" in normalized
-    ):
-        raise PublicationResourceNotFoundError
-    return normalized
+    # ZIP publication paths are POSIX names. Treat a backslash as a separator
+    # before normalization so harmless mixed-separator/dot spelling resolves to
+    # one canonical in-memory key; traversal still remains a boundary failure.
+    path = unquote(urlsplit(href).path).replace("\\", "/")
+    try:
+        return normalize_archive_path(path)
+    except UnsafeArchivePathError as error:
+        raise PublicationResourceNotFoundError from error
 
 
-def _validated_entries(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
+def _validated_entries(archive: zipfile.ZipFile) -> _ValidatedArchive:
     infos = archive.infolist()
     if len(infos) > MAX_ARCHIVE_ENTRIES:
         raise publication_parser_limit(
@@ -176,41 +193,20 @@ def _validated_entries(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
             "publication has too many resources",
         )
     entries: dict[str, zipfile.ZipInfo] = {}
+    integrity_hrefs: set[str] = set()
     total = 0
+    spans: list[tuple[int, int, str | None]] = []
     for info in infos:
-        try:
-            key = _entry_key(info.filename)
-        except PublicationResourceNotFoundError as error:
-            raise publication_security_rejection(
-                ReaderSafetyRuleId.EPUB_ARCHIVE_STRUCTURE,
-                "publication contains an unsafe resource path",
-            ) from error
-        if key in entries:
-            raise publication_security_rejection(
-                ReaderSafetyRuleId.EPUB_ARCHIVE_STRUCTURE,
-                "publication contains duplicate resource paths",
-            )
-        unix_mode = info.external_attr >> 16
-        if stat.S_ISLNK(unix_mode):
-            raise publication_security_rejection(
-                ReaderSafetyRuleId.EPUB_ARCHIVE_STRUCTURE,
-                "linked resources are not allowed",
-            )
-        if info.flag_bits & 0x1:
-            raise publication_security_rejection(
-                ReaderSafetyRuleId.EPUB_ARCHIVE_STRUCTURE,
-                "encrypted EPUB resources are not allowed",
-            )
-        if info.file_size > MAX_SINGLE_RESOURCE_BYTES:
-            raise publication_parser_limit(
-                ReaderSafetyRuleId.EPUB_ARCHIVE_ENTRY_MAX_BYTES,
-                "publication resource exceeds the size limit",
-            )
         total += info.file_size
         if total > MAX_TOTAL_UNCOMPRESSED_BYTES:
             raise publication_parser_limit(
                 ReaderSafetyRuleId.EPUB_ARCHIVE_EXPANDED_MAX_BYTES,
                 "publication exceeds the expanded size limit",
+            )
+        if info.file_size > MAX_SINGLE_RESOURCE_BYTES:
+            raise publication_parser_limit(
+                ReaderSafetyRuleId.EPUB_ARCHIVE_ENTRY_MAX_BYTES,
+                "publication resource exceeds the size limit",
             )
         if info.compress_size == 0 and info.file_size > 0:
             raise publication_parser_limit(
@@ -225,64 +221,133 @@ def _validated_entries(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
                 ReaderSafetyRuleId.EPUB_ARCHIVE_COMPRESSION_RATIO,
                 "publication resource compression ratio is unsafe",
             )
-        entries[key] = info
-    return entries
-
-
-def _verify_entry_contents(
-    archive: zipfile.ZipFile, entries: dict[str, zipfile.ZipInfo]
-) -> None:
-    """Stream every file once so CRC/overlap failures cannot hide in unused resources."""
-
-    buffer_size = 64 * 1024
-    for info in entries.values():
-        if info.is_dir():
-            continue
-        total = 0
+        key: str | None
         try:
-            with archive.open(info) as stream:
-                while chunk := stream.read(buffer_size):
-                    total += len(chunk)
-                    if total > info.file_size:
-                        raise publication_security_rejection(
-                            ReaderSafetyRuleId.EPUB_ARCHIVE_STRUCTURE,
-                            "publication resource length does not match its archive entry",
-                        )
-        except PublicationSecurityError:
-            raise
-        except NotImplementedError as error:
-            raise publication_native_parser_implementation_failure(
-                ReaderSafetyRuleId.EPUB_ARCHIVE_STRUCTURE,
-                parser="python-zipfile",
-                operation="verify-entry",
-                reason="compression algorithm is unavailable",
-            ) from error
-        except (
-            EOFError,
-            OSError,
-            RuntimeError,
-            ValueError,
-            zipfile.BadZipFile,
-        ) as error:
-            raise publication_security_rejection(
-                ReaderSafetyRuleId.EPUB_ARCHIVE_STRUCTURE,
-                "publication archive entry failed integrity verification",
-            ) from error
-        if total != info.file_size:
-            raise publication_security_rejection(
-                ReaderSafetyRuleId.EPUB_ARCHIVE_STRUCTURE,
-                "publication resource length does not match its archive entry",
+            key = normalize_archive_path(info.filename)
+        except UnsafeArchivePathError:
+            # An unused escaped name cannot be extracted through this adapter.
+            # Quarantine it while retaining the archive-wide bounds above; a
+            # required package/manifest lookup will fail when it is addressed.
+            key = None
+        unix_mode = info.external_attr >> 16
+        if stat.S_ISLNK(unix_mode):
+            if key is not None:
+                # A same-name regular member must not later resolve through
+                # ZipFile.getinfo() to this quarantined link (or vice versa).
+                integrity_hrefs.add(key)
+            key = None
+        duplicate = key is not None and key in entries
+        if duplicate and key is not None:
+            integrity_hrefs.add(key)
+        if key is not None and not duplicate:
+            entries[key] = info
+        span = zip_entry_data_span(archive, info)
+        if span is not None and span[0] < span[1]:
+            spans.append((span[0], span[1], key))
+    spans.sort(key=lambda item: (item[0], item[1]))
+    previous_end = -1
+    for start, end, key in spans:
+        if start < previous_end:
+            if key is not None:
+                integrity_hrefs.add(key)
+            for previous_start, previous_span_end, previous_key in spans:
+                if (
+                    previous_start < end
+                    and start < previous_span_end
+                    and previous_key is not None
+                ):
+                    integrity_hrefs.add(previous_key)
+        previous_end = max(previous_end, end)
+    return _ValidatedArchive(entries, frozenset(integrity_hrefs))
+
+
+def _read_archive_resource(
+    archive: zipfile.ZipFile,
+    info: zipfile.ZipInfo,
+    *,
+    required: bool,
+    integrity_failed: bool = False,
+    parser_budget: tuple[ReaderSafetyRuleId, int] | None = None,
+) -> bytes:
+    """Read one entry and classify checksum/decoder failures by role."""
+
+    if parser_budget is not None:
+        rule_id, maximum_bytes = parser_budget
+        if info.file_size > maximum_bytes:
+            raise publication_parser_limit(
+                rule_id, "EPUB parser resource exceeds its byte budget"
             )
+
+    if integrity_failed:
+        if required:
+            raise publication_integrity_failure(
+                ReaderSafetyRuleId.EPUB_RESOURCE_INTEGRITY,
+                "required EPUB resource has conflicting archive entries",
+            )
+        raise publication_integrity_failure(
+            ReaderSafetyRuleId.REFLOWABLE_OPTIONAL_RESOURCE_FAILURE,
+            "optional EPUB resource has conflicting archive entries",
+            optional=True,
+        )
+    if info.flag_bits & 0x1:
+        if not required:
+            raise publication_optional_resource_failure(
+                ReaderSafetyRuleId.COMMON_DRM_REJECTED,
+                "optional encrypted EPUB resource cannot be decrypted",
+            )
+        raise publication_native_parser_rejection(
+            ReaderSafetyRuleId.COMMON_DRM_REJECTED,
+            parser="python-zipfile",
+            operation="read-entry",
+            reason="encrypted EPUB resource is unsupported",
+        )
+    try:
+        return archive.read(info)
+    except (NotImplementedError, RuntimeError) as error:
+        raise publication_native_parser_implementation_failure(
+            ReaderSafetyRuleId.EPUB_RESOURCE_INTEGRITY,
+            parser="python-zipfile",
+            operation="read-entry",
+            reason="archive decoder cannot provide this resource",
+        ) from error
+    except (EOFError, zipfile.BadZipFile) as error:
+        if required:
+            raise publication_integrity_failure(
+                ReaderSafetyRuleId.EPUB_RESOURCE_INTEGRITY,
+                "required EPUB resource failed integrity or decoder validation",
+            ) from error
+        raise publication_integrity_failure(
+            ReaderSafetyRuleId.REFLOWABLE_OPTIONAL_RESOURCE_FAILURE,
+            "optional EPUB resource failed integrity or decoder validation",
+            optional=True,
+        ) from error
+    except ValueError as error:
+        raise PublicationReadError("EPUB resource cannot be read") from error
+    except OSError as error:
+        raise PublicationReadError("EPUB resource cannot be read") from error
 
 
 def _container_opf_path(
-    archive: zipfile.ZipFile, entries: dict[str, zipfile.ZipInfo]
+    archive: zipfile.ZipFile,
+    entries: dict[str, zipfile.ZipInfo],
+    integrity_hrefs: frozenset[str],
 ) -> str:
     container = entries.get("META-INF/container.xml")
     if container is None:
         raise PublicationStructureError("EPUB container is missing")
     try:
-        root = _xml_root(archive.read(container))
+        root = _xml_root(
+            _read_archive_resource(
+                archive,
+                container,
+                required=True,
+                integrity_failed="META-INF/container.xml" in integrity_hrefs,
+                parser_budget=(
+                    ReaderSafetyRuleId.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES,
+                    MAX_XML_CONTROL_DOCUMENT_BYTES,
+                ),
+            )
+        )
     except PublicationMarkupError as error:
         raise PublicationStructureError("EPUB container is invalid") from error
     for element in root.iter():
@@ -295,6 +360,11 @@ def _container_opf_path(
                     ReaderSafetyRuleId.EPUB_ARCHIVE_STRUCTURE,
                     "EPUB package path escapes its archive",
                 ) from error
+            if key in integrity_hrefs:
+                raise publication_integrity_failure(
+                    ReaderSafetyRuleId.EPUB_RESOURCE_INTEGRITY,
+                    "EPUB package path has conflicting archive entries",
+                )
             if key in entries:
                 return key
     raise PublicationStructureError("EPUB package document is missing")
@@ -321,7 +391,9 @@ def _reading_progression(root: ElementTree.Element) -> str:
 def _toc_from_nav(
     archive: zipfile.ZipFile,
     entries: dict[str, zipfile.ZipInfo],
+    integrity_hrefs: frozenset[str],
     nav_href: str | None,
+    known_hrefs: frozenset[str],
 ) -> tuple[PublicationTocEntry, ...]:
     if nav_href is None:
         return ()
@@ -329,95 +401,58 @@ def _toc_from_nav(
     nav_info = entries.get(nav_key)
     if nav_info is None:
         return ()
-    _markup, root = parse_safe_markup_root(archive.read(nav_info))
+    _markup, root = parse_safe_markup_root(
+        _read_archive_resource(
+            archive,
+            nav_info,
+            required=False,
+            integrity_failed=nav_key in integrity_hrefs,
+            parser_budget=(
+                ReaderSafetyRuleId.REFLOWABLE_MARKUP_MAX_BYTES,
+                MAX_MARKUP_RESOURCE_BYTES,
+            ),
+        )
+    )
     if _local_name(root.tag) != "html":
         return ()
-    nav_base = posixpath.dirname(nav_key)
+    return _chapter_xml_projection(root, nav_key, known_hrefs, 1)
 
-    def direct_children(
-        element: ElementTree.Element, name: str
-    ) -> list[ElementTree.Element]:
-        return [child for child in element if _local_name(child.tag) == name]
 
-    def list_entries(
-        ordered_list: ElementTree.Element,
-    ) -> tuple[PublicationTocEntry, ...]:
-        results: list[PublicationTocEntry] = []
-        for list_item in direct_children(ordered_list, "li"):
-            nested_lists = direct_children(list_item, "ol")
-            children = tuple(
-                entry for nested in nested_lists for entry in list_entries(nested)
+def _chapter_xml_projection(
+    root: ElementTree.Element,
+    document_path: str,
+    known_hrefs: frozenset[str],
+    format_id: int,
+) -> tuple[PublicationTocEntry, ...]:
+    def target(element: ElementTree.Element) -> str | None:
+        raw = element.attrib.get("href") or element.attrib.get("src")
+        if not raw:
+            return None
+        try:
+            href = _canonical_href(
+                posixpath.dirname(document_path),
+                posixpath.basename(document_path) + raw if raw.startswith("#") else raw,
             )
-            label_element = next(
-                (
-                    child
-                    for child in list_item
-                    if _local_name(child.tag) in {"a", "span"}
-                ),
-                None,
-            )
-            anchor = next(
-                (
-                    child
-                    for child in list_item
-                    if _local_name(child.tag) == "a" and child.attrib.get("href")
-                ),
-                None,
-            )
-            title = (
-                " ".join("".join(label_element.itertext()).split())
-                if label_element is not None
-                else ""
-            )
-            href = ""
-            if anchor is not None:
-                try:
-                    href = _canonical_href(nav_base, anchor.attrib["href"])
-                except (PublicationCorruptError, PublicationResourceNotFoundError):
-                    href = ""
-            elif children:
-                href = children[0].href
-            if title and href:
-                results.append(
-                    PublicationTocEntry(
-                        href=href,
-                        title=title,
-                        children=children,
-                    )
-                )
-            elif children:
-                results.extend(children)
-        return tuple(results)
+        except (PublicationCorruptError, PublicationResourceNotFoundError, ValueError):
+            return None
+        return href if _entry_key(href) in known_hrefs else None
 
-    for element in root.iter():
-        if _local_name(element.tag) != "nav":
-            continue
-        nav_type = next(
-            (
-                value
-                for key, value in element.attrib.items()
-                if _local_name(key) == "type"
-            ),
-            "",
+    return (
+        ChapterCore.load()
+        .parse_xml(
+            format_id,
+            tuple(xml_chapter_events(root, target)),
         )
-        if nav_type != "toc":
-            continue
-        ordered_list = next(
-            (
-                child
-                for child in element.iter()
-                if child is not element and _local_name(child.tag) == "ol"
-            ),
-            None,
-        )
-        return list_entries(ordered_list) if ordered_list is not None else ()
-    return ()
+        .table_of_contents()
+    )
 
 
 def _toc_from_ncx(
     archive: zipfile.ZipFile,
     entries: dict[str, zipfile.ZipInfo],
+    integrity_hrefs: frozenset[str],
     ncx_href: str | None,
+    known_hrefs: frozenset[str],
 ) -> tuple[PublicationTocEntry, ...]:
     if ncx_href is None:
         return ()
@@ -425,52 +460,19 @@ def _toc_from_ncx(
     ncx_info = entries.get(ncx_key)
     if ncx_info is None:
         return ()
-    root = _xml_root(archive.read(ncx_info))
-    ncx_base = posixpath.dirname(ncx_key)
-
-    def nav_point(element: ElementTree.Element) -> PublicationTocEntry | None:
-        children = tuple(
-            entry
-            for child in element
-            if _local_name(child.tag) == "navPoint"
-            for entry in [nav_point(child)]
-            if entry is not None
+    root = _xml_root(
+        _read_archive_resource(
+            archive,
+            ncx_info,
+            required=False,
+            integrity_failed=ncx_key in integrity_hrefs,
+            parser_budget=(
+                ReaderSafetyRuleId.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES,
+                MAX_XML_CONTROL_DOCUMENT_BYTES,
+            ),
         )
-        label = next(
-            (child for child in element if _local_name(child.tag) == "navLabel"),
-            None,
-        )
-        content = next(
-            (child for child in element if _local_name(child.tag) == "content"),
-            None,
-        )
-        title = " ".join("".join(label.itertext()).split()) if label is not None else ""
-        raw_href = content.attrib.get("src", "") if content is not None else ""
-        href = ""
-        if raw_href:
-            try:
-                href = _canonical_href(ncx_base, raw_href)
-            except (PublicationCorruptError, PublicationResourceNotFoundError):
-                href = ""
-        elif children:
-            href = children[0].href
-        if not title or not href:
-            return None
-        return PublicationTocEntry(href=href, title=title, children=children)
-
-    nav_map = next(
-        (element for element in root.iter() if _local_name(element.tag) == "navMap"),
-        None,
     )
-    if nav_map is None:
-        return ()
-    return tuple(
-        entry
-        for child in nav_map
-        if _local_name(child.tag) == "navPoint"
-        for entry in [nav_point(child)]
-        if entry is not None
-    )
+    return _chapter_xml_projection(root, ncx_key, known_hrefs, 2)
 
 
 def _index_epub(
@@ -483,11 +485,23 @@ def _index_epub(
     source_path = Path(source_path_value)
     try:
         with zipfile.ZipFile(source_path) as archive:
-            entries = _validated_entries(archive)
-            _verify_entry_contents(archive, entries)
-            opf_path = _container_opf_path(archive, entries)
+            validated = _validated_entries(archive)
+            entries = validated.entries
+            integrity_hrefs = validated.integrity_hrefs
+            opf_path = _container_opf_path(archive, entries, integrity_hrefs)
             try:
-                opf_root = _xml_root(archive.read(entries[opf_path]))
+                opf_root = _xml_root(
+                    _read_archive_resource(
+                        archive,
+                        entries[opf_path],
+                        required=True,
+                        integrity_failed=opf_path in integrity_hrefs,
+                        parser_budget=(
+                            ReaderSafetyRuleId.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES,
+                            MAX_XML_CONTROL_DOCUMENT_BYTES,
+                        ),
+                    )
+                )
             except PublicationMarkupError as error:
                 raise PublicationStructureError(
                     "EPUB package document is invalid"
@@ -503,8 +517,19 @@ def _index_epub(
                 raw_href = element.attrib.get("href")
                 if not item_id or not raw_href:
                     continue
-                href = _canonical_href(opf_base, raw_href)
-                key = _entry_key(href)
+                try:
+                    href = _canonical_href(opf_base, raw_href)
+                    key = _entry_key(href)
+                except (
+                    PublicationCorruptError,
+                    PublicationResourceNotFoundError,
+                    ValueError,
+                ):
+                    # An optional manifest item cannot be addressed safely.  It
+                    # is omitted from the in-memory publication; an itemref
+                    # that requires it is reported as a missing required item
+                    # below.
+                    continue
                 if key not in entries:
                     continue
                 media_type = (
@@ -517,7 +542,10 @@ def _index_epub(
                     media_type,
                     element.attrib.get("properties", ""),
                 )
-                if "nav" in element.attrib.get("properties", "").split():
+                if (
+                    nav_href is None
+                    and "nav" in element.attrib.get("properties", "").split()
+                ):
                     nav_href = href
                 if media_type == "application/x-dtbncx+xml":
                     ncx_hrefs_by_id[item_id] = href
@@ -529,11 +557,16 @@ def _index_epub(
                 ),
                 None,
             )
-            ncx_href = (
-                ncx_hrefs_by_id.get(spine.attrib.get("toc", ""))
+            declared_ncx = (
+                manifest_by_id.get(spine.attrib.get("toc", ""))
                 if spine is not None
                 else None
-            ) or next(iter(ncx_hrefs_by_id.values()), None)
+            )
+            ncx_href = (
+                declared_ncx[0]
+                if declared_ncx is not None
+                else next(iter(ncx_hrefs_by_id.values()), None)
+            )
             reading_order: list[PublicationLink] = []
             reading_ids: set[str] = set()
             for element in opf_root.iter():
@@ -542,15 +575,25 @@ def _index_epub(
                 item_id = element.attrib.get("idref", "")
                 manifest_item = manifest_by_id.get(item_id)
                 if manifest_item is None:
-                    raise PublicationStructureError(
-                        "EPUB spine references a missing manifest item"
+                    raise publication_integrity_failure(
+                        ReaderSafetyRuleId.REFLOWABLE_REQUIRED_READING_ORDER_MARKUP,
+                        "EPUB spine references a missing manifest item",
                     )
                 reading_ids.add(item_id)
                 reading_order.append(
                     PublicationLink(href=manifest_item[0], media_type=manifest_item[1])
                 )
             if not reading_order:
-                raise PublicationStructureError("EPUB reading order is empty")
+                raise publication_integrity_failure(
+                    ReaderSafetyRuleId.REFLOWABLE_REQUIRED_READING_ORDER_MARKUP,
+                    "EPUB reading order is empty",
+                )
+            required_hrefs = frozenset(_entry_key(link.href) for link in reading_order)
+            if required_hrefs & integrity_hrefs:
+                raise publication_integrity_failure(
+                    ReaderSafetyRuleId.EPUB_RESOURCE_INTEGRITY,
+                    "required EPUB reading-order resource has conflicting archive entries",
+                )
             resources = tuple(
                 PublicationLink(
                     href=href,
@@ -562,18 +605,30 @@ def _index_epub(
                 for item_id, (href, media_type, properties) in manifest_by_id.items()
                 if item_id not in reading_ids
             )
+            known_hrefs = frozenset(
+                _entry_key(href)
+                for href, _media, _properties in manifest_by_id.values()
+            )
             try:
-                toc = _toc_from_nav(archive, entries, nav_href)
-            except PublicationSecurityError:
-                raise
-            except PublicationCorruptError:
+                toc = _toc_from_nav(
+                    archive, entries, integrity_hrefs, nav_href, known_hrefs
+                )
+            except (
+                PublicationMarkupError,
+                PublicationStructureError,
+                PublicationResourceBlockedError,
+            ):
                 toc = ()
             if not toc:
                 try:
-                    toc = _toc_from_ncx(archive, entries, ncx_href)
-                except PublicationSecurityError:
-                    raise
-                except PublicationCorruptError:
+                    toc = _toc_from_ncx(
+                        archive, entries, integrity_hrefs, ncx_href, known_hrefs
+                    )
+                except (
+                    PublicationMarkupError,
+                    PublicationStructureError,
+                    PublicationResourceBlockedError,
+                ):
                     toc = ()
             publication = NormalizedPublication(
                 identifier=f"urn:shuku:volume:{source_path.name}",
@@ -601,8 +656,16 @@ def _index_epub(
                 publication=publication,
                 entries_by_href={key: info.filename for key, info in entries.items()},
                 media_types_by_href=media_types,
+                required_hrefs=required_hrefs,
+                integrity_hrefs=integrity_hrefs,
             )
-    except (zipfile.BadZipFile, RuntimeError) as error:
+    except (
+        EOFError,
+        NotImplementedError,
+        RuntimeError,
+        ValueError,
+        zipfile.BadZipFile,
+    ) as error:
         raise PublicationStructureError("EPUB archive is invalid") from error
     except OSError as error:
         raise PublicationReadError("EPUB archive cannot be read") from error
@@ -622,19 +685,28 @@ class EpubPublicationAdapter(PublicationAdapter):
         href: str,
     ) -> PublicationResource:
         indexed = self._index(source)
-        key = _entry_key(href)
+        try:
+            key = _entry_key(href)
+        except (PublicationResourceNotFoundError, ValueError) as error:
+            raise PublicationResourceNotFoundError from error
         archive_name = indexed.entries_by_href.get(key)
         if archive_name is None or key not in indexed.media_types_by_href:
             raise PublicationResourceNotFoundError
+        media_type = indexed.media_types_by_href[key].split(";", 1)[0].strip().lower()
+        is_markup = key in indexed.required_hrefs or media_type in {
+            "application/xhtml+xml",
+            "text/html",
+            "image/svg+xml",
+        }
         try:
             with zipfile.ZipFile(indexed.source_path) as archive:
                 size_limit = (
                     MAX_MARKUP_RESOURCE_BYTES
-                    if indexed.media_types_by_href[key]
-                    in {"application/xhtml+xml", "text/html"}
+                    if is_markup or media_type == "text/css"
                     else MAX_SINGLE_RESOURCE_BYTES
                 )
-                if archive.getinfo(archive_name).file_size > size_limit:
+                info = archive.getinfo(archive_name)
+                if info.file_size > size_limit:
                     if size_limit == MAX_MARKUP_RESOURCE_BYTES:
                         raise publication_parser_limit(
                             ReaderSafetyRuleId.REFLOWABLE_MARKUP_MAX_BYTES,
@@ -644,9 +716,38 @@ class EpubPublicationAdapter(PublicationAdapter):
                         ReaderSafetyRuleId.COMMON_BINARY_RESOURCE_MAX_BYTES,
                         "Publication resource exceeds the byte limit",
                     )
-                content = archive.read(archive_name)
-        except (OSError, KeyError, zipfile.BadZipFile, RuntimeError) as error:
+                content = _read_archive_resource(
+                    archive,
+                    info,
+                    required=key in indexed.required_hrefs,
+                    integrity_failed=key in indexed.integrity_hrefs,
+                )
+        except (
+            EOFError,
+            KeyError,
+            NotImplementedError,
+            OSError,
+            RuntimeError,
+            ValueError,
+            zipfile.BadZipFile,
+        ) as error:
             raise PublicationReadError("EPUB resource cannot be read") from error
+        try:
+            if is_markup:
+                content = sanitize_markup_resource(content)
+            elif media_type == "text/css":
+                content = sanitize_css_resource(content)
+        except PublicationMarkupError as error:
+            if key in indexed.required_hrefs:
+                raise publication_integrity_failure(
+                    ReaderSafetyRuleId.REFLOWABLE_REQUIRED_READING_ORDER_MARKUP,
+                    "required EPUB content cannot be decoded or parsed",
+                ) from error
+            raise publication_integrity_failure(
+                ReaderSafetyRuleId.REFLOWABLE_OPTIONAL_RESOURCE_FAILURE,
+                "optional EPUB text resource cannot be decoded or parsed",
+                optional=True,
+            ) from error
         return PublicationResource(
             href=href,
             media_type=indexed.media_types_by_href[key],

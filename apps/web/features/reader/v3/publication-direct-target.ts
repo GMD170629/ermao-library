@@ -1,26 +1,15 @@
-type PublicationHrefUnit = { href?: string | null };
+import type { ReaderNavigationEntry } from '@shuku/reader-core';
 
-function normalizeHref(value: string, includeFragment = true) {
-  const trimmed = value.trim();
-  const fragmentIndex = trimmed.indexOf('#');
-  const path = (fragmentIndex >= 0 ? trimmed.slice(0, fragmentIndex) : trimmed)
-    .replace(/^\.\//, '')
-    .replace(/\\/g, '/')
-    .toLowerCase();
-  return includeFragment && fragmentIndex >= 0 ? `${path}${trimmed.slice(fragmentIndex)}` : path;
-}
-
-/** Only bootstrap-owned Publication TOC hrefs may become direct reader targets. */
-export function resolveRequestedPublicationHref(
-  units: PublicationHrefUnit[],
-  requestedHref: string | null | undefined
-) {
-  if (!requestedHref?.trim()) return null;
-  const requestedKey = normalizeHref(requestedHref);
-  const exact = units.find((unit) => unit.href && normalizeHref(unit.href) === requestedKey);
-  if (exact?.href) return exact.href;
-  if (requestedHref.includes('#')) return null;
-  return units.find((unit) => (
-    unit.href && normalizeHref(unit.href, false) === normalizeHref(requestedHref, false)
-  ))?.href ?? null;
+/** Explicit chapter intents are resolved only against the opened local publication. */
+export function resolveRequestedChapterHref(
+  entries: readonly ReaderNavigationEntry[],
+  navigationKey: string | null | undefined
+): string | null {
+  if (!navigationKey) return null;
+  for (const entry of entries) {
+    if (entry.navigationKey === navigationKey) return entry.href ?? null;
+    const child = resolveRequestedChapterHref(entry.children ?? [], navigationKey);
+    if (child) return child;
+  }
+  return null;
 }

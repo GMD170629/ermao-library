@@ -281,6 +281,28 @@ class AudioSessionStateMachineTest {
     }
 
     @Test
+    fun tracksRemainPlayableWhenPublicationHasNoExplicitChapters() {
+        val state = AudioPlaybackStateMachine()
+        val publication = publication("resource-1", twoTracks = true, withChapters = false)
+        val firstSource = commit(state, publication, autoplay = true)
+
+        assertTrue(state.snapshot().publication?.chapters?.isEmpty() == true)
+        assertTrue(state.selectChapter("missing-chapter").effects.isEmpty())
+
+        val nextTrack = state.nextChapter()
+        val secondSource = requireNotNull(nextTrack.snapshot.pendingSourceId)
+        assertNotEquals(firstSource, secondSource)
+        assertEquals(
+            "asset-2",
+            nextTrack.effects.first { it.type == AudioPlaybackEffectType.PrepareSource }.asset?.assetId,
+        )
+        assertEquals(AudioProgressSaveReason.TrackChange, nextTrack.effects.last { it.type == AudioPlaybackEffectType.SaveProgress }.progressReason)
+        state.enginePrepared(secondSource, 60_000)
+        val committed = state.engineCommitted(secondSource)
+        assertEquals("asset-2", committed.snapshot.currentAssetId)
+    }
+
+    @Test
     fun remoteReaderLocationSelectsTrackAndPlaybackPositionInOneTransition() {
         val state = AudioPlaybackStateMachine()
         val publication = publication("resource-1", twoTracks = true)
@@ -565,15 +587,21 @@ class AudioSessionStateMachineTest {
         return sourceId
     }
 
-    private fun publication(resourceId: String, twoTracks: Boolean = false): AudioPublication {
+    private fun publication(
+        resourceId: String,
+        twoTracks: Boolean = false,
+        withChapters: Boolean = true,
+    ): AudioPublication {
         val assets = buildList {
             add(asset(resourceId, "asset-1", 0))
             if (twoTracks) add(asset(resourceId, "asset-2", 1))
         }
         val chapters = buildList {
-            add(AudioChapter("chapter-1", "asset-1", 0, "One", 0, 30_000))
-            add(AudioChapter("chapter-2", "asset-1", 1, "Two", 30_000, 60_000))
-            if (twoTracks) add(AudioChapter("chapter-3", "asset-2", 2, "Three", 0, 60_000))
+            if (withChapters) {
+                add(AudioChapter("chapter-1", "asset-1", 0, "One", 0, 30_000))
+                add(AudioChapter("chapter-2", "asset-1", 1, "Two", 30_000, 60_000))
+                if (twoTracks) add(AudioChapter("chapter-3", "asset-2", 2, "Three", 0, 60_000))
+            }
         }
         return AudioPublication(
             namespace = namespace(),

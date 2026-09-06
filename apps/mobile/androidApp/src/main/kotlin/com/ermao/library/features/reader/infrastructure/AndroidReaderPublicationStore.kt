@@ -137,7 +137,7 @@ internal class AndroidReaderPublicationStore(
 
     companion object {
         const val EPUB_PARSER_VERSION = "epub-package:1"
-        const val EPUB_NORMALIZATION_VERSION = "shuku-epub-locator-dom-v3"
+        const val EPUB_NORMALIZATION_VERSION = "shuku-epub-locator-dom-v4"
         private const val PUBLICATION_DIRECTORY = "reader-publications-v3"
         private const val COPY_BUFFER_BYTES = 64 * 1024
         private const val MAX_RESOURCE_ID_LENGTH = 256

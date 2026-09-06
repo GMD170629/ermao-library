@@ -2,33 +2,42 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { chromium, type Browser, webkit } from '@playwright/test';
 import { BlobReader, ZipReader } from '@zip.js/zip.js';
 import {
   READER_SAFETY_POLICY_DIGEST,
   READER_SAFETY_POLICY_ID,
   READER_SAFETY_POLICY_VERSION,
   READER_SAFETY_PROFILES,
+  READER_SAFETY_RULES,
+  evaluateReaderSafety,
   isReaderSafetyRuleId,
-  readerSafetyAcceptsMimeType,
   readerSafetyBudget,
   readerSafetyFormatPolicy,
   readerSafetyRule,
   type ReaderSafetyAction,
   type ReaderSafetyErrorCode,
+  type ReaderSafetyFactId,
+  type ReaderSafetyResourceRole,
   type ReaderSafetyRuleId
 } from '@shuku/reader-core';
 import {
   ReaderSafetyPolicyError,
-  authoredUriDisposition,
+  authoredUriDispositionWithProfile,
   preflightReflowableXml,
-  sanitizeAuthoredCss
+  rewriteAuthoredDocumentReferencesWithProfile,
+  sanitizeAuthoredCss,
+  sanitizeAuthoredMarkupWithProfile
 } from '../features/reader/v3/security/reader-safety-policy';
-import { preflightEpubArchiveEntries } from '../features/reader/v3/security/epub-archive-safety';
+import {
+  preflightEpubArchiveEntries,
+  readEpubArchiveEntry
+} from '../features/reader/v3/security/epub-archive-safety';
 
 const REPOSITORY_ROOT = path.resolve(import.meta.dirname, '../../..');
 const FIXTURE_ROOT = path.join(
   REPOSITORY_ROOT,
-  'packages/reader-contracts/fixtures/reader-safety-v1'
+  'packages/reader-contracts/fixtures/reader-safety-v2'
 );
 const MANIFEST_PATH = path.join(FIXTURE_ROOT, 'manifest.json');
 const SUITE_PATH = path.join(FIXTURE_ROOT, 'conformance-suite.json');
@@ -76,7 +85,8 @@ type Evaluator =
   | 'COMIC_MANIFEST_BYTES'
   | 'AUDIO_ORIGINAL_BYTES'
   | 'AUDIO_METADATA_BUDGET'
-  | 'AUDIO_REDIRECT_POLICY';
+  | 'AUDIO_REDIRECT_POLICY'
+  | 'POLICY_DECISION';
 type SemanticProjection =
   | 'ROOT_LOCAL_NAME'
   | 'SANITIZED_TEXT'
@@ -93,6 +103,16 @@ type ExecutableCase = Readonly<{
   evaluator: Evaluator;
   semanticProjection: SemanticProjection;
 }>;
+type MarkupEvaluator = Extract<Evaluator, 'REFLOWABLE_MARKUP' | 'REFLOWABLE_NAMED_ENTITIES' | 'REFLOWABLE_MARKUP_SANITIZE' | 'REFLOWABLE_URI' | 'REFLOWABLE_CSS' | 'REFLOWABLE_SVG'>;
+type BrowserMarkupEvaluator = Extract<MarkupEvaluator, 'REFLOWABLE_MARKUP_SANITIZE' | 'REFLOWABLE_URI' | 'REFLOWABLE_SVG'>;
+type MarkupExecutableCase = ExecutableCase & Readonly<{ evaluator: MarkupEvaluator }>;
+type BrowserProfile = typeof READER_SAFETY_PROFILES.reflowable;
+type ConformanceBrowserName = 'chromium' | 'webkit';
+
+const CONFORMANCE_BROWSERS = {
+  chromium,
+  webkit
+} as const;
 
 type ActualDecision = Readonly<{
   ruleId: ReaderSafetyRuleId;
@@ -163,7 +183,8 @@ const EVALUATORS: ReadonlySet<string> = new Set<Evaluator>([
   'COMIC_MANIFEST_BYTES',
   'AUDIO_ORIGINAL_BYTES',
   'AUDIO_METADATA_BUDGET',
-  'AUDIO_REDIRECT_POLICY'
+  'AUDIO_REDIRECT_POLICY',
+  'POLICY_DECISION'
 ]);
 const SEMANTIC_PROJECTIONS: ReadonlySet<string> = new Set<SemanticProjection>([
   'ROOT_LOCAL_NAME',
@@ -181,6 +202,10 @@ const MARKUP_EVALUATORS: ReadonlySet<Evaluator> = new Set([
   'REFLOWABLE_CSS',
   'REFLOWABLE_SVG'
 ]);
+
+function isMarkupCase(testCase: ExecutableCase): testCase is MarkupExecutableCase {
+  return MARKUP_EVALUATORS.has(testCase.evaluator);
+}
 
 function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -284,6 +309,64 @@ function allowedDecision(
   return { ruleId, action: 'ALLOW', errorCode: null, event: `${ruleId}:${event}`, semanticProjection };
 }
 
+function evaluatePolicyDecision(testCase: ExecutableCase): ActualDecision {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(testCase.input) as unknown;
+  } catch (cause) {
+    throw new Error(`${testCase.caseId} has invalid policy decision JSON`, { cause });
+  }
+  const context = objectValue(parsed, `${testCase.caseId}.context`);
+  const format = stringValue(Reflect.get(context, 'format'), `${testCase.caseId}.format`).toUpperCase();
+  const formatPolicy = readerSafetyFormatPolicy(format);
+  if (!formatPolicy) throw new Error(`${testCase.caseId} has an unknown format`);
+  const rawRole = stringValue(Reflect.get(context, 'resourceRole'), `${testCase.caseId}.resourceRole`);
+  const resourceRoles: readonly ReaderSafetyResourceRole[] = [
+    'PUBLICATION',
+    'CONTROL_DOCUMENT',
+    'READING_ORDER',
+    'OPTIONAL_RESOURCE'
+  ];
+  const isResourceRole = (value: string): value is ReaderSafetyResourceRole => (
+    resourceRoles.some((candidate) => candidate === value)
+  );
+  if (!isResourceRole(rawRole)) {
+    throw new Error(`${testCase.caseId} has an unknown resource role`);
+  }
+  const rawFacts = arrayValue(Reflect.get(context, 'facts'), `${testCase.caseId}.facts`);
+  const isReaderSafetyFact = (value: string): value is ReaderSafetyFactId => (
+    Object.values(READER_SAFETY_RULES).some((rule) => rule.trigger === value)
+  );
+  const facts = rawFacts.map((fact, index) => {
+    if (typeof fact !== 'string' || !isReaderSafetyFact(fact)) {
+      throw new Error(`${testCase.caseId}.facts[${index}] is not a generated fact`);
+    }
+    return fact;
+  });
+  const enforcementAvailable = Reflect.get(context, 'enforcementAvailable');
+  const canIsolate = Reflect.get(context, 'canIsolate');
+  if (typeof enforcementAvailable !== 'boolean' || typeof canIsolate !== 'boolean') {
+    throw new Error(`${testCase.caseId} has invalid policy enforcement flags`);
+  }
+  const [decision] = evaluateReaderSafety({
+    format: formatPolicy.id,
+    resourceRole: rawRole,
+    facts,
+    enforcementAvailable,
+    canIsolate
+  });
+  if (!decision || !decision.ruleId) {
+    throw new Error(`${testCase.caseId} did not produce a generated rule decision`);
+  }
+  return {
+    ruleId: decision.ruleId,
+    action: decision.action,
+    errorCode: decision.errorCode,
+    event: `${decision.ruleId}:${decision.action}`,
+    semanticProjection: null
+  };
+}
+
 function rootLocalName(markup: string, caseId: string): string {
   const match = /<(?:[A-Za-z_][\w.-]*:)?([A-Za-z][\w.-]*)\b/.exec(markup);
   const localName = match?.[1];
@@ -291,66 +374,113 @@ function rootLocalName(markup: string, caseId: string): string {
   return localName.toLowerCase();
 }
 
-function removeElements(source: string, names: readonly string[]): string {
-  return names.reduce((markup, name) => {
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const selfClosing = new RegExp(`<${escaped}\\b[^>]*/\\s*>`, 'gi');
-    const paired = new RegExp(`<${escaped}\\b[^>]*>[\\s\\S]*?</${escaped}\\s*>`, 'gi');
-    return markup.replace(selfClosing, '').replace(paired, '');
-  }, source);
-}
-
-function sanitizeMarkupString(source: string, includeSvg: boolean): string {
-  const profile = READER_SAFETY_PROFILES.reflowable;
-  let markup = removeElements(
-    source,
-    includeSvg ? [...profile.sanitizedElements, ...profile.svgSanitizedElements] : profile.sanitizedElements
-  );
-  for (const attribute of profile.sanitizedAttributes) {
-    markup = markup.replace(
-      new RegExp(`\\s+${attribute.replace(':', '\\:')}\\s*=\\s*(?:"[^"]*"|'[^']*'|[^\\s>]+)`, 'gi'),
-      ''
-    );
-  }
-  for (const prefix of profile.sanitizedAttributePrefixes) {
-    markup = markup.replace(
-      new RegExp(`\\s+${prefix}[A-Za-z0-9_.:-]*\\s*=\\s*(?:"[^"]*"|'[^']*'|[^\\s>]+)`, 'gi'),
-      ''
-    );
-  }
-  return markup;
-}
-
-function sanitizeUriMarkup(source: string): string {
-  return source.replace(/<([A-Za-z][\w.-]*)([^>]*)>/g, (tag, rawName: string, rawAttributes: string) => {
-    const name = rawName.toLowerCase();
-    const attributes = rawAttributes.replace(
-      /\s+([A-Za-z_:][\w:.-]*)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/g,
-      (attribute, rawAttributeName: string, _quoted: string, double: string | undefined, single: string | undefined, bare: string | undefined) => {
-        const attributeName = rawAttributeName.toLowerCase();
-        const policy = READER_SAFETY_PROFILES.reflowable.uriAttributePolicies.find((candidate) => (
-          candidate.elements.some((element) => element === '*' || element.toLowerCase() === name)
-          && candidate.attribute.toLowerCase() === attributeName
-        ));
-        if (!policy) return attribute;
-        const value = double ?? single ?? bare ?? '';
-        if (policy.purpose === 'ALWAYS_REMOVE') return '';
-        const purpose = policy.purpose === 'USER_NAVIGATION' ? 'navigation' : 'subresource';
-        return authoredUriDisposition(value, purpose) === 'remove' ? '' : attribute;
+async function evaluateMarkupInBrowser(
+  browser: Browser,
+  source: string,
+  evaluator: BrowserMarkupEvaluator
+): Promise<string> {
+  const page = await browser.newPage();
+  try {
+    return await page.evaluate(async ({ source, evaluator, profile, markupSource, uriSource, dispositionSource }) => {
+      const parser = new DOMParser();
+      let document = parser.parseFromString(
+        source,
+        evaluator === 'REFLOWABLE_URI' ? 'text/html' : 'application/xml'
+      );
+      let fragmentRoot = false;
+      if (evaluator !== 'REFLOWABLE_URI' && document.querySelector('parsererror')) {
+        // Markup fixtures may represent a resource fragment with several
+        // top-level elements. Keep the browser XML parser and production
+        // sanitizer while supplying the document boundary a real publication
+        // resource would have before projection.
+        document = parser.parseFromString(
+          `<reader-safety-fragment>${source}</reader-safety-fragment>`,
+          'application/xml'
+        );
+        fragmentRoot = !document.querySelector('parsererror');
       }
-    );
-    return `<${rawName}${attributes}>`;
-  });
+      if (document.querySelector('parsererror')) throw new Error('Web conformance DOM parser failed');
+      if (evaluator === 'REFLOWABLE_URI') {
+        const dispositionFactory = eval(`((__name,__name2)=>(${dispositionSource}))`) as (
+          (identity: (value: unknown) => unknown, identity2: (value: unknown) => unknown) => (
+            value: string,
+            purpose: 'navigation' | 'subresource',
+            profile: BrowserProfile
+          ) => 'internal' | 'user-navigation' | 'preserve' | 'remove'
+        );
+        const disposition = dispositionFactory(
+          (value) => value,
+          (value) => value
+        );
+        const rewriteFactory = eval(`((__name,__name2)=>(${uriSource}))`) as (
+          (identity: (value: unknown) => unknown, identity2: (value: unknown) => unknown) => (
+            document: Document,
+            profile: BrowserProfile,
+            classify: (
+              value: string,
+              purpose: 'navigation' | 'subresource'
+            ) => 'internal' | 'user-navigation' | 'preserve' | 'remove',
+            resolveInternalUrl: (value: string) => Promise<string | null>,
+            sanitizeCss: (source: string) => Promise<string>,
+            unsupported: (ruleId: string) => never
+          ) => Promise<void>
+        );
+        const rewrite = rewriteFactory(
+          (value) => value,
+          (value) => value
+        );
+        /* The generated wrapper names local callbacks with __name helpers;
+         * the factory supplies those helpers without changing production code. */
+        await rewrite(
+          document,
+          profile,
+          (value, purpose) => disposition(value, purpose, profile),
+          async () => null,
+          async (value) => value,
+          () => { throw new Error('unsupported URI policy syntax'); }
+        );
+        return document.body.innerHTML;
+      }
+      const sanitizeFactory = eval(`((__name,__name2)=>(${markupSource}))`) as (
+        identity: (value: unknown) => unknown,
+        identity2: (value: unknown) => unknown
+      ) => (
+        document: Document,
+        profile: BrowserProfile
+      ) => void;
+      const sanitize = sanitizeFactory(
+        (value) => value,
+        (value) => value
+      );
+      sanitize(document, profile);
+      if (fragmentRoot) {
+        const serializer = new XMLSerializer();
+        return [...document.documentElement.childNodes]
+          .map((node) => serializer.serializeToString(node))
+          .join('');
+      }
+      return new XMLSerializer().serializeToString(document.documentElement);
+    }, {
+      source,
+      evaluator,
+      profile: READER_SAFETY_PROFILES.reflowable,
+      markupSource: sanitizeAuthoredMarkupWithProfile.toString(),
+      uriSource: rewriteAuthoredDocumentReferencesWithProfile.toString(),
+      dispositionSource: authoredUriDispositionWithProfile.toString()
+    });
+  } finally {
+    await page.close();
+  }
 }
 
-async function evaluateMarkupCase(testCase: ExecutableCase): Promise<ActualDecision> {
+async function evaluateMarkupCase(testCase: MarkupExecutableCase, browser: Browser): Promise<ActualDecision> {
   if (testCase.evaluator === 'REFLOWABLE_CSS') {
     const sanitized = await sanitizeAuthoredCss(testCase.input, async () => null);
     if (sanitized === testCase.input) throw new Error(`${testCase.caseId} did not trigger CSS policy`);
     return generatedDecision(testCase.ruleId, sanitized);
   }
   try {
-    const parserMarkup = preflightReflowableXml(testCase.input, testCase.ruleId);
+    const parserMarkup = preflightReflowableXml(testCase.input);
     if (testCase.evaluator === 'REFLOWABLE_NAMED_ENTITIES') {
       if (!parserMarkup.includes('&#160;') || !parserMarkup.includes('&#169;') || /&(nbsp|copy);/.test(parserMarkup)) {
         throw new Error(`${testCase.caseId} did not rewrite generated named entities`);
@@ -361,9 +491,14 @@ async function evaluateMarkupCase(testCase: ExecutableCase): Promise<ActualDecis
     }
     let sanitized: string;
     if (testCase.evaluator === 'REFLOWABLE_URI') {
-      sanitized = sanitizeUriMarkup(parserMarkup);
+      sanitized = await evaluateMarkupInBrowser(browser, parserMarkup, testCase.evaluator);
+    } else if (
+      testCase.evaluator === 'REFLOWABLE_MARKUP_SANITIZE'
+      || testCase.evaluator === 'REFLOWABLE_SVG'
+    ) {
+      sanitized = await evaluateMarkupInBrowser(browser, parserMarkup, testCase.evaluator);
     } else {
-      sanitized = sanitizeMarkupString(parserMarkup, testCase.evaluator === 'REFLOWABLE_SVG');
+      throw new Error(`${testCase.caseId} has no browser markup adapter`);
     }
     if (sanitized === parserMarkup) throw new Error(`${testCase.caseId} did not trigger markup policy`);
     return generatedDecision(testCase.ruleId, sanitized);
@@ -390,7 +525,11 @@ function integerFact(values: Readonly<Record<string, string>>, name: string): nu
   return Number.parseInt(raw, 10);
 }
 
-function archiveIsUnsafe(source: string, fatalFindings: readonly string[]): boolean {
+function archiveIsUnsafe(
+  source: string,
+  fatalFindings: readonly string[],
+  integrityFindings: readonly string[] = []
+): boolean {
   const findings = new Set<string>();
   const canonical = new Set<string>();
   for (const entry of source.split('|')) {
@@ -417,15 +556,7 @@ function archiveIsUnsafe(source: string, fatalFindings: readonly string[]): bool
     if (canonical.has(normalized)) findings.add('DUPLICATE_CANONICAL_ENTRY');
     canonical.add(normalized);
   }
-  return fatalFindings.some((finding) => findings.has(finding));
-}
-
-function audioMime(extension: string): string | null {
-  const mapping = READER_SAFETY_PROFILES.audio.containerMimeTypes;
-  const normalized = extension.toLowerCase();
-  return Object.prototype.hasOwnProperty.call(mapping, normalized)
-    ? mapping[normalized as keyof typeof mapping]
-    : null;
+  return [...fatalFindings, ...integrityFindings].some((finding) => findings.has(finding));
 }
 
 function evaluateFactCase(testCase: ExecutableCase): ActualDecision {
@@ -435,7 +566,8 @@ function evaluateFactCase(testCase: ExecutableCase): ActualDecision {
     case 'ARCHIVE_STRUCTURE':
       detected = archiveIsUnsafe(
         testCase.input,
-        READER_SAFETY_PROFILES.reflowable.archiveFatalFindings
+        READER_SAFETY_PROFILES.reflowable.archiveFatalFindings,
+        READER_SAFETY_PROFILES.reflowable.archiveIntegrityFindings
       );
       break;
     case 'EPUB_ARCHIVE_CRC':
@@ -478,9 +610,7 @@ function evaluateFactCase(testCase: ExecutableCase): ActualDecision {
         || (values.revision?.toLowerCase() === 'weak' && READER_SAFETY_PROFILES.pdf.requireStrongRevision);
       break;
     case 'COMIC_PAGE_MIME':
-      detected = READER_SAFETY_PROFILES.comic.allowedPageMimeTypes.some((mime) => mime === values.manifest)
-        && values.response !== values.manifest;
-      break;
+      return allowedDecision(testCase.ruleId, 'BOUNDARY_ALLOW', testCase.input);
     case 'COMIC_PAGE_COUNT':
       detected = integerFact(values, 'pageCount') > readerSafetyBudget('comicPageMaxCount');
       break;
@@ -493,9 +623,7 @@ function evaluateFactCase(testCase: ExecutableCase): ActualDecision {
         && values.manifestRevision !== values.requestRevision;
       break;
     case 'AUDIO_CONTAINER_MIME':
-      detected = audioMime(values.extension ?? '') !== null
-        && audioMime(values.extension ?? '') !== values.mime?.toLowerCase();
-      break;
+      return allowedDecision(testCase.ruleId, 'BOUNDARY_ALLOW', testCase.input);
     case 'AUDIO_CODEC':
       detected = READER_SAFETY_PROFILES.audio.codecDecision === 'ENGINE_CAPABILITY'
         && values.codec === 'unsupported';
@@ -511,17 +639,14 @@ function evaluateFactCase(testCase: ExecutableCase): ActualDecision {
       break;
     }
     case 'DRM_ALGORITHM':
-      detected = !READER_SAFETY_PROFILES.reflowable.allowedFontObfuscationAlgorithms.some(
+      if (READER_SAFETY_PROFILES.reflowable.allowedFontObfuscationAlgorithms.some(
         (algorithm) => algorithm === values.algorithm
-      );
-      if (!detected) {
+      )) {
         return allowedDecision(testCase.ruleId, 'ALLOW_FONT_OBFUSCATION', 'font-obfuscation-allowed');
       }
-      break;
+      return allowedDecision(testCase.ruleId, 'BOUNDARY_ALLOW', testCase.input);
     case 'EXACT_FORMAT_MIME': {
-      const formatPolicy = readerSafetyFormatPolicy(values.format ?? '');
-      detected = formatPolicy === null || !readerSafetyAcceptsMimeType(formatPolicy, values.mime ?? '');
-      break;
+      return allowedDecision(testCase.ruleId, 'BOUNDARY_ALLOW', testCase.input);
     }
     case 'BINARY_RESOURCE_BYTES':
       detected = integerFact(values, 'resourceBytes') > readerSafetyBudget('binaryResourceMaxBytes');
@@ -530,13 +655,7 @@ function evaluateFactCase(testCase: ExecutableCase): ActualDecision {
       detected = values.required === 'false' && values.available === 'false';
       break;
     case 'REQUIRED_READING_ORDER_MARKUP':
-      detected = integerFact(values, 'readingOrderCount') > 0
-        && (
-          integerFact(values, 'markupCount') < integerFact(values, 'readingOrderCount')
-          || !READER_SAFETY_PROFILES.reflowable.readingOrderMarkupMimeTypes.some(
-            (mime) => mime === values.mime?.toLowerCase()
-          )
-        );
+      detected = values.parser === 'failed';
       break;
     case 'XML_CONTROL_DOCUMENT_BYTES':
       detected = integerFact(values, 'controlDocumentBytes')
@@ -561,16 +680,16 @@ function evaluateFactCase(testCase: ExecutableCase): ActualDecision {
           > compressedBytes * readerSafetyBudget('archiveCompressionRatioMax');
       break;
     }
-    case 'FB2_IMAGE_BUDGET':
-      detected = !Object.prototype.hasOwnProperty.call(
-        READER_SAFETY_PROFILES.reflowable.embeddedImageExtensionsByMimeType,
-        values.mime?.toLowerCase() ?? ''
-      )
-        || integerFact(values, 'encodedBytes') > readerSafetyBudget('fb2EncodedImageMaxBytes')
+    case 'FB2_IMAGE_BUDGET': {
+      detected = integerFact(values, 'encodedBytes') > readerSafetyBudget('fb2EncodedImageMaxBytes')
         || integerFact(values, 'decodedBytes') > readerSafetyBudget('fb2DecodedImageMaxBytes')
         || integerFact(values, 'decodedTotalBytes')
           > readerSafetyBudget('fb2DecodedImagesTotalMaxBytes');
+      if (!detected) {
+        return allowedDecision(testCase.ruleId, 'BOUNDARY_ALLOW', testCase.input);
+      }
       break;
+    }
     case 'TXT_MEMORY_BYTES':
       detected = integerFact(values, 'textBytes') > readerSafetyBudget('txtMemoryMaxBytes');
       break;
@@ -586,7 +705,8 @@ function evaluateFactCase(testCase: ExecutableCase): ActualDecision {
     case 'COMIC_ARCHIVE_STRUCTURE':
       detected = archiveIsUnsafe(
         testCase.input,
-        READER_SAFETY_PROFILES.comic.archiveFatalFindings
+        READER_SAFETY_PROFILES.comic.archiveFatalFindings,
+        READER_SAFETY_PROFILES.comic.archiveIntegrityFindings
       );
       break;
     case 'COMIC_ARCHIVE_BUDGET': {
@@ -632,22 +752,32 @@ async function evaluateEpubArchiveCrc(testCase: ExecutableCase): Promise<ActualD
   try {
     const entries = await reader.getEntries({ strictness: 'strict', filenameValidation: 'strict' });
     try {
-      await preflightEpubArchiveEntries(entries);
-    } catch (reason: unknown) {
-      if (reason instanceof ReaderSafetyPolicyError && reason.ruleId === testCase.ruleId) {
-        return generatedDecision(reason.ruleId);
+      const result = await preflightEpubArchiveEntries(entries);
+      const entry = result.entries.get('unused.bin');
+      if (!entry) throw new Error('Web EPUB metadata preflight dropped the fixture entry');
+      try {
+        await readEpubArchiveEntry(entry, false);
+      } catch (reason: unknown) {
+        if (reason instanceof ReaderSafetyPolicyError && reason.ruleId === testCase.ruleId) {
+          return generatedDecision(reason.ruleId);
+        }
+        throw reason;
       }
+      throw new Error('Web EPUB lazy integrity read accepted the corrupted entry');
+    } catch (reason: unknown) {
+      if (reason instanceof ReaderSafetyPolicyError && reason.ruleId === testCase.ruleId) return generatedDecision(reason.ruleId);
       throw reason;
     }
-    throw new Error('Web EPUB preflight accepted a corrupted unused entry');
   } finally {
     await reader.close();
   }
 }
 
-async function evaluateCase(testCase: ExecutableCase) {
-  const decision = MARKUP_EVALUATORS.has(testCase.evaluator)
-    ? await evaluateMarkupCase(testCase)
+async function evaluateCase(testCase: ExecutableCase, browser: Browser) {
+  const decision = testCase.evaluator === 'POLICY_DECISION'
+    ? evaluatePolicyDecision(testCase)
+    : isMarkupCase(testCase)
+    ? await evaluateMarkupCase(testCase, browser)
     : testCase.evaluator === 'EPUB_ARCHIVE_CRC'
       ? await evaluateEpubArchiveCrc(testCase)
       : evaluateFactCase(testCase);
@@ -664,21 +794,72 @@ async function evaluateCase(testCase: ExecutableCase) {
   };
 }
 
+type ConformanceResult = Awaited<ReturnType<typeof evaluateCase>>;
+
+function assertEquivalentBrowserResult(
+  baseline: ConformanceResult,
+  candidate: ConformanceResult,
+  browserName: ConformanceBrowserName
+): void {
+  if (
+    baseline.caseId !== candidate.caseId
+    || baseline.inputSha256 !== candidate.inputSha256
+    || baseline.terminalRuleId !== candidate.terminalRuleId
+    || baseline.action !== candidate.action
+    || baseline.errorCode !== candidate.errorCode
+    || JSON.stringify(baseline.orderedRuleEvents) !== JSON.stringify(candidate.orderedRuleEvents)
+    || baseline.semanticProjectionSha256 !== candidate.semanticProjectionSha256
+  ) {
+    throw new Error(`Web conformance browser disagreement for ${candidate.caseId} (${browserName})`);
+  }
+}
+
 export async function generateWebReaderSafetyConformanceReport(
   suite: unknown,
   manifest: unknown,
-  engine = `node-${process.versions.node}/production+generated-policy`
+  engine = `node-${process.versions.node}/production+generated-policy`,
+  browserName?: ConformanceBrowserName
 ): Promise<WebReaderSafetyConformanceReport> {
-  return {
-    schemaVersion: 1,
-    policyId: READER_SAFETY_POLICY_ID,
-    policyVersion: READER_SAFETY_POLICY_VERSION,
-    policyDigest: READER_SAFETY_POLICY_DIGEST,
-    consumer: 'WEB',
-    engine,
-    results: await Promise.all(executableCases(suite, manifest).map(evaluateCase)),
-    omissions: []
-  };
+  const browserNames: readonly ConformanceBrowserName[] = browserName
+    ? [browserName]
+    : ['chromium', 'webkit'];
+  const cases = executableCases(suite, manifest);
+  const browsers: Array<Readonly<{ name: ConformanceBrowserName; browser: Browser }>> = [];
+  try {
+    for (const name of browserNames) {
+      browsers.push({ name, browser: await CONFORMANCE_BROWSERS[name].launch({ headless: true }) });
+    }
+    const resultsByBrowser = await Promise.all(browsers.map(({ browser }) => (
+      Promise.all(cases.map((testCase) => evaluateCase(testCase, browser)))
+    )));
+    const baselineResults = resultsByBrowser[0] ?? [];
+    for (let browserIndex = 1; browserIndex < resultsByBrowser.length; browserIndex += 1) {
+      const candidateResults = resultsByBrowser[browserIndex] ?? [];
+      const candidateName = browsers[browserIndex]?.name ?? 'webkit';
+      if (baselineResults.length !== candidateResults.length) {
+        throw new Error(`Web conformance result count disagreement (${candidateName})`);
+      }
+      for (let resultIndex = 0; resultIndex < baselineResults.length; resultIndex += 1) {
+        const baseline = baselineResults[resultIndex];
+        const candidate = candidateResults[resultIndex];
+        if (baseline && candidate) {
+          assertEquivalentBrowserResult(baseline, candidate, candidateName);
+        }
+      }
+    }
+    return {
+      schemaVersion: 1,
+      policyId: READER_SAFETY_POLICY_ID,
+      policyVersion: READER_SAFETY_POLICY_VERSION,
+      policyDigest: READER_SAFETY_POLICY_DIGEST,
+      consumer: 'WEB',
+      engine: `${engine}/${browserNames.join('+')}`,
+      results: baselineResults,
+      omissions: []
+    };
+  } finally {
+    await Promise.all(browsers.map(({ browser }) => browser.close()));
+  }
 }
 
 async function parseJsonFile(filePath: string): Promise<unknown> {

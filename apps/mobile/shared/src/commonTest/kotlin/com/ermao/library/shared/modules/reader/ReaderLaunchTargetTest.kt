@@ -14,8 +14,10 @@ class ReaderLaunchTargetTest {
         assertFalse(matchesReaderNavigationHref("other.xhtml", "chapter.xhtml#p2", setOf("p2"), "#p2"))
         assertFalse(matchesReaderNavigationHref("chapter.xhtml", "chapter.xhtml#p2", emptySet(), "#p20"))
     }
-    @Test fun reflowableUsesServerHref() {
-        assertEquals(ReaderNavigationTargetReflowable("Text/chapter.xhtml#p2"), readingUnitLaunchTarget("reflowable", "Text/chapter.xhtml#p2", null))
+    @Test fun reflowableUsesChapterIdentityAndRejectsHrefOnlyLaunch() {
+        assertEquals(ReaderNavigationTargetChapter("chapter-1"), readingUnitLaunchTarget("reflowable", "wrong.xhtml", null, "chapter-1"))
+        assertIs<ReaderNavigationTargetInvalid>(readingUnitLaunchTarget("reflowable", "Text/chapter.xhtml#p2", null))
+        assertEquals(ReaderNavigationTargetChapter("chapter-1"), decodeReaderLaunchTarget(encodeReaderLaunchTarget(ReaderNavigationTargetChapter("chapter-1"))))
     }
 
     @Test fun pdfUsesOneBasedServerPageNumber() {

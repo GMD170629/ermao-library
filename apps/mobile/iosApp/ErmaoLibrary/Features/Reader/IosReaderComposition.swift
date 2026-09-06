@@ -497,7 +497,6 @@ final class IosReaderComposition: ObservableObject {
             resourceID: source.resourceId,
             displayTitle: source.displayTitle,
             sourceFormat: exactSourceFormat,
-            canonicalNavigation: [],
             preferences: preferencesStore.load(),
             managedStore: managedStore,
             progressStore: progressStore,
@@ -548,7 +547,7 @@ final class IosReaderComposition: ObservableObject {
     private static func localParserVersion(for format: ErmaoShared.ReaderSourceFormat) -> String {
         switch format {
         case .epub: "epub-package:1"
-        case .txt: "shuku-txt-parser-v1"
+        case .txt: "ermao-chapters:1"
         case .fb2: "shuku-fb2-parser-v1"
         case .cbz, .zip, .cbr, .rar: "libarchive-3.8.9:zip-rar-rar5-read-only"
         case .imagedir: "original-page-set-v1"
@@ -559,8 +558,8 @@ final class IosReaderComposition: ObservableObject {
 
     private static func localNormalizationVersion(for format: ErmaoShared.ReaderSourceFormat) -> String {
         switch format {
-        case .epub: "shuku-epub-locator-dom-v3"
-        case .txt: "shuku-txt-publication-v2"
+        case .epub: "shuku-epub-locator-dom-v4"
+        case .txt: "shuku-txt-publication-v3"
         case .fb2: "shuku-fb2-publication-v2"
         case .cbz, .zip, .cbr, .rar: "shuku-comic-pages-v1"
         case .imagedir: "shuku-image-dir-pages-v1"

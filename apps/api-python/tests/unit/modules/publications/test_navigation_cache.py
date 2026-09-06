@@ -30,15 +30,19 @@ def _publication() -> NormalizedPublication:
         toc=(
             PublicationTocEntry(
                 href="Text/part.xhtml#part",
+                navigation_key="chapter-0",
                 title="第一部",
                 children=(
                     PublicationTocEntry(
                         href="Text/part.xhtml#chapter-1",
+                        navigation_key="chapter-1",
                         title="第一章",
                     ),
                 ),
             ),
-            PublicationTocEntry(href="Text/end.xhtml", title="尾声"),
+            PublicationTocEntry(
+                navigation_key="chapter-2", href="Text/end.xhtml", title="尾声"
+            ),
         ),
     )
 
@@ -59,8 +63,14 @@ def test_flatten_navigation_is_zero_based_preorder_with_stable_metadata() -> Non
     assert [entry.path for entry in first] == [(0,), (0, 0), (1,)]
     assert [entry.level for entry in first] == [0, 1, 0]
     assert [entry.reading_order_position for entry in first] == [1, 1, 2]
-    assert all(entry.id == entry.navigation_key for entry in first)
-    assert all(entry.id.startswith("pubnav_") for entry in first)
+    assert [entry.navigation_key for entry in first] == [
+        "chapter-0",
+        "chapter-1",
+        "chapter-2",
+    ]
+    assert all(
+        entry.id == f"resource-navigation:{entry.navigation_key}" for entry in first
+    )
     assert [entry.media_type for entry in first] == [
         "application/xhtml+xml",
         "application/xhtml+xml",

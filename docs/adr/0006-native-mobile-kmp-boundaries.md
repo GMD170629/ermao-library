@@ -5,16 +5,11 @@
 
 ## Context
 
-The previous `apps/mobile` contents were untracked Expo/React Native generated artifacts
-without an iOS application or reusable business implementation. The mobile product
-baseline requires native platform navigation and controls, four independently restored
-top-level destinations, server-profile isolation, cookie sessions, explicit TLS risk
-handling, and a shared interpretation of the backend contracts.
-
-Sharing all UI would weaken the platform behavior required by the mobile visual and
-navigation specifications. Splitting every capability into a separate Kotlin module at
-the bootstrap stage would instead add framework export and Swift interop complexity before
-those capabilities have independent build or lifecycle needs.
+The mobile product requires native platform navigation and controls, independently
+restored top-level destinations, server-profile isolation, cookie sessions, explicit
+TLS risk handling, and one shared interpretation of the backend contracts. UI and
+platform lifecycle behavior remain native while stable domain and wire behavior is
+shared through KMP.
 
 ## Decision
 
@@ -65,6 +60,7 @@ phase. CocoaPods and experimental Swift Export are not part of the bootstrap arc
   platform adapters before release.
 - Cookie/TLS clients are profile scoped; no global certificate bypass or cross-profile
   cache is permitted.
-- The Stage 0 Android gate can be closed on the current development environment after
-  emulator and real test-server verification. The iOS gate remains open until the same
-  source revision passes KMP iOS tests and Xcode build/test on macOS.
+- Android and iOS runtime acceptance requires the selected physical device and the
+  real test server. Emulator, simulator, compilation or host-only checks cannot close
+  a device gate; platform-specific gates remain open until their physical-device
+  evidence is recorded.

@@ -63,13 +63,19 @@ class ReaderSafetyConformanceContractTests(unittest.TestCase):
         }
 
     def test_suite_is_policy_bound_and_uses_real_cross_platform_consumers(self) -> None:
-        self.assertEqual(48, len(self.suite_cases))
-        self.assertEqual(41, len({case.rule_id for case in self.suite_cases}))
+        self.assertGreaterEqual(len(self.suite_cases), 59)
+        policy = json.loads(
+            (CONTRACT_ROOT / "reader-safety-policy.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            {rule["id"] for rule in policy["rules"]},
+            {case.rule_id for case in self.suite_cases},
+        )
         self.assertEqual(
             set(self.expected), {case.case_id for case in self.suite_cases}
         )
         self.assertEqual(
-            {"BACKEND", "WEB", "KMP", "ANDROID"},
+            {"BACKEND", "WEB", "KMP", "ANDROID", "IOS"},
             set(
                 next(
                     case
@@ -88,14 +94,22 @@ class ReaderSafetyConformanceContractTests(unittest.TestCase):
                 ).consumers
             ),
         )
-        self.assertEqual(
-            48,
-            sum("ANDROID" in case.consumers for case in self.suite_cases),
-        )
-        self.assertEqual(
-            6,
-            sum("IOS" in case.consumers for case in self.suite_cases),
-        )
+        consumers_by_rule = {
+            rule["id"]: rule["requiredConsumers"] for rule in policy["rules"]
+        }
+        for consumer in ("ANDROID", "IOS"):
+            self.assertEqual(
+                {
+                    case.case_id
+                    for case in self.suite_cases
+                    if consumer in consumers_by_rule[case.rule_id]
+                },
+                {
+                    case.case_id
+                    for case in self.suite_cases
+                    if consumer in case.consumers
+                },
+            )
 
     def test_ios_report_is_a_first_class_native_execution_owner(self) -> None:
         report = self.report("IOS")
@@ -118,6 +132,19 @@ class ReaderSafetyConformanceContractTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 ValueError,
                 "suite platform execution owners differ",
+            ):
+                self.verifier.load_suite_and_expected(suite_path=suite_path)
+
+    def test_non_audio_ios_execution_cannot_be_omitted_or_replaced_by_kmp(self) -> None:
+        suite = copy.deepcopy(self.suite)
+        xml = next(case for case in suite["cases"] if case["id"] == "safe-ncx-doctype")
+        self.assertIn("KMP", xml["consumers"])
+        xml["consumers"].remove("IOS")
+        with tempfile.TemporaryDirectory() as directory:
+            suite_path = Path(directory) / "suite.json"
+            suite_path.write_text(json.dumps(suite), encoding="utf-8")
+            with self.assertRaisesRegex(
+                ValueError, "suite platform execution owners differ"
             ):
                 self.verifier.load_suite_and_expected(suite_path=suite_path)
 

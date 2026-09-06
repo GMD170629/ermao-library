@@ -13,8 +13,9 @@
     "chapterPresentation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["href", "title", "index"],
+      "required": ["href", "title", "index", "navigationKey"],
       "properties": {
+        "navigationKey": {"type": ["string", "null"], "maxLength": 256},
         "href": {
           "oneOf": [
             {"type": "string", "maxLength": 8192},

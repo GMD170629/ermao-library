@@ -20,7 +20,6 @@ import { ResourceSelect } from '../../components/ui/resource-select';
 import { useI18n } from '../../i18n/provider';
 import { isDarkReaderTheme, readerThemeSurfaces } from './reader-theme';
 import type { ReaderBookmark } from './v3/bookmarks';
-import { resolveActiveEpubNavigationIndex } from './v3/epub-navigation';
 import type { ReaderInteractionPolicy } from './v3/adapters/reader-interaction';
 import { hasActiveTextSelection, isReaderControlTarget, isReaderKeyboardControlTarget, ReaderKeyboardNavigationController, readerKeyIntent, readerPinchZoom, readerPointerIntentInViewport, readerSwipeIntent, type ReaderInputIntent } from './v3/input-router';
 import {
@@ -194,15 +193,7 @@ function activeNavigationItem(readerType: ReaderKind, items: ReaderNavigationIte
   if (navigationKey) {
     return items.find((item) => item.navigationKey === navigationKey) ?? null;
   }
-  const href = progressExtra.currentHref ?? progressExtra.chapterHref;
-  const sectionIndex = numberFromExtra(progressExtra.sectionIndex);
-  const index = resolveActiveEpubNavigationIndex(items, href, sectionIndex);
-  if (index !== null) return items[index] ?? null;
-  const chapterIndex = numberFromExtra(progressExtra.chapterIndex);
-  if (chapterIndex !== null) {
-    return items.find((item) => item.index === chapterIndex) ?? items[Math.floor(chapterIndex)] ?? null;
-  }
-  return sectionIndex === null ? null : items[Math.floor(sectionIndex)] ?? null;
+  return null;
 }
 
 function precisePercent(value: number, readerType: ReaderKind, locale: string) {
@@ -288,7 +279,9 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
   const dark = isDarkReaderTheme(settings.theme);
   const themeSurface = readerThemeSurfaces[settings.theme];
   const availableNavigationItems = navItems.length > 0 ? navItems : resourceNavigation?.pages ?? [];
-  const chapterNavigationItems = availableNavigationItems;
+  const chapterNavigationItems = readerType === 'reflowable'
+    ? availableNavigationItems.filter((item) => Boolean(item.href))
+    : availableNavigationItems;
   const currentNavigationItem = activeNavigationItem(readerType, chapterNavigationItems, progress, progressExtra);
   const currentNavigationIndex = currentNavigationItem
     ? chapterNavigationItems.findIndex((item) => navigationItemKey(item) === navigationItemKey(currentNavigationItem))
@@ -1062,11 +1055,6 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                   <div role="tabpanel" data-pwa-scroll="true" className="shuku-reader-control-border mt-4 min-h-0 overflow-auto rounded-2xl border p-5 text-center">
                     <Highlighter className="mx-auto opacity-45" size={24} />
                     <div className="mt-3 text-sm font-medium">{annotationTab === 'book' ? i18nAttribute("暂无可展示的书内注释") : i18nAttribute("还没有划线或批注")}</div>
-                    <p className="mx-auto mt-2 max-w-xs text-xs leading-5 opacity-60">
-                      {annotationTab === 'book'
-                        ? i18nAttribute("当前资源尚未建立注释索引；后续接入 EPUB 脚注与尾注解析后会集中显示在这里。")
-                        : i18nAttribute("划线、批注与跨设备同步的数据层尚未接入；这里先保留统一入口与完整的响应式结构。")}
-                    </p>
                   </div>
                 </div>
               ) : null}
@@ -1416,7 +1404,7 @@ function ResourceNavigationPanel({ navigation, readerType, activeItemKey, dark, 
               key={`${item.index}-${item.title}`}
               type="button"
               aria-current={activeItemKey && navigationItemKey(item) === activeItemKey ? 'location' : undefined}
-              disabled={navigation.loading}
+              disabled={navigation.loading || (!isComic && !item.href)}
               onClick={() => onJumpItem(item)}
               className={cn(
                 isComic ? 'min-h-11 rounded-xl px-2 text-sm tabular-nums transition active:scale-[0.98] disabled:cursor-wait disabled:opacity-60' : 'flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition active:scale-[0.99] disabled:cursor-wait disabled:opacity-60',
@@ -1493,7 +1481,8 @@ function ReaderPreferencesPanel({ panel, settings, readerType, dark, updateSetti
       preferences
     });
     const disabled = state.availability !== 'available';
-    const description = state.reason
+    const actionableReasons = ['scrollingMode', 'requiresDoubleSpread', 'optimizationDisabled', 'publisherStylesActive', 'verticalWritingMode'];
+    const description = state.reason && actionableReasons.includes(state.reason)
       ? t(READER_SETTINGS_CATALOG.availabilityReasons[state.reason]['zh-CN'])
       : undefined;
     if (id === 'theme') return <ThemeSwatches key={id} value={settings.theme} onChange={(value) => update(id, value)} dark={dark} />;

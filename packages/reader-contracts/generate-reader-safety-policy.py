@@ -13,10 +13,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_ROOT = ROOT / "packages/reader-contracts"
 SOURCE = CONTRACT_ROOT / "reader-safety-policy.json"
-SCHEMA = CONTRACT_ROOT / "schemas/reader-safety-policy-v1.schema.json"
-FIXTURES = CONTRACT_ROOT / "fixtures/reader-safety-v1/manifest.json"
+SCHEMA = CONTRACT_ROOT / "schemas/reader-safety-policy-v2.schema.json"
+FIXTURES = CONTRACT_ROOT / "fixtures/reader-safety-v2/manifest.json"
 FIXTURE_SCHEMA = CONTRACT_ROOT / "schemas/reader-safety-fixture-manifest-v1.schema.json"
-NORMALIZATION_V3_ROOT = CONTRACT_ROOT / "fixtures/normalization-v3"
+NORMALIZATION_V4_ROOT = CONTRACT_ROOT / "fixtures/normalization-v4"
 TS_TARGET = ROOT / "packages/reader-core/src/reader-safety-policy.generated.ts"
 KT_TARGET = ROOT / (
     "apps/mobile/shared/src/commonMain/kotlin/com/ermao/library/shared/"
@@ -40,6 +40,7 @@ TOP_LEVEL_KEYS = {
     "profiles",
     "rules",
     "platformDefenses",
+    "defaultAction",
 }
 ACTIONS = {"ALLOW", "SANITIZE", "BLOCK_RESOURCE", "REJECT_PUBLICATION"}
 MORPHOLOGIES = {"REFLOWABLE", "PDF", "COMIC", "AUDIO"}
@@ -110,14 +111,16 @@ def validate_policy(value: object) -> dict[str, object]:
 
     if not isinstance(value, dict) or set(value) != TOP_LEVEL_KEYS:
         raise ValueError("Reader safety policy has unexpected top-level fields")
-    if value["$schema"] != "./schemas/reader-safety-policy-v1.schema.json":
-        raise ValueError("Reader safety policy must reference the v1 schema")
-    if value["schemaVersion"] != 1:
-        raise ValueError("Reader safety policy schema version must be 1")
+    if value["$schema"] != "./schemas/reader-safety-policy-v2.schema.json":
+        raise ValueError("Reader safety policy must reference the v2 schema")
+    if value["schemaVersion"] != 2:
+        raise ValueError("Reader safety policy schema version must be 2")
     if type(value["policyVersion"]) is not int or value["policyVersion"] < 1:
         raise ValueError("Reader safety policy version must be a positive integer")
     if value["policyId"] != "shuku.reader-safety":
         raise ValueError("Reader safety policy id is invalid")
+    if value["defaultAction"] != "ALLOW":
+        raise ValueError("Content safety must default to ALLOW")
     consumers = require_string_list(
         value["consumers"], field="consumers", allowed=CONSUMERS
     )
@@ -297,6 +300,33 @@ def validate_policy(value: object) -> dict[str, object]:
     reflowable = profiles["reflowable"]
     if not isinstance(reflowable, dict):
         raise TypeError("reflowable profile is missing")
+    if any(
+        key in reflowable
+        for key in (
+            "safeDoctypes",
+            "rejectInternalSubset",
+            "rejectCustomEntities",
+            "userNavigationSchemes",
+            "trustedRuntimeSchemes",
+        )
+    ):
+        raise ValueError("Content admission allowlists are prohibited")
+    expected_xml = {
+        "declarationAction": "REMOVE_PARSER_DEPENDENCY",
+        "externalEntityAction": "LITERALIZE_REFERENCE",
+        "recursiveEntityAction": "LITERALIZE_REFERENCE",
+        "unknownEntityAction": "LITERALIZE_REFERENCE",
+        "parameterEntityAction": "LITERALIZE_REFERENCE",
+        "internalTextEntityAction": "BOUNDED_EXPANSION",
+        "expansionLimitAction": "LITERALIZE_REFERENCE",
+    }
+    if (
+        reflowable.get("xmlPreparation") != expected_xml
+        or reflowable.get("externalDtdResolution") is not False
+    ):
+        raise ValueError(
+            "XML preparation must neutralize external dependencies without an admission allowlist"
+        )
     named_entity_codepoints = reflowable.get("namedEntityCodepoints")
     if (
         not isinstance(named_entity_codepoints, dict)
@@ -396,8 +426,44 @@ def validate_policy(value: object) -> dict[str, object]:
             "action",
             "errorCode",
             "requiredConsumers",
+            "classification",
+            "isolatedAction",
+            "optionalResourceAction",
+            "scope",
+            "trigger",
+            "rationale",
+            "isolation",
+            "evidence",
         }:
             raise ValueError(f"rules[{index}] has unexpected fields")
+        if rule["classification"] not in {
+            "SECURITY",
+            "CAPABILITY",
+            "INTEGRITY",
+            "RESOURCE_LIMIT",
+            "IMPLEMENTATION",
+        }:
+            raise ValueError("A rule needs a stable failure classification")
+        if rule["scope"] not in {"PUBLICATION", "RESOURCE"} or not SYMBOL_ID.fullmatch(
+            rule["trigger"]
+        ):
+            raise ValueError("A rule needs a normalized fact and affected scope")
+        if not isinstance(rule["rationale"], str) or len(rule["rationale"]) < 20:
+            raise ValueError("Every rule needs an explicit rationale")
+        require_string_list(rule["evidence"], field="rule evidence")
+        if (
+            rule["isolatedAction"] not in ACTIONS
+            or rule["optionalResourceAction"] not in ACTIONS
+        ):
+            raise ValueError(
+                "Contextual rule actions must be generated contract actions"
+            )
+        if rule["isolation"] not in {
+            "SANITIZE_IN_MEMORY",
+            "BLOCK_AFFECTED_RESOURCE",
+            "REQUIRE_PUBLICATION_BOUNDARY",
+        }:
+            raise ValueError("Every rule needs a declared recovery boundary")
         rule_id = rule["id"]
         algorithm = rule["algorithm"]
         if (
@@ -624,36 +690,36 @@ def validate_fixture_manifest(
     return value
 
 
-def validate_normalization_v3_fixture(
+def validate_normalization_v4_fixture(
     *, policy: Mapping[str, object], digest: str
 ) -> None:
     """Protect the first policy-sanitized exact-location projection golden."""
 
-    projection_path = NORMALIZATION_V3_ROOT / "projection.json"
-    digest_path = NORMALIZATION_V3_ROOT / "projection.sha256"
-    chapter_path = NORMALIZATION_V3_ROOT / "chapter.xhtml"
+    projection_path = NORMALIZATION_V4_ROOT / "projection.json"
+    digest_path = NORMALIZATION_V4_ROOT / "projection.sha256"
+    chapter_path = NORMALIZATION_V4_ROOT / "chapter.xhtml"
     if (
         not projection_path.exists()
         or not digest_path.exists()
         or not chapter_path.exists()
     ):
-        raise ValueError("Reader safety normalization-v3 fixture is incomplete")
+        raise ValueError("Reader safety normalization-v4 fixture is incomplete")
     projection = json.loads(projection_path.read_text(encoding="utf-8"))
     projection_digest = (
         "sha256:"
         + hashlib.sha256(canonical_json(projection).encode("utf-8")).hexdigest()
     )
     if projection_digest != digest_path.read_text(encoding="utf-8").strip():
-        raise ValueError("Reader safety normalization-v3 projection hash is stale")
+        raise ValueError("Reader safety normalization-v4 projection hash is stale")
     if (
         projection.get("schemaVersion") != 3
-        or projection.get("normalization") != "shuku-epub-locator-dom-v3"
+        or projection.get("normalization") != "shuku-epub-locator-dom-v4"
         or projection.get("policyId") != policy["policyId"]
         or projection.get("policyVersion") != policy["policyVersion"]
         or projection.get("policyDigest") != digest
     ):
         raise ValueError(
-            "Reader safety normalization-v3 projection targets stale policy"
+            "Reader safety normalization-v4 projection targets stale policy"
         )
     elements = [
         element
@@ -664,14 +730,13 @@ def validate_normalization_v3_fixture(
     forbidden.update(policy["profiles"]["reflowable"]["svgSanitizedElements"])  # type: ignore[index]
     if any(element.get("localName") in forbidden for element in elements):
         raise ValueError(
-            "Reader safety normalization-v3 projection retains active content"
+            "Reader safety normalization-v4 projection retains active content"
         )
     chapter = chapter_path.read_text(encoding="utf-8")
-    if "<!DOCTYPE html PUBLIC" not in chapter or not any(
-        f'PUBLIC "{doctype["publicId"]}" "{doctype["systemId"]}"' in chapter
-        for doctype in policy["profiles"]["reflowable"]["safeDoctypes"]  # type: ignore[index]
-    ):
-        raise ValueError("Reader safety normalization-v3 source lacks a safe DOCTYPE")
+    if "<!DOCTYPE" not in chapter:
+        raise ValueError(
+            "Reader safety normalization source lacks its declaration regression"
+        )
 
 
 def enum_symbol(value: str) -> str:
@@ -709,6 +774,7 @@ export type ReaderSafetyAction = typeof READER_SAFETY_ACTIONS[number];
 export const READER_SAFETY_ALGORITHM_IDS = {ts_json(algorithms)} as const;
 export type ReaderSafetyAlgorithmId = typeof READER_SAFETY_ALGORITHM_IDS[number];
 export const READER_SAFETY_ERROR_CODES = {ts_json(error_codes)} as const;
+export const READER_SAFETY_ERROR_CODE = {ts_json({code: code for code in error_codes})} as const;
 export type ReaderSafetyErrorCode = typeof READER_SAFETY_ERROR_CODES[number];
 export const READER_SAFETY_IMPLEMENTATION_FAILURE_CODES = {ts_json(implementation_failure_codes)} as const;
 export type ReaderSafetyImplementationFailureCode = typeof READER_SAFETY_IMPLEMENTATION_FAILURE_CODES[number];
@@ -748,11 +814,6 @@ export function requireReaderSafetyFormatPolicy(value: string): ReaderSafetyForm
   return policy;
 }}
 
-export function readerSafetyAcceptsMimeType(format: ReaderSafetyFormatDefinition, value: string): boolean {{
-  const normalized = value.trim().toLowerCase().split(';', 1)[0] ?? '';
-  return (format.acceptedMimeTypes as readonly string[]).includes(normalized);
-}}
-
 export function readerSafetyBudget(name: ReaderSafetyBudgetName): number {{
   return READER_SAFETY_BUDGETS[name];
 }}
@@ -768,7 +829,9 @@ export function readerSafetyComicPageMimeType(extension: string): string | null 
     ? mapping[normalized as keyof typeof mapping]
     : null;
 }}
-"""
+""" + (CONTRACT_ROOT / "templates/reader-safety-decision.ts.in").read_text(
+        encoding="utf-8"
+    )
 
 
 def kotlin_string(value: str) -> str:
@@ -843,31 +906,32 @@ def render_kotlin(policy: Mapping[str, object], digest: str) -> str:
         "    val algorithm: ReaderSafetyAlgorithmId, val parameterRefs: List<String>,",
         "    val action: ReaderSafetyAction, val errorCode: ReaderSafetyErrorCode?,",
         "    val requiredConsumers: List<ReaderSafetyConsumer>,",
+        "    val classification: String, val scope: String, val trigger: String,",
+        "    val rationale: String, val isolation: String, val evidence: List<String>,",
+        "    val isolatedAction: ReaderSafetyAction, val optionalResourceAction: ReaderSafetyAction,",
         ")",
         "data class ReaderSafetyPlatformDefense(",
         "    val id: ReaderSafetyPlatformDefenseId, val formats: List<ReaderSafetyFormat>,",
         "    val stage: ReaderSafetyStage, val requiredConsumers: List<ReaderSafetyConsumer>,",
         ")",
-        "data class ReaderSafetyDoctype(val name: String, val publicId: String, val systemId: String)",
         "data class ReaderSafetyUriAttributePolicy(",
         "    val elements: List<String>, val attribute: String, val syntax: ReaderSafetyUriSyntax,",
         "    val purpose: ReaderSafetyUriPurpose,",
         ")",
         "data class ReaderSafetyReflowableProfile(",
-        "    val safeDoctypes: List<ReaderSafetyDoctype>, val externalDtdResolution: Boolean,",
-        "    val rejectInternalSubset: Boolean, val rejectCustomEntities: Boolean,",
+        "    val externalDtdResolution: Boolean, val xmlPreparation: Map<String, String>,",
         "    val namedEntityCodepoints: Map<String, Int>,",
         "    val readingOrderMarkupMimeTypes: List<String>,",
         "    val embeddedImageExtensionsByMimeType: Map<String, String>,",
         "    val sanitizedElements: List<String>, val sanitizedAttributes: List<String>,",
         "    val sanitizedAttributePrefixes: List<String>, val sanitizedMetaHttpEquivValues: List<String>,",
         "    val blockedAuthorSchemes: List<String>, val remoteSubresourceSchemes: List<String>,",
-        "    val userNavigationSchemes: List<String>, val trustedRuntimeSchemes: List<String>,",
         "    val uriAttributePolicies: List<ReaderSafetyUriAttributePolicy>,",
         "    val allowedFontObfuscationAlgorithms: List<String>,",
         "    val svgSanitizedElements: List<String>, val cssTextElements: List<String>,",
         "    val cssSanitizedConstructs: List<String>,",
         "    val archiveFatalFindings: List<String>,",
+        "    val archiveIntegrityFindings: List<String>,",
         ")",
         "data class ReaderSafetyPdfProfile(",
         "    val blockedActions: List<String>, val requireFinitePageGeometry: Boolean,",
@@ -878,6 +942,7 @@ def render_kotlin(policy: Mapping[str, object], digest: str) -> str:
         "data class ReaderSafetyComicProfile(",
         "    val allowedPageMimeTypes: List<String>, val pageMimeTypesByExtension: Map<String, String>,",
         "    val archiveFatalFindings: List<String>,",
+        "    val archiveIntegrityFindings: List<String>,",
         "    val singlePageDecodeFailureAction: ReaderSafetyAction, val manifestRevisionRequired: Boolean,",
         ")",
         "data class ReaderSafetyAudioProfile(",
@@ -944,7 +1009,20 @@ def render_kotlin(policy: Mapping[str, object], digest: str) -> str:
             + kotlin_list(rule["parameterRefs"])
             + f", ReaderSafetyAction.{rule['action']}, {error}, "
             + kotlin_list(rule["requiredConsumers"], transform="ReaderSafetyConsumer")
-            + "),"
+            + ", "
+            + ", ".join(
+                kotlin_string(rule[k])
+                for k in (
+                    "classification",
+                    "scope",
+                    "trigger",
+                    "rationale",
+                    "isolation",
+                )
+            )
+            + ", "
+            + kotlin_list(rule["evidence"])
+            + f", ReaderSafetyAction.{rule['isolatedAction']}, ReaderSafetyAction.{rule['optionalResourceAction']}),"
         )
     lines += [
         "    ).associateBy(ReaderSafetyRule::id)",
@@ -969,17 +1047,13 @@ def render_kotlin(policy: Mapping[str, object], digest: str) -> str:
         "    ).associateBy(ReaderSafetyPlatformDefense::id)",
         "",
         "    val reflowableProfile = ReaderSafetyReflowableProfile(",
-        "        safeDoctypes = listOf(",
-    ]
-    for item in reflow["safeDoctypes"]:
-        lines.append(
-            f"            ReaderSafetyDoctype({kotlin_string(item['name'])}, {kotlin_string(item['publicId'])}, {kotlin_string(item['systemId'])}),"
-        )
-    lines += [
-        "        ),",
         f"        externalDtdResolution = {str(reflow['externalDtdResolution']).lower()},",
-        f"        rejectInternalSubset = {str(reflow['rejectInternalSubset']).lower()},",
-        f"        rejectCustomEntities = {str(reflow['rejectCustomEntities']).lower()},",
+        "        xmlPreparation = mapOf("
+        + ", ".join(
+            f"{kotlin_string(k)} to {kotlin_string(v)}"
+            for k, v in reflow["xmlPreparation"].items()
+        )
+        + "),",
         "        namedEntityCodepoints = mapOf(",
     ]
     for name, codepoint in reflow["namedEntityCodepoints"].items():
@@ -1003,13 +1077,12 @@ def render_kotlin(policy: Mapping[str, object], digest: str) -> str:
         "sanitizedMetaHttpEquivValues",
         "blockedAuthorSchemes",
         "remoteSubresourceSchemes",
-        "userNavigationSchemes",
-        "trustedRuntimeSchemes",
         "allowedFontObfuscationAlgorithms",
         "svgSanitizedElements",
         "cssTextElements",
         "cssSanitizedConstructs",
         "archiveFatalFindings",
+        "archiveIntegrityFindings",
     ]:
         lines.append(f"        {field} = {kotlin_list(reflow[field])},")
     lines += [
@@ -1046,6 +1119,7 @@ def render_kotlin(policy: Mapping[str, object], digest: str) -> str:
     lines += [
         "        ),",
         f"        archiveFatalFindings = {kotlin_list(comic['archiveFatalFindings'])},",
+        f"        archiveIntegrityFindings = {kotlin_list(comic['archiveIntegrityFindings'])},",
         f"        singlePageDecodeFailureAction = ReaderSafetyAction.{comic['singlePageDecodeFailureAction']},",
         f"        manifestRevisionRequired = {str(comic['manifestRevisionRequired']).lower()},",
         "    )",
@@ -1077,7 +1151,9 @@ def render_kotlin(policy: Mapping[str, object], digest: str) -> str:
         "}",
         "",
     ]
-    return "\n".join(lines)
+    return "\n".join(lines) + (
+        CONTRACT_ROOT / "templates/reader-safety-decision.kt.in"
+    ).read_text(encoding="utf-8")
 
 
 def py_string(value: str) -> str:
@@ -1190,6 +1266,14 @@ def render_python(policy: Mapping[str, object], digest: str) -> str:
         "    action: ReaderSafetyAction",
         "    error_code: ReaderSafetyErrorCode | None",
         "    required_consumers: tuple[ReaderSafetyConsumer, ...]",
+        "    classification: str",
+        "    scope: str",
+        "    trigger: str",
+        "    rationale: str",
+        "    isolation: str",
+        "    evidence: tuple[str, ...]",
+        "    isolated_action: ReaderSafetyAction",
+        "    optional_resource_action: ReaderSafetyAction",
         "",
         "@dataclass(frozen=True, slots=True)",
         "class ReaderSafetyPlatformDefense:",
@@ -1197,12 +1281,6 @@ def render_python(policy: Mapping[str, object], digest: str) -> str:
         "    formats: tuple[ReaderSafetyFormat, ...]",
         "    stage: ReaderSafetyStage",
         "    required_consumers: tuple[ReaderSafetyConsumer, ...]",
-        "",
-        "@dataclass(frozen=True, slots=True)",
-        "class ReaderSafetyDoctype:",
-        "    name: str",
-        "    public_id: str",
-        "    system_id: str",
         "",
         "@dataclass(frozen=True, slots=True)",
         "class ReaderSafetyUriAttributePolicy:",
@@ -1213,10 +1291,8 @@ def render_python(policy: Mapping[str, object], digest: str) -> str:
         "",
         "@dataclass(frozen=True, slots=True)",
         "class ReaderSafetyReflowableProfile:",
-        "    safe_doctypes: tuple[ReaderSafetyDoctype, ...]",
         "    external_dtd_resolution: bool",
-        "    reject_internal_subset: bool",
-        "    reject_custom_entities: bool",
+        "    xml_preparation: Mapping[str, str]",
         "    named_entity_codepoints: Mapping[str, int]",
         "    reading_order_markup_mime_types: tuple[str, ...]",
         "    embedded_image_extensions_by_mime_type: Mapping[str, str]",
@@ -1226,14 +1302,13 @@ def render_python(policy: Mapping[str, object], digest: str) -> str:
         "    sanitized_meta_http_equiv_values: tuple[str, ...]",
         "    blocked_author_schemes: tuple[str, ...]",
         "    remote_subresource_schemes: tuple[str, ...]",
-        "    user_navigation_schemes: tuple[str, ...]",
-        "    trusted_runtime_schemes: tuple[str, ...]",
         "    uri_attribute_policies: tuple[ReaderSafetyUriAttributePolicy, ...]",
         "    allowed_font_obfuscation_algorithms: tuple[str, ...]",
         "    svg_sanitized_elements: tuple[str, ...]",
         "    css_text_elements: tuple[str, ...]",
         "    css_sanitized_constructs: tuple[str, ...]",
         "    archive_fatal_findings: tuple[str, ...]",
+        "    archive_integrity_findings: tuple[str, ...]",
         "",
         "@dataclass(frozen=True, slots=True)",
         "class ReaderSafetyPdfProfile:",
@@ -1250,6 +1325,7 @@ def render_python(policy: Mapping[str, object], digest: str) -> str:
         "    allowed_page_mime_types: tuple[str, ...]",
         "    page_mime_types_by_extension: Mapping[str, str]",
         "    archive_fatal_findings: tuple[str, ...]",
+        "    archive_integrity_findings: tuple[str, ...]",
         "    single_page_decode_failure_action: ReaderSafetyAction",
         "    manifest_revision_required: bool",
         "",
@@ -1291,7 +1367,20 @@ def render_python(policy: Mapping[str, object], digest: str) -> str:
             f"    ReaderSafetyRuleId.{enum_symbol(rule['id'])}: ReaderSafetyRule(ReaderSafetyRuleId.{enum_symbol(rule['id'])}, "
             f"{py_tuple(rule['formats'], transform='ReaderSafetyFormat')}, ReaderSafetyStage.{rule['stage']}, "
             f"ReaderSafetyAlgorithmId.{rule['algorithm']}, {py_tuple(rule['parameterRefs'])}, ReaderSafetyAction.{rule['action']}, "
-            f"{error}, {py_tuple(rule['requiredConsumers'], transform='ReaderSafetyConsumer')}),"
+            f"{error}, {py_tuple(rule['requiredConsumers'], transform='ReaderSafetyConsumer')}, "
+            + ", ".join(
+                py_string(rule[k])
+                for k in (
+                    "classification",
+                    "scope",
+                    "trigger",
+                    "rationale",
+                    "isolation",
+                )
+            )
+            + ", "
+            + py_tuple(rule["evidence"])
+            + f", ReaderSafetyAction.{rule['isolatedAction']}, ReaderSafetyAction.{rule['optionalResourceAction']}),"
         )
     lines += ["})", "READER_SAFETY_PLATFORM_DEFENSES = MappingProxyType({"]
     for defense in defenses:
@@ -1308,18 +1397,8 @@ def render_python(policy: Mapping[str, object], digest: str) -> str:
         "})",
         "",
         "READER_SAFETY_REFLOWABLE_PROFILE: Final = ReaderSafetyReflowableProfile(",
-        "    safe_doctypes=(",
-    ]
-    for item in reflow["safeDoctypes"]:
-        lines.append(
-            "        ReaderSafetyDoctype("
-            f"{py_string(item['name'])}, {py_string(item['publicId'])}, {py_string(item['systemId'])}),"
-        )
-    lines += [
-        "    ),",
         f"    external_dtd_resolution={reflow['externalDtdResolution']},",
-        f"    reject_internal_subset={reflow['rejectInternalSubset']},",
-        f"    reject_custom_entities={reflow['rejectCustomEntities']},",
+        "    xml_preparation=MappingProxyType(" + repr(reflow["xmlPreparation"]) + "),",
         "    named_entity_codepoints=MappingProxyType({",
     ]
     for name, codepoint in reflow["namedEntityCodepoints"].items():
@@ -1339,13 +1418,12 @@ def render_python(policy: Mapping[str, object], digest: str) -> str:
         f"    sanitized_meta_http_equiv_values={py_tuple(reflow['sanitizedMetaHttpEquivValues'])},",
         f"    blocked_author_schemes={py_tuple(reflow['blockedAuthorSchemes'])},",
         f"    remote_subresource_schemes={py_tuple(reflow['remoteSubresourceSchemes'])},",
-        f"    user_navigation_schemes={py_tuple(reflow['userNavigationSchemes'])},",
-        f"    trusted_runtime_schemes={py_tuple(reflow['trustedRuntimeSchemes'])},",
         f"    allowed_font_obfuscation_algorithms={py_tuple(reflow['allowedFontObfuscationAlgorithms'])},",
         f"    svg_sanitized_elements={py_tuple(reflow['svgSanitizedElements'])},",
         f"    css_text_elements={py_tuple(reflow['cssTextElements'])},",
         f"    css_sanitized_constructs={py_tuple(reflow['cssSanitizedConstructs'])},",
         f"    archive_fatal_findings={py_tuple(reflow['archiveFatalFindings'])},",
+        f"    archive_integrity_findings={py_tuple(reflow['archiveIntegrityFindings'])},",
         "    uri_attribute_policies=(",
     ]
     for uri_policy in reflow["uriAttributePolicies"]:
@@ -1378,6 +1456,7 @@ def render_python(policy: Mapping[str, object], digest: str) -> str:
     lines += [
         "    }),",
         f"    archive_fatal_findings={py_tuple(comic['archiveFatalFindings'])},",
+        f"    archive_integrity_findings={py_tuple(comic['archiveIntegrityFindings'])},",
         f"    single_page_decode_failure_action=ReaderSafetyAction.{comic['singlePageDecodeFailureAction']},",
         f"    manifest_revision_required={comic['manifestRevisionRequired']},",
         ")",
@@ -1427,36 +1506,26 @@ def render_python(policy: Mapping[str, object], digest: str) -> str:
         "# fmt: on",
         "",
     ]
-    return "\n".join(lines)
+    return "\n".join(lines) + (
+        CONTRACT_ROOT / "templates/reader-safety-decision.py.in"
+    ).read_text(encoding="utf-8")
 
 
 def render_c(policy: Mapping[str, object], digest: str) -> str:
-    """Generate native comic admission values from the authoritative policy."""
+    """Generate native comic resource budgets from the authoritative policy."""
 
-    comic = policy["profiles"]["comic"]  # type: ignore[index]
     budgets = policy["budgets"]  # type: ignore[index]
-    extensions = sorted(
-        extension.removeprefix(".") for extension in comic["pageMimeTypesByExtension"]
-    )
-    comparisons = " ||\n        ".join(
-        f"strcmp(extension, {json.dumps(extension)}) == 0" for extension in extensions
-    )
     return f"""/* Generated by packages/reader-contracts/generate-reader-safety-policy.py. Do not edit. */
 #ifndef ERMAO_READER_SAFETY_POLICY_GENERATED_H
 #define ERMAO_READER_SAFETY_POLICY_GENERATED_H
 
-#include <string.h>
-
+#define ERMAO_READER_SAFETY_SCHEMA_VERSION {policy["schemaVersion"]}
+#define ERMAO_READER_SAFETY_POLICY_VERSION {policy["policyVersion"]}
 #define ERMAO_READER_SAFETY_POLICY_DIGEST {json.dumps(digest)}
 #define ERMAO_READER_SAFETY_COMIC_PAGE_MAX_COUNT {budgets["comicPageMaxCount"]}LL
 #define ERMAO_READER_SAFETY_COMIC_PAGE_MAX_BYTES {budgets["comicPageMaxBytes"]}LL
 #define ERMAO_READER_SAFETY_COMIC_EXPANDED_MAX_BYTES {budgets["comicExpandedMaxBytes"]}LL
 #define ERMAO_READER_SAFETY_COMIC_COMPRESSION_RATIO_MAX {budgets["comicCompressionRatioMax"]}LL
-
-static inline int ermao_reader_safety_comic_extension_allowed(const char *extension) {{
-    if (extension == NULL) return 0;
-    return {comparisons};
-}}
 
 #endif
 """
@@ -1488,7 +1557,7 @@ def main() -> None:
     validate_fixture_manifest(
         json.loads(FIXTURES.read_text(encoding="utf-8")), policy=policy, digest=digest
     )
-    validate_normalization_v3_fixture(policy=policy, digest=digest)
+    validate_normalization_v4_fixture(policy=policy, digest=digest)
     write_or_check(TS_TARGET, render_typescript(policy, digest), check=args.check)
     write_or_check(KT_TARGET, render_kotlin(policy, digest), check=args.check)
     write_or_check(PY_TARGET, render_python(policy, digest), check=args.check)

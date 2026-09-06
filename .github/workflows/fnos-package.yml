@@ -95,6 +95,9 @@ jobs:
       - name: Install Web dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install browsers for production Reader safety conformance
+        run: pnpm --filter @shuku/web exec playwright install --with-deps chromium webkit
+
       - name: Run Web quality gates
         run: |
           pnpm --filter @shuku/web lint

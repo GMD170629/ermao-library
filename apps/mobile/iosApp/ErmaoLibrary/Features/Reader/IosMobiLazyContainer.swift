@@ -89,7 +89,10 @@ struct IosMobiResourceDescriptor: Equatable, Sendable {
     let decodedLength: UInt64
 
     var requiresSecurityDecoration: Bool {
-        category == .markup || category == .flow || mediaType.lowercased() == "text/css"
+        let baseMediaType = mediaType.split(separator: ";", maxSplits: 1).first
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+        return category == .markup || category == .flow ||
+            baseMediaType == "text/css" || baseMediaType == "image/svg+xml"
     }
 }
 
@@ -128,6 +131,7 @@ final class IosMobiLazyContainer: Container, @unchecked Sendable {
 
     init(
         descriptors: [IosMobiResourceDescriptor],
+        readingOrderIndices: Set<Int>,
         lifetime: IosMobiPublicationLifetime,
         securityAdapter: IosPublicationSecurityAdapter
     ) throws {
@@ -142,6 +146,7 @@ final class IosMobiLazyContainer: Container, @unchecked Sendable {
             }
             resources[descriptor.href] = IosMobiLazyResource(
                 descriptor: descriptor,
+                requiredReadingOrder: readingOrderIndices.contains(descriptor.index),
                 lifetime: lifetime,
                 securityAdapter: securityAdapter
             )
@@ -171,15 +176,18 @@ final class IosMobiLazyResource: Resource, @unchecked Sendable {
     let sourceURL: AbsoluteURL? = nil
 
     private let descriptor: IosMobiResourceDescriptor
+    private let requiredReadingOrder: Bool
     private let lifetime: IosMobiPublicationLifetime
     private let securityAdapter: IosPublicationSecurityAdapter
 
     init(
         descriptor: IosMobiResourceDescriptor,
+        requiredReadingOrder: Bool,
         lifetime: IosMobiPublicationLifetime,
         securityAdapter: IosPublicationSecurityAdapter
     ) {
         self.descriptor = descriptor
+        self.requiredReadingOrder = requiredReadingOrder
         self.lifetime = lifetime
         self.securityAdapter = securityAdapter
     }
@@ -216,9 +224,40 @@ final class IosMobiLazyResource: Resource, @unchecked Sendable {
         let streamed = await streamRaw(range: nil) { raw.append($0) }
         return streamed.flatMap { _ -> ReadResult<Data> in
             do {
+                let baseMediaType = descriptor.mediaType
+                    .split(separator: ";", maxSplits: 1)
+                    .first
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                let prepared: Data
+                if baseMediaType == "image/svg+xml" || baseMediaType == "text/css" {
+                    prepared = try IosPublicationSecurityPolicy.prepareResource(
+                        data: raw,
+                        mediaType: descriptor.mediaType
+                    )
+                } else {
+                    prepared = try securityAdapter.decorate(
+                        data: raw,
+                        mediaType: descriptor.mediaType
+                    )
+                }
                 return .success(
-                    try securityAdapter.decorate(data: raw, mediaType: descriptor.mediaType)
+                    prepared
                 )
+            } catch let error as IosPublicationSecurityError {
+                let mapped: IosPublicationSecurityError
+                switch error {
+                case .invalidEncoding, .invalidMarkup:
+                    let failure = requiredReadingOrder
+                        ? ErmaoShared.PublicKt.readerSafetyRequiredReadingOrderMarkupFailure()
+                        : ErmaoShared.PublicKt.readerSafetyOptionalResourceFailure()
+                    mapped = .rejected(ruleId: failure.ruleId, errorCode: failure.errorCode)
+                case .rejected:
+                    mapped = error
+                }
+                return .failure(.decoding(
+                    "Unsafe or invalid MOBI markup resource",
+                    cause: mapped
+                ))
             } catch {
                 return .failure(.decoding("Unsafe or invalid MOBI text resource", cause: error))
             }

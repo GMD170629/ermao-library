@@ -11,8 +11,10 @@ from app.contracts.reader_safety_policy_generated import (
     reader_safety_rule,
 )
 from app.modules.publications.domain.model import (
+    PublicationIntegrityError,
     PublicationParserError,
     PublicationParserLimitError,
+    PublicationResourceBlockedError,
     PublicationResourceTooLargeError,
     PublicationSecurityError,
 )
@@ -85,6 +87,35 @@ def publication_resource_limit(
     )
 
 
+def publication_integrity_failure(
+    rule_id: ReaderSafetyRuleId,
+    message: str,
+    *,
+    optional: bool = False,
+) -> PublicationIntegrityError | PublicationResourceBlockedError:
+    """Map archive/resource integrity through generated classification metadata."""
+
+    rule = reader_safety_rule(rule_id)
+    if getattr(rule, "classification", None) != "INTEGRITY":
+        raise ValueError(f"{rule_id.value} is not an integrity decision")
+    if optional:
+        return publication_optional_resource_failure(rule_id, message)
+    if rule.isolated_action is not ReaderSafetyAction.REJECT_PUBLICATION:
+        raise ValueError(f"{rule_id.value} is not a required-resource decision")
+    return PublicationIntegrityError(message, rule_id=rule_id.value)
+
+
+def publication_optional_resource_failure(
+    rule_id: ReaderSafetyRuleId,
+    message: str,
+) -> PublicationResourceBlockedError:
+    """Quarantine an optional resource only when its generated rule permits it."""
+    rule = reader_safety_rule(rule_id)
+    if rule.optional_resource_action is not ReaderSafetyAction.BLOCK_RESOURCE:
+        raise ValueError(f"{rule_id.value} is not an optional-resource decision")
+    return PublicationResourceBlockedError(message, rule_id=rule_id.value)
+
+
 def publication_native_parser_rejection(
     rule_id: ReaderSafetyRuleId,
     *,
@@ -94,13 +125,14 @@ def publication_native_parser_rejection(
 ) -> PublicationParserError:
     """Map a native parser fact to a generated non-security rejection code."""
 
-    rule = _checked_rule(
-        rule_id,
-        actions=(ReaderSafetyAction.REJECT_PUBLICATION,),
-        error_codes=(ReaderSafetyErrorCode.PUBLICATION_DRM_UNSUPPORTED,),
-    )
+    rule = reader_safety_rule(rule_id)
+    if (
+        rule.classification != "CAPABILITY"
+        or rule.action is not ReaderSafetyAction.REJECT_PUBLICATION
+    ):
+        raise ValueError(f"{rule_id.value} is not a parser capability decision")
     error_code = rule.error_code
-    if error_code is None:  # Guarded by _checked_rule.
+    if error_code is None:
         raise ValueError(f"{rule_id.value} has no generated error code")
     return PublicationParserError(
         code=error_code.value,
@@ -133,8 +165,10 @@ def publication_native_parser_implementation_failure(
 
 
 __all__ = [
+    "publication_integrity_failure",
     "publication_native_parser_implementation_failure",
     "publication_native_parser_rejection",
+    "publication_optional_resource_failure",
     "publication_parser_limit",
     "publication_resource_limit",
     "publication_security_rejection",

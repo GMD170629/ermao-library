@@ -1336,10 +1336,13 @@ struct WorkDetailView: View {
                     Text(resourceDetailTitle(resource)).appTextStyle(.sectionTitle)
                     Spacer()
                     if let page = store.resourceDetailPage {
+                        let count = resource.readerType.lowercased() == "reflowable"
+                            ? (page.chapterCount ?? resource.chapterCount ?? 0)
+                            : page.total
                         Text(String(
                             format: String(localized: "work.resource.units.count.format"),
                             locale: locale,
-                            page.total
+                            count
                         ))
                         .appTextStyle(.label)
                         .foregroundStyle(theme.textSecondary)
@@ -1440,6 +1443,7 @@ struct WorkDetailView: View {
         }
         .buttonStyle(.plain)
         .bookContentAnchor("unit:\(unit.id)")
+        .disabled(selectedResource(detail)?.readerType.lowercased() == "reflowable" && unit.href == nil)
     }
 
     private func resourceUnitRow(
@@ -1530,7 +1534,7 @@ struct WorkDetailView: View {
         displayIndex: Int,
         detail: BookDetailContent
     ) -> some View {
-        Button { requestReaderAccess(detail: detail, chapterHref: chapter.href) } label: {
+        Button { requestReaderAccess(detail: detail, chapterKey: chapter.navigationKey) } label: {
             HStack(spacing: .space1) {
                 Text(String(format: "%02d", displayIndex))
                     .appTextStyle(.body)
@@ -1556,6 +1560,7 @@ struct WorkDetailView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(chapter.href == nil || chapter.navigationKey == nil)
     }
 
     private func chapterStateTitle(_ state: ChapterReadingState) -> LocalizedStringKey {
@@ -2003,12 +2008,12 @@ struct WorkDetailView: View {
         }
     }
 
-    private func requestReaderAccess(detail: BookDetailContent, unit: BookResourceDetailUnit? = nil, chapterHref: String? = nil) {
+    private func requestReaderAccess(detail: BookDetailContent, unit: BookResourceDetailUnit? = nil, chapterKey: String? = nil) {
         guard let resource = selectedResource(detail) else { return }
-        requestReaderAccess(detail: detail, resource: resource, unit: unit, chapterHref: chapterHref)
+        requestReaderAccess(detail: detail, resource: resource, unit: unit, chapterKey: chapterKey)
     }
 
-    private func requestReaderAccess(detail: BookDetailContent, resource: BookResource, unit: BookResourceDetailUnit? = nil, chapterHref: String? = nil) {
+    private func requestReaderAccess(detail: BookDetailContent, resource: BookResource, unit: BookResourceDetailUnit? = nil, chapterKey: String? = nil) {
         guard resource.bookID == detail.book.id, resource.isReadable != false else { return }
         if resource.readerType.lowercased() == "audio" {
             guard let audioPlaybackRuntime else {
@@ -2043,10 +2048,11 @@ struct WorkDetailView: View {
             format: resource.format,
             readerType: readerType,
             source: .remoteStream,
-            initialTargetPayload: (unit != nil || chapterHref != nil) ? ErmaoShared.PublicKt.encodeReaderLaunchTarget(
+            initialTargetPayload: (unit != nil || chapterKey != nil) ? ErmaoShared.PublicKt.encodeReaderLaunchTarget(
                 target: ErmaoShared.PublicKt.readingUnitLaunchTarget(
-                    readerType: resource.readerType, href: unit?.href ?? chapterHref,
-                    pageNumber: unit?.pageNumber.map { KotlinInt(int: Int32($0)) }
+                    readerType: resource.readerType, href: unit?.href,
+                    pageNumber: unit?.pageNumber.map { KotlinInt(int: Int32($0)) },
+                    navigationKey: unit?.navigationKey ?? chapterKey
                 )
             ) : nil
         ))

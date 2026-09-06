@@ -428,18 +428,7 @@ def _audio_navigation_units(
 ) -> tuple[ResourceNavigationUnitInput, ...]:
     chapters = metadata.chapters
     if not chapters:
-        return (
-            ResourceNavigationUnitInput(
-                unit_type="audio_chapter",
-                title=title,
-                href=f"#t=0,{metadata.duration_ms / 1000:g}",
-                media_type=mime_type,
-                sort_order=0,
-                start_ms=0,
-                end_ms=metadata.duration_ms,
-                duration_ms=metadata.duration_ms,
-            ),
-        )
+        return ()
     return tuple(
         ResourceNavigationUnitInput(
             unit_type="audio_chapter",

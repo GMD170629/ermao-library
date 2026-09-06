@@ -58,7 +58,7 @@ test('position equality follows JSON object semantics, not insertion order', () 
       displayPercent: 20,
       totalProgression: 0.2,
       currentHref: 'chapter.xhtml',
-      chapter: { href: 'chapter.xhtml', title: 'Chapter', index: 0 },
+      chapter: { navigationKey: null, href: 'chapter.xhtml', title: 'Chapter', index: 0 },
       page: null,
       playback: null
     }
@@ -67,7 +67,7 @@ test('position equality follows JSON object semantics, not insertion order', () 
     presentation: {
       playback: null,
       page: null,
-      chapter: { index: 0, title: 'Chapter', href: 'chapter.xhtml' },
+      chapter: { navigationKey: null, index: 0, title: 'Chapter', href: 'chapter.xhtml' },
       currentHref: 'chapter.xhtml',
       totalProgression: 0.2,
       displayPercent: 20

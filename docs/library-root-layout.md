@@ -1,81 +1,37 @@
-# 书库根目录结构 / Library Root Layout
+# 书库根目录与资源
 
-## 中文
+每个书库配置一个真实根目录，组织方式只有 `FLAT`（平铺）和 `VOLUMES`（卷册）。有声书通过资源适配器识别，不是第三种组织方式。
 
-每个书库配置一个根目录和一种组织方式。扫描器只发现受支持的文件；领域解析器每次只接收
-一个相对于书库根目录的文件路径。同一组织方式下，同一路径始终得到相同的作品、版本、卷
-和来源键，不读取同级目录、扫描批次、数据库记录或媒体元数据。
+## 当前数据关系
 
-### 单本（FLAT）
+- `LibrarySourceNode` 保存扫描发现的物理路径树，中间目录保留为导航节点。
+- `LibraryBook` 是图书聚合，锚定一个来源节点。
+- `LibraryReadableResource` 是可以独立打开的文件或目录资源，归属于 Book。
+- `LibraryResourceAsset` 是资源使用的真实文件；阅读进度归属 `resourceId`，媒体访问使用 `assetId`。
 
-每个受支持文件都是一本独立作品。扫描会递归进入任意目录，但目录名称不形成作品层级：
+系统不再使用 Version／Volume 作为业务层级。目录名、文件名和相对路径保留原样；元数据可以补充展示信息，但不按标题相似度自动合并物理结构。
 
-```text
-books/
-├── 活着.epub                  -> 作品“活着”
-└── 科幻/中文/三体.pdf         -> 作品“三体”
-```
+## 组织方式
 
-每个作品包含一个隐式版本和一个同名卷。
+| 方式 | 图书归属 |
+| --- | --- |
+| `FLAT` | 任意深度识别出的每个资源独立形成 Book，包括文件资源和目录资源。 |
+| `VOLUMES` | 根目录的文件资源独立成书；第一级文件夹形成 Book，其内部任意深度的资源归属于该 Book。中间目录不形成版本。 |
 
-### 卷册（VOLUMES）
+例如 `三体/中文版/精校/02.epub` 在 `VOLUMES` 下属于 Book“三体”；`中文版/精校` 是导航目录，`02.epub` 是独立资源。在 `FLAT` 下，该资源独立成书。
 
-根目录文件独立成书；第一级目录是作品，第二级目录是版本。第二级之后不再解析目录层级，
-每个受支持文件独立成卷：
+有声书普通目录分别划分资源；`CD`、`Disc`、`Disk`、`碟`、`盘` 及编号形式可作为透明音轨目录。普通子目录不会被父级有声书吞并。具体规则见[有声书目录资源边界](adr/0022-audiobook-directory-resource-boundaries.md)。
 
-```text
-books/
-├── 活着.epub                         -> 作品“活着”/隐式版本/卷“活着”
-└── 三体/
-    ├── 01 地球往事.epub              -> 作品“三体”/隐式版本/卷“01 地球往事”
-    └── 中文版/精校/02 黑暗森林.epub   -> 作品“三体”/版本“中文版”/卷“02 黑暗森林”
-```
+## 扫描与文件生命周期
 
-卷来源键保留完整相对文件路径，因此不同深层目录中的同名文件仍是不同卷。
+首次导入和后续补齐共用“继续导入”。自动扫描保留本轮未发现的历史节点；用户手动扫描只在目录正常遍历完成后清理缺失项。符号链接只记录，不跟随导入。
+SourceNode 是扫描快照，不是文件系统实时镜像；移动或重命名不会自动迁移原身份。
 
-### 有声书（AUDIOBOOK）
+已有来源节点的书库不能原地切换组织方式。上传目标必须处于已启用、可写的根目录内。扫描和阅读保留原始文件，不持久化派生 EPUB、ZIP 或解包出版物。
 
-根目录音频文件独立成书。第一级目录是作品；作品之后忽略 `CD`、`Disc`、`Disk`、`碟`、
-`盘` 及其编号形式，再把第一个普通目录作为版本、第二个普通目录作为卷。其余更深目录不再
-形成业务层级：
+实现入口：
 
-```text
-audiobooks/
-├── 魔戒.m4b                         -> 作品“魔戒”/隐式版本/卷“魔戒”
-└── Book/
-    ├── CD1/01.mp3                   -> 作品“Book”/隐式版本/默认卷“Book”
-    ├── V1/CD2/02.mp3                -> 作品“Book”/版本“V1”/默认卷“V1”
-    └── V1/Vol1/CD3/03.mp3           -> 作品“Book”/版本“V1”/卷“Vol1”
-```
-
-解析到相同卷来源键的音频文件都归入该卷，并按完整相对路径自然排序。单个有声书扫描最多
-接受 10,000 条音轨。
-
-所有模式均直接读取原始文件，不生成派生出版物。文件元数据可以补充作者、封面、简介和
-音轨标签，但不能改变路径确定的作品、版本、卷、名称或来源键。实时监听和定时扫描由系统
-设置控制；仅在尚未保存扫描间隔时使用 `LIBRARY_SCAN_INTERVAL_MS` 作为兼容回退。所有触发
-使用相同的有界队列。每次扫描都让本次观察到的节点按当前规则收敛；自动扫描只保留本次未
-观察到的历史节点，用户手动扫描才清理这些缺失项。
-
-## English
-
-Each library has one root and one organization mode. The scanner only discovers supported
-files, and the domain parser receives one library-relative file path at a time. Under the
-same mode, the same path always produces the same Work, Version, Volume, and source keys;
-sibling entries, scan batches, database state, and embedded metadata are not inputs.
-
-- `FLAT`: every supported file is an independent Work, regardless of directory depth. It
-  receives an implicit Version and one same-named Volume.
-- `VOLUMES`: a root file is an independent Work. The first directory is the Work and the
-  second is the Version. Every supported file is a separate Volume; deeper directories do
-  not create more topology. The complete relative file path remains part of the Volume key.
-- `AUDIOBOOK`: a root audio file is independent. After the Work directory, transparent
-  `CD`, `Disc`, `Disk`, `碟`, and `盘` directories are ignored. The first remaining directory
-  is the Version and the second is the Volume. Files with the same Volume key aggregate as
-  tracks and use natural ordering by complete relative path.
-
-Every mode reads original files without producing a derived publication. Metadata may enrich
-authors, covers, descriptions, and track tags, but it cannot change path-owned topology,
-names, or keys. Periodic and manual scans use the same bounded queue and the same recognition
-pipeline. Every observed node converges to the current rules; automatic scans preserve only
-historical nodes not observed in that run, while manual scans prune those missing entries.
+- [组织方式](../apps/api-python/app/modules/library/domain/organization_modes.py)
+- [来源节点身份](../apps/api-python/app/modules/library/domain/source_nodes.py)
+- [图书归属](../apps/api-python/app/modules/library/domain/book_placement.py)
+- [导入能力](../apps/api-python/app/modules/imports)

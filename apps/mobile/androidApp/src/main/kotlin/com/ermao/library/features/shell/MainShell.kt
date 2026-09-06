@@ -907,7 +907,7 @@ private fun openResource(
 ) {
     if (ReaderFormatSupport.deliveryMode(resource.readerType, resource.format) != ReaderDeliveryMode.Unsupported) {
         context.startActivity(ReaderActivity.createServerIntent(context, profileId, resource.id,
-            unit?.let { com.ermao.library.shared.modules.reader.readingUnitLaunchTarget(resource.readerType, it.href, it.metadata.pageNumber) }))
+            unit?.let { com.ermao.library.shared.modules.reader.readingUnitLaunchTarget(resource.readerType, it.href, it.metadata.pageNumber, it.metadata.navigationKey) }))
     } else {
         onUnavailable(ReaderUnavailableRoute(resource.id, resource.readerType))
     }

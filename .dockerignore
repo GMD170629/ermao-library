@@ -11,6 +11,10 @@ __pycache__
 **/.pytest_cache
 .venv
 **/.venv
+.runtime-windows
+**/.venv-windows
+packages/reader-core/native/chapters/build*
+apps/web/.chapters-wasm-build
 *.egg-info
 **/*.egg-info
 .git

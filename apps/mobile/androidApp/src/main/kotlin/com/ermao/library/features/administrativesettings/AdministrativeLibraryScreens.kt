@@ -13,7 +13,6 @@ import androidx.compose.material.icons.outlined.CreateNewFolder
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Remove
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -31,6 +30,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import com.ermao.library.ui.components.WarmSettingsFilterBar
+import com.ermao.library.ui.components.WarmSettingsFilterOption
 import com.ermao.library.ui.components.rememberForwardProgress
 
 @Composable
@@ -206,13 +207,18 @@ fun ImportTasksScreen(
 ) {
     var filter by remember { mutableStateOf(QueueFilterValue.All) }
     var deleteTask by remember { mutableStateOf<ImportTask?>(null) }
-    AdministrativePage(AdministrativeCopy.ImportTasks, locale, onBack, modifier) {
+    AdministrativePage(
+        title = AdministrativeCopy.ImportTasks,
+        locale = locale,
+        onBack = onBack,
+        modifier = modifier,
+        tabs = { QueueFilterRow(filter, { filter = it }, locale) },
+    ) {
         ListItem(
             headlineContent = { Text(if (state.snapshot?.queueHealthy == true) AdministrativeCopy.QueueHealthy.text(locale) else AdministrativeCopy.Warning.text(locale)) },
             supportingContent = { Text("${state.snapshot?.runningCount ?: 0} ${AdministrativeCopy.Running.text(locale)}") },
             colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
         )
-        QueueFilterChips(filter, { filter = it }, locale)
         PageStateContent(state, locale, onRetry) { snapshot ->
             snapshot.tasks.filter { filter.matches(it.status) }.forEach { task ->
                 Column(
@@ -350,17 +356,21 @@ private fun QueueFilterValue.matches(status: QueueStatus): Boolean = when (this)
 }
 
 @Composable
-private fun QueueFilterChips(value: QueueFilterValue, onSelect: (QueueFilterValue) -> Unit, locale: AdministrativeLocale) {
-    Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        QueueFilterValue.entries.forEach { item ->
-            val copy = when (item) {
-                QueueFilterValue.All -> AdministrativeCopy.All
-                QueueFilterValue.Running -> AdministrativeCopy.Running
-                QueueFilterValue.Failed -> AdministrativeCopy.Failed
-            }
-            FilterChip(value == item, { onSelect(item) }, { Text(copy.text(locale)) })
-        }
-    }
+private fun QueueFilterRow(value: QueueFilterValue, onSelect: (QueueFilterValue) -> Unit, locale: AdministrativeLocale) {
+    WarmSettingsFilterBar(
+        options = QueueFilterValue.entries.map { item ->
+            WarmSettingsFilterOption(
+                value = item,
+                label = when (item) {
+                    QueueFilterValue.All -> AdministrativeCopy.All
+                    QueueFilterValue.Running -> AdministrativeCopy.Running
+                    QueueFilterValue.Failed -> AdministrativeCopy.Failed
+                }.text(locale),
+            )
+        },
+        selected = value,
+        onSelect = onSelect,
+    )
 }
 
 @Composable

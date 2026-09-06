@@ -7,7 +7,7 @@ import binascii
 import hashlib
 import html
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from xml.etree import ElementTree
@@ -23,8 +23,10 @@ from app.modules.publications.application.ports import (
     PublicationSource,
 )
 from app.modules.publications.application.safety_policy import (
+    publication_integrity_failure,
+    publication_native_parser_implementation_failure,
+    publication_optional_resource_failure,
     publication_parser_limit,
-    publication_security_rejection,
 )
 from app.modules.publications.domain.model import (
     NormalizedPublication,
@@ -36,8 +38,11 @@ from app.modules.publications.domain.model import (
     PublicationResourceNotFoundError,
     PublicationRevision,
     PublicationStructureError,
-    PublicationTocEntry,
     PublicationUnsupportedError,
+)
+from app.modules.publications.infrastructure.chapter_core import (
+    ChapterCore,
+    xml_chapter_events,
 )
 from app.modules.publications.infrastructure.locator_dom import (
     WEB_SECURITY_PROFILE,
@@ -45,15 +50,25 @@ from app.modules.publications.infrastructure.locator_dom import (
 )
 from app.modules.publications.infrastructure.snapshot_cache import (
     PublicationSnapshotCache,
+    publication_snapshot_weight,
 )
 from app.modules.publications.infrastructure.source_files import (
     resolve_publication_source,
     select_publication_source_root,
 )
+from app.modules.publications.infrastructure.xml_policy import (
+    XmlPolicyDecodeError,
+    XmlPolicyExpansionLimitError,
+    XmlPolicyPreparationError,
+    parse_xml,
+)
 
 FB2_PARSER_IDENTIFIER = "shuku-fb2-parser-v1"
-FB2_NORMALIZATION_IDENTIFIER = "shuku-fb2-publication-v2"
+FB2_NORMALIZATION_IDENTIFIER = "shuku-fb2-publication-v3"
 MAX_FB2_SOURCE_BYTES = reader_safety_budget(ReaderSafetyBudgetName.FB2_TEXT_MAX_BYTES)
+MAX_FB2_XML_EXPANSION_BYTES = reader_safety_budget(
+    ReaderSafetyBudgetName.REFLOWABLE_MARKUP_MAX_BYTES
+)
 MAX_ENCODED_BINARY_BYTES = reader_safety_budget(
     ReaderSafetyBudgetName.FB2_ENCODED_IMAGE_MAX_BYTES
 )
@@ -68,7 +83,6 @@ MAX_XML_DEPTH = reader_safety_budget(ReaderSafetyBudgetName.FB2_MAX_DEPTH)
 MAX_TEXT_CHARACTERS = reader_safety_budget(
     ReaderSafetyBudgetName.FB2_TEXT_MAX_CHARACTERS
 )
-_UNSAFE_XML_DECLARATION = re.compile(rb"<!DOCTYPE\b|<!ENTITY\b", re.IGNORECASE)
 _XLINK_NAMESPACE_DECLARATION = re.compile(
     rb"\bxmlns:xlink\s*=\s*(['\"])http://www\.w3\.org/1999/xlink\1"
 )
@@ -94,10 +108,25 @@ class _Fb2Section:
 
 
 @dataclass(frozen=True, slots=True)
+class _Fb2ResourceMarker:
+    """Deferred optional-resource decision retained in the publication index.
+
+    FB2 image budgets are enforced when the resource is first requested.  The
+    marker keeps the original encoded text and digest for provenance while
+    avoiding a speculative base64 decode during publication construction.
+    """
+
+    rule_id: ReaderSafetyRuleId
+    message: str
+    original_text: str
+    original_text_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
 class _Fb2Snapshot:
     publication: NormalizedPublication
     source_mtime: float
-    resources_by_href: dict[str, tuple[str, bytes | str]]
+    resources_by_href: dict[str, tuple[str, bytes | str | _Fb2ResourceMarker | None]]
     sections_by_href: dict[str, _Fb2Section]
     element_anchors: dict[ElementTree.Element, str]
     original_targets: dict[str, str]
@@ -144,16 +173,28 @@ def _xml_root(content: bytes) -> ElementTree.Element:
             ReaderSafetyRuleId.FB2_STRUCTURE_BUDGET,
             "FB2 source exceeds the size limit",
         )
-    if _UNSAFE_XML_DECLARATION.search(content):
-        raise publication_security_rejection(
-            ReaderSafetyRuleId.REFLOWABLE_REJECT_XML_ENTITY,
-            "FB2 active XML declarations are not allowed",
-        )
     content = _normalize_legacy_link_prefix(content)
     try:
-        root = ElementTree.fromstring(content)
-    except ElementTree.ParseError as error:
+        _projection, root = parse_xml(
+            content,
+            expansion_limit_bytes=MAX_FB2_XML_EXPANSION_BYTES,
+        )
+    except (ElementTree.ParseError, UnicodeDecodeError) as error:
         raise PublicationMarkupError("FB2 XML is invalid") from error
+    except XmlPolicyExpansionLimitError as error:
+        raise publication_parser_limit(
+            ReaderSafetyRuleId.FB2_STRUCTURE_BUDGET,
+            "FB2 XML entity expansion exceeds the size limit",
+        ) from error
+    except XmlPolicyDecodeError as error:
+        raise PublicationMarkupError("FB2 XML encoding is invalid") from error
+    except XmlPolicyPreparationError as error:
+        raise publication_native_parser_implementation_failure(
+            ReaderSafetyRuleId.REFLOWABLE_PREPARE_XML,
+            parser="reader-xml-policy",
+            operation="prepare",
+            reason="generated XML preparation defense is unavailable",
+        ) from error
     if _local_name(root.tag) != "FictionBook":
         raise PublicationStructureError("FB2 root element is invalid")
     _validate_tree_shape(root)
@@ -235,37 +276,82 @@ def _safe_resource_href(raw_href: str) -> str:
 
 def _binary_resources(
     root: ElementTree.Element,
-) -> tuple[dict[str, tuple[str, bytes | str]], dict[str, str]]:
-    resources: dict[str, tuple[str, bytes | str]] = {}
+) -> tuple[
+    dict[str, tuple[str, bytes | str | _Fb2ResourceMarker | None]],
+    dict[str, str],
+]:
+    resources: dict[str, tuple[str, bytes | str | _Fb2ResourceMarker | None]] = {}
     href_by_identifier: dict[str, str] = {}
     seen_identifiers: set[str] = set()
     total_size = 0
     for binary in (item for item in root if _local_name(item.tag) == "binary"):
         identifier = (_attribute(binary, "id") or "").strip()
         media_type = (_attribute(binary, "content-type") or "").strip().lower()
-        extension = reader_safety_fb2_embedded_image_extension(media_type)
-        if not identifier or extension is None:
+        extension = reader_safety_fb2_embedded_image_extension(media_type) or ""
+        if not identifier:
             continue
         if identifier in seen_identifiers:
-            raise PublicationCorruptError("FB2 contains duplicate binary identifiers")
+            previous_href = href_by_identifier.get(identifier)
+            if previous_href is not None:
+                previous_media_type, _ = resources[previous_href]
+                resources[previous_href] = (previous_media_type, None)
+            continue
         seen_identifiers.add(identifier)
         encoded = "".join("".join(binary.itertext()).split())
+
+        safe_identifier = hashlib.sha256(identifier.encode()).hexdigest()[:20]
+        href = f"fb2/images/{safe_identifier}{extension}"
+
+        def mark(
+            rule_id: ReaderSafetyRuleId,
+            message: str,
+            *,
+            resource_href: str = href,
+            resource_media_type: str = media_type,
+            original_encoded: str = encoded,
+            resource_identifier: str = identifier,
+        ) -> None:
+            resources[resource_href] = (
+                resource_media_type,
+                _Fb2ResourceMarker(
+                    rule_id=rule_id,
+                    message=message,
+                    original_text=original_encoded,
+                    original_text_sha256=hashlib.sha256(
+                        original_encoded.encode("ascii", "replace")
+                    ).hexdigest(),
+                ),
+            )
+            href_by_identifier[resource_identifier] = resource_href
+
         if len(encoded) > MAX_ENCODED_BINARY_BYTES:
+            mark(
+                ReaderSafetyRuleId.FB2_IMAGE_BUDGET,
+                "FB2 encoded image exceeds the generated resource budget",
+            )
             continue
         estimated_size = (len(encoded) // 4) * 3 - (
             len(encoded) - len(encoded.rstrip("="))
         )
-        if (
-            not encoded
-            or estimated_size < 1
-            or estimated_size > MAX_BINARY_RESOURCE_BYTES
-        ):
+        if not encoded or estimated_size < 1:
+            mark(
+                ReaderSafetyRuleId.REFLOWABLE_OPTIONAL_RESOURCE_FAILURE,
+                "FB2 binary resource has no valid encoded content",
+            )
+            continue
+        if estimated_size > MAX_BINARY_RESOURCE_BYTES:
+            mark(
+                ReaderSafetyRuleId.FB2_IMAGE_BUDGET,
+                "FB2 decoded image exceeds the generated resource budget",
+            )
             continue
         if total_size + estimated_size > MAX_TOTAL_BINARY_BYTES:
+            mark(
+                ReaderSafetyRuleId.FB2_IMAGE_BUDGET,
+                "FB2 decoded images exceed the generated aggregate budget",
+            )
             continue
         total_size += estimated_size
-        safe_identifier = hashlib.sha256(identifier.encode()).hexdigest()[:20]
-        href = f"fb2/images/{safe_identifier}{extension}"
         resources[href] = (media_type, encoded)
         href_by_identifier[identifier] = href
     return resources, href_by_identifier
@@ -283,67 +369,56 @@ def _build_sections(
     root: ElementTree.Element,
     publication_title: str,
 ) -> tuple[tuple[_Fb2Section, ...], dict[ElementTree.Element, str], dict[str, str]]:
-    element_anchors: dict[ElementTree.Element, str] = {}
+    # IDs reflect source element order, including unnamed sections. They are
+    # renderer addresses; chapter selection belongs exclusively to the C core.
+    element_anchors = {
+        element: f"chapter-node-{index}" for index, element in enumerate(root.iter())
+    }
     original_targets: dict[str, str] = {}
-    sequence = 0
 
-    def allocate_anchor(element: ElementTree.Element, resource_href: str) -> str:
-        nonlocal sequence
-        current = element_anchors.get(element)
-        if current is not None:
-            return current
-        sequence += 1
-        if sequence > MAX_XML_ELEMENTS:
-            raise publication_parser_limit(
-                ReaderSafetyRuleId.FB2_STRUCTURE_BUDGET,
-                "FB2 document has too many addressable nodes",
-            )
-        anchor = f"fb2-node-{sequence:06d}"
-        element_anchors[element] = anchor
-        original_identifier = (_attribute(element, "id") or "").strip()
-        if original_identifier:
-            if original_identifier in original_targets:
-                raise PublicationCorruptError("FB2 contains duplicate identifiers")
-            original_targets[original_identifier] = f"{resource_href}#{anchor}"
-        return anchor
-
-    section_count = 0
-
-    def build(
-        element: ElementTree.Element,
-        resource_href: str,
-        fallback: str,
-    ) -> _Fb2Section:
-        nonlocal section_count
-        section_count += 1
-        if section_count > MAX_XML_ELEMENTS:
-            raise publication_parser_limit(
-                ReaderSafetyRuleId.FB2_STRUCTURE_BUDGET,
-                "FB2 contains too many sections",
-            )
-        anchor = allocate_anchor(element, resource_href)
-        title = _section_title(element, fallback)
-        children = tuple(
-            build(child, resource_href, f"{title} {index}")
-            for index, child in enumerate(_direct_children(element, "section"), start=1)
+    def build(element: ElementTree.Element, href: str) -> _Fb2Section:
+        for descendant in element.iter():
+            identifier = (_attribute(descendant, "id") or "").strip()
+            if identifier:
+                target = f"{href}#{element_anchors[descendant]}"
+                if (
+                    identifier in original_targets
+                    and original_targets[identifier] != target
+                ):
+                    raise PublicationCorruptError("FB2 contains duplicate identifiers")
+                original_targets[identifier] = target
+        return _Fb2Section(
+            element,
+            href,
+            element_anchors.get(element, "body"),
+            _section_title(element, ""),
+            tuple(build(child, href) for child in _direct_children(element, "section")),
         )
-        return _Fb2Section(element, resource_href, anchor, title, children)
 
     roots: list[_Fb2Section] = []
-    root_index = 0
-    for body in _direct_children(root, "body"):
-        sections = _direct_children(body, "section")
-        if not sections:
-            sections = [body]
-        for section in sections:
-            root_index += 1
-            resource_href = f"fb2/section-{root_index:04d}.xhtml"
-            roots.append(
-                build(section, resource_href, f"{publication_title} {root_index}")
-            )
-            for element in section.iter():
-                if _attribute(element, "id"):
-                    allocate_anchor(element, resource_href)
+    section_index = 0
+    for body_index, body in enumerate(_direct_children(root, "body"), start=1):
+        loose = ElementTree.Element("body")
+        loose.text = body.text
+        part_index = 0
+
+        def flush_loose(body_number: int = body_index) -> None:
+            nonlocal loose, part_index
+            if len(loose) or (loose.text or "").strip():
+                part_index += 1
+                href = f"fb2/body-{body_number}-part-{part_index}.xhtml"
+                roots.append(build(loose, href))
+            loose = ElementTree.Element("body")
+
+        for child in body:
+            if _local_name(child.tag) == "section":
+                flush_loose()
+                section_index += 1
+                roots.append(build(child, f"fb2/section-{section_index:04d}.xhtml"))
+                loose.text = child.tail
+            else:
+                loose.append(child)
+        flush_loose()
     return tuple(roots), element_anchors, original_targets
 
 
@@ -414,7 +489,7 @@ def _render_element(
     if mapped_name is None:
         return content
     attributes = ""
-    anchor = element_anchors.get(element)
+    anchor = element_anchors.get(element) if _attribute(element, "id") else None
     if anchor is not None:
         attributes = f' id="{anchor}"'
     if name == "stanza":
@@ -431,30 +506,36 @@ def _render_section(
     image_hrefs: dict[str, str],
 ) -> str:
     heading = min(depth, 6)
-    content = "".join(
-        _render_element(
-            child,
-            element_anchors=element_anchors,
-            original_targets=original_targets,
-            image_hrefs=image_hrefs,
-        )
-        for child in section.element
-        if _local_name(child.tag) not in {"title", "section"}
+    child_sections = {child.element: child for child in section.children}
+    rendered = [_escape(section.element.text or "")]
+    for child in section.element:
+        if _local_name(child.tag) == "title":
+            continue
+        nested = child_sections.get(child)
+        if nested is not None:
+            rendered.append(
+                _render_section(
+                    nested,
+                    depth=depth + 1,
+                    element_anchors=element_anchors,
+                    original_targets=original_targets,
+                    image_hrefs=image_hrefs,
+                )
+            )
+        else:
+            rendered.append(
+                _render_element(
+                    child,
+                    element_anchors=element_anchors,
+                    original_targets=original_targets,
+                    image_hrefs=image_hrefs,
+                )
+            )
+        rendered.append(_escape(child.tail or ""))
+    title = (
+        f"<h{heading}>{_escape(section.title)}</h{heading}>" if section.title else ""
     )
-    nested = "".join(
-        _render_section(
-            child,
-            depth=depth + 1,
-            element_anchors=element_anchors,
-            original_targets=original_targets,
-            image_hrefs=image_hrefs,
-        )
-        for child in section.children
-    )
-    return (
-        f'<section id="{section.anchor}"><h{heading}>{_escape(section.title)}'
-        f"</h{heading}>{content}{nested}</section>"
-    )
+    return f'<section id="{section.anchor}">{title}{"".join(rendered)}</section>'
 
 
 def _section_xhtml(
@@ -478,14 +559,6 @@ def _section_xhtml(
 <link rel="stylesheet" type="text/css" href="reader.css"/></head>
 <body>{body}</body></html>""".encode()
     return document
-
-
-def _toc_entry(section: _Fb2Section) -> PublicationTocEntry:
-    return PublicationTocEntry(
-        href=f"{section.resource_href}#{section.anchor}",
-        title=section.title,
-        children=tuple(_toc_entry(child) for child in section.children),
-    )
 
 
 def _snapshot(
@@ -517,7 +590,33 @@ def _snapshot(
     sections, element_anchors, original_targets = _build_sections(root, title)
     if not sections:
         raise PublicationStructureError("FB2 reading order is empty")
-    resources_by_href: dict[str, tuple[str, bytes | str]] = {
+    targets = {
+        element: f"{section.resource_href}#{element_anchors[element]}"
+        for section in sections
+        for element in section.element.iter()
+        if element in element_anchors
+    }
+    projection = ChapterCore.load().parse_xml(
+        3, tuple(xml_chapter_events(root, targets.get))
+    )
+    chapter_titles = {
+        entry.href: entry.title for entry in projection.entries if entry.href
+    }
+
+    def titled(section: _Fb2Section) -> _Fb2Section:
+        return replace(
+            section,
+            title=chapter_titles.get(
+                f"{section.resource_href}#{section.anchor}", section.title
+            ),
+            children=tuple(titled(child) for child in section.children),
+        )
+
+    sections = tuple(titled(section) for section in sections)
+
+    resources_by_href: dict[
+        str, tuple[str, bytes | str | _Fb2ResourceMarker | None]
+    ] = {
         _STYLESHEET_HREF: ("text/css", _STYLESHEET),
         **binary_resources,
     }
@@ -548,7 +647,7 @@ def _snapshot(
             for href, (media_type, _content) in resources_by_href.items()
             if href not in {link.href for link in reading_order}
         ),
-        toc=tuple(_toc_entry(section) for section in sections),
+        toc=projection.table_of_contents(),
     )
     return _Fb2Snapshot(
         publication=publication,
@@ -589,12 +688,31 @@ class Fb2PublicationAdapter(PublicationAdapter):
             )
         elif indexed is not None:
             media_type, payload = indexed
+            if payload is None:
+                raise publication_integrity_failure(
+                    ReaderSafetyRuleId.REFLOWABLE_OPTIONAL_RESOURCE_FAILURE,
+                    "FB2 binary resource is ambiguous",
+                    optional=True,
+                )
+            if isinstance(payload, _Fb2ResourceMarker):
+                if payload.rule_id is ReaderSafetyRuleId.FB2_IMAGE_BUDGET:
+                    raise publication_optional_resource_failure(
+                        payload.rule_id,
+                        payload.message,
+                    )
+                raise publication_integrity_failure(
+                    payload.rule_id,
+                    payload.message,
+                    optional=True,
+                )
             if isinstance(payload, str):
                 try:
                     content = base64.b64decode(payload, validate=True)
                 except (ValueError, binascii.Error) as error:
-                    raise PublicationCorruptError(
-                        "FB2 binary resource is invalid"
+                    raise publication_integrity_failure(
+                        ReaderSafetyRuleId.REFLOWABLE_OPTIONAL_RESOURCE_FAILURE,
+                        "FB2 binary resource is invalid",
+                        optional=True,
                     ) from error
             else:
                 content = payload
@@ -628,7 +746,9 @@ class Fb2PublicationAdapter(PublicationAdapter):
             source.author,
         )
         return self._cache.get(
-            key, lambda: _snapshot(*key), max(1, stat_result.st_size * 8)
+            key,
+            lambda: _snapshot(*key),
+            publication_snapshot_weight(stat_result.st_size),
         )
 
     def close(self) -> None:

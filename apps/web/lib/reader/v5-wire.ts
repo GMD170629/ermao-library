@@ -165,12 +165,13 @@ function nullableNonNegativeInteger(value: unknown): number | null | undefined {
 function parseChapter(value: unknown): ReaderChapterPresentation | null | undefined {
   if (value === null) return null;
   const item = record(value);
-  if (!item || !hasOnlyKeys(item, ['href', 'title', 'index']) || !hasKeys(item, ['href', 'title', 'index'])) return undefined;
+  if (!item || !hasOnlyKeys(item, ['href', 'title', 'index', 'navigationKey']) || !hasKeys(item, ['href', 'title', 'index', 'navigationKey'])) return undefined;
+  const navigationKey = nullableString(item.navigationKey, 256);
   const href = nullableString(item.href, 8192);
   const title = nullableString(item.title, 4096);
   const index = nullableNonNegativeInteger(item.index);
-  if (href === undefined || title === undefined || index === undefined) return undefined;
-  return { href, title, index };
+  if (navigationKey === undefined || href === undefined || title === undefined || index === undefined) return undefined;
+  return { navigationKey, href, title, index };
 }
 
 function parsePage(value: unknown): ReaderPagePresentation | null | undefined {

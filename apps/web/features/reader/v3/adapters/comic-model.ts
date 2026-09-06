@@ -1,5 +1,30 @@
 import { comicVisualSpreadPages } from '../../../../lib/comic-reading-order';
+import { READER_SAFETY_RULES, READER_SAFETY_RULE_IDS } from '@shuku/reader-core';
 import type { ReaderSafetyFailure } from '../security/reader-safety-policy';
+
+const COMIC_RESOURCE_CORRUPT = READER_SAFETY_RULES[READER_SAFETY_RULE_IDS.COMIC_RESOURCE_INTEGRITY].errorCode;
+const PUBLICATION_CORRUPT = READER_SAFETY_RULES[READER_SAFETY_RULE_IDS.EPUB_RESOURCE_INTEGRITY].errorCode;
+const COMIC_RESOURCE_LIMIT = READER_SAFETY_RULES[READER_SAFETY_RULE_IDS.COMIC_PAGE_MAX_COUNT].errorCode;
+const COMIC_PAGE_BLOCKED = READER_SAFETY_RULES[READER_SAFETY_RULE_IDS.COMIC_PAGE_MAX_BYTES].errorCode;
+const COMIC_MIME_MISMATCH = READER_SAFETY_RULES[READER_SAFETY_RULE_IDS.COMIC_PAGE_MIME].errorCode;
+const COMIC_SECURITY_REJECTED = READER_SAFETY_RULES[READER_SAFETY_RULE_IDS.COMIC_ARCHIVE_STRUCTURE].errorCode;
+const PUBLICATION_SECURITY_REJECTED = READER_SAFETY_RULES[READER_SAFETY_RULE_IDS.REFLOWABLE_REJECT_XML_ENTITY].errorCode;
+
+export function comicSafetyPlaceholderMessage(code: ReaderSafetyFailure['code']): string {
+  if (code === COMIC_RESOURCE_CORRUPT || code === PUBLICATION_CORRUPT) {
+    return '漫画资源已损坏，无法显示。';
+  }
+  if (code === COMIC_RESOURCE_LIMIT || code === COMIC_PAGE_BLOCKED) {
+    return '漫画资源超过阅读器的处理限制。';
+  }
+  if (code === COMIC_MIME_MISMATCH) {
+    return '漫画页面格式不受当前解码器支持。';
+  }
+  if (code === COMIC_SECURITY_REJECTED || code === PUBLICATION_SECURITY_REJECTED) {
+    return '漫画页面包含无法在当前安全隔离边界内处理的风险内容。';
+  }
+  return '漫画页面因资源错误无法显示。';
+}
 
 export type ComicPageMeta = {
   pageIndex: number;

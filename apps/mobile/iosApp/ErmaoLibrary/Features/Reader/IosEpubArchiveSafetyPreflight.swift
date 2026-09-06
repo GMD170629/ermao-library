@@ -1,12 +1,73 @@
 import CoreFoundation
 import Foundation
 @preconcurrency import ErmaoShared
-@preconcurrency import ReadiumZIPFoundation
+
+enum IosEpubResourceRole: String, Sendable {
+    case controlDocument = "CONTROL_DOCUMENT"
+    case readingOrder = "READING_ORDER"
+    case optionalResource = "OPTIONAL_RESOURCE"
+}
+
+/// Resolves archive integrity scope from Readium's actual parser/resource access phases. MIME is
+/// metadata only and cannot establish that a resource is required for opening or reading.
+final class IosEpubResourceRoleResolver: @unchecked Sendable {
+    private let lock = NSLock()
+    private var controlPaths = Set(["META-INF/container.xml"])
+    private var readingOrderPaths = Set<String>()
+    private var observedPaths = Set<String>()
+
+    func observeParserAccess(path: String) {
+        guard let canonical = IosEpubArchiveSafetyPreflight.canonicalArchivePath(path) else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        observedPaths.insert(canonical)
+    }
+
+    func markControlDocument(path: String) {
+        guard let canonical = IosEpubArchiveSafetyPreflight.canonicalArchivePath(path) else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        controlPaths.insert(canonical)
+    }
+
+    func markReadingOrder(paths: [String]) {
+        let canonicalPaths = paths
+            .map(Self.archivePath)
+            .compactMap(IosEpubArchiveSafetyPreflight.canonicalArchivePath)
+            .filter { !$0.isEmpty }
+        lock.lock()
+        defer { lock.unlock() }
+        readingOrderPaths.formUnion(canonicalPaths)
+    }
+
+    func wasRequiredObserved(path: String) -> Bool {
+        guard let canonical = IosEpubArchiveSafetyPreflight.canonicalArchivePath(path) else { return false }
+        lock.lock()
+        defer { lock.unlock() }
+        guard observedPaths.contains(canonical) else { return false }
+        return readingOrderPaths.contains(canonical) || controlPaths.contains(canonical)
+    }
+
+    func role(for path: String) -> IosEpubResourceRole {
+        let canonical = IosEpubArchiveSafetyPreflight.canonicalArchivePath(path)
+        lock.lock()
+        defer { lock.unlock() }
+        if let canonical, readingOrderPaths.contains(canonical) { return .readingOrder }
+        if let canonical, controlPaths.contains(canonical) { return .controlDocument }
+        return .optionalResource
+    }
+
+    private static func archivePath(_ href: String) -> String {
+        href.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)[0]
+            .split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)[0]
+            .description
+    }
+}
 
 /// Detects ZIP facts before Readium builds an EPUB Publication. The original file is read-only;
 /// policy limits and outcomes are supplied by the generated Reader safety contract.
 struct IosEpubArchiveSafetyPreflight {
-    static func verify(fileURL: URL) async throws {
+    static func verify(fileURL: URL) async throws -> IosEpubArchiveSafetyResult {
         let entryLimit = UInt64(ErmaoShared.PublicKt.readerSafetyEpubArchiveEntryMaxCount())
         let parsed: ParsedArchive
         do {
@@ -24,21 +85,29 @@ struct IosEpubArchiveSafetyPreflight {
             )
         }
 
-        try verifyMetadata(parsed.entries, archiveLength: parsed.archiveLength)
-        try await verifyContents(fileURL: fileURL, entries: parsed.entries)
+        return try verifyMetadata(parsed.entries, archiveLength: parsed.archiveLength)
     }
 
-    static func verifyMetadata(_ entries: [EntryFacts], archiveLength: UInt64) throws {
+    static func verifyMetadata(
+        _ entries: [EntryFacts],
+        archiveLength: UInt64
+    ) throws -> IosEpubArchiveSafetyResult {
         let fatalFindings = Set(ErmaoShared.PublicKt.readerSafetyEpubArchiveFatalFindings())
-        let supportedFindings: Set<String> = [
-            "PATH_ESCAPE", "ABSOLUTE_PATH", "BACKSLASH_PATH", "NUL_PATH", "DOT_SEGMENT",
-            "DUPLICATE_CANONICAL_ENTRY", "SYMLINK", "ENCRYPTED_ENTRY", "OVERLAPPING_ENTRY",
-            "CRC_MISMATCH",
+        let integrityFindings = Set(ErmaoShared.PublicKt.readerSafetyEpubArchiveIntegrityFindings())
+        let supportedFatal: Set<String> = ["PATH_ESCAPE", "ABSOLUTE_PATH", "NUL_PATH", "SYMLINK"]
+        let supportedIntegrity: Set<String> = [
+            "DUPLICATE_CANONICAL_ENTRY", "OVERLAPPING_ENTRY", "CRC_MISMATCH",
         ]
-        if !fatalFindings.isSubset(of: supportedFindings) {
+        if !fatalFindings.isSubset(of: supportedFatal) {
             let ruleId = ErmaoShared.PublicKt.readerSafetyEpubArchiveStructureFailure().ruleId
             throw implementationFailure(
                 ErmaoShared.PublicKt.readerSafetyPlatformAlgorithmUnsupported(ruleId: ruleId)
+            )
+        }
+        if !integrityFindings.isSubset(of: supportedIntegrity) {
+            let ruleId = ErmaoShared.PublicKt.readerSafetyEpubArchiveIntegrityFailure().ruleId
+            throw implementationFailure(
+                ErmaoShared.PublicKt.readerSafetyEngineAlgorithmUnsupported(ruleId: ruleId)
             )
         }
 
@@ -48,7 +117,10 @@ struct IosEpubArchiveSafetyPreflight {
             )
         }
 
-        var canonicalPaths = Set<String>()
+        var entriesByCanonicalPath: [String: [EntryFacts]] = [:]
+        var expectedResources: [String: IosEpubArchiveResourceFacts] = [:]
+        var quarantinedResources: [String: ErmaoShared.ReaderSafetyFailure] = [:]
+        var quarantinedRawPaths: [String: ErmaoShared.ReaderSafetyFailure] = [:]
         var expandedBytes: UInt64 = 0
         let maximumEntryBytes = UInt64(ErmaoShared.PublicKt.readerSafetyEpubArchiveEntryMaxBytes())
         let maximumExpandedBytes = UInt64(ErmaoShared.PublicKt.readerSafetyEpubArchiveExpandedMaxBytes())
@@ -56,27 +128,40 @@ struct IosEpubArchiveSafetyPreflight {
 
         for entry in entries {
             let path = entry.path.hasSuffix("/") ? String(entry.path.dropLast()) : entry.path
-            try rejectFinding(
-                fatalFindings, "ABSOLUTE_PATH",
-                path.hasPrefix("/") || isWindowsAbsolutePath(path)
+            let absolutePath = path.hasPrefix("/") || path.hasPrefix("\\") || isWindowsAbsolutePath(path)
+            let nulPath = path.utf8.contains(0)
+            let canonical = canonicalArchivePath(path)
+            let pathEscape = canonical == nil
+            quarantineFinding(
+                path: path,
+                canonical: canonical,
+                finding: absolutePath ? "ABSOLUTE_PATH" : nulPath ? "NUL_PATH" : "PATH_ESCAPE",
+                condition: absolutePath || nulPath || pathEscape,
+                fatalFindings: fatalFindings,
+                integrityFindings: integrityFindings,
+                quarantinedResources: &quarantinedResources,
+                quarantinedRawPaths: &quarantinedRawPaths
             )
-            try rejectFinding(fatalFindings, "BACKSLASH_PATH", path.contains("\\"))
-            try rejectFinding(fatalFindings, "NUL_PATH", path.utf8.contains(0))
-            let segments = path.split(separator: "/", omittingEmptySubsequences: false)
-            try rejectFinding(
-                fatalFindings, "DOT_SEGMENT",
-                path.isEmpty || segments.contains { $0.isEmpty || $0 == "." || $0 == ".." }
+            if let canonical, !canonical.isEmpty, !entry.isDirectory {
+                entriesByCanonicalPath[canonical, default: []].append(entry)
+                expectedResources[canonical] = IosEpubArchiveResourceFacts(
+                    uncompressedSize: entry.uncompressedSize,
+                    crc32: entry.crc32
+                )
+                if integrityFindings.contains("CRC_MISMATCH"), entry.crc32 == UInt32.max {
+                    quarantinedResources[canonical] = ErmaoShared.PublicKt.readerSafetyOptionalResourceFailure()
+                }
+            }
+            quarantineFinding(
+                path: path,
+                canonical: canonical,
+                finding: "SYMLINK",
+                condition: entry.isSymbolicLink,
+                fatalFindings: fatalFindings,
+                integrityFindings: integrityFindings,
+                quarantinedResources: &quarantinedResources,
+                quarantinedRawPaths: &quarantinedRawPaths
             )
-            try rejectFinding(
-                fatalFindings, "PATH_ESCAPE",
-                path == ".." || path.hasPrefix("../")
-            )
-            try rejectFinding(
-                fatalFindings, "DUPLICATE_CANONICAL_ENTRY",
-                !canonicalPaths.insert(path).inserted
-            )
-            try rejectFinding(fatalFindings, "SYMLINK", entry.isSymbolicLink)
-            try rejectFinding(fatalFindings, "ENCRYPTED_ENTRY", entry.isEncrypted)
 
             if entry.uncompressedSize > maximumEntryBytes {
                 throw IosReaderFailure.safety(
@@ -103,7 +188,18 @@ struct IosEpubArchiveSafetyPreflight {
             expandedBytes = nextExpandedBytes
 
             if entry.localHeaderOffset > entry.dataOffset || entry.physicalEndOffset > archiveLength {
-                try rejectFinding(fatalFindings, "OVERLAPPING_ENTRY", true)
+                quarantineIntegrityEntry(
+                    entry: entry,
+                    canonical: canonical,
+                    integrityFindings: integrityFindings,
+                    quarantinedResources: &quarantinedResources
+                )
+            }
+        }
+
+        for (canonical, entries) in entriesByCanonicalPath where entries.count > 1 {
+            if integrityFindings.contains("DUPLICATE_CANONICAL_ENTRY") {
+                quarantinedResources[canonical] = ErmaoShared.PublicKt.readerSafetyEpubArchiveIntegrityFailure()
             }
         }
 
@@ -111,77 +207,133 @@ struct IosEpubArchiveSafetyPreflight {
         if physicalEntries.count > 1 {
             for index in 1 ..< physicalEntries.count {
                 if physicalEntries[index].localHeaderOffset < physicalEntries[index - 1].physicalEndOffset {
-                    try rejectFinding(fatalFindings, "OVERLAPPING_ENTRY", true)
+                    quarantineIntegrityEntry(
+                        entry: physicalEntries[index - 1],
+                        canonical: canonicalArchivePath(
+                            physicalEntries[index - 1].path.hasSuffix("/")
+                                ? String(physicalEntries[index - 1].path.dropLast())
+                                : physicalEntries[index - 1].path
+                        ),
+                        integrityFindings: integrityFindings,
+                        quarantinedResources: &quarantinedResources
+                    )
+                    quarantineIntegrityEntry(
+                        entry: physicalEntries[index],
+                        canonical: canonicalArchivePath(
+                            physicalEntries[index].path.hasSuffix("/")
+                                ? String(physicalEntries[index].path.dropLast())
+                                : physicalEntries[index].path
+                        ),
+                        integrityFindings: integrityFindings,
+                        quarantinedResources: &quarantinedResources
+                    )
                 }
             }
         }
+
+        return IosEpubArchiveSafetyResult(
+            quarantinedResources: quarantinedResources,
+            quarantinedRawPaths: quarantinedRawPaths,
+            expectedResources: expectedResources
+        )
     }
 
-    private static func verifyContents(fileURL: URL, entries expectedEntries: [EntryFacts]) async throws {
-        let structureFailure = ErmaoShared.PublicKt.readerSafetyEpubArchiveStructureFailure()
-        do {
-            let archive = try await ReadiumZIPFoundation.Archive(url: fileURL, accessMode: .read)
-            let archiveEntries = try await archive.entries()
-            var entriesByPath: [String: ReadiumZIPFoundation.Entry] = [:]
-            for entry in archiveEntries {
-                if entriesByPath.updateValue(entry, forKey: entry.path) != nil {
-                    throw IosReaderFailure.safety(structureFailure)
-                }
-            }
-
-            let counter = ExpandedByteCounter(
-                maximumEntryBytes: UInt64(ErmaoShared.PublicKt.readerSafetyEpubArchiveEntryMaxBytes()),
-                maximumExpandedBytes: UInt64(ErmaoShared.PublicKt.readerSafetyEpubArchiveExpandedMaxBytes()),
-                entryFailure: IosReaderFailure.safety(
-                    ErmaoShared.PublicKt.readerSafetyEpubArchiveEntryBytesFailure()
-                ),
-                expandedFailure: IosReaderFailure.safety(
-                    ErmaoShared.PublicKt.readerSafetyEpubArchiveExpandedBytesFailure()
-                )
+    static func rootfilePaths(from data: Data) throws -> [String] {
+        let delegate = ContainerRootfileDelegate()
+        let parser = XMLParser(data: data)
+        parser.shouldProcessNamespaces = true
+        parser.shouldResolveExternalEntities = false
+        parser.delegate = delegate
+        guard parser.parse() else {
+            let failure = ErmaoShared.PublicKt.readerSafetyPlatformAlgorithmUnsupported(
+                ruleId: ErmaoShared.PublicKt.readerSafetyPrepareXmlRuleId()
             )
-
-            for expected in expectedEntries where !expected.isDirectory {
-                guard let entry = entriesByPath[expected.path], entry.type == .file,
-                      entry.uncompressedSize == expected.uncompressedSize,
-                      entry.compressedSize == expected.compressedSize
-                else {
-                    throw IosReaderFailure.safety(structureFailure)
-                }
-                await counter.beginEntry()
-                let checksum = try await archive.extract(entry, skipCRC32: false) { chunk in
-                    try await counter.consume(UInt64(chunk.count))
-                }
-                let actualBytes = await counter.currentEntryBytes()
-                if actualBytes != expected.uncompressedSize || checksum != expected.crc32 {
-                    throw IosReaderFailure.safety(structureFailure)
-                }
-            }
-        } catch let failure as IosReaderFailure {
-            throw failure
-        } catch {
-            if let archiveError = error as? ReadiumZIPFoundation.Archive.ArchiveError,
-               case .invalidCompressionMethod = archiveError
-            {
-                throw implementationFailure(
-                    ErmaoShared.PublicKt.readerSafetyEngineAlgorithmUnsupported(
-                        ruleId: structureFailure.ruleId
-                    ),
-                    underlyingError: error as NSError
-                )
-            }
-            throw IosReaderFailure.safety(structureFailure, underlyingError: error as NSError)
+            throw IosPublicationSecurityError.rejected(
+                ruleId: failure.ruleId,
+                errorCode: failure.errorCode
+            )
         }
+        return delegate.paths
     }
 
-    private static func rejectFinding(
-        _ fatalFindings: Set<String>,
-        _ finding: String,
-        _ condition: Bool
+    /// Verifies bytes returned by the protected Readium resource before sanitization.
+    static func verifyResourceBytes(
+        expected: IosEpubArchiveResourceFacts,
+        data: Data
     ) throws {
-        if condition && fatalFindings.contains(finding) {
-            throw IosReaderFailure.safety(
-                ErmaoShared.PublicKt.readerSafetyEpubArchiveStructureFailure()
+        guard expected.crc32 != UInt32.max,
+              UInt64(data.count) == expected.uncompressedSize,
+              crc32(data) == expected.crc32
+        else {
+            let failure = ErmaoShared.PublicKt.readerSafetyOptionalResourceFailure()
+            throw IosPublicationSecurityError.rejected(
+                ruleId: failure.ruleId,
+                errorCode: failure.errorCode
             )
+        }
+    }
+
+    private static func quarantineIntegrityEntry(
+        entry: EntryFacts,
+        canonical: String?,
+        integrityFindings: Set<String>,
+        quarantinedResources: inout [String: ErmaoShared.ReaderSafetyFailure]
+    ) {
+        guard let canonical, !canonical.isEmpty, !entry.isDirectory,
+              integrityFindings.contains("OVERLAPPING_ENTRY")
+        else { return }
+        quarantinedResources[canonical] = ErmaoShared.PublicKt.readerSafetyEpubArchiveIntegrityFailure()
+    }
+
+    private static func crc32(_ data: Data) -> UInt32 {
+        var checksum: UInt32 = 0xFFFF_FFFF
+        for byte in data {
+            checksum ^= UInt32(byte)
+            for _ in 0 ..< 8 {
+                checksum = (checksum >> 1) ^ ((checksum & 1) == 1 ? 0xEDB8_8320 : 0)
+            }
+        }
+        return checksum ^ 0xFFFF_FFFF
+    }
+
+    static func canonicalArchivePath(_ path: String) -> String? {
+        var canonical: [String] = []
+        for segment in path.replacingOccurrences(of: "\\", with: "/").split(separator: "/", omittingEmptySubsequences: false) {
+            switch segment {
+            case "", ".": continue
+            case "..":
+                guard !canonical.isEmpty else { return nil }
+                canonical.removeLast()
+            default: canonical.append(String(segment))
+            }
+        }
+        return canonical.joined(separator: "/")
+    }
+
+    private static func quarantineFinding(
+        path: String,
+        canonical: String?,
+        finding: String,
+        condition: Bool,
+        fatalFindings: Set<String>,
+        integrityFindings: Set<String>,
+        quarantinedResources: inout [String: ErmaoShared.ReaderSafetyFailure],
+        quarantinedRawPaths: inout [String: ErmaoShared.ReaderSafetyFailure]
+    ) {
+        guard condition else { return }
+        let failure: ErmaoShared.ReaderSafetyFailure?
+        if fatalFindings.contains(finding) {
+            failure = ErmaoShared.PublicKt.readerSafetyEpubArchiveStructureFailure()
+        } else if integrityFindings.contains(finding) {
+            failure = ErmaoShared.PublicKt.readerSafetyEpubArchiveIntegrityFailure()
+        } else {
+            failure = nil
+        }
+        guard let failure else { return }
+        if let canonical, !canonical.isEmpty {
+            quarantinedResources[canonical] = failure
+        } else {
+            quarantinedRawPaths[path] = failure
         }
     }
 
@@ -231,6 +383,33 @@ struct IosEpubArchiveSafetyPreflight {
         let physicalEndOffset: UInt64
     }
 
+    struct IosEpubArchiveResourceFacts: Sendable {
+        let uncompressedSize: UInt64
+        let crc32: UInt32
+    }
+
+    struct IosEpubArchiveSafetyResult: Sendable {
+        let quarantinedResources: [String: ErmaoShared.ReaderSafetyFailure]
+        let quarantinedRawPaths: [String: ErmaoShared.ReaderSafetyFailure]
+        let expectedResources: [String: IosEpubArchiveResourceFacts]
+
+        func quarantineFor(path: String) -> ErmaoShared.ReaderSafetyFailure? {
+            if let canonical = IosEpubArchiveSafetyPreflight.canonicalArchivePath(path),
+               let failure = quarantinedResources[canonical] {
+                return failure
+            }
+            let rawPath = path.hasSuffix("/") ? String(path.dropLast()) : path
+            return quarantinedRawPaths[rawPath]
+        }
+
+        func expectedFor(path: String) -> IosEpubArchiveResourceFacts? {
+            guard let canonical = IosEpubArchiveSafetyPreflight.canonicalArchivePath(path) else {
+                return nil
+            }
+            return expectedResources[canonical]
+        }
+    }
+
     private struct ParsedArchive: Sendable {
         let archiveLength: UInt64
         let entries: [EntryFacts]
@@ -239,42 +418,6 @@ struct IosEpubArchiveSafetyPreflight {
     private enum ArchiveReadFailure: Error, Sendable {
         case invalidArchive
         case entryCountLimit
-    }
-
-    private actor ExpandedByteCounter {
-        let maximumEntryBytes: UInt64
-        let maximumExpandedBytes: UInt64
-        let entryFailure: IosReaderFailure
-        let expandedFailure: IosReaderFailure
-        var entryBytes: UInt64 = 0
-        var expandedBytes: UInt64 = 0
-
-        init(
-            maximumEntryBytes: UInt64,
-            maximumExpandedBytes: UInt64,
-            entryFailure: IosReaderFailure,
-            expandedFailure: IosReaderFailure
-        ) {
-            self.maximumEntryBytes = maximumEntryBytes
-            self.maximumExpandedBytes = maximumExpandedBytes
-            self.entryFailure = entryFailure
-            self.expandedFailure = expandedFailure
-        }
-
-        func beginEntry() {
-            entryBytes = 0
-        }
-
-        func consume(_ count: UInt64) throws {
-            let (nextEntryBytes, entryOverflow) = entryBytes.addingReportingOverflow(count)
-            if entryOverflow || nextEntryBytes > maximumEntryBytes { throw entryFailure }
-            let (nextExpandedBytes, expandedOverflow) = expandedBytes.addingReportingOverflow(count)
-            if expandedOverflow || nextExpandedBytes > maximumExpandedBytes { throw expandedFailure }
-            entryBytes = nextEntryBytes
-            expandedBytes = nextExpandedBytes
-        }
-
-        func currentEntryBytes() -> UInt64 { entryBytes }
     }
 
     private enum CentralDirectoryReader {
@@ -609,5 +752,25 @@ struct IosEpubArchiveSafetyPreflight {
         private static let zip64LocatorSize = 20
         private static let zip64RecordMinimumSize = 56
         private static let maximumEndSearchBytes = 65_557
+    }
+}
+
+private final class ContainerRootfileDelegate: NSObject, XMLParserDelegate {
+    private(set) var paths: [String] = []
+
+    func parser(
+        _: XMLParser,
+        didStartElement elementName: String,
+        namespaceURI _: String?,
+        qualifiedName _: String?,
+        attributes: [String: String] = [:]
+    ) {
+        guard elementName.split(separator: ":").last.map(String.init)?.lowercased() == "rootfile",
+              let path = attributes.first(where: { key, _ in
+                  key.split(separator: ":").last.map(String.init)?.lowercased() == "full-path"
+              })?.value,
+              !path.isEmpty
+        else { return }
+        paths.append(path)
     }
 }

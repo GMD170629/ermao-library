@@ -1,0 +1,308 @@
+{
+  "status": "PASS",
+  "visualTargetVersion": "core-tabs-polish-v2",
+  "colorContractVersion": "1.2.0",
+  "recordedAt": "2026-09-05T03:09:05.302870+00:00",
+  "sourceCommit": "9a4901edba41fab786bd28ff92144ff802ddfab3",
+  "worktree": "dirty; v1 changes and unrelated pre-existing changes preserved; no commit or dependency update",
+  "apkSha256": "d905267a8db41ba174f6bde5874b668204bb671cdf684e5043b625982ca339bd",
+  "installedApkMatches": true,
+  "apkPrivatePath": "C:\\Users\\gamer\\.codex\\visualizations\\2026\\09\\05\\01a06ee6-f648-7d52-bd32-8577349a8f1d\\core-tabs-polish-v2\\android-core-polish-v2-debug.apk",
+  "package": "com.ermao.library",
+  "versionName": "1.0.0",
+  "versionCode": 1,
+  "device": {
+    "serial": "9e896bbc",
+    "model": "M2102K1AC",
+    "android": "12",
+    "pixels": [
+      1440,
+      3200
+    ],
+    "density": 3.5,
+    "fontScale": 1.0,
+    "locale": "zh-CN",
+    "theme": "Light",
+    "orientation": "portrait",
+    "navigation": "gesture"
+  },
+  "installation": "adb install -r; data preserved; cold launch MainActivity; foreground/installed sha verified; crash buffer has no app crash",
+  "sourceFiles": {
+    "apps/mobile/androidApp/src/androidTest/kotlin/com/ermao/library/features/administrativesettings/AdministrativeSettingsUiTest.kt": "71ad13a279b134c2250173d9421d5f62f237f5e511ffb2a3cec8b6b98df3822c",
+    "apps/mobile/androidApp/src/androidTest/kotlin/com/ermao/library/features/downloads/ui/DownloadScreensTest.kt": "96b13916ddf7b6c91ae789e78451c55c81721ee9e3dd2d7f9104fc7115646ed7",
+    "apps/mobile/androidApp/src/androidTest/kotlin/com/ermao/library/features/home/ui/HomeScreenTest.kt": "00488c6e89e47bcd912f981f9395b3e1a2a5fde4a6735a0c61d817bd0dd99945",
+    "apps/mobile/androidApp/src/androidTest/kotlin/com/ermao/library/features/library/ui/WorkContentsPathSheetTest.kt": "383f3b255b0759e1b69233ca012cdd566a2f560950766f31d432e9a54abdeca2",
+    "apps/mobile/androidApp/src/androidTest/kotlin/com/ermao/library/ui/components/SettingsComponentsTest.kt": "75a161802d0c014dfac2183ac303521bed3890b38b0c7b70119c16f15a0b0693",
+    "apps/mobile/androidApp/src/androidTest/kotlin/com/ermao/library/ui/components/WarmPageMenusTest.kt": "3852879b615b6f8567f70886c9da19218b1a85a197f8905962a3f6ad8647591b",
+    "apps/mobile/androidApp/src/androidTest/kotlin/com/ermao/library/ui/components/WarmPageScaffoldTest.kt": "e24c07065bdcd7aafb7bbcd8582cc9c9f7dec81aa923b0d794b9fee66aeeab40",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/MainActivity.kt": "38148ce6f5eb1c8ff0a6cc3633904fbf21d59f1bedcf0e4f93ea14f5c03de1cb",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/administrativesettings/AdministrativeCoreScreens.kt": "e015ecc4f4d0fc063b31d8d42476c882d98a732384d271f5b6a9ea8487d1ce54",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/administrativesettings/AdministrativeLibraryScreens.kt": "c3907ebd457f612433689edf4e1f743c27c9f987f1afca7b12ac3bbbca65ccb2",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/administrativesettings/AdministrativePeopleAndQueueScreens.kt": "39f8c0a83b0561a2019c6696b1446198d7411bae9d04ffe42d39beb204998cdc",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/administrativesettings/AdministrativeSettingsCopy.kt": "31b8e9b2cc8c889751aa19a0bc312a90c1cadbfb30a3324b12d00f8e25712a58",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/administrativesettings/AdministrativeSystemScreens.kt": "60f69d203902718f7a8730b5c3f75dbdcfc2d2f8da256a6662155a6271136e30",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/content/ui/ContentComponents.kt": "2147ea0590dd08f570213ddec3d50479d5330578f6a3925f3d2d6729809d8513",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/home/ui/HomeScreen.kt": "c6a3dd91644fe3bba65b6b661dfcba6352fca1c234345668c3e6f0d14b3400e4",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/library/ui/LibraryScreen.kt": "ffd08d73fec4332bf93222b54e4090bdd3abf78070075054f828012bc7bf9788",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/library/ui/MultiDownloadSheet.kt": "eb5f466569f058d7fa0a0d8997c0f799da515c5b455bb371edccd1d6387680be",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/library/ui/WorkDetailScreen.kt": "3984c4c1d5648c8a838f9ecdc256bc6dcdb977fbc332a7fcff4cc97c6f6b6168",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/workmanagement/BookManagement.kt": "77cdf842d547738f1af385505e416206c5d71faf7c5b70e2c9a50efe5c7b6e2d",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/ui/components/SettingsControls.kt": "bbdfbfb6db9798551eac6a4d65228642412373fa35117a04c87553a474edc2b7",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/ui/components/WarmPageInputs.kt": "76d6661efd773f9128b67f3d28abccc5422594567c69fff25f5d330acbbe002e",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/ui/components/WarmPageMenus.kt": "e813c165fbbd358b7e6a61196254014c0d0c220183f21d14153b8495c68db619",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/ui/components/WarmPageNavigation.kt": "7316e9a180678a60e691884cf1dfd98a6c687dcd964e3903dc98aff71a6b5f8f",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/ui/components/WarmPageScaffolds.kt": "bdca5f075299ffd2f32787998a65acf27db55493577766034ba07658ef3b12a7",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/ui/components/WarmPageSettings.kt": "cba980f2695b9a15da98e19cbcf2bb0215c9b7c6a038493a8240de7cd60bca62",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/ui/theme/WarmPageComponentMetrics.kt": "91cf3e0d9b8d867d0261ec1268c493a954dcf33a70ec44ab003cd287869b4f9f",
+    "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/ui/theme/WarmPageTokens.kt": "61fb09100d5772602f3900cdaa576e342d296654c4aa62630185370e28baa91f",
+    "apps/mobile/androidApp/src/main/res/values-zh-rCN/strings.xml": "bf769dd27bae3e9264a275e123c45d34e52d2a19e33c53ac37b7f25fd8b75cbf",
+    "apps/mobile/androidApp/src/main/res/values/strings.xml": "e046ecf286fc78a03077fb7726749beb06d1247d18715f48c8c0b6871d9428c6",
+    "apps/mobile/androidApp/src/test/kotlin/com/ermao/library/features/library/ui/WorkDetailLayoutTest.kt": "bb057b7cc2d5a9e1d576b38e6a0146324674384ba5543bdd416085f1169b86c3",
+    "apps/mobile/androidApp/src/test/kotlin/com/ermao/library/ui/theme/WarmPageComponentMetricsTest.kt": "28681854f4e3d757ddd792eaa5680b3740c0c06f26be9d2fad6aa98ceb74468e",
+    "apps/mobile/androidApp/src/test/kotlin/com/ermao/library/ui/theme/WarmPageTokensTest.kt": "278f5336e91cbedad763d8c807caac98fc94a3130331c622e3fc2e9363365bb4",
+    "apps/mobile/buildSrc/src/main/java/com/ermao/buildlogic/VisualTokenGenerator.java": "292413f1254da3035f187bd742f1aefb9afc1ded874047fe2c5bedc659d1c4bd",
+    "apps/web/components/book/cover-reading-progress.tsx": "0a546c370a398523d9b2945b5d97ee7c4ebefc0c49ebdf73795f5bcc6cc878a8",
+    "apps/web/components/layout/app-shell.tsx": "277d9a5de776772bd1989d79861bdd681a07420a1d8c832aac95519ca2747c30",
+    "apps/web/components/ui/button.tsx": "e107f1a8550c04a7394cab28df83a7b0e5a366aeef7942627ce2f56292760ce5",
+    "apps/web/components/ui/combobox.tsx": "01e1bd433feaaa2c478d4fd58c36d557da8c175d13c221104fedc4af0ad2ae66",
+    "apps/web/components/ui/progress.tsx": "b9cfa9b39eaa1fe50cefeb5aea379dc31a2f07fe3468fe79ab1acf725d32a9dd",
+    "apps/web/components/ui/select.tsx": "e788516c1522c9fca7dbe288e472d4e2bb585a534a5f33d3262a4d63128e30fb",
+    "apps/web/features/books/book-detail-page.tsx": "1679b57b6d59237d19c480f0bf7f94882fc0124e880e57a356266cf0ae3fcb86",
+    "apps/web/generated/visual-tokens.css": "f860bfc7d7df608f3a32094d6b4fdb169a4abada0b1fbb532a3b2428a7840e69",
+    "apps/web/generated/visual-tokens.ts": "c742f61fda26aa3dc7de5791022aec39151b2da46e6aaa584e844b65fd814002",
+    "docs/mobile-app-phase-4-visual-master.md": "d99904b7c0ce168c6bd5f48109d729adda5d7c850e426472eaaa1087d3dd6340",
+    "packages/design-contracts/README.md": "42ab83baee6d093fe7cac3947514c1522190a6077ea2d9c82d14900571b72483",
+    "packages/design-contracts/visual-tokens.json": "6c227fd3b5f91064d9b3ea97736cd6ad70ec1ff64e1e2f14f271d35fd30d31cb"
+  },
+  "evidenceType": "product-shell; tests are component fixtures and do not prove whole-page shell",
+  "evidence": [
+    {
+      "title": "首页",
+      "file": "candidate-1/01-home.png",
+      "sha256": "ca4a890686b6fdbe2cec40f64068d1956687196474b756ee5a90fe505c851e0e"
+    },
+    {
+      "title": "目录详情 · 首屏",
+      "file": "candidate-1/02-directory-root.png",
+      "sha256": "1748617a852107e4bd9006e9765b6bb92e5a149f9a31111c0fb493ac6003dd58"
+    },
+    {
+      "title": "目录内容 · 网格",
+      "file": "candidate-1/03-directory-nested.png",
+      "sha256": "dd3d91651422ee3cef8d102683a9f75d5d646ed7b12ba21e4abc2dc8bdacfc38"
+    },
+    {
+      "title": "完整路径选择",
+      "file": "candidate-1/05-path-sheet-stable.png",
+      "sha256": "5c68acf149b05c41033ae78c937068fc99081b2fed80628f69c8f3d37c27c82e"
+    },
+    {
+      "title": "路径选择后回到根目录",
+      "file": "candidate-1/06-path-root-return.png",
+      "sha256": "2026e365c447eab89f66c589934c1950f91fc33d9dabe8777d2d8cdc6bc62d7f"
+    },
+    {
+      "title": "目录内容 · 列表",
+      "file": "candidate-1/07-list.png",
+      "sha256": "f77952f764b2ca4aeb0f374885ef48ff6de9c64c279cdafae407474a90190124"
+    },
+    {
+      "title": "内容排序菜单",
+      "file": "candidate-1/08-sort-menu.png",
+      "sha256": "efa5069f0d8a8fa7037ec6e1bc60464c2aaa52ec5f5d850496420c1dbe612e90"
+    },
+    {
+      "title": "名称倒序结果",
+      "file": "candidate-1/09-list-sort-reversed.png",
+      "sha256": "d76345b0051de06657973ede71f3a4764ce5e9918a5c8ad0efbd93d7c3930da4"
+    },
+    {
+      "title": "卷册封面菜单",
+      "file": "candidate-1/10-cover-menu.png",
+      "sha256": "bbbd97faa0a6f26b461d9390b2895e22c9569a84d3cd24455b91d8fa25e67ad3"
+    },
+    {
+      "title": "目录菜单 · 长标题",
+      "file": "candidate-1/11-directory-menu.png",
+      "sha256": "897187e92ad76637a454ee9c57f1818c2e9bb04e8703fced76f9054de9edf0a7"
+    },
+    {
+      "title": "单资源详情",
+      "file": "candidate-1/12-resource-detail.png",
+      "sha256": "a0151c4f0eabe8d1cede5731477d089abad409916dea1d5bd5ee760adc9e0aba"
+    },
+    {
+      "title": "资源操作菜单",
+      "file": "candidate-1/13-resource-menu.png",
+      "sha256": "982efe797b6a32d3bc12b58b3c38507b2dc1a69b45166cdeceaa733fd9c906d3"
+    },
+    {
+      "title": "我的 · 受限原图",
+      "file": "candidate-1/14-me.png",
+      "sha256": "d0baf9b5ac32a5637bc2f3f4bf8d5ff5a06af8c10e6b167bade85eab8ebe28e4"
+    },
+    {
+      "title": "队列 · 全部",
+      "file": "candidate-1/15-queue-all.png",
+      "sha256": "868705f881124b3559bf0a4a00384df43e038dcbbe9e9fc75017e59bd7be442f"
+    },
+    {
+      "title": "队列 · 进行中",
+      "file": "candidate-1/16-queue-running.png",
+      "sha256": "20c8eca8598c24a822546a1ac7eb7aa6ff994a803fa0f73c691dd8eba5f9ba1a"
+    },
+    {
+      "title": "队列 · 失败",
+      "file": "candidate-1/17-queue-failed.png",
+      "sha256": "6bcbd25d256beca57ebbf44c5470b7c1a6e55820cb8b7c0e40f90f61c675141d"
+    },
+    {
+      "title": "账户 Tabs · 受限原图",
+      "file": "candidate-1/18-account-tabs.png",
+      "sha256": "3b92e00e2563c8f99b82a21c2222f906b55f6e238f5f59cb07a62aa05a717b3a"
+    },
+    {
+      "title": "日志过滤 Tabs",
+      "file": "candidate-1/19-log-tabs.png",
+      "sha256": "e00ce1b961d1695357774b0b95ac57190fc534d869ad5b1a5fb1e4d896f071c7"
+    },
+    {
+      "title": "书架",
+      "file": "candidate-1/20-shelves.png",
+      "sha256": "976a3f8ea7710600e42deed77859fbb8bcaa575408bc5e08e868f1a4d80239c5"
+    },
+    {
+      "title": "书库",
+      "file": "candidate-1/21-library.png",
+      "sha256": "e5520fea22ac2645a18e8b400a5a71c62ad570ff91f34e82b83a17c81742cdb1"
+    },
+    {
+      "title": "书库菜单",
+      "file": "candidate-1/22-library-menu.png",
+      "sha256": "f3f7e75fc97029c3b010434fb5f8680bf7313670afabaa1c34fb2da985a06e34"
+    },
+    {
+      "title": "图书操作菜单",
+      "file": "candidate-1/23-book-menu.png",
+      "sha256": "fb482d59e476c458748f10376ec28f500a71caaf91f374a9d9de05571b44bb98"
+    },
+    {
+      "title": "下载面板 · 未提交",
+      "file": "candidate-1/24-download-sheet.png",
+      "sha256": "1d4350e2d86e26f47726d4abd45b1b30726138f3f722e661feec4d450a53c06b"
+    },
+    {
+      "title": "下载目录展开 · 未提交",
+      "file": "candidate-1/25-download-tree.png",
+      "sha256": "27044195332c68eb57f6e58b6f884ebf69e2c072a01e932d5571ad76d0d6581b"
+    },
+    {
+      "title": "用户过滤 · 受限原图",
+      "file": "candidate-1/28-users-all.png",
+      "sha256": "3cb16e85ba56686adbddab8c252463773c5fe38467cfb9917eb85dfb3587402b"
+    },
+    {
+      "title": "用户过滤 · 已停用",
+      "file": "candidate-1/29-users-disabled.png",
+      "sha256": "363b12dd8ff29d43d6083c1ef60e26e8ec5f765dcfa50379f604b36c18896f37"
+    }
+  ],
+  "privacy": "Raw evidence is stored outside git in local private workspace; account/user and server fields are omitted from report gallery. No real emails, account modifications, downloads or deletions were submitted.",
+  "unusedCaptures": [
+    "04-path-sheet duplicate",
+    "26-users-tabs captured download sheet after Back collapsed it",
+    "27-users-disabled captured directory after dismiss"
+  ],
+  "baseline": {
+    "id": "core-tabs-polish-v1",
+    "apkSha256": "008fd098f9d9fadde8ddb16ac017d53d5735e2f99f62bc46b97414cb1b6a60d4",
+    "raw": "baseline/*.png"
+  },
+  "baselineEvidence": [
+    {
+      "file": "baseline/01-current.png",
+      "sha256": "4d895fb2174cb584782b7802ca2672fcaab2f42ca38e719482e2c3ec365e07ca"
+    },
+    {
+      "file": "baseline/02-current-detail.png",
+      "sha256": "669bbc2f8b76aeff0dc16a86c859a2287fc90811b0b4742874cc14c77db34274"
+    },
+    {
+      "file": "baseline/03-directory.png",
+      "sha256": "016a72945a79afd40d032e7dafed30c356986cf5918c7a6e5dea5a7d5e0714ca"
+    },
+    {
+      "file": "baseline/04-me.png",
+      "sha256": "4596d42f5b197f1634ac49a29b56ed3ec4e70e77d70fcc0b04349dd2f2765edc"
+    },
+    {
+      "file": "baseline/05-kindle-queue.png",
+      "sha256": "2bf6f909b79f4a5ef78e8d35e23f340004c10c28f11af022ac965dcce51afef8"
+    },
+    {
+      "file": "baseline/06-account-tabs.png",
+      "sha256": "e01fb11ec66fd2e602031336ab17e14626559b1259fcb62a226b8537b194fd45"
+    },
+    {
+      "file": "baseline/07-home.png",
+      "sha256": "dca8f617761de19d2b39f469ab11c7e20676c283d11d0bb13bc0385fda150839"
+    },
+    {
+      "file": "baseline/08-directory-root.png",
+      "sha256": "d329d7b753891b411cbf41caa1c0d3959a853905065ea40114fe312ae60c621e"
+    },
+    {
+      "file": "baseline/09-directory-nested.png",
+      "sha256": "8bfd2c8af25bc337ff99bde7bdae984aa2d2b176fae80c97b7f96455d81ce3c8"
+    },
+    {
+      "file": "baseline/10-cover-menu.png",
+      "sha256": "bc6f55b8e77be20ef1d0dc8575eddc2548f3374c5cb28aa5fbc29a0ceb14fbea"
+    },
+    {
+      "file": "baseline/11-directory-menu.png",
+      "sha256": "9ca216210189020b112ac4090378409cdaae6a8a17bf32827b0cb1a1aab5bbcb"
+    }
+  ],
+  "candidate": {
+    "id": "candidate-1",
+    "decision": "accepted",
+    "axes": {
+      "sectionsAndOrder": "same",
+      "foldAndDensity": "better",
+      "heroAndReadingArea": "same",
+      "typography": "same",
+      "surfacesAndControls": "better",
+      "colorsAndShell": "better",
+      "adjacentConsumers": "same"
+    }
+  },
+  "checks": {
+    "designTokens": "pass",
+    "androidUnitTests": {
+      "tests": 204,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "deviceTests": "25 distinct passed: 24 in initial suite and corrected text-layout assertion passed in focused rerun; failed initial assertion retained",
+    "apkAndTestApk": "built",
+    "lint": "46 pre-existing errors; no new issue or baseline suppression",
+    "i18n": "3 new keys in zh-CN and en-US; XML valid",
+    "web": "no v2 Web changes; v1 results not reclassified as v2 validation"
+  },
+  "limitations": [
+    "MultiDownload popup state-dependent actions source-reviewed; full sheet and tree opened without submitting a download",
+    "Import task filters verified via physical component fixture; Kindle/users/logs also verified in product UI"
+  ],
+  "excluded": [
+    "contrast criteria",
+    "large fonts",
+    "TalkBack",
+    "landscape",
+    "Reader",
+    "backend",
+    "iOS",
+    "additional locales/themes"
+  ]
+}

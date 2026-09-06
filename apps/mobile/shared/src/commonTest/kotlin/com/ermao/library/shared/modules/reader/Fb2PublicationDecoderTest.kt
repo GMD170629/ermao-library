@@ -10,7 +10,7 @@ import kotlin.test.assertTrue
 
 class Fb2PublicationDecoderTest {
     @Test
-    fun nestedSectionAndOriginalIdsKeepServerAllocationOrder() {
+    fun nestedSectionAndOriginalIdsKeepGlobalSourceOrdinals() {
         val decoder = Fb2PublicationDecoder()
         decoder.element("FictionBook") {
             element("body") {
@@ -26,9 +26,72 @@ class Fb2PublicationDecoderTest {
             element("body") { element("section", mapOf("id" to "note")) { element("p") { text("Note") } } }
         }
         val publication = decoder.finish("Book", emptyList())
-        assertEquals("fb2/section-0001.xhtml#fb2-node-000002", publication.tableOfContents[0].children.single().href)
-        assertEquals("fb2/section-0002.xhtml#fb2-node-000004", publication.tableOfContents[1].href)
-        assertTrue(publication.resources.first().xhtml.contains("<p id=\"fb2-node-000003\">Before <strong>bold</strong> after</p>"))
+        assertEquals(emptyList(), publication.tableOfContents)
+        assertEquals(
+            listOf("fb2/section-0001.xhtml", "fb2/section-0002.xhtml"),
+            publication.resources.map { it.href },
+        )
+        assertTrue(publication.resources.first().xhtml.contains("<section id=\"chapter-node-2\">"))
+        assertTrue(publication.resources.first().xhtml.contains("<p id=\"chapter-node-3\">Before <strong>bold</strong> after</p>"))
+        assertTrue(publication.resources.first().xhtml.contains("<section id=\"chapter-node-5\">")
+        )
+        assertTrue(!publication.resources.first().xhtml.contains("<h1>Book</h1>"))
+        assertTrue(publication.resources.all { !it.xhtml.contains("fb2-node-") })
+    }
+
+    @Test
+    fun preservesLooseBodyRunsAndMixedContentInSourceOrder() {
+        val decoder = Fb2PublicationDecoder()
+        decoder.element("FictionBook") {
+            element("body") {
+                text("Before ")
+                element("p") { text("first") }
+                text("\n")
+                element("section") {
+                    element("title") { text("One") }
+                    text("lead ")
+                    element("p") { text("inside") }
+                    text(" tail")
+                    element("section") {
+                        element("title") { text("Nested") }
+                        text("nested text")
+                    }
+                    text(" after nested")
+                }
+                text("\nAfter ")
+                element("p") { text("last") }
+            }
+        }
+
+        val publication = decoder.finish("Book", emptyList())
+        assertEquals(
+            listOf(
+                "fb2/body-1-part-1.xhtml",
+                "fb2/section-0001.xhtml",
+                "fb2/body-1-part-2.xhtml",
+            ),
+            publication.resources.map { it.href },
+        )
+        val first = publication.resources[0].xhtml
+        val section = publication.resources[1].xhtml
+        val last = publication.resources[2].xhtml
+        assertTrue(first.indexOf("Before") < first.indexOf("<p>first</p>"))
+        assertTrue(section.indexOf("lead ") < section.indexOf("<p>inside</p>"))
+        assertTrue(section.indexOf("<p>inside</p>") < section.indexOf(" tail"))
+        assertTrue(section.indexOf(" tail") < section.indexOf("<section id=\"chapter-node-6\">")
+        )
+        assertTrue(section.indexOf("nested text") < section.indexOf(" after nested"))
+        assertTrue(last.contains("After "))
+        assertTrue(last.contains("<p>last</p>"))
+        assertTrue(publication.tableOfContents.isEmpty())
+    }
+
+    @Test
+    fun suppliedSourceOrdinalMustMatchDecoderEventOrder() {
+        val decoder = Fb2PublicationDecoder()
+        assertFailsWith<IllegalArgumentException> {
+            decoder.startElement("FictionBook", emptyMap(), sourceStart = 1L)
+        }
     }
 
     @Test
@@ -65,6 +128,26 @@ class Fb2PublicationDecoderTest {
 
         assertEquals(listOf("bad"), decoder.embeddedImages().map { it.identifier })
         assertTrue(decoder.finish("Book", emptyList()).resources.isNotEmpty())
+    }
+
+    @Test
+    fun preservesEmbeddedImageBytesWhenMimeHasNoGeneratedExtension() {
+        val decoder = Fb2PublicationDecoder()
+        decoder.element("FictionBook") {
+            element("body") { element("section") { element("p") { text("Readable") } } }
+            element("binary", mapOf("id" to "future", "content-type" to "image/future-format")) {
+                text("SGVsbG8=")
+            }
+        }
+
+        val image = decoder.embeddedImages().single()
+        assertEquals("image/future-format", image.mediaType)
+        val document = decoder.finish(
+            "Book",
+            listOf(Fb2ImageLink("future", "fb2/images/01234567890123456789", image.mediaType)),
+        )
+
+        assertEquals("fb2/images/01234567890123456789", document.images.single().href)
     }
 
     @Test

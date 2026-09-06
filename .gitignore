@@ -25,6 +25,7 @@ dist
 .fnos-build
 .turbo
 .tmp
+.runtime-windows/
 /tmp/
 tmp-worker-smoke
 __pycache__/
@@ -56,6 +57,8 @@ docs/testing/screenshots/
 
 # Local native builds and device/visual-test evidence
 /build/
+packages/reader-core/native/chapters/build*/
+apps/web/.chapters-wasm-build/
 /NUL/
 classes.jar
 # Android PDFium acceptance artifacts are repository inputs and are tracked via Git LFS.

@@ -297,7 +297,10 @@ private fun ColumnScope.KindleSettingsForm(
     AdministrativeSection(AdministrativeCopy.KindleRecipient, locale)
     AdministrativeTextField(recipient, onRecipientChanged, AdministrativeCopy.Email, locale)
     AdministrativeValueRow(AdministrativeCopy.Smtp.text(locale), if (initial.smtpConfigured) AdministrativeCopy.Enabled.text(locale) else AdministrativeCopy.Disabled.text(locale))
-    AdministrativeValueRow(AdministrativeCopy.SenderEmail.text(locale), initial.senderEmail)
+    AdministrativeValueRow(
+        AdministrativeCopy.SenderEmail.text(locale),
+        initial.senderEmail.trim().takeIf(String::isNotEmpty) ?: AdministrativeCopy.NotConfigured.text(locale),
+    )
 }
 
 @Composable
@@ -309,13 +312,13 @@ private fun ColumnScope.SmtpSettingsForm(
     saving: Boolean,
     onCommand: (AdministrativeCommand) -> Unit,
 ) {
+    AdministrativeSection(AdministrativeCopy.SmtpConnection, locale)
     AdministrativeTextField(form.host, { onFormChanged(form.copy(host = it)) }, AdministrativeCopy.SmtpHost, locale)
     AdministrativeTextField(
         form.port,
         { onFormChanged(form.copy(port = it.filter(Char::isDigit))) },
         AdministrativeCopy.Port,
         locale,
-        textAlign = TextAlign.End,
     )
     EnumChoiceRow(
         AdministrativeCopy.Encryption,
@@ -330,16 +333,10 @@ private fun ColumnScope.SmtpSettingsForm(
             SmtpEncryption.Tls -> "TLS"
         }
     }
+    AdministrativeSection(AdministrativeCopy.SmtpSenderIdentity, locale)
     AdministrativeTextField(form.senderEmail, { onFormChanged(form.copy(senderEmail = it)) }, AdministrativeCopy.SenderEmail, locale)
     AdministrativeTextField(form.username, { onFormChanged(form.copy(username = it)) }, AdministrativeCopy.Username, locale)
     AdministrativeTextField(form.senderName, { onFormChanged(form.copy(senderName = it)) }, AdministrativeCopy.DisplayName, locale)
-    AdministrativeTextField(
-        form.maximumAttachment,
-        { onFormChanged(form.copy(maximumAttachment = it.filter { character -> character.isDigit() || character == '.' })) },
-        AdministrativeCopy.MaximumAttachment,
-        locale,
-        textAlign = TextAlign.End,
-    )
     AdministrativeTextField(
         value = form.password,
         onValueChange = { onFormChanged(form.copy(password = it)) },
@@ -347,6 +344,13 @@ private fun ColumnScope.SmtpSettingsForm(
         locale = locale,
         placeholder = if (initial.passwordConfigured) AdministrativeCopy.PasswordUnchanged.text(locale) else null,
         password = true,
+    )
+    AdministrativeSection(AdministrativeCopy.SmtpDeliveryLimits, locale)
+    AdministrativeTextField(
+        form.maximumAttachment,
+        { onFormChanged(form.copy(maximumAttachment = it.filter { character -> character.isDigit() || character == '.' })) },
+        AdministrativeCopy.MaximumAttachment,
+        locale,
     )
     initial.lastTest?.let {
         AdministrativeValueRow(

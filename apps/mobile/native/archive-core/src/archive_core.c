@@ -7,10 +7,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 
 typedef struct {
     char *path;
+    char *canonical_path;
     int64_t size_bytes;
 } ermao_archive_page;
 
@@ -86,44 +86,62 @@ static struct archive *new_reader(ermao_archive_error *error) {
     return reader;
 }
 
-static int safe_path(const char *path) {
-    const char *component;
-    const char *cursor;
+/*
+ * Keep the archive spelling for the libarchive lookup, while normalizing a
+ * second identity for ordering and collision detection.  Backslashes are
+ * ordinary archive separators and dot segments are harmless when they stay
+ * inside the archive root.  Only an absolute path, a drive-qualified path,
+ * or a parent segment that escapes the root makes the resource unusable.
+ *
+ * Return 1 for a usable path, 0 for an isolated path, and -1 for allocation
+ * failure.  The caller deliberately treats an unusable path as a resource
+ * fact rather than a publication-fatal archive error.
+ */
+static int canonicalize_path(const char *path, char **canonical_out) {
     size_t length;
+    size_t index = 0;
+    size_t canonical_length = 0;
+    char *canonical;
+
+    if (canonical_out != NULL) *canonical_out = NULL;
     if (path == NULL || path[0] == '\0' || path[0] == '/' || path[0] == '\\') return 0;
     if (isalpha((unsigned char)path[0]) && path[1] == ':') return 0;
-    if (strchr(path, '\\') != NULL) return 0;
-    component = path;
-    cursor = path;
-    for (;;) {
-        if (*cursor == '/' || *cursor == '\0') {
-            length = (size_t)(cursor - component);
-            if (length == 0) {
-                if (*cursor == '\0' && cursor > path && cursor[-1] == '/') break;
+    length = strlen(path);
+    canonical = malloc(length + 1U);
+    if (canonical == NULL) return -1;
+
+    while (index < length) {
+        size_t component_start;
+        size_t component_length;
+
+        while (index < length && (path[index] == '/' || path[index] == '\\')) index++;
+        if (index == length) break;
+        component_start = index;
+        while (index < length && path[index] != '/' && path[index] != '\\') index++;
+        component_length = index - component_start;
+        if (component_length == 1 && path[component_start] == '.') continue;
+        if (component_length == 2 && path[component_start] == '.' && path[component_start + 1U] == '.') {
+            size_t component_end;
+            if (canonical_length == 0) {
+                free(canonical);
                 return 0;
             }
-            if ((length == 1 && component[0] == '.') ||
-                (length == 2 && component[0] == '.' && component[1] == '.')) return 0;
-            if (*cursor == '\0') break;
-            component = cursor + 1;
+            component_end = canonical_length;
+            while (component_end > 0 && canonical[component_end - 1U] != '/') component_end--;
+            canonical_length = component_end == 0 ? 0 : component_end - 1U;
+            continue;
         }
-        cursor++;
+        if (canonical_length != 0) canonical[canonical_length++] = '/';
+        memcpy(canonical + canonical_length, path + component_start, component_length);
+        canonical_length += component_length;
     }
+    if (canonical_length == 0) {
+        free(canonical);
+        return 0;
+    }
+    canonical[canonical_length] = '\0';
+    *canonical_out = canonical;
     return 1;
-}
-
-static int image_path(const char *path) {
-    const char *extension = strrchr(path, '.');
-    char lowered[8];
-    size_t length;
-    size_t index;
-    if (extension == NULL) return 0;
-    extension++;
-    length = strlen(extension);
-    if (length == 0 || length >= sizeof(lowered)) return 0;
-    for (index = 0; index < length; index++) lowered[index] = (char)tolower((unsigned char)extension[index]);
-    lowered[length] = '\0';
-    return ermao_reader_safety_comic_extension_allowed(lowered);
 }
 
 static int compression_ratio_exceeded(int64_t expanded_bytes, int64_t compressed_bytes) {
@@ -137,8 +155,10 @@ static int compression_ratio_exceeded(int64_t expanded_bytes, int64_t compressed
 }
 
 static int natural_compare(const void *left_value, const void *right_value) {
-    const unsigned char *left = (const unsigned char *)((const ermao_archive_page *)left_value)->path;
-    const unsigned char *right = (const unsigned char *)((const ermao_archive_page *)right_value)->path;
+    const char *left_identity = ((const ermao_archive_page *)left_value)->canonical_path;
+    const char *right_identity = ((const ermao_archive_page *)right_value)->canonical_path;
+    const unsigned char *left = (const unsigned char *)left_identity;
+    const unsigned char *right = (const unsigned char *)right_identity;
     while (*left != '\0' && *right != '\0') {
         if (isdigit(*left) && isdigit(*right)) {
             const unsigned char *left_end = left;
@@ -164,17 +184,28 @@ static int natural_compare(const void *left_value, const void *right_value) {
         left++;
         right++;
     }
-    return *left == *right ? 0 : (*left == '\0' ? -1 : 1);
+    if (*left != *right) return *left == '\0' ? -1 : 1;
+    /* Case-distinct archive identities are different resources. */
+    return strcmp(left_identity, right_identity);
 }
 
 static void free_pages(ermao_archive *value) {
     size_t index;
     if (value == NULL) return;
-    for (index = 0; index < value->page_count; index++) free(value->pages[index].path);
+    for (index = 0; index < value->page_count; index++) {
+        free(value->pages[index].path);
+        free(value->pages[index].canonical_path);
+    }
     free(value->pages);
 }
 
-static int append_page(ermao_archive *value, const char *path, int64_t size, ermao_archive_error *error) {
+static int append_page(
+    ermao_archive *value,
+    const char *path,
+    char *canonical_path,
+    int64_t size,
+    ermao_archive_error *error
+) {
     ermao_archive_page *pages = realloc(value->pages, (value->page_count + 1) * sizeof(*pages));
     if (pages == NULL) {
         set_error(error, "ARCHIVE_OUT_OF_MEMORY", "Unable to allocate archive page index");
@@ -186,9 +217,48 @@ static int append_page(ermao_archive *value, const char *path, int64_t size, erm
         set_error(error, "ARCHIVE_OUT_OF_MEMORY", "Unable to copy archive page path");
         return 0;
     }
+    value->pages[value->page_count].canonical_path = canonical_path;
     value->pages[value->page_count].size_bytes = size;
     value->page_count++;
     return 1;
+}
+
+static int set_zip_crc_mode(struct archive *reader, int ignore, ermao_archive_error *error) {
+    /* libarchive requires options before the stream is opened.  A non-empty
+     * value enables ZIP CRC suppression for the indexing pass; normal page
+     * readers leave the default strict mode in place. */
+    const char *option = ignore ? "zip:ignorecrc32=1" : "zip:ignorecrc32";
+    int status = archive_read_set_options(reader, option);
+    if (status == ARCHIVE_FATAL) {
+        set_reader_error(error, "ARCHIVE_FORMAT_SETUP_FAILED", archive_error_string(reader));
+        return 0;
+    }
+    return 1;
+}
+
+static void discard_canonical_conflicts(ermao_archive *value) {
+    size_t read_index = 0;
+    size_t write_index = 0;
+    while (read_index < value->page_count) {
+        size_t end_index = read_index + 1U;
+        while (end_index < value->page_count &&
+               strcmp(value->pages[read_index].canonical_path,
+                      value->pages[end_index].canonical_path) == 0) {
+            end_index++;
+        }
+        if (end_index - read_index == 1U) {
+            if (write_index != read_index) value->pages[write_index] = value->pages[read_index];
+            write_index++;
+        } else {
+            size_t index;
+            for (index = read_index; index < end_index; index++) {
+                free(value->pages[index].path);
+                free(value->pages[index].canonical_path);
+            }
+        }
+        read_index = end_index;
+    }
+    value->page_count = write_index;
 }
 
 int ermao_archive_open(
@@ -200,11 +270,11 @@ int ermao_archive_open(
     struct archive *reader = NULL;
     struct archive_entry *entry = NULL;
     ermao_archive *value = NULL;
-    size_t pages_seen = 0;
+    size_t entries_seen = 0;
+    size_t oversize_resources = 0;
     int64_t expanded_bytes = 0;
     int64_t compressed_bytes;
     int status;
-    size_t index;
     if (result != NULL) *result = NULL;
     if (path == NULL || result == NULL || limits.maximum_entries == 0 ||
         limits.maximum_page_bytes <= 0 || limits.maximum_expanded_bytes <= 0) {
@@ -220,64 +290,74 @@ int ermao_archive_open(
     value->limits = limits;
     reader = new_reader(error);
     if (reader == NULL) goto failure;
+    if (!set_zip_crc_mode(reader, 1, error)) goto failure;
     if (archive_read_open_filename(reader, path, 64 * 1024) != ARCHIVE_OK) {
         set_reader_error(error, "ARCHIVE_OPEN_FAILED", archive_error_string(reader));
         goto failure;
     }
     while ((status = archive_read_next_header(reader, &entry)) == ARCHIVE_OK) {
         const char *entry_path = archive_entry_pathname_utf8(entry);
-        int is_image;
+        char *canonical_path = NULL;
+        int path_status;
         int64_t size;
         if (entry_path == NULL) entry_path = archive_entry_pathname(entry);
-        if (!safe_path(entry_path)) {
-            set_error(error, "ARCHIVE_PATH_INVALID", "Archive contains an unsafe path");
+        entries_seen++;
+        if (entries_seen > limits.maximum_entries) {
+            set_error(error, "ARCHIVE_PAGE_COUNT_EXCEEDED", "Archive contains too many archive entries");
             goto failure;
         }
+        if (archive_entry_size_is_set(entry) && (size = archive_entry_size(entry)) >= 0) {
+            if (expanded_bytes > limits.maximum_expanded_bytes - size) {
+                set_error(error, "ARCHIVE_EXPANDED_LIMIT_EXCEEDED", "Archive expanded size is too large");
+                goto failure;
+            }
+            expanded_bytes += size;
+        }
         if (archive_entry_filetype(entry) == AE_IFDIR) {
-            archive_read_data_skip(reader);
+            if (archive_read_data_skip(reader) == ARCHIVE_FATAL) {
+                set_reader_error(error, "ARCHIVE_DATA_INVALID", archive_error_string(reader));
+                goto failure;
+            }
             continue;
         }
         if (archive_entry_filetype(entry) != AE_IFREG || archive_entry_symlink(entry) != NULL ||
             archive_entry_hardlink(entry) != NULL) {
-            set_error(error, "ARCHIVE_ENTRY_TYPE_INVALID", "Archive contains a non-regular entry");
-            goto failure;
-        }
-        if (!archive_entry_size_is_set(entry) || (size = archive_entry_size(entry)) < 0) {
-            set_error(error, "ARCHIVE_DATA_INVALID", "Archive entry size is invalid");
-            goto failure;
-        }
-        if (expanded_bytes > limits.maximum_expanded_bytes - size) {
-            set_error(error, "ARCHIVE_EXPANDED_LIMIT_EXCEEDED", "Archive expanded size is too large");
-            goto failure;
-        }
-        expanded_bytes += size;
-        if (archive_entry_is_encrypted(entry) == 1) {
-            set_error(error, "ARCHIVE_ENCRYPTED", "Archive contains encrypted entries");
-            goto failure;
-        }
-        is_image = image_path(entry_path);
-        if (is_image) {
-            pages_seen++;
-            if (pages_seen > limits.maximum_entries) {
-                set_error(error, "ARCHIVE_PAGE_COUNT_EXCEEDED", "Archive contains too many image pages");
+            /* Links and other entry kinds are isolated resources. */
+            if (archive_read_data_skip(reader) == ARCHIVE_FATAL) {
+                set_reader_error(error, "ARCHIVE_DATA_INVALID", archive_error_string(reader));
                 goto failure;
             }
-            /* COMIC.PAGE_MAX_BYTES is BLOCK_RESOURCE: omit only this page. */
-            if (size > 0 && size <= limits.maximum_page_bytes &&
-                !append_page(value, entry_path, size, error)) goto failure;
+            continue;
         }
+        if (!archive_entry_size_is_set(entry) || (size = archive_entry_size(entry)) < 0) {
+            /* An unreadable optional entry does not poison other pages. */
+            if (archive_read_data_skip(reader) == ARCHIVE_FATAL) {
+                set_reader_error(error, "ARCHIVE_DATA_INVALID", archive_error_string(reader));
+                goto failure;
+            }
+            continue;
+        }
+        if (size > limits.maximum_page_bytes) oversize_resources++;
+        path_status = canonicalize_path(entry_path, &canonical_path);
+        if (path_status < 0) {
+            set_error(error, "ARCHIVE_OUT_OF_MEMORY", "Unable to normalize archive resource path");
+            goto failure;
+        }
+        if (path_status == 1 && size > 0 && size <= limits.maximum_page_bytes &&
+            !append_page(value, entry_path, canonical_path, size, error)) {
+            free(canonical_path);
+            goto failure;
+        }
+        if (path_status == 1 && (size <= 0 || size > limits.maximum_page_bytes)) free(canonical_path);
+        /* Unknown extensions remain candidates for the real decoder. */
         status = archive_read_data_skip(reader);
-        if (status != ARCHIVE_OK && status != ARCHIVE_WARN) {
+        if (status == ARCHIVE_FATAL) {
             set_reader_error(error, "ARCHIVE_DATA_INVALID", archive_error_string(reader));
             goto failure;
         }
     }
     if (status != ARCHIVE_EOF) {
         set_reader_error(error, "ARCHIVE_HEADER_INVALID", archive_error_string(reader));
-        goto failure;
-    }
-    if (archive_read_has_encrypted_entries(reader) == 1) {
-        set_error(error, "ARCHIVE_ENCRYPTED", "Archive contains encrypted entries");
         goto failure;
     }
     compressed_bytes = archive_filter_bytes(reader, -1);
@@ -288,15 +368,18 @@ int ermao_archive_open(
     archive_read_free(reader);
     reader = NULL;
     if (value->page_count == 0) {
-        set_error(error, "ARCHIVE_NO_IMAGES", "Archive contains no supported image pages");
+        if (oversize_resources > 0) {
+            set_error(error, "ARCHIVE_PAGE_LIMIT_EXCEEDED", "Archive resource exceeds its page byte limit");
+            goto failure;
+        }
+        set_error(error, "ARCHIVE_NO_IMAGES", "Archive contains no readable archive resources");
         goto failure;
     }
     qsort(value->pages, value->page_count, sizeof(*value->pages), natural_compare);
-    for (index = 1; index < value->page_count; index++) {
-        if (strcasecmp(value->pages[index - 1].path, value->pages[index].path) == 0) {
-            set_error(error, "ARCHIVE_PATH_DUPLICATE", "Archive contains duplicate page paths");
-            goto failure;
-        }
+    discard_canonical_conflicts(value);
+    if (value->page_count == 0) {
+        set_error(error, "ARCHIVE_NO_IMAGES", "Archive contains no readable archive resources");
+        goto failure;
     }
     *result = value;
     return 1;
@@ -357,8 +440,10 @@ int ermao_archive_read_page(
     while ((status = archive_read_next_header(reader, &entry)) == ARCHIVE_OK) {
         const char *entry_path = archive_entry_pathname_utf8(entry);
         if (entry_path == NULL) entry_path = archive_entry_pathname(entry);
-        if (strcmp(entry_path, archive->pages[index].path) != 0) {
-            if (archive_read_data_skip(reader) < ARCHIVE_WARN) break;
+        if (entry_path == NULL || strcmp(entry_path, archive->pages[index].path) != 0) {
+            /* A failed optional entry is isolated by libarchive and leaves
+             * the stream ready for the next header; only FATAL ends lookup. */
+            if (archive_read_data_skip(reader) == ARCHIVE_FATAL) break;
             continue;
         }
         while (total < capacity) {
@@ -375,6 +460,20 @@ int ermao_archive_read_page(
             set_error(error, "ARCHIVE_DATA_TRUNCATED", "Archive page ended before its declared size");
             archive_read_free(reader);
             return 0;
+        }
+        {
+            unsigned char trailing_byte;
+            la_ssize_t trailing = archive_read_data(reader, &trailing_byte, 1);
+            if (trailing < 0) {
+                set_reader_error(error, "ARCHIVE_DATA_INVALID", archive_error_string(reader));
+                archive_read_free(reader);
+                return 0;
+            }
+            if (trailing > 0) {
+                set_error(error, "ARCHIVE_DATA_INVALID", "Archive page exceeds its declared size");
+                archive_read_free(reader);
+                return 0;
+            }
         }
         *written = total;
         archive_read_free(reader);

@@ -171,6 +171,7 @@ export type ReaderV5BootstrapResponse = {
 };
 
 export type ReaderV5Chapter = {
+  navigationKey: string | null;
   href: string | null;
   title: string | null;
   index: number | null;

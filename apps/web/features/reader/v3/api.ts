@@ -1,12 +1,8 @@
 import {
   READER_SAFETY_BUDGETS,
-  READER_SAFETY_FORMATS,
-  READER_SAFETY_PROFILES,
   READER_SAFETY_RULE_IDS,
   normalizeReaderPreferences,
   parseSupportedReaderSourceFormat,
-  readerSafetyAcceptsMimeType,
-  readerSafetyFormatPolicy,
   readerFormatCapability,
   type ReaderLocation,
   type ReaderOriginalResource,
@@ -69,6 +65,7 @@ export type ReaderPage = Readonly<{
 }>;
 
 export type ReaderBootstrap = Readonly<{
+  requestedChapterKey?: string;
   schemaVersion: 5;
   userId: string;
   readerType: VisualReaderType;
@@ -237,7 +234,6 @@ async function fetchComicManifest(
   if (readingOrder.length > READER_SAFETY_BUDGETS.comicPageMaxCount) {
     rejectReaderSafety(READER_SAFETY_RULE_IDS.COMIC_PAGE_MAX_COUNT);
   }
-  const allowedPageMimeTypes = new Set<string>(READER_SAFETY_PROFILES.comic.allowedPageMimeTypes);
   const pages = readingOrder.map((raw, index) => {
     const page = record(raw);
     const resourceHref = stringValue(page.resourceHref);
@@ -249,9 +245,7 @@ async function fetchComicManifest(
     if (size === null || !Number.isSafeInteger(size) || size < 0) {
       throw new ReaderBootstrapError('READER_COMIC_MANIFEST_INVALID', '漫画页面清单包含无效的页面大小');
     }
-    const safetyError = !mimeType || !allowedPageMimeTypes.has(mimeType)
-      ? readerSafetyFailure(READER_SAFETY_RULE_IDS.COMIC_PAGE_MIME)
-      : size > READER_SAFETY_BUDGETS.comicPageMaxBytes
+    const safetyError = size > READER_SAFETY_BUDGETS.comicPageMaxBytes
         ? readerSafetyFailure(READER_SAFETY_RULE_IDS.COMIC_PAGE_MAX_BYTES)
         : undefined;
     return {
@@ -306,19 +300,17 @@ export async function fetchReaderBootstrap(resourceId: string, signal: AbortSign
     return [{ id, kind: stringValue(asset.kind), mimeType: stringValue(asset.mimeType), sizeBytes: numberValue(asset.sizeBytes), durationMs: nullableNumber(asset.durationMs), discNumber: nullableNumber(asset.discNumber), trackNumber: nullableNumber(asset.trackNumber), sortOrder: numberValue(asset.sortOrder), url: withBasePath(stringValue(asset.url, `/api/assets/${encodeURIComponent(id)}`)) }];
   });
   if (readerType === 'pdf') {
-    const pdfAsset = assets.find((asset) => readerSafetyAcceptsMimeType(READER_SAFETY_FORMATS.PDF, asset.mimeType));
+    const pdfAsset = assets.find((asset) => asset.kind === 'CONTENT' && asset.url);
     if (!pdfAsset || pdfAsset.sizeBytes <= 0) {
       throw new ReaderBootstrapError('PDF_INVALID', 'PDF 阅读信息缺少准确大小');
     }
   }
-  const sourceFormatPolicy = readerSafetyFormatPolicy(format);
   const requiresContentAsset = readerType === 'pdf'
     || (readerType === 'comic' && format !== 'image_dir');
   const contentAsset = readerType === 'pdf'
-    ? assets.find((asset) => readerSafetyAcceptsMimeType(READER_SAFETY_FORMATS.PDF, asset.mimeType))
+    ? assets.find((asset) => asset.kind === 'CONTENT' && asset.url)
     : readerType === 'comic'
-      ? assets.find((asset) => sourceFormatPolicy !== null
-        && readerSafetyAcceptsMimeType(sourceFormatPolicy, asset.mimeType))
+      ? assets.find((asset) => asset.kind === 'CONTENT' && asset.url)
       : null;
   if (requiresContentAsset && assets.length > 0 && !contentAsset) {
     rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_EXACT_FORMAT_MIME);
@@ -332,9 +324,6 @@ export async function fetchReaderBootstrap(resourceId: string, signal: AbortSign
     }
     if (contentAsset.sizeBytes > READER_SAFETY_BUDGETS.originalMaxBytes) {
       rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_ORIGINAL_MAX_BYTES);
-    }
-    if (!sourceFormatPolicy || !readerSafetyAcceptsMimeType(sourceFormatPolicy, contentAsset.mimeType)) {
-      rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_EXACT_FORMAT_MIME);
     }
   }
   const capabilities = record(data.capabilities);

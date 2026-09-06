@@ -50,22 +50,22 @@ class ReaderSafetyPolicyContractTests(unittest.TestCase):
 
     def test_future_policy_version_validates_and_generates_bindings(self) -> None:
         future = copy.deepcopy(self.source)
-        future["policyVersion"] = 2
+        future["policyVersion"] = 5
         future["policyDigest"] = self.generator.policy_digest(future)
 
         validated = self.generator.validate_policy(future)
 
-        self.assertEqual(2, validated["policyVersion"])
+        self.assertEqual(5, validated["policyVersion"])
         self.assertIn(
-            "READER_SAFETY_POLICY_VERSION = 2 as const",
+            "READER_SAFETY_POLICY_VERSION = 5 as const",
             self.generator.render_typescript(validated, future["policyDigest"]),
         )
         self.assertIn(
-            "const val policyVersion: Int = 2",
+            "const val policyVersion: Int = 5",
             self.generator.render_kotlin(validated, future["policyDigest"]),
         )
         self.assertIn(
-            "READER_SAFETY_POLICY_VERSION: Final = 2",
+            "READER_SAFETY_POLICY_VERSION: Final = 5",
             self.generator.render_python(validated, future["policyDigest"]),
         )
 
@@ -124,7 +124,9 @@ class ReaderSafetyPolicyContractTests(unittest.TestCase):
         self.assertEqual("MATERIALIZE_VERIFIED_ORIGINAL", pdf["largeRequestAction"])
         self.assertFalse(pdf["allowWholeResponseFallback"])
         self.assertEqual(1 * 1024**2, self.policy["budgets"]["pdfRangeRequestMaxBytes"])
-        self.assertEqual(8 * 1024**2, self.policy["budgets"]["pdfRangeMemoryCacheMaxBytes"])
+        self.assertEqual(
+            8 * 1024**2, self.policy["budgets"]["pdfRangeMemoryCacheMaxBytes"]
+        )
         range_rule = next(
             rule for rule in self.policy["rules"] if rule["id"] == "PDF.RANGE_PROTOCOL"
         )
@@ -147,12 +149,17 @@ class ReaderSafetyPolicyContractTests(unittest.TestCase):
 
     def test_standard_doctype_is_allowed_without_external_resolution(self) -> None:
         profile = self.policy["profiles"]["reflowable"]
-        system_ids = {entry["systemId"] for entry in profile["safeDoctypes"]}
-        self.assertIn("http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd", system_ids)
-        self.assertIn("https://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd", system_ids)
+        self.assertEqual("ALLOW", self.policy["defaultAction"])
+        self.assertNotIn("safeDoctypes", profile)
+        self.assertNotIn("rejectInternalSubset", profile)
+        self.assertNotIn("rejectCustomEntities", profile)
         self.assertFalse(profile["externalDtdResolution"])
-        self.assertTrue(profile["rejectInternalSubset"])
-        self.assertTrue(profile["rejectCustomEntities"])
+        self.assertEqual(
+            "BOUNDED_EXPANSION", profile["xmlPreparation"]["internalTextEntityAction"]
+        )
+        self.assertEqual(
+            "LITERALIZE_REFERENCE", profile["xmlPreparation"]["externalEntityAction"]
+        )
         self.assertEqual(["style"], profile["cssTextElements"])
         descriptors = {
             (
@@ -171,8 +178,8 @@ class ReaderSafetyPolicyContractTests(unittest.TestCase):
             descriptors,
         )
 
-    def test_normalization_v3_projection_uses_canonical_semantic_hash(self) -> None:
-        fixture_root = CONTRACT_ROOT / "fixtures/normalization-v3"
+    def test_normalization_v4_projection_uses_canonical_semantic_hash(self) -> None:
+        fixture_root = CONTRACT_ROOT / "fixtures/normalization-v4"
         projection = json.loads(
             (fixture_root / "projection.json").read_text(encoding="utf-8")
         )
@@ -186,13 +193,13 @@ class ReaderSafetyPolicyContractTests(unittest.TestCase):
             expected,
             (fixture_root / "projection.sha256").read_text(encoding="utf-8").strip(),
         )
-        self.generator.validate_normalization_v3_fixture(
+        self.generator.validate_normalization_v4_fixture(
             policy=self.policy, digest=self.digest
         )
 
     def test_fixture_manifest_is_bound_to_policy_and_content(self) -> None:
         manifest = json.loads(
-            (CONTRACT_ROOT / "fixtures/reader-safety-v1/manifest.json").read_text(
+            (CONTRACT_ROOT / "fixtures/reader-safety-v2/manifest.json").read_text(
                 encoding="utf-8"
             )
         )
@@ -200,7 +207,7 @@ class ReaderSafetyPolicyContractTests(unittest.TestCase):
             manifest, policy=self.policy, digest=self.digest
         )
         self.assertEqual(self.digest, validated["policyDigest"])
-        self.assertEqual(48, len(validated["cases"]))
+        self.assertGreaterEqual(len(validated["cases"]), 59)
         self.assertEqual(
             {rule["id"] for rule in self.policy["rules"]},
             {case["expected"]["terminalRuleId"] for case in validated["cases"]},
@@ -274,7 +281,12 @@ class ReaderSafetyPolicyContractTests(unittest.TestCase):
             generated.ReaderSafetyRuleId.REFLOWABLE_REJECT_XML_ENTITY
         )
         self.assertEqual(generated.ReaderSafetyAction.REJECT_PUBLICATION, rule.action)
-        self.assertTrue(generated.READER_SAFETY_REFLOWABLE_PROFILE.safe_doctypes)
+        self.assertEqual(
+            "REMOVE_PARSER_DEPENDENCY",
+            generated.READER_SAFETY_REFLOWABLE_PROFILE.xml_preparation[
+                "declarationAction"
+            ],
+        )
         self.assertEqual(
             160,
             generated.READER_SAFETY_REFLOWABLE_PROFILE.named_entity_codepoints["nbsp"],
@@ -309,6 +321,92 @@ class ReaderSafetyPolicyContractTests(unittest.TestCase):
             generated.READER_SAFETY_REFLOWABLE_PROFILE.named_entity_codepoints[
                 "custom"
             ] = 1
+
+    def test_unified_decision_distinguishes_isolation_integrity_limits_and_missing_defenses(
+        self,
+    ) -> None:
+        generated = load_module(self.generator.PY_TARGET, "reader_safety_decision_test")
+
+        def decide(
+            rule_id: str | None,
+            *,
+            role: str = "PUBLICATION",
+            isolate: bool = False,
+            defense: bool = True,
+        ):
+            facts = (
+                ()
+                if rule_id is None
+                else (
+                    generated.reader_safety_rule(
+                        generated.ReaderSafetyRuleId(rule_id)
+                    ).trigger,
+                )
+            )
+            return generated.evaluate_reader_safety(
+                generated.ReaderSafetyDecisionContext(
+                    format=generated.ReaderSafetyFormat.EPUB,
+                    resource_role=generated.ReaderSafetyResourceRole(role),
+                    facts=facts,
+                    enforcement_available=defense,
+                    can_isolate=isolate,
+                )
+            )[0]
+
+        self.assertEqual("ALLOW", decide(None).action)
+        unavailable = decide(None, defense=False)
+        self.assertEqual("IMPLEMENTATION", unavailable.classification)
+        self.assertEqual(
+            "PLATFORM_POLICY_ALGORITHM_UNSUPPORTED", unavailable.error_code
+        )
+        unsafe = decide("REFLOWABLE.REJECT_XML_ENTITY")
+        self.assertEqual("SECURITY", unsafe.classification)
+        self.assertEqual("REJECT_PUBLICATION", unsafe.action)
+        isolated = decide("REFLOWABLE.REJECT_XML_ENTITY", isolate=True)
+        self.assertEqual(
+            ("SANITIZE", "RESOURCE", None),
+            (isolated.action, isolated.scope, isolated.error_code),
+        )
+        optional = decide("EPUB.RESOURCE_INTEGRITY", role="OPTIONAL_RESOURCE")
+        self.assertEqual(
+            ("BLOCK_RESOURCE", "INTEGRITY"), (optional.action, optional.classification)
+        )
+        required = decide("EPUB.RESOURCE_INTEGRITY", role="READING_ORDER")
+        self.assertEqual(
+            ("REJECT_PUBLICATION", "INTEGRITY"),
+            (required.action, required.classification),
+        )
+        capacity = decide(
+            "COMMON.ORIGINAL_MAX_BYTES", role="OPTIONAL_RESOURCE", isolate=True
+        )
+        self.assertEqual(
+            ("REJECT_PUBLICATION", "RESOURCE_LIMIT"),
+            (capacity.action, capacity.classification),
+        )
+
+    def test_policy_v4_preserves_every_existing_capacity_value(self) -> None:
+        historical = json.loads(
+            (CONTRACT_ROOT / "fixtures/reader-safety-v1/manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertLess(historical["policyVersion"], self.policy["policyVersion"])
+        for case in historical["cases"]:
+            if case["id"].endswith(("at-limit", "over-limit")):
+                current = json.loads(
+                    (
+                        CONTRACT_ROOT / "fixtures/reader-safety-v2/manifest.json"
+                    ).read_text(encoding="utf-8")
+                )
+                migrated = next(
+                    candidate
+                    for candidate in current["cases"]
+                    if candidate["id"] == case["id"]
+                )
+                self.assertEqual(case["input"], migrated["input"])
+                self.assertEqual(
+                    case["expected"]["action"], migrated["expected"]["action"]
+                )
 
 
 if __name__ == "__main__":

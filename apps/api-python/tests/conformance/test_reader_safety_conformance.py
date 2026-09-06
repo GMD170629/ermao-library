@@ -40,4 +40,6 @@ def test_backend_report_executes_parser_and_matches_contract() -> None:
         expected_cases=expected,
     )
     assert validated.consumer == "BACKEND"
-    assert len(validated.results) == 43
+    assert len(validated.results) == sum(
+        "BACKEND" in case.consumers for case in suite_cases
+    )

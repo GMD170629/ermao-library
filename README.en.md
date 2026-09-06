@@ -222,13 +222,7 @@ scripts/              Local development, validation, publishing, and unified run
 
 ## More Documentation
 
+- [Project documentation index](docs/README.md)
 - [Python API and worker](apps/api-python/README.md)
-- [Business-code layering and refactoring policy](docs/business-code-layering-and-refactoring.md)
-- [Mobile App Phase 1: Web → App functional baseline](docs/mobile-app-phase-1-web-to-app-functional-baseline.md)
-- [Mobile App Phase 2: 4-Tab information architecture and navigation](docs/mobile-app-phase-2-information-architecture.md)
-- [Mobile App Phase 3: critical user flows and wireframe anchors](docs/mobile-app-phase-3-user-flows-and-wireframes.md)
-- [Mobile App Phase 4: Direction A “Warm Page” visual specification v1](docs/mobile-app-phase-4-visual-master.md)
-- [Mobile App Phase 5: 1:1 high-fidelity visual anchors](docs/mobile-app-phase-5-high-fidelity-anchors.md)
-- [Mobile App global development guidelines: native experience and design fidelity](docs/mobile-app-development-global-guidelines.md)
 - [fnOS template and local build](deploy/fnos/README.md)
 - [Release notes](release-notes/README.md)

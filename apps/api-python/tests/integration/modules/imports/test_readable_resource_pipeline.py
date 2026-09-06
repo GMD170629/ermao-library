@@ -1020,7 +1020,7 @@ def test_audiobook_directory_ignores_sidecar_nodes_but_reads_their_metadata(
             assert metadata.cover_path is not None
             assert metadata.track_count == 1
             assert metadata.duration_ms == 60_000
-            assert metadata.chapter_count == 1
+            assert metadata.chapter_count == 0
             asset_metadata = db.get(LibraryResourceAssetMetadata, assets[0].id)
             assert asset_metadata is not None
             assert asset_metadata.title == "第一集"
@@ -1036,12 +1036,7 @@ def test_audiobook_directory_ignores_sidecar_nodes_but_reads_their_metadata(
                     ReadableResourceNavigationUnit.resource_id == resource.id
                 )
             )
-            assert unit is not None
-            assert (unit.start_ms, unit.end_ms, unit.duration_ms) == (
-                0,
-                60_000,
-                60_000,
-            )
+            assert unit is None  # A playable track does not invent an embedded chapter.
     finally:
         engine.dispose()
 

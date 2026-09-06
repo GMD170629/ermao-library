@@ -3,13 +3,16 @@ import {
   READER_SAFETY_RULE_IDS,
   type ReaderReadingProgression,
   type ReaderWritingMode,
+  type ReaderSafetyRuleId,
   type ReflowableFormat
 } from '@shuku/reader-core';
 import { createLocalPublication, type ReadiumPublication } from './local-publication';
+import { chapterEntriesToToc, chaptersFromMobi } from './chapter-core';
 import { MobiWorkerClient } from './mobi-worker-client';
 import {
   preflightReflowableXml,
   rejectReaderSafety,
+  ReaderSafetyPolicyError,
   rewriteAuthoredDocumentReferences,
   sanitizeAuthoredCss,
   sanitizeAuthoredMarkup
@@ -21,24 +24,34 @@ function safeInternalHref(index: number): string {
   return `mobi/resource-${index}.xhtml`;
 }
 
+function decodeResourceText(bytes: Uint8Array, failureRuleId: ReaderSafetyRuleId): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch (cause) {
+    rejectReaderSafety(failureRuleId, { cause });
+  }
+}
+
 async function sanitizeMarkup(
   bytes: Uint8Array,
   title: string,
-  resolveAssetUrl: (sourceName: string) => Promise<string | null>
+  resolveAssetUrl: (sourceName: string) => Promise<string | null>,
+  mediaType: 'text/html' | 'image/svg+xml' = 'text/html',
+  failureRuleId: ReaderSafetyRuleId = READER_SAFETY_RULE_IDS.REFLOWABLE_REQUIRED_READING_ORDER_MARKUP
 ): Promise<Uint8Array> {
   if (bytes.byteLength > READER_SAFETY_BUDGETS.reflowableMarkupMaxBytes) {
     rejectReaderSafety(READER_SAFETY_RULE_IDS.REFLOWABLE_MARKUP_MAX_BYTES);
   }
   const source = preflightReflowableXml(
-    new TextDecoder('utf-8', { fatal: true }).decode(bytes),
-    READER_SAFETY_RULE_IDS.REFLOWABLE_REJECT_XML_ENTITY
+    decodeResourceText(bytes, failureRuleId)
   );
   // MOBI6 and PalmDOC commonly contain valid HTML which is not XHTML.
   // Parse with the HTML algorithm, then serialize the sanitized DOM as the
   // XHTML bytes expected by the local Readium Publication.
-  const document = new DOMParser().parseFromString(source, 'text/html');
-  if (!document.documentElement || !document.body || !(document.body.textContent ?? '').trim()) {
-    throw new Error('PUBLICATION_MARKUP_INVALID');
+  const document = new DOMParser().parseFromString(source, mediaType);
+  if (!document.documentElement || document.querySelector('parsererror')
+    || (mediaType === 'text/html' && !document.body)) {
+    rejectReaderSafety(failureRuleId);
   }
   for (const legacy of [...document.querySelectorAll('*')].filter((element) => element.localName.includes(':'))) {
     const replacement = document.createElement('span');
@@ -56,6 +69,9 @@ async function sanitizeMarkup(
     const key = raw.replace(/^\.\//, '');
     return resolveAssetUrl(key);
   });
+  if (mediaType === 'image/svg+xml') {
+    return new TextEncoder().encode(new XMLSerializer().serializeToString(document));
+  }
   let head = document.querySelector('head');
   if (!head) {
     head = document.createElementNS('http://www.w3.org/1999/xhtml', 'head');
@@ -94,10 +110,13 @@ export async function openMobiPublication(
     if (opened.readingOrder.length === 0 || new Set(opened.readingOrder).size !== opened.readingOrder.length) {
       throw new Error('PUBLICATION_STRUCTURE_INVALID');
     }
-    const resourceByIndex = new Map(opened.resources.map((resource) => [resource.index, resource]));
+    const resourceByIndex = new Map(opened.resources.map((resource) => [resource.index, {
+      ...resource,
+      mediaType: resource.mediaType.split(';', 1)[0]?.trim().toLowerCase() || 'application/octet-stream'
+    }]));
     if (resourceByIndex.size !== opened.resources.length) throw new Error('PUBLICATION_STRUCTURE_INVALID');
     for (const resource of opened.resources) {
-      if (!resource.sourceName.trim() || !resource.mediaType.trim()) throw new Error('PUBLICATION_STRUCTURE_INVALID');
+      if (!resource.sourceName.trim()) throw new Error('PUBLICATION_STRUCTURE_INVALID');
     }
     const readingOrderSet = new Set(opened.readingOrder);
     if (opened.readingOrder.some((index) => !resourceByIndex.has(index))) {
@@ -110,6 +129,7 @@ export async function openMobiPublication(
     }
     const rawReads = new Map<number, Promise<Uint8Array>>();
     const markupReads = new Map<number, Promise<Uint8Array>>();
+    const preparedReads = new Map<number, Promise<Uint8Array>>();
     const assetUrls = new Map<number, Promise<string | null>>();
     const readResource = (resourceIndex: number): Promise<Uint8Array> => {
       const existing = rawReads.get(resourceIndex);
@@ -117,10 +137,45 @@ export async function openMobiPublication(
       const resource = resourceByIndex.get(resourceIndex);
       if (!resource) return Promise.reject(new Error('MOBI_RESOURCE_MISSING'));
       const pending = client.read(resourceIndex).then((bytes) => {
-        if (bytes.byteLength !== resource.decodedLength) throw new Error('MOBI_RESOURCE_LENGTH_INVALID');
+        if (bytes.byteLength !== resource.decodedLength) {
+          rejectReaderSafety(readingOrderSet.has(resourceIndex)
+            ? READER_SAFETY_RULE_IDS.REFLOWABLE_REQUIRED_READING_ORDER_MARKUP
+            : READER_SAFETY_RULE_IDS.REFLOWABLE_OPTIONAL_RESOURCE_FAILURE);
+        }
         return new Uint8Array(bytes);
       });
       rawReads.set(resourceIndex, pending);
+      return pending;
+    };
+    const readPreparedResource = (
+      resourceIndex: number,
+      ancestors: ReadonlySet<number> = new Set()
+    ): Promise<Uint8Array> => {
+      const existing = preparedReads.get(resourceIndex);
+      if (existing) return existing;
+      const pending = (async () => {
+        const resource = resourceByIndex.get(resourceIndex);
+        if (!resource) throw new Error('MOBI_RESOURCE_MISSING');
+        let bytes = await readResource(resourceIndex);
+        if (resource.mediaType === 'text/css') {
+          const nextAncestors = new Set(ancestors);
+          nextAncestors.add(resourceIndex);
+          bytes = new TextEncoder().encode(await rewriteCssUrls(
+            decodeResourceText(bytes, READER_SAFETY_RULE_IDS.REFLOWABLE_OPTIONAL_RESOURCE_FAILURE),
+            resolveAssetUrl,
+            nextAncestors
+          ));
+        } else if (resource.mediaType === 'image/svg+xml') {
+          const nextAncestors = new Set(ancestors);
+          nextAncestors.add(resourceIndex);
+          bytes = await sanitizeMarkup(
+            bytes, '', (raw) => resolveAssetUrl(raw, nextAncestors), 'image/svg+xml',
+            READER_SAFETY_RULE_IDS.REFLOWABLE_OPTIONAL_RESOURCE_FAILURE
+          );
+        }
+        return bytes;
+      })();
+      preparedReads.set(resourceIndex, pending);
       return pending;
     };
     const resolveAssetUrl = (sourceName: string, ancestors: ReadonlySet<number> = new Set()): Promise<string | null> => {
@@ -134,15 +189,12 @@ export async function openMobiPublication(
       const pending = (async () => {
         const resource = resourceByIndex.get(resourceIndex);
         if (!resource) return null;
-        let bytes = await readResource(resourceIndex);
-        if (resource.mediaType === 'text/css') {
-          const nextAncestors = new Set(ancestors);
-          nextAncestors.add(resourceIndex);
-          bytes = new TextEncoder().encode(await rewriteCssUrls(
-            new TextDecoder('utf-8', { fatal: true }).decode(bytes),
-            resolveAssetUrl,
-            nextAncestors
-          ));
+        let bytes: Uint8Array;
+        try {
+          bytes = await readPreparedResource(resourceIndex, ancestors);
+        } catch (cause) {
+          if (cause instanceof ReaderSafetyPolicyError && cause.action === 'BLOCK_RESOURCE') return null;
+          throw cause;
         }
         const url = URL.createObjectURL(new Blob([Uint8Array.from(bytes).buffer], { type: resource.mediaType }));
         objectUrls.add(url);
@@ -170,11 +222,17 @@ export async function openMobiPublication(
         }
       };
     });
-    const hrefByResource = new Map(opened.readingOrder.map((index) => [index, safeInternalHref(index)]));
-    const toc = opened.toc.flatMap((entry) => {
-      const href = hrefByResource.get(entry.resourceIndex);
-      return href ? [{ href: entry.fragment ? `${href}#${encodeURIComponent(entry.fragment)}` : href, title: entry.title }] : [];
-    });
+    const chapterResult = await chaptersFromMobi(opened.toc.map((entry) => ({
+      parentIndex: entry.parentIndex,
+      title: entry.title,
+      targetHref: resourceByIndex.has(entry.resourceIndex)
+        ? (() => {
+          const href = safeInternalHref(entry.resourceIndex);
+          return entry.fragment ? `${href}#${encodeURIComponent(entry.fragment)}` : href;
+        })()
+        : null
+    })));
+    const toc = chapterEntriesToToc(chapterResult.entries);
     return createLocalPublication({
       title: opened.title ?? fallbackTitle,
       language: opened.language,
@@ -182,13 +240,13 @@ export async function openMobiPublication(
       writingMode,
       readingOrder,
       toc,
-      extraResources: opened.resources
+      extraResources: [...resourceByIndex.values()]
         .filter((resource) => !readingOrderSet.has(resource.index))
         .map((resource) => ({
           href: `mobi/resource-${resource.index}`,
           type: resource.mediaType,
           size: resource.decodedLength,
-          read: () => readResource(resource.index)
+          read: () => readPreparedResource(resource.index)
         })),
       onClose: () => {
         for (const url of objectUrls) URL.revokeObjectURL(url);

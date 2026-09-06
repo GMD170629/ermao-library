@@ -284,6 +284,7 @@ def _chapter_dto(value: ReaderV5Chapter | None) -> ReaderV5ChapterDto | None:
     if value is None:
         return None
     return ReaderV5ChapterDto(
+        navigation_key=value.navigation_key,
         href=value.href,
         title=value.title,
         index=value.index,

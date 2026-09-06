@@ -746,7 +746,14 @@ internal fun BookDetailContent.applying(
             } else resource
         },
     )
-    val units = readingUnits.map { ReaderChapterUnit(href = it.href, sortOrder = it.sortOrder, readingOrderPosition = it.readingOrderPosition) }
+    val units = readingUnits.map {
+        ReaderChapterUnit(
+            href = it.href,
+            sortOrder = it.sortOrder,
+            readingOrderPosition = it.readingOrderPosition,
+            navigationKey = it.navigationKey,
+        )
+    }
     val states = com.ermao.library.shared.modules.reader.resolveReaderChapterStatesFromPresentation(
         units,
         snapshot.presentation,

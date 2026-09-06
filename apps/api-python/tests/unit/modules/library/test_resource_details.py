@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from app.modules.library.application.resource_details import (
     ListResourceDetails,
@@ -25,6 +25,8 @@ class FakeQueries:
     assets: tuple[ResourceAssetDetail, ...] = ()
     resolved_page_count: int | None = None
     requested_asset_id: str | None = None
+    requested_navigation_key: str | None = None
+    current_chapter: ResourceCurrentChapter | None = None
 
     def get_resource(self, **_kwargs: object) -> ResourceDetailResource:
         return self.resource
@@ -43,13 +45,17 @@ class FakeQueries:
     def list_assets(self, **_kwargs: object) -> tuple[ResourceAssetDetail, ...]:
         return self.assets
 
+    def count_chapters(self, **_kwargs: object) -> int:
+        return sum(bool(unit.href) for unit in self.units)
+
     def resolve_pdf_page_count(self, **_kwargs: object) -> int | None:
         return self.resolved_page_count
 
     def resolve_current_chapter(
-        self, **_kwargs: object
+        self, *, navigation_key: str, **_kwargs: object
     ) -> ResourceCurrentChapter | None:
-        return None
+        self.requested_navigation_key = navigation_key
+        return self.current_chapter
 
 
 @dataclass
@@ -112,7 +118,8 @@ def test_reflowable_details_keep_toc_level_and_apply_pagination() -> None:
             title=f"Chapter {index}",
             sort_order=index,
             href=f"chapter-{index}.xhtml",
-            metadata_json='{"level": 2}',
+            level=2,
+            navigation_key=f"chapter-{index}",
         )
         for index in range(55)
     )
@@ -142,6 +149,35 @@ def test_reflowable_details_prepare_missing_server_navigation() -> None:
     assert result.units == ()
     assert result.total == 0
     assert navigation.calls == 1
+
+
+def test_current_chapter_uses_shared_key_instead_of_client_index_or_href() -> None:
+    queries = FakeQueries(
+        replace(
+            resource("EPUB"),
+            current_chapter_navigation_key="chapter-4",
+            current_chapter_index=99,
+            current_href="wrong.xhtml",
+        ),
+        current_chapter=ResourceCurrentChapter(4, "Fourth", 4, "body.xhtml#fourth"),
+    )
+    result = details(queries).execute(
+        context=SCOPE, book_id="book-1", resource_id="resource-1", page=1, page_size=50
+    )
+    assert queries.requested_navigation_key == "chapter-4"
+    assert result.current_chapter_sort_order == 4
+    assert result.current_chapter_title == "Fourth"
+
+
+def test_unknown_current_chapter_is_not_guessed_from_client_presentation() -> None:
+    queries = FakeQueries(
+        replace(resource("EPUB"), current_chapter_index=1, current_href="chapter.xhtml")
+    )
+    result = details(queries).execute(
+        context=SCOPE, book_id="book-1", resource_id="resource-1", page=1, page_size=50
+    )
+    assert queries.requested_navigation_key is None
+    assert result.current_chapter_sort_order is None
 
 
 def test_pdf_details_are_synthesized_without_page_rows() -> None:

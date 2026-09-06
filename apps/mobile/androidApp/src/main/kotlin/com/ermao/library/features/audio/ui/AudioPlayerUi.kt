@@ -228,6 +228,7 @@ fun AudioNowPlayingScreen(
     val theme = WarmPageThemeValues
     var speedMenuVisible by remember { mutableStateOf(false) }
     var queueVisible by remember { mutableStateOf(false) }
+    var chaptersVisible by remember { mutableStateOf(false) }
     val title = snapshot.title ?: stringResource(R.string.audio_unknown_title)
     val chapter = snapshot.chapterTitle ?: stringResource(R.string.audio_no_chapter)
     val author = snapshot.author?.takeIf(String::isNotBlank)
@@ -247,7 +248,7 @@ fun AudioNowPlayingScreen(
         AndroidAudioPhase.Buffering,
         AndroidAudioPhase.Error,
     )
-    val chaptersEnabled = runtime.currentTracks().isNotEmpty()
+    val tracksEnabled = runtime.currentTracks().isNotEmpty()
     val speedEnabled = controlsEnabled
     val remoteNotice by runtime.remoteProgressNotice.collectAsState()
     val remoteActionFailed by runtime.remoteProgressActionFailed.collectAsState()
@@ -534,12 +535,33 @@ fun AudioNowPlayingScreen(
                         AudioToolButton(
                             label = stringResource(R.string.audio_queue_title),
                             contentDescription = stringResource(R.string.audio_queue_title),
-                            enabled = chaptersEnabled,
-                            onClick = { queueVisible = true },
+                            enabled = tracksEnabled,
+                            onClick = {
+                                chaptersVisible = false
+                                queueVisible = true
+                            },
                             modifier = Modifier.weight(1f),
                             content = { tint ->
                                 Icon(
                                     imageVector = Icons.Filled.FormatListBulleted,
+                                    contentDescription = null,
+                                    tint = tint,
+                                    modifier = Modifier.size(28.dp),
+                                )
+                            },
+                        )
+                        AudioToolButton(
+                            label = stringResource(R.string.audio_chapters_title),
+                            contentDescription = stringResource(R.string.audio_chapters_title),
+                            enabled = controlsEnabled,
+                            onClick = {
+                                queueVisible = false
+                                chaptersVisible = true
+                            },
+                            modifier = Modifier.weight(1f),
+                            content = { tint ->
+                                Icon(
+                                    imageVector = Icons.Filled.MenuBook,
                                     contentDescription = null,
                                     tint = tint,
                                     modifier = Modifier.size(28.dp),
@@ -633,6 +655,17 @@ fun AudioNowPlayingScreen(
                 runtime.selectAsset(assetId)
             },
             onDismiss = { queueVisible = false },
+        )
+    }
+    if (chaptersVisible) {
+        AudioChapterSheet(
+            snapshot = snapshot,
+            intentTracks = runtime.currentTracks(),
+            onSelectChapter = { chapterId ->
+                chaptersVisible = false
+                runtime.selectChapter(chapterId)
+            },
+            onDismiss = { chaptersVisible = false },
         )
     }
 }
@@ -993,6 +1026,106 @@ private fun AudioQueueSheet(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AudioChapterSheet(
+    snapshot: AndroidAudioPlaybackSnapshot,
+    intentTracks: List<AndroidAudioTrack>,
+    onSelectChapter: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val theme = WarmPageThemeValues
+    val currentChapterLabel = stringResource(R.string.audio_chapter_current)
+    val emptyChaptersLabel = stringResource(R.string.audio_chapters_empty)
+    val entries = remember(intentTracks) { audioChapterEntries(intentTracks) }
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Text(
+            text = stringResource(R.string.audio_chapters_title),
+            style = theme.typography.sectionTitle,
+            color = theme.colors.textPrimary,
+            modifier = Modifier.padding(horizontal = theme.spacing.two, vertical = theme.spacing.one),
+        )
+        if (entries.isEmpty()) {
+            Text(
+                text = emptyChaptersLabel,
+                style = theme.typography.body,
+                color = theme.colors.textSecondary,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = theme.spacing.two, vertical = theme.spacing.three)
+                    .semantics { stateDescription = emptyChaptersLabel },
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPaddingCompat(),
+            ) {
+                items(entries, key = { entry -> entry.key }) { entry ->
+                    val isCurrent = entry.chapterId == snapshot.chapterId
+                    Row(
+                        modifier = Modifier
+                            .heightIn(min = theme.components.controls.minimumTouchTarget)
+                            .fillMaxWidth()
+                            .background(if (isCurrent) theme.colors.accentSoft else theme.colors.surfaceRaised)
+                            .clickable(role = Role.Button) {
+                                onSelectChapter(entry.chapterId)
+                            }
+                            .semantics {
+                                selected = isCurrent
+                                if (isCurrent) stateDescription = currentChapterLabel
+                            }
+                            .padding(horizontal = theme.spacing.two, vertical = theme.spacing.oneAndHalf),
+                        horizontalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = entry.index.toString(),
+                            style = theme.typography.caption.copy(fontWeight = FontWeight.Medium),
+                            color = if (isCurrent) theme.colors.brandAccent else theme.colors.textTertiary,
+                            modifier = Modifier.widthIn(min = 24.dp),
+                            textAlign = TextAlign.End,
+                        )
+                        Text(
+                            text = entry.title,
+                            style = theme.typography.body.copy(
+                                fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                            ),
+                            color = if (isCurrent) theme.colors.brandAccent else theme.colors.textPrimary,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            text = formatMillis(entry.durationMillis),
+                            style = theme.typography.caption,
+                            color = if (isCurrent) theme.colors.brandAccent else theme.colors.textSecondary,
+                            maxLines = 1,
+                        )
+                        Box(modifier = Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                            if (isCurrent) {
+                                Icon(
+                                    imageVector = Icons.Filled.GraphicEq,
+                                    contentDescription = currentChapterLabel,
+                                    tint = theme.colors.brandAccent,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                        }
+                    }
+                    if (entry.index < entries.size) {
+                        HorizontalDivider(
+                            color = theme.colors.textTertiary.copy(alpha = 0.38f),
+                            thickness = 1.dp,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 private const val AUDIO_QUEUE_PAGE_SIZE = 20
 
 internal data class AudioQueueEntry(
@@ -1013,6 +1146,30 @@ internal fun audioQueueEntries(tracks: List<AndroidAudioTrack>): List<AudioQueue
             durationMillis = track.durationMillis ?: 0,
         )
     }
+
+internal data class AudioChapterEntry(
+    val key: String,
+    val index: Int,
+    val assetId: String,
+    val chapterId: String,
+    val title: String,
+    val durationMillis: Long,
+)
+
+internal fun audioChapterEntries(tracks: List<AndroidAudioTrack>): List<AudioChapterEntry> =
+    tracks.flatMap { track ->
+        track.chapters.map { chapter ->
+            AudioChapterEntry(
+                key = "chapter:${track.assetId}:${chapter.id}",
+                index = 0,
+                assetId = track.assetId,
+                chapterId = chapter.id,
+                title = chapter.title,
+                durationMillis = ((chapter.endMillis ?: track.durationMillis ?: chapter.startMillis) - chapter.startMillis)
+                    .coerceAtLeast(0),
+            )
+        }
+    }.mapIndexed { index, entry -> entry.copy(index = index + 1) }
 
 /**
  * Cover loading delegates to the content capability's authenticated cache and repository path.

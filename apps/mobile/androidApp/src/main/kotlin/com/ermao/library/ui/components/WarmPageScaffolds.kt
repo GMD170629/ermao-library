@@ -1,7 +1,9 @@
 package com.ermao.library.ui.components
 
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -47,6 +49,7 @@ fun WarmPageScaffold(
     navigation: WarmPageNavigationAction? = null,
     actions: List<WarmPageTopBarAction> = emptyList(),
     actionContent: @Composable RowScope.() -> Unit = {},
+    topBarBottom: (@Composable () -> Unit)? = null,
     snackbarHost: @Composable () -> Unit = {},
     containerColor: Color? = null,
     topBarContainerColor: Color? = null,
@@ -76,7 +79,13 @@ fun WarmPageScaffold(
             }
             val navigationContent: @Composable () -> Unit = {
                 navigation?.let { action ->
-                    WarmPageToolbarIcon(action.icon, action.label, true, action.onClick)
+                    WarmPageToolbarIcon(
+                        action.icon,
+                        action.label,
+                        true,
+                        action.onClick,
+                        Modifier.testTag("warm-page-navigation"),
+                    )
                 }
             }
             val actionsContent: @Composable RowScope.() -> Unit = {
@@ -97,22 +106,25 @@ fun WarmPageScaffold(
                 titleContentColor = theme.colors.textPrimary,
                 actionIconContentColor = theme.colors.textPrimary,
             )
-            if (role == WarmPageTopBarRole.Detail) {
-                CenterAlignedTopAppBar(
-                    title = titleContent,
-                    modifier = topBarModifier,
-                    navigationIcon = navigationContent,
-                    actions = actionsContent,
-                    colors = topBarColors,
-                )
-            } else {
-                TopAppBar(
-                    title = titleContent,
-                    modifier = topBarModifier,
-                    navigationIcon = navigationContent,
-                    actions = actionsContent,
-                    colors = topBarColors,
-                )
+            Column(Modifier.fillMaxWidth()) {
+                if (role == WarmPageTopBarRole.Detail) {
+                    CenterAlignedTopAppBar(
+                        title = titleContent,
+                        modifier = topBarModifier,
+                        navigationIcon = navigationContent,
+                        actions = actionsContent,
+                        colors = topBarColors,
+                    )
+                } else {
+                    TopAppBar(
+                        title = titleContent,
+                        modifier = topBarModifier,
+                        navigationIcon = navigationContent,
+                        actions = actionsContent,
+                        colors = topBarColors,
+                    )
+                }
+                topBarBottom?.invoke()
             }
         },
         snackbarHost = snackbarHost,
@@ -133,12 +145,13 @@ private fun WarmPageToolbarIcon(
     label: String,
     enabled: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val theme = WarmPageThemeValues
     IconButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.size(theme.components.controls.minimumTouchTarget),
+        modifier = modifier.size(theme.components.controls.minimumTouchTarget),
     ) {
         Icon(
             imageVector = icon,

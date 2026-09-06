@@ -31,7 +31,6 @@ class KtorComicPageServerPort internal constructor(
         when (val result = client.loadAuthenticatedBinary(
             apiPath = path,
             maximumBytes = ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.COMIC_PAGE_MAX_BYTES).toInt(),
-            allowedMimeTypes = ReaderSafetyPolicy.comicProfile.allowedPageMimeTypes.toSet(),
             queryParameters = mapOf(
                 "imageVariant" to listOf(variant.wireValue),
                 "revision" to listOf(source.revision),

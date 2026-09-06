@@ -17,6 +17,7 @@ export async function openTextPublication(
     language: parsed.language,
     readingProgression,
     writingMode,
+    toc: parsed.toc,
     readingOrder: parsed.chapters.map((chapter) => ({
       href: chapter.href,
       type: chapter.type,

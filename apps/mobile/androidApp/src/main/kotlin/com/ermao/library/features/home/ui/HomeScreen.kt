@@ -34,6 +34,7 @@ import com.ermao.library.features.content.ui.CoverRole
 import com.ermao.library.features.content.ui.ReadingProgressTrack
 import com.ermao.library.features.content.ui.BookCover
 import com.ermao.library.features.content.ui.BookGridItem
+import com.ermao.library.features.content.ui.BookListItem
 import com.ermao.library.features.content.ui.compactCoverGridColumnCount
 import com.ermao.library.features.content.ui.compactCoverGridItemWidth
 import com.ermao.library.features.home.application.HomeUiState
@@ -130,14 +131,23 @@ fun HomeScreen(
                         } else {
                             if (content.recentReading.isNotEmpty()) {
                                 item {
-                                    HomeShelf(
-                                        title = stringResource(R.string.home_recent_reading),
-                                        listTag = "home-recent-reading-list",
-                                        books = content.recentReading,
-                                        repository = repository,
-                                        context = context,
-                                        onOpenBook = onOpenBook,
-                                    )
+                                    if (content.recentReading.size == 1) {
+                                        HomeSingleRecentReading(
+                                            book = content.recentReading.single(),
+                                            repository = repository,
+                                            context = context,
+                                            onOpenBook = onOpenBook,
+                                        )
+                                    } else {
+                                        HomeShelf(
+                                            title = stringResource(R.string.home_recent_reading),
+                                            listTag = "home-recent-reading-list",
+                                            books = content.recentReading,
+                                            repository = repository,
+                                            context = context,
+                                            onOpenBook = onOpenBook,
+                                        )
+                                    }
                                 }
                             }
                             if (content.recentAdded.isNotEmpty()) {
@@ -167,6 +177,32 @@ fun HomeScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun HomeSingleRecentReading(
+    book: BookCard,
+    repository: ContentRepository,
+    context: ContentRequestContext,
+    onOpenBook: (String) -> Unit,
+) {
+    val theme = WarmPageThemeValues
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("home-recent-reading-list"),
+        verticalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf),
+    ) {
+        WarmPageSectionHeader(title = stringResource(R.string.home_recent_reading))
+        BookListItem(
+            book = book,
+            repository = repository,
+            context = context,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onOpenBook(book.id) },
+        )
     }
 }
 

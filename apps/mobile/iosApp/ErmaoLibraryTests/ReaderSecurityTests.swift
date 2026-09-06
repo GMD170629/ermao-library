@@ -8,6 +8,77 @@ import XCTest
 @testable import ErmaoLibrary
 
 final class ReaderSecurityTests: XCTestCase {
+    func testEpubArchiveRoleResolverUsesReadiumAccessContextForUnknownMime() {
+        let roles = IosEpubResourceRoleResolver()
+        roles.observeParserAccess(path: "OPS/package.bin")
+        roles.markControlDocument(path: "OPS/package.bin")
+        roles.markReadingOrder(paths: ["OPS/chapter.bin"])
+
+        XCTAssertEqual(roles.role(for: "OPS/package.bin"), .controlDocument)
+        XCTAssertEqual(roles.role(for: "OPS/chapter.bin"), .readingOrder)
+        XCTAssertEqual(roles.role(for: "OPS/image.bin"), .optionalResource)
+    }
+
+    func testReaderSafetyFailureSinkKeepsRequiredFailuresAndIsolatesOptionalResources() throws {
+        let optional = ErmaoShared.PublicKt.readerSafetyOptionalResourceFailure()
+        let optionalSink = IosReaderSafetyFailureSink()
+        optionalSink.record(
+            IosPublicationSecurityError.rejected(
+                ruleId: optional.ruleId,
+                errorCode: optional.errorCode
+            ),
+            resourceRole: .optionalResource
+        )
+        XCTAssertNoThrow(try optionalSink.throwIfPresent())
+
+        let required = ErmaoShared.PublicKt.readerSafetyEpubArchiveIntegrityFailure()
+        let requiredSink = IosReaderSafetyFailureSink()
+        requiredSink.record(
+            IosPublicationSecurityError.rejected(
+                ruleId: required.ruleId,
+                errorCode: required.errorCode
+            ),
+            resourceRole: .readingOrder
+        )
+        XCTAssertThrowsError(try requiredSink.throwIfPresent()) { error in
+            guard case let IosPublicationSecurityError.rejected(ruleId, errorCode) = error else {
+                return XCTFail("Unexpected safety sink error: \(error)")
+            }
+            XCTAssertEqual(ruleId, required.ruleId)
+            XCTAssertEqual(errorCode, required.errorCode)
+        }
+    }
+
+    @MainActor
+    func testProtectedContainerAssetReachesPublicationOpenerBeforeFirstReadingOrderRead() async throws {
+        let fixture = try XCTUnwrap(
+            Bundle(for: Self.self).url(forResource: "reader-v5-physical", withExtension: "epub")
+                ?? Bundle(for: Self.self).url(forResource: "reader-v2", withExtension: "epub")
+        )
+        let values = try fixture.resourceValues(forKeys: [.fileSizeKey])
+        let managed = IosManagedPublication(
+            resourceID: "reader-safety-first-read",
+            displayTitle: "Reader safety first read",
+            fileURL: fixture,
+            byteCount: Int64(values.fileSize ?? 0),
+            bookID: nil,
+            assetID: nil,
+            namespace: nil,
+            sourceFormat: .epub
+        )
+        let opened = try await IosReadiumRuntime().open(managed)
+        let link = try XCTUnwrap(opened.publication.readingOrder.first)
+        let resource = try XCTUnwrap(opened.publication.get(link))
+        let result = await resource.read()
+        let bytes = try result.get()
+        await opened.close()
+
+        XCTAssertTrue(
+            String(decoding: bytes, as: UTF8.self).contains("Content-Security-Policy"),
+            "The protected ContainerAsset must sanitize the first reading-order resource before the SDK read returns"
+        )
+    }
+
     func testLegacyMobiEnvelopeBindsNamespacesWithoutChangingLocatorBody() async throws {
         let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "01-basic-mobi6", withExtension: "mobi"))
         let book = try IosMobiBook.open(fileURL: url)
@@ -34,7 +105,7 @@ final class ReaderSecurityTests: XCTestCase {
     func testPhysicalEpubLastPageUploadsTheActualReadiumLocationChangeLocator() async throws {
         let fixture = try XCTUnwrap(
             Bundle(for: Self.self).url(
-                forResource: "reader-v2",
+                forResource: "reader-v5-physical",
                 withExtension: "epub"
             )
         )
@@ -163,7 +234,7 @@ final class ReaderSecurityTests: XCTestCase {
         let managed = try await managedStore.importPublication(
             from: file, resourceID: "controls", displayTitle: "Controls", sourceFormat: .txt,
             bookID: "book", assetID: "asset", namespace: "test",
-            parserVersion: "shuku-txt-parser-v1", normalizationVersion: "shuku-txt-publication-v2"
+            parserVersion: "ermao-chapters:1", normalizationVersion: "shuku-txt-publication-v3"
         )
         let publicationFiles = try FileManager.default.contentsOfDirectory(atPath: publicationRoot.path).sorted()
         let suite = "reader-controls-\(UUID().uuidString)"
@@ -616,8 +687,26 @@ final class ReaderSecurityTests: XCTestCase {
             let end = try XCTUnwrap(resource.xhtml.range(of: "</body>"))
             XCTAssertEqual(String(resource.xhtml[start.upperBound..<end.lowerBound]), expected[resource.href])
         }
-        XCTAssertEqual(parsed.document.tableOfContents.first?.children.first?.href,
-                       "fb2/section-0001.xhtml#fb2-node-000002")
+        let tableOfContents = parsed.document.tableOfContents
+        XCTAssertEqual(tableOfContents.count, 2)
+        let firstChapter = try XCTUnwrap(tableOfContents.first)
+        XCTAssertEqual(firstChapter.title, "第一章 Chapter One")
+        XCTAssertEqual(firstChapter.navigationKey, "chapter-0")
+        XCTAssertEqual(firstChapter.children.count, 1)
+        let nestedChapter = try XCTUnwrap(firstChapter.children.first)
+        XCTAssertEqual(nestedChapter.title, "子章节")
+        XCTAssertEqual(nestedChapter.navigationKey, "chapter-1")
+        XCTAssertEqual(nestedChapter.href, "fb2/section-0001.xhtml#chapter-node-20")
+        let notes = try XCTUnwrap(tableOfContents.dropFirst().first)
+        XCTAssertEqual(notes.title, "注释 Notes")
+        XCTAssertEqual(notes.navigationKey, "chapter-2")
+        XCTAssertTrue(notes.children.isEmpty)
+        let flattened = tableOfContents.flatMap { [$0] + $0.children }
+        XCTAssertEqual(flattened.count, 3)
+        XCTAssertEqual(
+            flattened.map(\.navigationKey),
+            ["chapter-0", "chapter-1", "chapter-2"]
+        )
         XCTAssertEqual(Set(parsed.images.keys), ["fb2/images/498cc84b29cb560e15b4.png"])
         XCTAssertEqual(try Data(contentsOf: source), original)
 
@@ -636,12 +725,24 @@ final class ReaderSecurityTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: file), source)
     }
 
+    func testFb2PreservesUnfamiliarImageMimeBytesWithoutAnExtension() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).fb2")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let source = Data("<FictionBook><body><p>text</p></body><binary id='image' content-type='image/future-format'>SGVsbG8=</binary></FictionBook>".utf8)
+        try source.write(to: file)
+
+        let parsed = try IosFb2PublicationFactory.read(fileURL: file, fallbackTitle: "Book")
+
+        XCTAssertEqual(parsed.images["fb2/images/6105d6cc76af400325e9"], Data("Hello".utf8))
+        XCTAssertEqual(parsed.document.images.single?.mediaType, "image/future-format")
+        XCTAssertEqual(try Data(contentsOf: file), source)
+    }
+
     func testGeneratedTxtPreservesNulAndEscapesActiveMarkupWithoutXmlPrevalidation() throws {
-        let publication = try ErmaoShared.TxtPublicationNormalizer().normalize(
-            decodedText: "a\0b\0<script>alert(1)</script>", publicationTitle: "Book"
+        let xhtml = ErmaoShared.PublicKt.renderTxtXhtml(
+            title: "Book", bodyText: "a\0b\0<script>alert(1)</script>"
         )
-        let resource = try XCTUnwrap(publication.resources.first)
-        let decorated = String(decoding: try IosPublicationSecurityPolicy.generatedChapter(resource.xhtml), as: UTF8.self)
+        let decorated = String(decoding: try IosPublicationSecurityPolicy.generatedChapter(xhtml), as: UTF8.self)
         XCTAssertTrue(decorated.contains("a\0b\0&lt;script&gt;"))
         XCTAssertTrue(decorated.contains("script-src 'none'"))
         XCTAssertFalse(decorated.contains("<script>"))
@@ -729,7 +830,7 @@ final class ReaderSecurityTests: XCTestCase {
 
     func testLocatorProjectionMatchesV3GoldenSemantics() throws {
         let fixture = try XCTUnwrap(Bundle(for: Self.self).url(
-            forResource: "reader-normalization-v3",
+            forResource: "reader-normalization-v4",
             withExtension: "xhtml"
         ))
         let markup = try String(contentsOf: fixture, encoding: .utf8)
@@ -960,25 +1061,65 @@ final class ReaderSecurityTests: XCTestCase {
                 isEncrypted: false, uncompressedSize: 16, compressedSize: 16, crc32: 0,
                 localHeaderOffset: 0, dataOffset: 30, physicalEndOffset: 46
             )],
-            [IosEpubArchiveSafetyPreflight.EntryFacts(
-                path: "OPS/secret", isDirectory: false, isSymbolicLink: false,
-                isEncrypted: true, uncompressedSize: 16, compressedSize: 16, crc32: 0,
-                localHeaderOffset: 0, dataOffset: 30, physicalEndOffset: 46
-            )],
-            [
-                safe,
-                IosEpubArchiveSafetyPreflight.EntryFacts(
-                    path: "OPS/next.xhtml", isDirectory: false, isSymbolicLink: false,
-                    isEncrypted: false, uncompressedSize: 16, compressedSize: 16, crc32: 0,
-                    localHeaderOffset: 40, dataOffset: 70, physicalEndOffset: 86
-                ),
-            ],
         ]
-        for entries in structuralCases {
-            assertEpubSafetyFailure(structure) {
-                try IosEpubArchiveSafetyPreflight.verifyMetadata(entries, archiveLength: 1_024)
-            }
-        }
+        let escapedResult = try IosEpubArchiveSafetyPreflight.verifyMetadata(
+            structuralCases[0],
+            archiveLength: 1_024
+        )
+        XCTAssertEqual(
+            escapedResult.quarantineFor(path: "../chapter.xhtml")?.ruleId,
+            structure.ruleId
+        )
+        let symlinkResult = try IosEpubArchiveSafetyPreflight.verifyMetadata(
+            structuralCases[1],
+            archiveLength: 1_024
+        )
+        XCTAssertEqual(
+            symlinkResult.quarantineFor(path: "OPS/link")?.ruleId,
+            structure.ruleId
+        )
+
+        let encrypted = IosEpubArchiveSafetyPreflight.EntryFacts(
+            path: "OPS/secret", isDirectory: false, isSymbolicLink: false,
+            isEncrypted: true, uncompressedSize: 16, compressedSize: 16, crc32: 0,
+            localHeaderOffset: 0, dataOffset: 30, physicalEndOffset: 46
+        )
+        XCTAssertNoThrow(
+            try IosEpubArchiveSafetyPreflight.verifyMetadata([encrypted], archiveLength: 1_024)
+        )
+
+        let overlapping = IosEpubArchiveSafetyPreflight.EntryFacts(
+            path: "OPS/next.xhtml", isDirectory: false, isSymbolicLink: false,
+            isEncrypted: false, uncompressedSize: 16, compressedSize: 16, crc32: 0,
+            localHeaderOffset: 40, dataOffset: 70, physicalEndOffset: 86
+        )
+        let overlapResult = try IosEpubArchiveSafetyPreflight.verifyMetadata(
+            [safe, overlapping], archiveLength: 1_024
+        )
+        XCTAssertEqual(
+            overlapResult.quarantinedResources["OPS/chapter.xhtml"]?.ruleId,
+            ErmaoShared.PublicKt.readerSafetyEpubArchiveIntegrityFailure().ruleId
+        )
+        XCTAssertEqual(
+            overlapResult.quarantinedResources["OPS/next.xhtml"]?.ruleId,
+            ErmaoShared.PublicKt.readerSafetyEpubArchiveIntegrityFailure().ruleId
+        )
+
+        let duplicateResult = try IosEpubArchiveSafetyPreflight.verifyMetadata(
+            [safe, safe], archiveLength: 1_024
+        )
+        XCTAssertEqual(
+            duplicateResult.quarantinedResources["OPS/chapter.xhtml"]?.ruleId,
+            ErmaoShared.PublicKt.readerSafetyEpubArchiveIntegrityFailure().ruleId
+        )
+
+        let container = Data(
+            #"<?xml version="1.0"?><container><rootfiles><rootfile full-path="OPS/package.opf"/></rootfiles></container>"#.utf8
+        )
+        XCTAssertEqual(
+            try IosEpubArchiveSafetyPreflight.rootfilePaths(from: container),
+            ["OPS/package.opf"]
+        )
 
         let countLimit = ErmaoShared.PublicKt.readerSafetyEpubArchiveEntryMaxCount()
         assertEpubSafetyFailure(ErmaoShared.PublicKt.readerSafetyEpubArchiveEntryCountFailure()) {

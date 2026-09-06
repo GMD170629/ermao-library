@@ -54,7 +54,7 @@ class DownloadScreensTest {
         compose.onNodeWithTag("settings-page-scroll").assertIsDisplayed()
         compose.onNodeWithTag("downloads-search").assertIsDisplayed().performTextInput("missing")
         compose.onNodeWithTag("settings-empty").assertIsDisplayed()
-        compose.onNodeWithTag("settings-back").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("warm-page-navigation").assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(1, backCount) }
     }
 

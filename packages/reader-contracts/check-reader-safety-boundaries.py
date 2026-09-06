@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import sys
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from types import ModuleType
@@ -14,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_ROOT = ROOT / "packages/reader-contracts"
 GENERATOR = CONTRACT_ROOT / "generate-reader-safety-policy.py"
 POLICY = CONTRACT_ROOT / "reader-safety-policy.json"
-FIXTURES = CONTRACT_ROOT / "fixtures/reader-safety-v1/manifest.json"
+FIXTURES = CONTRACT_ROOT / "fixtures/reader-safety-v2/manifest.json"
 
 SCAN_ROOTS = (
     ROOT / "packages/reader-core/src",
@@ -25,7 +26,8 @@ SCAN_ROOTS = (
     ROOT
     / "apps/mobile/shared/src/commonMain/kotlin/com/ermao/library/shared/modules/downloads",
     ROOT / "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/reader",
-    ROOT / "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/downloads",
+    ROOT
+    / "apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/downloads",
     ROOT / "apps/mobile/iosApp/ErmaoLibrary/Features/Reader",
     ROOT / "apps/mobile/iosApp/ErmaoLibrary/Features/Downloads",
     ROOT / "apps/mobile/iosApp/ErmaoLibrary/Persistence/ManagedDownloadStore.swift",
@@ -40,11 +42,23 @@ SCAN_ROOTS = (
     ROOT / "apps/api-python/app/modules/reader",
     ROOT / "apps/api-python/app/contracts/media_capabilities.py",
     ROOT / "apps/api-python/app/infrastructure/comic_archives.py",
+    ROOT / "apps/api-python/app/infrastructure/archive_integrity.py",
     ROOT / "apps/api-python/app/modules/imports/application/audio_types.py",
     ROOT / "apps/api-python/app/modules/imports/domain/resource_adapters.py",
     ROOT / "apps/api-python/app/services/audio_metadata.py",
 )
-SOURCE_SUFFIXES = {".py", ".ts", ".tsx", ".kt", ".swift", ".c", ".cc", ".cpp", ".h", ".hpp"}
+SOURCE_SUFFIXES = {
+    ".py",
+    ".ts",
+    ".tsx",
+    ".kt",
+    ".swift",
+    ".c",
+    ".cc",
+    ".cpp",
+    ".h",
+    ".hpp",
+}
 GENERATED_FILENAMES = {
     "reader-safety-policy.generated.ts",
     "ReaderSafetyPolicy.generated.kt",
@@ -57,6 +71,24 @@ GENERATED_FILENAMES = {
 # platform may compile generated values into sets/regexes; it may not author the
 # values inside a literal list or recreate policy outcomes with raw strings.
 PRIVATE_CATALOG_PATTERNS = (
+    re.compile(
+        r"(?is)\[\s*[\"'][a-z][a-z0-9+.-]*:[\"']\s*,[^\]]*\]"
+        r"\s*\.includes\s*\([^;\n]*(?:protocol|scheme)"
+    ),
+    re.compile(
+        r"(?im)^\s*(?:(?:private|const|val|let|static|final)\s+)*[A-Z_]*(?:MAX_REFERENCE_LENGTH|MAX_ENTITY_DEPTH|MAX_ENTITY_EXPANSIONS|MAX_DOCTYPE_LENGTH)\s*(?::[^=\n]+)?=\s*\d"
+    ),
+    # Declaration rules hidden in a compiled regex or an inline branch are
+    # catalogs too. Parser token recognition (DOCTYPE/ENTITY alone) is allowed.
+    re.compile(
+        r"(?is)(?:_?SAFE_[A-Z_]*DOCTYPE|safeDoctypes|allowedDoctypes)\s*(?::[^=\n]+)?=\s*(?:re\.compile|Regex|new\s+RegExp|setOf|listOf|[\[{])"
+    ),
+    re.compile(
+        r"(?is)(?:if|guard)\s*\(?\s*(?:doctype(?:Name|_name)?|publicId|systemId)\s*(?:!=|!==|==|===|not\s+in|in)\s*[\"'\[{]"
+    ),
+    re.compile(
+        r"(?is)(?:blocked(?:Tags|Schemes)|sanitizedElements|BLOCKED_SCHEMES|SANITIZED_ELEMENTS)\s*(?::[^=\n]+)?=\s*(?:new\s+Set\s*\(|setOf\s*\(|listOf\s*\(|set\s*\()?\s*[\[{]?\s*[\"']"
+    ),
     re.compile(r"(?is)allowedFontAlgorithms\s*=\s*(?:new\s+Set\s*\()?\s*\["),
     re.compile(
         r"(?is)(?:MIME_BY_FORMAT|MIME_TYPES_BY_FORMAT|CANONICAL_MIME_TYPES)\s*=\s*[\[{]"
@@ -93,13 +125,21 @@ SOURCE_STRING_LITERAL = re.compile(
     r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`(?:\\.|[^`\\])*`',
     re.DOTALL,
 )
+SOURCE_TOKEN = re.compile(
+    r"(?P<comment>//[^\n]*|/\*.*?\*/)|(?P<literal>"
+    + SOURCE_STRING_LITERAL.pattern
+    + ")",
+    re.DOTALL,
+)
 
 
 def find_source_literal_containing(
     source: str, values: Iterable[str]
 ) -> re.Match[str] | None:
     candidates = tuple(values)
-    for literal in SOURCE_STRING_LITERAL.finditer(source):
+    for literal in SOURCE_TOKEN.finditer(source):
+        if literal.group("literal") is None:
+            continue
         if any(value in literal.group(0) for value in candidates):
             return literal
     return None
@@ -114,6 +154,20 @@ def load_generator() -> ModuleType:
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
     return module
+
+
+def check_conformance_ownership() -> None:
+    """Run the report verifier's canonical suite ownership validation in CI."""
+    name = "reader_safety_conformance_boundary"
+    specification = importlib.util.spec_from_file_location(
+        name, CONTRACT_ROOT / "verify-reader-safety-conformance.py"
+    )
+    if specification is None or specification.loader is None:
+        raise RuntimeError("cannot load Reader safety conformance verifier")
+    module = importlib.util.module_from_spec(specification)
+    sys.modules[name] = module
+    specification.loader.exec_module(module)
+    module.load_suite_and_expected()
 
 
 def source_files() -> Iterable[Path]:
@@ -158,6 +212,14 @@ def check_generated(
 
 def check_source_ownership(policy: Mapping[str, object]) -> list[str]:
     rule_ids = [entry["id"] for entry in policy["rules"]]  # type: ignore[index]
+    rules = policy["rules"]
+    if not isinstance(rules, list):
+        raise TypeError("Reader safety rules must be an array")
+    rule_triggers = [
+        entry["trigger"]
+        for entry in rules
+        if isinstance(entry, dict) and isinstance(entry.get("trigger"), str)
+    ]
     error_codes = {
         entry["errorCode"]
         for entry in policy["rules"]  # type: ignore[index]
@@ -181,6 +243,11 @@ def check_source_ownership(policy: Mapping[str, object]) -> list[str]:
             issues.append(
                 f"{relative}:{line}: raw Reader safety errorCode; derive it from the generated rule/code"
             )
+        if match := find_source_literal_containing(source, rule_triggers):
+            line = source.count("\n", 0, match.start()) + 1
+            issues.append(
+                f"{relative}:{line}: raw Reader safety trigger; derive it from the generated rule"
+            )
         for pattern in PRIVATE_CATALOG_PATTERNS:
             if match := pattern.search(source):
                 line = source.count("\n", 0, match.start()) + 1
@@ -198,6 +265,7 @@ def main() -> None:
         json.loads(FIXTURES.read_text(encoding="utf-8")), policy=policy, digest=digest
     )
     issues = check_generated(module, policy, digest)
+    check_conformance_ownership()
     issues.extend(check_source_ownership(policy))
     if issues:
         raise SystemExit(

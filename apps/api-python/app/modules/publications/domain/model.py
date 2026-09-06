@@ -48,6 +48,26 @@ class PublicationSecurityError(PublicationCorruptError):
         self.rule_id = rule_id
 
 
+class PublicationIntegrityError(PublicationCorruptError):
+    """Required publication bytes failed an integrity check."""
+
+    code: str = ReaderSafetyErrorCode.PUBLICATION_CORRUPT.value
+
+    def __init__(self, message: str, *, rule_id: str | None = None) -> None:
+        super().__init__(message)
+        self.rule_id = rule_id
+
+
+class PublicationResourceBlockedError(PublicationCorruptError):
+    """An optional or independently requested resource cannot be used."""
+
+    code: str = ReaderSafetyErrorCode.PUBLICATION_RESOURCE_BLOCKED.value
+
+    def __init__(self, message: str, *, rule_id: str | None = None) -> None:
+        super().__init__(message)
+        self.rule_id = rule_id
+
+
 class PublicationMarkupError(PublicationCorruptError):
     """One publication markup resource is malformed but may be recoverable."""
 
@@ -147,8 +167,9 @@ class PublicationLink:
 
 @dataclass(frozen=True, slots=True)
 class PublicationTocEntry:
-    href: str
+    href: str | None
     title: str
+    navigation_key: str
     children: tuple[PublicationTocEntry, ...] = ()
 
 

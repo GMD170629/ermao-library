@@ -28,8 +28,8 @@ on:
       - 'apps/api-python/tests/test_sqlite_database.py'
       - 'docs/adr/0006-native-mobile-kmp-boundaries.md'
       - 'docs/adr/0015-mobile-v1-verified-session-without-offline-mode.md'
-      - 'docs/testing/mobile-stage-0-acceptance.md'
-      - 'docs/testing/mobile-stage-1-acceptance.md'
+      - 'docs/testing/test-execution-policy.md'
+      - 'docs/manual-acceptance.md'
       - '.github/workflows/mobile.yml'
   push:
     branches:
@@ -61,8 +61,8 @@ on:
       - 'apps/api-python/tests/test_sqlite_database.py'
       - 'docs/adr/0006-native-mobile-kmp-boundaries.md'
       - 'docs/adr/0015-mobile-v1-verified-session-without-offline-mode.md'
-      - 'docs/testing/mobile-stage-0-acceptance.md'
-      - 'docs/testing/mobile-stage-1-acceptance.md'
+      - 'docs/testing/test-execution-policy.md'
+      - 'docs/manual-acceptance.md'
       - '.github/workflows/mobile.yml'
   workflow_dispatch:
     inputs:

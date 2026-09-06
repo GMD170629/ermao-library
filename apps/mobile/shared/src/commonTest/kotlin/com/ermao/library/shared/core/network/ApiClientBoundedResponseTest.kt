@@ -38,7 +38,7 @@ class ApiClientBoundedResponseTest {
             val channel = ByteChannel(autoFlush = true)
             val api = client(channel, status)
             try {
-                val result = withTimeout(1000) { api.loadAuthenticatedBinary(PATH, 10, MIMES) }
+                val result = withTimeout(1000) { api.loadAuthenticatedBinary(PATH, 10) }
                 assertEquals(code, assertIs<ApiResult.Failure>(result).error.code)
             } finally { channel.cancel(null); api.close() }
         }
@@ -88,20 +88,28 @@ class ApiClientBoundedResponseTest {
     }
 
     @Test
-    fun missingContentTypeAndInvalidLengthAreProtocolFailuresNotMissingBooks(): Unit = runBlocking {
+    fun unknownContentTypeUsesGenericBinaryHintWhileInvalidLengthRemainsProtocolFailure(): Unit = runBlocking {
         for ((contentType, length, expected) in listOf(
-            Triple(null, null, "BINARY_CONTENT_TYPE_MISSING"),
-            Triple("text/plain", null, "BINARY_CONTENT_TYPE_INVALID"),
             Triple("application/xhtml+xml", "-1", "BINARY_LENGTH_INVALID"),
             Triple("application/xhtml+xml", "not-a-number", "BINARY_LENGTH_INVALID"),
         )) {
             val body = ByteChannel(autoFlush = true)
             val api = client(body, length = length, contentType = contentType)
             try {
-                val result = withTimeout(1000) { api.loadAuthenticatedBinary(PATH, 10, MIMES) }
+                val result = withTimeout(1000) { api.loadAuthenticatedBinary(PATH, 10) }
                 val error = assertIs<ApiResult.Failure>(result).error
                 assertEquals(expected, error.code)
                 assertEquals(AppErrorKind.ProtocolViolation, error.kind)
+            } finally { body.cancel(null); api.close() }
+        }
+
+        for (contentType in listOf(null, "text/plain")) {
+            val body = ByteReadChannel(byteArrayOf(1))
+            val api = client(body, length = "1", contentType = contentType)
+            try {
+                val result = withTimeout(1000) { api.loadAuthenticatedBinary(PATH, 10) }
+                val binary = assertIs<ApiResult.Success<AuthenticatedBinary>>(result).value
+                assertEquals(contentType ?: "application/octet-stream", binary.mimeType)
             } finally { body.cancel(null); api.close() }
         }
     }

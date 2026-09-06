@@ -46,7 +46,8 @@ class SqlAlchemyLibraryNavigationProjection:
                     asset_id=entry.asset_id,
                     unit_type="chapter",
                     title=entry.title,
-                    href=entry.href,
+                    # The navigation table stores an absent target as empty text.
+                    href=entry.href or "",
                     media_type=entry.media_type,
                     sort_order=entry.sort_order,
                     metadata_json=entry.metadata_json,
@@ -58,12 +59,12 @@ class SqlAlchemyLibraryNavigationProjection:
         self._session.add(
             LibraryResourceAssetNavigation(
                 asset_id=asset_id,
-                chapter_count=len(entries),
+                chapter_count=sum(entry.href is not None for entry in entries),
             )
         )
         metadata = self._session.get(LibraryReadableResourceMetadata, resource_id)
         if metadata is not None:
-            metadata.chapter_count = len(entries)
+            metadata.chapter_count = sum(entry.href is not None for entry in entries)
 
     def invalidate(self, *, resource_id: str) -> None:
         self._delete_units(resource_id=resource_id)

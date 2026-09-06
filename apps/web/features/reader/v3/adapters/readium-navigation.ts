@@ -1,5 +1,6 @@
 import type { Publication } from '@readium/shared';
 import type { ReaderNavigationEntry } from '@shuku/reader-core';
+import { authoredUriDisposition } from '../security/reader-safety-policy';
 
 export function bareHref(href: string) {
   return href.split('#', 1)[0] ?? href;
@@ -15,12 +16,8 @@ export function hasExplicitScheme(href: string) {
 }
 
 export function isAllowedReadiumExternalHref(href: string) {
-  try {
-    return ['http:', 'https:', 'mailto:', 'tel:'].includes(new URL(href, 'https://readium.invalid/').protocol)
-      && /^[a-z][a-z\d+.-]*:/iu.test(href);
-  } catch {
-    return false;
-  }
+  return hasExplicitScheme(href.trim())
+    && authoredUriDisposition(href, 'navigation') === 'user-navigation';
 }
 
 /** Resolves a publication-relative href without turning relative RWPM links into network URLs. */
@@ -93,48 +90,54 @@ export function resolveReadiumStartupTargets<T extends { href: string }>(
   return { start, initial };
 }
 
-function readingOrderIndex(publication: Publication, href: string) {
-  return publication.readingOrder.items.findIndex((item) => samePublicationResource(item.href, href));
-}
-
 /** Converts the Readium TOC to the Reader-owned, zero-based navigation contract. */
 export function readiumNavigationEntries(publication: Publication): ReaderNavigationEntry[] {
-  const map = (links: Publication['toc'], path: number[], level: number): ReaderNavigationEntry[] => {
+  const map = (links: Publication['toc'], level: number): ReaderNavigationEntry[] => {
     if (!links) return [];
-    return links.items.flatMap((link, offset) => {
-      const nextPath = [...path, offset];
-      const children = map(link.children, nextPath, level + 1);
-      const label = link.title?.trim();
-      if (!label) return children;
-      const index = readingOrderIndex(publication, link.href);
-      const navigationKey = `readium-toc:${nextPath.join('.')}:${link.href}`;
+    return links.items.map((link) => {
+      const children = map(link.children, level + 1);
+      const rawKey = link.properties?.otherProperties?.['shuku:navigationKey'];
+      if (typeof rawKey !== 'string' || !rawKey) {
+        throw new Error('READER_NAVIGATION_KEY_MISSING');
+      }
+      const navigationKey = rawKey;
+      const coreIndexText = /^chapter-(\d+)$/u.exec(navigationKey)?.[1];
+      if (!coreIndexText) throw new Error('READER_NAVIGATION_KEY_INVALID');
+      const index = Number(coreIndexText);
+      if (!Number.isSafeInteger(index) || index < 0) throw new Error('READER_NAVIGATION_INDEX_INVALID');
+      if (!link.title) throw new Error('READER_NAVIGATION_TITLE_MISSING');
+      const href = link.href.trim();
       return [{
         id: navigationKey,
         navigationKey,
-        label,
-        href: link.href,
-        ...(index >= 0 ? { index } : {}),
+        label: link.title,
+        ...(href ? { href } : {}),
+        index,
         level,
         ...(children.length > 0 ? { children } : {})
       }];
-    });
+    }).flat();
   };
-  return map(publication.toc, [], 0);
+  return map(publication.toc, 0);
 }
 
 /** Flattens authored navigation for list UIs without losing its hierarchy depth. */
 export function flattenReadiumNavigationEntries(
   entries: readonly ReaderNavigationEntry[]
-): ReaderNavigationEntry[] {
-  const flattened: ReaderNavigationEntry[] = [];
-  const visit = (entry: ReaderNavigationEntry, fallbackLevel: number) => {
+): Array<ReaderNavigationEntry & { index: number; level: number; navigationKey: string }> {
+  const flattened: Array<ReaderNavigationEntry & { index: number; level: number; navigationKey: string }> = [];
+  const visit = (entry: ReaderNavigationEntry, level: number) => {
+    if (entry.index === undefined || !Number.isSafeInteger(entry.index) || !entry.navigationKey) {
+      throw new Error('READER_NAVIGATION_IDENTITY_MISSING');
+    }
     const { children: _children, ...withoutChildren } = entry;
     flattened.push({
       ...withoutChildren,
-      index: entry.index ?? flattened.length,
-      level: entry.level ?? fallbackLevel
+      index: entry.index,
+      navigationKey: entry.navigationKey,
+      level
     });
-    for (const child of entry.children ?? []) visit(child, fallbackLevel + 1);
+    for (const child of entry.children ?? []) visit(child, level + 1);
   };
   for (const entry of entries) visit(entry, 0);
   return flattened;
@@ -165,6 +168,8 @@ type ReadiumProgressPoint = Readonly<{
   }>;
 }>;
 
+type ReadiumInterpolationPoint = Readonly<{ resource: number; total: number }>;
+
 function unitProgression(value: number | undefined, fallback = 0) {
   return typeof value === 'number' && Number.isFinite(value)
     ? Math.max(0, Math.min(1, value))
@@ -181,34 +186,43 @@ export function readiumTotalProgression(
   positions: readonly ReadiumProgressPoint[]
 ) {
   const resourceProgression = unitProgression(current.locations.progression);
-  const matchingIndexes = positions.flatMap((position, index) => (
-    samePublicationResource(position.href, current.href) ? [index] : []
-  ));
-  if (matchingIndexes.length === 0) {
-    return unitProgression(current.locations.totalProgression);
-  }
-
-  const resourcePoints = matchingIndexes
-    .map((index) => positions[index])
-    .filter((position): position is ReadiumProgressPoint => Boolean(position))
-    .map((position) => ({
+  let minimum: ReadiumInterpolationPoint | undefined;
+  let lower: ReadiumInterpolationPoint | undefined;
+  let upperInResource: ReadiumInterpolationPoint | undefined;
+  let finalMatchingIndex = -1;
+  // Select the interpolation bounds in O(positions.length), without sorting
+  // on the page-turn path. Equal lower points retain the last authored value;
+  // equal minimum/upper points retain the first, matching stable-sort semantics.
+  for (let index = 0; index < positions.length; index += 1) {
+    const position = positions[index];
+    if (!position || !samePublicationResource(position.href, current.href)) continue;
+    finalMatchingIndex = index;
+    const point = {
       resource: unitProgression(position.locations.progression),
       total: unitProgression(position.locations.totalProgression)
-    }))
-    .sort((left, right) => left.resource - right.resource);
-  const lower = [...resourcePoints]
-    .reverse()
-    .find((point) => point.resource <= resourceProgression)
-    ?? resourcePoints[0];
+    };
+    if (!minimum || point.resource < minimum.resource) minimum = point;
+    if (point.resource <= resourceProgression) {
+      if (!lower || point.resource >= lower.resource) lower = point;
+    } else if (!upperInResource || point.resource < upperInResource.resource) {
+      upperInResource = point;
+    }
+  }
+  lower ??= minimum;
   if (!lower) return unitProgression(current.locations.totalProgression);
 
-  const upperInResource = resourcePoints.find((point) => point.resource > resourceProgression);
-  const finalMatchingIndex = matchingIndexes.at(-1) ?? -1;
-  const nextResource = positions.slice(finalMatchingIndex + 1)
-    .find((position) => typeof position.locations.totalProgression === 'number');
+  let nextResourceTotal = 1;
+  if (!upperInResource) {
+    for (let index = finalMatchingIndex + 1; index < positions.length; index += 1) {
+      const total = positions[index]?.locations.totalProgression;
+      if (typeof total !== 'number') continue;
+      nextResourceTotal = unitProgression(total, 1);
+      break;
+    }
+  }
   const upper = upperInResource ?? {
     resource: 1,
-    total: unitProgression(nextResource?.locations.totalProgression, 1)
+    total: nextResourceTotal
   };
   if (upper.resource <= lower.resource) return lower.total;
   const ratio = (resourceProgression - lower.resource) / (upper.resource - lower.resource);

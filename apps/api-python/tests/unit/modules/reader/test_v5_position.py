@@ -61,7 +61,12 @@ def test_position_serialization_round_trips_complete_presentation() -> None:
         "displayPercent": 42.5,
         "totalProgression": 0.425,
         "currentHref": "Text/chapter.xhtml",
-        "chapter": {"href": "Text/chapter.xhtml", "title": "Chapter", "index": 2},
+        "chapter": {
+            "navigationKey": None,
+            "href": "Text/chapter.xhtml",
+            "title": "Chapter",
+            "index": 2,
+        },
         "page": {"number": 3, "total": 10},
         "playback": {"positionMillis": 100, "durationMillis": None},
     }

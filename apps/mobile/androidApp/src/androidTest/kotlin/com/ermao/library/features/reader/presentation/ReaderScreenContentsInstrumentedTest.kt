@@ -7,16 +7,21 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.centerLeft
 import androidx.compose.ui.test.centerRight
 import androidx.compose.ui.test.swipe
@@ -46,6 +51,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.math.abs
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -94,15 +100,306 @@ class ReaderScreenContentsInstrumentedTest {
         compose.onNodeWithText("Chapter 1000").assertDoesNotExist()
 
         compose.onNodeWithContentDescription(done).performClick()
-        compose.waitUntil(timeoutMillis = 5_000) {
-            compose.onAllNodesWithTag(READER_SHEET_TEST_TAG).fetchSemanticsNodes().isEmpty()
-        }
+        assertStableSheetAndProgress()
         compose.onNodeWithTag(READER_CONTENTS_TEST_TAG).performClick()
         compose.onNodeWithText("Chapter 1").assertIsDisplayed()
         compose.onNodeWithTag(READER_CONTENTS_LOADING_TEST_TAG).assertDoesNotExist()
         assertEquals(1, controller.loadCalls.get())
         compose.onNodeWithTag(READER_CONTENTS_TEST_TAG).performClick()
-        compose.onNodeWithTag(READER_SHEET_TEST_TAG).assertDoesNotExist()
+        assertStableSheetAndProgress()
+    }
+
+    @Test
+    fun currentNavigationEntryIsCenteredAfterAsyncLoadAndOnlyRecenteredOnReopen() {
+        val controller = DeferredContentsController(initialNavigationEntryId = "chapter-500.xhtml")
+        compose.setContent {
+            ReaderScreen(
+                title = "Navigation selection fixture",
+                controller = controller,
+                opening = false,
+                openError = null,
+                controlsVisible = true,
+                onControlsVisibleChange = {},
+                onClose = {},
+                onNavigatorContainerReady = {},
+            )
+        }
+        showTestHostOverKeyguard()
+
+        compose.onNodeWithTag(READER_CONTENTS_TEST_TAG).performClick()
+        compose.onNodeWithTag(READER_CONTENTS_LOADING_TEST_TAG).assertIsDisplayed()
+        controller.releaseContents()
+
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodesWithTag("reader-toc:chapter-500.xhtml")
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
+        val list = compose.onNodeWithTag(READER_CONTENTS_LIST_TEST_TAG)
+        val selected = compose.onNodeWithTag("reader-toc:chapter-500.xhtml")
+        selected.assertIsDisplayed().assertIsSelected()
+        val listBounds = list.getUnclippedBoundsInRoot()
+        val selectedBounds = selected.getUnclippedBoundsInRoot()
+        val listCenter = (listBounds.top.value + listBounds.bottom.value) / 2f
+        val selectedCenter = (selectedBounds.top.value + selectedBounds.bottom.value) / 2f
+        assertTrue(
+            "TOC selection was not centered: list=$listCenter selected=$selectedCenter",
+            abs(listCenter - selectedCenter) <= 96f,
+        )
+
+        // A user scroll must remain where the user left it; the one-time
+        // centering effect is scoped to this sheet opening.
+        list.performScrollToIndex(1)
+        compose.onNodeWithTag("reader-toc:chapter-1.xhtml").assertIsDisplayed()
+        compose.onAllNodesWithTag("reader-toc:chapter-500.xhtml").assertCountEquals(0)
+
+        val done = instrumentation.targetContext.getString(R.string.reader_done)
+        compose.onNodeWithContentDescription(done).performClick()
+        assertStableSheetAndProgress()
+        compose.onNodeWithTag(READER_CONTENTS_TEST_TAG).performClick()
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodesWithTag("reader-toc:chapter-500.xhtml")
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
+        compose.onNodeWithTag("reader-toc:chapter-500.xhtml").assertIsDisplayed().assertIsSelected()
+        assertStableSheetWithoutProgress()
+    }
+
+    @Test
+    fun contentsSheetKeepsAllPanelTabsAvailableWhileSwitchingNativePanels() {
+        val controller = DeferredContentsController()
+        compose.setContent {
+            ReaderScreen(
+                title = "Native panel fixture",
+                controller = controller,
+                opening = false,
+                openError = null,
+                controlsVisible = true,
+                onControlsVisibleChange = {},
+                onClose = {},
+                onNavigatorContainerReady = {},
+            )
+        }
+        showTestHostOverKeyguard()
+
+        compose.onNodeWithTag(READER_CONTENTS_TEST_TAG).performClick()
+        controller.releaseContents()
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodesWithTag(READER_CONTENTS_LIST_TEST_TAG)
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
+        compose.onNodeWithTag(READER_CONTENTS_LIST_TEST_TAG).assertIsDisplayed()
+        assertStableSheetWithoutProgress()
+        assertPanelTabsDisplayed()
+
+        compose.onNodeWithTag("reader-settings").performClick()
+        compose.onNodeWithTag(READER_PREFERENCES_SCROLL_TEST_TAG).assertIsDisplayed()
+        assertStableSheetWithoutProgress()
+        assertPanelTabsDisplayed()
+
+        compose.onNodeWithTag("reader-notes").performClick()
+        compose.onNodeWithText(instrumentation.targetContext.getString(R.string.reader_annotations))
+            .assertIsDisplayed()
+        assertStableSheetWithoutProgress()
+        assertPanelTabsDisplayed()
+    }
+
+    private fun assertPanelTabsDisplayed() {
+        compose.onNodeWithTag(READER_CONTENTS_TEST_TAG).assertIsDisplayed()
+        compose.onNodeWithTag("reader-notes").assertIsDisplayed()
+        compose.onNodeWithTag("reader-appearance").assertIsDisplayed()
+        compose.onNodeWithTag(READER_SETTINGS_TEST_TAG).assertIsDisplayed()
+    }
+
+    private fun assertStableSheet() {
+        compose.onAllNodesWithTag(READER_SHEET_TEST_TAG).assertCountEquals(1)
+        compose.onNodeWithTag(READER_SHEET_TEST_TAG).assertIsDisplayed()
+    }
+
+    private fun assertStableSheetAndProgress() {
+        assertStableSheet()
+        compose.onNodeWithTag(READER_PROGRESS_TEST_TAG).assertIsDisplayed()
+    }
+
+    @Test
+    fun nativeSheetKeepsIdentityWhileSwitchingProgressAndPanelContent() {
+        val controller = DeferredContentsController()
+        compose.setContent {
+            ReaderScreen(
+                title = "Persistent native sheet fixture",
+                controller = controller,
+                opening = false,
+                openError = null,
+                controlsVisible = true,
+                onControlsVisibleChange = {},
+                onClose = {},
+                onNavigatorContainerReady = {},
+            )
+        }
+        showTestHostOverKeyguard()
+
+        assertStableSheetAndProgress()
+        val sheetId = compose.onNodeWithTag(READER_SHEET_TEST_TAG).fetchSemanticsNode().id
+
+        compose.onNodeWithTag(READER_CONTENTS_TEST_TAG).performClick()
+        assertStableSheetWithoutProgress()
+        assertEquals(sheetId, compose.onNodeWithTag(READER_SHEET_TEST_TAG).fetchSemanticsNode().id)
+
+        val done = instrumentation.targetContext.getString(R.string.reader_done)
+        compose.onNodeWithContentDescription(done).performClick()
+        assertStableSheetAndProgress()
+        assertEquals(sheetId, compose.onNodeWithTag(READER_SHEET_TEST_TAG).fetchSemanticsNode().id)
+        compose.onNodeWithTag(READER_SETTINGS_TEST_TAG).performClick()
+        assertStableSheetWithoutProgress()
+        assertEquals(sheetId, compose.onNodeWithTag(READER_SHEET_TEST_TAG).fetchSemanticsNode().id)
+    }
+
+    private fun assertStableSheetWithoutProgress() {
+        assertStableSheet()
+        compose.onNodeWithTag(READER_PROGRESS_TEST_TAG).assertDoesNotExist()
+    }
+
+    @Test
+    fun nativeSheetExpandsBeforeScrollingAndCollapsesAtListStartWithoutTurningPages() {
+        val controller = DeferredContentsController()
+        compose.setContent {
+            ReaderScreen(
+                title = "Native scroll fixture", controller = controller, opening = false,
+                openError = null, controlsVisible = true, onControlsVisibleChange = {},
+                onClose = {}, onNavigatorContainerReady = {},
+            )
+        }
+        showTestHostOverKeyguard()
+        compose.onNodeWithTag(READER_CONTENTS_TEST_TAG).performClick()
+        controller.releaseContents()
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag(READER_CONTENTS_LIST_TEST_TAG).fetchSemanticsNodes().isNotEmpty() }
+        val list = compose.onNodeWithTag(READER_CONTENTS_LIST_TEST_TAG)
+        val partialTop = list.getUnclippedBoundsInRoot().top.value
+        list.performTouchInput { swipe(Offset(width / 2f, height * 0.9f), Offset(width / 2f, height * 0.2f), 600) }
+        compose.waitForIdle()
+        val expandedTop = list.getUnclippedBoundsInRoot().top.value
+        assertTrue("Sheet did not expand first", expandedTop < partialTop)
+        compose.onNodeWithTag("reader-toc:chapter-1.xhtml").assertIsDisplayed()
+        assertPanelTabsDisplayed()
+        list.performTouchInput { swipe(Offset(width / 2f, height * 0.8f), Offset(width / 2f, height * 0.2f), 600) }
+        compose.onAllNodesWithTag("reader-toc:chapter-1.xhtml").assertCountEquals(0)
+        list.performScrollToIndex(0)
+        list.performTouchInput { swipe(Offset(width / 2f, height * 0.15f), Offset(width / 2f, height * 0.75f), 600) }
+        compose.waitForIdle()
+        assertTrue("Sheet did not return to partial height", list.getUnclippedBoundsInRoot().top.value > expandedTop)
+        assertPanelTabsDisplayed()
+        assertEquals(0, controller.previousPageCalls.get())
+        assertEquals(0, controller.nextPageCalls.get())
+    }
+
+    @Test
+    fun nativeSheetFooterBoundsStayFixedAcrossIntermediateDragMoves() {
+        val controller = DeferredContentsController()
+        compose.setContent {
+            ReaderScreen(
+                title = "Native drag bounds fixture", controller = controller, opening = false,
+                openError = null, controlsVisible = true, onControlsVisibleChange = {},
+                onClose = {}, onNavigatorContainerReady = {},
+            )
+        }
+        showTestHostOverKeyguard()
+        compose.onNodeWithTag(READER_CONTENTS_TEST_TAG).performClick()
+        controller.releaseContents()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithTag(READER_CONTENTS_LIST_TEST_TAG).fetchSemanticsNodes().isNotEmpty()
+        }
+
+        val footer = compose.onNodeWithTag(READER_CONTENTS_TEST_TAG)
+        val initialFooter = footer.getUnclippedBoundsInRoot()
+        fun assertFooterStable(step: String) {
+            val actual = footer.getUnclippedBoundsInRoot()
+            assertEquals("$step footer left", initialFooter.left.value, actual.left.value, 1f)
+            assertEquals("$step footer top", initialFooter.top.value, actual.top.value, 1f)
+            assertEquals("$step footer right", initialFooter.right.value, actual.right.value, 1f)
+            assertEquals("$step footer bottom", initialFooter.bottom.value, actual.bottom.value, 1f)
+        }
+
+        val list = compose.onNodeWithTag(READER_CONTENTS_LIST_TEST_TAG)
+        val listBounds = list.getUnclippedBoundsInRoot()
+        val initialListTop = listBounds.top.value
+        val density = instrumentation.targetContext.resources.displayMetrics.density
+        val start = Offset(
+            ((listBounds.left + listBounds.right) / 2f).value * density,
+            listBounds.bottom.value * density - 24f * density,
+        )
+        val dragTargets = listOf(
+            Offset(start.x, start.y - 40f * density),
+            Offset(start.x, start.y - 80f * density),
+            Offset(start.x, start.y - 120f * density),
+        )
+        compose.onRoot().performTouchInput { down(start) }
+        var previousExpandTop = initialListTop
+        try {
+            dragTargets.forEachIndexed { index, target ->
+                compose.onRoot().performTouchInput { moveTo(target, delayMillis = 32) }
+                compose.waitForIdle()
+                assertFooterStable("expand move ${index + 1}")
+                val currentTop = list.getUnclippedBoundsInRoot().top.value
+                if (index > 0) {
+                    assertTrue(
+                        "expand move ${index + 1} did not move the sheet upward: previous=$previousExpandTop current=$currentTop",
+                        currentTop <= previousExpandTop,
+                    )
+                }
+                previousExpandTop = currentTop
+            }
+        } finally {
+            compose.onRoot().performTouchInput { up() }
+        }
+        compose.waitForIdle()
+        assertFooterStable("expand end")
+        assertTrue(
+            "held expand did not move the sheet upward: initial=$initialListTop final=$previousExpandTop",
+            previousExpandTop < initialListTop,
+        )
+
+        // Settle at the full-height anchor before sampling the downward drag.
+        list.performTouchInput { swipe(Offset(width / 2f, height * 0.9f), Offset(width / 2f, height * 0.1f), 600) }
+        list.performScrollToIndex(0)
+        compose.waitForIdle()
+        val expandedListBounds = list.getUnclippedBoundsInRoot()
+        val expandedTopBeforeCollapse = expandedListBounds.top.value
+        val collapseStart = Offset(
+            ((expandedListBounds.left + expandedListBounds.right) / 2f).value * density,
+            expandedListBounds.top.value * density + 24f * density,
+        )
+        val collapseTargets = listOf(
+            Offset(collapseStart.x, collapseStart.y + 40f * density),
+            Offset(collapseStart.x, collapseStart.y + 80f * density),
+            Offset(collapseStart.x, collapseStart.y + 120f * density),
+        )
+        compose.onRoot().performTouchInput { down(collapseStart) }
+        var previousCollapseTop = expandedTopBeforeCollapse
+        try {
+            collapseTargets.forEachIndexed { index, target ->
+                compose.onRoot().performTouchInput { moveTo(target, delayMillis = 32) }
+                compose.waitForIdle()
+                assertFooterStable("collapse move ${index + 1}")
+                val currentTop = list.getUnclippedBoundsInRoot().top.value
+                if (index > 0) {
+                    assertTrue(
+                        "collapse move ${index + 1} did not move the sheet downward: previous=$previousCollapseTop current=$currentTop",
+                        currentTop >= previousCollapseTop,
+                    )
+                }
+                previousCollapseTop = currentTop
+            }
+        } finally {
+            compose.onRoot().performTouchInput { up() }
+        }
+        compose.waitForIdle()
+        assertFooterStable("collapse end")
+        assertTrue(
+            "held collapse did not move the sheet downward: initial=$expandedTopBeforeCollapse final=$previousCollapseTop",
+            previousCollapseTop > expandedTopBeforeCollapse,
+        )
     }
 
     @Test
@@ -276,7 +573,7 @@ class ReaderScreenContentsInstrumentedTest {
     }
 
     @Test
-    fun fixedReaderControlsUseDisabledCatalogReason() {
+    fun fixedReaderControlsHideTechnicalDisabledReason() {
         val controller = DeferredContentsController()
         compose.setContent {
             ReaderScreen(
@@ -301,7 +598,7 @@ class ReaderScreenContentsInstrumentedTest {
             .assertIsDisplayed()
             .assertIsNotEnabled()
 
-        assertTrue(compose.onAllNodesWithText(notImplemented).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(compose.onAllNodesWithText(notImplemented).fetchSemanticsNodes().isEmpty())
     }
 
     @Test
@@ -338,11 +635,11 @@ class ReaderScreenContentsInstrumentedTest {
             .performScrollTo()
             .assertIsDisplayed()
             .assertIsNotEnabled()
-        assertTrue(compose.onAllNodesWithText(notImplemented).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(compose.onAllNodesWithText(notImplemented).fetchSemanticsNodes().isEmpty())
         compose.onNodeWithTag("reader-setting-control-tapZones")
             .performScrollTo()
             .assertIsDisplayed()
-        assertTrue(compose.onAllNodesWithText(constraintCopy).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(compose.onAllNodesWithText(constraintCopy).fetchSemanticsNodes().isEmpty())
     }
 
     @Test
@@ -454,7 +751,7 @@ class ReaderScreenContentsInstrumentedTest {
         val narrowViewport = com.ermao.library.shared.modules.reader.ReaderSettingsCatalog
             .availabilityReasons.getValue("narrowViewport")
             .let { localized(it.chinese, it.english) }
-        compose.onNodeWithText(narrowViewport).assertIsDisplayed()
+        compose.onNodeWithText(narrowViewport).assertDoesNotExist()
         assertEquals(ReaderPreferences().epub.pageWidth, controller.preferences.value.epub.pageWidth)
     }
 
@@ -502,6 +799,7 @@ class ReaderScreenContentsInstrumentedTest {
         private val unavailable: Set<ReaderControl> = emptySet(),
         initialPreferences: ReaderPreferences = ReaderPreferences(),
         supportsAnnotations: Boolean = false,
+        initialNavigationEntryId: String? = null,
     ) : ReaderScreenController {
         private val loadGate = CompletableDeferred<Unit>()
         private val contentsMutex = Mutex()
@@ -535,6 +833,8 @@ class ReaderScreenContentsInstrumentedTest {
         override val currentLocation: StateFlow<ReaderLocation?> = locationState
         private val preferenceState = MutableStateFlow(initialPreferences)
         override val preferences: StateFlow<ReaderPreferences> = preferenceState
+        private val navigationEntryIdState = MutableStateFlow(initialNavigationEntryId)
+        override val currentNavigationEntryId: StateFlow<String?>? = navigationEntryIdState
         override val resumeNotice: StateFlow<ReaderResumeNotice?> = MutableStateFlow(null)
         override val resumeActionFailed: StateFlow<Boolean> = MutableStateFlow(false)
         override val bookmarks: StateFlow<List<ReaderBookmark>> = MutableStateFlow(emptyList())

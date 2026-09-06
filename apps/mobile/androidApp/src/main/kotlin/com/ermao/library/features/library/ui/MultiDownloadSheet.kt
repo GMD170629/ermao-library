@@ -16,8 +16,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -47,6 +45,8 @@ import com.ermao.library.shared.modules.library.BookContentEntry
 import com.ermao.library.ui.components.WarmPageErrorState
 import com.ermao.library.ui.components.WarmPageLoadingState
 import com.ermao.library.ui.components.WarmPageModalBottomSheet
+import com.ermao.library.ui.components.WarmPageMenuItem
+import com.ermao.library.ui.components.WarmPagePopup
 import com.ermao.library.ui.theme.WarmPageThemeValues
 
 private data class MultiDownloadTreeRow(
@@ -255,7 +255,7 @@ internal fun MultiDownloadSheet(
                                     TextButton(onClick = { if (record != null) menuExpanded = true }) {
                                         Text(resourceStatusText(eligibility, record))
                                     }
-                                    DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                                    WarmPagePopup(expanded = menuExpanded, onDismiss = { menuExpanded = false }) {
                                         DownloadStatusMenuItems(
                                             record = record,
                                             onDismiss = { menuExpanded = false },
@@ -453,36 +453,32 @@ private fun DownloadStatusMenuItems(
         AndroidDownloadStatus.Queued,
         AndroidDownloadStatus.Downloading,
         AndroidDownloadStatus.Verifying,
-        -> DropdownMenuItem(
-            text = { Text(stringResource(R.string.multi_download_pause)) },
+        -> WarmPageMenuItem(
+            label = stringResource(R.string.multi_download_pause),
             onClick = { onDismiss(); onPause(record.resourceId) },
         )
         AndroidDownloadStatus.Paused,
         AndroidDownloadStatus.FailedRetryable,
-        -> DropdownMenuItem(
-            text = { Text(stringResource(R.string.multi_download_resume)) },
+        -> WarmPageMenuItem(
+            label = stringResource(R.string.multi_download_resume),
             onClick = { onDismiss(); onResumeOrRetry(record.resourceId) },
         )
         else -> Unit
     }
     if (record.status == AndroidDownloadStatus.Completed && record.isReadable) {
-        DropdownMenuItem(
-            text = { Text(stringResource(R.string.work_download_open_offline)) },
+        WarmPageMenuItem(
+            label = stringResource(R.string.work_download_open_offline),
             onClick = { onDismiss(); onOpenDownloaded(record) },
         )
     }
-    DropdownMenuItem(
-        text = {
-            Text(
-                stringResource(
-                    if (record.status == AndroidDownloadStatus.Completed) {
-                        R.string.downloads_remove_action
-                    } else {
-                        R.string.multi_download_delete_task
-                    },
-                ),
-            )
-        },
+    WarmPageMenuItem(
+        label = stringResource(
+            if (record.status == AndroidDownloadStatus.Completed) {
+                R.string.downloads_remove_action
+            } else {
+                R.string.multi_download_delete_task
+            },
+        ),
         onClick = { onDismiss(); onRemove(record) },
     )
 }

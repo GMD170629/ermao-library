@@ -7,7 +7,6 @@ import {
   planPdfByteRanges
 } from '@shuku/reader-core';
 import { PdfRangeByteSource, PdfRangeError, type PdfRangeAccess } from './pdf-range-transport';
-import { ReaderSafetyPolicyError } from '../security/reader-safety-policy';
 
 const ETAG = '"2097135-1786742400"';
 
@@ -26,14 +25,14 @@ function access(bytes: Uint8Array): PdfRangeAccess {
   };
 }
 
-function rangeResponse(bytes: Uint8Array, init?: RequestInit) {
+function rangeResponse(bytes: Uint8Array, init?: RequestInit, contentType: string | null = 'application/pdf') {
   const headers = new Headers({
     'Accept-Ranges': 'bytes',
     ETag: ETAG,
-    'Content-Type': 'application/pdf',
     'Content-Encoding': 'identity',
     'Content-Length': String(bytes.byteLength)
   });
+  if (contentType !== null) headers.set('Content-Type', contentType);
   if (init?.method === 'HEAD') return new Response(null, { status: 200, headers });
   const match = /^bytes=(\d+)-(\d+)$/u.exec(new Headers(init?.headers).get('Range') ?? '');
   assert.ok(match);
@@ -116,7 +115,7 @@ test('strong ETag becomes the If-Range validator and oversized reads send no ext
   source.abort();
 });
 
-test('HEAD admission rejects weak revisions and wrong MIME through their generated rules', async () => {
+test('HEAD admission rejects weak revisions but accepts unknown or missing MIME', async () => {
   const bytes = fixtureBytes();
   const weakRevision = new PdfRangeByteSource(access(bytes), async (_input, init) => {
     const response = rangeResponse(bytes, init);
@@ -129,16 +128,18 @@ test('HEAD admission rejects weak revisions and wrong MIME through their generat
       && reason.ruleId === READER_SAFETY_RULE_IDS.PDF_RANGE_PROTOCOL
   );
 
-  const wrongMime = new PdfRangeByteSource(access(bytes), async (_input, init) => {
-    const response = rangeResponse(bytes, init);
-    response.headers.set('Content-Type', 'application/octet-stream');
-    return response;
-  });
-  await assert.rejects(
-    wrongMime.prepare(new AbortController().signal),
-    (reason: unknown) => reason instanceof ReaderSafetyPolicyError
-      && reason.ruleId === READER_SAFETY_RULE_IDS.COMMON_EXACT_FORMAT_MIME
-  );
+  for (const contentType of ['application/octet-stream', 'application/x-reader-unknown', null]) {
+    const methods: string[] = [];
+    const source = new PdfRangeByteSource(access(bytes), async (_input, init) => {
+      methods.push(init?.method ?? 'GET');
+      return rangeResponse(bytes, init, contentType);
+    });
+    const prepared = await source.prepare(new AbortController().signal);
+    assert.deepEqual(prepared, bytes.slice(0, PDF_RANGE_CHUNK_BYTES));
+    assert.deepEqual(methods, ['HEAD', 'GET']);
+    assert.equal(source.metrics().requestCount, 1);
+    source.abort();
+  }
 });
 
 test('rejects a silent full-file fallback through the generated PDF Range rule', async () => {

@@ -1,0 +1,47 @@
+# 1.0 发布阻塞项
+
+R0 日期：2026-09-06。没有运行应用测试，**没有本轮已复现业务缺陷**，不代表零缺陷。工作树基线见 release-evidence.md。所有条目负责人待指定；环境/决策解除后用例回到 NOT_RUN，不能直接改 PASS。
+
+## 已确认阻塞项（只登记本轮确证事实）
+
+| ID | Gate/Case | 类型/严重性 | 确证事实与证据 | 状态 / 解阻条件 | 修复 commit / 回归 |
+|---|---|---|---|---|---|
+| ENV-01 | RG-01 / ART-01..05 | 追溯阻塞；非已复现 P0/P1 | ST-01：develop 工作树非净，RC 未冻结；四模板原已存在且未跟踪 | BLOCKED；负责人确定可追溯 RC，保留用户工作树，记录全部产物来源后重新验证 | — / 未执行 |
+| ENV-07 | RG-01 / ART-02..04 | 构建交付入口缺项；非运行缺陷 | ST-03：Android build.gradle.kts未设signingConfigs，CI只组装Debug；iOS有Release ArchiveAction但未找到export脚本/ExportOptions；镜像现有发布脚本默认push，隔离RC构建参数待补 | BLOCKED；交接可审查的正式签名APK流程、Xcode Archive与IPA导出/安装流程、无推送RC镜像构建部署方案；本轮不改配置 | — / 未执行 |
+| ENV-02 | RG-01..05 / 所有 iOS 路径 | 环境阻塞 | ST-04：当前 Windows 主机未提供 xcodebuild；本任务无可用的已登记 Mac/Xcode/配对 iOS 真机运行环境 | BLOCKED；提供授权 Mac、Xcode/iphoneos、配对解锁且 Developer Mode 可用设备、可达测试服务器；禁止 Simulator 或禁用签名绕过 | — / 未执行 |
+
+这里只确认本轮执行环境的缺口，不推断用户没有其他机器、证书或设备。
+
+## 未交接的执行前提（环境待补，不是业务缺陷）
+
+| ID | Gate/Case | 缺项与现有事实 | 状态 / 确切解阻条件 |
+|---|---|---|---|
+| ENV-03 | RG-01..05 / 原生与新部署 | 未提供同 RC 测试服务器/空数据根、两种架构部署目标；Android 正式签名配置/指纹及当前授权真机序列号未登记；iOS Team、证书、描述文件、有效期与 IPA 安装方式未登记。adb/docker 可定位不等于上述条件具备 | BLOCKED（执行前提未交接）；提供隔离数据/源文件目录、服务器与代理 HTTP/HTTPS/端口配置、有效 Release 签名和精确设备、安装权限；不清理真实旧数据，不以历史设备号默认选机 |
+| ENV-04 | RG-02 / OPDS-01..03 | 静读天下具体版本/平台/安装环境待补；第二个独立实现的真实客户端名称/版本未确定 | BLOCKED；登记两个真实应用及可验证各项能力的设备、合法样本和测试账号；不能以 curl 或同一应用两版本代替两个客户端 |
+| ENV-05 | RG-02/RG-04 / OPDS-04 | 未交接明确支持 OPDS Progression 扩展的真实客户端与版本；目录客户端不推定支持进度 | BLOCKED；保留承诺时提供支持扩展的客户端，在全新数据上做 GET/PUT 与第一方互通；如调整承诺必须负责人先决策，本轮不删除声明 |
+| ENV-06 | RG-03/RG-05 / 样本、LOAD-* | 已有18份候选文件及本轮SHA-256登记于矩阵§3.1，但未交接完整逐格式正常/复杂/异常实样、音频容器编码探测清单、1万/10万/30万有效书籍/可读资源数据集、低功耗目标机预算及采集执行入口 | BLOCKED；合法实样与清单到位，区分 file/Node/Book/Resource/Asset；批准隔离空间与数据分布；补齐请求级延迟/锁等待/内存等采集步骤；现有生成器不能证明这些已准备 |
+
+## 静态风险 / 待复现（不是已确认缺陷）
+
+| ID | Gate/Case | 源码/历史线索 | 下一步与关闭依据 | 状态 |
+|---|---|---|---|---|
+| RISK-01 | RG-02/RG-04 / OPDS-04 | README.md:38仍承诺同步；opds_runtime.py:660→bootstrap/reader.py:27明确retired v4→resource_reader.py:299/resource_repository.py:338旧ReaderResourceProgress，与v5_repository.py:203的ReaderResourceProgressV5不同；完整路径见release-gate.md §6 | 新数据协议探针与支持扩展真实客户端双向联调；记录协议位置与第一方 opaque Locator 能力边界，不只检查目录 | 静态风险/待复现 |
+| RISK-02 | RG-03 / REF-AZW、REF-PRC | scripts/prepare-public-domain-format-library.py:432–444 将 MOBI 同源复制到 AZW/PRC；test-data/library/mobi/CORPUS.md:3也说明扩展名变体，本轮hash相同；:465记录不可编码音频；现有PDF/漫画极小样本不证明正常读物/大页体验 | 同源文件最多证明扩展名路由；补独立来源和内部变体事实。缺编码器不是产品 REJECT_EXPECTED | 样本覆盖风险 |
+| RISK-03 | RG-03 / 全端安全、缓存、目录 | HIST-01/02 留有 WebKit 缓存、Reader UI、原生与权限环境缺口；历史执行 commit 不完整 | 当前 RC 逐项复现，分别登记实际失败；保留可读输出、危险副作用缺失、原文件不变证据，不搬历史失败数 | 历史线索/待复现 |
+| RISK-04 | RG-01/RG-03 | README.md:39仍称原生Reader建设中；AGENTS.md的早期Mobile“音频不可用”/Reader v4文字与现行播放器/v5源码并存；HIST-03 曾报告 lint/全量套件缺口 | 按现行入口验收，不能依据旧阶段说明取消音频；当前 RC 重跑必要检查，不能照抄历史结果 | 范围冲突/待复现 |
+
+## 范围和阈值待决（不改变既有承诺）
+
+| ID | 关联 | 需要冻结的决定 | 状态 |
+|---|---|---|---|
+| DEC-01 | RG-01 / ART-04 | iOS Release IPA 合法导出/安装方式、适用设备、有效期与负责人；不默认商店/TestFlight；Android 仅正式 APK | 待决定；未冻结不可放行 |
+| DEC-02 | RG-03 / AUD-* | 逐容器+编码+平台/浏览器冻结 PLAYBACK_REQUIRED / IMPORT_ONLY / REJECT_EXPECTED；常用可播组合不得失败后降级；未知能力不能直接列 REJECT_EXPECTED | 待范围签收；矩阵保留所有源格式 |
+| DEC-03 | RG-04 / POS-07 | 记录 ADR 0028 最后事务提交写入生效；离线首次迟到可能覆盖当前位置，是否符合 1.0 产品接受范围由负责人签收；若不接受另授权修复 | 待实测与签收，不引入新冲突算法 |
+| DEC-04 | RG-04/RG-05 | release-gate.md 的保存间隔/确认延迟/音频恢复误差与性能建议阈值、机器预算、并发、数据分布、采样方法 | 待冻结；建议值不是实测值；失败后不得临时放宽 |
+
+## 后续缺陷登记规则
+
+后续确认缺陷应补：ID、Gate/Case、严重级别、平台/格式/账号角色、RC/产物、前置与最小复现、预期/实际、脱敏证据、修复 commit、原失败和相邻用例回归、关闭人/时间。状态为待复现→已复现→修复中→待回归→已关闭；证据可标自动失败/真机复现/压力复现。没有回归证据不能关闭。
+
+门禁内硬要求失败无论 P0/P1/P2 均阻塞放行。延期只允许门禁外轻微问题且须负责人明确同意；本轮无已批准延期项。
+

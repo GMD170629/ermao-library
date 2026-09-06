@@ -10,10 +10,18 @@ export type TextPublicationChapter = Readonly<{
   positionLength: number;
 }>;
 
+export type TextPublicationTocEntry = Readonly<{
+  href: string | null;
+  title: string;
+  navigationKey?: string;
+  children?: readonly TextPublicationTocEntry[];
+}>;
+
 export type TextPublicationResult = Readonly<{
   title: string;
   language: string | null;
   chapters: readonly TextPublicationChapter[];
+  toc: readonly TextPublicationTocEntry[];
 }>;
 
 export type TextWorkerRequest = Readonly<{

@@ -28,6 +28,7 @@ class AudioProgressWriterTest {
         assertEquals("asset-1", writer.toAudioLocation(state.position)?.assetId)
         assertEquals(20.0, state.position.presentation.displayPercent)
         assertEquals(2_000, state.position.presentation.playback?.positionMillis)
+        assertEquals("chapter-1", state.position.presentation.chapter?.navigationKey)
         assertNotNull(state.position.locator.canonicalJson)
         now += 1
     }

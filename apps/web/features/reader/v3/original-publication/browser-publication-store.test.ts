@@ -5,8 +5,6 @@ import {
   OriginalPublicationStoreError,
   type OriginalPublicationDescriptor
 } from './browser-publication-store';
-import { READER_SAFETY_RULE_IDS } from '@shuku/reader-core';
-import { ReaderSafetyPolicyError } from '../security/reader-safety-policy';
 
 class MemoryCache {
   readonly entries = new Map<string, Response>();
@@ -31,12 +29,17 @@ const descriptor: OriginalPublicationDescriptor = {
   downloadUrl: '/api/assets/asset-1/download'
 };
 
-function response(bytes: Uint8Array, version = descriptor.assetVersion) {
-  return new Response(Uint8Array.from(bytes).buffer, { headers: {
-    'Content-Type': descriptor.mimeType,
+function response(
+  bytes: Uint8Array,
+  version = descriptor.assetVersion,
+  contentType: string | null = descriptor.mimeType
+) {
+  const headers = new Headers({
     'Content-Length': String(bytes.byteLength),
     'X-Asset-Version': version
-  } });
+  });
+  if (contentType !== null) headers.set('Content-Type', contentType);
+  return new Response(Uint8Array.from(bytes).buffer, { headers });
 }
 
 test('streams progress before publishing and then reopens with zero network requests', async () => {
@@ -97,7 +100,7 @@ test('cancellation removes the incomplete entry and never resumes it', async () 
   assert.equal(cache.entries.size, 0);
 });
 
-test('eviction triggers a fresh full request and a wrong MIME never publishes', async () => {
+test('eviction triggers a fresh full request', async () => {
   const cache = new MemoryCache();
   let requests = 0;
   const store = new BrowserPublicationStore({ open: async () => cache }, async () => {
@@ -108,22 +111,39 @@ test('eviction triggers a fresh full request and a wrong MIME never publishes', 
   cache.entries.clear();
   await store.ensure(descriptor, { signal: new AbortController().signal });
   assert.equal(requests, 2);
+});
 
-  cache.entries.clear();
-  const wrongMime = new BrowserPublicationStore({ open: async () => cache }, async () => new Response(
-    new Uint8Array([1, 2, 3, 4]),
-    { headers: {
-      'Content-Type': 'application/octet-stream',
-      'Content-Length': '4',
-      'X-Asset-Version': descriptor.assetVersion
-    } }
-  ), 'https://reader.test');
-  await assert.rejects(
-    wrongMime.ensure(descriptor, { signal: new AbortController().signal }),
-    (error: unknown) => error instanceof ReaderSafetyPolicyError
-      && error.ruleId === READER_SAFETY_RULE_IDS.COMMON_EXACT_FORMAT_MIME
-  );
-  assert.equal(cache.entries.size, 0);
+test('downloads complete originals and reopens them when MIME is unknown, missing, or mismatched', async () => {
+  const cases: ReadonlyArray<Readonly<{
+    descriptorMime: string;
+    responseMime: string | null;
+  }>> = [
+    { descriptorMime: 'application/x-reader-unknown', responseMime: 'application/octet-stream' },
+    { descriptorMime: '', responseMime: null },
+    { descriptorMime: 'application/epub+zip', responseMime: 'application/octet-stream' }
+  ];
+
+  for (const candidate of cases) {
+    const cache = new MemoryCache();
+    const requestedDescriptor = { ...descriptor, mimeType: candidate.descriptorMime };
+    let requests = 0;
+    const store = new BrowserPublicationStore({ open: async () => cache }, async () => {
+      requests += 1;
+      return response(new Uint8Array([1, 2, 3, 4]), requestedDescriptor.assetVersion, candidate.responseMime);
+    }, 'https://reader.test');
+
+    const first = await store.ensure(requestedDescriptor, { signal: new AbortController().signal });
+    const reopened = await store.ensure(requestedDescriptor, { signal: new AbortController().signal });
+
+    assert.equal(first.cacheHit, false);
+    assert.equal(first.blob.size, requestedDescriptor.sizeBytes);
+    assert.deepEqual(new Uint8Array(await first.blob.arrayBuffer()), new Uint8Array([1, 2, 3, 4]));
+    assert.equal(reopened.cacheHit, true);
+    assert.equal(reopened.blob.size, requestedDescriptor.sizeBytes);
+    assert.deepEqual(new Uint8Array(await reopened.blob.arrayBuffer()), new Uint8Array([1, 2, 3, 4]));
+    assert.equal(requests, 1);
+    assert.equal(cache.entries.size, 1);
+  }
 });
 
 test('quota failure without reclaimable reader entries is explicit and leaves no partial entry', async () => {

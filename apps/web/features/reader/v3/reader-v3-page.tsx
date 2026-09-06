@@ -3,7 +3,6 @@
 import {
   READER_SAFETY_RULES,
   READER_SAFETY_RULE_IDS,
-  publicationNavigationHref,
   type ReaderPositionReport,
   type ReaderLocation,
   type ReaderPreferences
@@ -31,7 +30,6 @@ import { BEFORE_PWA_UPDATE_EVENT, type BeforePwaUpdateDetail } from '../../../li
 import { DEFAULT_READER_THEME, readerThemeSurfaces, resolveReaderTheme } from '../reader-theme';
 import { fetchReaderBootstrap, ReaderBootstrapError, type ReaderBootstrap } from './api';
 import { requestedPdfPage } from './direct-page-target';
-import { resolveRequestedPublicationHref } from './publication-direct-target';
 import { resolveV5StartupResume } from './local-resume';
 import { ReaderEngineRuntime } from './reader-engine-runtime';
 import { useReaderPwaSurface } from './use-reader-pwa-surface';
@@ -43,13 +41,6 @@ const openingStorageKey = 'shuku:reader:opening';
 const PUBLICATION_CORRUPT_POLICY_ERROR =
   READER_SAFETY_RULES[READER_SAFETY_RULE_IDS.REFLOWABLE_REQUIRED_READING_ORDER_MARKUP].errorCode;
 
-function requireReflowableSourceFormat(bootstrap: ReaderBootstrap) {
-  if (bootstrap.readerType !== 'reflowable' || !bootstrap.sourceFormat) {
-    throw new Error('小说阅读器启动信息缺少源格式');
-  }
-  if (bootstrap.source.kind !== 'reflowable') throw new Error('REFLOWABLE_SOURCE_FORMAT_MISSING');
-  return bootstrap.source.sourceFormat;
-}
 
 type OpeningContext = {
   resourceId: string;
@@ -237,7 +228,7 @@ export function ReaderV5Page({ resourceId }: { resourceId: string }) {
   const { t: translate, formatDateTime, formatNumber } = useAttributeI18n();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const requestedHref = searchParams.get('href');
+  const requestedChapterKey = searchParams.get('chapterKey');
   const requestedPage = searchParams.get('page');
   const [state, dispatch] = useReducer(pageReducer, initialPageState);
   const [retry, setRetry] = useState(0);
@@ -301,20 +292,9 @@ export function ReaderV5Page({ resourceId }: { resourceId: string }) {
       let bootstrap = await fetchReaderBootstrap(resourceId, controller.signal);
       if (controller.signal.aborted) return;
       let hasDirectTarget = false;
-      if (bootstrap.readerType === 'reflowable' && requestedHref) {
-        const sourceFormat = requireReflowableSourceFormat(bootstrap);
-        const targetHref = resolveRequestedPublicationHref(bootstrap.units, requestedHref);
-        const navigationHref = publicationNavigationHref(sourceFormat, targetHref);
-        if (navigationHref) {
-          bootstrap = {
-          ...bootstrap,
-            initialLocation: { kind: 'reflowable', format: sourceFormat, href: navigationHref },
-            initialPosition: null
-          };
-          hasDirectTarget = true;
-        } else {
-          emitReaderDebug('warning', '已忽略不属于当前 Publication 的章节直达目标', { requestedHref });
-        }
+      if (bootstrap.readerType === 'reflowable' && requestedChapterKey) {
+        bootstrap = { ...bootstrap, requestedChapterKey, initialLocation: null, initialPosition: null };
+        hasDirectTarget = true;
       } else if (bootstrap.readerType === 'comic' && requestedPage) {
         const pageIndex = Number(requestedPage);
         const pageExists = Number.isInteger(pageIndex) && bootstrap.pages.some((page) => page.pageIndex === pageIndex);
@@ -403,7 +383,7 @@ export function ReaderV5Page({ resourceId }: { resourceId: string }) {
     });
 
     return () => controller.abort();
-  }, [requestedHref, requestedPage, retry, runtime.progress, runtime.storage, translate, resourceId]);
+  }, [requestedChapterKey, requestedPage, retry, runtime.progress, runtime.storage, translate, resourceId]);
 
   const savePreferences = useCallback((preferences: ReaderPreferences) => {
     const bootstrap = state.bootstrap;

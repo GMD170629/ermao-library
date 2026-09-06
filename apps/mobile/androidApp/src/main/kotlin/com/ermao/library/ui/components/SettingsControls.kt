@@ -11,7 +11,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
@@ -41,8 +40,7 @@ import com.ermao.library.ui.theme.WarmPageThemeValues
  * Settings text input with a stable left-to-right editing affordance.
  *
  * The optional [textAlign] argument remains for source compatibility with older callers. New
- * settings pages should use the default [TextAlign.Start]; only numeric/value controls should
- * opt into trailing alignment.
+ * settings pages, including numeric fields, use the default [TextAlign.Start].
  */
 @Composable
 fun SettingsTextField(
@@ -97,6 +95,7 @@ fun SettingsTextField(
                         } else {
                             showPasswordLabel
                         },
+                        modifier = Modifier.size(theme.components.controls.iconSize),
                     )
                 }
             }
@@ -105,24 +104,8 @@ fun SettingsTextField(
         },
         visualTransformation = effectiveTransformation,
         keyboardOptions = keyboardOptions,
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedTextColor = theme.colors.textPrimary,
-            unfocusedTextColor = theme.colors.textPrimary,
-            disabledTextColor = theme.colors.textTertiary,
-            focusedContainerColor = theme.colors.surface,
-            unfocusedContainerColor = theme.colors.surface,
-            disabledContainerColor = theme.colors.canvas,
-            cursorColor = theme.colors.actionAccent,
-            focusedBorderColor = theme.colors.actionAccent,
-            unfocusedBorderColor = theme.colors.divider,
-            disabledBorderColor = theme.colors.divider,
-            focusedLabelColor = theme.colors.actionAccent,
-            unfocusedLabelColor = theme.colors.textSecondary,
-            disabledLabelColor = theme.colors.textTertiary,
-            focusedPlaceholderColor = theme.colors.textSecondary,
-            unfocusedPlaceholderColor = theme.colors.textSecondary,
-            disabledPlaceholderColor = theme.colors.textTertiary,
-        ),
+        shape = WarmPageTextFieldDefaults.shape,
+        colors = WarmPageTextFieldDefaults.colors(),
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = theme.components.controls.minimumTouchTarget),
@@ -181,6 +164,7 @@ fun SettingsTabRow(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    enabledForTab: (Int) -> Boolean = { true },
 ) {
     val theme = WarmPageThemeValues
     if (tabs.isEmpty()) return
@@ -195,10 +179,13 @@ fun SettingsTabRow(
         },
     ) {
         tabs.forEachIndexed { index, label ->
+            val tabEnabled = enabled && enabledForTab(index)
             Tab(
                 selected = safeSelectedIndex == index,
-                onClick = { if (enabled) onSelect(index) },
-                enabled = enabled,
+                onClick = { if (tabEnabled) onSelect(index) },
+                enabled = tabEnabled,
+                selectedContentColor = theme.colors.brandAccent,
+                unselectedContentColor = theme.colors.textSecondary,
                 modifier = Modifier
                     .heightIn(min = theme.components.controls.minimumTouchTarget),
                 text = {

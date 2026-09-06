@@ -9,6 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -26,6 +27,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.ermao.library.ui.theme.WarmPageTheme
+import com.ermao.library.R
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -35,6 +38,38 @@ import org.junit.runner.RunWith
 class WarmPageScaffoldTest {
     @get:Rule
     val compose = createComposeRule()
+
+    @Test
+    fun compactNavigationConsumesItsInsetsWithoutMovingTheNestedSettingsTopBar() {
+        val nested = mutableStateOf(false)
+        compose.setContent {
+            WarmPageTheme(darkTheme = false) {
+                val page: @Composable () -> Unit = {
+                    WarmSettingsScaffold(
+                        role = WarmSettingsScaffoldRole.Detail,
+                        title = DETAIL_TITLE,
+                        onBack = {},
+                        tabs = { SettingsTabRow(0, listOf("Account", "Password"), onSelect = {}) },
+                    ) { padding -> Box(Modifier.fillMaxSize().padding(padding)) }
+                }
+                if (nested.value) {
+                    WarmPageNavigationSuite(
+                        items = listOf(WarmPageNavigationItem("home", R.string.tab_home, Icons.Outlined.MoreVert, Icons.Outlined.MoreVert, "tab")),
+                        selected = "home",
+                        onSelect = {},
+                        content = page,
+                    )
+                } else page()
+            }
+        }
+        val title = compose.onNodeWithTag("warm-page-title").getUnclippedBoundsInRoot()
+        val back = compose.onNodeWithTag("warm-page-navigation").getUnclippedBoundsInRoot()
+        val tabs = compose.onNodeWithText("Password").getUnclippedBoundsInRoot()
+        compose.runOnIdle { nested.value = true }
+        assertEquals(title, compose.onNodeWithTag("warm-page-title").getUnclippedBoundsInRoot())
+        assertEquals(back, compose.onNodeWithTag("warm-page-navigation").getUnclippedBoundsInRoot())
+        assertEquals(tabs, compose.onNodeWithText("Password").getUnclippedBoundsInRoot())
+    }
 
     @Test
     fun englishDetailTopBarKeepsNavigationTitleAndActionVisibleAtLargeText() {

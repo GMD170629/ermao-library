@@ -48,23 +48,17 @@ class ReaderSourceFormatTest {
     }
 
     @Test
-    fun sourceFormatOwnsItsMimePolicyAndMustMatchTheReaderFormat() {
-        assertTrue(ReaderSourceFormat.Epub.acceptsMimeType("application/epub+zip"))
-        assertTrue(ReaderSourceFormat.Fb2.acceptsMimeType("application/x-fictionbook+xml"))
-        assertTrue(ReaderSourceFormat.Azw3.acceptsMimeType("application/vnd.amazon.ebook"))
-        assertTrue(ReaderSourceFormat.Txt.acceptsMimeType("text/plain"))
-        assertTrue(ReaderSourceFormat.Cbz.acceptsMimeType("application/vnd.comicbook+zip"))
-        assertFalse(ReaderSourceFormat.Cbz.acceptsMimeType("application/zip"))
-        assertTrue(ReaderSourceFormat.Zip.acceptsMimeType("application/zip"))
-        assertTrue(ReaderSourceFormat.ImageDir.acceptsMimeType("image/webp"))
-        assertTrue(ReaderSourceFormat.Pdf.acceptsMimeType("application/pdf"))
-        assertTrue(ReaderSourceFormat.Audio.acceptsMimeType("audio/mpeg"))
-        assertTrue(ReaderSourceFormat.AudiobookDir.acceptsMimeType("audio/mp4"))
-        assertTrue(ReaderSourceFormat.M4b.acceptsMimeType("audio/mp4"))
-        assertFalse(ReaderSourceFormat.M4b.acceptsMimeType("audio/mpeg"))
+    fun sourceFormatMapsDeclaredFormatWithoutMimeAdmission() {
+        assertEquals(ReaderFormat.Epub, ReaderSourceFormat.Epub.readerFormat)
+        assertEquals(ReaderFormat.Epub, ReaderSourceFormat.Fb2.readerFormat)
+        assertEquals(ReaderFormat.Mobi, ReaderSourceFormat.Azw3.readerFormat)
+        assertEquals(ReaderFormat.Text, ReaderSourceFormat.Txt.readerFormat)
+        assertEquals(ReaderFormat.Comic, ReaderSourceFormat.Cbz.readerFormat)
+        assertEquals(ReaderFormat.Comic, ReaderSourceFormat.ImageDir.readerFormat)
+        assertEquals(ReaderFormat.Pdf, ReaderSourceFormat.Pdf.readerFormat)
+        assertEquals(ReaderFormat.Audio, ReaderSourceFormat.Audio.readerFormat)
+        assertEquals(ReaderFormat.Audio, ReaderSourceFormat.M4b.readerFormat)
         assertEquals("M4B", ReaderSourceFormat.M4b.fileKind)
-        assertFalse(ReaderSourceFormat.Audio.acceptsMimeType("audio/x-unknown"))
-        assertFalse(ReaderSourceFormat.Audio.acceptsMimeType("application/octet-stream"))
         assertFailsWith<IllegalArgumentException> {
             LocalReaderSource(
                 resourceId = "resource-1",

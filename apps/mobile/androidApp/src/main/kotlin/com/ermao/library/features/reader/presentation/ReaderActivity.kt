@@ -1210,8 +1210,8 @@ class ReaderActivity : AppCompatActivity() {
         "$serverIdentity|$userId|$authorizationVersion"
 
     private fun openExternalLink(rawUrl: String) {
+        if (!com.ermao.library.shared.modules.reader.readerAllowsAuthoredUserNavigation(rawUrl)) return
         val uri = rawUrl.toUri()
-        if (uri.scheme?.lowercase() !in setOf("https", "http")) return
         val externalIntent = Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE)
         try {
             startActivity(externalIntent)

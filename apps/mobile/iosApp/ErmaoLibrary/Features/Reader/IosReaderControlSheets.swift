@@ -32,46 +32,91 @@ struct ReaderTOCSheet<Session: IosReaderControlSession>: View {
     @ObservedObject var session: Session
     @State private var pendingEntryID: String?
     @State private var navigationFailed = false
+    @State private var didInitialScroll = false
+    @State private var initialScrollTarget: String?
 
     var body: some View {
         NavigationStack {
-            Group {
-                if session.controlContents.isEmpty {
-                    ReaderEmptyState(title: "reader.toc.empty", systemImage: "list.bullet")
-                } else {
-                    List {
-                        if navigationFailed {
-                            Text("reader.navigation.failed").foregroundStyle(.red)
-                        }
-                        ForEach(session.controlContents) { entry in
-                        Button {
-                            Task {
-                                pendingEntryID = entry.id
-                                navigationFailed = false
-                                if await session.goToTOCEntry(entry) { dismiss() }
-                                else { navigationFailed = true }
-                                pendingEntryID = nil
+            ScrollViewReader { proxy in
+                Group {
+                    if session.controlContents.isEmpty {
+                        ReaderEmptyState(title: "reader.toc.empty", systemImage: "list.bullet")
+                    } else {
+                        let currentID = session.currentNavigationEntryID
+                        List {
+                            if navigationFailed {
+                                Text("reader.navigation.failed")
+                                    .font(.caption2)
+                                    .foregroundStyle(.red)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                                    .listRowSeparator(.hidden)
+                                    .listRowBackground(Color.clear)
                             }
-                        } label: {
-                            HStack {
-                                Text(entry.title).padding(.leading, CGFloat(entry.depth) * 16)
-                                Spacer()
-                                if entry.title == session.chapterTitle {
-                                    Image(systemName: "location.fill").foregroundStyle(.tint)
+                            ForEach(session.controlContents) { entry in
+                                let selected = entry.id == currentID
+                                Button {
+                                    Task {
+                                        pendingEntryID = entry.id
+                                        navigationFailed = false
+                                        if await session.goToTOCEntry(entry) { dismiss() }
+                                        else { navigationFailed = true }
+                                        pendingEntryID = nil
+                                    }
+                                } label: {
+                                    HStack {
+                                        Text(entry.title)
+                                            .padding(.leading, CGFloat(entry.depth) * 16)
+                                        Spacer()
+                                        if pendingEntryID == entry.id { ProgressView().tint(.accentColor) }
+                                    }
+                                    .font(.caption2)
+                                    .foregroundStyle(selected ? Color.accentColor : Color.primary)
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                    .contentShape(Rectangle())
                                 }
-                                if pendingEntryID == entry.id { ProgressView() }
+                                .buttonStyle(.plain)
+                                .disabled(pendingEntryID != nil)
+                                .accessibilityLabel(Text(entry.title))
+                                .accessibilityAddTraits(selected ? .isSelected : [])
+                                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(selected ? Color.accentColor.opacity(0.12) : Color.clear)
+                                .id(entry.id)
                             }
-                            .foregroundStyle(.primary)
                         }
-                        .disabled(pendingEntryID != nil)
-                        }
+                        .listStyle(.plain)
+                        .scrollContentBackground(.hidden)
                     }
+                }
+                .onAppear { scrollToCurrentEntry() }
+                .onChange(of: session.controlContents.map(\.id)) { _, _ in scrollToCurrentEntry() }
+                .onChange(of: session.currentNavigationEntryID) { _, _ in scrollToCurrentEntry() }
+                .onChange(of: session.controlNavigationReady) { _, _ in scrollToCurrentEntry() }
+                .task(id: initialScrollTarget) {
+                    guard let target = initialScrollTarget else { return }
+                    await Task.yield()
+                    guard !Task.isCancelled else { return }
+                    proxy.scrollTo(target, anchor: .center)
                 }
             }
             .navigationTitle("reader.toc")
             .toolbar { closeToolbar }
         }
         .presentationDetents([.medium, .large])
+        .presentationContentInteraction(.resizes)
+    }
+
+    private func scrollToCurrentEntry() {
+        guard !didInitialScroll,
+              session.controlNavigationReady,
+              !session.controlContents.isEmpty
+        else { return }
+        didInitialScroll = true
+        guard let currentID = session.currentNavigationEntryID,
+              session.controlContents.contains(where: { $0.id == currentID })
+        else { return }
+        initialScrollTarget = currentID
     }
 
     @ToolbarContentBuilder private var closeToolbar: some ToolbarContent {
@@ -135,6 +180,7 @@ struct ReaderNotesSheet<Session: IosReaderControlSession>: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .presentationContentInteraction(.resizes)
     }
 }
 
@@ -179,7 +225,8 @@ struct ReaderPreferenceSheet<Session: IosReaderControlSession>: View {
             .accessibilityIdentifier("reader.panel.\(panel)")
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("common.done") { dismiss() }.accessibilityIdentifier("reader.panel.done") } }
         }
-        .presentationDetents([.large])
+        .presentationDetents([.medium, .large])
+        .presentationContentInteraction(.resizes)
     }
 
     @ViewBuilder private func catalogSection(_ section: ReaderSettingSection) -> some View {

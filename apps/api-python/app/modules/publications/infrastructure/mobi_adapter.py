@@ -23,7 +23,7 @@ from app.modules.publications.application.ports import (
     PublicationSource,
 )
 from app.modules.publications.application.safety_policy import (
-    publication_native_parser_implementation_failure,
+    publication_integrity_failure,
     publication_native_parser_rejection,
     publication_parser_limit,
     publication_resource_limit,
@@ -32,15 +32,24 @@ from app.modules.publications.domain.model import (
     NormalizedPublication,
     PublicationCorruptError,
     PublicationLink,
+    PublicationMarkupError,
     PublicationParserError,
     PublicationResource,
     PublicationResourceNotFoundError,
     PublicationRevision,
-    PublicationTocEntry,
     PublicationUnsupportedError,
+)
+from app.modules.publications.infrastructure.chapter_core import (
+    ChapterCore,
+    MobiChapterNode,
+)
+from app.modules.publications.infrastructure.locator_dom import (
+    sanitize_css_resource,
+    sanitize_markup_resource,
 )
 from app.modules.publications.infrastructure.snapshot_cache import (
     PublicationSnapshotCache,
+    publication_snapshot_weight,
 )
 from app.modules.publications.infrastructure.source_files import (
     resolve_publication_source,
@@ -52,6 +61,7 @@ _NOT_FOUND = 11
 _BUFFER_TOO_SMALL = 13
 _INDEX_NONE = 2**32 - 1
 _MARKUP_CATEGORY = 1
+_SVG_MEDIA_TYPE = "image/svg+xml"
 _MAX_READ_BYTES = 256 * 1024
 _MAX_RESOURCE_BYTES = reader_safety_budget(
     ReaderSafetyBudgetName.BINARY_RESOURCE_MAX_BYTES
@@ -61,17 +71,21 @@ _MAX_MARKUP_RESOURCE_BYTES = reader_safety_budget(
 )
 _MAX_SOURCE_BYTES = reader_safety_budget(ReaderSafetyBudgetName.ORIGINAL_MAX_BYTES)
 _MOBI_FORMATS = frozenset({"mobi", "azw", "azw3", "prc"})
-MOBI_NORMALIZATION_IDENTIFIER = "ermao-mobi-core-v1+shuku-locator-dom-v3"
+MOBI_NORMALIZATION_IDENTIFIER = "ermao-mobi-core-v1+shuku-locator-dom-v4"
 
 
-def _publication_media_type(*, category: int, core_media_type: str) -> str:
+def _base_media_type(value: str | None) -> str:
+    return (value or "").split(";", 1)[0].strip().lower()
+
+
+def _publication_media_type(*, category: int, core_media_type: str | None) -> str:
     # libmobi reconstructs legacy Mobipocket markup as HTML. Some sources retain
     # private prefixes such as ``mbp:pagebreak`` without XML namespace
     # declarations, so advertising these unchanged bytes as XHTML makes XML
     # consumers reject otherwise valid reading content.
     if category == _MARKUP_CATEGORY:
         return "text/html"
-    return core_media_type
+    return _base_media_type(core_media_type) or "application/octet-stream"
 
 
 class _BookInfo(ctypes.Structure):
@@ -118,6 +132,13 @@ class _MobiSnapshot:
     book: ctypes.c_void_p
     publication: NormalizedPublication
     resources_by_href: dict[str, _MobiResourceDescriptor]
+    reading_order_hrefs: frozenset[str]
+
+
+def _is_markup_resource(descriptor: _MobiResourceDescriptor) -> bool:
+    return descriptor.category == _MARKUP_CATEGORY or (
+        _base_media_type(descriptor.media_type) == _SVG_MEDIA_TYPE
+    )
 
 
 class _MobiCore:
@@ -248,14 +269,18 @@ class _MobiCore:
                 reason=name,
             )
         if name in {"limit_exceeded", "out_of_memory"}:
-            raise publication_native_parser_implementation_failure(
-                ReaderSafetyRuleId.REFLOWABLE_REQUIRED_READING_ORDER_MARKUP,
+            raise publication_resource_limit(
+                ReaderSafetyRuleId.COMMON_PARSER_SNAPSHOT_MEMORY,
+                f"libmobi parser memory reservation failed: {name}",
+            )
+        if name == "unsupported":
+            raise publication_native_parser_rejection(
+                ReaderSafetyRuleId.COMMON_EXACT_FORMAT_MIME,
                 parser="libmobi",
                 operation=operation,
                 reason=name,
             )
         code = {
-            "unsupported": "PUBLICATION_UNSUPPORTED",
             "file_not_found": "PUBLICATION_NOT_FOUND",
             "not_found": "PUBLICATION_RESOURCE_NOT_FOUND",
             "io": "PUBLICATION_READ_FAILED",
@@ -316,15 +341,12 @@ class _MobiCore:
             raise PublicationCorruptError("libmobi resource name is missing")
         return value
 
-    def copy_resource_type(self, book: ctypes.c_void_p, index: int) -> str:
-        value = self._copy_string(
+    def copy_resource_type(self, book: ctypes.c_void_p, index: int) -> str | None:
+        return self._copy_string(
             self._library.ermao_mobi_copy_resource_media_type,
             book,
             index,
         )
-        if value is None:
-            raise PublicationCorruptError("libmobi resource type is missing")
-        return value
 
     def copy_toc_title(self, book: ctypes.c_void_p, index: int) -> str | None:
         return self._copy_string(self._library.ermao_mobi_copy_toc_title, book, index)
@@ -460,33 +482,26 @@ def _snapshot(
         )
         toc_info = [core.toc_info(book, index) for index in range(info.toc_count)]
 
-        def toc_node(index: int) -> PublicationTocEntry | None:
-            entry = toc_info[index]
-            if entry.target_resource_index == _INDEX_NONE:
-                return None
-            target = descriptors[entry.target_resource_index]
-            fragment = core.copy_toc_fragment(book, index)
-            href = target.href + (f"#{fragment}" if fragment else "")
-            children = tuple(
-                child
-                for child_index, child_info in enumerate(toc_info)
-                if child_info.parent_index == index
-                for child in [toc_node(child_index)]
-                if child is not None
+        chapter_nodes: list[MobiChapterNode] = []
+        for index, entry in enumerate(toc_info):
+            chapter_href: str | None = None
+            if entry.target_resource_index != _INDEX_NONE:
+                if not 0 <= entry.target_resource_index < len(descriptors):
+                    raise PublicationCorruptError("MOBI directory target is invalid")
+                fragment = core.copy_toc_fragment(book, index)
+                chapter_href = descriptors[entry.target_resource_index].href + (
+                    f"#{fragment}" if fragment else ""
+                )
+            chapter_nodes.append(
+                MobiChapterNode(
+                    parent_index=-1
+                    if entry.parent_index == _INDEX_NONE
+                    else entry.parent_index,
+                    title=core.copy_toc_title(book, index) or "",
+                    target_href=chapter_href,
+                )
             )
-            return PublicationTocEntry(
-                href=href,
-                title=core.copy_toc_title(book, index) or target.href,
-                children=children,
-            )
-
-        toc = tuple(
-            entry
-            for index, entry_info in enumerate(toc_info)
-            if entry_info.parent_index == _INDEX_NONE
-            for entry in [toc_node(index)]
-            if entry is not None
-        )
+        toc = ChapterCore.load().from_mobi(chapter_nodes).table_of_contents()
         publication = NormalizedPublication(
             identifier=f"urn:shuku:mobi:{source_size}:{source_mtime_ns}",
             title=core.copy_metadata(book, 1) or "",
@@ -504,7 +519,10 @@ def _snapshot(
             toc=toc,
         )
         return _MobiSnapshot(
-            book=book, publication=publication, resources_by_href=by_href
+            book=book,
+            publication=publication,
+            resources_by_href=by_href,
+            reading_order_hrefs=frozenset(link.href for link in reading_order),
         )
     except BaseException:
         core.close(book)
@@ -543,13 +561,10 @@ class MobiPublicationAdapter(PublicationAdapter):
             descriptor = snapshot.resources_by_href.get(safe_href)
             if descriptor is None:
                 raise PublicationResourceNotFoundError
-            limit = (
-                _MAX_MARKUP_RESOURCE_BYTES
-                if descriptor.category == _MARKUP_CATEGORY
-                else _MAX_RESOURCE_BYTES
-            )
+            is_markup = _is_markup_resource(descriptor)
+            limit = _MAX_MARKUP_RESOURCE_BYTES if is_markup else _MAX_RESOURCE_BYTES
             if descriptor.decoded_length > limit:
-                if descriptor.category == _MARKUP_CATEGORY:
+                if is_markup:
                     raise publication_parser_limit(
                         ReaderSafetyRuleId.REFLOWABLE_MARKUP_MAX_BYTES,
                         "MOBI-family markup exceeds the size limit",
@@ -558,10 +573,31 @@ class MobiPublicationAdapter(PublicationAdapter):
                     ReaderSafetyRuleId.COMMON_BINARY_RESOURCE_MAX_BYTES,
                     "MOBI-family resource exceeds the size limit",
                 )
+            content = core.read_resource(snapshot.book, descriptor)
+            if is_markup:
+                # MOBI's native decoder returns authored HTML in memory. Run
+                # the same XML preparation/sanitization projection used by
+                # EPUB/FB2 before publication; the verified MOBI original is
+                # never rewritten or persisted.
+                try:
+                    content = sanitize_markup_resource(content)
+                except PublicationMarkupError as error:
+                    if safe_href in snapshot.reading_order_hrefs:
+                        raise publication_integrity_failure(
+                            ReaderSafetyRuleId.REFLOWABLE_REQUIRED_READING_ORDER_MARKUP,
+                            "required MOBI-family markup cannot be decoded or parsed",
+                        ) from error
+                    raise publication_integrity_failure(
+                        ReaderSafetyRuleId.REFLOWABLE_OPTIONAL_RESOURCE_FAILURE,
+                        "optional MOBI-family markup cannot be decoded or parsed",
+                        optional=True,
+                    ) from error
+            elif _base_media_type(descriptor.media_type) == "text/css":
+                content = sanitize_css_resource(content)
             return PublicationResource(
                 href=safe_href,
                 media_type=descriptor.media_type,
-                content=core.read_resource(snapshot.book, descriptor),
+                content=content,
                 source_mtime=snapshot.publication.revision.source_mtime_ms / 1000,
             )
 
@@ -580,7 +616,9 @@ class MobiPublicationAdapter(PublicationAdapter):
             )
         key = (str(path), stat.st_size, stat.st_mtime_ns)
         with self._cache.lease(
-            key, lambda: _snapshot(core, *key), max(1, stat.st_size * 8)
+            key,
+            lambda: _snapshot(core, *key),
+            publication_snapshot_weight(stat.st_size),
         ) as snapshot:
             yield snapshot
 

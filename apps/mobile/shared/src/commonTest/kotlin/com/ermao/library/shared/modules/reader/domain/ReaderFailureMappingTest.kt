@@ -79,6 +79,14 @@ class ReaderFailureMappingTest {
     }
 
     @Test
+    fun `actual unsupported publication MIME is a capability error`() {
+        assertEquals(
+            ReaderErrorCode.UnsupportedFormat,
+            readerErrorCodeForFailure("PUBLICATION_MIME_MISMATCH", recoverable = false),
+        )
+    }
+
+    @Test
     fun `unsupported source format remains explicit`() {
         assertEquals(
             ReaderErrorCode.UnsupportedFormat,

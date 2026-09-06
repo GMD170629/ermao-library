@@ -1,25 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resolveRequestedPublicationHref } from './publication-direct-target';
+import { resolveRequestedChapterHref } from './publication-direct-target';
 
-test('direct targets are limited to exact bootstrap Publication TOC entries', () => {
-  const units = [
-    { href: 'chapter.xhtml#first' },
-    { href: 'chapter.xhtml#second' },
-    { href: 'text/chapter-0002.xhtml#heading-000001' },
-    { href: 'fb2/section-0001.xhtml#fb2-node-000001' },
-    { href: 'other.xhtml' }
-  ];
-  assert.equal(resolveRequestedPublicationHref(units, 'CHAPTER.xhtml#second'), 'chapter.xhtml#second');
-  assert.equal(
-    resolveRequestedPublicationHref(units, 'text/chapter-0002.xhtml#heading-000001'),
-    'text/chapter-0002.xhtml#heading-000001'
-  );
-  assert.equal(
-    resolveRequestedPublicationHref(units, 'fb2/section-0001.xhtml#fb2-node-000001'),
-    'fb2/section-0001.xhtml#fb2-node-000001'
-  );
-  assert.equal(resolveRequestedPublicationHref(units, 'chapter.xhtml#missing'), null);
-  assert.equal(resolveRequestedPublicationHref(units, './other.xhtml'), 'other.xhtml');
-  assert.equal(resolveRequestedPublicationHref(units, 'https://example.com/chapter.xhtml'), null);
+test('resolves a local chapter key and fragment, never a group or unknown key', () => {
+  const entries = [{ id: 'group', navigationKey: 'chapter-0', label: 'Part', children: [
+    { id: 'first', navigationKey: 'chapter-1', label: 'A', href: 'body.xhtml#a' },
+    { id: 'second', navigationKey: 'chapter-2', label: 'B', href: 'body.xhtml#b' }
+  ] }];
+  assert.equal(resolveRequestedChapterHref(entries, 'chapter-2'), 'body.xhtml#b');
+  assert.equal(resolveRequestedChapterHref(entries, 'chapter-0'), null);
+  assert.equal(resolveRequestedChapterHref(entries, 'unknown'), null);
+  assert.equal(resolveRequestedChapterHref([], 'chapter-2'), null);
 });

@@ -2,21 +2,12 @@
 #ifndef ERMAO_READER_SAFETY_POLICY_GENERATED_H
 #define ERMAO_READER_SAFETY_POLICY_GENERATED_H
 
-#include <string.h>
-
-#define ERMAO_READER_SAFETY_POLICY_DIGEST "b01d103fa1b57035aa1c689326406a9099275ecd4196361eefed539f310f1619"
+#define ERMAO_READER_SAFETY_SCHEMA_VERSION 2
+#define ERMAO_READER_SAFETY_POLICY_VERSION 4
+#define ERMAO_READER_SAFETY_POLICY_DIGEST "edfc4aeef6a2f40316dcf38b5727559921ecd7af68da79f349718e2021d108f5"
 #define ERMAO_READER_SAFETY_COMIC_PAGE_MAX_COUNT 10000LL
 #define ERMAO_READER_SAFETY_COMIC_PAGE_MAX_BYTES 33554432LL
 #define ERMAO_READER_SAFETY_COMIC_EXPANDED_MAX_BYTES 2147483648LL
 #define ERMAO_READER_SAFETY_COMIC_COMPRESSION_RATIO_MAX 200LL
-
-static inline int ermao_reader_safety_comic_extension_allowed(const char *extension) {
-    if (extension == NULL) return 0;
-    return strcmp(extension, "gif") == 0 ||
-        strcmp(extension, "jpeg") == 0 ||
-        strcmp(extension, "jpg") == 0 ||
-        strcmp(extension, "png") == 0 ||
-        strcmp(extension, "webp") == 0;
-}
 
 #endif

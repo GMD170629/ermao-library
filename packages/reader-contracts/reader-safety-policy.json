@@ -1,31 +1,341 @@
 {
-  "$schema": "./schemas/reader-safety-policy-v1.schema.json",
-  "schemaVersion": 1,
+  "$schema": "./schemas/reader-safety-policy-v2.schema.json",
+  "schemaVersion": 2,
   "policyId": "shuku.reader-safety",
-  "policyVersion": 3,
-  "policyDigest": "b01d103fa1b57035aa1c689326406a9099275ecd4196361eefed539f310f1619",
-  "consumers": ["BACKEND", "WEB", "ANDROID", "IOS"],
-  "implementationFailureCodes": ["ENGINE_POLICY_ALGORITHM_UNSUPPORTED", "PLATFORM_POLICY_ALGORITHM_UNSUPPORTED"],
+  "policyVersion": 4,
+  "policyDigest": "edfc4aeef6a2f40316dcf38b5727559921ecd7af68da79f349718e2021d108f5",
+  "consumers": [
+    "BACKEND",
+    "WEB",
+    "ANDROID",
+    "IOS"
+  ],
+  "implementationFailureCodes": [
+    "ENGINE_POLICY_ALGORITHM_UNSUPPORTED",
+    "PLATFORM_POLICY_ALGORITHM_UNSUPPORTED"
+  ],
   "formats": [
-    {"id": "EPUB", "morphology": "REFLOWABLE", "deliveryMode": "DOWNLOAD_ORIGINAL", "lifecycle": "ACTIVE", "extension": ".epub", "canonicalMimeType": "application/epub+zip", "acceptedMimeTypes": ["application/epub+zip"], "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "FB2", "morphology": "REFLOWABLE", "deliveryMode": "DOWNLOAD_ORIGINAL", "lifecycle": "ACTIVE", "extension": ".fb2", "canonicalMimeType": "application/x-fictionbook+xml", "acceptedMimeTypes": ["application/x-fictionbook+xml", "text/xml", "application/xml"], "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "TXT", "morphology": "REFLOWABLE", "deliveryMode": "DOWNLOAD_ORIGINAL", "lifecycle": "ACTIVE", "extension": ".txt", "canonicalMimeType": "text/plain", "acceptedMimeTypes": ["text/plain"], "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "MOBI", "morphology": "REFLOWABLE", "deliveryMode": "DOWNLOAD_ORIGINAL", "lifecycle": "ACTIVE", "extension": ".mobi", "canonicalMimeType": "application/x-mobipocket-ebook", "acceptedMimeTypes": ["application/x-mobipocket-ebook"], "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "AZW", "morphology": "REFLOWABLE", "deliveryMode": "DOWNLOAD_ORIGINAL", "lifecycle": "ACTIVE", "extension": ".azw", "canonicalMimeType": "application/vnd.amazon.ebook", "acceptedMimeTypes": ["application/vnd.amazon.ebook"], "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "AZW3", "morphology": "REFLOWABLE", "deliveryMode": "DOWNLOAD_ORIGINAL", "lifecycle": "ACTIVE", "extension": ".azw3", "canonicalMimeType": "application/vnd.amazon.ebook", "acceptedMimeTypes": ["application/vnd.amazon.ebook", "application/x-mobipocket-ebook"], "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "PRC", "morphology": "REFLOWABLE", "deliveryMode": "DOWNLOAD_ORIGINAL", "lifecycle": "ACTIVE", "extension": ".prc", "canonicalMimeType": "application/x-mobipocket-ebook", "acceptedMimeTypes": ["application/x-mobipocket-ebook"], "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "PDF", "morphology": "PDF", "deliveryMode": "STREAM", "lifecycle": "ACTIVE", "extension": ".pdf", "canonicalMimeType": "application/pdf", "acceptedMimeTypes": ["application/pdf"], "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "CBZ", "morphology": "COMIC", "deliveryMode": "STREAM", "lifecycle": "ACTIVE", "extension": ".cbz", "canonicalMimeType": "application/vnd.comicbook+zip", "acceptedMimeTypes": ["application/vnd.comicbook+zip", "application/x-cbz"], "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "ZIP", "morphology": "COMIC", "deliveryMode": "STREAM", "lifecycle": "ACTIVE", "extension": ".zip", "canonicalMimeType": "application/zip", "acceptedMimeTypes": ["application/zip"], "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "CBR", "morphology": "COMIC", "deliveryMode": "STREAM", "lifecycle": "ACTIVE", "extension": ".cbr", "canonicalMimeType": "application/vnd.comicbook-rar", "acceptedMimeTypes": ["application/vnd.comicbook-rar", "application/x-cbr"], "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "RAR", "morphology": "COMIC", "deliveryMode": "STREAM", "lifecycle": "ACTIVE", "extension": ".rar", "canonicalMimeType": "application/vnd.rar", "acceptedMimeTypes": ["application/vnd.rar", "application/x-rar-compressed"], "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "IMAGE_DIR", "morphology": "COMIC", "deliveryMode": "STREAM", "lifecycle": "ACTIVE", "extension": null, "canonicalMimeType": null, "acceptedMimeTypes": [], "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "AUDIO", "morphology": "AUDIO", "deliveryMode": "PLAYER", "lifecycle": "ACTIVE", "extension": null, "canonicalMimeType": null, "acceptedMimeTypes": [], "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "AUDIOBOOK_DIR", "morphology": "AUDIO", "deliveryMode": "PLAYER", "lifecycle": "ACTIVE", "extension": null, "canonicalMimeType": null, "acceptedMimeTypes": [], "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "AUDIOBOOK", "morphology": "AUDIO", "deliveryMode": "PLAYER", "lifecycle": "RECEIVE_ONLY", "extension": null, "canonicalMimeType": null, "acceptedMimeTypes": [], "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "M4B", "morphology": "AUDIO", "deliveryMode": "PLAYER", "lifecycle": "RECEIVE_ONLY", "extension": ".m4b", "canonicalMimeType": "audio/mp4", "acceptedMimeTypes": ["audio/mp4"], "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "M4A", "morphology": "AUDIO", "deliveryMode": "PLAYER", "lifecycle": "RECEIVE_ONLY", "extension": ".m4a", "canonicalMimeType": "audio/mp4", "acceptedMimeTypes": ["audio/mp4"], "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "MP3", "morphology": "AUDIO", "deliveryMode": "PLAYER", "lifecycle": "RECEIVE_ONLY", "extension": ".mp3", "canonicalMimeType": "audio/mpeg", "acceptedMimeTypes": ["audio/mpeg"], "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]}
+    {
+      "id": "EPUB",
+      "morphology": "REFLOWABLE",
+      "deliveryMode": "DOWNLOAD_ORIGINAL",
+      "lifecycle": "ACTIVE",
+      "extension": ".epub",
+      "canonicalMimeType": "application/epub+zip",
+      "acceptedMimeTypes": [
+        "application/epub+zip"
+      ],
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "FB2",
+      "morphology": "REFLOWABLE",
+      "deliveryMode": "DOWNLOAD_ORIGINAL",
+      "lifecycle": "ACTIVE",
+      "extension": ".fb2",
+      "canonicalMimeType": "application/x-fictionbook+xml",
+      "acceptedMimeTypes": [
+        "application/x-fictionbook+xml",
+        "text/xml",
+        "application/xml"
+      ],
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "TXT",
+      "morphology": "REFLOWABLE",
+      "deliveryMode": "DOWNLOAD_ORIGINAL",
+      "lifecycle": "ACTIVE",
+      "extension": ".txt",
+      "canonicalMimeType": "text/plain",
+      "acceptedMimeTypes": [
+        "text/plain"
+      ],
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "MOBI",
+      "morphology": "REFLOWABLE",
+      "deliveryMode": "DOWNLOAD_ORIGINAL",
+      "lifecycle": "ACTIVE",
+      "extension": ".mobi",
+      "canonicalMimeType": "application/x-mobipocket-ebook",
+      "acceptedMimeTypes": [
+        "application/x-mobipocket-ebook"
+      ],
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "AZW",
+      "morphology": "REFLOWABLE",
+      "deliveryMode": "DOWNLOAD_ORIGINAL",
+      "lifecycle": "ACTIVE",
+      "extension": ".azw",
+      "canonicalMimeType": "application/vnd.amazon.ebook",
+      "acceptedMimeTypes": [
+        "application/vnd.amazon.ebook"
+      ],
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "AZW3",
+      "morphology": "REFLOWABLE",
+      "deliveryMode": "DOWNLOAD_ORIGINAL",
+      "lifecycle": "ACTIVE",
+      "extension": ".azw3",
+      "canonicalMimeType": "application/vnd.amazon.ebook",
+      "acceptedMimeTypes": [
+        "application/vnd.amazon.ebook",
+        "application/x-mobipocket-ebook"
+      ],
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "PRC",
+      "morphology": "REFLOWABLE",
+      "deliveryMode": "DOWNLOAD_ORIGINAL",
+      "lifecycle": "ACTIVE",
+      "extension": ".prc",
+      "canonicalMimeType": "application/x-mobipocket-ebook",
+      "acceptedMimeTypes": [
+        "application/x-mobipocket-ebook"
+      ],
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "PDF",
+      "morphology": "PDF",
+      "deliveryMode": "STREAM",
+      "lifecycle": "ACTIVE",
+      "extension": ".pdf",
+      "canonicalMimeType": "application/pdf",
+      "acceptedMimeTypes": [
+        "application/pdf"
+      ],
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "CBZ",
+      "morphology": "COMIC",
+      "deliveryMode": "STREAM",
+      "lifecycle": "ACTIVE",
+      "extension": ".cbz",
+      "canonicalMimeType": "application/vnd.comicbook+zip",
+      "acceptedMimeTypes": [
+        "application/vnd.comicbook+zip",
+        "application/x-cbz"
+      ],
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "ZIP",
+      "morphology": "COMIC",
+      "deliveryMode": "STREAM",
+      "lifecycle": "ACTIVE",
+      "extension": ".zip",
+      "canonicalMimeType": "application/zip",
+      "acceptedMimeTypes": [
+        "application/zip"
+      ],
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "CBR",
+      "morphology": "COMIC",
+      "deliveryMode": "STREAM",
+      "lifecycle": "ACTIVE",
+      "extension": ".cbr",
+      "canonicalMimeType": "application/vnd.comicbook-rar",
+      "acceptedMimeTypes": [
+        "application/vnd.comicbook-rar",
+        "application/x-cbr"
+      ],
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "RAR",
+      "morphology": "COMIC",
+      "deliveryMode": "STREAM",
+      "lifecycle": "ACTIVE",
+      "extension": ".rar",
+      "canonicalMimeType": "application/vnd.rar",
+      "acceptedMimeTypes": [
+        "application/vnd.rar",
+        "application/x-rar-compressed"
+      ],
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "IMAGE_DIR",
+      "morphology": "COMIC",
+      "deliveryMode": "STREAM",
+      "lifecycle": "ACTIVE",
+      "extension": null,
+      "canonicalMimeType": null,
+      "acceptedMimeTypes": [],
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "AUDIO",
+      "morphology": "AUDIO",
+      "deliveryMode": "PLAYER",
+      "lifecycle": "ACTIVE",
+      "extension": null,
+      "canonicalMimeType": null,
+      "acceptedMimeTypes": [],
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "AUDIOBOOK_DIR",
+      "morphology": "AUDIO",
+      "deliveryMode": "PLAYER",
+      "lifecycle": "ACTIVE",
+      "extension": null,
+      "canonicalMimeType": null,
+      "acceptedMimeTypes": [],
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "AUDIOBOOK",
+      "morphology": "AUDIO",
+      "deliveryMode": "PLAYER",
+      "lifecycle": "RECEIVE_ONLY",
+      "extension": null,
+      "canonicalMimeType": null,
+      "acceptedMimeTypes": [],
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "M4B",
+      "morphology": "AUDIO",
+      "deliveryMode": "PLAYER",
+      "lifecycle": "RECEIVE_ONLY",
+      "extension": ".m4b",
+      "canonicalMimeType": "audio/mp4",
+      "acceptedMimeTypes": [
+        "audio/mp4"
+      ],
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "M4A",
+      "morphology": "AUDIO",
+      "deliveryMode": "PLAYER",
+      "lifecycle": "RECEIVE_ONLY",
+      "extension": ".m4a",
+      "canonicalMimeType": "audio/mp4",
+      "acceptedMimeTypes": [
+        "audio/mp4"
+      ],
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "MP3",
+      "morphology": "AUDIO",
+      "deliveryMode": "PLAYER",
+      "lifecycle": "RECEIVE_ONLY",
+      "extension": ".mp3",
+      "canonicalMimeType": "audio/mpeg",
+      "acceptedMimeTypes": [
+        "audio/mpeg"
+      ],
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    }
   ],
   "budgets": {
     "originalMaxBytes": 2147483648,
@@ -60,65 +370,539 @@
     "audioTrackMaxCount": 10000,
     "audioChapterMaxCount": 10000,
     "audioMetadataMaxBytes": 1048576,
-    "audioArtworkMaxBytes": 20971520
+    "audioArtworkMaxBytes": 20971520,
+    "parserSnapshotMemoryMaxBytes": 134217728,
+    "parserSnapshotSourceWeightMultiplier": 8
   },
   "profiles": {
     "reflowable": {
-      "safeDoctypes": [
-        {"name": "html", "publicId": "-//W3C//DTD XHTML 1.0 Strict//EN", "systemId": "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"},
-        {"name": "html", "publicId": "-//W3C//DTD XHTML 1.0 Transitional//EN", "systemId": "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"},
-        {"name": "html", "publicId": "-//W3C//DTD XHTML 1.0 Frameset//EN", "systemId": "http://www.w3.org/TR/xhtml1/DTD/xhtml1-frameset.dtd"},
-        {"name": "html", "publicId": "-//W3C//DTD XHTML 1.1//EN", "systemId": "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"},
-        {"name": "html", "publicId": "-//W3C//DTD XHTML 1.0 Strict//EN", "systemId": "https://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"},
-        {"name": "html", "publicId": "-//W3C//DTD XHTML 1.0 Transitional//EN", "systemId": "https://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"},
-        {"name": "html", "publicId": "-//W3C//DTD XHTML 1.0 Frameset//EN", "systemId": "https://www.w3.org/TR/xhtml1/DTD/xhtml1-frameset.dtd"},
-        {"name": "html", "publicId": "-//W3C//DTD XHTML 1.1//EN", "systemId": "https://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"}
-      ],
       "externalDtdResolution": false,
-      "rejectInternalSubset": true,
-      "rejectCustomEntities": true,
-      "namedEntityCodepoints": {"AElig":198,"Aacute":193,"Acirc":194,"Agrave":192,"Alpha":913,"Aring":197,"Atilde":195,"Auml":196,"Beta":914,"Ccedil":199,"Chi":935,"Dagger":8225,"Delta":916,"ETH":208,"Eacute":201,"Ecirc":202,"Egrave":200,"Epsilon":917,"Eta":919,"Euml":203,"Gamma":915,"Iacute":205,"Icirc":206,"Igrave":204,"Iota":921,"Iuml":207,"Kappa":922,"Lambda":923,"Mu":924,"Ntilde":209,"Nu":925,"OElig":338,"Oacute":211,"Ocirc":212,"Ograve":210,"Omega":937,"Omicron":927,"Oslash":216,"Otilde":213,"Ouml":214,"Phi":934,"Pi":928,"Prime":8243,"Psi":936,"Rho":929,"Scaron":352,"Sigma":931,"THORN":222,"Tau":932,"Theta":920,"Uacute":218,"Ucirc":219,"Ugrave":217,"Upsilon":933,"Uuml":220,"Xi":926,"Yacute":221,"Yuml":376,"Zeta":918,"aacute":225,"acirc":226,"acute":180,"aelig":230,"agrave":224,"alefsym":8501,"alpha":945,"amp":38,"and":8743,"ang":8736,"apos":39,"aring":229,"asymp":8776,"atilde":227,"auml":228,"bdquo":8222,"beta":946,"brvbar":166,"bull":8226,"cap":8745,"ccedil":231,"cedil":184,"cent":162,"chi":967,"circ":710,"clubs":9827,"cong":8773,"copy":169,"crarr":8629,"cup":8746,"curren":164,"dArr":8659,"dagger":8224,"darr":8595,"deg":176,"delta":948,"diams":9830,"divide":247,"eacute":233,"ecirc":234,"egrave":232,"empty":8709,"emsp":8195,"ensp":8194,"epsilon":949,"equiv":8801,"eta":951,"eth":240,"euml":235,"euro":8364,"exist":8707,"fnof":402,"forall":8704,"frac12":189,"frac14":188,"frac34":190,"frasl":8260,"gamma":947,"ge":8805,"gt":62,"hArr":8660,"harr":8596,"hearts":9829,"hellip":8230,"iacute":237,"icirc":238,"iexcl":161,"igrave":236,"image":8465,"infin":8734,"int":8747,"iota":953,"iquest":191,"isin":8712,"iuml":239,"kappa":954,"lArr":8656,"lambda":955,"lang":9001,"laquo":171,"larr":8592,"lceil":8968,"ldquo":8220,"le":8804,"lfloor":8970,"lowast":8727,"loz":9674,"lrm":8206,"lsaquo":8249,"lsquo":8216,"lt":60,"macr":175,"mdash":8212,"micro":181,"middot":183,"minus":8722,"mu":956,"nabla":8711,"nbsp":160,"ndash":8211,"ne":8800,"ni":8715,"not":172,"notin":8713,"nsub":8836,"ntilde":241,"nu":957,"oacute":243,"ocirc":244,"oelig":339,"ograve":242,"oline":8254,"omega":969,"omicron":959,"oplus":8853,"or":8744,"ordf":170,"ordm":186,"oslash":248,"otilde":245,"otimes":8855,"ouml":246,"para":182,"part":8706,"permil":8240,"perp":8869,"phi":966,"pi":960,"piv":982,"plusmn":177,"pound":163,"prime":8242,"prod":8719,"prop":8733,"psi":968,"quot":34,"rArr":8658,"radic":8730,"rang":9002,"raquo":187,"rarr":8594,"rceil":8969,"rdquo":8221,"real":8476,"reg":174,"rfloor":8971,"rho":961,"rlm":8207,"rsaquo":8250,"rsquo":8217,"sbquo":8218,"scaron":353,"sdot":8901,"sect":167,"shy":173,"sigma":963,"sigmaf":962,"sim":8764,"spades":9824,"sub":8834,"sube":8838,"sum":8721,"sup":8835,"sup1":185,"sup2":178,"sup3":179,"supe":8839,"szlig":223,"tau":964,"there4":8756,"theta":952,"thetasym":977,"thinsp":8201,"thorn":254,"tilde":732,"times":215,"trade":8482,"uArr":8657,"uacute":250,"uarr":8593,"ucirc":251,"ugrave":249,"uml":168,"upsih":978,"upsilon":965,"uuml":252,"weierp":8472,"xi":958,"yacute":253,"yen":165,"yuml":255,"zeta":950,"zwj":8205,"zwnj":8204},
-      "readingOrderMarkupMimeTypes": ["application/xhtml+xml", "text/html"],
-      "embeddedImageExtensionsByMimeType": {"image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif", "image/webp": ".webp"},
-      "sanitizedElements": ["script", "iframe", "object", "embed", "form", "base"],
-      "sanitizedAttributes": ["srcdoc"],
-      "sanitizedAttributePrefixes": ["on"],
-      "sanitizedMetaHttpEquivValues": ["refresh", "content-security-policy"],
-      "blockedAuthorSchemes": ["javascript", "file", "data", "blob"],
-      "remoteSubresourceSchemes": ["http", "https"],
-      "userNavigationSchemes": ["http", "https", "mailto", "tel"],
-      "trustedRuntimeSchemes": ["blob", "data"],
-      "uriAttributePolicies": [
-        {"elements": ["*"], "attribute": "src", "syntax": "SCALAR", "purpose": "SUBRESOURCE"},
-        {"elements": ["*"], "attribute": "srcset", "syntax": "SRCSET", "purpose": "SUBRESOURCE"},
-        {"elements": ["*"], "attribute": "style", "syntax": "CSS", "purpose": "SUBRESOURCE"},
-        {"elements": ["*"], "attribute": "xml:base", "syntax": "SCALAR", "purpose": "SUBRESOURCE"},
-        {"elements": ["link"], "attribute": "href", "syntax": "SCALAR", "purpose": "SUBRESOURCE"},
-        {"elements": ["video"], "attribute": "poster", "syntax": "SCALAR", "purpose": "SUBRESOURCE"},
-        {"elements": ["*"], "attribute": "background", "syntax": "SCALAR", "purpose": "SUBRESOURCE"},
-        {"elements": ["html"], "attribute": "manifest", "syntax": "SCALAR", "purpose": "SUBRESOURCE"},
-        {"elements": ["img", "input"], "attribute": "usemap", "syntax": "SCALAR", "purpose": "SUBRESOURCE"},
-        {"elements": ["object"], "attribute": "data", "syntax": "SCALAR", "purpose": "SUBRESOURCE"},
-        {"elements": ["object", "applet"], "attribute": "codebase", "syntax": "SCALAR", "purpose": "SUBRESOURCE"},
-        {"elements": ["applet"], "attribute": "code", "syntax": "SCALAR", "purpose": "SUBRESOURCE"},
-        {"elements": ["applet"], "attribute": "archive", "syntax": "SPACE_SEPARATED", "purpose": "SUBRESOURCE"},
-        {"elements": ["image", "use", "feimage"], "attribute": "href", "syntax": "SCALAR", "purpose": "SUBRESOURCE"},
-        {"elements": ["image", "use", "feimage"], "attribute": "xlink:href", "syntax": "SCALAR", "purpose": "SUBRESOURCE"},
-        {"elements": ["a", "area"], "attribute": "href", "syntax": "SCALAR", "purpose": "USER_NAVIGATION"},
-        {"elements": ["a"], "attribute": "xlink:href", "syntax": "SCALAR", "purpose": "USER_NAVIGATION"},
-        {"elements": ["blockquote", "q", "ins", "del"], "attribute": "cite", "syntax": "SCALAR", "purpose": "USER_NAVIGATION"},
-        {"elements": ["a", "area"], "attribute": "ping", "syntax": "SPACE_SEPARATED", "purpose": "ALWAYS_REMOVE"},
-        {"elements": ["form"], "attribute": "action", "syntax": "SCALAR", "purpose": "ALWAYS_REMOVE"},
-        {"elements": ["button", "input"], "attribute": "formaction", "syntax": "SCALAR", "purpose": "ALWAYS_REMOVE"}
+      "namedEntityCodepoints": {
+        "AElig": 198,
+        "Aacute": 193,
+        "Acirc": 194,
+        "Agrave": 192,
+        "Alpha": 913,
+        "Aring": 197,
+        "Atilde": 195,
+        "Auml": 196,
+        "Beta": 914,
+        "Ccedil": 199,
+        "Chi": 935,
+        "Dagger": 8225,
+        "Delta": 916,
+        "ETH": 208,
+        "Eacute": 201,
+        "Ecirc": 202,
+        "Egrave": 200,
+        "Epsilon": 917,
+        "Eta": 919,
+        "Euml": 203,
+        "Gamma": 915,
+        "Iacute": 205,
+        "Icirc": 206,
+        "Igrave": 204,
+        "Iota": 921,
+        "Iuml": 207,
+        "Kappa": 922,
+        "Lambda": 923,
+        "Mu": 924,
+        "Ntilde": 209,
+        "Nu": 925,
+        "OElig": 338,
+        "Oacute": 211,
+        "Ocirc": 212,
+        "Ograve": 210,
+        "Omega": 937,
+        "Omicron": 927,
+        "Oslash": 216,
+        "Otilde": 213,
+        "Ouml": 214,
+        "Phi": 934,
+        "Pi": 928,
+        "Prime": 8243,
+        "Psi": 936,
+        "Rho": 929,
+        "Scaron": 352,
+        "Sigma": 931,
+        "THORN": 222,
+        "Tau": 932,
+        "Theta": 920,
+        "Uacute": 218,
+        "Ucirc": 219,
+        "Ugrave": 217,
+        "Upsilon": 933,
+        "Uuml": 220,
+        "Xi": 926,
+        "Yacute": 221,
+        "Yuml": 376,
+        "Zeta": 918,
+        "aacute": 225,
+        "acirc": 226,
+        "acute": 180,
+        "aelig": 230,
+        "agrave": 224,
+        "alefsym": 8501,
+        "alpha": 945,
+        "amp": 38,
+        "and": 8743,
+        "ang": 8736,
+        "apos": 39,
+        "aring": 229,
+        "asymp": 8776,
+        "atilde": 227,
+        "auml": 228,
+        "bdquo": 8222,
+        "beta": 946,
+        "brvbar": 166,
+        "bull": 8226,
+        "cap": 8745,
+        "ccedil": 231,
+        "cedil": 184,
+        "cent": 162,
+        "chi": 967,
+        "circ": 710,
+        "clubs": 9827,
+        "cong": 8773,
+        "copy": 169,
+        "crarr": 8629,
+        "cup": 8746,
+        "curren": 164,
+        "dArr": 8659,
+        "dagger": 8224,
+        "darr": 8595,
+        "deg": 176,
+        "delta": 948,
+        "diams": 9830,
+        "divide": 247,
+        "eacute": 233,
+        "ecirc": 234,
+        "egrave": 232,
+        "empty": 8709,
+        "emsp": 8195,
+        "ensp": 8194,
+        "epsilon": 949,
+        "equiv": 8801,
+        "eta": 951,
+        "eth": 240,
+        "euml": 235,
+        "euro": 8364,
+        "exist": 8707,
+        "fnof": 402,
+        "forall": 8704,
+        "frac12": 189,
+        "frac14": 188,
+        "frac34": 190,
+        "frasl": 8260,
+        "gamma": 947,
+        "ge": 8805,
+        "gt": 62,
+        "hArr": 8660,
+        "harr": 8596,
+        "hearts": 9829,
+        "hellip": 8230,
+        "iacute": 237,
+        "icirc": 238,
+        "iexcl": 161,
+        "igrave": 236,
+        "image": 8465,
+        "infin": 8734,
+        "int": 8747,
+        "iota": 953,
+        "iquest": 191,
+        "isin": 8712,
+        "iuml": 239,
+        "kappa": 954,
+        "lArr": 8656,
+        "lambda": 955,
+        "lang": 9001,
+        "laquo": 171,
+        "larr": 8592,
+        "lceil": 8968,
+        "ldquo": 8220,
+        "le": 8804,
+        "lfloor": 8970,
+        "lowast": 8727,
+        "loz": 9674,
+        "lrm": 8206,
+        "lsaquo": 8249,
+        "lsquo": 8216,
+        "lt": 60,
+        "macr": 175,
+        "mdash": 8212,
+        "micro": 181,
+        "middot": 183,
+        "minus": 8722,
+        "mu": 956,
+        "nabla": 8711,
+        "nbsp": 160,
+        "ndash": 8211,
+        "ne": 8800,
+        "ni": 8715,
+        "not": 172,
+        "notin": 8713,
+        "nsub": 8836,
+        "ntilde": 241,
+        "nu": 957,
+        "oacute": 243,
+        "ocirc": 244,
+        "oelig": 339,
+        "ograve": 242,
+        "oline": 8254,
+        "omega": 969,
+        "omicron": 959,
+        "oplus": 8853,
+        "or": 8744,
+        "ordf": 170,
+        "ordm": 186,
+        "oslash": 248,
+        "otilde": 245,
+        "otimes": 8855,
+        "ouml": 246,
+        "para": 182,
+        "part": 8706,
+        "permil": 8240,
+        "perp": 8869,
+        "phi": 966,
+        "pi": 960,
+        "piv": 982,
+        "plusmn": 177,
+        "pound": 163,
+        "prime": 8242,
+        "prod": 8719,
+        "prop": 8733,
+        "psi": 968,
+        "quot": 34,
+        "rArr": 8658,
+        "radic": 8730,
+        "rang": 9002,
+        "raquo": 187,
+        "rarr": 8594,
+        "rceil": 8969,
+        "rdquo": 8221,
+        "real": 8476,
+        "reg": 174,
+        "rfloor": 8971,
+        "rho": 961,
+        "rlm": 8207,
+        "rsaquo": 8250,
+        "rsquo": 8217,
+        "sbquo": 8218,
+        "scaron": 353,
+        "sdot": 8901,
+        "sect": 167,
+        "shy": 173,
+        "sigma": 963,
+        "sigmaf": 962,
+        "sim": 8764,
+        "spades": 9824,
+        "sub": 8834,
+        "sube": 8838,
+        "sum": 8721,
+        "sup": 8835,
+        "sup1": 185,
+        "sup2": 178,
+        "sup3": 179,
+        "supe": 8839,
+        "szlig": 223,
+        "tau": 964,
+        "there4": 8756,
+        "theta": 952,
+        "thetasym": 977,
+        "thinsp": 8201,
+        "thorn": 254,
+        "tilde": 732,
+        "times": 215,
+        "trade": 8482,
+        "uArr": 8657,
+        "uacute": 250,
+        "uarr": 8593,
+        "ucirc": 251,
+        "ugrave": 249,
+        "uml": 168,
+        "upsih": 978,
+        "upsilon": 965,
+        "uuml": 252,
+        "weierp": 8472,
+        "xi": 958,
+        "yacute": 253,
+        "yen": 165,
+        "yuml": 255,
+        "zeta": 950,
+        "zwj": 8205,
+        "zwnj": 8204
+      },
+      "readingOrderMarkupMimeTypes": [
+        "application/xhtml+xml",
+        "text/html"
       ],
-      "allowedFontObfuscationAlgorithms": ["http://www.idpf.org/2008/embedding", "http://ns.adobe.com/pdf/enc#RC"],
-      "svgSanitizedElements": ["script", "foreignObject", "iframe", "object", "embed"],
-      "cssTextElements": ["style"],
-      "cssSanitizedConstructs": ["REMOTE_IMPORT", "REMOTE_URL", "EXPRESSION", "BEHAVIOR", "MOZ_BINDING"],
-      "archiveFatalFindings": ["PATH_ESCAPE", "ABSOLUTE_PATH", "BACKSLASH_PATH", "NUL_PATH", "DOT_SEGMENT", "DUPLICATE_CANONICAL_ENTRY", "SYMLINK", "ENCRYPTED_ENTRY", "OVERLAPPING_ENTRY", "CRC_MISMATCH"]
+      "embeddedImageExtensionsByMimeType": {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/gif": ".gif",
+        "image/webp": ".webp"
+      },
+      "sanitizedElements": [
+        "script",
+        "iframe",
+        "object",
+        "embed",
+        "form",
+        "base"
+      ],
+      "sanitizedAttributes": [
+        "srcdoc"
+      ],
+      "sanitizedAttributePrefixes": [
+        "on"
+      ],
+      "sanitizedMetaHttpEquivValues": [
+        "refresh",
+        "content-security-policy"
+      ],
+      "blockedAuthorSchemes": [
+        "javascript",
+        "file",
+        "data",
+        "blob"
+      ],
+      "remoteSubresourceSchemes": [
+        "http",
+        "https"
+      ],
+      "uriAttributePolicies": [
+        {
+          "elements": [
+            "*"
+          ],
+          "attribute": "src",
+          "syntax": "SCALAR",
+          "purpose": "SUBRESOURCE"
+        },
+        {
+          "elements": [
+            "*"
+          ],
+          "attribute": "srcset",
+          "syntax": "SRCSET",
+          "purpose": "SUBRESOURCE"
+        },
+        {
+          "elements": [
+            "*"
+          ],
+          "attribute": "style",
+          "syntax": "CSS",
+          "purpose": "SUBRESOURCE"
+        },
+        {
+          "elements": [
+            "*"
+          ],
+          "attribute": "xml:base",
+          "syntax": "SCALAR",
+          "purpose": "SUBRESOURCE"
+        },
+        {
+          "elements": [
+            "link"
+          ],
+          "attribute": "href",
+          "syntax": "SCALAR",
+          "purpose": "SUBRESOURCE"
+        },
+        {
+          "elements": [
+            "video"
+          ],
+          "attribute": "poster",
+          "syntax": "SCALAR",
+          "purpose": "SUBRESOURCE"
+        },
+        {
+          "elements": [
+            "*"
+          ],
+          "attribute": "background",
+          "syntax": "SCALAR",
+          "purpose": "SUBRESOURCE"
+        },
+        {
+          "elements": [
+            "html"
+          ],
+          "attribute": "manifest",
+          "syntax": "SCALAR",
+          "purpose": "SUBRESOURCE"
+        },
+        {
+          "elements": [
+            "img",
+            "input"
+          ],
+          "attribute": "usemap",
+          "syntax": "SCALAR",
+          "purpose": "SUBRESOURCE"
+        },
+        {
+          "elements": [
+            "object"
+          ],
+          "attribute": "data",
+          "syntax": "SCALAR",
+          "purpose": "SUBRESOURCE"
+        },
+        {
+          "elements": [
+            "object",
+            "applet"
+          ],
+          "attribute": "codebase",
+          "syntax": "SCALAR",
+          "purpose": "SUBRESOURCE"
+        },
+        {
+          "elements": [
+            "applet"
+          ],
+          "attribute": "code",
+          "syntax": "SCALAR",
+          "purpose": "SUBRESOURCE"
+        },
+        {
+          "elements": [
+            "applet"
+          ],
+          "attribute": "archive",
+          "syntax": "SPACE_SEPARATED",
+          "purpose": "SUBRESOURCE"
+        },
+        {
+          "elements": [
+            "image",
+            "use",
+            "feimage"
+          ],
+          "attribute": "href",
+          "syntax": "SCALAR",
+          "purpose": "SUBRESOURCE"
+        },
+        {
+          "elements": [
+            "image",
+            "use",
+            "feimage"
+          ],
+          "attribute": "xlink:href",
+          "syntax": "SCALAR",
+          "purpose": "SUBRESOURCE"
+        },
+        {
+          "elements": [
+            "a",
+            "area"
+          ],
+          "attribute": "href",
+          "syntax": "SCALAR",
+          "purpose": "USER_NAVIGATION"
+        },
+        {
+          "elements": [
+            "a"
+          ],
+          "attribute": "xlink:href",
+          "syntax": "SCALAR",
+          "purpose": "USER_NAVIGATION"
+        },
+        {
+          "elements": [
+            "blockquote",
+            "q",
+            "ins",
+            "del"
+          ],
+          "attribute": "cite",
+          "syntax": "SCALAR",
+          "purpose": "USER_NAVIGATION"
+        },
+        {
+          "elements": [
+            "a",
+            "area"
+          ],
+          "attribute": "ping",
+          "syntax": "SPACE_SEPARATED",
+          "purpose": "ALWAYS_REMOVE"
+        },
+        {
+          "elements": [
+            "form"
+          ],
+          "attribute": "action",
+          "syntax": "SCALAR",
+          "purpose": "ALWAYS_REMOVE"
+        },
+        {
+          "elements": [
+            "button",
+            "input"
+          ],
+          "attribute": "formaction",
+          "syntax": "SCALAR",
+          "purpose": "ALWAYS_REMOVE"
+        }
+      ],
+      "allowedFontObfuscationAlgorithms": [
+        "http://www.idpf.org/2008/embedding",
+        "http://ns.adobe.com/pdf/enc#RC"
+      ],
+      "svgSanitizedElements": [
+        "script",
+        "foreignObject",
+        "iframe",
+        "object",
+        "embed"
+      ],
+      "cssTextElements": [
+        "style"
+      ],
+      "cssSanitizedConstructs": [
+        "REMOTE_IMPORT",
+        "REMOTE_URL",
+        "EXPRESSION",
+        "BEHAVIOR",
+        "MOZ_BINDING"
+      ],
+      "archiveFatalFindings": [
+        "PATH_ESCAPE",
+        "ABSOLUTE_PATH",
+        "NUL_PATH",
+        "SYMLINK"
+      ],
+      "xmlPreparation": {
+        "declarationAction": "REMOVE_PARSER_DEPENDENCY",
+        "externalEntityAction": "LITERALIZE_REFERENCE",
+        "recursiveEntityAction": "LITERALIZE_REFERENCE",
+        "unknownEntityAction": "LITERALIZE_REFERENCE",
+        "parameterEntityAction": "LITERALIZE_REFERENCE",
+        "internalTextEntityAction": "BOUNDED_EXPANSION",
+        "expansionLimitAction": "LITERALIZE_REFERENCE"
+      },
+      "archiveIntegrityFindings": [
+        "DUPLICATE_CANONICAL_ENTRY",
+        "OVERLAPPING_ENTRY",
+        "CRC_MISMATCH"
+      ]
     },
     "pdf": {
-      "blockedActions": ["JAVASCRIPT", "XFA", "FORM_ACTION", "LAUNCH", "EXTERNAL_DOCUMENT", "DOCUMENT_NETWORK"],
+      "blockedActions": [
+        "JAVASCRIPT",
+        "XFA",
+        "FORM_ACTION",
+        "LAUNCH",
+        "EXTERNAL_DOCUMENT",
+        "DOCUMENT_NETWORK"
+      ],
       "requireFinitePageGeometry": true,
       "requireIdentityContentEncoding": true,
       "requireStrongRevision": true,
@@ -127,72 +911,1735 @@
       "allowWholeResponseFallback": false
     },
     "comic": {
-      "allowedPageMimeTypes": ["image/jpeg", "image/png", "image/gif", "image/webp"],
-      "pageMimeTypesByExtension": {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp"},
-      "archiveFatalFindings": ["PATH_ESCAPE", "ABSOLUTE_PATH", "BACKSLASH_PATH", "NUL_PATH", "DOT_SEGMENT", "DUPLICATE_CANONICAL_ENTRY", "SYMLINK", "HARDLINK", "ENCRYPTED_ENTRY", "OVERLAPPING_ENTRY", "CRC_MISMATCH"],
+      "allowedPageMimeTypes": [
+        "image/jpeg",
+        "image/png",
+        "image/gif",
+        "image/webp"
+      ],
+      "pageMimeTypesByExtension": {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".gif": "image/gif",
+        ".webp": "image/webp"
+      },
+      "archiveFatalFindings": [
+        "PATH_ESCAPE",
+        "ABSOLUTE_PATH",
+        "NUL_PATH",
+        "SYMLINK"
+      ],
       "singlePageDecodeFailureAction": "BLOCK_RESOURCE",
-      "manifestRevisionRequired": true
+      "manifestRevisionRequired": true,
+      "archiveIntegrityFindings": [
+        "DUPLICATE_CANONICAL_ENTRY",
+        "OVERLAPPING_ENTRY",
+        "CRC_MISMATCH"
+      ]
     },
     "audio": {
       "containerMimeTypes": {
-        ".aac": "audio/aac", ".ac3": "audio/ac3", ".adx": "audio/x-adx", ".aif": "audio/aiff", ".aifc": "audio/aiff", ".aiff": "audio/aiff", ".amr": "audio/amr", ".ape": "audio/x-ape", ".aptx": "audio/x-aptx", ".aptxhd": "audio/x-aptxhd", ".au": "audio/basic", ".caf": "audio/x-caf", ".dff": "audio/x-dff", ".dsf": "audio/x-dsf", ".dts": "audio/vnd.dts", ".eac3": "audio/eac3", ".flac": "audio/flac", ".g722": "audio/x-g722", ".g726": "audio/x-g726", ".gsm": "audio/x-gsm", ".lbc": "audio/x-lbc", ".m4a": "audio/mp4", ".m4b": "audio/mp4", ".m4r": "audio/mp4", ".mka": "audio/x-matroska", ".mlp": "audio/x-mlp", ".mp2": "audio/mpeg", ".mp3": "audio/mpeg", ".mpc": "audio/x-mpc", ".oga": "audio/ogg", ".ogg": "audio/ogg", ".oma": "audio/x-oma", ".opus": "audio/ogg", ".qcp": "audio/x-qcp", ".ra": "audio/vnd.rn-realaudio", ".rf64": "audio/wav", ".shn": "audio/x-shn", ".snd": "audio/basic", ".sph": "audio/x-sph", ".spx": "audio/ogg", ".tak": "audio/x-tak", ".thd": "audio/x-thd", ".tta": "audio/x-tta", ".voc": "audio/x-voc", ".w64": "audio/wav", ".wav": "audio/wav", ".wave": "audio/wav", ".weba": "audio/webm", ".wma": "audio/x-ms-wma", ".wv": "audio/x-wv", ".xma": "audio/x-xma"
+        ".aac": "audio/aac",
+        ".ac3": "audio/ac3",
+        ".adx": "audio/x-adx",
+        ".aif": "audio/aiff",
+        ".aifc": "audio/aiff",
+        ".aiff": "audio/aiff",
+        ".amr": "audio/amr",
+        ".ape": "audio/x-ape",
+        ".aptx": "audio/x-aptx",
+        ".aptxhd": "audio/x-aptxhd",
+        ".au": "audio/basic",
+        ".caf": "audio/x-caf",
+        ".dff": "audio/x-dff",
+        ".dsf": "audio/x-dsf",
+        ".dts": "audio/vnd.dts",
+        ".eac3": "audio/eac3",
+        ".flac": "audio/flac",
+        ".g722": "audio/x-g722",
+        ".g726": "audio/x-g726",
+        ".gsm": "audio/x-gsm",
+        ".lbc": "audio/x-lbc",
+        ".m4a": "audio/mp4",
+        ".m4b": "audio/mp4",
+        ".m4r": "audio/mp4",
+        ".mka": "audio/x-matroska",
+        ".mlp": "audio/x-mlp",
+        ".mp2": "audio/mpeg",
+        ".mp3": "audio/mpeg",
+        ".mpc": "audio/x-mpc",
+        ".oga": "audio/ogg",
+        ".ogg": "audio/ogg",
+        ".oma": "audio/x-oma",
+        ".opus": "audio/ogg",
+        ".qcp": "audio/x-qcp",
+        ".ra": "audio/vnd.rn-realaudio",
+        ".rf64": "audio/wav",
+        ".shn": "audio/x-shn",
+        ".snd": "audio/basic",
+        ".sph": "audio/x-sph",
+        ".spx": "audio/ogg",
+        ".tak": "audio/x-tak",
+        ".thd": "audio/x-thd",
+        ".tta": "audio/x-tta",
+        ".voc": "audio/x-voc",
+        ".w64": "audio/wav",
+        ".wav": "audio/wav",
+        ".wave": "audio/wav",
+        ".weba": "audio/webm",
+        ".wma": "audio/x-ms-wma",
+        ".wv": "audio/x-wv",
+        ".xma": "audio/x-xma"
       },
       "codecDecision": "ENGINE_CAPABILITY",
-      "blockedRedirectSchemes": ["file", "data", "blob", "javascript"],
+      "blockedRedirectSchemes": [
+        "file",
+        "data",
+        "blob",
+        "javascript"
+      ],
       "requireFiniteNonNegativeDuration": true,
       "requireOrderedTrackIdentity": true
     }
   },
   "rules": [
-    {"id": "COMMON.EXACT_FORMAT_MIME", "formats": ["EPUB", "FB2", "TXT", "MOBI", "AZW", "AZW3", "PRC", "PDF", "CBZ", "ZIP", "CBR", "RAR"], "stage": "ADMISSION", "algorithm": "EXACT_FORMAT_MIME", "parameterRefs": ["formats"], "action": "REJECT_PUBLICATION", "errorCode": "PUBLICATION_MIME_MISMATCH", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "COMMON.ORIGINAL_MAX_BYTES", "formats": ["EPUB", "FB2", "TXT", "MOBI", "AZW", "AZW3", "PRC", "PDF", "CBZ", "ZIP", "CBR", "RAR"], "stage": "ADMISSION", "algorithm": "MAX_ORIGINAL_BYTES", "parameterRefs": ["budgets.originalMaxBytes"], "action": "REJECT_PUBLICATION", "errorCode": "PUBLICATION_TOO_LARGE", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "COMMON.BINARY_RESOURCE_MAX_BYTES", "formats": ["EPUB", "FB2", "MOBI", "AZW", "AZW3", "PRC"], "stage": "RESOURCE", "algorithm": "MAX_BINARY_RESOURCE_BYTES", "parameterRefs": ["budgets.binaryResourceMaxBytes"], "action": "BLOCK_RESOURCE", "errorCode": "PUBLICATION_RESOURCE_BLOCKED", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "COMMON.DRM_REJECTED", "formats": ["EPUB", "MOBI", "AZW", "AZW3", "PRC", "PDF"], "stage": "PARSE", "algorithm": "DRM_REJECTION", "parameterRefs": ["profiles.reflowable.allowedFontObfuscationAlgorithms"], "action": "REJECT_PUBLICATION", "errorCode": "PUBLICATION_DRM_UNSUPPORTED", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "REFLOWABLE.SAFE_STANDARD_DOCTYPE", "formats": ["EPUB", "FB2"], "stage": "PARSE", "algorithm": "DOCTYPE_ALLOWLIST", "parameterRefs": ["profiles.reflowable.safeDoctypes", "profiles.reflowable.externalDtdResolution"], "action": "ALLOW", "errorCode": null, "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "REFLOWABLE.REJECT_XML_ENTITY", "formats": ["EPUB", "FB2"], "stage": "PARSE", "algorithm": "REJECT_XML_ENTITY", "parameterRefs": ["profiles.reflowable.rejectInternalSubset", "profiles.reflowable.rejectCustomEntities", "profiles.reflowable.externalDtdResolution", "profiles.reflowable.namedEntityCodepoints"], "action": "REJECT_PUBLICATION", "errorCode": "PUBLICATION_SECURITY_REJECTED", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "REFLOWABLE.SANITIZE_MARKUP", "formats": ["EPUB", "FB2", "TXT", "MOBI", "AZW", "AZW3", "PRC"], "stage": "SANITIZE", "algorithm": "SANITIZE_MARKUP", "parameterRefs": ["profiles.reflowable.sanitizedElements", "profiles.reflowable.sanitizedAttributes", "profiles.reflowable.sanitizedAttributePrefixes", "profiles.reflowable.sanitizedMetaHttpEquivValues"], "action": "SANITIZE", "errorCode": null, "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "REFLOWABLE.SANITIZE_URI", "formats": ["EPUB", "FB2", "TXT", "MOBI", "AZW", "AZW3", "PRC"], "stage": "SANITIZE", "algorithm": "SANITIZE_URI", "parameterRefs": ["profiles.reflowable.blockedAuthorSchemes", "profiles.reflowable.remoteSubresourceSchemes", "profiles.reflowable.userNavigationSchemes", "profiles.reflowable.trustedRuntimeSchemes", "profiles.reflowable.uriAttributePolicies"], "action": "SANITIZE", "errorCode": null, "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "REFLOWABLE.SANITIZE_SVG", "formats": ["EPUB", "FB2"], "stage": "SANITIZE", "algorithm": "SANITIZE_SVG", "parameterRefs": ["profiles.reflowable.svgSanitizedElements", "profiles.reflowable.sanitizedAttributePrefixes", "profiles.reflowable.blockedAuthorSchemes", "profiles.reflowable.remoteSubresourceSchemes"], "action": "SANITIZE", "errorCode": null, "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "REFLOWABLE.SANITIZE_CSS", "formats": ["EPUB", "FB2", "MOBI", "AZW", "AZW3", "PRC"], "stage": "SANITIZE", "algorithm": "SANITIZE_CSS", "parameterRefs": ["profiles.reflowable.cssTextElements", "profiles.reflowable.cssSanitizedConstructs", "profiles.reflowable.remoteSubresourceSchemes", "profiles.reflowable.blockedAuthorSchemes"], "action": "SANITIZE", "errorCode": null, "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "REFLOWABLE.OPTIONAL_RESOURCE_FAILURE", "formats": ["EPUB", "FB2", "MOBI", "AZW", "AZW3", "PRC"], "stage": "RESOURCE", "algorithm": "BLOCK_MISSING_OPTIONAL_RESOURCE", "parameterRefs": [], "action": "BLOCK_RESOURCE", "errorCode": "PUBLICATION_RESOURCE_BLOCKED", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "REFLOWABLE.REQUIRED_READING_ORDER_MARKUP", "formats": ["EPUB", "FB2", "MOBI", "AZW", "AZW3", "PRC"], "stage": "PARSE", "algorithm": "REQUIRE_READING_ORDER_MARKUP", "parameterRefs": ["profiles.reflowable.readingOrderMarkupMimeTypes"], "action": "REJECT_PUBLICATION", "errorCode": "PUBLICATION_CORRUPT", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "REFLOWABLE.XML_CONTROL_DOCUMENT_MAX_BYTES", "formats": ["EPUB", "FB2"], "stage": "PARSE", "algorithm": "MAX_XML_BYTES", "parameterRefs": ["budgets.xmlControlDocumentMaxBytes"], "action": "REJECT_PUBLICATION", "errorCode": "PUBLICATION_PARSER_LIMIT", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "REFLOWABLE.MARKUP_MAX_BYTES", "formats": ["EPUB", "FB2", "MOBI", "AZW", "AZW3", "PRC"], "stage": "PARSE", "algorithm": "MAX_MARKUP_BYTES", "parameterRefs": ["budgets.reflowableMarkupMaxBytes"], "action": "REJECT_PUBLICATION", "errorCode": "PUBLICATION_PARSER_LIMIT", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "EPUB.ARCHIVE_STRUCTURE", "formats": ["EPUB"], "stage": "PARSE", "algorithm": "ARCHIVE_STRUCTURE", "parameterRefs": ["profiles.reflowable.archiveFatalFindings"], "action": "REJECT_PUBLICATION", "errorCode": "PUBLICATION_SECURITY_REJECTED", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "EPUB.ARCHIVE_ENTRY_MAX_COUNT", "formats": ["EPUB"], "stage": "PARSE", "algorithm": "MAX_ARCHIVE_ENTRIES", "parameterRefs": ["budgets.archiveEntryMaxCount"], "action": "REJECT_PUBLICATION", "errorCode": "PUBLICATION_PARSER_LIMIT", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "EPUB.ARCHIVE_EXPANDED_MAX_BYTES", "formats": ["EPUB"], "stage": "PARSE", "algorithm": "MAX_ARCHIVE_EXPANDED_BYTES", "parameterRefs": ["budgets.archiveExpandedMaxBytes"], "action": "REJECT_PUBLICATION", "errorCode": "PUBLICATION_PARSER_LIMIT", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "EPUB.ARCHIVE_ENTRY_MAX_BYTES", "formats": ["EPUB"], "stage": "PARSE", "algorithm": "MAX_ARCHIVE_ENTRY_BYTES", "parameterRefs": ["budgets.archiveEntryMaxBytes"], "action": "REJECT_PUBLICATION", "errorCode": "PUBLICATION_PARSER_LIMIT", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "EPUB.ARCHIVE_COMPRESSION_RATIO", "formats": ["EPUB"], "stage": "PARSE", "algorithm": "MAX_COMPRESSION_RATIO", "parameterRefs": ["budgets.archiveCompressionRatioMax"], "action": "REJECT_PUBLICATION", "errorCode": "PUBLICATION_PARSER_LIMIT", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "FB2.STRUCTURE_BUDGET", "formats": ["FB2"], "stage": "PARSE", "algorithm": "MAX_FB2_STRUCTURE", "parameterRefs": ["budgets.fb2MaxDepth", "budgets.fb2MaxNodes", "budgets.fb2TextMaxBytes", "budgets.fb2TextMaxCharacters"], "action": "REJECT_PUBLICATION", "errorCode": "PUBLICATION_PARSER_LIMIT", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "FB2.IMAGE_BUDGET", "formats": ["FB2"], "stage": "PARSE", "algorithm": "MAX_FB2_IMAGE_BYTES", "parameterRefs": ["budgets.fb2EncodedImageMaxBytes", "budgets.fb2DecodedImageMaxBytes", "budgets.fb2DecodedImagesTotalMaxBytes", "profiles.reflowable.embeddedImageExtensionsByMimeType"], "action": "BLOCK_RESOURCE", "errorCode": "PUBLICATION_RESOURCE_BLOCKED", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "TXT.MEMORY_BUDGET", "formats": ["TXT"], "stage": "PARSE", "algorithm": "MAX_TXT_MEMORY", "parameterRefs": ["budgets.txtMemoryMaxBytes"], "action": "REJECT_PUBLICATION", "errorCode": "PUBLICATION_PARSER_LIMIT", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "TXT.BOUNDED_CHUNK", "formats": ["TXT"], "stage": "PARSE", "algorithm": "BOUNDED_TXT_CHUNK", "parameterRefs": ["budgets.txtChunkMaxCharacters"], "action": "ALLOW", "errorCode": null, "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "PDF.DISABLE_ACTIVE_CONTENT", "formats": ["PDF"], "stage": "SANITIZE", "algorithm": "PDF_ACTIVE_CONTENT", "parameterRefs": ["profiles.pdf.blockedActions"], "action": "SANITIZE", "errorCode": null, "requiredConsumers": ["WEB", "ANDROID", "IOS"]},
-    {"id": "PDF.PAGE_GEOMETRY", "formats": ["PDF"], "stage": "PARSE", "algorithm": "PDF_PAGE_GEOMETRY", "parameterRefs": ["budgets.pdfPageMaxCount", "profiles.pdf.requireFinitePageGeometry"], "action": "REJECT_PUBLICATION", "errorCode": "PDF_PAGE_LIMIT", "requiredConsumers": ["WEB", "ANDROID", "IOS"]},
-    {"id": "PDF.RENDER_BUDGET", "formats": ["PDF"], "stage": "RENDER", "algorithm": "PDF_RENDER_BUDGET", "parameterRefs": ["budgets.pdfRenderMaxPixels", "budgets.pdfCanvasMaxDimension"], "action": "BLOCK_RESOURCE", "errorCode": "PDF_RENDER_LIMIT", "requiredConsumers": ["WEB", "ANDROID", "IOS"]},
-    {"id": "PDF.RANGE_PROTOCOL", "formats": ["PDF"], "stage": "DELIVERY", "algorithm": "PDF_RANGE_PROTOCOL", "parameterRefs": ["budgets.pdfRangeChunkBytes", "budgets.pdfRangeRequestMaxBytes", "budgets.pdfRangeMaxConcurrent", "budgets.pdfRangeMemoryCacheMaxBytes", "profiles.pdf.requireIdentityContentEncoding", "profiles.pdf.requireStrongRevision", "profiles.pdf.engineRequestLimit", "profiles.pdf.largeRequestAction", "profiles.pdf.allowWholeResponseFallback"], "action": "REJECT_PUBLICATION", "errorCode": "PDF_RANGE_INVALID", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "COMIC.PAGE_MIME", "formats": ["CBZ", "ZIP", "CBR", "RAR", "IMAGE_DIR"], "stage": "RESOURCE", "algorithm": "COMIC_PAGE_MIME", "parameterRefs": ["profiles.comic.allowedPageMimeTypes", "profiles.comic.pageMimeTypesByExtension"], "action": "BLOCK_RESOURCE", "errorCode": "COMIC_MIME_MISMATCH", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "COMIC.ARCHIVE_STRUCTURE", "formats": ["CBZ", "ZIP", "CBR", "RAR"], "stage": "PARSE", "algorithm": "COMIC_ARCHIVE_STRUCTURE", "parameterRefs": ["profiles.comic.archiveFatalFindings"], "action": "REJECT_PUBLICATION", "errorCode": "COMIC_SECURITY_REJECTED", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "COMIC.PAGE_MAX_COUNT", "formats": ["CBZ", "ZIP", "CBR", "RAR", "IMAGE_DIR"], "stage": "PARSE", "algorithm": "MAX_COMIC_PAGE_COUNT", "parameterRefs": ["budgets.comicPageMaxCount"], "action": "REJECT_PUBLICATION", "errorCode": "COMIC_SECURITY_REJECTED", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "COMIC.ARCHIVE_BUDGET", "formats": ["CBZ", "ZIP", "CBR", "RAR", "IMAGE_DIR"], "stage": "PARSE", "algorithm": "COMIC_ARCHIVE_BUDGET", "parameterRefs": ["budgets.comicExpandedMaxBytes", "budgets.comicCompressionRatioMax"], "action": "REJECT_PUBLICATION", "errorCode": "COMIC_SECURITY_REJECTED", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "COMIC.PAGE_MAX_BYTES", "formats": ["CBZ", "ZIP", "CBR", "RAR", "IMAGE_DIR"], "stage": "RESOURCE", "algorithm": "MAX_COMIC_PAGE_BYTES", "parameterRefs": ["budgets.comicPageMaxBytes"], "action": "BLOCK_RESOURCE", "errorCode": "COMIC_PAGE_BLOCKED", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "COMIC.MANIFEST_MAX_BYTES", "formats": ["CBZ", "ZIP", "CBR", "RAR", "IMAGE_DIR"], "stage": "DELIVERY", "algorithm": "MAX_COMIC_MANIFEST_BYTES", "parameterRefs": ["budgets.comicManifestMaxBytes"], "action": "REJECT_PUBLICATION", "errorCode": "COMIC_SECURITY_REJECTED", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "COMIC.PAGE_DECODE_FAILURE", "formats": ["CBZ", "ZIP", "CBR", "RAR", "IMAGE_DIR"], "stage": "RENDER", "algorithm": "COMIC_PAGE_FAILURE", "parameterRefs": ["profiles.comic.singlePageDecodeFailureAction"], "action": "BLOCK_RESOURCE", "errorCode": "COMIC_PAGE_BLOCKED", "requiredConsumers": ["WEB", "ANDROID", "IOS"]},
-    {"id": "COMIC.MANIFEST_REVISION", "formats": ["CBZ", "ZIP", "CBR", "RAR", "IMAGE_DIR"], "stage": "DELIVERY", "algorithm": "COMIC_MANIFEST_REVISION", "parameterRefs": ["profiles.comic.manifestRevisionRequired"], "action": "REJECT_PUBLICATION", "errorCode": "COMIC_RESOURCE_CHANGED", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "AUDIO.CONTAINER_MIME", "formats": ["AUDIO", "AUDIOBOOK_DIR", "AUDIOBOOK", "M4B", "M4A", "MP3"], "stage": "ADMISSION", "algorithm": "AUDIO_CONTAINER_MIME", "parameterRefs": ["profiles.audio.containerMimeTypes"], "action": "REJECT_PUBLICATION", "errorCode": "AUDIO_MIME_MISMATCH", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "AUDIO.ORIGINAL_MAX_BYTES", "formats": ["AUDIO", "AUDIOBOOK_DIR", "AUDIOBOOK", "M4B", "M4A", "MP3"], "stage": "ADMISSION", "algorithm": "MAX_ORIGINAL_BYTES", "parameterRefs": ["budgets.originalMaxBytes"], "action": "REJECT_PUBLICATION", "errorCode": "PUBLICATION_TOO_LARGE", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "AUDIO.ENGINE_CODEC", "formats": ["AUDIO", "AUDIOBOOK_DIR", "AUDIOBOOK", "M4B", "M4A", "MP3"], "stage": "PLAYBACK", "algorithm": "AUDIO_ENGINE_CODEC", "parameterRefs": ["profiles.audio.codecDecision"], "action": "BLOCK_RESOURCE", "errorCode": "ENGINE_CODEC_UNSUPPORTED", "requiredConsumers": ["WEB", "ANDROID", "IOS"]},
-    {"id": "AUDIO.TRACK_AND_CHAPTER_BOUNDS", "formats": ["AUDIO", "AUDIOBOOK_DIR", "AUDIOBOOK", "M4B", "M4A", "MP3"], "stage": "PARSE", "algorithm": "AUDIO_TRACK_CHAPTER_BOUNDS", "parameterRefs": ["budgets.audioTrackMaxCount", "budgets.audioChapterMaxCount", "profiles.audio.requireOrderedTrackIdentity", "profiles.audio.requireFiniteNonNegativeDuration"], "action": "REJECT_PUBLICATION", "errorCode": "AUDIO_DURATION_INVALID", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "AUDIO.METADATA_BUDGET", "formats": ["AUDIO", "AUDIOBOOK_DIR", "AUDIOBOOK", "M4B", "M4A", "MP3"], "stage": "PARSE", "algorithm": "AUDIO_METADATA_BUDGET", "parameterRefs": ["budgets.audioMetadataMaxBytes", "budgets.audioArtworkMaxBytes"], "action": "BLOCK_RESOURCE", "errorCode": "AUDIO_METADATA_LIMIT", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "AUDIO.REDIRECT_POLICY", "formats": ["AUDIO", "AUDIOBOOK_DIR", "AUDIOBOOK", "M4B", "M4A", "MP3"], "stage": "DELIVERY", "algorithm": "AUDIO_REDIRECT_POLICY", "parameterRefs": ["profiles.audio.blockedRedirectSchemes"], "action": "REJECT_PUBLICATION", "errorCode": "AUDIO_SECURITY_REJECTED", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]}
+    {
+      "id": "COMMON.EXACT_FORMAT_MIME",
+      "formats": [
+        "EPUB",
+        "FB2",
+        "TXT",
+        "MOBI",
+        "AZW",
+        "AZW3",
+        "PRC",
+        "PDF",
+        "CBZ",
+        "ZIP",
+        "CBR",
+        "RAR"
+      ],
+      "stage": "ADMISSION",
+      "algorithm": "EXACT_FORMAT_MIME",
+      "parameterRefs": [
+        "formats"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "PUBLICATION_MIME_MISMATCH",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "CAPABILITY",
+      "scope": "PUBLICATION",
+      "trigger": "COMMON_EXACT_FORMAT_MIME_DETECTED",
+      "rationale": "The actual selected parser, decoder or decryption engine reported unsupported content. Metadata absence or a format/MIME mismatch alone must not trigger this rule.",
+      "isolation": "REQUIRE_PUBLICATION_BOUNDARY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#format-mime-mismatch",
+        "fixtures/reader-safety-v2/manifest.json#actual-parser-unsupported"
+      ],
+      "isolatedAction": "REJECT_PUBLICATION",
+      "optionalResourceAction": "BLOCK_RESOURCE"
+    },
+    {
+      "id": "COMMON.ORIGINAL_MAX_BYTES",
+      "formats": [
+        "EPUB",
+        "FB2",
+        "TXT",
+        "MOBI",
+        "AZW",
+        "AZW3",
+        "PRC",
+        "PDF",
+        "CBZ",
+        "ZIP",
+        "CBR",
+        "RAR"
+      ],
+      "stage": "ADMISSION",
+      "algorithm": "MAX_ORIGINAL_BYTES",
+      "parameterRefs": [
+        "budgets.originalMaxBytes"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "PUBLICATION_TOO_LARGE",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "RESOURCE_LIMIT",
+      "scope": "PUBLICATION",
+      "trigger": "COMMON_ORIGINAL_MAX_BYTES_DETECTED",
+      "rationale": "Enforce the unchanged bounded processing capability.",
+      "isolation": "REQUIRE_PUBLICATION_BOUNDARY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#original-at-limit",
+        "fixtures/reader-safety-v2/manifest.json#original-over-limit"
+      ],
+      "isolatedAction": "REJECT_PUBLICATION",
+      "optionalResourceAction": "REJECT_PUBLICATION"
+    },
+    {
+      "id": "COMMON.BINARY_RESOURCE_MAX_BYTES",
+      "formats": [
+        "EPUB",
+        "FB2",
+        "MOBI",
+        "AZW",
+        "AZW3",
+        "PRC"
+      ],
+      "stage": "RESOURCE",
+      "algorithm": "MAX_BINARY_RESOURCE_BYTES",
+      "parameterRefs": [
+        "budgets.binaryResourceMaxBytes"
+      ],
+      "action": "BLOCK_RESOURCE",
+      "errorCode": "PUBLICATION_RESOURCE_BLOCKED",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "RESOURCE_LIMIT",
+      "scope": "RESOURCE",
+      "trigger": "COMMON_BINARY_RESOURCE_MAX_BYTES_DETECTED",
+      "rationale": "Enforce the unchanged bounded processing capability.",
+      "isolation": "BLOCK_AFFECTED_RESOURCE",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#binary-resource-over-limit"
+      ],
+      "isolatedAction": "BLOCK_RESOURCE",
+      "optionalResourceAction": "BLOCK_RESOURCE"
+    },
+    {
+      "id": "COMMON.DRM_REJECTED",
+      "formats": [
+        "EPUB",
+        "MOBI",
+        "AZW",
+        "AZW3",
+        "PRC",
+        "PDF"
+      ],
+      "stage": "PARSE",
+      "algorithm": "DRM_REJECTION",
+      "parameterRefs": [
+        "profiles.reflowable.allowedFontObfuscationAlgorithms"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "PUBLICATION_DRM_UNSUPPORTED",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "CAPABILITY",
+      "scope": "PUBLICATION",
+      "trigger": "COMMON_DRM_REJECTED_DETECTED",
+      "rationale": "The actual selected parser, decoder or decryption engine reported unsupported content. Metadata absence or a format/MIME mismatch alone must not trigger this rule.",
+      "isolation": "REQUIRE_PUBLICATION_BOUNDARY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#epub-font-obfuscation",
+        "fixtures/reader-safety-v2/manifest.json#epub-drm-rejected",
+        "fixtures/reader-safety-v2/manifest.json#actual-decryption-unsupported"
+      ],
+      "isolatedAction": "REJECT_PUBLICATION",
+      "optionalResourceAction": "BLOCK_RESOURCE"
+    },
+    {
+      "id": "REFLOWABLE.SAFE_STANDARD_DOCTYPE",
+      "formats": [
+        "EPUB",
+        "FB2"
+      ],
+      "stage": "PARSE",
+      "algorithm": "XML_DECLARATION_COMPATIBILITY",
+      "parameterRefs": [
+        "profiles.reflowable.externalDtdResolution",
+        "profiles.reflowable.xmlPreparation"
+      ],
+      "action": "ALLOW",
+      "errorCode": null,
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "SECURITY",
+      "scope": "PUBLICATION",
+      "trigger": "REFLOWABLE_SAFE_STANDARD_DOCTYPE_DETECTED",
+      "rationale": "Prevent authored active execution, external access, or ambiguous access outside the publication.",
+      "isolation": "SANITIZE_IN_MEMORY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#safe-xhtml-11-http",
+        "fixtures/reader-safety-v2/manifest.json#safe-xhtml-11-https",
+        "fixtures/reader-safety-v2/manifest.json#safe-xhtml-named-entities",
+        "https://cheatsheetseries.owasp.org/cheatsheets/XML_External_Entity_Prevention_Cheat_Sheet.html"
+      ],
+      "isolatedAction": "ALLOW",
+      "optionalResourceAction": "ALLOW"
+    },
+    {
+      "id": "REFLOWABLE.REJECT_XML_ENTITY",
+      "formats": [
+        "EPUB",
+        "FB2"
+      ],
+      "stage": "PARSE",
+      "algorithm": "REJECT_XML_ENTITY",
+      "parameterRefs": [
+        "profiles.reflowable.externalDtdResolution",
+        "profiles.reflowable.xmlPreparation"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "PUBLICATION_SECURITY_REJECTED",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "SECURITY",
+      "scope": "PUBLICATION",
+      "trigger": "XML_EXTERNAL_ACCESS_CANNOT_BE_ISOLATED",
+      "rationale": "External entity evaluation would read a local file or initiate network I/O and the resource cannot be safely isolated.",
+      "isolation": "REQUIRE_PUBLICATION_BOUNDARY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#xml-unisolatable-access",
+        "https://cheatsheetseries.owasp.org/cheatsheets/XML_External_Entity_Prevention_Cheat_Sheet.html"
+      ],
+      "isolatedAction": "SANITIZE",
+      "optionalResourceAction": "BLOCK_RESOURCE"
+    },
+    {
+      "id": "REFLOWABLE.SANITIZE_MARKUP",
+      "formats": [
+        "EPUB",
+        "FB2",
+        "TXT",
+        "MOBI",
+        "AZW",
+        "AZW3",
+        "PRC"
+      ],
+      "stage": "SANITIZE",
+      "algorithm": "SANITIZE_MARKUP",
+      "parameterRefs": [
+        "profiles.reflowable.sanitizedElements",
+        "profiles.reflowable.sanitizedAttributes",
+        "profiles.reflowable.sanitizedAttributePrefixes",
+        "profiles.reflowable.sanitizedMetaHttpEquivValues"
+      ],
+      "action": "SANITIZE",
+      "errorCode": null,
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "SECURITY",
+      "scope": "PUBLICATION",
+      "trigger": "AUTHORED_ACTIVE_MARKUP_DETECTED",
+      "rationale": "Executable elements, event attributes, document redirects and submission attributes can execute code or initiate unprompted I/O. Remove only matched behavior from the in-memory tree.",
+      "isolation": "SANITIZE_IN_MEMORY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#markup-active-elements"
+      ],
+      "isolatedAction": "SANITIZE",
+      "optionalResourceAction": "SANITIZE"
+    },
+    {
+      "id": "REFLOWABLE.SANITIZE_URI",
+      "formats": [
+        "EPUB",
+        "FB2",
+        "TXT",
+        "MOBI",
+        "AZW",
+        "AZW3",
+        "PRC"
+      ],
+      "stage": "SANITIZE",
+      "algorithm": "SANITIZE_URI",
+      "parameterRefs": [
+        "profiles.reflowable.blockedAuthorSchemes",
+        "profiles.reflowable.remoteSubresourceSchemes",
+        "profiles.reflowable.uriAttributePolicies"
+      ],
+      "action": "SANITIZE",
+      "errorCode": null,
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "SECURITY",
+      "scope": "PUBLICATION",
+      "trigger": "AUTHORED_DANGEROUS_URI_DETECTED",
+      "rationale": "Generated dangerous URI schemes access local files or execute code; automatic remote subresources leak activity. Remove matching references while retaining unknown inert values.",
+      "isolation": "SANITIZE_IN_MEMORY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#author-dangerous-uri"
+      ],
+      "isolatedAction": "SANITIZE",
+      "optionalResourceAction": "SANITIZE"
+    },
+    {
+      "id": "REFLOWABLE.SANITIZE_SVG",
+      "formats": [
+        "EPUB",
+        "FB2"
+      ],
+      "stage": "SANITIZE",
+      "algorithm": "SANITIZE_SVG",
+      "parameterRefs": [
+        "profiles.reflowable.svgSanitizedElements",
+        "profiles.reflowable.sanitizedAttributePrefixes",
+        "profiles.reflowable.blockedAuthorSchemes",
+        "profiles.reflowable.remoteSubresourceSchemes"
+      ],
+      "action": "SANITIZE",
+      "errorCode": null,
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "SECURITY",
+      "scope": "PUBLICATION",
+      "trigger": "AUTHORED_ACTIVE_SVG_DETECTED",
+      "rationale": "SVG executable or embedded foreign content and automatic external references can escape passive rendering. Remove only the generated blacklist matches.",
+      "isolation": "SANITIZE_IN_MEMORY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#svg-active-content"
+      ],
+      "isolatedAction": "SANITIZE",
+      "optionalResourceAction": "SANITIZE"
+    },
+    {
+      "id": "REFLOWABLE.SANITIZE_CSS",
+      "formats": [
+        "EPUB",
+        "FB2",
+        "MOBI",
+        "AZW",
+        "AZW3",
+        "PRC"
+      ],
+      "stage": "SANITIZE",
+      "algorithm": "SANITIZE_CSS",
+      "parameterRefs": [
+        "profiles.reflowable.cssTextElements",
+        "profiles.reflowable.cssSanitizedConstructs",
+        "profiles.reflowable.remoteSubresourceSchemes",
+        "profiles.reflowable.blockedAuthorSchemes"
+      ],
+      "action": "SANITIZE",
+      "errorCode": null,
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "SECURITY",
+      "scope": "PUBLICATION",
+      "trigger": "AUTHORED_ACTIVE_CSS_DETECTED",
+      "rationale": "CSS import, execution extensions and automatic external URLs can initiate I/O or execute code. Neutralize only generated blacklist constructs in volatile styles.",
+      "isolation": "SANITIZE_IN_MEMORY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#css-active-content"
+      ],
+      "isolatedAction": "SANITIZE",
+      "optionalResourceAction": "SANITIZE"
+    },
+    {
+      "id": "REFLOWABLE.OPTIONAL_RESOURCE_FAILURE",
+      "formats": [
+        "EPUB",
+        "FB2",
+        "MOBI",
+        "AZW",
+        "AZW3",
+        "PRC"
+      ],
+      "stage": "RESOURCE",
+      "algorithm": "BLOCK_MISSING_OPTIONAL_RESOURCE",
+      "parameterRefs": [],
+      "action": "BLOCK_RESOURCE",
+      "errorCode": "PUBLICATION_RESOURCE_BLOCKED",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "INTEGRITY",
+      "scope": "RESOURCE",
+      "trigger": "REFLOWABLE_OPTIONAL_RESOURCE_FAILURE_DETECTED",
+      "rationale": "The referenced content or transport cannot provide a reliable readable resource.",
+      "isolation": "BLOCK_AFFECTED_RESOURCE",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#archive-unused-entry-crc-mismatch",
+        "fixtures/reader-safety-v2/manifest.json#optional-resource-missing"
+      ],
+      "isolatedAction": "BLOCK_RESOURCE",
+      "optionalResourceAction": "BLOCK_RESOURCE"
+    },
+    {
+      "id": "REFLOWABLE.REQUIRED_READING_ORDER_MARKUP",
+      "formats": [
+        "EPUB",
+        "FB2",
+        "MOBI",
+        "AZW",
+        "AZW3",
+        "PRC"
+      ],
+      "stage": "PARSE",
+      "algorithm": "REQUIRE_READING_ORDER_MARKUP",
+      "parameterRefs": [
+        "profiles.reflowable.readingOrderMarkupMimeTypes"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "PUBLICATION_CORRUPT",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "INTEGRITY",
+      "scope": "PUBLICATION",
+      "trigger": "REFLOWABLE_REQUIRED_READING_ORDER_MARKUP_DETECTED",
+      "rationale": "The referenced content or transport cannot provide a reliable readable resource.",
+      "isolation": "REQUIRE_PUBLICATION_BOUNDARY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#required-reading-order-markup-missing"
+      ],
+      "isolatedAction": "REJECT_PUBLICATION",
+      "optionalResourceAction": "BLOCK_RESOURCE"
+    },
+    {
+      "id": "REFLOWABLE.XML_CONTROL_DOCUMENT_MAX_BYTES",
+      "formats": [
+        "EPUB",
+        "FB2"
+      ],
+      "stage": "PARSE",
+      "algorithm": "MAX_XML_BYTES",
+      "parameterRefs": [
+        "budgets.xmlControlDocumentMaxBytes"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "PUBLICATION_PARSER_LIMIT",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "RESOURCE_LIMIT",
+      "scope": "PUBLICATION",
+      "trigger": "REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES_DETECTED",
+      "rationale": "Enforce the unchanged bounded processing capability.",
+      "isolation": "REQUIRE_PUBLICATION_BOUNDARY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#xml-control-document-over-limit",
+        "https://cheatsheetseries.owasp.org/cheatsheets/XML_External_Entity_Prevention_Cheat_Sheet.html"
+      ],
+      "isolatedAction": "REJECT_PUBLICATION",
+      "optionalResourceAction": "REJECT_PUBLICATION"
+    },
+    {
+      "id": "REFLOWABLE.MARKUP_MAX_BYTES",
+      "formats": [
+        "EPUB",
+        "FB2",
+        "MOBI",
+        "AZW",
+        "AZW3",
+        "PRC"
+      ],
+      "stage": "PARSE",
+      "algorithm": "MAX_MARKUP_BYTES",
+      "parameterRefs": [
+        "budgets.reflowableMarkupMaxBytes"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "PUBLICATION_PARSER_LIMIT",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "RESOURCE_LIMIT",
+      "scope": "PUBLICATION",
+      "trigger": "REFLOWABLE_MARKUP_MAX_BYTES_DETECTED",
+      "rationale": "Enforce the unchanged bounded processing capability.",
+      "isolation": "REQUIRE_PUBLICATION_BOUNDARY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#reflowable-markup-over-limit"
+      ],
+      "isolatedAction": "REJECT_PUBLICATION",
+      "optionalResourceAction": "REJECT_PUBLICATION"
+    },
+    {
+      "id": "EPUB.ARCHIVE_STRUCTURE",
+      "formats": [
+        "EPUB"
+      ],
+      "stage": "PARSE",
+      "algorithm": "ARCHIVE_STRUCTURE",
+      "parameterRefs": [
+        "profiles.reflowable.archiveFatalFindings"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "PUBLICATION_SECURITY_REJECTED",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "SECURITY",
+      "scope": "PUBLICATION",
+      "trigger": "EPUB_ARCHIVE_ROOT_ESCAPE_DETECTED",
+      "rationale": "An absolute, escaping, NUL-containing or symlink entry can cross the publication root. Block the affected resource; stop the book only when that resource cannot be isolated.",
+      "isolation": "BLOCK_AFFECTED_RESOURCE",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#archive-path-escape"
+      ],
+      "isolatedAction": "SANITIZE",
+      "optionalResourceAction": "BLOCK_RESOURCE"
+    },
+    {
+      "id": "EPUB.ARCHIVE_ENTRY_MAX_COUNT",
+      "formats": [
+        "EPUB"
+      ],
+      "stage": "PARSE",
+      "algorithm": "MAX_ARCHIVE_ENTRIES",
+      "parameterRefs": [
+        "budgets.archiveEntryMaxCount"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "PUBLICATION_PARSER_LIMIT",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "RESOURCE_LIMIT",
+      "scope": "PUBLICATION",
+      "trigger": "EPUB_ARCHIVE_ENTRY_MAX_COUNT_DETECTED",
+      "rationale": "Enforce the unchanged bounded processing capability.",
+      "isolation": "REQUIRE_PUBLICATION_BOUNDARY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#epub-entry-count-over-limit"
+      ],
+      "isolatedAction": "REJECT_PUBLICATION",
+      "optionalResourceAction": "REJECT_PUBLICATION"
+    },
+    {
+      "id": "EPUB.ARCHIVE_EXPANDED_MAX_BYTES",
+      "formats": [
+        "EPUB"
+      ],
+      "stage": "PARSE",
+      "algorithm": "MAX_ARCHIVE_EXPANDED_BYTES",
+      "parameterRefs": [
+        "budgets.archiveExpandedMaxBytes"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "PUBLICATION_PARSER_LIMIT",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "RESOURCE_LIMIT",
+      "scope": "PUBLICATION",
+      "trigger": "EPUB_ARCHIVE_EXPANDED_MAX_BYTES_DETECTED",
+      "rationale": "Enforce the unchanged bounded processing capability.",
+      "isolation": "REQUIRE_PUBLICATION_BOUNDARY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#epub-expanded-over-limit"
+      ],
+      "isolatedAction": "REJECT_PUBLICATION",
+      "optionalResourceAction": "REJECT_PUBLICATION"
+    },
+    {
+      "id": "EPUB.ARCHIVE_ENTRY_MAX_BYTES",
+      "formats": [
+        "EPUB"
+      ],
+      "stage": "PARSE",
+      "algorithm": "MAX_ARCHIVE_ENTRY_BYTES",
+      "parameterRefs": [
+        "budgets.archiveEntryMaxBytes"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "PUBLICATION_PARSER_LIMIT",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "RESOURCE_LIMIT",
+      "scope": "PUBLICATION",
+      "trigger": "EPUB_ARCHIVE_ENTRY_MAX_BYTES_DETECTED",
+      "rationale": "Enforce the unchanged bounded processing capability.",
+      "isolation": "REQUIRE_PUBLICATION_BOUNDARY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#epub-entry-over-limit"
+      ],
+      "isolatedAction": "REJECT_PUBLICATION",
+      "optionalResourceAction": "REJECT_PUBLICATION"
+    },
+    {
+      "id": "EPUB.ARCHIVE_COMPRESSION_RATIO",
+      "formats": [
+        "EPUB"
+      ],
+      "stage": "PARSE",
+      "algorithm": "MAX_COMPRESSION_RATIO",
+      "parameterRefs": [
+        "budgets.archiveCompressionRatioMax"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "PUBLICATION_PARSER_LIMIT",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "RESOURCE_LIMIT",
+      "scope": "PUBLICATION",
+      "trigger": "EPUB_ARCHIVE_COMPRESSION_RATIO_DETECTED",
+      "rationale": "Enforce the unchanged bounded processing capability.",
+      "isolation": "REQUIRE_PUBLICATION_BOUNDARY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#epub-compression-ratio-over-limit"
+      ],
+      "isolatedAction": "REJECT_PUBLICATION",
+      "optionalResourceAction": "REJECT_PUBLICATION"
+    },
+    {
+      "id": "FB2.STRUCTURE_BUDGET",
+      "formats": [
+        "FB2"
+      ],
+      "stage": "PARSE",
+      "algorithm": "MAX_FB2_STRUCTURE",
+      "parameterRefs": [
+        "budgets.fb2MaxDepth",
+        "budgets.fb2MaxNodes",
+        "budgets.fb2TextMaxBytes",
+        "budgets.fb2TextMaxCharacters"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "PUBLICATION_PARSER_LIMIT",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "RESOURCE_LIMIT",
+      "scope": "PUBLICATION",
+      "trigger": "FB2_STRUCTURE_BUDGET_DETECTED",
+      "rationale": "Enforce the unchanged bounded processing capability.",
+      "isolation": "REQUIRE_PUBLICATION_BOUNDARY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#fb2-node-over-limit"
+      ],
+      "isolatedAction": "REJECT_PUBLICATION",
+      "optionalResourceAction": "REJECT_PUBLICATION"
+    },
+    {
+      "id": "FB2.IMAGE_BUDGET",
+      "formats": [
+        "FB2"
+      ],
+      "stage": "PARSE",
+      "algorithm": "MAX_FB2_IMAGE_BYTES",
+      "parameterRefs": [
+        "budgets.fb2EncodedImageMaxBytes",
+        "budgets.fb2DecodedImageMaxBytes",
+        "budgets.fb2DecodedImagesTotalMaxBytes",
+        "profiles.reflowable.embeddedImageExtensionsByMimeType"
+      ],
+      "action": "BLOCK_RESOURCE",
+      "errorCode": "PUBLICATION_RESOURCE_BLOCKED",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "RESOURCE_LIMIT",
+      "scope": "RESOURCE",
+      "trigger": "FB2_IMAGE_BUDGET_DETECTED",
+      "rationale": "Enforce the unchanged bounded processing capability.",
+      "isolation": "BLOCK_AFFECTED_RESOURCE",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#fb2-encoded-image-over-limit"
+      ],
+      "isolatedAction": "BLOCK_RESOURCE",
+      "optionalResourceAction": "BLOCK_RESOURCE"
+    },
+    {
+      "id": "TXT.MEMORY_BUDGET",
+      "formats": [
+        "TXT"
+      ],
+      "stage": "PARSE",
+      "algorithm": "MAX_TXT_MEMORY",
+      "parameterRefs": [
+        "budgets.txtMemoryMaxBytes"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "PUBLICATION_PARSER_LIMIT",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "RESOURCE_LIMIT",
+      "scope": "PUBLICATION",
+      "trigger": "TXT_MEMORY_BUDGET_DETECTED",
+      "rationale": "Enforce the unchanged bounded processing capability.",
+      "isolation": "REQUIRE_PUBLICATION_BOUNDARY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#txt-memory-over-limit"
+      ],
+      "isolatedAction": "REJECT_PUBLICATION",
+      "optionalResourceAction": "REJECT_PUBLICATION"
+    },
+    {
+      "id": "TXT.BOUNDED_CHUNK",
+      "formats": [
+        "TXT"
+      ],
+      "stage": "PARSE",
+      "algorithm": "BOUNDED_TXT_CHUNK",
+      "parameterRefs": [
+        "budgets.txtChunkMaxCharacters"
+      ],
+      "action": "ALLOW",
+      "errorCode": null,
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "RESOURCE_LIMIT",
+      "scope": "PUBLICATION",
+      "trigger": "TXT_BOUNDED_CHUNK_DETECTED",
+      "rationale": "Enforce the unchanged bounded processing capability.",
+      "isolation": "SANITIZE_IN_MEMORY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#txt-chunk-at-limit"
+      ],
+      "isolatedAction": "ALLOW",
+      "optionalResourceAction": "ALLOW"
+    },
+    {
+      "id": "PDF.DISABLE_ACTIVE_CONTENT",
+      "formats": [
+        "PDF"
+      ],
+      "stage": "SANITIZE",
+      "algorithm": "PDF_ACTIVE_CONTENT",
+      "parameterRefs": [
+        "profiles.pdf.blockedActions"
+      ],
+      "action": "SANITIZE",
+      "errorCode": null,
+      "requiredConsumers": [
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "SECURITY",
+      "scope": "PUBLICATION",
+      "trigger": "PDF_ACTIVE_ACTION_DETECTED",
+      "rationale": "PDF JavaScript, launch, form submission and external actions can execute code or initiate automatic I/O. Disable generated action types before rendering.",
+      "isolation": "SANITIZE_IN_MEMORY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#pdf-active-actions"
+      ],
+      "isolatedAction": "SANITIZE",
+      "optionalResourceAction": "SANITIZE"
+    },
+    {
+      "id": "PDF.PAGE_GEOMETRY",
+      "formats": [
+        "PDF"
+      ],
+      "stage": "PARSE",
+      "algorithm": "PDF_PAGE_GEOMETRY",
+      "parameterRefs": [
+        "budgets.pdfPageMaxCount",
+        "profiles.pdf.requireFinitePageGeometry"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "PDF_PAGE_LIMIT",
+      "requiredConsumers": [
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "RESOURCE_LIMIT",
+      "scope": "PUBLICATION",
+      "trigger": "PDF_PAGE_GEOMETRY_DETECTED",
+      "rationale": "Enforce the unchanged bounded processing capability.",
+      "isolation": "REQUIRE_PUBLICATION_BOUNDARY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#pdf-page-over-limit"
+      ],
+      "isolatedAction": "REJECT_PUBLICATION",
+      "optionalResourceAction": "REJECT_PUBLICATION"
+    },
+    {
+      "id": "PDF.RENDER_BUDGET",
+      "formats": [
+        "PDF"
+      ],
+      "stage": "RENDER",
+      "algorithm": "PDF_RENDER_BUDGET",
+      "parameterRefs": [
+        "budgets.pdfRenderMaxPixels",
+        "budgets.pdfCanvasMaxDimension"
+      ],
+      "action": "BLOCK_RESOURCE",
+      "errorCode": "PDF_RENDER_LIMIT",
+      "requiredConsumers": [
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "RESOURCE_LIMIT",
+      "scope": "RESOURCE",
+      "trigger": "PDF_RENDER_BUDGET_DETECTED",
+      "rationale": "Enforce the unchanged bounded processing capability.",
+      "isolation": "BLOCK_AFFECTED_RESOURCE",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#pdf-render-over-limit"
+      ],
+      "isolatedAction": "BLOCK_RESOURCE",
+      "optionalResourceAction": "BLOCK_RESOURCE"
+    },
+    {
+      "id": "PDF.RANGE_PROTOCOL",
+      "formats": [
+        "PDF"
+      ],
+      "stage": "DELIVERY",
+      "algorithm": "PDF_RANGE_PROTOCOL",
+      "parameterRefs": [
+        "budgets.pdfRangeChunkBytes",
+        "budgets.pdfRangeRequestMaxBytes",
+        "budgets.pdfRangeMaxConcurrent",
+        "budgets.pdfRangeMemoryCacheMaxBytes",
+        "profiles.pdf.requireIdentityContentEncoding",
+        "profiles.pdf.requireStrongRevision",
+        "profiles.pdf.engineRequestLimit",
+        "profiles.pdf.largeRequestAction",
+        "profiles.pdf.allowWholeResponseFallback"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "PDF_RANGE_INVALID",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "INTEGRITY",
+      "scope": "PUBLICATION",
+      "trigger": "PDF_RANGE_PROTOCOL_DETECTED",
+      "rationale": "The referenced content or transport cannot provide a reliable readable resource.",
+      "isolation": "REQUIRE_PUBLICATION_BOUNDARY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#pdf-invalid-range"
+      ],
+      "isolatedAction": "REJECT_PUBLICATION",
+      "optionalResourceAction": "BLOCK_RESOURCE"
+    },
+    {
+      "id": "COMIC.PAGE_MIME",
+      "formats": [
+        "CBZ",
+        "ZIP",
+        "CBR",
+        "RAR",
+        "IMAGE_DIR"
+      ],
+      "stage": "RESOURCE",
+      "algorithm": "COMIC_PAGE_MIME",
+      "parameterRefs": [
+        "profiles.comic.allowedPageMimeTypes",
+        "profiles.comic.pageMimeTypesByExtension"
+      ],
+      "action": "BLOCK_RESOURCE",
+      "errorCode": "COMIC_MIME_MISMATCH",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "CAPABILITY",
+      "scope": "RESOURCE",
+      "trigger": "COMIC_PAGE_MIME_DETECTED",
+      "rationale": "The actual selected parser, decoder or decryption engine reported unsupported content. Metadata absence or a format/MIME mismatch alone must not trigger this rule.",
+      "isolation": "BLOCK_AFFECTED_RESOURCE",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#comic-mime-mismatch",
+        "fixtures/reader-safety-v2/manifest.json#actual-comic-decoder-unsupported"
+      ],
+      "isolatedAction": "BLOCK_RESOURCE",
+      "optionalResourceAction": "BLOCK_RESOURCE"
+    },
+    {
+      "id": "COMIC.ARCHIVE_STRUCTURE",
+      "formats": [
+        "CBZ",
+        "ZIP",
+        "CBR",
+        "RAR"
+      ],
+      "stage": "PARSE",
+      "algorithm": "COMIC_ARCHIVE_STRUCTURE",
+      "parameterRefs": [
+        "profiles.comic.archiveFatalFindings"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "COMIC_SECURITY_REJECTED",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "SECURITY",
+      "scope": "PUBLICATION",
+      "trigger": "COMIC_ARCHIVE_ROOT_ESCAPE_DETECTED",
+      "rationale": "An absolute, escaping, NUL-containing or symlink entry can cross the publication root. Block the affected page; stop the book only when that page cannot be isolated.",
+      "isolation": "BLOCK_AFFECTED_RESOURCE",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#comic-archive-path-escape"
+      ],
+      "isolatedAction": "SANITIZE",
+      "optionalResourceAction": "BLOCK_RESOURCE"
+    },
+    {
+      "id": "COMIC.PAGE_MAX_COUNT",
+      "formats": [
+        "CBZ",
+        "ZIP",
+        "CBR",
+        "RAR",
+        "IMAGE_DIR"
+      ],
+      "stage": "PARSE",
+      "algorithm": "MAX_COMIC_PAGE_COUNT",
+      "parameterRefs": [
+        "budgets.comicPageMaxCount"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "COMIC_RESOURCE_LIMIT",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "RESOURCE_LIMIT",
+      "scope": "PUBLICATION",
+      "trigger": "COMIC_PAGE_MAX_COUNT_DETECTED",
+      "rationale": "Enforce the unchanged bounded processing capability.",
+      "isolation": "REQUIRE_PUBLICATION_BOUNDARY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#comic-page-count-over-limit"
+      ],
+      "isolatedAction": "REJECT_PUBLICATION",
+      "optionalResourceAction": "REJECT_PUBLICATION"
+    },
+    {
+      "id": "COMIC.ARCHIVE_BUDGET",
+      "formats": [
+        "CBZ",
+        "ZIP",
+        "CBR",
+        "RAR",
+        "IMAGE_DIR"
+      ],
+      "stage": "PARSE",
+      "algorithm": "COMIC_ARCHIVE_BUDGET",
+      "parameterRefs": [
+        "budgets.comicExpandedMaxBytes",
+        "budgets.comicCompressionRatioMax"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "COMIC_RESOURCE_LIMIT",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "RESOURCE_LIMIT",
+      "scope": "PUBLICATION",
+      "trigger": "COMIC_ARCHIVE_BUDGET_DETECTED",
+      "rationale": "Enforce the unchanged bounded processing capability.",
+      "isolation": "REQUIRE_PUBLICATION_BOUNDARY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#comic-archive-budget-over-limit"
+      ],
+      "isolatedAction": "REJECT_PUBLICATION",
+      "optionalResourceAction": "REJECT_PUBLICATION"
+    },
+    {
+      "id": "COMIC.PAGE_MAX_BYTES",
+      "formats": [
+        "CBZ",
+        "ZIP",
+        "CBR",
+        "RAR",
+        "IMAGE_DIR"
+      ],
+      "stage": "RESOURCE",
+      "algorithm": "MAX_COMIC_PAGE_BYTES",
+      "parameterRefs": [
+        "budgets.comicPageMaxBytes"
+      ],
+      "action": "BLOCK_RESOURCE",
+      "errorCode": "COMIC_PAGE_BLOCKED",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "RESOURCE_LIMIT",
+      "scope": "RESOURCE",
+      "trigger": "COMIC_PAGE_MAX_BYTES_DETECTED",
+      "rationale": "Enforce the unchanged bounded processing capability.",
+      "isolation": "BLOCK_AFFECTED_RESOURCE",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#comic-page-over-limit"
+      ],
+      "isolatedAction": "BLOCK_RESOURCE",
+      "optionalResourceAction": "BLOCK_RESOURCE"
+    },
+    {
+      "id": "COMIC.MANIFEST_MAX_BYTES",
+      "formats": [
+        "CBZ",
+        "ZIP",
+        "CBR",
+        "RAR",
+        "IMAGE_DIR"
+      ],
+      "stage": "DELIVERY",
+      "algorithm": "MAX_COMIC_MANIFEST_BYTES",
+      "parameterRefs": [
+        "budgets.comicManifestMaxBytes"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "COMIC_RESOURCE_LIMIT",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "RESOURCE_LIMIT",
+      "scope": "PUBLICATION",
+      "trigger": "COMIC_MANIFEST_MAX_BYTES_DETECTED",
+      "rationale": "Enforce the unchanged bounded processing capability.",
+      "isolation": "REQUIRE_PUBLICATION_BOUNDARY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#comic-manifest-over-limit"
+      ],
+      "isolatedAction": "REJECT_PUBLICATION",
+      "optionalResourceAction": "REJECT_PUBLICATION"
+    },
+    {
+      "id": "COMIC.PAGE_DECODE_FAILURE",
+      "formats": [
+        "CBZ",
+        "ZIP",
+        "CBR",
+        "RAR",
+        "IMAGE_DIR"
+      ],
+      "stage": "RENDER",
+      "algorithm": "COMIC_PAGE_FAILURE",
+      "parameterRefs": [
+        "profiles.comic.singlePageDecodeFailureAction"
+      ],
+      "action": "BLOCK_RESOURCE",
+      "errorCode": "COMIC_PAGE_BLOCKED",
+      "requiredConsumers": [
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "INTEGRITY",
+      "scope": "RESOURCE",
+      "trigger": "COMIC_PAGE_DECODE_FAILURE_DETECTED",
+      "rationale": "The referenced content or transport cannot provide a reliable readable resource.",
+      "isolation": "BLOCK_AFFECTED_RESOURCE",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#comic-page-decode-failure"
+      ],
+      "isolatedAction": "BLOCK_RESOURCE",
+      "optionalResourceAction": "BLOCK_RESOURCE"
+    },
+    {
+      "id": "COMIC.MANIFEST_REVISION",
+      "formats": [
+        "CBZ",
+        "ZIP",
+        "CBR",
+        "RAR",
+        "IMAGE_DIR"
+      ],
+      "stage": "DELIVERY",
+      "algorithm": "COMIC_MANIFEST_REVISION",
+      "parameterRefs": [
+        "profiles.comic.manifestRevisionRequired"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "COMIC_RESOURCE_CHANGED",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "INTEGRITY",
+      "scope": "PUBLICATION",
+      "trigger": "COMIC_MANIFEST_REVISION_DETECTED",
+      "rationale": "The referenced content or transport cannot provide a reliable readable resource.",
+      "isolation": "REQUIRE_PUBLICATION_BOUNDARY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#comic-revision-mismatch"
+      ],
+      "isolatedAction": "REJECT_PUBLICATION",
+      "optionalResourceAction": "BLOCK_RESOURCE"
+    },
+    {
+      "id": "AUDIO.CONTAINER_MIME",
+      "formats": [
+        "AUDIO",
+        "AUDIOBOOK_DIR",
+        "AUDIOBOOK",
+        "M4B",
+        "M4A",
+        "MP3"
+      ],
+      "stage": "ADMISSION",
+      "algorithm": "AUDIO_CONTAINER_MIME",
+      "parameterRefs": [
+        "profiles.audio.containerMimeTypes"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "AUDIO_MIME_MISMATCH",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "CAPABILITY",
+      "scope": "PUBLICATION",
+      "trigger": "AUDIO_CONTAINER_MIME_DETECTED",
+      "rationale": "The actual selected parser, decoder or decryption engine reported unsupported content. Metadata absence or a format/MIME mismatch alone must not trigger this rule.",
+      "isolation": "REQUIRE_PUBLICATION_BOUNDARY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#audio-mime-mismatch",
+        "fixtures/reader-safety-v2/manifest.json#actual-audio-container-unsupported"
+      ],
+      "isolatedAction": "REJECT_PUBLICATION",
+      "optionalResourceAction": "BLOCK_RESOURCE"
+    },
+    {
+      "id": "AUDIO.ORIGINAL_MAX_BYTES",
+      "formats": [
+        "AUDIO",
+        "AUDIOBOOK_DIR",
+        "AUDIOBOOK",
+        "M4B",
+        "M4A",
+        "MP3"
+      ],
+      "stage": "ADMISSION",
+      "algorithm": "MAX_ORIGINAL_BYTES",
+      "parameterRefs": [
+        "budgets.originalMaxBytes"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "PUBLICATION_TOO_LARGE",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "RESOURCE_LIMIT",
+      "scope": "PUBLICATION",
+      "trigger": "AUDIO_ORIGINAL_MAX_BYTES_DETECTED",
+      "rationale": "Enforce the unchanged bounded processing capability.",
+      "isolation": "REQUIRE_PUBLICATION_BOUNDARY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#audio-original-over-limit"
+      ],
+      "isolatedAction": "REJECT_PUBLICATION",
+      "optionalResourceAction": "REJECT_PUBLICATION"
+    },
+    {
+      "id": "AUDIO.ENGINE_CODEC",
+      "formats": [
+        "AUDIO",
+        "AUDIOBOOK_DIR",
+        "AUDIOBOOK",
+        "M4B",
+        "M4A",
+        "MP3"
+      ],
+      "stage": "PLAYBACK",
+      "algorithm": "AUDIO_ENGINE_CODEC",
+      "parameterRefs": [
+        "profiles.audio.codecDecision"
+      ],
+      "action": "BLOCK_RESOURCE",
+      "errorCode": "ENGINE_CODEC_UNSUPPORTED",
+      "requiredConsumers": [
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "CAPABILITY",
+      "scope": "RESOURCE",
+      "trigger": "AUDIO_ENGINE_CODEC_DETECTED",
+      "rationale": "The actual selected parser, decoder or decryption engine reported unsupported content. Metadata absence or a format/MIME mismatch alone must not trigger this rule.",
+      "isolation": "BLOCK_AFFECTED_RESOURCE",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#audio-codec-unsupported"
+      ],
+      "isolatedAction": "BLOCK_RESOURCE",
+      "optionalResourceAction": "BLOCK_RESOURCE"
+    },
+    {
+      "id": "AUDIO.TRACK_AND_CHAPTER_BOUNDS",
+      "formats": [
+        "AUDIO",
+        "AUDIOBOOK_DIR",
+        "AUDIOBOOK",
+        "M4B",
+        "M4A",
+        "MP3"
+      ],
+      "stage": "PARSE",
+      "algorithm": "AUDIO_TRACK_CHAPTER_BOUNDS",
+      "parameterRefs": [
+        "budgets.audioTrackMaxCount",
+        "budgets.audioChapterMaxCount",
+        "profiles.audio.requireOrderedTrackIdentity",
+        "profiles.audio.requireFiniteNonNegativeDuration"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "AUDIO_DURATION_INVALID",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "INTEGRITY",
+      "scope": "PUBLICATION",
+      "trigger": "AUDIO_TRACK_AND_CHAPTER_BOUNDS_DETECTED",
+      "rationale": "The referenced content or transport cannot provide a reliable readable resource.",
+      "isolation": "REQUIRE_PUBLICATION_BOUNDARY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#audio-invalid-chapter"
+      ],
+      "isolatedAction": "REJECT_PUBLICATION",
+      "optionalResourceAction": "BLOCK_RESOURCE"
+    },
+    {
+      "id": "AUDIO.METADATA_BUDGET",
+      "formats": [
+        "AUDIO",
+        "AUDIOBOOK_DIR",
+        "AUDIOBOOK",
+        "M4B",
+        "M4A",
+        "MP3"
+      ],
+      "stage": "PARSE",
+      "algorithm": "AUDIO_METADATA_BUDGET",
+      "parameterRefs": [
+        "budgets.audioMetadataMaxBytes",
+        "budgets.audioArtworkMaxBytes"
+      ],
+      "action": "BLOCK_RESOURCE",
+      "errorCode": "AUDIO_METADATA_LIMIT",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "RESOURCE_LIMIT",
+      "scope": "RESOURCE",
+      "trigger": "AUDIO_METADATA_BUDGET_DETECTED",
+      "rationale": "Enforce the unchanged bounded processing capability.",
+      "isolation": "BLOCK_AFFECTED_RESOURCE",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#audio-metadata-over-limit"
+      ],
+      "isolatedAction": "BLOCK_RESOURCE",
+      "optionalResourceAction": "BLOCK_RESOURCE"
+    },
+    {
+      "id": "AUDIO.REDIRECT_POLICY",
+      "formats": [
+        "AUDIO",
+        "AUDIOBOOK_DIR",
+        "AUDIOBOOK",
+        "M4B",
+        "M4A",
+        "MP3"
+      ],
+      "stage": "DELIVERY",
+      "algorithm": "AUDIO_REDIRECT_POLICY",
+      "parameterRefs": [
+        "profiles.audio.blockedRedirectSchemes"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "AUDIO_SECURITY_REJECTED",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "SECURITY",
+      "scope": "PUBLICATION",
+      "trigger": "AUDIO_DANGEROUS_REDIRECT_DETECTED",
+      "rationale": "A transport redirect to a generated dangerous scheme can access local files or execute handlers. Refuse the redirect; the affected source cannot continue through that transport.",
+      "isolation": "REQUIRE_PUBLICATION_BOUNDARY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#audio-blocked-redirect"
+      ],
+      "isolatedAction": "SANITIZE",
+      "optionalResourceAction": "BLOCK_RESOURCE"
+    },
+    {
+      "id": "REFLOWABLE.PREPARE_XML",
+      "formats": [
+        "EPUB",
+        "FB2",
+        "MOBI",
+        "AZW",
+        "AZW3",
+        "PRC"
+      ],
+      "stage": "SANITIZE",
+      "algorithm": "PREPARE_XML",
+      "parameterRefs": [
+        "profiles.reflowable.xmlPreparation",
+        "profiles.reflowable.namedEntityCodepoints",
+        "profiles.reflowable.externalDtdResolution"
+      ],
+      "action": "SANITIZE",
+      "errorCode": null,
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "SECURITY",
+      "scope": "RESOURCE",
+      "trigger": "XML_PARSER_DEPENDENCY_DETECTED",
+      "rationale": "Neutralize external resolution and recursive expansion while preserving literal readable text.",
+      "isolation": "SANITIZE_IN_MEMORY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#xml-internal-entity",
+        "fixtures/reader-safety-v2/manifest.json#xml-external-entity",
+        "fixtures/reader-safety-v2/manifest.json#safe-ncx-doctype",
+        "fixtures/reader-safety-v2/manifest.json#safe-unknown-doctype",
+        "fixtures/reader-safety-v2/manifest.json#safe-html5-doctype",
+        "fixtures/reader-safety-v2/manifest.json#safe-no-doctype",
+        "fixtures/reader-safety-v2/manifest.json#safe-internal-text-entity",
+        "fixtures/reader-safety-v2/manifest.json#safe-unknown-entity",
+        "fixtures/reader-safety-v2/manifest.json#safe-recursive-entity",
+        "fixtures/reader-safety-v2/manifest.json#safe-masked-declaration",
+        "https://cheatsheetseries.owasp.org/cheatsheets/XML_External_Entity_Prevention_Cheat_Sheet.html"
+      ],
+      "isolatedAction": "SANITIZE",
+      "optionalResourceAction": "SANITIZE"
+    },
+    {
+      "id": "EPUB.RESOURCE_INTEGRITY",
+      "formats": [
+        "EPUB"
+      ],
+      "stage": "RESOURCE",
+      "action": "REJECT_PUBLICATION",
+      "algorithm": "ARCHIVE_RESOURCE_INTEGRITY",
+      "parameterRefs": [
+        "profiles.reflowable.archiveIntegrityFindings"
+      ],
+      "errorCode": "PUBLICATION_CORRUPT",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "INTEGRITY",
+      "scope": "PUBLICATION",
+      "trigger": "EPUB_RESOURCE_INTEGRITY_DETECTED",
+      "rationale": "A verified resource has conflicting bytes or a failed checksum; required content cannot be read reliably.",
+      "isolation": "BLOCK_AFFECTED_RESOURCE",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#archive-duplicate",
+        "fixtures/reader-safety-v2/manifest.json#epub-required-resource-corrupt"
+      ],
+      "isolatedAction": "REJECT_PUBLICATION",
+      "optionalResourceAction": "BLOCK_RESOURCE"
+    },
+    {
+      "id": "COMIC.RESOURCE_INTEGRITY",
+      "formats": [
+        "CBZ",
+        "ZIP",
+        "CBR",
+        "RAR"
+      ],
+      "stage": "RESOURCE",
+      "action": "REJECT_PUBLICATION",
+      "algorithm": "ARCHIVE_RESOURCE_INTEGRITY",
+      "parameterRefs": [
+        "profiles.comic.archiveIntegrityFindings"
+      ],
+      "errorCode": "COMIC_RESOURCE_CORRUPT",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ],
+      "classification": "INTEGRITY",
+      "scope": "PUBLICATION",
+      "trigger": "COMIC_RESOURCE_INTEGRITY_DETECTED",
+      "rationale": "A verified resource has conflicting bytes or a failed checksum; required content cannot be read reliably.",
+      "isolation": "BLOCK_AFFECTED_RESOURCE",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#comic-required-resource-corrupt"
+      ],
+      "isolatedAction": "REJECT_PUBLICATION",
+      "optionalResourceAction": "BLOCK_RESOURCE"
+    },
+    {
+      "id": "COMMON.PARSER_SNAPSHOT_MEMORY",
+      "formats": [
+        "EPUB",
+        "FB2",
+        "TXT",
+        "MOBI",
+        "AZW",
+        "AZW3",
+        "PRC"
+      ],
+      "stage": "PARSE",
+      "algorithm": "PARSER_SNAPSHOT_MEMORY",
+      "parameterRefs": [
+        "budgets.parserSnapshotMemoryMaxBytes",
+        "budgets.parserSnapshotSourceWeightMultiplier"
+      ],
+      "action": "REJECT_PUBLICATION",
+      "errorCode": "PUBLICATION_TOO_LARGE",
+      "requiredConsumers": [
+        "BACKEND"
+      ],
+      "classification": "RESOURCE_LIMIT",
+      "scope": "PUBLICATION",
+      "trigger": "PARSER_SNAPSHOT_MEMORY_LIMIT_EXCEEDED",
+      "rationale": "Preserve the existing bounded backend parser snapshot memory reservation before allocation. Source-size weighting is a retained cost estimate, not evidence of malicious content. The required parser snapshot cannot fit in the existing memory reservation; evicting optional cache entries cannot make this individual snapshot fit.",
+      "isolation": "REQUIRE_PUBLICATION_BOUNDARY",
+      "evidence": [
+        "fixtures/reader-safety-v2/manifest.json#parser-snapshot-memory-over-limit"
+      ],
+      "isolatedAction": "REJECT_PUBLICATION",
+      "optionalResourceAction": "REJECT_PUBLICATION"
+    }
   ],
   "platformDefenses": [
-    {"id": "XML_EXTERNAL_ENTITY_RESOLUTION_DISABLED", "formats": ["EPUB", "FB2"], "stage": "PARSE", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "DOCUMENT_SCRIPT_EXECUTION_DISABLED", "formats": ["EPUB", "FB2", "TXT", "MOBI", "AZW", "AZW3", "PRC"], "stage": "RENDER", "requiredConsumers": ["WEB", "ANDROID", "IOS"]},
-    {"id": "DOCUMENT_INITIATED_NETWORK_DISABLED", "formats": ["EPUB", "FB2", "TXT", "MOBI", "AZW", "AZW3", "PRC", "PDF"], "stage": "RENDER", "requiredConsumers": ["WEB", "ANDROID", "IOS"]},
-    {"id": "TRUSTED_RUNTIME_URI_PROVENANCE", "formats": ["EPUB", "FB2", "TXT", "MOBI", "AZW", "AZW3", "PRC"], "stage": "RESOURCE", "requiredConsumers": ["WEB", "ANDROID", "IOS"]},
-    {"id": "PDF_ACTIVE_ACTIONS_DISABLED", "formats": ["PDF"], "stage": "RENDER", "requiredConsumers": ["WEB", "ANDROID", "IOS"]},
-    {"id": "ORIGINAL_ARTIFACT_IMMUTABLE", "formats": ["EPUB", "FB2", "TXT", "MOBI", "AZW", "AZW3", "PRC", "PDF", "CBZ", "ZIP", "CBR", "RAR", "IMAGE_DIR", "AUDIO", "AUDIOBOOK_DIR"], "stage": "ADMISSION", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
-    {"id": "NO_SECURITY_FAILURE_PARSER_FALLBACK", "formats": ["EPUB", "FB2", "TXT", "MOBI", "AZW", "AZW3", "PRC", "PDF", "CBZ", "ZIP", "CBR", "RAR", "IMAGE_DIR", "AUDIO", "AUDIOBOOK_DIR"], "stage": "PARSE", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]}
-  ]
+    {
+      "id": "XML_EXTERNAL_ENTITY_RESOLUTION_DISABLED",
+      "formats": [
+        "EPUB",
+        "FB2"
+      ],
+      "stage": "PARSE",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "DOCUMENT_SCRIPT_EXECUTION_DISABLED",
+      "formats": [
+        "EPUB",
+        "FB2",
+        "TXT",
+        "MOBI",
+        "AZW",
+        "AZW3",
+        "PRC"
+      ],
+      "stage": "RENDER",
+      "requiredConsumers": [
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "DOCUMENT_INITIATED_NETWORK_DISABLED",
+      "formats": [
+        "EPUB",
+        "FB2",
+        "TXT",
+        "MOBI",
+        "AZW",
+        "AZW3",
+        "PRC",
+        "PDF"
+      ],
+      "stage": "RENDER",
+      "requiredConsumers": [
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "TRUSTED_RUNTIME_URI_PROVENANCE",
+      "formats": [
+        "EPUB",
+        "FB2",
+        "TXT",
+        "MOBI",
+        "AZW",
+        "AZW3",
+        "PRC"
+      ],
+      "stage": "RESOURCE",
+      "requiredConsumers": [
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "PDF_ACTIVE_ACTIONS_DISABLED",
+      "formats": [
+        "PDF"
+      ],
+      "stage": "RENDER",
+      "requiredConsumers": [
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "ORIGINAL_ARTIFACT_IMMUTABLE",
+      "formats": [
+        "EPUB",
+        "FB2",
+        "TXT",
+        "MOBI",
+        "AZW",
+        "AZW3",
+        "PRC",
+        "PDF",
+        "CBZ",
+        "ZIP",
+        "CBR",
+        "RAR",
+        "IMAGE_DIR",
+        "AUDIO",
+        "AUDIOBOOK_DIR"
+      ],
+      "stage": "ADMISSION",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    },
+    {
+      "id": "NO_SECURITY_FAILURE_PARSER_FALLBACK",
+      "formats": [
+        "EPUB",
+        "FB2",
+        "TXT",
+        "MOBI",
+        "AZW",
+        "AZW3",
+        "PRC",
+        "PDF",
+        "CBZ",
+        "ZIP",
+        "CBR",
+        "RAR",
+        "IMAGE_DIR",
+        "AUDIO",
+        "AUDIOBOOK_DIR"
+      ],
+      "stage": "PARSE",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB",
+        "ANDROID",
+        "IOS"
+      ]
+    }
+  ],
+  "defaultAction": "ALLOW"
 }

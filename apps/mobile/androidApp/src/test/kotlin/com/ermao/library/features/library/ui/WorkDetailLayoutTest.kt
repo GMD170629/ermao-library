@@ -1,6 +1,7 @@
 package com.ermao.library.features.library.ui
 
 import androidx.compose.ui.unit.dp
+import com.ermao.library.R
 import com.ermao.library.features.content.model.BookCard
 import com.ermao.library.features.content.model.BookDetailContent
 import com.ermao.library.features.content.model.ResourceContent
@@ -24,6 +25,29 @@ import kotlin.test.assertTrue
 import org.junit.Test
 
 class WorkDetailLayoutTest {
+    @Test
+    fun resourceMetadataOmitsBlankOptionalRowsAndCanHideTheSection() {
+        val resource = ResourceContent(
+            id = "resource-1",
+            title = "Resource",
+            format = " EPUB ",
+            language = " ",
+            publishedAt = "",
+            metadataSource = " ",
+            progressPercent = null,
+            readable = true,
+            selected = false,
+        )
+
+        assertEquals(
+            listOf(R.string.work_metadata_format),
+            workResourceMetadataRows(resource, Locale.US, pageCountValue = null).map { it.label },
+        )
+        assertTrue(
+            workResourceMetadataRows(resource.copy(format = ""), Locale.US, pageCountValue = null).isEmpty(),
+        )
+    }
+
     @Test
     fun workContentPresentationMatchesWebDirectoryAndResourceRules() {
         fun entry(

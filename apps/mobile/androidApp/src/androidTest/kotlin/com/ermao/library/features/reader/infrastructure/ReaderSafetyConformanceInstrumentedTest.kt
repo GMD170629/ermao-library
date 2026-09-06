@@ -57,7 +57,11 @@ class ReaderSafetyConformanceInstrumentedTest {
         )
     }
 
-    private fun evaluateProductionAdapter(evaluator: String, source: String): AndroidSafetyAdapterProbeResult =
+    private fun evaluateProductionAdapter(
+        evaluator: String,
+        source: String,
+        configuredRuleId: String,
+    ): AndroidSafetyAdapterProbeResult =
         when (evaluator) {
             "REFLOWABLE_MARKUP",
             "REFLOWABLE_NAMED_ENTITIES",
@@ -65,7 +69,7 @@ class ReaderSafetyConformanceInstrumentedTest {
             "REFLOWABLE_URI",
             "REFLOWABLE_CSS",
             "REFLOWABLE_SVG",
-            -> evaluateMarkup(evaluator, source)
+            -> evaluateMarkup(evaluator, source, configuredRuleId)
             "EPUB_ARCHIVE_CRC" -> evaluateArchiveCrc(source)
             "PDF_ACTIVE_ACTIONS" -> evaluatePdfActiveActions(source)
             "PDF_PAGE_GEOMETRY" -> evaluatePdfPageGeometry(source)
@@ -74,20 +78,27 @@ class ReaderSafetyConformanceInstrumentedTest {
             else -> error("Unsupported Android production adapter evaluator: $evaluator")
         }
 
-    private fun evaluateMarkup(evaluator: String, source: String): AndroidSafetyAdapterProbeResult {
+    private fun evaluateMarkup(
+        evaluator: String,
+        source: String,
+        configuredRuleId: String,
+    ): AndroidSafetyAdapterProbeResult {
         val facadeSource = if (evaluator == "REFLOWABLE_CSS") "<style>$source</style>" else source
         return when (val result = ReaderSafetyFacade().sanitizeMarkup(facadeSource)) {
             is ReaderSafetyMarkupAccepted -> {
                 val ruleId = when (evaluator) {
-                    "REFLOWABLE_MARKUP", "REFLOWABLE_NAMED_ENTITIES" ->
-                        ReaderSafetyRuleId.REFLOWABLE_SAFE_STANDARD_DOCTYPE
+                    "REFLOWABLE_MARKUP", "REFLOWABLE_NAMED_ENTITIES" -> ReaderSafetyRuleId.entries.single {
+                        it.wireValue == configuredRuleId
+                    }
                     "REFLOWABLE_MARKUP_SANITIZE" -> ReaderSafetyRuleId.REFLOWABLE_SANITIZE_MARKUP
                     "REFLOWABLE_URI" -> ReaderSafetyRuleId.REFLOWABLE_SANITIZE_URI
                     "REFLOWABLE_CSS" -> ReaderSafetyRuleId.REFLOWABLE_SANITIZE_CSS
                     "REFLOWABLE_SVG" -> ReaderSafetyRuleId.REFLOWABLE_SANITIZE_SVG
                     else -> error("Unsupported markup evaluator: $evaluator")
                 }
-                if (ReaderSafetyPolicy.rule(ruleId).action == ReaderSafetyAction.SANITIZE) {
+                if (ReaderSafetyPolicy.rule(ruleId).action == ReaderSafetyAction.SANITIZE &&
+                    ruleId != ReaderSafetyRuleId.REFLOWABLE_PREPARE_XML
+                ) {
                     check(result.value.changed) { "Android markup adapter did not apply the generated sanitize action" }
                 }
                 if (evaluator == "REFLOWABLE_MARKUP" || evaluator == "REFLOWABLE_NAMED_ENTITIES") {
@@ -124,8 +135,16 @@ class ReaderSafetyConformanceInstrumentedTest {
         val archive = File.createTempFile("reader-safety-crc-", ".epub", instrumentation.targetContext.cacheDir)
         try {
             archive.writeBytes(Base64.decode(source.removePrefix("base64:"), Base64.DEFAULT))
+            val safety = runBlocking { AndroidEpubArchiveSafetyPreflight.verify(archive) }
+            val expected = requireNotNull(safety.expectedFor("unused.bin"))
             return try {
-                runBlocking { AndroidEpubArchiveSafetyPreflight.verify(archive) }
+                // This is the same byte verifier used by the protected Readium Container. The
+                // fixture's original resource bytes are represented directly here because the
+                // SDK ZIP stream does not expose the corrupted-entry CRC check as a public API.
+                AndroidEpubArchiveSafetyPreflight.verifyResourceBytes(
+                    expected,
+                    "unused-entry-crc-payload".encodeToByteArray(),
+                )
                 error("Android EPUB archive preflight accepted a CRC mismatch")
             } catch (failure: ReaderSafetyException) {
                 failureResult(failure.failure.ruleId)

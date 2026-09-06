@@ -39,7 +39,7 @@ exact Reader safety policy version/digest. Equal normalization identifiers are
 valid only when this projection is equal.
 
 `normalization-v2` and its schema remain immutable historical fixtures for the
-former head-only policy. They are superseded by `normalization-v3` and must not
+former head-only policy. They are superseded by `normalization-v4` and must not
 be rewritten to make current sanitization tests pass. The v3
 `projection.sha256` value is `sha256:` followed by the SHA-256 of canonical
 projection JSON (UTF-8, sorted keys and compact separators), so formatting the
@@ -61,23 +61,35 @@ waiting for EOF. `PUBLICATION_TXT_NUL_CHARACTER` is receive-only compatibility
 for older servers; new parsers never emit it. Remove this compatibility entry
 only when support for those server versions ends.
 
-See `docs/testing/reader-parser-implementation-2026-08-28.md` for migrated
-callers, security/SDK limitations and verification evidence.
+See [Reader architecture](../../docs/mobile-reader-architecture.md) for current
+adapters and [acceptance gaps](../../docs/reader-safety-v4-verification.md) for
+outstanding security/SDK verification.
 
 ## Reader safety policy
 
 `reader-safety-policy.json` is the only semantic owner for first-party Reader
-content filtering and bounded delivery. Its v1 schema fixes the format/MIME
-inventory, budgets, algorithm and rule IDs, actions, stable error codes,
-required consumers and platform-defense capabilities for reflowable books,
-PDF, comics and audio. A platform may detect normalized facts and apply the
-generated action; it must not author another allowlist, denylist, threshold,
-MIME table, rule ID or safety error mapping.
+content filtering and bounded delivery. Schema v2 / Policy v4 defaults to ALLOW.
+Only explicit harmful behavior belongs in a security blacklist. Format and MIME
+maps select adapters; absence from a map is not evidence of harmful content.
+Existing inclusive size, compression, parser, memory and rendering limits remain
+unchanged. Generated decisions carry action, scope, classification, rule ID and
+error code. Classifications distinguish SECURITY, CAPABILITY, INTEGRITY,
+RESOURCE_LIMIT and IMPLEMENTATION.
 
-The reflowable profile includes the generated XHTML/XML named-entity codepoint
-table. Standard XHTML DOCTYPEs can therefore be accepted without resolving an
-external DTD, and every platform parses `&nbsp;`, `&copy;` and the remaining
-standard names with the same semantics while rejecting unknown names.
+XML control documents (container, OPF, NCX) and body markup use the same bounded
+XML preprocessor before their respective parsers. Arbitrary DOCTYPE names and
+PUBLIC/SYSTEM identifiers are accepted; declarations are removed only in memory
+so no parser resolves an external DTD. Ordinary internal text entities expand
+within the existing document budget. External, recursive, parameter and unknown
+references become literal text. Comments, CDATA and processing instructions are
+not executable declarations. The generated named-entity table is encoding data,
+not an admission list. No unrestricted DTD parser is introduced.
+
+Sanitize recoverable active content, isolate a damaged optional resource, and
+stop the publication only when required content is unreadable, an existing
+resource limit is exceeded, or a concrete risk cannot be isolated. Missing engine
+or platform defenses stop unprotected execution as an IMPLEMENTATION outcome.
+Never retry through an unvalidated parser or online-body fallback.
 
 For PDF, `pdfRangeRequestMaxBytes` is the maximum HTTP transport span and
 `pdfRangeMemoryCacheMaxBytes` is the maximum volatile session cache. The
@@ -105,18 +117,18 @@ fixture manifest. It emits:
   detector cannot retain a private comic MIME catalog.
 
 Use `--check` to reject generated drift. The versioned
-`fixtures/reader-safety-v1/manifest.json` binds every input and semantic
+`fixtures/reader-safety-v2/manifest.json` binds every input and semantic
 projection to SHA-256 and records the ordered rule events expected from each
 consumer. `check-reader-safety-boundaries.py` rejects raw rule IDs and private
 policy catalogs in platform Reader code.
 
-`fixtures/reader-safety-v1/conformance-suite.json` covers every policy rule and
+`fixtures/reader-safety-v2/conformance-suite.json` covers every policy rule and
 lists only implementation owners that execute each case through a real
 production facade in their designated host or physical-device gate. The manifest preserves the exact,
 ordered backend/Web/Android/iOS obligations of the authoritative rule; KMP is
 not inferred as an iOS substitute, and native physical-device gates remain
 separate release evidence.
-The backend, Web, KMP host target and Android physical-device instrumentation target write reports matching
+The backend, Web, KMP host target, Android and iOS physical-device targets must write reports matching
 `schemas/reader-safety-conformance-report-v1.schema.json`; the reports contain
 the bundled version/digest, actual terminal rule event, action/error code and
 semantic projection hash. They never derive an outcome from the fixture's
@@ -126,8 +138,8 @@ with:
 ```bash
 python3 packages/reader-contracts/verify-reader-safety-conformance.py \
   --require-consumer BACKEND --require-consumer WEB \
-  --require-consumer KMP --require-consumer ANDROID \
-  <backend-report> <web-report> <kmp-report> <android-report>
+  --require-consumer KMP --require-consumer ANDROID --require-consumer IOS \
+  <backend-report> <web-report> <kmp-report> <android-report> <ios-report>
 ```
 
 The verifier rejects missing rule coverage, stale policy bindings, fixture input
@@ -150,3 +162,27 @@ The check also verifies that iOS maps every catalog field. Web pretest runs it.
 Preference storage uses version 6; Reader progress uses v5. Web, Android and
 iOS do not migrate older preference schemas. The generator verifies that Web and
 KMP runtime versions match the catalog owner.
+
+Historical `reader-safety-v1` and `normalization-v3` fixtures remain immutable.
+The v2 suite removes the previous iOS non-audio execution exemption. Missing iOS
+adapter/device evidence is a failed release obligation, not coverage supplied by
+KMP. `POLICY_DECISION` cases test the generated decision function; they do not
+claim SDK call-path coverage. Separate integration tests must prove that native
+ContainerAsset wrappers run before PublicationOpener parses control documents.
+The normalization v4 identifier diagnoses volatile projections only; Reader v5
+opaque progress, verified original caches and download ownership are unchanged.
+
+`COMMON.PARSER_SNAPSHOT_MEMORY` captures the backend's existing parser snapshot
+memory reservation and cost estimate. Its fixtures are backend-only because
+native and Web readers do not use that snapshot implementation. All previously
+declared resource budgets retain their values; this extraction introduces no
+new admission threshold. MIME tables are adapter-selection hints: original
+download, cache reopen, audio bootstrap, comic resources and PDF Range transport
+must not use membership in those tables to refuse content.
+
+## Chapter identity
+
+The [shared chapter core](../../docs/reader-chapter-consistency.md) owns chapter
+recognition and final `chapter-N` preorder keys. Reader chapter presentation carries
+`navigationKey` (nullable); Book Detail matches it within the same resource.
+Cross-binding fixtures live in `fixtures/chapters-v1`. Empty TOCs stay empty.

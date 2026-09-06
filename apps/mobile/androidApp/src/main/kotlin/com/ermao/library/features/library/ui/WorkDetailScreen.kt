@@ -11,6 +11,7 @@ import com.ermao.library.shared.modules.workmanagement.ManagementTarget
 import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -19,6 +20,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
@@ -29,6 +31,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -46,9 +49,13 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.outlined.Sort
+import androidx.compose.material.icons.automirrored.outlined.ViewList
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.CheckCircle
@@ -74,8 +81,6 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -90,7 +95,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
@@ -105,6 +110,7 @@ import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
@@ -151,17 +157,20 @@ import com.ermao.library.ui.components.WarmPageEmptyState
 import com.ermao.library.ui.components.WarmPageErrorState
 import com.ermao.library.ui.components.WarmPageLoadingState
 import com.ermao.library.ui.components.WarmPageIconAction
+import com.ermao.library.ui.components.WarmPageActionMenu
+import com.ermao.library.ui.components.WarmPageMenuAction
+import com.ermao.library.ui.components.WarmPageMenuItem
+import com.ermao.library.ui.components.WarmPageMenuOption
 import com.ermao.library.ui.components.WarmPageModalBottomSheet
 import com.ermao.library.ui.components.WarmPageNavigationAction
 import com.ermao.library.ui.components.WarmPagePrimaryAction
 import com.ermao.library.ui.components.WarmPageScaffold
+import com.ermao.library.ui.components.WarmPageSingleChoiceMenu
 import com.ermao.library.ui.components.WarmPageSecondaryAction
 import com.ermao.library.ui.components.WarmPageSectionHeader
 import com.ermao.library.ui.components.WarmPageSegmentedControl
 import com.ermao.library.ui.components.WarmPageSnackbarHost
 import com.ermao.library.ui.components.WarmPageTextAction
-import com.ermao.library.ui.components.WarmPageFloatingActionMenu
-import com.ermao.library.ui.components.WarmPageFloatingMenuAction
 import com.ermao.library.ui.components.WarmPageTopBarRole
 import com.ermao.library.ui.components.warmPageActionHorizontalPadding
 import com.ermao.library.ui.theme.WarmPageThemeValues
@@ -544,6 +553,13 @@ private fun WorkDetailBody(
     val theme = WarmPageThemeValues
     val content = requireNotNull(workDetailPageContent(state))
     val selectedResource = state.resolveSelectedResource()
+    val metadataRows = selectedResource?.let { resource ->
+        workResourceMetadataRows(
+            resource,
+            LocalConfiguration.current.locales[0],
+            resource.pageCount?.let { pluralStringResource(R.plurals.work_metadata_page_count_value, it, it) },
+        )
+    }.orEmpty()
     val actionScope = state.detailActionScope()
     val readingResource = state.resolveReadingResource()
     val managementTarget = if (state.isBookRoot || state.selectedResourceId != null) ManagementTarget(
@@ -567,7 +583,25 @@ private fun WorkDetailBody(
     ) {
         if (state.isBookRoot || state.presentation == BookDetailPresentation.ResourceDetail) item {
             Box(Modifier.testTag("work-identity")) {
-                ManagementIdentityScope(managementTarget, managementMenuContext) { IdentityHeader(content, repository, context, onOpenFacet, coverRefreshToken) }
+                ManagementIdentityScope(managementTarget, managementMenuContext) {
+                    IdentityHeader(
+                        content = content,
+                        repository = repository,
+                        context = context,
+                        onOpenFacet = onOpenFacet,
+                        coverRefreshToken = coverRefreshToken,
+                        heroCoverWidth = if (state.presentation == BookDetailPresentation.ResourceDetail) {
+                            theme.components.workDetail.heroCoverWidth
+                        } else {
+                            theme.components.workDetail.directoryHeroCoverWidth
+                        },
+                        identityGap = if (state.presentation == BookDetailPresentation.ResourceDetail) {
+                            theme.spacing.oneAndHalf
+                        } else {
+                            theme.spacing.one
+                        },
+                    )
+                }
             }
         }
         if (state.isBookRoot && state.presentation == BookDetailPresentation.ContentBrowser && (readingResource?.progressPercent ?: 0) > 0) item {
@@ -596,7 +630,9 @@ private fun WorkDetailBody(
         if ((state.isBookRoot || state.presentation == BookDetailPresentation.ResourceDetail) && content.hasDescription) {
             item { WorkAboutSection(content) }
         }
-        if (selectedResource != null) item { SelectedResourceMetadata(selectedResource) }
+        if (selectedResource != null && metadataRows.isNotEmpty()) item {
+            SelectedResourceMetadata(selectedResource.id, metadataRows)
+        }
         if (selectedResource != null && state.contents?.currentNode?.hasChildren == true) item {
             TextButton(onClick = { onOpenSourceNode(state.contents.currentNode.sourceNodeId) }) {
                 Text(stringResource(R.string.work_contents_open_children))
@@ -761,27 +797,33 @@ private fun WorkDetailActionRow(
                     modifier = Modifier.fillMaxWidth(),
                     testTag = "work-download-action",
                 )
-                DropdownMenu(
+                WarmPageActionMenu(
+                    title = null,
                     expanded = downloadMenuExpanded,
-                    onDismissRequest = { downloadMenuExpanded = false },
-                ) {
-                    selectedDownload?.takeIf(AndroidDownloadRecord::isReadable)?.let { download ->
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.work_download_open_offline)) },
-                            onClick = {
-                                downloadMenuExpanded = false
-                                onOpenDownloadedResource(download)
-                            },
+                    actions = selectedDownload?.takeIf(AndroidDownloadRecord::isReadable)?.let {
+                        listOf(
+                            WarmPageMenuAction(
+                                value = DownloadMenuAction.OpenOffline,
+                                label = stringResource(R.string.work_download_open_offline),
+                            ),
+                            WarmPageMenuAction(
+                                value = DownloadMenuAction.Remove,
+                                label = stringResource(R.string.downloads_remove_action),
+                                destructive = true,
+                            ),
                         )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.downloads_remove_action)) },
-                            onClick = {
-                                downloadMenuExpanded = false
-                                onRequestRemoveDownload(download)
-                            },
-                        )
-                    }
-                }
+                    }.orEmpty(),
+                    onSelect = { action ->
+                        downloadMenuExpanded = false
+                        selectedDownload?.takeIf(AndroidDownloadRecord::isReadable)?.let { download ->
+                            when (action) {
+                                DownloadMenuAction.OpenOffline -> onOpenDownloadedResource(download)
+                                DownloadMenuAction.Remove -> onRequestRemoveDownload(download)
+                            }
+                        }
+                    },
+                    onDismiss = { downloadMenuExpanded = false },
+                )
             }
             WorkDetailQuickAction(
                 icon = Icons.Outlined.Check,
@@ -830,6 +872,11 @@ private fun WorkDetailActionRow(
             )
         }
     }
+}
+
+private enum class DownloadMenuAction {
+    OpenOffline,
+    Remove,
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -899,22 +946,24 @@ private fun IdentityHeader(
     context: ContentRequestContext,
     onOpenFacet: (LibraryScope, String) -> Unit,
     coverRefreshToken: Int,
+    heroCoverWidth: Dp,
+    identityGap: Dp,
 ) {
     val theme = WarmPageThemeValues
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf),
+        verticalArrangement = Arrangement.spacedBy(identityGap),
     ) {
         BookCover(
             content.book,
             repository,
             context,
             CoverRole.Hero,
-            Modifier.width(theme.components.workDetail.heroCoverWidth),
+            Modifier.width(heroCoverWidth),
             cacheRevision = coverRefreshToken,
         )
-        WorkIdentityText(content, onOpenFacet, Modifier.fillMaxWidth())
+        WorkIdentityText(content, onOpenFacet, Modifier.fillMaxWidth(), identityGap)
         ReadingSummary(content)
     }
 }
@@ -941,6 +990,7 @@ private fun WorkIdentityText(
     content: BookDetailContent,
     onOpenFacet: (LibraryScope, String) -> Unit,
     modifier: Modifier = Modifier,
+    identityGap: Dp = WarmPageThemeValues.spacing.half,
 ) {
     val theme = WarmPageThemeValues
     val presentation = workDetailIdentityPresentation(
@@ -951,7 +1001,7 @@ private fun WorkIdentityText(
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(theme.spacing.half),
+        verticalArrangement = Arrangement.spacedBy(identityGap),
     ) {
         presentation.elements.forEach { element ->
             when (element) {
@@ -979,22 +1029,27 @@ private fun WorkCreatorAndSeriesLine(
     onOpenFacet: (LibraryScope, String) -> Unit,
 ) {
     val theme = WarmPageThemeValues
+    val author = content.book.author.takeIf(String::isNotBlank)
+    val series = content.seriesName?.takeIf(String::isNotBlank)
+    if (author == null && series == null) return
     Row(
         modifier = Modifier.fillMaxWidth().testTag("work-creator-series-line"),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        FacetLink(
-            label = content.book.author,
-            enabled = content.authorFacetId != null,
-            modifier = Modifier.weight(1f, fill = false),
-        ) {
-            content.authorFacetId?.let { onOpenFacet(LibraryScope.Authors, it) }
-        }
-        content.seriesName?.let { series ->
-            Text(" / ", style = theme.typography.body, color = theme.colors.textTertiary)
+        author?.let { authorName ->
             FacetLink(
-                label = series,
+                label = authorName,
+                enabled = content.authorFacetId != null,
+                modifier = Modifier.weight(1f, fill = false),
+            ) {
+                content.authorFacetId?.let { onOpenFacet(LibraryScope.Authors, it) }
+            }
+        }
+        series?.let { seriesName ->
+            if (author != null) Text(" / ", style = theme.typography.body, color = theme.colors.textTertiary)
+            FacetLink(
+                label = seriesName,
                 enabled = content.seriesId != null,
                 modifier = Modifier.weight(1f, fill = false),
             ) {
@@ -1342,57 +1397,99 @@ private fun WorkContentBrowser(
     val theme = WarmPageThemeValues
     var sortMenuExpanded by remember { mutableStateOf(false) }
     var gridLayout by rememberSaveable(page?.bookId) { mutableStateOf(true) }
+    var pathSheetExpanded by remember(page?.bookId, page?.currentSourceNodeId) {
+        mutableStateOf(false)
+    }
     val items = page?.let { workContentItemPresentations(it, resources, bookCoverUrl) }.orEmpty()
     Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                page?.let {
-                    Text(
-                        pluralStringResource(R.plurals.work_contents_count, it.total, it.total),
-                        style = theme.typography.caption,
-                        color = theme.colors.textSecondary,
-                    )
-                }
-            }
-            TextButton(onClick = { gridLayout = !gridLayout }) {
-                Text(stringResource(if (gridLayout) R.string.work_contents_list else R.string.work_contents_grid))
-            }
-            Box {
-                TextButton(onClick = { sortMenuExpanded = true }) { Text(bookContentSortLabel(sort)) }
-                DropdownMenu(expanded = sortMenuExpanded, onDismissRequest = { sortMenuExpanded = false }) {
-                    BookContentSort.entries.forEach { option ->
-                        DropdownMenuItem(
-                            text = { Text(bookContentSortLabel(option)) },
-                            onClick = {
-                                sortMenuExpanded = false
-                                onSelectSort(option)
-                            },
-                        )
-                    }
-                }
-            }
-        }
-        page?.let { contents ->
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                workContentBreadcrumbs(bookTitle, contents).forEachIndexed { index, breadcrumb ->
-                    if (index > 0) Text("/", color = theme.colors.textSecondary)
-                    TextButton(
-                        onClick = { onOpenSourceNode(breadcrumb.sourceNodeId) },
-                        modifier = Modifier.testTag(
-                            if (breadcrumb.sourceNodeId == null) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(theme.components.controls.minimumTouchTarget),
+            horizontalArrangement = Arrangement.spacedBy(theme.spacing.half),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            page?.let { contents ->
+                val path = workContentBreadcrumbs(bookTitle, contents)
+                val currentDirectory = path.lastOrNull()?.title ?: contents.currentNode.title
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clickable(role = Role.Button) { pathSheetExpanded = true }
+                        .testTag(
+                            if (path.lastOrNull()?.sourceNodeId == null) {
                                 "work-contents-breadcrumb-root"
                             } else {
-                                "work-contents-breadcrumb-${breadcrumb.sourceNodeId}"
+                                "work-contents-breadcrumb-${contents.currentNode.sourceNodeId}"
                             },
                         ),
-                    ) {
-                        Text(breadcrumb.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    horizontalArrangement = Arrangement.spacedBy(theme.spacing.half),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+                        Text(
+                            text = currentDirectory,
+                            style = theme.typography.body,
+                            color = theme.colors.textPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = pluralStringResource(R.plurals.work_contents_count, contents.total, contents.total),
+                            style = theme.typography.caption,
+                            color = theme.colors.textSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
+                    Icon(
+                        imageVector = Icons.Filled.KeyboardArrowDown,
+                        contentDescription = stringResource(R.string.work_contents_path_title),
+                        tint = theme.colors.textSecondary,
+                        modifier = Modifier.size(theme.components.controls.iconSize),
+                    )
                 }
+            } ?: Spacer(Modifier.weight(1f))
+            WorkContentToolbarIconButton(
+                icon = if (gridLayout) Icons.AutoMirrored.Outlined.ViewList else Icons.Outlined.GridView,
+                label = stringResource(
+                    if (gridLayout) R.string.work_contents_list else R.string.work_contents_grid,
+                ),
+                onClick = { gridLayout = !gridLayout },
+                testTag = "work-contents-view-toggle",
+            )
+            Box {
+                WorkContentToolbarIconButton(
+                    icon = Icons.AutoMirrored.Outlined.Sort,
+                    label = stringResource(R.string.work_contents_sort),
+                    onClick = { sortMenuExpanded = true },
+                    testTag = "work-contents-sort",
+                )
+                WarmPageSingleChoiceMenu(
+                    title = stringResource(R.string.work_contents_sort),
+                    expanded = sortMenuExpanded,
+                    options = BookContentSort.entries.map { option ->
+                        WarmPageMenuOption(option, bookContentSortLabel(option))
+                    },
+                    selected = sort,
+                    onSelect = { option ->
+                        sortMenuExpanded = false
+                        onSelectSort(option)
+                    },
+                    onDismiss = { sortMenuExpanded = false },
+                )
             }
+        }
+        if (pathSheetExpanded && page != null) {
+            WorkContentsPathSheet(
+                breadcrumbs = workContentBreadcrumbs(bookTitle, page),
+                onSelectSourceNode = { sourceNodeId ->
+                    pathSheetExpanded = false
+                    onOpenSourceNode(sourceNodeId)
+                },
+                onDismiss = { pathSheetExpanded = false },
+            )
         }
         when {
             loading && page == null -> WarmPageLoadingState(
@@ -1480,6 +1577,127 @@ private fun WorkContentBrowser(
 }
 
 @Composable
+private fun WorkContentToolbarIconButton(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    testTag: String,
+) {
+    val theme = WarmPageThemeValues
+    Surface(
+        onClick = onClick,
+        modifier = Modifier
+            .size(theme.components.controls.minimumTouchTarget)
+            .testTag(testTag),
+        shape = RoundedCornerShape(theme.radii.control),
+        color = theme.colors.surface,
+        contentColor = theme.colors.textSecondary,
+        border = BorderStroke(theme.components.dividerThickness, theme.colors.divider),
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = theme.colors.textSecondary,
+                modifier = Modifier.size(theme.components.controls.iconSize),
+            )
+        }
+    }
+}
+
+@Composable
+internal fun WorkContentsPathSheet(
+    breadcrumbs: List<WorkContentBreadcrumbPresentation>,
+    onSelectSourceNode: (String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val theme = WarmPageThemeValues
+    WarmPageModalBottomSheet(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.testTag("work-contents-path-sheet"),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 560.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(
+                    horizontal = theme.components.page.compactGutter,
+                    vertical = theme.spacing.two,
+                ),
+            verticalArrangement = Arrangement.spacedBy(theme.spacing.half),
+        ) {
+            WarmPageSectionHeader(
+                title = stringResource(R.string.work_contents_path_title),
+                modifier = Modifier.testTag("work-contents-path-title"),
+            )
+            Column(Modifier.selectableGroup()) {
+                breadcrumbs.forEachIndexed { index, breadcrumb ->
+                    val isCurrent = index == breadcrumbs.lastIndex
+                    val currentStateDescription = if (isCurrent) {
+                        stringResource(R.string.work_contents_current_directory)
+                    } else {
+                        null
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = theme.components.controls.minimumTouchTarget)
+                            .then(
+                                if (isCurrent) {
+                                    Modifier
+                                } else {
+                                    Modifier.clickable(role = Role.RadioButton) {
+                                        onSelectSourceNode(breadcrumb.sourceNodeId)
+                                    }
+                                },
+                            )
+                            .semantics {
+                                selected = isCurrent
+                                role = Role.RadioButton
+                                currentStateDescription?.let { stateDescription = it }
+                            }
+                            .testTag(
+                                if (breadcrumb.sourceNodeId == null) {
+                                    "work-contents-path-option-root"
+                                } else {
+                                    "work-contents-path-option-${breadcrumb.sourceNodeId}"
+                                },
+                            )
+                            .padding(vertical = theme.spacing.half),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(theme.spacing.one),
+                    ) {
+                        Text(
+                            text = breadcrumb.title,
+                            style = theme.typography.body,
+                            color = if (isCurrent) theme.colors.textPrimary else theme.colors.textSecondary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Box(
+                            modifier = Modifier.size(theme.components.controls.iconSize),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (isCurrent) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Check,
+                                    contentDescription = null,
+                                    tint = theme.colors.brandAccent,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun WorkContentEntryCard(
     bookId: String,
     item: WorkContentItemPresentation,
@@ -1555,7 +1773,7 @@ private fun WorkContentEntryCard(
                         item.title,
                         modifier = Modifier.weight(1f),
                         style = theme.typography.body,
-                        maxLines = 2,
+                        maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
                     )
                     if (item.kind == WorkContentItemKind.SourceDirectory) {
@@ -1653,6 +1871,11 @@ private fun WorkResourceDetail(
         "comic", "pdf" -> R.string.work_resource_pages_title
         else -> R.string.work_resource_chapters_title
     }
+    val displayedUnitCount = if (resource.readerType.equals("reflowable", ignoreCase = true)) {
+        page?.chapterCount ?: resource.chapterCount ?: 0
+    } else {
+        page?.total ?: 0
+    }
     Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -1660,8 +1883,8 @@ private fun WorkResourceDetail(
                 Text(
                     pluralStringResource(
                         R.plurals.work_resource_units_count,
-                        page?.total ?: 0,
-                        page?.total ?: 0,
+                        displayedUnitCount,
+                        displayedUnitCount,
                     ),
                     style = theme.typography.caption,
                     color = theme.colors.textSecondary,
@@ -1740,6 +1963,7 @@ private fun WorkResourceDetail(
                     displayIndex = (page.page - 1) * page.pageSize + index + 1,
                     currentSortOrder = page.currentChapterSortOrder,
                     progress = page.progress,
+                    canOpen = !resource.readerType.equals("reflowable", true) || !unit.href.isNullOrBlank(),
                     onOpen = { onOpenUnit(unit) },
                 )
             }
@@ -1795,15 +2019,17 @@ private fun WorkReadingUnitRow(
     displayIndex: Int,
     currentSortOrder: Int?,
     progress: Double,
+    canOpen: Boolean,
     onOpen: () -> Unit,
 ) {
     val theme = WarmPageThemeValues
     val readingState = when {
+        unit.href.isNullOrBlank() -> R.string.work_chapter_unread
         currentSortOrder != null && unit.sortOrder == currentSortOrder -> R.string.work_chapter_current
         progress >= 100.0 || (currentSortOrder != null && unit.sortOrder < currentSortOrder) -> R.string.work_chapter_read
         else -> R.string.work_chapter_unread
     }
-    Surface(onClick = onOpen, color = theme.colors.surface, modifier = Modifier.fillMaxWidth()) {
+    Surface(onClick = onOpen, enabled = canOpen, color = theme.colors.surface, modifier = Modifier.fillMaxWidth()) {
         Row(
             Modifier.padding(horizontal = theme.spacing.oneAndHalf, vertical = theme.spacing.one),
             verticalAlignment = Alignment.CenterVertically,
@@ -1880,33 +2106,20 @@ private fun formatWorkDuration(durationMillis: Long?): String {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SelectedResourceMetadata(resource: ResourceContent) {
-    val locale = LocalConfiguration.current.locales[0]
-    var fullPath by remember(resource.id) { mutableStateOf<String?>(null) }
-    val rows = listOf(
-        Triple(R.string.work_metadata_format, resource.format, false),
-        Triple(R.string.work_metadata_language, resource.language, false),
-        Triple(R.string.work_metadata_published, formatWorkMetadataDate(resource.publishedAt, locale), false),
-        Triple(R.string.work_metadata_page_count, resource.pageCount?.let {
-            pluralStringResource(R.plurals.work_metadata_page_count_value, it, it)
-        }, false),
-        Triple(R.string.work_metadata_source, resource.metadataSource, false),
-        Triple(R.string.work_metadata_file_path, resource.assets.firstOrNull()?.path, true),
-    )
+private fun SelectedResourceMetadata(resourceId: String, rows: List<WorkMetadataRow>) {
+    var fullPath by remember(resourceId) { mutableStateOf<String?>(null) }
     val theme = WarmPageThemeValues
     Column(Modifier.fillMaxWidth().testTag("work-selected-volume-metadata")) {
         Text(stringResource(R.string.work_resource_metadata_title), style = theme.typography.sectionTitle)
-        rows.forEach { (label, rawValue, isFilePath) ->
-            val value = rawValue?.trim()?.takeIf(String::isNotEmpty)
-                ?: stringResource(R.string.work_metadata_missing)
+        rows.forEach { row ->
             val rowModifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = theme.components.controls.minimumTouchTarget)
                 .then(
-                    if (isFilePath && rawValue?.isNotBlank() == true) {
+                    if (row.isFilePath) {
                         Modifier.combinedClickable(
                             onClick = {},
-                            onLongClick = { fullPath = value },
+                            onLongClick = { fullPath = row.value },
                         )
                     } else {
                         Modifier
@@ -1917,15 +2130,15 @@ private fun SelectedResourceMetadata(resource: ResourceContent) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = stringResource(label),
+                    text = stringResource(row.label),
                     style = theme.typography.body,
                     color = theme.colors.textSecondary,
                 )
                 Spacer(Modifier.weight(1f))
                 Text(
-                    text = value,
+                    text = row.value,
                     style = theme.typography.body,
-                    maxLines = if (isFilePath) 1 else 2,
+                    maxLines = if (row.isFilePath) 1 else 2,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.End,
                     modifier = Modifier.weight(1.4f),
@@ -1952,6 +2165,37 @@ private fun SelectedResourceMetadata(resource: ResourceContent) {
                 }
             },
         )
+    }
+}
+
+internal data class WorkMetadataRow(
+    val label: Int,
+    val value: String,
+    val isFilePath: Boolean = false,
+)
+
+internal fun workResourceMetadataRows(
+    resource: ResourceContent,
+    locale: Locale,
+    pageCountValue: String?,
+): List<WorkMetadataRow> = buildList {
+    resource.format.trim().takeIf(String::isNotEmpty)?.let {
+        add(WorkMetadataRow(R.string.work_metadata_format, it))
+    }
+    resource.language?.trim()?.takeIf(String::isNotEmpty)?.let {
+        add(WorkMetadataRow(R.string.work_metadata_language, it))
+    }
+    formatWorkMetadataDate(resource.publishedAt, locale)?.trim()?.takeIf(String::isNotEmpty)?.let {
+        add(WorkMetadataRow(R.string.work_metadata_published, it))
+    }
+    pageCountValue?.trim()?.takeIf(String::isNotEmpty)?.let {
+        add(WorkMetadataRow(R.string.work_metadata_page_count, it))
+    }
+    resource.metadataSource?.trim()?.takeIf(String::isNotEmpty)?.let {
+        add(WorkMetadataRow(R.string.work_metadata_source, it))
+    }
+    resource.assets.firstOrNull()?.path?.trim()?.takeIf(String::isNotEmpty)?.let {
+        add(WorkMetadataRow(R.string.work_metadata_file_path, it, isFilePath = true))
     }
 }
 
@@ -2302,7 +2546,10 @@ internal fun DirectoryControlMenu(
 ) {
     if (target != null) {
         ManagementAnchor(target, menuContext = menuContext, menuExtras = { close ->
-            DropdownMenuItem(text = { Text(stringResource(R.string.work_quick_download)) },
+            WarmPageMenuItem(
+                label = stringResource(R.string.work_quick_download),
+                leadingIcon = Icons.Outlined.Download,
+                hasLeadingSlot = true,
                 onClick = { close(); onDownload() }, modifier = Modifier.testTag("work-directory-download"))
         }) { open ->
             WarmPageIconAction(icon = Icons.Outlined.MoreVert, label = stringResource(R.string.work_quick_more),
@@ -2318,14 +2565,23 @@ internal fun DirectoryControlMenu(
             onClick = { expanded = true },
             modifier = Modifier.testTag("work-directory-more"),
         )
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.work_quick_download)) },
-                leadingIcon = { Icon(Icons.Outlined.Download, contentDescription = null) },
-                onClick = { expanded = false; onDownload() },
-                modifier = Modifier.testTag("work-directory-download"),
-            )
-        }
+        WarmPageActionMenu(
+            title = null,
+            expanded = expanded,
+            actions = listOf(
+                WarmPageMenuAction(
+                    value = Unit,
+                    label = stringResource(R.string.work_quick_download),
+                    leadingIcon = Icons.Outlined.Download,
+                    testTag = "work-directory-download",
+                ),
+            ),
+            onSelect = { _: Unit ->
+                expanded = false
+                onDownload()
+            },
+            onDismiss = { expanded = false },
+        )
     }
 }
 

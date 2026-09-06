@@ -1,6 +1,7 @@
 package com.ermao.library.features.reader.infrastructure
 
 import com.ermao.library.design.GeneratedDesignTokens
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyResourceRole
 import com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -8,6 +9,56 @@ import kotlin.test.assertTrue
 import org.junit.Test
 
 class EpubContentSecurityPolicyTest {
+    @Test
+    fun archiveResourceRoleUsesExplicitControlAndReadingOrderFactsInsteadOfParserPhaseOrMime() {
+        val roles = EpubContentSecurityPolicy.ArchiveResourceRoleResolver()
+
+        roles.observeParserAccess("OPS/package.bin")
+        assertEquals(
+            ReaderSafetyResourceRole.OPTIONAL_RESOURCE,
+            roles.roleFor("OPS/package.bin"),
+        )
+        roles.markControlDocument("OPS/package.bin")
+        roles.markReadingOrder(listOf("OPS/chapter.bin"))
+
+        assertEquals(
+            ReaderSafetyResourceRole.CONTROL_DOCUMENT,
+            roles.roleFor("OPS/package.bin"),
+        )
+        assertEquals(
+            ReaderSafetyResourceRole.READING_ORDER,
+            roles.roleFor("OPS/chapter.bin"),
+        )
+        assertEquals(
+            ReaderSafetyResourceRole.OPTIONAL_RESOURCE,
+            roles.roleFor("OPS/image.bin"),
+        )
+    }
+
+    @Test
+    fun packageControlRoleComesFromProtectedContainerReference() {
+        val roles = EpubContentSecurityPolicy.ArchiveResourceRoleResolver()
+
+        roles.markContainerRootFiles(
+            """
+                <!-- <rootfile full-path="fake.opf"/> -->
+                <container><rootfiles>
+                  <rootfile full-path="OPS/package.bin"/>
+                </rootfiles></container>
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            ReaderSafetyResourceRole.CONTROL_DOCUMENT,
+            roles.roleFor("OPS/package.bin"),
+        )
+        assertEquals(
+            ReaderSafetyResourceRole.OPTIONAL_RESOURCE,
+            roles.roleFor("fake.opf"),
+        )
+    }
+
+
     @Test
     fun permitsOnlyBundledReaderFontPathsWithoutUsingAnInvalidCspHostname() {
         val decorated = EpubContentSecurityPolicy.decorateHtml(
@@ -47,8 +98,8 @@ class EpubContentSecurityPolicyTest {
     }
 
     @Test
-    fun locatorProjectionMatchesV3GoldenSemantics() {
-        val markup = checkNotNull(javaClass.getResource("/normalization-v3/chapter.xhtml"))
+    fun locatorProjectionMatchesV4GoldenSemantics() {
+        val markup = checkNotNull(javaClass.getResource("/normalization-v4/chapter.xhtml"))
             .readText()
 
         assertEquals(
@@ -101,7 +152,7 @@ class EpubContentSecurityPolicyTest {
         val decorated = EpubContentSecurityPolicy.decorateHtml(markup.encodeToByteArray()).decodeToString()
 
         assertEquals("Chapter One", projection.last()["text"])
-        assertTrue(decorated.contains("<!DOCTYPE html PUBLIC"))
+        assertTrue(!decorated.contains("<!DOCTYPE"))
         assertTrue(decorated.contains("Chapter&nbsp;One"))
     }
 
@@ -113,13 +164,13 @@ class EpubContentSecurityPolicyTest {
         assertFailsWith<Exception> {
             EpubContentSecurityPolicy.decorateHtml("<html><head></head><body><p>Text</body></html>".toByteArray())
         }
-        assertFailsWith<IllegalArgumentException> {
-            EpubContentSecurityPolicy.decorateHtml(
-                """<!DOCTYPE html SYSTEM "https://attacker.invalid/book.dtd">
-                    <html><head></head><body><p>Text</p></body></html>
-                """.trimIndent().toByteArray(),
-            )
-        }
+        val prepared = EpubContentSecurityPolicy.decorateHtml(
+            """<!DOCTYPE html SYSTEM "https://attacker.invalid/book.dtd">
+                <html><head></head><body><p>Text</p></body></html>
+            """.trimIndent().toByteArray(),
+        ).decodeToString()
+        assertTrue(!prepared.contains("<!DOCTYPE"))
+        assertTrue(prepared.contains("<p>Text</p>"))
     }
 
     @Test
@@ -141,4 +192,5 @@ class EpubContentSecurityPolicyTest {
         assertTrue(profileIndex < decorated.indexOf("<title>Real</title>"))
         assertTrue(!decorated.contains("<![CDATA[\"<head>fake</head>\"]]>"))
     }
+
 }

@@ -26,8 +26,10 @@ export type ReadiumPublication = Readonly<{
  * navigator consumes the nested hierarchy through the generated manifest.
  */
 export type LocalPublicationTocEntry = Readonly<{
-  href: string;
+  href: string | null;
   title: string;
+  /** Stable chapter-core key; absent only for legacy test/adapters. */
+  navigationKey?: string;
   children?: readonly LocalPublicationTocEntry[];
 }>;
 
@@ -106,14 +108,19 @@ type LocalTocLink = {
   href: string;
   title: string;
   type: string;
+  properties?: Readonly<Record<string, string>>;
   children?: LocalTocLink[];
 };
 
 function localTocLinks(items: readonly LocalPublicationTocEntry[]): LocalTocLink[] {
   return items.map((item) => ({
-    href: item.href,
+    // Readium Link.href is required even for a non-clickable group. An empty
+    // href keeps the group label and children in the manifest; navigation
+    // maps it back to an entry without a target.
+    href: item.href ?? '',
     title: item.title,
     type: 'application/xhtml+xml',
+    ...(item.navigationKey ? { properties: { 'shuku:navigationKey': item.navigationKey } } : {}),
     ...(item.children && item.children.length > 0
       ? { children: localTocLinks(item.children) }
       : {})
@@ -148,7 +155,9 @@ export function createLocalPublication(input: Readonly<{
     type: item.type,
     title: item.title
   }));
-  const toc = input.toc && input.toc.length > 0 ? input.toc : readingOrder;
+  // An absent authored TOC is intentionally empty. Reading order is a
+  // rendering sequence and must never become a synthetic chapter directory.
+  const toc = input.toc ?? [];
   const reflowable = input.layout !== 'fixed';
   const manifest = Manifest.deserialize({
     metadata: {

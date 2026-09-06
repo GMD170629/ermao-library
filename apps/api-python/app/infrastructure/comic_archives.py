@@ -8,7 +8,7 @@ import shutil
 import stat
 import zipfile
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import BinaryIO, Literal, Self, TypeAlias, cast
 from xml.etree import ElementTree
 
@@ -18,12 +18,22 @@ import rarfile  # type: ignore[import-not-found,import-untyped]
 from app.contracts.reader_safety_policy_generated import (
     ReaderSafetyAction,
     ReaderSafetyBudgetName,
+    ReaderSafetyDecision,
+    ReaderSafetyDecisionContext,
+    ReaderSafetyFormat,
+    ReaderSafetyResourceRole,
     ReaderSafetyRuleId,
+    evaluate_reader_safety,
     reader_safety_budget,
     reader_safety_comic_page_mime_type,
     reader_safety_rule,
 )
 from app.core.natural_sort import natural_sort_key
+from app.infrastructure.archive_integrity import (
+    UnsafeArchivePathError,
+    normalize_archive_path,
+    zip_entry_data_span,
+)
 from app.modules.imports.application.comic_types import (
     ComicArchiveInspection,
     ComicInfoMetadata,
@@ -57,17 +67,92 @@ def _comic_policy_error(
     rule_id: ReaderSafetyRuleId,
     message: str,
     error_type: type[ComicArchiveError] = ComicArchiveInvalidError,
+    *,
+    expected_action: ReaderSafetyAction | None = None,
+    optional: bool = False,
 ) -> ComicArchiveError:
-    rule = reader_safety_rule(rule_id)
+    decision = _comic_policy_decision(rule_id, optional=optional)
+    if expected_action is not None and decision.action is not expected_action:
+        raise RuntimeError(
+            f"generated comic rule {rule_id.value} has an unexpected action"
+        )
     if (
-        rule.action is not ReaderSafetyAction.REJECT_PUBLICATION
-        or rule.error_code is None
+        decision.action
+        not in {
+            ReaderSafetyAction.BLOCK_RESOURCE,
+            ReaderSafetyAction.REJECT_PUBLICATION,
+        }
+        or decision.error_code is None
+        or decision.rule_id is None
     ):
         raise RuntimeError(f"generated comic rule {rule_id.value} is not a rejection")
     return error_type(
         message,
-        code=rule.error_code.value,
-        rule_id=rule.id.value,
+        code=decision.error_code.value,
+        rule_id=decision.rule_id.value,
+    )
+
+
+def _comic_policy_decision(
+    rule_id: ReaderSafetyRuleId,
+    *,
+    optional: bool,
+) -> ReaderSafetyDecision:
+    rule = reader_safety_rule(rule_id)
+    role = (
+        ReaderSafetyResourceRole.OPTIONAL_RESOURCE
+        if optional
+        else ReaderSafetyResourceRole.READING_ORDER
+    )
+    decisions = evaluate_reader_safety(
+        ReaderSafetyDecisionContext(
+            format=ReaderSafetyFormat.CBZ,
+            resource_role=role,
+            facts=(rule.trigger,),
+            enforcement_available=True,
+            can_isolate=False,
+        )
+    )
+    decision = next((item for item in decisions if item.rule_id is rule_id), None)
+    if decision is None:
+        raise RuntimeError(f"generated comic rule {rule_id.value} is unavailable")
+    return decision
+
+
+def _comic_integrity_error(
+    message: str,
+    *,
+    optional: bool,
+) -> ComicArchiveInvalidError:
+    decision = _comic_policy_decision(
+        ReaderSafetyRuleId.COMIC_RESOURCE_INTEGRITY,
+        optional=optional,
+    )
+    if decision.classification != "INTEGRITY" or decision.error_code is None:
+        raise RuntimeError("generated comic integrity rule is inconsistent")
+    expected_action = (
+        ReaderSafetyAction.BLOCK_RESOURCE
+        if optional
+        else ReaderSafetyAction.REJECT_PUBLICATION
+    )
+    if decision.action is not expected_action:
+        raise RuntimeError("generated comic integrity action is inconsistent")
+    return ComicArchiveInvalidError(
+        message,
+        code=decision.error_code.value,
+        rule_id=decision.rule_id.value if decision.rule_id is not None else None,
+    )
+
+
+def _comic_capability_error(
+    message: str,
+    error_type: type[ComicArchiveError] = ComicArchiveInvalidError,
+) -> ComicArchiveError:
+    return _comic_policy_error(
+        ReaderSafetyRuleId.COMIC_PAGE_MIME,
+        message,
+        error_type,
+        expected_action=ReaderSafetyAction.BLOCK_RESOURCE,
     )
 
 
@@ -76,28 +161,24 @@ def _title_from_file(path: Path) -> str:
 
 
 def _safe_entry_name(name: str) -> bool:
-    if "\\" in name or "\x00" in name:
+    try:
+        normalize_archive_path(name)
+    except UnsafeArchivePathError:
         return False
-    path = PurePosixPath(name)
-    normalized = str(path)
-    return bool(
-        name
-        and not name.startswith("/")
-        and not re.match(r"^[a-zA-Z]:", name)
-        and all(part not in {"", ".", ".."} for part in path.parts)
-        and not normalized.startswith("../")
-        and "/../" not in normalized
-    )
+    return True
+
+
+def _canonical_entry_name(name: str) -> str:
+    return normalize_archive_path(name)
 
 
 def _ignored_entry(name: str) -> bool:
-    parts = name.split("/")
+    parts = _canonical_entry_name(name).split("/")
     last = parts[-1]
     return (
         "__MACOSX" in parts
         or last in {".DS_Store", "Thumbs.db"}
         or last.startswith("._")
-        or any(part.startswith(".") for part in parts)
     )
 
 
@@ -139,12 +220,19 @@ MAX_COMIC_INFO_BYTES = reader_safety_budget(
     ReaderSafetyBudgetName.COMIC_MANIFEST_MAX_BYTES
 )
 MAX_COMIC_PAGES = reader_safety_budget(ReaderSafetyBudgetName.COMIC_PAGE_MAX_COUNT)
+MAX_COMIC_PAGE_BYTES = reader_safety_budget(ReaderSafetyBudgetName.COMIC_PAGE_MAX_BYTES)
 MAX_COMIC_UNCOMPRESSED_BYTES = reader_safety_budget(
     ReaderSafetyBudgetName.COMIC_EXPANDED_MAX_BYTES
 )
 MAX_COMIC_COMPRESSION_RATIO = reader_safety_budget(
     ReaderSafetyBudgetName.COMIC_COMPRESSION_RATIO_MAX
 )
+
+
+def comic_page_exceeds_limit(size: int) -> bool:
+    """Return whether a comic page must be blocked before its body is read."""
+
+    return size > MAX_COMIC_PAGE_BYTES
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,9 +244,17 @@ class ComicArchiveEntry:
     compressed_size: int
     encrypted: bool
     unix_mode: int
+    data_span: tuple[int, int] | None = None
 
     def is_dir(self) -> bool:
         return self.directory
+
+
+@dataclass(frozen=True, slots=True)
+class _ComicArchiveValidation:
+    integrity_entries: frozenset[str]
+    encrypted_entries: frozenset[str]
+    quarantined_entries: frozenset[str]
 
 
 ArchiveImplementation: TypeAlias = zipfile.ZipFile | rarfile.RarFile
@@ -187,15 +283,29 @@ class ComicArchiveStream:
                 "系统缺少 RAR 解压器，请安装 unrar 或 unar"
             ) from exc
         except (rarfile.PasswordRequired, rarfile.RarWrongPassword) as exc:
-            raise _comic_policy_error(
-                ReaderSafetyRuleId.COMIC_ARCHIVE_STRUCTURE,
+            raise _comic_capability_error(
                 "RAR 漫画压缩包需要密码",
                 ComicArchiveEncryptedError,
             ) from exc
         except rarfile.Error as exc:
-            raise _comic_policy_error(
-                ReaderSafetyRuleId.COMIC_ARCHIVE_STRUCTURE,
-                "RAR 漫画压缩包已损坏或不受支持",
+            raise _comic_integrity_error(
+                "RAR 漫画压缩包条目校验失败",
+                optional=True,
+            ) from exc
+        except RuntimeError as exc:
+            if "encrypt" in str(exc).casefold() or "password" in str(exc).casefold():
+                raise _comic_capability_error(
+                    "漫画压缩包需要密码",
+                    ComicArchiveEncryptedError,
+                ) from exc
+            raise _comic_integrity_error(
+                "漫画压缩包条目校验失败",
+                optional=True,
+            ) from exc
+        except zipfile.BadZipFile as exc:
+            raise _comic_integrity_error(
+                "漫画压缩包条目校验失败",
+                optional=True,
             ) from exc
 
 
@@ -214,8 +324,7 @@ class ComicArchive:
                 archive = rarfile.RarFile(path)
                 if archive.needs_password():
                     archive.close()
-                    raise _comic_policy_error(
-                        ReaderSafetyRuleId.COMIC_ARCHIVE_STRUCTURE,
+                    raise _comic_capability_error(
                         "RAR 漫画压缩包需要密码",
                         ComicArchiveEncryptedError,
                     )
@@ -231,8 +340,7 @@ class ComicArchive:
             except ComicArchiveError:
                 raise
             except (rarfile.PasswordRequired, rarfile.RarWrongPassword) as exc:
-                raise _comic_policy_error(
-                    ReaderSafetyRuleId.COMIC_ARCHIVE_STRUCTURE,
+                raise _comic_capability_error(
                     "RAR 漫画压缩包需要密码",
                     ComicArchiveEncryptedError,
                 ) from exc
@@ -277,6 +385,7 @@ class ComicArchive:
 
     def getinfo(self, name: str) -> ComicArchiveEntry:
         try:
+            self._raise_if_ambiguous(name)
             return self._entry(self._archive.getinfo(name))
         except (KeyError, rarfile.NoRarEntry) as exc:
             raise KeyError(name) from exc
@@ -286,6 +395,7 @@ class ComicArchive:
     ) -> ComicArchiveStream:
         name = entry.filename if isinstance(entry, ComicArchiveEntry) else entry
         try:
+            self._raise_if_ambiguous(name)
             source = cast(BinaryIO, self._archive.open(name, mode))
             return ComicArchiveStream(source)
         except rarfile.RarCannotExec as exc:
@@ -293,39 +403,76 @@ class ComicArchive:
                 "系统缺少 RAR 解压器，请安装 unrar 或 unar"
             ) from exc
         except (rarfile.PasswordRequired, rarfile.RarWrongPassword) as exc:
-            raise ComicArchiveEncryptedError("RAR 漫画压缩包需要密码") from exc
+            raise _comic_capability_error(
+                "RAR 漫画压缩包需要密码",
+                ComicArchiveEncryptedError,
+            ) from exc
         except rarfile.Error as exc:
-            raise ComicArchiveInvalidError("RAR 漫画压缩包已损坏或不受支持") from exc
+            raise _comic_integrity_error(
+                "漫画压缩包条目校验失败",
+                optional=True,
+            ) from exc
+        except RuntimeError as exc:
+            if "encrypt" in str(exc).casefold() or "password" in str(exc).casefold():
+                raise _comic_capability_error(
+                    "漫画压缩包需要密码",
+                    ComicArchiveEncryptedError,
+                ) from exc
+            raise _comic_integrity_error(
+                "漫画压缩包条目校验失败",
+                optional=True,
+            ) from exc
+        except zipfile.BadZipFile as exc:
+            raise _comic_integrity_error(
+                "漫画压缩包条目校验失败",
+                optional=True,
+            ) from exc
 
     def read(self, entry: str | ComicArchiveEntry) -> bytes:
         with self.open(entry) as source:
             return source.read()
 
-    def validate_integrity(self) -> None:
-        """Verify archive CRCs without publishing any extracted artifact."""
-
-        try:
-            if isinstance(self._archive, zipfile.ZipFile):
-                failed_entry = self._archive.testzip()
-                if failed_entry is not None:
-                    raise _comic_policy_error(
-                        ReaderSafetyRuleId.COMIC_ARCHIVE_STRUCTURE,
-                        "漫画压缩包包含校验失败的条目",
-                    )
-                return
-            self._archive.testrar()
-        except ComicArchiveError:
-            raise
-        except (zipfile.BadZipFile, rarfile.BadRarFile, rarfile.Error) as exc:
+    def _raise_if_ambiguous(self, name: str) -> None:
+        if not _safe_entry_name(name):
             raise _comic_policy_error(
                 ReaderSafetyRuleId.COMIC_ARCHIVE_STRUCTURE,
-                "漫画压缩包校验失败",
-            ) from exc
+                "漫画压缩包包含不安全路径",
+                optional=True,
+            )
+        canonical_name = _canonical_entry_name(name)
+        matches = [
+            info
+            for info in self._archive.infolist()
+            if _safe_entry_name(info.filename)
+            and _canonical_entry_name(info.filename) == canonical_name
+        ]
+        if len(matches) > 1:
+            raise _comic_integrity_error(
+                "漫画压缩包包含规范化重复路径",
+                optional=True,
+            )
+        if any(
+            stat.S_ISLNK(int(getattr(info, "external_attr", 0)) >> 16)
+            for info in matches
+        ):
+            raise _comic_policy_error(
+                ReaderSafetyRuleId.COMIC_ARCHIVE_STRUCTURE,
+                "漫画压缩包包含符号链接",
+                optional=True,
+            )
 
-    @staticmethod
-    def _entry(info: zipfile.ZipInfo | rarfile.RarInfo) -> ComicArchiveEntry:
+    def _entry(
+        self,
+        info: zipfile.ZipInfo | rarfile.RarInfo,
+    ) -> ComicArchiveEntry:
         flag_bits = int(getattr(info, "flag_bits", 0))
         external_attr = int(getattr(info, "external_attr", 0))
+        data_span = (
+            zip_entry_data_span(self._archive, info)
+            if isinstance(self._archive, zipfile.ZipFile)
+            and isinstance(info, zipfile.ZipInfo)
+            else None
+        )
         return ComicArchiveEntry(
             filename=info.filename,
             file_size=int(info.file_size),
@@ -334,6 +481,7 @@ class ComicArchive:
             compressed_size=int(getattr(info, "compress_size", info.file_size)),
             encrypted=bool(flag_bits & 0x1),
             unix_mode=(external_attr >> 16) & 0xFFFF,
+            data_span=data_span,
         )
 
 
@@ -347,7 +495,7 @@ def inspect_comic_archive(
     fmt = path.suffix.lower().removeprefix(".")
     with open_comic_archive(path) as archive:
         all_entries = archive.infolist()
-        _validate_comic_entries(all_entries)
+        validation = _validate_comic_entries(all_entries)
         entries = [
             info
             for info in all_entries
@@ -356,17 +504,71 @@ def inspect_comic_archive(
         images = [
             info
             for info in entries
-            if _comic_page_mime_type(info.filename) is not None
-            and not _ignored_entry(info.filename)
+            if not _ignored_entry(info.filename)
+            and Path(info.filename).name.casefold() != "comicinfo.xml"
+            and _canonical_entry_name(info.filename)
+            not in validation.quarantined_entries
         ]
         if not images:
-            raise ValueError("漫画压缩包内没有可导入的图片")
+            raise _comic_integrity_error(
+                "漫画压缩包没有可读取的完整页面", optional=False
+            )
         if len(images) > MAX_COMIC_PAGES:
             raise _comic_policy_error(
                 ReaderSafetyRuleId.COMIC_PAGE_MAX_COUNT,
                 "漫画压缩包页数超过安全限制",
             )
         images.sort(key=lambda item: natural_sort_key(item.filename))
+        readable_images: list[ComicArchiveEntry] = []
+        integrity_failures = False
+        capability_failures = False
+        page_limit_failure: ComicArchiveError | None = None
+        for info in images:
+            if info.file_size > reader_safety_budget(
+                ReaderSafetyBudgetName.COMIC_PAGE_MAX_BYTES
+            ):
+                page_limit_failure = _comic_policy_error(
+                    ReaderSafetyRuleId.COMIC_PAGE_MAX_BYTES,
+                    "漫画页面超过阅读器的资源限制。",
+                    optional=True,
+                )
+                continue
+            canonical_name = _canonical_entry_name(info.filename)
+            if canonical_name in validation.integrity_entries:
+                integrity_failures = True
+                continue
+            if canonical_name in validation.encrypted_entries:
+                capability_failures = True
+                continue
+            try:
+                archive.read(info)
+            except ComicArchiveBackendUnavailableError:
+                raise
+            except ComicArchiveEncryptedError:
+                capability_failures = True
+            except ComicArchiveError as error:
+                if getattr(error, "rule_id", None) == (
+                    ReaderSafetyRuleId.COMIC_PAGE_MIME.value
+                ):
+                    capability_failures = True
+                else:
+                    integrity_failures = True
+            except (OSError, RuntimeError, zipfile.BadZipFile):
+                integrity_failures = True
+            else:
+                readable_images.append(info)
+        if not readable_images:
+            if page_limit_failure is not None:
+                raise page_limit_failure
+            if integrity_failures:
+                raise _comic_integrity_error(
+                    "漫画压缩包没有可读取的完整页面",
+                    optional=False,
+                )
+            if capability_failures:
+                raise _comic_capability_error("漫画页面解码器不支持此内容")
+            raise ValueError("漫画压缩包内没有可导入的图片")
+        images = readable_images
         comic_info_entry = next(
             (
                 info
@@ -376,11 +578,16 @@ def inspect_comic_archive(
             ),
             None,
         )
-        comic_info = (
-            _parse_comic_info(archive.read(comic_info_entry).decode("utf-8", "replace"))
-            if comic_info_entry
-            else None
-        )
+        comic_info: ComicInfoMetadata | None = None
+        if comic_info_entry is not None:
+            try:
+                comic_info = _parse_comic_info(
+                    archive.read(comic_info_entry).decode("utf-8", "replace")
+                )
+            except (ComicArchiveError, OSError, UnicodeError):
+                # ComicInfo is optional metadata; a bad copy must not hide
+                # otherwise readable pages.
+                comic_info = None
         pages: list[ComicPageInspection] = [
             {
                 "index": index + 1,
@@ -420,7 +627,6 @@ def inspect_comic_archive(
         }
         if comic_info:
             raw_metadata["comicInfo"] = comic_info.get("raw") or {}
-        archive.validate_integrity()
         return {
             "title": (comic_info or {}).get("title")
             or _title_from_file(Path(original_name or path.name)),
@@ -441,35 +647,18 @@ def _comic_page_mime_type(filename: str) -> str | None:
     return reader_safety_comic_page_mime_type(Path(filename).suffix)
 
 
-def _validate_comic_entries(entries: list[ComicArchiveEntry]) -> None:
-    """Fail closed before indexing a comic whose archive metadata is unsafe."""
+def _validate_comic_entries(
+    entries: list[ComicArchiveEntry],
+) -> _ComicArchiveValidation:
+    """Validate whole-archive bounds and classify entry-level findings."""
 
     names: set[str] = set()
+    integrity_entries: set[str] = set()
+    encrypted_entries: set[str] = set()
+    quarantined_entries: set[str] = set()
     total_size = 0
+    spans: list[tuple[int, int, str]] = []
     for entry in entries:
-        if entry.encrypted:
-            raise _comic_policy_error(
-                ReaderSafetyRuleId.COMIC_ARCHIVE_STRUCTURE,
-                "加密漫画压缩包不受支持",
-                ComicArchiveEncryptedError,
-            )
-        if not _safe_entry_name(entry.filename):
-            raise _comic_policy_error(
-                ReaderSafetyRuleId.COMIC_ARCHIVE_STRUCTURE,
-                "漫画压缩包包含不安全路径",
-            )
-        canonical_name = str(PurePosixPath(entry.filename)).casefold()
-        if canonical_name in names:
-            raise _comic_policy_error(
-                ReaderSafetyRuleId.COMIC_ARCHIVE_STRUCTURE,
-                "漫画压缩包包含规范化重复路径",
-            )
-        names.add(canonical_name)
-        if entry.unix_mode and stat.S_ISLNK(entry.unix_mode):
-            raise _comic_policy_error(
-                ReaderSafetyRuleId.COMIC_ARCHIVE_STRUCTURE,
-                "漫画压缩包包含符号链接",
-            )
         total_size += entry.file_size
         if total_size > MAX_COMIC_UNCOMPRESSED_BYTES:
             raise _comic_policy_error(
@@ -485,6 +674,35 @@ def _validate_comic_entries(entries: list[ComicArchiveEntry]) -> None:
                 ReaderSafetyRuleId.COMIC_ARCHIVE_BUDGET,
                 "漫画压缩包压缩比超过安全限制",
             )
+        try:
+            canonical_name = _canonical_entry_name(entry.filename)
+        except UnsafeArchivePathError:
+            # No member is extracted. An unaddressable entry is isolated while
+            # its declared bytes still count toward the archive-wide budgets.
+            continue
+        if canonical_name in names:
+            integrity_entries.add(canonical_name)
+        names.add(canonical_name)
+        if entry.encrypted:
+            encrypted_entries.add(canonical_name)
+        if entry.unix_mode and stat.S_ISLNK(entry.unix_mode):
+            quarantined_entries.add(canonical_name)
+        if entry.data_span is not None and entry.data_span[0] < entry.data_span[1]:
+            spans.append((*entry.data_span, canonical_name))
+    spans.sort(key=lambda item: (item[0], item[1]))
+    previous_end = -1
+    for start, end, canonical_name in spans:
+        if start < previous_end:
+            integrity_entries.add(canonical_name)
+            for previous_start, previous_end_value, previous_name in spans:
+                if previous_start < end and start < previous_end_value:
+                    integrity_entries.add(previous_name)
+        previous_end = max(previous_end, end)
+    return _ComicArchiveValidation(
+        integrity_entries=frozenset(integrity_entries),
+        encrypted_entries=frozenset(encrypted_entries),
+        quarantined_entries=frozenset(quarantined_entries),
+    )
 
 
 def extract_comic_cover(
@@ -499,15 +717,22 @@ def extract_comic_cover(
     target = (
         storage_root / "books" / book_id / resource_id / asset_id / f"cover{extension}"
     )
-    target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(f"{target.suffix}.part")
     try:
-        with (
-            open_comic_archive(source_path) as archive,
-            archive.open(entry_name, "r") as source,
-            temporary.open("wb") as destination,
-        ):
-            shutil.copyfileobj(source, destination, length=1024 * 1024)
+        with open_comic_archive(source_path) as archive:
+            info = archive.getinfo(entry_name)
+            if comic_page_exceeds_limit(info.file_size):
+                raise _comic_policy_error(
+                    ReaderSafetyRuleId.COMIC_PAGE_MAX_BYTES,
+                    "漫画封面超过阅读器的资源限制",
+                    optional=True,
+                )
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with (
+                archive.open(info, "r") as source,
+                temporary.open("wb") as destination,
+            ):
+                shutil.copyfileobj(source, destination, length=1024 * 1024)
         temporary.replace(target)
     except Exception:
         temporary.unlink(missing_ok=True)

@@ -28,7 +28,7 @@ test('adds a cache-busting retry marker without changing the original preview ro
 
 test('builds exact chapter, page and stable audio track links', () => {
   const epub = resource({ format: 'EPUB' });
-  assert.equal(resourceDetailItemHref(epub, { id: 'chapter', unitType: 'chapter', title: 'One', sortOrder: 0, assetId: null, mediaType: null, href: 'Text/one.xhtml', level: 0 }), '/reader/resource-1?href=Text%2Fone.xhtml');
+  assert.equal(resourceDetailItemHref(epub, { id: 'chapter', unitType: 'chapter', title: 'One', sortOrder: 0, assetId: null, mediaType: null, href: 'Text/one.xhtml', navigationKey: 'chapter-0', level: 0 }), '/reader/resource-1?chapterKey=chapter-0');
   assert.equal(resourceDetailItemHref(resource({ format: 'PDF', readerType: 'pdf' }), { id: 'page', unitType: 'page', title: '', sortOrder: 8, assetId: null, mediaType: 'application/pdf', pageNumber: 9, previewUrl: '/preview' }), '/reader/resource-1?page=9');
   assert.equal(resourceDetailItemHref(resource({ format: 'AUDIOBOOK_DIR', readerType: 'audio' }), { id: 'track', unitType: 'track', title: 'Track', sortOrder: 0, assetId: 'asset 1', mediaType: 'audio/mpeg', durationMs: null, discNumber: null, trackNumber: null }), '/listen/resource-1?assetId=asset%201');
 });

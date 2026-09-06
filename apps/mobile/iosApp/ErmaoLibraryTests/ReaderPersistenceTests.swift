@@ -2,10 +2,94 @@ import CryptoKit
 import Foundation
 import XCTest
 @preconcurrency import ErmaoShared
+@preconcurrency import ReadiumShared
 @testable import ErmaoLibrary
 
 final class ReaderPersistenceTests: XCTestCase {
     private var temporaryRoot: URL!
+
+    func testPublicationContentsPreserveNestedChaptersAndAnchors() throws {
+        let links = [
+            Link(
+                href: "one.xhtml",
+                title: "Volume",
+                properties: Properties(["shuku:navigationKey": .string("chapter-0")]),
+                children: [
+                    Link(
+                        href: "one.xhtml",
+                        title: "First chapter",
+                        properties: Properties(["shuku:navigationKey": .string("chapter-1")]),
+                        children: [
+                            Link(
+                                href: "one.xhtml#section",
+                                title: "Section",
+                                properties: Properties(["shuku:navigationKey": .string("chapter-2")])
+                            ),
+                        ]
+                    ),
+                    Link(
+                        href: "two.xhtml#chapter",
+                        title: "Second chapter",
+                        properties: Properties(["shuku:navigationKey": .string("chapter-3")])
+                    ),
+                ]
+            ),
+            Link(
+                href: "appendix.xhtml",
+                title: "Appendix",
+                properties: Properties(["shuku:navigationKey": .string("chapter-4")])
+            ),
+        ]
+        let entries = try iosReaderTableOfContents(links)
+        XCTAssertEqual(entries.map(\.title), ["Volume", "First chapter", "Section", "Second chapter", "Appendix"])
+        XCTAssertEqual(entries.map(\.depth), [0, 1, 2, 1, 0])
+        XCTAssertEqual(entries.map(\.href), ["one.xhtml", "one.xhtml", "one.xhtml#section", "two.xhtml#chapter", "appendix.xhtml"])
+        XCTAssertEqual(entries.map(\.id), ["chapter-0", "chapter-1", "chapter-2", "chapter-3", "chapter-4"])
+        XCTAssertEqual(entries.map(\.navigationKey), ["chapter-0", "chapter-1", "chapter-2", "chapter-3", "chapter-4"])
+        XCTAssertEqual(Set(entries.map(\.id)).count, entries.count)
+    }
+
+    func testPublicationContentsRejectMissingCoreNavigationKey() {
+        XCTAssertThrowsError(
+            try iosReaderTableOfContents([
+                Link(href: "untitled.xhtml", title: "Untitled"),
+            ])
+        )
+    }
+
+    func testPublicationContentsRetainGroupWithoutNavigationTarget() throws {
+        let entries = try iosReaderTableOfContents([
+            Link(
+                href: "",
+                title: "Volume",
+                properties: Properties(["shuku:navigationKey": .string("chapter-0")]),
+                children: [
+                    Link(
+                        href: "one.xhtml",
+                        title: "First chapter",
+                        properties: Properties(["shuku:navigationKey": .string("chapter-1")])
+                    ),
+                ]
+            ),
+        ])
+
+        XCTAssertEqual(entries.map(\.id), ["chapter-0", "chapter-1"])
+        XCTAssertNil(entries[0].href)
+        XCTAssertEqual(entries[1].href, "one.xhtml")
+    }
+
+    func testPublicationContentsUseCanonicalTitlesAndKeys() throws {
+        let entries = try iosReaderTableOfContents([
+            Link(
+                href: "untitled.xhtml",
+                title: "Canonical title",
+                properties: Properties(["shuku:navigationKey": .string("chapter-7")])
+            ),
+        ])
+
+        XCTAssertEqual(entries.map(\.title), ["Canonical title"])
+        XCTAssertEqual(entries.map(\.id), ["chapter-7"])
+    }
 
     override func setUpWithError() throws {
         #if targetEnvironment(simulator)
@@ -48,6 +132,35 @@ final class ReaderPersistenceTests: XCTestCase {
         )
         XCTAssertEqual(adjacent.previous?.id, "one")
         XCTAssertEqual(adjacent.next?.id, "three")
+    }
+
+    func testProgressArrowsUseLocatorWhenChapterTitlesRepeat() {
+        let chapters = [
+            IosReaderTocEntry(id: "one", title: "Repeated", href: "book.xhtml#one", depth: 0),
+            IosReaderTocEntry(id: "two", title: "Repeated", href: "book.xhtml#two", depth: 0),
+            IosReaderTocEntry(id: "three", title: "Next", href: "next.xhtml", depth: 0),
+        ]
+
+        let adjacent = resolveIosReaderAdjacentChapters(entries: chapters, currentHref: "book.xhtml#two")
+
+        XCTAssertEqual(adjacent.previous?.id, "one")
+        XCTAssertEqual(adjacent.next?.id, "three")
+    }
+
+    func testProgressArrowsSkipGroupsAndLeaveAmbiguousTargetsUnknown() {
+        let chapters = [
+            IosReaderTocEntry(id: "chapter-0", title: "Part", href: nil, depth: 0),
+            IosReaderTocEntry(id: "chapter-1", title: "One", href: "one.xhtml", depth: 1),
+            IosReaderTocEntry(id: "chapter-2", title: "Part II", href: nil, depth: 0),
+            IosReaderTocEntry(id: "chapter-3", title: "Two", href: "two.xhtml#start", depth: 1),
+            IosReaderTocEntry(id: "chapter-4", title: "Also Two", href: "two.xhtml#start", depth: 2),
+        ]
+        let first = resolveIosReaderAdjacentChapters(entries: chapters, currentHref: "one.xhtml")
+        XCTAssertNil(first.previous)
+        XCTAssertEqual(first.next?.id, "chapter-3")
+        let ambiguous = resolveIosReaderAdjacentChapters(entries: chapters, currentHref: "two.xhtml#start")
+        XCTAssertNil(ambiguous.previous)
+        XCTAssertNil(ambiguous.next)
     }
 
     func testReaderPreferencesMatchWebDefaultsAndPersistPerServerUser() {

@@ -1,0 +1,50 @@
+
+/** Facts are emitted by owned detectors, never inferred from an unknown author value. */
+export type ReaderSafetyFactId = ReaderSafetyRule['trigger'];
+export type ReaderSafetyClassification = ReaderSafetyRule['classification'] | 'IMPLEMENTATION';
+export type ReaderSafetyResourceRole = 'PUBLICATION' | 'CONTROL_DOCUMENT' | 'READING_ORDER' | 'OPTIONAL_RESOURCE';
+export type ReaderSafetyDecisionContext = Readonly<{
+  format: ReaderSafetyFormat;
+  resourceRole: ReaderSafetyResourceRole;
+  facts: readonly ReaderSafetyFactId[];
+  enforcementAvailable: boolean;
+  canIsolate: boolean;
+}>;
+export type ReaderSafetyDecision = Readonly<{
+  action: ReaderSafetyAction;
+  scope: 'PUBLICATION' | 'RESOURCE';
+  classification: ReaderSafetyClassification | null;
+  ruleId: ReaderSafetyRuleId | null;
+  errorCode: ReaderSafetyErrorCode | null;
+}>;
+
+export function evaluateReaderSafety(context: ReaderSafetyDecisionContext): readonly ReaderSafetyDecision[] {
+  if (!context.enforcementAvailable) {
+    return [{ action: 'REJECT_PUBLICATION', scope: 'PUBLICATION', classification: 'IMPLEMENTATION',
+      ruleId: null, errorCode: 'PLATFORM_POLICY_ALGORITHM_UNSUPPORTED' }];
+  }
+  const results: ReaderSafetyDecision[] = [];
+  const knownFacts = new Set(Object.values(READER_SAFETY_RULES).map((rule) => rule.trigger));
+  for (const fact of context.facts) {
+    if (!knownFacts.has(fact)) {
+      return [{ action: 'REJECT_PUBLICATION', scope: 'PUBLICATION', classification: 'IMPLEMENTATION',
+        ruleId: null, errorCode: 'ENGINE_POLICY_ALGORITHM_UNSUPPORTED' }];
+    }
+  }
+  for (const rule of Object.values(READER_SAFETY_RULES)) {
+    if (!context.facts.includes(rule.trigger) || !(rule.formats as readonly string[]).includes(context.format)) continue;
+    let action: ReaderSafetyAction = rule.action;
+    let scope: 'PUBLICATION' | 'RESOURCE' = rule.scope;
+    if (context.canIsolate && rule.isolatedAction !== rule.action) {
+      action = rule.isolatedAction;
+      scope = 'RESOURCE';
+    } else if (context.resourceRole === 'OPTIONAL_RESOURCE' && rule.optionalResourceAction !== rule.action) {
+      action = rule.optionalResourceAction;
+      scope = 'RESOURCE';
+    }
+    results.push({ action, scope, classification: rule.classification, ruleId: rule.id,
+      errorCode: action === 'ALLOW' || action === 'SANITIZE' ? null : rule.errorCode });
+  }
+  return results.length ? results : [{ action: 'ALLOW', scope: 'PUBLICATION', classification: null,
+    ruleId: null, errorCode: null }];
+}

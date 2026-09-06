@@ -1,5 +1,5 @@
 import type { PagedTrackDriver, PagedTrackDriverSnapshot, PageStep } from '../paged-track/paged-track-types';
-import { comicImageSizing, comicPageSlotSizing, type ComicImageFit, type ComicPageMeta } from './comic-model';
+import { comicImageSizing, comicPageSlotSizing, comicSafetyPlaceholderMessage, type ComicImageFit, type ComicPageMeta } from './comic-model';
 import { normalizeLocale } from '../../../../i18n/config';
 import { translateMessage } from '../../../../i18n/messages';
 
@@ -390,7 +390,7 @@ export class ComicSpreadTrackDriver implements PagedTrackDriver {
           placeholder.dataset.readerSafetyRuleId = page.safetyError.ruleId;
           placeholder.dataset.readerSafetyErrorCode = page.safetyError.code;
           placeholder.setAttribute('role', 'alert');
-          placeholder.textContent = translateMessage(locale, '漫画页面因安全策略无法显示。');
+          placeholder.textContent = translateMessage(locale, comicSafetyPlaceholderMessage(page.safetyError.code));
           pageSlot.append(placeholder);
           frame.append(pageSlot);
           return;

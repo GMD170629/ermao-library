@@ -398,6 +398,7 @@ enum ChapterReadingState: String, Codable, Equatable, Sendable {
 
 struct BookChapter: Identifiable, Codable, Equatable, Sendable {
     let id: String
+    let navigationKey: String?
     let title: String
     let progress: Double?
     let href: String?
@@ -412,12 +413,14 @@ struct BookChapter: Identifiable, Codable, Equatable, Sendable {
         title: String,
         progress: Double?,
         isCurrent: Bool,
+        navigationKey: String? = nil,
         href: String? = nil,
         sortOrder: Int = 0,
         readingOrderPosition: Int? = nil,
         state: ChapterReadingState? = nil
     ) {
         self.id = id
+        self.navigationKey = navigationKey
         self.title = title
         self.progress = progress
         self.href = href
@@ -438,6 +441,7 @@ struct BookChapterPage: Equatable, Sendable {
 
 struct BookResourceDetailUnit: Identifiable, Equatable, Sendable {
     let id: String
+    var navigationKey: String? = nil
     let title: String
     let unitType: String
     let assetID: String?
@@ -459,6 +463,7 @@ struct BookResourceDetailPage: Equatable, Sendable {
     let pageSize: Int
     let total: Int
     let totalPages: Int
+    let chapterCount: Int?
     let currentHref: String?
     let currentChapterSortOrder: Int?
     let currentPageNumber: Int?

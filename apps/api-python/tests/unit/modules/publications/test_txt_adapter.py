@@ -68,8 +68,8 @@ def test_txt_adapter_has_fixed_encoding_and_newline_policy(
     publication = adapter.open(_source(path))
     resource = adapter.read_resource(_source(path), "text/chapter-0001.xhtml")
 
-    assert publication.revision.parser == "shuku-txt-parser-v1"
-    assert publication.revision.normalization == "shuku-txt-publication-v2"
+    assert publication.revision.parser == "ermao-chapters:1"
+    assert publication.revision.normalization == "shuku-txt-publication-v3"
     assert publication.reading_order[0].href == "text/chapter-0001.xhtml"
     assert publication.toc[0].href == ("text/chapter-0001.xhtml#heading-000001")
     assert marker in resource.content.decode("utf-8")
@@ -95,19 +95,17 @@ def test_txt_adapter_golden_chapters_hrefs_and_dom_ids_are_stable(
 
     assert first == second
     assert [link.href for link in first.reading_order] == [
+        "text/frontmatter.xhtml",
         "text/chapter-0001.xhtml",
         "text/chapter-0002.xhtml",
-        "text/chapter-0003.xhtml",
     ]
     assert [entry.title for entry in first.toc] == [
-        "确定性文本 1",
         "第一章 开端",
         "Chapter II: Finale",
     ]
     assert [entry.href for entry in first.toc] == [
         "text/chapter-0001.xhtml#heading-000001",
         "text/chapter-0002.xhtml#heading-000001",
-        "text/chapter-0003.xhtml#heading-000001",
     ]
     first_xhtml = adapter.read_resource(source, first.reading_order[0].href).content
     second_xhtml = adapter.read_resource(source, first.reading_order[1].href).content
@@ -116,7 +114,36 @@ def test_txt_adapter_golden_chapters_hrefs_and_dom_ids_are_stable(
     assert 'id="heading-000001"' in second_xhtml.decode()
     assert 'id="block-000001"' in second_xhtml.decode()
     assert "天地 &amp; &lt;宇宙&gt;" in second_xhtml.decode()
-    assert "&gt;<br/>第二行" in second_xhtml.decode()
+    assert "&gt;  <br/>第二行" in second_xhtml.decode()
+
+
+def test_repeated_printed_contents_are_not_body_chapters(tmp_path: Path) -> None:
+    path = tmp_path / "printed-contents.txt"
+    labels = [f"CHAPTER {number}. Entry {number}" for number in range(1, 13)]
+    text = "Preface\nContents\n\n" + "\n".join(labels) + "\n\n"
+    text += "\n\n".join(
+        f"{label}\nBody paragraph {number}." for number, label in enumerate(labels)
+    )
+    path.write_text(text, encoding="utf-8")
+    adapter = TxtPublicationAdapter(tmp_path)
+    source = _source(path)
+    publication = adapter.open(source)
+    assert [entry.title for entry in publication.toc] == labels
+    assert [entry.navigation_key for entry in publication.toc] == [
+        f"chapter-{index}" for index in range(12)
+    ]
+    assert publication.reading_order[0].href == "text/frontmatter.xhtml"
+    assert (
+        "Contents"
+        in adapter.read_resource(source, "text/frontmatter.xhtml").content.decode()
+    )
+    for index, entry in enumerate(publication.toc):
+        assert entry.href is not None
+        href, _, fragment = entry.href.partition("#")
+        markup = adapter.read_resource(source, href).content.decode()
+        assert f'id="{fragment}"' in markup
+        assert f"Body paragraph {index}." in markup
+    assert path.read_text(encoding="utf-8") == text
 
 
 def test_txt_adapter_preserves_nul_and_rejects_unindexed_resources(
@@ -126,8 +153,9 @@ def test_txt_adapter_preserves_nul_and_rejects_unindexed_resources(
     path.write_bytes(b"valid\x00binary")
     adapter = TxtPublicationAdapter(tmp_path)
 
-    adapter.open(_source(path))
-    chapter = adapter.read_resource(_source(path), "text/chapter-0001.xhtml")
+    publication = adapter.open(_source(path))
+    assert publication.toc == ()
+    chapter = adapter.read_resource(_source(path), "text/body.xhtml")
     assert b"valid\x00binary" in chapter.content
     assert path.read_bytes() == b"valid\x00binary"
 

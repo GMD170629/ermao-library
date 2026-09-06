@@ -47,7 +47,10 @@ data class WarmPageControlMetrics(
 
 @Immutable
 data class WarmPageMenuMetrics(
+    val maximumWidth: Dp,
     val itemMinimumHeight: Dp,
+    val itemHorizontalPadding: Dp,
+    val iconSlotSize: Dp,
     val titleHorizontalPadding: Dp,
     val titleVerticalPadding: Dp,
 )
@@ -74,6 +77,7 @@ data class WarmPageComponentCoverMetrics(
 @Immutable
 data class WarmPageWorkDetailMetrics(
     val heroCoverWidth: Dp,
+    val directoryHeroCoverWidth: Dp,
     val horizontalVolumeWidth: Dp,
     val chapterRowMinimumHeight: Dp,
     val statusBadgeMinimumHeight: Dp,
@@ -116,7 +120,10 @@ val WarmPageComponentMetricTokens = WarmPageComponentMetrics(
         loadingIndicatorSize = WarmPageSpacingTokens.three,
     ),
     menu = WarmPageMenuMetrics(
+        maximumWidth = 224.dp,
         itemMinimumHeight = WarmPageMetricTokens.androidMinimumTouchTarget,
+        itemHorizontalPadding = WarmPageSpacingTokens.oneAndHalf,
+        iconSlotSize = WarmPageSpacingTokens.three,
         titleHorizontalPadding = WarmPageSpacingTokens.oneAndHalf,
         titleVerticalPadding = WarmPageSpacingTokens.one,
     ),
@@ -137,6 +144,7 @@ val WarmPageComponentMetricTokens = WarmPageComponentMetrics(
     ),
     workDetail = WarmPageWorkDetailMetrics(
         heroCoverWidth = 120.dp,
+        directoryHeroCoverWidth = 96.dp,
         horizontalVolumeWidth = 84.dp,
         chapterRowMinimumHeight = 56.dp,
         statusBadgeMinimumHeight = 24.dp,

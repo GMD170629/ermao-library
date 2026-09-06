@@ -9,9 +9,9 @@ import { cn } from './cn';
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 
 const variants: Record<ButtonVariant, string> = {
-  primary: 'bg-[#ff4f2a] text-white hover:bg-[#e94320]',
-  secondary: 'border border-[#ded8d1] bg-white text-[#4f4b47] hover:border-[#f2b7a6] hover:bg-[#fff5f1] hover:text-[#d94322]',
-  ghost: 'bg-transparent text-[#6f6a65] hover:bg-[#f1eeea] hover:text-[#17191d]',
+  primary: 'bg-[var(--visual-color-app-action-accent)] text-white hover:bg-[var(--visual-color-app-brand-hover)]',
+  secondary: 'border border-[var(--visual-color-app-divider-strong)] bg-[var(--visual-color-app-surface-raised)] text-[var(--visual-color-app-text-secondary)] hover:border-[var(--visual-color-app-focus-ring)] hover:bg-[var(--visual-color-app-accent-softer)] hover:text-[var(--visual-color-app-brand-accent)]',
+  ghost: 'bg-transparent text-[var(--visual-color-app-text-secondary)] hover:bg-[var(--visual-color-app-navigation)] hover:text-[var(--visual-color-app-text-primary)]',
   danger: 'border border-red-100 bg-red-50 text-red-700 hover:border-red-200 hover:bg-red-100 hover:text-red-800'
 };
 
@@ -28,7 +28,7 @@ export function Button({ children, icon: Icon, loading = false, loadingText, var
   return (
     <button
       className={cn(
-        'inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-[12px] px-4 py-2.5 text-sm font-medium leading-5 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ffc9b9] disabled:cursor-not-allowed disabled:opacity-60 data-[loading=true]:opacity-100',
+        'inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-[12px] px-4 py-2.5 text-sm font-medium leading-5 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--visual-color-app-focus-ring)] disabled:cursor-not-allowed disabled:opacity-60 data-[loading=true]:opacity-100',
         variants[variant],
         className
       )}

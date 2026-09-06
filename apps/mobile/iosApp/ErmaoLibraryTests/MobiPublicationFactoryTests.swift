@@ -107,7 +107,7 @@ final class MobiPublicationFactoryTests: XCTestCase {
         await result.close()
     }
 
-    func testStructuralTocNodeUsesFirstDescendantTarget() async throws {
+    func testStructuralTocNodeRetainsEmptyGroupTargetAndChildTarget() async throws {
         let book = FixedMobiBook.fixture(structuralTocRoot: true)
         let result = try await IosMobiPublicationFactory().build(
             book: book,
@@ -115,13 +115,17 @@ final class MobiPublicationFactoryTests: XCTestCase {
         )
 
         let root = try XCTUnwrap(result.publication.manifest.tableOfContents.first)
-        XCTAssertEqual(root.href, "text/chapter.xhtml#section")
-        XCTAssertEqual(root.children.first?.href, "text/chapter.xhtml#section")
+        XCTAssertEqual(root.href, "")
+        XCTAssertEqual(root.properties["shuku:navigationKey"]?.string, "chapter-0")
+        let child = try XCTUnwrap(root.children.first)
+        XCTAssertEqual(child.href, "text/chapter.xhtml#section")
+        XCTAssertEqual(child.properties["shuku:navigationKey"]?.string, "chapter-1")
         await result.close()
     }
 
-    func testLegacyValidMarkupHeadIsDecoratedWithoutChangingAuthorBodyOrCss() async throws {
+    func testLegacyMarkupAndCssAreSanitizedBeforeReadiumDelivery() async throws {
         let book = FixedMobiBook.fixture(
+            markupMediaType: nil,
             markup: """
             <html xmlns="http://www.w3.org/1999/xhtml"><head></head><body onload="steal()">
             <script src="https://evil.example/a.js">steal()</script>
@@ -153,13 +157,40 @@ final class MobiPublicationFactoryTests: XCTestCase {
         let markup = try XCTUnwrap(String(data: markupData, encoding: .utf8))
         let css = try XCTUnwrap(String(data: cssData, encoding: .utf8))
         XCTAssertTrue(markup.contains("Content-Security-Policy"))
-        XCTAssertTrue(markup.localizedCaseInsensitiveContains("<script"))
-        XCTAssertTrue(markup.localizedCaseInsensitiveContains("onload="))
-        XCTAssertTrue(markup.contains("https://evil.example"))
+        XCTAssertFalse(markup.localizedCaseInsensitiveContains("<script"))
+        XCTAssertFalse(markup.localizedCaseInsensitiveContains("onload="))
+        XCTAssertFalse(markup.contains("https://evil.example"))
         XCTAssertTrue(markup.contains("href=\"chapter2.xhtml\""))
-        XCTAssertTrue(css.contains("https://evil.example"))
-        XCTAssertTrue(css.contains("//evil.example"))
+        XCTAssertFalse(css.contains("https://evil.example"))
+        XCTAssertFalse(css.contains("//evil.example"))
         XCTAssertTrue(css.contains("../images/local.png"))
+
+        await result.close()
+    }
+
+    func testUnknownAndMissingMobiMimeTypesReachTheDecoderAndSvgIsSanitized() async throws {
+        let book = FixedMobiBook.fixture(
+            markupMediaType: nil,
+            includeSvg: true,
+            unknownAssetMediaType: "application/x-reader-future"
+        )
+        let result = try await IosMobiPublicationFactory().build(
+            book: book,
+            resourceID: "unknown-mime-fixture"
+        )
+        XCTAssertEqual(result.normalizationIdentifier, IosMobiPublicationIdentity.normalizationIdentifier)
+
+        let chapter = try XCTUnwrap(result.publication.readingOrder.first)
+        let chapterResource = try XCTUnwrap(result.publication.get(chapter))
+        let chapterData = try await chapterResource.read().get()
+        XCTAssertTrue(String(decoding: chapterData, as: UTF8.self).contains("Content-Security-Policy"))
+
+        let svgLink = try XCTUnwrap(result.publication.resources.first { $0.href == "images/figure.svg" })
+        let svgResource = try XCTUnwrap(result.publication.get(svgLink))
+        let svgData = try await svgResource.read().get()
+        let svg = String(decoding: svgData, as: UTF8.self)
+        XCTAssertTrue(svg.contains("<svg"))
+        XCTAssertFalse(svg.localizedCaseInsensitiveContains("<script"))
 
         await result.close()
     }
@@ -299,21 +330,34 @@ private actor FixedMobiBook: IosMobiBookAccess {
         binarySize: Int = 17,
         markup: String = "<html><head></head><body><h1 id=\"section\">Chapter</h1></body></html>",
         css: String = "body { color: black; }",
+        markupMediaType: String? = "application/xhtml+xml",
+        includeSvg: Bool = false,
+        unknownAssetMediaType: String? = nil,
         resourceNameOverride: String? = nil,
         invalidTocParent: Bool = false,
         structuralTocRoot: Bool = false
     ) -> FixedMobiBook {
-        let contents: [(String, String, IosMobiResourceCategory, Data)] = [
+        var contents: [(String, String?, IosMobiResourceCategory, Data)] = [
             (
                 resourceNameOverride ?? "text/chapter.xhtml",
-                "application/xhtml+xml",
+                markupMediaType,
                 .markup,
                 Data(markup.utf8)
             ),
             ("styles/book.css", "text/css", .flow, Data(css.utf8)),
             ("images/cover.jpg", "image/jpeg", .asset, Data([0xFF, 0xD8, 0xFF, 0xD9])),
-            ("assets/large.bin", "application/octet-stream", .asset, Data(repeating: 0xA5, count: binarySize)),
+            ("assets/large.bin", unknownAssetMediaType ?? "application/octet-stream", .asset, Data(repeating: 0xA5, count: binarySize)),
         ]
+        if includeSvg {
+            contents.append(
+                (
+                    "images/figure.svg",
+                    "image/svg+xml; charset=utf-8",
+                    .asset,
+                    Data(#"<svg xmlns="http://www.w3.org/2000/svg"><script>steal()</script><circle cx="1" cy="1" r="1"/></svg>"#.utf8)
+                )
+            )
+        }
         let resources = contents.enumerated().map { index, value in
             StoredResource(
                 info: IosMobiResourceInfo(

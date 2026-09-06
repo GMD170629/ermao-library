@@ -62,13 +62,6 @@ enum IosPublicationSecurityPolicy {
         try decorate(data: Data(markup.utf8))
     }
 
-    static func isMarkup(_ resource: String) -> Bool {
-        let path = resource.lowercased()
-            .split(whereSeparator: { $0 == "#" || $0 == "?" })
-            .first.map(String.init) ?? resource
-        return path.hasSuffix(".html") || path.hasSuffix(".htm") || path.hasSuffix(".xhtml")
-    }
-
     static func decorate(data: Data) throws -> Data {
         guard !data.isEmpty else {
             throw IosPublicationSecurityError.invalidMarkup
@@ -91,6 +84,46 @@ enum IosPublicationSecurityPolicy {
         let decorated = String(safeMarkup[..<headStart]) + securityHead + viewport + originalHead +
             String(safeMarkup[close.range.lowerBound...])
         return Data(normalizeXmlDeclaration(decorated).utf8)
+    }
+
+    /// Prepares a Readium resource before the EPUB parser sees it. Media type is only a
+    /// capability hint; the content root is detected by the shared KMP lexical pass.
+    static func prepareResource(data: Data, mediaType: String?) throws -> Data {
+        guard !data.isEmpty else {
+            if isTextualMediaType(mediaType) { throw IosPublicationSecurityError.invalidMarkup }
+            return data
+        }
+        guard let markup = decodeOptional(data) else {
+            if isTextualMediaType(mediaType) {
+                throw IosPublicationSecurityError.invalidEncoding
+            }
+            return data
+        }
+        let leading = markup.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{FEFF}")))
+        guard leading.hasPrefix("<") || isTextualMediaType(mediaType) else { return data }
+
+        let facade = ErmaoShared.ReaderSafetyFacade()
+        let root = facade.rootElementName(markup: markup)
+        let normalizedMediaType = baseMediaType(mediaType)
+        switch true {
+        case normalizedMediaType == "text/css":
+            return try sanitizedCss(facade: facade, source: markup, sourceByteCount: Int64(data.count))
+        case root == "html" || normalizedMediaType == "application/xhtml+xml" || normalizedMediaType == "text/html":
+            return try decorate(data: data)
+        case root == "svg" || normalizedMediaType == "image/svg+xml":
+            let sanitized = try sanitizedMarkup(
+                facade: facade,
+                source: markup,
+                sourceByteCount: Int64(data.count)
+            )
+            guard let encoded = sanitized.markup.data(using: .utf8) else {
+                throw IosPublicationSecurityError.invalidEncoding
+            }
+            return encoded
+        default:
+            let prepared = try preparedXml(facade: facade, source: markup, sourceByteCount: Int64(data.count))
+            return Data(prepared.parserMarkup.utf8)
+        }
     }
 
     static func locatorBodyProjection(data: Data) throws -> [[String: String]] {
@@ -124,6 +157,96 @@ enum IosPublicationSecurityPolicy {
         throw IosPublicationSecurityError.invalidMarkup
     }
 
+    private static func sanitizedMarkup(
+        facade: ErmaoShared.ReaderSafetyFacade,
+        source: String,
+        sourceByteCount: Int64
+    ) throws -> ErmaoShared.ReaderSanitizedMarkup {
+        let result = facade.sanitizeMarkup(markup: source, sourceByteCount: sourceByteCount)
+        if let accepted = result as? ErmaoShared.ReaderSafetyMarkupResultAccepted {
+            return accepted.value
+        }
+        if let rejected = result as? ErmaoShared.ReaderSafetyMarkupResultRejected {
+            throw IosPublicationSecurityError.rejected(
+                ruleId: rejected.failure.ruleId,
+                errorCode: rejected.failure.errorCode
+            )
+        }
+        throw IosPublicationSecurityError.invalidMarkup
+    }
+
+    private static func sanitizedCss(
+        facade: ErmaoShared.ReaderSafetyFacade,
+        source: String,
+        sourceByteCount: Int64
+    ) throws -> Data {
+        let result = facade.sanitizeCss(css: source, sourceByteCount: sourceByteCount)
+        if let accepted = result as? ErmaoShared.ReaderSafetyMarkupResultAccepted {
+            return Data(accepted.value.markup.utf8)
+        }
+        if let rejected = result as? ErmaoShared.ReaderSafetyMarkupResultRejected {
+            throw IosPublicationSecurityError.rejected(
+                ruleId: rejected.failure.ruleId,
+                errorCode: rejected.failure.errorCode
+            )
+        }
+        throw IosPublicationSecurityError.invalidMarkup
+    }
+
+    private static func preparedXml(
+        facade: ErmaoShared.ReaderSafetyFacade,
+        source: String,
+        sourceByteCount: Int64
+    ) throws -> ErmaoShared.ReaderSanitizedMarkup {
+        let result = facade.prepareXmlControlDocument(markup: source, sourceByteCount: sourceByteCount)
+        if let accepted = result as? ErmaoShared.ReaderSafetyMarkupResultAccepted {
+            return accepted.value
+        }
+        if let rejected = result as? ErmaoShared.ReaderSafetyMarkupResultRejected {
+            throw IosPublicationSecurityError.rejected(
+                ruleId: rejected.failure.ruleId,
+                errorCode: rejected.failure.errorCode
+            )
+        }
+        throw IosPublicationSecurityError.invalidMarkup
+    }
+
+    private static func isTextualMediaType(_ mediaType: String?) -> Bool {
+        switch baseMediaType(mediaType) {
+        case "text/css", "text/html", "application/xhtml+xml", "application/xml", "text/xml", "image/svg+xml":
+            true
+        default:
+            false
+        }
+    }
+
+    private static func baseMediaType(_ mediaType: String?) -> String? {
+        mediaType?
+            .split(separator: ";", maxSplits: 1, omittingEmptySubsequences: true)
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private static func decodeOptional(_ data: Data) -> String? {
+        if data.starts(with: [0xEF, 0xBB, 0xBF]) {
+            return String(data: data.dropFirst(3), encoding: .utf8)
+        }
+        if data.starts(with: [0xFF, 0xFE]) {
+            return String(data: data.dropFirst(2), encoding: .utf16LittleEndian)
+        }
+        if data.starts(with: [0xFE, 0xFF]) {
+            return String(data: data.dropFirst(2), encoding: .utf16BigEndian)
+        }
+        if let utf8 = String(data: data, encoding: .utf8) {
+            return utf8
+        }
+        let prefix = String(decoding: data.prefix(512), as: UTF8.self)
+        guard prefix.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<") else { return nil }
+        guard let encoding = declaredEncoding(in: prefix) else { return nil }
+        return String(data: data, encoding: encoding)
+    }
+
     private static func decode(_ data: Data) throws -> String {
         let decoded: String?
         if data.starts(with: [0xEF, 0xBB, 0xBF]) {
@@ -134,23 +257,38 @@ enum IosPublicationSecurityPolicy {
             decoded = String(data: data.dropFirst(2), encoding: .utf16BigEndian)
         } else {
             let prefix = String(decoding: data.prefix(512), as: UTF8.self)
-            let declaration = prefix.range(
-                of: #"(?i)<\?xml\b[^?]*\?>"#,
-                options: .regularExpression
-            ).map { String(prefix[$0]) }
-            let encoding = declaration?.range(
-                of: #"(?i)encoding\s*=\s*[\"'](?<encoding>[^\"']+)[\"']"#,
-                options: .regularExpression
-            ).map { String(declaration![$0]) } ?? "utf-8"
-            guard encoding.lowercased().contains("utf-8") else {
-                throw IosPublicationSecurityError.invalidEncoding
-            }
-            decoded = String(data: data, encoding: .utf8)
+            let encoding = declaredEncoding(in: prefix) ?? .utf8
+            decoded = String(data: data, encoding: encoding)
         }
         guard let decoded else {
             throw IosPublicationSecurityError.invalidEncoding
         }
         return decoded
+    }
+
+    private static func declaredEncoding(in prefix: String) -> String.Encoding? {
+        let declaration = prefix.range(
+            of: #"(?i)<\?xml\b[^?]*\?>"#,
+            options: .regularExpression
+        ).map { String(prefix[$0]) }
+        let name = declaration?.range(
+            of: #"(?i)encoding\s*=\s*[\"']([^\"']+)[\"']"#,
+            options: .regularExpression
+        ).map { String(declaration![$0]) }
+        let normalized = name?
+            .replacingOccurrences(of: #"(?i).*encoding\s*=\s*[\"']"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"[\"'].*$"#, with: "", options: .regularExpression)
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "-")
+        switch normalized {
+        case nil, "utf-8", "utf8": return .utf8
+        case "utf-16", "utf16": return .utf16
+        case "utf-16le", "utf16le": return .utf16LittleEndian
+        case "utf-16be", "utf16be": return .utf16BigEndian
+        case "windows-1251", "cp1251": return .windowsCP1251
+        case "iso-8859-1", "latin1": return .isoLatin1
+        default: return nil
+        }
     }
 
     private static func parse(_ parserMarkup: String) throws -> [LocatorElementProjection] {
@@ -343,7 +481,12 @@ private final class StrictXhtmlDelegate: NSObject, XMLParserDelegate {
 
 struct IosPublicationSecurityAdapter: Sendable {
     func decorate(data: Data, mediaType: String) throws -> Data {
-        if mediaType.lowercased() == "text/css" { return data }
+        let baseMediaType = mediaType
+            .split(separator: ";", maxSplits: 1, omittingEmptySubsequences: true)
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if baseMediaType == "text/css" { return data }
         guard let markup = String(data: data, encoding: .utf8) else {
             throw IosPublicationSecurityError.invalidEncoding
         }

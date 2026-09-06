@@ -3,6 +3,7 @@ package com.ermao.library
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.SystemBarStyle
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.getValue
@@ -33,7 +34,14 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         audioPlayerRequested = savedInstanceState == null && intent?.action == ACTION_OPEN_AUDIO_PLAYER
-        enableEdgeToEdge()
+        // The App shell owns the light navigation surface, including the gesture inset.
+        // An automatic platform scrim would insert a differently colored strip below it.
+        enableEdgeToEdge(
+            navigationBarStyle = SystemBarStyle.light(
+                android.graphics.Color.TRANSPARENT,
+                android.graphics.Color.TRANSPARENT,
+            ),
+        )
         setContent {
             WarmPageTheme {
                 val uiState by mainViewModel.uiState.collectAsStateWithLifecycle()

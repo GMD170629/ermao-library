@@ -1,3 +1,0 @@
-
-    mResumedActivity: ActivityRecord{2de23e1 u0 com.ermao.library/.MainActivity t1851}
-

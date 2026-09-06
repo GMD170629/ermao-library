@@ -14,7 +14,6 @@ enum class ReaderSourceFormat(
     val wireValue: String,
     val readerFormat: ReaderFormat,
     private val policyFormat: ReaderSafetyFormat,
-    private val codecExtension: String? = null,
 ) {
     Epub("epub", ReaderFormat.Epub, ReaderSafetyFormat.EPUB),
     Mobi("mobi", ReaderFormat.Mobi, ReaderSafetyFormat.MOBI),
@@ -35,37 +34,14 @@ enum class ReaderSourceFormat(
     M4b("m4b", ReaderFormat.Audio, ReaderSafetyFormat.M4B),
     M4a("m4a", ReaderFormat.Audio, ReaderSafetyFormat.M4A),
     Mp3("mp3", ReaderFormat.Audio, ReaderSafetyFormat.MP3),
-    Flac("flac", ReaderFormat.Audio, ReaderSafetyFormat.AUDIO, ".flac"),
-    Ogg("ogg", ReaderFormat.Audio, ReaderSafetyFormat.AUDIO, ".ogg"),
-    Opus("opus", ReaderFormat.Audio, ReaderSafetyFormat.AUDIO, ".opus"),
-    Wav("wav", ReaderFormat.Audio, ReaderSafetyFormat.AUDIO, ".wav"),
+    Flac("flac", ReaderFormat.Audio, ReaderSafetyFormat.AUDIO),
+    Ogg("ogg", ReaderFormat.Audio, ReaderSafetyFormat.AUDIO),
+    Opus("opus", ReaderFormat.Audio, ReaderSafetyFormat.AUDIO),
+    Wav("wav", ReaderFormat.Audio, ReaderSafetyFormat.AUDIO),
     ;
 
     val fileKind: String
         get() = policyFormat.name
-
-    private val allowedMimeTypes: Set<String>
-        get() {
-            if (policyFormat == ReaderSafetyFormat.IMAGE_DIR) {
-                return ReaderSafetyPolicy.comicProfile.allowedPageMimeTypes.toSet()
-            }
-            val formatPolicy = ReaderSafetyPolicy.formats.getValue(policyFormat)
-            if (formatPolicy.acceptedMimeTypes.isNotEmpty()) {
-                return formatPolicy.acceptedMimeTypes.toSet()
-            }
-            if (readerFormat != ReaderFormat.Audio) return emptySet()
-            val exactExtension = codecExtension ?: formatPolicy.extension
-            return if (exactExtension == null) {
-                ReaderSafetyPolicy.audioProfile.containerMimeTypes.values.toSet()
-            } else {
-                setOfNotNull(ReaderSafetyPolicy.audioProfile.containerMimeTypes[exactExtension])
-            }
-        }
-
-    fun acceptsMimeType(value: String): Boolean {
-        val normalized = value.trim().lowercase().substringBefore(';')
-        return normalized in allowedMimeTypes
-    }
 
     val isComic: Boolean
         get() = ReaderSafetyPolicy.formats.getValue(policyFormat).morphology ==
@@ -188,7 +164,6 @@ data class RemoteComicPage(
     init {
         require(pageIndex >= 0)
         require(resourceHref == "pages/$pageIndex")
-        require(mediaType in ReaderSafetyPolicy.comicProfile.allowedPageMimeTypes)
         require(width == null || width > 0)
         require(height == null || height > 0)
     }

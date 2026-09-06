@@ -1,69 +1,46 @@
 # ADR 0025: 可重排原文件下载后阅读
 
-- 状态：采用；物理设备验收进行中
-- 日期：2026-08-29
-- 范围：Web、Android、iOS、Reader v4 与共享 Downloads
-- 取代：ADR 0024 中的可重排 online-first／Web online-only 决策
-
-安全补充（2026-08-31）：ADR 0026 统一定义三端及后端的格式/MIME、预算、
-过滤动作与错误码。本 ADR 保持完整原文件下载、任务所有权和禁止派生出版物的
-决定；下载后的内存 Publication 可以按生成契约执行 `SANITIZE`。
-
-PDF 补充（2026-09-01）：ADR 0027 修订原生 PDF 的交付规则。PDFium 仍优先
-使用有界 Range；当引擎要求整文件或工作集超出易失缓存时，透明复用 Downloads
-物化已验证原件并在同一 document handle 中切源。Web pdf.js 与漫画规则不变。
+- 状态：Accepted
+- 范围：Web、Android、iOS、KMP Reader 与 Downloads
+- 相关：安全由 [ADR 0026](0026-versioned-reader-safety-policy-contract.md) 统一定义；
+  原生 PDFium 交付由 [ADR 0027](0027-pdfium-transparent-original-materialization.md) 补充；
+  progress 由 [ADR 0028](0028-reader-v5-opaque-position-report.md) 定义。
 
 ## 决策
 
-`EPUB`、`FB2`、`TXT`、`MOBI`、`AZW`、`AZW3`、`PRC` 在所有第一方
-Reader 中统一使用完整原文件：启动时验证本地工件，缺失或版本过期时显示
-Reader 加载页和真实传输进度，完整校验成功后由本地解析器创建内存
-Publication。阅读入口与详情文案不暴露新的产品模式。
+`EPUB`、`FB2`、`TXT`、`MOBI`、`AZW`、`AZW3` 和 `PRC` 在第一方 Reader 中使用完整
+原文件。`packages/reader-core/src/format-capabilities.ts` 将这些可重排格式映射到
+`DOWNLOAD_ORIGINAL`。Native Reader 启动时取得授权的 asset 描述，缺失、过期或不合格时
+由共享 Downloads 用例传输并校验原文件；完成原子发布后，平台本地 parser 创建内存
+Publication。Web 复用同一原文件 contract，通过 Reader 私有 Cache Storage adapter 管理
+浏览器缓存。
 
-漫画继续使用现有分页在线交付；PDF 的普通请求仍优先 Range，但原生 PDFium
-按 ADR 0027 可将合法的大工作集请求透明路由到 Downloads 完整原件。该路由不是
-普通网络／内容错误 fallback，也不适用于 Web。有声书继续由播放器能力负责。
-通用在线可读性判定、可重排 RWPM／positions／章节交付以及
-`OnlineLimit`／`RangeUnsupported` 下载回退被删除。
+原文件是唯一持久化正文。任何路径都不得生成派生 EPUB、ZIP 或持久解包目录；安全、MIME、
+格式、长度、容量和 parser/engine 失败按 ADR 0026 的稳定 rule ID 与错误类别处理。Reader
+本身不启动第二套下载、修复或在线回退流程。
 
-下载工件以 `namespace + resourceId + assetId + size:mtime` 标识，并校验实际
-格式、MIME 与长度。原文件是唯一持久化 Reader 正文；不得转换、持久化解包
-目录或生成派生出版物。准入、DRM、XML、ZIP、图片、分配和解析器硬限制由
-ADR 0026 的稳定规则 ID 定义并继续生效。
+漫画格式与 `image_dir` 继续使用有界流式 manifest/page 交付。PDF 普通请求优先 Range，
+当 PDFium 按 ADR 0027 需要完整原件时透明复用 Downloads 的合格 artifact；Web PDF 与
+漫画的既有在线合同不因此改变。有声书使用播放器能力和同一安全 contract，不隐式创建
+可重排下载任务。
 
-## 所有权
+Reader v5 bootstrap 提供授权的资源、asset、格式和状态上下文；可重排内容的正文、reading
+order、TOC 与 positions 来自本地原文件和 parser。Library 的 `reading-units` 是详情元数据
+projection，按 [ADR 0012](0012-publication-navigation-cache.md) 懒加载当前 asset，不是
+Reader 正文或 manifest/positions 传输。
 
-原生完整传输、断点续传、任务状态、重建、原子发布和完成登记仍只有共享
-Downloads 一个 owner。Reader 通过公共用例创建或观察卷册任务。缺失工件由
-同一用例清除失效任务并按最新描述重建；本地解析失败不触发重新下载。
+Web 只使用账号授权命名空间下的 Reader Cache Storage adapter；它不创建原生 Downloads
+中心的任务状态机。Native Downloads 由共享 `DownloadResourceRuntime` 唯一拥有，单项、批量
+和 Downloads UI 都调用同一用例。
 
-Web 复用同一 Library／媒体原文件合同，但只实现 Reader 私有的 Cache Storage
-adapter，不建立下载中心、暂停、续传或账号切换任务状态机。取消删除未完成
-缓存并从零开始；缓存按账号授权命名空间及精确资产版本隔离。冷启动仍需要
-在线授权和同步 bootstrap。
+## 验收约束
 
-正文来自本地与进度／书签同步相互独立。已下载的原生文件可以先离线打开，
-认证会话继续使用现有非阻塞同步；Web 已打开的会话不再依赖正文网络请求。
+必须验证慢传输完成前 Reader 不打开、完整工件命中不重复传输、取消和截断不发布可读文件、
+删除缓存后按相同资源/asset 版本重建，以及打开可重排内容不会请求远程正文章节。验证须
+覆盖实际平台；Android/iOS 物理设备证据不能由编译或模拟器替代。
 
-## 接口后果
+## 当前证据
 
-Reader v4 的可重排 bootstrap 只提供授权、元数据、进度和书签上下文，不生成
-导航，也不返回 manifest、positions 或章节资源 URL。本地 Publication 的
-reading order、目录和 positions 为客户端正文权威来源。服务端保存进度时只
-校验有界、相对且与资源形态匹配的 Locator 合同，不为 href 校验重新打开或
-解析可重排原文件。服务端解析基础设施只保留给导入和元数据等仍有消费者的
-能力。Library 的卷册 `reading-units` 接口属于详情元数据能力，按 ADR 0012
-在首次访问时同步解析缺失目录并按当前 `assetId` 缓存；它不向 Reader 提供正文、
-manifest、positions 或章节资源，也不改变下载后阅读契约。
-
-共享启动策略公开 `DOWNLOAD_ORIGINAL | STREAM | UNSUPPORTED`，替代
-`canOpenOnline`。七种可重排格式映射到 `DOWNLOAD_ORIGINAL`，PDF／漫画映射到
-`STREAM`。任何平台都不得用在线正文作为可重排失败回退。
-
-## 验证
-
-验收必须证明：慢速响应未完成时进度已更新且 Reader 未打开；完成工件命中不
-重复传输；取消不能发布部分文件；删除文件或浏览器缓存后按同一 `resourceId`
-和最新资产版本重建；打开后没有可重排 manifest／positions／章节请求；PDF、
-漫画和音频未创建隐式任务；三端原文件长度和 SHA-256 与媒体端点一致且没有
-派生出版物。Android 与 iOS 最终证据必须来自明确选择的物理设备。
+Reader v5 route and Web adapter use `/api/reader/v5`; `reader-core` format capabilities expose
+the delivery modes above; Downloads and PDFium adapters implement the ownership split. Safety
+and generated bindings remain owned by `packages/reader-contracts/reader-safety-policy.json`.

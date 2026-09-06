@@ -37,6 +37,8 @@ export default defineConfig([
     '.next-*/**',
     'out/**',
     'build/**',
+    // CMake intermediates include compiler_depend.ts files that are not TypeScript.
+    '.chapters-wasm-build/**',
     'generated/**',
     'public/vendor/**',
     'next-env.d.ts'

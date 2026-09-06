@@ -7,6 +7,10 @@ from zipfile import ZipFile
 
 import pytest
 
+from app.modules.imports.application.audio_types import (
+    AudioChapterMetadata,
+    AudioFileMetadata,
+)
 from app.modules.imports.application.pdf_types import PdfInspection
 from app.modules.imports.domain.pdf_content import PdfContentKind, PdfTextEvidence
 from app.modules.imports.domain.resource_adapters import (
@@ -17,8 +21,67 @@ from app.modules.imports.domain.resource_adapters import (
 )
 from app.modules.imports.infrastructure.readable_resource.adapter_registry import (
     RegistryResourceAdapterExecutor,
+    _audio_navigation_units,
 )
 from app.modules.library.domain.readable_resource_states import AssetRole
+
+
+def _audio_metadata(
+    path: Path,
+    *,
+    chapters: tuple[AudioChapterMetadata, ...] = (),
+) -> AudioFileMetadata:
+    return AudioFileMetadata(
+        path=path,
+        title="Track title",
+        album="Album",
+        author=None,
+        narrator=None,
+        duration_ms=10_000,
+        codec="aac",
+        bitrate=None,
+        sample_rate=None,
+        channels=None,
+        disc_number=None,
+        track_number=None,
+        chapters=chapters,
+    )
+
+
+def test_audio_without_embedded_chapters_has_no_navigation_units(
+    tmp_path: Path,
+) -> None:
+    metadata = _audio_metadata(tmp_path / "track.m4b")
+
+    assert (
+        _audio_navigation_units(
+            metadata,
+            title="Track title",
+            mime_type="audio/mp4",
+        )
+        == ()
+    )
+
+
+def test_audio_embedded_chapters_remain_navigation_units(tmp_path: Path) -> None:
+    metadata = _audio_metadata(
+        tmp_path / "track.m4b",
+        chapters=(
+            AudioChapterMetadata(title="Part one", start_ms=0, end_ms=5_000),
+            AudioChapterMetadata(title="Part two", start_ms=5_000, end_ms=10_000),
+        ),
+    )
+
+    units = _audio_navigation_units(
+        metadata,
+        title="Track title",
+        mime_type="audio/mp4",
+    )
+
+    assert [(unit.title, unit.start_ms, unit.end_ms) for unit in units] == [
+        ("Part one", 0, 5_000),
+        ("Part two", 5_000, 10_000),
+    ]
 
 
 def test_suffix_matching_boundaries() -> None:
