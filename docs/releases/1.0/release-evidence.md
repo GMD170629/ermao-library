@@ -52,8 +52,8 @@ DEC-07已纳入执行：停止已关闭AUDIO-03和ANDROID-03周边工具完善�
 |---|---|---|
 | RG-01 交付 | NOT_RUN / 部分BLOCKED | APK/IPA正式构建用户暂缓；Docker引擎、Mac/iOS条件仍缺 |
 | RG-02 初始化/连接 | 第一方新库链路部分PASS；OPDS客户端负责人放行（DEC-08） | 继续组织模式/异常连接及协议回归；双客户端由用户自测，不虚构代理实测 |
-| RG-03 格式 | 部分PASS，HTML剩余边界FAIL | READER-03实体上下文待收敛；逐格式/异常媒体/原生iOS矩阵未完成 |
-| RG-04 进度 | AUDIO-03已关闭；SYNC-02候选自动回归PASS；AUDIO-04长播放FAIL | 启动进度和长音频修复需实际Chrome回归；异常恢复、跨端仍待验收 |
+| RG-03 格式 | READER-03本批关闭；WAV短时PASS；AAC/FLAC真实FAIL待分类 | AUDIO-05/06定位；TEST-11完整时窗仍待候选验证；逐格式/异常媒体/原生iOS矩阵未完成 |
+| RG-04 进度 | AUDIO-03关闭；AUDIO-04原生产链PASS但时窗证据有明确限制；SYNC-02自动回归PASS | SYNC-02浏览器对照受ENV-11阻塞；AAC恢复/FLAC确认失败；异常恢复、跨端仍待验收 |
 | RG-05 导入性能 | 本轮本机1万导入预检PASS（DEC-06） | 大规模/长时压力独立脚本按需运行，不作为当前阻塞；不外推NAS或30万表现 |
 
 持续播放最近恢复点：`audio-soak/production-1800-execution.json`，run `r1788689717566-w0`，启动源版本 `a5ac3b8b`，已以AUDIO-04 FAIL结束并安全清理。后续从原事件/HTTP日志定位，不假定它仍在运行。此工作属于音频功能稳定性，不是已停止的超大书库压测。
