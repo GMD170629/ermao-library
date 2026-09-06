@@ -20,10 +20,13 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 | TEST-06 | Web 详情 fixture 缺 canonical chapter fields；封面 mock 不匹配 size 查询串；触摸端套用精确指针菜单假设；旧按钮/目录交互过期 | 修正 fixtures/真实入口，保留封面比例、触摸可达、键盘管理、当前章节和翻页断言；生产封面/菜单视觉未改，Chrome 全套随后留完整日志 |
 | READER-01 | 共享 C 章节核未识别“第 1 章”含数词空白的合法标题，Chrome TXT 实际失败 | `854712bb` 修复唯一 C owner、针对性正负例与 WASM 同步；C warning-as-error 测试及 Chrome 全套 PASS |
 | ANDROID-01 | 真机漫画目录截图显示按钮 0/1、第二页摘要仍称第 1 页；长目录 Row 无滚动入口 | `805be838` 修复，千页目录与全套目录19项真机 PASS；截图复核继续。早期新测试自身目录 fixture 问题已纠正并保留失败日志；不将 EPUB 早期截图空白推定为产品缺陷 |
-| READER-02（原 RISK-05） | 新库真实HTTP已复现：FINISHED无进度时详情仍未完成；显式UNREAD后37%进度使管理列表误显READING；`preflight-mobile/reading-status-public-projection-20260906/` | FAIL / 修复中；复用 Reader 公共查询与状态规则统一投影，不修改真实 Locator 或百分比；须原失败和多资源/隔离回归 |
+| READER-02（原 RISK-05） | 新库真实HTTP已复现：FINISHED无进度时详情仍未完成；显式UNREAD后37%进度使管理列表误显READING；进一步复现bootstrap摘要同类遗漏 | `c04818f3`修复；219相邻回归与26项bootstrap/v5回归PASS，491mypy通过。保留3查询预算，Locator/百分比不变，详见最新证据；最终完整RC仍需回归 |
 | AUDIO-01 | 真实Chrome快速播放/暂停后，迟到的play Promise拒绝覆盖当前正常暂停状态；`release-live/r1788672824257-w0/` | `c14b3033` 已修复并推送，3项顺序测试PASS；第二次真实运行经过该步骤，完整闭环仍待回归 |
-| AUDIO-02 | KMP/Android注入5秒播放没有自动捕获，Web现有间隔15秒；`preflight-mobile/rg04-audio-autosave-repro-20260906/` | FAIL / 修复中；共享时序契约及各端接入，必须区分捕获、持久化与服务端确认，不用UI时钟证明保存 |
-| MEDIA-01 | Windows真实Chrome请求封面出现500；缓存临时文件替换报WinError32/5，`release-live/r1788672824257-w0/api.log` | FAIL / 定位及针对性复现；沿用唯一缓存owner修复并回归并发读取，不新增缓存框架 |
+| AUDIO-02 | KMP/Android注入5秒播放没有自动捕获，Web原间隔15秒；`preflight-mobile/rg04-audio-autosave-repro-20260906/` | `c6b3e802`修复，KMP23/Android6与Web459 PASS；Chrome真实5/10秒确认位置断言通过，Android真实落盘仍在验证，不据捕获报告关闭所有平台 |
+| MEDIA-01 | Windows真实Chrome请求缩略封面出现500；cache/covers临时文件替换报WinError32/5 | `8a4ed3fb`修复与5项独立回归PASS；最新实际失败位于另一default-cover owner，另列MEDIA-02 |
+| MEDIA-02 | 最新MP3两视口均因默认封面500失败，`release-live/r1788675527007-w0/api.log:104` 指`services/default_cover.py`的原子替换，非缩略缓存 | FAIL / 修复中；两个真实入口复用同一原子文件发布机制，不能复制重试实现，待新根并发与严格Chrome回归 |
+| LOAD-01 | 实际10k预检列表/命中搜索随progress增长变慢，随后pool耗尽及进度读回超时；原始目录见最新证据 | FAIL / `c13a7034`修复唯一Reader聚合，10项复杂度/语义相邻回归PASS；`68c02047`修复maintenance阻塞放大点，39+主11项PASS。原10k有Chrome干扰，须安静重测，未声明永久泄漏或整体解除 |
+| ENV-09 | 真实Chrome EPUB详情reading-units 503；测试Windows缺canonical native章核 | 同C源码已隔离编译DLL并加载，最新MP3两视口无该503；测试入口新增native预检，不将环境缺失改为产品格式拒绝 |
 | TEST-07 | 真实Chrome重开音频时，脚本用即时count误判尚未加载按钮并等待不存在的资源卡；`web-baseline/chrome-live-audio-fix.log` | 已修改为等待可用入口，待重跑；保留完整音频恢复误差≤2秒断言 |
 
 RUN-01 最新拆分：`f3748d58` 后端 Linux 完整1250 PASS + 原有平台2 skip，Windows 两项补测均 PASS；Android host216 PASS、集成 lint PASS。`80c5d5b9` Android/C 同源码集成真机147项全部 PASS，证据见 R1-ANDROID-FULL，此批原自动回归失败已解除，最终 RC 全套仍待冻结重跑。ANDROID-01 截图已由主代理复核确认页码修正。真实音频短时引擎测试 PASS，长时/逐编码/实际服务端恢复仍待执行。
@@ -40,7 +43,7 @@ RUN-01 最新拆分：`f3748d58` 后端 Linux 完整1250 PASS + 原有平台2 sk
 
 ART-02 的本地构建入口现已补充：既有镜像脚本 `--output-dir` 导出 OCI 与版本/hash manifest，命令边界回归17项 PASS；此项仅解除“必须 push 才能构建”的工程缺口。Docker 引擎与双架构实际运行验收仍未解除。
 
-ENV-06 局部进展：10000份紧凑有效 EPUB/PDF/CBZ 已生成、重新打开及校验，负载采集保护4项测试 PASS；真实扫描/延迟/RSS 测量仍 NOT_RUN。约14 MB 紧凑库不代表大文件或10万/30万表现。原工作区后续出现未提交变化，保留并排除于本分支验收，归属核查中。
+ENV-06 局部进展：10000份紧凑有效 EPUB/PDF/CBZ 已实际导入/重扫；负载采集15项保护测试PASS。实际测量FAIL（LOAD-01），原文件/关联完整性收尾未验。约14 MB紧凑库不代表大文件或10万/30万表现。原工作区后续15项未提交变化归属无法确认，全部保留并排除于本分支验收。
 
 尚未解除：真实第三方目录客户端（ENV-04）、逐格式完整样本与平台播放承诺（ENV-06/DEC-02）、iOS 执行条件。Progression 客户端不再是 1.0 前提。先检查现有素材与可安全补齐的测试样本，不把旧缺项一概视为无法推进。
 

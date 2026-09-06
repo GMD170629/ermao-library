@@ -4,6 +4,8 @@
 
 ## 1. 执行基线与展开规则
 
+最新`c13a7034`：独立阅读状态投影含bootstrap修复及相邻回归PASS；音频时序的Web459/KMP23/Android6通过，Android真实落盘继续。严格MP3两Chrome视口仍FAIL（默认封面500），不得使用旧WAV测试scope误报MP3通过。10k真实导入/重扫已执行但性能与收尾失败，已修复慢查询及维护检查放大点，待独立安静复测。所有数量、源码与证据位置见 release-evidence.md 最新检查点；没有整体GO。
+
 `c14b3033` 增量状态：RG-04 音频自动保存间隔与 reading-status 公共投影确证 FAIL，修复及复测中；真实Chrome新库→7种文件导入→EPUB保存/重开已有局部证据，整个闭环仍FAIL，不覆盖Android/iOS或全部格式。音频快速暂停修复单测3项PASS，后续完整Chrome回归待执行。两镜像锁定安装入口 `bc94df7d` 的边界测试和WSL实际安装PASS，ART-02实际容器仍BLOCKED。具体路径见证据台账最新增量。
 
 RG-05 可执行入口：`scripts/python_release_load_precheck.py`，使用真实文件导入、实际 API/Worker、分扫描状态请求日志和进程树 RSS；10000份紧凑样本就绪。工具4项保护测试 PASS，负载结果待实际运行，命令与证据见 R1-LOAD-OBSERVER。默认短窗口仅为本机预检，完整时长/规模要求保持。

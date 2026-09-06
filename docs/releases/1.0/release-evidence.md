@@ -4,13 +4,32 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+### 最新检查点：`c13a7034`（未冻结 RC）
+
+| 增量 | 已执行证据 | 判定边界 |
+|---|---|---|
+| `c6b3e802` 音频共享4秒捕获周期 | `preflight-mobile/rg04-audio-autosave-fix-20260906/`：KMP23、Android6；`web-baseline/audio-timing-full-unit.log`：Web459 PASS/0skip | 捕获单测不代替实际落盘；真实Chrome连续5/10秒服务端位置见下行 |
+| Chrome真实后端链路 | WAV两视口旧脚本通过，目录中 `release-live/r1788674923465-w0/`、`r1788675072817-w0/`；第5/10秒可读回新位置。随后按MIME精确选择MP3、禁止任何API 5xx：`web-baseline/chrome-live-mp3.log` 两项FAIL，`release-live/r1788675527007-w0/`、`r1788675587866-w1/` | MP3播放/暂停/定位/重开与5/10秒读回断言通过，但默认封面500使整例FAIL。旧报告scope称MP3不准确，实际WAV，不用旧scope计格式覆盖。旧脚本漏断言的EPUB目录503已定位到缺Windows native章核；现已编译并显式接入，最新两轮不再503 |
+| `8a4ed3fb`/`80a65f77` 缩略图缓存竞争 | `backend-baseline/cover-cache-primary.log`：5 PASS，包括双并发、WinError5/32、永久失败、非Windows errno5、原文件不变/有效图片/临时清理 | 此cache owner回归通过；另一路 `services/default_cover.py` 原子发布仍复现500，MEDIA-02继续修复，不混作已关闭 |
+| `c04818f3` 独立阅读状态投影 | `backend-baseline/reading-status-batched-regression.log`：219 PASS；`reading-status-bootstrap-regression.log`：26 PASS；mypy491通过。`reading-status-bootstrap-red.log`保留打开接口遗漏的原始失败 | Reader/Library复用同一批量状态查询和domain规则，原3查询预算保留。手动已读不伪造100%位置；原百分比仍是实际阅读位置 |
+| `68c02047` 维护检查线程边界 | `backend-baseline/maintenance-pool-20260906/REPORT.md`：RED/GREEN、39 PASS；主独立11 PASS在`maintenance-pool-primary.log` | 修复已复现的事件循环阻塞放大点；不宣告原池耗尽/全部并发已解除 |
+| `c13a7034` 最近阅读聚合 | `backend-baseline/recent-read-query-20260906/diagnosis.md`：10k库副本0/1000/1817进度的VM工作量比较与语义对照；主`recent-read-query-primary.log`：10 PASS | 既有唯一Reader聚合增加按书分组，无索引/阈值变更；受控复杂度回归不等于完整负载PASS |
+| `d9c96db1` 10k实际预检 | 工具15 PASS：`contracts/load-observer-primary-reviewed.log`；实际失败目录是`artifacts/releases/1.0/local-load/measurement-20260906-053850/`（不在本节E根），`failure-summary.json`记录10000 Books/Resources/Assets、重扫结束后进度读回超时 | 与13:41–13:46 Chrome运行重叠，性能数受干扰；保留FAIL，原文件/关联完整性收尾未验。修复后须安静窗口重测，不据此通过RG-05 |
+| `efaeadd7` 位置HTTP探针 | 工具4 PASS：`contracts/position-probe-tools-primary.log`；真实探针历史`artifacts/releases/1.0/position-http/20260906T053626495Z/position-report.json`，脚本SHA与最终提交一致 | 真实API/Worker、两账号、回包放弃/幂等重放/迟到写/并发/重启快照；合成opaque Locator仅证明存取，报告明确PARTIAL/NOT_COVERED，不替代真实引擎恢复和客户端outbox |
+
+Windows C章核由同一`chapters.c`以Zig C99 warning-as-error编译共享DLL，`chapter-core/windows-shared-build.log`；SHA256 `36ccc43c4c5c15f327728442b259f1673c6815bfe3642137d26916a1141a8740`。测试环境通过`ERMAO_CHAPTER_CORE_LIBRARY`接入`.tmp/chapter-core-windows/ermao_chapters.dll`，不是正式后端交付物。
+
+下一项可执行工作：默认封面并发发布修复、严格MP3两视口闭环、Chrome全量回归、Android真实落盘测试，随后锁定源码做本机负载重测与后端完整回归。已完成代理产出由主审后分项commit/push；当前未公开发布。
+
+### 之前增量（保留追溯，以以上最新状态为准）
+
 最新增量：`bc94df7d` 将两个 Dockerfile 的 Python 安装统一到现有 lock，复用 `scripts/install-python-runtime.sh`；5项命令边界测试和 WSL 实际39个锁定运行依赖安装/导入通过，见 `preflight-containers/result.md`、`05-locked-runtime-import-verification.log`、`07-final-static-tests.log`。锁漂移在创建环境前失败；Docker 引擎、双架构镜像运行仍 BLOCKED。
 
 真实 Chrome 新库链路当前尚 FAIL：`release-live/r1788672824257-w0/` 与 `r1788673266527-w0/` 记录七种真实文件导入、EPUB第二章保存和重开。首轮播放后立即暂停触发未完成 `play()` Promise 的过期错误，已由 `c14b3033` 修复；3项异步顺序单测、ESLint和TypeScript检查通过，`web-baseline/audio-play-attempt-tests.log`、`audio-live-typecheck.log`。第二轮通过该步骤，在重开按钮尚未加载时错误选择资源卡的测试分支超时，日志 `web-baseline/chrome-live-audio-fix.log`；测试已改为等待可用入口，待重跑。不得将局部经过路径登记成完整用例 PASS。
 
 新确证缺陷：独立 reading-status 与列表/详情投影不一致，见 `preflight-mobile/reading-status-public-projection-20260906/`；音频5秒内没有自动捕获位置，见 `preflight-mobile/rg04-audio-autosave-repro-20260906/`。正在复用 Reader 状态规则和跨端时序常量修复，旧 Android147项通过只代表之前检查点。真实 API 的 Windows 封面并发500亦已保留 `release-live/r1788672824257-w0/api.log`，正在定位唯一缓存实现。下一项可执行工作为上述修复、Chrome真实闭环、本机10k测量和位置HTTP探针；后端源码在负载测量窗口内保持不变。
 
-- 当前已推送检查点 `c14b3033`；后续工作树修改按逻辑审查提交。正式 RC 未冻结。Chrome 全量使用 `854712bb` 的 Web/C/WASM 源码，后续音频修复使相关旧结果不再代表当前源码，必须重新回归。
+- 初始全套Chrome使用 `854712bb` 的 Web/C/WASM 源码；后续音频修复使相关旧结果不再代表当前源码，必须重新回归。当前已推送检查点以上方最新登记为准。
 - 用户批准 DEC-05：1.0 暂不支持第三方进度同步；OPDS 目录、搜索、下载保留。`f3748d58` 删除同步实现和声明，授权 GET/PUT 返回 410，未授权仍 401；阴性测试验证旧表、v5 表及所有 DML 均无写入。
 - 起点：`develop@197e81a808ba32595a8a6ffeda62422b3a7d3473`，初始 `git status --short` 无输出。后续复核发现原工作区出现 OPDS/shared 等未提交变化，归属正在核查；这些变化全部保留，不清理、不提交，不作为隔离发布分支的已验收内容。
 - 隔离工作区：`D:/www/ermao-release-1.0`；分支 `codex/release-1.0-convergence`。正式 RC 未冻结，无 tag/公开发布。用户追加授权及时 commit/push；已检查三个工作流，push 仅匹配 develop/prod 或版本 tag，专用分支不触发发布。只推专用分支，不创建 PR/触发工作流。
