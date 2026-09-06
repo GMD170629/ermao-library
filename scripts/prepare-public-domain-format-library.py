@@ -89,6 +89,8 @@ UNAVAILABLE_AUDIO_EXTENSIONS = (
 )
 
 EXPLICIT_AUDIO_ARGUMENTS: dict[str, tuple[str, ...]] = {
+    # FFmpeg's default big-endian PCM emits AIFF even for an .aifc suffix.
+    ".aifc": ("-c:a", "pcm_s16le", "-f", "aiff"),
     ".amr": (
         "-ar",
         "8000",
@@ -246,6 +248,13 @@ def package_comics(images: list[Path], target_root: Path, rar: Path) -> list[Pat
 
 
 def probe_audio(ffprobe: Path, path: Path) -> dict[str, object]:
+    if path.suffix.lower() == ".aifc":
+        with path.open("rb") as stream:
+            header = stream.read(12)
+        if header[:4] != b"FORM" or header[8:] != b"AIFC":
+            raise RuntimeError(
+                "AIFC fixture must contain an AIFC FORM, not an AIFF alias"
+            )
     raw_options = (
         ["-f", "g726", "-code_size", "4", "-ar", "8000"]
         if path.suffix.lower() == ".g726"
