@@ -1,5 +1,11 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 POS-06 Android同步owner/真实HTTP/SQLite子项实际PASS（12.965s，尚待原online相邻收尾）：从真实播放器确认的M3933ms/r2、N9939ms/r4完整报告建立新mutation；M实际提交r5并扣留返回，N已持久化；释放旧ACK后第二次push进入但尚未发出，独立连接核对N/local/pending及confirmedRevision=0全量不变，服务器仍M/r5。取消并join第一scope、关闭并重开独立case DB后，原N mutation真实重试成为r6，5秒内本地/独立GET一致且pending清空。证据`artifacts/releases/1.0/938afd24/pos06-native-late-ack-20260907/online-evidence.log`与`device-pos06-with-host.log`，实际API/Web源码ffd4228a（目录名938afd24为准备点，manifest记录实际HEAD）；主设备应用生产业务源码未改。929项源码/原件hash一致，6次PUT200，无4xx/5xx；独立审查无必修项。
+
+这次仅新增一个针对性仪器用例及必要独立数据库参数，原确认/暂停/重开owner和断言保持；主审查去掉了多余确认封装、重复位置比较，并用位置值增加而非仅capture时间证明两个真实报告不同。首编译`test-build.log`为配置/测试类型引用失败，不是业务失败：release变体不能编译依赖debug专用视觉宿主的默认套件，Kotlin alias不能直接访问嵌套Accepted。独立opt-in APK仅编译既有release-live目录，默认全量套件及入口保留；结果类型直接引用现有公开application port定义。首次设备运行在Compose规则创建Activity前失败，`device-pos06.log`保留；输入文件当时未消费（device-fixture-before-retry.txt），没有发生业务调用。随后在现有隔离init中复用版本目录已有ui-test-manifest依赖提供标准Compose宿主，保留数据换装独立开发包并同输入复验通过，没有新增业务宿主或生产诊断。
+
+本批独立开发APK SHA-256 `32d16edc070fafc4f7935bc150ac6c63476489102c510a97de958062428c6489`，测试APK `4c90d73da79416cef141b60a2bbc1edcc954956e9fa0810ccb91d933bfeaed44`；包名releasecheck / releasecheck.test，均Debug证书，含测试宿主，不是正式交付。验签/manifest/实际安装包hash及最终测试源码hash见同目录。fixture exit0、端口释放、独立包强停、自有reverse移除、私有输入消费及原App元数据/原工作区15改动保留均已核验；私有测试证据DB保留。本例控制的是实际HTTP响应返回到同步器的交付，不是socket丢包、进程强杀、普通UI或Chrome竞态。下一项只做原online必要相邻，之后停止此工具补口。
+
 2026-09-07 POS-06最小执行补口进行中：独立只读核实已有单测/本地SQLite和正常在线仪器不能覆盖“真实HTTP提交M后，N已持久化才处理M的ACK”。依DEC-07例外，仅在现有Android online仪器中加入该用例：复用实际引擎已捕获的完整报告、KMP coordinator、真实HTTP port和生产Android SQLite，在测试拥有的port返回边界扣留实际ACK；不是伪造响应或声称网络丢包。释放旧ACK后核对完整N仍在，重建同步owner并真实重试确认。尚未编译/执行，不计PASS。辅助入口现有硬编码仍指向原App，必须改为现有独立releasecheck包；现有隔离init选择release测试variant，以免仪器误用含本地默认值的debug源码集。这两项仅服务设备数据隔离，不增加任意包名/平台配置。停止条件为本用例及必要原在线相邻实际通过、精确清理，无通用框架扩展。
 
 POS-11相邻补验（938afd24）：本次详情投影改动后，复用现有`test_reading_status_public_projection.py`及`test_request_mutations.py`真实API/SQLite三项通过；无位置标已读仍无Locator、取消已读保持37%完整进度/公开投影及书籍身份批量状态保护保留。证据`artifacts/releases/1.0/938afd24/pos11-status-projection-20260907/regression.log`。仅此API保护，不替代首页/Reader真实客户端各格式完整验收，未新增测试或工具。

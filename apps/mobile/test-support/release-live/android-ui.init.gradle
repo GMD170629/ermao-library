@@ -7,6 +7,16 @@ gradle.beforeProject { project ->
             project.extensions.getByName('androidComponents').finalizeDsl { android ->
                 android.defaultConfig.applicationId = 'com.ermao.library.releasecheck'
                 android.testBuildType = 'release'
+                if (project.providers.gradleProperty('enableReleaseLiveProbe').orNull == 'true') {
+                    // This separate opt-in APK contains only the live gate. The normal
+                    // debug instrumentation suite depends on debug-only visual hosts.
+                    def liveSources = android.sourceSets.getByName('androidTest').kotlin.directories
+                    liveSources.clear()
+                    liveSources.add(project.rootProject.file('test-support/release-live/androidTest').absolutePath)
+                    // Reuse the normal Compose test host in this isolated development APK.
+                    def libs = project.extensions.getByType(org.gradle.api.artifacts.VersionCatalogsExtension).named('libs')
+                    project.dependencies.add('releaseImplementation', libs.findLibrary('androidx-compose-ui-test-manifest').get())
+                }
                 def acceptanceBuild = android.buildTypes.getByName('release')
                 acceptanceBuild.signingConfig = android.signingConfigs.getByName('debug')
                 acceptanceBuild.debuggable = true

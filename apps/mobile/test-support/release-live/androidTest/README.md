@@ -9,6 +9,8 @@ weakened default tests. Build separately and select one exact method:
   `com.ermao.library.release.live.AndroidAudioOnlineConfirmationInstrumentedTest#realHttpConfirmsPlaybackAtFiveAndTenSecondsAndRestoresAfterReopen`
 - MP3 Web-to-Android handoff:
   `com.ermao.library.release.live.AndroidAudioOnlineConfirmationInstrumentedTest#restoresWebMp3ProgressAndConfirmsPlaybackForWebHandoff`
+- POS-06 late ACK with durable newer pending and coordinator/database reopen:
+  `com.ermao.library.release.live.AndroidAudioOnlineConfirmationInstrumentedTest#realHttpLateAckKeepsNewerAudioPositionDurableAcrossCoordinatorRestart`
 
 Do not run the whole class with one input: each method consumes its own fresh
 private fixture, and their initial server-progress requirements differ.
@@ -24,6 +26,9 @@ defaults, debug signing, and the isolated `com.ermao.library.releasecheck` UID.
 Its release-named APKs are development acceptance artifacts, not formal delivery.
 The provisioner targets only that package; install the matching test APK without
 clearing either app's data. Never run this probe against `com.ermao.library`.
+With this explicit init script and opt-in flag, the test APK compiles only this
+live source directory. The ordinary debug instrumentation suite, including its
+debug-only visual hosts, retains its separate normal build and acceptance path.
 
 The primary operator owns real backend setup/import, exact port authorization,
 device provisioning and execution. Use `scripts/python_android_release_live_fixture.py`,
@@ -119,6 +124,22 @@ RG04 bidirectional SYNC requires that actual Web-to-Android-to-Web result plus
 one fresh-server run of the original online method. Compilation cannot satisfy
 that stop condition. There are no new fixture fields, phase options or
 force-stop steps.
+
+The POS-06 method captures two distinct reports through the real player and the
+unchanged HTTP/SQLite confirmation helper. It reuses those complete reports as
+new M/N mutations in the production coordinator with a separate case database
+inside the same private fixture directory. This avoids a closed player's Stop
+write interfering with the controlled sequence. No Locator is derived from a
+percentage or modified for the test.
+
+The test port delegates M to real HTTP, verifies its committed value by a fresh
+GET, and holds only the decoded ACK's delivery to the coordinator. After N is
+durable, releasing M must lead to the exact N upload; that second call is held
+before transmission so an independent SQLite connection can verify the whole
+N state remains unchanged. The test cancels and joins its scope, reopens the case
+database and coordinator, and confirms retry of that exact mutation through real
+HTTP within five seconds. This covers the Android sync-owner/HTTP/SQLite boundary;
+it is not a socket-drop test, process kill, ordinary UI race or Chrome result.
 
 `online-evidence.log` and the matching `RG04ReleaseLive` logcat tag contain only
 result codes, resource/asset/client IDs and scalar capture, position, revision

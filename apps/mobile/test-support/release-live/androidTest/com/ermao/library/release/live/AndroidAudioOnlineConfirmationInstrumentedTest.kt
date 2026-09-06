@@ -36,13 +36,22 @@ import com.ermao.library.shared.modules.reader.ReaderLocalProgressIdentity
 import com.ermao.library.shared.modules.reader.ReaderPositionDurableState
 import com.ermao.library.shared.modules.reader.ReaderPositionLocalState
 import com.ermao.library.shared.modules.reader.ReaderPositionServerPort
+import com.ermao.library.shared.modules.reader.ReaderPositionSyncCoordinator
+import com.ermao.library.shared.modules.reader.ReaderPositionUpload
+import com.ermao.library.shared.modules.reader.ReaderProgressMutationV5
 import com.ermao.library.shared.modules.reader.ReaderProgressSnapshotV5
 import com.ermao.library.shared.modules.reader.ReaderProgressSyncTarget
 import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
 import com.ermao.library.shared.modules.reader.application.ReaderPositionQueryResult
+import com.ermao.library.shared.modules.reader.application.ReaderPositionPushResult
 import com.ermao.library.shared.modules.servers.application.InMemoryServerProfileRepository
 import java.io.File
 import kotlin.math.abs
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
@@ -93,6 +102,36 @@ class AndroidAudioOnlineConfirmationInstrumentedTest {
         assertAppSessionUnchanged()
         record("PASS", restored, reopenedConfirmation.revision)
     }
+
+    @Test
+    fun realHttpLateAckKeepsNewerAudioPositionDurableAcrossCoordinatorRestart() =
+        withOnlineAudioFixture {
+            assertTrue(
+                "RG04_POS06_NEW_SERVER_PROGRESS_REQUIRED",
+                database.get(SystemClock.elapsedRealtime() + 15_000) == null,
+            )
+            record("POS06_ISOLATION_PASS")
+            prepareActivity()
+            val player = openPlayer(autoplay = true)
+            awaitPlayer(player) { it.phase == AudioPlaybackPhase.Playing && it.durationMillis > 0 }
+            assertFixturePlayer(player, fixture)
+            val started = SystemClock.elapsedRealtime()
+            val capturedM = confirmPlaybackCheckpoint(player, null, started, 5_000)
+            waitUntil(started + 10_000)
+            val capturedN = confirmPause(player, capturedM).confirmed
+            assertTrue("RG04_POS06_CAPTURE_ORDER", capturedN.capturedAtEpochMillis > capturedM.capturedAtEpochMillis)
+            assertTrue("RG04_POS06_DISTINCT_REAL_LOCATORS", locatorMillis(capturedN) > locatorMillis(capturedM))
+            record(
+                "POS06_REAL_REPORTS_CAPTURED mPosition=${locatorMillis(capturedM)} " +
+                    "mRevision=${capturedM.revision} nCapturedAt=${capturedN.capturedAtEpochMillis}",
+                locatorMillis(capturedN),
+                capturedN.revision,
+            )
+            closePlayerAndObserve()
+
+            verifyLateAckRecovery(localPosition(capturedM), localPosition(capturedN))
+            assertAppSessionUnchanged()
+        }
 
     @Test
     fun restoresWebMp3ProgressAndConfirmsPlaybackForWebHandoff() = withOnlineAudioFixture {
@@ -298,7 +337,17 @@ class AndroidAudioOnlineConfirmationInstrumentedTest {
             val database = PositionObservations(isolated, identity, target, port, fixture)
             val empty = database.read()
             assertTrue("RG04_FRESH_DATABASE_REQUIRED", empty?.local == null && empty?.sync == ReaderPositionDurableState())
-            online = OnlineAudioFixture(fixture, privateFixture.directory, isolated, app, session, identity, database)
+            online = OnlineAudioFixture(
+                fixture,
+                privateFixture.directory,
+                isolated,
+                app,
+                session,
+                identity,
+                target,
+                port,
+                database,
+            )
             online.test()
         } finally {
             try {
@@ -316,6 +365,8 @@ class AndroidAudioOnlineConfirmationInstrumentedTest {
         private val app: ErmaoLibraryApplication,
         private val session: AppSession.Authenticated,
         val identity: ReaderLocalProgressIdentity,
+        private val target: ReaderProgressSyncTarget,
+        private val port: ReaderPositionServerPort,
         val database: PositionObservations,
     ) {
         private val evidence = File(directory, "online-evidence.log")
@@ -408,6 +459,111 @@ class AndroidAudioOnlineConfirmationInstrumentedTest {
             return ConfirmedPause(pausedSnapshot, paused)
         }
 
+        fun verifyLateAckRecovery(
+            capturedM: ReaderPositionLocalState,
+            capturedN: ReaderPositionLocalState,
+        ) = runBlocking {
+            // Keep the closed player's possible Stop write out of this case's database.
+            val observations = PositionObservations(isolated, identity, target, port, fixture, POS06_DATABASE_NAME)
+            val empty = observations.read()
+            assertTrue("RG04_POS06_FRESH_DATABASE", empty?.local == null && empty?.sync == ReaderPositionDurableState())
+            val committed = CompletableDeferred<Pair<ReaderPositionUpload, ReaderPositionPushResult>>()
+            val releaseAck = CompletableDeferred<Unit>()
+            val nextUpload = CompletableDeferred<ReaderPositionUpload>()
+            val gatedPort = object : ReaderPositionServerPort by port {
+                var calls = 0
+                override suspend fun push(upload: ReaderPositionUpload): ReaderPositionPushResult {
+                    calls += 1
+                    if (calls == 1) {
+                        val result = port.push(upload)
+                        check(committed.complete(upload to result))
+                        // Actual HTTP completed; hold only its delivery to the sync owner.
+                        releaseAck.await()
+                        return result
+                    }
+                    check(calls == 2 && nextUpload.complete(upload))
+                    // The old ACK was processed. N must remain unsent until the owner is rebuilt.
+                    kotlinx.coroutines.awaitCancellation()
+                }
+            }
+            val firstJob = SupervisorJob()
+            val firstDatabase = AndroidReaderV5Database(isolated, identity, POS06_DATABASE_NAME)
+            val first = ReaderPositionSyncCoordinator(
+                firstDatabase, gatedPort, CoroutineScope(firstJob + Dispatchers.Default),
+            )
+            lateinit var savedN: DurableObservation
+            lateinit var committedM: ReaderProgressSnapshotV5
+            lateinit var pendingN: ReaderProgressMutationV5
+            try {
+                val deadline = SystemClock.elapsedRealtime() + 5_000
+                first.saveLocalAndSubmit(target, capturedM)
+                val remaining = deadline - SystemClock.elapsedRealtime()
+                assertTrue("RG04_POS06_M_DEADLINE", remaining > 0)
+                val (upload, result) = withTimeout(remaining) { committed.await() }
+                val accepted = result as? ReaderPositionPushResult.Accepted
+                    ?: throw AssertionError("RG04_POS06_REAL_HTTP_NOT_ACCEPTED")
+                assertTrue("RG04_POS06_M_FULL_UPLOAD", upload.target == target &&
+                    upload.mutation == capturedM.toMutation(upload.mutation.mutationId))
+                committedM = requireNotNull(observations.get(deadline))
+                assertTrue("RG04_POS06_M_FULL_ACK_AND_GET", accepted.response.currentSnapshot == committedM &&
+                    accepted.response.acceptedMutationId == upload.mutation.mutationId &&
+                    committedM.mutationId == upload.mutation.mutationId &&
+                    committedM.revision == accepted.response.acceptedRevision &&
+                    sameLocalPosition(capturedM, localPosition(committedM)))
+                assertFalse("RG04_POS06_ACK_RELEASED_EARLY", releaseAck.isCompleted)
+                record("POS06_M_HTTP_ACK_HELD mutation=${committedM.mutationId}",
+                    locatorMillis(committedM), committedM.revision)
+
+                // Create N only after M's server commit and independent GET, while its ACK is held.
+                first.saveLocalAndSubmit(target, capturedN)
+                savedN = requireNotNull(observations.read())
+                pendingN = requireNotNull(savedN.sync.pending)
+                assertTrue("RG04_POS06_N_FULL_LOCAL", sameLocalPosition(capturedN, requireNotNull(savedN.local)))
+                assertTrue("RG04_POS06_N_FULL_PENDING", pendingN == capturedN.toMutation(pendingN.mutationId) &&
+                    pendingN.mutationId != upload.mutation.mutationId &&
+                    savedN.sync.confirmedRevision == 0L && savedN.sync.terminalFailureCode == null)
+                assertTrue("RG04_POS06_RELEASE_ACK", releaseAck.complete(Unit))
+                val afterAckDeadline = SystemClock.elapsedRealtime() + 5_000
+                val next = withTimeout(5_000) { nextUpload.await() }
+                assertTrue("RG04_POS06_NEXT_UPLOAD_IS_EXACT_N", next.target == target && next.mutation == pendingN)
+                // Reaching the next push proves ACK processing, not a sleep-based assumption.
+                assertTrue("RG04_POS06_OLD_ACK_PRESERVES_COMPLETE_STATE", observations.read() == savedN)
+                assertTrue("RG04_POS06_N_NOT_SENT", observations.get(afterAckDeadline) == committedM)
+                record("POS06_OLD_ACK_LEFT_N_PENDING mutation=${pendingN.mutationId} confirmedRevision=0",
+                    locatorMillis(capturedN), committedM.revision)
+            } finally {
+                firstJob.cancelAndJoin()
+                firstDatabase.close()
+            }
+
+            val retryJob = SupervisorJob()
+            val retryDatabase = AndroidReaderV5Database(isolated, identity, POS06_DATABASE_NAME)
+            val retry = ReaderPositionSyncCoordinator(
+                retryDatabase, port, CoroutineScope(retryJob + Dispatchers.Default),
+            )
+            try {
+                assertTrue("RG04_POS06_REOPEN_PRESERVES_COMPLETE_STATE", observations.read() == savedN)
+                val deadline = SystemClock.elapsedRealtime() + 5_000
+                retry.retryPending(target)
+                val remote = observations.awaitConfirmed(deadline) { local, sync ->
+                    sameLocalPosition(capturedN, local) && sync.confirmedRevision > committedM.revision
+                }
+                assertTrue("RG04_POS06_FINAL_EXACT_N", sameLocalPosition(capturedN, localPosition(remote)) &&
+                    remote.mutationId == pendingN.mutationId && remote.revision == committedM.revision + 1)
+                val finalState = requireNotNull(observations.read())
+                assertTrue("RG04_POS06_FINAL_DURABLE_N", sameLocalPosition(capturedN, requireNotNull(finalState.local)) &&
+                    finalState.sync.pending == null && finalState.sync.terminalFailureCode == null &&
+                    finalState.sync.confirmedRevision == remote.revision)
+                val remaining = deadline - SystemClock.elapsedRealtime()
+                assertTrue("RG04_POS06_RETRY_DEADLINE", remaining > 0)
+                withTimeout(remaining) { retry.awaitIdle() }
+                record("POS06_PASS mutation=${remote.mutationId}", locatorMillis(remote), remote.revision)
+            } finally {
+                retryJob.cancelAndJoin()
+                retryDatabase.close()
+            }
+        }
+
         fun closePlayerAndObserve() {
             instrumentation.runOnMainSync { requireNotNull(runtime).close() }
             runtime = null
@@ -493,12 +649,13 @@ private class PositionObservations(
     private val target: ReaderProgressSyncTarget,
     private val port: ReaderPositionServerPort,
     private val fixture: ReleaseAudioFixture,
+    private val databaseName: String = AndroidReaderV5Database.DATABASE_NAME,
 ) {
     var confirmationObservation = "read=not-started get=not-requested"
         private set
 
     fun read(): DurableObservation? = runBlocking {
-        val database = AndroidReaderV5Database(context, identity)
+        val database = AndroidReaderV5Database(context, identity, databaseName)
         try {
             val before = database.loadPositionSyncState()
             val local = database.loadPosition(identity.resourceId)
@@ -588,7 +745,23 @@ private fun locatorMillis(canonicalJson: String): Long =
     (Json.parseToJsonElement(canonicalJson).jsonObject.getValue("locations").jsonObject
         .getValue("time").jsonPrimitive.double * 1_000).toLong()
 
+private fun localPosition(snapshot: ReaderProgressSnapshotV5) = ReaderPositionLocalState(
+    resourceId = snapshot.resourceId,
+    clientId = snapshot.clientId,
+    capturedAtEpochMillis = snapshot.capturedAtEpochMillis,
+    position = snapshot.position,
+)
+
+private fun sameLocalPosition(expected: ReaderPositionLocalState, actual: ReaderPositionLocalState): Boolean =
+    expected.resourceId == actual.resourceId && expected.clientId == actual.clientId &&
+        expected.capturedAtEpochMillis == actual.capturedAtEpochMillis &&
+        expected.position.presentation == actual.position.presentation &&
+        Json.parseToJsonElement(expected.position.locator.canonicalJson) ==
+        Json.parseToJsonElement(actual.position.locator.canonicalJson)
+
 private fun waitUntil(deadline: Long) {
     val remaining = deadline - SystemClock.elapsedRealtime()
     if (remaining > 0) Thread.sleep(remaining)
 }
+
+private const val POS06_DATABASE_NAME = "reader-position-v5-pos06.db"
