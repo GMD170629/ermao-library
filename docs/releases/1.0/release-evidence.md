@@ -4,9 +4,9 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
-- 当前已推送检查点 `854712bb`；后续工作树修改按逻辑审查提交。正式 RC 未冻结。Chrome 全量使用该提交的 Web/C/WASM 源码，运行期间 Android/OPDS 工作树仍有并行修改，不能作为整体冻结验收。
+- 当前已推送检查点 `4ccdd8c4`；后续工作树修改按逻辑审查提交。正式 RC 未冻结。Chrome 全量使用 `854712bb` 的 Web/C/WASM 源码，运行期间 Android/OPDS 工作树仍有并行修改，不能作为整体冻结验收。
 - 用户批准 DEC-05：1.0 暂不支持第三方进度同步；OPDS 目录、搜索、下载保留。`f3748d58` 删除同步实现和声明，授权 GET/PUT 返回 410，未授权仍 401；阴性测试验证旧表、v5 表及所有 DML 均无写入。
-- 起点：`develop@197e81a808ba32595a8a6ffeda62422b3a7d3473`，初始 `git status --short` 无输出；没有用户未提交改动被纳入或排除。原工作区不修改。
+- 起点：`develop@197e81a808ba32595a8a6ffeda62422b3a7d3473`，初始 `git status --short` 无输出。后续复核发现原工作区出现 OPDS/shared 等未提交变化，归属正在核查；这些变化全部保留，不清理、不提交，不作为隔离发布分支的已验收内容。
 - 隔离工作区：`D:/www/ermao-release-1.0`；分支 `codex/release-1.0-convergence`。正式 RC 未冻结，无 tag/公开发布。用户追加授权及时 commit/push；已检查三个工作流，push 仅匹配 develop/prod 或版本 tag，专用分支不触发发布。只推专用分支，不创建 PR/触发工作流。
 - 实际证据根：`artifacts/releases/1.0/197e81a808ba32595a8a6ffeda62422b3a7d3473/`。这是开发基线证据，后续修复须另记源码差异/提交；不能直接用于冻结 RC 放行。
 - 环境：Windows；复用已安装 Node 22.23.1、pnpm 9.12.2、Python 3.11.15/uv 0.12.7，依赖在隔离工作区安装。Python 不在 PATH 的问题通过本任务 PATH 和 `PYTHON_EXECUTABLE` 解决，无系统配置变更。
@@ -15,6 +15,7 @@
 
 | ID / 关联 | 实际执行 | 结果 / 证据（相对本节证据根） | 效力 |
 |---|---|---|---|
+| R1-LOAD-OBSERVER / RG-05 | `scripts/python_release_load_precheck.py` 复用既有 smoke 生命周期和真实 API/Worker | 采集保护4项 PASS：实际子进程内存计入、失败请求不丢弃、进度确认后真实 HTTP 读回正反例、样本路径越界拒绝；`contracts/load-observer-tests.log`。psutil 7.2.2 仅安装到 `.tmp/release-tools` | 实际负载待运行。`D:/www/ermao-perf-precheck-20260906/corpus-10k-20260906-124641/` 中10000份有效 EPUB/PDF/CBZ 共约14 MB，只覆盖紧凑混合索引预检。运行设 `PYTHONPATH=.tmp/release-tools`、`PRECHECK_EVIDENCE_ROOT=<本节证据根>/local-load`，参数 `--measure-window --prepared-corpus-root <上述目录>`；135/180秒默认窗口不冒充30分钟门禁或10万/30万 |
 | R1-WEB-STATIC / ART-01 | `pnpm lint`、`pnpm typecheck`、`pnpm i18n:check` | PASS；`web-baseline/lint.log`、`typecheck.log`、`i18n-runtime-fixed.log` | 基线 Web 静态检查；i18n 首次 PATH 失败日志另保留 |
 | R1-WEB-UNIT / ART-01 | `pnpm --filter @shuku/web test`，含前置 WASM/安全生成/边界/设置/双语校验 | PASS：456 tests，0 failed/skipped；`web-baseline/unit-runtime-fixed.log` | 自动测试，不代表完整格式/真机通过 |
 | R1-WEB-E2E-HIST / ART-01 | 原四浏览器 `pnpm test:e2e --workers=2` | 155 PASS / 97 FAIL；`web-baseline/e2e.log`、`test-results/` | 用户已收敛为 Chrome，仅保留诊断历史；63 个 Firefox 启动失败为环境问题，其余逐项分类 |
