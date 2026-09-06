@@ -44,6 +44,7 @@ fun HomeSnapshot.toUiContent(): HomeContent {
                 positionLabel = it.chapter,
                 lastReadAtEpochMillis = it.lastReadAt.toEpochMillisOrNull(),
                 resumeResourceId = it.resumeResourceId,
+                readerType = it.readerType,
             )
         },
         recentReading = readingItems.map(BookSummary::toCard),

@@ -53,6 +53,7 @@ import androidx.navigation3.ui.NavDisplay
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ermao.library.R
 import com.ermao.library.features.content.model.LibraryScope
+import com.ermao.library.features.content.model.ContinueReadingCard
 import com.ermao.library.features.content.model.ResourceContent
 import com.ermao.library.features.home.application.HomeViewModel
 import com.ermao.library.features.home.ui.HomeScreen
@@ -145,6 +146,22 @@ private fun AndroidAudioPhase.toSharedAudioPlaybackStage(): AudioPlaybackStage =
     AndroidAudioPhase.Buffering -> AudioPlaybackStage.Buffering
     AndroidAudioPhase.Ended -> AudioPlaybackStage.Ended
     AndroidAudioPhase.Error -> AudioPlaybackStage.Error
+}
+
+internal fun continueReading(
+    item: ContinueReadingCard,
+    openBook: (String) -> Unit,
+    openReader: (String) -> Unit,
+    openAudio: (String) -> Unit,
+) {
+    val resourceId = item.resumeResourceId
+    if (resourceId.isNullOrBlank()) {
+        openBook(item.book.id)
+    } else if (item.readerType.equals("audio", ignoreCase = true)) {
+        openAudio(resourceId)
+    } else {
+        openReader(resourceId)
+    }
 }
 
 @Serializable
@@ -488,8 +505,8 @@ fun MainShell(
             modifier = libraryModifier,
         )
     }
-    val openAudio: (ResourceContent, ReadingUnit?) -> Unit = { resource, unit ->
-        val artworkUri = resource.coverUrl.takeIf(String::isNotBlank)
+    fun openAudio(resourceId: String, title: String, coverUrl: String, unit: ReadingUnit? = null) {
+        val artworkUri = coverUrl.takeIf(String::isNotBlank)
         audioRuntime.launchRemote(
             profile = session.profile,
             namespace = ReaderSyncNamespace(
@@ -497,9 +514,9 @@ fun MainShell(
                 session.identity.namespace.userId,
                 session.identity.namespace.authorizationVersion,
             ),
-            resourceId = resource.id,
+            resourceId = resourceId,
             chapterId = unit?.id,
-            titleHint = resource.title,
+            titleHint = title,
             artworkUri = artworkUri,
             bootstrapGateway = audioBootstrapGateway,
             mediaTransport = audioMediaTransport,
@@ -593,15 +610,21 @@ fun MainShell(
                             if (homeBackStack.lastOrNull() != route) homeBackStack.add(route)
                         },
                         onContinueReading = { item ->
-                            val resourceId = item.resumeResourceId
-                            if (resourceId.isNullOrBlank()) {
-                                val route = BookDetailRoute(item.book.id)
-                                if (homeBackStack.lastOrNull() != route) homeBackStack.add(route)
-                            } else {
-                                appContext.startActivity(
-                                    ReaderActivity.createServerIntent(appContext, session.profile.id, resourceId),
-                                )
-                            }
+                            continueReading(
+                                item = item,
+                                openBook = { bookId ->
+                                    val route = BookDetailRoute(bookId)
+                                    if (homeBackStack.lastOrNull() != route) homeBackStack.add(route)
+                                },
+                                openReader = { resourceId ->
+                                    appContext.startActivity(
+                                        ReaderActivity.createServerIntent(appContext, session.profile.id, resourceId),
+                                    )
+                                },
+                                openAudio = { resourceId ->
+                                    openAudio(resourceId, item.book.title, item.book.coverUrl)
+                                },
+                            )
                         },
                         onOpenLibrary = { selectedTabValue = TabId.Library.stableValue },
                         onRetry = homeViewModel::retry,
@@ -834,14 +857,14 @@ fun MainShell(
                                     onOpenFacet = { kind, id -> currentBackStack.add(FacetRoute(kind.name, id)) },
                                     onOpenResource = { resource ->
                                         if (resource.readerType.equals("audio", ignoreCase = true)) {
-                                            openAudio(resource, null)
+                                            openAudio(resource.id, resource.title, resource.coverUrl)
                                         } else {
                                             openResource(appContext, session.profile.id, resource) { currentBackStack.add(it) }
                                         }
                                     },
                                     onOpenReadingUnit = { resource, unit ->
                                         if (resource.readerType.equals("audio", ignoreCase = true)) {
-                                            openAudio(resource, unit)
+                                            openAudio(resource.id, resource.title, resource.coverUrl, unit)
                                         } else {
                                             openResource(appContext, session.profile.id, resource, unit) { currentBackStack.add(it) }
                                         }

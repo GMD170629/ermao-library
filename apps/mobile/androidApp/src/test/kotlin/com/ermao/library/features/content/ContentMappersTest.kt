@@ -7,11 +7,32 @@ import com.ermao.library.shared.modules.library.domain.Asset
 import com.ermao.library.shared.modules.library.domain.BookDetailSummary
 import com.ermao.library.shared.modules.library.domain.FacetKind
 import com.ermao.library.shared.modules.library.domain.Resource
+import com.ermao.library.shared.modules.library.ContinueReadingItem
+import com.ermao.library.shared.modules.library.HomeSection
+import com.ermao.library.shared.modules.library.HomeSnapshot
 import java.time.Instant
 import kotlin.test.assertEquals
 import org.junit.Test
 
 class ContentMappersTest {
+    @Test
+    fun homePreservesTheResumeResourcesDeclaredReaderType() {
+        val snapshot = HomeSnapshot(
+            continueReading = HomeSection.Content(ContinueReadingItem(
+                bookId = "book-1", title = "Title", author = null, coverUrl = "/cover",
+                resourceFormat = "AUDIOBOOK_DIR", readerType = "audio",
+                resumeResourceId = "audio-resource", progress = 88.0, chapter = null,
+                lastReadAt = null, resourceTitle = "Four tracks", narrator = null,
+            )),
+            recentReading = HomeSection.Content(emptyList()),
+            recentAdded = HomeSection.Content(emptyList()),
+        )
+        val mapped = snapshot.toUiContent().continueReading
+        assertEquals("audio", mapped?.readerType)
+        assertEquals("audio-resource", mapped?.resumeResourceId)
+        assertEquals("book-1", mapped?.book?.id)
+    }
+
     @Test
     fun continueTimestampIsValidatedAtTheMappingBoundary() {
         val wireTimestamp = "2026-08-15T13:47:38.286000Z"

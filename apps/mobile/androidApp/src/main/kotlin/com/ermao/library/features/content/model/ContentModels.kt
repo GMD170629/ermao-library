@@ -51,6 +51,7 @@ data class ContinueReadingCard(
     val positionLabel: String?,
     val lastReadAtEpochMillis: Long?,
     val resumeResourceId: String? = null,
+    val readerType: String = "",
 )
 
 @Immutable
