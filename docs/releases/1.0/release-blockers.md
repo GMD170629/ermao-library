@@ -14,6 +14,8 @@ AUDIO-05/06诊断已取得断言前现场且停止扩展：AAC确认9916ms/rev4�
 
 IMP-01双模式真实API拓扑通过，但实际venv与指定入口不同，保留环境限制；已使用现有fixture推进实际Chrome界面子项，未执行完成前不计PASS。
 
+AUDIO-07 / RG-04 POS-02：真实Android运行时+受控引擎端口复现短暂缓冲使捕获饥饿；每播放2秒缓冲100ms，三轮后position7000、初始1000，却无任何新capture。证据 `D:/www/ermao-release-audio-capture/artifacts/audio-capture/red-junit.xml`。独立候选 `0159f691` 在Playing→Buffering时复用现有captureProgress保存最后位置，原例及整类7 PASS；完整host/lint、独立审查及真机持久化待验。此为已复现的捕获缺陷，不等同已确定FLAC首5秒失败根因，不降低期限或更改生成时序契约。
+
 下方旧的“最新/当前”表述为历史过程，以本节恢复点和release-evidence最新记录覆盖。
 
 当前修复进展：SYNC-02 `76a88845` 已通过原时序/相邻回归和独立审查，真实Chrome待验证。AUDIO-04已用实际Next代理背压复现默认超时截断，null参数对照完整传输但不符合Next配置schema；采用有限3600000ms候选，schema/lint通过，实际有限值运输及长播放待验证。未降低播放停顿2秒阈值；不能以运输探针取代原30分钟播放。

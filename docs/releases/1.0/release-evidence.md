@@ -10,6 +10,8 @@ AUDIO-05/06最小诊断各一次真实FAIL，证据根 `D:/www/ermao-release-and
 
 IMP-01正在补实际Chrome界面创建、扫描及两模式可见目录，复用现有fixture和固定操作；既有API拓扑已足以覆盖的部分不再造工具。必须使用主工作区发布venv；取得两模式真实结果与清理证据即停止，不扩通用测试能力。`e85fb206` 的最小连续观察退出条件已通过主typecheck（`web-baseline/typecheck-e85fb206.log`），仍须实际候选完整窗口验证。
 
+AUDIO-07捕获饥饿已受控复现：独立工作区 `D:/www/ermao-release-audio-capture` 从 `23317754` 建立，原运行时SHA `7ce5581e…`，在现有AndroidAudioPlaybackRuntimeTest增加单个针对性场景；播放2秒/缓冲100ms重复三轮，真实运行时没有新capture，RED断言为position7000/latest=null。不是SQLite/真实引擎或FLAC根因证明。候选 `0159f691`（已在专用分支推送）仅在Playing→Buffering时复用既有captureProgress与AudioProgressWriter链，整类7 PASS/0 skip；证据 `artifacts/audio-capture/red-junit.xml`、`green-class-junit.xml`、源码patch及命令日志位于该工作区。初始两次执行因新shell未指向已有Python/Zig而未进入测试，日志保留，补齐已有工具路径后才取得有效RED；没有安装工具或更改基础设施。完整Android host/lint与独立审查继续，主分支尚未整合，真机持久化待验证。
+
 2026-09-06 19:30当前恢复点：主分支已整合HTML修复 `17cf8cba`，与独立已审候选 `5a0a3add` 的八文件逐字节一致；整合前先核对主工作树八文件仍匹配原复制基线，只替换此授权范围，原仓库15项既有改动保持排除。READER-03原422及必要相邻问题本批关闭：主代理核对五份真实文件每项结果、十个正文200/可读锚点、两种原件下载与Range、全部hash，以及Linux193项无skip。证据 `D:/www/ermao-release-html/artifacts/html-causal-linux-mobi-20260906/`；原生库SHA `969e080e…`未更换；MOBI/AZW/PRC为同源别名。此不关闭客户端逐格式或最终RC门禁，不再扩展相关诊断。
 
 AUDIO-04原生产链修复实测：`0c28f117` 的 `audio-soak/runs-proxyfix-1800/r1788691746993-w0/` 全用例1 PASS（30.9分钟），保存475464ms→重开475000ms，误差464ms；SW控制/断网导航/恢复认证200通过。独立既有检查器核实7样本及来源hash、911应用文件不变、Next配置原字节恢复、18081/3102关闭、无记录到API5xx，执行57546已结束。默认30秒代理截断的原失败已不再复现，保留原FAIL及完整响应对照。
