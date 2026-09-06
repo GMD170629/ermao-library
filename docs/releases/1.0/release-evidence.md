@@ -4,6 +4,31 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+最终控制栏候选检查完成：`reader-console-regression/web-test-final.log`477 PASS/0 skip，typecheck-final/lint-final/i18n-final均退出0；独立只读审查通过四处按钮、漫画index边界、双页owner、EPUB与RTL保留。真实浏览器回归仍受ENV-12限制，READER-05/06不关闭。自有服务均已结束，无后台测试仍在运行。
+
+ENV-12恢复使用原Playwright入口，无新脚本。可在本机PowerShell手动运行以下命令并保留实际结果；不涉及生产、发布或真实账户，3100为原配置测试端口（本轮启动前已核实无监听）：
+
+```powershell
+Set-Location D:\www\ermao-release-1.0\apps\web
+$env:PATH='C:\Users\gamer\.cache\codex-runtimes\shuku-mobile-toolchain-22.23.1\node-v22.23.1-win-x64;D:\www\ermao-release-1.0\.tmp\release-bin;'+$env:PATH
+$env:PYTHON_EXECUTABLE='D:\www\ermao-release-1.0\.venv-windows-1.0\Scripts\python.exe'
+$env:PLAYWRIGHT_BASE_URL=''
+pnpm exec playwright test --reporter line *> 'D:\www\ermao-release-1.0\artifacts\releases\1.0\1d298ce6\reader-console-regression\manual-chrome.log'
+$LASTEXITCODE
+```
+
+该命令使用仓库现有Chrome桌面/移动视口配置及自有开发测试服务，测试API由既有用例模拟，不是PDF69页/CBZ6页真实production复测；后者仍需新候选原fixture验证。最终报告须分别记录两类结果，不能互相代替。
+
+控制栏独立审查补充：漫画双页/封面独页模式下，相邻目录索引可能被comicNormalizePage归回当前spread，不能以目录项替代引擎翻页。最终候选使PDF和漫画均复用既有capabilities＋goByIntent，目录点选保持原index；不另造单页/双页算法。现有comic-semantics-conformance涵盖cover-single模型并纳入完整Web回归；没有新增通用辅助代码。另发现漫画详情链接的pageNumber与Reader请求pageIndex可能一基/零基冲突，作为RISK-07静态线索登记，须原入口实际验证，不直接判已复现。
+
+本轮实际复测已结束并清理：`1d298ce6/rg03-pdf-cbz-live/16-cleanup-and-hashes.json`核验1050源码文件、PDF/CBZ源与fixture hash均不变，三个Next配置恢复，session75423退出0，18081/3102关闭；17-service-http-summary无4xx/5xx，PDF/CBZ browser-errors为空。PDF首页/第二页/第35页，以及CBZ图像切换、目录末页及末页重开真实通过，故READER-04原主资产启动缺陷关闭；这不覆盖PDF末页、缩放等未执行步骤，也不关闭下面两个真实控制栏缺陷。
+
+READER-05/06候选（基于`1d298ce6`）：PDF按钮复用已有goByIntent及adapter的canGoNext/canGoPrevious，不再依赖目录条目；漫画把展示页号减一后匹配既有零基pageIndex，目录仅在显示处加一并使用当前locale格式化，命令/Locator索引不改变。两个控制栏布局调用同一导航owner，EPUB目录跳章路径不变。现有comic-reader.spec增加首页→下一页→末页上一页、目录1/2及高亮定位回归，复用原mock与像素断言；无新工具/依赖/分支。DEC-07停止条件为原PDF/漫画现场及必要相邻通过，不能由单元检查关单。
+
+候选完整Web477 PASS/0 skip、lint/i18n PASS，日志`artifacts/releases/1.0/1d298ce6/reader-console-regression/`，typecheck实际退出0。新增漫画浏览器回归在生产修复前尝试，但整个命令在进程创建前被自动审批拒绝，仅返回“blocked by policy”；记录`browser-start-rejection.json`。没有有效自动RED/GREEN，已有真实UI失败仍是原失败证据。此新工具执行限制独立于ENV-11旧SYNC-02服务，不能推定为产品失败；不通过子任务或换启动器绕过，浏览器原场景和相邻仍待执行。下一步为审查候选、提交推送并取得既有浏览器入口的实际执行结果；未冻结RC。
+
+`1d298ce6`真实production增量：READER-04原PDF启动错误已解除，69页正文首页实际渲染；同时发现READER-05，底部下一页按钮被禁用，键盘到第2页、滑块到第35页可用。证据在`artifacts/releases/1.0/1d298ce6/rg03-pdf-cbz-live/`的03首页、04禁用按钮、05键盘第二页、06滑块第35页截图与DOM。主已查看首页/禁用按钮截图并追踪ReaderShell到现有PDF adapter：按钮取相邻目录项，PDF无目录时为空；实际分页能力未用于这些按钮。当前先完成漫画对照及fixture清理，再在同一分支修复；未完成不宣布PDF整项通过，不在此旧候选上重复完整回归。
+
 最新恢复点（基于`3d798902`的READER-04修复候选，真实回归未完成）：RG-03 PDF正常69页样本在真实Chrome从全新账户、FLAT书库自动导入后打开，bootstrap两次HTTP200却显示“PDF 阅读信息缺少准确大小”，未渲染页面。原FAIL位于`D:/www/ermao-release-android-formats/artifacts/releases/1.0/ac25497d3a4ee29383ddc97ac27c0a7230a5d078/rg03-pdf-69-20260906/development-r2/`。样本711671字节、SHA-256 `f6dd04bcb9cf62087625edc5a38f091e6fe7edbf5cb39d612479bb332f5dbbd3`；原件及应用源码不变，原fixture已退出、18085/3106关闭。该工作区production构建因跨工作区依赖链接失败留在同目录`production/next-build.log`，实际FAIL来自development，不混称production运行。
 
 只读SQLAlchemy核验同一测试库及实际repository输出：唯一READY主资产role=PRIMARY、sizeBytes=711671，和生成ReaderAssetSummary契约一致；真实HTTP响应体未独立捕获，不以DB输出冒充响应体。Web却读取旧kind=CONTENT，旧mock同样用旧字段而掩盖缺陷。先仅纠正mock为真实契约，原生产代码出现PDF_INVALID和漫画PUBLICATION_MIME_MISMATCH两个受控失败，再修复唯一bootstrap映射owner按PRIMARY选取并让PDF运行时复用其结果；保留原流式路径、大小/安全校验、IMAGE_DIR行为及未知MIME保护，不改生成文件或安全策略。

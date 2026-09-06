@@ -184,6 +184,36 @@ test('IMAGE_DIR comic paging streams PAGE images, avoids assets, and returns fro
   expect(requests.some((pathname) => pathname.includes('/api/assets/'))).toBe(false);
 });
 
+test('comic console uses physical page numbers and keeps previous available on the last page', async ({ page }) => {
+  const { releaseSecondPage } = await installRoutes(page);
+  releaseSecondPage();
+  await page.goto('/reader/comic-resource', { waitUntil: 'domcontentloaded' });
+  const surface = page.locator('[data-comic-view="true"]');
+  await expect(surface.locator('[data-comic-page-index="0"]')).toBeVisible();
+  await expect(page.locator('[data-reader-opening-cover]')).toHaveCount(0);
+  const bounds = await surface.boundingBox();
+  if (!bounds) throw new Error('COMIC_SURFACE_BOUNDS_MISSING');
+  await surface.click({ position: { x: bounds.width / 2, y: 200 } });
+  const next = page.getByRole('button', { name: '下一页', exact: true });
+  const previous = page.getByRole('button', { name: '上一页', exact: true });
+  await expect(next).toBeEnabled();
+  await expect(previous).toBeDisabled();
+  await next.click();
+  await expectComicPixel(page, 1, [240, 128, 32, 255]);
+  await expect(next).toBeDisabled();
+  await expect(previous).toBeEnabled();
+  await page.getByRole('button', { name: '目录', exact: true }).click();
+  const contents = page.getByRole('dialog', { name: '目录', exact: true });
+  await expect(contents.getByRole('button', { name: '0', exact: true })).toHaveCount(0);
+  await expect(contents.getByRole('button', { name: '1', exact: true })).toBeVisible();
+  await expect(contents.getByRole('button', { name: '2', exact: true })).toHaveAttribute('aria-current', 'location');
+  await page.getByRole('button', { name: '关闭面板', exact: true }).click();
+  await previous.click();
+  await expectComicPixel(page, 0, [48, 96, 224, 255]);
+  await expect(previous).toBeDisabled();
+  await expect(next).toBeEnabled();
+});
+
 async function expectComicPixel(page: Page, pageIndex: number, expected: [number, number, number, number]) {
   const image = page.locator(`[data-comic-view="true"] [data-comic-page-index="${pageIndex}"] img`);
   await expect(image).toHaveJSProperty('naturalWidth', 320);

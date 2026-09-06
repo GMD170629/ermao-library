@@ -4,6 +4,14 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 
 ## R1 状态覆盖与外部条件
 
+RISK-07 / RG-03、RG-04 POS-09：独立审查指出漫画详情resource_details.pageNumber是一基数，resourceDetailItemHref原样传?page，而reader-v3-page.tsx的漫画入口按零基pageIndex解析。此为尚未实际执行的静态线索，需真实详情页逐页点选与首/末页对照；不直接登记为已复现、不全局重定义索引。与已复现READER-06控制栏分开验证。
+
+当前覆盖：READER-04主资产识别/启动原缺陷已由`1d298ce6`真实production PDF/CBZ成功读页关闭，保留完整格式验收缺口。READER-05 PDF按钮导航、READER-06漫画零基索引与展示页号混用仍待真实回归。READER-06实际表现为第3页却标题第4页、目录0–5、末页上一页disabled，原现场在`1d298ce6/rg03-pdf-cbz-live/10..14-*`；候选仅修复控制栏索引和显示，不改Locator/保存协议。
+
+ENV-12 / RG-03 READER-05/06：新增漫画Playwright回归命令在进程创建前被自动审批拒绝，原因仅“blocked by policy”；测试NOT_RUN，未产生自动RED/GREEN。现有真实失败保留，代码候选完整Web/typecheck/lint/i18n通过但不能据此关单。记录`artifacts/releases/1.0/1d298ce6/reader-console-regression/browser-start-rejection.json`；当前执行限制不通过换入口/子任务绕过，需现有浏览器命令的实际运行结果。ENV-11旧时序对照仍单独保留。
+
+READER-05 / RG-03 PDF页间导航，P1，已复现：`1d298ce6`真实production Chrome的69页PDF可渲染首页，但底部“下一页”disabled；键盘可以到第2页，滑块可以到第35页。按钮错误依赖空目录的leftChapter/rightChapter而非PDF adapter分页能力；不是PDF解析失败。原证据`artifacts/releases/1.0/1d298ce6/rg03-pdf-cbz-live/03..06-*`。待复用现有分页命令修复按钮并完成无目录PDF原场景与EPUB/漫画相邻回归，不生成虚假目录，不扩展工具框架。READER-04的原启动错误已在production解除，整PDF仍FAIL。
+
 READER-04 / RG-03 PDF、COM-CBZ，P1，待真实回归：69页正常PDF在Chrome真实全新导入后无法打开，提示缺少准确大小。只读实际库/repository及生成契约证明PRIMARY资产大小711671有效；Web仍按旧kind=CONTENT找资产。真实wire mock纠正后受控PDF和漫画双FAIL，候选改为bootstrap唯一owner选择PRIMARY、PDF引擎复用，原错误fixture同步纠正，大小/安全和流式保护不变。针对性及完整Web/typecheck/lint/i18n通过，实际PDF和漫画回归未完成，不能关闭。证据路径、原FAIL与环境限制见release-evidence最新恢复点；没有新工具/分支。
 
 最新覆盖`7e207c38`：POS-03 Chrome两视口已确认MP3强杀并真实重登录恢复子项PASS（5892→5892ms、5862→6067.804ms），进程归属、kill前无close、kill后登录前完整IDB、服务端原ACK及实际引擎恢复均通过；真实cookie未保留/需重登及既有私有缓存清理作为限制保留。TEST-12已关闭，本子场景工具停止扩展，所有原失败继续留证。主及独立审查通过，8次运行源码/原件与清理复核通过，原相邻2 PASS。其他强杀阶段/引擎、跨端异常及格式继续；不代表整POS-03或RG-04放行。

@@ -186,7 +186,10 @@ function navigationItemKey(item: ReaderNavigationItem) {
 }
 
 function activeNavigationItem(readerType: ReaderKind, items: ReaderNavigationItem[], progress: ReaderProgress, progressExtra: Record<string, unknown>) {
-  if (readerType !== 'reflowable') return items.find((item) => item.index === progress.page) ?? null;
+  if (readerType !== 'reflowable') {
+    const pageIndex = readerType === 'comic' ? progress.page - 1 : progress.page;
+    return items.find((item) => item.index === pageIndex) ?? null;
+  }
   const navigationKey = typeof progressExtra.navigationKey === 'string'
     ? progressExtra.navigationKey
     : null;
@@ -666,6 +669,22 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
     await navigateToItem(item, true);
   }
 
+  function canNavigateFromConsole(direction: 'previous' | 'next', chapter: ReaderNavigationItem | null) {
+    if (readerType === 'reflowable') return chapter !== null;
+    return Boolean(controls && !interactionBlocked && (direction === 'next'
+      ? capabilities?.canGoNext
+      : capabilities?.canGoPrevious));
+  }
+
+  async function navigateFromConsole(direction: 'previous' | 'next', chapter: ReaderNavigationItem | null) {
+    if (readerType !== 'reflowable') {
+      await goByIntent(direction);
+      keepControlsOpen();
+      return;
+    }
+    if (chapter) await navigateToItem(chapter, false);
+  }
+
   function updateSettings(next: Partial<ReaderSettings>) {
     onSettingsChange({ ...settings, ...next });
     keepControlsOpen();
@@ -1077,8 +1096,8 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                   type="button"
                   aria-label={i18nAttribute(leftChapterLabel)}
                   data-reader-chapter-target={leftChapter?.href ?? leftChapter?.index}
-                  disabled={!leftChapter}
-                  onClick={() => { if (leftChapter) void navigateToItem(leftChapter, false); }}
+                  disabled={!canNavigateFromConsole(leftDirection, leftChapter)}
+                  onClick={() => { void navigateFromConsole(leftDirection, leftChapter); }}
                   className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition active:scale-[0.97] disabled:opacity-35', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}
                 >
                   <ChevronLeft size={20} />
@@ -1103,8 +1122,8 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                   type="button"
                   aria-label={i18nAttribute(rightChapterLabel)}
                   data-reader-chapter-target={rightChapter?.href ?? rightChapter?.index}
-                  disabled={!rightChapter}
-                  onClick={() => { if (rightChapter) void navigateToItem(rightChapter, false); }}
+                  disabled={!canNavigateFromConsole(rightDirection, rightChapter)}
+                  onClick={() => { void navigateFromConsole(rightDirection, rightChapter); }}
                   className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition active:scale-[0.97] disabled:opacity-35', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}
                 >
                   <ChevronRight size={20} />
@@ -1138,7 +1157,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
             ) : null}
             <ReaderControlNavButton layout="dock" icon={NotebookPen} label={i18nAttribute("笔记")} active={bookmarkActive} selected={panel === 'notes'} expanded={panel === 'notes'} panelTrigger="notes" onClick={(event) => { setNotesTab('bookmarks'); togglePanel('notes', event.currentTarget); }} dark={dark} />
             <div className="min-w-0 flex-1 items-center gap-2 px-2 md:flex lg:px-4">
-            <button type="button" aria-label={i18nAttribute(leftChapterLabel)} data-reader-chapter-target={leftChapter?.href ?? leftChapter?.index} disabled={!leftChapter} onClick={() => { if (leftChapter) void navigateToItem(leftChapter, false); }} className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition active:scale-[0.97] disabled:opacity-35', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}>
+            <button type="button" aria-label={i18nAttribute(leftChapterLabel)} data-reader-chapter-target={leftChapter?.href ?? leftChapter?.index} disabled={!canNavigateFromConsole(leftDirection, leftChapter)} onClick={() => { void navigateFromConsole(leftDirection, leftChapter); }} className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition active:scale-[0.97] disabled:opacity-35', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}>
               <ChevronLeft size={20} />
             </button>
             <div className="min-w-0 flex-1">
@@ -1163,7 +1182,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                 style={{ accentColor }}
               />
             </div>
-            <button type="button" aria-label={i18nAttribute(rightChapterLabel)} data-reader-chapter-target={rightChapter?.href ?? rightChapter?.index} disabled={!rightChapter} onClick={() => { if (rightChapter) void navigateToItem(rightChapter, false); }} className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition active:scale-[0.97] disabled:opacity-35', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}>
+            <button type="button" aria-label={i18nAttribute(rightChapterLabel)} data-reader-chapter-target={rightChapter?.href ?? rightChapter?.index} disabled={!canNavigateFromConsole(rightDirection, rightChapter)} onClick={() => { void navigateFromConsole(rightDirection, rightChapter); }} className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition active:scale-[0.97] disabled:opacity-35', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}>
               <ChevronRight size={20} />
             </button>
             </div>
@@ -1349,6 +1368,7 @@ function ReaderToggleRow({ label, description, checked, disabled = false, onChan
 
 function ResourceNavigationPanel({ navigation, readerType, activeItemKey, dark, onJumpItem }: { navigation: ReaderResourceNavigation; readerType: ReaderKind; activeItemKey: string | null; dark: boolean; onJumpItem: (item: ReaderNavigationItem) => void }) {
   const { t: i18nAttribute } = useAttributeI18n();
+  const { locale } = useI18n();
   const showResources = navigation.resourceSections.length > 1;
   const idleText = navigation.loading ? '正在切换...' : null;
   const isComic = readerType === 'comic';
@@ -1413,7 +1433,7 @@ function ResourceNavigationPanel({ navigation, readerType, activeItemKey, dark, 
               style={isComic ? undefined : { paddingInlineStart: `${0.75 + Math.min(6, item.level ?? 0) * 0.75}rem` }}
               data-reader-navigation-level={item.level ?? 0}
             >
-              {isComic ? item.index : (
+              {isComic ? new Intl.NumberFormat(locale).format(item.index + 1) : (
                 <>
                   <span className="w-9 shrink-0 tabular-nums opacity-60">{itemIndex + 1}</span>
                   <span className="line-clamp-2">{item.title}</span>
