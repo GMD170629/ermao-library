@@ -4,6 +4,8 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+当前执行恢复点：`e0299fda24880d83160abecfafbdd00805b1e01a` 的TEST-11生产Chrome1800秒用例已启动，既有入口/原断言，运行目录 `audio-soak/runs-tailfix-1800/r1788699790558-w0/`，日志 `audio-soak/tailfix-1800-command.log`，执行会话38954。Next build/prestart已成功、媒体采样进行中，未完成不计PASS。主Web/API受测源码保持冻结，Next生成的tsconfig/next-env及独立build目录由fixture最终恢复，不能手动清理。首次命令误选系统fallback pnpm（自带Node24而项目要求22.23.1），未进入测试，失败保留 `tailfix-1800-node-wrapper-failure.log`；改为已有锁定工具链路径，没有升级安装。后端完整回归在独立Linux源码归档并行执行；本轮不是安静负载性能测量。
+
 本轮音频修复已整合：`01ac165e`（缓冲前捕获）、`4f439b51`（prepared/active身份绑定）、`0ca6d1bb`（Stop取消迟到恢复）、`b912b427`（两项针对性真机回归）。主代理逐项检查完整diff、原RED/新GREEN现场、安装包hash、源码和清理，并由另一代理独立复核，无新增阻断。候选 `567909e4` 完整Android host219/0skip和lint PASS，原日志在 `D:/www/ermao-release-audio-capture/artifacts/audio-capture/prepared-context-5679-unit-lint.log` 及同目录 `prepared-context-5679-unit-summary.json`。
 
 真机候选 `93100b0677e6b7426eca448d59ce53d3658a0d39` 结果位于 `D:/www/ermao-release-android-formats/artifacts/releases/1.0/93100b0677e6b7426eca448d59ce53d3658a0d39/android-capture-binding-green-20260906/`。AUDIO-08原串写2507ms到B、A仍0；同例新包A2522ms正确存A，B未出现A。AUDIO-09为必要相邻场景确证的Stop缺陷：旧包释放B恢复门控后126ms实际Playing（原RED在同工作树 `artifacts/releases/1.0/8cc135ebb69deba1cae824356f559ee14b811431/android-stop-restore-red-20260906/`）；新包门控退出后持续10008ms为Idle、无session/队列。两项各1 PASS，保留两个有效RED。测试仅在现有私有Context复用一次SQLite-open门控，原方法不能控制此竞态；已达到原失败、相邻回归和真实验证停止条件，不再扩工具。
