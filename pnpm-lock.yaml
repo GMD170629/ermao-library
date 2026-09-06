@@ -112,6 +112,8 @@ importers:
         specifier: ^5.6.3
         version: 5.9.3
 
+  packages/design-contracts: {}
+
   packages/reader-contracts: {}
 
   packages/reader-core:
