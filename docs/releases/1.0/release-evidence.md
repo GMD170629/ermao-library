@@ -4,7 +4,11 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
-### 最新检查点：`c13a7034`（未冻结 RC）
+### 最新检查点：`d6b11360`（未冻结 RC）
+
+最新完整回归：Chrome桌面/移动视口126 PASS、0 skip（`web-baseline/chrome-full-audio.log`、`chrome-full-audio-results/`）；Web生产构建PASS（`web-baseline/production-build-audio.log`，输出归档`web-baseline/production-build-c13a7034/`）。该批包含音频时序及播放Promise修复，普通E2E使用既有HTTP fixtures，真实后端严格MP3两视口仍另行验收。
+
+Android新增实际持久化测试已提交`d6b11360`：真实Media3→共享进度运行时→生产SQLite owner，在第5/10秒从独立连接读到更新的Locator；暂停9980ms、关闭运行时后重开9988ms，误差8ms。原始测试/数据库/PCM/hash在`preflight-mobile/rg04-audio-durability-20260906/`，其README保留提交前HEAD，最终源码归属以上述提交为准。随后同一Android源码及测试包完整真机回归 **148 PASS，344.921s**（`preflight-mobile/46-audio-timing-full-device.log`）；共享层416、Android单元218、lint全部PASS（`45-audio-timing-full-host.log`、`47-audio-timing-host-counts.json`）。设备`9e896bbc`，开发包hash沿用该durability目录记录，不是正式签名产物。该测试覆盖离线上报队列及同进程运行时关闭/重开，不宣告在线确认、进程死亡、全部编码或30分钟通过。
 
 | 增量 | 已执行证据 | 判定边界 |
 |---|---|---|
