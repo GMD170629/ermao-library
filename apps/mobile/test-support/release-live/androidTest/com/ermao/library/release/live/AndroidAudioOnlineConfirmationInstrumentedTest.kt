@@ -55,7 +55,70 @@ class AndroidAudioOnlineConfirmationInstrumentedTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
 
     @Test
-    fun realHttpConfirmsPlaybackAtFiveAndTenSecondsAndRestoresAfterReopen() {
+    fun realHttpConfirmsPlaybackAtFiveAndTenSecondsAndRestoresAfterReopen() = withOnlineAudioFixture {
+        assertTrue("RG04_NEW_SERVER_PROGRESS_REQUIRED", database.get(SystemClock.elapsedRealtime() + 15_000) == null)
+        record("ISOLATION_PASS")
+        prepareActivity()
+        val player = openPlayer(autoplay = true)
+        val pause = confirmPlaybackAndPause(player)
+        val pausedSnapshot = pause.engine
+        val pausedPosition = pausedSnapshot.positionMillis
+        val paused = pause.confirmed
+        closePlayerAndObserve()
+        val reopened = openPlayer(autoplay = false)
+        val restoredSnapshot = awaitRestoredPlayer(reopened, fixture)
+        val restored = restoredSnapshot.positionMillis
+        val restoreObservation = "restored=$restored phase=${restoredSnapshot.phase} " +
+            "duration=${restoredSnapshot.durationMillis} paused=$pausedPosition " +
+            "pausedPhase=${pausedSnapshot.phase} pausedDuration=${pausedSnapshot.durationMillis} " +
+            "confirmed=${locatorMillis(paused)} confirmedRevision=${paused.revision} " +
+            "confirmedDuration=${paused.position.presentation.playback?.durationMillis}"
+        record("REOPEN_OBSERVATION $restoreObservation", restored, paused.revision)
+        assertTrue("RG04_REOPEN_RESTORE_TOLERANCE $restoreObservation", abs(restored - pausedPosition) <= 2_000)
+        assertTrue("RG04_REOPEN_CONFIRMED_LOCATOR_TOLERANCE $restoreObservation",
+            abs(restored - locatorMillis(paused)) <= 2_000)
+        val reopenedConfirmation = database.awaitConfirmed(SystemClock.elapsedRealtime() + 5_000) { local, sync ->
+            abs(locatorMillis(local) - pausedPosition) <= 2_000 && sync.confirmedRevision >= paused.revision
+        }
+        record("REOPEN_PASS", restored, reopenedConfirmation.revision)
+        assertAppSessionUnchanged()
+        record("PASS", restored, reopenedConfirmation.revision)
+    }
+
+    @Test
+    fun restoresWebMp3ProgressAndConfirmsPlaybackForWebHandoff() = withOnlineAudioFixture {
+        assertEquals("RG04_WEB_HANDOFF_MP3_REQUIRED", "audio/mpeg", fixture.mimeType)
+        val web = database.get(SystemClock.elapsedRealtime() + 15_000)
+            ?: throw AssertionError("RG04_WEB_PROGRESS_REQUIRED")
+        database.assertFixtureSnapshot(web)
+        assertTrue("RG04_WEB_PROGRESS_CLIENT_REQUIRED", web.clientId != identity.clientId)
+        assertTrue("RG04_WEB_PROGRESS_POSITION_REQUIRED", locatorMillis(web) > 0)
+        record("ISOLATION_PASS")
+        record("WEB_PROGRESS_OBSERVED clientId=${web.clientId} capturedAt=${web.capturedAtEpochMillis}",
+            locatorMillis(web), web.revision)
+        prepareActivity()
+        val player = openPlayer(autoplay = false)
+        val restored = awaitRestoredPlayer(player, fixture)
+        val restoreObservation = "restored=${restored.positionMillis} phase=${restored.phase} " +
+            "duration=${restored.durationMillis} webPosition=${locatorMillis(web)} " +
+            "webRevision=${web.revision} webClientId=${web.clientId}"
+        record("WEB_RESTORE_OBSERVATION $restoreObservation", restored.positionMillis, web.revision)
+        assertTrue("RG04_WEB_RESTORE_TOLERANCE $restoreObservation",
+            abs(restored.positionMillis - locatorMillis(web)) <= 2_000)
+        record("WEB_RESTORE_PASS", restored.positionMillis, web.revision)
+        instrumentation.runOnMainSync { player.play() }
+        val pause = confirmPlaybackAndPause(player, initialConfirmation = web)
+        record("ANDROID_HANDOFF_CONFIRMED clientId=${pause.confirmed.clientId} " +
+            "capturedAt=${pause.confirmed.capturedAtEpochMillis}",
+            locatorMillis(pause.confirmed), pause.confirmed.revision)
+        closePlayerAndObserve()
+        assertAppSessionUnchanged()
+        // This JUnit result covers the Android leg; the primary verifies the final Web reopen.
+        record("ANDROID_HANDOFF_PASS", locatorMillis(pause.confirmed), pause.confirmed.revision)
+    }
+
+    /** Both gates use the same real login, isolated storage and production playback owners. */
+    private fun withOnlineAudioFixture(test: OnlineAudioFixture.() -> Unit) {
         val context = instrumentation.targetContext
         val privateFixture = PrivateAudioFixture.consume(
             context, InstrumentationRegistry.getArguments().getString("releaseFixture"),
@@ -71,15 +134,7 @@ class AndroidAudioOnlineConfirmationInstrumentedTest {
         val profiles = InMemoryServerProfileRepository()
         val sessions = InMemoryVerifiedSessionRepository()
         val auth = createAndroidMobileRuntime(isolated, profiles, sessions)
-        val evidence = File(privateFixture.directory, "online-evidence.log")
-        fun record(result: String, position: Long = 0, revision: Long = 0) {
-            // IDs are fixed fixture facts; no profile, locator, URL, title, JSON or credentials.
-            val line = "result=$result resourceId=${fixture.resourceId} assetId=${fixture.assetId} " +
-                "position=$position revision=$revision"
-            evidence.appendText("$line\n")
-            Log.i("RG04ReleaseLive", line)
-        }
-        var runtime: AudioPlaybackRuntime? = null
+        var online: OnlineAudioFixture? = null
         try {
             val login = runBlocking {
                 withTimeout(45_000) { auth.loginToServer(fixture.baseUrl, fixture.email, fixture.password) }
@@ -99,30 +154,63 @@ class AndroidAudioOnlineConfirmationInstrumentedTest {
             val database = PositionObservations(isolated, identity, target, port, fixture)
             val empty = database.read()
             assertTrue("RG04_FRESH_DATABASE_REQUIRED", empty?.local == null && empty?.sync == ReaderPositionDurableState())
-            assertTrue("RG04_NEW_SERVER_PROGRESS_REQUIRED", database.get(SystemClock.elapsedRealtime() + 15_000) == null)
-            record("ISOLATION_PASS")
-            prepareActivity()
-            val bootstrap = createAndroidReaderBootstrapGateway(isolated)
-            val media = createAndroidAudioMediaTransport(isolated, session.profile)
-            fun openPlayer(autoplay: Boolean): AudioPlaybackRuntime {
-                lateinit var player: AudioPlaybackRuntime
-                instrumentation.runOnMainSync {
-                    assertFalse("RG04_EXISTING_APP_AUDIO_SESSION", app.audioPlaybackRuntime.snapshot.value.hasSession)
-                    player = AudioPlaybackRuntime(isolated, app.audioTransportRegistry)
-                    runtime = player
-                    // No supplied chapter/position: both launches use the production restore owner.
-                    player.launchRemote(
-                        profile = session.profile, namespace = namespace, resourceId = fixture.resourceId,
-                        autoplay = autoplay, bootstrapGateway = bootstrap, mediaTransport = media,
-                    )
-                }
-                return player
+            online = OnlineAudioFixture(fixture, privateFixture.directory, isolated, app, session, identity, database)
+            online.test()
+        } finally {
+            try {
+                instrumentation.runOnMainSync { online?.runtime?.close() }
+            } finally {
+                auth.close()
             }
-            val player = openPlayer(autoplay = true)
+        }
+    }
+
+    private inner class OnlineAudioFixture(
+        val fixture: ReleaseAudioFixture,
+        directory: File,
+        private val isolated: ReleaseAudioContext,
+        private val app: ErmaoLibraryApplication,
+        private val session: AppSession.Authenticated,
+        val identity: ReaderLocalProgressIdentity,
+        val database: PositionObservations,
+    ) {
+        private val evidence = File(directory, "online-evidence.log")
+        private val bootstrap = createAndroidReaderBootstrapGateway(isolated)
+        private val media = createAndroidAudioMediaTransport(isolated, session.profile)
+        var runtime: AudioPlaybackRuntime? = null
+            private set
+
+        fun record(result: String, position: Long = 0, revision: Long = 0) {
+            // IDs are fixed fixture facts; no profile, locator, URL, title, JSON or credentials.
+            val line = "result=$result resourceId=${fixture.resourceId} assetId=${fixture.assetId} " +
+                "position=$position revision=$revision"
+            evidence.appendText("$line\n")
+            Log.i("RG04ReleaseLive", line)
+        }
+
+        fun openPlayer(autoplay: Boolean): AudioPlaybackRuntime {
+            lateinit var player: AudioPlaybackRuntime
+            instrumentation.runOnMainSync {
+                assertFalse("RG04_EXISTING_APP_AUDIO_SESSION", app.audioPlaybackRuntime.snapshot.value.hasSession)
+                player = AudioPlaybackRuntime(isolated, app.audioTransportRegistry)
+                runtime = player
+                // No supplied chapter/position: every launch uses the production restore owner.
+                player.launchRemote(
+                    profile = session.profile, namespace = identity.namespace, resourceId = fixture.resourceId,
+                    autoplay = autoplay, bootstrapGateway = bootstrap, mediaTransport = media,
+                )
+            }
+            return player
+        }
+
+        fun confirmPlaybackAndPause(
+            player: AudioPlaybackRuntime,
+            initialConfirmation: ReaderProgressSnapshotV5? = null,
+        ): ConfirmedPause {
             awaitPlayer(player) { it.phase == AudioPlaybackPhase.Playing && it.durationMillis > 0 }
             assertFixturePlayer(player, fixture)
             val started = SystemClock.elapsedRealtime()
-            var previous: ReaderProgressSnapshotV5? = null
+            var previous = initialConfirmation
             for (checkpoint in listOf(5_000L, 10_000L)) {
                 // Observe the last second of each absolute window; HTTP and DB reads share its deadline.
                 waitUntil(started + checkpoint - 1_000)
@@ -158,7 +246,11 @@ class AndroidAudioOnlineConfirmationInstrumentedTest {
                     sync.confirmedRevision > requireNotNull(previous).revision
             }
             record("PAUSE_CONFIRMED", locatorMillis(paused), paused.revision)
-            instrumentation.runOnMainSync { player.close() }
+            return ConfirmedPause(pausedSnapshot, paused)
+        }
+
+        fun closePlayerAndObserve() {
+            instrumentation.runOnMainSync { requireNotNull(runtime).close() }
             runtime = null
             // close() can capture Stop before cancelling sync. Do not erase or manually ACK that outbox.
             val closeObservationDeadline = SystemClock.elapsedRealtime() + 5_000
@@ -173,35 +265,19 @@ class AndroidAudioOnlineConfirmationInstrumentedTest {
             assertTrue("RG04_CLOSE_TERMINAL_FAILURE", closed.sync.terminalFailureCode == null)
             record(if (closed.sync.pending == null) "CLOSED_CONFIRMED" else "CLOSED_PENDING",
                 closed.local?.let(::locatorMillis) ?: 0, closed.sync.confirmedRevision)
-            val reopened = openPlayer(autoplay = false)
-            awaitPlayer(reopened) {
-                it.phase in setOf(AudioPlaybackPhase.Ready, AudioPlaybackPhase.Paused) && it.durationMillis > 0
-            }
-            assertFixturePlayer(reopened, fixture)
-            val restoredSnapshot = reopened.snapshot.value
-            val restored = restoredSnapshot.positionMillis
-            val restoreObservation = "restored=$restored phase=${restoredSnapshot.phase} " +
-                "duration=${restoredSnapshot.durationMillis} paused=$pausedPosition " +
-                "pausedPhase=${pausedSnapshot.phase} pausedDuration=${pausedSnapshot.durationMillis} " +
-                "confirmed=${locatorMillis(paused)} confirmedRevision=${paused.revision} " +
-                "confirmedDuration=${paused.position.presentation.playback?.durationMillis}"
-            record("REOPEN_OBSERVATION $restoreObservation", restored, paused.revision)
-            assertTrue("RG04_REOPEN_RESTORE_TOLERANCE $restoreObservation", abs(restored - pausedPosition) <= 2_000)
-            assertTrue("RG04_REOPEN_CONFIRMED_LOCATOR_TOLERANCE $restoreObservation",
-                abs(restored - locatorMillis(paused)) <= 2_000)
-            val reopenedConfirmation = database.awaitConfirmed(SystemClock.elapsedRealtime() + 5_000) { local, sync ->
-                abs(locatorMillis(local) - pausedPosition) <= 2_000 && sync.confirmedRevision >= paused.revision
-            }
-            record("REOPEN_PASS", restored, reopenedConfirmation.revision)
-            assertFalse("RG04_APP_AUDIO_SESSION_CHANGED", app.audioPlaybackRuntime.snapshot.value.hasSession)
-            record("PASS", restored, reopenedConfirmation.revision)
-        } finally {
-            try {
-                instrumentation.runOnMainSync { runtime?.close() }
-            } finally {
-                auth.close()
-            }
         }
+
+        fun assertAppSessionUnchanged() {
+            assertFalse("RG04_APP_AUDIO_SESSION_CHANGED", app.audioPlaybackRuntime.snapshot.value.hasSession)
+        }
+    }
+
+    private fun awaitRestoredPlayer(player: AudioPlaybackRuntime, fixture: ReleaseAudioFixture): AudioPlaybackSnapshot {
+        awaitPlayer(player) {
+            it.phase in setOf(AudioPlaybackPhase.Ready, AudioPlaybackPhase.Paused) && it.durationMillis > 0
+        }
+        assertFixturePlayer(player, fixture)
+        return player.snapshot.value
     }
 
     private fun prepareActivity() {
@@ -234,6 +310,8 @@ class AndroidAudioOnlineConfirmationInstrumentedTest {
             abs(snapshot.durationMillis - fixture.expectedDurationMillis) <= 2_000)
     }
 }
+
+private data class ConfirmedPause(val engine: AudioPlaybackSnapshot, val confirmed: ReaderProgressSnapshotV5)
 
 private data class DurableObservation(val local: ReaderPositionLocalState?, val sync: ReaderPositionDurableState)
 
@@ -312,19 +390,23 @@ private class PositionObservations(
                     Json.parseToJsonElement(remote.position.locator.canonicalJson) ==
                         Json.parseToJsonElement(local.position.locator.canonicalJson) &&
                     SystemClock.elapsedRealtime() <= deadline) {
-                    assertTrue("RG04_SERVER_RESOURCE_ID", remote.resourceId == fixture.resourceId)
-                    val locator = Json.parseToJsonElement(remote.position.locator.canonicalJson).jsonObject
-                    assertTrue("RG04_CANONICAL_AUDIO_LOCATOR",
-                        locator.getValue("href").jsonPrimitive.content == fixture.sourceApiPath &&
-                            locator.getValue("type").jsonPrimitive.content == fixture.mimeType)
-                    assertTrue("RG04_LOCATOR_PRESENTATION_AGREE",
-                        abs(locatorMillis(remote) - requireNotNull(remote.position.presentation.playback).positionMillis) <= 1)
+                    assertFixtureSnapshot(remote)
                     return remote
                 }
             }
             Thread.sleep(25)
         }
         throw AssertionError("RG04_CONFIRMED_DATABASE_AND_GET_DEADLINE $confirmationObservation")
+    }
+
+    fun assertFixtureSnapshot(remote: ReaderProgressSnapshotV5) {
+        assertTrue("RG04_SERVER_RESOURCE_ID", remote.resourceId == fixture.resourceId)
+        val locator = Json.parseToJsonElement(remote.position.locator.canonicalJson).jsonObject
+        assertTrue("RG04_CANONICAL_AUDIO_LOCATOR",
+            locator.getValue("href").jsonPrimitive.content == fixture.sourceApiPath &&
+                locator.getValue("type").jsonPrimitive.content == fixture.mimeType)
+        assertTrue("RG04_LOCATOR_PRESENTATION_AGREE",
+            abs(locatorMillis(remote) - requireNotNull(remote.position.presentation.playback).positionMillis) <= 1)
     }
 }
 
