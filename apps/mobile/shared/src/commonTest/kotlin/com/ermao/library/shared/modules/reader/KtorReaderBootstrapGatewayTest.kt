@@ -336,7 +336,7 @@ class KtorReaderBootstrapGatewayTest {
               "availableResources":[],
               "assets":[{"id":"asset-1","title":"Resource","resourceId":"resource-1","sourceNodeId":"node-1","role":"PRIMARY","mimeType":"application/epub+zip","sizeBytes":1234,"durationMs":null,"discNumber":null,"trackNumber":null,"sortOrder":0,"url":"/api/assets/asset-1","codec":null}],
               "units":[],"resourceUrl":"/api/reader/v5/resources/resource-1/publication","capabilities":{},$REFLOWABLE_PUBLICATION,
-              "progressSnapshot":{"schemaVersion":5,"revision":18,"clientId":"ios-client","mutationId":"0b65b4fd-29d3-4a33-8c61-3a286a3154a2","capturedAtEpochMillis":2000,"receivedAtEpochMillis":2222,"position":{"locator":{"href":"EPUB/chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#chapter-title"},"text":{"highlight":"Chapter"}},"presentation":{"displayPercent":80.0,"totalProgression":0.8,"currentHref":"EPUB/chapter.xhtml","chapter":{"href":"EPUB/chapter.xhtml","title":"Chapter","index":0},"page":null,"playback":null}}}
+              "progressSnapshot":{"schemaVersion":5,"revision":18,"clientId":"ios-client","mutationId":"0b65b4fd-29d3-4a33-8c61-3a286a3154a2","capturedAtEpochMillis":2000,"receivedAtEpochMillis":2222,"position":{"locator":{"href":"EPUB/chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#chapter-title"},"text":{"highlight":"Chapter"}},"presentation":{"displayPercent":80.0,"totalProgression":0.8,"currentHref":"EPUB/chapter.xhtml","chapter":{"href":"EPUB/chapter.xhtml","title":"Chapter","index":0,"navigationKey":null},"page":null,"playback":null}}}
             }
         """.trimIndent()
     }

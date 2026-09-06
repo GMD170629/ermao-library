@@ -79,10 +79,10 @@ class KtorReaderBookmarkSyncPortTest {
     private companion object {
         const val BOOKMARKS_RESPONSE = """
             {"ok":true,"data":{"bookmarks":[
-              {"id":"reflow-1","position":{"locator":{"href":"chapter-1.xhtml"},"presentation":{"displayPercent":10.0,"totalProgression":0.1,"currentHref":"chapter-1.xhtml","chapter":{"href":"chapter-1.xhtml","title":"Chapter 1","index":0},"page":null,"playback":null}},"label":"Chapter 1","createdAt":"2026-08-13T00:00:00Z"},
+              {"id":"reflow-1","position":{"locator":{"href":"chapter-1.xhtml"},"presentation":{"displayPercent":10.0,"totalProgression":0.1,"currentHref":"chapter-1.xhtml","chapter":{"href":"chapter-1.xhtml","title":"Chapter 1","index":0,"navigationKey":null},"page":null,"playback":null}},"label":"Chapter 1","createdAt":"2026-08-13T00:00:00Z"},
               {"id":"comic-1","position":{"locator":{"href":"comic/page-3"},"presentation":{"displayPercent":30.0,"totalProgression":0.3,"currentHref":"comic/page-3","chapter":null,"page":{"number":3,"total":10},"playback":null}},"label":"Page 3","createdAt":"2026-08-13T01:00:00Z"},
               {"id":"pdf-1","position":{"locator":{"href":"pdf/page-4"},"presentation":{"displayPercent":40.0,"totalProgression":0.4,"currentHref":"pdf/page-4","chapter":null,"page":{"number":4,"total":10},"playback":null}},"label":"Page 4","createdAt":"2026-08-13T02:00:00Z"},
-              {"id":"audio-1","position":{"locator":{"href":"asset-1"},"presentation":{"displayPercent":50.0,"totalProgression":0.5,"currentHref":"asset-1","chapter":{"href":"chapter-2","title":null,"index":null},"page":null,"playback":{"positionMillis":42000,"durationMillis":84000}}},"label":"Track 2","createdAt":"2026-08-13T03:00:00Z"}
+              {"id":"audio-1","position":{"locator":{"href":"asset-1"},"presentation":{"displayPercent":50.0,"totalProgression":0.5,"currentHref":"asset-1","chapter":{"href":"chapter-2","title":null,"index":null,"navigationKey":null},"page":null,"playback":{"positionMillis":42000,"durationMillis":84000}}},"label":"Track 2","createdAt":"2026-08-13T03:00:00Z"}
             ]}}
         """
     }
