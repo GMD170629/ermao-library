@@ -4,8 +4,6 @@
 from __future__ import annotations
 
 import os
-import signal
-import subprocess
 import sys
 import time
 import zipfile
@@ -16,18 +14,22 @@ from xml.sax.saxutils import escape
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 API_ROOT = REPO_ROOT / "apps" / "api-python"
+# This standalone script needs the API root before importing app modules.  The
+# current Ruff configuration does not select E402; if that rule is enabled,
+# keep its exception line-scoped on these imports.
 sys.path.insert(0, str(API_ROOT))
 
-from app.bootstrap.readable_resource_pipeline import (  # noqa: E402
+from python_smoke_process import LoggedProcess, start_logged_process
+
+from app.bootstrap.readable_resource_pipeline import (
     continue_library_import,
 )
-from app.core.config import Settings  # noqa: E402
-from app.db.bootstrap import bootstrap_database  # noqa: E402
-from app.db.sqlite import create_sqlite_engine  # noqa: E402
-from app.models import (  # noqa: E402
+from app.core.config import Settings
+from app.db.bootstrap import bootstrap_database
+from app.db.sqlite import create_sqlite_engine
+from app.models import (
     Library,
     LibraryBook,
     LibraryImportTask,
@@ -89,12 +91,15 @@ def setup_database(storage_root: Path, monitor_root: Path) -> str:
     return f"sqlite+pysqlite:///{settings.database_path}"
 
 
-def wait_for_ready(ready_file: Path, process: subprocess.Popen[str]) -> None:
+def wait_for_ready(ready_file: Path, process: LoggedProcess) -> None:
     deadline = time.time() + 15
     while time.time() < deadline:
         if process.poll() is not None:
             raise RuntimeError(f"worker exited early with code {process.returncode}")
-        if ready_file.is_file() and ready_file.read_text(encoding="utf-8").strip().isdigit():
+        if (
+            ready_file.is_file()
+            and ready_file.read_text(encoding="utf-8").strip().isdigit()
+        ):
             return
         time.sleep(0.2)
     raise RuntimeError("worker did not create ready file")
@@ -110,32 +115,36 @@ def wait_for_import(database_url: str) -> None:
                 task = db.scalar(
                     select(LibraryImportTask)
                     .where(LibraryImportTask.library_id == "continue-import-smoke")
-                    .order_by(LibraryImportTask.created_at.desc(), LibraryImportTask.id.desc())
+                    .order_by(
+                        LibraryImportTask.created_at.desc(), LibraryImportTask.id.desc()
+                    )
                 )
                 counts = {
                     "sourceNodes": db.scalar(
-                        select(LibrarySourceNode.id).where(
-                            LibrarySourceNode.library_id == "continue-import-smoke"
-                        ).limit(1)
+                        select(LibrarySourceNode.id)
+                        .where(LibrarySourceNode.library_id == "continue-import-smoke")
+                        .limit(1)
                     )
                     is not None,
                     "books": db.scalar(
-                        select(LibraryBook.id).where(
-                            LibraryBook.library_id == "continue-import-smoke"
-                        ).limit(1)
+                        select(LibraryBook.id)
+                        .where(LibraryBook.library_id == "continue-import-smoke")
+                        .limit(1)
                     )
                     is not None,
                     "resources": db.scalar(
-                        select(LibraryReadableResource.id).where(
-                            LibraryReadableResource.library_id == "continue-import-smoke"
-                        ).limit(1)
+                        select(LibraryReadableResource.id)
+                        .where(
+                            LibraryReadableResource.library_id
+                            == "continue-import-smoke"
+                        )
+                        .limit(1)
                     )
                     is not None,
                     "assets": db.scalar(
                         select(LibraryResourceAsset.id)
                         .where(
-                            LibraryResourceAsset.library_id
-                            == "continue-import-smoke"
+                            LibraryResourceAsset.library_id == "continue-import-smoke"
                         )
                         .limit(1)
                     )
@@ -178,29 +187,20 @@ def main() -> None:
             "STORAGE_ROOT": str(storage_root),
             "IMPORT_WORKER_READY_FILE": str(ready_file),
         }
-        process = subprocess.Popen(
-            ["uv", "run", "--extra", "dev", "python", "-m", "app.worker.main"],
+        process = start_logged_process(
+            [sys.executable, "-m", "app.worker.main"],
             cwd=API_ROOT,
             env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
+            log_path=root / "worker.log",
         )
         try:
             wait_for_ready(ready_file, process)
             wait_for_import(database_url)
             print("ContinueImport worker smoke ok")
         finally:
-            if process.poll() is None:
-                process.send_signal(signal.SIGTERM)
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=5)
-            output = process.stdout.read() if process.stdout else ""
+            output = process.stop()
             if output.strip():
-                print(output.strip())
+                print(f"[worker log]\n{output.strip()}")
 
 
 if __name__ == "__main__":

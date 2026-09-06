@@ -5,23 +5,25 @@ from __future__ import annotations
 The fixture library is deliberately isolated in a TemporaryDirectory.  The
 library is created through the authenticated HTTP API, which queues a
 ``SCAN_LIBRARY`` task; the real ``app.worker.main`` process then builds the
-Book -> ReadableResource -> ResourceAsset projection.  Reader v4 and media
+Book -> ReadableResource -> ResourceAsset projection.  Reader v5 and media
 requests are made with the resource and asset identifiers returned by the
 current contracts.
 """
 
+import hashlib
 import os
 import shutil
-import signal
 import socket
 import subprocess
 import sys
 import time
 import zipfile
 from collections.abc import Iterable
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import quote
+from xml.etree import ElementTree
 
 import httpx
 from sqlalchemy import func, select
@@ -29,7 +31,12 @@ from sqlalchemy.orm import Session
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 API_ROOT = REPO_ROOT / "apps" / "api-python"
+# This standalone script needs the API root before importing app modules.  The
+# current Ruff configuration does not select E402; if that rule is enabled,
+# keep its exception line-scoped on these imports.
 sys.path.insert(0, str(API_ROOT))
+
+from python_smoke_process import LoggedProcess, start_logged_process
 
 from app.core.config import Settings
 from app.db.sqlite import create_sqlite_engine
@@ -65,7 +72,58 @@ def free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def wait_for_health(base_url: str, process: subprocess.Popen[str]) -> None:
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def assert_exact_asset_range(
+    client: httpx.Client,
+    asset_url: str,
+    source_path: Path,
+) -> None:
+    size = source_path.stat().st_size
+    assert size > 0, source_path
+    start = 0
+    end = min(4, size - 1)
+    with source_path.open("rb") as source:
+        source.seek(start)
+        expected = source.read(end - start + 1)
+    headers = {"Range": f"bytes={start}-{end}"}
+    if source_path.suffix.lower() == ".pdf":
+        probe = client.get(asset_url)
+        assert probe.status_code == 200, probe.text
+        revision = probe.headers.get("etag")
+        assert isinstance(revision, str) and revision.startswith('"'), probe.headers
+        headers["If-Range"] = revision
+    response = client.get(
+        asset_url,
+        headers=headers,
+    )
+    assert response.status_code == 206, response.text
+    assert response.content == expected
+    assert response.headers.get("content-range") == f"bytes {start}-{end}/{size}"
+    assert response.headers.get("content-length") == str(len(expected))
+
+
+def read_complete_original(
+    client: httpx.Client,
+    resource_url: str,
+    source_path: Path,
+) -> bytes:
+    response = client.get(resource_url)
+    assert response.status_code == 200, response.text
+    expected_size = source_path.stat().st_size
+    assert response.headers.get("content-length") == str(expected_size)
+    assert len(response.content) == expected_size
+    assert hashlib.sha256(response.content).hexdigest() == sha256_file(source_path)
+    return response.content
+
+
+def wait_for_health(base_url: str, process: LoggedProcess) -> None:
     deadline = time.time() + 20
     last_error: Exception | None = None
     while time.time() < deadline:
@@ -91,7 +149,7 @@ def wait_for_health(base_url: str, process: subprocess.Popen[str]) -> None:
     raise RuntimeError(f"health check timed out: {last_error}")
 
 
-def wait_for_worker(ready_file: Path, process: subprocess.Popen[str]) -> None:
+def wait_for_worker(ready_file: Path, process: LoggedProcess) -> None:
     deadline = time.time() + 25
     while time.time() < deadline:
         if process.poll() is not None:
@@ -274,6 +332,7 @@ def validate_imported_sample(
     book: dict,
     resource: dict,
     expected_format: str,
+    source_path: Path,
 ) -> None:
     resource_id = resource.get("id")
     book_id = book.get("id")
@@ -296,8 +355,9 @@ def validate_imported_sample(
     assert asset_data.get("resourceId") == resource_id, asset_data
 
     bootstrap = expect_ok(
-        client.get(f"/api/reader/v4/resources/{quote(resource_id, safe='')}/bootstrap")
+        client.get(f"/api/reader/v5/resources/{quote(resource_id, safe='')}/bootstrap")
     )
+    assert bootstrap.get("schemaVersion") == 5, bootstrap
     bootstrap_resource = bootstrap.get("resource")
     bootstrap_assets = bootstrap.get("assets")
     assert isinstance(bootstrap_resource, dict), bootstrap
@@ -305,6 +365,10 @@ def validate_imported_sample(
     assert bootstrap_resource.get("id") == resource_id, bootstrap
     assert bootstrap_resource.get("bookId") == book_id, bootstrap
     assert all(item.get("resourceId") == resource_id for item in bootstrap_assets)
+    resource_url = bootstrap.get("resourceUrl")
+    assert resource_url == (
+        f"/api/reader/v5/resources/{quote(resource_id, safe='')}/publication"
+    ), bootstrap
 
     primary = next(
         (item for item in bootstrap_assets if item.get("role") == "PRIMARY"),
@@ -315,44 +379,29 @@ def validate_imported_sample(
     asset_url = primary.get("url")
     assert isinstance(asset_id, str) and asset_id, primary
     assert asset_url == f"/api/assets/{quote(asset_id, safe='')}", primary
+    assert primary.get("sizeBytes") == source_path.stat().st_size, primary
 
-    media = client.get(asset_url, headers={"Range": "bytes=0-4"})
-    assert media.status_code == 206, media.text
-    assert media.content, "asset Range response was empty"
-    assert media.headers.get("content-range", "").startswith("bytes 0-"), media.headers
+    assert_exact_asset_range(client, asset_url, source_path)
+    assert isinstance(resource_url, str), bootstrap
+    original = read_complete_original(client, resource_url, source_path)
 
     if expected_format == "epub":
         assert bootstrap.get("readerType") == "reflowable", bootstrap
-        publication = bootstrap.get("publication")
-        assert isinstance(publication, dict), bootstrap
-        manifest_url = publication.get("manifestUrl")
-        positions_url = publication.get("positionsUrl")
-        assert isinstance(manifest_url, str), publication
-        assert isinstance(positions_url, str), publication
-        manifest_response = client.get(manifest_url)
-        assert manifest_response.status_code == 200, manifest_response.text
-        manifest = manifest_response.json()
-        assert isinstance(manifest, dict), manifest
-        reading_order = manifest.get("readingOrder")
-        assert isinstance(reading_order, list) and reading_order, manifest
-        positions_response = client.get(positions_url)
-        assert positions_response.status_code == 200, positions_response.text
-        positions = positions_response.json()
-        assert isinstance(positions, dict) and positions.get("positions"), positions
-        href = reading_order[0].get("href")
-        assert isinstance(href, str) and href, reading_order[0]
-        publication_resource = client.get(
-            f"/api/reader/v4/resources/{quote(resource_id, safe='')}/publication/"
-            f"{quote(href, safe='/@:;=+$,._~-')}"
+        assert bootstrap.get("publication") is None, bootstrap
+        with zipfile.ZipFile(BytesIO(original)) as archive:
+            assert archive.testzip() is None
+            chapter = archive.read("OEBPS/chapter1.xhtml")
+        root = ElementTree.fromstring(chapter)
+        readable_text = " ".join(
+            text.strip() for text in root.itertext() if text.strip()
         )
-        assert publication_resource.status_code == 200, publication_resource.text
-        assert publication_resource.content, "publication resource was empty"
-        assert media.content.startswith(b"PK\x03\x04"), media.content[:8]
+        assert "第一章 开始阅读" in readable_text, readable_text
         return
 
     if expected_format == "pdf":
         assert bootstrap.get("readerType") == "pdf", bootstrap
-        assert media.content.startswith(b"%PDF-"), media.content[:8]
+        assert bootstrap.get("publication") is None, bootstrap
+        assert original.startswith(b"%PDF-"), original[:8]
         return
 
     if expected_format == "cbz":
@@ -360,19 +409,33 @@ def validate_imported_sample(
         publication = bootstrap.get("publication")
         assert isinstance(publication, dict), bootstrap
         manifest_url = publication.get("manifestUrl")
+        page_url_template = publication.get("pageUrlTemplate")
         assert isinstance(manifest_url, str), publication
+        assert isinstance(page_url_template, str), publication
         manifest = expect_ok(client.get(manifest_url))
+        assert manifest.get("schemaVersion") == 2, manifest
+        assert manifest.get("kind") == "comic", manifest
+        assert manifest.get("sourceFormat") == "cbz", manifest
+        revision = manifest.get("revision")
+        assert isinstance(revision, str) and revision.startswith("sha256:"), manifest
         pages = manifest.get("readingOrder")
         assert isinstance(pages, list) and pages, manifest
+        assert manifest.get("pageCount") == len(pages), manifest
         page_index = pages[0].get("pageIndex")
         assert isinstance(page_index, int) and page_index >= 0, pages[0]
+        page_url = page_url_template.replace("{pageIndex}", str(page_index))
         page = client.get(
-            f"/api/reader/v4/resources/{quote(resource_id, safe='')}/comic/pages/"
-            f"{page_index}"
+            page_url,
+            params={"revision": revision},
         )
         assert page.status_code == 200, page.text
         assert page.headers.get("content-type", "").startswith("image/"), page.headers
+        assert page.headers.get("x-comic-revision") == revision, page.headers
+        assert page.headers.get("x-comic-resource-href") == f"pages/{page_index}", (
+            page.headers
+        )
         assert page.content, "comic page response was empty"
+        assert page.content.startswith(b"\x89PNG\r\n\x1a\n"), page.content[:8]
         return
 
     raise AssertionError(f"unsupported imported format {expected_format!r}")
@@ -411,17 +474,6 @@ def discover_real_library_samples() -> Iterable[Path]:
     if required and not found:
         raise RuntimeError(f"no supported EPUB/CBZ/ZIP/PDF samples found under {root}")
     return found
-
-
-def stop_process(process: subprocess.Popen[str]) -> str:
-    if process.poll() is None:
-        process.send_signal(signal.SIGTERM)
-        try:
-            process.wait(timeout=8)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=8)
-    return process.stdout.read() if process.stdout else ""
 
 
 def run_http_flow(base_url: str, sample_dir: Path, settings: Settings) -> None:
@@ -463,6 +515,7 @@ def run_http_flow(base_url: str, sample_dir: Path, settings: Settings) -> None:
                 client,
                 *by_format[expected_format],
                 expected_format,
+                {"epub": epub, "pdf": pdf, "cbz": comic}[expected_format],
             )
 
         real_samples = list(discover_real_library_samples())
@@ -513,12 +566,10 @@ def main() -> None:
             env=env,
             check=True,
         )
-        api_process = subprocess.Popen(
+        api_process = start_logged_process(
             [
-                "uv",
-                "run",
-                "--extra",
-                "dev",
+                sys.executable,
+                "-m",
                 "uvicorn",
                 "app.main:app",
                 "--host",
@@ -530,32 +581,28 @@ def main() -> None:
             ],
             cwd=API_ROOT,
             env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
+            log_path=root / "api.log",
         )
-        worker_process: subprocess.Popen[str] | None = None
+        worker_process: LoggedProcess | None = None
         try:
             base_url = f"http://127.0.0.1:{api_port}"
             wait_for_health(base_url, api_process)
-            worker_process = subprocess.Popen(
-                ["uv", "run", "--extra", "dev", "python", "-m", "app.worker.main"],
+            worker_process = start_logged_process(
+                [sys.executable, "-m", "app.worker.main"],
                 cwd=API_ROOT,
                 env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
+                log_path=root / "worker.log",
             )
             wait_for_worker(worker_ready_file, worker_process)
             run_http_flow(base_url, sample_dir, settings)
             print("Python backend production-sample smoke ok")
         finally:
-            worker_output = stop_process(worker_process) if worker_process else ""
-            api_output = stop_process(api_process)
+            worker_output = worker_process.stop() if worker_process else ""
+            api_output = api_process.stop()
             if worker_output.strip():
-                print(worker_output.strip())
+                print(f"[worker log]\n{worker_output.strip()}")
             if api_output.strip():
-                print(api_output.strip())
+                print(f"[api log]\n{api_output.strip()}")
 
 
 if __name__ == "__main__":
