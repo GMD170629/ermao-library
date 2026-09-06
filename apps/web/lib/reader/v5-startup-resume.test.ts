@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resolveV5StartupResume } from './local-resume';
+import { resolveV5StartupResume } from './v5-startup-resume';
 
 const position = {
   locator: { href: 'chapter.xhtml' },
