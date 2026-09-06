@@ -4,6 +4,12 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+2026-09-07 Chrome普通音频界面增量（源码d62438f0）：AUD-01 M4B/M4A独立原件经正常setup、书库导入、详情打开播放器、播放/暂停、键盘滑块定位15s、关闭重开，两子项PASS。M4B实际HTML音频恢复16.126938s，距已确认15s偏差1126.938ms；M4A恢复15.108089s，偏差108.089ms，均≤2000ms，包含重开自动播放到人工暂停的时间。最终只读ORM分别16127ms/r14、15108ms/r16，真实API PUT分别14/16次200，媒体206，浏览器error/warn为空，无API5xx。两个30秒样本同SHA `3ee91a25eeb4fd8c6261db8c660d2e84d0d624e8686499c35d0c06fbab6c6833`，只证明两扩展名各自真实路径，不作为不同编码/内嵌章节证据。
+
+证据根`artifacts/releases/1.0/d62438f0/chrome-m4b-m4a-20260907/`：`chrome-observations.json`是实际CUA交互与只读媒体时钟的转录，`first-resource-middle-orm.json`、`m4a-middle-orm.json`、`final-progress-orm.json`保留服务端事实，`fixture/api.log`保留原HTTP日志，`manual-preparation.json`/原始manifest及`final-verification.json`保留输入和收尾。原7样本+M4B/M4A两样本共9个，原件和911应用源码均未变，准备后manifest未变。Chrome导出功能不支持，未伪称有本地截图；一次M4A暂停点击因已自然播到EOF无匹配，复核真实状态后继续。人工hash检查初次误将CBZ源目录当文件，按现有sourceFiles清单逐文件核验后通过，未改工具或产品。退出测试账号并关闭自有标签页，stop正常触发、launcher exit0，保留Windows子进程停止码；配置恢复、工作树干净、18081/3102释放，没有活动fixture。
+
+本轮没有业务缺陷或工具改动；只关闭Chrome桌面普通界面短时子项，不覆盖精确5/10秒确认窗口、移动视口、后台、长时、章节、多轨、原生普通UI或最终RC。子代理仅准备现有四格式的专用输入并已关闭，主用原ffprobe和hash独立复核6个文件。`artifacts/releases/1.0/d62438f0/audio-chapters-multitrack-20260907/`中的`sample-manifest.json`、`commands.txt`及`parent-verification.json`记录来源和结果：两个M4B/M4A章节样本均30s、三章0/10/20s，音频以-c copy保留，另四轨原件复制hash一致。样本准备不是客户端PASS。下一可执行项用现有入口导入这些章节/多轨输入并验证导航、切轨和恢复；不增加通用工具/编码矩阵，不重跑已闭环项。ENV-11/12、iOS/容器及暂缓正式包仍独立保留，尚未冻结RC。
+
 2026-09-07当前恢复点：主候选eecff919已提交推送，移动生产源码与已安装主APK对应的ac25497d无差异，只增量安装测试包。新增Android MP3后台与真实短暂音频焦点中断两子项通过，原在线恢复相邻的新增前置误用TEST-13已修正并实际回归通过。主已核验全部原始日志、原件/911应用源码每轮无差异、四个fixture shutdown无错及exit0、所有专用UUID/偏好清理、reverse为空、18084/3105释放；主工作树干净。设备测试host空闲进程5053保留、主App无进程。子代理独立审查已完成并关闭；没有活动fixture或仪器任务。尚未冻结RC，不把不同源码候选的开发结果合成最终放行。
 
 证据根`artifacts/releases/1.0/5f75f35f/android-audio-lifecycle-20260907/`，`final-verification.json`汇总并保留各子目录原记录：
