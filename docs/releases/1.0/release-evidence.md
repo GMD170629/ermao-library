@@ -4,6 +4,8 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+本轮收尾恢复点`64b966aa`（业务修复d6a34cf0，均已推送）：两音频子项与清理已由主复核，链接修复另经独立只读审查通过，确认PreviewTile调用、漫画page=0可消费和PDF链接不变；READER-07仍待真实浏览器。主/Androidformats工作树清洁，自有fixture/instrumentation均结束，reverse为空、相关测试端口释放；设备原有测试包休眠进程28816保留，无主App进程。下一项继续其余已获样本的原生格式及进度异常；ENV-11/12等待已提出的外部执行条件，不重复请求授权、不绕过工具拒绝。正式产物仍暂缓，RC未冻结。
+
 当前主基线`d6a34cf0`已推送；READER-05/06/07代码检查通过、真实浏览器回归仍待ENV-12，SYNC-02对照仍待ENV-11。此次另补RG-03 AUD-01/AUD-08及RG-04 POS-01/02的Android真实运行时子项：M4A/MPEG-4 AAC-LC与Ogg/Opus分别在独立全新数据上完成播放、5/10秒实际服务端确认、暂停及关闭重开，均PASS。M4A确认3898ms/r2、7901ms/r3，暂停9899ms/r4→实际重开9899ms；Opus确认3887ms/r2、7892ms/r3，暂停9909ms/r4→实际重开9909ms，两者恢复误差0，阈值未改变。不覆盖长时、多轨、后台中断、其他内部编码、普通界面完整入口或最终RC。
 
 证据根`D:/www/ermao-release-android-formats/artifacts/releases/1.0/ac25497d3a4ee29383ddc97ac27c0a7230a5d078/android-m4a-opus-20260906/`：各`m4a/`与`opus/`的instrumentation.log（各1 PASS，13.136s/14.613s）、online-evidence.log、真实bootstrap、result.json和shutdown；根source-verification.json及final-handoff.json保留源码/设备/清理。主已实际核对两仪器终态、完整记录、各7次GET/PUT200、API5xx=0、当前测试PID无fatal日志、每组8个样本源/fixture不变、三个配置和两个工具未变、准备后manifest不变及服务退出。909应用文件每组无差异，2623移动文件无差异。
