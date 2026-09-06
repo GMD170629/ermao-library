@@ -4,7 +4,7 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
-- 当前已推送检查点 `4ccdd8c4`；后续工作树修改按逻辑审查提交。正式 RC 未冻结。Chrome 全量使用 `854712bb` 的 Web/C/WASM 源码，运行期间 Android/OPDS 工作树仍有并行修改，不能作为整体冻结验收。
+- 当前已推送检查点 `80c5d5b9`；后续工作树修改按逻辑审查提交。正式 RC 未冻结。Chrome 全量使用 `854712bb` 的 Web/C/WASM 源码，运行期间 Android/OPDS 工作树仍有并行修改，不能作为整体冻结验收。
 - 用户批准 DEC-05：1.0 暂不支持第三方进度同步；OPDS 目录、搜索、下载保留。`f3748d58` 删除同步实现和声明，授权 GET/PUT 返回 410，未授权仍 401；阴性测试验证旧表、v5 表及所有 DML 均无写入。
 - 起点：`develop@197e81a808ba32595a8a6ffeda62422b3a7d3473`，初始 `git status --short` 无输出。后续复核发现原工作区出现 OPDS/shared 等未提交变化，归属正在核查；这些变化全部保留，不清理、不提交，不作为隔离发布分支的已验收内容。
 - 隔离工作区：`D:/www/ermao-release-1.0`；分支 `codex/release-1.0-convergence`。正式 RC 未冻结，无 tag/公开发布。用户追加授权及时 commit/push；已检查三个工作流，push 仅匹配 develop/prod 或版本 tag，专用分支不触发发布。只推专用分支，不创建 PR/触发工作流。
@@ -15,6 +15,11 @@
 
 | ID / 关联 | 实际执行 | 结果 / 证据（相对本节证据根） | 效力 |
 |---|---|---|---|
+| R1-PYTHON-OPDS-FINAL / ART-01 | `f3748d58` 后端源码快照，Linux 完整无选择过滤 pytest-cov、ruff format/check、mypy；Windows 对应平台专项 | Linux 1250 PASS / 2 原有 Windows pipe skipped，coverage 77%；`backend-baseline/linux-f3748d58/evidence/pytest-full-coverage-no-filter.log`、`pytest-selection-summary.txt`。Windows 同后端树两项分别1 PASS / 0 skip：`backend-baseline/windows-pipe-tests-f3748d58-20260906/summary.txt` | 两个系统共同覆盖全部1252项；早期 `-k` 排除运行保留为历史诊断，不作为最终全量依据。后端运行门禁仍需真实客户端、性能及冻结 RC |
+| R1-ANDROID-HOST / ART-01 | `80c5d5b9` 从唯一章节 C/JNI/CMake owner 构建 Windows host DLL，再跑完整 JVM tests；集成 lint | 216 tests / 0 failed/error/skipped；`preflight-mobile/39-host-jni-integrated-unit.log`、`32-android-unit-final-xml-exact-summary.log`。`38-lint-integrated.log` BUILD SUCCESSFUL | 缺失 DLL 的 FB2 6项失败解除；单个标准 MediaSessionService ExportedService lint 有说明的局部抑制保留现有绑定语义，无新权限。旧视觉夹具唯一引用的废弃双语资源已删除，不改检查规则 |
+| R1-ANDROID-VISUAL / RG-03 | `51a7b3e8` 真实管理宿主/公开详情契约夹具；授权机7项+ReaderControls 1项 | 全部 PASS；`preflight-mobile/visual-fixture-codex-review-20260906/` 中 `visual-fixture-am-instrument-after-reading-status-owner.log`、`reader-controls-am-instrument-after-comic.log`，25张 `reader-controls-after-comic/` 截图 | 主代理已查看 comic-contents：按钮1/2、第二页摘要一致；epub-contents 有正文和目录，早期控制截图空白不作为已复现缺陷。测试仍保留双语/大字号可达、路径长按、书架入口保护。真实后端 reading-status 投影另列静态风险，未凭 fixture 关闭 |
+| R1-ANDROID-AUDIO-ENGINE / AUD-* | `d666bfa1` 真机 MediaController→MediaSessionService→Media3，12秒静音 PCM 原文件；暂停启动、播放/暂停、7秒定位、1.5倍速、两轨切换、退后台实际时钟、原文件hash | PASS 1 test；`preflight-mobile/35-real-audio-readiness-build.log`、`36-real-audio-test-install.log`、`37-real-audio-readiness-device.log` | 初轮 `34-real-audio-device.log` 在切轨 Loading 阶段提前 play，现等引擎 Paused 确认后再操作；未延长超时或弱化断言。仅真实引擎短时 PCM，不代表服务端下载/v5恢复、全部编码或30分钟播放。只有专用临时WAV被删除，保留设备数据 |
+| R1-CORPUS-59 / RG-03 | 复用现有公开格式素材生成器、Gutenberg/LibriVox原始素材、固定 FFmpeg/ffprobe | 59份正常样本及探测/原始来源hash：`corpus-format-library-20260906/corpus-manifest.json`、`audio-format-inventory.json`、`source-provenance.json` | 准备完成不等于播放通过；RAR/CBR及10个缺编码器格式仍缺样本，AZW/PRC同源扩展名变体限制保留，不伪装独立格式内部变体 |
 | R1-LOAD-OBSERVER / RG-05 | `scripts/python_release_load_precheck.py` 复用既有 smoke 生命周期和真实 API/Worker | 采集保护4项 PASS：实际子进程内存计入、失败请求不丢弃、进度确认后真实 HTTP 读回正反例、样本路径越界拒绝；`contracts/load-observer-tests.log`。psutil 7.2.2 仅安装到 `.tmp/release-tools` | 实际负载待运行。`D:/www/ermao-perf-precheck-20260906/corpus-10k-20260906-124641/` 中10000份有效 EPUB/PDF/CBZ 共约14 MB，只覆盖紧凑混合索引预检。运行设 `PYTHONPATH=.tmp/release-tools`、`PRECHECK_EVIDENCE_ROOT=<本节证据根>/local-load`，参数 `--measure-window --prepared-corpus-root <上述目录>`；135/180秒默认窗口不冒充30分钟门禁或10万/30万 |
 | R1-WEB-STATIC / ART-01 | `pnpm lint`、`pnpm typecheck`、`pnpm i18n:check` | PASS；`web-baseline/lint.log`、`typecheck.log`、`i18n-runtime-fixed.log` | 基线 Web 静态检查；i18n 首次 PATH 失败日志另保留 |
 | R1-WEB-UNIT / ART-01 | `pnpm --filter @shuku/web test`，含前置 WASM/安全生成/边界/设置/双语校验 | PASS：456 tests，0 failed/skipped；`web-baseline/unit-runtime-fixed.log` | 自动测试，不代表完整格式/真机通过 |

@@ -20,6 +20,9 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 | TEST-06 | Web 详情 fixture 缺 canonical chapter fields；封面 mock 不匹配 size 查询串；触摸端套用精确指针菜单假设；旧按钮/目录交互过期 | 修正 fixtures/真实入口，保留封面比例、触摸可达、键盘管理、当前章节和翻页断言；生产封面/菜单视觉未改，Chrome 全套随后留完整日志 |
 | READER-01 | 共享 C 章节核未识别“第 1 章”含数词空白的合法标题，Chrome TXT 实际失败 | `854712bb` 修复唯一 C owner、针对性正负例与 WASM 同步；C warning-as-error 测试及 Chrome 全套 PASS |
 | ANDROID-01 | 真机漫画目录截图显示按钮 0/1、第二页摘要仍称第 1 页；长目录 Row 无滚动入口 | `805be838` 修复，千页目录与全套目录19项真机 PASS；截图复核继续。早期新测试自身目录 fixture 问题已纠正并保留失败日志；不将 EPUB 早期截图空白推定为产品缺陷 |
+| RISK-05 | 视觉夹具追踪发现旧 `legacy_views.book_view` 按进度推导 completed，可能未合并独立 reading status；尚未通过真实请求复现 | 已安排专用新库 FINISHED/UNREAD 与详情/列表投影对照；保留 Locator/进度不变，不直接当作确证缺陷或通过 |
+
+RUN-01 最新拆分：`f3748d58` 后端 Linux 完整1250 PASS + 原有平台2 skip，Windows 两项补测均 PASS；Android host216 PASS、集成 lint PASS。Android 同源码集成真机147项正在运行；不能用局部测试替代这一结果。ANDROID-01 截图已由主代理复核确认页码修正。真实音频短时引擎测试 PASS，长时/逐编码/实际服务端恢复仍待执行。
 
 | ID | 当前事实与证据 | 当前处理 |
 |---|---|---|
