@@ -4,6 +4,12 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+本轮在`e8d4209e`之后继续修复，未冻结RC。READER-03已由Linux实际样本复现：`corpus-format-library-20260906/backend-preflight/mobi-linux-7c6c991c/REPORT.md`、`body-failure-requests.json`记录MOBI/AZW/PRC目录16项成功，但共用的`part00000.html`正文422，cause为`ElementTree.ParseError: unbound prefix`。AZW3正文首末200，派生FB2目录18项及首末正文200；实际FORM/AIFC在独立Windows新库导入/单轨/原文Range通过，Linux缺ffprobe的失败保留。均未据此声明全部客户端阅读/播放通过。
+
+修复增量临时证据：`backend-baseline/mobi-html-red.log`保留生产路径先失败；共享markup owner显式选择HTML解析/序列化并复用生成策略准备、预算和过滤，XML/SVG不作HTML失败回退。主34项针对性测试通过（`mobi-html-green-final.log`），mypy492通过，Ruff通过；`mobi-html-browser/results.json`记录Chrome152实际重解析3项、脚本/事件执行和网络请求均0；安全报告64与既有Chrome66/Android66校验通过（`contracts/safety-mobi-html.log`）。新预算测试第一次写错异常类别，按既有`PublicationParserLimitError`修正，保留`mobi-html-test-taxonomy-failure.log`，未改生产错误合同或预算。误用缺native配置的Windows广泛publication回归31 FAIL/77 PASS原始记录在`mobi-html-publications.log`；章核缺失与Windows符号链接条件由正确Linux环境另验，不跳过测试。
+
+恢复顺序：先完成MOBI实际文件回归及可追溯native重建、移动端正常ACK完整链复现/修复，再执行Android在线读听与确认验证。大库工具在原入口补10万/30万规模参数、精确计数和采样覆盖；完整规模/时长尚未实测。此前`7c6c991c`完整后端报告保留为历史基准，本轮后端业务改动后的受影响结果须重新验证，不能拼接成同一RC通过。
+
 ### 最新检查点：`61d36d02`（未冻结 RC；后端源码`7c6c991c`）
 
 真实Chrome音频扩展验收：`61d36d02`复用同一完整新库/EPUB/音频流程，按服务端MIME选择而非标题；AAC、WAV、FLAC桌面/移动视口共 **6 PASS**，分别`web-baseline/chrome-live-{aac,wav,flac}.log`和`chrome-live-{aac,wav,flac}-results/`。实际运行`release-live/`下AAC为`r1788679009311-w0`、`r1788679092759-w1`；WAV为`r1788679154307-w0`、`r1788679211032-w1`；FLAC为`r1788679268535-w0`、`r1788679327873-w1`。主核对实际MIME、每5/10秒更新服务端位置、重开误差（均≤200ms）、API 5xx为0及全部shutdown-complete；ESLint/typecheck通过。连同之前MP3两视口，四组合获得真实短时播放/连续保存/重开证据，不扩为全部音频、30分钟、多轨或原生平台PASS。

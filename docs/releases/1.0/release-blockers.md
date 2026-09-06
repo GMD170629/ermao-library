@@ -4,7 +4,7 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 
 ## R1 状态覆盖与外部条件
 
-最新RUN-01增量：`7c6c991c`后端完整Linux1284 PASS+Windows平台2项补测PASS、coverage77%、Ruff689/mypy492通过；Android当前完整148/共享416/单元218/lint通过，旧失败数量仅保留历史。RG-05安静实测仍待执行，整套门禁未放行。
+最新RUN-01增量：`7c6c991c`后端完整Linux1284 PASS+Windows平台2项补测PASS、coverage77%、Ruff689/mypy492通过；Android当前完整148/共享416/单元218/lint通过，旧失败数量仅保留历史。安静10k短时实测已完成；新MOBI/移动端位置修复后须更新受影响证据，整套门禁未放行。
 
 本轮确证及修复：
 
@@ -32,6 +32,8 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 | ENV-10 | 59语料中MOBI/AZW/PRC/AZW3的目录返回PUBLICATION_UNSUPPORTED；本机探针未配置ERMAO_MOBI_CORE_LIBRARY | Windows runtime子项BLOCKED，正在检查现有DLL/构建入口；其导入/原文下载成功不能替代目录通过，不能据此判读物损坏 |
 | SAMPLE-01 | 59语料中FB2为0 section，AIFC实际AIFF且与AIF/AIFF同hash；仓库另一个FB2的l:前缀未绑定 | `32175712`修复AIFC生成/验证，2测试+真实probe PASS；另保存仅补命名空间的18 section FB2派生样本及精确hash/差异，XML解析PASS。原文件/旧失败保留，新后端/客户端验收分开登记，不改支持范围 |
 | TEST-07 | 真实Chrome重开音频时，脚本用即时count误判尚未加载按钮并等待不存在的资源卡；`web-baseline/chrome-live-audio-fix.log` | 已修改为等待可用入口，待重跑；保留完整音频恢复误差≤2秒断言 |
+| READER-03 | Linux实际MOBI/AZW/PRC的公开publication子资源返回422；目录各16项、原文hash/Range通过。native读取完成后HTML的未绑定前缀触发ElementTree XML解析失败 | 已补先失败的针对性测试；显式HTML适配复用现有准备/预算/安全过滤，34项针对性测试、mypy492及Chrome3项实际DOM重解析通过；独立Linux真实文件回归进行中。该子资源路径失败不等于已复现生产Web原文件阅读失败；三个扩展名共用同一源hash，不冒充三份独立编码 |
+| SYNC-01 | 共享Ktor位置PUT成功链疑似重复解包：ApiClient输出data，mapper仍要求ok/data，可能拒绝正常ACK | 正在用完整ApiClient/port链复现并修复；尚不以静态风险或服务端存在位置证明客户端已确认，后续须Android真实HTTP与持久化联验 |
 
 RUN-01 最新拆分：`f3748d58` 后端 Linux 完整1250 PASS + 原有平台2 skip，Windows 两项补测均 PASS；Android host216 PASS、集成 lint PASS。`80c5d5b9` Android/C 同源码集成真机147项全部 PASS，证据见 R1-ANDROID-FULL，此批原自动回归失败已解除，最终 RC 全套仍待冻结重跑。ANDROID-01 截图已由主代理复核确认页码修正。真实音频短时引擎测试 PASS，长时/逐编码/实际服务端恢复仍待执行。
 
