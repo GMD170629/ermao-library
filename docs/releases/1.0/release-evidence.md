@@ -4,6 +4,18 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+2026-09-07当前恢复点：主候选eecff919已提交推送，移动生产源码与已安装主APK对应的ac25497d无差异，只增量安装测试包。新增Android MP3后台与真实短暂音频焦点中断两子项通过，原在线恢复相邻的新增前置误用TEST-13已修正并实际回归通过。主已核验全部原始日志、原件/911应用源码每轮无差异、四个fixture shutdown无错及exit0、所有专用UUID/偏好清理、reverse为空、18084/3105释放；主工作树干净。设备测试host空闲进程5053保留、主App无进程。子代理独立审查已完成并关闭；没有活动fixture或仪器任务。尚未冻结RC，不把不同源码候选的开发结果合成最终放行。
+
+证据根`artifacts/releases/1.0/5f75f35f/android-audio-lifecycle-20260907/`，`final-verification.json`汇总并保留各子目录原记录：
+
+- `background/`（0b234f2d）：Activity实际PAUSED→STOPPED，全程无RESUMED；5秒确认3879ms/r2、10秒7891ms/r3，后台暂停10662ms/r4。1 PASS（13.078s），真实progress GET/PUT分别5/4次200。
+- `focus/`（0b234f2d）：真实SDK AUDIOFOCUS_GAIN_TRANSIENT获准，中断前3901ms/r2，自动暂停4920ms/r3并稳定，abandon获准后自动Playing、8958ms/r4确认，最后暂停9934ms/r5。1 PASS（13.172s），GET/PUT分别6/5次200；中断至恢复未用play/pause命令伪造。
+- `original-adjacent/`（0b234f2d）：保留TEST-13原FAIL，5/10秒及暂停9913/r4后，第二次open被全局音频活跃前置挡住，未执行重开断言。`original-guard-fix/`（eecff919）：该检查移至fixture首次获取播放之前，旧App会话/确认/恢复断言全保留；原用例1 PASS（13.069s），3898/r2、7905/r3、暂停9905/r4→重开9905/r7，误差0，GET/PUT各7次200。所有运行无API5xx。原close后的CLOSED_PENDING照实保留，后台/focus不据此声称Stop outbox已确认。
+
+本次仅在既有测试类增加两个必须场景并等价抽取checkpoint/pause；fixture/provisioner零修改，无生产代码变更。编译及lint（含androidTest分析）通过，日志`build-test-apk.log`、`lint.log`、`build-lint-guard-fix.log`；初始测试APK SHA `58608971ef1eec702623020ac4789add3cca9503e074f9e97bcc4c3882b2e69d`，guard修正后及当前安装 `1fd94b216668916aedf8928d15e0ad33f0a080170aba3cca165d5104c128da27`；主APK始终 `2fb7cb3214b1c19353f082b724c55981c095533cf9bbacd901fae80df07826f6`。独立复核确认旧5/10秒、pause断言等价，guard初始放置不合理，移动未削弱原保护。原失败与必要相邻已闭环，达到DEC-07停止条件，不继续完善该项工具。
+
+真实限制和下一项：新增两场景为MP3的隔离运行时/真实HTTP链路，不是四格式各自后台全矩阵、锁屏、真实来电、普通App完整UI或最终RC。范围仍仅M4B/MP3/AAC/M4A；继续Web M4B/M4A及Android普通详情/播放器入口、范围内内嵌章节/多轨与进度异常。独立审查并由主核对，audio_metadata章节提取、Web bootstrap章节映射/导航及Android selectChapter现已存在，章节验收不是新增功能；现有短样本单asset且units为空，不能证明该项。后续用原工具和专用样本执行，不扩大编码矩阵。ENV-11/12、iOS/容器及暂缓正式交付分别保留，不重复询问既有授权。
+
 2026-09-07 AUD-01 M4B原生短时子项PASS：独立全新库、`.m4b`原件经现有导入/bootstrap与真实Media3运行时，5秒确认3897ms/r2、10秒7901ms/r3，暂停9912ms/r4→重开9912ms、最终r7，误差0；仪器1 PASS（13.123s）。证据`D:/www/ermao-release-android-formats/artifacts/releases/1.0/ac25497d3a4ee29383ddc97ac27c0a7230a5d078/android-m4b-20260907/`的instrumentation.log、online-evidence.log、media-probe.json、manual-preparation.json、result.json及fixture原始记录。主核对实际GET/PUT各7次200、无API5xx、909源码及8样本hash无变化、准备后manifest不变、shutdown无错/exit0、专用UUID及两个偏好文件已清理、reverse为空、18084/3105释放、工作树干净。
 
 样本为MPEG-4 AAC-LC/22050Hz单声道30s、272503字节，SHA-256 `3ee91a25eeb4fd8c6261db8c660d2e84d0d624e8686499c35d0c06fbab6c6833`，与既有M4A原件同hash。因此仅证明M4B扩展名独立导入/播放/确认/恢复路径，不代替有章节/长时/多轨或普通界面入口。实际环境仍ac25497d development，沿用已核验main `2fb7cb32…` / test `531ae5c9…` APK，未构建安装，不是最终RC。测试输入准备复用前述7+1方式，工具零修改；手工汇总最初误用/position匹配而显示零请求，已根据原日志真实/progress路径修正为各7次，原日志和运行结果未变。
