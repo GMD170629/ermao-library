@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { normalizeAudioBootstrap } from './api';
-import { absolutePositionForTrack, beginAudioResourceSwitch, failAudioResourceSwitch, mergeAudioLoadIntent, orderedTracks, targetForAbsolutePosition } from './audio-model';
+import { absolutePositionForTrack, beginAudioResourceSwitch, cancelAudioResourceSwitch, failAudioResourceSwitch, mergeAudioLoadIntent, orderedTracks, targetForAbsolutePosition } from './audio-model';
 import type { AudioPlaybackState } from './types';
 
 const payload = {
@@ -112,11 +112,22 @@ test('unknown MIME and codec metadata reach the playback engine without admissio
 test('resource switching keeps the previous playback until the request commits or fails', () => {
   const bootstrap = normalizeAudioBootstrap(payload, 'resource-1');
   const previous: AudioPlaybackState = { lifecycle: 'playing', bootstrap, resourceId: bootstrap.resource.id, pendingResourceId: null, pendingSummary: null, loadError: null, bookId: bootstrap.book.id, trackIndex: 0, track: bootstrap.tracks[0] ?? null, chapter: null, positionMs: 0, durationMs: 10_000, absolutePositionMs: 0, totalDurationMs: 30_000, playbackRate: 1, skipBackwardSeconds: 15, skipForwardSeconds: 30, volume: 1, sleepTimerEndsAt: null, sleepTimerMode: null, error: null, safetyError: null };
-  const loading = beginAudioResourceSwitch(previous, 'resource-2');
+  const summary = { resourceId: 'resource-2', bookId: 'book-2', title: 'Second book', author: null, coverUrl: null, resourceTitle: null, narrator: null };
+  const loading = beginAudioResourceSwitch(previous, 'resource-2', summary);
   assert.equal(loading.resourceId, 'resource-1');
   assert.equal(loading.pendingResourceId, 'resource-2');
-  const failed = failAudioResourceSwitch(previous, 'resource-2', '启动失败');
+  const failed = failAudioResourceSwitch(previous, 'resource-2', '启动失败', summary);
   assert.equal(failed.resourceId, 'resource-1');
   assert.equal(failed.pendingResourceId, 'resource-2');
   assert.equal(failed.lifecycle, 'paused');
+  const canceled = cancelAudioResourceSwitch({ ...failed, error: 'local-save-failed' });
+  assert.equal(canceled.bootstrap, bootstrap);
+  assert.equal(canceled.resourceId, 'resource-1');
+  assert.equal(canceled.positionMs, previous.positionMs);
+  assert.equal(canceled.pendingResourceId, null);
+  assert.equal(canceled.pendingSummary, null);
+  assert.equal(canceled.loadError, null);
+  assert.equal(canceled.lifecycle, 'paused');
+  assert.equal(canceled.error, 'local-save-failed');
+  assert.equal(cancelAudioResourceSwitch({ ...loading, bootstrap: null }).lifecycle, 'idle');
 });

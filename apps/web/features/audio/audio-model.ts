@@ -55,6 +55,16 @@ export function beginAudioResourceSwitch(
   };
 }
 
+export function cancelAudioResourceSwitch(current: AudioPlaybackState): AudioPlaybackState {
+  return {
+    ...current,
+    pendingResourceId: null,
+    pendingSummary: null,
+    loadError: null,
+    lifecycle: current.bootstrap ? 'paused' : 'idle'
+  };
+}
+
 export function failAudioResourceSwitch(
   previous: AudioPlaybackState,
   requestedResourceId: string,

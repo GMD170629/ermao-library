@@ -4,6 +4,10 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+AUDIO-03关闭竞态补充：取消加载统一复用 `cancelPendingLoad`，关闭时同时撤销待加载摘要；保存失败保留当前资源和可见错误，过期保存失败不能覆盖新加载。IDB读取后的取消检查阻止旧结果重新打开播放器。独立限定差异复核未发现新阻断；模型用例已使用非空pending summary验证撤销，旧断言全部保留。`audio-soak/save-close-cancel-tests.log` 20 PASS、`web-full-cancel.log` 完整465 PASS/0 skip、`cancel-lint.log` 和 `cancel-typecheck.log` 通过。真实快速关闭与异常IDB顺序尚待执行，不从纯状态测试推定浏览器失败路径通过。
+
+恢复时继续三个独立方向：主执行Chrome AUDIO-03原失败链路；ANDROID-03补唯一Expanded几何前置并重跑；READER-03处理MathML annotation-xml的encoding实体改变HTML解析上下文。后者当前HTML/XML/locator95项通过，扩展独立对照87/90通过，余下同一反例在三个分块大小下失败，证据 `backend-baseline/html-independent-review/raw-text-integration-20260906/`，不能关闭。此前Web边界前置失败已确认为扫描器跨注释引号误匹配：AST无对应错误码字符串；仅改注释，未放宽检查器或策略。
+
 AUDIO-03第二次复现：`audio-soak/runs-30/r1788686887667-w0/audio-seek-observations.json` 记录真实引擎已seeked至475000ms、暂停475012.459ms，seeking=false，仍重开差437000ms；“跳转尚未完成”已不能解释此轮。保存调用先等待500ms debounce后才flush，而close立即reset，是当前有证据支持的修复方向；独立owner分析见 `audio-soak/seek-owner-review.md`，原记录未包含IDB逐事件追踪，不把完整因果写成已证明。
 
 AUDIO-03修复候选：共享v5协调器新增 `saveNow`，复用既有enqueue/原子exact+pending提交与上传owner，立即本地落盘且不等待远端ACK；audio关闭等待该本地结果，失败保留播放器并使用既有双语错误提示。原AudioPlayAttempt及全部原测试迁移到AudioPlaybackAttempt，新增同一owner的待关闭意图仲裁，后来的播放、同资源打开、seek及重复close不会被旧close清掉；注销/清私有数据仍直接reset。`audio-soak/save-now-red.log` 新增2 FAIL→相关正反例通过，`save-close-intent-tests.log` 15 PASS；最终增量完整 `web-full-close-intent.log` **465 PASS / 0 skip**，lint/typecheck及2106消息i18n通过。第一次全Web前置曾被在编HTML错误码边界拦截，后来修正后完整前置通过；中间unit-only运行的Python入口环境失败也保留，未跳过有效测试。**真实Chrome原失败链路待复测，AUDIO-03不关闭。**
