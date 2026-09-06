@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 AUDIO-14候选：BookDetailPage的reading-units effect改为依赖实际bookId/resourceId/pageSize/page标量，进度展示对象引用变化不再重取静态目录；取消与原错误处理保持。新增原resource-details.spec内针对性断言复用mock owner和readerV5ProgressKey，音频wire格式保持AUDIO/mime audio/mpeg。主复核实际两文件差异，纠正测试最初的MP3 wire值和重复key codec后，完整Web lint/typecheck/483单元/i18n通过；首次pretest因Node子进程命中Windows python3别名exit9009，未运行单测，使用既有PYTHON_EXECUTABLE配置指向现有venv后原检查通过，原失败日志保留。证据`artifacts/releases/1.0/61498daa/audio14-stable-reading-units-20260907/`。此处新E2E和普通原场景仍待执行，不冒充已关单或扩为任意详情失败的通用自动重试。
+
+SYNC-04独立James四文件复核：61498daa冷启动pending-only路径未见静态阻塞，原schema/key/ACK与专用数据库保护保持，实际普通UI仍待。另保留RISK-08待验证边界：Detail在持久查询返回后未再次检查generation，旧查询可能越过较新load；Home/Detail的旧runCatching会把查询失败/取消转为空集合。此次不把这些静态推断当作已复现缺陷或无证据关闭，也不由冷启动子项通过覆盖并发/失败路径。新开发UI APK已构建安装，SHA-256=d36da7bd99e632e6607ebf66d46292df46760c8d312abc18391af9787dfce58d，来源61498daa，独立包与开发签名；同轮Chrome/Android实际复验继续。
+
 2026-09-07 SYNC-04候选已完成共用查询修复与自动检查，实际普通UI尚待复验，暂不关单。AndroidReaderV5Database.loadPresentationSnapshots复用ReaderPositionSyncStateJson与既有同步表，只返回未确认pending的presentation；Home/Detail每次成功读取后替换pending快照集合，避免已ACK条目留在旧映射中。原POSITION_TABLE、schema/ACK/保存/Locator不变，当前页面即时捕获继续按原语义投影。主审查实际diff并补充同服务器不同user隔离；完整Android host224/0失败/0跳过、lint通过，既有ReaderV5PersistenceInstrumentedTest在9e896bbc独立UID真实运行2 PASS（pending、旧ACK、新ACK保留原position及server/user/client/book隔离）。证据`artifacts/releases/1.0/b1c0a8fa/sync04-native-pending-projection-20260907/`含原日志、JUnit、测试源码patch/散列和APK/配置manifest；无原生iOS实测，不冒充普通UI或正式APK。
 
 SYNC-04本次最小隔离接入说明（DEC-07）：现有查询硬编码生产库名，原UUID专用数据库测试无法直接调用；仅为此必测查询新增内部databaseName默认参数，正常调用仍原默认库。仪器沿原测试类，复用android-ui.init.gradle的独立com.ermao.library.releasecheck UID，再用证据目录的一次性init仅选择debug测试源码集；原release live源码集不含该数据库仪器类，普通默认debug包名又会覆盖原App，因此需要该最小隔离配置。无新增仓库通用工具、模式或生产调用路径。停止条件为原query/ACK/隔离断言与普通新包原失败回归通过；现已结束本两项仪器，测试包强停，独立审查及新UI验证继续。Web AUDIO-14两文件候选单独处理，不混入Android修复提交。

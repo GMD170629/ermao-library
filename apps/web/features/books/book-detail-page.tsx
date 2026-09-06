@@ -306,6 +306,9 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     : singleReadableResource
       ? displayedResources.find((resource) => resource.id === singleReadableResource.id) ?? null
       : null;
+  const resourceDetailBookId = book?.id ?? null;
+  const resourceDetailResourceId = requestedResource?.id ?? null;
+  const resourceDetailRequestPageSize = requestedResource ? resourceDetailPageSize(requestedResource) : null;
   const nestedNode = contentSourceNodeId
     ? contents?.currentNode?.sourceNodeId === contentSourceNodeId
       ? contents.currentNode
@@ -440,7 +443,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   }, [book, requestedResourceId, router, searchParams, singleReadableResource]);
 
   useEffect(() => {
-    if (!book || !requestedResource) {
+    if (resourceDetailBookId === null || resourceDetailResourceId === null || resourceDetailRequestPageSize === null) {
       setResourceDetail(null);
       setResourceDetailError('');
       setResourceDetailLoading(false);
@@ -449,7 +452,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     const controller = new AbortController();
     setResourceDetailLoading(true);
     setResourceDetailError('');
-    void fetchResourceDetail(book.id, requestedResource.id, requestedResourcePage, resourceDetailPageSize(requestedResource), controller.signal)
+    void fetchResourceDetail(resourceDetailBookId, resourceDetailResourceId, requestedResourcePage, resourceDetailRequestPageSize, controller.signal)
       .then((next) => { setResourceDetail(next); setResourceDetailError(''); })
       .catch((reason) => {
         if (controller.signal.aborted) return;
@@ -458,7 +461,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       })
       .finally(() => { if (!controller.signal.aborted) setResourceDetailLoading(false); });
     return () => controller.abort();
-  }, [book, requestedResource, requestedResourcePage, t]);
+  }, [requestedResourcePage, resourceDetailBookId, resourceDetailRequestPageSize, resourceDetailResourceId, t]);
 
   const updateResourceLocation = (resourceId: string | null, page?: number) => {
     router.push(bookDetailHref(bookId, resourceId, searchParams.get('returnTo'), resourceId ? page ?? 1 : null));
