@@ -4,6 +4,12 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+2026-09-07 AUD-01 M4B原生短时子项PASS：独立全新库、`.m4b`原件经现有导入/bootstrap与真实Media3运行时，5秒确认3897ms/r2、10秒7901ms/r3，暂停9912ms/r4→重开9912ms、最终r7，误差0；仪器1 PASS（13.123s）。证据`D:/www/ermao-release-android-formats/artifacts/releases/1.0/ac25497d3a4ee29383ddc97ac27c0a7230a5d078/android-m4b-20260907/`的instrumentation.log、online-evidence.log、media-probe.json、manual-preparation.json、result.json及fixture原始记录。主核对实际GET/PUT各7次200、无API5xx、909源码及8样本hash无变化、准备后manifest不变、shutdown无错/exit0、专用UUID及两个偏好文件已清理、reverse为空、18084/3105释放、工作树干净。
+
+样本为MPEG-4 AAC-LC/22050Hz单声道30s、272503字节，SHA-256 `3ee91a25eeb4fd8c6261db8c660d2e84d0d624e8686499c35d0c06fbab6c6833`，与既有M4A原件同hash。因此仅证明M4B扩展名独立导入/播放/确认/恢复路径，不代替有章节/长时/多轨或普通界面入口。实际环境仍ac25497d development，沿用已核验main `2fb7cb32…` / test `531ae5c9…` APK，未构建安装，不是最终RC。测试输入准备复用前述7+1方式，工具零修改；手工汇总最初误用/position匹配而显示零请求，已根据原日志真实/progress路径修正为各7次，原日志和运行结果未变。
+
+下一可执行项：RG-03音频后台/中断及RG-04 POS-01/02的Android真实链路。现有仪器仅覆盖前台播放/暂停重开，无法证明后台持续确认及真实焦点中断后持久化；只允许在既有测试类增加两个针对性用例，共用登录/隔离存储/运行时/确认/清理owner。停止条件为这两个真实场景及必要相邻通过，不扩fixture/provisioner或报告框架；焦点中断不冒充真实来电。子代理只写该测试文件，主串行整合验证，不新建分支。
+
 2026-09-07最新恢复点：主基线c560d1a2，DEC-09按用户明确名单仅保留M4B、MP3、AAC、M4A四种有声书格式；不继续Vorbis及其他编码矩阵，既有产品能力、有效断言和历史证据保持。用户告知子代理用量恢复，已安排独立只读核验四格式缺口。下一步优先补M4B实际源文件的原生播放/确认/重开，再继续范围内后台中断及进度异常；不把已有M4A结果当作M4B通过，不扩通用工具。
 
 Vorbis中断收尾（均非播放验收）：`D:/www/ermao-release-android-formats/artifacts/releases/1.0/ac25497d3a4ee29383ddc97ac27c0a7230a5d078/android-vorbis-20260906/`保留原600秒寿命超时，shutdown报告processesStopped=true、cleanupErrors=[]；子代理用量中断后未完成样本准备/仪器运行。`android-vorbis-20260907-recovery/`曾启动全新fixture，收到DEC-09后写入其既有stop文件，shutdown报告status=stopped、primaryError=null、cleanupErrors=[]、processesStopped=true，launcher exitCode=0；原7样本manifest保留，未追加Vorbis、未provision设备或启动仪器。主代理核实18084/3105无监听、adb reverse为空、Androidformats工作树干净。两个目录保留为中断/范围取消证据，不能登记Vorbis PASS；正式构建仍暂缓、RC未冻结。
