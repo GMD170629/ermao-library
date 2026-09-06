@@ -6,7 +6,7 @@
 
 RG-05 可执行入口：`scripts/python_release_load_precheck.py`，使用真实文件导入、实际 API/Worker、分扫描状态请求日志和进程树 RSS；10000份紧凑样本就绪。工具4项保护测试 PASS，负载结果待实际运行，命令与证据见 R1-LOAD-OBSERVER。默认短窗口仅为本机预检，完整时长/规模要求保持。
 
-当前代码验证检查点 `80c5d5b9`：后端完整跨平台1252项覆盖、Android host216与lint通过；实际真机全套147项运行中。AUD-* 目前新增真实 Media3 短时PCM引擎证据，仅覆盖列明操作。59份公开格式样本已登记，实际播放状态继续逐组合展开，不能批量填 PASS。
+当前代码验证检查点 `80c5d5b9`：后端完整跨平台1252项覆盖、Android host216与lint通过；实际真机全套147项全部通过，Debug/test两包hash和冷启动证据见 R1-ANDROID-FULL。AUD-* 目前新增真实 Media3 短时PCM引擎证据，仅覆盖列明操作。59份公开格式样本已登记，实际播放状态继续逐组合展开，不能批量填 PASS。
 
 R1 当前基线为干净的 `develop@197e81a808ba32595a8a6ffeda62422b3a7d3473`，在 `D:/www/ermao-release-1.0` 的 `codex/release-1.0-convergence` 分支执行。历史 R0 工作树不是当前基线。最终 RC/产物仍待冻结；每次执行须记录实际改动，不能将有源码变更的结果登记成纯 HEAD。
 
