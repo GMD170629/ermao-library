@@ -4,7 +4,7 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
-- 当前已推送检查点 `ae1275cd`；后续工作树修改按逻辑审查提交。Chrome Reader 专项以 `614b5fed` 加 `apps/web/e2e/readium-reader.spec.ts` 测试修正执行（修正提交 `7847cdd2`），生产 Reader 源码未改。
+- 当前已推送检查点 `854712bb`；后续工作树修改按逻辑审查提交。正式 RC 未冻结。Chrome 全量使用该提交的 Web/C/WASM 源码，运行期间 Android/OPDS 工作树仍有并行修改，不能作为整体冻结验收。
 - 用户批准 DEC-05：1.0 暂不支持第三方进度同步；OPDS 目录、搜索、下载保留。原双向互通不再属于 1.0，端点/声明关闭及负面副作用测试待实施。
 - 起点：`develop@197e81a808ba32595a8a6ffeda62422b3a7d3473`，初始 `git status --short` 无输出；没有用户未提交改动被纳入或排除。原工作区不修改。
 - 隔离工作区：`D:/www/ermao-release-1.0`；分支 `codex/release-1.0-convergence`。正式 RC 未冻结，无 tag/公开发布。用户追加授权及时 commit/push；已检查三个工作流，push 仅匹配 develop/prod 或版本 tag，专用分支不触发发布。只推专用分支，不创建 PR/触发工作流。
@@ -20,6 +20,9 @@
 | R1-WEB-E2E-HIST / ART-01 | 原四浏览器 `pnpm test:e2e --workers=2` | 155 PASS / 97 FAIL；`web-baseline/e2e.log`、`test-results/` | 用户已收敛为 Chrome，仅保留诊断历史；63 个 Firefox 启动失败为环境问题，其余逐项分类 |
 | R1-CHROME-READER / RG-03/04 | `pnpm exec playwright test e2e/readium-reader.spec.ts e2e/comic-reader.spec.ts --workers=2`；Chrome 152.0.7977.76 桌面和移动视口 | PASS：42 tests，0 skipped；`web-baseline/chrome-reader-retest.log`、`chrome-reader-retest/results/`；目标文件 ESLint 与 Web typecheck PASS | 修正过时 Locator 字段/移动点击与布局假设；增加缓存重开仍仅下载一次。保留真实段落恢复、显示百分比不控制恢复等断言；HTTP fixtures 不替代真实服务器或最终 RC |
 | R1-WEB-BUILD / ART-01 | `NEXT_DIST_DIR=.next-codex pnpm build` | PASS；`web-baseline/production-build.log` | Web 生产构建，不是双架构部署验收 |
+| R1-CHROME-FULL / ART-01 | Chrome 桌面及移动视口完整 Playwright，`--workers=1` | PASS：126 tests，0 skipped，3.2m；`web-baseline/chrome-full-r2.log`、`chrome-full-r2-results/` | 前轮 124 PASS / 2 FAIL 的 trace 均停在 `browserContext.newPage`，尚未加载应用；单 worker 全量重跑通过，没有改断言/超时/重试掩盖失败。仍非真实后端逐格式验收 |
+| R1-PYTHON-LINUX / ART-01 | WSL Ubuntu 24.04、独立环境及 GCC native core，完整 pytest coverage | PASS：1253 passed，2 Windows-only skipped，coverage 78%；`backend-baseline/linux-614b5fed/evidence/pytest-full-linux-coverage.log` | `614b5fed` 快照；与 Windows 结果互补，OPDS 后续修复使相关旧证据失效，最终完整回归待执行 |
+| R1-CHAPTER-CORE / RG-03 | Zig C99 warning-as-error 编译共享章节核及 native 测试；生成 WASM manifest 校验；Chrome TXT 用例双视口 | PASS；`chapter-core/native-test.log`，全量 Chrome 见上 | `854712bb` 接受“第 1 章”的数词周围空格/tab，保留原文、偏移及非标题负例；修改唯一 C owner 并重新生成 WASM，无平台另写推断规则 |
 | R1-PYTHON-WINDOWS / ART-01 | 完整 pytest + coverage，ruff format/check、mypy | 1219 PASS / 36 FAIL，1255 collected，coverage 77%；`backend-baseline/` | 6 个 Windows 能力/路径问题、30 个缺 native core 的失败；Linux 隔离重验进行中，不将缺工具直接计产品失败 |
 | R1-PYTHON-SMOKE / RG-02/03 | 新临时数据根，经 setup/鉴权 API 创建书库→真实 Worker 扫描；EPUB/PDF/CBZ v5 bootstrap、完整原文件 hash、精确 Range、漫画页 revision；独立 ContinueImport worker | PASS；`runtime-smoke/sample-after-review.log`、`worker-after-review.log`、`sample-hashes-after-review.txt`；过程工具测试 4 PASS | `76707cce` 修正旧 v4 smoke/PIPE 阻塞；复用同一有界进程宿主，不新增服务端正文路径。仅三媒体后端链路，不替代客户端阅读或所有格式 |
 | R1-MOBILE-BASELINE / ART-01 | shared host、Android unit/lint、授权真机完整 instrumentation | shared 414 中 3 FAIL；Android unit 216 中 8 FAIL；lint 46 errors；仪器 145 中 19 FAIL；`preflight-mobile/07-failure-summary.txt` 及原始日志 | 失败正在分类修复；Debug 冷启动成功不替代正式 APK 或完整门禁 |
@@ -31,7 +34,7 @@
 
 Android 测试修正依据：CRC 使用 fixture 的实际损坏 bytes，禁止传入写死的完好原文；音频 MIME 一致性案例按既有 v2 manifest 的 ALLOW 输出（未改规则/期望）；漫画双页偏好按共享设置持久化，增加同用户跨服务器隔离；章节按钮提供显式引擎 TOC identity；书库目录挂载实际 Shell 所需管理宿主并校验仅下载回调；Compose 1.11.3 的 `stringResource` 实际读取 `LocalResources`，双语 fixture 补全该上下文；菜单按现有 224dp 平台几何校验，以 `positionOnScreen` 验证 60px 移动且保持 2px 容差；应用浅色外壳按 design-contracts README 校验两个系统模式的 canonical canvas，Reader 自身日夜主题测试保留。均未修改产品视觉或降低验收阈值。
 
-当前可执行工作：完成后端、Web、KMP/Android 全量检查；复现 OPDS 与旧 smoke 入口疑点；修复确认缺陷并回归；运行隔离新数据 API/Worker/本机压力预检。每轮更新本节和阻塞台账。正式产物及最终 RC 完整验证仍未完成。
+当前可执行工作：关闭已退范围的 OPDS 同步入口并验证无副作用；完成 KMP/Android 剩余回归，修复漫画目录真实页码/长目录可达性缺陷；执行隔离新数据本机压力预检与位置链路验收。后端最终代码全量及冻结 RC 完整验证仍待执行；正式产物暂缓。
 
 ## R0 基线与工作树边界
 
