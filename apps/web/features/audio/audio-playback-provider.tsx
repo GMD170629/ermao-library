@@ -17,7 +17,7 @@ import { createStandardReaderLocator, parseStandardReaderLocator, standardLocato
 import { BEFORE_PWA_UPDATE_EVENT, type BeforePwaUpdateDetail } from '../../lib/pwa/update-coordination';
 import { AUDIO_DEVICE_PREFERENCES_KEY, readAudioDevicePreferences, writeAudioDevicePreferences } from '../../lib/audio-device-preferences';
 import { fetchAudioBootstrap } from './api';
-import { AudioPlayAttempt } from './application/audio-play-attempt';
+import { AudioPlaybackAttempt } from './application/audio-playback-attempt';
 import {
   absolutePositionForTrack,
   audioFormatLabel,
@@ -166,7 +166,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
   const [remoteJumpFailed, setRemoteJumpFailed] = useState(false);
   const { t: translate } = useAttributeI18n();
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const playAttemptRef = useRef(new AudioPlayAttempt());
+  const playbackAttemptRef = useRef(new AudioPlaybackAttempt());
   const stateRef = useRef(state);
   const bootstrapRef = useRef<AudioBootstrap | null>(null);
   const trackIndexRef = useRef(-1);
@@ -187,7 +187,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
   const runtime = getReaderRuntime();
 
   useEffect(() => {
-    const attempt = playAttemptRef.current;
+    const attempt = playbackAttemptRef.current;
     return () => attempt.cancel();
   }, []);
 
@@ -209,12 +209,12 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const persistProgress = useCallback((completed = false, flush = false) => {
+  const persistProgress = useCallback((completed = false, saveImmediately = false): Promise<boolean> => {
     const bootstrap = bootstrapRef.current;
     const audio = audioRef.current;
     const trackIndex = trackIndexRef.current;
     const track = bootstrap?.tracks[trackIndex];
-    if (!bootstrap || !track || !bootstrap.userId) return Promise.resolve();
+    if (!bootstrap || !track || !bootstrap.userId) return Promise.resolve(true);
     const positionMs = completed
       ? Math.max(0, track.durationMs)
       : clamp((audio?.currentTime ?? stateRef.current.positionMs / 1000) * 1000, 0, Math.max(track.durationMs, 0));
@@ -226,17 +226,22 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const displayPercent = audioProgressPercent(absolutePositionMs, bootstrap.totalDurationMs, completed);
     const position = audioPositionReport(bootstrap, track, chapter, location.positionMs, displayPercent);
     lastProgressEnqueueRef.current = Date.now();
-    return runtime.progress.enqueue({
+    const input = {
       serverIdentity: currentReaderServerIdentity(),
       userId: bootstrap.userId,
       bookId: bootstrap.book.id,
       resourceId: bootstrap.resource.id,
       position
-    }).then(() => flush ? runtime.progress.flushNow() : undefined).catch(() => undefined);
-  }, [runtime.progress]);
+    };
+    const saved = saveImmediately ? runtime.progress.saveNow(input) : runtime.progress.enqueue(input);
+    return saved.then(() => true, () => {
+      updateState({ error: translate('阅读进度无法写入本机') });
+      return false;
+    });
+  }, [runtime.progress, translate, updateState]);
 
   const pauseCurrentAudio = useCallback(() => {
-    playAttemptRef.current.cancel();
+    playbackAttemptRef.current.cancel();
     audioRef.current?.pause();
   }, []);
 
@@ -244,7 +249,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const audio = audioRef.current;
     if (!audio || !bootstrapRef.current || trackIndexRef.current < 0) return;
     claimPlayback();
-    const outcome = await playAttemptRef.current.run(() => audio.play());
+    const outcome = await playbackAttemptRef.current.run(() => audio.play());
     if (outcome.type === 'superseded') return;
     if (outcome.type === 'playing') {
       updateState({ lifecycle: 'playing', error: null, safetyError: null });
@@ -317,6 +322,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
   const loadResource = useCallback((resourceId: string, options: LoadAudioResourceOptions = {}): Promise<void> => {
     const normalizedResourceId = resourceId.trim();
     if (!normalizedResourceId) return Promise.resolve();
+    playbackAttemptRef.current.cancelPendingClose();
 
     const pendingLoad = pendingLoadRef.current;
     if (!options.force && pendingLoad?.resourceId === normalizedResourceId) {
@@ -524,6 +530,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const audio = audioRef.current;
     const track = bootstrapRef.current?.tracks[trackIndexRef.current];
     if (!audio || !track) return;
+    playbackAttemptRef.current.cancelPendingClose();
     const target = clamp(positionMs, 0, Math.max(track.durationMs, 0));
     pendingSeekRef.current = null;
     try {
@@ -689,8 +696,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     }
   }, [updateState]);
 
-  const resetPlayback = useCallback((saveProgress: boolean) => {
-    if (saveProgress) void persistProgress(false, true);
+  const resetPlayback = useCallback(() => {
     loadSequenceRef.current += 1;
     loadAbortRef.current?.abort();
     loadAbortRef.current = null;
@@ -716,9 +722,14 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
       playbackRate: clamp(preferences.playbackRate ?? 1, 0.75, 3),
       volume: clamp(preferences.volume ?? 1, 0, 1)
     });
-  }, [pauseCurrentAudio, persistProgress, updateState]);
+  }, [pauseCurrentAudio, updateState]);
 
-  const close = useCallback(() => resetPlayback(true), [resetPlayback]);
+  const close = useCallback(async () => {
+    pendingAutoplayRef.current = false;
+    if (pendingLoadRef.current) pendingLoadRef.current.autoplay = false;
+    pauseCurrentAudio();
+    await playbackAttemptRef.current.close(() => persistProgress(false, true), resetPlayback);
+  }, [pauseCurrentAudio, persistProgress, resetPlayback]);
 
   const retry = useCallback(async () => {
     const failedLoad = failedLoadRef.current;
@@ -984,7 +995,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     };
     const handlePageHide = () => void persistProgress(false, true);
     const handleUnauthorized = () => {
-      resetPlayback(false);
+      resetPlayback();
     };
     const handlePrivateDataClearing = () => {
       try {
@@ -998,7 +1009,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
       } catch {
         // Storage may be unavailable while signing out in private mode.
       }
-      resetPlayback(false);
+      resetPlayback();
     };
     const handleBeforePwaUpdate = (event: Event) => {
       const detail = (event as CustomEvent<BeforePwaUpdateDetail>).detail;

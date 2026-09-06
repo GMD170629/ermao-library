@@ -4,6 +4,10 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+AUDIO-03第二次复现：`audio-soak/runs-30/r1788686887667-w0/audio-seek-observations.json` 记录真实引擎已seeked至475000ms、暂停475012.459ms，seeking=false，仍重开差437000ms；“跳转尚未完成”已不能解释此轮。保存调用先等待500ms debounce后才flush，而close立即reset，是当前有证据支持的修复方向；独立owner分析见 `audio-soak/seek-owner-review.md`，原记录未包含IDB逐事件追踪，不把完整因果写成已证明。
+
+AUDIO-03修复候选：共享v5协调器新增 `saveNow`，复用既有enqueue/原子exact+pending提交与上传owner，立即本地落盘且不等待远端ACK；audio关闭等待该本地结果，失败保留播放器并使用既有双语错误提示。原AudioPlayAttempt及全部原测试迁移到AudioPlaybackAttempt，新增同一owner的待关闭意图仲裁，后来的播放、同资源打开、seek及重复close不会被旧close清掉；注销/清私有数据仍直接reset。`audio-soak/save-now-red.log` 新增2 FAIL→相关正反例通过，`save-close-intent-tests.log` 15 PASS；最终增量完整 `web-full-close-intent.log` **465 PASS / 0 skip**，lint/typecheck及2106消息i18n通过。第一次全Web前置曾被在编HTML错误码边界拦截，后来修正后完整前置通过；中间unit-only运行的Python入口环境失败也保留，未跳过有效测试。**真实Chrome原失败链路待复测，AUDIO-03不关闭。**
+
 最新功能验证：新增 Chrome 可选持续音频观察入口复用既有真实 E2E，默认短用例不变；工具20项、ESLint/typecheck通过。`audio-soak/runs-30/r1788686654444-w0/` 使用实际1898.4秒MP3，新增30.77秒连续观察通过（采样最大间隔/无推进均167.2ms），但随后跳转、暂停、关闭重开误差438000ms，完整用例 FAIL（AUDIO-03）。最后位置PUT仍37479ms，不能把UI滑块值当引擎跳转成功；正在补媒体事件/实际位置诊断。原 `audio-soak/run-30.log` 为主执行命令把章核变量名写错导致的启动失败，后续已改正确 `ERMAO_CHAPTER_CORE_LIBRARY`，没有修改产品路径或关闭原断言。正式30分钟播放尚未执行。
 
 DEC-06 取消终态已核实：300k生成PID147712与监督130612/启动器148052等均退出，17:22:58按用户调整停止，非资源守卫触发；`local-load/prepare-300k-supervision-20260906-085353/cancellation-final.json` 与 `process-exit-check.json` 保留记录。部分目录含122342文件，日志仅确证至少122250已验证，无完整manifest，不计完成也不删除；100k完整样本保持可用。后续无大规模准备/测量任务。

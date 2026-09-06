@@ -124,6 +124,41 @@ test('v5 coalesces latest full position and sends no baseRevision', async () => 
   assert.equal(await storage.getV5PendingProgressForIdentity({ ...identity, clientId: await storage.getClientId() }), null);
 });
 
+test('immediate save commits exact position and outbox before a held network acknowledgment', async () => {
+  const storage = new TestV5Storage();
+  let releaseUpload: () => void = () => { throw new Error('upload gate was not initialized'); };
+  const uploadGate = new Promise<void>((resolve) => { releaseUpload = resolve; });
+  const coordinator = new ReaderV5ProgressSyncCoordinator(storage, async (upload) => {
+    await uploadGate;
+    return { acceptedMutationId: upload.request.mutationId, acceptedRevision: 1, currentSnapshot: snapshot(upload, 1) };
+  }, { debounceMs: 10_000, now: () => 123 });
+  try {
+    const exact = await coordinator.saveNow({ ...identity, position });
+    assert.equal(exact.capturedAtEpochMillis, 123);
+    assert.deepEqual(exact.position, position);
+    assert.deepEqual((await storage.getV5Progress(exact))?.position, position);
+    assert.deepEqual((await storage.getV5PendingProgressForIdentity(exact))?.position, position);
+    assert.equal(exact.revision, 0, 'local durability must not claim an unreceived server ACK');
+  } finally {
+    releaseUpload();
+    await coordinator.flushNow();
+  }
+});
+
+test('immediate save reports local transaction failure and never uploads it', async () => {
+  const failure = new Error('fixture local transaction unavailable');
+  class FailingStorage extends TestV5Storage {
+    override async putV5ExactAndPending(): Promise<void> { throw failure; }
+  }
+  let uploads = 0;
+  const coordinator = new ReaderV5ProgressSyncCoordinator(new FailingStorage(), async (upload) => {
+    uploads += 1;
+    return { acceptedMutationId: upload.request.mutationId, acceptedRevision: 1, currentSnapshot: snapshot(upload, 1) };
+  });
+  await assert.rejects(coordinator.saveNow({ ...identity, position }), (reason) => reason === failure);
+  assert.equal(uploads, 0);
+});
+
 test('an old or out-of-order ack cannot clear a newer pending mutation', async () => {
   const storage = new TestV5Storage();
   let call = 0;
@@ -176,46 +211,48 @@ test('an idempotent replay keeps the local position when the server snapshot is 
   assert.equal(coordinator.getLatestServerSnapshot(identity.resourceId)?.position.presentation.displayPercent, 10);
 });
 
-test('an enqueue during the atomic local commit is serialized and eventually uploaded', async () => {
-  class SlowStorage extends TestV5Storage {
-    private readonly commitGate: Promise<void>;
-    private releaseCommit: (() => void) | null = null;
-    private markStarted: (() => void) | null = null;
-    readonly commitStarted: Promise<void>;
-    constructor() {
-      super();
-      this.commitGate = new Promise<void>((resolve) => { this.releaseCommit = resolve; });
-      this.commitStarted = new Promise<void>((resolve) => { this.markStarted = resolve; });
+for (const saveMode of ['enqueue', 'saveNow'] as const) {
+  test(`a ${saveMode} during the atomic local commit is serialized and eventually uploaded`, async () => {
+    class SlowStorage extends TestV5Storage {
+      private readonly commitGate: Promise<void>;
+      private releaseCommit: (() => void) | null = null;
+      private markStarted: (() => void) | null = null;
+      readonly commitStarted: Promise<void>;
+      constructor() {
+        super();
+        this.commitGate = new Promise<void>((resolve) => { this.releaseCommit = resolve; });
+        this.commitStarted = new Promise<void>((resolve) => { this.markStarted = resolve; });
+      }
+      async putV5ExactAndPending(...args: Parameters<TestV5Storage['putV5ExactAndPending']>) {
+        this.markStarted?.();
+        this.markStarted = null;
+        await this.commitGate;
+        return super.putV5ExactAndPending(...args);
+      }
+      release() {
+        this.releaseCommit?.();
+        this.releaseCommit = null;
+      }
     }
-    async putV5ExactAndPending(...args: Parameters<TestV5Storage['putV5ExactAndPending']>) {
-      this.markStarted?.();
-      this.markStarted = null;
-      await this.commitGate;
-      return super.putV5ExactAndPending(...args);
-    }
-    release() {
-      this.releaseCommit?.();
-      this.releaseCommit = null;
-    }
-  }
 
-  const storage = new SlowStorage();
-  const sent: ReaderV5ProgressUpload[] = [];
-  const coordinator = new ReaderV5ProgressSyncCoordinator(storage, async (upload) => {
-    sent.push(upload);
-    return { acceptedMutationId: upload.request.mutationId, acceptedRevision: sent.length, currentSnapshot: snapshot(upload, sent.length) };
-  }, { debounceMs: 0 });
-  const first = coordinator.enqueue({ ...identity, position });
-  await storage.commitStarted;
-  const secondPosition = { ...position, presentation: { ...position.presentation, displayPercent: 99, totalProgression: 0.99 } };
-  const second = coordinator.enqueue({ ...identity, position: secondPosition });
-  const flushed = coordinator.flushNow();
-  storage.release();
-  await flushed;
-  await Promise.all([first, second]);
+    const storage = new SlowStorage();
+    const sent: ReaderV5ProgressUpload[] = [];
+    const coordinator = new ReaderV5ProgressSyncCoordinator(storage, async (upload) => {
+      sent.push(upload);
+      return { acceptedMutationId: upload.request.mutationId, acceptedRevision: sent.length, currentSnapshot: snapshot(upload, sent.length) };
+    }, { debounceMs: 0 });
+    const first = coordinator.enqueue({ ...identity, position });
+    await storage.commitStarted;
+    const secondPosition = { ...position, presentation: { ...position.presentation, displayPercent: 99, totalProgression: 0.99 } };
+    const second = coordinator[saveMode]({ ...identity, position: secondPosition });
+    const flushed = coordinator.flushNow();
+    storage.release();
+    await flushed;
+    await Promise.all([first, second]);
 
-  assert.equal(sent.length, 2);
-  assert.equal(sent[1]?.request.position.presentation.displayPercent, 99);
-  const clientId = await storage.getClientId();
-  assert.equal(await storage.getV5PendingProgressForIdentity({ ...identity, clientId }), null);
-});
+    assert.equal(sent.length, 2);
+    assert.equal(sent[1]?.request.position.presentation.displayPercent, 99);
+    const clientId = await storage.getClientId();
+    assert.equal(await storage.getV5PendingProgressForIdentity({ ...identity, clientId }), null);
+  });
+}

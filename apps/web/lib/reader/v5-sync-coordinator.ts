@@ -154,11 +154,22 @@ export class ReaderV5ProgressSyncCoordinator {
     return new Promise<ReaderV5ProgressRecord>((resolve, reject) => this.waiters.push({ resolve, reject }));
   }
 
-  async flushNow(options: { timeoutMs?: number } = {}) {
+  /** Complete local position/outbox durability without waiting for the network. */
+  async saveNow(input: ReaderV5ProgressSaveInput): Promise<ReaderV5ProgressRecord> {
+    const saved = this.enqueue(input);
+    const [record] = await Promise.all([saved, this.commitPendingInputs()]);
+    return record;
+  }
+
+  private async commitPendingInputs(): Promise<void> {
     this.clearTimer();
     do {
       await this.commitPending();
     } while (this.pendingInput);
+  }
+
+  async flushNow(options: { timeoutMs?: number } = {}) {
+    await this.commitPendingInputs();
     if (!this.uploadPromise) return;
     if (options.timeoutMs === undefined) return this.uploadPromise;
     await Promise.race([
