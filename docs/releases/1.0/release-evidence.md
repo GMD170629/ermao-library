@@ -4,6 +4,8 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+移动全量本轮最终结果：`preflight-mobile/mobile-full-227e09f1-20260906/` 中 shared429、Android unit218全PASS且零skip，lint零问题；默认真机仪器148项 **147 PASS / 1 FAIL / 0 skipped，346.265s**。`09-instrumentation-summary.json` 精确记录第一章节点在第二次目录滚动手势后未消失；不得把adb退出0当套件通过，也不得用已通过的在线MP3独立1项覆盖该失败。普通test APK未包括opt-in在线入口，源码/APK比对及冷启证据由同目录文件记录；正在针对同包复现ANDROID-03。Docker于17:07只读复查仍无Linux engine pipe，`preflight-containers/docker-recheck-1707.log`，未执行重置或生产操作。
+
 Chrome PWA 实际增量：`web-baseline/pwa-both-browser-transport.log` **2 PASS / 1.4m**；`release-live-pwa/r1788685159444-w0/`（desktop）、`r1788685202566-w1/`（mobile viewport）各以全新 production Web build/API/Worker 完成现有初始化、导入、EPUB恢复、MP3实际5/10秒保存与重开链路，且 Service Worker 已控制页面、shell缓存含offline/login、SW的shell/static/API/cover缓存不含认证响应或Reader/Asset原文。断网访问未缓存路径实际返回离线页，联网后auth/me为200；`service-worker-observations.json`、截图11和`post-run-verification.json`保留证据，7份原文件hash不变、API 5xx=0、服务均退出。运行使用 `RELEASE_LIVE_WEB_RUNTIME=production`、`PLAYWRIGHT_BASE_URL=http://release-live.localhost:3102`、`RELEASE_LIVE_API_PORT=18081`；仅浏览器自身解析此隔离loopback域名，无系统hosts/TLS修改。
 
 PWA入口复用 `scripts/python_release_live_fixture.py` 与原真实E2E，生产模式显式构建并启用SW，默认开发模式不变；工具17项、Ruff、两TS文件ESLint及Web typecheck通过。原 `pwa-desktop-live.log` 与 `pwa-both-live.log` 的DNS失败保留并将测试会话值脱敏；失败来自Node请求客户端不能解析浏览器可解析的loopback域名，所有验证请求及logout现复用浏览器同源/no-store请求owner。`next start` 对standalone配置的警告保留：这里证明production模式PWA功能，**不证明standalone容器部署、系统PWA安装、版本更新切换或离线写入恢复**，上述门禁子项仍待执行。

@@ -4,6 +4,8 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 
 ## R1 状态覆盖与外部条件
 
+ANDROID-03 / RUN-01 当前自动真机结论：`227e09f1` 移动生产源码完整148项运行 **147 PASS / 1 FAIL / 0 skipped**（346.265s），失败为 `ReaderScreenContentsInstrumentedTest.nativeSheetExpandsBeforeScrollingAndCollapsesAtListStartWithoutTurningPages:326`：第二次手势后仍存在第一章节点。`preflight-mobile/mobile-full-227e09f1-20260906/09-instrumentation-summary.json` 和原始stdout留证；当前尚未确定产品缺陷、手势/动画测试问题或用例间状态影响。授权同包单项/同class重现，不改超时/断言，不用重跑一次PASS关闭不稳定性。shared429/Android unit218/lint通过不覆盖此失败。
+
 TEST-09：生产PWA测试中Node API客户端无法解析 `release-live.localhost`，浏览器能正常建库且SW注册通过；已将既有验证/注销请求统一到浏览器同源/no-store入口，不改系统DNS或产品网络边界。Chrome两个视口真实回归通过，原DNS失败保留且测试会话值脱敏；此测试环境缺口关闭。PWA实际安装/版本更新与离线位置异常恢复仍未完成，不以已有shell/断网导航通过代替。
 
 ENV-06规模数据子项进展：100k真实紧凑文件已准备并逐文件校验，工具/数据缺失不再阻塞该规模的索引预检；完整测量尚未开始。300k准备进行中，不能计PASS；真实大文件/媒体混合负载、缺格式样本与客户端覆盖仍有缺口。复用既有工具，不增加支持格式或改阈值。
