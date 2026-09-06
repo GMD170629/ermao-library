@@ -475,6 +475,8 @@ class AndroidAudioPlaybackRuntime private constructor(
 
     /** App-owned stop: save first, then release the current queue and clear the mini player. */
     fun stop() {
+        generation.incrementAndGet()
+        localLaunchToken = null
         activeSeek = null
         cancelSeekTimeout()
         transportExpectation = null
