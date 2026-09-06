@@ -1,12 +1,21 @@
 package com.ermao.library.release.live
 
+import android.app.Activity
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.WindowManager
+import androidx.activity.compose.LocalActivity
 import androidx.compose.material3.Text
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleCallback
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
 import com.ermao.library.ErmaoLibraryApplication
@@ -117,7 +126,138 @@ class AndroidAudioOnlineConfirmationInstrumentedTest {
         record("ANDROID_HANDOFF_PASS", locatorMillis(pause.confirmed), pause.confirmed.revision)
     }
 
-    /** Both gates use the same real login, isolated storage and production playback owners. */
+    @Test
+    fun realHttpConfirmsBackgroundPlaybackAtFiveAndTenSecondsAndPause() = withOnlineAudioFixture {
+        assertTrue("RG04_NEW_SERVER_PROGRESS_REQUIRED", database.get(SystemClock.elapsedRealtime() + 15_000) == null)
+        record("ISOLATION_PASS")
+        val activity = prepareActivity()
+        val player = openPlayer(autoplay = true)
+        awaitPlayer(player) { it.phase == AudioPlaybackPhase.Playing && it.durationMillis > 0 }
+        val monitor = ActivityLifecycleMonitorRegistry.getInstance()
+        // Main-thread-only lifecycle observations of the Activity hosting our Compose content.
+        val stages = mutableListOf<Stage>()
+        val callback = ActivityLifecycleCallback { changed, stage ->
+            if (changed === activity) stages += stage
+        }
+        try {
+            instrumentation.runOnMainSync {
+                monitor.addLifecycleCallback(callback)
+                assertEquals("RG04_BACKGROUND_INITIAL_STAGE", Stage.RESUMED, monitor.getLifecycleStageOf(activity))
+                assertTrue("RG04_BACKGROUND_OWN_TASK_REQUIRED", activity.isTaskRoot &&
+                    Stage.values().filter { it != Stage.DESTROYED }.all { stage ->
+                        monitor.getActivitiesInStage(stage).none { it !== activity && it.taskId == activity.taskId }
+                    })
+                // Same task-backgrounding operation as the local PCM gate, restricted to our root.
+                assertTrue("RG04_BACKGROUND_MOVE_FAILED", activity.moveTaskToBack(false))
+            }
+            compose.waitUntil(5_000) {
+                var stopped = false
+                instrumentation.runOnMainSync {
+                    stopped = monitor.getLifecycleStageOf(activity) == Stage.STOPPED &&
+                        monitor.getActivitiesInStage(Stage.RESUMED).none { it.packageName == activity.packageName }
+                }
+                stopped
+            }
+            instrumentation.runOnMainSync {
+                record("BACKGROUND_OBSERVED stage=${monitor.getLifecycleStageOf(activity)} stages=$stages")
+            }
+            val pause = confirmPlaybackAndPause(player)
+            instrumentation.runOnMainSync {
+                val stage = monitor.getLifecycleStageOf(activity)
+                val ownResumed = monitor.getActivitiesInStage(Stage.RESUMED)
+                    .any { it.packageName == activity.packageName }
+                record("BACKGROUND_PAUSE_OBSERVED stage=$stage ownResumed=$ownResumed stages=$stages",
+                    pause.engine.positionMillis, pause.confirmed.revision)
+                assertEquals("RG04_BACKGROUND_FINAL_STAGE", Stage.STOPPED, stage)
+                assertFalse("RG04_BACKGROUND_OWN_ACTIVITY_RESUMED", ownResumed)
+                assertTrue("RG04_BACKGROUND_STOP_CALLBACK_REQUIRED", Stage.STOPPED in stages)
+                assertFalse("RG04_BACKGROUND_RETURNED_TO_FOREGROUND",
+                    Stage.RESUMED in stages.dropWhile { it != Stage.STOPPED })
+            }
+            closePlayerAndObserve()
+            assertAppSessionUnchanged()
+            record("BACKGROUND_PASS", locatorMillis(pause.confirmed), pause.confirmed.revision)
+        } finally {
+            instrumentation.runOnMainSync { monitor.removeLifecycleCallback(callback) }
+            // The Compose rule owns Activity disposal; do not bring any app task to the foreground.
+        }
+    }
+
+    @Test
+    fun realHttpConfirmsTransientAudioFocusPauseAndAutomaticResume() = withOnlineAudioFixture {
+        assertTrue("RG04_NEW_SERVER_PROGRESS_REQUIRED", database.get(SystemClock.elapsedRealtime() + 15_000) == null)
+        record("ISOLATION_PASS")
+        val activity = prepareActivity()
+        val audioManager = requireNotNull(activity.getSystemService(AudioManager::class.java))
+        val player = openPlayer(autoplay = true)
+        awaitPlayer(player) { it.phase == AudioPlaybackPhase.Playing && it.durationMillis > 0 }
+        assertFixturePlayer(player, fixture)
+        val before = confirmPlaybackCheckpoint(player, null, SystemClock.elapsedRealtime(), 5_000)
+        record("FOCUS_BEFORE_CONFIRMED", locatorMillis(before), before.revision)
+        // A distinct SDK requester triggers transient loss, not a phone-call simulation.
+        // Media3 1.8.1 suppresses playback on loss and resumes on gain; READY + !isPlaying
+        // reaches the runtime's Paused phase and its existing Pause progress capture.
+        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+            .setAudioAttributes(AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build())
+            .setOnAudioFocusChangeListener(
+                { change -> record("FOCUS_REQUESTER_EVENT change=$change") }, Handler(Looper.getMainLooper()),
+            )
+            .build()
+        var abandonedAt = 0L
+        var abandonResult = AudioManager.AUDIOFOCUS_REQUEST_FAILED
+        val interrupted = try {
+            val requestedAt = System.currentTimeMillis()
+            val deadline = SystemClock.elapsedRealtime() + 5_000
+            instrumentation.runOnMainSync {
+                assertEquals("RG04_FOCUS_FOREGROUND_REQUIRED", Stage.RESUMED,
+                    ActivityLifecycleMonitorRegistry.getInstance().getLifecycleStageOf(activity))
+                assertEquals("RG04_FOCUS_PLAYING_REQUIRED", AudioPlaybackPhase.Playing, player.snapshot.value.phase)
+                val result = audioManager.requestAudioFocus(request)
+                record("FOCUS_REQUEST_RESULT sdkResult=$result")
+                assertEquals("RG04_TRANSIENT_FOCUS_NOT_GRANTED", AudioManager.AUDIOFOCUS_REQUEST_GRANTED, result)
+            }
+            awaitPlayer(player, timeoutMillis = deadline - SystemClock.elapsedRealtime()) {
+                it.phase == AudioPlaybackPhase.Paused
+            }
+            val paused = player.snapshot.value
+            val observedAt = SystemClock.elapsedRealtime()
+            val confirmed = database.awaitConfirmed(deadline) { local, sync ->
+                local.capturedAtEpochMillis >= requestedAt &&
+                    abs(locatorMillis(local) - paused.positionMillis) <= 100 && sync.confirmedRevision > before.revision
+            }
+            waitUntil(observedAt + 500)
+            assertTrue("RG04_FOCUS_PAUSE_DEADLINE", SystemClock.elapsedRealtime() <= deadline)
+            assertEquals("RG04_FOCUS_HELD_PAUSED", AudioPlaybackPhase.Paused, player.snapshot.value.phase)
+            assertTrue("RG04_FOCUS_PAUSED_POSITION_STABLE",
+                abs(player.snapshot.value.positionMillis - paused.positionMillis) <= 100)
+            record("FOCUS_PAUSE_CONFIRMED phase=${player.snapshot.value.phase}",
+                locatorMillis(confirmed), confirmed.revision)
+            ConfirmedPause(paused, confirmed)
+        } finally {
+            // Release the exact request even when grant, observation or HTTP confirmation fails.
+            instrumentation.runOnMainSync {
+                abandonedAt = SystemClock.elapsedRealtime()
+                abandonResult = audioManager.abandonAudioFocusRequest(request)
+                record("FOCUS_ABANDON_RESULT sdkResult=$abandonResult")
+            }
+        }
+        assertEquals("RG04_TRANSIENT_FOCUS_ABANDON_FAILED", AudioManager.AUDIOFOCUS_REQUEST_GRANTED, abandonResult)
+        // No play()/pause() command between requesting focus and observing automatic recovery.
+        awaitPlayer(player, timeoutMillis = abandonedAt + 5_000 - SystemClock.elapsedRealtime()) {
+            it.phase == AudioPlaybackPhase.Playing && it.positionMillis > interrupted.engine.positionMillis
+        }
+        val resumed = confirmPlaybackCheckpoint(player, interrupted.confirmed, abandonedAt, 5_000)
+        record("FOCUS_RESUME_CONFIRMED phase=${player.snapshot.value.phase}", locatorMillis(resumed), resumed.revision)
+        val pause = confirmPause(player, resumed)
+        closePlayerAndObserve()
+        assertAppSessionUnchanged()
+        record("TRANSIENT_FOCUS_PASS", locatorMillis(pause.confirmed), pause.confirmed.revision)
+    }
+
+    /** All gates use the same real login, isolated storage and production playback owners. */
     private fun withOnlineAudioFixture(test: OnlineAudioFixture.() -> Unit) {
         val context = instrumentation.targetContext
         val privateFixture = PrivateAudioFixture.consume(
@@ -192,6 +332,8 @@ class AndroidAudioOnlineConfirmationInstrumentedTest {
             lateinit var player: AudioPlaybackRuntime
             instrumentation.runOnMainSync {
                 assertFalse("RG04_EXISTING_APP_AUDIO_SESSION", app.audioPlaybackRuntime.snapshot.value.hasSession)
+                assertFalse("RG04_EXISTING_SYSTEM_MUSIC_ACTIVE",
+                    requireNotNull(isolated.getSystemService(AudioManager::class.java)).isMusicActive)
                 player = AudioPlaybackRuntime(isolated, app.audioTransportRegistry)
                 runtime = player
                 // No supplied chapter/position: every launch uses the production restore owner.
@@ -212,32 +354,44 @@ class AndroidAudioOnlineConfirmationInstrumentedTest {
             val started = SystemClock.elapsedRealtime()
             var previous = initialConfirmation
             for (checkpoint in listOf(5_000L, 10_000L)) {
-                // Observe the last second of each absolute window; HTTP and DB reads share its deadline.
-                waitUntil(started + checkpoint - 1_000)
-                val confirmed = try {
-                    database.awaitConfirmed(started + checkpoint) { local, sync ->
-                        val prior = previous
-                        locatorMillis(local) > (prior?.let { locatorMillis(it) } ?: 0) &&
-                            // ADR0028: capture clocks are comparable only within one client.
-                            (prior != null && prior.clientId != local.clientId ||
-                                local.capturedAtEpochMillis > (prior?.capturedAtEpochMillis ?: 0)) &&
-                            sync.confirmedRevision > (prior?.revision ?: 0)
-                    }
-                } catch (failure: Throwable) {
-                    // Capture before finally/close creates a different Stop position; rethrow unchanged.
-                    val snapshot = player.snapshot.value
-                    record("CHECKPOINT_${checkpoint}_FAIL_OBSERVATION phase=${snapshot.phase} " +
-                        "duration=${snapshot.durationMillis} ${database.confirmationObservation}",
-                        snapshot.positionMillis)
-                    throw failure
-                }
-                waitUntil(started + checkpoint)
-                assertEquals("RG04_CONTINUOUS_PLAYBACK", AudioPlaybackPhase.Playing, player.snapshot.value.phase)
-                assertTrue("RG04_CONFIRMED_POSITION_LAG",
-                    abs(player.snapshot.value.positionMillis - locatorMillis(confirmed)) <= 5_000)
-                record("CHECKPOINT_${checkpoint}_PASS", locatorMillis(confirmed), confirmed.revision)
-                previous = confirmed
+                previous = confirmPlaybackCheckpoint(player, previous, started, checkpoint)
             }
+            return confirmPause(player, requireNotNull(previous))
+        }
+
+        fun confirmPlaybackCheckpoint(
+            player: AudioPlaybackRuntime,
+            previous: ReaderProgressSnapshotV5?,
+            started: Long,
+            checkpoint: Long,
+        ): ReaderProgressSnapshotV5 {
+            // Observe the last second of each absolute window; HTTP and DB reads share its deadline.
+            waitUntil(started + checkpoint - 1_000)
+            val confirmed = try {
+                database.awaitConfirmed(started + checkpoint) { local, sync ->
+                    locatorMillis(local) > (previous?.let { locatorMillis(it) } ?: 0) &&
+                        // ADR0028: capture clocks are comparable only within one client.
+                        (previous != null && previous.clientId != local.clientId ||
+                            local.capturedAtEpochMillis > (previous?.capturedAtEpochMillis ?: 0)) &&
+                        sync.confirmedRevision > (previous?.revision ?: 0)
+                }
+            } catch (failure: Throwable) {
+                // Capture before finally/close creates a different Stop position; rethrow unchanged.
+                val snapshot = player.snapshot.value
+                record("CHECKPOINT_${checkpoint}_FAIL_OBSERVATION phase=${snapshot.phase} " +
+                    "duration=${snapshot.durationMillis} ${database.confirmationObservation}",
+                    snapshot.positionMillis)
+                throw failure
+            }
+            waitUntil(started + checkpoint)
+            assertEquals("RG04_CONTINUOUS_PLAYBACK", AudioPlaybackPhase.Playing, player.snapshot.value.phase)
+            assertTrue("RG04_CONFIRMED_POSITION_LAG",
+                abs(player.snapshot.value.positionMillis - locatorMillis(confirmed)) <= 5_000)
+            record("CHECKPOINT_${checkpoint}_PASS", locatorMillis(confirmed), confirmed.revision)
+            return confirmed
+        }
+
+        fun confirmPause(player: AudioPlaybackRuntime, previous: ReaderProgressSnapshotV5): ConfirmedPause {
             val pauseRequestedAt = System.currentTimeMillis()
             instrumentation.runOnMainSync { player.pause() }
             awaitPlayer(player) { it.phase == AudioPlaybackPhase.Paused }
@@ -246,7 +400,7 @@ class AndroidAudioOnlineConfirmationInstrumentedTest {
             val paused = database.awaitConfirmed(SystemClock.elapsedRealtime() + 5_000) { local, sync ->
                 local.capturedAtEpochMillis >= pauseRequestedAt &&
                     abs(locatorMillis(local) - pausedPosition) <= 100 &&
-                    sync.confirmedRevision > requireNotNull(previous).revision
+                    sync.confirmedRevision > previous.revision
             }
             record("PAUSE_CONFIRMED", locatorMillis(paused), paused.revision)
             return ConfirmedPause(pausedSnapshot, paused)
@@ -283,18 +437,30 @@ class AndroidAudioOnlineConfirmationInstrumentedTest {
         return player.snapshot.value
     }
 
-    private fun prepareActivity() {
-        compose.setContent { Text("RG04") }
+    private fun prepareActivity(): Activity {
+        lateinit var activity: Activity
+        compose.setContent {
+            val host = requireNotNull(LocalActivity.current)
+            SideEffect { activity = host }
+            Text("RG04")
+        }
         instrumentation.runOnMainSync {
-            val activity = ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).single()
+            assertEquals("RG04_COMPOSE_ACTIVITY_RESUMED", Stage.RESUMED,
+                ActivityLifecycleMonitorRegistry.getInstance().getLifecycleStageOf(activity))
             activity.setShowWhenLocked(true)
             activity.setTurnScreenOn(true)
             activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
+        return activity
     }
 
-    private fun awaitPlayer(player: AudioPlaybackRuntime, predicate: (AudioPlaybackSnapshot) -> Boolean) {
-        compose.waitUntil(30_000) {
+    private fun awaitPlayer(
+        player: AudioPlaybackRuntime,
+        timeoutMillis: Long = 30_000,
+        predicate: (AudioPlaybackSnapshot) -> Boolean,
+    ) {
+        assertTrue("RG04_PLAYER_OBSERVATION_DEADLINE", timeoutMillis > 0)
+        compose.waitUntil(timeoutMillis) {
             val snapshot = player.snapshot.value
             assertTrue("RG04_MEDIA3_ERROR:${snapshot.error?.code}", snapshot.phase != AudioPlaybackPhase.Error)
             predicate(snapshot)
