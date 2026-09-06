@@ -390,8 +390,8 @@ Java_com_ermao_library_chapter_infrastructure_ChapterCoreNative_parseXml(
         }
         (*env)->DeleteLocalRef(env, attributes);
     }
-    if (count > UINT32_MAX) {
-        throw_chapter_error(env, "Chapter XML input is too large", false);
+    if (count < 0 || (uint64_t)count > (uint64_t)UINT32_MAX) {
+        throw_chapter_error(env, "Chapter XML input length is invalid", false);
         failed = true;
         goto cleanup;
     }

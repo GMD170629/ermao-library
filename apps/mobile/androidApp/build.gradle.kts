@@ -1,3 +1,4 @@
+import org.gradle.api.tasks.testing.Test
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -74,6 +75,25 @@ android {
     lint {
         abortOnError = true
         warningsAsErrors = true
+    }
+}
+
+val testHostOsName = System.getProperty("os.name")
+val testHostArchitecture = System.getProperty("os.arch")
+val testHostOsNameLowercase = testHostOsName.lowercase()
+val testHostArchitectureLowercase = testHostArchitecture.lowercase()
+val testHostIsX86_64 = testHostArchitectureLowercase in setOf("amd64", "x86_64")
+val hostJniPlatformForTests = when {
+    testHostOsNameLowercase.contains("windows") && testHostIsX86_64 -> "windows-x86_64"
+    testHostOsNameLowercase.contains("linux") && testHostIsX86_64 -> "linux-x86_64"
+    else -> "unsupported"
+}
+val hostJniLibraryDirectory = rootProject.projectDir.resolve("chapterCore/build/host-jni/$hostJniPlatformForTests")
+
+tasks.withType<Test>().configureEach {
+    if (name == "testDebugUnitTest") {
+        dependsOn(":chapterCore:buildHostJni")
+        systemProperty("java.library.path", hostJniLibraryDirectory.absolutePath)
     }
 }
 

@@ -34,7 +34,11 @@
         <service
             android:name=".features.audio.infrastructure.AndroidAudioPlaybackService"
             android:exported="true"
-            android:foregroundServiceType="mediaPlayback">
+            android:foregroundServiceType="mediaPlayback"
+            tools:ignore="ExportedService">
+            <!-- Media3's standard MediaSessionService entry point stays exported for
+                 external media-controller binding. The service keeps its current
+                 onGetSession policy, which returns the process MediaSession. -->
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
