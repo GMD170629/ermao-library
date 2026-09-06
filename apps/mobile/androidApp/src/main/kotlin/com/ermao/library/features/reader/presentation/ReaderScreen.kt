@@ -41,6 +41,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -2140,7 +2141,7 @@ private fun ReaderContentsPanel(
             stringResource(
                 R.string.reader_comic_toc_detail,
                 currentLocation.pageIndex + 1,
-                currentLocation.pageIndex,
+                currentLocation.pageIndex + 1,
                 readyState?.entries?.size ?: 0,
             )
         morphology == ReaderMorphology.Pdf && currentLocation is PdfReaderLocation ->
@@ -2213,8 +2214,20 @@ private fun ReaderContentsPanel(
                         )
                     }
                     item(key = "page-navigation") {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            state.entries.forEachIndexed { index, entry ->
+                        val pagesState = rememberLazyListState(
+                            initialFirstVisibleItemIndex = state.entries.indexOfFirst {
+                                readerContentsEntrySelected(currentLocation, it.entry.location)
+                            }.coerceAtLeast(0),
+                        )
+                        val pageNumberFormat = java.text.NumberFormat.getIntegerInstance(
+                            androidx.compose.ui.platform.LocalConfiguration.current.locales[0],
+                        )
+                        LazyRow(
+                            modifier = Modifier.fillMaxWidth().testTag("reader-comic-pages"),
+                            state = pagesState,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            itemsIndexed(state.entries, key = { _, node -> node.entry.id }) { index, entry ->
                                 val selected = readerContentsEntrySelected(currentLocation, entry.entry.location)
                                 TextButton(
                                     onClick = { onSelect(entry.entry) },
@@ -2226,7 +2239,7 @@ private fun ReaderContentsPanel(
                                         contentColor = if (selected) WarmPageThemeValues.colors.onAction else WarmPageThemeValues.colors.textPrimary,
                                     ),
                                     border = BorderStroke(1.dp, if (selected) WarmPageThemeValues.colors.actionAccent else WarmPageThemeValues.colors.divider),
-                                ) { Text(index.toString()) }
+                                ) { Text(pageNumberFormat.format(index + 1)) }
                             }
                         }
                     }

@@ -35,6 +35,7 @@ import com.ermao.library.features.reader.application.ReaderBookmarkChange
 import com.ermao.library.features.reader.application.ReaderResumeNotice
 import com.ermao.library.features.reader.application.ReaderScreenController
 import com.ermao.library.shared.modules.reader.ReaderBookmark
+import com.ermao.library.shared.modules.reader.ComicReaderLocation
 import com.ermao.library.shared.modules.reader.ReaderCapabilities
 import com.ermao.library.shared.modules.reader.ReaderControl
 import com.ermao.library.shared.modules.reader.ReaderError
@@ -44,6 +45,7 @@ import com.ermao.library.shared.modules.reader.ReaderMorphology
 import com.ermao.library.shared.modules.reader.ReaderPreferences
 import com.ermao.library.shared.modules.reader.ReaderTocEntry
 import com.ermao.library.shared.modules.reader.ReflowReaderLocation
+import com.ermao.library.shared.modules.reader.readerPlatformCapabilities
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CompletableDeferred
@@ -63,6 +65,43 @@ class ReaderScreenContentsInstrumentedTest {
     @get:Rule
     val compose = createComposeRule()
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+    @Test
+    fun comicContentsUseOneBasedPagesAndKeepTheLastPageReachable() {
+        val controller = DeferredContentsController(morphology = ReaderMorphology.Comic)
+        compose.setContent {
+            ReaderScreen(
+                title = "Large comic contents fixture",
+                controller = controller,
+                opening = false,
+                openError = null,
+                controlsVisible = true,
+                onControlsVisibleChange = {},
+                onClose = {},
+                onNavigatorContainerReady = {},
+            )
+        }
+        showTestHostOverKeyguard()
+        controller.releaseContents()
+        compose.onNodeWithTag(READER_CONTENTS_TEST_TAG).performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithTag(READER_CONTENTS_LIST_TEST_TAG).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("1", substring = false).assertIsDisplayed()
+        compose.onNodeWithText("0", substring = false).assertDoesNotExist()
+        compose.onNodeWithText(
+            instrumentation.targetContext.getString(R.string.reader_comic_toc_detail, 1, 1, 1000),
+        ).assertIsDisplayed()
+        val lastPageLabel = java.text.NumberFormat.getIntegerInstance().format(1000)
+        compose.onNodeWithText(lastPageLabel, substring = false).assertDoesNotExist()
+        compose.onNodeWithTag("reader-comic-pages").performScrollToIndex(999)
+        compose.onNodeWithText(lastPageLabel, substring = false).assertIsDisplayed().performClick()
+        compose.waitUntil(timeoutMillis = 5_000) {
+            (controller.currentLocation.value as? ComicReaderLocation)?.pageIndex == 999
+        }
+        assertEquals(1, controller.chapterNavigationCalls.get())
+        assertEquals(0, controller.nextPageCalls.get())
+    }
 
     @Test
     fun contentsSheetOpensBeforeFirstLoadAndReusesTheLoadedLazyList() {
@@ -801,6 +840,7 @@ class ReaderScreenContentsInstrumentedTest {
         initialPreferences: ReaderPreferences = ReaderPreferences(),
         supportsAnnotations: Boolean = false,
         initialNavigationEntryId: String? = null,
+        override val morphology: ReaderMorphology = ReaderMorphology.Reflowable,
     ) : ReaderScreenController {
         private val loadGate = CompletableDeferred<Unit>()
         private val contentsMutex = Mutex()
@@ -816,7 +856,9 @@ class ReaderScreenContentsInstrumentedTest {
             val href = "chapter-$number.xhtml"
             ReaderTocEntry(
                 title = "Chapter $number",
-                location = ReflowReaderLocation(
+                location = if (morphology == ReaderMorphology.Comic) {
+                    ComicReaderLocation(resourceHref = "pages/${number - 1}", pageIndex = number - 1)
+                } else ReflowReaderLocation(
                     resourceKey = href,
                     progression = 0.0,
                     totalProgression = (number - 1).toDouble() / 999.0,
@@ -827,8 +869,9 @@ class ReaderScreenContentsInstrumentedTest {
             )
         }
 
-        override val morphology = ReaderMorphology.Reflowable
-        override val capabilities = ReaderCapabilities.epub(supportsVolumeKeys = true, supportsCustomFonts = true)
+        override val capabilities = readerPlatformCapabilities(
+            morphology = morphology, volumeKeys = true, pdfZoom = false, pdfFit = false,
+        )
             .copy(supportsAnnotations = supportsAnnotations)
         private val locationState = MutableStateFlow<ReaderLocation?>(entries.first().location)
         override val currentLocation: StateFlow<ReaderLocation?> = locationState
@@ -840,7 +883,8 @@ class ReaderScreenContentsInstrumentedTest {
         override val resumeActionFailed: StateFlow<Boolean> = MutableStateFlow(false)
         override val bookmarks: StateFlow<List<ReaderBookmark>> = MutableStateFlow(emptyList())
         override val bookmarkSyncPending: StateFlow<Boolean> = MutableStateFlow(false)
-        override val tableOfContents: List<ReaderTocEntry> = emptyList()
+        override val tableOfContents: List<ReaderTocEntry> =
+            if (morphology == ReaderMorphology.Comic) entries else emptyList()
 
         override suspend fun loadTableOfContents(): List<ReaderTocEntry> = contentsMutex.withLock {
             if (!contentsLoaded) {
