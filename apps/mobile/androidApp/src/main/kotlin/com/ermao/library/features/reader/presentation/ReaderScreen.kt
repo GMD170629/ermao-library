@@ -117,6 +117,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
@@ -1922,7 +1923,7 @@ private fun ReaderNotesPanel(
     var selectedTab by remember { mutableStateOf("bookmarks") }
     ReaderPanelWorkspace(
         title = R.string.reader_notes,
-        subtitle = stringResource(R.string.reader_bookmark_count, bookmarks.size),
+        subtitle = pluralStringResource(R.plurals.reader_bookmark_count, bookmarks.size, bookmarks.size),
         onDismiss = onDismiss,
         snackbarHostState = snackbarHostState,
     ) {
@@ -2143,8 +2144,9 @@ private fun ReaderContentsPanel(
                 readyState?.entries?.size ?: 0,
             )
         morphology == ReaderMorphology.Pdf && currentLocation is PdfReaderLocation ->
-            stringResource(
-                R.string.reader_pdf_page_count_detail,
+            pluralStringResource(
+                R.plurals.reader_pdf_page_count_detail,
+                readyState?.entries?.size ?: 0,
                 currentLocation.pageIndex + 1,
                 readyState?.entries?.size ?: 0,
             )
