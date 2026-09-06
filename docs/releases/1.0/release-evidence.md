@@ -4,7 +4,7 @@
 
 证据`artifacts/releases/1.0/34d4a24e/pos10-active-session-20260907/`：normal-ui-observations明确为实际CUA/ADB观察转录；两个source-confirmed独立GET、Android原始XML/MediaSession、manifest及prestop-hashes可追溯。931项源码/原件hash全部匹配；11次进度PUT均200，10个401全部在Android新库重新登录前，后续无4xx/5xx，Chrome error为空。恢复专用标签网络并Network.disable，正常退出测试账号，主/辅助标签关闭；早期未使用空白tab35842965仍报告Debugger unattached，未访问用户其他标签。独立包强停、reverse移除、fixture exit0/cleanupErrors空、端口释放、Web配置恢复及原工作区15改动保留见cleanup-verification。未新增业务、回归测试或工具。
 
-当前恢复点：POS-10仅上述MP3活动会话双端子项通过，服务受控重启/重开及其他引擎仍NOT_RUN；POS-09显式目标只应用一次等未覆盖项继续使用现有入口。无活动fixture，未冻结RC；ENV-11/12、iOS/容器条件和正式APK/IPA暂缓不变，五组最终门禁尚未整体放行。
+当前恢复点：POS-10仅上述MP3活动会话双端子项通过，服务受控重启/重开及其他引擎仍NOT_RUN；POS-09下一可执行项为Android普通M4B章节显式A→实际读到不同B并确认→独立包冷启/首页重进，核对实际引擎恢复B。只读子代理建议的Chrome CBZ同URL重载因涉及ENV-12已拒绝的真实回归，不改入口绕行；其报告仅作规划，不作验收证据，已关闭。无活动fixture/子代理，未冻结RC；ENV-11/12、iOS/容器条件和正式APK/IPA暂缓不变，五组最终门禁尚未整体放行。
 
 2026-09-07 POS-06本轮收尾：`5b967260`同一测试代码/开发APK的原online相邻在另一全新隔离库实际PASS（13.045s）：5秒3899ms/r2、10秒7900ms/r3、暂停9904ms/r4，关闭重开实际9904ms，误差0；本地/独立GET最终r7一致。证据`artifacts/releases/1.0/5b967260/pos06-online-adjacent-20260907/`的device-online、online-evidence、fixture manifest、api-observations及cleanup-verification。935项校验全部匹配（929应用源码/原件和6最终测试源码/配置/APK），7次PUT200，无4xx/5xx；正常stop/exit0、Web配置恢复、18084/3105释放、自有reverse移除、独立包强停、输入消费、原App元数据及原工作区15改动不变。独立审查、POS-06实际原用例与必要相邻齐备，本工具补口结束，不再扩展。以下“尚待相邻/进行中”是历史。
 
