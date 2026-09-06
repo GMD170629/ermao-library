@@ -124,6 +124,7 @@ fun Resource.toUiContent(selected: Boolean = false): ResourceContent = ResourceC
     coverUrl = coverUrl,
     sizeBytes = sizeBytes,
     progressPercent = progress.toInt().takeIf { it > 0 },
+    completed = completed,
     readable = readable,
     selected = selected,
 )

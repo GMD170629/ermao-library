@@ -416,6 +416,7 @@ class WorkDetailLayoutTest {
     fun readingStatusDerivesAllThreeStableSingleChoiceStates() {
         assertEquals(WorkReadingStatus.Unread, workReadingStatus(completed = false, progressPercent = 0))
         assertEquals(WorkReadingStatus.Reading, workReadingStatus(completed = false, progressPercent = 34))
+        assertEquals(WorkReadingStatus.Reading, workReadingStatus(completed = false, progressPercent = 100))
         assertEquals(WorkReadingStatus.Finished, workReadingStatus(completed = true, progressPercent = 34))
         assertEquals(WorkReadingStatus.Finished, nextWorkReadingStatus(WorkReadingStatus.Unread))
         assertEquals(WorkReadingStatus.Finished, nextWorkReadingStatus(WorkReadingStatus.Reading))
@@ -423,6 +424,105 @@ class WorkDetailLayoutTest {
         assertEquals(
             listOf(WorkReadingStatus.Unread, WorkReadingStatus.Finished),
             workReadingStatusChoices(),
+        )
+    }
+
+    @Test
+    fun resourcePageKeepsServerReadingStatusIndependentFromProgressAndBookScope() {
+        fun state(
+            bookCompleted: Boolean,
+            resourceCompleted: Boolean,
+            progressPercent: Int,
+        ): WorkDetailUiState {
+            val resource = testResource(
+                readerType = "audio",
+                format = "M4B",
+                progressPercent = progressPercent,
+            ).copy(completed = resourceCompleted)
+            return WorkDetailUiState(
+                isBookRoot = false,
+                isLoading = false,
+                content = BookDetailContent(
+                    book = BookCard(
+                        id = "book-1",
+                        title = "Book",
+                        author = "Author",
+                        coverUrl = "",
+                        progressPercent = progressPercent,
+                        completed = bookCompleted,
+                    ),
+                    seriesId = null,
+                    seriesName = null,
+                    authorFacetId = null,
+                    description = null,
+                    tags = emptyList(),
+                    resources = listOf(resource),
+                    selectedResourceId = resource.id,
+                    completed = bookCompleted,
+                    continueResourceId = resource.id,
+                ),
+                selectedResourceId = resource.id,
+                presentation = BookDetailPresentation.ResourceDetail,
+            )
+        }
+
+        val markedFinishedAt67Percent = assertNotNull(workDetailPageContent(state(
+            bookCompleted = false,
+            resourceCompleted = true,
+            progressPercent = 67,
+        )))
+        assertTrue(markedFinishedAt67Percent.completed)
+        assertEquals(67, markedFinishedAt67Percent.book.progressPercent)
+        assertEquals(
+            WorkReadingStatus.Finished,
+            workReadingStatus(markedFinishedAt67Percent.completed, markedFinishedAt67Percent.book.progressPercent),
+        )
+        assertEquals(
+            WorkDetailVolumeReadingState.Finished,
+            workDetailVolumePresentation(
+                markedFinishedAt67Percent.resources.single(),
+                selected = true,
+                download = null,
+            ).readingState,
+        )
+
+        val unmarkedAt100Percent = assertNotNull(workDetailPageContent(state(
+            bookCompleted = true,
+            resourceCompleted = false,
+            progressPercent = 100,
+        )))
+        assertFalse(unmarkedAt100Percent.completed)
+        assertEquals(
+            WorkReadingStatus.Reading,
+            workReadingStatus(unmarkedAt100Percent.completed, unmarkedAt100Percent.book.progressPercent),
+        )
+        assertEquals(
+            WorkDetailVolumeReadingState.Reading,
+            workDetailVolumePresentation(
+                unmarkedAt100Percent.resources.single(),
+                selected = true,
+                download = null,
+            ).readingState,
+        )
+
+        val cancelledFinishedAt67Percent = assertNotNull(workDetailPageContent(state(
+            bookCompleted = true,
+            resourceCompleted = false,
+            progressPercent = 67,
+        )))
+        assertFalse(cancelledFinishedAt67Percent.completed)
+        assertEquals(67, cancelledFinishedAt67Percent.book.progressPercent)
+        assertEquals(
+            WorkReadingStatus.Reading,
+            workReadingStatus(cancelledFinishedAt67Percent.completed, cancelledFinishedAt67Percent.book.progressPercent),
+        )
+        assertEquals(
+            WorkDetailVolumeReadingState.Reading,
+            workDetailVolumePresentation(
+                cancelledFinishedAt67Percent.resources.single(),
+                selected = true,
+                download = null,
+            ).readingState,
         )
     }
 

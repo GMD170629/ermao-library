@@ -265,13 +265,16 @@ fun WorkDetailScreen(
         empty = stringResource(R.string.work_shelf_empty),
         save = stringResource(R.string.work_shelf_save),
     )
-    val currentReadingStatus = if (state.isBookRoot) when {
-        state.content?.completed == true -> WorkReadingStatus.Finished
-        state.content?.resources?.any { (it.progressPercent ?: 0) > 0 } == true -> WorkReadingStatus.Reading
-        else -> WorkReadingStatus.Unread
+    val currentReadingStatus = if (state.isBookRoot) {
+        workReadingStatus(
+            completed = state.content?.completed == true,
+            progressPercent = state.content?.resources
+                ?.firstOrNull { (it.progressPercent ?: 0) > 0 }
+                ?.progressPercent,
+        )
     } else selectedResource?.let { resource ->
         workReadingStatus(
-            completed = (resource.progressPercent ?: 0) >= 100,
+            completed = resource.completed,
             progressPercent = resource.progressPercent,
         )
     } ?: WorkReadingStatus.Unread
@@ -2390,10 +2393,10 @@ internal fun workDetailVolumePresentation(
     download: AndroidDownloadRecord?,
 ): WorkDetailVolumePresentation {
     val progress = resource.progressPercent?.coerceIn(0, 100) ?: 0
-    val readingState = when {
-        progress >= 100 -> WorkDetailVolumeReadingState.Finished
-        progress > 0 -> WorkDetailVolumeReadingState.Reading
-        else -> WorkDetailVolumeReadingState.Unread
+    val readingState = when (workReadingStatus(resource.completed, progress)) {
+        WorkReadingStatus.Finished -> WorkDetailVolumeReadingState.Finished
+        WorkReadingStatus.Reading -> WorkDetailVolumeReadingState.Reading
+        WorkReadingStatus.Unread -> WorkDetailVolumeReadingState.Unread
     }
     val downloadState = when {
         download?.resourceId == resource.id && download.isReadable -> WorkDetailVolumeDownloadState.Downloaded
@@ -2810,7 +2813,7 @@ internal fun workDetailPageContent(state: WorkDetailUiState): BookDetailContent?
             progressPercent = resource?.progressPercent,
         ),
         description = if (resource != null) resource.description else node?.description ?: content.description.takeIf { state.isBookRoot },
-        completed = (resource?.progressPercent ?: 0) >= 100,
+        completed = resource?.completed == true,
         tags = content.tags.takeIf { state.isBookRoot }.orEmpty(),
     )
 }

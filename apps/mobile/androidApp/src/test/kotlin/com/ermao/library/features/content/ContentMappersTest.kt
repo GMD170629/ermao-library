@@ -155,6 +155,7 @@ class ContentMappersTest {
         assertEquals("2010-11-01", mappedResource.publishedAt)
         assertEquals("zh-CN", mappedResource.language)
         assertEquals(428, mappedResource.pageCount)
+        assertEquals(true, mappedResource.completed)
         assertEquals(null, mappedResource.metadataSource)
         assertEquals("library/golden-dream.epub", mappedResource.assets.single().path)
     }

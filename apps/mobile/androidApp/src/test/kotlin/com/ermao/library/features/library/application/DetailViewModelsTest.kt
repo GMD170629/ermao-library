@@ -8,6 +8,7 @@ import com.ermao.library.features.content.model.BookDetailContent
 import com.ermao.library.shared.modules.reader.ReaderChapterPresentation
 import com.ermao.library.shared.modules.reader.ReaderOpaqueLocator
 import com.ermao.library.shared.modules.reader.ReaderPositionPresentation
+import com.ermao.library.shared.modules.reader.ReaderPositionPresentationSnapshot
 import com.ermao.library.shared.modules.reader.ReaderPositionReport
 import com.ermao.library.shared.modules.reader.ReaderProgressPresentationUpdate
 import kotlin.test.assertEquals
@@ -80,13 +81,61 @@ class DetailViewModelsTest {
         assertEquals(42, parentDirectory.continueResource?.progressPercent)
     }
 
-    private fun contentWithChapters(vararg chapters: ReadingUnitContent): BookDetailContent = BookDetailContent(
+    @Test
+    fun durableProgressProjectionPreservesIndependentReadingStatus() {
+        val markedFinished = contentWithChapters(
+            bookCompleted = true,
+            resourceCompleted = false,
+        ).applying(
+            presentationSnapshot(displayPercent = 67.0),
+            selectedResourceId = "resource-1",
+        )
+
+        assertEquals(true, markedFinished.completed)
+        assertEquals(false, markedFinished.resources.single().completed)
+        assertEquals(67, markedFinished.book.progressPercent)
+        assertEquals(67, markedFinished.resources.single().progressPercent)
+
+        val unmarkedAtEnd = contentWithChapters(
+            bookCompleted = false,
+            resourceCompleted = true,
+        ).applying(
+            presentationSnapshot(displayPercent = 100.0),
+            selectedResourceId = "resource-1",
+        )
+
+        assertEquals(false, unmarkedAtEnd.completed)
+        assertEquals(true, unmarkedAtEnd.resources.single().completed)
+        assertEquals(100, unmarkedAtEnd.book.progressPercent)
+        assertEquals(100, unmarkedAtEnd.resources.single().progressPercent)
+    }
+
+    private fun presentationSnapshot(displayPercent: Double) = ReaderPositionPresentationSnapshot(
+        bookId = "book-1",
+        resourceId = "resource-1",
+        capturedAtEpochMillis = 123,
+        presentation = ReaderPositionPresentation(
+            displayPercent = displayPercent,
+            totalProgression = displayPercent / 100.0,
+            currentHref = null,
+            chapter = null,
+            page = null,
+            playback = null,
+        ),
+    )
+
+    private fun contentWithChapters(
+        vararg chapters: ReadingUnitContent,
+        bookCompleted: Boolean = false,
+        resourceCompleted: Boolean = false,
+    ): BookDetailContent = BookDetailContent(
         book = BookCard(
             id = "book-1",
             title = "Book",
             author = "Author",
             coverUrl = "",
             progressPercent = null,
+            completed = bookCompleted,
         ),
         seriesId = null,
         seriesName = null,
@@ -99,11 +148,13 @@ class DetailViewModelsTest {
                 title = "Resource",
                 format = "EPUB",
                 progressPercent = null,
+                completed = resourceCompleted,
                 readable = true,
                 selected = true,
             ),
         ),
         selectedResourceId = "resource-1",
+        completed = bookCompleted,
         readingUnits = chapters.toList(),
     )
 }

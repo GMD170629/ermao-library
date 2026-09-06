@@ -762,7 +762,6 @@ internal fun BookDetailContent.applying(
     return copy(
         book = book.copy(progressPercent = progress),
         continueResourceId = snapshot.resourceId,
-        completed = snapshot.presentation.displayPercent >= 100.0,
         resources = resources.map { resource -> if (resource.id == snapshot.resourceId) resource.copy(progressPercent = progress) else resource },
         readingUnits = readingUnits.mapIndexed { index, unit ->
             unit.copy(

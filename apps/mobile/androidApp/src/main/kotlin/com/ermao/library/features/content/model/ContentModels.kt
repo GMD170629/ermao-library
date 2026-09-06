@@ -91,6 +91,7 @@ data class ResourceContent(
     val coverUrl: String = "",
     val sizeBytes: Long = 0,
     val progressPercent: Int?,
+    val completed: Boolean = false,
     val readable: Boolean,
     val selected: Boolean,
 ) {
