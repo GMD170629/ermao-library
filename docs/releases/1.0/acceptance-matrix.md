@@ -1,5 +1,7 @@
 # 1.0 发布验收矩阵
 
+2026-09-07 POS-05增量：afe19dca Chrome MP3真实M提交丢ACK→Android新N→Chrome完全相同M重试子项PASS，receipt仍M/r4、当前完整快照N/r7、无新增revision；同M异payload409且N不变。Chrome保留暂停5s并提示远端34%，没有自动seek。详见release-evidence首节；未直接检查IDB或测5秒时限，不覆盖其余引擎/原生方向/iOS或同冻结RC。
+
 2026-09-07 RG-04/POS-01详情与恢复相邻增量：SYNC-03在ead1ba20实际关闭。新库M4B Web确认5000→Android5015ms；Android确认15000/r8→Chrome重载详情在播放器未开时直接50%/当前收听0:15，随后实际恢复15000ms。完整presentation及非空章节由独立GET/reading-units核验；原生正常详情相邻通过。证据`artifacts/releases/1.0/ead1ba20/sync03-complete-20260907/`，原cff3e689/ffcbd4aa失败及清理在release-evidence。仅上述开发验证子项PASS，不覆盖POS-06真实ACK竞态、全部异常/格式或最终RC。
 
 2026-09-07 RG-04 正常交接增量（cff3e689 Web/API、f8847633 Android）：M4B/M4A/AAC 的 Chrome→Android 分别5000→5015/5015/5000ms；Android→Chrome分别15000→15000、15000→15000、15039→15039ms，六个短时子项PASS。通过实际普通UI与独立GET核验，同资源/资产且两端clientId不同；详见release-evidence最新记录。既有MP3结果保留，四格式正常交接有开发证据，但异常组合、iOS和最终RC仍非整体PASS。详情重载旧位置另行追踪。
@@ -247,7 +249,7 @@ POS-08新增AUDIO-08（原RISK-06）：真实Android引擎+SQLite单次IO门控�
 | POS-02 | P3；各引擎代表样本 | 连续读听，量测捕获/本地持久化/发送/确认；不足5秒即返回/暂停/切后台 | 最后捕获位置按冻结间隔可靠保存，确认延迟单列 | E/POS-02/ | NOT_RUN（原生/缺样本子项BLOCKED）；DEC-04 |
 | POS-03 | P3；各引擎 | 分别在本地持久化前、后、网络确认后强杀；App重启/系统回收/浏览器刷新 | 至少最后已持久化位置恢复；已确认零丢失，未持久化损失不超冻结间隔 | artifacts/releases/1.0/7e207c38/process-recovery/ | Chrome桌面/移动视口MP3已确认暂停后强杀并重登录恢复PASS（0/205.804ms）；Android普通首页已确认AAC四轨与M4B/M4A章节强停恢复PASS（f8847633，0/31/31ms）；未确认/其他引擎子项NOT_RUN；iOS BLOCKED |
 | POS-04 | P3；已合法打开/可本地读取资源 | 断网读到B→观察pending→重启客户端→重连→重试并另端重开 | pending持久保留并最终确认；不扩展离线登录契约 | artifacts/releases/1.0/02d6ea2d/epub-offline-and-adjacent/ 与 epub-offline-mobile/；1d8d0c7c/pos10-native-server-restart-20260907/ | Chrome桌面/移动视口EPUB页面重建及重连子项PASS（965/959ms）；Android M4B离线完整pending持久、冷恢复20226→20247ms及最终r14/完整位置一致/pending空子项PASS；原mutation被新capture替代不证明精确原body重放，具体r12/r13回调不可归因；其他格式/另端交接NOT_RUN，iOS BLOCKED |
-| POS-05 | P3；同账号同资源两端 | 写mutation M让服务提交但丢回包→另一端新写N→重试M；另测同M不同payload | 重放M不再覆盖N，不递增revision；不同payload受既有冲突处理 | artifacts/releases/1.0/62377271/pos07-late-first-submit-20260907/ | 既有API/ORM成功M重放不覆盖后写、异payload409保护PASS；真实客户端提交后丢ACK与重试链仍NOT_RUN，不由服务端保护替代 |
+| POS-05 | P3；同账号同资源两端 | 写mutation M让服务提交但丢回包→另一端新写N→重试M；另测同M不同payload | 重放M不再覆盖N，不递增revision；不同payload受既有冲突处理 | artifacts/releases/1.0/afe19dca/pos05-lost-ack-chrome-android-20260907/；原62377271 API/ORM证据保留 | Chrome MP3真实丢ACK→Android N→Chrome原body重试及异payload409子项PASS，完整N/r7不变；非5秒时限/IDB清pending证据，其余引擎/方向与最终RC未覆盖 |
 | POS-06 | P3；各端读/听writer | 阻留旧M响应→本端生成新pending N→释放M响应→重开/重试N | 旧ACK仅清对应M，N保留；不能回滚本地较新位置 | artifacts/releases/1.0/938afd24/pos06-native-late-ack-20260907/；5b967260/pos06-online-adjacent-20260907/ | Android实际同步owner/HTTP/SQLite子项PASS：M3933ms/r5实际提交后扣留ACK，N9939ms完整pending不被旧ACK清除，重建owner/DB原mutation重试r6；原online相邻PASS。控制点在真实HTTP返回后交付到coordinator，不是socket丢包、普通UI或进程强杀；Chrome/其他引擎NOT_RUN、iOS BLOCKED |
 | POS-07 | P3；双端并发、离线首次提交 | A/B分别写并控制事务完成顺序；再让离线未提交C在N后首次到达；主动回读 | 按服务端最后事务提交生效；C可成为新当前位置，区别成功mutation重放；明确记录用户可见回退，不自创最大百分比算法 | artifacts/releases/1.0/62377271/pos07-late-first-submit-20260907/ | 首次迟到C生效、旧成功M重放及异payload409的真实API/ORM子项PASS（e39e6de2）；双端受控事务顺序及真实离线客户端NOT_RUN，iOS BLOCKED |
 | POS-08 | P3；两账号/服务器/资源 | 在途保存时切账号/服务器/资源，释放旧请求；尝试无权资源和同mutation跨namespace | 无串写、越权、错误清pending；业务身份以资源为准 | release-evidence中AUDIO-08/09实际RED/GREEN与93100b06证据 | Android音频资源切换restore挂起时旧捕获身份、Stop取消迟到恢复子项PASS，AUDIO-08/09已关闭；账号/服务器切换、其他引擎和传输在途组合仍NOT_RUN，iOS BLOCKED |
