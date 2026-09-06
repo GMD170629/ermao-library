@@ -1,6 +1,24 @@
 # 1.0 发布证据与最终签收
 
-当前结论：**NOT_RUN / 尚无放行依据**。R0 仅进行只读盘点与四份文档整理，没有构建、部署、真机、协议、回归或性能实测。
+当前结论：**NOT_RUN / R1 执行中，尚无整体放行依据**。正式安装包构建/导出由用户暂缓；代码回归、修复与 Android 真机验证继续。下方 R0 为历史记录，不能覆盖本节当前事实。
+
+## R1 当前执行与恢复入口（2026-09-06）
+
+- 起点：`develop@197e81a808ba32595a8a6ffeda62422b3a7d3473`，初始 `git status --short` 无输出；没有用户未提交改动被纳入或排除。原工作区不修改。
+- 隔离工作区：`D:/www/ermao-release-1.0`；分支 `codex/release-1.0-convergence`。正式 RC 未冻结，无 tag/公开发布。用户追加授权及时 commit/push；已检查三个工作流，push 仅匹配 develop/prod 或版本 tag，专用分支不触发发布。只推专用分支，不创建 PR/触发工作流。
+- 实际证据根：`artifacts/releases/1.0/197e81a808ba32595a8a6ffeda62422b3a7d3473/`。这是开发基线证据，后续修复须另记源码差异/提交；不能直接用于冻结 RC 放行。
+- 环境：Windows；复用已安装 Node 22.23.1、pnpm 9.12.2、Python 3.11.15/uv 0.12.7，依赖在隔离工作区安装。Python 不在 PATH 的问题通过本任务 PATH 和 `PYTHON_EXECUTABLE` 解决，无系统配置变更。
+- Android `adb devices -l`：`9e896bbc` / M2102K1AC / device，用户明确允许真机测试；只做保留数据验证。没有可用 Mac/Xcode/iOS 签名运行环境登记。
+- 用户已接受现有阈值/ADR 0028 语义；本轮低功耗 NAS 暂缓，以本机预检为准。正式安装包构建/导出暂缓，交付物未准备与未发布分别记录。
+
+| ID / 关联 | 实际执行 | 结果 / 证据（相对本节证据根） | 效力 |
+|---|---|---|---|
+| R1-WEB-STATIC / ART-01 | `pnpm lint`、`pnpm typecheck`、`pnpm i18n:check` | PASS；`web-baseline/lint.log`、`typecheck.log`、`i18n-runtime-fixed.log` | 基线 Web 静态检查；i18n 首次 PATH 失败日志另保留 |
+| R1-WEB-UNIT / ART-01 | `pnpm --filter @shuku/web test`，含前置 WASM/安全生成/边界/设置/双语校验 | PASS：456 tests，0 failed/skipped；`web-baseline/unit-runtime-fixed.log` | 自动测试，不代表完整格式/真机通过 |
+| R1-WEB-E2E / ART-01 | `pnpm test:e2e --workers=2`；Chromium/WebKit/Firefox/iPhone-WebKit | 执行中；`web-baseline/e2e.log` | 既有 HTTP fixtures E2E；不替代真实初始化/服务器和 iOS 真机 |
+| R1-DOCKER / ART-02 | `docker version/info/buildx ls`，启动现有 Docker Desktop 后复查 | BLOCKED：引擎未启动；宿主日志显示 Inference manager 本地 socket 无法访问 | 环境故障；未重置/删除 Docker 数据 |
+
+当前可执行工作：完成后端、Web、KMP/Android 全量检查；复现 OPDS 与旧 smoke 入口疑点；修复确认缺陷并回归；运行隔离新数据 API/Worker/本机压力预检。每轮更新本节和阻塞台账。正式产物及最终 RC 完整验证仍未完成。
 
 ## R0 基线与工作树边界
 
@@ -84,5 +102,3 @@
 | 范围/阈值批准，负责人/日期 | 待填 |
 | 最终结论 | NOT_RUN / 尚无放行依据 |
 | 实际发布操作授权 | 本轮未授权 |
-
-
