@@ -4,6 +4,18 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+当前阶段仍为代码与真实流程收敛，尚未冻结RC。按最新获准范围汇总：
+
+| 门禁 | 当前事实 | 下一步 / 真实限制 |
+|---|---|---|
+| RG-01 交付 | NOT_RUN / 部分BLOCKED | APK/IPA正式构建用户暂缓；Docker引擎、Mac/iOS条件仍缺 |
+| RG-02 初始化/连接 | 第一方新库链路部分PASS，整组NOT_RUN | 继续组织模式/异常连接与两个真实OPDS客户端；Windows库存未确认客户端，Android349包仅发现多看/番茄且OPDS能力未证实 |
+| RG-03 格式 | 部分PASS，HTML剩余边界FAIL | READER-03实体上下文待收敛；逐格式/异常媒体/原生iOS矩阵未完成 |
+| RG-04 进度 | 已复现快速关闭缺陷已修复，整组NOT_RUN | 生产Chrome30分钟播放正在执行；异常恢复、跨端仍待验收 |
+| RG-05 导入性能 | 本轮本机1万导入预检PASS（DEC-06） | 大规模/长时压力独立脚本按需运行，不作为当前阻塞；不外推NAS或30万表现 |
+
+正在执行的恢复点：`audio-soak/production-1800-execution.json`，run `r1788689717566-w0`，启动源版本 `a5ac3b8b`，生产Web构建后连续播放1800秒并检查PWA。未结束前不能计PASS；恢复应核查实际自有进程、`browser-observations.json`、`shutdown-result.json`，不能根据会话记忆或进程文件推定仍运行/已通过。Next两配置与独立dist在运行中由fixture拥有，不能手工恢复。此工作属于音频功能稳定性，不是已停止的超大书库压测。
+
 ANDROID-03当前自动回归PASS：`preflight-mobile/android03-expanded-anchor-20260906/`，默认仪器单项1 PASS（3.204s）、整类19 PASS（31.537s）、完整148 PASS（334.740s），均零skip。只改测试，原手势/第一章滚动/回缩/不翻页全部保留；第二手势前新增唯一原生Collapse且无Expand、未裁剪handle顶边与sheet底边均对齐root的校验。容差来自SDK整数像素定位（1物理像素），无固定屏幕尺寸、sleep或重复手势。主代理核对生产fillMaxHeight与M3 1.4.0的Expanded零偏移公式及完整diff。主APK仍为 `b3fe00868a770d1e38b46369d9420ac42c7470fb8144ba805cc08e695bb29459`，测试APK为 `26ed0a58682b36930e4bb850a80c8b6eaf4969455d7ae3e0b9139e9e35ac6324`；全部自有进程退出，设备交还。旧147/1失败保留；能够证明旧用例未要求完全展开及新前置通过，不能证明旧失败唯一原因。当前完整移动自动回归恢复PASS，最终RC仍须重跑。
 
 AUDIO-03原失败链路真实回归PASS：`audio-soak/runs-savefix-30/r1788689332133-w0/`，Web生产修复源码 `4aaa40c7`，Chrome全新库/EPUB/长MP3、原5/10秒确认、30.658秒连续观察、原快速seek/pause/close/reopen完整1 PASS（1.4m）。保存475006ms、恢复475000ms，误差6ms；连续采样最大间隔/无推进172.7ms，无额外等待上传或弱化恢复断言。`post-run-verification.json` 独立核实7份原文件不变、910份受测应用源码不变、API 5xx=0、18081/3102关闭、Python清理成功、Next两配置恢复原字节。此已复现快速关闭缺陷本批关闭，未覆盖30分钟、异常IDB顺序、其他编码/跨端。
