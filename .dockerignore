@@ -13,6 +13,8 @@ __pycache__
 **/.venv
 .runtime-windows
 **/.venv-windows
+/.venv-windows-1.0/
+**/.venv-windows-1.0/
 packages/reader-core/native/chapters/build*
 apps/web/.chapters-wasm-build
 *.egg-info

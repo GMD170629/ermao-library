@@ -26,6 +26,7 @@ dist
 .turbo
 .tmp
 .runtime-windows/
+/.venv-windows-1.0/
 /tmp/
 tmp-worker-smoke
 __pycache__/
