@@ -1,8 +1,24 @@
 # 1.0 发布证据与最终签收
 
-当前结论：**NOT_RUN / R1 执行中，尚无整体放行依据**。正式安装包构建/导出由用户暂缓；代码回归、修复与 Android 真机验证继续。下方 R0 为历史记录，不能覆盖本节当前事实。
+当前结论：**R2逐项验收与缺陷收敛，尚无整体放行依据**。正式安装包构建/导出由用户暂缓；尚未冻结RC。既有R1证据编号保留，不能将不同候选的局部通过合并成最终GO。
 
 ## R1 当前执行与恢复入口（2026-09-06）
+
+2026-09-06 19:30当前恢复点：主分支已整合HTML修复 `17cf8cba`，与独立已审候选 `5a0a3add` 的八文件逐字节一致；整合前先核对主工作树八文件仍匹配原复制基线，只替换此授权范围，原仓库15项既有改动保持排除。READER-03原422及必要相邻问题本批关闭：主代理核对五份真实文件每项结果、十个正文200/可读锚点、两种原件下载与Range、全部hash，以及Linux193项无skip。证据 `D:/www/ermao-release-html/artifacts/html-causal-linux-mobi-20260906/`；原生库SHA `969e080e…`未更换；MOBI/AZW/PRC为同源别名。此不关闭客户端逐格式或最终RC门禁，不再扩展相关诊断。
+
+AUDIO-04原生产链修复实测：`0c28f117` 的 `audio-soak/runs-proxyfix-1800/r1788691746993-w0/` 全用例1 PASS（30.9分钟），保存475464ms→重开475000ms，误差464ms；SW控制/断网导航/恢复认证200通过。独立既有检查器核实7样本及来源hash、911应用文件不变、Next配置原字节恢复、18081/3102关闭、无记录到API5xx，执行57546已结束。默认30秒代理截断的原失败已不再复现，保留原FAIL及完整响应对照。
+
+TEST-11 / RG-03连续时窗证据缺口：上述用例虽PASS，jsonl最后观察为1799429.1ms；首个实际引擎采样10453.731ms，末次独立读数1811289.155ms（跨1800.835秒），但最后网络确认期间的事件/采样未转储。不能把jsonl说成完整1800秒。现有方法的退出条件读主机截止时间，确认请求跨截止后会遗漏末段；仅把循环改为按已落盘观察的elapsedMillis达到目标退出，原停顿/事件/采样/确认断言全部保留，ESLint通过。停止条件为后续实际候选长测的最终记录覆盖1800秒且原断言通过；不再扩展采集工具，不为此重复已关闭运输机制诊断。完整时窗证据仍待补齐。
+
+Android新增真实结果：`D:/www/ermao-release-android-formats/artifacts/releases/1.0/0c28f117a8cb5733d20952e29e22d10b210f83b4/android-formats-20260906/gate-results.json`，主APK仍 `b3fe00868a770d1e38b46369d9420ac42c7470fb8144ba805cc08e695bb29459`，测试APK `8b8a88cbe700af2f7ceb7a35b6482f9937448bbbca9c695c4eb2f58dfaf211d0`。WAV PCM16短时1 PASS，9955ms/r4→9955ms/r7；AAC-LC重开容差FAIL（AUDIO-05），5/10秒确认及9911ms/r4暂停已通过；FLAC24-bit首5秒确认截止FAIL（AUDIO-06）。两失败尚不能唯一归因产品/环境/入口时序；断言瞬时恢复值、checkpoint状态未记录，finally后SQLite值不能替代。2623移动源码与样本hash不变，服务/仪器/logcat已退出、reverse已移除、无活动播放器，用户数据未清理。
+
+AUDIO-05/06最小观测：仅补既有仪器断言前的实际引擎/本地确认状态摘要，当前日志不足以分类失败，不能靠finally后数据库反推。复用已有私有目录/数据库owner/日志与fixture，保留全部期限和断言；各一次AAC/FLAC运行取得瞬时值后停止诊断，不扩配置/报告框架，不重跑已过WAV/MP3。实现与验证仍在独立Android工作树。
+
+IMP-01真实API/Worker部分PASS：`organization-live/imp01-1788692823181/`，预期先按ADR0018固定，FLAT为3 Book/4 Node/3 Resource/3 Asset，VOLUMES为2/4/3/3；两库任务全部成功，38业务HTTP均2xx，原件与复制样本hash一致，源文件917项不变，自有60948/进程/临时目录均回收。仅复用既有helper的固定操作记录，不新增通用工具；此Gate因此前只有FLAT和测试文件记录而需实跑，双模式对账后停止。执行偏差：使用原仓库 `.venv-windows`，非指定发布venv；实际应用路径正确，事后只读核对两环境Python3.11.15、39生产依赖匹配发布锁，不能补证运行时完整依赖快照。保留该实际环境的拓扑PASS，不计指定发布环境/最终RC或Web界面通过。
+
+ENV-11 / SYNC-02浏览器对照：修正门控前的DEV尝试因第二个bootstrap回调读取ACK后快照而失败，非有效产品RED；两个请求均早于ACK，现改为同次重开冻结一次响应。针对性用例已在 `codex/release-1.0-startup-progress@d35c7585` 备份推送，尚未合入主分支；typecheck/lint通过，修正后RED/GREEN未运行。旧/新production构建均已完成、源与配置恢复，证据 `D:/www/ermao-release-startup-progress/apps/web/.next/startup-progress/browser-red-green/build-provenance.json`。子任务自动审批拒绝本地production `next start`，仅报“blocked by policy”，未返回具体原因；未绕过。已集中请求确认127.0.0.1:3107/3108两隔离服务的启动，其他门禁继续。
+
+下方按时间保留的R1过程记录含已被本节覆盖的“运行中/待修复”状态，不作为当前执行状态。
 
 READER-03候选已在独立分支 `codex/release-1.0-html@5a0a3add` 提交并推送，尚未合入主受测工作树。HTML按SDK因果顺序先处理原始属性引用、再决定命名空间/raw-text；严格XML继续原全局声明处理，实体/预算仍复用一个owner，canonical policy字节不变。旧HTML后置/重复DTD回填行为会改变，属于本次显式HTML适配修复的已记录兼容性差异，不伪称原来不可达，也不新增跨平台顺序保证。候选158项相邻回归通过；主代理检查完整八文件差异、原保护断言与共享账本，再原样复用既有 `review-integrated.py`，仅给新sourceRoot/hash清单，7反例×2种scripting均PASS、源码不变。证据：`D:/www/ermao-release-html/artifacts/html-causal-fix-20260906/`、`html-causal-primary-review-20260906/`。真实Linux新库MOBI链路尚在执行；只完成审查与相邻验证，不关闭整组格式门禁。主受测八文件仍保持原复制基线，待长播放退出后才整合。
 

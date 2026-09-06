@@ -72,11 +72,12 @@ export async function observeAudioSoak(
   const probe = await startAudioProbe(page);
   try {
     expect(await probe.evaluate((value) => value.remainingSeconds), 'source must span the whole observation without looping').toBeGreaterThan(seconds + 10);
-    const deadline = Date.now() + seconds * 1_000;
-    while (Date.now() < deadline) {
+    let observedMillis = 0;
+    while (observedMillis < seconds * 1_000) {
       await delay(5_000);
       const observation = await probe.evaluate((value) => value.read());
       await appendFile(evidencePath, `${JSON.stringify(observation)}\n`, 'utf8');
+      observedMillis = observation.elapsedMillis;
       expect(observation.maxSamplingGapMillis, 'observer gaps cannot hide playback stalls').toBeLessThanOrEqual(2_000);
       expect(observation.maxNoAdvanceMillis, 'continuous engine playback must not stop for over two seconds').toBeLessThanOrEqual(2_000);
       expect(observation.samples.length).toBeGreaterThan(0);
