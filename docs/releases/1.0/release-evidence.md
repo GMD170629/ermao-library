@@ -4,6 +4,8 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+ANDROID-03当前自动回归PASS：`preflight-mobile/android03-expanded-anchor-20260906/`，默认仪器单项1 PASS（3.204s）、整类19 PASS（31.537s）、完整148 PASS（334.740s），均零skip。只改测试，原手势/第一章滚动/回缩/不翻页全部保留；第二手势前新增唯一原生Collapse且无Expand、未裁剪handle顶边与sheet底边均对齐root的校验。容差来自SDK整数像素定位（1物理像素），无固定屏幕尺寸、sleep或重复手势。主代理核对生产fillMaxHeight与M3 1.4.0的Expanded零偏移公式及完整diff。主APK仍为 `b3fe00868a770d1e38b46369d9420ac42c7470fb8144ba805cc08e695bb29459`，测试APK为 `26ed0a58682b36930e4bb850a80c8b6eaf4969455d7ae3e0b9139e9e35ac6324`；全部自有进程退出，设备交还。旧147/1失败保留；能够证明旧用例未要求完全展开及新前置通过，不能证明旧失败唯一原因。当前完整移动自动回归恢复PASS，最终RC仍须重跑。
+
 AUDIO-03原失败链路真实回归PASS：`audio-soak/runs-savefix-30/r1788689332133-w0/`，Web生产修复源码 `4aaa40c7`，Chrome全新库/EPUB/长MP3、原5/10秒确认、30.658秒连续观察、原快速seek/pause/close/reopen完整1 PASS（1.4m）。保存475006ms、恢复475000ms，误差6ms；连续采样最大间隔/无推进172.7ms，无额外等待上传或弱化恢复断言。`post-run-verification.json` 独立核实7份原文件不变、910份受测应用源码不变、API 5xx=0、18081/3102关闭、Python清理成功、Next两配置恢复原字节。此已复现快速关闭缺陷本批关闭，未覆盖30分钟、异常IDB顺序、其他编码/跨端。
 
 TEST-10修复当前验证：启动/preflight/build/readiness统一有界可取消生命周期，原错与清理错均保留；stop先于Python启动到达也不能被删除。Next配置按本轮安装字节比较后恢复，冲突保留用户改动并显式失败；Chrome串行、trace关闭。源码清单含未跟踪应用文件哈希，避免git diff遗漏在编模块。`web-baseline/pwa-independent-review/fixes-e90c87df/primary-final-tests.log` 本工具与Android相邻40 PASS，Ruff/ESLint/typecheck通过；上述真实开发模式运行验证清理与配置恢复。新基础设施的production PWA与构建中取消真实验证仍待执行；有限生命周期单测不等于完整发布验收。

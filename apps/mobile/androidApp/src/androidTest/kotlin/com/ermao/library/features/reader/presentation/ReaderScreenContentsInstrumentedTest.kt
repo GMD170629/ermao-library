@@ -1,5 +1,7 @@
 package com.ermao.library.features.reader.presentation
 
+import android.os.SystemClock
+import android.util.Log
 import android.view.WindowManager
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
@@ -10,6 +12,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -316,21 +319,122 @@ class ReaderScreenContentsInstrumentedTest {
         compose.waitUntil(5_000) { compose.onAllNodesWithTag(READER_CONTENTS_LIST_TEST_TAG).fetchSemanticsNodes().isNotEmpty() }
         val list = compose.onNodeWithTag(READER_CONTENTS_LIST_TEST_TAG)
         val partialTop = list.getUnclippedBoundsInRoot().top.value
-        list.performTouchInput { swipe(Offset(width / 2f, height * 0.9f), Offset(width / 2f, height * 0.2f), 600) }
+        logNativeSheetObservation("before_expand_swipe")
+        list.performTouchInput {
+            val start = Offset(width / 2f, height * 0.9f)
+            val end = Offset(width / 2f, height * 0.2f)
+            Log.i("ANDROID03Sheet", "stage=expand_input widthPx=$width heightPx=$height startPx=$start endPx=$end durationMs=600")
+            swipe(start, end, 600)
+        }
         compose.waitForIdle()
+        logNativeSheetObservation("after_expand_swipe")
+        assertNativeSheetAtExpandedAnchor()
         val expandedTop = list.getUnclippedBoundsInRoot().top.value
         assertTrue("Sheet did not expand first", expandedTop < partialTop)
         compose.onNodeWithTag("reader-toc:chapter-1.xhtml").assertIsDisplayed()
         assertPanelTabsDisplayed()
-        list.performTouchInput { swipe(Offset(width / 2f, height * 0.8f), Offset(width / 2f, height * 0.2f), 600) }
+        logNativeSheetObservation("before_scroll_swipe")
+        list.performTouchInput {
+            val start = Offset(width / 2f, height * 0.8f)
+            val end = Offset(width / 2f, height * 0.2f)
+            Log.i("ANDROID03Sheet", "stage=scroll_input widthPx=$width heightPx=$height startPx=$start endPx=$end durationMs=600")
+            swipe(start, end, 600)
+        }
+        logNativeSheetObservation("after_scroll_swipe")
         compose.onAllNodesWithTag("reader-toc:chapter-1.xhtml").assertCountEquals(0)
         list.performScrollToIndex(0)
-        list.performTouchInput { swipe(Offset(width / 2f, height * 0.15f), Offset(width / 2f, height * 0.75f), 600) }
+        logNativeSheetObservation("before_collapse_swipe")
+        list.performTouchInput {
+            val start = Offset(width / 2f, height * 0.15f)
+            val end = Offset(width / 2f, height * 0.75f)
+            Log.i("ANDROID03Sheet", "stage=collapse_input widthPx=$width heightPx=$height startPx=$start endPx=$end durationMs=600")
+            swipe(start, end, 600)
+        }
         compose.waitForIdle()
+        logNativeSheetObservation("after_collapse_swipe")
         assertTrue("Sheet did not return to partial height", list.getUnclippedBoundsInRoot().top.value > expandedTop)
         assertPanelTabsDisplayed()
         assertEquals(0, controller.previousPageCalls.get())
         assertEquals(0, controller.nextPageCalls.get())
+    }
+
+    private fun assertNativeSheetAtExpandedAnchor() {
+        val root = compose.onRoot()
+        val sheet = compose.onNodeWithTag(READER_SHEET_TEST_TAG)
+        val expandedHandleMatcher = SemanticsMatcher("Native sheet exposes Collapse without Expand") { node ->
+            node.config.contains(SemanticsActions.Collapse) && !node.config.contains(SemanticsActions.Expand)
+        }
+        val expandedHandles = compose.onAllNodes(expandedHandleMatcher, useUnmergedTree = true)
+        val handle = compose.onNode(expandedHandleMatcher, useUnmergedTree = true)
+        // Native offset placement rounds to pixels; this is tighter than the existing 1 dp bounds checks.
+        val roundingToleranceDp = 1f / instrumentation.targetContext.resources.displayMetrics.density
+        // The full-height sheet's Expanded anchor is offset zero. Use unclipped bounds so clipping
+        // cannot make an intermediate sheet position appear aligned with the root.
+        compose.waitUntil(timeoutMillis = 5_000) {
+            expandedHandles.fetchSemanticsNodes().size == 1 &&
+                abs(handle.getUnclippedBoundsInRoot().top.value - root.getUnclippedBoundsInRoot().top.value) <= roundingToleranceDp &&
+                abs(sheet.getUnclippedBoundsInRoot().bottom.value - root.getUnclippedBoundsInRoot().bottom.value) <= roundingToleranceDp
+        }
+        expandedHandles.assertCountEquals(1)
+        val rootBounds = root.getUnclippedBoundsInRoot()
+        val handleBounds = handle.getUnclippedBoundsInRoot()
+        val sheetBounds = sheet.getUnclippedBoundsInRoot()
+        assertEquals("Expanded drag handle top", rootBounds.top.value, handleBounds.top.value, roundingToleranceDp)
+        assertEquals("Expanded sheet bottom", rootBounds.bottom.value, sheetBounds.bottom.value, roundingToleranceDp)
+        Log.i(
+            "ANDROID03Sheet",
+            "stage=expanded_anchor_verified collapse=true expand=false rootUnclippedDp=$rootBounds " +
+                "handleUnclippedDp=$handleBounds sheetUnclippedDp=$sheetBounds roundingToleranceDp=$roundingToleranceDp",
+        )
+    }
+
+    private fun logNativeSheetObservation(stage: String) {
+        Log.i(
+            "ANDROID03Sheet",
+            "stage=$stage elapsedMs=${SystemClock.elapsedRealtime()} " +
+                "testClockMs=${compose.mainClock.currentTime} autoAdvance=${compose.mainClock.autoAdvance} " +
+                "density=${instrumentation.targetContext.resources.displayMetrics.density}",
+        )
+        listOf(
+            "root" to compose.onRoot(),
+            "sheet" to compose.onNodeWithTag(READER_SHEET_TEST_TAG),
+            "list" to compose.onNodeWithTag(READER_CONTENTS_LIST_TEST_TAG),
+        ).forEach { (name, interaction) ->
+            val node = interaction.fetchSemanticsNode()
+            Log.i(
+                "ANDROID03Sheet",
+                "stage=$stage node=$name id=${node.id} clippedPx=${node.boundsInRoot} " +
+                    "unclippedDp=${interaction.getUnclippedBoundsInRoot()}",
+            )
+        }
+        // M3 actions describe currentValue/allowed transitions, not a settled anchor.
+        val nativeNodes = compose.onAllNodes(
+            SemanticsMatcher("Native sheet actions or state") { node ->
+                node.config.contains(SemanticsActions.Expand) ||
+                    node.config.contains(SemanticsActions.Collapse) ||
+                    node.config.contains(SemanticsProperties.StateDescription) ||
+                    node.config.contains(SemanticsProperties.PaneTitle)
+            },
+            useUnmergedTree = true,
+        ).fetchSemanticsNodes()
+        Log.i("ANDROID03Sheet", "stage=$stage nativeNodeCount=${nativeNodes.size}")
+        nativeNodes.forEach { node ->
+            val state = if (node.config.contains(SemanticsProperties.StateDescription)) {
+                node.config[SemanticsProperties.StateDescription]
+            } else null
+            Log.i(
+                "ANDROID03Sheet",
+                "stage=$stage nativeId=${node.id} clippedPx=${node.boundsInRoot} " +
+                    "expand=${node.config.contains(SemanticsActions.Expand)} " +
+                    "collapse=${node.config.contains(SemanticsActions.Collapse)} stateDescription=$state",
+            )
+        }
+        val firstChapter = compose.onAllNodesWithTag("reader-toc:chapter-1.xhtml").fetchSemanticsNodes()
+        Log.i(
+            "ANDROID03Sheet",
+            "stage=$stage chapter1NodeCount=${firstChapter.size} " +
+                "chapter1ClippedPx=${firstChapter.map { it.boundsInRoot }}",
+        )
     }
 
     @Test
