@@ -55,6 +55,11 @@ from app.models import (
     LibraryResourceAsset,
     LibrarySourceNode,
 )
+from app.modules.library.public import (
+    SourceNodePhysicalKind,
+    SourceNodeRelativePath,
+    is_resource_anchor_within_book_scope,
+)
 from app.modules.reader.presentation.v5_schemas import (
     ReaderV5ProgressPut,
     ReaderV5ProgressSnapshot,
@@ -65,13 +70,14 @@ from python_backend_sample_smoke import (
     create_fixture_library,
     expect_ok,
     free_port,
+    sha256_file,
     wait_for_health,
     wait_for_worker,
 )
 from python_smoke_process import LoggedProcess, start_logged_process
 from sqlalchemy import and_, func, select
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 TOTAL_FILES = 10_000
 INITIAL_FILES = 2_000
@@ -270,7 +276,7 @@ def _write_one_spec(
         _write_pdf(path, title, ordinal, size_class, seed_pdf)
     else:
         _write_cbz(path, title, ordinal, size_class)
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    digest = sha256_file(path)
     return FileRecord(
         relative_path=relative,
         format=format_name,
@@ -286,7 +292,7 @@ def _validate_file(record: FileRecord, root: Path) -> None:
     path = root / Path(record.relative_path)
     if path.stat().st_size != record.size_bytes:
         raise RuntimeError(f"generated file changed during validation: {path}")
-    if hashlib.sha256(path.read_bytes()).hexdigest() != record.sha256:
+    if sha256_file(path) != record.sha256:
         raise RuntimeError(f"generated file hash changed during validation: {path}")
     if record.format in {"epub", "cbz"}:
         with zipfile.ZipFile(path) as archive:
@@ -420,7 +426,7 @@ def stage_dataset(
             shutil.copy2(source, destination)
             if destination.stat().st_size != record.size_bytes:
                 raise RuntimeError(f"staged file size changed: {destination}")
-            if hashlib.sha256(destination.read_bytes()).hexdigest() != record.sha256:
+            if sha256_file(destination) != record.sha256:
                 raise RuntimeError(f"staged file hash changed: {destination}")
             staged.append(record)
             if index == 1 or index % 250 == 0 or index == len(selected):
@@ -429,6 +435,56 @@ def stage_dataset(
                 log.write(f"{utc_now()} {message}\n")
                 log.flush()
     return staged
+
+
+def _verify_source_hashes(
+    root: Path, records: list[FileRecord], report_path: Path
+) -> None:
+    """Read only manifest-listed originals, never enumerate the library tree."""
+    owned_root = root.resolve()
+    failures: list[dict[str, object]] = []
+    verified = 0
+    for record in records:
+        observation: dict[str, object] = {"relativePath": record.relative_path}
+        try:
+            relative = Path(record.relative_path)
+            path = (owned_root / relative).resolve()
+            if relative.is_absolute() or not path.is_relative_to(owned_root):
+                raise ValueError("corpus path escapes its configured root")
+            if not path.is_file():
+                raise FileNotFoundError("corpus file is missing")
+            size = path.stat().st_size
+            digest = sha256_file(path)
+            if size == record.size_bytes and digest == record.sha256:
+                verified += 1
+                continue
+            observation.update(
+                expectedSizeBytes=record.size_bytes,
+                actualSizeBytes=size,
+                expectedSha256=record.sha256,
+                actualSha256=digest,
+            )
+        except (OSError, ValueError, RuntimeError) as error:
+            # Retain failed observations without exposing a resolved private path.
+            observation["errorType"] = type(error).__name__
+        failures.append(observation)
+    passed = (
+        bool(records)
+        and len({record.relative_path for record in records}) == len(records)
+        and not failures
+    )
+    write_json(
+        report_path,
+        {
+            "capturedAt": utc_now(),
+            "status": "verified" if passed else "failed",
+            "expectedFiles": len(records),
+            "verifiedFiles": verified,
+            "failures": failures,
+        },
+    )
+    if not passed:
+        raise RuntimeError(f"source hash integrity failed; see {report_path}")
 
 
 def dataset_summary(records: list[FileRecord]) -> dict[str, object]:
@@ -1236,11 +1292,16 @@ def _identity_snapshot(engine: Engine, library_id: str) -> dict[str, object]:
                 )
             ).all()
         )
-        book_ids = list(
-            db.scalars(
-                select(LibraryBook.id).where(LibraryBook.library_id == library_id)
-            ).all()
+        book_bindings = (
+            db.execute(
+                select(LibraryBook.id, LibraryBook.source_node_id)
+                .where(LibraryBook.library_id == library_id)
+                .order_by(LibraryBook.id)
+            )
+            .tuples()
+            .all()
         )
+        book_ids = [book_id for book_id, _ in book_bindings]
         resource_ids = list(
             db.scalars(
                 select(LibraryReadableResource.id).where(
@@ -1272,9 +1333,159 @@ def _identity_snapshot(engine: Engine, library_id: str) -> dict[str, object]:
         "assetUniqueIds": len(set(asset_ids)),
         "relativePathDigest": digest(paths),
         "bookIdDigest": digest(book_ids),
+        "bookBindings": dict(book_bindings),
         "resourceIdDigest": digest(resource_ids),
         "assetIdDigest": digest(asset_ids),
     }
+
+
+@dataclass(frozen=True)
+class SourceAssociation:
+    resource_id: str
+    resource_node_id: str
+    format: str
+    resource_state: str
+    book_id: str | None
+    book_node_id: str | None
+    book_path: str | None
+    book_kind: str | None
+    asset_id: str | None
+    asset_node_id: str | None
+    asset_role: str | None
+    asset_state: str | None
+    relative_path: str | None
+    physical_kind: str | None
+
+
+@dataclass(frozen=True)
+class ScanIntegritySnapshot:
+    identity: dict[str, object]
+    associations: tuple[SourceAssociation, ...]
+
+
+def _source_associations(
+    engine: Engine, library_id: str
+) -> tuple[SourceAssociation, ...]:
+    """Project the existing ORM relationships, including broken/absent links."""
+    book_node = aliased(LibrarySourceNode)
+    with Session(engine) as db:
+        rows = db.execute(
+            select(
+                LibraryReadableResource.id,
+                LibraryReadableResource.source_node_id,
+                LibraryReadableResource.format,
+                LibraryReadableResource.import_state,
+                LibraryBook.id,
+                book_node.id,
+                book_node.relative_path,
+                book_node.physical_kind,
+                LibraryResourceAsset.id,
+                LibraryResourceAsset.source_node_id,
+                LibraryResourceAsset.role,
+                LibraryResourceAsset.import_state,
+                LibrarySourceNode.relative_path,
+                LibrarySourceNode.physical_kind,
+            )
+            .select_from(LibraryReadableResource)
+            .outerjoin(LibraryReadableResource.book)
+            .outerjoin(LibraryBook.source_node.of_type(book_node))
+            .outerjoin(LibraryReadableResource.assets)
+            .outerjoin(LibraryResourceAsset.source_node)
+            .where(LibraryReadableResource.library_id == library_id)
+            .order_by(LibraryReadableResource.id, LibraryResourceAsset.id)
+        ).tuples()
+        return tuple(SourceAssociation(*row) for row in rows)
+
+
+def _verify_scan_integrity(
+    engine: Engine,
+    library_id: str,
+    records: list[FileRecord],
+    report_path: Path,
+    *,
+    previous: ScanIntegritySnapshot | None = None,
+) -> ScanIntegritySnapshot:
+    """Check this single-file corpus, reusing the public Book scope policy."""
+    write_json(report_path, {"status": "not_verified", "capturedAt": utc_now()})
+    identity = _identity_snapshot(engine, library_id)
+    associations = _source_associations(engine, library_id)
+    expected = {record.relative_path: record for record in records}
+    invalid: list[SourceAssociation] = []
+    for binding in associations:
+        record = expected.get(binding.relative_path or "")
+        if (
+            record is None
+            or binding.format.lower() != record.format
+            or binding.resource_state != "READY"
+            or binding.book_id is None
+            or binding.book_node_id is None
+            or binding.book_path is None
+            or binding.book_kind is None
+            or binding.asset_id is None
+            or binding.asset_node_id != binding.resource_node_id
+            or binding.relative_path is None
+            or binding.physical_kind != "REGULAR_FILE"
+            or binding.asset_role != "PRIMARY"
+            or binding.asset_state != "READY"
+        ):
+            invalid.append(binding)
+            continue
+        try:
+            valid = is_resource_anchor_within_book_scope(
+                book_anchor=SourceNodeRelativePath(binding.book_path),
+                book_anchor_kind=SourceNodePhysicalKind(binding.book_kind),
+                resource_anchor=SourceNodeRelativePath(binding.relative_path),
+            )
+        except ValueError:
+            valid = False
+        if not valid:
+            invalid.append(binding)
+    lost_bindings = (
+        set(previous.associations) - set(associations)
+        if previous is not None
+        else set()
+    )
+    checks = {
+        "countsMatchExpected": (
+            bool(records)
+            and len(associations)
+            == identity["resourceCount"]
+            == identity["assetCount"]
+            == len(records)
+        ),
+        "pathsMatchManifest": (
+            len(expected) == len(records)
+            and {binding.relative_path for binding in associations} == set(expected)
+        ),
+        "resourceIdsUnique": len({b.resource_id for b in associations}) == len(records),
+        "assetIdsUnique": len({b.asset_id for b in associations}) == len(records),
+        "bindingsValid": not invalid,
+        "previousBindingsPreserved": not lost_bindings,
+        "previousBookIdentitiesPreserved": previous is None
+        or all(
+            identity["bookBindings"].get(book_id) == source_node_id
+            for book_id, source_node_id in previous.identity["bookBindings"].items()
+        ),
+    }
+    passed = all(checks.values())
+    write_json(
+        report_path,
+        {
+            "capturedAt": utc_now(),
+            "status": "verified" if passed else "failed",
+            "checks": checks,
+            "identity": identity,
+            "associations": [asdict(binding) for binding in associations],
+            "invalidBindings": [asdict(binding) for binding in invalid],
+            "lostOrChangedBindings": [
+                asdict(binding)
+                for binding in sorted(lost_bindings, key=lambda b: b.resource_id)
+            ],
+        },
+    )
+    if not passed:
+        raise RuntimeError(f"resource association integrity failed; see {report_path}")
+    return ScanIntegritySnapshot(identity, associations)
 
 
 def _freeze_scan_settings(client: httpx.Client) -> dict[str, object]:
@@ -1455,6 +1666,17 @@ def _resource_summaries(metrics_path: Path) -> list[dict[str, object]]:
     return summaries
 
 
+def _integrity_evidence(run_root: Path) -> dict[str, object]:
+    evidence: dict[str, object] = {}
+    for path in sorted((run_root / "integrity").glob("*.json")):
+        report = json.loads(path.read_text(encoding="utf-8"))
+        evidence[path.stem] = {
+            "path": str(path),
+            **{key: value for key, value in report.items() if key != "associations"},
+        }
+    return evidence
+
+
 def _write_failure_evidence(run_root: Path, error_type: str) -> dict[str, object]:
     """Summarize an incomplete run without treating missing checks as passing."""
     logs = run_root / "logs"
@@ -1488,12 +1710,13 @@ def _write_failure_evidence(run_root: Path, error_type: str) -> dict[str, object
         else [],
         "lastScanObservation": json.loads(observations[-1]) if observations else None,
         "phases": [json.loads(line) for line in phases],
+        "integrityChecks": _integrity_evidence(run_root),
         "rescan": json.loads(rescan_path.read_text(encoding="utf-8"))
         if rescan_path.is_file()
         else {"status": "not_verified"},
         "missingEvidence": [
             "Only persisted phase records establish progress verification and scan coverage; absent records are unknown.",
-            "Post-scan source hashes and resource associations are not verified.",
+            "Only persisted integrity checkpoints establish source hashes and resource associations; absent checkpoints are not verified.",
             "An incomplete run cannot establish the full release LOAD gate.",
         ],
     }
@@ -1837,6 +2060,11 @@ def run_measurement(args: argparse.Namespace) -> Path:
     cleanup_errors: list[str] = []
     failure: Exception | None = None
     try:
+        _verify_source_hashes(
+            source_root,
+            initial_records,
+            run_root / "integrity/source-initial-before.json",
+        )
         api_port = free_port()
         worker_ready = run_root / "import-worker-ready"
         env = {
@@ -1918,6 +2146,17 @@ def run_measurement(args: argparse.Namespace) -> Path:
                 timeout_seconds=args.scan_timeout_seconds,
             )
             scan_results.append(initial_scan)
+            _verify_source_hashes(
+                source_root,
+                initial_records,
+                run_root / "integrity/source-initial-after.json",
+            )
+            initial_integrity = _verify_scan_integrity(
+                engine,
+                library_id,
+                initial_records,
+                run_root / "integrity/associations-initial-after.json",
+            )
 
             phase_state.set("dataset_expand", scan_active=False)
             if prepared_records is None or prepared_source is None:
@@ -1973,6 +2212,9 @@ def run_measurement(args: argparse.Namespace) -> Path:
                 output_path=run_root / "v5-sanity-initial.json",
             )
 
+            _verify_source_hashes(
+                source_root, records, run_root / "integrity/source-growth-before.json"
+            )
             growth_phase = _run_load_phase(
                 client=client,
                 engine=engine,
@@ -1992,6 +2234,16 @@ def run_measurement(args: argparse.Namespace) -> Path:
             phase_results.append(growth_phase)
             if growth_phase["scan"] is not None:
                 scan_results.append(growth_phase["scan"])
+            _verify_source_hashes(
+                source_root, records, run_root / "integrity/source-growth-after.json"
+            )
+            growth_integrity = _verify_scan_integrity(
+                engine,
+                library_id,
+                records,
+                run_root / "integrity/associations-growth-after.json",
+                previous=initial_integrity,
+            )
 
             pool_full = _resource_pool(engine, library_id)
             if len(pool_full["resourceIds"]) != TOTAL_FILES:
@@ -2019,7 +2271,17 @@ def run_measurement(args: argparse.Namespace) -> Path:
             )
             phase_results.append(idle_phase)
 
-            before_rescan = _identity_snapshot(engine, library_id)
+            _verify_source_hashes(
+                source_root, records, run_root / "integrity/source-rescan-before.json"
+            )
+            before_integrity = _verify_scan_integrity(
+                engine,
+                library_id,
+                records,
+                run_root / "integrity/associations-rescan-before.json",
+                previous=growth_integrity,
+            )
+            before_rescan = before_integrity.identity
             sentinels, rescan_pool = _seed_rescan_sentinels(
                 client,
                 pool_full,
@@ -2046,12 +2308,22 @@ def run_measurement(args: argparse.Namespace) -> Path:
             phase_results.append(rescan_phase)
             if rescan_phase["scan"] is not None:
                 scan_results.append(rescan_phase["scan"])
-            after_rescan = _identity_snapshot(engine, library_id)
+            _verify_source_hashes(
+                source_root, records, run_root / "integrity/source-rescan-after.json"
+            )
+            after_integrity = _verify_scan_integrity(
+                engine,
+                library_id,
+                records,
+                run_root / "integrity/associations-rescan-after.json",
+                previous=before_integrity,
+            )
+            after_rescan = after_integrity.identity
             sentinel_integrity = _verify_progress(client, sentinels, abort_event)
             rescan_integrity = {
                 "sentinelProgress": sentinel_integrity,
-                "sourceHashesAfterScanVerified": False,
-                "resourceAssociationIntegrityVerified": False,
+                "sourceHashesAfterScanVerified": True,
+                "resourceAssociationIntegrityVerified": True,
                 "before": before_rescan,
                 "after": after_rescan,
                 "countsUnchanged": all(
@@ -2089,6 +2361,8 @@ def run_measurement(args: argparse.Namespace) -> Path:
                     "relativePathsUniqueAfter",
                     "idsUniqueAfter",
                     "identityDigestsUnchanged",
+                    "sourceHashesAfterScanVerified",
+                    "resourceAssociationIntegrityVerified",
                 )
             ):
                 raise RuntimeError(
@@ -2142,12 +2416,13 @@ def run_measurement(args: argparse.Namespace) -> Path:
         ],
         "resourceSummaries": resource_summaries,
         "rescan": rescan_integrity,
+        "integrityChecks": _integrity_evidence(run_root),
         "budget": budget,
         "cleanupErrors": cleanup_errors,
         "limitations": [
             "Local precheck only: short windows and small generated media do not satisfy the full release LOAD gate.",
             "Serial endpoint clients back off under latency: actual rate and scan coverage must be assessed, not configured rate.",
-            "Source hashes after scanning and path/resource/asset association integrity were not verified.",
+            "Integrity checks cover manifest-listed single-file EPUB/PDF/CBZ originals and this isolated library, outside load windows; unrelated directories are not inspected.",
             "Queue activity is sampled; it does not prove continuous parser CPU activity.",
         ],
         "evidence": {
@@ -2169,6 +2444,7 @@ def run_measurement(args: argparse.Namespace) -> Path:
             "requests": str(requests_path),
             "resources": str(metrics_path),
             "rescanIntegrity": str(run_root / "rescan-integrity.json"),
+            "integrityChecks": str(run_root / "integrity"),
             "v5SanityInitial": str(run_root / "v5-sanity-initial.json"),
             "v5SanityFull": str(run_root / "v5-sanity-full.json"),
         },

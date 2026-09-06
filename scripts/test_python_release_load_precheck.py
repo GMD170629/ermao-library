@@ -2,17 +2,29 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
 import threading
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
 import httpx
 import psutil
 import pytest
+import python_release_load_precheck as precheck
+from app.db.base import Base
+from app.models import (
+    Library,
+    LibraryBook,
+    LibraryReadableResource,
+    LibraryResourceAsset,
+    LibrarySourceNode,
+)
+from app.modules.library.public import SourceNodeRelativePath
 from python_release_load_precheck import (
     FileRecord,
     LoadDriver,
@@ -23,10 +35,389 @@ from python_release_load_precheck import (
     _request_summaries,
     _seed_rescan_sentinels,
     _supervise_measurement_process,
+    _verify_scan_integrity,
+    _verify_source_hashes,
     _write_failure_evidence,
     stage_dataset,
 )
 from python_smoke_process import start_logged_process
+from sqlalchemy import create_engine, event, select
+from sqlalchemy.orm import Session
+
+
+def make_source(root: Path, index: int) -> FileRecord:
+    relative = f"group-{index}/sample-{index}.epub"
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    content = f"original-{index}".encode()
+    path.write_bytes(content)
+    return FileRecord(
+        relative,
+        "epub",
+        f"sample-{index}",
+        index,
+        "small",
+        len(content),
+        hashlib.sha256(content).hexdigest(),
+    )
+
+
+def add_sample_identity(
+    db: Session, record: FileRecord, library_id: str = "owned"
+) -> None:
+    suffix = f"{library_id}-{record.ordinal}"
+    for node_id, relative, kind in (
+        (
+            f"book-node-{suffix}",
+            str(Path(record.relative_path).parent).replace("\\", "/"),
+            "DIRECTORY",
+        ),
+        (f"file-node-{suffix}", record.relative_path, "REGULAR_FILE"),
+    ):
+        db.add(
+            LibrarySourceNode(
+                id=node_id,
+                library_id=library_id,
+                relative_path=relative,
+                path_key=SourceNodeRelativePath(relative).path_key,
+                name=Path(relative).name,
+                physical_kind=kind,
+                observed_size_bytes=record.size_bytes
+                if kind == "REGULAR_FILE"
+                else None,
+                observed_mtime_ns=1,
+                observed_at=datetime(2026, 9, 6, tzinfo=UTC),
+            )
+        )
+    db.flush()
+    db.add(
+        LibraryBook(
+            id=f"book-{suffix}",
+            library_id=library_id,
+            source_node_id=f"book-node-{suffix}",
+        )
+    )
+    db.flush()
+    db.add(
+        LibraryReadableResource(
+            id=f"resource-{suffix}",
+            library_id=library_id,
+            book_id=f"book-{suffix}",
+            source_node_id=f"file-node-{suffix}",
+            adapter_id="epub",
+            adapter_version="1",
+            format=record.format,
+            import_state="READY",
+        )
+    )
+    db.flush()
+    db.add(
+        LibraryResourceAsset(
+            id=f"asset-{suffix}",
+            library_id=library_id,
+            resource_id=f"resource-{suffix}",
+            source_node_id=f"file-node-{suffix}",
+            role="PRIMARY",
+            import_state="READY",
+        )
+    )
+
+
+@pytest.fixture
+def integrity_library(tmp_path: Path):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            model.__table__
+            for model in (
+                Library,
+                LibrarySourceNode,
+                LibraryBook,
+                LibraryReadableResource,
+                LibraryResourceAsset,
+            )
+        ],
+    )
+    source_root = tmp_path / "source"
+    records = [make_source(source_root, index) for index in range(2)]
+    with Session(engine) as db, db.begin():
+        for library_id in ("owned", "unrelated"):
+            db.add(
+                Library(
+                    id=library_id,
+                    name=library_id,
+                    root_path=library_id,
+                    organization_mode="FLAT",
+                )
+            )
+        db.flush()
+        for record in records:
+            add_sample_identity(db, record)
+        add_sample_identity(db, records[0], "unrelated")
+    try:
+        yield engine, source_root, records
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("damage", ["same_size", "size", "missing"])
+def test_source_hashes_reopen_originals_and_preserve_failure_report(
+    tmp_path: Path,
+    damage: str,
+) -> None:
+    source = tmp_path / "source"
+    record = make_source(source, 0)
+    _verify_source_hashes(source, [record], tmp_path / "before.json")
+    path = source / record.relative_path
+    if damage == "missing":
+        path.unlink()
+    else:
+        path.write_bytes(b"x" * (record.size_bytes if damage == "same_size" else 1))
+    report = tmp_path / "after.json"
+    with pytest.raises(RuntimeError, match="source hash integrity failed"):
+        _verify_source_hashes(source, [record], report)
+    evidence = json.loads(report.read_text())
+    assert evidence["status"] == "failed"
+    assert evidence["verifiedFiles"] == 0
+    assert evidence["failures"][0]["relativePath"] == record.relative_path
+    if damage == "same_size":
+        assert evidence["failures"][0]["actualSizeBytes"] == record.size_bytes
+        assert evidence["failures"][0]["actualSha256"] != record.sha256
+
+
+@pytest.mark.parametrize("escape", ["relative", "absolute", "symlink"])
+def test_hash_check_never_reads_outside_owned_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    escape: str,
+) -> None:
+    source = tmp_path / "owned"
+    source.mkdir()
+    private = tmp_path / "private.epub"
+    private.write_bytes(b"private")
+    relative = "../private.epub" if escape == "relative" else str(private)
+    if escape == "symlink":
+        relative = "link.epub"
+        original_resolve = Path.resolve
+
+        def resolve(path: Path, *args, **kwargs) -> Path:
+            return (
+                private
+                if path == source / relative
+                else original_resolve(path, *args, **kwargs)
+            )
+
+        monkeypatch.setattr(Path, "resolve", resolve)
+
+    def forbidden_hash(path: Path) -> str:
+        pytest.fail("escaped source must not be opened")
+
+    monkeypatch.setattr(precheck, "sha256_file", forbidden_hash)
+    report = tmp_path / "integrity/source-initial-before.json"
+    with pytest.raises(RuntimeError, match="source hash integrity failed"):
+        _verify_source_hashes(
+            source,
+            [FileRecord(relative, "epub", "test", 1, "small", 7, "hash")],
+            report,
+        )
+    assert json.loads(report.read_text())["failures"][0]["errorType"] == "ValueError"
+    assert private.read_bytes() == b"private"
+
+
+def test_integrity_checks_are_read_only_and_library_scoped(
+    tmp_path: Path,
+    integrity_library,
+) -> None:
+    engine, source, records = integrity_library
+    originals = {
+        r.relative_path: (source / r.relative_path).read_bytes() for r in records
+    }
+    writes: list[str] = []
+
+    def observe(connection, clause, multiparams, params, execution_options) -> None:
+        if not clause.is_select:
+            writes.append(type(clause).__name__)
+
+    event.listen(engine, "before_execute", observe)
+    try:
+        _verify_source_hashes(
+            source, records, tmp_path / "integrity/source-rescan-after.json"
+        )
+        before = _verify_scan_integrity(
+            engine, "owned", records, tmp_path / "before.json"
+        )
+        after = _verify_scan_integrity(
+            engine, "owned", records, tmp_path / "after.json", previous=before
+        )
+    finally:
+        event.remove(engine, "before_execute", observe)
+    assert writes == []
+    assert after.associations == before.associations
+    assert len(after.associations) == len(records)
+    assert {
+        r.relative_path: (source / r.relative_path).read_bytes() for r in records
+    } == originals
+    assert json.loads((tmp_path / "after.json").read_text())["status"] == "verified"
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "asset_path",
+        "asset_resource_swap",
+        "asset_id_swap",
+        "book_swap",
+        "book_replaced",
+        "resource_deleted",
+        "resource_replaced",
+        "missing_book",
+        "cross_library_book",
+        "orphan_asset",
+        "resource_not_ready",
+        "asset_not_ready",
+    ],
+)
+def test_association_check_rejects_loss_rebinding_and_non_ready_rows(
+    tmp_path: Path,
+    integrity_library,
+    damage: str,
+) -> None:
+    engine, _, records = integrity_library
+    before = _verify_scan_integrity(engine, "owned", records, tmp_path / "before.json")
+    with Session(engine) as db, db.begin():
+        resource = db.scalars(
+            select(LibraryReadableResource).where(
+                LibraryReadableResource.id == "resource-owned-0"
+            )
+        ).one()
+        asset = db.scalars(
+            select(LibraryResourceAsset).where(
+                LibraryResourceAsset.id == "asset-owned-0"
+            )
+        ).one()
+        if damage == "asset_path":
+            asset.source_node_id = "file-node-owned-1"
+        elif damage == "asset_resource_swap":
+            other = db.scalars(
+                select(LibraryResourceAsset).where(
+                    LibraryResourceAsset.id == "asset-owned-1"
+                )
+            ).one()
+            asset.resource_id, other.resource_id = other.resource_id, asset.resource_id
+        elif damage == "asset_id_swap":
+            other = db.scalars(
+                select(LibraryResourceAsset).where(
+                    LibraryResourceAsset.id == "asset-owned-1"
+                )
+            ).one()
+            asset.id = "temporary-id"
+            db.flush()
+            other.id = "asset-owned-0"
+            db.flush()
+            asset.id = "asset-owned-1"
+        elif damage == "book_swap":
+            resource.book_id = "book-owned-1"
+        elif damage == "book_replaced":
+            book = db.scalars(
+                select(LibraryBook).where(LibraryBook.id == resource.book_id)
+            ).one()
+            book.id = resource.book_id = "replacement-book"
+        elif damage == "resource_deleted":
+            db.delete(resource)
+        elif damage == "resource_replaced":
+            resource.id = asset.resource_id = "replacement-resource"
+        elif damage == "missing_book":
+            resource.book_id = "missing"
+        elif damage == "cross_library_book":
+            resource.book_id = "book-unrelated-0"
+        elif damage == "orphan_asset":
+            db.add(
+                LibraryResourceAsset(
+                    id="orphan",
+                    library_id="owned",
+                    resource_id="missing",
+                    source_node_id="file-node-owned-0",
+                    role="PRIMARY",
+                    import_state="READY",
+                )
+            )
+        elif damage == "resource_not_ready":
+            resource.import_state = "PENDING"
+        else:
+            asset.import_state = "FAILED"
+    report = tmp_path / "integrity/associations-rescan-after.json"
+    with pytest.raises(RuntimeError, match="resource association integrity failed"):
+        _verify_scan_integrity(engine, "owned", records, report, previous=before)
+    evidence = json.loads(report.read_text())
+    assert evidence["status"] == "failed"
+    assert not all(evidence["checks"].values())
+    if damage == "asset_id_swap":
+        assert evidence["identity"]["assetIdDigest"] == before.identity["assetIdDigest"]
+        assert evidence["checks"]["bindingsValid"] is True
+        assert evidence["checks"]["previousBindingsPreserved"] is False
+    failure = _write_failure_evidence(tmp_path, "RuntimeError")
+    assert failure["integrityChecks"]["associations-rescan-after"]["status"] == "failed"
+    assert report.is_file()
+
+
+def test_growth_preserves_existing_identities_while_adding_samples(
+    tmp_path: Path,
+    integrity_library,
+) -> None:
+    engine, source, records = integrity_library
+    before = _verify_scan_integrity(engine, "owned", records, tmp_path / "before.json")
+    added = make_source(source, 2)
+    with Session(engine) as db, db.begin():
+        add_sample_identity(db, added)
+    after = _verify_scan_integrity(
+        engine, "owned", records + [added], tmp_path / "growth.json", previous=before
+    )
+    assert set(before.associations) < set(after.associations)
+
+
+def test_measurement_integrity_failure_reaches_cli_and_keeps_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_root = tmp_path / "measurement"
+    run_root.mkdir()
+    (run_root / "logs").mkdir()
+    state_path = tmp_path / "supervisor-state.json"
+    monkeypatch.setattr(precheck, "_new_run_root", lambda label: run_root)
+    monkeypatch.setattr(precheck, "_git_commit", lambda: "baseline")
+    monkeypatch.setattr(precheck, "_backend_source_digest", lambda: "digest")
+    monkeypatch.setattr(precheck, "_machine_snapshot", lambda root: {})
+
+    def corrupted_dataset(
+        root: Path, limit: int, *, log_path: Path
+    ) -> list[FileRecord]:
+        record = make_source(root, 0)
+        (root / record.relative_path).write_bytes(b"x" * record.size_bytes)
+        return [record]
+
+    def forbidden_services(*args, **kwargs):
+        pytest.fail("this test must not start services")
+
+    monkeypatch.setattr(precheck, "generate_dataset", corrupted_dataset)
+    monkeypatch.setattr(precheck, "_start_service_processes", forbidden_services)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "precheck",
+            "--measure-window",
+            "--measurement-child",
+            "--supervisor-state",
+            str(state_path),
+        ],
+    )
+    with pytest.raises(RuntimeError, match="source hash integrity failed"):
+        precheck.main()
+    assert json.loads(state_path.read_text()) == {"status": "failed"}
+    failure = json.loads((run_root / "failure-summary.json").read_text())
+    assert failure["integrityChecks"]["source-initial-before"]["status"] == "failed"
+    assert not (run_root / "complete.json").exists()
 
 
 def test_latency_summary_keeps_failures_and_scan_states(tmp_path: Path) -> None:
