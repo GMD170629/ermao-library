@@ -544,13 +544,7 @@ async function setupLiveCatalog(
   const logout = await requestJson(page, webOrigin, '/api/auth/logout', apiResponses, 'POST');
   expect(logout.status).toBe(200);
   await page.context().clearCookies();
-  await page.goto(`${webOrigin}/login`, { waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('button', { name: '登录', exact: true })).toBeVisible();
-  const loginInputs = page.locator('form input');
-  await loginInputs.nth(0).fill(manifest.email);
-  await loginInputs.nth(1).fill(password);
-  await page.getByRole('button', { name: '登录', exact: true }).click();
-  await expect(page).toHaveURL(/\/library$/);
+  await loginLiveAccount(page, webOrigin, manifest.email, password);
 
   const expectedBookCount = new Set(catalog.map((entry) => entry.bookId)).size;
   const libraryBookButtons = page.getByRole('button', { name: /查看《/ });
@@ -571,6 +565,16 @@ function livePassword(): string {
   const password = process.env.RELEASE_LIVE_PASSWORD;
   if (!password || password.length < 10) throw new Error('RELEASE_LIVE_PASSWORD must be a local-only password of at least 10 characters');
   return password;
+}
+
+async function loginLiveAccount(page: Page, webOrigin: string, email: string, password: string) {
+  await page.goto(`${webOrigin}/login`, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('button', { name: '登录', exact: true })).toBeVisible();
+  const loginInputs = page.locator('form input');
+  await loginInputs.nth(0).fill(email);
+  await loginInputs.nth(1).fill(password);
+  await page.getByRole('button', { name: '登录', exact: true }).click();
+  await expect(page).toHaveURL(/\/library$/);
 }
 
 async function openLiveAudioPlayer(page: Page) {
@@ -671,6 +675,11 @@ test('release live paused confirmed MP3 survives dedicated Chrome process termin
   let profile: string | null = null;
   let primaryFailure: Error | null = null;
   let cleanupFailure: Error | null = null;
+
+  // POS03's observed restart 401 needs cookie-presence evidence, never values.
+  const cookieMetadata = async (context: BrowserContext, origin: string) =>
+    (await context.cookies(origin)).map(({ name, expires, httpOnly, secure, sameSite }) =>
+      ({ name, expires, httpOnly, secure, sameSite }));
 
   const launch = async (profilePath: string) => {
     const startedAt = Date.now();
@@ -787,6 +796,7 @@ test('release live paused confirmed MP3 survives dedicated Chrome process termin
     expect(await storedProgress(page)).toEqual(confirmed);
     expect(await engine.evaluate((element: HTMLAudioElement) => element.paused)).toBe(true);
     expect(apiResponses.filter((response) => response.status >= 500)).toEqual([]);
+    evidence.cookiesBeforeKill = await cookieMetadata(source.context, webOrigin);
     evidence.kill = { root: verifiedRoot, signal: 'SIGKILL', beforeKillAt: Date.now(), pageOpen: true };
     await writeFile(resolve(manifest.artifactDir, 'process-recovery-before-kill.json'), `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
     // Recheck PID + creation time immediately before the destructive operation.
@@ -810,6 +820,18 @@ test('release live paused confirmed MP3 survives dedicated Chrome process termin
     const afterRestart = await storedProgress(reopened);
     evidence.afterRestart = afterRestart;
     expect(afterRestart).toEqual(confirmed);
+    evidence.cookiesAfterRestart = await cookieMetadata(target.context, webOrigin);
+    const restartProgress = await requestJson(reopened, webOrigin, progressPath, apiResponses);
+    evidence.restartAuthentication = { status: restartProgress.status, requiredLogin: restartProgress.status === 401 };
+    // Process recovery preserves position; it does not bypass authentication.
+    // Preserve the 401 and use the same real UI login as fresh setup.
+    if (restartProgress.status === 401) {
+      await loginLiveAccount(reopened, webOrigin, manifest.email, password);
+      expect(await storedProgress(reopened)).toEqual(confirmed);
+    } else {
+      expect(parseReaderV5ProgressSnapshot(responseData(restartProgress, progressPath).progressSnapshot))
+        .toEqual(ack.currentSnapshot);
+    }
     expect(parseReaderV5ProgressSnapshot(
       responseData(await requestJson(reopened, webOrigin, progressPath, apiResponses), progressPath).progressSnapshot
     )).toEqual(ack.currentSnapshot);

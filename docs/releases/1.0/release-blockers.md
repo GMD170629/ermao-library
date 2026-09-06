@@ -4,6 +4,8 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 
 ## R1 状态覆盖与外部条件
 
+POS-03当前实际限制：`a9bb694b`两视口已完成专用Chrome强杀并证明已确认IDB位置5668/5857ms完整保留，但首次GET401，真实播放器恢复仍未验证，不关闭该子项。保留原FAIL并通过现有同账号UI登录继续；只记录cookie是否存在等非秘密元数据，不推定401根因、不改产品认证。所有位置、mutation、revision、IDB和2秒恢复断言保留；原场景及必要相邻通过即停止工具完善。
+
 TEST-12 / POS-03：`ef3dc979`首次实际production Chrome在setup进程归属核验失败，CDP `Browser.getBrowserCommandLine`明确要求`--enable-automation`。未登录/未强杀，不是产品恢复失败；专用context/profile与fixture已清理。当前仅给该专用Chrome增加此启动参数，保留CDP/CIM、创建时间和精确profile守卫；依据已安装Playwright 1.61.1协议声明及真实错误，不删除校验。DEC-07允许原因是当前必测项无法进入执行；停止条件为原强杀恢复实际通过及已抽取owner的必要相邻通过。原live/POS-04相邻已在`ef3dc979`分别PASS，新增原场景待重跑。
 
 最新恢复点 `02d6ea2d`：POS-04 Chrome桌面/移动视口EPUB离线页面重建与重连子项已实际PASS（完整pending不变，ACK/本地确认/独立GET965ms及959ms，恢复第二章），原live生产相邻PASS，源码/样本/服务清理复核通过。测试仅服务该必测缺口，复用现有owner，达到停止条件；独立工作区首次生产构建被跨根依赖链接阻断的环境失败已留证，通过主工作区现成环境解决，未新增依赖/工具能力。POS-03进程强杀及其他异常/格式组合继续；ENV-11、iOS/容器及正式产物暂缓不变，未冻结RC，不作整体GO。

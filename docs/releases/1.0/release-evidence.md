@@ -4,6 +4,8 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+POS-03实际强杀已执行但完整用例尚未通过：`a9bb694b/process-recovery/r1788704683244-w0/`及`r1788704727087-w1/`，Chrome两视口分别确认5668ms/r3、5857ms/r3后直接SIGKILL，旧root退出且同profile新root启动，完整IDB记录前后一致；随后首次GET均401，故未进入引擎恢复，原两次FAIL保留。两context、root、专用profile及fixture清理成功，55244已结束。已核对现有会话cookie带expires，但现场不证明401唯一根因；仅增加不含值的cookie元数据观察，并复用原真实UI登录同账号后继续，仍要求登录前后完整IDB、独立GET及实际播放位置不丢失。不得注入会话/进度，也不宣称免重登恢复。该最小修正服务POS-03的实际401阻断，typecheck和文件eslint通过；原场景实际完成后停止扩展。
+
 POS-03针对性测试`92b240ca`已整合为`ef3dc979`，仅复用原setup、音频打开与只读IDB观察，并增加专用持久Chrome的进程归属/强杀/重启验证；完整typecheck/lint通过。首跑`artifacts/releases/1.0/ef3dc979/process-recovery-and-adjacent/r1788704462524-w0/`在CDP命令行读取阶段因缺`--enable-automation`失败，尚未实际强杀；browser-observations和shutdown保留，context关闭、专用profile移除、fixture退出通过。原live及POS-04相邻2 PASS，完整命令如实为1 FAIL+2 PASS。TEST-12只补该参数后重跑原场景，保留所有安全守卫，不改业务或扩框架；执行53319已结束。
 
 当前恢复点 `02d6ea2d80b3b7820dc09c3c05ed605cbe674c92`：POS-04的Chrome桌面/移动视口EPUB离线pending、页面重建及重连恢复子项均PASS。真实“下一章”产生第二章完整Locator；断网页面关闭后，新页面由生产Service Worker提供离线页，只读IDB确认pending/exact完整值不变；重连原mutation获ACK，revision从1到2，本地pending清空且独立GET完整值一致，分别用时965ms/959ms（从真实认证响应开始，包含ACK落盘与GET，阈值5秒），实际Reader恢复第二章。没有模拟API、手写进度或IDB注入；不代表进程强杀、原生客户端或另端离线交接通过。
