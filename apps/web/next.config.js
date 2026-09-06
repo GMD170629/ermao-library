@@ -30,6 +30,11 @@ const nextConfig = {
   httpAgentOptions: {
     keepAlive: false
   },
+  experimental: {
+    // Media prebuffering can leave the loopback upstream idle while Chrome
+    // applies backpressure. Client disconnects still close the proxy stream.
+    proxyTimeout: 3_600_000
+  },
   async rewrites() {
     const apiOrigin = pythonBackendOrigin();
     return {

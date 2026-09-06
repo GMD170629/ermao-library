@@ -4,6 +4,10 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+SYNC-02修复已集成为 `76a88845`：Reader与音频复用coordinator启动入口，在pending为空后通过现有queryTransport读取当前服务端位置；保留直接目标优先、完整身份/Locator、取消及迟到结果保护，服务端空位置清除旧恢复值。不读取local exact、不按revision合并。原纯规则及测试搬至唯一owner，旧实现删除。受控原竞态及相邻回归通过，完整Web476 PASS/0 skip（`audio-soak/ack-bootstrap-race/full-web-candidate.log`），独立只读复核35 PASS且无新增阻断；实际Chrome回归待执行。
+
+AUDIO-04运输机制已实证：`audio-soak/audio04-transport-once.jsonl` 同Next16.2.12/Node22.23.1和原MP3 Range，在客户端暂停读取40秒时，默认30000ms于30029ms超时并abort上游，客户端最终仅524288/12880827字节；null SDK参数对照完整收到且SHA一致。客户端aborted出现在60秒诊断收尾，不能误记为30秒客户端事件。两服务/所有socket与流已清理。此为机制复现，原Chrome停顿仍待真实回归。实际Next配置schema不接受null，因此候选使用合法有限3600000ms空闲超时，保持loopback限制、断连清理和现有后端容量限制；配置schema与ESLint通过，有限值同运输对照及原长播放待验证。该最小诊断仅服务AUDIO-04，实收/哈希/清理验证后停止。
+
 DEC-08：用户明确“OPDS 客户端标记为通过，我会自行测试”。OPDS-01/02及OPDS-03真实客户端部分PASS（负责人放行，用户自行测试），解除ENV-04客户端环境阻塞。代理没有完成两客户端实际认证/浏览/下载验收，不虚构名称、版本或测试结果；下方客户端权限调查保留为历史，不再等待授权，也不继续安装或扩展工具。已有协议/安全回归和DEC-05关闭同步要求保持，最终RC按实际执行单独登记。
 
 AUDIO-04（RG-03音频稳定性、RG-04/POS-02）实际FAIL：生产Chrome1800秒运行 `audio-soak/runs-production-1800/r1788689717566-w0/` 在观测699.373秒终止，播放停在704256.08ms，readyState=2、paused=false；waiting/stalled后无推进5300.4ms，采样最大间隔119.7ms，不能解释为观察器停顿，也不能计30分钟通过。完整FFmpeg解码同一MP3至1898.354286秒无错，`audio04-full-decode.log`。API记录Range `bytes=2307064-` 的流32640ms结束；该日志bytes是预期长度，不是实发证明。锁定Next16.2.12的默认30秒上游socket空闲超时是待验证候选，不能仅凭时间相近定根因。
@@ -23,9 +27,9 @@ DEC-07已纳入执行：停止已关闭AUDIO-03和ANDROID-03周边工具完善�
 | 门禁 | 当前事实 | 下一步 / 真实限制 |
 |---|---|---|
 | RG-01 交付 | NOT_RUN / 部分BLOCKED | APK/IPA正式构建用户暂缓；Docker引擎、Mac/iOS条件仍缺 |
-| RG-02 初始化/连接 | 第一方新库链路部分PASS，整组NOT_RUN | 继续组织模式/异常连接与两个真实OPDS客户端；Windows库存未确认客户端，Android349包仅发现多看/番茄且OPDS能力未证实 |
+| RG-02 初始化/连接 | 第一方新库链路部分PASS；OPDS客户端负责人放行（DEC-08） | 继续组织模式/异常连接及协议回归；双客户端由用户自测，不虚构代理实测 |
 | RG-03 格式 | 部分PASS，HTML剩余边界FAIL | READER-03实体上下文待收敛；逐格式/异常媒体/原生iOS矩阵未完成 |
-| RG-04 进度 | 已复现快速关闭缺陷已修复，整组NOT_RUN | 生产Chrome30分钟播放正在执行；异常恢复、跨端仍待验收 |
+| RG-04 进度 | AUDIO-03已关闭；SYNC-02候选自动回归PASS；AUDIO-04长播放FAIL | 启动进度和长音频修复需实际Chrome回归；异常恢复、跨端仍待验收 |
 | RG-05 导入性能 | 本轮本机1万导入预检PASS（DEC-06） | 大规模/长时压力独立脚本按需运行，不作为当前阻塞；不外推NAS或30万表现 |
 
 持续播放最近恢复点：`audio-soak/production-1800-execution.json`，run `r1788689717566-w0`，启动源版本 `a5ac3b8b`，已以AUDIO-04 FAIL结束并安全清理。后续从原事件/HTTP日志定位，不假定它仍在运行。此工作属于音频功能稳定性，不是已停止的超大书库压测。
