@@ -41,8 +41,8 @@ class KtorReaderPositionSyncPort internal constructor(
             )) {
                 is ApiResult.Success -> runCatching {
                     ReaderPositionPushResult.Accepted(
-                        mapper.decodeWriteResponse(
-                            result.value.toString(),
+                        mapper.decodeWriteResponseData(
+                            result.value,
                             upload.target.resourceId,
                         ),
                     )

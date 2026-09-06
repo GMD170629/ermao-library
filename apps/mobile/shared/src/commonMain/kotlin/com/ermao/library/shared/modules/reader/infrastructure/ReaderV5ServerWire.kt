@@ -38,10 +38,8 @@ class ReaderV5ServerWireMapper(
 
     internal fun responseSerializer() = JsonObject.serializer()
 
-    fun decodeWriteResponse(payload: String, expectedResourceId: String): ReaderPositionWriteResponse {
-        val root = parseObject(payload, "Reader v5 progress response")
-        requireTrue(root.requiredBoolean("ok"), "Reader v5 progress response is unsuccessful")
-        val data = root.requiredObject("data")
+    /** ApiClient has already validated and unwrapped the HTTP envelope. */
+    fun decodeWriteResponseData(data: JsonObject, expectedResourceId: String): ReaderPositionWriteResponse {
         requireKeys(data, setOf("acceptedMutationId", "acceptedRevision", "currentSnapshot"))
         val acceptedMutationId = requireReaderMutationId(data.requiredString("acceptedMutationId"))
         val acceptedRevision = data.requiredLong("acceptedRevision")
