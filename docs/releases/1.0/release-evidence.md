@@ -4,6 +4,10 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+TEST-11完整时窗本轮关闭：生产Chrome `audio-soak/runs-tailfix-1800/r1788699790558-w0/`（受测源码 `e0299fda`）整用例1 PASS/31.3分钟，实际末条jsonl覆盖1805229.4ms；最大采样间隔和无推进间隔均116.3ms，原2秒阈值、事件、连续确认断言均保留。暂停保存475433ms→重开475000ms，误差433ms；随后既有production PWA步骤通过。主实际运行既有verify-run.py核验7样本、911应用源码不变，Next两配置恢复、18081/3102关闭、所有fixture进程退出、无API5xx；`post-run-verification.json` 为PASS，执行38954已结束。原1799429.1ms尾段不足证据仍保留；工具至此停止完善，不把本项外推为多轨/移动端后台/最终RC。
+
+真实MP3双向子项已执行PASS：源Web完整PUT获服务器确认5857ms/r4→空本地库Android真实Paused5857ms；Android原5/10秒确认9728ms/r7、13738ms/r8，暂停15749ms/r9→全新Web会话首次读取对应Android client/r9，实际恢复15763.868ms（误差14.868ms）。Android单项JUnit1 PASS/13.901s，Web两阶段PASS；关闭后的 `CLOSED_PENDING` 如实保留，不称outbox清零。证据在Android工作树 `android-web-sync-mp3-20260906/` 的 `web-source.json`、`android-online-evidence.log`、`instrumentation.log`、`web-target.json`。主及独立代理已复核真实UI/原生owner、完整mutation/位置读回、909 Web/API文件与7样本hash、无API5xx及浏览器/fixture清理。主APK仍 `2fb7cb32…`，本次测试APK `531ae5c92e2879f87d8ff23d48c4f03e6d65a8ae52c7e686457f28efff5620c9`，测试源码 `ac25497d`（前提交 `647752d5`）；fixture启动在647752d5，随后仅新测试跨client时钟比较修正，应用源码未变。测试提交暂未整合，原online MP3相邻回归完成后再合入；不同源码的结果不组合成冻结RC放行。
+
 已补齐HTML整合后的完整后端回归：`e0299fda` 同一git归档（SHA256 `c5abf2b7803fb723bef5ffbc9826be5ee03145d687ea34fa9aa4be729195fdfc`），Linux1381 PASS/2项已有Windows专用skip，Windows精确补测2 PASS；Ruff format/check、mypy、native C检查全部通过，coverage 77.7791%。主复核原pytest日志、skip补测对应、归档hash与两平台清理；4169归档文件前后不变，未安装/升级依赖。完整证据 `artifacts/releases/1.0/e0299fda24880d83160abecfafbdd00805b1e01a/backend-baseline/backend-e0299fda-20260906-r1/`。仅既有Starlette弃用警告，不计最终RC或性能放行。Android最终仪器源码的opt-in lint也已通过（候选93100b0证据目录 `final-instrumentation-lint.log`），停止扩展已关闭音频缺陷。
 
 RG-04 MP3 W→A→W正在补必测入口：原online用例强制服务端初始空，无法验另一端已确认的位置；只在现有Android测试抽取认证/播放器/数据库观察共用owner并加一个目标用例，保留原5/10秒、完整Locator、pending/revision断言，无新增fixture字段。主的固定浏览器执行记录 `D:/www/ermao-release-android-formats/artifacts/releases/1.0/93100b0677e6b7426eca448d59ce53d3658a0d39/android-web-sync-mp3-20260906/browser-handoff.cjs` 仅使用真实UI产生进度和fresh GET：源最后真实PUT的mutation/client/capture/完整position获服务器确认，目标使用全新Web context；私有测试凭据仅内存交接，失败脱敏与独立浏览器清理已核对。此为DEC-07允许的当前必测项最小执行记录，未运行不计PASS；停止条件为一次真实双向交接及原在线相邻回归通过，不增加通用配置/框架或强杀功能。

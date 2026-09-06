@@ -1,5 +1,7 @@
 # 1.0 发布验收矩阵
 
+新增实际通过：TEST-11生产Chrome完整1800秒时窗与原后续重开/PWA流程（末条采样1805229.4ms、恢复误差433ms）；MP3 W→A与A→W正常交接（5857ms→5857ms、15749ms→15763.868ms），独立新Web会话，Android真实引擎及5/10秒确认。仅这些子项PASS；跨端测试原online相邻回归待完成，不代替异常组合、其他格式或最终RC。详见release-evidence最新证据。
+
 最新覆盖：Android AUDIO-07/08/09原捕获、跨资源串写、Stop后迟到重启已修复并真实回归，主整合至 `b912b427`；AUDIO-06原FLAC5/10秒确认及暂停8610ms→重开8610ms通过，PCM恢复误差10ms。POS-02/08上述子场景PASS，原RED保留；不代表全部资源/账号/服务器/格式组合通过。下文旧候选和FLAC FAIL状态为历史，完整证据见release-evidence首节。W↔Android同步和进程重启仍NOT_RUN，iOS相关项仍BLOCKED；TEST-11完整时窗待实跑，未冻结RC。
 
 配套硬要求与建议阈值唯一见 release-gate.md；事实来源见其 §6；证据登记见 release-evidence.md；缺项见 release-blockers.md。本表是可执行计划，**未执行不计 PASS**。
