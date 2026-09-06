@@ -8,7 +8,11 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 
 新增AUDIO-05（AAC-LC，RG-03/AUD-04+RG-04/POS-01）：真实5/10秒确认及9911ms暂停通过，重开容差FAIL，瞬时恢复值未知。新增AUDIO-06（FLAC24-bit，RG-03/AUD-05+RG-04/POS-02）：首5秒确认期限FAIL，瞬时状态未知。均为尚待分类的必测失败，不能仅用finally后DB推断根因；只补既有断言前最小观测，各一次复验后转具体业务修复或真实环境结论。WAV同入口9955ms恢复PASS独立保留。
 
-ENV-11：SYNC-02修正后的真实Chrome/IDB对照因自动审批拒绝隔离production Next启动而BLOCKED，理由仅“blocked by policy”。RED/GREEN构建和用例已备妥，已请求用户确认3107/3108回环服务；不得换启动方式绕过。该项不阻塞Android缺陷与其他独立验证。IMP-01双模式真实API拓扑通过，但实际venv与指定入口不同，保留环境限制，Web界面/最终RC仍待验收。
+ENV-11：用户已明确允许3107/3108回环测试服务。按相同命令重试仍在创建进程前被自动审批拒绝，理由仅“blocked by policy”；两端口无监听，RED/GREEN仍NOT_RUN。已请求用户手动启动已备妥的两份构建，不重复索要授权、不换入口绕过。拒绝及清理记录位于启动修复工作树的 `apps/web/.next/startup-progress/browser-red-green/explicit-authorization-*.json`。此项不阻塞其他验证。
+
+AUDIO-05/06诊断已取得断言前现场且停止扩展：AAC确认9916ms/rev4，重开0ms/Paused；FLAC截止时Playing/4185ms，但SQLite仍0ms/rev1、无pending/terminal，未满足GET前置。不是finally数据库反推；两项仍FAIL。AAC现有Media3 1.8.1默认ADTS寻址禁用与归零链相符，待最小配置修复及真实回归；FLAC继续核对首次播放/捕获时序。既有测试仅补观测，主APK不变，设备和服务清理通过。
+
+IMP-01双模式真实API拓扑通过，但实际venv与指定入口不同，保留环境限制；已使用现有fixture推进实际Chrome界面子项，未执行完成前不计PASS。
 
 下方旧的“最新/当前”表述为历史过程，以本节恢复点和release-evidence最新记录覆盖。
 

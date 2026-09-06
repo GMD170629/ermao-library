@@ -4,6 +4,12 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+2026-09-06 19:40恢复增量：用户已授权SYNC-02的3107/3108服务；子任务实际重试仍在进程创建前遭自动审批拒绝，精确理由 `rejected: blocked by policy`。启动前Node/源码/测试/构建hash匹配，未创建Chrome context或服务，两端口均空闲；RED/GREEN仍NOT_RUN。证据 `D:/www/ermao-release-startup-progress/apps/web/.next/startup-progress/browser-red-green/explicit-authorization-start-rejection.json` 与 `explicit-authorization-cleanup.json`。已给用户两条现有构建的手动启动命令，等待期间继续Android和IMP-01界面验收。
+
+AUDIO-05/06最小诊断各一次真实FAIL，证据根 `D:/www/ermao-release-android-formats/artifacts/releases/1.0/0c28f117a8cb5733d20952e29e22d10b210f83b4/android-format-diagnostics-20260906/`：AAC暂停/GET9916ms、rev4，重开0ms/Paused，双方duration30009ms；FLAC期限现场Playing/4185ms/duration30000，稳定SQLite仍0ms/rev1/pending=false/terminal=null，本窗口未满足GET前置。原断言、时限与轮询不变，原方法缺失断言瞬间值而finally会更新Stop位置，因此仅在既有测试加最小状态摘要。已达到记录现场的停止条件，不再扩展诊断；下一步具体SDK配置/捕获时序定位。主APK前后保持 `b3fe0086…`，测试包完整hash与样本校验见 `hashes-before-run.json` 和 `handoff.json`；两fixture/仪器/Gradle已退出、18084/3105关闭、reverse已移除。
+
+IMP-01正在补实际Chrome界面创建、扫描及两模式可见目录，复用现有fixture和固定操作；既有API拓扑已足以覆盖的部分不再造工具。必须使用主工作区发布venv；取得两模式真实结果与清理证据即停止，不扩通用测试能力。`e85fb206` 的最小连续观察退出条件已通过主typecheck（`web-baseline/typecheck-e85fb206.log`），仍须实际候选完整窗口验证。
+
 2026-09-06 19:30当前恢复点：主分支已整合HTML修复 `17cf8cba`，与独立已审候选 `5a0a3add` 的八文件逐字节一致；整合前先核对主工作树八文件仍匹配原复制基线，只替换此授权范围，原仓库15项既有改动保持排除。READER-03原422及必要相邻问题本批关闭：主代理核对五份真实文件每项结果、十个正文200/可读锚点、两种原件下载与Range、全部hash，以及Linux193项无skip。证据 `D:/www/ermao-release-html/artifacts/html-causal-linux-mobi-20260906/`；原生库SHA `969e080e…`未更换；MOBI/AZW/PRC为同源别名。此不关闭客户端逐格式或最终RC门禁，不再扩展相关诊断。
 
 AUDIO-04原生产链修复实测：`0c28f117` 的 `audio-soak/runs-proxyfix-1800/r1788691746993-w0/` 全用例1 PASS（30.9分钟），保存475464ms→重开475000ms，误差464ms；SW控制/断网导航/恢复认证200通过。独立既有检查器核实7样本及来源hash、911应用文件不变、Next配置原字节恢复、18081/3102关闭、无记录到API5xx，执行57546已结束。默认30秒代理截断的原失败已不再复现，保留原FAIL及完整响应对照。
