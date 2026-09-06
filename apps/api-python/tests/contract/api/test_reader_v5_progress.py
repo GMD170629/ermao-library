@@ -271,6 +271,137 @@ def test_v5_idempotency_and_reuse_return_original_receipt_and_current_snapshot(
     assert db_session.scalar(select(ReaderResourceProgressV5.revision)) == 2
 
 
+def test_v5_late_first_submission_becomes_current_despite_older_capture_time(
+    client,
+    db_session: Session,
+) -> None:
+    _seed_reader_resource(client, db_session)
+
+    mutation_m = _payload(
+        _MUTATION_A,
+        locator={"opaquePosition": {"label": "M"}},
+        presentation=_presentation(display_percent=41, total_progression=0.41),
+    )
+    mutation_m["clientId"] = "reader-v5-api-client-m"
+    mutation_m["capturedAtEpochMillis"] = 1_000
+    accepted_m = client.put(_progress_url(), json=mutation_m)
+
+    mutation_n = _payload(
+        _MUTATION_B,
+        locator={
+            "href": "OEBPS/Text/newer.xhtml",
+            "locations": {"position": 91},
+            "engineExtension": {"marker": "N"},
+        },
+        presentation=_presentation(display_percent=86, total_progression=0.86),
+    )
+    mutation_n["clientId"] = "reader-v5-api-client-n"
+    mutation_n["capturedAtEpochMillis"] = 3_000
+    accepted_n = client.put(_progress_url(), json=mutation_n)
+
+    late_locator = {
+        "href": "OEBPS/Text/offline.xhtml",
+        "locations": {"position": 7, "cssSelector": "#late-c"},
+        "text": {"before": "older", "highlight": "", "after": "offline"},
+        "unknownOfflineExtension": {
+            "path": [{"segment": 1}, None, ""],
+            "flags": [],
+        },
+    }
+    late_presentation = _presentation(display_percent=17, total_progression=0.17)
+    late_presentation["currentHref"] = "OEBPS/Text/offline.xhtml"
+    late_mutation_id = "00000000-0000-4000-8000-000000000003"
+    mutation_c = _payload(
+        late_mutation_id,
+        locator=late_locator,
+        presentation=late_presentation,
+    )
+    mutation_c["clientId"] = "reader-v5-api-client-c"
+    mutation_c["capturedAtEpochMillis"] = 2_000
+    accepted_c = client.put(_progress_url(), json=mutation_c)
+
+    assert accepted_m.status_code == 200, accepted_m.text
+    assert accepted_m.json()["data"]["acceptedRevision"] == 1
+    assert accepted_n.status_code == 200, accepted_n.text
+    assert accepted_n.json()["data"]["acceptedRevision"] == 2
+    assert (
+        accepted_n.json()["data"]["currentSnapshot"]["position"]
+        == mutation_n["position"]
+    )
+    assert mutation_c["capturedAtEpochMillis"] < mutation_n["capturedAtEpochMillis"]
+    assert accepted_c.status_code == 200, accepted_c.text
+    accepted_c_data = accepted_c.json()["data"]
+    assert accepted_c_data["acceptedMutationId"] == late_mutation_id
+    assert accepted_c_data["acceptedRevision"] == 3
+    current_c = accepted_c_data["currentSnapshot"]
+    assert set(current_c) == {
+        "schemaVersion",
+        "revision",
+        "clientId",
+        "mutationId",
+        "capturedAtEpochMillis",
+        "receivedAtEpochMillis",
+        "position",
+    }
+    assert current_c["schemaVersion"] == 5
+    assert current_c["revision"] == 3
+    assert current_c["clientId"] == mutation_c["clientId"]
+    assert current_c["mutationId"] == late_mutation_id
+    assert current_c["capturedAtEpochMillis"] == 2_000
+    assert isinstance(current_c["receivedAtEpochMillis"], int)
+    assert current_c["position"] == mutation_c["position"]
+    assert current_c["position"]["locator"] == late_locator
+    assert current_c["position"]["presentation"] == late_presentation
+    assert current_c["position"]["presentation"]["displayPercent"] == 17
+    assert (
+        accepted_n.json()["data"]["currentSnapshot"]["position"]["presentation"][
+            "displayPercent"
+        ]
+        > current_c["position"]["presentation"]["displayPercent"]
+    )
+
+    fetched_c = client.get(_progress_url())
+    assert fetched_c.status_code == 200, fetched_c.text
+    assert fetched_c.json()["data"]["progressSnapshot"] == current_c
+
+    replayed_m = client.put(_progress_url(), json=copy.deepcopy(mutation_m))
+    assert replayed_m.status_code == 200, replayed_m.text
+    assert replayed_m.json()["data"]["acceptedMutationId"] == _MUTATION_A
+    assert replayed_m.json()["data"]["acceptedRevision"] == 1
+    assert replayed_m.json()["data"]["currentSnapshot"] == current_c
+
+    conflicting_m = copy.deepcopy(mutation_m)
+    conflicting_m["position"]["locator"] = {"attemptedOverwrite": True}
+    conflict = client.put(_progress_url(), json=conflicting_m)
+    assert conflict.status_code == 409, conflict.text
+    assert conflict.json()["error"]["code"] == "READER_PROGRESS_MUTATION_REUSE"
+
+    final_get = client.get(_progress_url())
+    assert final_get.status_code == 200, final_get.text
+    assert final_get.json()["data"]["progressSnapshot"] == current_c
+
+    db_session.expire_all()
+    row = db_session.scalar(
+        select(ReaderResourceProgressV5).where(
+            ReaderResourceProgressV5.resource_id == _RESOURCE_ID
+        )
+    )
+    assert row is not None
+    assert row.revision == 3
+    assert row.client_id == mutation_c["clientId"]
+    assert row.mutation_id == late_mutation_id
+    stored_locator = json.loads(row.locator_json)
+    assert stored_locator == late_locator
+    assert stored_locator["locations"] == {
+        "position": 7,
+        "cssSelector": "#late-c",
+    }
+    assert json.loads(row.presentation_json) == late_presentation
+    assert row.display_percent == 17
+    assert row.total_progression == 0.17
+    assert row.current_href == "OEBPS/Text/offline.xhtml"
+
+
 def test_v5_bootstrap_and_progress_use_the_same_snapshot(
     client, db_session: Session
 ) -> None:
