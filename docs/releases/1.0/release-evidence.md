@@ -4,6 +4,14 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+当前恢复点 `02d6ea2d80b3b7820dc09c3c05ed605cbe674c92`：POS-04的Chrome桌面/移动视口EPUB离线pending、页面重建及重连恢复子项均PASS。真实“下一章”产生第二章完整Locator；断网页面关闭后，新页面由生产Service Worker提供离线页，只读IDB确认pending/exact完整值不变；重连原mutation获ACK，revision从1到2，本地pending清空且独立GET完整值一致，分别用时965ms/959ms（从真实认证响应开始，包含ACK落盘与GET，阈值5秒），实际Reader恢复第二章。没有模拟API、手写进度或IDB注入；不代表进程强杀、原生客户端或另端离线交接通过。
+
+证据位于主工作区 `artifacts/releases/1.0/02d6ea2d/epub-offline-and-adjacent/r1788703654124-w0/` 与 `epub-offline-mobile/r1788703796970-w0/`。原live相邻生产Chrome用例也PASS（`epub-offline-and-adjacent/r1788703577909-w0/`），原EPUB、MP3及PWA断言保留，MP3暂停8440ms→重开8000ms，误差440ms；本次soak=0，不重复或冒充30分钟。三个运行的browser-observations、截图及post-run-verification均已主复核：911应用文件、7样本及源成员hash不变，无API5xx，Next配置还原，18081/3102及fixture进程退出；执行57395/13583均结束。
+
+针对性测试 `23001a68` 已原样整合为 `02d6ea2d` 并推送；全Web typecheck/lint及独立差异复核PASS。DEC-07用途仍仅POS-04现有在线重开不能证明的离线持久化，复用原setup/导入/登录owner，实际场景与原相邻均通过，停止该项工具完善。最初独立工作区因跨工作区node_modules链接被Turbopack拒绝，未进入业务；失败保留于 `D:/www/ermao-release-web-epub-pending/artifacts/releases/1.0/23001a68b417a0bdc58533c9dbee20f1bf48c72e/epub-offline/r1788703499557-w0/`，清理成功；通过复用主工作区现成依赖解决，未改生产构建或扩展工具。
+
+下一可执行项为POS-03已确认后Chrome进程强杀恢复，正在独立工作区准备针对性用例，尚未实际运行；原生iOS、容器、ENV-11手动服务和暂缓正式产物分别保留。原工作区15项既有未提交改动已再次只读核实，仍全部保留并排除；尚未冻结RC。以下前序恢复点作为历史保留。
+
 本轮继续POS-03/04：已重新核实 `b2e1a896` 主工作树干净、上一轮自有服务均退出。现有Android持久化用例仅关闭/重开SQLite连接，Web live仅重开页面，不能替代进程强杀；POS-03优先使用已有Playwright的专用持久Chrome profile及可核验所属进程。POS-04仅在现有release-live用例中补实际已打开EPUB的离线pending、页面重建与重连确认，复用fixture/真实Reader/只读IDB观察；不得手工造位置或扩大离线登录契约。两项均仍NOT_RUN。DEC-07依据为现有方法无法执行/判定当前必测项；只允许必要针对性用例及所属进程观测，实际原场景和必要相邻通过后停止，不增加通用runner、审批或报告框架。
 
 本轮收敛恢复点：主候选 `d19a7942` 已包含音频业务修复与MP3交接测试（`38d59635`、`d19a7942`），业务源码自 `e0299fda` 未变，未冻结RC。原online MP3相邻单方法在相同测试APK再次1 PASS/13.129s：5/10秒3898ms/r2、7899ms/r3，暂停/重开9899ms→9899ms/r7；原断言及完整位置校验保留。证据 `D:/www/ermao-release-android-formats/artifacts/releases/1.0/ac25497d3a4ee29383ddc97ac27c0a7230a5d078/android-web-handoff-adjacent-20260906/`；主已核验原JUnit、安装hash与清理，无重编译/换装、API5xx、源码/原件变化或遗留设备/fixture进程。真实双向、原相邻、独立审查已齐，测试原样整合，停止该Case工具完善。
@@ -89,9 +97,9 @@ DEC-07已纳入执行：停止已关闭AUDIO-03和ANDROID-03周边工具完善�
 | 门禁 | 当前事实 | 下一步 / 真实限制 |
 |---|---|---|
 | RG-01 交付 | NOT_RUN / 部分BLOCKED | APK/IPA正式构建用户暂缓；Docker引擎、Mac/iOS条件仍缺 |
-| RG-02 初始化/连接 | 第一方新库链路部分PASS；OPDS客户端负责人放行（DEC-08） | 继续组织模式/异常连接及协议回归；双客户端由用户自测，不虚构代理实测 |
-| RG-03 格式 | READER-03与AAC回零本批关闭；MP3/WAV/AAC正常短时PASS；FLAC原期限FAIL保留 | AUDIO-06待新候选验证；TEST-11完整时窗仍待补；逐格式/异常媒体/原生iOS矩阵未完成 |
-| RG-04 进度 | AUDIO-03关闭；AAC原恢复缺陷关闭；捕获饥饿与跨资源串写AUDIO-07/08待真实GREEN | SYNC-02浏览器对照受ENV-11阻塞；FLAC确认、异常恢复与跨端仍待验收；尚无同RC整体PASS |
+| RG-02 初始化/连接 | 第一方新库及正常两种组织模式子项PASS；OPDS客户端负责人放行（DEC-08） | 其余导入/连接异常和平台子项继续；双客户端由用户自测，不虚构代理实测 |
+| RG-03 格式 | READER-03、AAC回零已关闭；MP3/WAV/AAC/FLAC列明短时场景及TEST-11完整长播放PASS | 其余格式、复杂/异常媒体及原生iOS矩阵未完成 |
+| RG-04 进度 | 已关闭保存、捕获、串写及Stop迟到重启缺陷；MP3 W↔A正常交接、Chrome EPUB离线页面重建子项PASS | 确认后强杀、其余异常组合继续；SYNC-02真实浏览器受ENV-11阻塞；尚无同RC整体PASS |
 | RG-05 导入性能 | 本轮本机1万导入预检PASS（DEC-06） | 大规模/长时压力独立脚本按需运行，不作为当前阻塞；不外推NAS或30万表现 |
 
 持续播放最近恢复点：`audio-soak/production-1800-execution.json`，run `r1788689717566-w0`，启动源版本 `a5ac3b8b`，已以AUDIO-04 FAIL结束并安全清理。后续从原事件/HTTP日志定位，不假定它仍在运行。此工作属于音频功能稳定性，不是已停止的超大书库压测。

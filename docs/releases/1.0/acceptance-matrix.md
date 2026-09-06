@@ -1,5 +1,7 @@
 # 1.0 发布验收矩阵
 
+最新覆盖 `02d6ea2d`：POS-04 Chrome桌面/移动视口EPUB离线pending跨页面关闭/重建完整保留，重连ACK、IDB清pending与独立GET分别965ms/959ms内一致，实际恢复第二章；这两个子项PASS。原live生产Chrome相邻PASS，MP3恢复误差440ms；源码/样本/无5xx/清理复核通过。仅补当前必测用例，共用原setup owner，达到DEC-07停止条件，不继续扩工具。POS-03进程强杀及POS-04原生/另端异常交接仍待执行，不由页面重建结果覆盖；证据见release-evidence首节。
+
 当前主候选 `d19a7942` 已整合交接测试。MP3 W→A/A→W的正常子项及原online相邻回归均PASS；TEST-11完整时窗已PASS。POS-03进程重启、POS-04离线恢复等仍须实际执行，其他格式/原生iOS状态不由这些结果覆盖；后续旧的待相邻/待整合记录保留为历史。
 
 新增实际通过：TEST-11生产Chrome完整1800秒时窗与原后续重开/PWA流程（末条采样1805229.4ms、恢复误差433ms）；MP3 W→A与A→W正常交接（5857ms→5857ms、15749ms→15763.868ms），独立新Web会话，Android真实引擎及5/10秒确认。仅这些子项PASS；跨端测试原online相邻回归待完成，不代替异常组合、其他格式或最终RC。详见release-evidence最新证据。
@@ -208,7 +210,7 @@ POS-08新增AUDIO-08（原RISK-06）：真实Android引擎+SQLite单次IO门控�
 | POS-01 | P3；W/A/I、全部承诺格式 | 各格式记录唯一文字/物理页/图片/轨时间→保存→退出重开；目标端换字体屏幕 | 精确语义恢复；展示百分比不反推Locator | E/POS-01/ | NOT_RUN（原生/缺样本子项BLOCKED）；ENV-02/03/06 |
 | POS-02 | P3；各引擎代表样本 | 连续读听，量测捕获/本地持久化/发送/确认；不足5秒即返回/暂停/切后台 | 最后捕获位置按冻结间隔可靠保存，确认延迟单列 | E/POS-02/ | NOT_RUN（原生/缺样本子项BLOCKED）；DEC-04 |
 | POS-03 | P3；各引擎 | 分别在本地持久化前、后、网络确认后强杀；App重启/系统回收/浏览器刷新 | 至少最后已持久化位置恢复；已确认零丢失，未持久化损失不超冻结间隔 | E/POS-03/ | NOT_RUN（原生/缺样本子项BLOCKED）；ENV-02/03 |
-| POS-04 | P3；已合法打开/可本地读取资源 | 断网读到B→观察pending→重启客户端→重连→重试并另端重开 | pending持久保留并最终确认；不扩展离线登录契约 | E/POS-04/ | NOT_RUN（原生/缺样本子项BLOCKED）；ENV-03 |
+| POS-04 | P3；已合法打开/可本地读取资源 | 断网读到B→观察pending→重启客户端→重连→重试并另端重开 | pending持久保留并最终确认；不扩展离线登录契约 | artifacts/releases/1.0/02d6ea2d/epub-offline-and-adjacent/ 与 epub-offline-mobile/ | Chrome桌面/移动视口EPUB页面重建及重连子项PASS（965/959ms）；进程强杀、其他格式及另端交接NOT_RUN；原生iOS BLOCKED |
 | POS-05 | P3；同账号同资源两端 | 写mutation M让服务提交但丢回包→另一端新写N→重试M；另测同M不同payload | 重放M不再覆盖N，不递增revision；不同payload受既有冲突处理 | E/POS-05/ | NOT_RUN（原生/缺样本子项BLOCKED）；ENV-03 |
 | POS-06 | P3；各端读/听writer | 阻留旧M响应→本端生成新pending N→释放M响应→重开/重试N | 旧ACK仅清对应M，N保留；不能回滚本地较新位置 | E/POS-06/ | NOT_RUN（原生/缺样本子项BLOCKED）；ENV-03 |
 | POS-07 | P3；双端并发、离线首次提交 | A/B分别写并控制事务完成顺序；再让离线未提交C在N后首次到达；主动回读 | 按服务端最后事务提交生效；C可成为新当前位置，区别成功mutation重放；明确记录用户可见回退，不自创最大百分比算法 | E/POS-07/ | NOT_RUN（原生/缺样本子项BLOCKED）；DEC-03 |
