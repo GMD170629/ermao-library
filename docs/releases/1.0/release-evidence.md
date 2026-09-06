@@ -1,5 +1,7 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 POS-04分类收尾：主与独立Halley核对restore→retry→commitSharedPublication→applyLaunch→capture链。retry/drain只上传当前持久pending，不生成ID；新ID属于saveLocalAndSubmit的新捕获。共享commit只推进状态、不执行保存effects；实际setMediaItems/prepare/play之后的publishFromController直接观察及Listener都可能捕获，不能把r12/r13指定为某个具体回调。原生离线完整pending持久、冷恢复20226→20247及最终完整位置一致/r14/pending空三个子事实成立；旧mutation无receipt不单独构成产品FAIL，也不是旧body精确重放PASS。源码分类、限制和不扩工具理由见原目录pos04-source-classification.txt；另端重开/精确原body实跑等缺口保留，不能以此关闭整体POS-04。
+
 2026-09-07 STATUS-01原失败（180bb697源码、既有b5fce996独立开发APK）：复制已停止的POS-10专用测试库至新证据目录，启动现有API模块，未运行Worker或修改原库。普通首页封面→M4B详情67%→点击在读，API标记成功且book.completed/resourceCompleted均false→true；完整v5 GET保持20247ms/r14，无任何进度PUT。但即时/稳定详情以及独立包强停后重进详情均显示“在读”。此为实际UI失败，不是只凭静态百分比代码判断；取消已读及后续恢复在修复前不计通过。
 
 证据`artifacts/releases/1.0/180bb697/pos11-native-reading-status-20260907/`含before/marked-book与完整progress、marked-detail/marked-cold-detail XML、冷停PID、normal-ui-observations和原始API日志。1次reading-status POST200，HTTP无4xx/5xx；914项源码hash与原基线匹配，实际设备APK sha256=b5fce9966004f299d27350c86447238fe77e8e2981db0672b6b2209b7326535f。按PID/创建时间/父链终止自有API（exit=-1为有意强停）、端口释放、独立包强停、自有reverse/临时XML移除，原App和15项用户工作树改动不变。复用现有工具，无测试基础设施扩展；正在现有状态owner及既有单测中做最小修复，实际新包原场景尚待验收。

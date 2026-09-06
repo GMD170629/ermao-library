@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-07 POS-04待分类观察已收尾：主与独立复核支持latest-only新capture覆盖，未发现retry自行改ID证据；实际持久/冷恢复/最终确认分别有效，原pending精确重放与r12/r13具体触发归因不作已通过声明。无需以该观察另立产品缺陷或继续扩工具。STATUS-01仍在修复，其余必测缺口和外部条件保持。
+
 2026-09-07 STATUS-01 / RG-04 POS-11真实FAIL：Android普通M4B详情67%点击标已读，独立GET的book.completed/resourceCompleted均false→true，整个v5快照逐字段不变；详情仍“在读”，强停冷启重进仍“在读”。已定位原生详情进度投影以百分比重算completed及资源状态展示同类逻辑；不能用后端状态正确抵销UI失败。最小修复与针对性回归进行中，尚未关闭。原证据`180bb697/pos11-native-reading-status-20260907`已清理服务/设备；其余外部阻塞、正式包暂缓及未冻结RC保持。
 
 2026-09-07 POS-10 API/Worker重启后Android M4B普通恢复15000→15000/988ms子项PASS；POS-04原生离线20226ms完整pending持久、冷恢复20247ms和最终r14一致已观察，但原pending mutation未上送、被新capture mutation替代的语义尚在分类，不能直接标原mutation重试PASS或已复现产品FAIL。原始DB/GET/receipt证据完整，服务和设备已收尾，独立只读追踪进行中。详情参数化ReadingUnit入口现为隐藏产品面，不因测试开启；仅播放器公开章节行为沿原矩阵验收。尚未冻结RC，现有外部阻塞/正式产物暂缓不变。
