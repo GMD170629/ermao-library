@@ -24,6 +24,36 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class AndroidAudioPlaybackRuntimeTest {
     @Test
+    fun briefBufferingDoesNotPostponePeriodicCaptureIndefinitely() = runTest {
+        val controller = FakeMediaController(initialPositionMillis = 1_000, startsPlaying = true)
+        val progress = RecordingProgressSink()
+        val runtime = newRuntime(controller, progress)
+        try {
+            runCurrent()
+            val capturesAtStart = progress.captures.size
+            repeat(3) {
+                controller.currentPosition += 2_000
+                advanceTimeBy(2_000)
+                runCurrent()
+                controller.playbackState = Player.STATE_BUFFERING
+                controller.emitTransportState(playing = false)
+                advanceTimeBy(100)
+                runCurrent()
+                controller.playbackState = Player.STATE_READY
+                controller.emitTransportState(playing = true)
+                runCurrent()
+            }
+            val latest = progress.captures.drop(capturesAtStart).lastOrNull()?.positionMillis
+            assertTrue(
+                latest != null && controller.currentPosition - latest <= ReaderProgressTimingFixture.maxCaptureAgeMillis,
+                "RG04: brief buffering postponed captures; position=${controller.currentPosition}, latest=$latest",
+            )
+        } finally {
+            runtime.close()
+        }
+    }
+
+    @Test
     fun uninterruptedPlaybackCapturesProgressWithinFiveSeconds() = runTest {
         val controller = FakeMediaController(initialPositionMillis = 1_000, startsPlaying = true)
         val progress = RecordingProgressSink()
