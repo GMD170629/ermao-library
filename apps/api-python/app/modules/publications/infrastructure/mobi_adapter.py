@@ -88,6 +88,14 @@ def _publication_media_type(*, category: int, core_media_type: str | None) -> st
     return _base_media_type(core_media_type) or "application/octet-stream"
 
 
+class _OpenOptions(ctypes.Structure):
+    _fields_ = [
+        ("struct_size", ctypes.c_uint32),
+        ("max_read_bytes", ctypes.c_uint32),
+        ("max_file_bytes", ctypes.c_uint64),
+    ]
+
+
 class _BookInfo(ctypes.Structure):
     _fields_ = [
         ("struct_size", ctypes.c_uint32),
@@ -173,9 +181,11 @@ class _MobiCore:
         library.ermao_mobi_normalization_identifier.restype = ctypes.c_char_p
         library.ermao_mobi_status_name.argtypes = [ctypes.c_int]
         library.ermao_mobi_status_name.restype = ctypes.c_char_p
+        library.ermao_mobi_default_options.argtypes = [ctypes.POINTER(_OpenOptions)]
+        library.ermao_mobi_default_options.restype = None
         library.ermao_mobi_open.argtypes = [
             ctypes.c_char_p,
-            ctypes.c_void_p,
+            ctypes.POINTER(_OpenOptions),
             ctypes.POINTER(ctypes.c_void_p),
         ]
         library.ermao_mobi_open.restype = ctypes.c_int
@@ -245,10 +255,13 @@ class _MobiCore:
         return self._library.ermao_mobi_normalization_identifier().decode("utf-8")
 
     def open(self, path: Path) -> ctypes.c_void_p:
+        options = _OpenOptions()
+        self._library.ermao_mobi_default_options(ctypes.byref(options))
+        options.max_file_bytes = _MAX_SOURCE_BYTES
         book = ctypes.c_void_p()
         status = self._library.ermao_mobi_open(
             os.fsencode(path),
-            None,
+            ctypes.byref(options),
             ctypes.byref(book),
         )
         self.require_ok(status, "open")
