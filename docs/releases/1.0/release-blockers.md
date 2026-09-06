@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-07 STATUS-01 / RG-04 POS-11真实FAIL：Android普通M4B详情67%点击标已读，独立GET的book.completed/resourceCompleted均false→true，整个v5快照逐字段不变；详情仍“在读”，强停冷启重进仍“在读”。已定位原生详情进度投影以百分比重算completed及资源状态展示同类逻辑；不能用后端状态正确抵销UI失败。最小修复与针对性回归进行中，尚未关闭。原证据`180bb697/pos11-native-reading-status-20260907`已清理服务/设备；其余外部阻塞、正式包暂缓及未冻结RC保持。
+
 2026-09-07 POS-10 API/Worker重启后Android M4B普通恢复15000→15000/988ms子项PASS；POS-04原生离线20226ms完整pending持久、冷恢复20247ms和最终r14一致已观察，但原pending mutation未上送、被新capture mutation替代的语义尚在分类，不能直接标原mutation重试PASS或已复现产品FAIL。原始DB/GET/receipt证据完整，服务和设备已收尾，独立只读追踪进行中。详情参数化ReadingUnit入口现为隐藏产品面，不因测试开启；仅播放器公开章节行为沿原矩阵验收。尚未冻结RC，现有外部阻塞/正式产物暂缓不变。
 
 2026-09-07 AUDIO-13 CLOSED：582c81fc最小配置生命周期修复已在新独立开发包真实通过M4B播放中旋转、暂停旋转及普通注销停止相邻。原失败、自动检查、独立owner/安全边界审查和新包原场景证据齐备，详见release-evidence首条。不是放宽账号退出停止规则；无工具扩展。POS-09其余显式启动/引擎子项、POS-10服务重启等仍待验证，ENV-11/12、iOS/容器、正式包暂缓不变；未冻结RC/未整体GO。

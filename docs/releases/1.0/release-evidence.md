@@ -1,5 +1,11 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 STATUS-01原失败（180bb697源码、既有b5fce996独立开发APK）：复制已停止的POS-10专用测试库至新证据目录，启动现有API模块，未运行Worker或修改原库。普通首页封面→M4B详情67%→点击在读，API标记成功且book.completed/resourceCompleted均false→true；完整v5 GET保持20247ms/r14，无任何进度PUT。但即时/稳定详情以及独立包强停后重进详情均显示“在读”。此为实际UI失败，不是只凭静态百分比代码判断；取消已读及后续恢复在修复前不计通过。
+
+证据`artifacts/releases/1.0/180bb697/pos11-native-reading-status-20260907/`含before/marked-book与完整progress、marked-detail/marked-cold-detail XML、冷停PID、normal-ui-observations和原始API日志。1次reading-status POST200，HTTP无4xx/5xx；914项源码hash与原基线匹配，实际设备APK sha256=b5fce9966004f299d27350c86447238fe77e8e2981db0672b6b2209b7326535f。按PID/创建时间/父链终止自有API（exit=-1为有意强停）、端口释放、独立包强停、自有reverse/临时XML移除，原App和15项用户工作树改动不变。复用现有工具，无测试基础设施扩展；正在现有状态owner及既有单测中做最小修复，实际新包原场景尚待验收。
+
+POS-04补充只读核验：原目录的pos04-receipt-position-comparison.json复用现有HTTP DTO mapper和payload_hash，r12/r13与离线/最终完整位置均不等，r14与最终位置digest一致；不重写散列策略、不推定缺失的历史body。主机点击时间与设备capture时钟未经校准，不能据57ms表面先后来认定预启动保存。主已核对恢复读取/精确pending重试不创建ID，播放器回调才调用保存；独立复核进行中，暂不将旧mutation未出现直接判产品FAIL或精确重试PASS。
+
 2026-09-07 POS-10服务端重启/Android真实恢复子项PASS（源码1d8d0c7c，既有b5fce996开发包）：新专用目录直接运行现有prestart、Uvicorn/API与Worker模块；普通M4B确认15000ms/r9后强停测试客户端，逐PID/创建时间/父进程链核验后终止自有API和Worker，端口实际消失，再以相同数据库及既有测试会话配置启动新PID。重启后整个GET快照和bootstrap progressSnapshot逐字段完全一致，客户端冷启保持登录、首页普通继续首次实际Playing15000ms/988ms，误差0。是API/Worker非正常进程终止后的恢复，不声称Web/网关、容器或完整发布产物重启通过。
 
 同环境补POS-04原生M4B：仅移除自有ADB reverse，已缓冲音频从15009ms读到20226ms；真实SQLite本地完整位置/pending已持久、服务端仍15009/r11。测试包强停后保留原DB及journal副本，以只读SQLAlchemy ORM按唯一resource查询。恢复reverse冷启普通首页继续，实际buffer20226、Playing20247/802ms，误差21ms；最终本地与服务端完整位置相等/r14、pending为空。但60秒独立GET未观察到原pending mutation，ORM receipt亦无该ID，取而代之是新capture时间的r12～14。暂不宣称原mutation精确重试通过，独立追踪判断是否为合法latest-only新捕获覆盖；未据此登记已复现产品缺陷。
