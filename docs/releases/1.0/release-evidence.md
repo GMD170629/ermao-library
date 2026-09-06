@@ -4,7 +4,7 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
-- 当前已推送检查点 `614b5fed`；后续工作树修改按逻辑审查提交。Chrome Reader 专项以该提交加 `apps/web/e2e/readium-reader.spec.ts` 测试修正执行，生产 Reader 源码未改。
+- 当前已推送检查点 `ae1275cd`；后续工作树修改按逻辑审查提交。Chrome Reader 专项以 `614b5fed` 加 `apps/web/e2e/readium-reader.spec.ts` 测试修正执行（修正提交 `7847cdd2`），生产 Reader 源码未改。
 - 用户批准 DEC-05：1.0 暂不支持第三方进度同步；OPDS 目录、搜索、下载保留。原双向互通不再属于 1.0，端点/声明关闭及负面副作用测试待实施。
 - 起点：`develop@197e81a808ba32595a8a6ffeda62422b3a7d3473`，初始 `git status --short` 无输出；没有用户未提交改动被纳入或排除。原工作区不修改。
 - 隔离工作区：`D:/www/ermao-release-1.0`；分支 `codex/release-1.0-convergence`。正式 RC 未冻结，无 tag/公开发布。用户追加授权及时 commit/push；已检查三个工作流，push 仅匹配 develop/prod 或版本 tag，专用分支不触发发布。只推专用分支，不创建 PR/触发工作流。
@@ -21,12 +21,14 @@
 | R1-CHROME-READER / RG-03/04 | `pnpm exec playwright test e2e/readium-reader.spec.ts e2e/comic-reader.spec.ts --workers=2`；Chrome 152.0.7977.76 桌面和移动视口 | PASS：42 tests，0 skipped；`web-baseline/chrome-reader-retest.log`、`chrome-reader-retest/results/`；目标文件 ESLint 与 Web typecheck PASS | 修正过时 Locator 字段/移动点击与布局假设；增加缓存重开仍仅下载一次。保留真实段落恢复、显示百分比不控制恢复等断言；HTTP fixtures 不替代真实服务器或最终 RC |
 | R1-WEB-BUILD / ART-01 | `NEXT_DIST_DIR=.next-codex pnpm build` | PASS；`web-baseline/production-build.log` | Web 生产构建，不是双架构部署验收 |
 | R1-PYTHON-WINDOWS / ART-01 | 完整 pytest + coverage，ruff format/check、mypy | 1219 PASS / 36 FAIL，1255 collected，coverage 77%；`backend-baseline/` | 6 个 Windows 能力/路径问题、30 个缺 native core 的失败；Linux 隔离重验进行中，不将缺工具直接计产品失败 |
+| R1-PYTHON-SMOKE / RG-02/03 | 新临时数据根，经 setup/鉴权 API 创建书库→真实 Worker 扫描；EPUB/PDF/CBZ v5 bootstrap、完整原文件 hash、精确 Range、漫画页 revision；独立 ContinueImport worker | PASS；`runtime-smoke/sample-after-review.log`、`worker-after-review.log`、`sample-hashes-after-review.txt`；过程工具测试 4 PASS | `76707cce` 修正旧 v4 smoke/PIPE 阻塞；复用同一有界进程宿主，不新增服务端正文路径。仅三媒体后端链路，不替代客户端阅读或所有格式 |
 | R1-MOBILE-BASELINE / ART-01 | shared host、Android unit/lint、授权真机完整 instrumentation | shared 414 中 3 FAIL；Android unit 216 中 8 FAIL；lint 46 errors；仪器 145 中 19 FAIL；`preflight-mobile/07-failure-summary.txt` 及原始日志 | 失败正在分类修复；Debug 冷启动成功不替代正式 APK 或完整门禁 |
+| R1-CONTRACT / ART-01 | Reader schema unit、生成/边界；iOS verify_readium.py | schema 33 PASS（修复 nullable type union 验证器）；静态生成/边界及 iOS 静态检查 PASS | `6cfbf7bb`；静态 iOS 检查不替代适配器或设备执行 |
+| R1-DOCKER / ART-02 | `docker version/info/buildx ls`，启动现有 Docker Desktop 后复查 | BLOCKED：引擎未启动；宿主日志显示 Inference manager 本地 socket 无法访问 | 环境故障；未重置/删除 Docker 数据 |
+| R1-ANDROID-SAFETY / RG-03 | 真机生成报告后 `verify-reader-safety-conformance.py --require-consumer ANDROID` | PASS：66 cases，0 omissions；`preflight-mobile/android-conformance.json`；SDK31 / PDFium `875172eae557a308d0c5b2be43822814c8a885bb` | `ae1275cd` 测试修正；不代替 Web/backend/iOS 独立报告 |
 | R1-ANDROID-FIXTURES / RG-03/ART-01 | 增量 assembleDebug/assembleDebugAndroidTest，保留数据安装；设备 `9e896bbc`，7 个类/选定方法 | PASS：32 tests；`preflight-mobile/12-test-fixture-rebuild.log`、`13-test-fixture-artifacts.txt`（APK SHA-256）、`14-test-fixture-device.log`；首轮 20 中 2 FAIL 另存 `10-test-fixture-device.log` | `7847cdd2` 加后续测试修正及并行未提交源码的开发快照；正式 RC 全量须重跑。instrumentation 尾部 `INSTRUMENTATION_CODE=-1` 为 runner 结束码，本次 `OK (32 tests)`；不能单凭 adb exit 或该码判定失败/通过 |
 
 Android 测试修正依据：CRC 使用 fixture 的实际损坏 bytes，禁止传入写死的完好原文；音频 MIME 一致性案例按既有 v2 manifest 的 ALLOW 输出（未改规则/期望）；漫画双页偏好按共享设置持久化，增加同用户跨服务器隔离；章节按钮提供显式引擎 TOC identity；书库目录挂载实际 Shell 所需管理宿主并校验仅下载回调；Compose 1.11.3 的 `stringResource` 实际读取 `LocalResources`，双语 fixture 补全该上下文；菜单按现有 224dp 平台几何校验，以 `positionOnScreen` 验证 60px 移动且保持 2px 容差；应用浅色外壳按 design-contracts README 校验两个系统模式的 canonical canvas，Reader 自身日夜主题测试保留。均未修改产品视觉或降低验收阈值。
-| R1-CONTRACT / ART-01 | Reader schema unit、生成/边界；iOS verify_readium.py | schema 33 PASS（修复 nullable type union 验证器）；静态生成/边界及 iOS 静态检查 PASS | `6cfbf7bb`；静态 iOS 检查不替代适配器或设备执行 |
-| R1-DOCKER / ART-02 | `docker version/info/buildx ls`，启动现有 Docker Desktop 后复查 | BLOCKED：引擎未启动；宿主日志显示 Inference manager 本地 socket 无法访问 | 环境故障；未重置/删除 Docker 数据 |
 
 当前可执行工作：完成后端、Web、KMP/Android 全量检查；复现 OPDS 与旧 smoke 入口疑点；修复确认缺陷并回归；运行隔离新数据 API/Worker/本机压力预检。每轮更新本节和阻塞台账。正式产物及最终 RC 完整验证仍未完成。
 

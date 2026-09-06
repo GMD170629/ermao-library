@@ -15,6 +15,7 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 | RUN-01 | Windows 后端 36 个运行失败；Android shared/unit/lint/instrumentation 均有失败 | 正在隔离 Linux 重验和分类修复；不得宣告代码门禁通过 |
 | RUN-02 | Web 原四浏览器回归失败，含环境启动、过期 fixtures/断言、TXT 章节识别等不同原因 | 用户只要求 Chrome；Chrome 全套仍待修复后完整重跑，不能用 42 项专项替代 |
 | TEST-04 | Android 仪器 fixture 与已实现契约不符：CRC 完好 bytes、音频 ALLOW 报告、双页偏好、显式章节 identity、目录宿主、双语资源及弹窗坐标等 | 针对性 32 项真机 PASS，见 evidence R1-ANDROID-FIXTURES；其余仪器失败继续，尚未关闭整套 RUN-01 |
+| TEST-05 | 旧后端 smoke 请求退役 v4，并存在 uv/PIPE 子进程清理阻塞 | `76707cce`：共享文件日志/有界进程回收，迁移至 v5 原文件；两个真实 smoke PASS，4 个过程/HTTP 正负测试 PASS |
 
 | ID | 当前事实与证据 | 当前处理 |
 |---|---|---|
