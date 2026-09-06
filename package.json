@@ -27,7 +27,7 @@
     "fnos:validate": "FNOS_VALIDATE_ONLY=true scripts/build-fnos-package.sh",
     "fnos:build": "scripts/build-fnos-package.sh",
     "release:validate": "node scripts/validate-release-notes.mjs",
-    "test:release-notes": "node --test scripts/validate-release-notes.test.mjs scripts/release-workflow-policy.test.mjs",
+    "test:release-notes": "node --test scripts/validate-release-notes.test.mjs scripts/release-workflow-policy.test.mjs scripts/docker-artifact-export.test.mjs",
     "test:gateway": "node --test scripts/unified-http-gateway.test.mjs",
     "docker:publish": "scripts/publish-docker-hub.sh"
   },

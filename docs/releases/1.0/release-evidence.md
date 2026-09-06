@@ -34,6 +34,7 @@
 | R1-OPDS-CLOSURE / OPDS-04 | 主代理独立执行 OPDS HTTP/protocol 与 v5 progress/contract 五个文件 | PASS：41 tests，0 skipped；`opds-investigation/closure-primary-regression.log` | `f3748d58` 后端源码；目录/搜索/详情不发布同步链接，原 GET/PUT 不写任一进度 owner。原 44 项中的已退出范围同步正例被关闭行为正负例取代；真实第三方客户端目录验收仍待执行 |
 | R1-ANDROID-COMIC-TOC / RG-03 | 千页目录首/末页、摘要、真实导航回调与全部目录交互；授权真机 | PASS：19 tests；`preflight-mobile/30-comic-toc-contract-build.log`、`31-comic-toc-contract-device.log` | `805be838` 修复一基显示页码及 LazyRow 可达性。最初新测错误沿用 EPUB 异步目录夹具，日志 22/25/27/29 保留，不计为长漫画已复现证据；页码原缺陷以真实 comic-contents.png 为据；最终夹具复用漫画同步目录契约 |
 | R1-NATIVE-CROSS-HOST / RG-03 | Linux 同一 C patch + GCC `.so`、Python TXT/章节71项；Windows平台专属pipe2项 | PASS：71 + 2；`backend-baseline/linux-614b5fed/native-854712bb/`、`backend-baseline/windows-pipe-tests-20260906/` | Linux 原完整套件两个 Windows-only skip 已在真实 win32 各自 PASS；非无条件跳过 |
+| R1-LOCAL-OCI-CLI / ART-02 | 现有镜像入口新增 `--output-dir`，5项命令边界测试 + 原12项发布校验 | PASS：17 tests，0 skipped；`contracts/local-oci-release-final.log`；Bash语法检查通过 | Docker/Git/验证命令使用临时 stub；证明本地模式不 push、不使用 prod tag、仅归档冻结提交、拒绝脏源码/检查后变动/覆盖、失败不写成功manifest。不是 Docker 构建成功，真实引擎仍 ENV-08 |
 
 Android 测试修正依据：CRC 使用 fixture 的实际损坏 bytes，禁止传入写死的完好原文；音频 MIME 一致性案例按既有 v2 manifest 的 ALLOW 输出（未改规则/期望）；漫画双页偏好按共享设置持久化，增加同用户跨服务器隔离；章节按钮提供显式引擎 TOC identity；书库目录挂载实际 Shell 所需管理宿主并校验仅下载回调；Compose 1.11.3 的 `stringResource` 实际读取 `LocalResources`，双语 fixture 补全该上下文；菜单按现有 224dp 平台几何校验，以 `positionOnScreen` 验证 60px 移动且保持 2px 容差；应用浅色外壳按 design-contracts README 校验两个系统模式的 canonical canvas，Reader 自身日夜主题测试保留。均未修改产品视觉或降低验收阈值。
 

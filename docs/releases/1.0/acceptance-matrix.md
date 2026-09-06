@@ -181,11 +181,11 @@ P4的冻结表必须填写：CPU/架构、RAM、磁盘/文件系统/挂载、数
 | 编号 | 工作目录 | 已存在命令/入口与边界 |
 |---|---|---|
 | C-01 | apps/api-python | `uv run --extra dev --locked pytest -q`（发布完整回归）；另按AGENTS现有要求执行 `uv run --extra dev --locked ruff format --check .`、`uv run --extra dev --locked ruff check .`、`uv run --extra dev --locked mypy app`、`uv run --extra dev --locked pytest --cov=app --cov-report=term-missing`，实际执行命令应同一locked环境，不能因PATH缺失省略 |
-| C-02 | apps/web | `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm i18n:check`、`pnpm test:e2e`；真实iPhone Safari/PWA另做人工验收 |
+| C-02 | apps/web | `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm i18n:check`、`pnpm test:e2e`；R1 仅 Chrome 桌面/移动视口 |
 | C-03 | packages/reader-contracts | `python3 generate-reader-safety-policy.py --check`；`python3 check-reader-safety-boundaries.py`；`python3 -m unittest discover -s tests -p 'test_*.py'` |
 | C-04 | apps/mobile | 当前 .github/workflows/mobile.yml 的 `./gradlew :shared:testAndroidHostTest :androidApp:testDebugUnitTest :androidApp:lintDebug :androidApp:assembleDebug`；完整回归使用GitHub Actions workflow_dispatch输入 `run_full_android_regression=true`；CI模拟器仅补充，不替代正式APK物理设备 |
 | C-05 | 仓库根 | `pnpm smoke:python-worker-import`：现有临时新库小样本Worker测试，仅辅助；`python3 apps/mobile/iosApp/verify_readium.py`：SDK静态检查，不是IPA或真机通过 |
-| C-06 | 仓库根 | apps/web/Dockerfile.prod / docker-compose.prod.yml / scripts/start-unified-app.sh 的实际构建部署入口见门禁§6；RC本地双架构构建参数/测试compose覆盖文件待补；不执行 docker:publish / tag推送 |
+| C-06 | 干净冻结 RC 仓库根 | `bash scripts/publish-docker-hub.sh --output-dir artifacts/releases/1.0/<rc>/oci --platform linux/amd64,linux/arm64`；复用生产 Dockerfile runner，将 `git archive` 的纯提交内容交给 Buildx，导出 OCI 与 SHA-256 JSON，使用 `ermao-local/...:<rc>`；不推送。需要可用 Docker/Buildx，当前 ENV-08 阻塞真实构建；不得省略 `--output-dir`（原默认模式会公开推送）。按架构独立导出时使用不同目录；后续隔离安装/运行验收待实际产物 |
 | C-07 | apps/mobile | 已存在gradlew/gradlew.bat及Android application模块；未找到正式Release/签名入口，正式构建命令与签名注入方式待补（ENV-07），不把默认任务推断成可交付入口。安装前 `adb devices -l` 精确核实物理设备；签名与正式Release测试安装步骤待环境交接 |
 | C-08 | apps/mobile/iosApp | 已发现Xcode项目/shared scheme的Release ArchiveAction，可按Xcode Product→Archive→Organizer操作；未找到仓库archive/export脚本或ExportOptions，实际导出步骤待签名/安装方案冻结（ENV-07）；不得把device debug build当IPA |
 | C-09 | apps/api-python | OPDS与v5现有测试文件见门禁§6；`uv run --extra dev --locked pytest -q tests/contract/api/test_opds_http.py tests/contract/api/test_reader_v5_progress.py tests/contract/api/test_reader_v5_contract.py`；其他已核实路径见§6；协议/真实客户端/故障注入入口另行登记，不能编造脚本 |

@@ -11,6 +11,7 @@ VERSION_TAG="${VERSION_TAG:-}"
 PLATFORM="${PLATFORM:-linux/amd64,linux/arm64}"
 RUN_CHECKS="${RUN_CHECKS:-true}"
 NO_CACHE="${NO_CACHE:-false}"
+OUTPUT_DIR=""
 
 usage() {
   cat <<'EOF'
@@ -25,6 +26,7 @@ Options:
   --version-tag TAG    Extra immutable tag. Default: current git short SHA
   --platform VALUE     Build platform(s). Default: linux/amd64,linux/arm64
   --registry VALUE     Registry host. Default: docker.io
+  --output-dir DIR     Export an OCI archive locally; never push. Requires clean Git source.
   --skip-checks        Skip local typecheck/test/build checks before docker build
   --no-cache           Build images without Docker cache
   -h, --help           Show this help
@@ -71,6 +73,10 @@ while [ "$#" -gt 0 ]; do
     --skip-checks)
       RUN_CHECKS="false"
       shift
+      ;;
+    --output-dir)
+      OUTPUT_DIR="${2:?Missing value for --output-dir}"
+      shift 2
       ;;
     --no-cache)
       NO_CACHE="true"
@@ -124,7 +130,28 @@ if [[ "$VERSION_TAG" == v* && "$VERSION_TAG" != "v${APP_VERSION}" ]]; then
 fi
 
 IMAGE_PREFIX="${REGISTRY}/${NAMESPACE}"
-BUILD_ARGS=(--platform "$PLATFORM" --push)
+BUILD_ARGS=(--platform "$PLATFORM")
+
+require_clean_rc() {
+  if [ "$(git rev-parse --verify HEAD)" != "$SOURCE_COMMIT" ] ||
+     [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
+    echo "Local RC export requires clean committed source, including untracked files." >&2
+    exit 1
+  fi
+}
+
+if [ -n "$OUTPUT_DIR" ]; then
+  SOURCE_COMMIT="$(git rev-parse --verify HEAD)"
+  require_clean_rc
+  if [[ "$OUTPUT_DIR" == *,* ]]; then
+    echo "OCI output directory cannot contain a comma (Buildx output option separator)." >&2
+    exit 2
+  fi
+  mkdir -p "$OUTPUT_DIR"
+  OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
+else
+  BUILD_ARGS+=(--push)
+fi
 
 if [ "$NO_CACHE" = "true" ]; then
   BUILD_ARGS+=(--no-cache)
@@ -146,16 +173,58 @@ build_image() {
 
   local image="${IMAGE_PREFIX}/${image_name}"
   local args=("${BUILD_ARGS[@]}" -f "$dockerfile" -t "${image}:${CHANNEL_TAG}" -t "${image}:${VERSION_TAG}")
+  if [ -n "$OUTPUT_DIR" ]; then
+    image="ermao-local/${image_name}:${SOURCE_COMMIT}"
+    args=("${BUILD_ARGS[@]}" -f "$dockerfile" -t "$image")
+  fi
 
   if [ -n "$target" ]; then
     args+=(--target "$target")
   fi
 
-  echo "==> Building and pushing ${image}:${CHANNEL_TAG} (${PLATFORM})"
-  docker buildx build "${args[@]}" .
+  if [ -n "$OUTPUT_DIR" ]; then
+    # A check may regenerate tracked inputs. Do not label those changes as HEAD.
+    require_clean_rc
+    local archive="${OUTPUT_DIR}/${image_name}-${SOURCE_COMMIT}.oci.tar"
+    if [ -e "$archive" ] || [ -e "${archive}.json" ]; then
+      echo "Refusing to overwrite an existing RC artifact: ${archive}" >&2
+      exit 1
+    fi
+    args+=(--output "type=oci,dest=${archive}")
+    args+=(--label "org.opencontainers.image.revision=${SOURCE_COMMIT}")
+    args+=(--label "org.opencontainers.image.version=${APP_VERSION}")
+    echo "==> Exporting local OCI archive (${PLATFORM})"
+  else
+    echo "==> Building and pushing ${image}:${CHANNEL_TAG} (${PLATFORM})"
+  fi
+  if [ -n "$OUTPUT_DIR" ]; then
+    # The context contains only the frozen commit, never ignored local test data,
+    # credentials, previous archives or runtime caches from the worktree.
+    git archive --format=tar "$SOURCE_COMMIT" | docker buildx build "${args[@]}" -
+  else
+    docker buildx build "${args[@]}" .
+  fi
+  if [ -n "$OUTPUT_DIR" ]; then
+    node --input-type=module - "$archive" "$SOURCE_COMMIT" "$APP_VERSION" "$PLATFORM" "$image" <<'NODE'
+import { createReadStream, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { basename } from 'node:path';
+const [archive, sourceCommit, version, platforms, image] = process.argv.slice(2);
+const hash = createHash('sha256');
+for await (const chunk of createReadStream(archive)) hash.update(chunk);
+writeFileSync(`${archive}.json`, `${JSON.stringify({
+  archive: basename(archive), sha256: hash.digest('hex'), sourceCommit, version, image,
+  platforms: platforms.split(','), published: false,
+}, null, 2)}\n`, { flag: 'wx' });
+NODE
+  fi
 }
 
-echo "Publishing Docker images"
+if [ -n "$OUTPUT_DIR" ]; then
+  echo "Preparing local OCI artifacts; no registry push"
+else
+  echo "Publishing Docker images"
+fi
 echo "  registry:     ${REGISTRY}"
 echo "  namespace:    ${NAMESPACE}"
 echo "  platform:     ${PLATFORM}"
@@ -170,6 +239,10 @@ fi
 
 build_image "shuku-starship-web" "apps/web/Dockerfile.prod" "runner"
 
+if [ -n "$OUTPUT_DIR" ]; then
+  echo "==> Local artifact and SHA-256 manifest: ${OUTPUT_DIR} (not published)"
+  exit 0
+fi
 cat <<EOF
 ==> Published:
   ${IMAGE_PREFIX}/shuku-starship-web:${CHANNEL_TAG}
