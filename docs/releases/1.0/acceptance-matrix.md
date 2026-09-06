@@ -253,7 +253,7 @@ POS-08新增AUDIO-08（原RISK-06）：真实Android引擎+SQLite单次IO门控�
 | POS-08 | P3；两账号/服务器/资源 | 在途保存时切账号/服务器/资源，释放旧请求；尝试无权资源和同mutation跨namespace | 无串写、越权、错误清pending；业务身份以资源为准 | release-evidence中AUDIO-08/09实际RED/GREEN与93100b06证据 | Android音频资源切换restore挂起时旧捕获身份、Stop取消迟到恢复子项PASS，AUDIO-08/09已关闭；账号/服务器切换、其他引擎和传输在途组合仍NOT_RUN，iOS BLOCKED |
 | POS-09 | P3；有章/页入口的各格式 | 从目录显式目标A进入→读到B保存→旋转/重建/重进 | 显式入口只应用一次，回到后来B | E/POS-09/；58cff471/pos09-native-explicit-entry-20260907 | PARTIAL：Android M4B播放器章节导航后冷启恢复B子项PASS；AUDIO-13已关闭（582c81fc新包真实播放/暂停旋转保持、注销停止PASS）；带显式启动参数及其他引擎NOT_RUN，iOS BLOCKED |
 | POS-10 | P3；各引擎 | 确认位置→服务受控重启→重开；另保持目标端正在阅读，远端写入 | 已确认位置保留；活动会话不被强行跳转 | E/POS-10/；34d4a24e/pos10-active-session-20260907 | PARTIAL：MP3 Chrome实际重连/Android ON_RESUME活动暂停会话远端提示不自动跳转、显式跳转PASS；1d8d0c7c的API/Worker终止重启后Android M4B同确认位置恢复PASS；其他引擎/完整部署重启NOT_RUN，iOS缺设备BLOCKED |
-| POS-11 | P3；各格式 | 标记已读/取消已读→主动回读→检查首页/详情/目录/Reader | 已读状态独立；不制造恢复位置；展示与实际语义一致 | artifacts/releases/1.0/938afd24/pos11-status-projection-20260907/；180bb697/pos11-native-reading-status-20260907/ | API/SQLite公开投影及批量身份相邻PASS；Android M4B普通详情真实FAIL STATUS-01：67%标已读后服务端状态正确且完整位置不变，详情即时及冷重开仍在读，最小修复待回归；其他界面/格式仍NOT_RUN，iOS BLOCKED |
+| POS-11 | P3；各格式 | 标记已读/取消已读→主动回读→检查首页/详情/目录/Reader | 已读状态独立；不制造恢复位置；展示与实际语义一致 | artifacts/releases/1.0/938afd24/pos11-status-projection-20260907/；180bb697/pos11-native-reading-status-20260907/；f778eecf/status01-native-regression-20260907/ | STATUS-01 CLOSED；Android M4B普通详情67%标已读/强停重开/取消、API完整位置不变、首页冷恢复20247→20247ms子项PASS；API/SQLite公开投影及批量身份相邻PASS；100%未标已读与书/资源owner由自动回归覆盖，其他界面/格式NOT_RUN，iOS BLOCKED |
 
 以上NOT_RUN异常组若执行到缺设备/样本的具体子项则为BLOCKED；Android 9e896bbc已有授权，可用子项直接执行，不再等待旧ENV-03交接。原生iOS缺口仍单列。辅助自动测试 C-09 单独记录，不替代真机和竞态网络证据。
 

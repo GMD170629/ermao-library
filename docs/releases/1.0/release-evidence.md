@@ -1,5 +1,13 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 STATUS-01 CLOSED（源码f778eecf）：新独立开发APK sha256=5e667fce665e07db353329119f77698655ee7caf9b16baa2352240e7beee18cb，在另一份已停止专用库副本上普通M4B详情67%→标已读立即显示“已读”，强停冷启重进仍“已读”；点击取消后显示“在读”且保留67%。三个阶段独立GET的book/resource完成标志false→true→false，完整v5快照20247ms/r14逐字段不变。取消后再强停冷启，从首页普通继续首次Playing20247ms/923ms，恢复误差0，暂停后GET仍20247ms/r16、completed=false。100%未标已读和书级/资源级不同状态仅由针对性自动回归覆盖，不冒充这些真机操作。
+
+修复复用shared Resource.completed→原Android Resource.toUiContent→ResourceContent.completed，详情资源页/卷册状态消费同一workReadingStatus，书级状态保持原owner；删除本地进度覆盖completed及百分比派生已读，没有改Locator/同步协议/用户文案/测试工具。主实际diff审查纠正了子代理最初混淆书级/资源级的测试fixture，正确fixture后目标3 FAIL及卷册相邻1 FAIL的实际输出有标注转录，原始RED控制台未落盘、不伪称原日志；新fixture补映射字段后才可编译RED的边界亦保留。主保存定向35 GREEN JUnit，完整Android host224无失败/错误/跳过和lint原日志通过（42s），后端状态相邻3 PASS；独立Hilbert最终7文件只读审查无阻塞。旧设备原失败本身仍有完整XML/GET/日志，不因RED日志限制删除或夸大。
+
+新包实际证据`artifacts/releases/1.0/f778eecf/status01-native-regression-20260907/`含manifest/源码索引、签名/安装/设备APK实测hash、before/marked/cancelled GET及XML、marked冷停/冷重开、取消后的首页与restore-first-playing/paused-media/player、最终GET和normal-ui-observations。原失败、修正fixture的转录、定向/完整JUnit和host/lint日志在`180bb697/pos11-native-reading-status-20260907/`。917项源码/两原件/开发APK校验一致，2次状态POST200、2次进度PUT200，无4xx/5xx；自有API按PID/创建时间/父链有意强停exit=-1，18084释放，测试包强停、自有reverse和临时XML移除，原App及15项用户改动不变。首次启动UI dump未生成文件的命令失败已保留为观察限制，后续原入口成功，不推为产品失败。没有新工具扩展，停止此缺陷的完善。
+
+当前恢复点：主修复f778eecf已推送；无活动服务/仪器/子代理，设备保留新独立开发包和专用账户数据。下一项为POS-05真实提交后丢ACK、另端N和原M重试链，先复用现有POS-06真实HTTP/SQLite/引擎捕获入口；若必需最小用例补口，按DEC-07登记明确失败/重试边界，不扩通用框架。其他进度异常/格式仍按矩阵执行；ENV-11/12、iOS/容器和正式APK/IPA暂缓分别保留，仍在R2、未冻结RC，五组最终放行与正式发布未完成。
+
 2026-09-07 POS-04分类收尾：主与独立Halley核对restore→retry→commitSharedPublication→applyLaunch→capture链。retry/drain只上传当前持久pending，不生成ID；新ID属于saveLocalAndSubmit的新捕获。共享commit只推进状态、不执行保存effects；实际setMediaItems/prepare/play之后的publishFromController直接观察及Listener都可能捕获，不能把r12/r13指定为某个具体回调。原生离线完整pending持久、冷恢复20226→20247及最终完整位置一致/r14/pending空三个子事实成立；旧mutation无receipt不单独构成产品FAIL，也不是旧body精确重放PASS。源码分类、限制和不扩工具理由见原目录pos04-source-classification.txt；另端重开/精确原body实跑等缺口保留，不能以此关闭整体POS-04。
 
 2026-09-07 STATUS-01原失败（180bb697源码、既有b5fce996独立开发APK）：复制已停止的POS-10专用测试库至新证据目录，启动现有API模块，未运行Worker或修改原库。普通首页封面→M4B详情67%→点击在读，API标记成功且book.completed/resourceCompleted均false→true；完整v5 GET保持20247ms/r14，无任何进度PUT。但即时/稳定详情以及独立包强停后重进详情均显示“在读”。此为实际UI失败，不是只凭静态百分比代码判断；取消已读及后续恢复在修复前不计通过。
