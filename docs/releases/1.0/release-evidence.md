@@ -4,6 +4,14 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+最新恢复点`7e207c3821abc522b7ff19a91f02b7bd6800a5f2`：POS-03 Chrome桌面/移动视口“MP3暂停且已确认后强杀、同profile重启、必要时真实同账号重登录恢复”子项均PASS。桌面5892ms/r3→实际5892ms（误差0）；移动视口5862ms/r3→6067.804ms（误差205.804ms），阈值仍2秒。杀前完整PUT/ACK/GET、pending=0及杀后登录前完整IDB等值已验证；CDP/CIM精确profile/创建时间核验后直接SIGKILL，杀前无页面关闭或播放器关闭。两次重启均未保留session cookie、首次GET401，真实UI登录按既有隐私策略清空两store，随后fresh GET必须完整等于原ACK，实际引擎恢复通过。此结论不覆盖免重登录、未确认pending、播放中强杀、其他引擎或原生平台。
+
+证据：`artifacts/releases/1.0/7e207c38/process-recovery/r1788705237079-w0/`（桌面）与`r1788705279829-w1/`（移动视口），含强杀前记录、browser-observations、截图、shutdown及post-run-verification。主已核验源/目标进程与实际结果，独立审查已复核桌面实际证据、测试修正及边界。杀后GET未单独序列化响应体，其完整比较由实际运行的必经断言证明；`source.fresh`仅是杀前GET，不能混称杀后响应。
+
+本批8次运行的完整性/清理均已复核：911应用文件、7样本及源成员hash不变、API无5xx、Next配置还原、18081/3102关闭、各自专用profile已删除、fixture进程退出。失败运行仍为FAIL且单独记录integrityPassed，不改写历史通过率。主执行46926已结束；原live/POS-04相邻在`ef3dc979`为2 PASS，后续仅按实际失败补专用启动参数、真实登录及正确隐私清理预期，未更改生产代码或原保护阈值。TEST-12及本POS-03子场景达到停止条件，不继续扩展辅助工具。
+
+后续默认在同一主发布分支串行修改，既有子分支的有效修改已逐项整合，不安排最后批量合并。PDF69页真实Chrome阅读正在既有Android格式工作区独立18085/3106上验收，未完成不计PASS；其余POS异常组合、格式、ENV-11、iOS/容器与暂缓正式产物仍分别保留，RC尚未冻结。
+
 POS-03登录阶段的测试预期修正依据：`58a8923a/process-recovery/r1788705072683-w0/`实际确认6084ms/r3后强杀，重启前后的完整IDB相等；cookie元数据证明本次重启未保留`shuku_session`，首次GET401，正常UI同账号登录后两张进度store为空。已核对`app-shell.tsx`登录页401→`clearPrivatePwaStorage`→Reader `clearAll`的现有隐私清理路径。原“登录后缓存不变”不符合此既有契约，改为检查两store清空；保留原失败、强杀前后完整IDB相等、源pending为0、fresh GET完整原ACK及真实引擎恢复≤2秒的全部有效保护。只修测试预期，不改认证/清理业务；不能据此宣称未确认位置或免重登恢复。命令16541已结束且清理成功，修正后typecheck/文件eslint PASS，真实恢复仍待重跑。
 
 POS-03实际强杀已执行但完整用例尚未通过：`a9bb694b/process-recovery/r1788704683244-w0/`及`r1788704727087-w1/`，Chrome两视口分别确认5668ms/r3、5857ms/r3后直接SIGKILL，旧root退出且同profile新root启动，完整IDB记录前后一致；随后首次GET均401，故未进入引擎恢复，原两次FAIL保留。两context、root、专用profile及fixture清理成功，55244已结束。已核对现有会话cookie带expires，但现场不证明401唯一根因；仅增加不含值的cookie元数据观察，并复用原真实UI登录同账号后继续，仍要求登录前后完整IDB、独立GET及实际播放位置不丢失。不得注入会话/进度，也不宣称免重登恢复。该最小修正服务POS-03的实际401阻断，typecheck和文件eslint通过；原场景实际完成后停止扩展。
@@ -105,7 +113,7 @@ DEC-07已纳入执行：停止已关闭AUDIO-03和ANDROID-03周边工具完善�
 | RG-01 交付 | NOT_RUN / 部分BLOCKED | APK/IPA正式构建用户暂缓；Docker引擎、Mac/iOS条件仍缺 |
 | RG-02 初始化/连接 | 第一方新库及正常两种组织模式子项PASS；OPDS客户端负责人放行（DEC-08） | 其余导入/连接异常和平台子项继续；双客户端由用户自测，不虚构代理实测 |
 | RG-03 格式 | READER-03、AAC回零已关闭；MP3/WAV/AAC/FLAC列明短时场景及TEST-11完整长播放PASS | 其余格式、复杂/异常媒体及原生iOS矩阵未完成 |
-| RG-04 进度 | 已关闭保存、捕获、串写及Stop迟到重启缺陷；MP3 W↔A正常交接、Chrome EPUB离线页面重建子项PASS | 确认后强杀、其余异常组合继续；SYNC-02真实浏览器受ENV-11阻塞；尚无同RC整体PASS |
+| RG-04 进度 | 已关闭保存、捕获、串写及Stop迟到重启缺陷；MP3 W↔A正常交接、Chrome EPUB离线页面重建、MP3确认后强杀并重登录恢复子项PASS | 未确认/其他引擎强杀及其余异常组合继续；SYNC-02真实浏览器受ENV-11阻塞；尚无同RC整体PASS |
 | RG-05 导入性能 | 本轮本机1万导入预检PASS（DEC-06） | 大规模/长时压力独立脚本按需运行，不作为当前阻塞；不外推NAS或30万表现 |
 
 持续播放最近恢复点：`audio-soak/production-1800-execution.json`，run `r1788689717566-w0`，启动源版本 `a5ac3b8b`，已以AUDIO-04 FAIL结束并安全清理。后续从原事件/HTTP日志定位，不假定它仍在运行。此工作属于音频功能稳定性，不是已停止的超大书库压测。
