@@ -22,7 +22,9 @@ class MainShellNavigationTest {
             readerType = "audio",
         )
         for ((card, expected) in listOf(
-            item to "audio:resume-resource",
+            item to "audio:resume-resource:Audio resource:/cover",
+            item.copy(resourceTitle = null) to "audio:resume-resource:Title:/cover",
+            item.copy(resourceTitle = " ") to "audio:resume-resource:Title:/cover",
             item.copy(readerType = "reflowable") to "reader:resume-resource",
             item.copy(readerType = "pdf") to "reader:resume-resource",
             item.copy(readerType = "comic") to "reader:resume-resource",
@@ -34,7 +36,7 @@ class MainShellNavigationTest {
                 item = card,
                 openBook = { calls.add("book:$it") },
                 openReader = { calls.add("reader:$it") },
-                openAudio = { calls.add("audio:$it") },
+                openAudio = { id, title, cover -> calls.add("audio:$id:$title:$cover") },
             )
             assertEquals(listOf(expected), calls)
         }

@@ -1,5 +1,7 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07独立复核收尾：gpt-5.6-sol/max只读核对AUDIO-11的准确readerType/资源身份、共享音频启动、空ID和非音频入口，提出首页titleHint应优先resourceTitle。主已据实修正并补非空/缺失/空白标题payload断言，Android完整host及lint再次通过（audio-11-title-host-lint.log，33s）；AUDIO-12主复核确认提示消费现有主动作owner，原不可读/Unsupported断言保留。子代理已关闭。74098307开发包构建成功但不是最终标题修订源码，不用于原场景回归；应从标题修订后的已提交候选重新增量构建。AUDIO-11/12真实回归仍NOT_RUN，不能关闭。
+
 2026-09-07 AUDIO-12候选：详情能力提示直接消费已有workDetailPrimaryActionPresentation的可用性结果，消除PLAYER音频被Reader专用Unsupported误判；不可读、缺资源与真实不支持的提示保护保留。新增原场景及PDF/CBZ/EPUB相邻呈现断言，旧条件28项中1失败（audio-12-red.log），候选完整host/lint通过。未改文案、格式列表或安全策略，真实新包详情待复验，暂不关闭。
 
 2026-09-07 AUDIO-11候选：Android继续项透传shared已有readerType，首页按真实resumeResourceId调用同一openAudio启动owner，详情/章节入口也使用该owner；不拼造ResourceContent，不修改Reader安全边界或Locator。旧行为针对性实际7项中2失败（映射和路由），修复后7项通过；原日志audio-11-red-configured.log、audio-11-green.log在85662d5d/android-normal-ui-20260907。首次命令因未配置ERMAO_ZIG未到测试，保留audio-11-red.log；随后复用既有0.14.1安装，无新增工具/系统变更。最终相邻Android host222与shared host429、lint通过，零失败/跳过（Gradle允许未受影响任务复用）；原生新包原场景尚待执行，AUDIO-11不关闭。

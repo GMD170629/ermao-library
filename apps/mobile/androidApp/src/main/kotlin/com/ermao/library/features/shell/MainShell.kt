@@ -152,13 +152,13 @@ internal fun continueReading(
     item: ContinueReadingCard,
     openBook: (String) -> Unit,
     openReader: (String) -> Unit,
-    openAudio: (String) -> Unit,
+    openAudio: (String, String, String) -> Unit,
 ) {
     val resourceId = item.resumeResourceId
     if (resourceId.isNullOrBlank()) {
         openBook(item.book.id)
     } else if (item.readerType.equals("audio", ignoreCase = true)) {
-        openAudio(resourceId)
+        openAudio(resourceId, item.resourceTitle?.takeIf(String::isNotBlank) ?: item.book.title, item.book.coverUrl)
     } else {
         openReader(resourceId)
     }
@@ -621,8 +621,8 @@ fun MainShell(
                                         ReaderActivity.createServerIntent(appContext, session.profile.id, resourceId),
                                     )
                                 },
-                                openAudio = { resourceId ->
-                                    openAudio(resourceId, item.book.title, item.book.coverUrl)
+                                openAudio = { resourceId, title, coverUrl ->
+                                    openAudio(resourceId, title, coverUrl)
                                 },
                             )
                         },
