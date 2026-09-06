@@ -4,7 +4,15 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
-### 最新检查点：`b93e1025`（未冻结 RC；后端源码`7c6c991c`）
+### 最新检查点：`27bad491`（未冻结 RC；后端源码`7c6c991c`）
+
+当前后端完整回归已由主代理读取原始日志核对：Linux **1284 PASS、2项既有Windows平台skip，coverage77%，321.91s**；Windows补测该两项均PASS。`backend-baseline/linux-7c6c991c/{linux,windows}/`保留pytest原始日志、XML、coverage、实际环境及源码hash；Linux689文件Ruff format/check与mypy492均PASS。从`7c6c991c`直接git archive得到SHA256 `436cab9d3d34f951ef1034004a698fa44563eb1c6e467ac5de8425f9df4f2875`，运行后归档源码未改变。合计1286个适用后端用例覆盖，不将平台skip改成无条件跳过。后续提交仅工具/文档/Web取证入口，后端源码保持该版本；最终RC仍需冻结验证。
+
+59份语料实际后端报告在`corpus-format-library-20260906/backend-preflight/REPORT.md`：60任务全部成功、53资源bootstrap、59原始asset下载hash和Range、51单文件publication下载全部通过；另外两目录共8成员按asset验证。59文件只有48个独立hash、43音频文件覆盖24个codec，客户端引擎执行数为0。MOBI/AZW/PRC/AZW3目录缺Windows libmobi，FB2没有section、AIFC实际AIFF的样本限制保留，G726需格式提示的裸流探测记录双结果。源码摘要与`7c6c991c`的Git对象逐文件匹配；不能按后缀数量宣布所有格式播放通过。
+
+`8ec43a27`为现有Web安全报告入口增加显式`--browser chrome`及真实Chrome channel选择，没有改策略/期望；Backend64、Chrome66报告与已有Android66报告跨消费者校验PASS（`contracts/backend-safety.json`、`web-chrome-safety.json`、`safety-three-consumers.log`）；不覆盖iOS。脚本ESLint/typecheck通过。`b93e1025`共同取证等待修改的38项Reader Chrome回归PASS，`web-baseline/chrome-opening-ready.log`、`chrome-opening-ready-results/`。
+
+`27bad491`补齐已有负载工具的扫描前后source SHA与book/resource/asset/path身份关联校验，复用既有散列、ORM关联及公共范围规则；主独立36项正反工具测试PASS（`contracts/load-integrity-primary.log`），Ruff/diff检查PASS。完整性观测在负载窗口之外，失败先保存证据再进入非零退出，135/180默认窗口与门禁阈值未改。实际安静10k重测是下一项，不凭工具测试计LOAD通过。
 
 `7c6c991c`已统一默认封面与缩略图/漫画缓存的原子发布owner，删除旧重复发布实现。主独立7项正负/并发回归、五文件Ruff及diff检查PASS（`backend-baseline/default-cover-primary.log`）。严格真实Chrome桌面/移动视口 **2 PASS，2.2m**，`web-baseline/chrome-live-default-cover.log`、`chrome-live-default-cover-results/`；实际运行目录`release-live/r1788676774434-w0/`、`r1788676846298-w1/`，记录源码、样本hash、API/Worker/浏览器和已完成清理。两项均使用实际`audio/mpeg`资源，API无5xx；第5/10秒服务端位置分别为3673/7927ms和3926/8187ms，最新位置重开为8000ms，均满足已冻结误差。七类导入不等于七类客户端播放。截图复核发现EPUB在ready后的退场动画尚未结束即取证；`b93e1025`仅加强共同等待条件为开屏层完全移除，重新采集画面，未据此推定产品卡死。
 

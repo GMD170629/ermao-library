@@ -4,6 +4,8 @@
 
 ## 1. 执行基线与展开规则
 
+`27bad491`检查点：后端`7c6c991c`完整Linux1284 PASS+Windows补测2 PASS，Ruff/mypy通过；59份实际语料的53资源bootstrap和59原文件hash/Range通过，目录环境/样本限制见证据，不代表客户端播放。Chrome安全报告66/Backend64与既有Android66一致性通过。负载原文件及关联完整性工具36项PASS，安静10k重测待执行。
+
 `7c6c991c`后端增量：MEDIA-02默认封面修复、主7项回归及严格真实Chrome两视口2 PASS，MP3实际MIME与5/10秒服务端读回已核实，无API 5xx。后端位置HTTP探针重新PASS；完整后端和59样本验收正在执行。`b93e1025`加强开屏动画等待后另采稳定截图，具体证据与限制见最新检查点。
 
 `d6b11360`增量：Chrome完整126 PASS、Web生产构建PASS；Android完整真机148 PASS，共享416/Android单元218/lint PASS。实际PCM播放的5/10秒生产SQLite读回及暂停重开误差8ms通过；在线确认、进程死亡、长时/逐编码不在该测试覆盖内。严格真实后端MP3两视口仍因MEDIA-02待复测。下文较旧状态保留追溯，以最新证据为准。
