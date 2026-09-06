@@ -37,9 +37,9 @@ async function mockBookDetailApi(page: Page, resources = [epubResource], directo
       const count = pageNumber === 1 ? 50 : 1;
       const units = Array.from({ length: count }, (_, offset) => {
         const index = firstIndex + offset + 1;
-        return { id: `chapter-${index}`, unitType: 'chapter', title: `Chapter ${index}`, href: `chapter-${index}.xhtml`, sortOrder: index - 1, assetId: null, pageNumber: null, mediaType: 'application/xhtml+xml', previewUrl: null, level: index === 51 ? 1 : 0, durationMs: null, discNumber: null, trackNumber: null, metadataJson: '{}' };
+        return { id: `chapter-${index}`, unitType: 'chapter', title: `Chapter ${index}`, navigationKey: `chapter-${index - 1}`, href: `chapter-${index}.xhtml`, sortOrder: index - 1, assetId: null, pageNumber: null, mediaType: 'application/xhtml+xml', previewUrl: null, level: index === 51 ? 1 : 0, durationMs: null, discNumber: null, trackNumber: null, metadataJson: '{}' };
       });
-      await route.fulfill({ json: { ok: true, data: { bookId: 'book-1', resourceId: 'resource-epub', units, page: { page: pageNumber, pageSize: 50, total: 51, totalPages: 2 }, currentHref: 'chapter-2.xhtml', currentChapterIndex: null, currentChapterTitle: null, currentChapterSortOrder: null, currentPageNumber: null, progress: 10 } } });
+      await route.fulfill({ json: { ok: true, data: { bookId: 'book-1', resourceId: 'resource-epub', units, page: { page: pageNumber, pageSize: 50, total: 51, totalPages: 2 }, currentHref: 'chapter-2.xhtml', currentChapterIndex: 1, currentChapterTitle: 'Chapter 2', currentChapterSortOrder: 1, chapterCount: 51, currentPageNumber: null, progress: 10 } } });
       return;
     }
     if (url.pathname.endsWith('/api/books/book-1')) {
@@ -60,10 +60,9 @@ test('a single readable resource opens its paginated detail by default and survi
   await expect(page).toHaveURL(/resourceId=resource-epub/);
   await expect(page).toHaveURL(/resourcePage=1/);
   await expect(page.getByRole('heading', { name: '章节', exact: true })).toBeVisible();
-  const currentChapter = page.getByText('Chapter 2', { exact: true });
+  const currentChapter = page.getByRole('button', { name: /^2 Chapter 2 (正在阅读|Reading)$/ });
   await expect(currentChapter).toBeVisible();
-  await expect(currentChapter.locator('xpath=ancestor::button')).toContainText(/正在阅读|Reading/);
-  await expect(page.getByText('Chapter 1', { exact: true }).locator('xpath=ancestor::button')).toContainText(/已读|Read/);
+  await expect(page.getByRole('button', { name: /^1 Chapter 1 (已读|Read)$/ })).toContainText(/已读|Read/);
 
   await page.getByRole('button', { name: '下一页' }).click();
   await expect(page).toHaveURL(/resourcePage=2/);
@@ -84,7 +83,8 @@ test('detail volume cover requests the small variant and uses compact dimensions
   await page.goto('/books/book-1?resourceId=resource-epub&resourcePage=1');
 
   const cover = page.locator('[data-book-cover="true"]').first();
-  await expect(cover).toHaveCSS('width', '128px');
+  const expectedInitialWidth = await page.evaluate(() => window.innerWidth >= 640 ? '150px' : '96px');
+  await expect(cover).toHaveCSS('width', expectedInitialWidth);
   await expect.poll(() => coverRequests.some((url) => url.includes('size=small'))).toBe(true);
 
   await page.setViewportSize({ width: 390, height: 844 });

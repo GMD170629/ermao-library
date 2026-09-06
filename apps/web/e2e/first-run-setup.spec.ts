@@ -118,7 +118,7 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
   await expect(addDialog.getByText(/快速检查/)).toHaveCount(0);
   await expect(page.getByText('识别说明')).toHaveCount(0);
   await expect(addDialog.getByRole('radio', { checked: true })).toHaveCount(0);
-  await expect(addDialog).toHaveCSS('overflow-y', 'visible');
+  await expect(addDialog).toHaveCSS('overflow-y', 'auto');
   await page.getByLabel('书库名称').fill('电子书');
   const folderPath = page.getByRole('combobox', { name: '书库路径' });
   await folderPath.fill('/home/liu');
@@ -145,7 +145,11 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
   await expect(addDialog.getByRole('alert')).toHaveText('请选择文件组织方式');
   const organizationModes = page.getByRole('radiogroup', { name: '组织方式' });
   const modeBoxes = await Promise.all(['单本', '分卷'].map((name) => addDialog.getByRole('radio', { name }).boundingBox()));
-  expect(modeBoxes[0]?.y).toBe(modeBoxes[1]?.y);
+  if ((page.viewportSize()?.width ?? 0) >= 640) {
+    expect(modeBoxes[0]?.y).toBe(modeBoxes[1]?.y);
+  } else {
+    expect(modeBoxes[1]?.y).toBeGreaterThan(modeBoxes[0]?.y ?? 0);
+  }
   await expect(addDialog.getByText('下级目录作为图书，一个图书可能有多个分卷')).toBeVisible();
   await page.getByRole('button', { name: '展开文件夹路径树' }).click();
   await expect(selectedLibrary).toHaveAttribute('aria-selected', 'true');

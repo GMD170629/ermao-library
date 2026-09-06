@@ -398,9 +398,17 @@ test('book detail resource covers support selection, keyboard-accessible context
   expect(progressRatio).toBeCloseTo(0.8, 2);
 
   const firstActions = page.getByRole('button', { name: '管理 第一资源', exact: true });
-  await expect(firstActions).toHaveCSS('opacity', '0');
-  await page.locator('[data-resource-card="true"]').filter({ hasText: '第一资源' }).hover();
-  await expect(firstActions).toHaveCSS('opacity', '1');
+  const touchPointer = await page.evaluate(() => window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0);
+  if (touchPointer) {
+    await expect(firstActions).toHaveCSS('opacity', '1');
+    await expect(firstActions).toHaveCSS('pointer-events', 'auto');
+  } else {
+    await expect(firstActions).toHaveCSS('opacity', '0');
+    await expect(firstActions).toHaveCSS('pointer-events', 'none');
+    await page.locator('[data-resource-card="true"]').filter({ hasText: '第一资源' }).hover();
+    await expect(firstActions).toHaveCSS('opacity', '1');
+    await expect(firstActions).toHaveCSS('pointer-events', 'auto');
+  }
   await firstActions.click();
   const cardMenu = page.getByRole('menu', { name: '管理可读资源' });
   await expect(cardMenu.getByRole('menuitem')).toHaveCount(6);
@@ -482,6 +490,32 @@ test('book detail requests a selected readable resource through the direct contr
   await page.unroute('**/api/**');
   await mockWebAppApi(page, async (route, url) => {
     if (!url.pathname.includes('/api/books/direct-book')) return false;
+    if (url.pathname.endsWith('/api/books/direct-book/resources/resource-2/reading-units')) {
+      const units = Array.from({ length: 24 }, (_, index) => ({
+        id: `page-${index + 1}`,
+        unitType: 'page',
+        title: `第 ${index + 1} 页`,
+        sortOrder: index,
+        assetId: 'resource-2-asset',
+        pageNumber: index + 1,
+        mediaType: 'application/pdf',
+        previewUrl: null
+      }));
+      await route.fulfill({ json: { ok: true, data: {
+        bookId: 'direct-book',
+        resourceId: 'resource-2',
+        units,
+        page: { page: 1, pageSize: 24, total: 128, totalPages: 6 },
+        currentHref: null,
+        currentChapterIndex: null,
+        currentChapterTitle: null,
+        currentChapterSortOrder: null,
+        chapterCount: null,
+        currentPageNumber: null,
+        progress: 0
+      } } });
+      return true;
+    }
     if (url.pathname.includes('/contents')) {
       await route.fulfill({ json: { ok: true, data: {
         bookId: 'direct-book',
@@ -536,7 +570,8 @@ test('book detail requests a selected readable resource through the direct contr
 
   await page.goto('/books/direct-book?resourceId=resource-2');
   await expect(page.getByRole('heading', { name: '直接资源图书' })).toBeVisible();
-  await expect(page.getByRole('button', { name: '第 1 卷' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '页面', exact: true })).toBeVisible();
+  await expect(page.getByText('共 128 页', { exact: true })).toBeVisible();
   expect(requestedResourceIds).toContain('resource-2');
 });
 
@@ -886,19 +921,19 @@ test('wide shelf details use responsive bookshelf rows and load more on scroll',
     gradient: 'from-orange-100 to-stone-200'
   }));
 
-  await page.route('**/test-landscape-cover.svg', async (route) => {
+  await page.route('**/test-landscape-cover.svg**', async (route) => {
     await route.fulfill({
       contentType: 'image/svg+xml',
       body: '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="320" height="180" fill="#d94724"/></svg>'
     });
   });
-  await page.route('**/test-square-cover.svg', async (route) => {
+  await page.route('**/test-square-cover.svg**', async (route) => {
     await route.fulfill({
       contentType: 'image/svg+xml',
       body: '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320"><rect width="320" height="320" fill="#222222"/></svg>'
     });
   });
-  await page.route('**/test-extra-tall-cover.svg', async (route) => {
+  await page.route('**/test-extra-tall-cover.svg**', async (route) => {
     await route.fulfill({
       contentType: 'image/svg+xml',
       body: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="600"><rect width="120" height="600" fill="#5a4238"/></svg>'
@@ -1073,16 +1108,22 @@ test('wide shelf details use responsive bookshelf rows and load more on scroll',
 
 test('mobile page actions keep labels horizontal and move below long headings', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.route('**/api/libraries', async (route) => {
+    await route.fulfill({ json: { ok: true, data: { libraries: [{ id: 'library-1', name: '主书库', enabled: true }] } } });
+  });
+  await page.route('**/api/libraries/library-1/import-tasks**', async (route) => {
+    await route.fulfill({ json: { ok: true, data: { tasks: [], queued: 0, running: 0, completed: 0, failed: 0, page: 1, pageSize: 10, total: 0, totalPages: 1 } } });
+  });
   await page.goto('/import-tasks');
 
   const title = page.getByRole('heading', { name: '导入任务' });
-  const action = page.getByRole('button', { name: '强制重新识别' });
+  const action = page.getByRole('button', { name: '刷新', exact: true });
   await expect(title).toBeVisible();
   await expect(action).toBeVisible();
 
   const layout = await page.evaluate(() => {
     const heading = document.querySelector('h1');
-    const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent?.includes('强制重新识别'));
+    const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent?.includes('刷新'));
     if (!heading || !button) return null;
     const headingBounds = heading.getBoundingClientRect();
     const buttonBounds = button.getBoundingClientRect();

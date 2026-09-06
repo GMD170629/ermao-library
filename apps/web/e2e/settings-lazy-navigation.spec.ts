@@ -230,7 +230,6 @@ test('new library shows expanded scan rules with a 10 KB minimum by default', as
 
   const folderPath = page.getByRole('combobox', { name: '书库路径' });
   await folderPath.fill('/library');
-  await page.getByRole('button', { name: '展开文件夹路径树' }).click();
   const directoryTree = page.getByRole('tree');
   await expect(directoryTree.getByRole('button', { name: '/', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'library', exact: true }).click();

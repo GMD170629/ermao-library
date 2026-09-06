@@ -211,7 +211,7 @@ function LibraryDialog(p: LibraryWorkspaceProps & { busy: boolean }) {
     return () => { document.body.style.overflow = previousOverflow; document.removeEventListener('keydown', handleKeyDown); };
   }, [busy, onCloseDialog]);
   return <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#3B4423]/55 p-4 backdrop-blur-sm" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) p.onCloseDialog(); }}>
-    <section role="dialog" aria-modal="true" aria-labelledby="add-library-dialog-title" className="relative max-h-[calc(100dvh-2rem)] w-full max-w-5xl overflow-visible rounded-[30px] border border-[#B08B6E]/45 bg-[#D4B895] p-5 shadow-[0_30px_90px_rgba(35,42,19,0.35)] sm:p-8">
+    <section role="dialog" aria-modal="true" aria-labelledby="add-library-dialog-title" className="relative max-h-[calc(100dvh-2rem)] w-full max-w-5xl overflow-y-auto rounded-[30px] border border-[#B08B6E]/45 bg-[#D4B895] p-5 shadow-[0_30px_90px_rgba(35,42,19,0.35)] sm:p-8">
       <button type="button" onClick={p.onCloseDialog} disabled={p.busy} aria-label={t('关闭')} className="absolute right-5 top-5 flex h-11 w-11 items-center justify-center rounded-2xl bg-[#E8DCC7]/75 transition hover:bg-[#E8DCC7] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#C66B3D]/25 disabled:opacity-50"><X size={20} /></button>
       <div className="pr-14"><h2 id="add-library-dialog-title" className="text-2xl font-semibold sm:text-3xl"><I18nText>新增书库</I18nText></h2><p className="mt-2 text-sm leading-6 text-[#606C38]/75"><I18nText>路径和组织方式一起保存，添加后仍可继续新增或删除。</I18nText></p></div>
       <form onSubmit={p.onSubmit} className="mt-6 space-y-5">
