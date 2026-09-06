@@ -14,8 +14,9 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from email.utils import format_datetime, parsedate_to_datetime
 from pathlib import Path
-from time import monotonic, time_ns
+from time import monotonic, sleep
 from urllib.parse import quote
+from uuid import uuid4
 
 from fastapi import Request
 from fastapi.responses import Response, StreamingResponse
@@ -59,6 +60,7 @@ SMALL_COVER_MAX_DIMENSION = 600
 SMALL_COVER_MEDIA_TYPE = "image/webp"
 SMALL_COVER_CACHE_VERSION = 1
 SMALL_COVER_QUALITIES = (82, 74, 66, 58, 50, 42, 34, 26, 18, 10)
+_CACHE_REPLACE_RETRY_DELAYS_SECONDS = (0.005, 0.01, 0.02)
 PSE_PAGE_CACHE_VERSION = 1
 PSE_PAGE_JPEG_QUALITY = 88
 PDF_RANGE_REQUEST_MAX_BYTES = reader_safety_budget(
@@ -500,12 +502,26 @@ def _pse_image_response(
         release()
 
 
+def _is_windows_cache_replace_lock(error: PermissionError) -> bool:
+    # Windows errors carry winerror; POSIX errno=5 is an unrelated I/O failure.
+    return getattr(error, "winerror", None) in {5, 32}
+
+
 def _write_cache_bytes(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{time_ns()}.tmp")
+    tmp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
     try:
         tmp.write_bytes(data)
-        tmp.replace(path)
+        for attempt in range(len(_CACHE_REPLACE_RETRY_DELAYS_SECONDS) + 1):
+            try:
+                tmp.replace(path)
+                return
+            except PermissionError as exc:
+                if not _is_windows_cache_replace_lock(exc):
+                    raise
+                if attempt == len(_CACHE_REPLACE_RETRY_DELAYS_SECONDS):
+                    raise
+                sleep(_CACHE_REPLACE_RETRY_DELAYS_SECONDS[attempt])
     finally:
         tmp.unlink(missing_ok=True)
 
