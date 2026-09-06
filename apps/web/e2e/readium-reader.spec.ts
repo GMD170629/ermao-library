@@ -4,6 +4,8 @@ import type { Locator } from '@readium/shared';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { revealReaderControls, visibleReaderFrame as visibleReadiumFrame } from './reader-controls';
+import { parseReaderV5ProgressPut, type ReaderV5ProgressPut, type ReaderV5ProgressSnapshot } from '../lib/reader/v5-wire';
+import { READER_V5_DB_NAME } from '../lib/reader/v5-storage';
 
 test.beforeEach(async ({ context }) => {
   await context.addCookies([{ name: 'shuku_session', value: 'readium-e2e-session', domain: '127.0.0.1', path: '/' }]);
@@ -549,6 +551,124 @@ test('Readium restore uses the opaque Locator and does not emit a corrective wri
   await expect(frame.contentFrame().locator('#chapter-two')).toBeVisible();
   expect(writes).toHaveLength(0);
   await expect(page.getByText('阅读器加载失败')).toHaveCount(0);
+});
+
+test('startup reopens current progress after an ACK retires pending behind an old bootstrap', async ({ page, context }, testInfo) => {
+  // Real browser UI, Readium and IndexedDB; only the owned HTTP boundary is mocked.
+  // A captured old HTTP response is delayed, not the IDB API or its transaction order.
+  const reopened = await context.newPage();
+  const epub = await createEpub();
+  const writes: unknown[] = [];
+  const uploads: ReaderV5ProgressPut[] = [];
+  const oldSnapshot = { ...progressSnapshot(readiumLocator('#chapter-title', '第一章 Readium 验收'), 0), schemaVersion: 5 as const };
+  let currentSnapshot: ReaderV5ProgressSnapshot = oldSnapshot;
+  let releaseAck: () => void = () => { throw new Error('ACK gate not initialized'); };
+  let releaseBootstrap: () => void = () => { throw new Error('bootstrap gate not initialized'); };
+  let markBootstrapCaptured: () => void = () => { throw new Error('bootstrap capture not initialized'); };
+  const ackGate = new Promise<void>((resolve) => { releaseAck = resolve; });
+  const bootstrapGate = new Promise<void>((resolve) => { releaseBootstrap = resolve; });
+  const bootstrapCaptured = new Promise<void>((resolve) => { markBootstrapCaptured = resolve; });
+  const stages: string[] = [];
+  let reopenQueries = 0;
+  let capturedBootstrap: ReturnType<typeof readerBootstrap> | null = null;
+  // This read-only observation is scoped to the fresh Playwright context's v5 DB.
+  const storedProgress = () => page.evaluate(async (databaseName) => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const open = indexedDB.open(databaseName);
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => reject(open.error);
+      open.onupgradeneeded = () => { open.transaction?.abort(); reject(new Error('v5 database must already exist')); };
+    });
+    try {
+      return await new Promise<{ pending: unknown[]; exact: unknown[] }>((resolve, reject) => {
+        const transaction = database.transaction(['pending-position', 'position'], 'readonly');
+        const pending = transaction.objectStore('pending-position').getAll();
+        const exact = transaction.objectStore('position').getAll();
+        transaction.oncomplete = () => resolve({ pending: pending.result, exact: exact.result });
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
+    } finally { database.close(); }
+  }, READER_V5_DB_NAME);
+  let beforeAck: Awaited<ReturnType<typeof storedProgress>> | null = null;
+  let afterAck: Awaited<ReturnType<typeof storedProgress>> | null = null;
+  await context.route('**/api/**', async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    const reopening = request.frame().page() === reopened;
+    if (reopening && pathname.endsWith('/bootstrap')) {
+      // DEV can repeat this logical reopen's request. Freeze its controlled old
+      // response once; a later route callback must not recapture the ACKed state.
+      if (!capturedBootstrap) {
+        expect(currentSnapshot).toEqual(oldSnapshot);
+        capturedBootstrap = readerBootstrap(structuredClone(currentSnapshot));
+        stages.push('old-bootstrap-response-captured');
+        markBootstrapCaptured();
+      }
+      await bootstrapGate;
+      stages.push('old-bootstrap-response-delivered');
+      return route.fulfill({ json: capturedBootstrap });
+    }
+    if (pathname.endsWith('/progress') && request.method() === 'PUT') {
+      const upload = parseReaderV5ProgressPut(request.postDataJSON());
+      if (!upload) throw new Error('ACK_RACE_PROGRESS_REQUEST_INVALID');
+      uploads.push(upload);
+      await ackGate;
+      currentSnapshot = {
+        schemaVersion: 5, revision: currentSnapshot.revision + 1,
+        clientId: upload.clientId, mutationId: upload.mutationId,
+        capturedAtEpochMillis: upload.capturedAtEpochMillis,
+        receivedAtEpochMillis: Date.now(), position: upload.position
+      };
+      stages.push('matching-ack-delivered');
+      return route.fulfill({ json: { ok: true, data: {
+        acceptedMutationId: upload.mutationId,
+        acceptedRevision: currentSnapshot.revision,
+        currentSnapshot
+      } } });
+    }
+    if (reopening && pathname.endsWith('/progress') && request.method() === 'GET') {
+      reopenQueries += 1;
+      stages.push('reopen-current-progress-query');
+    }
+    return fulfillApi(route, currentSnapshot, 0, writes, epub);
+  });
+  try {
+    await page.goto('/reader/epub-resource?chapterKey=chapter-1');
+    const writingFrame = await visibleReadiumFrame(page);
+    await expect(writingFrame.contentFrame().locator('#chapter-two')).toBeVisible();
+    await expect.poll(() => uploads.length).toBeGreaterThan(0);
+    const upload = uploads[0];
+    expect(upload.position.locator.href).toBe('chapter2.xhtml');
+    beforeAck = await storedProgress();
+    expect(beforeAck.pending).toEqual([expect.objectContaining({ mutationId: upload.mutationId, position: upload.position })]);
+    stages.push('real-idb-pending-observed');
+    await reopened.goto('/reader/epub-resource', { waitUntil: 'domcontentloaded' });
+    await bootstrapCaptured;
+    releaseAck();
+    await expect.poll(async () => (await storedProgress()).pending).toEqual([]);
+    afterAck = await storedProgress();
+    expect(afterAck.exact).toEqual([expect.objectContaining({ mutationId: upload.mutationId, revision: currentSnapshot.revision, position: upload.position })]);
+    stages.push('real-idb-ack-transaction-observed-pending-empty');
+    releaseBootstrap();
+    const restoredFrame = await visibleReadiumFrame(reopened);
+    await expect(restoredFrame.contentFrame().locator('#chapter-two')).toBeVisible();
+    expect(reopenQueries).toBeGreaterThan(0);
+    await expect(reopened.getByText('阅读器加载失败')).toHaveCount(0);
+    stages.push('reopen-current-chapter-visible');
+  } finally {
+    releaseAck();
+    releaseBootstrap();
+    try {
+      await testInfo.attach('ack-bootstrap-order', {
+        body: Buffer.from(JSON.stringify({ boundary: 'mock API / real Chrome, IDB and Readium UI', stages, beforeAck, afterAck, fullPosition: uploads[0]?.position })),
+        contentType: 'application/json'
+      });
+    } finally {
+      // Playwright owns this nonpersistent context: closing it discards only its storage.
+      await context.close();
+    }
+  }
 });
 
 test('an in-session remote update stays non-modal and jumps only after explicit user action', async ({ page }) => {
