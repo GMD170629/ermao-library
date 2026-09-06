@@ -677,6 +677,8 @@ test('release live paused confirmed MP3 survives dedicated Chrome process termin
     const { viewport, deviceScaleFactor, isMobile, hasTouch, userAgent } = testInfo.project.use;
     const context = await playwright.chromium.launchPersistentContext(profilePath, {
       channel: 'chrome', headless: true, serviceWorkers: 'allow',
+      // CDP command-line ownership checks require this explicit Chrome flag.
+      args: ['--enable-automation'],
       viewport, deviceScaleFactor, isMobile, hasTouch, userAgent
     });
     contexts.push(context);

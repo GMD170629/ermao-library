@@ -4,6 +4,8 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+POS-03针对性测试`92b240ca`已整合为`ef3dc979`，仅复用原setup、音频打开与只读IDB观察，并增加专用持久Chrome的进程归属/强杀/重启验证；完整typecheck/lint通过。首跑`artifacts/releases/1.0/ef3dc979/process-recovery-and-adjacent/r1788704462524-w0/`在CDP命令行读取阶段因缺`--enable-automation`失败，尚未实际强杀；browser-observations和shutdown保留，context关闭、专用profile移除、fixture退出通过。原live及POS-04相邻2 PASS，完整命令如实为1 FAIL+2 PASS。TEST-12只补该参数后重跑原场景，保留所有安全守卫，不改业务或扩框架；执行53319已结束。
+
 当前恢复点 `02d6ea2d80b3b7820dc09c3c05ed605cbe674c92`：POS-04的Chrome桌面/移动视口EPUB离线pending、页面重建及重连恢复子项均PASS。真实“下一章”产生第二章完整Locator；断网页面关闭后，新页面由生产Service Worker提供离线页，只读IDB确认pending/exact完整值不变；重连原mutation获ACK，revision从1到2，本地pending清空且独立GET完整值一致，分别用时965ms/959ms（从真实认证响应开始，包含ACK落盘与GET，阈值5秒），实际Reader恢复第二章。没有模拟API、手写进度或IDB注入；不代表进程强杀、原生客户端或另端离线交接通过。
 
 证据位于主工作区 `artifacts/releases/1.0/02d6ea2d/epub-offline-and-adjacent/r1788703654124-w0/` 与 `epub-offline-mobile/r1788703796970-w0/`。原live相邻生产Chrome用例也PASS（`epub-offline-and-adjacent/r1788703577909-w0/`），原EPUB、MP3及PWA断言保留，MP3暂停8440ms→重开8000ms，误差440ms；本次soak=0，不重复或冒充30分钟。三个运行的browser-observations、截图及post-run-verification均已主复核：911应用文件、7样本及源成员hash不变，无API5xx，Next配置还原，18081/3102及fixture进程退出；执行57395/13583均结束。
