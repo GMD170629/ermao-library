@@ -72,6 +72,9 @@ def reader_v5_latest_read_at_expression(
             resource.book_id == book_id_expression,
             resource_visibility_predicate(context, resource),
         )
+        # Scope MAX to the correlated book rather than rescanning the actor's
+        # full time index for every candidate book (SQLite MIN/MAX optimization).
+        .group_by(resource.book_id)
         .correlate_except(progress, resource)
         .scalar_subquery()
     )
