@@ -1,5 +1,9 @@
 # 1.0 发布阻塞项
 
+2026-09-07 SYNC-03候选ffcbd4aa实际复验仍PARTIAL：新库M4B从Web5000ms交给Android确认15000ms/r8，Chrome fresh reload百分比50%正确，但当前收听退成书名。实际reading-units只有currentHref/percent，未携带完整v5 presentation，故不能关闭。该候选已停止并保留失败，继续沿现有投影owner补全服务端展示；不以百分比反算当前位置、不增加逐资源额外GET。
+
+2026-09-07 SYNC-03（RG-04/POS-01，真实FAIL，候选待Chrome回归）：cff3e689普通交接中Chrome重载详情仍显示旧Web5秒，服务端已确认Android15秒，打开播放器后才纠正。owner为详情从getV5Progress无条件叠加已确认本地历史。ffcbd4aa复用既有pending身份读取，统一百分比/位置/继续资源投影并保留本页capture；原行为针对性RED、候选Web481及lint/typecheck/pretest通过，尚未关闭。当前独立fixture正在启动准备真实原场景；与SYNC-02启动ACK竞态无关，不改协调器。POS-07服务端首次迟到C、重放M和冲突保护已实测通过（e39e6de2）；客户端离线/受控并发顺序仍未覆盖。
+
 2026-09-07 最新：M4B/M4A/AAC普通Chrome↔Android六个短时交接子项已通过，最大恢复偏差15ms；没有本轮业务/测试工具改动。当前新增待分类观察为Chrome详情重载后仍显旧位置，播放器打开后才刷新（正常恢复已确认正确），只读追踪进行中。证据在cff3e689/ordinary-audio-sync-20260907；fixture、浏览器测试账号和自有tab、设备播放与reverse均已收尾。前轮AUDIO-11/12关闭获独立证据复核支持。下一项为该显示现象的owner定位及其余进度异常/生命周期缺口；ENV-11/12、iOS、容器及正式产物暂缓仍独立保留，尚未冻结RC，未整体GO。
 
 2026-09-07最新：AUDIO-11首页音频误路由、AUDIO-12详情错误能力提示均已关闭，原失败、必要自动回归、独立审查和f8847633新包真机普通原场景齐备。AAC首页强停恢复17380→17380ms；M4B/M4A三章导航及各自确认后强停恢复10000→10031ms通过。原样本/源码、安装包hash、原App不变与服务清理已核验，见release-evidence和f8847633/android-normal-ui-regression-20260907。无活动fixture/子代理/设备验收进程，新独立测试包保留；本批不再扩工具。下一可执行缺口为其余第一方跨端与异常组合，ENV-11/12工具拒绝、iOS、容器及暂缓正式产物分别保留；未冻结RC，不作整体GO。

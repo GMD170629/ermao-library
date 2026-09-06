@@ -241,13 +241,13 @@ POS-08新增AUDIO-08（原RISK-06）：真实Android引擎+SQLite单次IO门控�
 
 | ID / RG-04 | 前置/平台/样本 | 操作步骤 | 预期 | 证据 | 状态/关联 |
 |---|---|---|---|---|---|
-| POS-01 | P3；W/A/I、全部承诺格式 | 各格式记录唯一文字/物理页/图片/轨时间→保存→退出重开；目标端换字体屏幕 | 精确语义恢复；展示百分比不反推Locator | E/POS-01/ | NOT_RUN（原生/缺样本子项BLOCKED）；ENV-02/03/06 |
+| POS-01 | P3；W/A/I、全部承诺格式 | 各格式记录唯一文字/物理页/图片/轨时间→保存→退出重开；目标端换字体屏幕 | 精确语义恢复；展示百分比不反推Locator | artifacts/releases/1.0/cff3e689/ordinary-audio-sync-20260907/；既有MP3见release-evidence | MP3及M4B/M4A/AAC正常W↔Android交接开发子项PASS；本轮后三格式误差最大15ms。其余格式/布局组合仍待逐项，iOS BLOCKED；未冻结RC |
 | POS-02 | P3；各引擎代表样本 | 连续读听，量测捕获/本地持久化/发送/确认；不足5秒即返回/暂停/切后台 | 最后捕获位置按冻结间隔可靠保存，确认延迟单列 | E/POS-02/ | NOT_RUN（原生/缺样本子项BLOCKED）；DEC-04 |
 | POS-03 | P3；各引擎 | 分别在本地持久化前、后、网络确认后强杀；App重启/系统回收/浏览器刷新 | 至少最后已持久化位置恢复；已确认零丢失，未持久化损失不超冻结间隔 | artifacts/releases/1.0/7e207c38/process-recovery/ | Chrome桌面/移动视口MP3已确认暂停后强杀并重登录恢复PASS（0/205.804ms）；Android普通首页已确认AAC四轨与M4B/M4A章节强停恢复PASS（f8847633，0/31/31ms）；未确认/其他引擎子项NOT_RUN；iOS BLOCKED |
 | POS-04 | P3；已合法打开/可本地读取资源 | 断网读到B→观察pending→重启客户端→重连→重试并另端重开 | pending持久保留并最终确认；不扩展离线登录契约 | artifacts/releases/1.0/02d6ea2d/epub-offline-and-adjacent/ 与 epub-offline-mobile/ | Chrome桌面/移动视口EPUB页面重建及重连子项PASS（965/959ms）；进程强杀、其他格式及另端交接NOT_RUN；原生iOS BLOCKED |
 | POS-05 | P3；同账号同资源两端 | 写mutation M让服务提交但丢回包→另一端新写N→重试M；另测同M不同payload | 重放M不再覆盖N，不递增revision；不同payload受既有冲突处理 | E/POS-05/ | NOT_RUN（原生/缺样本子项BLOCKED）；ENV-03 |
 | POS-06 | P3；各端读/听writer | 阻留旧M响应→本端生成新pending N→释放M响应→重开/重试N | 旧ACK仅清对应M，N保留；不能回滚本地较新位置 | E/POS-06/ | NOT_RUN（原生/缺样本子项BLOCKED）；ENV-03 |
-| POS-07 | P3；双端并发、离线首次提交 | A/B分别写并控制事务完成顺序；再让离线未提交C在N后首次到达；主动回读 | 按服务端最后事务提交生效；C可成为新当前位置，区别成功mutation重放；明确记录用户可见回退，不自创最大百分比算法 | E/POS-07/ | NOT_RUN（原生/缺样本子项BLOCKED）；DEC-03 |
+| POS-07 | P3；双端并发、离线首次提交 | A/B分别写并控制事务完成顺序；再让离线未提交C在N后首次到达；主动回读 | 按服务端最后事务提交生效；C可成为新当前位置，区别成功mutation重放；明确记录用户可见回退，不自创最大百分比算法 | artifacts/releases/1.0/62377271/pos07-late-first-submit-20260907/ | 首次迟到C生效、旧成功M重放及异payload409的真实API/ORM子项PASS（e39e6de2）；双端受控事务顺序及真实离线客户端NOT_RUN，iOS BLOCKED |
 | POS-08 | P3；两账号/服务器/资源 | 在途保存时切账号/服务器/资源，释放旧请求；尝试无权资源和同mutation跨namespace | 无串写、越权、错误清pending；业务身份以资源为准 | E/POS-08/ | NOT_RUN（原生/缺样本子项BLOCKED）；ENV-03 |
 | POS-09 | P3；有章/页入口的各格式 | 从目录显式目标A进入→读到B保存→旋转/重建/重进 | 显式入口只应用一次，回到后来B | E/POS-09/ | NOT_RUN（原生/缺样本子项BLOCKED）；ENV-06 |
 | POS-10 | P3；各引擎 | 确认位置→服务受控重启→重开；另保持目标端正在阅读，远端写入 | 已确认位置保留；活动会话不被强行跳转 | E/POS-10/ | NOT_RUN（原生/缺样本子项BLOCKED）；ENV-03 |
