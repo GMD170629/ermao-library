@@ -4,6 +4,17 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 
 ## R1 状态覆盖与外部条件
 
+本轮确证及修复：
+
+| ID | 类型 / 证据 | 当前处理 |
+|---|---|---|
+| DEC-05 / RISK-01 / ENV-05 | 全新测试库复现 OPDS 与 v5 各自持久化、双向不可见；`opds-investigation/`。用户批准 1.0 暂不支持第三方进度同步 | 原互通范围 N/A；端点和能力声明关闭待回归，目录/搜索/下载继续验收 |
+| TEST-01 | schema 验证器不支持合法 nullable type union；原 33 tests 中 2 errors | 已修复 `6cfbf7bb`，33 PASS；新增正反例，未改 schema 或弱化断言 |
+| TEST-02 | 后端同名测试模块收集冲突且锁中缺 coverage 执行依赖 | 已修复 `aa02e0ae`，完整收集 1255；仍有运行失败，另行处理 |
+| TEST-03 | Web Reader 测试强制 SDK 不承诺的 selector 字段、移动视口硬编码点击/桌面间距假设 | Chrome 两视口专项 42 PASS；SDK round-trip、原有真实段落恢复与新增缓存重开保护保留，详见 evidence |
+| RUN-01 | Windows 后端 36 个运行失败；Android shared/unit/lint/instrumentation 均有失败 | 正在隔离 Linux 重验和分类修复；不得宣告代码门禁通过 |
+| RUN-02 | Web 原四浏览器回归失败，含环境启动、过期 fixtures/断言、TXT 章节识别等不同原因 | 用户只要求 Chrome；Chrome 全套仍待修复后完整重跑，不能用 42 项专项替代 |
+
 | ID | 当前事实与证据 | 当前处理 |
 |---|---|---|
 | ENV-01 | 当前 develop `197e81a8` 干净，已创建隔离发布分支；见 evidence R1 | 旧脏工作树阻塞解除；最终 RC 冻结仍 NOT_RUN |

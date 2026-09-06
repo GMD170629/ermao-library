@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 import { TextReader, Uint8ArrayWriter, ZipWriter } from '@zip.js/zip.js';
+import type { Locator } from '@readium/shared';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -138,6 +139,30 @@ async function visibleReadiumFrame(page: Page) {
   const frame = shell.locator('iframe:visible').first(); await expect(frame).toBeVisible(); return frame;
 }
 
+async function revealReaderControls(page: Page) {
+  const frame = await visibleReadiumFrame(page);
+  const bounds = await frame.boundingBox();
+  if (!bounds) throw new Error('READIUM_FRAME_BOUNDS_MISSING');
+  await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  await expect(page.getByRole('button', { name: '外观', exact: true })).toBeVisible();
+}
+
+async function emittedReadiumLocator(writes: readonly unknown[]): Promise<Locator> {
+  const write = writes.at(-1);
+  if (!write || typeof write !== 'object' || !('position' in write)
+    || !write.position || typeof write.position !== 'object' || !('locator' in write.position)) {
+    throw new Error('READIUM_POSITION_WRITE_MISSING');
+  }
+  // ADR 0028 preserves the SDK's opaque object. Requiring an application-defined
+  // selector/text field rejects valid Readium Locators; validate SDK round-trip
+  // while the surrounding assertions verify the rendered publication position.
+  const { Locator } = await import('@readium/shared');
+  const locator = Locator.deserialize(write.position.locator);
+  if (!locator) throw new Error('READIUM_LOCATOR_DESERIALIZATION_FAILED');
+  expect(locator.serialize()).toEqual(write.position.locator);
+  return locator;
+}
+
 test('shared chapter key opens the same chapter and reports its identity', async ({ page }) => {
   await page.setViewportSize({ width: 411, height: 914 });
   const writes = await installReaderRoutes(page);
@@ -223,9 +248,10 @@ test('Readium opens a cached original EPUB without manifest, positions or chapte
   const writes = await installReaderRoutes(page); await page.goto('/reader/epub-resource');
   const frame = await visibleReadiumFrame(page); await expect(frame.contentFrame().getByText('第一章 Readium 验收')).toBeVisible();
   await expect.poll(() => writes.length, { timeout: 10_000 }).toBeGreaterThan(0);
-  const write = writes.at(-1) as { position: { locator: ReturnType<typeof readiumLocator> } };
-  expect(write.position.locator.href).toBe('chapter1.xhtml');
-  expect(write.position.locator.locations.cssSelector || write.position.locator.locations.fragments?.length || write.position.locator.text?.highlight).toBeTruthy();
+  expect((await emittedReadiumLocator(writes)).href).toBe('chapter1.xhtml');
+  await page.reload();
+  const reopenedFrame = await visibleReadiumFrame(page);
+  await expect(reopenedFrame.contentFrame().getByText('第一章 Readium 验收')).toBeVisible();
   expect(requests.filter((path) => /\/publication\/(?:manifest|positions|chapter)/.test(path))).toEqual([]);
   expect(requests.filter((path) => path === '/api/assets/epub-asset')).toHaveLength(1);
 });
@@ -295,15 +321,20 @@ test('Readium highlights the current chapter and enables adjacent chapter naviga
   const previous = page.locator('button[aria-label="上一章"]:visible');
   const next = page.locator('button[aria-label="下一章"]:visible');
   await expect(firstChapter).toHaveAttribute('aria-current', 'location');
+  // Compact Reader places chapter controls on the home console, below the TOC.
+  await page.getByRole('button', { name: '关闭面板', exact: true }).click();
   await expect(previous).toBeDisabled();
   await expect(next).toBeEnabled();
 
   await next.click();
+  await page.getByRole('button', { name: '目录', exact: true }).click();
   await expect(secondChapter).toHaveAttribute('aria-current', 'location');
+  await page.getByRole('button', { name: '关闭面板', exact: true }).click();
   await expect(previous).toBeEnabled();
   await expect(next).toBeDisabled();
 
   await previous.click();
+  await page.getByRole('button', { name: '目录', exact: true }).click();
   await expect(firstChapter).toHaveAttribute('aria-current', 'location');
 });
 
@@ -364,9 +395,15 @@ test('Readium applies block margins to every page viewport without special-casin
   const viewportBounds = await readerViewport.boundingBox();
   bounds = await frame.boundingBox();
   if (!viewportBounds || !bounds) throw new Error('READIUM_VIEWPORT_BOUNDS_MISSING');
-  expect(bounds.y - viewportBounds.y).toBeCloseTo(viewportBounds.height * 0.05, 0);
+  // The established compact layout uses clamp(16px, 2.5vh, 32px);
+  // desktop uses clamp(32px, 5vh, 64px). Keep the same subpixel tolerance.
+  const compact = viewportBounds.width <= 640;
+  const expectedMargin = compact
+    ? Math.max(16, Math.min(32, viewportBounds.height * 0.025))
+    : Math.max(32, Math.min(64, viewportBounds.height * 0.05));
+  expect(bounds.y - viewportBounds.y).toBeCloseTo(expectedMargin, 0);
   expect(viewportBounds.y + viewportBounds.height - (bounds.y + bounds.height)).toBeCloseTo(
-    viewportBounds.height * 0.05,
+    expectedMargin,
     0
   );
 
@@ -551,9 +588,9 @@ test('whole-publication percentage is display-only and never an automatic restor
   const writes = await installReaderRoutes(page, null, 88); await page.goto('/reader/epub-resource');
   const frame = await visibleReadiumFrame(page); await expect(frame.contentFrame().locator('#chapter-title')).toBeVisible();
   await expect.poll(() => writes.length, { timeout: 10_000 }).toBeGreaterThan(0);
-  const write = writes.at(-1) as { position: { locator: ReturnType<typeof readiumLocator> } };
-  expect(write.position.locator.locations.cssSelector).toBeTruthy();
-  expect(write.position.locator.locations.progression).not.toBe(0.88);
+  const locator = await emittedReadiumLocator(writes);
+  expect(locator.href).toBe('chapter1.xhtml');
+  expect(locator.locations.progression).not.toBe(0.88);
 });
 
 test('Readium settings expose scrolling, auto spread and publisher styles with truthful context states', async ({ page }) => {
@@ -561,10 +598,7 @@ test('Readium settings expose scrolling, auto spread and publisher styles with t
   await page.goto('/reader/epub-resource');
   await visibleReadiumFrame(page);
 
-  await page.locator('[data-reader-shell="v3"] > div.relative').dispatchEvent('click', {
-    clientX: 640,
-    clientY: 320
-  });
+  await revealReaderControls(page);
   await page.getByRole('button', { name: '阅读设置' }).click();
 
   const flow = page.getByRole('group', { name: '阅读方式' });
@@ -640,10 +674,7 @@ test('Readium applies reader themes inside the publication without persisting a 
   await page.waitForTimeout(300);
   const writesBeforeTheme = writes.length;
 
-  await page.locator('[data-reader-shell="v3"] > div.relative').dispatchEvent('click', {
-    clientX: 640,
-    clientY: 320
-  });
+  await revealReaderControls(page);
   await page.getByRole('button', { name: '外观' }).click();
   await page.getByRole('button', { name: '纯黑' }).click();
 
