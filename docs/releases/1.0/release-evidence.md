@@ -4,6 +4,10 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+AUDIO-03原失败链路真实回归PASS：`audio-soak/runs-savefix-30/r1788689332133-w0/`，Web生产修复源码 `4aaa40c7`，Chrome全新库/EPUB/长MP3、原5/10秒确认、30.658秒连续观察、原快速seek/pause/close/reopen完整1 PASS（1.4m）。保存475006ms、恢复475000ms，误差6ms；连续采样最大间隔/无推进172.7ms，无额外等待上传或弱化恢复断言。`post-run-verification.json` 独立核实7份原文件不变、910份受测应用源码不变、API 5xx=0、18081/3102关闭、Python清理成功、Next两配置恢复原字节。此已复现快速关闭缺陷本批关闭，未覆盖30分钟、异常IDB顺序、其他编码/跨端。
+
+TEST-10修复当前验证：启动/preflight/build/readiness统一有界可取消生命周期，原错与清理错均保留；stop先于Python启动到达也不能被删除。Next配置按本轮安装字节比较后恢复，冲突保留用户改动并显式失败；Chrome串行、trace关闭。源码清单含未跟踪应用文件哈希，避免git diff遗漏在编模块。`web-baseline/pwa-independent-review/fixes-e90c87df/primary-final-tests.log` 本工具与Android相邻40 PASS，Ruff/ESLint/typecheck通过；上述真实开发模式运行验证清理与配置恢复。新基础设施的production PWA与构建中取消真实验证仍待执行；有限生命周期单测不等于完整发布验收。
+
 AUDIO-03关闭竞态补充：取消加载统一复用 `cancelPendingLoad`，关闭时同时撤销待加载摘要；保存失败保留当前资源和可见错误，过期保存失败不能覆盖新加载。IDB读取后的取消检查阻止旧结果重新打开播放器。独立限定差异复核未发现新阻断；模型用例已使用非空pending summary验证撤销，旧断言全部保留。`audio-soak/save-close-cancel-tests.log` 20 PASS、`web-full-cancel.log` 完整465 PASS/0 skip、`cancel-lint.log` 和 `cancel-typecheck.log` 通过。真实快速关闭与异常IDB顺序尚待执行，不从纯状态测试推定浏览器失败路径通过。
 
 恢复时继续三个独立方向：主执行Chrome AUDIO-03原失败链路；ANDROID-03补唯一Expanded几何前置并重跑；READER-03处理MathML annotation-xml的encoding实体改变HTML解析上下文。后者当前HTML/XML/locator95项通过，扩展独立对照87/90通过，余下同一反例在三个分块大小下失败，证据 `backend-baseline/html-independent-review/raw-text-integration-20260906/`，不能关闭。此前Web边界前置失败已确认为扫描器跨注释引号误匹配：AST无对应错误码字符串；仅改注释，未放宽检查器或策略。

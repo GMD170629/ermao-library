@@ -51,6 +51,7 @@ type FixtureRun = {
   stopFile: string;
   shutdownFile: string;
   manifest: LiveManifest | null;
+  spawnError: Error | null;
 };
 
 type ApiResponseObservation = {
@@ -81,6 +82,10 @@ const DEFAULT_ARTIFACT_ROOT = resolve(
 );
 const RESERVED_PORTS = new Set([3000, 3100, 8000]);
 const productionWeb = process.env.RELEASE_LIVE_WEB_RUNTIME === 'production';
+// Includes preflight, bounded prepare/build/readiness, then the existing
+// browser/soak budget and enough time for LoggedProcess tree shutdown.
+const FIXTURE_STARTUP_TIMEOUT_MS = 1_200_000;
+const FIXTURE_STOP_TIMEOUT_MS = 120_000;
 
 function record(value: unknown): JsonRecord {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -156,11 +161,49 @@ async function readJson(path: string): Promise<unknown> {
   return JSON.parse(await readFile(path, 'utf8')) as unknown;
 }
 
-async function stopFixture(fixture: FixtureRun): Promise<void> {
+function safeFixtureError(error: unknown): Error {
+  const password = process.env.RELEASE_LIVE_PASSWORD ?? '';
+  if (error instanceof AggregateError) {
+    const errors: unknown[] = error.errors;
+    return new AggregateError(errors.map(safeFixtureError), redact(error.message, password));
+  }
+  const safe = new Error(redact(error instanceof Error ? error.message : String(error), password));
+  if (error instanceof Error) {
+    safe.name = error.name;
+    if (error.stack) safe.stack = redact(error.stack, password);
+  }
+  return safe;
+}
+
+function combineFixtureErrors(primary: Error | null, cleanup: Error | null): Error | null {
+  if (primary && cleanup) {
+    return new AggregateError([primary, cleanup], `${primary.message}\nFixture cleanup also failed: ${cleanup.message}`);
+  }
+  return primary ?? cleanup;
+}
+
+async function stopFixture(fixture: FixtureRun): Promise<string | null> {
   await writeFile(fixture.stopFile, 'stop\n', 'utf8');
-  const deadline = Date.now() + 30_000;
+  const deadline = Date.now() + FIXTURE_STOP_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    if (fixture.child.exitCode !== null && existsSync(fixture.shutdownFile)) return;
+    if (fixture.spawnError && fixture.child.pid === undefined) return null;
+    if (fixture.child.exitCode !== null || fixture.child.signalCode !== null) {
+      const resultPath = resolve(fixture.artifactDir, 'shutdown-result.json');
+      if (!existsSync(resultPath)) {
+        throw new Error(`fixture exited without a shutdown result; inspect ${fixture.artifactDir}`);
+      }
+      const result = record(await readJson(resultPath));
+      const cleanupErrors = result.cleanupErrors;
+      if (!Array.isArray(cleanupErrors) || !cleanupErrors.every((entry) => typeof entry === 'string')) {
+        throw new Error(`invalid fixture cleanup result; inspect ${resultPath}`);
+      }
+      if (result.status !== 'stopped' || result.processesStopped !== true || cleanupErrors.length > 0 || !existsSync(fixture.shutdownFile)) {
+        throw new Error(`fixture cleanup failed: ${cleanupErrors.join('; ') || 'shutdown not confirmed'}; inspect ${resultPath}`);
+      }
+      if (typeof result.primaryError === 'string') return result.primaryError;
+      if (result.primaryError !== null) throw new Error(`invalid fixture primary error; inspect ${resultPath}`);
+      return fixture.child.exitCode === 0 ? null : `fixture exited ${fixture.child.exitCode ?? fixture.child.signalCode}`;
+    }
     await delay(100);
   }
   const childState = fixture.child.exitCode === null ? 'still running' : `exited ${fixture.child.exitCode}`;
@@ -208,6 +251,7 @@ async function startFixture(testInfo: { workerIndex: number }): Promise<FixtureR
       '--web-port', String(webPort),
       '--web-runtime', productionWeb ? 'production' : 'development',
       '--lifetime-seconds', String(audioSoakSeconds() + 600),
+      '--startup-timeout-seconds', String(FIXTURE_STARTUP_TIMEOUT_MS / 1_000),
       ...(productionWeb ? ['--web-hostname', 'release-live.localhost'] : [])
     ],
     {
@@ -222,26 +266,46 @@ async function startFixture(testInfo: { workerIndex: number }): Promise<FixtureR
     manifestPath,
     stopFile,
     shutdownFile,
-    manifest: null
+    manifest: null,
+    spawnError: null
   };
-  const deadline = Date.now() + 180_000;
+  child.once('error', (error) => { provisional.spawnError = error; });
+  const deadline = Date.now() + FIXTURE_STARTUP_TIMEOUT_MS;
   try {
     while (Date.now() < deadline) {
-      if (child.exitCode !== null) {
+      if (provisional.spawnError) throw provisional.spawnError;
+      if (child.exitCode !== null || child.signalCode !== null) {
         const fixtureLog = resolve(artifactDir, 'fixture.log');
         const detail = existsSync(fixtureLog) ? await readFile(fixtureLog, 'utf8') : 'fixture.log missing';
         throw new Error(`live fixture exited before readiness (${child.exitCode})\n${detail}`);
       }
       if (existsSync(manifestPath)) {
         const manifest = parseManifest(await readJson(manifestPath));
-        return { ...provisional, manifest };
+        provisional.manifest = manifest;
+        return provisional;
       }
       await delay(500);
     }
     throw new Error(`live fixture readiness timed out; inspect ${resolve(artifactDir, 'fixture.log')}`);
   } catch (error) {
-    await stopFixture(provisional);
-    throw error;
+    const primary = safeFixtureError(error);
+    let cleanup: Error | null = null;
+    try {
+      await stopFixture(provisional);
+    } catch (cleanupError) {
+      cleanup = safeFixtureError(cleanupError);
+    }
+    try {
+      await writeFile(resolve(artifactDir, 'startup-failure.json'), `${JSON.stringify({
+        failure: primary.message,
+        cleanupFailure: cleanup?.message ?? null,
+        exitCode: child.exitCode,
+        signal: child.signalCode
+      }, null, 2)}\n`, 'utf8');
+    } catch (evidenceError) {
+      cleanup = combineFixtureErrors(cleanup, safeFixtureError(evidenceError));
+    }
+    throw combineFixtureErrors(primary, cleanup);
   }
 }
 
@@ -385,7 +449,7 @@ async function openDetailResource(page: Page, action: '打开阅读器' | '打�
 const requestedAudioMime = process.env.RELEASE_LIVE_AUDIO_MIME ?? 'audio/mpeg';
 
 test(`release live fresh install resumes EPUB and ${requestedAudioMime} through Reader v5`, async ({ page, context }, testInfo) => {
-  test.setTimeout(300_000 + audioSoakSeconds() * 1_000);
+  test.setTimeout(FIXTURE_STARTUP_TIMEOUT_MS + 300_000 + audioSoakSeconds() * 1_000 + FIXTURE_STOP_TIMEOUT_MS);
 
   const password = process.env.RELEASE_LIVE_PASSWORD;
   if (!password || password.length < 10) throw new Error('RELEASE_LIVE_PASSWORD must be a local-only password of at least 10 characters');
@@ -396,6 +460,8 @@ test(`release live fresh install resumes EPUB and ${requestedAudioMime} through 
   let fixture: FixtureRun | null = null;
   let result = 'FAILED';
   let failure: string | null = null;
+  let primaryFailure: Error | null = null;
+  let cleanupFailure: Error | null = null;
   let manifest: LiveManifest | null = null;
   let audioObservation: JsonRecord | null = null;
   const importTaskFailures: JsonRecord[] = [];
@@ -786,14 +852,21 @@ test(`release live fresh install resumes EPUB and ${requestedAudioMime} through 
     expect(apiResponses.filter((response) => response.status >= 500)).toEqual([]);
     result = 'PASS';
   } catch (error) {
-    failure = redact(error instanceof Error ? error.message : String(error), password);
-    throw error;
+    primaryFailure = safeFixtureError(error);
+    failure = primaryFailure.message;
   } finally {
     if (fixture) {
-      await stopFixture(fixture);
+      try {
+        const fixtureFailure = await stopFixture(fixture);
+        if (fixtureFailure) throw new Error(fixtureFailure);
+      } catch (error) {
+        cleanupFailure = safeFixtureError(error);
+        result = 'FAILED';
+      }
       const observations = {
         result,
         failure,
+        cleanupFailure: cleanupFailure?.message ?? null,
         audioEnvironment: {
           ffprobeAvailable: manifest?.ffprobeAvailable ?? false,
           ffprobePath: manifest?.ffprobePath ?? null,
@@ -818,11 +891,17 @@ test(`release live fresh install resumes EPUB and ${requestedAudioMime} through 
         project: testInfo.project.name,
         webRuntime: productionWeb ? 'production' : 'development'
       };
-      await writeFile(
-        resolve(fixture.artifactDir, 'browser-observations.json'),
-        `${JSON.stringify(observations, null, 2)}\n`,
-        'utf8'
-      );
+      try {
+        await writeFile(
+          resolve(fixture.artifactDir, 'browser-observations.json'),
+          `${JSON.stringify(observations, null, 2)}\n`,
+          'utf8'
+        );
+      } catch (error) {
+        cleanupFailure = combineFixtureErrors(cleanupFailure, safeFixtureError(error));
+      }
     }
   }
+  const error = combineFixtureErrors(primaryFailure, cleanupFailure);
+  if (error) throw error;
 });

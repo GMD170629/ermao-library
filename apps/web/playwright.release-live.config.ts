@@ -15,12 +15,15 @@ export default defineConfig({
   testDir: './e2e',
   testMatch: /release-live\.spec\.ts$/,
   fullyParallel: false,
+  workers: 1,
   timeout: 300_000,
   expect: { timeout: 15_000 },
   use: {
     baseURL,
     serviceWorkers: productionWeb ? 'allow' : 'block',
-    trace: 'retain-on-failure',
+    // This fixture submits temporary credentials; raw traces retain input
+    // values, auth bodies and cookies outside the structured redaction path.
+    trace: 'off',
     screenshot: 'only-on-failure'
   },
   webServer: undefined,
