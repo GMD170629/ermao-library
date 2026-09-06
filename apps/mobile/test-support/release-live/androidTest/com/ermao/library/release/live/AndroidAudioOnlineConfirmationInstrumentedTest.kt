@@ -126,10 +126,19 @@ class AndroidAudioOnlineConfirmationInstrumentedTest {
             for (checkpoint in listOf(5_000L, 10_000L)) {
                 // Observe the last second of each absolute window; HTTP and DB reads share its deadline.
                 waitUntil(started + checkpoint - 1_000)
-                val confirmed = database.awaitConfirmed(started + checkpoint) { local, sync ->
-                    locatorMillis(local) > (previous?.let { locatorMillis(it) } ?: 0) &&
-                        local.capturedAtEpochMillis > (previous?.capturedAtEpochMillis ?: 0) &&
-                        sync.confirmedRevision > (previous?.revision ?: 0)
+                val confirmed = try {
+                    database.awaitConfirmed(started + checkpoint) { local, sync ->
+                        locatorMillis(local) > (previous?.let { locatorMillis(it) } ?: 0) &&
+                            local.capturedAtEpochMillis > (previous?.capturedAtEpochMillis ?: 0) &&
+                            sync.confirmedRevision > (previous?.revision ?: 0)
+                    }
+                } catch (failure: Throwable) {
+                    // Capture before finally/close creates a different Stop position; rethrow unchanged.
+                    val snapshot = player.snapshot.value
+                    record("CHECKPOINT_${checkpoint}_FAIL_OBSERVATION phase=${snapshot.phase} " +
+                        "duration=${snapshot.durationMillis} ${database.confirmationObservation}",
+                        snapshot.positionMillis)
+                    throw failure
                 }
                 waitUntil(started + checkpoint)
                 assertEquals("RG04_CONTINUOUS_PLAYBACK", AudioPlaybackPhase.Playing, player.snapshot.value.phase)
@@ -141,7 +150,8 @@ class AndroidAudioOnlineConfirmationInstrumentedTest {
             val pauseRequestedAt = System.currentTimeMillis()
             instrumentation.runOnMainSync { player.pause() }
             awaitPlayer(player) { it.phase == AudioPlaybackPhase.Paused }
-            val pausedPosition = player.snapshot.value.positionMillis
+            val pausedSnapshot = player.snapshot.value
+            val pausedPosition = pausedSnapshot.positionMillis
             val paused = database.awaitConfirmed(SystemClock.elapsedRealtime() + 5_000) { local, sync ->
                 local.capturedAtEpochMillis >= pauseRequestedAt &&
                     abs(locatorMillis(local) - pausedPosition) <= 100 &&
@@ -168,9 +178,17 @@ class AndroidAudioOnlineConfirmationInstrumentedTest {
                 it.phase in setOf(AudioPlaybackPhase.Ready, AudioPlaybackPhase.Paused) && it.durationMillis > 0
             }
             assertFixturePlayer(reopened, fixture)
-            val restored = reopened.snapshot.value.positionMillis
-            assertTrue("RG04_REOPEN_RESTORE_TOLERANCE", abs(restored - pausedPosition) <= 2_000)
-            assertTrue("RG04_REOPEN_CONFIRMED_LOCATOR_TOLERANCE", abs(restored - locatorMillis(paused)) <= 2_000)
+            val restoredSnapshot = reopened.snapshot.value
+            val restored = restoredSnapshot.positionMillis
+            val restoreObservation = "restored=$restored phase=${restoredSnapshot.phase} " +
+                "duration=${restoredSnapshot.durationMillis} paused=$pausedPosition " +
+                "pausedPhase=${pausedSnapshot.phase} pausedDuration=${pausedSnapshot.durationMillis} " +
+                "confirmed=${locatorMillis(paused)} confirmedRevision=${paused.revision} " +
+                "confirmedDuration=${paused.position.presentation.playback?.durationMillis}"
+            record("REOPEN_OBSERVATION $restoreObservation", restored, paused.revision)
+            assertTrue("RG04_REOPEN_RESTORE_TOLERANCE $restoreObservation", abs(restored - pausedPosition) <= 2_000)
+            assertTrue("RG04_REOPEN_CONFIRMED_LOCATOR_TOLERANCE $restoreObservation",
+                abs(restored - locatorMillis(paused)) <= 2_000)
             val reopenedConfirmation = database.awaitConfirmed(SystemClock.elapsedRealtime() + 5_000) { local, sync ->
                 abs(locatorMillis(local) - pausedPosition) <= 2_000 && sync.confirmedRevision >= paused.revision
             }
@@ -227,6 +245,9 @@ private class PositionObservations(
     private val port: ReaderPositionServerPort,
     private val fixture: ReleaseAudioFixture,
 ) {
+    var confirmationObservation = "read=not-started get=not-requested"
+        private set
+
     fun read(): DurableObservation? = runBlocking {
         val database = AndroidReaderV5Database(context, identity)
         try {
@@ -253,14 +274,36 @@ private class PositionObservations(
         deadline: Long,
         eligible: (ReaderPositionLocalState, ReaderPositionDurableState) -> Boolean,
     ): ReaderProgressSnapshotV5 {
+        var lastGet = "get=not-requested"
+        confirmationObservation = "read=not-started $lastGet"
         while (SystemClock.elapsedRealtime() < deadline) {
             val observed = read()
-            assertTrue("RG04_PROGRESS_TERMINAL_FAILURE", observed?.sync?.terminalFailureCode == null)
             val local = observed?.local
+            val pending = observed?.sync?.pending
+            // Retain scalar facts from these existing reads only; no diagnostic reads or GETs.
+            val localSummary = "readAt=${SystemClock.elapsedRealtime()} readStable=${observed != null} " +
+                "localPosition=${local?.position?.presentation?.playback?.positionMillis} " +
+                "localDuration=${local?.position?.presentation?.playback?.durationMillis} " +
+                "localCapturedAt=${local?.capturedAtEpochMillis} localClientId=${local?.clientId} " +
+                "confirmedRevision=${observed?.sync?.confirmedRevision} " +
+                "pending=${observed?.let { it.sync.pending != null }} " +
+                "pendingPosition=${pending?.position?.presentation?.playback?.positionMillis} " +
+                "pendingCapturedAt=${pending?.capturedAtEpochMillis} pendingMutationId=${pending?.mutationId} " +
+                "terminal=${observed?.sync?.terminalFailureCode}"
+            confirmationObservation = "$localSummary $lastGet"
+            assertTrue("RG04_PROGRESS_TERMINAL_FAILURE", observed?.sync?.terminalFailureCode == null)
             if (local != null && observed.sync.pending == null && observed.sync.confirmedRevision > 0 &&
                 eligible(local, observed.sync)) {
+                confirmationObservation = "$localSummary get=in-flight"
                 val remote = get(deadline)
+                lastGet = "get=${if (remote == null) "current-null" else "current"} " +
+                    "getAt=${SystemClock.elapsedRealtime()} getRevision=${remote?.revision} " +
+                    "getPosition=${remote?.position?.presentation?.playback?.positionMillis} " +
+                    "getDuration=${remote?.position?.presentation?.playback?.durationMillis} " +
+                    "getCapturedAt=${remote?.capturedAtEpochMillis} getClientId=${remote?.clientId}"
+                confirmationObservation = "$localSummary $lastGet"
                 val after = read()
+                confirmationObservation += " getReadStable=${after == observed}"
                 if (after == observed && remote != null && remote.revision == observed.sync.confirmedRevision &&
                     remote.clientId == local.clientId && remote.capturedAtEpochMillis == local.capturedAtEpochMillis &&
                     remote.position.presentation == local.position.presentation &&
@@ -281,7 +324,7 @@ private class PositionObservations(
             }
             Thread.sleep(25)
         }
-        throw AssertionError("RG04_CONFIRMED_DATABASE_AND_GET_DEADLINE")
+        throw AssertionError("RG04_CONFIRMED_DATABASE_AND_GET_DEADLINE $confirmationObservation")
     }
 }
 
