@@ -55,6 +55,12 @@ from app.models import (
     LibraryResourceAsset,
     LibrarySourceNode,
 )
+from app.modules.reader.presentation.v5_schemas import (
+    ReaderV5ProgressPut,
+    ReaderV5ProgressSnapshot,
+    ReaderV5ProgressStateResponse,
+    ReaderV5ProgressWriteResponse,
+)
 from python_backend_sample_smoke import (
     create_fixture_library,
     expect_ok,
@@ -86,10 +92,12 @@ def utc_now() -> str:
 
 def write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
         json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    temporary.replace(path)
 
 
 def append_jsonl(path: Path, value: object) -> None:
@@ -469,6 +477,7 @@ def _machine_snapshot(root: Path) -> dict[str, object]:
         },
     }
     command = (
+        "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); "
         "$os = Get-CimInstance Win32_OperatingSystem; "
         "$cpu = Get-CimInstance Win32_Processor | Select-Object -First 1; "
         "[pscustomobject]@{"
@@ -484,6 +493,7 @@ def _machine_snapshot(root: Path) -> dict[str, object]:
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=30,
         )
         snapshot["windows"] = json.loads(completed.stdout)
@@ -497,11 +507,30 @@ class PhaseState:
         self._lock = threading.Lock()
         self.phase = "startup"
         self.scan_active = False
+        self._active_start: float | None = None
+        self._intervals: list[tuple[float, float]] = []
 
     def set(self, phase: str, *, scan_active: bool) -> None:
         with self._lock:
+            now = time.perf_counter()
+            if scan_active and not self.scan_active:
+                self._active_start = now
+            elif self.scan_active and not scan_active:
+                if self._active_start is not None:
+                    self._intervals.append((self._active_start, now))
+                self._active_start = None
             self.phase = phase
             self.scan_active = scan_active
+
+    def active_seconds(self, start: float, end: float) -> float:
+        with self._lock:
+            intervals = list(self._intervals)
+            if self._active_start is not None:
+                intervals.append((self._active_start, end))
+            return sum(
+                max(0.0, min(end, right) - max(start, left))
+                for left, right in intervals
+            )
 
     def snapshot(self) -> dict[str, object]:
         with self._lock:
@@ -706,6 +735,7 @@ def _wait_for_scan(
 ) -> dict[str, object]:
     started = time.monotonic()
     last: dict[str, object] = {}
+    settled_since: float | None = None
     while time.monotonic() - started < timeout_seconds:
         if abort_event.is_set():
             raise RuntimeError("resource guardrail requested an abort")
@@ -737,13 +767,20 @@ def _wait_for_scan(
             and int(last["assets"]) >= expected_resources
         ):
             state.set(phase, scan_active=False)
+            if settled_since is None:
+                settled_since = time.monotonic()
+            # Observe a full coordinator refresh before accepting quiescence.
+            if time.monotonic() - settled_since < 6:
+                time.sleep(1)
+                continue
             return {
                 "phase": phase,
                 "taskId": task_id,
                 "durationSeconds": round(time.monotonic() - started, 3),
                 "final": last,
             }
-        state.set(phase, scan_active=True)
+        settled_since = None
+        state.set(phase, scan_active=bool(last["scanActive"]))
         time.sleep(1)
     raise TimeoutError(f"scan did not settle in {timeout_seconds}s: {last}")
 
@@ -831,6 +868,45 @@ def _v5_sanity(
     write_json(output_path, {"capturedAt": utc_now(), "formats": results})
 
 
+def _validated_acknowledgement(
+    response: httpx.Response, payload: dict[str, object]
+) -> ReaderV5ProgressSnapshot:
+    response.raise_for_status()
+    request = ReaderV5ProgressPut.model_validate(payload)
+    acknowledgement = ReaderV5ProgressWriteResponse.model_validate(response.json()).data
+    snapshot = acknowledgement.current_snapshot
+    if (
+        acknowledgement.accepted_mutation_id != request.mutation_id
+        or acknowledgement.accepted_revision != snapshot.revision
+        or snapshot.mutation_id != request.mutation_id
+        or snapshot.client_id != request.client_id
+        or snapshot.captured_at_epoch_millis != request.captured_at_epoch_millis
+        or snapshot.position != request.position
+    ):
+        raise ValueError("acknowledged progress does not match the submitted position")
+    return snapshot
+
+
+def _verify_progress(
+    client: httpx.Client,
+    acknowledged: dict[str, ReaderV5ProgressSnapshot],
+    abort_event: threading.Event,
+) -> dict[str, int]:
+    for resource_id, expected in acknowledged.items():
+        if abort_event.is_set():
+            raise RuntimeError("progress verification aborted")
+        response = client.get(
+            f"/api/reader/v5/resources/{quote(resource_id, safe='')}/progress"
+        )
+        response.raise_for_status()
+        actual = ReaderV5ProgressStateResponse.model_validate(
+            response.json()
+        ).data.progress_snapshot
+        if actual != expected:
+            raise RuntimeError("acknowledged progress is missing, changed or replaced")
+    return {"resourcesVerified": len(acknowledged), "lostAcknowledgedWrites": 0}
+
+
 class LoadDriver:
     def __init__(
         self,
@@ -856,7 +932,8 @@ class LoadDriver:
         self.requests_per_second = requests_per_second
         self._write_lock = threading.Lock()
         self._threads: list[threading.Thread] = []
-        self.acknowledged: dict[str, str] = {}
+        self.acknowledged: dict[str, ReaderV5ProgressSnapshot] = {}
+        self.windows: dict[str, tuple[float, float]] = {}
 
     def _append(self, record: dict[str, object]) -> None:
         with self._write_lock:
@@ -935,15 +1012,19 @@ class LoadDriver:
                 and body.get("ok") is True
             )
             if success and endpoint == "v5_save":
-                self.acknowledged[resource_id] = payload["mutationId"]
+                success = False
+                self.acknowledged[resource_id] = _validated_acknowledgement(
+                    response, payload
+                )
+                success = True
             if not success and isinstance(body, dict):
                 error = body.get("error")
                 if isinstance(error, dict) and isinstance(error.get("code"), str):
                     error_code = error["code"]
         except (httpx.HTTPError, ValueError, OSError) as exc:
             error_type = type(exc).__name__
-        elapsed = (time.perf_counter() - start) * 1000
-        state_snapshot = self.state.snapshot()
+        end = time.perf_counter()
+        elapsed = (end - start) * 1000
         return {
             "capturedAt": utc_now(),
             "epochMillis": int(time.time() * 1000),
@@ -955,7 +1036,9 @@ class LoadDriver:
             "errorCode": error_code,
             "errorType": error_type,
             "elapsedMs": round(elapsed, 3),
-            "scanActive": state_snapshot["scanActive"],
+            "startedMonotonic": start,
+            "endedMonotonic": end,
+            "scanActive": self.state.active_seconds(start, end) > 0,
         }
 
     def _run_endpoint(self, endpoint: str, worker_index: int) -> None:
@@ -966,6 +1049,7 @@ class LoadDriver:
             follow_redirects=False,
         ) as client:
             interval = 1.0 / self.requests_per_second
+            started = time.perf_counter()
             deadline = time.monotonic() + self.duration_seconds
             next_at = time.monotonic()
             sequence = worker_index
@@ -995,6 +1079,7 @@ class LoadDriver:
                     )
                 sequence += 4
                 next_at = max(next_at + interval, time.monotonic())
+            self.windows[endpoint] = (started, time.perf_counter())
 
     def run(self) -> None:
         for index, endpoint in enumerate(REQUEST_ENDPOINTS):
@@ -1007,27 +1092,22 @@ class LoadDriver:
             thread.start()
 
     def join(self) -> None:
+        deadline = time.monotonic() + self.duration_seconds + 15
         for thread in self._threads:
-            thread.join()
+            thread.join(timeout=max(0, deadline - time.monotonic()))
+        if any(thread.is_alive() for thread in self._threads):
+            self.abort_event.set()
+            raise TimeoutError(
+                "load threads exceeded their window; supervisor will terminate the owned process tree"
+            )
+        if set(self.windows) != set(REQUEST_ENDPOINTS):
+            raise RuntimeError(
+                "one or more endpoint load threads failed before completing"
+            )
 
     def verify_acknowledged(self, client: httpx.Client) -> dict[str, int]:
         """Read back each latest acknowledged write after load has stopped."""
-        for resource_id, mutation_id in self.acknowledged.items():
-            current = expect_ok(
-                client.get(
-                    f"/api/reader/v5/resources/{quote(resource_id, safe='')}/progress"
-                )
-            )
-            snapshot = current.get("progressSnapshot")
-            if (
-                not isinstance(snapshot, dict)
-                or snapshot.get("mutationId") != mutation_id
-            ):
-                raise RuntimeError("acknowledged progress is missing or replaced")
-        return {
-            "resourcesVerified": len(self.acknowledged),
-            "lostAcknowledgedWrites": 0,
-        }
+        return _verify_progress(client, self.acknowledged, self.abort_event)
 
 
 def _run_load_phase(
@@ -1048,6 +1128,7 @@ def _run_load_phase(
     scan_timeout_seconds: float,
 ) -> dict[str, object]:
     state.set(phase, scan_active=False)
+    phase_started = time.perf_counter()
     driver = LoadDriver(
         base_url=str(client.base_url),
         cookies=dict(client.cookies),
@@ -1061,8 +1142,13 @@ def _run_load_phase(
     )
     driver.run()
     scan_result: dict[str, object] | None = None
+    progress_integrity: dict[str, object] = {"status": "not_verified"}
+    failure: Exception | None = None
+    load_finished = phase_started
     try:
         if scan:
+            # Include the queue-request boundary, before the first polling result.
+            state.set(phase, scan_active=True)
             task_id = _trigger_scan(client, library_id)
             scan_result = _wait_for_scan(
                 engine,
@@ -1075,21 +1161,70 @@ def _run_load_phase(
                 abort_event=abort_event,
                 timeout_seconds=scan_timeout_seconds,
             )
+        while any(thread.is_alive() for thread in driver._threads):
+            if abort_event.is_set():
+                raise RuntimeError("load phase aborted")
+            if time.perf_counter() - phase_started > duration_seconds + 15:
+                abort_event.set()
+                raise TimeoutError(
+                    "load phase exceeded bounded request completion time"
+                )
+            observation = _db_snapshot(engine, library_id)
+            append_jsonl(
+                progress_path, {"capturedAt": utc_now(), "phase": phase, **observation}
+            )
+            state.set(phase, scan_active=bool(observation["scanActive"]))
+            if not scan and observation["scanActive"]:
+                abort_event.set()
+                raise RuntimeError("idle baseline contaminated by an automatic scan")
+            time.sleep(0.5)
         driver.join()
+        load_finished = time.perf_counter()
         progress_integrity = driver.verify_acknowledged(client)
+    except Exception as error:
+        logger.exception("load_phase.failed", extra={"phase": phase})
+        failure = error
+        if load_finished == phase_started:
+            load_finished = time.perf_counter()
     finally:
         state.set(phase, scan_active=False)
         for thread in driver._threads:
             if thread.is_alive():
                 abort_event.set()
                 thread.join(timeout=10)
-    return {
+    result = {
         "phase": phase,
+        "status": "failed" if failure is not None else "completed",
+        "failureType": type(failure).__name__ if failure is not None else None,
         "durationSeconds": duration_seconds,
+        "actualPhaseSeconds": time.perf_counter() - phase_started,
+        "scanActiveSeconds": state.active_seconds(phase_started, load_finished),
+        "scanCoverageByEndpoint": {
+            endpoint: {
+                "loadSeconds": end - start,
+                "coveredScanSeconds": state.active_seconds(start, end),
+                "scanCoverageRatio": (
+                    state.active_seconds(start, end)
+                    / state.active_seconds(phase_started, load_finished)
+                    if state.active_seconds(phase_started, load_finished) > 0
+                    else None
+                ),
+            }
+            for endpoint, (start, end) in driver.windows.items()
+        },
+        "coverageLimit": "queue observations every 0.5-1s; queue activity is not proof of sustained parsing; uncovered scan time is not measured",
         "requestRatePerEndpoint": requests_per_second,
         "scan": scan_result,
         "progressIntegrity": progress_integrity,
     }
+    append_jsonl(progress_path.parent / "phases.jsonl", result)
+    if failure is not None and not (
+        isinstance(failure, httpx.TimeoutException)
+        and not abort_event.is_set()
+        and set(driver.windows) == set(REQUEST_ENDPOINTS)
+    ):
+        raise failure
+    return result
 
 
 def _identity_snapshot(engine: Engine, library_id: str) -> dict[str, object]:
@@ -1142,6 +1277,60 @@ def _identity_snapshot(engine: Engine, library_id: str) -> dict[str, object]:
     }
 
 
+def _freeze_scan_settings(client: httpx.Client) -> dict[str, object]:
+    expected = {"watchEnabled": False, "intervalMinutes": 1440}
+    expect_ok(client.put("/api/system-settings/library-scan", json=expected))
+    actual = expect_ok(client.get("/api/system-settings/library-scan"))
+    if any(actual.get(key) != value for key, value in expected.items()):
+        raise RuntimeError("isolated scan settings were not persisted")
+    return actual
+
+
+def _seed_rescan_sentinels(
+    client: httpx.Client,
+    pool: dict[str, object],
+    state: PhaseState,
+    path: Path,
+    abort_event: threading.Event,
+) -> tuple[dict[str, ReaderV5ProgressSnapshot], dict[str, object]]:
+    selected: dict[str, int] = {}
+    for index, format_name in enumerate(pool["formats"]):
+        selected.setdefault(format_name, index)
+    sentinel_indices = set(selected.values())
+    sentinels: dict[str, ReaderV5ProgressSnapshot] = {}
+    for index in sentinel_indices:
+        driver = LoadDriver(
+            base_url=str(client.base_url),
+            cookies=dict(client.cookies),
+            pool={key: [values[index]] for key, values in pool.items()},
+            phase="rescan_sentinel",
+            state=state,
+            output_path=path,
+            abort_event=abort_event,
+            duration_seconds=1,
+            requests_per_second=1,
+        )
+        result = driver._request(client, "v5_save", 0)
+        if result["success"] is not True:
+            raise RuntimeError(f"rescan sentinel write failed: {result}")
+        sentinels.update(driver.acknowledged)
+    _verify_progress(client, sentinels, abort_event)
+    write_json(
+        path,
+        {
+            key: value.model_dump(mode="json", by_alias=True)
+            for key, value in sentinels.items()
+        },
+    )
+    filtered = {
+        key: [
+            value for index, value in enumerate(values) if index not in sentinel_indices
+        ]
+        for key, values in pool.items()
+    }
+    return sentinels, filtered
+
+
 def _percentile(values: list[float], percentile: float) -> float | None:
     if not values:
         return None
@@ -1177,6 +1366,17 @@ def _request_summaries(requests_path: Path) -> list[dict[str, object]]:
             for record in records
             if not record.get("success")
         )
+        starts = [
+            float(record["startedMonotonic"])
+            for record in records
+            if "startedMonotonic" in record
+        ]
+        ends = [
+            float(record["endedMonotonic"])
+            for record in records
+            if "endedMonotonic" in record
+        ]
+        observed_seconds = max(ends) - min(starts) if starts and ends else None
         summaries.append(
             {
                 "phase": phase,
@@ -1186,6 +1386,12 @@ def _request_summaries(requests_path: Path) -> list[dict[str, object]]:
                 "successCount": successes,
                 "failureCount": len(records) - successes,
                 "successRate": round(successes / len(records), 6) if records else 0,
+                "observedSeconds": observed_seconds,
+                "achievedRequestsPerSecond": len(records) / observed_seconds
+                if observed_seconds
+                else None,
+                "sampleEvidenceSufficient": len(records) >= 1000,
+                "loadModel": "one serial client per endpoint; configured rate is a ceiling, unsent requests are not successes",
                 "latencyMs": {
                     "p50": _percentile(durations, 0.50),
                     "p95": _percentile(durations, 0.95),
@@ -1247,6 +1453,52 @@ def _resource_summaries(metrics_path: Path) -> list[dict[str, object]]:
             }
         )
     return summaries
+
+
+def _write_failure_evidence(run_root: Path, error_type: str) -> dict[str, object]:
+    """Summarize an incomplete run without treating missing checks as passing."""
+    logs = run_root / "logs"
+    config_path = run_root / "run-config.json"
+    config = (
+        json.loads(config_path.read_text(encoding="utf-8"))
+        if config_path.is_file()
+        else {}
+    )
+    observations = (
+        (logs / "scan-progress.jsonl").read_text(encoding="utf-8").splitlines()
+        if (logs / "scan-progress.jsonl").is_file()
+        else []
+    )
+    phases = (
+        (logs / "phases.jsonl").read_text(encoding="utf-8").splitlines()
+        if (logs / "phases.jsonl").is_file()
+        else []
+    )
+    rescan_path = run_root / "rescan-integrity.json"
+    summary = {
+        "status": "failed",
+        "errorType": error_type,
+        "capturedAt": utc_now(),
+        "runConfig": config,
+        "requestSummaries": _request_summaries(logs / "requests.jsonl")
+        if (logs / "requests.jsonl").is_file()
+        else [],
+        "resourceSummaries": _resource_summaries(logs / "resources.jsonl")
+        if (logs / "resources.jsonl").is_file()
+        else [],
+        "lastScanObservation": json.loads(observations[-1]) if observations else None,
+        "phases": [json.loads(line) for line in phases],
+        "rescan": json.loads(rescan_path.read_text(encoding="utf-8"))
+        if rescan_path.is_file()
+        else {"status": "not_verified"},
+        "missingEvidence": [
+            "Only persisted phase records establish progress verification and scan coverage; absent records are unknown.",
+            "Post-scan source hashes and resource associations are not verified.",
+            "An incomplete run cannot establish the full release LOAD gate.",
+        ],
+    }
+    write_json(run_root / "failure-summary.json", summary)
+    return summary
 
 
 def _backend_source_digest() -> str:
@@ -1328,6 +1580,16 @@ def _summary_markdown(summary: dict[str, object], *, run_root: Path) -> str:
     )
     for key, value in summary["evidence"].items():
         lines.append(f"- {key}: {value}")
+    lines.extend(["", "## Limitations", ""])
+    lines.extend(f"- {value}" for value in summary["limitations"])
+    lines.extend(
+        [
+            "",
+            "## Actual load and scan coverage",
+            "",
+            json.dumps(summary["phases"], ensure_ascii=False, indent=2),
+        ]
+    )
     return "\n".join(lines) + "\n"
 
 
@@ -1573,6 +1835,7 @@ def run_measurement(args: argparse.Namespace) -> Path:
     phase_results: list[dict[str, object]] = []
     engine = None
     cleanup_errors: list[str] = []
+    failure: Exception | None = None
     try:
         api_port = free_port()
         worker_ready = run_root / "import-worker-ready"
@@ -1635,6 +1898,10 @@ def run_measurement(args: argparse.Namespace) -> Path:
             )
             if setup.get("initialized") is not True:
                 raise RuntimeError(f"isolated setup failed: {setup}")
+            scan_settings = _freeze_scan_settings(client)
+            write_json(run_root / "scan-settings.json", scan_settings)
+            # Coordinator polls settings every five seconds; freeze before new files exist.
+            time.sleep(6)
             library_id = create_fixture_library(client, source_root)
 
             phase_state.set("active_initial_scan", scan_active=True)
@@ -1753,13 +2020,20 @@ def run_measurement(args: argparse.Namespace) -> Path:
             phase_results.append(idle_phase)
 
             before_rescan = _identity_snapshot(engine, library_id)
+            sentinels, rescan_pool = _seed_rescan_sentinels(
+                client,
+                pool_full,
+                phase_state,
+                run_root / "rescan-sentinels.json",
+                abort_event,
+            )
             rescan_phase = _run_load_phase(
                 client=client,
                 engine=engine,
                 library_id=library_id,
                 task_expected_resources=TOTAL_FILES,
                 phase="active_rescan",
-                pool=pool_full,
+                pool=rescan_pool,
                 state=phase_state,
                 requests_path=requests_path,
                 progress_path=progress_path,
@@ -1773,7 +2047,11 @@ def run_measurement(args: argparse.Namespace) -> Path:
             if rescan_phase["scan"] is not None:
                 scan_results.append(rescan_phase["scan"])
             after_rescan = _identity_snapshot(engine, library_id)
+            sentinel_integrity = _verify_progress(client, sentinels, abort_event)
             rescan_integrity = {
+                "sentinelProgress": sentinel_integrity,
+                "sourceHashesAfterScanVerified": False,
+                "resourceAssociationIntegrityVerified": False,
                 "before": before_rescan,
                 "after": after_rescan,
                 "countsUnchanged": all(
@@ -1821,6 +2099,9 @@ def run_measurement(args: argparse.Namespace) -> Path:
                 f"local safety guardrail reached: "
                 f"{sampler.abort_reason if sampler else 'unknown'}"
             )
+    except Exception as error:
+        logger.exception("measurement.failed")
+        failure = error
     finally:
         if sampler is not None:
             sampler.stop()
@@ -1828,6 +2109,9 @@ def run_measurement(args: argparse.Namespace) -> Path:
             engine.dispose()
         cleanup_errors = _stop_services(api, worker)
 
+    if failure is not None:
+        _write_failure_evidence(run_root, type(failure).__name__)
+        raise failure
     if backend_digest != _backend_source_digest():
         raise RuntimeError(
             "backend source changed during measurement; evidence invalid"
@@ -1845,10 +2129,27 @@ def run_measurement(args: argparse.Namespace) -> Path:
         "scanResults": scan_results,
         "phases": phase_results,
         "requestSummaries": request_summaries,
+        "performanceTargetViolations": [
+            {
+                "phase": row["phase"],
+                "scanState": row["scanState"],
+                "endpoint": row["endpoint"],
+            }
+            for row in request_summaries
+            if row["successRate"] < 0.999
+            or row["latencyMs"]["p95"] is None
+            or row["latencyMs"]["p95"] > row["releaseP95TargetMs"]
+        ],
         "resourceSummaries": resource_summaries,
         "rescan": rescan_integrity,
         "budget": budget,
         "cleanupErrors": cleanup_errors,
+        "limitations": [
+            "Local precheck only: short windows and small generated media do not satisfy the full release LOAD gate.",
+            "Serial endpoint clients back off under latency: actual rate and scan coverage must be assessed, not configured rate.",
+            "Source hashes after scanning and path/resource/asset association integrity were not verified.",
+            "Queue activity is sampled; it does not prove continuous parser CPU activity.",
+        ],
         "evidence": {
             "machine": str(run_root / "machine.json"),
             "budget": str(run_root / "budget.json"),
@@ -1881,13 +2182,105 @@ def run_measurement(args: argparse.Namespace) -> Path:
         run_root / "complete.json",
         {
             "capturedAt": utc_now(),
-            "status": "completed",
+            "status": "completed_with_failures"
+            if summary["performanceTargetViolations"]
+            or any(phase.get("status") == "failed" for phase in phase_results)
+            or cleanup_errors
+            else "completed",
             "summary": str(run_root / "summary.json"),
             "markdown": str(run_root / "summary.md"),
         },
     )
     print(f"measurement complete: {run_root}", flush=True)
+    if (
+        summary["performanceTargetViolations"]
+        or any(phase.get("status") == "failed" for phase in phase_results)
+        or cleanup_errors
+    ):
+        raise RuntimeError(f"measurement evidence collected with failures: {run_root}")
     return run_root
+
+
+def _supervise_measurement_process(
+    process: LoggedProcess, state_path: Path, timeout_seconds: float
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    descendants: dict[int, psutil.Process] = {}
+    try:
+        while process.poll() is None:
+            try:
+                for child in psutil.Process(process.process.pid).children(
+                    recursive=True
+                ):
+                    descendants[child.pid] = child
+            except psutil.NoSuchProcess:
+                break
+            if state_path.is_file():
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+                if state.get("status") == "failed":
+                    raise RuntimeError(
+                        f"measurement child failed; see {process.log_path}"
+                    )
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"measurement exceeded {timeout_seconds}s; see {process.log_path}"
+                )
+            time.sleep(0.2)
+        if process.poll() != 0:
+            raise RuntimeError(
+                f"measurement child exited {process.poll()}; see {process.log_path}"
+            )
+    finally:
+        try:
+            process.stop(timeout=5)
+        finally:
+            # The API and worker own separate groups; retain their exact process
+            # identities while the runner lives, including the Windows venv launcher.
+            _, alive = psutil.wait_procs(list(descendants.values()), timeout=2)
+            for child in alive:
+                try:
+                    child.kill()
+                except psutil.NoSuchProcess:
+                    continue  # Child exited between wait and kill.
+            _, survivors = psutil.wait_procs(alive, timeout=5)
+            if survivors:
+                raise TimeoutError(
+                    f"owned measurement descendants remain: {[child.pid for child in survivors]}"
+                )
+
+
+def run_supervised_measurement(args: argparse.Namespace) -> None:
+    root = _new_run_root("supervisor")
+    state_path = root / "child-state.json"
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--measure-window",
+        "--measurement-child",
+        "--supervisor-state",
+        str(state_path),
+        "--idle-window-seconds",
+        str(args.idle_window_seconds),
+        "--active-window-seconds",
+        str(args.active_window_seconds),
+        "--request-rate",
+        str(args.request_rate),
+        "--scan-timeout-seconds",
+        str(args.scan_timeout_seconds),
+    ]
+    if args.prepared_corpus_root is not None:
+        command.extend(
+            ["--prepared-corpus-root", str(args.prepared_corpus_root.resolve())]
+        )
+    print(f"supervisor evidence: {root}", flush=True)
+    process = start_logged_process(
+        command,
+        cwd=RELEASE_ROOT,
+        env=os.environ,
+        log_path=root / "logs/measurement.log",
+    )
+    _supervise_measurement_process(process, state_path, args.overall_timeout_seconds)
+    print(state_path.read_text(encoding="utf-8"), flush=True)
 
 
 def main() -> int:
@@ -1921,12 +2314,23 @@ def main() -> int:
     parser.add_argument("--active-window-seconds", type=float, default=180)
     parser.add_argument("--request-rate", type=float, default=10)
     parser.add_argument("--scan-timeout-seconds", type=float, default=2_700)
+    parser.add_argument("--overall-timeout-seconds", type=float, default=3600)
+    parser.add_argument(
+        "--summarize-failed-run",
+        type=Path,
+        help="summarize existing incomplete evidence without starting services",
+    )
+    parser.add_argument(
+        "--measurement-child", action="store_true", help=argparse.SUPPRESS
+    )
+    parser.add_argument("--supervisor-state", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()
     for value in (
         args.idle_window_seconds,
         args.active_window_seconds,
         args.request_rate,
         args.scan_timeout_seconds,
+        args.overall_timeout_seconds,
     ):
         if not math.isfinite(value) or value <= 0:
             parser.error(
@@ -1936,10 +2340,29 @@ def main() -> int:
         bool(value)
         for value in (args.small_smoke, args.prepare_only, args.measure_window)
     )
+    if args.summarize_failed_run is not None:
+        if modes:
+            parser.error("offline summary cannot be combined with an execution mode")
+        _write_failure_evidence(
+            args.summarize_failed_run.resolve(), "See supervisor log"
+        )
+        return 0
     if modes > 1:
         parser.error("choose at most one execution mode")
     if args.measure_window:
-        run_measurement(args)
+        if args.measurement_child:
+            if args.supervisor_state is None:
+                parser.error("measurement child requires supervisor state")
+            try:
+                run_root = run_measurement(args)
+            except BaseException:
+                write_json(args.supervisor_state, {"status": "failed"})
+                raise
+            write_json(
+                args.supervisor_state, {"status": "completed", "runRoot": str(run_root)}
+            )
+        else:
+            run_supervised_measurement(args)
     elif args.prepare_only:
         run_prepare_only()
     else:
