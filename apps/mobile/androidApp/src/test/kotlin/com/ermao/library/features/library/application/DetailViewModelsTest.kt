@@ -15,7 +15,7 @@ import org.junit.Test
 
 class DetailViewModelsTest {
     @Test
-    fun liveReaderLocationUsesReadingOrderPositionWhenRuntimeHrefDiffers() {
+    fun liveReaderLocationUsesChapterIdentityWhenRuntimeHrefDiffers() {
         val content = contentWithChapters(
             ReadingUnitContent(
                 id = "chapter-1",
@@ -28,6 +28,7 @@ class DetailViewModelsTest {
                 id = "chapter-2",
                 title = "Chapter 2",
                 href = "text/part0008_split_000.html",
+                navigationKey = "chapter-2",
                 sortOrder = 4,
                 readingOrderPosition = 10,
             ),
@@ -53,6 +54,7 @@ class DetailViewModelsTest {
                     totalProgression = 0.42,
                     currentHref = "text/part0008_split_001.html",
                     chapter = ReaderChapterPresentation(
+                        navigationKey = "chapter-2",
                         href = "text/part0008_split_000.html",
                         title = "Chapter 2",
                         index = 1,

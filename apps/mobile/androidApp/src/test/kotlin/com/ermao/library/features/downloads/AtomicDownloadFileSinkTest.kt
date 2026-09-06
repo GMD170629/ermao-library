@@ -97,7 +97,7 @@ class AtomicDownloadFileSinkTest {
     }
 
     @Test
-    fun originalPageSetSinkEnforcesGeneratedComicBudgetsAndMimePolicy() = runTest {
+    fun originalPageSetSinkEnforcesGeneratedComicBudgetsAndSniffsImageBytes() = runTest {
         val root = Files.createTempDirectory("download-page-set-policy-test").toFile()
         try {
             val sink = AtomicDownloadFileSink(root)
@@ -117,11 +117,15 @@ class AtomicDownloadFileSinkTest {
             assertFailsWith<IllegalArgumentException> {
                 sink.beginBundle(request(1, readerSafetyComicExpandedMaxBytes() + 1))
             }
-            val invalidMime = sink.beginBundle(request(1, 1))
-            assertFailsWith<IllegalArgumentException> {
-                invalidMime.beginMember(DownloadBundleMemberSinkRequest("page", 0, "image/svg+xml", 1))
+            val unknownMimePage = pngBytes(3)
+            val unknownMime = sink.beginBundle(request(1, unknownMimePage.size.toLong()))
+            unknownMime.beginMember(
+                DownloadBundleMemberSinkRequest("page", 0, "image/svg+xml", unknownMimePage.size.toLong()),
+            ).also { page ->
+                page.write(unknownMimePage)
+                page.commit(unknownMimePage.size.toLong())
             }
-            invalidMime.abort()
+            unknownMime.commit()
             val oversizedPage = sink.beginBundle(request(1, readerSafetyComicPageMaxBytes() + 1))
             assertFailsWith<IllegalArgumentException> {
                 oversizedPage.beginMember(
