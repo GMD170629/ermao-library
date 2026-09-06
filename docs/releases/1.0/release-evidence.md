@@ -1,5 +1,7 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07恢复入口：业务候选`f8847633fd436d981bc628e9e464814324d04bac`已提交推送，含AUDIO-11首页音频路由/资源标题及AUDIO-12详情提示修复。新独立开发APK已构建与验签，尚未安装：`artifacts/releases/1.0/f8847633/android-normal-ui-regression-20260907/android-normal-ui-development.apk`，SHA-256 `c7c1fbed6ce9795f8c8d5ed68865e1dcd6c8800925056f8a6de3530bb576654b`；package=com.ermao.library.releasecheck，1.0.0/1，debuggable、CN=Android Debug，绝非正式交付。该目录build.log、apk-verification.json、apk-badging.txt、apk-signature.txt保存源码/配置/签名证据。设备仍保留旧验收包（85662d5d）且强停，原com.ermao.library未变；无活动fixture/monitor/子代理，18084/3105和reverse已释放。下一项必须先使用现有scripts/python_release_live_fixture.py在新隔离目录启动实际服务，再以adb -s 9e896bbc install -r替换独立包，正常UI登录/导入四轨和章节样本，复验AUDIO-11首页冷启继续同一AAC资产及≤2秒恢复、AUDIO-12详情提示、原生M4B/M4A章节导航相邻；不得把旧库确认值直接写入新库充当通过。样本来源/hash及原失败均在85662d5d/android-normal-ui-20260907/input-and-import.json和normal-ui-observations.json，继续复用现有入口，不扩工具。正式包仍暂缓，未冻结RC。
+
 2026-09-07独立复核收尾：gpt-5.6-sol/max只读核对AUDIO-11的准确readerType/资源身份、共享音频启动、空ID和非音频入口，提出首页titleHint应优先resourceTitle。主已据实修正并补非空/缺失/空白标题payload断言，Android完整host及lint再次通过（audio-11-title-host-lint.log，33s）；AUDIO-12主复核确认提示消费现有主动作owner，原不可读/Unsupported断言保留。子代理已关闭。74098307开发包构建成功但不是最终标题修订源码，不用于原场景回归；应从标题修订后的已提交候选重新增量构建。AUDIO-11/12真实回归仍NOT_RUN，不能关闭。
 
 2026-09-07 AUDIO-12候选：详情能力提示直接消费已有workDetailPrimaryActionPresentation的可用性结果，消除PLAYER音频被Reader专用Unsupported误判；不可读、缺资源与真实不支持的提示保护保留。新增原场景及PDF/CBZ/EPUB相邻呈现断言，旧条件28项中1失败（audio-12-red.log），候选完整host/lint通过。未改文案、格式列表或安全策略，真实新包详情待复验，暂不关闭。
