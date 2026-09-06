@@ -4,6 +4,13 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+最新恢复点：已推送 `d1fc48a9`；下文旧检查点仅保留历史效力。当前继续 Android bootstrap 格式映射与 MOBI HTML 修复；100k 真实紧凑文件准备独立执行。没有冻结 RC、正式产物或整体 GO。
+
+- Android 独立真实 HTTP 用例两次 FAIL：`android-live/android-1788681827033/`、`android-live/android-1788682483508/` 的 `instrumentation.log`。实际新库 setup/import/login 和初始空进度读取通过，bootstrap HTTP 200 后本地拒绝，第二次稳定错误码 `READER_BOOTSTRAP_INVALID`；媒体请求尚未发生。各目录 `post-run-verification.json` 核实 7 份原文件 hash 不变、私有一次性凭据已消费、fixture 已退出；18080 reverse 已移除，18080/3101 无监听。APK hash、源码差异及日志留在各自目录，不把 adb 的退出码 0 当 JUnit PASS。
+- `9e3a31a8` 的 Android fixture 入口复用现有真实 setup/导入 owner，13 项工具及 17 项相邻回归通过。独立测试源码位于 `apps/mobile/test-support/release-live/androidTest/`，通过 Gradle 属性显式启用；`preflight-mobile/48-online-confirmation-build.log` 和 `49-online-diagnostic-test-build.log` 记录开发构建，属于上述失败链路的测试准备。新增保存已严格校验 bootstrap 原始响应后工具再验 13 PASS。
+- `d1fc48a9` 共享 ACK 修复通过 32 项针对性 host 测试；`c5157d71` 负载工具主复核 88 PASS，日志 `contracts/load-scale-primary.log`。二者均已推送专用分支，前者不是实际 Android 服务端确认通过，后者不是 100k/300k 负载验收。
+- MOBI 新建 native options 修复候选：`corpus-format-library-20260906/backend-preflight/mobi-options-integrated-20260906/REPORT.md`，新 `.so` SHA-256 `969e080eb7f29188a6dad18c3bdf81a1aa8b3ac613afadc24136db6e50fa81fb`，5 文件目录及 10 个首末正文请求通过、原文件/hash/Range 通过，Linux publications 114 PASS。但后续独立审查 `backend-baseline/html-independent-review/REVIEW.md` 确认 noscript 可重新形成活动属性、删除节点丢 tail、raw-text 实体改写三个缺口，候选仍需修复；SDK DOM 证据不冒充 Chrome 执行，浏览器安全策略拒绝的访问未绕行。
+
 `a533b89b`之后独立审查拒绝首版HTML修复候选：SVG/style文字重新解析产生onerror属性，以及SVG的xlink:href/href/xml:lang序列化失真；`corpus-format-library-20260906/backend-preflight/mobi-html-regression-20260906/REPORT.md`和`independent-review.json`保留精确输入/证据。主新增仅适配html5lib1.1 namespace与raw-text语义的token处理，保留唯一安全过滤owner和正常HTML CSS，37项针对性回归及Chrome4条实际DOM重新解析通过，mypy493通过；仍待独立复核，不将先前3条通过视为安全性完备。早期Chrome结果另存`backend-baseline/mobi-html-browser/results-initial.json`，当前`results.json`为4条。
 
 同轮旧.so上真实五文件目录/首末正文/原文hash/Range通过、Linux publication109项通过；为消除旧二进制来源限制，从49份冻结native源码隔离重建.so（SHA256 `969e080eb7f29188a6dad18c3bdf81a1aa8b3ac613afadc24136db6e50fa81fb`，输入摘要`b50edf6ec7d6dfbb6d8695e45c8d6a7289725fca9a2e50ed79bfa3f229359d92`）。新.so却在MOBI族open阶段复现invalid_argument：Python传null options，与当前C要求有限options不一致，登记NATIVE-01修复。两次新库的API/Worker均已停止；重建不是正式产物，不回用旧库制造通过。

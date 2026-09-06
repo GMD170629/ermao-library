@@ -53,6 +53,13 @@ android {
     }
 
     sourceSets.named("androidTest") {
+        if (providers.gradleProperty("enableReleaseLiveProbe").orNull == "true") {
+            kotlin.directories.add(
+                rootProject.layout.projectDirectory.dir(
+                    "test-support/release-live/androidTest",
+                ).asFile.absolutePath,
+            )
+        }
         kotlin.directories.add(
             rootProject.layout.projectDirectory.dir(
                 "test-support/reader-safety-conformance/kotlin",

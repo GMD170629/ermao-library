@@ -154,6 +154,9 @@ def prepare(manifest_path: Path, adb: str, serial: str, mime_type: str) -> Path:
         response = client.get(f"/api/reader/v5/resources/{resource_id}/bootstrap")
         response.raise_for_status()
         bootstrap = ReaderV5BootstrapResponse.model_validate(response.json()).data
+        # The strict response schema contains publication metadata only. Preserve
+        # the real wire bytes for cross-language contract diagnosis, not secrets.
+        (artifact_dir / "android-bootstrap.json").write_bytes(response.content)
         if (
             bootstrap.reader_type != "audio"
             or len(bootstrap.assets) != 1

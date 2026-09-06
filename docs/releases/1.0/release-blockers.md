@@ -4,6 +4,8 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 
 ## R1 状态覆盖与外部条件
 
+最新覆盖：`d1fc48a9` 已修复 SYNC-01 的正常 ACK 重复解包，32 项 host 回归 PASS，实际在线闭环仍待完成。新增 ANDROID-02：两次全新库真机运行 bootstrap 200 后失败，第二次报 `READER_BOOTSTRAP_INVALID`，尚无媒体请求，证据 `android-live/android-1788681827033/` 与 `android-live/android-1788682483508/`；正在以真实 `audio/AUDIO` 响应复现共享格式映射，不能归因于解码器。NATIVE-01 新库真实 options 回归已通过，READER-03 仍因第二轮 HTML 独立审查的 noscript、正文 tail 与 raw-text 三项问题继续修复。`c5157d71` 仅完成负载工具 88 项验证，100k/300k 运行仍 NOT_RUN。
+
 最新RUN-01增量：`7c6c991c`后端完整Linux1284 PASS+Windows平台2项补测PASS、coverage77%、Ruff689/mypy492通过；Android当前完整148/共享416/单元218/lint通过，旧失败数量仅保留历史。安静10k短时实测已完成；新MOBI/移动端位置修复后须更新受影响证据，整套门禁未放行。
 
 本轮确证及修复：
