@@ -4,6 +4,12 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+2026-09-06 20:20恢复点：主源码 `9938c350` 已整合AAC寻址修复（独立 `02008ed0`），AUDIO-05原9916ms→0ms场景已在新包实际回归为9906ms→9906ms；MP3相邻9912ms→9912ms，两者5/10秒确认、完整Locator读回、原件hash、无API5xx、保留数据换装/新服务进程与清理均PASS。证据 `D:/www/ermao-release-android-formats/artifacts/releases/1.0/a43fd62aabf83bba19ab8fbb4f76fadcd3e0537b/android-aac-cbr-20260906/`。主代理读取原结果/现场日志并核对当前服务源码hash与构建APKhash匹配；主APK SHA256 `962d0fb62dc41d643bdc177d48992ce19b41d6a24130fbff558c1501eeff6bc8`，测试APK `19a586718146038742c84d18c143e21dbba45907868d44fdca9c4a29e175959c`。Media3 1.8.1默认ADTS不可寻址归零，现仅启用SDK ADTS平均码率寻址，不启用全局或ALWAYS选项，不改变认证传输。只关闭原正常AAC回零缺陷，不外推长时/复杂VBR精度保证；MP3运行可能与主host编译重叠，未失败。
+
+IMP-01正常两模式UI与同库持久化子项PASS：`organization-live/imp01-ui-1788695317426/` 的实际Chrome创建/自动扫描，FLAT三本分别进入详情，VOLUMES两本及同Book内两个独立EPUB/PDF资源；主已复核截图05/10b。原执行900秒超期、后续ChunkLoadError、未存HTTP响应body及FLAT任务读回缺口保留在 `ui-result.json`，不改成完整浏览器命令PASS。为补齐本Case持久化判定，主对停服后保留的同一测试库运行固定只读ORM操作 `database-readback.py`，使用指定发布venv与mode=ro；两库模式/启用正确、各5任务SUCCEEDED，FLAT Book/Node/Resource/Asset=3/4/3/3、VOLUMES=2/4/3/3，DB与WAL全hash不变（`database-readback-complete.json`）。这是同库持久化证据，不是补造当时HTTP响应。911受测应用源码、样本和Next配置恢复均经原校验通过；此必测子项已具备UI及持久化依据，停止工具扩展，不计Reader引擎/production/PWA/最终RC或整RG-02通过。
+
+AUDIO-07候选暂未整合：`0159f691` 完整Android host219/0skip与lint通过，但独立审查指出prepare B时可能将A捕获交给B writer（RISK-06，静态可达尚未动态复现）。已暂停进一步原候选真机验收。主在独立工作区建立 `9df3d412`：prepared与active绑定分开、切换与launch提交一起完成、旧捕获继续写原身份、捕获/异步回读核对同context，仍复用KMP唯一writer/session/store；最终候选host/lint已执行，具体JUnit和真实跨资源RED/GREEN仍待汇总/验收。Hypatia仅补此风险所需的现有真实runtime/SQLite单次IO门控用例，不扩通用工具；FLAC原期限FAIL仍保留，不能由捕获模型结果倒推真实根因。后续从此处继续，不把原候选局部PASS合并为放行。
+
 2026-09-06 19:40恢复增量：用户已授权SYNC-02的3107/3108服务；子任务实际重试仍在进程创建前遭自动审批拒绝，精确理由 `rejected: blocked by policy`。启动前Node/源码/测试/构建hash匹配，未创建Chrome context或服务，两端口均空闲；RED/GREEN仍NOT_RUN。证据 `D:/www/ermao-release-startup-progress/apps/web/.next/startup-progress/browser-red-green/explicit-authorization-start-rejection.json` 与 `explicit-authorization-cleanup.json`。已给用户两条现有构建的手动启动命令，等待期间继续Android和IMP-01界面验收。
 
 AUDIO-05/06最小诊断各一次真实FAIL，证据根 `D:/www/ermao-release-android-formats/artifacts/releases/1.0/0c28f117a8cb5733d20952e29e22d10b210f83b4/android-format-diagnostics-20260906/`：AAC暂停/GET9916ms、rev4，重开0ms/Paused，双方duration30009ms；FLAC期限现场Playing/4185ms/duration30000，稳定SQLite仍0ms/rev1/pending=false/terminal=null，本窗口未满足GET前置。原断言、时限与轮询不变，原方法缺失断言瞬间值而finally会更新Stop位置，因此仅在既有测试加最小状态摘要。已达到记录现场的停止条件，不再扩展诊断；下一步具体SDK配置/捕获时序定位。主APK前后保持 `b3fe0086…`，测试包完整hash与样本校验见 `hashes-before-run.json` 和 `handoff.json`；两fixture/仪器/Gradle已退出、18084/3105关闭、reverse已移除。

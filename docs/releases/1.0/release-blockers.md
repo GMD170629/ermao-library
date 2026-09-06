@@ -4,9 +4,11 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 
 ## R1 状态覆盖与外部条件
 
-当前阶段R2（既有R1编号保留）：READER-03已整合 `17cf8cba`，原真实422及必要相邻问题关闭，停止工具扩展；客户端逐格式验收仍未完成。AUDIO-04在 `0c28f117` 生产Chrome全用例PASS、464ms恢复、PWA与清理通过；TEST-11发现jsonl只覆盖1799.429秒，末次网络确认跨截止会漏收尾，已最小改退出条件，完整1800秒采样证据留待后续候选长测。
+当前阶段R2（既有R1编号保留）：READER-03原问题关闭；AUDIO-05原AAC回零经新包真实恢复9906ms→9906ms及MP3相邻回归关闭，已整合 `9938c350`，长时/复杂VBR不外推。IMP-01正常两模式UI+同测试库只读持久化/拓扑子项PASS，原900秒退出和未存HTTPbody仍保留。AUDIO-06 FLAC仍FAIL；AUDIO-07受控捕获修复因新增跨资源writer风险RISK-06暂不整合，独立候选 `9df3d412` 待实际竞态与持久化验证。AUDIO-04原生产链PASS但TEST-11完整1800秒采样末段仍待补齐；尚未冻结RC。
 
 新增AUDIO-05（AAC-LC，RG-03/AUD-04+RG-04/POS-01）：真实5/10秒确认及9911ms暂停通过，重开容差FAIL，瞬时恢复值未知。新增AUDIO-06（FLAC24-bit，RG-03/AUD-05+RG-04/POS-02）：首5秒确认期限FAIL，瞬时状态未知。均为尚待分类的必测失败，不能仅用finally后DB推断根因；只补既有断言前最小观测，各一次复验后转具体业务修复或真实环境结论。WAV同入口9955ms恢复PASS独立保留。
+
+以上首次失败状态保留为历史，以首段及最新证据覆盖。RISK-06 / RG-04 POS-08：configureProgress提前替换active writer，而旧资源仍可播放；新Buffering捕获与既有Pause/Tick可能进入该身份窗口。只读路径尚非串写复现，正在用现有Android运行时与真实SQLite门控取得原场景证据；新候选不只丢弃旧书暂停保存，而是保留旧绑定直到新launch提交。未通过实际验证前不关闭此风险或放行AUDIO-07。
 
 ENV-11：用户已明确允许3107/3108回环测试服务。按相同命令重试仍在创建进程前被自动审批拒绝，理由仅“blocked by policy”；两端口无监听，RED/GREEN仍NOT_RUN。已请求用户手动启动已备妥的两份构建，不重复索要授权、不换入口绕过。拒绝及清理记录位于启动修复工作树的 `apps/web/.next/startup-progress/browser-red-green/explicit-authorization-*.json`。此项不阻塞其他验证。
 
