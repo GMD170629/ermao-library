@@ -4,6 +4,8 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+当前实际执行：`0c28f117`生产Chrome1800秒回归已启动，`audio-soak/runs-proxyfix-1800/r1788691746993-w0/`，命令日志 `audio-soak/proxyfix-1800-command.log`，执行会话57546；完成前不得填PASS。主工作区应用源码冻结于该运行快照，HTML后续修复仅在独立工作树进行。Next运行时临时修改的tsconfig/next-env由现有fixture在退出后校验并恢复，不手工清理。有限3600000ms代理运输对照已通过：40秒背压后40304ms完成，12880827字节/SHA一致、所有自有服务/socket/文件流退出，`audio-soak/audio04-transport-finite.jsonl`及两行测试组diff；AUDIO-04诊断工具到此停止。只读审查记录此配置也延长普通API/OPDS挂起请求的空闲等待，仍有有限上限及现有断连清理，未改变后端容量。Docker当前再次核实无Linux engine管道，ENV-08保持，不做系统重置。
+
 SYNC-02修复已集成为 `76a88845`：Reader与音频复用coordinator启动入口，在pending为空后通过现有queryTransport读取当前服务端位置；保留直接目标优先、完整身份/Locator、取消及迟到结果保护，服务端空位置清除旧恢复值。不读取local exact、不按revision合并。原纯规则及测试搬至唯一owner，旧实现删除。受控原竞态及相邻回归通过，完整Web476 PASS/0 skip（`audio-soak/ack-bootstrap-race/full-web-candidate.log`），独立只读复核35 PASS且无新增阻断；实际Chrome回归待执行。
 
 AUDIO-04运输机制已实证：`audio-soak/audio04-transport-once.jsonl` 同Next16.2.12/Node22.23.1和原MP3 Range，在客户端暂停读取40秒时，默认30000ms于30029ms超时并abort上游，客户端最终仅524288/12880827字节；null SDK参数对照完整收到且SHA一致。客户端aborted出现在60秒诊断收尾，不能误记为30秒客户端事件。两服务/所有socket与流已清理。此为机制复现，原Chrome停顿仍待真实回归。实际Next配置schema不接受null，因此候选使用合法有限3600000ms空闲超时，保持loopback限制、断连清理和现有后端容量限制；配置schema与ESLint通过，有限值同运输对照及原长播放待验证。该最小诊断仅服务AUDIO-04，实收/哈希/清理验证后停止。
