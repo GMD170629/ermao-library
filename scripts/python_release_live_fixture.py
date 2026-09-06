@@ -72,6 +72,14 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--api-port", type=int, default=0)
     parser.add_argument("--web-port", type=int, default=DEFAULT_WEB_PORT)
+    parser.add_argument(
+        "--web-runtime", choices=("development", "production"), default="development"
+    )
+    parser.add_argument(
+        "--web-hostname",
+        choices=("127.0.0.1", "localhost", "release-live.localhost"),
+        default="127.0.0.1",
+    )
     return parser.parse_args()
 
 
@@ -283,7 +291,7 @@ def _wait_for_stop(
     _event(event_log, "stop_file observed")
 
 
-def _next_command(web_port: int) -> list[str]:
+def _pnpm_command() -> list[str]:
     pnpm_override = os.environ.get("RELEASE_LIVE_PNPM")
     node_override = os.environ.get("RELEASE_LIVE_NODE")
     if pnpm_override:
@@ -295,17 +303,38 @@ def _next_command(web_port: int) -> list[str]:
         if not pnpm:
             raise RuntimeError("pnpm was not found; the live Next fixture cannot start")
         pnpm_command = [pnpm]
+    return pnpm_command
+
+
+def _next_command(web_port: int, web_runtime: str = "development") -> list[str]:
+    runtime_arguments = {
+        "development": ["dev", "--webpack"],
+        "production": ["start"],
+    }[web_runtime]
     return [
-        *pnpm_command,
+        *_pnpm_command(),
         "exec",
         "next",
-        "dev",
-        "--webpack",
+        *runtime_arguments,
         "-H",
         "127.0.0.1",
         "-p",
         str(web_port),
     ]
+
+
+def _build_production_web(env: dict[str, str], log_path: Path) -> None:
+    build = start_logged_process(
+        [*_pnpm_command(), "run", "build"],
+        cwd=WEB_ROOT,
+        env=env,
+        log_path=log_path,
+    )
+    try:
+        if build.wait(timeout=600) != 0:
+            raise RuntimeError("Production Web build failed; inspect next-build.log")
+    finally:
+        build.stop(timeout=12)
 
 
 def main() -> int:
@@ -395,6 +424,7 @@ def main() -> int:
         "ffprobePath": ffprobe_path,
         "samples": samples,
         "fixtureSha256": sha256_file(Path(__file__)),
+        "webRuntime": args.web_runtime,
         "testSha256": sha256_file(WEB_ROOT / "e2e" / "release-live.spec.ts"),
         "worktreePatchSha256": sha256_file(artifact_dir / "tested-worktree.patch"),
         "configuredChapterLibrary": chapter_library,
@@ -485,9 +515,12 @@ def main() -> int:
                 "NEXT_DIST_DIR": next_dist_name,
                 "PYTHON_API_ORIGIN": api_origin,
                 "NEXT_TELEMETRY_DISABLED": "1",
+                "NODE_ENV": args.web_runtime,
             }
         )
-        next_command = _next_command(web_port)
+        if args.web_runtime == "production":
+            _build_production_web(next_env, artifact_dir / "next-build.log")
+        next_command = _next_command(web_port, args.web_runtime)
         _event(event_log, f"next_command={' '.join(next_command)}")
         next_process = start_logged_process(
             next_command,
@@ -495,14 +528,15 @@ def main() -> int:
             env=next_env,
             log_path=artifact_dir / "next.log",
         )
-        web_origin = f"http://127.0.0.1:{web_port}"
-        _wait_for_web(web_origin, next_process)
+        _wait_for_web(f"http://127.0.0.1:{web_port}", next_process)
+        web_origin = f"http://{args.web_hostname}:{web_port}"
 
         manifest = {
             "runId": args.run_id,
             "repoHead": source_snapshot["repoHead"],
             "apiOrigin": api_origin,
             "webOrigin": web_origin,
+            "webRuntime": args.web_runtime,
             "artifactDir": str(artifact_dir),
             "databasePath": str(database_path),
             "libraryRootPath": str(library_root),
@@ -523,6 +557,9 @@ def main() -> int:
                 "api": str(artifact_dir / "api.log"),
                 "worker": str(artifact_dir / "worker.log"),
                 "nextPrepare": str(artifact_dir / "next-prepare.log"),
+                "nextBuild": str(artifact_dir / "next-build.log")
+                if args.web_runtime == "production"
+                else None,
                 "next": str(artifact_dir / "next.log"),
                 "shutdown": str(shutdown_file),
             },

@@ -79,6 +79,7 @@ const DEFAULT_ARTIFACT_ROOT = resolve(
   'artifacts/releases/1.0/197e81a808ba32595a8a6ffeda62422b3a7d3473/release-live'
 );
 const RESERVED_PORTS = new Set([3000, 3100, 8000]);
+const productionWeb = process.env.RELEASE_LIVE_WEB_RUNTIME === 'production';
 
 function record(value: unknown): JsonRecord {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -171,7 +172,7 @@ async function startFixture(testInfo: { workerIndex: number }): Promise<FixtureR
     throw new Error('RELEASE_LIVE_E2E=1 requires PLAYWRIGHT_BASE_URL for the isolated Next server');
   }
   const webURL = new URL(configuredBaseURL);
-  if (!['127.0.0.1', 'localhost', '::1'].includes(webURL.hostname)) {
+  if (!['127.0.0.1', 'localhost', '::1', ...(productionWeb ? ['release-live.localhost'] : [])].includes(webURL.hostname)) {
     throw new Error('release live E2E requires a loopback PLAYWRIGHT_BASE_URL');
   }
   const webPort = Number(webURL.port || (webURL.protocol === 'https:' ? 443 : 80));
@@ -203,7 +204,9 @@ async function startFixture(testInfo: { workerIndex: number }): Promise<FixtureR
       '--shutdown-file', shutdownFile,
       '--run-id', runId,
       '--api-port', String(apiPort),
-      '--web-port', String(webPort)
+      '--web-port', String(webPort),
+      '--web-runtime', productionWeb ? 'production' : 'development',
+      ...(productionWeb ? ['--web-hostname', 'release-live.localhost'] : [])
     ],
     {
       cwd: REPO_ROOT,
@@ -248,20 +251,28 @@ async function requestJson(
   method = 'GET',
   data?: JsonRecord
 ): Promise<{ status: number; payload: unknown }> {
-  const response = await page.request.fetch(`${origin}${path}`, {
-    method,
-    data,
-    failOnStatusCode: false
-  });
-  const text = await response.text();
+  const response = await page.evaluate(async ({ origin, path, method, data }) => {
+    if (origin !== location.origin) throw new Error('Live verification requires the current isolated origin');
+    const result = await fetch(`${origin}${path}`, {
+      method,
+      cache: 'no-store',
+      credentials: 'same-origin',
+      ...(data === undefined ? {} : {
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      })
+    });
+    return { status: result.status, text: await result.text() };
+  }, { origin, path, method, data });
+  const text = response.text;
   let payload: unknown = null;
   try {
     payload = JSON.parse(text) as unknown;
   } catch {
     payload = text;
   }
-  observations.push({ method, path, status: response.status() });
-  return { status: response.status(), payload };
+  observations.push({ method, path, status: response.status });
+  return { status: response.status, payload };
 }
 
 function responseData(result: { status: number; payload: unknown }, path: string): JsonRecord {
@@ -432,6 +443,11 @@ test(`release live fresh install resumes EPUB and ${requestedAudioMime} through 
 
     await page.goto(`${webOrigin}/setup`, { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: '创建你的管理账户' })).toBeVisible();
+    if (productionWeb) {
+      expect(new URL(webOrigin).hostname, 'production PWA must exercise the caching branch').toBe('release-live.localhost');
+      expect(await page.evaluate(() => window.isSecureContext)).toBe(true);
+      await page.waitForFunction(() => navigator.serviceWorker.controller?.state === 'activated');
+    }
     const setupForm = page.getByTestId('setup-form');
     const setupInputs = setupForm.locator('input');
     await setupInputs.nth(0).fill('Release Live Admin');
@@ -488,7 +504,8 @@ test(`release live fresh install resumes EPUB and ${requestedAudioMime} through 
     await page.screenshot({ path: resolve(manifest.artifactDir, 'screenshots/02-library-imported.png') });
     screenshots.push('screenshots/02-library-imported.png');
 
-    await page.request.post(`${webOrigin}/api/auth/logout`, { failOnStatusCode: false });
+    const logout = await requestJson(page, webOrigin, '/api/auth/logout', apiResponses, 'POST');
+    expect(logout.status).toBe(200);
     await context.clearCookies();
     await page.goto(`${webOrigin}/login`, { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('button', { name: '登录', exact: true })).toBeVisible();
@@ -705,6 +722,40 @@ test(`release live fresh install resumes EPUB and ${requestedAudioMime} through 
     };
     await page.screenshot({ path: resolve(manifest.artifactDir, 'screenshots/10-audio-reopened-v5.png') });
     screenshots.push('screenshots/10-audio-reopened-v5.png');
+    if (productionWeb) {
+      const serviceWorker = await page.evaluate(async () => {
+        const cacheEntries = await Promise.all((await caches.keys()).map(async (name) => ({
+          name,
+          paths: (await (await caches.open(name)).keys()).map((request) => new URL(request.url).pathname)
+        })));
+        return { controller: navigator.serviceWorker.controller?.scriptURL ?? null, cacheEntries };
+      });
+      await writeFile(resolve(manifest.artifactDir, 'service-worker-observations.json'), `${JSON.stringify(serviceWorker, null, 2)}\n`, 'utf8');
+      expect(serviceWorker.controller).toBe(`${webOrigin}/sw.js`);
+      const shell = serviceWorker.cacheEntries.find((cache) => cache.name.endsWith('-app-shell'));
+      expect(shell?.paths).toContain('/offline');
+      expect(shell?.paths).toContain('/login');
+      // App-owned verified originals have a separate cache owner; only examine
+      // the service worker's shell/static/API/cover caches for forbidden bodies.
+      const workerPaths = serviceWorker.cacheEntries.filter((cache) => /-(app-shell|static|api|cover)$/.test(cache.name))
+        .flatMap((cache) => cache.paths);
+      expect(workerPaths.filter((path) => path.startsWith('/api/auth/') || path.startsWith('/api/reader/') || path.startsWith('/api/assets/'))).toEqual([]);
+      await context.setOffline(true);
+      try {
+        await page.goto(`${webOrigin}/__release_offline_probe`, { waitUntil: 'domcontentloaded' });
+        await expect(page.getByRole('heading', { name: '当前网络不可用', exact: true })).toBeVisible();
+        await page.screenshot({ path: resolve(manifest.artifactDir, 'screenshots/11-pwa-offline.png') });
+        screenshots.push('screenshots/11-pwa-offline.png');
+      } finally {
+        await context.setOffline(false);
+      }
+      await page.goto(`${webOrigin}/`, { waitUntil: 'domcontentloaded' });
+      const restoredAuth = await requestJson(page, webOrigin, '/api/auth/me', apiResponses);
+      expect(restoredAuth.status).toBe(200);
+      await writeFile(resolve(manifest.artifactDir, 'service-worker-observations.json'), `${JSON.stringify({
+        ...serviceWorker, offlineNavigation: 'PASS', restoredAuthStatus: restoredAuth.status
+      }, null, 2)}\n`, 'utf8');
+    }
     expect(apiResponses.filter((response) => response.status >= 500)).toEqual([]);
     result = 'PASS';
   } catch (error) {
@@ -737,7 +788,8 @@ test(`release live fresh install resumes EPUB and ${requestedAudioMime} through 
         screenshots,
         processLogs: manifest?.processLogs ?? {},
         noRouteMocks: true,
-        project: testInfo.project.name
+        project: testInfo.project.name,
+        webRuntime: productionWeb ? 'production' : 'development'
       };
       await writeFile(
         resolve(fixture.artifactDir, 'browser-observations.json'),

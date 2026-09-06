@@ -9,6 +9,8 @@ if (!baseURL) {
   throw new Error('The release live suite requires PLAYWRIGHT_BASE_URL');
 }
 
+const productionWeb = process.env.RELEASE_LIVE_WEB_RUNTIME === 'production';
+
 export default defineConfig({
   testDir: './e2e',
   testMatch: /release-live\.spec\.ts$/,
@@ -17,7 +19,7 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   use: {
     baseURL,
-    serviceWorkers: 'block',
+    serviceWorkers: productionWeb ? 'allow' : 'block',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure'
   },
