@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-07 POS-10 API/Worker重启后Android M4B普通恢复15000→15000/988ms子项PASS；POS-04原生离线20226ms完整pending持久、冷恢复20247ms和最终r14一致已观察，但原pending mutation未上送、被新capture mutation替代的语义尚在分类，不能直接标原mutation重试PASS或已复现产品FAIL。原始DB/GET/receipt证据完整，服务和设备已收尾，独立只读追踪进行中。详情参数化ReadingUnit入口现为隐藏产品面，不因测试开启；仅播放器公开章节行为沿原矩阵验收。尚未冻结RC，现有外部阻塞/正式产物暂缓不变。
+
 2026-09-07 AUDIO-13 CLOSED：582c81fc最小配置生命周期修复已在新独立开发包真实通过M4B播放中旋转、暂停旋转及普通注销停止相邻。原失败、自动检查、独立owner/安全边界审查和新包原场景证据齐备，详见release-evidence首条。不是放宽账号退出停止规则；无工具扩展。POS-09其余显式启动/引擎子项、POS-10服务重启等仍待验证，ENV-11/12、iOS/容器、正式包暂缓不变；未冻结RC/未整体GO。
 
 2026-09-07 AUDIO-13（RG-03移动音频生命周期/RG-04 POS-09，真实FAIL，候选待回归）：Android普通M4B正在Playing15092ms时旋转，实际横屏返回首页，MediaSession变state0/position0；不是仅凭代码推断。MainShell配置重建销毁无条件停止Application持有的音频会话。候选仅跳过isChangingConfigurations期间的stop，账号/namespace和普通退出原停止行为保留，复用现有LocalActivity。旧包32d16edc原失败与完整服务证据位于58cff471/pos09-native-explicit-entry-20260907；新包真实旋转及注销相邻尚待验收，不关闭。播放器内部章节A10000→真实B14978/r7→冷启首页首次15000/959ms已通过，但不是已证明的携带chapterId显式启动重建。

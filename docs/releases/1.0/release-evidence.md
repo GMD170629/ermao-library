@@ -1,5 +1,13 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 POS-10服务端重启/Android真实恢复子项PASS（源码1d8d0c7c，既有b5fce996开发包）：新专用目录直接运行现有prestart、Uvicorn/API与Worker模块；普通M4B确认15000ms/r9后强停测试客户端，逐PID/创建时间/父进程链核验后终止自有API和Worker，端口实际消失，再以相同数据库及既有测试会话配置启动新PID。重启后整个GET快照和bootstrap progressSnapshot逐字段完全一致，客户端冷启保持登录、首页普通继续首次实际Playing15000ms/988ms，误差0。是API/Worker非正常进程终止后的恢复，不声称Web/网关、容器或完整发布产物重启通过。
+
+同环境补POS-04原生M4B：仅移除自有ADB reverse，已缓冲音频从15009ms读到20226ms；真实SQLite本地完整位置/pending已持久、服务端仍15009/r11。测试包强停后保留原DB及journal副本，以只读SQLAlchemy ORM按唯一resource查询。恢复reverse冷启普通首页继续，实际buffer20226、Playing20247/802ms，误差21ms；最终本地与服务端完整位置相等/r14、pending为空。但60秒独立GET未观察到原pending mutation，ORM receipt亦无该ID，取而代之是新capture时间的r12～14。暂不宣称原mutation精确重试通过，独立追踪判断是否为合法latest-only新捕获覆盖；未据此登记已复现产品缺陷。
+
+证据`artifacts/releases/1.0/1d8d0c7c/pos10-native-server-restart-20260907/`：两阶段process归属/日志、before/after-restart完整GET/bootstrap、实际XML/MediaSession；pos04-offline/reconnected-durable-state、原生DB副本、observer-timeout和server-receipts分别保留。917项源码/原件/开发APK校验相同，实际安装hash匹配b5fce996；两阶段PUT9+5均200，唯一401在初次重新登录之前，第二阶段无4xx/5xx。自有服务有意终止所以exit=-1，不能写exit0；父脚本均结束、端口释放、独立包强停、自有reverse/临时XML移除、原App元数据及15项用户改动不变见cleanup-verification。没有新增仓库辅助代码，现有CLI、进程命令和只读观察已足够，不扩框架。
+
+POS-09入口边界已独立及主复核：WorkDetailScreen的RESOURCE_PREVIEW_IS_VISIBLE=false隐藏详情ReadingUnit入口，对此不能注入手工chapter参数或为测试开放新功能。只有该详情参数化入口不可达，不是整个POS-09不可达；已公开播放器章节A→B冷恢复证据仍有效，其他公开格式/引擎子项仍待验收。
+
 2026-09-07 AUDIO-13已关闭（源码582c81fc）：新库同一M4B三章原件、独立开发APK b5fce9966004f299d27350c86447238fe77e8e2981db0672b6b2209b7326535f，普通Playing9705ms→横屏Playing12643ms→竖屏仍Playing且播放器页保留；明确暂停15195ms后横/竖屏均state2、位置15195不变。普通账户安全页注销相邻：唯一测试媒体会话由系统媒体键开始播放，确认注销前真实Playing25054ms，确认后登录页且state0/position0。仅清除releasecheck合成账户私有数据，原App元数据不变。
 
 新包原场景证据`artifacts/releases/1.0/582c81fc/audio13-rotation-regression-20260907/`：rotation-controlled-*、rotation-paused-*、logout-confirm-controlled-before/logout-confirmed-*及normal-ui-observations关联原始XML/MediaSession/独立GET。最初27秒旋转到自然EOF、另一次中段准备及首次注销确认因已EOF被guard阻止，不计为决定性通过且保留；cmd media_session dispatch的packageName为空是设备命令自身失败，后用标准input媒体键在仅自有会话下执行，未调用生产runtime/API伪造位置。已安装APK实测hash与构建产物一致，开发Debug签名/可调试/独立包，不是正式APK；正式包仍暂缓。
