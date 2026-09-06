@@ -46,11 +46,12 @@ import { resourceDetailPageSize, type ResourceDetailPage } from './model/resourc
 import type { BookContentLayout, BookContentSort, BookContentsPage } from './model/book-contents';
 import type { BookContentEntry } from './model/book-contents';
 import { currentPositionLabel } from './model/current-position-label';
-import { latestLocalV5Progress, localV5ProgressPercent } from './local-reader-progress';
+import { latestLocalV5Progress, localV5ProgressPercent, mergeLocalV5Progress } from './local-reader-progress';
+import { loadBookLocalProgress } from './application/load-local-reader-progress';
 import { getReaderRuntime } from '../../lib/reader';
 import { currentReaderServerIdentity } from '../../lib/reader/v5-storage';
 import { READER_V5_PROGRESS_CHANGED_EVENT } from '../../lib/reader/v5-sync-coordinator';
-import { parseReaderV5PositionReport, type ReaderV5ProgressRecord } from '../../lib/reader/v5-wire';
+import { parseReaderV5PositionReport, type ReaderV5PendingMutation } from '../../lib/reader/v5-wire';
 import { BookContentBrowser } from './ui/book-content-browser';
 import { ResourceDetailView } from './ui/resource-detail-view';
 import { SourceNodeMetadataEditor, SourceNodeMetadataRecognitionDialog } from './ui/source-node-metadata-dialogs';
@@ -285,7 +286,13 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   }, [bookId, contentPage, contentSort, contentSourceNodeId, contentsRevision, t]);
 
   const resources = useMemo(() => book ? allVisibleResources(book) : [], [book]);
-  const [localProgressByResource, setLocalProgressByResource] = useState<Record<string, ReaderV5ProgressRecord>>({});
+  const [localProgressByResource, setLocalProgressByResource] = useState<Record<string, ReaderV5PendingMutation>>({});
+  const pageCaptures = useRef<{
+    serverIdentity: string;
+    userId: string;
+    bookId: string;
+    records: Record<string, ReaderV5PendingMutation>;
+  } | null>(null);
   const displayedResources = useMemo(() => resources.map((resource) => {
     const local = localProgressByResource[resource.id];
     return local ? { ...resource, progress: local.position.presentation.displayPercent } : resource;
@@ -326,29 +333,24 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const bookCopy = bookResumeResource ? consumptionCopy(bookResumeResource.readerType) : null;
   useEffect(() => {
     const userId = session?.user?.id;
-    if (!book || !userId) { setLocalProgressByResource({}); return undefined; }
+    if (!book || !userId) { pageCaptures.current = null; setLocalProgressByResource({}); return undefined; }
     let active = true;
+    const serverIdentity = currentReaderServerIdentity();
     const readableResources = book.resources.filter((resource) => !resource.hidden && resource.readable);
-    const applyLocalProgress = (records: ReaderV5ProgressRecord[]) => {
-      if (active) setLocalProgressByResource((current) => {
-        const next = { ...current };
-        records.forEach((record) => {
-          const previous = next[record.resourceId];
-          if (!previous || previous.capturedAtEpochMillis <= record.capturedAtEpochMillis) next[record.resourceId] = record;
-        });
-        return next;
-      });
-    };
-    void readerRuntime.storage.getClientId().then(async (clientId) => {
-      const records = await Promise.all(readableResources.map(async (resource) => readerRuntime.storage.getV5Progress({
-        serverIdentity: currentReaderServerIdentity(),
-        userId,
-        clientId,
-        bookId: book.id,
-        resourceId: resource.id
-      })));
-      applyLocalProgress(records.filter((record): record is ReaderV5ProgressRecord => record !== null));
-    }).catch(() => { if (active) setLocalProgressByResource({}); });
+    // Keep this page's captures across book refreshes: their ACK may finish while
+    // an older book response is still in flight. A new page starts with no history.
+    if (pageCaptures.current?.serverIdentity !== serverIdentity || pageCaptures.current.userId !== userId
+      || pageCaptures.current.bookId !== book.id) {
+      pageCaptures.current = { serverIdentity, userId, bookId: book.id, records: {} };
+    }
+    const captures = pageCaptures.current;
+    captures.records = mergeLocalV5Progress([], Object.values(captures.records)
+      .filter((record) => readableResources.some((resource) => resource.id === record.resourceId)));
+    void loadBookLocalProgress(readerRuntime.storage, { serverIdentity, userId, bookId: book.id },
+      readableResources.map((resource) => resource.id))
+      .then((records) => {
+        if (active) setLocalProgressByResource(mergeLocalV5Progress(records, Object.values(captures.records)));
+      }).catch(() => { if (active) setLocalProgressByResource(captures.records); });
 
     const handleProgressChanged = (event: Event) => {
       if (!(event instanceof CustomEvent)) return;
@@ -357,13 +359,11 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       const value = detail as Record<string, unknown>;
       const position = parseReaderV5PositionReport(value.position);
       if (!position || value.userId !== userId || value.bookId !== book.id || typeof value.resourceId !== 'string'
-        || typeof value.clientId !== 'string' || typeof value.serverIdentity !== 'string' || typeof value.key !== 'string'
+        || typeof value.clientId !== 'string' || value.serverIdentity !== serverIdentity || typeof value.key !== 'string'
         || typeof value.mutationId !== 'string' || typeof value.capturedAtEpochMillis !== 'number'
-        || !Number.isSafeInteger(value.capturedAtEpochMillis)) return;
-      const revision = typeof value.revision === 'number' && Number.isSafeInteger(value.revision) && value.revision >= 0
-        ? value.revision
-        : 0;
-      const record: ReaderV5ProgressRecord = {
+        || !Number.isSafeInteger(value.capturedAtEpochMillis)
+        || !readableResources.some((resource) => resource.id === value.resourceId)) return;
+      const record: ReaderV5PendingMutation = {
         serverIdentity: value.serverIdentity,
         userId,
         clientId: value.clientId,
@@ -372,15 +372,11 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         key: value.key,
         schemaVersion: 5,
         mutationId: value.mutationId,
-        revision,
         capturedAtEpochMillis: value.capturedAtEpochMillis,
         position
       };
-      setLocalProgressByResource((current) => {
-        const previous = current[record.resourceId];
-        if (previous && previous.capturedAtEpochMillis > record.capturedAtEpochMillis) return current;
-        return { ...current, [record.resourceId]: record };
-      });
+      captures.records = mergeLocalV5Progress(Object.values(captures.records), [record]);
+      setLocalProgressByResource((current) => mergeLocalV5Progress(Object.values(current), [record]));
     };
     window.addEventListener(READER_V5_PROGRESS_CHANGED_EVENT, handleProgressChanged);
     return () => {

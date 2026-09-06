@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import fixture from '../../../../packages/reader-contracts/fixtures/reader-v5/reflowable-empty-highlight.json';
-import { latestLocalV5Progress, localV5ProgressPercent } from './local-reader-progress';
+import { latestLocalV5Progress, localV5ProgressPercent, mergeLocalV5Progress } from './local-reader-progress';
 import { parseReaderV5PositionReport, type ReaderV5ProgressRecord } from '../../lib/reader/v5-wire';
 
 function localProgress(capturedAtEpochMillis: number, displayPercent: number, resourceId = 'resource-1'): ReaderV5ProgressRecord {
@@ -36,4 +36,12 @@ test('book-level local resume picks the most recently captured readable resource
   const newer = localProgress(20, 99, 'resource-new');
   assert.equal(latestLocalV5Progress([older, newer])?.resourceId, 'resource-new');
   assert.equal(latestLocalV5Progress([older, newer])?.position.presentation.displayPercent, 99);
+});
+
+test('pending reload replaces acknowledged overlays and preserves captures made during the read', () => {
+  const stored = localProgress(10, 40);
+  const captured = localProgress(20, 15);
+  assert.deepEqual(mergeLocalV5Progress([stored], [captured]), { 'resource-1': captured });
+  assert.deepEqual(mergeLocalV5Progress([], [captured]), { 'resource-1': captured });
+  assert.deepEqual(mergeLocalV5Progress([], []), {});
 });
