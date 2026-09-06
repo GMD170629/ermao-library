@@ -4,7 +4,11 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
-### 最新检查点：`c7f5d5eb`（未冻结 RC；后端源码`7c6c991c`）
+### 最新检查点：`61d36d02`（未冻结 RC；后端源码`7c6c991c`）
+
+真实Chrome音频扩展验收：`61d36d02`复用同一完整新库/EPUB/音频流程，按服务端MIME选择而非标题；AAC、WAV、FLAC桌面/移动视口共 **6 PASS**，分别`web-baseline/chrome-live-{aac,wav,flac}.log`和`chrome-live-{aac,wav,flac}-results/`。实际运行`release-live/`下AAC为`r1788679009311-w0`、`r1788679092759-w1`；WAV为`r1788679154307-w0`、`r1788679211032-w1`；FLAC为`r1788679268535-w0`、`r1788679327873-w1`。主核对实际MIME、每5/10秒更新服务端位置、重开误差（均≤200ms）、API 5xx为0及全部shutdown-complete；ESLint/typecheck通过。连同之前MP3两视口，四组合获得真实短时播放/连续保存/重开证据，不扩为全部音频、30分钟、多轨或原生平台PASS。
+
+`32175712`修复语料生成器的AIFC别名问题：显式pcm_s16le输出并检查FORM/AIFC头；2项正负测试及真实ffprobe校验通过（`contracts/aifc-generator-tests.log`、`aifc-generator-real-probe.log`）。新样本在`corpus-supplement-20260906/`；旧AIFF别名字节保留。仓库已有带章节FB2样本实际存在未绑定l:前缀，原文件与复制件保留；派生`sectioned-namespaced.fb2`仅补xmlns:l，XML解析确认18 section，精确变更/输入输出hash及验证边界见`provenance.json`。不声明已做完整FB2 XSD验证；Linux真实新库验收进行中。
 
 安静10k实测已完成：`local-load/measurement-20260906-065525/`，独立监督日志`local-load/supervisor-20260906-065525/`。2026-09-06 14:55–15:07（UTC+8），测试前停止本任务Next3100、所有并行功能回归及代理服务，未操作原开发3000/8000。SOURCE digest `cbdb032d03ea946adf38e225838013f97b7a0f92d48c4deea5954bf386ee86d8`保持不变。**19685次请求，0失败，预设性能阈值违规0项**；真实导入10000 Books/Resources/Assets、10103 SourceNodes、10000唯一文件hash，共14196456 bytes。增长扫描列表/搜索/详情/进度保存p95分别63.226/64.074/18.765/60.405ms；重扫活跃阶段分别89.028/83.038/20.642/34.953ms。全流程API+Worker进程树RSS最大306278400 bytes，清理错误0，主复核4个任务PID均退出。
 
