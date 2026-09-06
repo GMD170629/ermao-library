@@ -447,13 +447,13 @@ Android 测试修正依据：CRC 使用 fixture 的实际损坏 bytes，禁止�
 
 | 门禁 | 状态 | 覆盖 | 关联阻塞/待决 |
 |---|---|---|---|
-| RG-01 | NOT_RUN | ART-01..05：同 RC 全套产物、双架构服务、APK/IPA、签名、安装 | ENV-01..03、ENV-07、DEC-01 |
-| RG-02 | NOT_RUN | INI/IMP/CON/OPDS：新数据闭环、两种组织模式、三种网络、两个独立客户端 | ENV-02..05、RISK-01 |
-| RG-03 | NOT_RUN | REF/PDF/COM/AUD：逐格式×三端×正常/复杂/异常 | ENV-02..06、DEC-02、RISK-02..04 |
-| RG-04 | NOT_RUN | 六方向×各格式，POS-01..11 与 OPDS-04 | ENV-02..05、DEC-03、RISK-01 |
-| RG-05 | NOT_RUN | LOAD-00/10K/100K/300K/FULL/RESCAN/RECOVER/EVIDENCE | ENV-02、ENV-03、ENV-06、DEC-04 |
+| RG-01 | PARTIAL；正式产物NOT_RUN | 现有后端/Web构建与Android开发包有验证；最终同RC后端/APK/IPA交付尚未执行 | ENV-02 iOS、ENV-08容器；ENV-07正式包由负责人暂缓，不能用开发包代替 |
+| RG-02 | PARTIAL | 新库API/Worker、两组织模式正常导入及部分第一方实际连接有开发证据；OPDS客户端为DEC-08负责人PASS | 未覆盖的初始化/导入异常/网络/权限与iOS子项继续；DEC-05已移除第三方进度同步，原ENV-04不再阻塞 |
+| RG-03 | PARTIAL；有未闭环FAIL | 逐格式开发验收推进中；AUDIO-10/11/12关闭，四音频格式普通短时、章节/多轨部分场景通过 | READER-05/06/07真实回归受ENV-12限制；其余格式/异常/生命周期及iOS仍有缺口；音频仅DEC-09四格式 |
+| RG-04 | PARTIAL；有未闭环FAIL | 四音频格式正常Chrome↔Android有开发证据；SYNC-03关闭；POS-03/04/07及其他子项部分通过 | SYNC-02真实时序回归受ENV-11限制；POS异常组合、其他格式及iOS方向继续；不再要求OPDS进度互通 |
+| RG-05 | 本机预检PASS；最终RC NOT_RUN | DEC-06既有安静10K导入/前台可用性/重扫完整性预检通过，原始测量保留 | 100K/300K和低功耗NAS按负责人决定暂缓，不继续AI压测；不外推本机结果到NAS或未冻结RC |
 
-子项缺明确前提标 BLOCKED；门禁汇总仍为 NOT_RUN，不能把环境阻塞转成已执行失败或通过。
+以上汇总按2026-09-07 fbe61f89时点的开发证据更新，替换R0整组NOT_RUN概述；每个具体子项仍以矩阵和原始结果为准。五组最终同RC完整验收均尚未完成，不能把PARTIAL、负责人暂缓或环境阻塞转成整体PASS。下方原始最终签收占位表保持未签收。
 
 ## RC 与产物清单（全部待填）
 
