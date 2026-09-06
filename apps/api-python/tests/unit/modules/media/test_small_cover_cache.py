@@ -9,6 +9,7 @@ from fastapi import Request
 from PIL import Image
 
 from app.core.config import Settings
+from app.infrastructure import atomic_files
 from app.modules.media.infrastructure import http_streaming
 
 
@@ -101,7 +102,7 @@ def test_small_cover_cache_retries_transient_windows_replace_errors_from_concurr
     replace_lock = Lock()
     replace_attempts = 0
     temporary_names: set[str] = set()
-    original_replace = http_streaming.os.replace
+    original_replace = atomic_files.os.replace
 
     def transient_windows_lock(
         source_path: str | Path, target_path: str | Path
@@ -115,7 +116,7 @@ def test_small_cover_cache_retries_transient_windows_replace_errors_from_concurr
             raise _windows_replace_error(target_path, winerror)
         original_replace(source_path, target_path)
 
-    monkeypatch.setattr(http_streaming.os, "replace", transient_windows_lock)
+    monkeypatch.setattr(atomic_files.os, "replace", transient_windows_lock)
 
     responses = _request_concurrently(source, settings)
 
@@ -143,15 +144,15 @@ def test_small_cover_cache_permanent_windows_replace_failure_preserves_cache_byt
         errors.append(error)
         raise error
 
-    monkeypatch.setattr(http_streaming.os, "replace", permanent_windows_lock)
+    monkeypatch.setattr(atomic_files.os, "replace", permanent_windows_lock)
 
     with pytest.raises(PermissionError) as raised:
-        http_streaming._write_cache_bytes(target, b"new-cache")
+        atomic_files.write_atomic_bytes(target, b"new-cache")
 
     assert raised.value is errors[-1]
     assert raised.value.winerror == 32
     assert replace_attempts == 1 + len(
-        http_streaming._CACHE_REPLACE_RETRY_DELAYS_SECONDS
+        atomic_files._ATOMIC_REPLACE_RETRY_DELAYS_SECONDS
     )
     assert target.read_bytes() == b"old-cache"
     assert not list(target.parent.glob("*.tmp"))
@@ -170,10 +171,10 @@ def test_small_cover_cache_errno_five_without_winerror_is_not_retried(
         replace_attempts += 1
         raise PermissionError(5, "I/O error")
 
-    monkeypatch.setattr(http_streaming.os, "replace", posix_errno_five)
+    monkeypatch.setattr(atomic_files.os, "replace", posix_errno_five)
 
     with pytest.raises(PermissionError) as raised:
-        http_streaming._write_cache_bytes(target, b"new-cache")
+        atomic_files.write_atomic_bytes(target, b"new-cache")
 
     assert raised.value.errno == 5
     assert getattr(raised.value, "winerror", None) is None

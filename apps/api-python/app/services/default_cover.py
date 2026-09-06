@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 
 from app.core.config import Settings
+from app.infrastructure.atomic_files import write_atomic_bytes
 
 DEFAULT_COVER_RELATIVE_PATH = Path("covers/default-book-cover-v1.png")
 DEFAULT_COVER_ASSET_PATH = (
@@ -20,25 +19,14 @@ def default_cover_path(settings: Settings) -> Path:
 def ensure_default_cover(settings: Settings) -> str:
     """Copy the bundled fallback cover into durable storage and return its path."""
     target = default_cover_path(settings)
-    if (
-        target.is_file()
-        and target.stat().st_size == DEFAULT_COVER_ASSET_PATH.stat().st_size
-    ):
+    asset_size = DEFAULT_COVER_ASSET_PATH.stat().st_size
+    if target.is_file() and target.stat().st_size == asset_size:
         return str(DEFAULT_COVER_RELATIVE_PATH)
 
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary: Path | None = None
-    try:
-        with NamedTemporaryFile(
-            dir=target.parent, prefix=".default-cover-", suffix=".png", delete=False
-        ) as handle:
-            temporary = Path(handle.name)
-            with DEFAULT_COVER_ASSET_PATH.open("rb") as source:
-                shutil.copyfileobj(source, handle)
-        temporary.replace(target)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+    asset = DEFAULT_COVER_ASSET_PATH.read_bytes()
+    if len(asset) != asset_size:
+        raise OSError("default cover asset changed while being read")
+    write_atomic_bytes(target, asset)
     return str(DEFAULT_COVER_RELATIVE_PATH)
 
 

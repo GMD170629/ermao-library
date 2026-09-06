@@ -14,9 +14,8 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from email.utils import format_datetime, parsedate_to_datetime
 from pathlib import Path
-from time import monotonic, sleep
+from time import monotonic
 from urllib.parse import quote
-from uuid import uuid4
 
 from fastapi import Request
 from fastapi.responses import Response, StreamingResponse
@@ -33,6 +32,7 @@ from app.contracts.reader_safety_policy_generated import (
     reader_safety_rule,
 )
 from app.core.config import Settings, get_settings
+from app.infrastructure.atomic_files import write_atomic_bytes
 from app.infrastructure.comic_archives import (
     ComicArchiveBackendUnavailableError,
     ComicArchiveEncryptedError,
@@ -60,7 +60,6 @@ SMALL_COVER_MAX_DIMENSION = 600
 SMALL_COVER_MEDIA_TYPE = "image/webp"
 SMALL_COVER_CACHE_VERSION = 1
 SMALL_COVER_QUALITIES = (82, 74, 66, 58, 50, 42, 34, 26, 18, 10)
-_CACHE_REPLACE_RETRY_DELAYS_SECONDS = (0.005, 0.01, 0.02)
 PSE_PAGE_CACHE_VERSION = 1
 PSE_PAGE_JPEG_QUALITY = 88
 PDF_RANGE_REQUEST_MAX_BYTES = reader_safety_budget(
@@ -446,7 +445,7 @@ def _pse_image_response_unlimited(
         data = _pse_image_bytes(source, max_width, media_type)
         if data is None:
             return fail("页面无法转换", status_code=415, code="PSE_PAGE_UNSUPPORTED")
-        _write_cache_bytes(cache_path, data)
+        write_atomic_bytes(cache_path, data)
     request.state.user_id = user_id
     if request.method == "HEAD":
         headers = _response_headers(
@@ -500,30 +499,6 @@ def _pse_image_response(
         )
     finally:
         release()
-
-
-def _is_windows_cache_replace_lock(error: PermissionError) -> bool:
-    # Windows errors carry winerror; POSIX errno=5 is an unrelated I/O failure.
-    return getattr(error, "winerror", None) in {5, 32}
-
-
-def _write_cache_bytes(path: Path, data: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-    try:
-        tmp.write_bytes(data)
-        for attempt in range(len(_CACHE_REPLACE_RETRY_DELAYS_SECONDS) + 1):
-            try:
-                tmp.replace(path)
-                return
-            except PermissionError as exc:
-                if not _is_windows_cache_replace_lock(exc):
-                    raise
-                if attempt == len(_CACHE_REPLACE_RETRY_DELAYS_SECONDS):
-                    raise
-                sleep(_CACHE_REPLACE_RETRY_DELAYS_SECONDS[attempt])
-    finally:
-        tmp.unlink(missing_ok=True)
 
 
 def _small_cover_cache_key(path: Path, stat: os.stat_result) -> str:
@@ -606,7 +581,7 @@ def _small_cover_response(
         data = _small_cover_webp_bytes(path)
         if data is None:
             return None
-        _write_cache_bytes(cache_path, data)
+        write_atomic_bytes(cache_path, data)
     request.state.user_id = user_id
     cache_identity = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()[:24]
     return _bytes_response(
@@ -1301,7 +1276,7 @@ def _send_comic_page_file(
             route=route,
             asset_id=asset_id,
         )
-    _write_cache_bytes(cache_path, optimized)
+    write_atomic_bytes(cache_path, optimized)
     return _comic_page_webp_response(
         optimized, request, path.name, stat.st_mtime, len(source), cache_key
     )
@@ -1389,7 +1364,7 @@ def _send_comic_page_zip_entry(
             route=route,
             asset_id=asset_id,
         )
-    _write_cache_bytes(cache_path, optimized)
+    write_atomic_bytes(cache_path, optimized)
     return _comic_page_webp_response(
         optimized,
         request,
