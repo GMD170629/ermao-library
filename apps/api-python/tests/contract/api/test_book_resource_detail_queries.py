@@ -738,6 +738,135 @@ def test_resource_details_preserve_member_scope_and_anti_enumeration(
     assert denied.json()["error"]["code"] == "RESOURCE_NOT_FOUND"
 
 
+def test_audio_track_details_and_bootstrap_preserve_import_sequence(
+    client, db_session, tmp_path: Path
+) -> None:
+    _login(client, db_session, email="audio-order@example.com")
+    _book, resources = _add_book(db_session, resource_count=1)
+    resource = resources[0]
+    resource.format = "AUDIOBOOK_DIR"
+    resource.adapter_id = "audiobook-directory"
+    library = db_session.get(Library, "test-library")
+    assert library is not None
+    library_root = tmp_path / "library"
+    library_root.mkdir()
+    library.root_path = str(library_root)
+
+    samples = (
+        ("01", "01-mp3.mp3", 1, 0, "audio/mpeg"),
+        ("02", "02-aac.aac", 2, 3, "audio/aac"),
+        ("03", "03-m4a.m4a", 1, 1, "audio/mp4"),
+        ("04", "04-m4b.m4b", 1, 2, "audio/mp4"),
+    )
+
+    first_filename = samples[0][1]
+    first_path = library_root / "detail-book/audio" / first_filename
+    first_path.parent.mkdir(parents=True, exist_ok=True)
+    # Query-contract fixtures need files to exist, not decodable media. Actual
+    # import/playback is covered separately by the release's Chrome evidence.
+    first_path.write_bytes(f"sample-{first_filename}".encode())
+    first_node = db_session.get(LibrarySourceNode, resource.source_node_id)
+    first_asset = db_session.get(LibraryResourceAsset, f"{resource.id}-asset")
+    first_metadata = db_session.get(
+        LibraryResourceAssetMetadata, f"{resource.id}-asset"
+    )
+    assert first_node is not None
+    assert first_asset is not None
+    assert first_metadata is not None
+    first_node.relative_path = f"detail-book/audio/{first_filename}"
+    first_node.path_key = _path_key(first_node.relative_path)
+    first_node.name = first_filename
+    first_node.observed_size_bytes = first_path.stat().st_size
+    first_asset.role = "TRACK"
+    first_asset.import_state = "READY"
+    first_asset.sequence_index = samples[0][3]
+    first_asset.sort_key = first_filename
+    first_metadata.mime_type = samples[0][4]
+    first_metadata.track_number = samples[0][2]
+
+    for suffix, filename, track_number, sequence_index, mime_type in samples[1:]:
+        relative_path = f"detail-book/audio/{filename}"
+        path = library_root / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(f"sample-{filename}".encode())
+        node = _source_node(
+            f"audio-node-{suffix}", relative_path, size=path.stat().st_size
+        )
+        asset_id = f"audio-asset-{suffix}"
+        db_session.add(node)
+        db_session.flush()
+        db_session.add(
+            LibraryResourceAsset(
+                id=asset_id,
+                library_id="test-library",
+                resource_id=resource.id,
+                source_node_id=node.id,
+                source_node_physical_kind="REGULAR_FILE",
+                role="TRACK",
+                import_state="READY",
+                sequence_index=sequence_index,
+                sort_key=filename,
+            )
+        )
+        db_session.flush()
+        db_session.add(
+            LibraryResourceAssetMetadata(
+                asset_id=asset_id,
+                mime_type=mime_type,
+                track_number=track_number,
+            )
+        )
+    db_session.commit()
+
+    expected_asset_ids = [
+        f"{resource.id}-asset",
+        "audio-asset-03",
+        "audio-asset-04",
+        "audio-asset-02",
+    ]
+    expected_track_numbers = [1, 1, 1, 2]
+    expected_mime_types = ["audio/mpeg", "audio/mp4", "audio/mp4", "audio/aac"]
+    detail_asset_ids: list[str] = []
+    detail_track_numbers: list[int | None] = []
+    detail_mime_types: list[str | None] = []
+    for page, expected_page_ids in enumerate(
+        (expected_asset_ids[:2], expected_asset_ids[2:]), start=1
+    ):
+        response = client.get(
+            f"/api/books/{resource.book_id}/resources/{resource.id}/reading-units",
+            params={"page": page, "pageSize": 2},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()["data"]
+        assert data["page"] == {
+            "page": page,
+            "pageSize": 2,
+            "total": 4,
+            "totalPages": 2,
+        }
+        units = data["units"]
+        assert [unit["assetId"] for unit in units] == expected_page_ids
+        assert [unit["sortOrder"] for unit in units] == list(
+            range((page - 1) * 2, page * 2)
+        )
+        detail_asset_ids.extend(unit["assetId"] for unit in units)
+        detail_track_numbers.extend(unit["trackNumber"] for unit in units)
+        detail_mime_types.extend(unit["mediaType"] for unit in units)
+
+    assert detail_asset_ids == expected_asset_ids
+    assert detail_track_numbers == expected_track_numbers
+    assert detail_mime_types == expected_mime_types
+
+    bootstrap_response = client.get(f"/api/reader/v5/resources/{resource.id}/bootstrap")
+    assert bootstrap_response.status_code == 200, bootstrap_response.text
+    bootstrap = bootstrap_response.json()["data"]
+    assets = bootstrap["assets"]
+    assert [asset["id"] for asset in assets] == expected_asset_ids
+    assert [asset["sortOrder"] for asset in assets] == [0, 1, 2, 3]
+    assert [asset["trackNumber"] for asset in assets] == expected_track_numbers
+    assert [asset["mimeType"] for asset in assets] == expected_mime_types
+
+
 def test_image_directory_details_and_previews_are_naturally_sorted_and_cached(
     client, db_session, tmp_path: Path
 ) -> None:

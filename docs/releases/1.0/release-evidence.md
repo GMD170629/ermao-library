@@ -4,6 +4,14 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+2026-09-07 AUDIO-10闭环（生产候选521e74ed）：同一组原失败四轨原件在全新库以正常分卷UI导入后，详情HTTP186908.147、bootstrap186908.162及播放器列表均按01-MP3/03-M4A/04-M4B/02-AAC排序，assetId、sortOrder和轨号逐项一致；点击详情第二轨实际M4A约2.125s、全局约32s/27%，原错误顺序消除。播放器列表切M4B和下一轨控制切AAC分别核对实际媒体资产。全局滑块定位最后AAC中段，真实ACK r8保存14841ms、Locator position=4与AAC资产；关闭重开实际AAC15.938585s，偏差1097.585ms≤2秒。MP3在28s由正常播放自然到EOF后，未发切轨命令即实际自动播放M4A11.041434s；只证明该边界自动接轨，不声称量化无缝或全部边界。
+
+证据根`artifacts/releases/1.0/521e74ed/chrome-audio-10-20260907/`：chrome-observations.json、additional-library-inputs.json、final-orm.json、final-verification.json与fixture原始API/构建/源码记录。真实进度PUT22次200，无HTTP4xx/5xx、无浏览器error/warn；7生成样本及4额外原件、911应用源码均无差异，stop/launcher0、配置恢复、账号退出、自有标签关闭、18081/3102释放。运行中仅独立编辑一个契约测试，生产源码固定521e74ed，未冒充冻结RC。
+
+子代理新增单个真实SQLite/ASGI API契约用例，主审查实际diff、格式整理并运行整个test_book_resource_detail_queries.py，16 PASS（contract-regression.log），覆盖两页与bootstrap同序、连续索引、轨号/MIME保留及既有授权/图片等相邻。该测试文件使用存在的字节占位文件，证明查询协议、不证明解码；子代理“实际样本”措辞据实限定，真实导入/解码证据来自Chrome。与已保留的原unit RED、候选unit/相邻32 PASS、mypy及Ruff共同闭环，AUDIO-10关闭，达到DEC-07停止条件，不再围绕此缺陷扩工具。导入排序owner与其持久化sequence_index被复用，详情二次按文件名覆盖音频顺序的行为已移除，图片路径保护保留。
+
+当前仍R2逐项收敛：章节与普通音频、多轨短时结果是明确源码的开发子项，不合并成最终RC。下一可执行项为Android普通详情/播放器的现有四格式及章节/多轨入口、其余进度异常和移动生命周期缺口；ENV-11/12的独立浏览器验收仍待既有外部执行条件，iOS/容器条件和正式包暂缓分别保留。所有本轮子代理、fixture与仪器任务已结束，没有后台承诺或对外发布。
+
 2026-09-07内嵌章节增量（04231cda）：两个独立M4B/M4A原件通过正常Chrome桌面导入/详情/播放器显示三章0/10/20s，章节列表跳转及上一章/下一章实际媒体时钟10/20s；M4B确认20000ms/r11第三章→重开21.133828s，偏差1133.828ms；M4A确认10000ms/r9第二章→重开10.132305s，偏差132.305ms，均≤2秒。真实bootstrap三条units与对应资产、服务端chapter index/navigationKey一致；这两个章节短时子项PASS，不外推长时/多轨/原生。证据`artifacts/releases/1.0/04231cda/chrome-audio-chapters-20260907/`中的chapter-observations.json、first-chapter-middle-orm.json、m4a-chapter-middle-orm.json、final-orm.json及原API日志。
 
 同轮首次四轨实际验收FAIL，登记AUDIO-10：正常分卷库根下单个目录被正确识别为一个AUDIOBOOK_DIR、4个TRACK；详情顺序01-MP3/02-AAC/03-M4A/04-M4B，但bootstrap/播放器顺序01/03/04/02，详情点击第二轨实际进入全局约90s/75%。`audio-10-original-failure.json`记录真实reading-units请求186536.844与bootstrap186536.848均200、资产身份和当前时钟，final-orm.json保留sequence_index。原源MP3/M4A/M4B轨号均1，AAC轨号2；现有导入owner优先盘号/轨号再路径，子代理“文件名保证顺序”的推断已由主纠正，不能据它伪改真实预期。
