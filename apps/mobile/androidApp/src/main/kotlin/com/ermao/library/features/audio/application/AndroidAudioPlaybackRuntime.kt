@@ -137,12 +137,7 @@ class AndroidAudioPlaybackRuntime private constructor(
     private var localLaunchToken: Long? = null
     private var activePublication: com.ermao.library.shared.modules.audio.AudioPublication? = null
     private var sharedSessionId: Long? = null
-    private var activeProgressRuntime: ReaderPositionSyncRuntime? = null
-    private var activeProgressWriter: AudioProgressWriter? = null
-    private var activeProgressSession: AudioProgressSession? = null
-    private var activeProgressServer: ReaderPositionServerPort? = null
-    private var activeProgressTarget: ReaderProgressSyncTarget? = null
-    private var activeProgressClientId: String? = null
+    private var activeProgress: AudioProgressContext? = null
     private var progressEtag: String? = null
     private val _remoteProgressNotice = MutableStateFlow<ReaderRemotePositionNoticeV5?>(null)
     private val _remoteProgressActionFailed = MutableStateFlow(false)
@@ -260,19 +255,16 @@ class AndroidAudioPlaybackRuntime private constructor(
         cancelSeekTimeout()
         activeSeek = null
         transportExpectation = null
-        stopPlaybackTickers()
         if (!snapshot.value.hasSession) _snapshot.value = intent.toSnapshot(AndroidAudioPhase.Loading)
         scope.launch {
-            var configuredRuntime: ReaderPositionSyncRuntime? = null
+            var preparedProgress: AudioProgressContext? = null
             try {
-                configuredRuntime = configureProgress(publication, profile, bootstrapSnapshot = null)
-                val configuredWriter = requireNotNull(activeProgressWriter)
+                val prepared = prepareProgress(publication, profile, bootstrapSnapshot = null)
+                preparedProgress = prepared
                 val restored = if (positionMillis == null) {
-                    restoreProgress(
+                    prepared.session.restore(
                         publication,
                         remoteSnapshot = null,
-                        runtime = requireNotNull(configuredRuntime),
-                        writer = configuredWriter,
                     )
                 } else {
                     null
@@ -281,18 +273,14 @@ class AndroidAudioPlaybackRuntime private constructor(
                 // acknowledgement may clear the outbox, but must never change this launch's
                 // already-selected position.
                 if (generation.get() != token || localLaunchToken != token) {
-                    if (activeProgressRuntime === configuredRuntime) {
-                        clearProgressRuntime(cancelPendingProgressOperation = true)
-                    }
                     return@launch
                 }
-                requireNotNull(configuredRuntime).store.retryPendingUpload()
+                prepared.runtime.store.retryPendingUpload()
                 if (generation.get() != token || localLaunchToken != token) {
-                    if (activeProgressRuntime === configuredRuntime) {
-                        clearProgressRuntime(cancelPendingProgressOperation = true)
-                    }
                     return@launch
                 }
+                activateProgress(prepared)
+                preparedProgress = null
                 activePublication = publication
                 localLaunchToken = null
                 launch(
@@ -306,23 +294,21 @@ class AndroidAudioPlaybackRuntime private constructor(
                 throw cancelled
             } catch (_: ReaderLocationRestoreException) {
                 if (generation.get() == token && localLaunchToken == token) {
+                    activateProgress(preparedProgress)
+                    preparedProgress = null
                     localLaunchToken = null
                     activePublication = publication
                     launch(intent)
-                } else if (configuredRuntime != null && activeProgressRuntime === configuredRuntime) {
-                    clearProgressRuntime(cancelPendingProgressOperation = true)
                 }
             } catch (_: Exception) {
                 if (generation.get() == token && localLaunchToken == token) {
                     localLaunchToken = null
-                    if (configuredRuntime != null && activeProgressRuntime === configuredRuntime) {
-                        clearProgressRuntime(cancelPendingProgressOperation = true)
-                    }
+                    clearProgressRuntime()
                     activePublication = publication
                     launch(intent)
-                } else if (configuredRuntime != null && activeProgressRuntime === configuredRuntime) {
-                    clearProgressRuntime(cancelPendingProgressOperation = true)
                 }
+            } finally {
+                preparedProgress?.runtime?.close()
             }
         }
     }
@@ -392,69 +378,70 @@ class AndroidAudioPlaybackRuntime private constructor(
                         profile.baseUrl.resolveApiPath(asset.apiPath) to asset
                     }
                     transportRegistry?.register(namespace.stableKey, mediaTransport, sourceUris)
-                    val restored = try {
-                        val configuredRuntime = configureProgress(
-                            publication,
-                            profile,
-                            bootstrapSnapshot = result.bootstrap.remoteSnapshot,
-                        )
-                        val configuredWriter = requireNotNull(activeProgressWriter)
-                        // Explicit chapter/position launches are user navigation and must
-                        // outrank both the durable pending report and the server snapshot.
-                        // With no explicit target, the shared audio restore use case selects
-                        // pending local v5 state first, then the server snapshot, then start.
-                        val candidate = if (request.chapterId != null || request.positionMillis != null) {
-                            null
-                        } else {
-                            restoreProgress(
+                    var preparedProgress: AudioProgressContext? = null
+                    try {
+                        val restored = try {
+                            val prepared = prepareProgress(
                                 publication,
-                                result.bootstrap.remoteSnapshot,
-                                runtime = configuredRuntime,
-                                writer = configuredWriter,
+                                profile,
+                                bootstrapSnapshot = result.bootstrap.remoteSnapshot,
                             )
-                        }
-                        if (generation.get() != token || remoteLaunch !== request) {
-                            if (activeProgressRuntime === configuredRuntime) {
-                                clearProgressRuntime(cancelPendingProgressOperation = true)
+                            preparedProgress = prepared
+                            // Explicit chapter/position launches are user navigation and must
+                            // outrank both the durable pending report and the server snapshot.
+                            // With no explicit target, the shared audio restore use case selects
+                            // pending local v5 state first, then the server snapshot, then start.
+                            val candidate = if (request.chapterId != null || request.positionMillis != null) {
+                                null
+                            } else {
+                                prepared.session.restore(
+                                    publication,
+                                    result.bootstrap.remoteSnapshot,
+                                )
                             }
-                            return@launch
-                        }
-                        // The restore candidate is frozen before draining the exact pending
-                        // mutation; an acknowledgement cannot change this launch's position.
-                        configuredRuntime.store.retryPendingUpload()
-                        if (generation.get() != token || remoteLaunch !== request) {
-                            if (activeProgressRuntime === configuredRuntime) {
-                                clearProgressRuntime(cancelPendingProgressOperation = true)
+                            if (generation.get() != token || remoteLaunch !== request) {
+                                return@launch
                             }
-                            return@launch
+                            // The restore candidate is frozen before draining the exact pending
+                            // mutation; an acknowledgement cannot change this launch's position.
+                            prepared.runtime.store.retryPendingUpload()
+                            if (generation.get() != token || remoteLaunch !== request) {
+                                return@launch
+                            }
+                            candidate
+                        } catch (_: ReaderLocationRestoreException) {
+                            null
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            preparedProgress?.runtime?.close()
+                            preparedProgress = null
+                            null
                         }
-                        candidate
-                    } catch (_: ReaderLocationRestoreException) {
-                        null
-                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                        throw cancelled
-                    } catch (_: Exception) {
-                        clearProgressRuntime(cancelPendingProgressOperation = true)
-                        null
+                        if (generation.get() != token || remoteLaunch !== request) return@launch
+                        val intent = AudioLaunchIntent(
+                            resourceId = resourceId,
+                            assetId = requestAssetId(publication, request.chapterId) ?: restored?.assetId,
+                            chapterId = request.chapterId,
+                            positionMillis = request.positionMillis ?: restored?.positionMillis,
+                            autoplay = autoplay,
+                        )
+                        val mapped = AndroidAudioLaunchIntent.fromPublication(
+                            publication = publication,
+                            intent = intent,
+                            sourceUriForAsset = { asset -> profile.baseUrl.resolveApiPath(asset.apiPath) },
+                            artworkUri = artworkUri ?: publication.coverApiPath,
+                        )
+                        activateProgress(preparedProgress)
+                        preparedProgress = null
+                        activePublication = publication
+                        commitSharedPublication(publication, intent)
+                        remoteLaunch = null
+                        launch(mapped)
+                        checkRemoteProgress()
+                    } finally {
+                        preparedProgress?.runtime?.close()
                     }
-                    val intent = AudioLaunchIntent(
-                        resourceId = resourceId,
-                        assetId = requestAssetId(publication, request.chapterId) ?: restored?.assetId,
-                        chapterId = request.chapterId,
-                        positionMillis = request.positionMillis ?: restored?.positionMillis,
-                        autoplay = autoplay,
-                    )
-                    val mapped = AndroidAudioLaunchIntent.fromPublication(
-                        publication = publication,
-                        intent = intent,
-                        sourceUriForAsset = { asset -> profile.baseUrl.resolveApiPath(asset.apiPath) },
-                        artworkUri = artworkUri ?: publication.coverApiPath,
-                    )
-                    activePublication = publication
-                    commitSharedPublication(publication, intent)
-                    remoteLaunch = null
-                    launch(mapped)
-                    checkRemoteProgress()
                 }
                 is AudioBootstrapFailure -> {
                     if (!snapshot.value.hasSession) {
@@ -580,7 +567,7 @@ class AndroidAudioPlaybackRuntime private constructor(
     }
 
     fun dismissRemoteProgressNotice() {
-        activeProgressRuntime?.coordinator?.dismissRemotePositionNotice()
+        activeProgress?.runtime?.coordinator?.dismissRemotePositionNotice()
         _remoteProgressNotice.value = null
         _remoteProgressActionFailed.value = false
     }
@@ -592,16 +579,17 @@ class AndroidAudioPlaybackRuntime private constructor(
     fun goToRemoteProgress() {
         val notice = _remoteProgressNotice.value ?: return
         val publication = activePublication ?: return
-        val progressSession = activeProgressSession ?: return
+        val context = activeProgress ?: return
         val intent = activeIntent ?: return
         val controller = controller ?: return
         scope.launch {
             val location = try {
-                progressSession.remoteLocation(publication, notice.snapshot)
+                context.session.remoteLocation(publication, notice.snapshot)
             } catch (_: Exception) {
-                _remoteProgressActionFailed.value = true
+                if (activeProgress === context) _remoteProgressActionFailed.value = true
                 return@launch
             }
+            if (activeProgress !== context || activeIntent !== intent) return@launch
             val trackIndex = intent.tracks.indexOfFirst { it.assetId == location.assetId }
             if (trackIndex < 0 || activeSeek != null) {
                 _remoteProgressActionFailed.value = true
@@ -832,13 +820,12 @@ class AndroidAudioPlaybackRuntime private constructor(
         progressJob = null
     }
 
-    private fun configureProgress(
+    private fun prepareProgress(
         publication: AudioPublication,
         profile: ServerProfile,
         bootstrapSnapshot: ReaderProgressSnapshotV5?,
-    ): ReaderPositionSyncRuntime {
+    ): AudioProgressContext {
         val appContext = requireNotNull(appContext) { "AUDIO_ANDROID_CONTEXT_REQUIRED" }
-        clearProgressRuntime(cancelPendingProgressOperation = true)
         val identity = ReaderLocalProgressIdentity(
             namespace = publication.namespace,
             clientId = AndroidReaderDeviceIdentity(appContext).stableDeviceId(),
@@ -859,57 +846,50 @@ class AndroidAudioPlaybackRuntime private constructor(
             server = server,
         )
         syncRuntime.coordinator.beginSession(bootstrapSnapshot)
-        activeProgressRuntime = syncRuntime
-        remoteProgressNoticeJob = scope.launch {
-            syncRuntime.coordinator.remotePositionNotices.collectLatest { notice ->
-                _remoteProgressNotice.value = notice
-                if (notice == null) _remoteProgressActionFailed.value = false
-            }
-        }
-        activeProgressWriter = AudioProgressWriter(
+        val writer = AudioProgressWriter(
             store = syncRuntime.store,
             resourceId = publication.resource.resourceId,
             deviceId = identity.clientId,
             nowEpochMillis = System::currentTimeMillis,
         )
-        activeProgressSession = AudioProgressSession(
-            writer = requireNotNull(activeProgressWriter),
-            syncRuntime = syncRuntime,
-            syncTarget = target,
+        return AudioProgressContext(
+            runtime = syncRuntime,
+            writer = writer,
+            session = AudioProgressSession(writer, syncRuntime, target),
+            server = server,
+            target = target,
+            clientId = identity.clientId,
         )
-        activeProgressServer = server
-        activeProgressTarget = target
-        activeProgressClientId = identity.clientId
-        progressEtag = null
-        _remoteProgressNotice.value = null
-        _remoteProgressActionFailed.value = false
-        return syncRuntime
     }
 
-    private suspend fun restoreProgress(
-        publication: AudioPublication,
-        remoteSnapshot: ReaderProgressSnapshotV5?,
-        runtime: ReaderPositionSyncRuntime,
-        writer: AudioProgressWriter,
-    ): com.ermao.library.shared.modules.reader.AudioReaderLocation? {
-        return (activeProgressSession ?: AudioProgressSession(
-            writer = writer,
-            syncRuntime = runtime,
-            syncTarget = activeProgressTarget,
-        )).restore(publication, remoteSnapshot)
+    private fun activateProgress(prepared: AudioProgressContext?) {
+        // Preparation can suspend while the old media still plays. Bind the new writer only
+        // when its launch commits, and let already-captured old writes finish in their namespace.
+        clearProgressRuntime()
+        activeProgress = prepared
+        if (prepared == null) return
+        remoteProgressNoticeJob = scope.launch {
+            prepared.runtime.coordinator.remotePositionNotices.collectLatest { notice ->
+                _remoteProgressNotice.value = notice
+                if (notice == null) _remoteProgressActionFailed.value = false
+            }
+        }
     }
 
     private suspend fun checkRemoteProgress() {
-        val runtime = activeProgressRuntime ?: return
-        val server = activeProgressServer ?: return
-        val target = activeProgressTarget ?: return
-        val clientId = activeProgressClientId ?: return
-        when (val result = try { server.load(target, progressEtag) } catch (_: Exception) { return }) {
+        val context = activeProgress ?: return
+        val result = try {
+            context.server.load(context.target, progressEtag)
+        } catch (_: Exception) {
+            return
+        }
+        if (activeProgress !== context) return
+        when (result) {
             is PositionQueryResult.Current -> {
                 progressEtag = result.etag
                 val snapshot = result.snapshot ?: return
-                runtime.coordinator.observeRemotePosition(snapshot, clientId)
-                _remoteProgressNotice.value = runtime.coordinator.remotePositionNotice()
+                context.runtime.coordinator.observeRemotePosition(snapshot, context.clientId)
+                _remoteProgressNotice.value = context.runtime.coordinator.remotePositionNotice()
             }
             is PositionQueryResult.Unchanged -> progressEtag = result.etag ?: progressEtag
             is PositionQueryResult.Failure -> Unit
@@ -957,11 +937,14 @@ class AndroidAudioPlaybackRuntime private constructor(
     ) {
         val current = _snapshot.value
         if (!current.hasSession || current.phase == AndroidAudioPhase.Idle) return
-        val writer = activeProgressWriter
-        if (writer == null) {
+        val context = activeProgress
+        if (context == null) {
             progressSink.capture(current, immediate)
             return
         }
+        if (current.namespace?.toReaderSyncNamespace() != context.target.namespace ||
+            current.bookId != context.target.bookId || current.resourceId != context.target.resourceId) return
+        val writer = context.writer
         val assetId = current.assetId ?: return
         val intent = activeIntent
         val trackIndex = intent?.tracks?.indexOfFirst { it.assetId == assetId }?.takeIf { it >= 0 } ?: 0
@@ -999,9 +982,9 @@ class AndroidAudioPlaybackRuntime private constructor(
             )
             publishProgressUpdate(
                 createReaderProgressPresentationUpdate(
-                    namespaceKey = current.namespace?.key ?: return@launch,
-                    bookId = current.bookId ?: return@launch,
-                    resourceId = current.resourceId ?: return@launch,
+                    namespaceKey = current.namespace.key,
+                    bookId = current.bookId,
+                    resourceId = current.resourceId,
                     position = saved.position,
                     capturedAtEpochMillis = saved.capturedAtEpochMillis,
                 ),
@@ -1009,20 +992,11 @@ class AndroidAudioPlaybackRuntime private constructor(
         }
     }
 
-    private fun clearProgressRuntime(cancelPendingProgressOperation: Boolean = false) {
-        if (cancelPendingProgressOperation) {
-            progressOperationJob?.cancel()
-            progressOperationJob = null
-        }
+    private fun clearProgressRuntime() {
         remoteProgressNoticeJob?.cancel()
         remoteProgressNoticeJob = null
-        activeProgressRuntime?.close()
-        activeProgressRuntime = null
-        activeProgressWriter = null
-        activeProgressSession = null
-        activeProgressServer = null
-        activeProgressTarget = null
-        activeProgressClientId = null
+        activeProgress?.runtime?.close()
+        activeProgress = null
         progressEtag = null
         _remoteProgressNotice.value = null
         _remoteProgressActionFailed.value = false
@@ -1083,15 +1057,16 @@ class AndroidAudioPlaybackRuntime private constructor(
         if (remoteSnapshot == null) {
             captureProgress(immediate = true, reason = AudioProgressSaveReason.Seek)
         } else {
-            val progressSession = activeProgressSession
-            val clientId = activeProgressClientId
+            val context = activeProgress
             scope.launch {
                 try {
-                    requireNotNull(progressSession).acceptRemote(remoteSnapshot, requireNotNull(clientId))
-                    _remoteProgressNotice.value = null
-                    _remoteProgressActionFailed.value = false
+                    requireNotNull(context).session.acceptRemote(remoteSnapshot, context.clientId)
+                    if (activeProgress === context) {
+                        _remoteProgressNotice.value = null
+                        _remoteProgressActionFailed.value = false
+                    }
                 } catch (_: Exception) {
-                    _remoteProgressActionFailed.value = true
+                    if (activeProgress === context) _remoteProgressActionFailed.value = true
                 }
             }
         }
@@ -1315,6 +1290,15 @@ class AndroidAudioPlaybackRuntime private constructor(
             playbackRate = DEFAULT_PLAYBACK_RATE,
         )
     }
+
+    private data class AudioProgressContext(
+        val runtime: ReaderPositionSyncRuntime,
+        val writer: AudioProgressWriter,
+        val session: AudioProgressSession,
+        val server: ReaderPositionServerPort,
+        val target: ReaderProgressSyncTarget,
+        val clientId: String,
+    )
 
     private data class RemoteLaunch(
         val token: Long,
