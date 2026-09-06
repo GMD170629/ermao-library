@@ -380,7 +380,8 @@ private fun ReaderBootstrapResourceWire.hasExactFormatAndMorphology(): Boolean =
     exactSourceFormat() != null
 
 private fun ReaderBootstrapResourceWire.exactSourceFormat(): ReaderSourceFormat? =
-    ReaderSourceFormat.entries.singleOrNull { sourceFormat ->
+    // fileKind is a safety category shared by audio aliases, not a unique wire identity.
+    ReaderSourceFormat.fromWireValue(format)?.takeIf { sourceFormat ->
         format == sourceFormat.fileKind && readerType == sourceFormat.readerTypeWire()
     }
 

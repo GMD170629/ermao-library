@@ -1,6 +1,8 @@
 package com.ermao.library.shared.modules.reader
 
 import com.ermao.library.shared.core.network.ApiClient
+import com.ermao.library.shared.modules.audio.AudioBootstrapContent
+import com.ermao.library.shared.modules.audio.LoadAudioPublication
 import com.ermao.library.shared.modules.reader.application.ReaderBootstrapRequest
 import com.ermao.library.shared.modules.reader.application.ReaderBootstrapResult.Content
 import com.ermao.library.shared.modules.reader.application.ReaderBootstrapResult.Failure
@@ -19,6 +21,11 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -26,6 +33,92 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class KtorReaderBootstrapGatewayTest {
+    @Test
+    fun mapsCapturedAudioMpegBootstrapThroughApiEnvelopeAndAudioProjection() = runBlocking {
+        val result = gateway(CAPTURED_AUDIO_MPEG_BOOTSTRAP).load(request())
+        val bootstrap = assertIs<Content>(result,
+            "Captured AUDIO bootstrap failed: ${(result as? Failure)?.failureCode}").value
+
+        assertEquals(ReaderSourceFormat.Audio, bootstrap.resource.sourceFormat)
+        assertEquals(ReaderSourceFormat.Audio, bootstrap.availableResources.single().sourceFormat)
+        assertEquals("resource-1", bootstrap.availableResources.single().resourceId)
+        assertEquals("asset-1", bootstrap.resource.assetId)
+        assertEquals("audio/mpeg", bootstrap.assets.single().mimeType)
+        assertEquals("mp3", bootstrap.assets.single().codec)
+        assertEquals(120_751L, bootstrap.assets.single().sizeBytes)
+        assertEquals(30_067L, bootstrap.assets.single().durationMillis)
+        assertNull(bootstrap.remoteSnapshot)
+
+        val audio = assertIs<AudioBootstrapContent>(
+            LoadAudioPublication(gateway(CAPTURED_AUDIO_MPEG_BOOTSTRAP)).execute(request()),
+        ).publication
+        assertEquals(ReaderSourceFormat.Audio, audio.resource.sourceFormat)
+        assertEquals("/api/assets/asset-1", audio.assets.single().apiPath)
+        assertEquals(30_067L, audio.assets.single().durationMillis)
+    }
+
+    @Test
+    fun rejectsCapturedAudioResourceFormatAndMorphologyMismatches() = runBlocking {
+        val original = Json.parseToJsonElement(CAPTURED_AUDIO_MPEG_BOOTSTRAP).jsonObject
+        val available = original.getValue("availableResources").jsonArray.single().jsonObject
+        for ((field, value) in listOf(
+            "format" to "audio", "format" to " AUDIO ", "format" to "FLAC", "format" to "UNKNOWN",
+            "readerType" to "pdf", "readerType" to "Audio",
+        )) {
+            val invalid = JsonObject(available + (field to JsonPrimitive(value)))
+            val response = JsonObject(original + ("availableResources" to JsonArray(listOf(invalid))))
+            val failure = assertIs<Failure>(gateway(response.toString()).load(request()))
+            assertEquals("READER_BOOTSTRAP_INVALID", failure.failureCode, "available resource $field=$value")
+        }
+        val resource = original.getValue("resource").jsonObject
+        for ((field, value) in listOf("format" to "MP3", "readerType" to "pdf")) {
+            val invalid = JsonObject(resource + (field to JsonPrimitive(value)))
+            val response = JsonObject(original + ("resource" to invalid))
+            val failure = assertIs<Failure>(gateway(response.toString()).load(request()))
+            assertEquals("READER_BOOTSTRAP_INVALID", failure.failureCode, "current resource $field=$value")
+        }
+    }
+
+    @Test
+    fun rejectsCapturedAudioIdentityMismatches() = runBlocking {
+        val original = Json.parseToJsonElement(CAPTURED_AUDIO_MPEG_BOOTSTRAP).jsonObject
+        val available = original.getValue("availableResources").jsonArray.single().jsonObject
+        val asset = original.getValue("assets").jsonArray.single().jsonObject
+        val cases = listOf(
+            "READER_BOOTSTRAP_USER_MISMATCH" to JsonObject(original + ("userId" to JsonPrimitive("user-2"))),
+            "READER_BOOTSTRAP_IDENTITY_MISMATCH" to JsonObject(original + ("availableResources" to JsonArray(
+                listOf(JsonObject(available + ("bookId" to JsonPrimitive("book-2")))),
+            ))),
+            "READER_BOOTSTRAP_IDENTITY_MISMATCH" to JsonObject(original + ("assets" to JsonArray(
+                listOf(JsonObject(asset + ("resourceId" to JsonPrimitive("resource-2")))),
+            ))),
+        )
+        for ((expected, response) in cases) {
+            val failure = assertIs<Failure>(gateway(response.toString()).load(request()))
+            assertEquals(expected, failure.failureCode)
+        }
+    }
+
+    @Test
+    fun rejectsCapturedAudioMissingFieldsUnknownFieldsAndInvalidTypes() = runBlocking {
+        val original = Json.parseToJsonElement(CAPTURED_AUDIO_MPEG_BOOTSTRAP).jsonObject
+        val asset = original.getValue("assets").jsonArray.single().jsonObject
+        val cases = listOf(
+            "missing required assets" to JsonObject(original - "assets"),
+            "unknown bootstrap field" to JsonObject(original + ("unexpected" to JsonPrimitive(true))),
+            "unknown asset field" to JsonObject(original + ("assets" to JsonArray(
+                listOf(JsonObject(asset + ("unexpected" to JsonPrimitive(true)))),
+            ))),
+            "invalid asset size type" to JsonObject(original + ("assets" to JsonArray(
+                listOf(JsonObject(asset + ("sizeBytes" to JsonArray(emptyList())))),
+            ))),
+        )
+        for ((caseName, response) in cases) {
+            val failure = assertIs<Failure>(gateway(response.toString()).load(request()))
+            assertEquals("READER_BOOTSTRAP_INVALID", failure.failureCode, caseName)
+        }
+    }
+
     @Test
     fun mapsResourceIdentityAndLightweightReflowableBootstrap() = runBlocking {
         val content = assertIs<Content>(gateway(VALID_BOOTSTRAP).load(request())).value
@@ -319,6 +412,94 @@ class KtorReaderBootstrapGatewayTest {
     }
 
     private companion object {
+        // Real backend-preflight/run-20260906-143405/bootstrap-py_4c315408330a4d5f88f09d52a2f48e49.json.
+        // Original SHA-256: 147804ce13bcb001fb209ec5fddebae84fd27c825e0d32f9b94f8c6cea6c6f8f.
+        // Root is data, not an envelope. Only user/book/resource/node/asset IDs and their URL
+        // occurrences are normalized; format, MIME, metadata, nulls and field presence are unchanged.
+        val CAPTURED_AUDIO_MPEG_BOOTSTRAP = """
+            {
+              "schemaVersion": 5,
+              "userId": "user-1",
+              "readerType": "audio",
+              "sourceFormat": "audio",
+              "book": {
+                "id": "book-1",
+                "title": "Alice's Adventures in Wonderland (version 6)",
+                "author": "Lewis Carroll",
+                "coverUrl": "/api/books/book-1/cover"
+              },
+              "resource": {
+                "id": "resource-1",
+                "bookId": "book-1",
+                "sourceNodeId": "node-1",
+                "title": "Alice's Adventures in Wonderland (version 6)",
+                "resourceIndex": null,
+                "sortOrder": 0,
+                "format": "AUDIO",
+                "readerType": "audio",
+                "pageCount": null,
+                "chapterCount": null,
+                "durationMs": null,
+                "trackCount": null,
+                "progress": 0.0,
+                "resourceCompleted": false,
+                "lastReadAt": null
+              },
+              "availableResources": [
+                {
+                  "id": "resource-1",
+                  "bookId": "book-1",
+                  "sourceNodeId": "node-1",
+                  "title": "Alice's Adventures in Wonderland (version 6)",
+                  "resourceIndex": null,
+                  "sortOrder": 0,
+                  "format": "AUDIO",
+                  "readerType": "audio",
+                  "pageCount": null,
+                  "chapterCount": null,
+                  "durationMs": null,
+                  "trackCount": null,
+                  "progress": 0.0,
+                  "resourceCompleted": false,
+                  "lastReadAt": null
+                }
+              ],
+              "assets": [
+                {
+                  "id": "asset-1",
+                  "title": "01 - Down The Rabbit-Hole",
+                  "resourceId": "resource-1",
+                  "sourceNodeId": "node-1",
+                  "role": "PRIMARY",
+                  "mimeType": "audio/mpeg",
+                  "sizeBytes": 120751,
+                  "durationMs": 30067,
+                  "discNumber": null,
+                  "trackNumber": 1,
+                  "sortOrder": 0,
+                  "url": "/api/assets/asset-1",
+                  "codec": "mp3"
+                }
+              ],
+              "units": [],
+              "resourceUrl": "/api/reader/v5/resources/resource-1/publication",
+              "capabilities": {
+                "canGoNext": true,
+                "canGoPrevious": true,
+                "canJumpToProgress": true,
+                "canJumpToHref": false,
+                "canJumpToIndex": true,
+                "canZoom": false,
+                "canSelectText": false,
+                "supportsPagination": false,
+                "supportsScrolling": false,
+                "supportsSpreads": false
+              },
+              "publication": null,
+              "progressSnapshot": null
+            }
+        """.trimIndent()
+
         const val PDF_UNIT = """{"id":"pdf-page-1","index":0,"title":"Page 1","href":"page-1","assetId":"asset-1","startMs":null,"endMs":null,"durationMs":null,"metadata":{"pageNumber":1}}"""
         const val PDF_UNITS = """"units":[$PDF_UNIT]"""
         const val COMIC_UNITS = """"units":[{"id":"comic-page-1","index":0,"title":"Page 1","href":"pages/0","assetId":"asset-1","startMs":null,"endMs":null,"durationMs":null,"metadata":{"pageIndex":0}}]"""
