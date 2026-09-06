@@ -95,7 +95,13 @@ nonzero remote MP3 position from a different client, and opens with
 `autoplay=false` and no chapter/position target. `WEB_RESTORE_OBSERVATION` records
 the actual engine value before the mandatory two-second comparison. Playback
 then uses the same 5/10-second and pause-confirmation owner as the fresh-server
-test, with the Web snapshot as the initial position/capture/revision baseline.
+test, with the Web snapshot as the initial position/revision baseline.
+Per [ADR0028](../../../../../docs/adr/0028-reader-v5-opaque-position-report.md),
+different clients are ordered by committed server revision; their capture clocks
+need not agree. Capture time must still increase for subsequent same-client
+checkpoints, and the original empty-server case retains its positive initial
+capture-time requirement. All confirmation deadlines and exact local/GET
+identity, capture and complete-position comparisons remain unchanged.
 `ANDROID_HANDOFF_CONFIRMED` records the Android client, capture time, position and
 revision; close still records any Stop pending state without manual ACK.
 
