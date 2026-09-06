@@ -4,6 +4,14 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+本轮音频修复已整合：`01ac165e`（缓冲前捕获）、`4f439b51`（prepared/active身份绑定）、`0ca6d1bb`（Stop取消迟到恢复）、`b912b427`（两项针对性真机回归）。主代理逐项检查完整diff、原RED/新GREEN现场、安装包hash、源码和清理，并由另一代理独立复核，无新增阻断。候选 `567909e4` 完整Android host219/0skip和lint PASS，原日志在 `D:/www/ermao-release-audio-capture/artifacts/audio-capture/prepared-context-5679-unit-lint.log` 及同目录 `prepared-context-5679-unit-summary.json`。
+
+真机候选 `93100b0677e6b7426eca448d59ce53d3658a0d39` 结果位于 `D:/www/ermao-release-android-formats/artifacts/releases/1.0/93100b0677e6b7426eca448d59ce53d3658a0d39/android-capture-binding-green-20260906/`。AUDIO-08原串写2507ms到B、A仍0；同例新包A2522ms正确存A，B未出现A。AUDIO-09为必要相邻场景确证的Stop缺陷：旧包释放B恢复门控后126ms实际Playing（原RED在同工作树 `artifacts/releases/1.0/8cc135ebb69deba1cae824356f559ee14b811431/android-stop-restore-red-20260906/`）；新包门控退出后持续10008ms为Idle、无session/队列。两项各1 PASS，保留两个有效RED。测试仅在现有私有Context复用一次SQLite-open门控，原方法不能控制此竞态；已达到原失败、相邻回归和真实验证停止条件，不再扩工具。
+
+AUDIO-06原FLAC用例在相同5/10秒期限通过：2566ms/r2、7259ms/r5，暂停/重开8610ms→8610ms/r9；真实GET7次200、PUT9次200、媒体3次206、API无5xx。既有PCM持久化/重开9953ms→9963ms（10ms）通过。四项均无skip，原文件不变；受测移动源码摘要 `72fb5d6cc3dd776007859e417d7d7cf65651f73e3a5becf505a022f517ec21d5`，主APK SHA256 `2fb7cb3214b1c19353f082b724c55981c095533cf9bbacd901fae80df07826f6`、测试APK `8567aa938057fa0f6e4e1a8528840141bd249ea8b1ae456a10d8d3b31bb5c69d`。保留数据安装/冷启、原件/源码、fixture/Gradle/logcat退出、18084/3105关闭、reverse移除及无活动播放器均已核实。
+
+本批关闭AUDIO-07捕获饥饿、AUDIO-08串写、AUDIO-09停止后重启；AUDIO-06原严格短时用例失败已解除，仍不认定旧FLAC失败的唯一原因，也不声称本次真机诱发了受控重复缓冲。证据仅覆盖本候选和上述场景，未冻结RC；下一项可执行工作为W↔Android真实同步/确认后进程重启，以及TEST-11完整1800秒采样。SYNC-02仍待手动双服务；原生iOS、容器及正式产物条件分别保留。
+
 2026-09-06 20:20恢复点：主源码 `9938c350` 已整合AAC寻址修复（独立 `02008ed0`），AUDIO-05原9916ms→0ms场景已在新包实际回归为9906ms→9906ms；MP3相邻9912ms→9912ms，两者5/10秒确认、完整Locator读回、原件hash、无API5xx、保留数据换装/新服务进程与清理均PASS。证据 `D:/www/ermao-release-android-formats/artifacts/releases/1.0/a43fd62aabf83bba19ab8fbb4f76fadcd3e0537b/android-aac-cbr-20260906/`。主代理读取原结果/现场日志并核对当前服务源码hash与构建APKhash匹配；主APK SHA256 `962d0fb62dc41d643bdc177d48992ce19b41d6a24130fbff558c1501eeff6bc8`，测试APK `19a586718146038742c84d18c143e21dbba45907868d44fdca9c4a29e175959c`。Media3 1.8.1默认ADTS不可寻址归零，现仅启用SDK ADTS平均码率寻址，不启用全局或ALWAYS选项，不改变认证传输。只关闭原正常AAC回零缺陷，不外推长时/复杂VBR精度保证；MP3运行可能与主host编译重叠，未失败。
 
 IMP-01正常两模式UI与同库持久化子项PASS：`organization-live/imp01-ui-1788695317426/` 的实际Chrome创建/自动扫描，FLAT三本分别进入详情，VOLUMES两本及同Book内两个独立EPUB/PDF资源；主已复核截图05/10b。原执行900秒超期、后续ChunkLoadError、未存HTTP响应body及FLAT任务读回缺口保留在 `ui-result.json`，不改成完整浏览器命令PASS。为补齐本Case持久化判定，主对停服后保留的同一测试库运行固定只读ORM操作 `database-readback.py`，使用指定发布venv与mode=ro；两库模式/启用正确、各5任务SUCCEEDED，FLAT Book/Node/Resource/Asset=3/4/3/3、VOLUMES=2/4/3/3，DB与WAL全hash不变（`database-readback-complete.json`）。这是同库持久化证据，不是补造当时HTTP响应。911受测应用源码、样本和Next配置恢复均经原校验通过；此必测子项已具备UI及持久化依据，停止工具扩展，不计Reader引擎/production/PWA/最终RC或整RG-02通过。
