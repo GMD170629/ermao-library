@@ -23,10 +23,11 @@ import time
 import uuid
 import zipfile
 from collections import Counter, defaultdict
-from collections.abc import Callable, Iterable
-from dataclasses import asdict, dataclass
+from collections.abc import Callable, Iterable, Iterator
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from io import BytesIO
+from itertools import islice
 from pathlib import Path
 from urllib.parse import quote
 from xml.sax.saxutils import escape
@@ -56,6 +57,7 @@ from app.models import (
     LibrarySourceNode,
 )
 from app.modules.library.public import (
+    InvalidSourceNodeRelativePathError,
     SourceNodePhysicalKind,
     SourceNodeRelativePath,
     is_resource_anchor_within_book_scope,
@@ -79,9 +81,10 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, aliased
 
-TOTAL_FILES = 10_000
-INITIAL_FILES = 2_000
-FORMAT_COUNTS = {"epub": 4_000, "pdf": 3_000, "cbz": 3_000}
+SUPPORTED_TOTAL_FILES = (10_000, 100_000, 300_000)
+INITIAL_PERCENT = 20
+FORMAT_WEIGHTS = (("epub", 4), ("pdf", 3), ("cbz", 3))
+FileSpec = tuple[str, int, str, str, Path]
 REQUEST_ENDPOINTS = ("list", "detail", "search", "v5_save")
 logger = logging.getLogger(__name__)
 RELEASE_THRESHOLDS_MS = {
@@ -90,6 +93,17 @@ RELEASE_THRESHOLDS_MS = {
     "search": 3_000.0,
     "v5_save": 2_000.0,
 }
+PRECHECK_LIMITATIONS = (
+    "Local precheck only: corpus size and configured windows do not establish the full release LOAD gate.",
+    "Generated media remain compact single-file EPUB/PDF/CBZ; representative heavy media and audio are not covered.",
+    "Actual Web/Android/iOS media clients, reading, playback interruptions, engine positions and proxy/network paths are not verified.",
+    "Long-duration sustained parsing/import activity is not verified: sampled queued/running tasks do not prove continuous parser work.",
+    "Serial endpoint clients back off under latency: actual rate and scan coverage must be assessed, not configured rate.",
+    "Lists rotate through the first 20 pages; growth requests use the initial resource pool, so newly imported readability is not verified.",
+    "CPU samples are system-wide only; per-service CPU, I/O, DB lock waits, cache/swap and runner memory are not measured.",
+    "Cold/hot media paths, continuous foreground unavailability, service restart and client reconnect recovery are not verified.",
+    "Integrity checks cover manifest-listed single-file originals and this isolated library outside load windows; unrelated directories are not inspected.",
+)
 
 
 def utc_now() -> str:
@@ -121,6 +135,50 @@ class FileRecord:
     size_class: str
     size_bytes: int
     sha256: str
+
+
+@dataclass(frozen=True)
+class CorpusConfig:
+    total_files: int = SUPPORTED_TOTAL_FILES[0]
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.total_files) is not int
+            or self.total_files not in SUPPORTED_TOTAL_FILES
+        ):
+            raise ValueError(f"total files must be one of {SUPPORTED_TOTAL_FILES}")
+
+    @property
+    def initial_files(self) -> int:
+        return self.total_files * INITIAL_PERCENT // 100
+
+    @property
+    def format_counts(self) -> dict[str, int]:
+        total_weight = sum(weight for _, weight in FORMAT_WEIGHTS)
+        return {
+            name: self.total_files * weight // total_weight
+            for name, weight in FORMAT_WEIGHTS
+        }
+
+    @property
+    def initial_format_counts(self) -> dict[str, int]:
+        return {
+            name: count * INITIAL_PERCENT // 100
+            for name, count in self.format_counts.items()
+        }
+
+    @property
+    def scale_label(self) -> str:
+        return f"{self.total_files // 1000}k"
+
+    def evidence(self) -> dict[str, object]:
+        return {
+            "totalFiles": self.total_files,
+            "initialFiles": self.initial_files,
+            "initialPercent": INITIAL_PERCENT,
+            "formatCounts": self.format_counts,
+            "initialFormatCounts": self.initial_format_counts,
+        }
 
 
 def _png_bytes(seed: str, edge: int) -> bytes:
@@ -221,51 +279,33 @@ def _write_cbz(path: Path, title: str, ordinal: int, size_class: str) -> None:
         )
 
 
-def _file_specs(limit: int) -> list[tuple[str, int, str, str, Path]]:
+def _file_specs(corpus: CorpusConfig) -> Iterator[FileSpec]:
     seed_pdf = RELEASE_ROOT / "test-data" / "library" / "pdf" / "reading-notes.pdf"
-    specs: list[tuple[str, int, str, str, Path]] = []
-    for format_name in ("epub", "pdf", "cbz"):
-        initial_count = {"epub": 800, "pdf": 600, "cbz": 600}[format_name]
-        for ordinal in range(1, FORMAT_COUNTS[format_name] + 1):
-            if ordinal > initial_count:
-                continue
-            size_class = ("small", "medium", "large")[(ordinal - 1) % 3]
-            extension = f".{format_name}"
-            base = {"epub": "reflowable", "pdf": "documents", "cbz": "comics"}[
-                format_name
-            ]
-            shard = (ordinal - 1) // 100
-            relative = (
-                Path(base)
-                / f"shard-{shard:02d}"
-                / f"precheck-{format_name}-{ordinal:05d}{extension}"
-            )
-            specs.append(
-                (format_name, ordinal, size_class, relative.as_posix(), seed_pdf)
-            )
-    for format_name in ("epub", "pdf", "cbz"):
-        initial_count = {"epub": 800, "pdf": 600, "cbz": 600}[format_name]
-        for ordinal in range(initial_count + 1, FORMAT_COUNTS[format_name] + 1):
-            size_class = ("small", "medium", "large")[(ordinal - 1) % 3]
-            extension = f".{format_name}"
-            base = {"epub": "reflowable", "pdf": "documents", "cbz": "comics"}[
-                format_name
-            ]
-            shard = (ordinal - 1) // 100
-            relative = (
-                Path(base)
-                / f"shard-{shard:02d}"
-                / f"precheck-{format_name}-{ordinal:05d}{extension}"
-            )
-            specs.append(
-                (format_name, ordinal, size_class, relative.as_posix(), seed_pdf)
-            )
-    return specs[:limit]
+    initial_counts = corpus.initial_format_counts
+    total_counts = corpus.format_counts
+    # Keep the initial mixed library as a prefix; generate each specification once.
+    for lower_counts, upper_counts in (
+        (dict.fromkeys(total_counts, 0), initial_counts),
+        (initial_counts, total_counts),
+    ):
+        for format_name, upper in upper_counts.items():
+            for ordinal in range(lower_counts[format_name] + 1, upper + 1):
+                size_class = ("small", "medium", "large")[(ordinal - 1) % 3]
+                base = {"epub": "reflowable", "pdf": "documents", "cbz": "comics"}[
+                    format_name
+                ]
+                shard = (ordinal - 1) // 100
+                relative = (
+                    Path(base)
+                    / f"shard-{shard:02d}"
+                    / f"precheck-{format_name}-{ordinal:05d}.{format_name}"
+                )
+                yield format_name, ordinal, size_class, relative.as_posix(), seed_pdf
 
 
 def _write_one_spec(
     root: Path,
-    spec: tuple[str, int, str, str, Path],
+    spec: FileSpec,
 ) -> FileRecord:
     format_name, ordinal, size_class, relative, seed_pdf = spec
     title = f"Precheck {format_name.upper()} {ordinal:05d}"
@@ -315,25 +355,55 @@ def generate_dataset(
     root: Path,
     limit: int,
     *,
+    corpus: CorpusConfig,
     log_path: Path,
     start_index: int = 0,
 ) -> list[FileRecord]:
+    if not 0 <= start_index <= limit <= corpus.total_files:
+        raise ValueError("dataset slice is outside the configured corpus")
     records: list[FileRecord] = []
-    specs = _file_specs(limit)[start_index:]
+    specs = islice(_file_specs(corpus), start_index, limit)
+    selected_count = limit - start_index
     with log_path.open("a", encoding="utf-8") as log:
         for index, spec in enumerate(specs, start=1):
             record = _write_one_spec(root, spec)
             _validate_file(record, root)
             records.append(record)
-            if index == 1 or index % 250 == 0 or index == len(specs):
-                message = f"generated_valid_files={index}/{len(specs)}"
+            if index == 1 or index % 250 == 0 or index == selected_count:
+                message = f"generated_valid_files={index}/{selected_count}"
                 print(message, flush=True)
                 log.write(f"{utc_now()} {message}\n")
                 log.flush()
     return records
 
 
-def _load_prepared_corpus(prepared_root: Path) -> tuple[Path, list[FileRecord]]:
+def _validate_dataset_records(
+    records: list[FileRecord], expected_counts: dict[str, int]
+) -> None:
+    expected_total = sum(expected_counts.values())
+    if len(records) != expected_total:
+        raise RuntimeError(
+            f"corpus must contain {expected_total} records, found {len(records)}"
+        )
+    if Counter(record.format for record in records) != expected_counts:
+        raise RuntimeError("corpus format distribution does not match configuration")
+    paths: set[Path] = set()
+    for record in records:
+        # Reuse the public path contract; Path equality also catches case aliases
+        # on the Windows filesystem used by this local runner.
+        try:
+            SourceNodeRelativePath(record.relative_path)
+        except InvalidSourceNodeRelativePathError as error:
+            raise ValueError("corpus relative path is invalid") from error
+        path = Path(record.relative_path)
+        if path in paths:
+            raise RuntimeError("corpus relative paths must be unique")
+        paths.add(path)
+
+
+def _load_prepared_corpus(
+    prepared_root: Path, corpus: CorpusConfig
+) -> tuple[Path, list[FileRecord]]:
     requested_root = prepared_root.resolve()
     manifest_candidates = (
         requested_root / "dataset-manifest.json",
@@ -390,10 +460,13 @@ def _load_prepared_corpus(prepared_root: Path) -> tuple[Path, list[FileRecord]]:
                 f"prepared corpus record is malformed: {manifest_path}"
             ) from exc
 
-    if len(records) != TOTAL_FILES:
-        raise RuntimeError(
-            f"prepared corpus must contain {TOTAL_FILES} records, found {len(records)}"
-        )
+    _validate_dataset_records(records, corpus.format_counts)
+    _validate_dataset_records(
+        records[: corpus.initial_files], corpus.initial_format_counts
+    )
+    for key, expected in corpus.evidence().items():
+        if key in payload and payload[key] != expected:
+            raise RuntimeError(f"prepared corpus configuration mismatch: {key}")
     if dataset_summary(records) != payload.get("summary"):
         raise RuntimeError(
             f"prepared corpus summary does not match records: {manifest_path}"
@@ -1097,7 +1170,7 @@ class LoadDriver:
             "scanActive": self.state.active_seconds(start, end) > 0,
         }
 
-    def _run_endpoint(self, endpoint: str, worker_index: int) -> None:
+    def _run_endpoint(self, endpoint: str) -> None:
         with httpx.Client(
             base_url=self.base_url,
             cookies=self.cookies,
@@ -1108,7 +1181,7 @@ class LoadDriver:
             started = time.perf_counter()
             deadline = time.monotonic() + self.duration_seconds
             next_at = time.monotonic()
-            sequence = worker_index
+            sequence = 0
             while time.monotonic() < deadline and not self.abort_event.is_set():
                 if time.monotonic() < next_at:
                     time.sleep(min(0.02, next_at - time.monotonic()))
@@ -1133,15 +1206,15 @@ class LoadDriver:
                             "scanActive": self.state.snapshot()["scanActive"],
                         }
                     )
-                sequence += 4
+                sequence += 1
                 next_at = max(next_at + interval, time.monotonic())
             self.windows[endpoint] = (started, time.perf_counter())
 
     def run(self) -> None:
-        for index, endpoint in enumerate(REQUEST_ENDPOINTS):
+        for endpoint in REQUEST_ENDPOINTS:
             thread = threading.Thread(
                 target=self._run_endpoint,
-                args=(endpoint, index),
+                args=(endpoint,),
                 name=f"load-{endpoint}",
             )
             self._threads.append(thread)
@@ -1436,7 +1509,7 @@ def _verify_scan_integrity(
                 book_anchor_kind=SourceNodePhysicalKind(binding.book_kind),
                 resource_anchor=SourceNodeRelativePath(binding.relative_path),
             )
-        except ValueError:
+        except (InvalidSourceNodeRelativePathError, ValueError):
             valid = False
         if not valid:
             invalid.append(binding)
@@ -1449,6 +1522,7 @@ def _verify_scan_integrity(
         "countsMatchExpected": (
             bool(records)
             and len(associations)
+            == identity["bookCount"]
             == identity["resourceCount"]
             == identity["assetCount"]
             == len(records)
@@ -1458,6 +1532,7 @@ def _verify_scan_integrity(
             and {binding.relative_path for binding in associations} == set(expected)
         ),
         "resourceIdsUnique": len({b.resource_id for b in associations}) == len(records),
+        "bookIdsUnique": len({b.book_id for b in associations}) == len(records),
         "assetIdsUnique": len({b.asset_id for b in associations}) == len(records),
         "bindingsValid": not invalid,
         "previousBindingsPreserved": not lost_bindings,
@@ -1550,58 +1625,91 @@ def _percentile(values: list[float], percentile: float) -> float | None:
     return round(ordered[index], 3)
 
 
-def _request_summaries(requests_path: Path) -> list[dict[str, object]]:
-    grouped: dict[tuple[str, str, str], list[dict[str, object]]] = defaultdict(list)
-    with requests_path.open("r", encoding="utf-8") as stream:
-        for line in stream:
-            if line.strip():
-                record = json.loads(line)
-                scan_label = "scan_active" if record.get("scanActive") else "scan_idle"
-                grouped[(record["phase"], record["endpoint"], scan_label)].append(
-                    record
-                )
-    summaries: list[dict[str, object]] = []
-    for (phase, endpoint, scan_label), records in sorted(grouped.items()):
-        durations = [
-            float(record["elapsedMs"])
-            for record in records
-            if isinstance(record.get("elapsedMs"), (int, float))
-        ]
-        successes = sum(bool(record.get("success")) for record in records)
-        errors = Counter(
-            str(
+@dataclass
+class RequestStatistics:
+    sample_count: int = 0
+    success_count: int = 0
+    durations: list[float] = field(default_factory=list)
+    errors: Counter[str] = field(default_factory=Counter)
+    first_start: float | None = None
+    last_end: float | None = None
+
+    def observe(self, record: dict[str, object]) -> None:
+        self.sample_count += 1
+        if record.get("success"):
+            self.success_count += 1
+        else:
+            error = (
                 record.get("errorCode")
                 or record.get("errorType")
                 or record.get("status")
             )
-            for record in records
-            if not record.get("success")
+            self.errors[str(error)] += 1
+        duration = record.get("elapsedMs")
+        if isinstance(duration, (int, float)):
+            self.durations.append(float(duration))
+        if "startedMonotonic" in record:
+            start_value = record["startedMonotonic"]
+            if not isinstance(start_value, (int, float, str)):
+                raise TypeError("request start time must be numeric")
+            start = float(start_value)
+            self.first_start = (
+                min(self.first_start, start)
+                if self.first_start is not None
+                else float(start)
+            )
+        if "endedMonotonic" in record:
+            end_value = record["endedMonotonic"]
+            if not isinstance(end_value, (int, float, str)):
+                raise TypeError("request end time must be numeric")
+            end = float(end_value)
+            self.last_end = (
+                max(self.last_end, end) if self.last_end is not None else float(end)
+            )
+
+
+def _request_summaries(requests_path: Path) -> list[dict[str, object]]:
+    # Keep exact percentile values and scalar counters, not every request object.
+    grouped: dict[tuple[str, str, str], RequestStatistics] = defaultdict(
+        RequestStatistics
+    )
+    with requests_path.open("r", encoding="utf-8") as stream:
+        for line in stream:
+            if line.strip():
+                record = json.loads(line)
+                if not isinstance(record, dict):
+                    raise TypeError("request evidence must be a JSON object")
+                phase, endpoint = record.get("phase"), record.get("endpoint")
+                if not isinstance(phase, str) or not isinstance(endpoint, str):
+                    raise TypeError(
+                        "request evidence must identify its phase and endpoint"
+                    )
+                scan_label = "scan_active" if record.get("scanActive") else "scan_idle"
+                grouped[(phase, endpoint, scan_label)].observe(record)
+    summaries: list[dict[str, object]] = []
+    for (phase, endpoint, scan_label), statistics in sorted(grouped.items()):
+        durations = statistics.durations
+        observed_seconds = (
+            statistics.last_end - statistics.first_start
+            if statistics.last_end is not None and statistics.first_start is not None
+            else None
         )
-        starts = [
-            float(record["startedMonotonic"])
-            for record in records
-            if "startedMonotonic" in record
-        ]
-        ends = [
-            float(record["endedMonotonic"])
-            for record in records
-            if "endedMonotonic" in record
-        ]
-        observed_seconds = max(ends) - min(starts) if starts and ends else None
         summaries.append(
             {
                 "phase": phase,
                 "endpoint": endpoint,
                 "scanState": scan_label,
-                "sampleCount": len(records),
-                "successCount": successes,
-                "failureCount": len(records) - successes,
-                "successRate": round(successes / len(records), 6) if records else 0,
+                "sampleCount": statistics.sample_count,
+                "successCount": statistics.success_count,
+                "failureCount": statistics.sample_count - statistics.success_count,
+                "successRate": round(
+                    statistics.success_count / statistics.sample_count, 6
+                ),
                 "observedSeconds": observed_seconds,
-                "achievedRequestsPerSecond": len(records) / observed_seconds
+                "achievedRequestsPerSecond": statistics.sample_count / observed_seconds
                 if observed_seconds
                 else None,
-                "sampleEvidenceSufficient": len(records) >= 1000,
+                "sampleEvidenceSufficient": statistics.sample_count >= 1000,
                 "loadModel": "one serial client per endpoint; configured rate is a ceiling, unsent requests are not successes",
                 "latencyMs": {
                     "p50": _percentile(durations, 0.50),
@@ -1609,7 +1717,7 @@ def _request_summaries(requests_path: Path) -> list[dict[str, object]]:
                     "p99": _percentile(durations, 0.99),
                     "max": round(max(durations), 3) if durations else None,
                 },
-                "errors": dict(errors),
+                "errors": dict(statistics.errors),
                 "releaseP95TargetMs": RELEASE_THRESHOLDS_MS.get(endpoint),
             }
         )
@@ -1699,6 +1807,8 @@ def _write_failure_evidence(run_root: Path, error_type: str) -> dict[str, object
     rescan_path = run_root / "rescan-integrity.json"
     summary = {
         "status": "failed",
+        "releaseGateStatus": "not_verified",
+        "limitations": list(PRECHECK_LIMITATIONS),
         "errorType": error_type,
         "capturedAt": utc_now(),
         "runConfig": config,
@@ -1752,6 +1862,19 @@ def _git_commit() -> str:
 
 
 def _summary_markdown(summary: dict[str, object], *, run_root: Path) -> str:
+    rescan = summary["rescan"]
+    if not isinstance(rescan, dict):
+        raise TypeError("rescan evidence must be an object")
+    compact_rescan = {
+        key: {
+            identity_key: identity_value
+            for identity_key, identity_value in value.items()
+            if identity_key != "bookBindings"
+        }
+        if key in {"before", "after"} and isinstance(value, dict)
+        else value
+        for key, value in rescan.items()
+    }
     lines = [
         "# Local performance precheck",
         "",
@@ -1795,7 +1918,12 @@ def _summary_markdown(summary: dict[str, object], *, run_root: Path) -> str:
             "",
             "## Rescan identity",
             "",
-            json.dumps(summary["rescan"], ensure_ascii=False, indent=2),
+            json.dumps(compact_rescan, ensure_ascii=False, indent=2),
+            "",
+            (
+                "Full book bindings and identity evidence: "
+                "[rescan-integrity.json](rescan-integrity.json); full report: [summary.json](summary.json)."
+            ),
             "",
             "## Evidence paths",
             "",
@@ -1894,20 +2022,24 @@ def _new_run_root(label: str) -> Path:
     return run_root
 
 
-def run_small_smoke() -> Path:
+def run_small_smoke(corpus: CorpusConfig) -> Path:
     run_root = _new_run_root("fixture-smoke")
     source_root = run_root / "library"
     source_root.mkdir()
-    specs = _file_specs(TOTAL_FILES)
-    selected = [specs[0], specs[800], specs[1_400]]
+    selected: dict[str, FileSpec] = {}
+    for spec in _file_specs(corpus):
+        selected.setdefault(spec[0], spec)
+        if len(selected) == len(corpus.format_counts):
+            break
     records: list[FileRecord] = []
-    for spec in selected:
+    for spec in selected.values():
         record = _write_one_spec(source_root, spec)
         _validate_file(record, source_root)
         records.append(record)
     summary = {
         "capturedAt": utc_now(),
         "status": "small-smoke-ok",
+        "corpusConfig": corpus.evidence(),
         "files": [asdict(record) for record in records],
         "summary": dataset_summary(records),
         "releaseRoot": str(RELEASE_ROOT),
@@ -1918,18 +2050,21 @@ def run_small_smoke() -> Path:
     return run_root
 
 
-def run_prepare_only() -> Path:
-    run_root = _new_run_root("corpus-10k")
+def run_prepare_only(corpus: CorpusConfig) -> Path:
+    run_root = _new_run_root(f"corpus-{corpus.scale_label}")
     source_root = run_root / "library"
     source_root.mkdir()
     records = generate_dataset(
         source_root,
-        TOTAL_FILES,
+        corpus.total_files,
+        corpus=corpus,
         log_path=run_root / "logs" / "dataset-generation.log",
     )
+    _validate_dataset_records(records, corpus.format_counts)
     summary = {
         "capturedAt": utc_now(),
         "status": "corpus-ready",
+        **corpus.evidence(),
         "root": str(source_root),
         "releaseRoot": str(RELEASE_ROOT),
         "releaseCommit": _git_commit(),
@@ -1938,15 +2073,16 @@ def run_prepare_only() -> Path:
         "validation": {
             "allFilesWrittenAndReopened": True,
             "databaseRowsWritten": False,
-            "formats": ["EPUB", "PDF", "CBZ"],
+            "formats": [name.upper() for name in corpus.format_counts],
         },
     }
     write_json(run_root / "dataset-manifest.json", summary)
-    print(f"10k corpus ready: {run_root}", flush=True)
+    print(f"{corpus.scale_label} corpus ready: {run_root}", flush=True)
     return run_root
 
 
 def run_measurement(args: argparse.Namespace) -> Path:
+    corpus = CorpusConfig(args.total_files)
     source_commit = _git_commit()
     backend_digest = _backend_source_digest()
     if not RELEASE_ROOT.is_dir():
@@ -1955,7 +2091,7 @@ def run_measurement(args: argparse.Namespace) -> Path:
     prepared_records: list[FileRecord] | None = None
     if args.prepared_corpus_root is not None:
         prepared_source, prepared_records = _load_prepared_corpus(
-            args.prepared_corpus_root
+            args.prepared_corpus_root, corpus
         )
 
     run_root = _new_run_root("measurement")
@@ -1999,13 +2135,13 @@ def run_measurement(args: argparse.Namespace) -> Path:
             "python": sys.executable,
             "psutilVersion": psutil.__version__,
             "runnerSha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-            "totalFiles": TOTAL_FILES,
-            "initialFiles": INITIAL_FILES,
-            "formatCounts": FORMAT_COUNTS,
+            **corpus.evidence(),
             "idleWindowSeconds": args.idle_window_seconds,
             "activeWindowSeconds": args.active_window_seconds,
             "requestRatePerEndpoint": args.request_rate,
             "scanTimeoutSeconds": args.scan_timeout_seconds,
+            "overallTimeoutSeconds": args.overall_timeout_seconds,
+            "overallTimeoutOwner": "supervisor",
             "launcher": "direct sys.executable -m uvicorn / -m app.worker.main",
             "preparedCorpusRoot": (
                 str(args.prepared_corpus_root.resolve())
@@ -2020,22 +2156,27 @@ def run_measurement(args: argparse.Namespace) -> Path:
 
     print(f"measurement run root: {run_root}", flush=True)
     if prepared_records is None or prepared_source is None:
-        print("generating and validating initial 2,000 real files", flush=True)
+        print(
+            f"generating and validating initial {corpus.initial_files:,} real files",
+            flush=True,
+        )
         initial_records = generate_dataset(
             source_root,
-            INITIAL_FILES,
+            corpus.initial_files,
+            corpus=corpus,
             log_path=generation_log,
         )
     else:
         print(
-            "staging and hash-validating initial 2,000 prepared real files", flush=True
+            f"staging and hash-validating initial {corpus.initial_files:,} prepared real files",
+            flush=True,
         )
         initial_records = stage_dataset(
             prepared_source,
             source_root,
             prepared_records,
             start_index=0,
-            end_index=INITIAL_FILES,
+            end_index=corpus.initial_files,
             log_path=generation_log,
         )
     write_json(
@@ -2043,6 +2184,7 @@ def run_measurement(args: argparse.Namespace) -> Path:
         {
             "capturedAt": utc_now(),
             "stage": "initial",
+            "corpusConfig": corpus.evidence(),
             "root": str(source_root),
             "records": [asdict(record) for record in initial_records],
             "summary": dataset_summary(initial_records),
@@ -2065,6 +2207,7 @@ def run_measurement(args: argparse.Namespace) -> Path:
             initial_records,
             run_root / "integrity/source-initial-before.json",
         )
+        _validate_dataset_records(initial_records, corpus.initial_format_counts)
         api_port = free_port()
         worker_ready = run_root / "import-worker-ready"
         env = {
@@ -2138,7 +2281,7 @@ def run_measurement(args: argparse.Namespace) -> Path:
                 engine,
                 library_id,
                 initial_task_id,
-                INITIAL_FILES,
+                corpus.initial_files,
                 phase="active_initial_scan",
                 state=phase_state,
                 progress_path=progress_path,
@@ -2161,47 +2304,50 @@ def run_measurement(args: argparse.Namespace) -> Path:
             phase_state.set("dataset_expand", scan_active=False)
             if prepared_records is None or prepared_source is None:
                 print(
-                    "generating and validating the remaining 8,000 real files",
+                    f"generating and validating the remaining {corpus.total_files - corpus.initial_files:,} real files",
                     flush=True,
                 )
                 remaining_records = generate_dataset(
                     source_root,
-                    TOTAL_FILES,
-                    start_index=INITIAL_FILES,
+                    corpus.total_files,
+                    corpus=corpus,
+                    start_index=corpus.initial_files,
                     log_path=generation_log,
                 )
             else:
                 print(
-                    "staging and hash-validating the remaining 8,000 prepared real files",
+                    f"staging and hash-validating the remaining {corpus.total_files - corpus.initial_files:,} prepared real files",
                     flush=True,
                 )
                 remaining_records = stage_dataset(
                     prepared_source,
                     source_root,
                     prepared_records,
-                    start_index=INITIAL_FILES,
-                    end_index=TOTAL_FILES,
+                    start_index=corpus.initial_files,
+                    end_index=corpus.total_files,
                     log_path=generation_log,
                 )
             records = initial_records + remaining_records
+            _validate_dataset_records(records, corpus.format_counts)
             write_json(
                 dataset_manifest,
                 {
                     "capturedAt": utc_now(),
                     "stage": "complete",
+                    "corpusConfig": corpus.evidence(),
                     "root": str(source_root),
                     "records": [asdict(record) for record in records],
                     "summary": dataset_summary(records),
-                    "validFiles": len(records) == TOTAL_FILES,
+                    "validFiles": len(records) == corpus.total_files,
                 },
             )
-            if len(records) != TOTAL_FILES:
+            if len(records) != corpus.total_files:
                 raise RuntimeError(
-                    f"expected {TOTAL_FILES} files, found {len(records)}"
+                    f"expected {corpus.total_files} files, found {len(records)}"
                 )
 
             pool_initial = _resource_pool(engine, library_id)
-            if len(pool_initial["resourceIds"]) != INITIAL_FILES:
+            if len(pool_initial["resourceIds"]) != corpus.initial_files:
                 raise RuntimeError(
                     "initial scan resource count mismatch: "
                     f"{len(pool_initial['resourceIds'])}"
@@ -2219,7 +2365,7 @@ def run_measurement(args: argparse.Namespace) -> Path:
                 client=client,
                 engine=engine,
                 library_id=library_id,
-                task_expected_resources=TOTAL_FILES,
+                task_expected_resources=corpus.total_files,
                 phase="active_growth_scan",
                 pool=pool_initial,
                 state=phase_state,
@@ -2246,9 +2392,9 @@ def run_measurement(args: argparse.Namespace) -> Path:
             )
 
             pool_full = _resource_pool(engine, library_id)
-            if len(pool_full["resourceIds"]) != TOTAL_FILES:
+            if len(pool_full["resourceIds"]) != corpus.total_files:
                 raise RuntimeError(
-                    f"full scan did not produce {TOTAL_FILES} resources: "
+                    f"full scan did not produce {corpus.total_files} resources: "
                     f"{len(pool_full['resourceIds'])}"
                 )
             _v5_sanity(client, pool_full, output_path=run_root / "v5-sanity-full.json")
@@ -2257,8 +2403,8 @@ def run_measurement(args: argparse.Namespace) -> Path:
                 client=client,
                 engine=engine,
                 library_id=library_id,
-                task_expected_resources=TOTAL_FILES,
-                phase="idle_10k",
+                task_expected_resources=corpus.total_files,
+                phase=f"idle_{corpus.scale_label}",
                 pool=pool_full,
                 state=phase_state,
                 requests_path=requests_path,
@@ -2293,7 +2439,7 @@ def run_measurement(args: argparse.Namespace) -> Path:
                 client=client,
                 engine=engine,
                 library_id=library_id,
-                task_expected_resources=TOTAL_FILES,
+                task_expected_resources=corpus.total_files,
                 phase="active_rescan",
                 pool=rescan_pool,
                 state=phase_state,
@@ -2397,6 +2543,8 @@ def run_measurement(args: argparse.Namespace) -> Path:
     )
     summary: dict[str, object] = {
         "capturedAt": utc_now(),
+        "releaseGateStatus": "not_verified",
+        "corpusConfig": corpus.evidence(),
         "releaseCommit": source_commit,
         "backendSourceSha256": backend_digest,
         "dataset": dataset_summary(records),
@@ -2419,12 +2567,7 @@ def run_measurement(args: argparse.Namespace) -> Path:
         "integrityChecks": _integrity_evidence(run_root),
         "budget": budget,
         "cleanupErrors": cleanup_errors,
-        "limitations": [
-            "Local precheck only: short windows and small generated media do not satisfy the full release LOAD gate.",
-            "Serial endpoint clients back off under latency: actual rate and scan coverage must be assessed, not configured rate.",
-            "Integrity checks cover manifest-listed single-file EPUB/PDF/CBZ originals and this isolated library, outside load windows; unrelated directories are not inspected.",
-            "Queue activity is sampled; it does not prove continuous parser CPU activity.",
-        ],
+        "limitations": list(PRECHECK_LIMITATIONS),
         "evidence": {
             "machine": str(run_root / "machine.json"),
             "budget": str(run_root / "budget.json"),
@@ -2458,6 +2601,7 @@ def run_measurement(args: argparse.Namespace) -> Path:
         run_root / "complete.json",
         {
             "capturedAt": utc_now(),
+            "releaseGateStatus": "not_verified",
             "status": "completed_with_failures"
             if summary["performanceTargetViolations"]
             or any(phase.get("status") == "failed" for phase in phase_results)
@@ -2526,6 +2670,7 @@ def _supervise_measurement_process(
 
 
 def run_supervised_measurement(args: argparse.Namespace) -> None:
+    corpus = CorpusConfig(args.total_files)
     root = _new_run_root("supervisor")
     state_path = root / "child-state.json"
     command = [
@@ -2535,6 +2680,8 @@ def run_supervised_measurement(args: argparse.Namespace) -> None:
         "--measurement-child",
         "--supervisor-state",
         str(state_path),
+        "--total-files",
+        str(corpus.total_files),
         "--idle-window-seconds",
         str(args.idle_window_seconds),
         "--active-window-seconds",
@@ -2543,11 +2690,21 @@ def run_supervised_measurement(args: argparse.Namespace) -> None:
         str(args.request_rate),
         "--scan-timeout-seconds",
         str(args.scan_timeout_seconds),
+        "--overall-timeout-seconds",
+        str(args.overall_timeout_seconds),
     ]
     if args.prepared_corpus_root is not None:
         command.extend(
             ["--prepared-corpus-root", str(args.prepared_corpus_root.resolve())]
         )
+    write_json(
+        root / "supervisor-config.json",
+        {
+            **corpus.evidence(),
+            "overallTimeoutSeconds": args.overall_timeout_seconds,
+            "measurementCommand": command,
+        },
+    )
     print(f"supervisor evidence: {root}", flush=True)
     process = start_logged_process(
         command,
@@ -2564,6 +2721,13 @@ def main() -> int:
         description="Prepare local corpus or run an explicitly enabled measurement window."
     )
     parser.add_argument(
+        "--total-files",
+        type=int,
+        choices=SUPPORTED_TOTAL_FILES,
+        default=SUPPORTED_TOTAL_FILES[0],
+        help="total compact real files; the initial library is always 20 percent",
+    )
+    parser.add_argument(
         "--small-smoke",
         action="store_true",
         help="write and reopen one valid EPUB/PDF/CBZ in an isolated directory",
@@ -2571,7 +2735,7 @@ def main() -> int:
     parser.add_argument(
         "--prepare-only",
         action="store_true",
-        help="generate and validate the complete 10,000-file corpus without services",
+        help="generate and validate the selected corpus without services",
     )
     parser.add_argument(
         "--measure-window",
@@ -2582,7 +2746,7 @@ def main() -> int:
         "--prepared-corpus-root",
         type=Path,
         help=(
-            "reuse a validated corpus-10k directory (or its library directory) "
+            "reuse a validated corpus directory of the selected size (or its library directory) "
             "and stage it into the isolated measurement run"
         ),
     )
@@ -2640,9 +2804,9 @@ def main() -> int:
         else:
             run_supervised_measurement(args)
     elif args.prepare_only:
-        run_prepare_only()
+        run_prepare_only(CorpusConfig(args.total_files))
     else:
-        run_small_smoke()
+        run_small_smoke(CorpusConfig(args.total_files))
     return 0
 
 
