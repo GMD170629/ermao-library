@@ -108,6 +108,7 @@ class SqlAlchemyResourceDetailQueries:
         current_chapter_index = progress.chapter_index if progress is not None else None
         current_chapter_title = progress.chapter_title if progress is not None else None
         return ResourceDetailResource(
+            presentation=progress.presentation if progress is not None else None,
             id=resource.id,
             book_id=resource.book_id,
             format=resource.format,

@@ -14,6 +14,7 @@ from app.contracts.library_views import (
     ResourceImportSummary,
     ResourceView,
 )
+from app.contracts.reader_progress import ReaderV5Presentation
 from app.modules.library.application.recognized_metadata import (
     MetadataTargetScope,
     RecognizedMetadataField,
@@ -564,6 +565,7 @@ class ReadingUnitsPage(HttpContractModel):
 
 
 class ReadingUnitsPayload(HttpContractModel):
+    presentation: ReaderV5Presentation | None = None
     chapter_count: int | None = Field(default=None, alias="chapterCount")
     book_id: str = Field(alias="bookId")
     resource_id: str = Field(alias="resourceId")

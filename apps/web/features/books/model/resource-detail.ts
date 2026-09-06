@@ -1,4 +1,5 @@
 import type { ReadableResourceView } from '../../../types/book';
+import type { ReaderPositionPresentation } from '@shuku/reader-core';
 
 export const RESOURCE_DETAIL_LIST_PAGE_SIZE = 50;
 export const RESOURCE_DETAIL_PREVIEW_PAGE_SIZE = 24;
@@ -34,6 +35,7 @@ export type ResourceTrackDetailUnit = ResourceDetailUnitBase & Readonly<{
 export type ResourceDetailUnit = ResourceChapterDetailUnit | ResourcePageDetailUnit | ResourceTrackDetailUnit;
 
 export type ResourceDetailPage = Readonly<{
+  presentation?: ReaderPositionPresentation | null;
   chapterCount: number | null;
   units: ResourceDetailUnit[];
   page: Readonly<{

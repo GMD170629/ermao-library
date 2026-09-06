@@ -194,7 +194,8 @@ function parsePlayback(value: unknown): ReaderPlaybackPresentation | null | unde
   return { positionMillis, durationMillis };
 }
 
-function parsePresentation(value: unknown): ReaderPositionPresentation | null {
+export function parseReaderV5Presentation(value: unknown): ReaderPositionPresentation | null {
+  if (!isJsonValue(value)) return null;
   const item = record(value);
   if (!item || !hasOnlyKeys(item, ['displayPercent', 'totalProgression', 'currentHref', 'chapter', 'page', 'playback'])
     || !hasKeys(item, ['displayPercent', 'totalProgression', 'currentHref', 'chapter', 'page', 'playback'])) return null;
@@ -220,7 +221,7 @@ export function parseReaderV5PositionReport(value: unknown): ReaderPositionRepor
   const locator = record(item.locator);
   if (!locator || !isJsonValue(locator)) return null;
   const locatorBytes = jsonByteLength(locator);
-  const presentation = parsePresentation(item.presentation);
+  const presentation = parseReaderV5Presentation(item.presentation);
   if (!locator || locatorBytes === null || locatorBytes > READER_V5_LOCATOR_MAX_BYTES || !presentation) return null;
   return { locator: locator as ReaderOpaqueLocator, presentation };
 }

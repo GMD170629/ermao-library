@@ -28,7 +28,8 @@ from app.modules.reader.infrastructure.v5_repository import decode_stored_presen
 
 
 def _presentation_view(row: ReaderResourceProgressV5) -> ReaderV5PresentationView:
-    chapter = decode_stored_presentation(row.presentation_json).chapter
+    presentation = decode_stored_presentation(row.presentation_json)
+    chapter = presentation.chapter
     return ReaderV5PresentationView(
         resource_id=row.resource_id,
         display_percent=float(row.display_percent),
@@ -44,6 +45,7 @@ def _presentation_view(row: ReaderResourceProgressV5) -> ReaderV5PresentationVie
         playback_duration_millis=row.playback_duration_millis,
         captured_at=row.captured_at,
         updated_at=row.updated_at,
+        presentation=presentation,
     )
 
 

@@ -738,6 +738,90 @@ def test_resource_details_preserve_member_scope_and_anti_enumeration(
     assert denied.json()["error"]["code"] == "RESOURCE_NOT_FOUND"
 
 
+def test_audio_reading_units_preserve_complete_v5_presentation(
+    client, db_session, tmp_path: Path
+) -> None:
+    _login(client, db_session, email="sync03-presentation@example.com")
+    _book, resources = _add_book(db_session, resource_count=1)
+    resource = resources[0]
+    resource.format = "M4B"
+    resource.adapter_id = "audio-file"
+    library = db_session.get(Library, "test-library")
+    node = db_session.get(LibrarySourceNode, resource.source_node_id)
+    asset_id = f"{resource.id}-asset"
+    metadata = db_session.get(LibraryResourceAssetMetadata, asset_id)
+    assert library is not None
+    assert node is not None
+    assert metadata is not None
+    library_root = tmp_path / "library"
+    audio_path = library_root / "detail-book" / "sample.m4b"
+    audio_path.parent.mkdir(parents=True)
+    # Protocol fixture only: these existing-style asset bytes do not prove decoding.
+    audio_path.write_bytes(b"sample-sample.m4b")
+    library.root_path = str(library_root)
+    node.relative_path = "detail-book/sample.m4b"
+    node.path_key = _path_key(node.relative_path)
+    node.name = audio_path.name
+    node.observed_size_bytes = audio_path.stat().st_size
+    metadata.mime_type = "audio/mp4"
+    # Keep metadata duration unknown: the detail label needs v5 playback time.
+    metadata.duration_ms = None
+    db_session.commit()
+
+    detail_url = f"/api/books/{resource.book_id}/resources/{resource.id}/reading-units"
+    empty_response = client.get(detail_url)
+    assert empty_response.status_code == 200
+    empty_detail = empty_response.json()["data"]
+    presentation = {
+        "displayPercent": 50.0,
+        "totalProgression": 0.5,
+        "currentHref": f"/api/assets/{asset_id}",
+        "chapter": None,
+        "page": None,
+        "playback": {"positionMillis": 15000, "durationMillis": 30000},
+    }
+    progress_url = f"/api/reader/v5/resources/{resource.id}/progress"
+    accepted = client.put(
+        progress_url,
+        json={
+            "schemaVersion": 5,
+            "clientId": "sync03-audio-client",
+            "mutationId": "00000000-0000-4000-8000-000000000015",
+            "capturedAtEpochMillis": 0,
+            "position": {
+                "locator": {"sync03OpaqueMarker": "must-stay-in-reader"},
+                "presentation": presentation,
+            },
+        },
+    )
+    assert accepted.status_code == 200
+    ack_presentation = accepted.json()["data"]["currentSnapshot"]["position"][
+        "presentation"
+    ]
+    assert ack_presentation == presentation
+    current = client.get(progress_url)
+    assert current.status_code == 200
+    current_presentation = current.json()["data"]["progressSnapshot"]["position"][
+        "presentation"
+    ]
+    assert current_presentation == ack_presentation
+
+    response = client.get(detail_url)
+    assert response.status_code == 200
+    detail = response.json()["data"]
+    assert [unit["assetId"] for unit in detail["units"]] == [asset_id]
+    assert detail["units"][0]["durationMs"] is None
+    assert detail["progress"] == 50.0
+    assert detail["currentHref"] == presentation["currentHref"]
+    for payload in (empty_detail, detail):
+        serialized = json.dumps(payload)
+        assert '"locator"' not in serialized
+        assert "sync03OpaqueMarker" not in serialized
+    assert detail["presentation"] == ack_presentation == current_presentation
+    # Require explicit null rather than treating an omitted field as no progress.
+    assert empty_detail["presentation"] is None
+
+
 def test_audio_track_details_and_bootstrap_preserve_import_sequence(
     client, db_session, tmp_path: Path
 ) -> None:

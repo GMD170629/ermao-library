@@ -1,6 +1,7 @@
 import type { ReaderType, ReadableResourceView, ResourceFormat, ResourceImportSummary, BookView } from '../../../types/book';
 import { withBasePath } from '../../../lib/base-path';
 import { updateBulkBookCovers, type BulkBookCoverResult } from '../../library/public';
+import { parseReaderV5Presentation } from '../../../lib/reader';
 import type {
   ResourceChapterDetailUnit,
   ResourceDetailPage,
@@ -521,7 +522,10 @@ export async function fetchResourceDetail(
   const pageData = record(data.page);
   const pageSizeValue = positiveInteger(pageData.pageSize, pageSize);
   const total = Math.max(0, finiteNumber(pageData.total));
+  const presentation = data.presentation == null ? null : parseReaderV5Presentation(data.presentation);
+  if (data.presentation != null && !presentation) throw new Error('READER_PROGRESS_RESPONSE_INVALID');
   return {
+    presentation,
     units: (Array.isArray(data.units) ? data.units : []).map(mapResourceDetailUnit).filter((unit): unit is ResourceDetailUnit => unit !== null),
     page: {
       page: positiveInteger(pageData.page, page),

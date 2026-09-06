@@ -222,6 +222,7 @@ from app.modules.publications.public import (
     PublicationResourceTooLargeError,
     PublicationUnsupportedError,
 )
+from app.modules.reader.public import presentation_json
 from app.schemas.responses import fail, ok
 
 router = APIRouter(tags=["library"], route_class=TypedContractRoute)
@@ -1959,6 +1960,9 @@ def list_library_reading_units(
                 "chapterCount": result.chapter_count,
                 "currentPageNumber": result.current_page_number,
                 "progress": result.progress,
+                "presentation": presentation_json(result.presentation)
+                if result.presentation is not None
+                else None,
             }
         )
     )

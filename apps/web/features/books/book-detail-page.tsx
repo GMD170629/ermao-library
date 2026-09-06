@@ -393,6 +393,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const displayedResourceDetail = resourceDetail && requestedLocalPresentation
     ? {
         ...resourceDetail,
+        presentation: requestedLocalPresentation,
         progress: requestedLocalPresentation.displayPercent,
         currentHref: requestedLocalPresentation.currentHref,
         currentChapterIndex: requestedLocalPresentation.chapter?.index ?? null,

@@ -10,6 +10,7 @@ from app.contracts.reader_safety_policy_generated import (
     ReaderSafetyFormat,
 )
 from app.core.natural_sort import natural_sort_key
+from app.modules.reader.public import ReaderV5PresentationDto
 
 REFLOWABLE_FORMATS = frozenset({"EPUB", "MOBI", "AZW", "AZW3", "PRC", "FB2", "TXT"})
 COMIC_FORMATS = frozenset({"CBZ", "ZIP", "CBR", "RAR", "IMAGE_DIR"})
@@ -37,6 +38,7 @@ class ResourceDetailResource:
     current_chapter_index: int | None = None
     current_chapter_title: str | None = None
     current_chapter_navigation_key: str | None = None
+    presentation: ReaderV5PresentationDto | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +96,7 @@ class ResourceDetailPage:
     current_chapter_title: str | None
     current_chapter_sort_order: int | None
     chapter_count: int | None = None
+    presentation: ReaderV5PresentationDto | None = None
 
 
 class ResourceDetailNotFoundError(Exception):
@@ -278,6 +281,7 @@ class ListResourceDetails:
             units, total = (), 0
 
         return ResourceDetailPage(
+            presentation=resource.presentation,
             chapter_count=chapter_count,
             book_id=book_id,
             resource_id=resource_id,

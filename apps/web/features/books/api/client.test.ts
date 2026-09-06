@@ -368,3 +368,31 @@ test('validates and maps a unified paginated resource detail response', async ()
   }
   assert.equal(requestedUrl, '/api/books/book-1/resources/resource-1/reading-units?page=2&pageSize=24');
 });
+
+test('resource detail validates the canonical server presentation without a progress request', async () => {
+  const originalFetch = globalThis.fetch;
+  const urls: string[] = [];
+  const presentation = {
+    displayPercent: 50, totalProgression: 0.5, currentHref: '/api/assets/audio-1',
+    chapter: null, page: null, playback: { positionMillis: 15_000, durationMillis: 30_000 }
+  };
+  let invalid = false;
+  globalThis.fetch = async (input) => {
+    urls.push(String(input));
+    return new Response(JSON.stringify({ ok: true, data: {
+      bookId: 'book-1', resourceId: 'resource-1', units: [],
+      page: { page: 1, pageSize: 50, total: 0, totalPages: 1 },
+      progress: 50, presentation: invalid ? { ...presentation, playback: { positionMillis: -1, durationMillis: 30_000 } } : presentation
+    } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const detail = await fetchResourceDetail('book-1', 'resource-1', 1, 50);
+    assert.deepEqual(detail.presentation, presentation);
+    assert.equal(urls.length, 1);
+    assert.match(urls[0] ?? '', /\/reading-units\?/u);
+    invalid = true;
+    await assert.rejects(fetchResourceDetail('book-1', 'resource-1', 1, 50), /READER_PROGRESS_RESPONSE_INVALID/u);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

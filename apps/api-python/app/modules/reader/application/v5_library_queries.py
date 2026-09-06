@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Literal, Protocol
 
 from app.core.authorization import AuthorizationContext
+from app.modules.reader.application.v5_dto import ReaderV5PresentationDto
 from app.modules.reader.domain.resource_progress import ResourceReadingState
 
 
@@ -35,6 +36,7 @@ class ReaderV5PresentationView:
     captured_at: datetime
     updated_at: datetime
     chapter_navigation_key: str | None = None
+    presentation: ReaderV5PresentationDto | None = None
 
 
 @dataclass(frozen=True, slots=True)

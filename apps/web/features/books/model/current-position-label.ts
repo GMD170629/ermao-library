@@ -15,13 +15,14 @@ export function currentPositionLabel(
   translate: Translate,
   presentation: ReaderPositionPresentation | null = null
 ): string {
-  if (resource.readerType === 'audio' && presentation?.playback) {
-    return formatDuration(presentation.playback.positionMillis);
+  const currentPresentation = presentation ?? detail?.presentation;
+  if (resource.readerType === 'audio' && currentPresentation?.playback) {
+    return formatDuration(currentPresentation.playback.positionMillis);
   }
-  if (presentation?.page) {
-    return translate('第 {value0} 页', { value0: presentation.page.number });
+  if (currentPresentation?.page) {
+    return translate('第 {value0} 页', { value0: currentPresentation.page.number });
   }
-  if (presentation?.chapter?.title) return presentation.chapter.title;
+  if (currentPresentation?.chapter?.title) return currentPresentation.chapter.title;
   if (resource.readerType === 'audio' && resource.durationMs) {
     return formatDuration(resource.durationMs * resource.progress / 100);
   }
