@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 from sqlalchemy import event, func, select
@@ -26,6 +26,9 @@ from app.models.settings import SystemEvent
 from app.modules.opds.public import (
     OPDS_ENABLED_SETTING_KEY,
     OPDS_PUBLIC_BASE_URL_SETTING_KEY,
+)
+from app.modules.reader.infrastructure.persistence.models import (
+    ReaderResourceProgressV5,
 )
 from app.modules.system.infrastructure.settings import upsert_setting
 
@@ -126,65 +129,105 @@ def _client(test_settings: Settings, db_session: Session) -> TestClient:
     return TestClient(app)
 
 
-def test_opds_catalog_and_progression_use_book_and_resource_routes(
+def test_opds_catalog_keeps_download_and_retires_progression_without_writes(
     test_settings: Settings,
     db_session: Session,
 ) -> None:
     _seed_opds_book(db_session)
     _enable_opds(db_session)
+    dml_statements: list[str] = []
 
-    with _client(test_settings, db_session) as client:
-        unauthorized = client.get("/opds/v1.2/catalog")
-        assert unauthorized.status_code == 401
-        assert unauthorized.headers["www-authenticate"].startswith("Basic ")
+    def capture_dml(conn, cursor, statement, parameters, context, executemany):
+        if context.isinsert or context.isupdate or context.isdelete:
+            dml_statements.append(statement)
 
-        auth = ("reader@example.com", "reader-password")
-        catalog = client.get("/opds/v1.2/books", auth=auth)
-        assert catalog.status_code == 200
-        assert b"Escaped &amp; Visible" in catalog.content
-        assert b"/opds/v1.2/books/opds-book" in catalog.content
+    event.listen(db_session.bind, "before_cursor_execute", capture_dml)
+    try:
+        with _client(test_settings, db_session) as client:
+            unauthorized = client.get("/opds/v1.2/catalog")
+            assert unauthorized.status_code == 401
+            assert unauthorized.headers["www-authenticate"].startswith("Basic ")
 
-        publication = client.get("/opds/v1.2/books/opds-book", auth=auth)
-        assert publication.status_code == 200
-        assert b"/opds/v1.2/resources/opds-resource/progression" in publication.content
+            auth = ("reader@example.com", "reader-password")
+            catalog = client.get("/opds/v1.2/books", auth=auth)
+            assert catalog.status_code == 200
+            assert b"Escaped &amp; Visible" in catalog.content
+            assert b"/opds/v1.2/books/opds-book" in catalog.content
 
-        modified = datetime.now(UTC).replace(microsecond=0)
-        body = {
-            "modified": modified.isoformat(),
-            "device": {"id": "urn:device:test", "name": "Test Reader"},
-            "progression": 0.3,
-            "references": ["#page=3"],
-        }
-        saved = client.put(
-            "/opds/v1.2/resources/opds-resource/progression",
-            auth=auth,
-            json=body,
-        )
-        assert saved.status_code == 201
+            search = client.get("/opds/v1.2/search", params={"q": "Visible"}, auth=auth)
+            assert search.status_code == 200
+            assert b"Escaped &amp; Visible" in search.content
 
+            for feed in (catalog.content, search.content):
+                assert b"/opds/v1.2/resources/opds-resource/progression" not in feed
+                assert b"application/opds-progression+json" not in feed
+                assert b"http://vaemendis.net/opds-pse/stream" not in feed
+                assert b"pse:lastRead" not in feed
+                assert b"pse:lastReadDate" not in feed
+
+            publication = client.get("/opds/v1.2/books/opds-book", auth=auth)
+            assert publication.status_code == 200
+            assert b"/opds/v1.2/resources/opds-resource/asset" in publication.content
+            assert (
+                b"/opds/v1.2/resources/opds-resource/progression"
+                not in publication.content
+            )
+            assert b"application/opds-progression+json" not in publication.content
+            assert b"pse:lastRead" not in publication.content
+            assert b"pse:lastReadDate" not in publication.content
+
+            progression_url = "/opds/v1.2/resources/opds-resource/progression"
+            body = {
+                "modified": datetime.now(UTC).replace(microsecond=0).isoformat(),
+                "device": {"id": "urn:device:test", "name": "Test Reader"},
+                "progression": 0.3,
+                "references": ["#page=3"],
+            }
+            unauthorized_get = client.get(progression_url)
+            unauthorized_put = client.put(progression_url, json=body)
+            retired_get = client.get(progression_url, auth=auth)
+            retired_put = client.put(progression_url, auth=auth, json=body)
+            retired_malformed_put = client.put(
+                progression_url,
+                auth=auth,
+                content=b"not-json",
+                headers={"Content-Type": "application/opds-progression+json"},
+            )
+
+            for response in (unauthorized_get, unauthorized_put):
+                assert response.status_code == 401
+                assert response.headers["www-authenticate"].startswith("Basic ")
+            for response in (retired_get, retired_put, retired_malformed_put):
+                assert response.status_code == 410
+                assert response.headers["content-type"].startswith(
+                    "application/problem+json"
+                )
+                assert response.headers["cache-control"] == "no-store"
+                assert response.headers["vary"] == "Authorization"
+                assert response.json() == {
+                    "type": "https://shuku.invalid/errors/opds-progression-retired",
+                    "title": "OPDS progression is no longer supported.",
+                }
+    finally:
+        event.remove(db_session.bind, "before_cursor_execute", capture_dml)
+
+    assert dml_statements == []
     progress = db_session.scalar(
         select(ReaderResourceProgress).where(
             ReaderResourceProgress.user_id == "opds-user",
             ReaderResourceProgress.resource_id == "opds-resource",
         )
     )
-    assert progress is not None
-    assert progress.schema_version == 3
-    assert progress.mutation_id is not None
-    assert progress.client_id == "urn:device:test"
-    assert progress.client_sequence == int(modified.timestamp() * 1000)
-    assert progress.source_protocol == "OPDS_PROGRESSION_1"
-    assert progress.source_device_name == "Test Reader"
-
-    stale_body = {**body, "modified": (modified - timedelta(seconds=1)).isoformat()}
-    with _client(test_settings, db_session) as client:
-        stale = client.put(
-            "/opds/v1.2/resources/opds-resource/progression",
-            auth=("reader@example.com", "reader-password"),
-            json=stale_body,
+    assert progress is None
+    assert (
+        db_session.scalar(
+            select(ReaderResourceProgressV5).where(
+                ReaderResourceProgressV5.user_id == "opds-user",
+                ReaderResourceProgressV5.resource_id == "opds-resource",
+            )
         )
-    assert stale.status_code == 409
-    assert stale.json()["type"].endswith("progression-date")
+        is None
+    )
 
 
 def test_opds_missing_resource_page_does_not_read_or_create_navigation_units(

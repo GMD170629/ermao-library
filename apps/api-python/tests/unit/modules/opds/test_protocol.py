@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 from xml.etree import ElementTree as ET
 
 import pytest
-from pydantic import ValidationError
 
 from app.modules.opds.application.dto import (
     OPDS_ACQUISITION_REL,
@@ -22,7 +21,6 @@ from app.modules.opds.domain.errors import OpdsAuthenticationRequired
 from app.modules.opds.presentation.atom import serialize_opds_feed
 from app.modules.opds.presentation.auth import parse_basic_authorization
 from app.modules.opds.presentation.opensearch import serialize_opensearch_description
-from app.modules.opds.presentation.schemas import OpdsProgressionDocument
 
 
 def test_pse_resource_page_number_is_zero_based_but_internal_index_is_one_based() -> (
@@ -69,22 +67,6 @@ def test_pse_mime_is_preserved_only_for_uniform_supported_pages() -> None:
     assert select_pse_stream_media_type(()) == "image/jpeg"
 
 
-def test_pse_last_read_is_strictly_one_based() -> None:
-    with pytest.raises(ValueError):
-        PseStreamDto(
-            href_template="https://books.test/pages/{pageNumber}",
-            media_type="image/jpeg",
-            page_count=3,
-            last_read=0,
-        )
-    with pytest.raises(ValueError):
-        PseStreamDto(
-            href_template="https://books.test/pages/{pageNumber}",
-            media_type="image/avif",
-            page_count=3,
-        )
-
-
 def test_atom_serializer_emits_opensearch_and_pse_contract() -> None:
     now = datetime(2026, 8, 3, 8, 30, tzinfo=UTC)
     feed = OpdsFeedDto(
@@ -112,8 +94,6 @@ def test_atom_serializer_emits_opensearch_and_pse_contract() -> None:
                     href_template="https://books.test/pages/{pageNumber}?maxWidth={maxWidth}",
                     media_type="image/jpeg",
                     page_count=12,
-                    last_read=4,
-                    last_read_date=now,
                 ),
             ),
         ),
@@ -141,7 +121,8 @@ def test_atom_serializer_emits_opensearch_and_pse_contract() -> None:
     assert pse is not None
     assert pse.attrib["type"] == "image/jpeg"
     assert pse.attrib["{http://vaemendis.net/opds-pse/ns}count"] == "12"
-    assert pse.attrib["{http://vaemendis.net/opds-pse/ns}lastRead"] == "4"
+    assert "{http://vaemendis.net/opds-pse/ns}lastRead" not in pse.attrib
+    assert "{http://vaemendis.net/opds-pse/ns}lastReadDate" not in pse.attrib
 
 
 def test_basic_authorization_is_utf8_and_splits_only_first_colon() -> None:
@@ -158,29 +139,3 @@ def test_basic_authorization_is_utf8_and_splits_only_first_colon() -> None:
 def test_invalid_basic_authorization_is_one_named_error(value: str | None) -> None:
     with pytest.raises(OpdsAuthenticationRequired):
         parse_basic_authorization(value)
-
-
-def test_progression_schema_requires_timezone_uri_and_unit_interval() -> None:
-    valid = OpdsProgressionDocument.model_validate(
-        {
-            "modified": "2026-08-03T10:00:00+08:00",
-            "device": {"id": "urn:uuid:device-1", "name": "Panels"},
-            "progression": 0.5,
-            "references": ["pages/4"],
-        }
-    )
-    assert valid.to_dto().references == ("pages/4",)
-
-    for changed in (
-        {"modified": "2026-08-03T10:00:00"},
-        {"device": {"id": "device-1", "name": "Panels"}},
-        {"progression": 1.1},
-    ):
-        payload = {
-            "modified": "2026-08-03T10:00:00Z",
-            "device": {"id": "urn:uuid:device-1", "name": "Panels"},
-            "progression": 0.5,
-        }
-        payload.update(changed)
-        with pytest.raises(ValidationError):
-            OpdsProgressionDocument.model_validate(payload)

@@ -11,11 +11,8 @@ from app.modules.opds.application.dto import (
     OpdsAuthenticationRequestDto,
     OpdsCatalogQueryDto,
     OpdsFeedDto,
-    OpdsProgressionDocumentDto,
-    OpdsProgressionUpdateResultDto,
 )
 from app.modules.opds.application.settings import OpdsSettingsSnapshot
-from app.modules.opds.domain.errors import OpdsProgressionDateConflict
 from app.modules.opds.presentation.http import OpdsHttpDependencies, create_opds_router
 
 NOW = datetime(2026, 8, 3, 8, 0, tzinfo=UTC)
@@ -56,32 +53,8 @@ class FakeCatalog:
         )
 
 
-class FakeProgression:
-    conflict = False
-    stored: OpdsProgressionDocumentDto | None = None
-
-    def get_progression(
-        self, actor_id: str, resource_id: str
-    ) -> OpdsProgressionDocumentDto | None:
-        assert actor_id == "user-1"
-        return self.stored
-
-    def update_progression(
-        self,
-        actor_id: str,
-        resource_id: str,
-        document: OpdsProgressionDocumentDto,
-    ) -> OpdsProgressionUpdateResultDto:
-        if self.conflict:
-            raise OpdsProgressionDateConflict
-        created = self.stored is None
-        self.stored = document
-        return OpdsProgressionUpdateResultDto(created=created, document=document)
-
-
-def _client() -> tuple[TestClient, FakeCatalog, FakeProgression]:
+def _client() -> tuple[TestClient, FakeCatalog]:
     catalog = FakeCatalog()
-    progression = FakeProgression()
     app = FastAPI()
     app.include_router(
         create_opds_router(
@@ -94,11 +67,10 @@ def _client() -> tuple[TestClient, FakeCatalog, FakeProgression]:
                 ),
                 authenticator=FakeAuthenticator(),
                 catalog=catalog,
-                progression=progression,
             )
         )
     )
-    return TestClient(app), catalog, progression
+    return TestClient(app), catalog
 
 
 def _authorization() -> dict[str, str]:
@@ -112,7 +84,7 @@ def _invalid_authorization() -> dict[str, str]:
 
 
 def test_catalog_requires_basic_and_partitions_cache_by_authorization() -> None:
-    client, catalog, _ = _client()
+    client, catalog = _client()
 
     unauthorized = client.get("/opds/v1.2/catalog")
     invalid_credentials = client.get(
@@ -139,54 +111,29 @@ def test_catalog_requires_basic_and_partitions_cache_by_authorization() -> None:
     )
 
 
-def test_progression_create_read_and_date_conflict_contracts() -> None:
-    client, _, progression = _client()
-    payload = {
-        "modified": "2026-08-03T08:00:00Z",
-        "device": {"id": "urn:uuid:device-1", "name": "Panels"},
-        "progression": 0.5,
-        "references": ["pages/4"],
-    }
+def test_progression_routes_require_authentication_and_are_retired() -> None:
+    client, _ = _client()
+    path = "/opds/v1.2/resources/resource-1/progression"
 
-    empty = client.get(
-        "/opds/v1.2/resources/resource-1/progression", headers=_authorization()
+    unauthorized_get = client.get(path)
+    unauthorized_put = client.put(path, content=b"not-json")
+    invalid_get = client.get(path, headers=_invalid_authorization())
+    invalid_put = client.put(
+        path, headers=_invalid_authorization(), content=b"not-json"
     )
-    created = client.put(
-        "/opds/v1.2/resources/resource-1/progression",
-        headers=_authorization(),
-        json=payload,
-    )
-    fetched = client.get(
-        "/opds/v1.2/resources/resource-1/progression", headers=_authorization()
-    )
-    progression.conflict = True
-    conflict = client.put(
-        "/opds/v1.2/resources/resource-1/progression",
-        headers=_authorization(),
-        json=payload,
-    )
+    retired_get = client.get(path, headers=_authorization())
+    retired_put = client.put(path, headers=_authorization(), content=b"not-json")
 
-    assert empty.status_code == 200 and empty.content == b""
-    assert created.status_code == 201
-    assert fetched.status_code == 200
-    assert fetched.json()["device"]["name"] == "Panels"
-    assert conflict.status_code == 409
-    assert conflict.json()["type"].endswith("#progression-date")
+    for response in (unauthorized_get, unauthorized_put, invalid_get, invalid_put):
+        assert response.status_code == 401
+        assert response.headers["www-authenticate"] == 'Basic realm="Shuku OPDS"'
 
-
-def test_progression_validation_uses_opds_problem_details_instead_of_422() -> None:
-    client, _, _ = _client()
-
-    response = client.put(
-        "/opds/v1.2/resources/resource-1/progression",
-        headers=_authorization(),
-        json={
-            "modified": "not-a-date",
-            "device": {"id": "not-a-uri", "name": "Panels"},
-            "progression": 2,
-        },
-    )
-
-    assert response.status_code == 400
-    assert response.headers["content-type"].startswith("application/problem+json")
-    assert response.json()["type"].endswith("#progression-invalid-payload")
+    for response in (retired_get, retired_put):
+        assert response.status_code == 410
+        assert response.headers["content-type"].startswith("application/problem+json")
+        assert response.headers["cache-control"] == "no-store"
+        assert response.headers["vary"] == "Authorization"
+        assert response.json() == {
+            "type": "https://shuku.invalid/errors/opds-progression-retired",
+            "title": "OPDS progression is no longer supported.",
+        }

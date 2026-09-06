@@ -4,8 +4,6 @@ from datetime import UTC, datetime
 from xml.etree import ElementTree as ET
 
 from app.modules.opds.application.dto import (
-    OPDS_PROGRESSION_MEDIA_TYPE,
-    OPDS_PROGRESSION_REL,
     PSE_STREAM_REL,
     OpdsEntryDto,
     OpdsFeedDto,
@@ -69,10 +67,6 @@ def _entry_element(parent: ET.Element, entry: OpdsEntryDto) -> None:
             "type": pse.media_type,
             "pse:count": str(pse.page_count),
         }
-        if pse.last_read is not None:
-            attributes["pse:lastRead"] = str(pse.last_read)
-        if pse.last_read_date is not None:
-            attributes["pse:lastReadDate"] = _atom_date(pse.last_read_date)
         ET.SubElement(node, "link", attributes)
 
 
@@ -109,7 +103,3 @@ def serialize_opds_feed(feed: OpdsFeedDto) -> bytes:
     for entry in feed.entries:
         _entry_element(root, entry)
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
-
-
-def progression_link(href: str) -> tuple[str, str, str]:
-    return href, OPDS_PROGRESSION_REL, OPDS_PROGRESSION_MEDIA_TYPE

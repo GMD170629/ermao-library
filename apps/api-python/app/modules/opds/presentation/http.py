@@ -4,9 +4,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Header, Query, Request
+from fastapi import APIRouter, Header, Query, Request
 from fastapi.responses import JSONResponse, Response
-from pydantic import ValidationError
 
 from app.modules.opds.application.dto import (
     OpdsAuthenticationRequestDto,
@@ -16,16 +15,11 @@ from app.modules.opds.application.dto import (
 from app.modules.opds.application.ports import (
     OpdsAuthenticator,
     OpdsCatalogPort,
-    OpdsProgressionPort,
 )
 from app.modules.opds.application.settings import OpdsSettingsSnapshot
 from app.modules.opds.domain.errors import (
     OpdsAuthenticationRequired,
     OpdsAuthenticationThrottled,
-    OpdsProgressionDateConflict,
-    OpdsProgressionIncorrectUser,
-    OpdsProgressionInvalidPayload,
-    OpdsProgressionLocked,
     OpdsPublicationNotFound,
 )
 from app.modules.opds.presentation.atom import CATALOG_MEDIA_TYPE, serialize_opds_feed
@@ -36,10 +30,9 @@ from app.modules.opds.presentation.schemas import (
     OpdsAuthenticationFlow,
     OpdsAuthenticationLabels,
     OpdsProblemDetails,
-    OpdsProgressionDocument,
 )
 
-PROGRESSION_MEDIA_TYPE = "application/opds-progression+json"
+PROGRESSION_RETIRED_TYPE = "https://shuku.invalid/errors/opds-progression-retired"
 
 
 class OpdsProtocolResponse(Response):
@@ -53,7 +46,6 @@ class OpdsHttpDependencies:
     settings: Callable[[], OpdsSettingsSnapshot]
     authenticator: OpdsAuthenticator
     catalog: OpdsCatalogPort
-    progression: OpdsProgressionPort
     default_page_size: int = 50
     max_page_size: int = 100
     book_cover: Callable[[str, str, Request], Response] | None = None
@@ -107,30 +99,6 @@ def problem_response(status_code: int, problem_type: str, title: str) -> JSONRes
 def _problem_for(error: Exception) -> JSONResponse:
     if isinstance(error, OpdsPublicationNotFound):
         return problem_response(404, "about:blank", "Publication not found.")
-    if isinstance(error, OpdsProgressionInvalidPayload):
-        return problem_response(
-            400,
-            "https://registry.opds.io/error#progression-invalid-payload",
-            "Progression could not be updated due to an invalid payload.",
-        )
-    if isinstance(error, OpdsProgressionIncorrectUser):
-        return problem_response(
-            403,
-            "https://registry.opds.io/error#progression-incorrect-user",
-            "Progression could not be updated for the current user.",
-        )
-    if isinstance(error, OpdsProgressionLocked):
-        return problem_response(
-            403,
-            "https://registry.opds.io/error#progression-locked",
-            "Progression can no longer be updated for this publication.",
-        )
-    if isinstance(error, OpdsProgressionDateConflict):
-        return problem_response(
-            409,
-            "https://registry.opds.io/error#progression-date",
-            "A more recent progression point is already available.",
-        )
     raise error
 
 
@@ -388,8 +356,10 @@ def create_opds_router(dependencies: OpdsHttpDependencies) -> APIRouter:
             request=request,
         )
 
-    @router.get("/opds/v1.2/resources/{resource_id}/progression")
-    def get_progression(
+    @router.api_route(
+        "/opds/v1.2/resources/{resource_id}/progression", methods=["GET", "PUT"]
+    )
+    def retired_progression(
         resource_id: str,
         request: Request,
         authorization: Annotated[str | None, Header()] = None,
@@ -397,55 +367,10 @@ def create_opds_router(dependencies: OpdsHttpDependencies) -> APIRouter:
         actor = actor_id(authorization, request)
         if isinstance(actor, JSONResponse):
             return actor
-        try:
-            document = dependencies.progression.get_progression(actor, resource_id)
-        except (OpdsPublicationNotFound, OpdsProgressionIncorrectUser) as error:
-            return _problem_for(error)
-        if document is None:
-            return Response(
-                status_code=200,
-                media_type=PROGRESSION_MEDIA_TYPE,
-                headers={"Cache-Control": "no-store", "Vary": "Authorization"},
-            )
-        wire_document = OpdsProgressionDocument.from_dto(document)
-        return JSONResponse(
-            content=wire_document.model_dump(mode="json", exclude_none=True),
-            media_type=PROGRESSION_MEDIA_TYPE,
-            headers={"Cache-Control": "no-store", "Vary": "Authorization"},
-        )
-
-    @router.put("/opds/v1.2/resources/{resource_id}/progression")
-    def put_progression(
-        resource_id: str,
-        request: Request,
-        document_payload: Annotated[object, Body()],
-        authorization: Annotated[str | None, Header()] = None,
-    ) -> Response:
-        actor = actor_id(authorization, request)
-        if isinstance(actor, JSONResponse):
-            return actor
-        try:
-            document = OpdsProgressionDocument.model_validate(document_payload)
-        except ValidationError:
-            return _problem_for(OpdsProgressionInvalidPayload())
-        try:
-            result = dependencies.progression.update_progression(
-                actor, resource_id, document.to_dto()
-            )
-        except (
-            OpdsPublicationNotFound,
-            OpdsProgressionInvalidPayload,
-            OpdsProgressionIncorrectUser,
-            OpdsProgressionLocked,
-            OpdsProgressionDateConflict,
-        ) as error:
-            return _problem_for(error)
-        response_document = OpdsProgressionDocument.from_dto(result.document)
-        return JSONResponse(
-            status_code=201 if result.created else 200,
-            content=response_document.model_dump(mode="json", exclude_none=True),
-            media_type=PROGRESSION_MEDIA_TYPE,
-            headers={"Cache-Control": "no-store", "Vary": "Authorization"},
+        return problem_response(
+            410,
+            PROGRESSION_RETIRED_TYPE,
+            "OPDS progression is no longer supported.",
         )
 
     def resource_response(

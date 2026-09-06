@@ -35,7 +35,7 @@ The database, accounts, reading progress, and system settings remain on your own
 - SQLite database backup, restore, and download.
 - Import activity, Kindle delivery history, system events, health checks, and log export.
 - Responsive Web access and PWA installation.
-- Optional OPDS 1.2 catalog access for browsing, search, downloads, and reading-progress synchronization in compatible readers.
+- Optional OPDS 1.2 catalog access for browsing, search, and downloads in compatible readers; OPDS does not provide third-party reading-progress synchronization.
 - A native iOS and Android client is under active development. Server connection, sign-in, library browsing, shelves, and imports are available; the native reader is still in progress.
 
 ## Supported Formats

@@ -17,19 +17,3 @@ class OpdsAuthenticationThrottled(OpdsError):
 
 class OpdsPublicationNotFound(OpdsError):
     pass
-
-
-class OpdsProgressionInvalidPayload(OpdsError):
-    pass
-
-
-class OpdsProgressionIncorrectUser(OpdsError):
-    pass
-
-
-class OpdsProgressionLocked(OpdsError):
-    pass
-
-
-class OpdsProgressionDateConflict(OpdsError):
-    pass

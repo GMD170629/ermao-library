@@ -2,8 +2,6 @@
 
 from app.modules.opds.application.dto import (
     OPDS_ACQUISITION_REL,
-    OPDS_PROGRESSION_MEDIA_TYPE,
-    OPDS_PROGRESSION_REL,
     PSE_MEDIA_TYPES,
     PSE_STREAM_REL,
     BasicCredentialsDto,
@@ -14,9 +12,6 @@ from app.modules.opds.application.dto import (
     OpdsEntryDto,
     OpdsFeedDto,
     OpdsLinkDto,
-    OpdsProgressionDeviceDto,
-    OpdsProgressionDocumentDto,
-    OpdsProgressionUpdateResultDto,
     PsePageRequestDto,
     PseStreamDto,
     normalize_pse_max_width,
@@ -25,7 +20,6 @@ from app.modules.opds.application.dto import (
 from app.modules.opds.application.ports import (
     OpdsAuthenticator,
     OpdsCatalogPort,
-    OpdsProgressionPort,
 )
 from app.modules.opds.application.settings import (
     OPDS_ENABLED_SETTING_KEY,
@@ -39,18 +33,12 @@ from app.modules.opds.application.settings import (
 )
 from app.modules.opds.domain.errors import (
     OpdsAuthenticationRequired,
-    OpdsProgressionDateConflict,
-    OpdsProgressionIncorrectUser,
-    OpdsProgressionInvalidPayload,
-    OpdsProgressionLocked,
     OpdsPublicationNotFound,
 )
 
 __all__ = [
     "OPDS_ACQUISITION_REL",
     "OPDS_ENABLED_SETTING_KEY",
-    "OPDS_PROGRESSION_MEDIA_TYPE",
-    "OPDS_PROGRESSION_REL",
     "OPDS_PUBLIC_BASE_URL_SETTING_KEY",
     "PSE_MEDIA_TYPES",
     "PSE_STREAM_REL",
@@ -65,14 +53,6 @@ __all__ = [
     "OpdsEntryDto",
     "OpdsFeedDto",
     "OpdsLinkDto",
-    "OpdsProgressionDateConflict",
-    "OpdsProgressionDeviceDto",
-    "OpdsProgressionDocumentDto",
-    "OpdsProgressionIncorrectUser",
-    "OpdsProgressionInvalidPayload",
-    "OpdsProgressionLocked",
-    "OpdsProgressionPort",
-    "OpdsProgressionUpdateResultDto",
     "OpdsPublicBaseUrlInvalid",
     "OpdsPublicBaseUrlRequired",
     "OpdsPublicationNotFound",

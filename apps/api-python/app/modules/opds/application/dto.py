@@ -5,8 +5,6 @@ from datetime import datetime
 from typing import Literal
 
 OPDS_ACQUISITION_REL = "http://opds-spec.org/acquisition"
-OPDS_PROGRESSION_REL = "http://opds-spec.org/progression"
-OPDS_PROGRESSION_MEDIA_TYPE = "application/opds-progression+json"
 PSE_STREAM_REL = "http://vaemendis.net/opds-pse/stream"
 PSE_MEDIA_TYPES = frozenset({"image/jpeg", "image/gif", "image/png"})
 
@@ -53,8 +51,6 @@ class PseStreamDto:
     href_template: str
     media_type: str
     page_count: int
-    last_read: int | None = None
-    last_read_date: datetime | None = None
 
     def __post_init__(self) -> None:
         if "{pageNumber}" not in self.href_template:
@@ -63,16 +59,6 @@ class PseStreamDto:
             raise ValueError("PSE stream media_type must be JPEG, GIF, or PNG")
         if self.page_count < 1:
             raise ValueError("PSE page_count must be positive")
-        if self.last_read is not None and not 1 <= self.last_read <= self.page_count:
-            raise ValueError("PSE last_read is 1-based and must be within page_count")
-        if self.last_read_date is not None:
-            if self.last_read is None:
-                raise ValueError("PSE last_read_date requires last_read")
-            if (
-                self.last_read_date.tzinfo is None
-                or self.last_read_date.utcoffset() is None
-            ):
-                raise ValueError("PSE last_read_date must include a timezone")
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,27 +124,6 @@ class PsePageRequestDto:
         """Translate the PSE 0-based page number to Shuku's 1-based index."""
 
         return self.page_number + 1
-
-
-@dataclass(frozen=True, slots=True)
-class OpdsProgressionDeviceDto:
-    id: str
-    name: str
-
-
-@dataclass(frozen=True, slots=True)
-class OpdsProgressionDocumentDto:
-    modified: datetime
-    device: OpdsProgressionDeviceDto
-    progression: float
-    title: str | None = None
-    references: tuple[str, ...] | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class OpdsProgressionUpdateResultDto:
-    created: bool
-    document: OpdsProgressionDocumentDto
 
 
 def select_pse_stream_media_type(page_media_types: tuple[str, ...]) -> str:

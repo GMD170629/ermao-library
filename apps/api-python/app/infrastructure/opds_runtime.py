@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,7 +22,7 @@ from app.bootstrap.media import (
     media_resource_query,
     media_streaming,
 )
-from app.bootstrap.reader import reader_resource_service, reader_v5_library_queries
+from app.bootstrap.reader import reader_v5_library_queries
 from app.contracts.media_capabilities import ReaderType, reader_type_for_format
 from app.core.authorization import (
     AuthorizationContext,
@@ -60,8 +60,6 @@ from app.modules.library.infrastructure.catalog import SqlAlchemyCatalogQueries
 from app.modules.library.infrastructure.queries import SqlAlchemyLibraryQueries
 from app.modules.opds.application.dto import (
     OPDS_ACQUISITION_REL,
-    OPDS_PROGRESSION_MEDIA_TYPE,
-    OPDS_PROGRESSION_REL,
     OpdsActorDto,
     OpdsAuthenticationRequestDto,
     OpdsAuthorDto,
@@ -69,9 +67,6 @@ from app.modules.opds.application.dto import (
     OpdsEntryDto,
     OpdsFeedDto,
     OpdsLinkDto,
-    OpdsProgressionDeviceDto,
-    OpdsProgressionDocumentDto,
-    OpdsProgressionUpdateResultDto,
     PsePageRequestDto,
     PseStreamDto,
     normalize_pse_max_width,
@@ -85,23 +80,9 @@ from app.modules.opds.application.settings import (
 )
 from app.modules.opds.domain.errors import (
     OpdsAuthenticationThrottled,
-    OpdsProgressionDateConflict,
-    OpdsProgressionInvalidPayload,
     OpdsPublicationNotFound,
 )
 from app.modules.opds.presentation.http import OpdsHttpDependencies, create_opds_router
-from app.modules.reader.application.dto import ReaderProgressDto
-from app.modules.reader.infrastructure.resource_repository import (
-    SqlAlchemyReaderResourceRepository,
-)
-from app.modules.reader.public import (
-    ReaderAccessScope,
-    ReaderExternalProgressDto,
-    ReaderProgressDateConflict,
-    ReaderResourceFormatUnsupported,
-    ReaderResourceNotFound,
-    SaveExternalProgressCommand,
-)
 from app.modules.shelf.application.catalog import (
     ListCatalogShelfBookIds,
     ListCatalogShelves,
@@ -140,14 +121,6 @@ def _active_user(db: Session, user_id: str) -> User:
     if user is None or user.status != "active":
         raise OpdsPublicationNotFound
     return user
-
-
-def _reader_scope(context: AuthorizationContext) -> ReaderAccessScope:
-    return ReaderAccessScope(
-        is_admin=context.is_admin,
-        can_view_manual_imports=context.can_view_manual_imports,
-        library_ids=context.library_ids,
-    )
 
 
 class PasswordOpdsAuthenticator:
@@ -331,7 +304,6 @@ class SqlAlchemyOpdsCatalog:
         urls: OpdsCatalogUrls,
         book: CatalogBook,
         resource: CatalogResource,
-        progress_by_resource: Mapping[str, ReaderProgressDto],
         pse_media_type: str = "image/jpeg",
     ) -> OpdsEntryDto:
         links = [
@@ -339,11 +311,6 @@ class SqlAlchemyOpdsCatalog:
                 href=urls.url(f"/opds/v1.2/resources/{quote(resource.id)}/asset"),
                 rel=OPDS_ACQUISITION_REL,
                 media_type=resource.asset.mime_type,
-            ),
-            OpdsLinkDto(
-                href=urls.url(f"/opds/v1.2/resources/{quote(resource.id)}/progression"),
-                rel=OPDS_PROGRESSION_REL,
-                media_type=OPDS_PROGRESSION_MEDIA_TYPE,
             ),
         ]
         if resource.has_cover:
@@ -354,12 +321,6 @@ class SqlAlchemyOpdsCatalog:
                     media_type="image/jpeg",
                 )
             )
-        progress = progress_by_resource.get(resource.id)
-        last_read = (
-            _comic_page_from_progress(progress) if progress is not None else None
-        )
-        if last_read is not None and resource.page_count is not None:
-            last_read = min(last_read, resource.page_count)
         pse = (
             PseStreamDto(
                 href_template=urls.url(
@@ -372,12 +333,6 @@ class SqlAlchemyOpdsCatalog:
                 ),
                 media_type=pse_media_type,
                 page_count=resource.page_count or 0,
-                last_read=last_read,
-                last_read_date=(
-                    progress.progressed_at
-                    if last_read is not None and progress is not None
-                    else None
-                ),
             )
             if reader_type_for_format(resource.format) is ReaderType.COMIC
             and (resource.page_count or 0) > 0
@@ -456,13 +411,6 @@ class SqlAlchemyOpdsCatalog:
                 )
                 if book is None:
                     raise OpdsPublicationNotFound
-                repository = SqlAlchemyReaderResourceRepository(db)
-                progresses = repository.list_progresses(
-                    user.id, [resource.id for resource in book.resources]
-                )
-                progress_by_resource = {
-                    progress.resource_id: progress for progress in progresses
-                }
                 pse_media_types = {
                     resource.id: self._pse_media_type(resource.id)
                     for resource in book.resources
@@ -473,7 +421,6 @@ class SqlAlchemyOpdsCatalog:
                         urls=urls,
                         book=book,
                         resource=resource,
-                        progress_by_resource=progress_by_resource,
                         pse_media_type=pse_media_types.get(resource.id, "image/jpeg"),
                     )
                     for resource in book.resources
@@ -657,73 +604,6 @@ class SqlAlchemyOpdsCatalog:
         )
 
 
-class ReaderOpdsProgression:
-    def __init__(self, session_factory: SessionFactory, settings: Settings) -> None:
-        self._session_factory = session_factory
-        self._settings = settings
-
-    def get_progression(
-        self, actor_id: str, resource_id: str
-    ) -> OpdsProgressionDocumentDto | None:
-        db = self._session_factory()
-        try:
-            user = _active_user(db, actor_id)
-            context = authorization_context(db, user)
-            progress = reader_resource_service(
-                db, self._settings
-            ).get_external_progress(
-                user_id=user.id,
-                resource_id=resource_id,
-                access_scope=_reader_scope(context),
-            )
-            return _opds_progression(progress) if progress is not None else None
-        except (ReaderResourceNotFound, ReaderResourceFormatUnsupported) as error:
-            raise OpdsPublicationNotFound from error
-        finally:
-            db.close()
-
-    def update_progression(
-        self,
-        actor_id: str,
-        resource_id: str,
-        document: OpdsProgressionDocumentDto,
-    ) -> OpdsProgressionUpdateResultDto:
-        db = self._session_factory()
-        try:
-            user = _active_user(db, actor_id)
-            context = authorization_context(db, user)
-            service = reader_resource_service(db, self._settings)
-            existing = service.get_external_progress(
-                user_id=user.id,
-                resource_id=resource_id,
-                access_scope=_reader_scope(context),
-            )
-            saved = service.save_external_progress(
-                SaveExternalProgressCommand(
-                    user_id=user.id,
-                    resource_id=resource_id,
-                    access_scope=_reader_scope(context),
-                    progression=document.progression,
-                    modified_at=document.modified,
-                    device_id=document.device.id,
-                    device_name=document.device.name,
-                    references=document.references or (),
-                )
-            )
-            return OpdsProgressionUpdateResultDto(
-                created=existing is None,
-                document=_opds_progression(saved),
-            )
-        except ReaderProgressDateConflict as error:
-            raise OpdsProgressionDateConflict from error
-        except (ReaderResourceNotFound, ReaderResourceFormatUnsupported) as error:
-            raise OpdsPublicationNotFound from error
-        except ValueError as error:
-            raise OpdsProgressionInvalidPayload from error
-        finally:
-            db.close()
-
-
 class OpdsMediaResources:
     def __init__(self, session_factory: SessionFactory, settings: Settings) -> None:
         self._session_factory = session_factory
@@ -867,26 +747,6 @@ def _json_object(value: object) -> dict[str, object]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _comic_page_from_progress(progress: ReaderProgressDto) -> int | None:
-    location = _json_object(progress.location_json)
-    page = location.get("pageIndex")
-    return page if isinstance(page, int) and page >= 1 else None
-
-
-def _opds_progression(
-    progress: ReaderExternalProgressDto,
-) -> OpdsProgressionDocumentDto:
-    return OpdsProgressionDocumentDto(
-        modified=progress.modified_at,
-        device=OpdsProgressionDeviceDto(
-            id=progress.device_id,
-            name=progress.device_name,
-        ),
-        progression=progress.progression,
-        references=progress.references,
-    )
-
-
 def build_opds_router(
     session_factory: SessionFactory,
     settings: Settings,
@@ -900,7 +760,6 @@ def build_opds_router(
                 session_factory, authentication_runtime
             ),
             catalog=SqlAlchemyOpdsCatalog(session_factory, settings),
-            progression=ReaderOpdsProgression(session_factory, settings),
             default_page_size=settings.opds_page_size,
             max_page_size=settings.opds_max_page_size,
             book_cover=resources.book_cover,
