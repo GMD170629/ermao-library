@@ -1,5 +1,7 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 Android普通UI原场景：独立开发包com.ermao.library.releasecheck已在9e896bbc安装并正常登录全新隔离库，原App的UID/codePath/version/安装时间前后不变。源码85662d5d、APK SHA-256 1ed92ec8f3b4aaeba831187880b9111f84e1e07405f6ebb18a22d15333be997c；不是正式APK。证据根`artifacts/releases/1.0/85662d5d/android-normal-ui-20260907/`。四轨普通详情/队列实际操作及系统只读媒体回调确认M4B→AAC自然切轨；不外推全部边界或长时。AAC显式暂停后服务端确认17182ms/rev64，仅强停独立包并冷启动，首页“继续阅读”进入电子阅读器报格式不支持，登记AUDIO-11 FAIL。关闭错误页后，从同一作品详情“继续收听”进入，真实MediaSession第四轨首次Playing位置17182ms（点击后1390ms），误差0ms；仅详情恢复对照PASS，首页恢复仍FAIL。音频详情同时两次显示无关的PDF/漫画原生渲染器缺失提示，登记AUDIO-12。`normal-ui-observations.json`关联UI XML、系统状态序列、只读ORM和失败截图，保留早期EOF/操作观察，不计作明确暂停证据。原始7fixture、额外6音频与911应用源码共932项hash全匹配；API无4xx/5xx、67次PUT200。媒体monitor正常q退出；测试包强停保留供修复回归，原应用不动，reverse与临时UI文件已清理、输入凭据文件已删除，fixture stop/exit0、端口释放、Web配置恢复。详细见prestop-verification.json与cleanup-verification.json。后续先修复实际入口阻塞，再补未执行的原生章节普通UI；未冻结RC。此前“尚未安装”是历史准备状态。
+
 当前结论：**R2逐项验收与缺陷收敛，尚无整体放行依据**。正式安装包构建/导出由用户暂缓；尚未冻结RC。既有R1证据编号保留，不能将不同候选的局部通过合并成最终GO。
 
 ## R1 当前执行与恢复入口（2026-09-06）
