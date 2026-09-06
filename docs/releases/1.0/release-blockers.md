@@ -24,7 +24,7 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 | AUDIO-01 | 真实Chrome快速播放/暂停后，迟到的play Promise拒绝覆盖当前正常暂停状态；`release-live/r1788672824257-w0/` | `c14b3033` 已修复并推送，3项顺序测试PASS；第二次真实运行经过该步骤，完整闭环仍待回归 |
 | AUDIO-02 | KMP/Android注入5秒播放没有自动捕获，Web原间隔15秒；`preflight-mobile/rg04-audio-autosave-repro-20260906/` | `c6b3e802`修复；Web459 PASS、Chrome实际5/10秒读回断言通过；`d6b11360`真机生产SQLite落盘及重开误差8ms通过，完整148/共享416/Android218/lint PASS。在线确认/后台/长时/iOS仍未覆盖，不整体关闭RG-04 |
 | MEDIA-01 | Windows真实Chrome请求缩略封面出现500；cache/covers临时文件替换报WinError32/5 | `8a4ed3fb`修复与5项独立回归PASS；最新实际失败位于另一default-cover owner，另列MEDIA-02 |
-| MEDIA-02 | 最新MP3两视口均因默认封面500失败，`release-live/r1788675527007-w0/api.log:104` 指`services/default_cover.py`的原子替换，非缩略缓存 | FAIL / 修复中；两个真实入口复用同一原子文件发布机制，不能复制重试实现，待新根并发与严格Chrome回归 |
+| MEDIA-02 | MP3两视口因默认封面500失败，`release-live/r1788675527007-w0/api.log:104` 指`services/default_cover.py`的原子替换，非缩略缓存 | `7c6c991c`修复并推送；两个入口复用唯一原子发布owner，7项回归PASS，`chrome-live-default-cover.log`严格两视口2 PASS且无API 5xx，此缺陷本批关闭；最终RC需重验 |
 | LOAD-01 | 实际10k预检列表/命中搜索随progress增长变慢，随后pool耗尽及进度读回超时；原始目录见最新证据 | FAIL / `c13a7034`修复唯一Reader聚合，10项复杂度/语义相邻回归PASS；`68c02047`修复maintenance阻塞放大点，39+主11项PASS。原10k有Chrome干扰，须安静重测，未声明永久泄漏或整体解除 |
 | ENV-09 | 真实Chrome EPUB详情reading-units 503；测试Windows缺canonical native章核 | 同C源码已隔离编译DLL并加载，最新MP3两视口无该503；测试入口新增native预检，不将环境缺失改为产品格式拒绝 |
 | TEST-07 | 真实Chrome重开音频时，脚本用即时count误判尚未加载按钮并等待不存在的资源卡；`web-baseline/chrome-live-audio-fix.log` | 已修改为等待可用入口，待重跑；保留完整音频恢复误差≤2秒断言 |

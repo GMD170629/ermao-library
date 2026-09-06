@@ -4,7 +4,13 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
-### 最新检查点：`d6b11360`（未冻结 RC）
+### 最新检查点：`b93e1025`（未冻结 RC；后端源码`7c6c991c`）
+
+`7c6c991c`已统一默认封面与缩略图/漫画缓存的原子发布owner，删除旧重复发布实现。主独立7项正负/并发回归、五文件Ruff及diff检查PASS（`backend-baseline/default-cover-primary.log`）。严格真实Chrome桌面/移动视口 **2 PASS，2.2m**，`web-baseline/chrome-live-default-cover.log`、`chrome-live-default-cover-results/`；实际运行目录`release-live/r1788676774434-w0/`、`r1788676846298-w1/`，记录源码、样本hash、API/Worker/浏览器和已完成清理。两项均使用实际`audio/mpeg`资源，API无5xx；第5/10秒服务端位置分别为3673/7927ms和3926/8187ms，最新位置重开为8000ms，均满足已冻结误差。七类导入不等于七类客户端播放。截图复核发现EPUB在ready后的退场动画尚未结束即取证；`b93e1025`仅加强共同等待条件为开屏层完全移除，重新采集画面，未据此推定产品卡死。
+
+当前后端位置HTTP探针再次PASS（`position-http/7c6c991c/position-report.json`、`backend-baseline/position-http-7c6c991c.log`），仍仅证明合成opaque Locator的真实协议/存储，不替代引擎恢复。完整Web lint/typecheck PASS（`web-baseline/lint-7c6c991c.log`、`typecheck-7c6c991c.log`）；双语2106消息校验PASS（`i18n-7c6c991c-correct-entry.log`）。首次从根目录调用不存在的i18n脚本为执行入口错误，原日志保留；改用现有`pnpm --filter @shuku/web i18n:check`，未修改校验器。
+
+`b93e1025`重新实测两视口 **2 PASS，1.9m**（`web-baseline/chrome-live-ready.log`、`chrome-live-ready-results/`）；运行目录`release-live/r1788677017469-w0/`、`r1788677072813-w1/`。主代理复核移动视口`07-epub-reopened-chapter2.png`已显示无遮挡的第二章，另核对音频恢复界面；原安全fixture自带红字绿底与被阻止的远程像素，未改写读物或以截图替代安全副作用测试。两运行均记录shutdown-complete，生成的Next配置差异核对后仅恢复该两文件。
 
 最新完整回归：Chrome桌面/移动视口126 PASS、0 skip（`web-baseline/chrome-full-audio.log`、`chrome-full-audio-results/`）；Web生产构建PASS（`web-baseline/production-build-audio.log`，输出归档`web-baseline/production-build-c13a7034/`）。该批包含音频时序及播放Promise修复，普通E2E使用既有HTTP fixtures，真实后端严格MP3两视口仍另行验收。
 
@@ -23,7 +29,7 @@ Android新增实际持久化测试已提交`d6b11360`：真实Media3→共享进
 
 Windows C章核由同一`chapters.c`以Zig C99 warning-as-error编译共享DLL，`chapter-core/windows-shared-build.log`；SHA256 `36ccc43c4c5c15f327728442b259f1673c6815bfe3642137d26916a1141a8740`。测试环境通过`ERMAO_CHAPTER_CORE_LIBRARY`接入`.tmp/chapter-core-windows/ermao_chapters.dll`，不是正式后端交付物。
 
-下一项可执行工作：默认封面并发发布修复、严格MP3两视口闭环、Chrome全量回归、Android真实落盘测试，随后锁定源码做本机负载重测与后端完整回归。已完成代理产出由主审后分项commit/push；当前未公开发布。
+下一项可执行工作：完成EPUB稳定画面复取证、59份真实格式后端验收、当前后端完整回归及负载工具的原文件/关联收尾检查；上述功能运行结束后锁定源码做安静本机负载重测。已完成代理产出由主审后分项commit/push；当前未公开发布。
 
 ### 之前增量（保留追溯，以以上最新状态为准）
 
