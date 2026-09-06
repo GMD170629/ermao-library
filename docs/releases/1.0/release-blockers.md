@@ -4,6 +4,8 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 
 ## R1 状态覆盖与外部条件
 
+SYNC-02（RG-04/POS-01、POS-06，应用owner链已复现）：启动bootstrap先读取旧位置，随后新位置ACK原子清pending，启动再读pending为空并选择旧bootstrap位置。`audio-soak/ack-bootstrap-race/results.json` 中真实coordinator和现有owned fake ports/恢复owner复现4%→已确认25%→重开选择4%；完整Locator保留，百分比这里只作诊断摘要。尚非Chrome/真实IDB/媒体引擎复现。修复在独立工作树 `D:/www/ermao-release-startup-progress` 进行，避免影响当前production连续播放源码；复用同一启动owner在pending为空后读当前服务端，不变更最后事务语义。原AUDIO-03快速关闭已关闭，两个问题分开登记。
+
 DEC-07覆盖工具收敛规则：AUDIO-03/ANDROID-03已关闭场景不再扩展工具；TEST-10已有保护回归及真实开发模式清理通过，当前production流程验证后即结束该工具修复，不以未来通用能力或重型取消演练另加阻塞。HTML具体未关闭问题只做决定修复所需最小观测；OPDS真实客户端、iOS/签名/容器条件缺失仍按对应项处理，不以无关工具开发替代。
 
 ANDROID-03 / RUN-01当前默认仪器全量148 PASS/0 skip（334.740s），在原断言之外补充完全展开的可观察前置后，单项及整类亦通过。主APK及生产源码未变，只替换测试APK；依据与hash在 `preflight-mobile/android03-expanded-anchor-20260906/`。本轮自动失败已解除，保留历史147/1及未证实唯一原因的限制；不把一次重跑解释为“环境偶发”，也不覆盖最终RC/真实逐格式缺口。
