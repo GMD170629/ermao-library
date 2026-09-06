@@ -4,6 +4,10 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+已补齐HTML整合后的完整后端回归：`e0299fda` 同一git归档（SHA256 `c5abf2b7803fb723bef5ffbc9826be5ee03145d687ea34fa9aa4be729195fdfc`），Linux1381 PASS/2项已有Windows专用skip，Windows精确补测2 PASS；Ruff format/check、mypy、native C检查全部通过，coverage 77.7791%。主复核原pytest日志、skip补测对应、归档hash与两平台清理；4169归档文件前后不变，未安装/升级依赖。完整证据 `artifacts/releases/1.0/e0299fda24880d83160abecfafbdd00805b1e01a/backend-baseline/backend-e0299fda-20260906-r1/`。仅既有Starlette弃用警告，不计最终RC或性能放行。Android最终仪器源码的opt-in lint也已通过（候选93100b0证据目录 `final-instrumentation-lint.log`），停止扩展已关闭音频缺陷。
+
+RG-04 MP3 W→A→W正在补必测入口：原online用例强制服务端初始空，无法验另一端已确认的位置；只在现有Android测试抽取认证/播放器/数据库观察共用owner并加一个目标用例，保留原5/10秒、完整Locator、pending/revision断言，无新增fixture字段。主的固定浏览器执行记录 `D:/www/ermao-release-android-formats/artifacts/releases/1.0/93100b0677e6b7426eca448d59ce53d3658a0d39/android-web-sync-mp3-20260906/browser-handoff.cjs` 仅使用真实UI产生进度和fresh GET：源最后真实PUT的mutation/client/capture/完整position获服务器确认，目标使用全新Web context；私有测试凭据仅内存交接，失败脱敏与独立浏览器清理已核对。此为DEC-07允许的当前必测项最小执行记录，未运行不计PASS；停止条件为一次真实双向交接及原在线相邻回归通过，不增加通用配置/框架或强杀功能。
+
 当前执行恢复点：`e0299fda24880d83160abecfafbdd00805b1e01a` 的TEST-11生产Chrome1800秒用例已启动，既有入口/原断言，运行目录 `audio-soak/runs-tailfix-1800/r1788699790558-w0/`，日志 `audio-soak/tailfix-1800-command.log`，执行会话38954。Next build/prestart已成功、媒体采样进行中，未完成不计PASS。主Web/API受测源码保持冻结，Next生成的tsconfig/next-env及独立build目录由fixture最终恢复，不能手动清理。首次命令误选系统fallback pnpm（自带Node24而项目要求22.23.1），未进入测试，失败保留 `tailfix-1800-node-wrapper-failure.log`；改为已有锁定工具链路径，没有升级安装。后端完整回归在独立Linux源码归档并行执行；本轮不是安静负载性能测量。
 
 本轮音频修复已整合：`01ac165e`（缓冲前捕获）、`4f439b51`（prepared/active身份绑定）、`0ca6d1bb`（Stop取消迟到恢复）、`b912b427`（两项针对性真机回归）。主代理逐项检查完整diff、原RED/新GREEN现场、安装包hash、源码和清理，并由另一代理独立复核，无新增阻断。候选 `567909e4` 完整Android host219/0skip和lint PASS，原日志在 `D:/www/ermao-release-audio-capture/artifacts/audio-capture/prepared-context-5679-unit-lint.log` 及同目录 `prepared-context-5679-unit-summary.json`。
