@@ -256,3 +256,148 @@ for (const saveMode of ['enqueue', 'saveNow'] as const) {
     assert.equal(await storage.getV5PendingProgressForIdentity({ ...identity, clientId }), null);
   });
 }
+
+const startupSnapshot: ReaderV5ProgressSnapshot = {
+  schemaVersion: 5, revision: 1, clientId: 'web-test-client',
+  mutationId: '11111111-1111-4111-8111-111111111111',
+  capturedAtEpochMillis: 1, receivedAtEpochMillis: 2, position
+};
+const startupInput = () => ({
+  identity, directPosition: null, serverSnapshot: startupSnapshot,
+  signal: new AbortController().signal
+});
+
+test('startup queries after an ACK clears pending and keeps the complete fresh locator', async () => {
+  let allowRead = () => {};
+  let readStarted = () => {};
+  const readGate = new Promise<void>((resolve) => { allowRead = resolve; });
+  const started = new Promise<void>((resolve) => { readStarted = resolve; });
+  class GatedStorage extends TestV5Storage {
+    override async getV5PendingProgressForIdentity(value: ReaderV5ProgressIdentity) {
+      readStarted();
+      await readGate;
+      return super.getV5PendingProgressForIdentity(value);
+    }
+  }
+  let allowAck = () => {};
+  const ackGate = new Promise<void>((resolve) => { allowAck = resolve; });
+  let server = startupSnapshot;
+  const storage = new GatedStorage();
+  const opaquePosition = {
+    ...position,
+    locator: { href: 'future.bin', type: 'application/x-future', locations: { progression: 0.75, futureAnchor: { offset: 73 } } },
+    presentation: { ...position.presentation, displayPercent: 75, totalProgression: 0.75 }
+  };
+  const coordinator = new ReaderV5ProgressSyncCoordinator(storage, async (upload) => {
+    await ackGate;
+    server = snapshot(upload, 2);
+    return { acceptedMutationId: upload.request.mutationId, acceptedRevision: 2, currentSnapshot: server };
+  }, { queryTransport: async (resourceId, etag) => {
+    assert.equal(resourceId, identity.resourceId);
+    assert.equal(etag, '"reader-v5-progress-1"');
+    assert.equal(await storage.getV5PendingProgressForIdentity({ ...identity, clientId: await storage.getClientId() }), null);
+    return { kind: 'current', snapshot: server, etag: '"reader-v5-progress-2"' };
+  } });
+  try {
+    await coordinator.saveNow({ ...identity, position: opaquePosition });
+    const resumed = coordinator.resolveStartupProgress(startupInput());
+    await started;
+    allowAck();
+    await coordinator.flushNow();
+    allowRead();
+    const decision = await resumed;
+    assert.equal(decision.source, 'server');
+    assert.deepEqual(decision.position, opaquePosition);
+    assert.equal(decision.serverSnapshot, server);
+  } finally { allowAck(); allowRead(); await coordinator.flushNow(); }
+});
+
+test('startup uses a pending position without waiting for its held upload or querying', async () => {
+  let allowAck = () => {};
+  const ackGate = new Promise<void>((resolve) => { allowAck = resolve; });
+  const storage = new TestV5Storage();
+  const coordinator = new ReaderV5ProgressSyncCoordinator(storage, async (upload) => {
+    await ackGate;
+    return { acceptedMutationId: upload.request.mutationId, acceptedRevision: 2, currentSnapshot: snapshot(upload, 2) };
+  }, { queryTransport: async () => { throw new Error('pending must not query'); } });
+  try {
+    const exact = await coordinator.saveNow({ ...identity, position });
+    const decision = await coordinator.resolveStartupProgress(startupInput());
+    assert.equal(decision.source, 'local-pending');
+    assert.deepEqual(decision.position, exact.position);
+    assert.equal(decision.serverSnapshot, startupSnapshot);
+    assert.ok(await storage.getV5PendingProgressForIdentity(exact));
+  } finally { allowAck(); await coordinator.flushNow(); }
+});
+
+for (const response of ['null', 'unchanged'] as const) {
+  test(`startup respects a ${response} server response without consulting local exact`, async () => {
+    class NoExactStorage extends TestV5Storage {
+      override async getV5Progress(): Promise<ReaderV5ProgressRecord | null> { throw new Error('startup must not read local exact'); }
+    }
+    const coordinator = new ReaderV5ProgressSyncCoordinator(new NoExactStorage(), async () => { throw new Error('must not upload'); }, {
+      queryTransport: async () => response === 'null'
+        ? { kind: 'current', snapshot: null, etag: '"reader-v5-progress-0"' }
+        : { kind: 'unchanged', etag: '"reader-v5-progress-1"' }
+    });
+    const decision = await coordinator.resolveStartupProgress(startupInput());
+    assert.equal(decision.source, response === 'null' ? 'start' : 'server');
+    assert.equal(decision.position, response === 'null' ? null : position);
+    assert.equal(decision.serverSnapshot, response === 'null' ? null : startupSnapshot);
+  });
+}
+
+test('startup explicit chapter/page target outranks pending and server without storage or query', async () => {
+  class UnavailableStorage extends TestV5Storage {
+    override async getClientId(): Promise<string> { throw new Error('direct target needs no storage'); }
+  }
+  const coordinator = new ReaderV5ProgressSyncCoordinator(new UnavailableStorage(), async () => { throw new Error('must not upload'); });
+  for (const directPosition of [null, position]) {
+    const decision = await coordinator.resolveStartupProgress({ ...startupInput(), hasDirectTarget: true, directPosition });
+    assert.equal(decision.source, 'direct-target');
+    assert.equal(decision.position, directPosition);
+  }
+});
+
+for (const stage of ['storage', 'query', 'missing-query'] as const) {
+  test(`startup propagates ${stage} failure instead of restoring an old snapshot`, async () => {
+    const failure = new Error(`startup ${stage} failed`);
+    class FailingStorage extends TestV5Storage {
+      override async getV5PendingProgressForIdentity(value: ReaderV5ProgressIdentity) {
+        if (stage === 'storage') throw failure;
+        return super.getV5PendingProgressForIdentity(value);
+      }
+    }
+    const coordinator = new ReaderV5ProgressSyncCoordinator(new FailingStorage(), async () => { throw new Error('must not upload'); }, stage === 'missing-query' ? {} : {
+      queryTransport: async () => { throw failure; }
+    });
+    await assert.rejects(coordinator.resolveStartupProgress(startupInput()), stage === 'missing-query'
+      ? /READER_PROGRESS_QUERY_UNAVAILABLE/
+      : (reason: unknown) => reason === failure);
+  });
+}
+
+for (const stage of ['before', 'storage', 'query'] as const) {
+  test(`startup rejects cancellation ${stage} without applying a late result`, async () => {
+    const controller = new AbortController();
+    const reason = new Error('startup canceled');
+    if (stage === 'before') controller.abort(reason);
+    class CancelingStorage extends TestV5Storage {
+      override async getV5PendingProgressForIdentity(value: ReaderV5ProgressIdentity) {
+        if (stage === 'storage') controller.abort(reason);
+        return super.getV5PendingProgressForIdentity(value);
+      }
+    }
+    let queried = false;
+    const coordinator = new ReaderV5ProgressSyncCoordinator(new CancelingStorage(), async () => { throw new Error('must not upload'); }, {
+      queryTransport: async (_resourceId, _etag, signal) => {
+        queried = true;
+        assert.equal(signal, controller.signal);
+        controller.abort(reason);
+        return { kind: 'current', snapshot: null, etag: null };
+      }
+    });
+    await assert.rejects(coordinator.resolveStartupProgress({ ...startupInput(), signal: controller.signal }), (error) => error === reason);
+    assert.equal(queried, stage === 'query');
+  });
+}

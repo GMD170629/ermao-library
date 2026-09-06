@@ -30,7 +30,6 @@ import { BEFORE_PWA_UPDATE_EVENT, type BeforePwaUpdateDetail } from '../../../li
 import { DEFAULT_READER_THEME, readerThemeSurfaces, resolveReaderTheme } from '../reader-theme';
 import { fetchReaderBootstrap, ReaderBootstrapError, type ReaderBootstrap } from './api';
 import { requestedPdfPage } from './direct-page-target';
-import { resolveV5StartupResume } from './local-resume';
 import { ReaderEngineRuntime } from './reader-engine-runtime';
 import { useReaderPwaSurface } from './use-reader-pwa-surface';
 import { I18nText, type I18nContextValue } from '@/i18n/provider';
@@ -324,34 +323,35 @@ export function ReaderV5Page({ resourceId }: { resourceId: string }) {
           emitReaderDebug('warning', '已忽略超出当前 PDF 范围的页码', { requestedPage });
         }
       }
-      const clientId = await runtime.storage.getClientId();
-      const identity = {
-        serverIdentity: currentReaderServerIdentity(),
-        userId: bootstrap.userId,
-        clientId,
-        bookId: bootstrap.book.id,
-        resourceId: bootstrap.resource.id
-      } as const;
-      const pending = await runtime.storage.getV5PendingProgressForIdentity(identity).catch(() => null);
-      const startupResume = resolveV5StartupResume({
+      const startupResume = await runtime.progress.resolveStartupProgress({
+        identity: {
+          serverIdentity: currentReaderServerIdentity(),
+          userId: bootstrap.userId,
+          bookId: bootstrap.book.id,
+          resourceId: bootstrap.resource.id
+        },
         hasDirectTarget,
         directPosition: hasDirectTarget ? bootstrap.initialPosition : null,
-        pending,
-        serverSnapshot: bootstrap.serverProgressSnapshot
+        serverSnapshot: bootstrap.serverProgressSnapshot,
+        signal: controller.signal
       });
-      if (startupResume.position && !hasDirectTarget) {
+      if (controller.signal.aborted || requestId !== requestSequenceRef.current) return;
+      bootstrap = { ...bootstrap, serverProgressSnapshot: startupResume.serverSnapshot };
+      if (!hasDirectTarget) {
         bootstrap = {
           ...bootstrap,
           initialLocation: null,
           initialPosition: startupResume.position,
-          progressPercent: startupResume.position.presentation.displayPercent
+          progressPercent: startupResume.position?.presentation.displayPercent ?? 0
         };
-        emitReaderDebug('info', startupResume.source === 'local-pending'
-          ? '启动时恢复尚未上传的本机阅读位置'
-          : '启动时恢复服务端阅读位置', {
-          resourceId: bootstrap.resource.id,
-          capturedAtEpochMillis: pending?.capturedAtEpochMillis ?? bootstrap.serverProgressSnapshot?.capturedAtEpochMillis
-        });
+        if (startupResume.position) {
+          emitReaderDebug('info', startupResume.source === 'local-pending'
+            ? '启动时恢复尚未上传的本机阅读位置'
+            : '启动时恢复服务端阅读位置', {
+            resourceId: bootstrap.resource.id,
+            source: startupResume.source
+          });
+        }
       }
       const preferences = readDeviceReaderPreferences(
         bootstrap.userId,

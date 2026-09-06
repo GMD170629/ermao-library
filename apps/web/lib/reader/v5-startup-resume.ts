@@ -1,5 +1,5 @@
 import type { ReaderPositionReport } from '@shuku/reader-core';
-import type { ReaderV5PendingMutation, ReaderV5ProgressSnapshot } from '../../../lib/reader/v5-wire';
+import type { ReaderV5PendingMutation, ReaderV5ProgressSnapshot } from './v5-wire';
 
 export type V5StartupResumeDecision = {
   position: ReaderPositionReport | null;

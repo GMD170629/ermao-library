@@ -411,18 +411,6 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         let bootstrap = await fetchAudioBootstrap(normalizedResourceId, controller.signal);
         if (controller.signal.aborted || requestId !== loadSequenceRef.current) return;
         activateReaderUser(bootstrap.userId);
-        const clientId = await runtime.storage.getClientId();
-        const pending = await runtime.storage.getV5PendingProgressForIdentity({
-          serverIdentity: currentReaderServerIdentity(),
-          userId: bootstrap.userId,
-          clientId,
-          bookId: bootstrap.book.id,
-          resourceId: bootstrap.resource.id
-        });
-        if (controller.signal.aborted || requestId !== loadSequenceRef.current) return;
-        loadAbortRef.current = null;
-        failedLoadRef.current = null;
-        const localPosition = pending?.position ?? null;
         const requestedChapter = request.chapterId
           ? bootstrap.chapters.find((chapter) => chapter.id === request.chapterId)
           : null;
@@ -432,28 +420,34 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             ? bootstrap.tracks.findIndex((track) => track.assetId === request.assetId)
             : -1;
         const hasExplicitTarget = requestedTrackIndex >= 0;
-        const localAudioLocation = hasExplicitTarget
-          ? null
-          : audioLocationFromPosition(localPosition, bootstrap);
-        if (!hasExplicitTarget && localPosition && localAudioLocation) {
+        const startupResume = await runtime.progress.resolveStartupProgress({
+          identity: {
+            serverIdentity: currentReaderServerIdentity(),
+            userId: bootstrap.userId,
+            bookId: bootstrap.book.id,
+            resourceId: bootstrap.resource.id
+          },
+          hasDirectTarget: hasExplicitTarget,
+          directPosition: null,
+          serverSnapshot: bootstrap.serverProgressSnapshot,
+          signal: controller.signal
+        });
+        if (controller.signal.aborted || requestId !== loadSequenceRef.current) return;
+        loadAbortRef.current = null;
+        failedLoadRef.current = null;
+        const serverSnapshot = startupResume.serverSnapshot;
+        bootstrap = {
+          ...bootstrap,
+          serverProgressSnapshot: serverSnapshot,
+          progressRevision: serverSnapshot?.revision ?? 0,
+          serverUpdatedAtEpochMillis: serverSnapshot?.receivedAtEpochMillis ?? null
+        };
+        if (!hasExplicitTarget) {
           bootstrap = {
             ...bootstrap,
-            resumeLocation: {
-              type: 'audio',
-              resourceId: bootstrap.resource.id,
-              assetId: localAudioLocation.assetId,
-              chapterId: localAudioLocation.chapterId ?? null,
-              positionMs: localAudioLocation.positionMs
-            },
-            resumePosition: localPosition,
-            progressPercent: localPosition.presentation.displayPercent
-          };
-        } else if (!hasExplicitTarget && localPosition && !localAudioLocation) {
-          bootstrap = {
-            ...bootstrap,
-            resumeLocation: null,
-            resumePosition: localPosition,
-            progressPercent: localPosition.presentation.displayPercent
+            resumeLocation: audioLocationFromPosition(startupResume.position, bootstrap),
+            resumePosition: startupResume.position,
+            progressPercent: startupResume.position?.presentation.displayPercent ?? 0
           };
         }
         bootstrapRef.current = bootstrap;
@@ -513,7 +507,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     });
     pendingLoadRef.current = request;
     return request.promise;
-  }, [cancelPendingLoad, configureTrack, pauseCurrentAudio, persistProgress, playCurrentAudio, runtime.storage, updateState]);
+  }, [cancelPendingLoad, configureTrack, pauseCurrentAudio, persistProgress, playCurrentAudio, runtime.progress, updateState]);
 
   const pause = useCallback(() => {
     pendingAutoplayRef.current = false;

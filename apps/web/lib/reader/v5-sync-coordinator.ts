@@ -1,4 +1,5 @@
 import { emitReaderDebug } from './debug';
+import { resolveV5StartupResume, type V5StartupResumeDecision } from './v5-startup-resume';
 import { readerV5PendingKey, readerV5ProgressKey } from './v5-storage';
 import {
   parseReaderV5PositionReport,
@@ -176,6 +177,38 @@ export class ReaderV5ProgressSyncCoordinator {
       this.uploadPromise,
       new Promise<void>((resolve) => setTimeout(resolve, options.timeoutMs))
     ]);
+  }
+
+  /** Read pending before querying: an ACK may have retired it since bootstrap. */
+  async resolveStartupProgress(input: {
+    identity: Omit<ReaderV5ProgressIdentity, 'clientId'>;
+    hasDirectTarget?: boolean;
+    directPosition: import('@shuku/reader-core').ReaderPositionReport | null;
+    serverSnapshot: ReaderV5ProgressSnapshot | null;
+    signal: AbortSignal;
+  }): Promise<V5StartupResumeDecision & { serverSnapshot: ReaderV5ProgressSnapshot | null }> {
+    const { signal } = input;
+    signal.throwIfAborted();
+    const initial = resolveV5StartupResume({ ...input, pending: null });
+    if (initial.source === 'direct-target') {
+      return { ...initial, serverSnapshot: input.serverSnapshot };
+    }
+    const clientId = await this.storage.getClientId();
+    signal.throwIfAborted();
+    const pending = await this.storage.getV5PendingProgressForIdentity({ ...input.identity, clientId });
+    signal.throwIfAborted();
+    let serverSnapshot = input.serverSnapshot;
+    if (!pending) {
+      if (!this.queryTransport) throw new Error('READER_PROGRESS_QUERY_UNAVAILABLE');
+      const result = await this.queryTransport(
+        input.identity.resourceId,
+        `"reader-v5-progress-${serverSnapshot?.revision ?? 0}"`,
+        signal
+      );
+      signal.throwIfAborted();
+      if (result.kind === 'current') serverSnapshot = result.snapshot;
+    }
+    return { ...resolveV5StartupResume({ ...input, pending, serverSnapshot }), serverSnapshot };
   }
 
   getLatestServerSnapshot(resourceId: string) {
