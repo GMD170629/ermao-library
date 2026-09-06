@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import replace
 from datetime import datetime
 from typing import Any, cast
 
@@ -46,16 +46,8 @@ from app.modules.reader.public import (
     ReaderV5LibraryPresentationQueryPort,
     ResourceReadingState,
     choose_continue_resource_id,
-    completed_for_available_resources,
+    reading_status_for_available_resources,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class _ResourceSummary:
-    resource_id: str
-    sort_order: int
-    percent: float
-    last_read_at: datetime | None
 
 
 def _resource_exists(
@@ -227,7 +219,7 @@ def _resource_summaries(
     user: User,
     book_ids: tuple[str, ...],
     reader_queries: ReaderV5LibraryPresentationQueryPort,
-) -> dict[str, list[_ResourceSummary]]:
+) -> dict[str, list[ResourceReadingState]]:
     if not book_ids:
         return {}
     rows = db.execute(
@@ -251,23 +243,19 @@ def _resource_summaries(
             LibraryReadableResource.id.asc(),
         )
     ).all()
-    progress_by_resource = reader_queries.list_presentations(
+    resource_ids = [str(row.resource_id) for row in rows]
+    reading_states = reader_queries.list_reading_states(
         user_id=user.id,
-        resource_ids=[str(row.resource_id) for row in rows],
+        resource_ids=resource_ids,
     )
-    result: dict[str, list[_ResourceSummary]] = {book_id: [] for book_id in book_ids}
+    result: dict[str, list[ResourceReadingState]] = {
+        book_id: [] for book_id in book_ids
+    }
     for row in rows:
-        progress = progress_by_resource.get(str(row.resource_id))
-        percent = min(
-            100.0,
-            max(0.0, float(progress.display_percent if progress else 0)),
-        )
         result[str(row.book_id)].append(
-            _ResourceSummary(
-                resource_id=str(row.resource_id),
+            replace(
+                reading_states[str(row.resource_id)],
                 sort_order=int(row.resource_index or 0),
-                percent=percent,
-                last_read_at=progress.updated_at if progress else None,
             )
         )
     return result
@@ -301,29 +289,12 @@ def _tag_names(
 
 
 def _reading_summary(
-    resources: list[_ResourceSummary],
+    resources: list[ResourceReadingState],
 ) -> tuple[str, float, datetime | None]:
-    states = [
-        ResourceReadingState(
-            resource_id=resource.resource_id,
-            sort_order=resource.sort_order,
-            percent=int(resource.percent),
-            last_read_at=resource.last_read_at,
-        )
-        for resource in resources
-    ]
-    if not states:
+    if not resources:
         return "UNREAD", 0.0, None
-    status = (
-        "FINISHED"
-        if completed_for_available_resources(states)
-        else (
-            "READING"
-            if any(resource.percent > 0 for resource in resources)
-            else "UNREAD"
-        )
-    )
-    continue_resource_id = choose_continue_resource_id(states)
+    status = reading_status_for_available_resources(resources)
+    continue_resource_id = choose_continue_resource_id(resources)
     progress = next(
         (
             resource.percent

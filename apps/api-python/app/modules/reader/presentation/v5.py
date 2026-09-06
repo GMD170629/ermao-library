@@ -208,7 +208,10 @@ def _authorized_bootstrap(
 
 
 def _resource_summary(
-    resource: ReaderResourceDto, progress: ReaderV5ProgressDto | None
+    resource: ReaderResourceDto,
+    progress: ReaderV5ProgressDto | None,
+    *,
+    completed: bool,
 ) -> ReaderResourceSummary:
     reader_type = reader_type_for_format(resource.source_format)
     if reader_type is None:
@@ -228,7 +231,7 @@ def _resource_summary(
         durationMs=resource.duration_ms,
         trackCount=resource.track_count,
         progress=display_percent,
-        resourceCompleted=display_percent >= 100,
+        resourceCompleted=completed,
         lastReadAt=progress.captured_at if progress else None,
     )
 
@@ -417,11 +420,16 @@ def reader_bootstrap_v5(
                 author=context.book.author,
                 coverUrl=f"/api/books/{context.book.id}/cover",
             ),
-            resource=_resource_summary(context.resource, bootstrap.progress),
+            resource=_resource_summary(
+                context.resource,
+                bootstrap.progress,
+                completed=bootstrap.reading_states[context.resource.id].completed,
+            ),
             availableResources=[
                 _resource_summary(
                     resource,
                     bootstrap.progress_by_resource_id.get(resource.id),
+                    completed=bootstrap.reading_states[resource.id].completed,
                 )
                 for resource in bootstrap.available_resources
             ],

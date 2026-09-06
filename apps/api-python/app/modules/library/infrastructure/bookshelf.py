@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import replace
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -95,29 +96,22 @@ class SqlAlchemyBookshelfItemQueries(BookshelfItemQueryPort):
                 LibraryReadableResource.id.asc(),
             )
         ).all()
-        progress_by_resource = self._reader_queries.list_presentations(
+        resource_ids = [str(row.resource_id) for row in rows]
+        reading_states = self._reader_queries.list_reading_states(
             user_id=context.user_id,
-            resource_ids=[str(row.resource_id) for row in rows],
+            resource_ids=resource_ids,
         )
         states_by_book: dict[str, list[ResourceReadingState]] = defaultdict(list)
         percent_by_resource: dict[str, float] = {}
         for row in rows:
             book_id = str(row.book_id)
             resource_id = str(row.resource_id)
-            progress = progress_by_resource.get(resource_id)
-            percent = min(
-                100.0,
-                max(0.0, float(progress.display_percent if progress else 0)),
+            state = replace(
+                reading_states[resource_id],
+                sort_order=int(row.resource_index or 0),
             )
-            percent_by_resource[resource_id] = percent
-            states_by_book[book_id].append(
-                ResourceReadingState(
-                    resource_id=resource_id,
-                    sort_order=int(row.resource_index or 0),
-                    percent=int(percent),
-                    last_read_at=progress.updated_at if progress else None,
-                )
-            )
+            percent_by_resource[resource_id] = state.percent
+            states_by_book[book_id].append(state)
 
         summaries: list[BookshelfItemSummary] = []
         for book_id in visible_book_ids:

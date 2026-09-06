@@ -17,7 +17,9 @@ from app.modules.reader.application.v5_library_queries import (
     ReaderV5LibraryPresentationQueryPort,
     ReaderV5PresentationView,
     ReaderV5StatusView,
+    resource_reading_state,
 )
+from app.modules.reader.domain.resource_progress import ResourceReadingState
 from app.modules.reader.infrastructure.persistence.models import (
     ReaderResourceProgressV5,
     ReaderResourceReadingStatusV5,
@@ -230,6 +232,50 @@ class SqlAlchemyReaderV5LibraryPresentationQueries(
 
     def __init__(self, db: Session) -> None:
         self._db = db
+
+    def list_reading_states(
+        self, *, user_id: str, resource_ids: Sequence[str]
+    ) -> Mapping[str, ResourceReadingState]:
+        """Read both independent aggregates in one actor-scoped batch."""
+
+        normalized_ids = tuple(dict.fromkeys(resource_ids))
+        if not normalized_ids:
+            return {}
+        rows = self._db.execute(
+            select(
+                LibraryReadableResource.id,
+                ReaderResourceProgressV5,
+                ReaderResourceReadingStatusV5,
+            )
+            .select_from(LibraryReadableResource)
+            .outerjoin(
+                ReaderResourceProgressV5,
+                and_(
+                    ReaderResourceProgressV5.resource_id == LibraryReadableResource.id,
+                    ReaderResourceProgressV5.user_id == user_id,
+                ),
+            )
+            .outerjoin(
+                ReaderResourceReadingStatusV5,
+                and_(
+                    ReaderResourceReadingStatusV5.resource_id
+                    == LibraryReadableResource.id,
+                    ReaderResourceReadingStatusV5.user_id == user_id,
+                ),
+            )
+            .where(LibraryReadableResource.id.in_(normalized_ids))
+        ).all()
+        return {
+            resource_id: resource_reading_state(
+                resource_id=resource_id,
+                sort_order=0,
+                presentation=_presentation_view(progress)
+                if progress is not None
+                else None,
+                status=_status_view(status) if status is not None else None,
+            )
+            for resource_id, progress, status in rows
+        }
 
     def list_presentations(
         self, *, user_id: str, resource_ids: Sequence[str]

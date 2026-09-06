@@ -1,9 +1,13 @@
 from datetime import UTC, datetime
+from typing import Literal
+
+import pytest
 
 from app.modules.reader.domain.resource_progress import (
     ResourceReadingState,
     choose_continue_resource_id,
     completed_for_available_resources,
+    reading_status_for_available_resources,
 )
 
 
@@ -15,6 +19,7 @@ def _resource(
     last_read_at: datetime | None = None,
     visible: bool = True,
     authorized: bool = True,
+    explicit_status: Literal["UNREAD", "FINISHED"] | None = None,
 ) -> ResourceReadingState:
     return ResourceReadingState(
         resource_id=resource_id,
@@ -23,6 +28,7 @@ def _resource(
         last_read_at=last_read_at,
         visible=visible,
         authorized=authorized,
+        explicit_status=explicit_status,
     )
 
 
@@ -85,3 +91,41 @@ def test_all_complete_returns_latest_read_resource() -> None:
     ]
 
     assert choose_continue_resource_id(resources) == "second"
+
+
+@pytest.mark.parametrize("percent", [0, 37, 100])
+@pytest.mark.parametrize("status", ["UNREAD", "FINISHED"])
+def test_explicit_status_overrides_completion_without_changing_position(
+    percent: int, status: Literal["UNREAD", "FINISHED"]
+) -> None:
+    resource = _resource("one", 0, percent=percent, explicit_status=status)
+    assert reading_status_for_available_resources([resource]) == status
+    assert resource.completed is (status == "FINISHED")
+    assert resource.percent == percent
+
+
+def test_mixed_explicit_completion_keeps_unfinished_resource_for_continuation() -> None:
+    finished = _resource(
+        "finished",
+        0,
+        explicit_status="FINISHED",
+        last_read_at=datetime(2026, 7, 3, tzinfo=UTC),
+    )
+    unread = _resource("unread", 1, percent=100, explicit_status="UNREAD")
+    assert reading_status_for_available_resources([finished, unread]) == "READING"
+    assert choose_continue_resource_id([finished, unread]) == "unread"
+    assert not completed_for_available_resources([finished, unread])
+
+
+def test_status_activity_excludes_unavailable_resources_and_empty_projection() -> None:
+    assert reading_status_for_available_resources([]) == "UNREAD"
+    assert (
+        reading_status_for_available_resources(
+            [
+                _resource("one", 0, explicit_status="UNREAD", percent=100),
+                _resource("hidden", 1, explicit_status="FINISHED", visible=False),
+                _resource("denied", 2, percent=37, authorized=False),
+            ]
+        )
+        == "UNREAD"
+    )

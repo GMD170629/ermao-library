@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Literal, Protocol
 
 from app.core.authorization import AuthorizationContext
+from app.modules.reader.domain.resource_progress import ResourceReadingState
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,7 +44,35 @@ class ReaderV5StatusView:
     updated_at: datetime
 
 
-class ReaderV5LibraryPresentationQueryPort(Protocol):
+def resource_reading_state(
+    *,
+    resource_id: str,
+    sort_order: int,
+    presentation: ReaderV5PresentationView | None,
+    status: ReaderV5StatusView | None,
+) -> ResourceReadingState:
+    """Combine actor-scoped display and explicit status through the domain owner."""
+
+    return ResourceReadingState(
+        resource_id=resource_id,
+        sort_order=sort_order,
+        percent=min(100.0, max(0.0, presentation.display_percent))
+        if presentation
+        else 0,
+        last_read_at=presentation.updated_at if presentation else None,
+        explicit_status=status.status if status else None,
+    )
+
+
+class ReaderReadingStateQueryPort(Protocol):
+    """Actor-scoped reading state shared by Reader and Library projections."""
+
+    def list_reading_states(
+        self, *, user_id: str, resource_ids: Sequence[str]
+    ) -> Mapping[str, ResourceReadingState]: ...
+
+
+class ReaderV5LibraryPresentationQueryPort(ReaderReadingStateQueryPort, Protocol):
     """Reader-owned query API for Library's display and filter projections."""
 
     def list_presentations(

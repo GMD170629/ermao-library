@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,7 +31,11 @@ from app.modules.reader.application.v5_dto import (
     ReaderV5PresentationDto,
 )
 from app.modules.reader.application.v5_locator import OpaqueLocator
+from app.modules.reader.domain.resource_progress import ResourceReadingState
 from app.modules.reader.infrastructure.clock import SystemReaderClock
+from app.modules.reader.infrastructure.v5_library_queries import (
+    SqlAlchemyReaderV5LibraryPresentationQueries,
+)
 from app.modules.reader.infrastructure.v5_repository import (
     SqlAlchemyReaderV5Repository,
 )
@@ -372,12 +377,20 @@ class _FixedClock:
         return datetime(2026, 1, 1, tzinfo=UTC)
 
 
+class _UnusedReadingStateQueries:
+    def list_reading_states(
+        self, *, user_id: str, resource_ids: Sequence[str]
+    ) -> Mapping[str, ResourceReadingState]:
+        raise AssertionError("saving progress must not load reading-state projections")
+
+
 def test_v5_storage_failure_rolls_back_application_transaction() -> None:
     unit_of_work = _RecordingUnitOfWork()
     service = ResourceReaderV5Service(
         _FailingRepository(),  # type: ignore[arg-type]
         unit_of_work,  # type: ignore[arg-type]
         _FixedClock(),  # type: ignore[arg-type]
+        _UnusedReadingStateQueries(),
     )
     position = ReaderV5PositionDto(
         locator=OpaqueLocator.from_object({}),
@@ -456,6 +469,7 @@ def test_v5_concurrent_writes_allocate_monotonic_revisions(tmp_path: Path) -> No
                 SqlAlchemyReaderV5Repository(session),
                 session,
                 SystemReaderClock(),
+                SqlAlchemyReaderV5LibraryPresentationQueries(session),
             )
             position = ReaderV5PositionDto(
                 locator=OpaqueLocator.from_object({"mutation": mutation_id}),

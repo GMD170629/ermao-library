@@ -63,6 +63,7 @@ def reader_v5_service(session: Session, settings: Settings) -> ResourceReaderV5S
         SqlAlchemyReaderV5Repository(session),
         session,
         SystemReaderClock(),
+        SqlAlchemyReaderV5LibraryPresentationQueries(session),
     )
 
 

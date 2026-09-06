@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime
 from typing import Any
 from urllib.parse import quote
@@ -31,7 +32,9 @@ from app.modules.library.domain.asset_titles import (
 from app.modules.library.infrastructure import books as library_books
 from app.modules.reader.public import (
     ReaderV5LibraryPresentationQueryPort,
-    ReaderV5PresentationView,
+    ResourceReadingState,
+    choose_continue_resource_id,
+    completed_for_available_resources,
 )
 
 
@@ -156,9 +159,8 @@ def _resource_view(
     resource: LibraryReadableResource,
     metadata: LibraryReadableResourceMetadata | None,
     *,
-    progress: ReaderV5PresentationView | None = None,
+    reading_state: ResourceReadingState,
     include_assets: bool = True,
-    sort_order: int = 0,
 ) -> dict[str, Any]:
     format_value = str(resource.format)
     reader_type = require_reader_type_for_format(format_value)
@@ -213,7 +215,7 @@ def _resource_view(
         "title": metadata.title if metadata else "",
         "description": metadata.description if metadata else None,
         "resourceIndex": metadata.resource_index if metadata else None,
-        "sortOrder": sort_order,
+        "sortOrder": reading_state.sort_order,
         "format": format_value,
         "readerType": reader_type.value,
         "kindleSendAvailable": kindle_send_available_for_format(format_value),
@@ -234,9 +236,9 @@ def _resource_view(
         "coverStatus": metadata.cover_status if metadata else "PENDING",
         "coverPath": metadata.cover_path if metadata else None,
         "coverUrl": _cover_url("resources", resource.id),
-        "progress": float(progress.display_percent if progress else 0),
-        "lastReadAt": _dt(progress.updated_at) if progress else None,
-        "resourceCompleted": bool(progress and progress.display_percent >= 100),
+        "progress": float(reading_state.percent),
+        "lastReadAt": reading_state.last_read_at,
+        "resourceCompleted": reading_state.completed,
         "hidden": resource.enablement_state != "ENABLED",
         "readable": resource.import_state == "READY" and bool(asset_views),
         "assets": asset_views,
@@ -261,40 +263,35 @@ def book_view(
     reader_queries: ReaderV5LibraryPresentationQueryPort,
 ) -> dict[str, Any]:
     book_id = str(book["id"])
-    progress_by_resource: dict[str, ReaderV5PresentationView] = {}
+    rows = _resource_rows(db, book_id)
+    reading_states: dict[str, ResourceReadingState] = {}
     if user_id:
-        resource_ids = [
-            resource.id for resource, _metadata in _resource_rows(db, book_id)
-        ]
+        resource_ids = [resource.id for resource, _metadata in rows]
         if resource_ids:
-            progress_by_resource = dict(
-                reader_queries.list_presentations(
+            reading_states = dict(
+                reader_queries.list_reading_states(
                     user_id=user_id,
                     resource_ids=resource_ids,
                 )
             )
+    states = [
+        replace(
+            reading_states.get(resource.id, ResourceReadingState(resource.id, 0)),
+            sort_order=index,
+        )
+        for index, (resource, _metadata) in enumerate(rows)
+    ]
     resources = [
         _resource_view(
             db,
             resource,
             metadata,
-            progress=progress_by_resource.get(resource.id),
-            sort_order=index,
+            reading_state=states[index],
         )
-        for index, (resource, metadata) in enumerate(_resource_rows(db, book_id))
+        for index, (resource, metadata) in enumerate(rows)
     ]
-    unfinished = [item for item in resources if item["progress"] < 100]
-    candidates = unfinished or resources
-    with_history = [item for item in candidates if item["lastReadAt"] is not None]
-    selected = (
-        max(
-            with_history, key=lambda item: (item["lastReadAt"], -int(item["sortOrder"]))
-        )
-        if with_history
-        else min(candidates, key=lambda item: (int(item["sortOrder"]), str(item["id"])))
-        if candidates
-        else None
-    )
+    selected_id = choose_continue_resource_id(states)
+    selected = next((item for item in resources if item["id"] == selected_id), None)
     return {
         **book,
         "tags": list(book.get("tags") or []),
@@ -305,7 +302,7 @@ def book_view(
         "gradient": "",
         "coverUrl": _cover_url("books", book_id, book, size="medium"),
         "resources": resources,
-        "completed": bool(resources) and not unfinished,
+        "completed": completed_for_available_resources(states),
         "continueResourceId": selected["id"] if selected else None,
         "continueResourceTitle": selected["title"] if selected else None,
         "continueResourceProgress": selected["progress"] if selected else 0,
@@ -329,13 +326,17 @@ def resource_view(
     ).first()
     if row is None:
         return None
-    progress = None
+    state = ResourceReadingState(resource_id, 0)
     if user_id:
-        progress = reader_queries.get_presentation(
-            user_id=user_id,
-            resource_id=resource_id,
-        )
-    return _resource_view(db, row[0], row[1], progress=progress)
+        state = reader_queries.list_reading_states(
+            user_id=user_id, resource_ids=[resource_id]
+        )[resource_id]
+    return _resource_view(
+        db,
+        row[0],
+        row[1],
+        reading_state=state,
+    )
 
 
 def list_resource_views(
@@ -356,10 +357,10 @@ def list_resource_views(
     start = (normalized_page - 1) * normalized_size
     selected = rows[start : start + normalized_size]
     resource_ids = [resource.id for resource, _metadata in selected]
-    progress_by_resource: dict[str, ReaderV5PresentationView] = {}
+    reading_states: dict[str, ResourceReadingState] = {}
     if user_id and resource_ids:
-        progress_by_resource = dict(
-            reader_queries.list_presentations(
+        reading_states = dict(
+            reader_queries.list_reading_states(
                 user_id=user_id,
                 resource_ids=resource_ids,
             )
@@ -371,8 +372,12 @@ def list_resource_views(
                 db,
                 resource,
                 metadata,
-                progress=progress_by_resource.get(resource.id),
-                sort_order=offset + index,
+                reading_state=replace(
+                    reading_states.get(
+                        resource.id, ResourceReadingState(resource.id, 0)
+                    ),
+                    sort_order=offset + index,
+                ),
             )
             for index, (resource, metadata) in enumerate(selected)
         ],

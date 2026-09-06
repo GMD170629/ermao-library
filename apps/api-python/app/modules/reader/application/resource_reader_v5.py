@@ -23,6 +23,9 @@ from app.modules.reader.application.v5_dto import (
     ReaderV5ReadingStatusDto,
     ReaderV5StoredBookmarkDto,
 )
+from app.modules.reader.application.v5_library_queries import (
+    ReaderReadingStateQueryPort,
+)
 from app.modules.reader.application.v5_ports import ReaderV5Repository
 from app.modules.reader.application.v5_position import (
     payload_hash_for_stored,
@@ -116,10 +119,12 @@ class ResourceReaderV5Service:
         repository: ReaderV5Repository,
         unit_of_work: ReaderUnitOfWork,
         clock: ReaderClock,
+        reading_states: ReaderReadingStateQueryPort,
     ) -> None:
         self._repository = repository
         self._unit_of_work = unit_of_work
         self._clock = clock
+        self._reading_states = reading_states
 
     def load_bootstrap(
         self,
@@ -153,6 +158,9 @@ class ResourceReaderV5Service:
             units=tuple(units),
             progress=progress_by_resource_id.get(resource_id),
             progress_by_resource_id=progress_by_resource_id,
+            reading_states=self._reading_states.list_reading_states(
+                user_id=user_id, resource_ids=resource_ids
+            ),
         )
 
     def load_progress(
