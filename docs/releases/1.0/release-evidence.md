@@ -4,7 +4,11 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
-### 最新检查点：`27bad491`（未冻结 RC；后端源码`7c6c991c`）
+### 最新检查点：`c7f5d5eb`（未冻结 RC；后端源码`7c6c991c`）
+
+安静10k实测已完成：`local-load/measurement-20260906-065525/`，独立监督日志`local-load/supervisor-20260906-065525/`。2026-09-06 14:55–15:07（UTC+8），测试前停止本任务Next3100、所有并行功能回归及代理服务，未操作原开发3000/8000。SOURCE digest `cbdb032d03ea946adf38e225838013f97b7a0f92d48c4deea5954bf386ee86d8`保持不变。**19685次请求，0失败，预设性能阈值违规0项**；真实导入10000 Books/Resources/Assets、10103 SourceNodes、10000唯一文件hash，共14196456 bytes。增长扫描列表/搜索/详情/进度保存p95分别63.226/64.074/18.765/60.405ms；重扫活跃阶段分别89.028/83.038/20.642/34.953ms。全流程API+Worker进程树RSS最大306278400 bytes，清理错误0，主复核4个任务PID均退出。
+
+扫描后全部10000原文件hash匹配，book/resource/asset/path关联和身份保留检查通过；增长/空闲/重扫分别读回500/1346/1798资源的最新已确认位置、丢失0，另3个未被负载覆盖的重扫哨兵保持一致。原失败仍保留，此次`complete.json`、`summary.json`、`rescan-integrity.json`和`integrity/`为修复后的独立证据。边界：135/180秒固定负载窗口，增长实际扫描208.078秒，采样活跃201.947秒中约180秒有负载（89.1%）；重扫活跃45.008秒中约44.995秒有负载（99.97%），其余请求明确归scan_idle。短窗口、紧凑三格式、四HTTP端点不代替30分钟/2小时、10万/30万、真实三端读听并发或NAS结论；RG-05未整体PASS。
 
 当前后端完整回归已由主代理读取原始日志核对：Linux **1284 PASS、2项既有Windows平台skip，coverage77%，321.91s**；Windows补测该两项均PASS。`backend-baseline/linux-7c6c991c/{linux,windows}/`保留pytest原始日志、XML、coverage、实际环境及源码hash；Linux689文件Ruff format/check与mypy492均PASS。从`7c6c991c`直接git archive得到SHA256 `436cab9d3d34f951ef1034004a698fa44563eb1c6e467ac5de8425f9df4f2875`，运行后归档源码未改变。合计1286个适用后端用例覆盖，不将平台skip改成无条件跳过。后续提交仅工具/文档/Web取证入口，后端源码保持该版本；最终RC仍需冻结验证。
 
@@ -37,7 +41,7 @@ Android新增实际持久化测试已提交`d6b11360`：真实Media3→共享进
 
 Windows C章核由同一`chapters.c`以Zig C99 warning-as-error编译共享DLL，`chapter-core/windows-shared-build.log`；SHA256 `36ccc43c4c5c15f327728442b259f1673c6815bfe3642137d26916a1141a8740`。测试环境通过`ERMAO_CHAPTER_CORE_LIBRARY`接入`.tmp/chapter-core-windows/ermao_chapters.dll`，不是正式后端交付物。
 
-下一项可执行工作：完成EPUB稳定画面复取证、59份真实格式后端验收、当前后端完整回归及负载工具的原文件/关联收尾检查；上述功能运行结束后锁定源码做安静本机负载重测。已完成代理产出由主审后分项commit/push；当前未公开发布。
+下一项可执行工作：用现有Linux native库完成MOBI族目录实测，补全有章节FB2和真正AIFC样本，继续实际客户端格式/位置异常链路及更大规模时长验证。Windows没有现成MOBI DLL，检查证据在`corpus-format-library-20260906/backend-preflight/mobi-environment-20260906/inspection.json`；不因一个宿主能力缺失停下其余项。已完成代理产出由主审后分项commit/push；当前未公开发布。
 
 ### 之前增量（保留追溯，以以上最新状态为准）
 

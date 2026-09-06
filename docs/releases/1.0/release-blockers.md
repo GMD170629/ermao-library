@@ -27,7 +27,7 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 | AUDIO-02 | KMP/Android注入5秒播放没有自动捕获，Web原间隔15秒；`preflight-mobile/rg04-audio-autosave-repro-20260906/` | `c6b3e802`修复；Web459 PASS、Chrome实际5/10秒读回断言通过；`d6b11360`真机生产SQLite落盘及重开误差8ms通过，完整148/共享416/Android218/lint PASS。在线确认/后台/长时/iOS仍未覆盖，不整体关闭RG-04 |
 | MEDIA-01 | Windows真实Chrome请求缩略封面出现500；cache/covers临时文件替换报WinError32/5 | `8a4ed3fb`修复与5项独立回归PASS；最新实际失败位于另一default-cover owner，另列MEDIA-02 |
 | MEDIA-02 | MP3两视口因默认封面500失败，`release-live/r1788675527007-w0/api.log:104` 指`services/default_cover.py`的原子替换，非缩略缓存 | `7c6c991c`修复并推送；两个入口复用唯一原子发布owner，7项回归PASS，`chrome-live-default-cover.log`严格两视口2 PASS且无API 5xx，此缺陷本批关闭；最终RC需重验 |
-| LOAD-01 | 实际10k预检列表/命中搜索随progress增长变慢，随后pool耗尽及进度读回超时；原始目录见最新证据 | FAIL / `c13a7034`修复唯一Reader聚合，10项复杂度/语义相邻回归PASS；`68c02047`修复maintenance阻塞放大点，39+主11项PASS。原10k有Chrome干扰，须安静重测，未声明永久泄漏或整体解除 |
+| LOAD-01 | 实际10k预检列表/命中搜索随progress增长变慢，随后pool耗尽及进度读回超时；原始目录见最新证据 | `c13a7034`/`68c02047`修复后，`c7f5d5eb`安静10k实测19685请求全部成功、p95均达标、进度零丢失及原文/身份校验PASS，`local-load/measurement-20260906-065525/`；本批已复现缺陷关闭。完整时长/大规模/三端并发仍未覆盖，RG-05不整体放行 |
 | ENV-09 | 真实Chrome EPUB详情reading-units 503；测试Windows缺canonical native章核 | 同C源码已隔离编译DLL并加载，最新MP3两视口无该503；测试入口新增native预检，不将环境缺失改为产品格式拒绝 |
 | ENV-10 | 59语料中MOBI/AZW/PRC/AZW3的目录返回PUBLICATION_UNSUPPORTED；本机探针未配置ERMAO_MOBI_CORE_LIBRARY | Windows runtime子项BLOCKED，正在检查现有DLL/构建入口；其导入/原文下载成功不能替代目录通过，不能据此判读物损坏 |
 | SAMPLE-01 | 59语料中FB2为0 section，AIFC实际AIFF且与AIF/AIFF同hash | 分章节FB2及真正AIFC编码未覆盖，需补合法样本；没有修改公开支持范围或把缺样本改REJECT |
