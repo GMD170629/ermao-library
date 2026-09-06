@@ -3,6 +3,7 @@ import { TextReader, Uint8ArrayWriter, ZipWriter } from '@zip.js/zip.js';
 import type { Locator } from '@readium/shared';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { revealReaderControls, visibleReaderFrame as visibleReadiumFrame } from './reader-controls';
 
 test.beforeEach(async ({ context }) => {
   await context.addCookies([{ name: 'shuku_session', value: 'readium-e2e-session', domain: '127.0.0.1', path: '/' }]);
@@ -132,19 +133,6 @@ async function installReaderRoutes(
   const epub = await createEpub(items, language);
   await page.route('**/api/**', (route) => fulfillApi(route, snapshot, fallbackPercent, writes, epub));
   return writes;
-}
-
-async function visibleReadiumFrame(page: Page) {
-  const shell = page.locator('[data-reader-shell="v3"]'); await expect(shell).toBeVisible();
-  const frame = shell.locator('iframe:visible').first(); await expect(frame).toBeVisible(); return frame;
-}
-
-async function revealReaderControls(page: Page) {
-  const frame = await visibleReadiumFrame(page);
-  const bounds = await frame.boundingBox();
-  if (!bounds) throw new Error('READIUM_FRAME_BOUNDS_MISSING');
-  await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
-  await expect(page.getByRole('button', { name: '外观', exact: true })).toBeVisible();
 }
 
 async function emittedReadiumLocator(writes: readonly unknown[]): Promise<Locator> {
