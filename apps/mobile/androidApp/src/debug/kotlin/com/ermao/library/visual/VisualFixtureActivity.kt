@@ -15,6 +15,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,9 +51,14 @@ import com.ermao.library.features.library.application.ScopeUiState
 import com.ermao.library.features.library.application.WorkDetailUiState
 import com.ermao.library.features.library.ui.LibraryScreen
 import com.ermao.library.features.library.ui.WorkDetailScreen
+import com.ermao.library.features.workmanagement.BookManagementHost
+import com.ermao.library.features.workmanagement.application.WorkManagementViewModel
 import com.ermao.library.platform.persistence.AndroidCoverCache
 import com.ermao.library.shared.modules.auth.domain.PrivateDataNamespace
 import com.ermao.library.shared.modules.library.AuthenticatedCover
+import com.ermao.library.shared.modules.library.BookContentEntry
+import com.ermao.library.shared.modules.library.BookContentsPage
+import com.ermao.library.shared.modules.library.BookDetailPresentation
 import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.shared.modules.library.ContentResult
@@ -72,13 +78,36 @@ import com.ermao.library.shared.modules.servers.domain.ServerProfile
 import com.ermao.library.shared.modules.servers.domain.TlsMode
 import com.ermao.library.shared.modules.shelf.domain.ShelfKind
 import com.ermao.library.shared.modules.shelf.domain.ShelfSummary
+import com.ermao.library.shared.modules.workmanagement.application.WorkManagementRepository
+import com.ermao.library.shared.modules.workmanagement.domain.BookManagementContext
+import com.ermao.library.shared.modules.workmanagement.domain.BookDeletionOutcome
+import com.ermao.library.shared.modules.workmanagement.domain.BookMetadataDraft
+import com.ermao.library.shared.modules.workmanagement.domain.CoverMutationOutcome
+import com.ermao.library.shared.modules.workmanagement.domain.CoverUpload
+import com.ermao.library.shared.modules.workmanagement.domain.KindleSendOutcome
+import com.ermao.library.shared.modules.workmanagement.domain.KindleSettings
+import com.ermao.library.shared.modules.workmanagement.domain.ManagedReadingStatus
+import com.ermao.library.shared.modules.workmanagement.domain.ManagementFieldValue
+import com.ermao.library.shared.modules.workmanagement.domain.ManagementSnapshot
+import com.ermao.library.shared.modules.workmanagement.domain.ManagementTarget
+import com.ermao.library.shared.modules.workmanagement.domain.MetadataApplyOutcome
+import com.ermao.library.shared.modules.workmanagement.domain.MetadataCandidate
+import com.ermao.library.shared.modules.workmanagement.domain.MetadataProvider
+import com.ermao.library.shared.modules.workmanagement.domain.MetadataSearchResult
+import com.ermao.library.shared.modules.workmanagement.domain.RecognizedField
+import com.ermao.library.shared.modules.workmanagement.domain.WorkManagementResult
 import com.ermao.library.ui.theme.WarmPageTheme
+import androidx.lifecycle.viewmodel.compose.viewModel
 import java.io.ByteArrayOutputStream
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -89,6 +118,8 @@ import kotlinx.coroutines.runBlocking
  * of silently producing a misleading baseline.
  */
 class VisualFixtureActivity : ComponentActivity() {
+    private val fixtureManagementRepository = FixtureManagementRepository()
+
     var renderedVariant: VisualFixtureVariant? by mutableStateOf(null)
         private set
 
@@ -134,8 +165,10 @@ class VisualFixtureActivity : ComponentActivity() {
             // the deterministic fixture locale/font scale must be scoped to the
             // composition instead of mutating the Activity resources lifecycle.
             CompositionLocalProvider(
+                androidx.activity.compose.LocalActivityResultRegistryOwner provides this@VisualFixtureActivity,
                 LocalContext provides fixtureContext,
                 LocalConfiguration provides fixtureConfiguration,
+                androidx.compose.ui.platform.LocalResources provides fixtureContext.resources,
                 LocalDensity provides Density(
                     density = fixtureContext.resources.displayMetrics.density,
                     fontScale = fontScale,
@@ -146,12 +179,24 @@ class VisualFixtureActivity : ComponentActivity() {
                         VisualFixtureScenario.HomeDefault -> FixtureHome()
                         VisualFixtureScenario.LibraryBooks -> FixtureLibrary(showFilter = false)
                         VisualFixtureScenario.LibraryFilter -> FixtureLibrary(showFilter = true)
-                        VisualFixtureScenario.BookAbout -> FixtureBookDetail(fixtureDetail)
-                        VisualFixtureScenario.BookResources -> FixtureBookDetail(
-                            fixtureDetail.copy(description = null),
+                        VisualFixtureScenario.BookAbout -> FixtureBookDetail(
+                            managementRepository = fixtureManagementRepository,
+                            content = fixtureDetail,
                         )
-                        VisualFixtureScenario.BookSingleEbook -> FixtureBookDetail(fixtureSingleEbookDetail)
-                        VisualFixtureScenario.BookActions -> FixtureBookDetail(fixtureDetail)
+                        VisualFixtureScenario.BookResources -> FixtureBookDetail(
+                            managementRepository = fixtureManagementRepository,
+                            content = fixtureDetail.copy(description = null, continueResourceId = "resource-2"),
+                            presentation = BookDetailPresentation.ContentBrowser,
+                            contents = fixtureContents(fixtureDetail),
+                        )
+                        VisualFixtureScenario.BookSingleEbook -> FixtureBookDetail(
+                            managementRepository = fixtureManagementRepository,
+                            content = fixtureSingleEbookDetail,
+                        )
+                        VisualFixtureScenario.BookActions -> FixtureBookDetail(
+                            managementRepository = fixtureManagementRepository,
+                            content = fixtureDetail,
+                        )
                     }
                 }
             }
@@ -377,39 +422,141 @@ private fun FixtureLibrary(showFilter: Boolean) {
 }
 
 @androidx.compose.runtime.Composable
-private fun FixtureBookDetail(content: BookDetailContent) {
+private fun FixtureBookDetail(
+    managementRepository: FixtureManagementRepository,
+    content: BookDetailContent,
+    presentation: BookDetailPresentation = BookDetailPresentation.ResourceDetail,
+    contents: BookContentsPage? = null,
+) {
     var showShelfPicker by remember { mutableStateOf(false) }
-    val selectedResource = content.resources.getOrNull(1) ?: content.resources.firstOrNull()
-    WorkDetailScreen(
-        state = WorkDetailUiState(
-            isLoading = false,
-            content = content,
-            selectedResourceId = selectedResource?.id,
-            presentation = com.ermao.library.shared.modules.library.BookDetailPresentation.ResourceDetail,
-            shelves = fixtureShelves,
-            selectedShelfIds = setOf(fixtureShelves.first().id),
-            isShelfPickerVisible = showShelfPicker,
+    var showMultiDownload by remember { mutableStateOf(false) }
+    val bookReadingStatuses by managementRepository.bookReadingStatuses.collectAsState()
+    val renderedContent = if (bookReadingStatuses[content.book.id] == ManagedReadingStatus.Finished) {
+        content.copy(completed = true)
+    } else {
+        content
+    }
+    val selectedResource = renderedContent.resources.getOrNull(1) ?: renderedContent.resources.firstOrNull()
+    val selectedResourceId = if (presentation == BookDetailPresentation.ContentBrowser) null else selectedResource?.id
+    val multiDownloadRootNodeId = contents?.currentNode?.sourceNodeId
+    val multiDownloadChildren = contents?.let { page ->
+        mapOf(page.currentNode.sourceNodeId to page.entries)
+    }.orEmpty()
+    val multiDownloadDescendants = contents?.let { page ->
+        mapOf(page.currentNode.sourceNodeId to page.entries.mapNotNull(BookContentEntry::resourceId).toSet())
+    }.orEmpty()
+    val managementViewModel: WorkManagementViewModel = viewModel(
+        factory = WorkManagementViewModel.factory(
+            repository = managementRepository,
+            context = fixtureRequestContext,
+            bookId = content.book.id,
+            onUnauthorized = {},
         ),
-        repository = fixtureRepository,
+    )
+    BookManagementHost(
+        repository = managementRepository,
         context = fixtureRequestContext,
-        onBack = {},
-        onSelectResource = {},
-        onOpenSourceNode = {},
-        onSelectContentsSort = {},
-        onSelectContentsPage = {},
-        onSelectReadingUnitsPage = {},
-        onRetrySurface = {},
-        onOpenShelfPicker = { showShelfPicker = true },
-        onDismissShelfPicker = { showShelfPicker = false },
-        onToggleShelf = {},
-        onSaveShelves = {},
-        onShelfSaveFeedbackShown = {},
-        onViewShelves = {},
-        onOpenFacet = { _, _ -> },
-        onRetry = {},
-        downloadRecordsByResource = selectedResource?.let { resource ->
-            mapOf(resource.id to fixtureCompletedDownload(content, resource))
-        }.orEmpty(),
+        canManage = true,
+        onUnauthorized = {},
+        onRefreshAuthorization = {},
+        onChanged = {},
+        onOpenKindleSettings = {},
+        onOpenKindleQueue = {},
+    ) {
+        WorkDetailScreen(
+            state = WorkDetailUiState(
+                isLoading = false,
+                content = renderedContent,
+                selectedResourceId = selectedResourceId,
+                presentation = presentation,
+                contents = contents,
+                shelves = fixtureShelves,
+                selectedShelfIds = setOf(fixtureShelves.first().id),
+                isShelfPickerVisible = showShelfPicker,
+                isMultiDownloadVisible = showMultiDownload,
+                multiDownloadRootNodeId = multiDownloadRootNodeId.takeIf { showMultiDownload },
+                multiDownloadChildrenByNodeId = multiDownloadChildren.takeIf { showMultiDownload }.orEmpty(),
+                multiDownloadDescendantResourceIdsByNodeId = multiDownloadDescendants.takeIf { showMultiDownload }.orEmpty(),
+                multiDownloadExpandedNodeIds = setOfNotNull(multiDownloadRootNodeId).takeIf { showMultiDownload }.orEmpty(),
+                multiDownloadResources = renderedContent.resources.takeIf { showMultiDownload }.orEmpty(),
+            ),
+            repository = fixtureRepository,
+            context = fixtureRequestContext,
+            onBack = {},
+            onSelectResource = {},
+            onOpenSourceNode = {},
+            onSelectContentsSort = {},
+            onSelectContentsPage = {},
+            onSelectReadingUnitsPage = {},
+            onRetrySurface = {},
+            onOpenShelfPicker = { showShelfPicker = true },
+            onDismissShelfPicker = { showShelfPicker = false },
+            onToggleShelf = {},
+            onSaveShelves = {},
+            onShelfSaveFeedbackShown = {},
+            onViewShelves = {},
+            onOpenFacet = { _, _ -> },
+            onRetry = {},
+            onOpenMultiDownload = { showMultiDownload = true },
+            onDismissMultiDownload = { showMultiDownload = false },
+            onToggleMultiDownloadFolder = {},
+            onEnsureMultiDownloadFolderLoaded = {},
+            onPerformDownloadBatch = { _, completion -> completion(com.ermao.library.shared.modules.downloads.DownloadBatchResult(emptyList())) },
+            managementViewModel = managementViewModel,
+            downloadRecordsByResource = selectedResource?.let { resource ->
+                mapOf(resource.id to fixtureCompletedDownload(renderedContent, resource))
+            }.orEmpty(),
+        )
+    }
+}
+
+private fun fixtureContents(content: BookDetailContent): BookContentsPage {
+    val rootSourceNodeId = "fixture-root-${content.book.id}"
+    val root = BookContentEntry(
+        sourceNodeId = rootSourceNodeId,
+        parentSourceNodeId = null,
+        name = content.book.title,
+        title = content.book.title,
+        description = content.description,
+        kind = "FOLDER",
+        physicalKind = "DIRECTORY",
+        sizeBytes = null,
+        observedAt = "2026-08-15T00:00:00Z",
+        hasChildren = true,
+        resourceId = null,
+        representativeResourceId = content.resources.firstOrNull()?.id,
+        coverUrl = content.book.coverUrl,
+    )
+    val entries = content.resources.map { resource ->
+        BookContentEntry(
+            sourceNodeId = "fixture-entry-${resource.id}",
+            parentSourceNodeId = rootSourceNodeId,
+            name = resource.title,
+            title = resource.title,
+            description = resource.description,
+            kind = "FILE",
+            physicalKind = "FILE",
+            sizeBytes = resource.sizeBytes,
+            observedAt = "2026-08-15T00:00:00Z",
+            hasChildren = false,
+            resourceId = resource.id,
+            representativeResourceId = null,
+            coverUrl = resource.coverUrl,
+        )
+    }
+    return BookContentsPage(
+        bookId = content.book.id,
+        currentSourceNodeId = rootSourceNodeId,
+        currentResourceId = null,
+        currentNode = root,
+        currentResourceIds = entries.mapNotNull(BookContentEntry::resourceId),
+        parentSourceNodeId = null,
+        breadcrumbs = emptyList(),
+        entries = entries,
+        page = 1,
+        pageSize = entries.size.coerceAtLeast(1),
+        total = entries.size,
+        totalPages = 1,
     )
 }
 
@@ -440,6 +587,146 @@ private fun fixtureCompletedDownload(
     resourceIndex = resource.resourceIndex,
     resourceSortOrder = resource.sortOrder,
 )
+
+/**
+ * The visual fixture exercises the real management host and session. Its
+ * menu-only captures must stay offline, so operations behind a selected menu
+ * action are deliberately outside this fixture's contract.
+ */
+private class FixtureManagementRepository : WorkManagementRepository {
+    private val mutableBookReadingStatuses = MutableStateFlow<Map<String, ManagedReadingStatus>>(emptyMap())
+    val bookReadingStatuses: StateFlow<Map<String, ManagedReadingStatus>> = mutableBookReadingStatuses.asStateFlow()
+
+    override suspend fun loadBookCompleted(
+        context: BookManagementContext,
+        bookId: String,
+    ): WorkManagementResult<Boolean> = WorkManagementResult.Content(
+        mutableBookReadingStatuses.value[bookId] == ManagedReadingStatus.Finished,
+    )
+
+    override suspend fun saveBookFields(
+        context: BookManagementContext,
+        bookId: String,
+        draft: BookMetadataDraft,
+    ): WorkManagementResult<Unit> = error("Unexpected visual-fixture operation: saveBookFields")
+
+    override suspend fun replaceBookTags(
+        context: BookManagementContext,
+        bookId: String,
+        current: List<String>,
+        next: List<String>,
+    ): WorkManagementResult<Unit> = error("Unexpected visual-fixture operation: replaceBookTags")
+
+    override suspend fun loadManagementSnapshot(
+        context: BookManagementContext,
+        target: ManagementTarget,
+    ): WorkManagementResult<ManagementSnapshot> = error("Unexpected visual-fixture operation: loadManagementSnapshot")
+
+    override suspend fun saveResourceFields(
+        context: BookManagementContext,
+        bookId: String,
+        resourceId: String,
+        fields: List<ManagementFieldValue>,
+    ): WorkManagementResult<Unit> = error("Unexpected visual-fixture operation: saveResourceFields")
+
+    override suspend fun saveSourcePresentation(
+        context: BookManagementContext,
+        bookId: String,
+        sourceNodeId: String,
+        title: String,
+        description: String,
+        removeCover: Boolean,
+        upload: CoverUpload?,
+    ): WorkManagementResult<Unit> = error("Unexpected visual-fixture operation: saveSourcePresentation")
+
+    override suspend fun regenerateBookImage(
+        context: BookManagementContext,
+        bookId: String,
+    ): WorkManagementResult<Unit> = error("Unexpected visual-fixture operation: regenerateBookImage")
+
+    override suspend fun deleteResourceSource(
+        context: BookManagementContext,
+        bookId: String,
+        resourceId: String,
+        confirmation: String,
+        idempotencyKey: String,
+    ): WorkManagementResult<Unit> = error("Unexpected visual-fixture operation: deleteResourceSource")
+
+    override suspend fun applyRecognizedFields(
+        context: BookManagementContext,
+        target: ManagementTarget,
+        candidate: MetadataCandidate,
+        fields: List<RecognizedField>,
+    ): WorkManagementResult<MetadataApplyOutcome> = error("Unexpected visual-fixture operation: applyRecognizedFields")
+
+    override suspend fun applyDirectoryMetadata(
+        context: BookManagementContext,
+        bookId: String,
+        sourceNodeId: String,
+        title: String,
+        description: String,
+    ): WorkManagementResult<Unit> = error("Unexpected visual-fixture operation: applyDirectoryMetadata")
+
+    override suspend fun uploadCover(
+        context: BookManagementContext,
+        bookId: String,
+        resourceId: String,
+        upload: CoverUpload,
+    ): WorkManagementResult<CoverMutationOutcome> = error("Unexpected visual-fixture operation: uploadCover")
+
+    override suspend fun regenerateResourceCover(
+        context: BookManagementContext,
+        bookId: String,
+        resourceId: String,
+    ): WorkManagementResult<Unit> = error("Unexpected visual-fixture operation: regenerateResourceCover")
+
+    override suspend fun rescanBook(
+        context: BookManagementContext,
+        sourceNodeId: String,
+    ): WorkManagementResult<Unit> = error("Unexpected visual-fixture operation: rescanBook")
+
+    override suspend fun deleteBook(
+        context: BookManagementContext,
+        bookId: String,
+    ): WorkManagementResult<BookDeletionOutcome> = error("Unexpected visual-fixture operation: deleteBook")
+
+    override suspend fun loadMetadataProviders(
+        context: BookManagementContext,
+    ): WorkManagementResult<List<MetadataProvider>> = error("Unexpected visual-fixture operation: loadMetadataProviders")
+
+    override suspend fun searchMetadata(
+        context: BookManagementContext,
+        bookId: String,
+        sourceNodeId: String,
+        providerId: String,
+        query: String,
+    ): WorkManagementResult<MetadataSearchResult> = error("Unexpected visual-fixture operation: searchMetadata")
+
+    override suspend fun loadKindleSettings(
+        context: BookManagementContext,
+    ): WorkManagementResult<KindleSettings> = error("Unexpected visual-fixture operation: loadKindleSettings")
+
+    override suspend fun sendToKindle(
+        context: BookManagementContext,
+        bookId: String,
+        assetId: String,
+    ): WorkManagementResult<KindleSendOutcome> = error("Unexpected visual-fixture operation: sendToKindle")
+
+    override suspend fun setReadingStatus(
+        context: BookManagementContext,
+        resourceId: String,
+        status: ManagedReadingStatus,
+    ): WorkManagementResult<Unit> = error("Unexpected visual-fixture operation: setReadingStatus")
+
+    override suspend fun setBookReadingStatus(
+        context: BookManagementContext,
+        bookId: String,
+        status: ManagedReadingStatus,
+    ): WorkManagementResult<Unit> {
+        mutableBookReadingStatuses.update { statuses -> statuses + (bookId to status) }
+        return WorkManagementResult.Content(Unit)
+    }
+}
 
 private val fixtureShelves = listOf(
     ShelfSummary(

@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.SystemClock
+import android.view.KeyEvent
 import android.view.Choreographer
 import android.view.InputDevice
 import android.view.MotionEvent
@@ -20,6 +21,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import androidx.test.core.app.ActivityScenario
@@ -162,12 +164,17 @@ class VisualFixtureActivityTest {
             assertScenarioRoot(variant)
             revealRequestedOverlay(variant, scenario)
 
-            val addToShelf = scenario.localizedString(variant, R.string.work_control_add_shelf)
-            awaitTextDisplayed(addToShelf)
+            val edit = scenario.localizedString(variant, R.string.work_control_edit)
+            awaitTextDisplayed(edit)
             composeRule.onNode(
-                matcher = hasText(addToShelf) and hasAnyAncestor(hasTestTag("work-book-control-menu")),
+                matcher = hasText(edit) and hasAnyAncestor(hasTestTag("management-menu")),
                 useUnmergedTree = true,
-            ).performClick()
+            ).assertIsDisplayed()
+            InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+            composeRule.waitForIdle()
+            composeRule.onNodeWithTag("work-shelf-action")
+                .assertTextEquals(scenario.localizedString(variant, R.string.work_quick_add))
+                .performClick()
             awaitTagDisplayed("work-shelf-picker-sheet")
             awaitTagDisplayed("work-shelf-picker-title")
             awaitTextDisplayed(scenario.localizedString(variant, R.string.work_shelf_picker_title))
@@ -191,14 +198,15 @@ class VisualFixtureActivityTest {
             composeRule.waitUntil(CAPTURE_READY_TIMEOUT_MILLIS) { fixtureActivity.isCaptureReady }
 
             composeRule.onNodeWithTag("work-reading-status-action")
-                .assertTextEquals(scenario.localizedString(variant, R.string.work_quick_reading_unread))
+                .assertTextEquals(scenario.localizedString(variant, R.string.work_quick_reading_in_progress))
                 .performClick()
                 .assertTextEquals(scenario.localizedString(variant, R.string.work_quick_reading_read))
 
             composeRule.onNodeWithTag("work-download-action")
-                .assertTextEquals(scenario.localizedString(variant, R.string.work_quick_downloaded))
+                .assertTextEquals(scenario.localizedString(variant, R.string.work_book_download_count, 1))
                 .performClick()
-            awaitTextDisplayed(scenario.localizedString(variant, R.string.downloads_remove_title))
+            awaitTagDisplayed("multi-download-sheet")
+            awaitTextDisplayed(scenario.localizedString(variant, R.string.multi_download_title))
         }
 
         val pathVariant = variant.copy(scenario = VisualFixtureScenario.BookAbout)
@@ -209,8 +217,9 @@ class VisualFixtureActivityTest {
             scenario.onActivity { activity -> fixtureActivity = activity }
             composeRule.waitUntil(CAPTURE_READY_TIMEOUT_MILLIS) { fixtureActivity.isCaptureReady }
             val fullPath = "/library/三体系列/第二卷 黑暗森林.epub"
-            composeRule.onNodeWithTag("work-detail-list").performScrollToIndex(5)
-            composeRule.onNodeWithText(fullPath).performScrollTo().performTouchInput { longClick() }
+            composeRule.onNodeWithTag("work-detail-list")
+                .performScrollToNode(hasText(fullPath))
+            composeRule.onNodeWithText(fullPath).performTouchInput { longClick() }
             awaitTextDisplayed(scenario.localizedString(pathVariant, R.string.work_metadata_file_path_full_title))
         }
     }
@@ -290,7 +299,8 @@ class VisualFixtureActivityTest {
 
     private fun assertFilterApplyReachable() {
         val applyAction = composeRule.onNodeWithTag(LIBRARY_FILTER_LARGE_FONT_APPLY_TAG)
-        applyAction.performScrollTo()
+        // The current filter contract keeps Apply in the fixed bottom action
+        // bar; only the filter choices are inside library-filter-scroll.
         repeat(FILTER_SCROLL_GESTURE_ATTEMPTS) {
             if (runCatching { applyAction.assertIsDisplayed() }.isSuccess) return
             composeRule.onNodeWithTag("library-filter-scroll").performTouchInput { swipeUp() }
@@ -328,7 +338,7 @@ class VisualFixtureActivityTest {
             VisualFixtureScenario.BookActions -> {
                 composeRule.onNodeWithTag("work-more-action").performClick()
                 composeRule.waitForIdle()
-                awaitTagDisplayed("work-book-control-menu")
+                awaitTagDisplayed("management-menu")
             }
             VisualFixtureScenario.BookAbout,
             VisualFixtureScenario.BookResources,
@@ -376,9 +386,9 @@ private fun largeFontReachabilityTag(scenario: VisualFixtureScenario): String = 
     else -> error("No large-font reachability target for ${scenario.wireValue}")
 }
 
-private const val HOME_LARGE_FONT_LAST_ITEM_TAG = "work-work-3"
+private const val HOME_LARGE_FONT_LAST_ITEM_TAG = "book-book-3"
 private const val HOME_LARGE_FONT_LAST_ITEM_INDEX = 2
-private const val LIBRARY_LARGE_FONT_LAST_ITEM_TAG = "work-work-6"
+private const val LIBRARY_LARGE_FONT_LAST_ITEM_TAG = "book-book-6"
 private const val LIBRARY_LARGE_FONT_LAST_ITEM_INDEX = 5
 private const val LIBRARY_FILTER_LARGE_FONT_APPLY_TAG = "library-filter-apply"
 private const val FILTER_SCROLL_GESTURE_ATTEMPTS = 4
@@ -455,6 +465,7 @@ private val largeFontFixtureVariants: List<VisualFixtureVariant> =
 private fun ActivityScenario<VisualFixtureActivity>.localizedString(
     variant: VisualFixtureVariant,
     resourceId: Int,
+    vararg formatArgs: Any,
 ): String {
     var value: String? = null
     onActivity { activity ->
@@ -462,7 +473,7 @@ private fun ActivityScenario<VisualFixtureActivity>.localizedString(
             base = activity.resources.configuration,
             fontScale = 1f,
         )
-        value = activity.createConfigurationContext(fixtureConfiguration).getString(resourceId)
+        value = activity.createConfigurationContext(fixtureConfiguration).getString(resourceId, *formatArgs)
     }
     return checkNotNull(value)
 }

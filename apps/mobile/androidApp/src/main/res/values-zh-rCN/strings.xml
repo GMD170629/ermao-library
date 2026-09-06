@@ -208,7 +208,6 @@
     <string name="work_resources_title">媒体类型</string>
     <string name="work_detail_title">图书详情</string>
     <string name="work_resource_accessibility_progress">阅读进度 %1$d%%</string>
-    <string name="work_control_add_shelf">添加到书架</string>
     <string name="work_control_mark_unread">标记为未读</string>
     <string name="work_control_edit">编辑</string>
     <string name="work_control_recognize">识别</string>

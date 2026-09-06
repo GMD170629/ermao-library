@@ -214,7 +214,6 @@
     <string name="work_resources_title">Media types</string>
     <string name="work_detail_title">Book Details</string>
     <string name="work_resource_accessibility_progress">Reading progress %1$d%%</string>
-    <string name="work_control_add_shelf">Add to shelf</string>
     <string name="work_control_mark_unread">Mark as unread</string>
     <string name="work_control_edit">Edit</string>
     <string name="work_control_recognize">Recognize</string>
