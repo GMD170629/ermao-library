@@ -19,6 +19,8 @@ R1 当前基线为干净的 `develop@197e81a808ba32595a8a6ffeda62422b3a7d3473`�
 
 参数组须按 `ID/平台/源格式/样本/场景` 展开成独立执行记录；不能一次 PASS 覆盖未跑组合。默认 NOT_RUN；已明确缺交接前提的真机、真实客户端、素材/大库条目标 BLOCKED。若共享行含 W/A/I，W 不因 I 阻塞被伪造为已执行；各子项分别记状态。
 
+R1 用户范围调整：Web 仅 Chrome（桌面/移动视口），Firefox、WebKit/Safari 不再执行。旧四浏览器回归为历史诊断，不混入最终 Chrome 通过率；Android/iOS 原生范围独立保留。Playwright 项目为 `chrome`、`mobile-chrome`，使用实际安装的 Chrome channel。
+
 ## 2. 发布、初始化与接入
 
 命令编号 C-* 见 §7，人工操作依据 release-gate.md §6 的实际 UI/API；所列命令本轮均未运行。
@@ -198,6 +200,5 @@ P4的冻结表必须填写：CPU/架构、RAM、磁盘/文件系统/挂载、数
 | 大库可慢但不崩溃或拖死前台 | RG-05 / LOAD全组，联动RG-04确认位置 |
 
 单条实测记录使用 release-evidence.md 的必填字段；失败绑定台账ID，样本/命令/预期变动必须先留痕再重跑。所有来源尚未运行的用例保持NOT_RUN或因明确前提缺失BLOCKED；当前无PASS/N/A记录。
-
 
 
