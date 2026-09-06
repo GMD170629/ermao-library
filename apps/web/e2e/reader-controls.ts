@@ -4,7 +4,9 @@ export async function visibleReaderFrame(page: Page) {
   const shell = page.locator('[data-reader-shell="v3"]');
   await expect(shell).toBeVisible();
   await expect(shell.locator('[data-reader-error-code]')).toHaveCount(0);
-  await expect(page.locator('[data-reader-opening-cover="loading"]')).toHaveCount(0);
+  // Ready disables input interception before the opening cover finishes fading.
+  // Evidence and reader interactions must wait until the cover is removed.
+  await expect(page.locator('[data-reader-opening-cover]')).toHaveCount(0);
   const frame = shell.locator('iframe:visible').first();
   await expect(frame).toBeVisible();
   return frame;
