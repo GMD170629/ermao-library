@@ -4,6 +4,8 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+并行实际验收安排：Android AAC/FLAC/WAV短时播放、5/10秒真实确认及暂停重开复用既有 `python_android_release_live_fixture.py --mime-type` 与已授权9e896bbc仪器入口；独立工作树 `D:/www/ermao-release-android-formats@0c28f117`，自有18084/3105端口，全新库/UUID私有目录，不改应用源码或工具功能。该源码的移动与后端受测部分须按实际hash核实，不能把主工作树未提交HTML当作已包含。结果未出，当前NOT_RUN；对应AUD-04/05/06及POS-02部分，不涵盖长时/后台。Chrome运行18081/3102及其源码保持隔离。
+
 当前实际执行：`0c28f117`生产Chrome1800秒回归已启动，`audio-soak/runs-proxyfix-1800/r1788691746993-w0/`，命令日志 `audio-soak/proxyfix-1800-command.log`，执行会话57546；完成前不得填PASS。主工作区应用源码冻结于该运行快照，HTML后续修复仅在独立工作树进行。Next运行时临时修改的tsconfig/next-env由现有fixture在退出后校验并恢复，不手工清理。有限3600000ms代理运输对照已通过：40秒背压后40304ms完成，12880827字节/SHA一致、所有自有服务/socket/文件流退出，`audio-soak/audio04-transport-finite.jsonl`及两行测试组diff；AUDIO-04诊断工具到此停止。只读审查记录此配置也延长普通API/OPDS挂起请求的空闲等待，仍有有限上限及现有断连清理，未改变后端容量。Docker当前再次核实无Linux engine管道，ENV-08保持，不做系统重置。
 
 SYNC-02修复已集成为 `76a88845`：Reader与音频复用coordinator启动入口，在pending为空后通过现有queryTransport读取当前服务端位置；保留直接目标优先、完整身份/Locator、取消及迟到结果保护，服务端空位置清除旧恢复值。不读取local exact、不按revision合并。原纯规则及测试搬至唯一owner，旧实现删除。受控原竞态及相邻回归通过，完整Web476 PASS/0 skip（`audio-soak/ack-bootstrap-race/full-web-candidate.log`），独立只读复核35 PASS且无新增阻断；实际Chrome回归待执行。
