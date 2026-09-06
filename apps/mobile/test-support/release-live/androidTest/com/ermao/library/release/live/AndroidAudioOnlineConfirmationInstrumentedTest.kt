@@ -267,6 +267,10 @@ class AndroidAudioOnlineConfirmationInstrumentedTest {
         val isolated = ReleaseAudioContext(context, privateFixture.directory)
         val app = context.applicationContext as ErmaoLibraryApplication
         assertFalse("RG04_EXISTING_APP_AUDIO_SESSION", app.audioPlaybackRuntime.snapshot.value.hasSession)
+        // Check before this fixture acquires playback. A global music flag cannot distinguish
+        // this fixture's own service during close/reopen from unrelated pre-existing playback.
+        assertFalse("RG04_EXISTING_SYSTEM_MUSIC_ACTIVE",
+            requireNotNull(isolated.getSystemService(AudioManager::class.java)).isMusicActive)
         assertTrue("RG04_FRESH_COOKIE_PREFS_REQUIRED",
             isolated.getSharedPreferences("ermao_session_cookies", 0).all.isEmpty())
         assertTrue("RG04_FRESH_DEVICE_PREFS_REQUIRED",
@@ -332,8 +336,6 @@ class AndroidAudioOnlineConfirmationInstrumentedTest {
             lateinit var player: AudioPlaybackRuntime
             instrumentation.runOnMainSync {
                 assertFalse("RG04_EXISTING_APP_AUDIO_SESSION", app.audioPlaybackRuntime.snapshot.value.hasSession)
-                assertFalse("RG04_EXISTING_SYSTEM_MUSIC_ACTIVE",
-                    requireNotNull(isolated.getSystemService(AudioManager::class.java)).isMusicActive)
                 player = AudioPlaybackRuntime(isolated, app.audioTransportRegistry)
                 runtime = player
                 // No supplied chapter/position: every launch uses the production restore owner.
