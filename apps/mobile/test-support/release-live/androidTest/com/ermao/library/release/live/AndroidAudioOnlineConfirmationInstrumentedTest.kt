@@ -216,9 +216,12 @@ class AndroidAudioOnlineConfirmationInstrumentedTest {
                 waitUntil(started + checkpoint - 1_000)
                 val confirmed = try {
                     database.awaitConfirmed(started + checkpoint) { local, sync ->
-                        locatorMillis(local) > (previous?.let { locatorMillis(it) } ?: 0) &&
-                            local.capturedAtEpochMillis > (previous?.capturedAtEpochMillis ?: 0) &&
-                            sync.confirmedRevision > (previous?.revision ?: 0)
+                        val prior = previous
+                        locatorMillis(local) > (prior?.let { locatorMillis(it) } ?: 0) &&
+                            // ADR0028: capture clocks are comparable only within one client.
+                            (prior != null && prior.clientId != local.clientId ||
+                                local.capturedAtEpochMillis > (prior?.capturedAtEpochMillis ?: 0)) &&
+                            sync.confirmedRevision > (prior?.revision ?: 0)
                     }
                 } catch (failure: Throwable) {
                     // Capture before finally/close creates a different Stop position; rethrow unchanged.
