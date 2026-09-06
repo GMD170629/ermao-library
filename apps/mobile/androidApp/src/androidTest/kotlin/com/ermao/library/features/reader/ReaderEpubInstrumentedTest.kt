@@ -249,7 +249,7 @@ class ReaderEpubInstrumentedTest {
     }
 
     @Test
-    fun continuousScrollSupportsViewportTurnsNativeSwipeAndForcesSinglePage() {
+    fun continuousScrollSupportsViewportTurnsAndPreservesThePagedSpreadPreference() {
         ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { scenario ->
             scenario.keepReaderTestFixtureVisible()
             waitForReader(scenario)
@@ -267,8 +267,17 @@ class ReaderEpubInstrumentedTest {
             waitUntil(scenario, "continuous scroll preferences") { activity ->
                 val controller = activity.controllerForTesting ?: return@waitUntil false
                 activity.navigatorOrNull()?.settings?.value?.scroll == true &&
-                    controller.preferences.value.epub.spreadMode == ReaderSpreadMode.Single
+                    controller.preferences.value.epub.spreadMode == ReaderSpreadMode.Double
             }
+            // Flow changes must not rewrite the stored paged-layout choice. Verify the
+            // effective scrolling layout itself has no horizontal page overflow.
+            assertEquals(
+                "true",
+                evaluateJavascript(
+                    scenario,
+                    "document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1",
+                ),
+            )
             evaluateJavascript(
                 scenario,
                 "document.body.style.minHeight = '400vh'; document.scrollingElement.scrollTop = 0; true",

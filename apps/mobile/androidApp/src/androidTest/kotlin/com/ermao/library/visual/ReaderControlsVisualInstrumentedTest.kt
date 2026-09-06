@@ -25,8 +25,8 @@ import com.ermao.library.features.reader.infrastructure.AndroidReaderPublication
 import com.ermao.library.features.reader.keepReaderTestFixtureVisible
 import com.ermao.library.features.reader.presentation.READER_CONTENTS_TEST_TAG
 import com.ermao.library.features.reader.presentation.READER_PASSIVE_STATUS_TEST_TAG
+import com.ermao.library.features.reader.presentation.READER_PANEL_WORKSPACE_TEST_TAG
 import com.ermao.library.features.reader.presentation.READER_SETTINGS_TEST_TAG
-import com.ermao.library.features.reader.presentation.READER_SHEET_TEST_TAG
 import com.ermao.library.features.reader.presentation.ReaderActivity
 import com.ermao.library.shared.modules.reader.LocalReaderSource
 import com.ermao.library.shared.modules.reader.ReaderTheme
@@ -223,7 +223,9 @@ class ReaderControlsVisualInstrumentedTest {
                 ) {
                     scenario.onActivity { activity -> activity.onBackPressedDispatcher.onBackPressed() }
                     composeRule.waitUntil(READER_READY_TIMEOUT_MILLIS) {
-                        composeRule.onAllNodesWithTag(READER_SHEET_TEST_TAG).fetchSemanticsNodes().isEmpty()
+                        // The home console remains in the standard bottom sheet after closing
+                        // a panel. Its workspace, not the entire console, must disappear.
+                        composeRule.onAllNodesWithTag(READER_PANEL_WORKSPACE_TEST_TAG).fetchSemanticsNodes().isEmpty()
                     }
                 }
                 destination
@@ -277,9 +279,9 @@ class ReaderControlsVisualInstrumentedTest {
     private fun openPanel(tag: String) {
         composeRule.onNodeWithTag(tag).assertIsDisplayed().performClick()
         composeRule.waitUntil(READER_READY_TIMEOUT_MILLIS) {
-            runCatching { composeRule.onNodeWithTag(READER_SHEET_TEST_TAG).assertIsDisplayed() }.isSuccess
+            runCatching { composeRule.onNodeWithTag(READER_PANEL_WORKSPACE_TEST_TAG).assertIsDisplayed() }.isSuccess
         }
-        composeRule.onNodeWithTag(READER_SHEET_TEST_TAG).assertIsDisplayed()
+        composeRule.onNodeWithTag(READER_PANEL_WORKSPACE_TEST_TAG).assertIsDisplayed()
     }
 
     private fun buildComicArchive(): ByteArray = ByteArrayOutputStream().use { output ->
