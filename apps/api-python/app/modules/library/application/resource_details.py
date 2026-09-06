@@ -311,6 +311,11 @@ class ListResourceDetails:
             sorted(
                 assets,
                 key=lambda asset: (
+                    # Audio import owns the persisted playback sequence; filenames
+                    # must not reorder tracks relative to the Reader bootstrap.
+                    asset.sort_order
+                    if asset.role.strip().upper() in {"TRACK", "PRIMARY"}
+                    else 0,
                     natural_sort_key(asset.sort_key or asset.title),
                     asset.id,
                 ),

@@ -201,7 +201,7 @@ def test_pdf_details_resolve_page_count_when_legacy_metadata_is_missing() -> Non
     assert [unit.page_number for unit in result.units] == [1, 2, 3]
 
 
-def test_directory_pages_and_audio_tracks_use_natural_stable_order() -> None:
+def test_directory_pages_use_natural_order_and_audio_uses_imported_order() -> None:
     image_assets = (
         asset("page-10", "page10.jpg", role="PAGE"),
         asset("page-2", "page2.jpg", role="PAGE"),
@@ -228,5 +228,46 @@ def test_directory_pages_and_audio_tracks_use_natural_stable_order() -> None:
     ).execute(
         context=SCOPE, book_id="book-1", resource_id="resource-1", page=1, page_size=50
     )
-    assert [unit.asset_id for unit in audio_result.units] == ["track-2", "track-10"]
-    assert [unit.track_number for unit in audio_result.units] == [99, 1]
+    assert [unit.asset_id for unit in audio_result.units] == ["track-10", "track-2"]
+    assert [unit.track_number for unit in audio_result.units] == [1, 99]
+
+
+def test_audio_details_paginate_imported_sequence_and_preserve_tags() -> None:
+    tracks = tuple(
+        replace(
+            asset(name, name, role="TRACK", track=track_number),
+            sort_order=sequence,
+        )
+        for name, track_number, sequence in (
+            ("01-mp3.mp3", 1, 0),
+            ("02-aac.aac", 2, 3),
+            ("03-m4a.m4a", 1, 1),
+            ("04-m4b.m4b", 1, 2),
+        )
+    )
+    queries = FakeQueries(
+        resource("AUDIOBOOK_DIR"),
+        assets=tracks + (asset("cover", "cover.jpg", role="COVER"),),
+    )
+    result = details(queries).execute(
+        context=SCOPE, book_id="book-1", resource_id="resource-1", page=2, page_size=2
+    )
+
+    assert result.total == 4
+    assert [unit.asset_id for unit in result.units] == ["04-m4b.m4b", "02-aac.aac"]
+    assert [unit.sort_order for unit in result.units] == [2, 3]
+    assert [unit.track_number for unit in result.units] == [1, 2]
+
+
+def test_single_audio_primary_asset_stays_a_playable_track() -> None:
+    primary = replace(
+        asset("single", "book.m4b", role="PRIMARY"), media_type="audio/mp4"
+    )
+    result = details(FakeQueries(resource("AUDIO"), assets=(primary,))).execute(
+        context=SCOPE, book_id="book-1", resource_id="resource-1", page=1, page_size=50
+    )
+
+    assert result.total == 1
+    assert result.units[0].asset_id == "single"
+    assert result.units[0].unit_type == "track"
+    assert result.units[0].media_type == "audio/mp4"

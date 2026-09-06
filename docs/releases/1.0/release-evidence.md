@@ -4,6 +4,14 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+2026-09-07内嵌章节增量（04231cda）：两个独立M4B/M4A原件通过正常Chrome桌面导入/详情/播放器显示三章0/10/20s，章节列表跳转及上一章/下一章实际媒体时钟10/20s；M4B确认20000ms/r11第三章→重开21.133828s，偏差1133.828ms；M4A确认10000ms/r9第二章→重开10.132305s，偏差132.305ms，均≤2秒。真实bootstrap三条units与对应资产、服务端chapter index/navigationKey一致；这两个章节短时子项PASS，不外推长时/多轨/原生。证据`artifacts/releases/1.0/04231cda/chrome-audio-chapters-20260907/`中的chapter-observations.json、first-chapter-middle-orm.json、m4a-chapter-middle-orm.json、final-orm.json及原API日志。
+
+同轮首次四轨实际验收FAIL，登记AUDIO-10：正常分卷库根下单个目录被正确识别为一个AUDIOBOOK_DIR、4个TRACK；详情顺序01-MP3/02-AAC/03-M4A/04-M4B，但bootstrap/播放器顺序01/03/04/02，详情点击第二轨实际进入全局约90s/75%。`audio-10-original-failure.json`记录真实reading-units请求186536.844与bootstrap186536.848均200、资产身份和当前时钟，final-orm.json保留sequence_index。原源MP3/M4A/M4B轨号均1，AAC轨号2；现有导入owner优先盘号/轨号再路径，子代理“文件名保证顺序”的推断已由主纠正，不能据它伪改真实预期。
+
+原运行收尾：原7个fixture样本和额外导入6原件、911应用源码均未变，API5xx=0；仅初始化保留地址.invalid被422拒绝，随后专用.invalidx正常通过。退出账号、关闭自有Chrome标签、stop正常/launcher0，配置恢复和18081/3102释放，详见final-verification.json。Chrome原失败保留，不在运行中替换源码。
+
+AUDIO-10候选复用导入持久化sequence_index，经既有ResourceAssetDetail.sort_order传至详情，仅音频排序优先该值；不重写disc/track规则，不改变Reader播放顺序或图片自然排序。旧单测把音频固定为自然文件名排序，与真实两端契约冲突，已改为验证导入顺序并保留原图片/轨号断言，补分页/过滤封面/单文件相邻。实际原代码2 FAIL、7 PASS→候选9 PASS，相邻audio/reader API32 PASS，mypy494通过；日志audio-10-unit-red.log、audio-10-unit-green.log、audio-10-adjacent.log、audio-10-mypy.log。真实SQLite双端一致性回归和新候选Chrome原场景仍待完成，AUDIO-10未关闭；测试仅针对该真实缺陷，不改fixture或通用工具。下一项是候选Chrome四轨顺序/切轨/恢复，之后继续原生与其余异常门禁。
+
 2026-09-07 Chrome普通音频界面增量（源码d62438f0）：AUD-01 M4B/M4A独立原件经正常setup、书库导入、详情打开播放器、播放/暂停、键盘滑块定位15s、关闭重开，两子项PASS。M4B实际HTML音频恢复16.126938s，距已确认15s偏差1126.938ms；M4A恢复15.108089s，偏差108.089ms，均≤2000ms，包含重开自动播放到人工暂停的时间。最终只读ORM分别16127ms/r14、15108ms/r16，真实API PUT分别14/16次200，媒体206，浏览器error/warn为空，无API5xx。两个30秒样本同SHA `3ee91a25eeb4fd8c6261db8c660d2e84d0d624e8686499c35d0c06fbab6c6833`，只证明两扩展名各自真实路径，不作为不同编码/内嵌章节证据。
 
 证据根`artifacts/releases/1.0/d62438f0/chrome-m4b-m4a-20260907/`：`chrome-observations.json`是实际CUA交互与只读媒体时钟的转录，`first-resource-middle-orm.json`、`m4a-middle-orm.json`、`final-progress-orm.json`保留服务端事实，`fixture/api.log`保留原HTTP日志，`manual-preparation.json`/原始manifest及`final-verification.json`保留输入和收尾。原7样本+M4B/M4A两样本共9个，原件和911应用源码均未变，准备后manifest未变。Chrome导出功能不支持，未伪称有本地截图；一次M4A暂停点击因已自然播到EOF无匹配，复核真实状态后继续。人工hash检查初次误将CBZ源目录当文件，按现有sourceFiles清单逐文件核验后通过，未改工具或产品。退出测试账号并关闭自有标签页，stop正常触发、launcher exit0，保留Windows子进程停止码；配置恢复、工作树干净、18081/3102释放，没有活动fixture。
