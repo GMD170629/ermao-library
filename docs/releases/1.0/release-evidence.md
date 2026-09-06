@@ -1,5 +1,13 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 SYNC-03已关闭（当前应用源码 `ead1ba20dce37e941d952d711cee7f72aa76bf42`）：在全新隔离库、Chrome production 与现有 f8847633 Android 独立开发包中重新执行原链路。Web确认5000ms→Android首页首次Playing5015ms；Android普通暂停/滑块确认15000ms/r8后，Chrome fresh reload在播放器尚未打开（audio空src/time0/paused）时直接显示50%和“当前收听 0:15”；正常打开播放器首个实际Playing为15秒，同一resource/asset，误差0ms。reading-units完整presentation与独立v5 GET相同，实际非空Chapter 2亦保留。Android再从首页新导入封面进入真实详情，reading-units pageSize=100返回200、继续收听可用、无无关能力提示。`android-detail-adjacent.xml`实际为首页，不用它证明详情；真正相邻证据为`android-adjacent-detail-cover-entry.xml`。
+
+证据根 `artifacts/releases/1.0/ead1ba20/sync03-complete-20260907/`：inputs、bootstrap、web-confirmed、android-first-playing、android-confirmed、server-reading-units-before-reload及原生XML为实际记录；`chrome-observations.json`明确为实际CUA AX/DOM观察的人工转录，不冒充浏览器网络导出。931项hash复核全部一致（914应用源码及17样本/原件），设备已安装APK实测SHA-256仍为`c7c1fbed6ce9795f8c8d5ed68865e1dcd6c8800925056f8a6de3530bb576654b`。API有10次重新登录前401，全部位于Android正常登录行69之前；之后无4xx/5xx，12次进度PUT为200；浏览器关闭播放器后error日志为空。正常退出测试账号、关闭自有tab、强停独立包、移除自有reverse、fixture exit0/stopped、18084/3105释放及配置恢复均核验，见cleanup-verification。首次保存空pid输出没有生成文件，随后重查pidof退出1/空输出并显式保存，不把缺文件当作进程已退出证据。原仓库15项用户改动保留。
+
+最小修复复用Reader已有一次presentation解码及public mapper，Library详情携带同一完整投影；原HTTP presentation schema移到共享contracts由Reader/Library两处消费，原定义删除、约束不变，无新查询或逐资源GET。Web复用v5-wire唯一presentation parser及pending/本页capture owner，时钟消费实际playback，不按百分比反推。原cff3e689与中间ffcbd4aa真实失败保留。针对性API原RED 1FAIL/16PASS→17PASS；Web缺时间原RED 1FAIL/2PASS→完整Web483PASS，lint/typecheck/pretest含i18n通过；后端进度/契约/Library相邻36PASS、mypy app及Ruff通过，OpenAPI生成Reader文件byte-identical。日志位于`54362ccf/sync03-server-presentation-20260907/`和`62377271/sync03-detail-overlay-20260907/web-presentation-*.log`。独立子代理实际diff复核无必要修正；本轮真实非空章节补齐其API空章节样本限制。没有测试工具扩展，停止围绕SYNC-03继续完善工具。
+
+当前继续POS-04～10的未覆盖异常/生命周期子项，优先现有入口；ENV-11/12的真实回归执行限制、iOS、容器及负责人暂缓正式APK/IPA分别保留。本轮仅关闭上述具体缺陷，非全格式、真实竞态全覆盖或同冻结RC放行；下方较早OPEN/PARTIAL均为历史过程。
+
 2026-09-07 ffcbd4aa真实候选未闭环：新库M4B同一原件经Web正常5秒确认、Android首页首次5015ms、暂停/滑块15秒并GET r8后强停；Chrome reload直接50%（旧已确认overlay已修），但当前收听为书名。该页面audio元素空src/time0/paused，尚未打开播放器，不把播放器后来刷新充当详情通过。`ffcbd4aa/sync03-detail-regression-20260907/chrome-observations.json`、web/Android-confirmed.json、server-book-before-browser-reload.json、server-reading-units-after-reload.json留证；后者chapter/page字段null，无完整presentation。930项源码/原件hash一致；正常退出、自有标签关闭、独立包强停、自有reverse移除、fixture stop/exit0/端口释放，cleanup-verification.json保留。后续源码修改在该运行关闭后进行，新候选需重验，SYNC-03保持OPEN。
 
 同缺陷后续Web原时钟显示函数针对性RED为1FAIL/2PASS，保留missing-server-position-red.log；正在复用v5-wire唯一presentation parser读取服务端详情完整投影。对应时钟/本地pending优先/API验证及原wire相邻25 PASS（server-presentation-web-focused-configured.log）；第一次从仓库根执行因Web路径别名未加载失败，改从apps/web原入口执行，不修改工具。后端投影尚待完成，不能计整链通过。

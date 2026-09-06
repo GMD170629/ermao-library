@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-07 最新覆盖：SYNC-03已关闭。ead1ba20新库真实Chrome↔Android原场景：Web5000→Android5015ms、Android15000/r8→Chrome重载详情直接50%/0:15（尚未打开播放器），实际播放器恢复15000ms；完整服务端presentation含非空章节一致，原生正常详情相邻通过。原失败、针对性RED/GREEN、完整Web及后端相邻、独立审查、931项hash和服务/设备清理见release-evidence。停止该缺陷的工具完善。剩余可执行项为POS-04～10异常/生命周期缺口；ENV-11/12、iOS、容器及正式产物暂缓仍分项保留，未冻结RC、未整体GO。以下较早SYNC-03 OPEN/PARTIAL保留为历史。
+
 2026-09-07 SYNC-03候选ffcbd4aa实际复验仍PARTIAL：新库M4B从Web5000ms交给Android确认15000ms/r8，Chrome fresh reload百分比50%正确，但当前收听退成书名。实际reading-units只有currentHref/percent，未携带完整v5 presentation，故不能关闭。该候选已停止并保留失败，继续沿现有投影owner补全服务端展示；不以百分比反算当前位置、不增加逐资源额外GET。
 
 2026-09-07 SYNC-03（RG-04/POS-01，真实FAIL，候选待Chrome回归）：cff3e689普通交接中Chrome重载详情仍显示旧Web5秒，服务端已确认Android15秒，打开播放器后才纠正。owner为详情从getV5Progress无条件叠加已确认本地历史。ffcbd4aa复用既有pending身份读取，统一百分比/位置/继续资源投影并保留本页capture；原行为针对性RED、候选Web481及lint/typecheck/pretest通过，尚未关闭。当前独立fixture正在启动准备真实原场景；与SYNC-02启动ACK竞态无关，不改协调器。POS-07服务端首次迟到C、重放M和冲突保护已实测通过（e39e6de2）；客户端离线/受控并发顺序仍未覆盖。
@@ -122,6 +124,7 @@ ENV-06规模数据子项进展：100k真实紧凑文件已准备并逐文件校�
 
 | ID | 类型 / 证据 | 当前处理 |
 |---|---|---|
+| SYNC-03 | Chrome重载详情以已确认旧本地历史覆盖新远端位置；ffcbd4aa中间候选还缺完整服务端时间展示 | ead1ba20真实重载直接50%/0:15及同资产15秒恢复、原生详情相邻、针对性/完整回归与独立审查通过，已关闭；cff3e689和ffcbd4aa失败保留 |
 | AUDIO-11 | Android普通首页继续已确认音频误进Reader；85662d5d真机原失败 | f8847633新包原首页强停恢复同AAC资产17380ms/误差0，针对性/相邻及独立审查通过，已关闭；M4B/M4A章节恢复相邻31ms |
 | AUDIO-12 | 普通音频详情错误显示PDF/comic原生渲染器未提供 | 74098307复用主动作可用性owner；f8847633新包四轨和双单音频详情实际正常、独立审查及相邻保护通过，已关闭 |
 | AUDIO-10 | Chrome真实四轨详情与播放器/Reader bootstrap排序不一致；04231cda原失败及持久化sequence_index见最新证据 | 521e74ed真实Chrome原场景/切轨/恢复/首轨接轨PASS；SQLite/API分页一致性及相邻16 PASS，主核验清理，已关闭；原失败保留 |

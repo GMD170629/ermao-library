@@ -1,5 +1,7 @@
 # 1.0 发布验收矩阵
 
+2026-09-07 RG-04/POS-01详情与恢复相邻增量：SYNC-03在ead1ba20实际关闭。新库M4B Web确认5000→Android5015ms；Android确认15000/r8→Chrome重载详情在播放器未开时直接50%/当前收听0:15，随后实际恢复15000ms。完整presentation及非空章节由独立GET/reading-units核验；原生正常详情相邻通过。证据`artifacts/releases/1.0/ead1ba20/sync03-complete-20260907/`，原cff3e689/ffcbd4aa失败及清理在release-evidence。仅上述开发验证子项PASS，不覆盖POS-06真实ACK竞态、全部异常/格式或最终RC。
+
 2026-09-07 RG-04 正常交接增量（cff3e689 Web/API、f8847633 Android）：M4B/M4A/AAC 的 Chrome→Android 分别5000→5015/5015/5000ms；Android→Chrome分别15000→15000、15000→15000、15039→15039ms，六个短时子项PASS。通过实际普通UI与独立GET核验，同资源/资产且两端clientId不同；详见release-evidence最新记录。既有MP3结果保留，四格式正常交接有开发证据，但异常组合、iOS和最终RC仍非整体PASS。详情重载旧位置另行追踪。
 
 2026-09-07真实新包增量f8847633：AUDIO-11/12已关闭。Android普通首页AAC第四轨确认后强停冷启恢复17380→17380ms；M4B/M4A各自三章列表/上下章与确认后强停恢复10000→10031ms、第二章显示均PASS。详情正常收听可用且无无关能力提示。只覆盖上述已确认/短时/普通入口子项；离线未确认、其他异常、长时/全部边界和iOS仍未由本轮覆盖。证据、输入身份、原失败及清理见release-evidence最新记录。
