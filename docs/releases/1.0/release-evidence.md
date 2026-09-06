@@ -4,7 +4,13 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
-- 当前已推送检查点 `80c5d5b9`；后续工作树修改按逻辑审查提交。正式 RC 未冻结。Chrome 全量使用 `854712bb` 的 Web/C/WASM 源码，运行期间 Android/OPDS 工作树仍有并行修改，不能作为整体冻结验收。
+最新增量：`bc94df7d` 将两个 Dockerfile 的 Python 安装统一到现有 lock，复用 `scripts/install-python-runtime.sh`；5项命令边界测试和 WSL 实际39个锁定运行依赖安装/导入通过，见 `preflight-containers/result.md`、`05-locked-runtime-import-verification.log`、`07-final-static-tests.log`。锁漂移在创建环境前失败；Docker 引擎、双架构镜像运行仍 BLOCKED。
+
+真实 Chrome 新库链路当前尚 FAIL：`release-live/r1788672824257-w0/` 与 `r1788673266527-w0/` 记录七种真实文件导入、EPUB第二章保存和重开。首轮播放后立即暂停触发未完成 `play()` Promise 的过期错误，已由 `c14b3033` 修复；3项异步顺序单测、ESLint和TypeScript检查通过，`web-baseline/audio-play-attempt-tests.log`、`audio-live-typecheck.log`。第二轮通过该步骤，在重开按钮尚未加载时错误选择资源卡的测试分支超时，日志 `web-baseline/chrome-live-audio-fix.log`；测试已改为等待可用入口，待重跑。不得将局部经过路径登记成完整用例 PASS。
+
+新确证缺陷：独立 reading-status 与列表/详情投影不一致，见 `preflight-mobile/reading-status-public-projection-20260906/`；音频5秒内没有自动捕获位置，见 `preflight-mobile/rg04-audio-autosave-repro-20260906/`。正在复用 Reader 状态规则和跨端时序常量修复，旧 Android147项通过只代表之前检查点。真实 API 的 Windows 封面并发500亦已保留 `release-live/r1788672824257-w0/api.log`，正在定位唯一缓存实现。下一项可执行工作为上述修复、Chrome真实闭环、本机10k测量和位置HTTP探针；后端源码在负载测量窗口内保持不变。
+
+- 当前已推送检查点 `c14b3033`；后续工作树修改按逻辑审查提交。正式 RC 未冻结。Chrome 全量使用 `854712bb` 的 Web/C/WASM 源码，后续音频修复使相关旧结果不再代表当前源码，必须重新回归。
 - 用户批准 DEC-05：1.0 暂不支持第三方进度同步；OPDS 目录、搜索、下载保留。`f3748d58` 删除同步实现和声明，授权 GET/PUT 返回 410，未授权仍 401；阴性测试验证旧表、v5 表及所有 DML 均无写入。
 - 起点：`develop@197e81a808ba32595a8a6ffeda62422b3a7d3473`，初始 `git status --short` 无输出。后续复核发现原工作区出现 OPDS/shared 等未提交变化，归属正在核查；这些变化全部保留，不清理、不提交，不作为隔离发布分支的已验收内容。
 - 隔离工作区：`D:/www/ermao-release-1.0`；分支 `codex/release-1.0-convergence`。正式 RC 未冻结，无 tag/公开发布。用户追加授权及时 commit/push；已检查三个工作流，push 仅匹配 develop/prod 或版本 tag，专用分支不触发发布。只推专用分支，不创建 PR/触发工作流。

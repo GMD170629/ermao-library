@@ -4,6 +4,8 @@
 
 ## 1. 执行基线与展开规则
 
+`c14b3033` 增量状态：RG-04 音频自动保存间隔与 reading-status 公共投影确证 FAIL，修复及复测中；真实Chrome新库→7种文件导入→EPUB保存/重开已有局部证据，整个闭环仍FAIL，不覆盖Android/iOS或全部格式。音频快速暂停修复单测3项PASS，后续完整Chrome回归待执行。两镜像锁定安装入口 `bc94df7d` 的边界测试和WSL实际安装PASS，ART-02实际容器仍BLOCKED。具体路径见证据台账最新增量。
+
 RG-05 可执行入口：`scripts/python_release_load_precheck.py`，使用真实文件导入、实际 API/Worker、分扫描状态请求日志和进程树 RSS；10000份紧凑样本就绪。工具4项保护测试 PASS，负载结果待实际运行，命令与证据见 R1-LOAD-OBSERVER。默认短窗口仅为本机预检，完整时长/规模要求保持。
 
 当前代码验证检查点 `80c5d5b9`：后端完整跨平台1252项覆盖、Android host216与lint通过；实际真机全套147项全部通过，Debug/test两包hash和冷启动证据见 R1-ANDROID-FULL。AUD-* 目前新增真实 Media3 短时PCM引擎证据，仅覆盖列明操作。59份公开格式样本已登记，实际播放状态继续逐组合展开，不能批量填 PASS。

@@ -20,13 +20,17 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 | TEST-06 | Web 详情 fixture 缺 canonical chapter fields；封面 mock 不匹配 size 查询串；触摸端套用精确指针菜单假设；旧按钮/目录交互过期 | 修正 fixtures/真实入口，保留封面比例、触摸可达、键盘管理、当前章节和翻页断言；生产封面/菜单视觉未改，Chrome 全套随后留完整日志 |
 | READER-01 | 共享 C 章节核未识别“第 1 章”含数词空白的合法标题，Chrome TXT 实际失败 | `854712bb` 修复唯一 C owner、针对性正负例与 WASM 同步；C warning-as-error 测试及 Chrome 全套 PASS |
 | ANDROID-01 | 真机漫画目录截图显示按钮 0/1、第二页摘要仍称第 1 页；长目录 Row 无滚动入口 | `805be838` 修复，千页目录与全套目录19项真机 PASS；截图复核继续。早期新测试自身目录 fixture 问题已纠正并保留失败日志；不将 EPUB 早期截图空白推定为产品缺陷 |
-| RISK-05 | 视觉夹具追踪发现旧 `legacy_views.book_view` 按进度推导 completed，可能未合并独立 reading status；尚未通过真实请求复现 | 已安排专用新库 FINISHED/UNREAD 与详情/列表投影对照；保留 Locator/进度不变，不直接当作确证缺陷或通过 |
+| READER-02（原 RISK-05） | 新库真实HTTP已复现：FINISHED无进度时详情仍未完成；显式UNREAD后37%进度使管理列表误显READING；`preflight-mobile/reading-status-public-projection-20260906/` | FAIL / 修复中；复用 Reader 公共查询与状态规则统一投影，不修改真实 Locator 或百分比；须原失败和多资源/隔离回归 |
+| AUDIO-01 | 真实Chrome快速播放/暂停后，迟到的play Promise拒绝覆盖当前正常暂停状态；`release-live/r1788672824257-w0/` | `c14b3033` 已修复并推送，3项顺序测试PASS；第二次真实运行经过该步骤，完整闭环仍待回归 |
+| AUDIO-02 | KMP/Android注入5秒播放没有自动捕获，Web现有间隔15秒；`preflight-mobile/rg04-audio-autosave-repro-20260906/` | FAIL / 修复中；共享时序契约及各端接入，必须区分捕获、持久化与服务端确认，不用UI时钟证明保存 |
+| MEDIA-01 | Windows真实Chrome请求封面出现500；缓存临时文件替换报WinError32/5，`release-live/r1788672824257-w0/api.log` | FAIL / 定位及针对性复现；沿用唯一缓存owner修复并回归并发读取，不新增缓存框架 |
+| TEST-07 | 真实Chrome重开音频时，脚本用即时count误判尚未加载按钮并等待不存在的资源卡；`web-baseline/chrome-live-audio-fix.log` | 已修改为等待可用入口，待重跑；保留完整音频恢复误差≤2秒断言 |
 
 RUN-01 最新拆分：`f3748d58` 后端 Linux 完整1250 PASS + 原有平台2 skip，Windows 两项补测均 PASS；Android host216 PASS、集成 lint PASS。`80c5d5b9` Android/C 同源码集成真机147项全部 PASS，证据见 R1-ANDROID-FULL，此批原自动回归失败已解除，最终 RC 全套仍待冻结重跑。ANDROID-01 截图已由主代理复核确认页码修正。真实音频短时引擎测试 PASS，长时/逐编码/实际服务端恢复仍待执行。
 
 | ID | 当前事实与证据 | 当前处理 |
 |---|---|---|
-| ENV-01 | 当前 develop `197e81a8` 干净，已创建隔离发布分支；见 evidence R1 | 旧脏工作树阻塞解除；最终 RC 冻结仍 NOT_RUN |
+| ENV-01 | 起点 develop `197e81a8` 干净，已创建隔离发布分支；原工作区后续15项改动归属无法确认，全部保留并排除 | 最终 RC 冻结仍 NOT_RUN，不将原工作区后续改动视为已纳入验收 |
 | ENV-02 | Windows 可用，未登记 Mac/Xcode/配对 iOS 设备 | iOS 编译/适配器/真机 BLOCKED；继续其他平台 |
 | ENV-03 | Android `9e896bbc` 在线，用户授权测试；可创建本机专用数据目录 | Android 开发验证、本机新库不再因旧交接缺失停工；正式签名/最终部署条件另记 |
 | ENV-07 / DEC-01 | 用户明确暂缓正式安装包构建/导出 | ART-03/04 正式交付 NOT_RUN（用户暂缓），不构建替代物、不填 PASS |
