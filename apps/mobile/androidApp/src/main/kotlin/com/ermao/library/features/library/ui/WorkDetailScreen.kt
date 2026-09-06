@@ -857,13 +857,7 @@ private fun WorkDetailActionRow(
             )
             }
         }
-        val captionResource = when {
-            selectedResource == null || !selectedResource.readable -> R.string.work_no_readable_resources
-            ReaderFormatSupport.deliveryMode(selectedResource.readerType, selectedResource.format) ==
-                ReaderDeliveryMode.Unsupported ->
-                R.string.work_reader_renderer_pending
-            else -> null
-        }
+        val captionResource = workDetailAvailabilityCaption(selectedResource, primaryAction)
         captionResource?.let { resource ->
             Text(
                 stringResource(resource),
@@ -2379,6 +2373,15 @@ internal fun workDetailPrimaryActionPresentation(
         label = readingLabel,
         enabled = true,
     )
+}
+
+internal fun workDetailAvailabilityCaption(
+    selectedResource: ResourceContent?,
+    primaryAction: WorkDetailPrimaryActionPresentation,
+): Int? = when {
+    selectedResource == null || !selectedResource.readable -> R.string.work_no_readable_resources
+    primaryAction.intent == WorkDetailPrimaryActionIntent.Unavailable -> R.string.work_reader_renderer_pending
+    else -> null
 }
 
 internal fun workDetailVolumePresentation(

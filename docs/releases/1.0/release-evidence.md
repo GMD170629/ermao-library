@@ -1,5 +1,7 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 AUDIO-12候选：详情能力提示直接消费已有workDetailPrimaryActionPresentation的可用性结果，消除PLAYER音频被Reader专用Unsupported误判；不可读、缺资源与真实不支持的提示保护保留。新增原场景及PDF/CBZ/EPUB相邻呈现断言，旧条件28项中1失败（audio-12-red.log），候选完整host/lint通过。未改文案、格式列表或安全策略，真实新包详情待复验，暂不关闭。
+
 2026-09-07 AUDIO-11候选：Android继续项透传shared已有readerType，首页按真实resumeResourceId调用同一openAudio启动owner，详情/章节入口也使用该owner；不拼造ResourceContent，不修改Reader安全边界或Locator。旧行为针对性实际7项中2失败（映射和路由），修复后7项通过；原日志audio-11-red-configured.log、audio-11-green.log在85662d5d/android-normal-ui-20260907。首次命令因未配置ERMAO_ZIG未到测试，保留audio-11-red.log；随后复用既有0.14.1安装，无新增工具/系统变更。最终相邻Android host222与shared host429、lint通过，零失败/跳过（Gradle允许未受影响任务复用）；原生新包原场景尚待执行，AUDIO-11不关闭。
 
 2026-09-07 Android普通UI原场景：独立开发包com.ermao.library.releasecheck已在9e896bbc安装并正常登录全新隔离库，原App的UID/codePath/version/安装时间前后不变。源码85662d5d、APK SHA-256 1ed92ec8f3b4aaeba831187880b9111f84e1e07405f6ebb18a22d15333be997c；不是正式APK。证据根`artifacts/releases/1.0/85662d5d/android-normal-ui-20260907/`。四轨普通详情/队列实际操作及系统只读媒体回调确认M4B→AAC自然切轨；不外推全部边界或长时。AAC显式暂停后服务端确认17182ms/rev64，仅强停独立包并冷启动，首页“继续阅读”进入电子阅读器报格式不支持，登记AUDIO-11 FAIL。关闭错误页后，从同一作品详情“继续收听”进入，真实MediaSession第四轨首次Playing位置17182ms（点击后1390ms），误差0ms；仅详情恢复对照PASS，首页恢复仍FAIL。音频详情同时两次显示无关的PDF/漫画原生渲染器缺失提示，登记AUDIO-12。`normal-ui-observations.json`关联UI XML、系统状态序列、只读ORM和失败截图，保留早期EOF/操作观察，不计作明确暂停证据。原始7fixture、额外6音频与911应用源码共932项hash全匹配；API无4xx/5xx、67次PUT200。媒体monitor正常q退出；测试包强停保留供修复回归，原应用不动，reverse与临时UI文件已清理、输入凭据文件已删除，fixture stop/exit0、端口释放、Web配置恢复。详细见prestop-verification.json与cleanup-verification.json。后续先修复实际入口阻塞，再补未执行的原生章节普通UI；未冻结RC。此前“尚未安装”是历史准备状态。

@@ -313,6 +313,27 @@ class WorkDetailLayoutTest {
     }
 
     @Test
+    fun availabilityCaptionMatchesTheActualPrimaryAction() {
+        val audio = testResource(readerType = "audio", format = "AUDIOBOOK_DIR", progressPercent = 88)
+        val cases = listOf(
+            audio to null,
+            audio.copy(format = "M4B") to null,
+            audio.copy(readerType = "pdf", format = "PDF") to null,
+            audio.copy(readerType = "comic", format = "CBZ") to null,
+            audio.copy(readerType = "reflowable", format = "EPUB") to null,
+            audio.copy(readable = false) to R.string.work_no_readable_resources,
+            null to R.string.work_no_readable_resources,
+            audio.copy(readerType = "reflowable", format = "invalid-format") to R.string.work_reader_renderer_pending,
+        )
+        for ((resource, expected) in cases) {
+            assertEquals(
+                expected,
+                workDetailAvailabilityCaption(resource, workDetailPrimaryActionPresentation(resource, null)),
+            )
+        }
+    }
+
+    @Test
     fun reflowableProgressKeepsDownloadIndependentFromOnlineReading() {
         val currentResource = testResource(
             readerType = "reflowable",
