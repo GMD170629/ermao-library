@@ -36,8 +36,6 @@ API_ROOT = REPO_ROOT / "apps" / "api-python"
 # keep its exception line-scoped on these imports.
 sys.path.insert(0, str(API_ROOT))
 
-from python_smoke_process import LoggedProcess, start_logged_process
-
 from app.core.config import Settings
 from app.db.sqlite import create_sqlite_engine
 from app.models import (
@@ -46,6 +44,7 @@ from app.models import (
     LibraryReadableResource,
     LibraryResourceAsset,
 )
+from python_smoke_process import LoggedProcess, start_logged_process
 
 SUPPORTED_EXTS = {".epub", ".pdf", ".cbz", ".zip"}
 SAMPLE_LIBRARY_NAME = "Sample library"
@@ -304,7 +303,12 @@ def wait_for_task_api(
     raise RuntimeError(f"import task API did not settle: {last_payload}")
 
 
-def catalog_resources(client: httpx.Client) -> list[tuple[dict, dict]]:
+def catalog_resources(
+    client: httpx.Client,
+    *,
+    expected_books: int = 3,
+    expected_resources: int = 3,
+) -> list[tuple[dict, dict]]:
     catalog = expect_ok(client.get("/api/books", params={"pageSize": 100}))
     books = catalog.get("books")
     assert isinstance(books, list), catalog
@@ -322,8 +326,8 @@ def catalog_resources(client: httpx.Client) -> list[tuple[dict, dict]]:
             assert isinstance(resource, dict), resource
             assert resource.get("bookId") == book_id, resource
             resources.append((detail_book, resource))
-    assert len(books) == 3, books
-    assert len(resources) == 3, resources
+    assert len(books) == expected_books, books
+    assert len(resources) == expected_resources, resources
     return resources
 
 
