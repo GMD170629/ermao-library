@@ -1,10 +1,11 @@
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { basename, dirname, resolve } from 'node:path';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
+import { promisify } from 'node:util';
 
-import { expect, test, type Page, type Response } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page, type Request, type Response } from '@playwright/test';
 import timingFixture from '../../../packages/reader-contracts/fixtures/reader-progress-timing-v1.json';
 import { READER_V5_DB_NAME, readerV5ProgressKey } from '../lib/reader/v5-storage';
 import { parseReaderV5ProgressPut, parseReaderV5ProgressSnapshot, parseReaderV5ProgressWriteResult } from '../lib/reader/v5-wire';
@@ -572,6 +573,305 @@ function livePassword(): string {
   return password;
 }
 
+async function openLiveAudioPlayer(page: Page) {
+  await openDetailResource(page, '打开播放器');
+  const player = page.getByTestId('audio-mini-player');
+  await expect(player).toBeVisible({ timeout: 30_000 });
+  const audioToggle = player.getByTestId('audio-play-toggle');
+  await expect(audioToggle).toBeVisible({ timeout: 30_000 });
+  if (await audioToggle.getAttribute('aria-label') === '播放') await audioToggle.click();
+  await expect(audioToggle).toHaveAttribute('aria-label', '暂停', { timeout: 30_000 });
+  return { player, audioToggle };
+}
+
+// Observe both stores in one completed readonly transaction. Opening a
+// missing DB aborts its upgrade instead of creating test progress/schema.
+const storedProgress = (target: Page) => target.evaluate(async (databaseName) => {
+  const database = await new Promise<IDBDatabase>((resolve, reject) => {
+    const open = indexedDB.open(databaseName);
+    open.onsuccess = () => resolve(open.result);
+    open.onerror = () => reject(open.error);
+    open.onupgradeneeded = () => { open.transaction?.abort(); reject(new Error('v5 database must already exist')); };
+  });
+  try {
+    return await new Promise<{ pending: unknown[]; exact: unknown[] }>((resolve, reject) => {
+      const transaction = database.transaction(['pending-position', 'position'], 'readonly');
+      const pending = transaction.objectStore('pending-position').getAll();
+      const exact = transaction.objectStore('position').getAll();
+      transaction.oncomplete = () => resolve({ pending: pending.result, exact: exact.result });
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } finally { database.close(); }
+}, READER_V5_DB_NAME);
+
+type ChromeProcessIdentity = { pid: number; createdAt: string; executablePath: string; commandLine: string };
+
+async function readChromeProcess(pid: number): Promise<ChromeProcessIdentity | null> {
+  if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('invalid dedicated Chrome PID');
+  const { stdout } = await promisify(execFile)('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `
+    $ErrorActionPreference = 'Stop'
+    $chromeProcess = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"
+    if ($null -ne $chromeProcess) {
+      @{ pid = [int]$chromeProcess.ProcessId; createdAt = $chromeProcess.CreationDate.ToUniversalTime().ToString('o'); executablePath = $chromeProcess.ExecutablePath; commandLine = $chromeProcess.CommandLine } | ConvertTo-Json -Compress
+    }
+  `], { windowsHide: true, timeout: 10_000, maxBuffer: 65_536 });
+  if (!stdout.trim()) return null;
+  const value = record(JSON.parse(stdout));
+  return {
+    pid: numberValue(value.pid, 'Chrome PID'),
+    createdAt: stringValue(value.createdAt, 'Chrome creation time'),
+    executablePath: stringValue(value.executablePath, 'Chrome executable'),
+    commandLine: stringValue(value.commandLine, 'Chrome command line')
+  };
+}
+
+async function identifyDedicatedChrome(context: BrowserContext, profile: string, launchStartedAt: number) {
+  const browser = context.browser();
+  if (!browser) throw new Error('dedicated desktop Chrome browser is unavailable');
+  const cdp = await browser.newBrowserCDPSession();
+  try {
+    const processes = await cdp.send('SystemInfo.getProcessInfo');
+    const roots = processes.processInfo.filter((entry) => entry.type === 'browser');
+    expect(roots).toHaveLength(1);
+    const command = await cdp.send('Browser.getBrowserCommandLine');
+    expect(command.arguments.filter((arg) => arg.startsWith('--user-data-dir=')))
+      .toEqual([`--user-data-dir=${profile}`]);
+    const root = await readChromeProcess(roots[0].id);
+    if (!root) throw new Error('dedicated Chrome root exited before ownership verification');
+    expect(root.pid).toBe(roots[0].id);
+    expect(basename(root.executablePath).toLowerCase()).toBe('chrome.exe');
+    expect(Date.parse(root.createdAt)).toBeGreaterThanOrEqual(launchStartedAt);
+    expect(Date.parse(root.createdAt)).toBeLessThanOrEqual(Date.now());
+    // Check the exact argument, not a profile-name substring or a parent path.
+    const path = escapeRegExp(profile);
+    expect(root.commandLine).toMatch(new RegExp(`(?:^|\\s)(?:"--user-data-dir=${path}"|--user-data-dir="${path}"|--user-data-dir=${path})(?=\\s|$)`, 'i'));
+    return root;
+  } finally { await cdp.detach(); }
+}
+
+test('release live paused confirmed MP3 survives dedicated Chrome process termination', async ({ playwright }, testInfo) => {
+  test.setTimeout(FIXTURE_STARTUP_TIMEOUT_MS + 300_000 + FIXTURE_STOP_TIMEOUT_MS);
+  if (!productionWeb || process.platform !== 'win32') {
+    throw new Error('RG04_POS03 requires production Chrome on Windows for CDP/CIM process ownership');
+  }
+  const password = livePassword();
+  const apiResponses: ApiResponseObservation[] = [];
+  const importTaskFailures: JsonRecord[] = [];
+  const screenshots: string[] = [];
+  const evidence: JsonRecord = { gate: 'RG04/POS03', scenario: 'paused-confirmed-process-kill', phase: 'setup' };
+  const contexts: BrowserContext[] = [];
+  const roots: ChromeProcessIdentity[] = [];
+  const cleanup: JsonRecord[] = [];
+  const progressRequests: Request[] = [];
+  const progressResponses: Response[] = [];
+  let progressPath: string | null = null;
+  let fixture: FixtureRun | null = null;
+  let manifest: LiveManifest | null = null;
+  let profile: string | null = null;
+  let primaryFailure: Error | null = null;
+  let cleanupFailure: Error | null = null;
+
+  const launch = async (profilePath: string) => {
+    const startedAt = Date.now();
+    const { viewport, deviceScaleFactor, isMobile, hasTouch, userAgent } = testInfo.project.use;
+    const context = await playwright.chromium.launchPersistentContext(profilePath, {
+      channel: 'chrome', headless: true, serviceWorkers: 'allow',
+      viewport, deviceScaleFactor, isMobile, hasTouch, userAgent
+    });
+    contexts.push(context);
+    context.on('request', (request) => {
+      const url = new URL(request.url());
+      if (url.origin === manifest?.webOrigin && url.pathname === progressPath && request.method() === 'PUT') {
+        progressRequests.push(request);
+      }
+    });
+    context.on('response', (response) => {
+      const url = new URL(response.url());
+      if (url.origin !== manifest?.webOrigin || !url.pathname.startsWith('/api/')) return;
+      const method = response.request().method();
+      apiResponses.push({ method, path: `${url.pathname}${url.search}`, status: response.status() });
+      if (method === 'PUT' && url.pathname === progressPath) progressResponses.push(response);
+    });
+    const root = await identifyDedicatedChrome(context, profilePath, startedAt);
+    roots.push(root);
+    return { context, root, startedAt };
+  };
+
+  try {
+    fixture = await startFixture(testInfo);
+    manifest = fixture.manifest;
+    if (!manifest) throw new Error('live fixture returned without a manifest');
+    const { webOrigin } = manifest;
+    const temporaryRoot = resolve(REPO_ROOT, '.tmp');
+    await mkdir(temporaryRoot, { recursive: true });
+    // No caller-supplied profile, user profile or junction out of the workspace.
+    expect((await realpath(temporaryRoot)).toLowerCase()).toBe(temporaryRoot.toLowerCase());
+    profile = await mkdtemp(resolve(temporaryRoot, 'rg04-pos03-chrome-'));
+    expect(await realpath(profile)).toBe(profile);
+    evidence.profile = profile;
+    const source = await launch(profile);
+    const page = source.context.pages()[0] ?? await source.context.newPage();
+    const { catalog } = await setupLiveCatalog(page, manifest, password, apiResponses, importTaskFailures, screenshots);
+    const audio = catalog.find((entry) => entry.readerType === 'audio' && entry.assetMimeTypes.includes('audio/mpeg'));
+    if (!audio) throw new Error('real catalog did not contain the required MP3 resource');
+    expect(manifest.samples.some((sample) => sample.expectedMime === 'audio/mpeg')).toBe(true);
+    progressPath = `/api/reader/v5/resources/${encodeURIComponent(audio.resourceId)}/progress`;
+    expect(responseData(await requestJson(page, webOrigin, progressPath, apiResponses), progressPath).progressSnapshot).toBeNull();
+    const detailURL = `${webOrigin}/books/${encodeURIComponent(audio.bookId)}?resourceId=${encodeURIComponent(audio.resourceId)}`;
+    await page.goto(detailURL, { waitUntil: 'domcontentloaded' });
+    await expect(page.getByText(audio.bookTitle, { exact: true }).first()).toBeVisible();
+    const { audioToggle } = await openLiveAudioPlayer(page);
+    const engine = page.locator('audio');
+    const startedPosition = await engine.evaluate((element: HTMLAudioElement) => element.currentTime * 1_000);
+    await expect.poll(() => engine.evaluate((element: HTMLAudioElement) => element.currentTime * 1_000), { timeout: 15_000 })
+      .toBeGreaterThanOrEqual(startedPosition + 5_000);
+    const pauseRequestedAt = Date.now();
+    await audioToggle.click();
+    await expect(audioToggle).toHaveAttribute('aria-label', '播放');
+    const paused = await engine.evaluate((element: HTMLAudioElement) => ({ paused: element.paused, positionMillis: element.currentTime * 1_000 }));
+    expect(paused.paused).toBe(true);
+    expect(paused.positionMillis).toBeGreaterThanOrEqual(startedPosition + 5_000);
+    evidence.phase = 'confirm-paused';
+    await expect.poll(() => {
+      const latest = progressRequests.at(-1);
+      const upload = latest && parseReaderV5ProgressPut(latest.postDataJSON());
+      return Boolean(upload && upload.capturedAtEpochMillis >= pauseRequestedAt
+        && progressResponses.some((response) => response.request() === latest));
+    }).toBe(true);
+    const latestRequest = progressRequests.at(-1);
+    const ackResponse = progressResponses.filter((response) => response.request() === latestRequest).at(-1);
+    if (!latestRequest || !ackResponse) throw new Error('RG04_POS03_PAUSE_ACK_MISSING');
+    const upload = parseReaderV5ProgressPut(latestRequest.postDataJSON());
+    if (!upload) throw new Error('RG04_POS03_INVALID_REAL_PUT');
+    expect(ackResponse.status()).toBe(200);
+    expect(ackResponse.fromServiceWorker()).toBe(false);
+    const ackPayload: unknown = await ackResponse.json();
+    const ack = parseReaderV5ProgressWriteResult(responseData({ status: ackResponse.status(), payload: ackPayload }, progressPath));
+    if (!ack) throw new Error('RG04_POS03_INVALID_REAL_ACK');
+    expect(ack.acceptedMutationId).toBe(upload.mutationId);
+    expect(ack.acceptedRevision).toBeGreaterThan(0);
+    expect(ack.currentSnapshot).toMatchObject({ ...upload, revision: ack.acceptedRevision });
+    await expect.poll(async () => {
+      const stored = await storedProgress(page);
+      return stored.pending.length === 0 && stored.exact.length === 1
+        && optionalRecord(stored.exact[0])?.revision === ack.acceptedRevision;
+    }).toBe(true);
+    const confirmed = await storedProgress(page);
+    const exact = record(confirmed.exact[0]);
+    const identity = {
+      serverIdentity: webOrigin, userId: stringValue(exact.userId, 'local userId'), clientId: upload.clientId,
+      bookId: audio.bookId, resourceId: audio.resourceId
+    };
+    expect(confirmed).toEqual({ pending: [], exact: [{ ...identity, key: readerV5ProgressKey(identity), ...upload, revision: ack.acceptedRevision }] });
+    const fresh = parseReaderV5ProgressSnapshot(
+      responseData(await requestJson(page, webOrigin, progressPath, apiResponses), progressPath).progressSnapshot
+    );
+    expect(fresh).toEqual(ack.currentSnapshot);
+    const confirmedMillis = numberValue(record(record(upload.position.presentation).playback).positionMillis, 'confirmed audio position');
+    expect(Math.abs(confirmedMillis - paused.positionMillis)).toBeLessThanOrEqual(2_000);
+    expect(Object.keys(record(upload.position.locator)).length).toBeGreaterThan(0);
+    evidence.source = { bookId: audio.bookId, resourceId: audio.resourceId, startedPosition, pauseRequestedAt, paused, upload, ack, fresh, confirmed };
+    await page.screenshot({ path: resolve(manifest.artifactDir, 'screenshots/04-mp3-confirmed-before-kill.png') });
+    screenshots.push('screenshots/04-mp3-confirmed-before-kill.png');
+
+    evidence.phase = 'kill-confirmed-root';
+    const verifiedRoot = await identifyDedicatedChrome(source.context, profile, source.startedAt);
+    expect(verifiedRoot).toEqual(source.root);
+    // Last guards run while the original page/context are still open. No
+    // page close, context close, player close or navigation may flush progress.
+    expect(page.isClosed()).toBe(false);
+    expect(progressRequests.at(-1)).toBe(latestRequest);
+    expect(await storedProgress(page)).toEqual(confirmed);
+    expect(await engine.evaluate((element: HTMLAudioElement) => element.paused)).toBe(true);
+    expect(apiResponses.filter((response) => response.status >= 500)).toEqual([]);
+    evidence.kill = { root: verifiedRoot, signal: 'SIGKILL', beforeKillAt: Date.now(), pageOpen: true };
+    await writeFile(resolve(manifest.artifactDir, 'process-recovery-before-kill.json'), `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
+    // Recheck PID + creation time immediately before the destructive operation.
+    expect(await readChromeProcess(verifiedRoot.pid)).toEqual(verifiedRoot);
+    const browser = source.context.browser();
+    if (!browser) throw new Error('dedicated source browser disappeared before kill');
+    const killedAt = Date.now();
+    process.kill(verifiedRoot.pid, 'SIGKILL');
+    await expect.poll(() => browser.isConnected(), { timeout: 15_000 }).toBe(false);
+    await expect.poll(() => readChromeProcess(verifiedRoot.pid), { timeout: 15_000 }).toBeNull();
+    evidence.kill = { ...record(evidence.kill), killedAt, exitedAt: Date.now(), disconnected: true, rootAbsent: true };
+
+    evidence.phase = 'restart-same-profile';
+    const target = await launch(profile);
+    expect(target.root.createdAt).not.toBe(source.root.createdAt);
+    evidence.restartedRoot = target.root;
+    const reopened = target.context.pages()[0] ?? await target.context.newPage();
+    // The same-origin offline shell observes persisted stores before a reader
+    // can capture a new position. It does not seed storage or replace login.
+    await reopened.goto(`${webOrigin}/offline`, { waitUntil: 'domcontentloaded' });
+    const afterRestart = await storedProgress(reopened);
+    evidence.afterRestart = afterRestart;
+    expect(afterRestart).toEqual(confirmed);
+    expect(parseReaderV5ProgressSnapshot(
+      responseData(await requestJson(reopened, webOrigin, progressPath, apiResponses), progressPath).progressSnapshot
+    )).toEqual(ack.currentSnapshot);
+    await reopened.goto(detailURL, { waitUntil: 'domcontentloaded' });
+    await expect(reopened.getByText(audio.bookTitle, { exact: true }).first()).toBeVisible();
+    const restoredPlayer = await openLiveAudioPlayer(reopened);
+    await restoredPlayer.audioToggle.click();
+    await expect(restoredPlayer.audioToggle).toHaveAttribute('aria-label', '播放');
+    const restored = await reopened.locator('audio').evaluate((element: HTMLAudioElement) => ({
+      paused: element.paused, positionMillis: element.currentTime * 1_000, durationMillis: element.duration * 1_000
+    }));
+    evidence.restored = { ...restored, confirmedMillis, errorMillis: Math.abs(restored.positionMillis - confirmedMillis) };
+    expect(restored.paused).toBe(true);
+    expect(restored.positionMillis).toBeGreaterThan(0);
+    expect(Math.abs(restored.positionMillis - confirmedMillis)).toBeLessThanOrEqual(2_000);
+    await reopened.screenshot({ path: resolve(manifest.artifactDir, 'screenshots/05-mp3-restored-after-process-kill.png') });
+    screenshots.push('screenshots/05-mp3-restored-after-process-kill.png');
+    expect(apiResponses.filter((response) => response.status >= 500)).toEqual([]);
+    evidence.phase = 'complete';
+  } catch (error) {
+    primaryFailure = safeFixtureError(error);
+  } finally {
+    // Close each owned context independently, including partial setup. Never
+    // enumerate/kill arbitrary Chrome processes or touch a user profile.
+    const closed = await Promise.allSettled(contexts.map((context) => context.close()));
+    for (const [index, outcome] of closed.entries()) {
+      cleanup.push({ context: index, outcome: outcome.status });
+      if (outcome.status === 'rejected') cleanupFailure = combineFixtureErrors(cleanupFailure, safeFixtureError(outcome.reason));
+    }
+    for (const root of roots) {
+      try {
+        await expect.poll(() => readChromeProcess(root.pid), { timeout: 15_000 }).toBeNull();
+        cleanup.push({ pid: root.pid, createdAt: root.createdAt, rootAbsent: true });
+      } catch (error) { cleanupFailure = combineFixtureErrors(cleanupFailure, safeFixtureError(error)); }
+    }
+    if (profile && !cleanupFailure) {
+      try {
+        expect(dirname(profile)).toBe(resolve(REPO_ROOT, '.tmp'));
+        expect(basename(profile)).toMatch(/^rg04-pos03-chrome-/);
+        expect(await realpath(profile)).toBe(profile);
+        await rm(profile, { recursive: true, maxRetries: 5, retryDelay: 200 });
+        cleanup.push({ profile, removed: !existsSync(profile) });
+        expect(existsSync(profile)).toBe(false);
+      } catch (error) { cleanupFailure = combineFixtureErrors(cleanupFailure, safeFixtureError(error)); }
+    }
+    if (fixture) {
+      try {
+        const fixtureFailure = await stopFixture(fixture);
+        if (fixtureFailure) throw new Error(fixtureFailure);
+      } catch (error) { cleanupFailure = combineFixtureErrors(cleanupFailure, safeFixtureError(error)); }
+      try {
+        await writeFile(resolve(fixture.artifactDir, 'browser-observations.json'), `${JSON.stringify({
+          result: primaryFailure || cleanupFailure ? 'FAILED' : 'PASS',
+          failure: primaryFailure?.message ?? null, cleanupFailure: cleanupFailure?.message ?? null,
+          repoHead: manifest?.repoHead ?? null, project: testInfo.project.name, noRouteMocks: true,
+          importTaskFailures, responses: apiResponses, screenshots, cleanup, ...evidence
+        }, null, 2)}\n`, 'utf8');
+      } catch (error) { cleanupFailure = combineFixtureErrors(cleanupFailure, safeFixtureError(error)); }
+    }
+  }
+  const error = combineFixtureErrors(primaryFailure, cleanupFailure);
+  if (error) throw error;
+});
+
 test(`release live fresh install resumes EPUB and ${requestedAudioMime} through Reader v5`, async ({ page, context }, testInfo) => {
   test.setTimeout(FIXTURE_STARTUP_TIMEOUT_MS + 300_000 + audioSoakSeconds() * 1_000 + FIXTURE_STOP_TIMEOUT_MS);
 
@@ -695,14 +995,7 @@ test(`release live fresh install resumes EPUB and ${requestedAudioMime} through 
 
     const audioProgressPath = `/api/reader/v5/resources/${encodeURIComponent(audio.resourceId)}/progress`;
     progressPaths.add(audioProgressPath);
-    await openDetailResource(page, '打开播放器');
-
-    const player = page.getByTestId('audio-mini-player');
-    await expect(player).toBeVisible({ timeout: 30_000 });
-    const audioToggle = player.getByTestId('audio-play-toggle');
-    await expect(audioToggle).toBeVisible({ timeout: 30_000 });
-    if (await audioToggle.getAttribute('aria-label') === '播放') await audioToggle.click();
-    await expect(audioToggle).toHaveAttribute('aria-label', '暂停', { timeout: 30_000 });
+    const { player, audioToggle } = await openLiveAudioPlayer(page);
     await audioToggle.click();
     await expect(audioToggle).toHaveAttribute('aria-label', '播放');
     await audioToggle.click();
@@ -969,27 +1262,6 @@ test('release live EPUB preserves offline pending across page rebuild and confir
       confirmation.responseAt ??= Date.now();
     }
   });
-
-  // Observe both stores in one completed readonly transaction. Opening a
-  // missing DB aborts its upgrade instead of creating test progress/schema.
-  const storedProgress = (target: Page) => target.evaluate(async (databaseName) => {
-    const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const open = indexedDB.open(databaseName);
-      open.onsuccess = () => resolve(open.result);
-      open.onerror = () => reject(open.error);
-      open.onupgradeneeded = () => { open.transaction?.abort(); reject(new Error('v5 database must already exist')); };
-    });
-    try {
-      return await new Promise<{ pending: unknown[]; exact: unknown[] }>((resolve, reject) => {
-        const transaction = database.transaction(['pending-position', 'position'], 'readonly');
-        const pending = transaction.objectStore('pending-position').getAll();
-        const exact = transaction.objectStore('position').getAll();
-        transaction.oncomplete = () => resolve({ pending: pending.result, exact: exact.result });
-        transaction.onerror = () => reject(transaction.error);
-        transaction.onabort = () => reject(transaction.error);
-      });
-    } finally { database.close(); }
-  }, READER_V5_DB_NAME);
 
   try {
     fixture = await startFixture(testInfo);
