@@ -1,0 +1,15 @@
+// Opt-in RG-03/04 device UI acceptance only. This does not build a deliverable.
+// Keep the normal release source set (empty login defaults), but install into
+// a separate Android UID so MainActivity can run without touching user data.
+gradle.beforeProject { project ->
+    if (project.path == ':androidApp') {
+        project.plugins.withId('com.android.application') {
+            project.extensions.getByName('androidComponents').finalizeDsl { android ->
+                android.defaultConfig.applicationId = 'com.ermao.library.releasecheck'
+                def acceptanceBuild = android.buildTypes.getByName('release')
+                acceptanceBuild.signingConfig = android.signingConfigs.getByName('debug')
+                acceptanceBuild.debuggable = true
+            }
+        }
+    }
+}

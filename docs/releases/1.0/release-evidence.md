@@ -4,6 +4,12 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+2026-09-07 Android隔离UI开发包已构建验证（应用源码85662d5d + 独立init配置hash，尚未安装）：`artifacts/releases/1.0/85662d5d/android-normal-ui-20260907/`保存build-isolated-ui.log（1m27s成功）、apk-verification.json、apk-badging.txt与apk-signature.txt。包名com.ermao.library.releasecheck、入口com.ermao.library.MainActivity、开发签名CN=Android Debug、debuggable；SHA-256 `1ed92ec8f3b4aaeba831187880b9111f84e1e07405f6ebb18a22d15333be997c`。选用现有release空登录默认值，逐DEX检查不含本地Debug预填server/email；不在日志重述这些值。无应用业务源码变更，不作为正式签名APK。子代理普通UI入口只读报告已由主复核：Shell书目为合成Repository，音频UI测试只是投影，VisualFixture无网络；该子代理已结束。下一项为独立包安装、完整MainActivity实际登录与四格式/章节/多轨操作，缺口尚未计PASS。
+
+2026-09-07 Android普通UI准备（85662d5d）：现有release-live只在Compose宿主显示RG04并直接调用真实音频runtime，不能充当Book Detail/MainShell完整入口。MainShell直接使用ErmaoLibraryApplication的应用级账号/媒体状态，ReleaseAudioContext返回包装Context，无法不改真实用户状态而直接套入。当前已授权设备9e896bbc在线，原应用宿主PID5053空闲、前台为MIUI Launcher，reverse为空；专用包com.ermao.library.releasecheck尚未安装。不得把此前“主App无进程”历史描述当作执行时事实。
+
+本次最小辅助改动服务RG-03 AUD-01/02/04及RG-04普通UI：新增仅显式-I调用的test-support/release-live/android-ui.init.gradle，使用现有release空登录默认值源码集、独立包名/Android UID、开发签名和可调试标记，复用完整MainActivity/Application/真实网络/持久化/播放器。现有仪器不能证明普通UI，原应用存储不属于专用数据，因此现有方法不足；不新增测试框架或生产运行路径。普通Debug源码集包含本地预填账号值，独立验收选择既有release空默认值，既有文件保持。此包只用于隔离设备开发验收，绝非暂缓中的正式签名APK交付。停止条件为既有正常UI必测操作、真实位置/HTTP及专用包清理能够完成；不再增加平台/配置通用能力。AGP9.1.1本地API已核实finalizeDsl/signingConfig/debuggable接口，实际构建安装尚待执行，不能计PASS。
+
 2026-09-07 AUDIO-10闭环（生产候选521e74ed）：同一组原失败四轨原件在全新库以正常分卷UI导入后，详情HTTP186908.147、bootstrap186908.162及播放器列表均按01-MP3/03-M4A/04-M4B/02-AAC排序，assetId、sortOrder和轨号逐项一致；点击详情第二轨实际M4A约2.125s、全局约32s/27%，原错误顺序消除。播放器列表切M4B和下一轨控制切AAC分别核对实际媒体资产。全局滑块定位最后AAC中段，真实ACK r8保存14841ms、Locator position=4与AAC资产；关闭重开实际AAC15.938585s，偏差1097.585ms≤2秒。MP3在28s由正常播放自然到EOF后，未发切轨命令即实际自动播放M4A11.041434s；只证明该边界自动接轨，不声称量化无缝或全部边界。
 
 证据根`artifacts/releases/1.0/521e74ed/chrome-audio-10-20260907/`：chrome-observations.json、additional-library-inputs.json、final-orm.json、final-verification.json与fixture原始API/构建/源码记录。真实进度PUT22次200，无HTTP4xx/5xx、无浏览器error/warn；7生成样本及4额外原件、911应用源码均无差异，stop/launcher0、配置恢复、账号退出、自有标签关闭、18081/3102释放。运行中仅独立编辑一个契约测试，生产源码固定521e74ed，未冒充冻结RC。
