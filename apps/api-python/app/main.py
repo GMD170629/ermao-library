@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.concurrency import run_in_threadpool
 from starlette.types import ExceptionHandler
 
 from app.api.error_handlers import (
@@ -212,21 +213,23 @@ def create_app(
     app.state.password_authentication_runtime = password_authentication_runtime
     app.state.publication_navigation_runtime = publication_navigation_runtime
 
+    def check_database_maintenance() -> bool:
+        # Keep pool waits and the entire Session lifetime off the event loop.
+        with runtime_factory() as maintenance_db:
+            return database_maintenance_is_active(maintenance_db)
+
     @app.middleware("http")
     async def enforce_system_manager_boundary(request, call_next):
-        if request.method not in {"GET", "HEAD", "OPTIONS"}:
-            maintenance_db = runtime_factory()
-            try:
-                if database_maintenance_is_active(maintenance_db):
-                    return _vary_api_response_by_cookie(
-                        fail(
-                            "DATABASE_MAINTENANCE",
-                            status_code=503,
-                            code="DATABASE_MAINTENANCE",
-                        )
-                    )
-            finally:
-                maintenance_db.close()
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and await run_in_threadpool(
+            check_database_maintenance
+        ):
+            return _vary_api_response_by_cookie(
+                fail(
+                    "DATABASE_MAINTENANCE",
+                    status_code=503,
+                    code="DATABASE_MAINTENANCE",
+                )
+            )
         if not _requires_system_manager(request.url.path, request.method):
             response = await call_next(request)
             return (
