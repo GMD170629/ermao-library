@@ -4,8 +4,10 @@ import { resolve } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Response } from '@playwright/test';
 import timingFixture from '../../../packages/reader-contracts/fixtures/reader-progress-timing-v1.json';
+import { READER_V5_DB_NAME, readerV5ProgressKey } from '../lib/reader/v5-storage';
+import { parseReaderV5ProgressPut, parseReaderV5ProgressSnapshot, parseReaderV5ProgressWriteResult } from '../lib/reader/v5-wire';
 import { revealReaderControls, visibleReaderFrame } from './reader-controls';
 import { audioSoakSeconds, observeAudioSoak, startAudioProbe } from './release-audio-soak';
 
@@ -446,13 +448,134 @@ async function openDetailResource(page: Page, action: '打开阅读器' | '打�
   await open.click();
 }
 
+async function setupLiveCatalog(
+  page: Page,
+  manifest: LiveManifest,
+  password: string,
+  apiResponses: ApiResponseObservation[],
+  importTaskFailures: JsonRecord[],
+  screenshots: string[]
+): Promise<{ catalog: CatalogEntry[]; epub: CatalogEntry }> {
+  const { webOrigin } = manifest;
+  if (!manifest.ffprobeAvailable) throw new Error('Live audio import verification requires the configured ffprobe tool');
+  const requiredAudioCount = 4;
+  const samplesByFormat = new Map(manifest.samples.map((sample) => [sample.format.toUpperCase(), sample]));
+  expect(samplesByFormat.get('EPUB')?.fixtureSha256).toBeTruthy();
+  expect(samplesByFormat.get('PDF')?.fixtureSha256).toBeTruthy();
+  expect(samplesByFormat.get('CBZ')?.fixtureSha256).toBeTruthy();
+  for (const [format, extension] of [
+    ['AUDIO_MP3', '.mp3'],
+    ['AUDIO_AAC', '.aac'],
+    ['AUDIO_WAV', '.wav'],
+    ['AUDIO_FLAC', '.flac']
+  ] as const) {
+    const sample = samplesByFormat.get(format);
+    expect(sample?.fixtureSha256, `${format} fixture hash`).toBeTruthy();
+    expect(sample?.sourceExtension, `${format} source extension`).toBe(extension);
+    expect(sample?.corpusManifest, `${format} corpus manifest`).toBeTruthy();
+    expect(sample?.durationClaim).toContain('duration must be verified by the actual engine');
+  }
+  await mkdir(resolve(manifest.artifactDir, 'screenshots'), { recursive: true });
+
+  await page.goto(`${webOrigin}/setup`, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('heading', { name: '创建你的管理账户' })).toBeVisible();
+  if (productionWeb) {
+    expect(new URL(webOrigin).hostname, 'production PWA must exercise the caching branch').toBe('release-live.localhost');
+    expect(await page.evaluate(() => window.isSecureContext)).toBe(true);
+    await page.waitForFunction(() => navigator.serviceWorker.controller?.state === 'activated');
+  }
+  const setupForm = page.getByTestId('setup-form');
+  const setupInputs = setupForm.locator('input');
+  await setupInputs.nth(0).fill('Release Live Admin');
+  await setupInputs.nth(1).fill(manifest.email);
+  await setupInputs.nth(2).fill(password);
+  await setupInputs.nth(3).fill(password);
+  await page.getByRole('button', { name: '创建账户', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '添加书库' })).toBeVisible();
+  await page.screenshot({ path: resolve(manifest.artifactDir, 'screenshots/01-setup-account.png') });
+  screenshots.push('screenshots/01-setup-account.png');
+
+  const libraryRegion = page.getByRole('region', { name: '书库清单' });
+  await libraryRegion.getByRole('button', { name: /添加书库/ }).click();
+  const dialog = page.getByRole('dialog', { name: '新增书库' });
+  await expect(dialog).toBeVisible();
+  await page.getByLabel('书库名称').fill(manifest.libraryName);
+  await page.getByRole('combobox', { name: '书库路径' }).fill(manifest.libraryRootPath);
+  const collapseTree = dialog.getByRole('button', { name: '收起文件夹路径树' });
+  if (await collapseTree.count() > 0) await collapseTree.click();
+  await dialog.getByRole('radio', { name: '单本' }).click();
+  await dialog.getByRole('button', { name: '添加', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByText(manifest.libraryName, { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '确认', exact: true }).click();
+  await expect(page).toHaveURL(/\/library$/);
+
+  const librariesResult = await requestJson(page, webOrigin, '/api/libraries', apiResponses);
+  const librariesData = responseData(librariesResult, '/api/libraries');
+  const libraries = recordArray(librariesData.libraries, 'libraries');
+  const library = libraries.find((candidate) => candidate.name === manifest.libraryName);
+  if (!library) throw new Error('created FLAT library was not returned by the real API');
+  const libraryId = stringValue(library.id, 'library.id');
+  expect(library.organizationMode).toBe('FLAT');
+  expect(library.enabled).toBe(true);
+
+  const scanPath = `/api/libraries/${encodeURIComponent(libraryId)}/scan`;
+  const scanResult = await requestJson(page, webOrigin, scanPath, apiResponses, 'POST');
+  expect(scanResult.status).toBe(202);
+  await waitForImportTasks(
+    page,
+    webOrigin,
+    libraryId,
+    apiResponses,
+    importTaskFailures
+  );
+  const catalog = await waitForCatalog(page, webOrigin, apiResponses, requiredAudioCount);
+  const epub = catalog.find((entry) => entry.format === 'EPUB');
+  if (!epub) throw new Error('real catalog did not contain an EPUB resource');
+  expect(catalog.some((entry) => entry.format === 'PDF')).toBe(true);
+  expect(catalog.some((entry) => entry.format === 'CBZ')).toBe(true);
+  const audioEntries = catalog.filter((entry) => entry.readerType === 'audio');
+  expect(audioEntries.length).toBeGreaterThanOrEqual(requiredAudioCount);
+  expect(importTaskFailures).toHaveLength(0);
+  await page.screenshot({ path: resolve(manifest.artifactDir, 'screenshots/02-library-imported.png') });
+  screenshots.push('screenshots/02-library-imported.png');
+
+  const logout = await requestJson(page, webOrigin, '/api/auth/logout', apiResponses, 'POST');
+  expect(logout.status).toBe(200);
+  await page.context().clearCookies();
+  await page.goto(`${webOrigin}/login`, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('button', { name: '登录', exact: true })).toBeVisible();
+  const loginInputs = page.locator('form input');
+  await loginInputs.nth(0).fill(manifest.email);
+  await loginInputs.nth(1).fill(password);
+  await page.getByRole('button', { name: '登录', exact: true }).click();
+  await expect(page).toHaveURL(/\/library$/);
+
+  const expectedBookCount = new Set(catalog.map((entry) => entry.bookId)).size;
+  const libraryBookButtons = page.getByRole('button', { name: /查看《/ });
+  await expect.poll(() => libraryBookButtons.count()).toBeGreaterThanOrEqual(expectedBookCount);
+  for (const catalogEntry of catalog) {
+    await expect(
+      page.getByRole('button', { name: new RegExp(escapeRegExp(catalogEntry.bookTitle)) }).first()
+    ).toBeVisible();
+  }
+  await page.screenshot({ path: resolve(manifest.artifactDir, 'screenshots/03-library-list-after-login.png') });
+  screenshots.push('screenshots/03-library-list-after-login.png');
+  return { catalog, epub };
+}
+
 const requestedAudioMime = process.env.RELEASE_LIVE_AUDIO_MIME ?? 'audio/mpeg';
+
+function livePassword(): string {
+  const password = process.env.RELEASE_LIVE_PASSWORD;
+  if (!password || password.length < 10) throw new Error('RELEASE_LIVE_PASSWORD must be a local-only password of at least 10 characters');
+  return password;
+}
 
 test(`release live fresh install resumes EPUB and ${requestedAudioMime} through Reader v5`, async ({ page, context }, testInfo) => {
   test.setTimeout(FIXTURE_STARTUP_TIMEOUT_MS + 300_000 + audioSoakSeconds() * 1_000 + FIXTURE_STOP_TIMEOUT_MS);
 
-  const password = process.env.RELEASE_LIVE_PASSWORD;
-  if (!password || password.length < 10) throw new Error('RELEASE_LIVE_PASSWORD must be a local-only password of at least 10 characters');
+  const password = livePassword();
   const apiResponses: ApiResponseObservation[] = [];
   const progressPaths = new Set<string>();
   const progressWrites: ProgressWriteObservation[] = [];
@@ -488,111 +611,10 @@ test(`release live fresh install resumes EPUB and ${requestedAudioMime} through 
     fixture = await startFixture(testInfo);
     manifest = fixture.manifest;
     if (!manifest) throw new Error('live fixture returned without a manifest');
-    const { apiOrigin, webOrigin } = manifest;
-    if (!manifest.ffprobeAvailable) throw new Error('Live audio import verification requires the configured ffprobe tool');
-    const requiredAudioCount = 4;
-    const samplesByFormat = new Map(manifest.samples.map((sample) => [sample.format.toUpperCase(), sample]));
-    expect(samplesByFormat.get('EPUB')?.fixtureSha256).toBeTruthy();
-    expect(samplesByFormat.get('PDF')?.fixtureSha256).toBeTruthy();
-    expect(samplesByFormat.get('CBZ')?.fixtureSha256).toBeTruthy();
-    for (const [format, extension] of [
-      ['AUDIO_MP3', '.mp3'],
-      ['AUDIO_AAC', '.aac'],
-      ['AUDIO_WAV', '.wav'],
-      ['AUDIO_FLAC', '.flac']
-    ] as const) {
-      const sample = samplesByFormat.get(format);
-      expect(sample?.fixtureSha256, `${format} fixture hash`).toBeTruthy();
-      expect(sample?.sourceExtension, `${format} source extension`).toBe(extension);
-      expect(sample?.corpusManifest, `${format} corpus manifest`).toBeTruthy();
-      expect(sample?.durationClaim).toContain('duration must be verified by the actual engine');
-    }
-    await mkdir(resolve(manifest.artifactDir, 'screenshots'), { recursive: true });
-
-    await page.goto(`${webOrigin}/setup`, { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('heading', { name: '创建你的管理账户' })).toBeVisible();
-    if (productionWeb) {
-      expect(new URL(webOrigin).hostname, 'production PWA must exercise the caching branch').toBe('release-live.localhost');
-      expect(await page.evaluate(() => window.isSecureContext)).toBe(true);
-      await page.waitForFunction(() => navigator.serviceWorker.controller?.state === 'activated');
-    }
-    const setupForm = page.getByTestId('setup-form');
-    const setupInputs = setupForm.locator('input');
-    await setupInputs.nth(0).fill('Release Live Admin');
-    await setupInputs.nth(1).fill(manifest.email);
-    await setupInputs.nth(2).fill(password);
-    await setupInputs.nth(3).fill(password);
-    await page.getByRole('button', { name: '创建账户', exact: true }).click();
-    await expect(page.getByRole('heading', { name: '添加书库' })).toBeVisible();
-    await page.screenshot({ path: resolve(manifest.artifactDir, 'screenshots/01-setup-account.png') });
-    screenshots.push('screenshots/01-setup-account.png');
-
-    const libraryRegion = page.getByRole('region', { name: '书库清单' });
-    await libraryRegion.getByRole('button', { name: /添加书库/ }).click();
-    const dialog = page.getByRole('dialog', { name: '新增书库' });
-    await expect(dialog).toBeVisible();
-    await page.getByLabel('书库名称').fill(manifest.libraryName);
-    await page.getByRole('combobox', { name: '书库路径' }).fill(manifest.libraryRootPath);
-    const collapseTree = dialog.getByRole('button', { name: '收起文件夹路径树' });
-    if (await collapseTree.count() > 0) await collapseTree.click();
-    await dialog.getByRole('radio', { name: '单本' }).click();
-    await dialog.getByRole('button', { name: '添加', exact: true }).click();
-    await expect(dialog).toHaveCount(0);
-    await expect(page.getByText(manifest.libraryName, { exact: true })).toBeVisible();
-    await page.getByRole('button', { name: '确认', exact: true }).click();
-    await expect(page).toHaveURL(/\/library$/);
-
-    const librariesResult = await requestJson(page, webOrigin, '/api/libraries', apiResponses);
-    const librariesData = responseData(librariesResult, '/api/libraries');
-    const libraries = recordArray(librariesData.libraries, 'libraries');
-    const library = libraries.find((candidate) => candidate.name === manifest?.libraryName);
-    if (!library) throw new Error('created FLAT library was not returned by the real API');
-    const libraryId = stringValue(library.id, 'library.id');
-    expect(library.organizationMode).toBe('FLAT');
-    expect(library.enabled).toBe(true);
-
-    const scanPath = `/api/libraries/${encodeURIComponent(libraryId)}/scan`;
-    const scanResult = await requestJson(page, webOrigin, scanPath, apiResponses, 'POST');
-    expect(scanResult.status).toBe(202);
-    await waitForImportTasks(
-      page,
-      webOrigin,
-      libraryId,
-      apiResponses,
-      importTaskFailures
+    const { webOrigin } = manifest;
+    const { catalog, epub } = await setupLiveCatalog(
+      page, manifest, password, apiResponses, importTaskFailures, screenshots
     );
-    const catalog = await waitForCatalog(page, webOrigin, apiResponses, requiredAudioCount);
-    const epub = catalog.find((entry) => entry.format === 'EPUB');
-    if (!epub) throw new Error('real catalog did not contain an EPUB resource');
-    expect(catalog.some((entry) => entry.format === 'PDF')).toBe(true);
-    expect(catalog.some((entry) => entry.format === 'CBZ')).toBe(true);
-    const audioEntries = catalog.filter((entry) => entry.readerType === 'audio');
-    expect(audioEntries.length).toBeGreaterThanOrEqual(requiredAudioCount);
-    expect(importTaskFailures).toHaveLength(0);
-    await page.screenshot({ path: resolve(manifest.artifactDir, 'screenshots/02-library-imported.png') });
-    screenshots.push('screenshots/02-library-imported.png');
-
-    const logout = await requestJson(page, webOrigin, '/api/auth/logout', apiResponses, 'POST');
-    expect(logout.status).toBe(200);
-    await context.clearCookies();
-    await page.goto(`${webOrigin}/login`, { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('button', { name: '登录', exact: true })).toBeVisible();
-    const loginInputs = page.locator('form input');
-    await loginInputs.nth(0).fill(manifest.email);
-    await loginInputs.nth(1).fill(password);
-    await page.getByRole('button', { name: '登录', exact: true }).click();
-    await expect(page).toHaveURL(/\/library$/);
-
-    const expectedBookCount = new Set(catalog.map((entry) => entry.bookId)).size;
-    const libraryBookButtons = page.getByRole('button', { name: /查看《/ });
-    await expect.poll(() => libraryBookButtons.count()).toBeGreaterThanOrEqual(expectedBookCount);
-    for (const catalogEntry of catalog) {
-      await expect(
-        page.getByRole('button', { name: new RegExp(escapeRegExp(catalogEntry.bookTitle)) }).first()
-      ).toBeVisible();
-    }
-    await page.screenshot({ path: resolve(manifest.artifactDir, 'screenshots/03-library-list-after-login.png') });
-    screenshots.push('screenshots/03-library-list-after-login.png');
     const bookButton = page.getByRole('button', { name: new RegExp(escapeRegExp(epub.bookTitle)) }).first();
     await expect(bookButton).toBeVisible();
     await bookButton.click();
@@ -897,6 +919,239 @@ test(`release live fresh install resumes EPUB and ${requestedAudioMime} through 
           `${JSON.stringify(observations, null, 2)}\n`,
           'utf8'
         );
+      } catch (error) {
+        cleanupFailure = combineFixtureErrors(cleanupFailure, safeFixtureError(error));
+      }
+    }
+  }
+  const error = combineFixtureErrors(primaryFailure, cleanupFailure);
+  if (error) throw error;
+});
+
+test('release live EPUB preserves offline pending across page rebuild and confirms on reconnect', async ({ page, context }, testInfo) => {
+  test.setTimeout(FIXTURE_STARTUP_TIMEOUT_MS + 300_000 + FIXTURE_STOP_TIMEOUT_MS);
+  // RG04/POS04 (DEC07): the existing online reopen case cannot prove durable
+  // offline pending. The production offline page is only a same-origin observer,
+  // not an offline login/reader contract or a browser-process termination probe.
+  if (!productionWeb) throw new Error('RG04_POS04 requires RELEASE_LIVE_WEB_RUNTIME=production and the real service worker');
+  const password = livePassword();
+  const apiResponses: ApiResponseObservation[] = [];
+  const importTaskFailures: JsonRecord[] = [];
+  const screenshots: string[] = [];
+  const evidence: JsonRecord = { gate: 'RG04/POS04', phase: 'setup' };
+  let fixture: FixtureRun | null = null;
+  let manifest: LiveManifest | null = null;
+  let rebuilt: Page | null = null;
+  let primaryFailure: Error | null = null;
+  let cleanupFailure: Error | null = null;
+  let progressPath: string | null = null;
+  let expectedMutationId: string | null = null;
+  let reconnecting = false;
+  const confirmation: { sendableAt: number | null; responseAt: number | null; response: Response | null } = {
+    sendableAt: null, responseAt: null, response: null
+  };
+
+  context.on('response', (response) => {
+    const url = new URL(response.url());
+    if (url.origin !== manifest?.webOrigin || !url.pathname.startsWith('/api/')) return;
+    const method = response.request().method();
+    apiResponses.push({ method, path: `${url.pathname}${url.search}`, status: response.status() });
+    if (!reconnecting) return;
+    // The rebuilt offline page has no authenticated runtime. Start before the
+    // successful /me response is consumed and activateReaderUser loads pending;
+    // do not hide activation/queue time by starting the budget at the PUT.
+    if (method === 'GET' && url.pathname === '/api/auth/me' && response.status() === 200) {
+      confirmation.sendableAt ??= Date.now();
+    }
+    if (method === 'PUT' && url.pathname === progressPath && expectedMutationId
+      && response.request().postData()?.includes(JSON.stringify(expectedMutationId))) {
+      confirmation.response ??= response;
+      confirmation.responseAt ??= Date.now();
+    }
+  });
+
+  // Observe both stores in one completed readonly transaction. Opening a
+  // missing DB aborts its upgrade instead of creating test progress/schema.
+  const storedProgress = (target: Page) => target.evaluate(async (databaseName) => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const open = indexedDB.open(databaseName);
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => reject(open.error);
+      open.onupgradeneeded = () => { open.transaction?.abort(); reject(new Error('v5 database must already exist')); };
+    });
+    try {
+      return await new Promise<{ pending: unknown[]; exact: unknown[] }>((resolve, reject) => {
+        const transaction = database.transaction(['pending-position', 'position'], 'readonly');
+        const pending = transaction.objectStore('pending-position').getAll();
+        const exact = transaction.objectStore('position').getAll();
+        transaction.oncomplete = () => resolve({ pending: pending.result, exact: exact.result });
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
+    } finally { database.close(); }
+  }, READER_V5_DB_NAME);
+
+  try {
+    fixture = await startFixture(testInfo);
+    manifest = fixture.manifest;
+    if (!manifest) throw new Error('live fixture returned without a manifest');
+    const { webOrigin } = manifest;
+    const { epub } = await setupLiveCatalog(page, manifest, password, apiResponses, importTaskFailures, screenshots);
+    const readerURL = `${webOrigin}/reader/${encodeURIComponent(epub.resourceId)}`;
+    progressPath = `/api/reader/v5/resources/${encodeURIComponent(epub.resourceId)}/progress`;
+    expect(responseData(await requestJson(page, webOrigin, progressPath, apiResponses), progressPath).progressSnapshot).toBeNull();
+    await page.goto(`${webOrigin}/books/${encodeURIComponent(epub.bookId)}?resourceId=${encodeURIComponent(epub.resourceId)}`, { waitUntil: 'domcontentloaded' });
+    await openDetailResource(page, '打开阅读器');
+    const firstFrame = await visibleReaderFrame(page);
+    await expect(firstFrame.contentFrame().getByRole('heading', { name: '第一章 开始阅读', exact: true })).toBeVisible();
+    await expect.poll(async () => {
+      const stored = await storedProgress(page);
+      const exact = optionalRecord(stored.exact[0]);
+      return stored.pending.length === 0 && stored.exact.length === 1
+        && typeof exact?.revision === 'number' && exact.revision > 0;
+    }).toBe(true);
+    const initial = await storedProgress(page);
+    const initialExact = record(initial.exact[0]);
+    const identity = {
+      serverIdentity: webOrigin,
+      userId: stringValue(initialExact.userId, 'local userId'),
+      clientId: stringValue(initialExact.clientId, 'local clientId'),
+      bookId: epub.bookId,
+      resourceId: epub.resourceId
+    };
+    expect(initialExact).toMatchObject({ ...identity, key: readerV5ProgressKey(identity), schemaVersion: 5 });
+    const initialServer = parseReaderV5ProgressSnapshot(
+      responseData(await requestJson(page, webOrigin, progressPath, apiResponses), progressPath).progressSnapshot
+    );
+    expect(initialServer).toMatchObject({
+      schemaVersion: 5, clientId: identity.clientId, mutationId: initialExact.mutationId,
+      revision: initialExact.revision, capturedAtEpochMillis: initialExact.capturedAtEpochMillis,
+      position: initialExact.position
+    });
+    evidence.initial = initial;
+
+    evidence.phase = 'offline-capture';
+    await context.setOffline(true);
+    expect(await page.evaluate(() => navigator.onLine)).toBe(false);
+    const offlineAt = Date.now();
+    await revealReaderControls(page);
+    await page.getByRole('button', { name: '下一章', exact: true }).click();
+    const offlineFrame = await visibleReaderFrame(page);
+    await expect(offlineFrame.contentFrame().getByRole('heading', { name: '第二章 翻页验证', exact: true })).toBeVisible();
+    await expect.poll(async () => {
+      const stored = await storedProgress(page);
+      const pending = optionalRecord(stored.pending[0]);
+      const locator = optionalRecord(optionalRecord(pending?.position)?.locator);
+      return stored.pending.length === 1 && typeof locator?.href === 'string'
+        && /(?:^|\/)chapter2\.xhtml(?:#|$)/.test(locator.href);
+    }).toBe(true);
+    const offline = await storedProgress(page);
+    evidence.offline = offline;
+    const pending = record(offline.pending[0]);
+    const upload = parseReaderV5ProgressPut({
+      schemaVersion: pending.schemaVersion, clientId: pending.clientId, mutationId: pending.mutationId,
+      capturedAtEpochMillis: pending.capturedAtEpochMillis, position: pending.position
+    });
+    if (!upload) throw new Error('RG04_POS04_INVALID_REAL_PENDING');
+    expect(pending).toEqual({ ...identity, key: initialExact.key, ...upload });
+    expect(offline.exact).toEqual([{ ...pending, revision: initialExact.revision }]);
+    expect(upload.mutationId).not.toBe(initialExact.mutationId);
+    expect(upload.capturedAtEpochMillis).toBeGreaterThan(numberValue(initialExact.capturedAtEpochMillis, 'initial capturedAt'));
+    expect(upload.capturedAtEpochMillis).toBeGreaterThanOrEqual(offlineAt);
+    expect(upload.position).not.toEqual(initialExact.position);
+    const locator = record(upload.position.locator);
+    expect(locator.href).toMatch(/(?:^|\/)chapter2\.xhtml(?:#|$)/);
+    expect(locator.type).toBe('application/xhtml+xml');
+    expect(Object.keys(record(locator.locations)).length).toBeGreaterThan(0);
+    await page.screenshot({ path: resolve(manifest.artifactDir, 'screenshots/04-epub-offline-pending.png') });
+    screenshots.push('screenshots/04-epub-offline-pending.png');
+
+    evidence.phase = 'offline-page-rebuild';
+    await page.close();
+    rebuilt = await context.newPage();
+    const offlineResponse = await rebuilt.goto(`${webOrigin}/offline`, { waitUntil: 'domcontentloaded' });
+    expect(offlineResponse?.fromServiceWorker()).toBe(true);
+    await expect(rebuilt.getByRole('heading', { name: '当前网络不可用', exact: true })).toBeVisible();
+    expect(await rebuilt.evaluate(() => ({ origin: location.origin, online: navigator.onLine })))
+      .toEqual({ origin: webOrigin, online: false });
+    const afterRebuild = await storedProgress(rebuilt);
+    evidence.afterRebuild = afterRebuild;
+    expect(afterRebuild).toEqual(offline);
+
+    evidence.phase = 'reconnect-confirmation';
+    expectedMutationId = upload.mutationId;
+    reconnecting = true;
+    await context.setOffline(false);
+    await rebuilt.goto(readerURL, { waitUntil: 'domcontentloaded' });
+    await expect.poll(() => confirmation.sendableAt, { message: 'rebuilt page must obtain its real authenticated session' }).not.toBeNull();
+    const sendableAt = numberValue(confirmation.sendableAt, 'pending sendableAt');
+    // release-gate RG04: five seconds from sendable pending, including ACK
+    // application to IndexedDB and the independent, uncached server readback.
+    const deadline = sendableAt + 5_000;
+    const remaining = () => {
+      const millis = deadline - Date.now();
+      if (millis <= 0) throw new Error('RG04_POS04_CONFIRMATION_DEADLINE');
+      return millis;
+    };
+    await expect.poll(() => confirmation.response !== null, { timeout: remaining() }).toBe(true);
+    const ackResponse = confirmation.response;
+    if (!ackResponse) throw new Error('RG04_POS04_PENDING_ACK_MISSING');
+    expect(numberValue(confirmation.responseAt, 'ACK responseAt')).toBeGreaterThanOrEqual(sendableAt);
+    expect(ackResponse.fromServiceWorker()).toBe(false);
+    expect(parseReaderV5ProgressPut(ackResponse.request().postDataJSON())).toEqual(upload);
+    const ackPayload: unknown = await ackResponse.json();
+    const ack = parseReaderV5ProgressWriteResult(responseData({ status: ackResponse.status(), payload: ackPayload }, progressPath));
+    if (!ack) throw new Error('RG04_POS04_INVALID_REAL_ACK');
+    evidence.ack = ack;
+    expect(ack.acceptedMutationId).toBe(upload.mutationId);
+    expect(ack.acceptedRevision).toBeGreaterThan(numberValue(initialExact.revision, 'initial revision'));
+    expect(ack.currentSnapshot).toMatchObject({ ...upload, revision: ack.acceptedRevision });
+    const confirmedLocal = { pending: [], exact: [{ ...pending, revision: ack.acceptedRevision }] };
+    const confirmationPage = rebuilt;
+    await expect.poll(() => storedProgress(confirmationPage), { timeout: remaining() }).toEqual(confirmedLocal);
+    const fresh = parseReaderV5ProgressSnapshot(
+      responseData(await requestJson(rebuilt, webOrigin, progressPath, apiResponses), progressPath).progressSnapshot
+    );
+    evidence.freshServer = fresh;
+    expect(fresh).toEqual(ack.currentSnapshot);
+    const confirmed = await storedProgress(rebuilt);
+    evidence.confirmed = confirmed;
+    expect(confirmed).toEqual(confirmedLocal);
+    const confirmedAt = Date.now();
+    evidence.confirmation = { sendableAt, responseAt: confirmation.responseAt, confirmedAt, elapsedMillis: confirmedAt - sendableAt };
+    expect(confirmedAt - sendableAt).toBeLessThanOrEqual(5_000);
+
+    const restoredFrame = await visibleReaderFrame(rebuilt);
+    await expect(restoredFrame.contentFrame().getByRole('heading', { name: '第二章 翻页验证', exact: true })).toBeVisible();
+    await rebuilt.screenshot({ path: resolve(manifest.artifactDir, 'screenshots/05-epub-reconnected-chapter2.png') });
+    screenshots.push('screenshots/05-epub-reconnected-chapter2.png');
+    expect(apiResponses.filter((response) => response.status >= 500)).toEqual([]);
+    evidence.phase = 'complete';
+  } catch (error) {
+    primaryFailure = safeFixtureError(error);
+  } finally {
+    try {
+      for (const ownedPage of [page, rebuilt]) {
+        if (ownedPage && !ownedPage.isClosed()) await ownedPage.close();
+      }
+      await context.setOffline(false);
+    } catch (error) {
+      cleanupFailure = safeFixtureError(error);
+    }
+    if (fixture) {
+      try {
+        const fixtureFailure = await stopFixture(fixture);
+        if (fixtureFailure) throw new Error(fixtureFailure);
+      } catch (error) {
+        cleanupFailure = combineFixtureErrors(cleanupFailure, safeFixtureError(error));
+      }
+      try {
+        await writeFile(resolve(fixture.artifactDir, 'browser-observations.json'), `${JSON.stringify({
+          result: primaryFailure || cleanupFailure ? 'FAILED' : 'PASS',
+          failure: primaryFailure?.message ?? null, cleanupFailure: cleanupFailure?.message ?? null,
+          repoHead: manifest?.repoHead ?? null, project: testInfo.project.name,
+          noRouteMocks: true, importTaskFailures, responses: apiResponses, screenshots, ...evidence
+        }, null, 2)}\n`, 'utf8');
       } catch (error) {
         cleanupFailure = combineFixtureErrors(cleanupFailure, safeFixtureError(error));
       }
