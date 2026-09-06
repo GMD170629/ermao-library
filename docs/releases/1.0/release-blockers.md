@@ -4,6 +4,8 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 
 ## R1 状态覆盖与外部条件
 
+AUDIO-04新真实阻塞：生产Chrome长播放在约12分钟出现waiting/stalled，位置停止推进5300ms，原阈值2000ms；完整30分钟FAIL，后续PWA步骤未到达。采样连续、无pause/seek，原文件完整解码通过。Next默认30秒socket超时与后端Range流32640ms结束相容，当前只作具体运输对照，不静态关单。TEST-10已在此失败中正确留错、回收服务并恢复配置，该工具修复闭环结束。另RG-02已核验两官方客户端产物，但Thorium协议注册与KOReader所有文件权限超出隔离边界，待用户提供/授权合适环境，不绕过。
+
 SYNC-02（RG-04/POS-01、POS-06，应用owner链已复现）：启动bootstrap先读取旧位置，随后新位置ACK原子清pending，启动再读pending为空并选择旧bootstrap位置。`audio-soak/ack-bootstrap-race/results.json` 中真实coordinator和现有owned fake ports/恢复owner复现4%→已确认25%→重开选择4%；完整Locator保留，百分比这里只作诊断摘要。尚非Chrome/真实IDB/媒体引擎复现。修复在独立工作树 `D:/www/ermao-release-startup-progress` 进行，避免影响当前production连续播放源码；复用同一启动owner在pending为空后读当前服务端，不变更最后事务语义。原AUDIO-03快速关闭已关闭，两个问题分开登记。
 
 DEC-07覆盖工具收敛规则：AUDIO-03/ANDROID-03已关闭场景不再扩展工具；TEST-10已有保护回归及真实开发模式清理通过，当前production流程验证后即结束该工具修复，不以未来通用能力或重型取消演练另加阻塞。HTML具体未关闭问题只做决定修复所需最小观测；OPDS真实客户端、iOS/签名/容器条件缺失仍按对应项处理，不以无关工具开发替代。

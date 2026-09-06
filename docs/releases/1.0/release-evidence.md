@@ -4,6 +4,14 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+AUDIO-04（RG-03音频稳定性、RG-04/POS-02）实际FAIL：生产Chrome1800秒运行 `audio-soak/runs-production-1800/r1788689717566-w0/` 在观测699.373秒终止，播放停在704256.08ms，readyState=2、paused=false；waiting/stalled后无推进5300.4ms，采样最大间隔119.7ms，不能解释为观察器停顿，也不能计30分钟通过。完整FFmpeg解码同一MP3至1898.354286秒无错，`audio04-full-decode.log`。API记录Range `bytes=2307064-` 的流32640ms结束；该日志bytes是预期长度，不是实发证明。锁定Next16.2.12的默认30秒上游socket空闲超时是待验证候选，不能仅凭时间相近定根因。
+
+AUDIO-04诊断边界：既有媒体事件已经证明真实停顿，但既有响应日志没有实际接收/中断量，因此只做同锁定Next proxy的有限背压对照，结果足以选择最小修复即停止，不增加通用网络报告工具。源码清单漏写实际Next配置扩展名，一行修正 `next.config.ts`→`next.config.js`（RG-01追溯/AUDIO-04证据正确性）；停止条件为下一真实运行清单覆盖该实际文件，原commit+patch证据保留。
+
+本次production失败仍完成安全收尾：`post-run-verification.json` 核实7份测试输入不变、受测应用文件不变、Next两配置恢复、18081/3102无监听，shutdown无清理失败；exec96865已结束。TEST-10在真实production失败路径也验证了正确保留原错与清理，停止围绕该项完善工具。新PWA断网步骤未执行，因为发生在播放阶段之后，不将此前旧版PWA结果冒充本次通过。
+
+RG-02真实双客户端外部条件已集中请求用户：Thorium3.5.1官方签名/哈希已核验并免安装解包至 `E:/opds-clients/thorium/`，但GUI会注册HKCU协议；KOReader v2026.07.1官方APK位于本证据 `opds-clients/koreader/`，签名/官方SHA核验通过，Android12启动强制所有文件访问。两者均未启动、未授权，不能计客户端验收；不编写工具绕过权限或协议关联隔离。
+
 SYNC-02最小诊断用途/停止点：服务RG-04/POS-01、POS-06；原短闭环不能控制bootstrap取旧快照与ACK清pending之间的顺序，因此只复用既有coordinator、storage/transport fake和恢复owner做精确时序。`audio-soak/ack-bootstrap-race/command.log`、`results.json` 已复现，两个顺序对照与源码hash保留；诊断到此停止，不扩通用工具。进入独立工作树中的实际业务修复与针对性回归，后续真实入口验证仍必需，不能把受控owner复现冒充浏览器/原生通过。
 
 DEC-07已纳入执行：停止已关闭AUDIO-03和ANDROID-03周边工具完善，保留原失败及必要断言；不进行全仓清理。当前production音频/PWA直接使用已提交入口。TEST-10停止条件为原错误/取消/安全清理的已有保护回归，加当前真实production运行的退出与配置恢复核实；不把进一步开发通用取消工具或独立重型取消演练增加为发布门禁。READER-03只保留具体未关闭实体上下文反例所需的最小观测，完成格式adapter顺序判断后转业务修复或明确语义阻塞。OPDS缺客户端时只检查官方现成产物和权限，不新建安装/交互自动化框架。
@@ -18,7 +26,7 @@ DEC-07已纳入执行：停止已关闭AUDIO-03和ANDROID-03周边工具完善�
 | RG-04 进度 | 已复现快速关闭缺陷已修复，整组NOT_RUN | 生产Chrome30分钟播放正在执行；异常恢复、跨端仍待验收 |
 | RG-05 导入性能 | 本轮本机1万导入预检PASS（DEC-06） | 大规模/长时压力独立脚本按需运行，不作为当前阻塞；不外推NAS或30万表现 |
 
-正在执行的恢复点：`audio-soak/production-1800-execution.json`，run `r1788689717566-w0`，启动源版本 `a5ac3b8b`，生产Web构建后连续播放1800秒并检查PWA。未结束前不能计PASS；恢复应核查实际自有进程、`browser-observations.json`、`shutdown-result.json`，不能根据会话记忆或进程文件推定仍运行/已通过。Next两配置与独立dist在运行中由fixture拥有，不能手工恢复。此工作属于音频功能稳定性，不是已停止的超大书库压测。
+持续播放最近恢复点：`audio-soak/production-1800-execution.json`，run `r1788689717566-w0`，启动源版本 `a5ac3b8b`，已以AUDIO-04 FAIL结束并安全清理。后续从原事件/HTTP日志定位，不假定它仍在运行。此工作属于音频功能稳定性，不是已停止的超大书库压测。
 
 ANDROID-03当前自动回归PASS：`preflight-mobile/android03-expanded-anchor-20260906/`，默认仪器单项1 PASS（3.204s）、整类19 PASS（31.537s）、完整148 PASS（334.740s），均零skip。只改测试，原手势/第一章滚动/回缩/不翻页全部保留；第二手势前新增唯一原生Collapse且无Expand、未裁剪handle顶边与sheet底边均对齐root的校验。容差来自SDK整数像素定位（1物理像素），无固定屏幕尺寸、sleep或重复手势。主代理核对生产fillMaxHeight与M3 1.4.0的Expanded零偏移公式及完整diff。主APK仍为 `b3fe00868a770d1e38b46369d9420ac42c7470fb8144ba805cc08e695bb29459`，测试APK为 `26ed0a58682b36930e4bb850a80c8b6eaf4969455d7ae3e0b9139e9e35ac6324`；全部自有进程退出，设备交还。旧147/1失败保留；能够证明旧用例未要求完全展开及新前置通过，不能证明旧失败唯一原因。当前完整移动自动回归恢复PASS，最终RC仍须重跑。
 

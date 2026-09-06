@@ -68,7 +68,7 @@ APPLICATION_SOURCE_ROOTS = (
     "packages/reader-core/src",
 )
 APPLICATION_SOURCE_FILES = (
-    "apps/web/next.config.ts",
+    "apps/web/next.config.js",
     "apps/web/public/sw.js",
     "packages/reader-contracts/reader-http-error-statuses.json",
     "packages/reader-contracts/reader-navigation-policy.json",
