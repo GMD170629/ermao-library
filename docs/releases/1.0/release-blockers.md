@@ -32,7 +32,8 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 | ENV-10 | 59语料中MOBI/AZW/PRC/AZW3的目录返回PUBLICATION_UNSUPPORTED；本机探针未配置ERMAO_MOBI_CORE_LIBRARY | Windows runtime子项BLOCKED，正在检查现有DLL/构建入口；其导入/原文下载成功不能替代目录通过，不能据此判读物损坏 |
 | SAMPLE-01 | 59语料中FB2为0 section，AIFC实际AIFF且与AIF/AIFF同hash；仓库另一个FB2的l:前缀未绑定 | `32175712`修复AIFC生成/验证，2测试+真实probe PASS；另保存仅补命名空间的18 section FB2派生样本及精确hash/差异，XML解析PASS。原文件/旧失败保留，新后端/客户端验收分开登记，不改支持范围 |
 | TEST-07 | 真实Chrome重开音频时，脚本用即时count误判尚未加载按钮并等待不存在的资源卡；`web-baseline/chrome-live-audio-fix.log` | 已修改为等待可用入口，待重跑；保留完整音频恢复误差≤2秒断言 |
-| READER-03 | Linux实际MOBI/AZW/PRC的公开publication子资源返回422；目录各16项、原文hash/Range通过。native读取完成后HTML的未绑定前缀触发ElementTree XML解析失败 | 已补先失败的针对性测试；显式HTML适配复用现有准备/预算/安全过滤，34项针对性测试、mypy492及Chrome3项实际DOM重解析通过；独立Linux真实文件回归进行中。该子资源路径失败不等于已复现生产Web原文件阅读失败；三个扩展名共用同一源hash，不冒充三份独立编码 |
+| READER-03 | Linux实际MOBI/AZW/PRC的公开publication子资源返回422；目录各16项、原文hash/Range通过。native读取完成后HTML的未绑定前缀触发ElementTree XML解析失败 | 原二进制上五份真实文件目录/首末正文/原文hash/Range回归通过，Linux publication109项通过。修复候选独立审查另发现SVG/style序列化可重建事件属性、xlink/xml属性namespace丢失，已阻止采纳；补SDK namespace/token适配后主37项与Chrome4项通过，仍待独立复核。该路径失败不等于生产Web原文件阅读失败；三扩展名共用一个hash |
+| NATIVE-01 | 从冻结当前native源码新建.so成功，但Python传null options，当前C入口要求有限有效options，四份MOBI族在open阶段invalid_argument；ABI1加载检查本身通过 | 新构建与真实失败在`mobi-html-regression-20260906/`；正在按头文件ABI、默认options及生成容量预算修复Python绑定。不得回换旧.so冒充当前源码通过 |
 | SYNC-01 | 共享Ktor位置PUT成功链疑似重复解包：ApiClient输出data，mapper仍要求ok/data，可能拒绝正常ACK | 正在用完整ApiClient/port链复现并修复；尚不以静态风险或服务端存在位置证明客户端已确认，后续须Android真实HTTP与持久化联验 |
 
 RUN-01 最新拆分：`f3748d58` 后端 Linux 完整1250 PASS + 原有平台2 skip，Windows 两项补测均 PASS；Android host216 PASS、集成 lint PASS。`80c5d5b9` Android/C 同源码集成真机147项全部 PASS，证据见 R1-ANDROID-FULL，此批原自动回归失败已解除，最终 RC 全套仍待冻结重跑。ANDROID-01 截图已由主代理复核确认页码修正。真实音频短时引擎测试 PASS，长时/逐编码/实际服务端恢复仍待执行。

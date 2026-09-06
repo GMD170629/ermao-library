@@ -4,6 +4,10 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+`a533b89b`之后独立审查拒绝首版HTML修复候选：SVG/style文字重新解析产生onerror属性，以及SVG的xlink:href/href/xml:lang序列化失真；`corpus-format-library-20260906/backend-preflight/mobi-html-regression-20260906/REPORT.md`和`independent-review.json`保留精确输入/证据。主新增仅适配html5lib1.1 namespace与raw-text语义的token处理，保留唯一安全过滤owner和正常HTML CSS，37项针对性回归及Chrome4条实际DOM重新解析通过，mypy493通过；仍待独立复核，不将先前3条通过视为安全性完备。早期Chrome结果另存`backend-baseline/mobi-html-browser/results-initial.json`，当前`results.json`为4条。
+
+同轮旧.so上真实五文件目录/首末正文/原文hash/Range通过、Linux publication109项通过；为消除旧二进制来源限制，从49份冻结native源码隔离重建.so（SHA256 `969e080eb7f29188a6dad18c3bdf81a1aa8b3ac613afadc24136db6e50fa81fb`，输入摘要`b50edf6ec7d6dfbb6d8695e45c8d6a7289725fca9a2e50ed79bfa3f229359d92`）。新.so却在MOBI族open阶段复现invalid_argument：Python传null options，与当前C要求有限options不一致，登记NATIVE-01修复。两次新库的API/Worker均已停止；重建不是正式产物，不回用旧库制造通过。
+
 本轮在`e8d4209e`之后继续修复，未冻结RC。READER-03已由Linux实际样本复现：`corpus-format-library-20260906/backend-preflight/mobi-linux-7c6c991c/REPORT.md`、`body-failure-requests.json`记录MOBI/AZW/PRC目录16项成功，但共用的`part00000.html`正文422，cause为`ElementTree.ParseError: unbound prefix`。AZW3正文首末200，派生FB2目录18项及首末正文200；实际FORM/AIFC在独立Windows新库导入/单轨/原文Range通过，Linux缺ffprobe的失败保留。均未据此声明全部客户端阅读/播放通过。
 
 修复增量临时证据：`backend-baseline/mobi-html-red.log`保留生产路径先失败；共享markup owner显式选择HTML解析/序列化并复用生成策略准备、预算和过滤，XML/SVG不作HTML失败回退。主34项针对性测试通过（`mobi-html-green-final.log`），mypy492通过，Ruff通过；`mobi-html-browser/results.json`记录Chrome152实际重解析3项、脚本/事件执行和网络请求均0；安全报告64与既有Chrome66/Android66校验通过（`contracts/safety-mobi-html.log`）。新预算测试第一次写错异常类别，按既有`PublicationParserLimitError`修正，保留`mobi-html-test-taxonomy-failure.log`，未改生产错误合同或预算。误用缺native配置的Windows广泛publication回归31 FAIL/77 PASS原始记录在`mobi-html-publications.log`；章核缺失与Windows符号链接条件由正确Linux环境另验，不跳过测试。
