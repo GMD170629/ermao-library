@@ -19,7 +19,7 @@
     "verify:mobi-wasm": "node scripts/verify-mobi-wasm.mjs",
     "conformance:reader-safety": "tsx scripts/generate-reader-safety-conformance.ts --output ../../artifacts/reader-safety-conformance/web.json",
     "lint": "eslint . --max-warnings=0",
-    "pretest": "node scripts/verify-chapters-wasm.mjs && python3 ../../packages/reader-contracts/generate-reader-safety-policy.py --check && python3 ../../packages/reader-contracts/check-reader-safety-boundaries.py && python3 ../../packages/reader-contracts/generate-reader-settings.py --check && node scripts/generate-i18n-catalog.mjs",
+    "pretest": "node scripts/verify-chapters-wasm.mjs && python3 ../../packages/reader-contracts/generate-reader-safety-policy.py --check && python3 ../../packages/reader-contracts/check-reader-safety-boundaries.py && python3 ../../packages/reader-contracts/generate-reader-settings.py --check && python3 ../../packages/reader-contracts/generate-reader-progress-timing.py --check && node scripts/generate-i18n-catalog.mjs",
     "test": "node scripts/run-tests.mjs",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit",

@@ -18,10 +18,63 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AndroidAudioPlaybackRuntimeTest {
+    @Test
+    fun uninterruptedPlaybackCapturesProgressWithinFiveSeconds() = runTest {
+        val controller = FakeMediaController(initialPositionMillis = 1_000, startsPlaying = true)
+        val progress = RecordingProgressSink()
+        val runtime = newRuntime(controller, progress)
+        try {
+            runCurrent()
+            val capturesAtStart = progress.captures.size
+            var elapsed = 0L
+            ReaderProgressTimingFixture.continuousCheckpointsMillis.forEach { checkpoint ->
+                while (elapsed < checkpoint) {
+                    elapsed += ReaderProgressTimingFixture.positionStepMillis
+                    controller.currentPosition = 1_000L + elapsed
+                    advanceTimeBy(ReaderProgressTimingFixture.positionStepMillis)
+                    runCurrent()
+                }
+                assertEquals(AndroidAudioPhase.Playing, runtime.snapshot.value.phase)
+                assertEquals(1_000L + checkpoint, runtime.snapshot.value.positionMillis)
+                val latest = progress.captures.drop(capturesAtStart).lastOrNull()?.positionMillis
+                // Capture acceptance only: this port does not prove durable storage.
+                assertTrue(
+                    latest != null && latest > 1_000L &&
+                        1_000L + checkpoint - latest <= ReaderProgressTimingFixture.maxCaptureAgeMillis,
+                    "RG04: capture overdue at ${checkpoint}ms; latest=$latest",
+                )
+            }
+        } finally {
+            runtime.close()
+        }
+    }
+
+    @Test
+    fun pauseCapturesCurrentPositionBeforePeriodicDeadline() = runTest {
+        val controller = FakeMediaController(initialPositionMillis = 1_000, startsPlaying = true)
+        val progress = RecordingProgressSink()
+        val runtime = newRuntime(controller, progress)
+        try {
+            runCurrent()
+            controller.currentPosition = 1_000L + ReaderProgressTimingFixture.pauseAtMillis
+            advanceTimeBy(ReaderProgressTimingFixture.pauseAtMillis)
+            runCurrent()
+            val capturesBeforePause = progress.captures.size
+            runtime.pause()
+            runCurrent()
+            assertEquals(AndroidAudioPhase.Paused, runtime.snapshot.value.phase)
+            assertTrue(progress.captures.size > capturesBeforePause)
+            assertEquals(controller.currentPosition, progress.captures.last().positionMillis)
+        } finally {
+            runtime.close()
+        }
+    }
+
     @Test
     fun playingScrubPausesOnceAndKeepsPreviewUntilEngineConfirms() = runTest {
         val controller = FakeMediaController(initialPositionMillis = 1_000, startsPlaying = true)

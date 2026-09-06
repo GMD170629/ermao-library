@@ -13,6 +13,7 @@ import com.ermao.library.shared.modules.audio.domain.AudioSleepTimerMode
 import com.ermao.library.shared.modules.audio.domain.AudioSourcePreparationStage
 import com.ermao.library.shared.modules.reader.AudioReaderLocation
 import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
+import com.ermao.library.shared.modules.reader.ReaderProgressTiming
 
 enum class AudioPlaybackEffectType {
     PrepareSource,
@@ -694,7 +695,9 @@ class AudioPlaybackStateMachine(
         if (shouldPauseForSleepBoundary(sourceId)) return pauseForSleepTimer()
         val now = nowEpochMillis()
         val shouldSaveTick = state.isPlaying && now >= 0 &&
-            lastTickRequestedAtEpochMillis?.let { now - it >= SAVE_INTERVAL_MILLIS } == true
+            lastTickRequestedAtEpochMillis?.let {
+                now - it >= ReaderProgressTiming.periodicCaptureIntervalMillis
+            } == true
         if (!shouldSaveTick) return transition()
         lastTickRequestedAtEpochMillis = now
         val effect = progressEffect(AudioProgressSaveReason.Tick)
@@ -1182,5 +1185,4 @@ private fun absoluteDifference(left: Long, right: Long): Long =
 
 private fun <T> T?.asList(): List<T> = if (this == null) emptyList() else listOf(this)
 
-private const val SAVE_INTERVAL_MILLIS = 15_000L
 private const val POSITION_ACCEPTANCE_MILLIS = 5_000L

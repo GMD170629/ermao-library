@@ -16,6 +16,7 @@ import com.ermao.library.shared.modules.audio.domain.AudioSourcePreparationStage
 import com.ermao.library.shared.modules.reader.ReaderSourceFormat
 import com.ermao.library.shared.modules.reader.AudioReaderLocation
 import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
+import com.ermao.library.shared.modules.reader.ReaderProgressTiming
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
@@ -23,6 +24,48 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class AudioSessionStateMachineTest {
+    @Test
+    fun uninterruptedPlaybackRequestsProgressSaveWithinFiveSeconds() {
+        var now = 10_000L
+        val state = AudioPlaybackStateMachine(nowEpochMillis = { now })
+        val source = commit(state, publication("resource-1"), autoplay = true)
+        var elapsed = 0L
+        var latestCapturedPosition: Long? = null
+        ReaderProgressTimingFixture.continuousCheckpointsMillis.forEach { checkpoint ->
+            while (elapsed < checkpoint) {
+                elapsed += ReaderProgressTimingFixture.positionStepMillis
+                now += ReaderProgressTimingFixture.positionStepMillis
+                state.enginePosition(source, elapsed, 60_000L).effects.lastOrNull {
+                    it.type == AudioPlaybackEffectType.SaveProgress &&
+                        it.progressReason == AudioProgressSaveReason.Tick
+                }?.let { latestCapturedPosition = it.positionMillis }
+            }
+            // Capture acceptance only: the writer/outbox durability has a separate gate.
+            assertTrue(
+                latestCapturedPosition?.let {
+                    it > 0 && checkpoint - it <= ReaderProgressTimingFixture.maxCaptureAgeMillis
+                } == true,
+                "RG04: capture overdue at ${checkpoint}ms; latest=$latestCapturedPosition",
+            )
+        }
+    }
+
+    @Test
+    fun pauseCapturesCurrentPositionBeforePeriodicDeadline() {
+        var now = 10_000L
+        val state = AudioPlaybackStateMachine(nowEpochMillis = { now })
+        val source = commit(state, publication("resource-1"), autoplay = true)
+        val position = ReaderProgressTimingFixture.pauseAtMillis
+        now += position
+        state.enginePosition(source, position, 60_000L)
+        state.pause()
+        val capture = state.enginePaused(source).effects.single {
+            it.type == AudioPlaybackEffectType.SaveProgress
+        }
+        assertEquals(AudioProgressSaveReason.Pause, capture.progressReason)
+        assertEquals(position, capture.positionMillis)
+    }
+
     @Test
     fun sourceIsCommittedOnlyAfterPreparedAndCommitFacts() {
         val state = AudioPlaybackStateMachine()
@@ -536,7 +579,7 @@ class AudioSessionStateMachineTest {
         val source = commit(state, publication("resource-1"), autoplay = true)
         state.setSleepTimer(AudioSleepTimerMode.Minutes15)
 
-        now += 14_999
+        now += ReaderProgressTiming.periodicCaptureIntervalMillis - 1
         assertTrue(state.enginePosition(source, 1_000, 60_000).effects.isEmpty())
         now += 1
         val tick = state.enginePosition(source, 2_000, 60_000)

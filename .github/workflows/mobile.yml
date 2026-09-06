@@ -154,6 +154,7 @@ jobs:
       - name: Check generated Reader safety contract
         run: |
           python3 ../../packages/reader-contracts/generate-reader-safety-policy.py --check
+          python3 ../../packages/reader-contracts/generate-reader-progress-timing.py --check
           python3 ../../packages/reader-contracts/check-reader-safety-boundaries.py
           python3 -m unittest discover \
             -s ../../packages/reader-contracts/tests -p 'test_*.py'

@@ -4,6 +4,7 @@ export * from './preferences';
 export * from './pdf-range';
 export * from './publication-navigation';
 export * from './reader-navigation-policy.generated';
+export * from './reader-progress-timing.generated';
 export * from './session';
 export * from './types';
 export * from './setting-catalog.generated';

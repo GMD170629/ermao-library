@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
+  READER_PROGRESS_TIMING,
   READER_SAFETY_RULE_IDS,
   ReaderSafetyPolicyError,
   readerSafetyFailure,
@@ -45,7 +46,7 @@ import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 const PLAYBACK_CHANNEL = 'shuku-audio-playback';
 const PLAYBACK_CLAIM_KEY = 'shuku:audio:playback-claim';
-const PROGRESS_INTERVAL_MS = 15_000;
+const PROGRESS_INTERVAL_MS = READER_PROGRESS_TIMING.periodicCaptureIntervalMillis;
 
 type PendingAudioResourceLoad = AudioLoadIntent & {
   resourceId: string;

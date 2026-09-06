@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "positionStepMillis": 500,
+  "continuousCheckpointsMillis": [5000, 10000],
+  "maxCaptureAgeMillis": 5000,
+  "pauseAtMillis": 2500
+}

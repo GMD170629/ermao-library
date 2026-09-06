@@ -42,6 +42,7 @@ import com.ermao.library.shared.modules.reader.ReaderLocalProgressIdentity
 import com.ermao.library.shared.modules.reader.ReaderLocationRestoreException
 import com.ermao.library.shared.modules.reader.ReaderProgressPresentationUpdate
 import com.ermao.library.shared.modules.reader.ReaderProgressSyncTarget
+import com.ermao.library.shared.modules.reader.ReaderProgressTiming
 import com.ermao.library.shared.modules.reader.ReaderPositionSyncRuntime
 import com.ermao.library.shared.modules.reader.ReaderPositionServerPort
 import com.ermao.library.shared.modules.reader.ReaderRemotePositionNoticeV5
@@ -815,7 +816,7 @@ class AndroidAudioPlaybackRuntime private constructor(
         if (progressJob?.isActive == true) return
         progressJob = scope.launch {
             while (isActive) {
-                delay(PROGRESS_INTERVAL_MILLIS)
+                delay(ReaderProgressTiming.periodicCaptureIntervalMillis)
                 if (controller?.isPlaying == true) {
                     publishFromController()
                     captureProgress(immediate = false, reason = AudioProgressSaveReason.Tick)
@@ -1341,7 +1342,6 @@ class AndroidAudioPlaybackRuntime private constructor(
         const val BACK_SKIP_MILLIS = 15_000L
         const val FORWARD_SKIP_MILLIS = 30_000L
         const val POSITION_REFRESH_INTERVAL_MILLIS = 500L
-        const val PROGRESS_INTERVAL_MILLIS = 15_000L
         const val PREVIOUS_CHAPTER_THRESHOLD_MILLIS = 3_000L
         const val SEEK_POSITION_ACCEPTANCE_MILLIS = 5_000L
         const val SEEK_TIMEOUT_MILLIS = 15_000L
