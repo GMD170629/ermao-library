@@ -4,6 +4,10 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+READER-03候选已在独立分支 `codex/release-1.0-html@5a0a3add` 提交并推送，尚未合入主受测工作树。HTML按SDK因果顺序先处理原始属性引用、再决定命名空间/raw-text；严格XML继续原全局声明处理，实体/预算仍复用一个owner，canonical policy字节不变。旧HTML后置/重复DTD回填行为会改变，属于本次显式HTML适配修复的已记录兼容性差异，不伪称原来不可达，也不新增跨平台顺序保证。候选158项相邻回归通过；主代理检查完整八文件差异、原保护断言与共享账本，再原样复用既有 `review-integrated.py`，仅给新sourceRoot/hash清单，7反例×2种scripting均PASS、源码不变。证据：`D:/www/ermao-release-html/artifacts/html-causal-fix-20260906/`、`html-causal-primary-review-20260906/`。真实Linux新库MOBI链路尚在执行；只完成审查与相邻验证，不关闭整组格式门禁。主受测八文件仍保持原复制基线，待长播放退出后才整合。
+
+SYNC-02浏览器证据补充仅在既有 `readium-reader.spec.ts` 增加针对性原时序回归：实际Chrome/Readium/IndexedDB，通过owned API响应阻留控制bootstrap与ACK先后；不替换IDB事务，不手工清pending，完整Locator与最终章节均必须一致。既有owner单元测试无法判定页面/真实IDB落点，这是本次必要观测理由；原时序RED/GREEN和必要相邻回归通过即停止，不扩通用工具。目前结果待执行，不能计PASS或真实后端/跨设备证据。
+
 并行实际验收安排：Android AAC/FLAC/WAV短时播放、5/10秒真实确认及暂停重开复用既有 `python_android_release_live_fixture.py --mime-type` 与已授权9e896bbc仪器入口；独立工作树 `D:/www/ermao-release-android-formats@0c28f117`，自有18084/3105端口，全新库/UUID私有目录，不改应用源码或工具功能。该源码的移动与后端受测部分须按实际hash核实，不能把主工作树未提交HTML当作已包含。结果未出，当前NOT_RUN；对应AUD-04/05/06及POS-02部分，不涵盖长时/后台。Chrome运行18081/3102及其源码保持隔离。
 
 当前实际执行：`0c28f117`生产Chrome1800秒回归已启动，`audio-soak/runs-proxyfix-1800/r1788691746993-w0/`，命令日志 `audio-soak/proxyfix-1800-command.log`，执行会话57546；完成前不得填PASS。主工作区应用源码冻结于该运行快照，HTML后续修复仅在独立工作树进行。Next运行时临时修改的tsconfig/next-env由现有fixture在退出后校验并恢复，不手工清理。有限3600000ms代理运输对照已通过：40秒背压后40304ms完成，12880827字节/SHA一致、所有自有服务/socket/文件流退出，`audio-soak/audio04-transport-finite.jsonl`及两行测试组diff；AUDIO-04诊断工具到此停止。只读审查记录此配置也延长普通API/OPDS挂起请求的空闲等待，仍有有限上限及现有断连清理，未改变后端容量。Docker当前再次核实无Linux engine管道，ENV-08保持，不做系统重置。
