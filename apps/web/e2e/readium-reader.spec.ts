@@ -77,7 +77,7 @@ function readerBootstrap(progressSnapshotValue: Record<string, unknown> | null, 
     book: { id: 'book-epub', title: 'Readium E2E', author: 'Test', coverUrl: null },
     resourceCompleted: false,
     resource, availableResources: [resource],
-    assets: [{ id: 'epub-asset', kind: 'CONTENT', mimeType: 'application/epub+zip', sizeBytes: 100, durationMs: null, discNumber: null, trackNumber: null, sortOrder: 0, url: '/api/assets/epub-asset' }],
+    assets: [{ id: 'epub-asset', role: 'PRIMARY', mimeType: 'application/epub+zip', sizeBytes: 100, durationMs: null, discNumber: null, trackNumber: null, sortOrder: 0, url: '/api/assets/epub-asset' }],
     units: [],
     capabilities: { canGoNext: true, canGoPrevious: false, canJumpToProgress: false, canJumpToHref: true, canJumpToIndex: true, canZoom: false, canSelectText: true, supportsPagination: true, supportsScrolling: true, supportsSpreads: true },
     progressSnapshot: progressSnapshotValue, progressPercent: fallbackPercent

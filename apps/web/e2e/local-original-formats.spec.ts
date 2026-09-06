@@ -59,7 +59,7 @@ function bootstrap(fixture: ReflowableFixture, sizeBytes: number) {
     availableResources: [resource],
     assets: [{
       id: assetId,
-      kind: 'CONTENT',
+      role: 'PRIMARY',
       mimeType: fixture.mimeType,
       sizeBytes,
       durationMs: null,

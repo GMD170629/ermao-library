@@ -13,6 +13,7 @@ import {
 } from '@shuku/reader-core';
 import { readBoundedResponse, ResponseLimitError } from '../../../shared/api/bounded-response';
 import { withBasePath } from '../../../lib/base-path';
+import type { ReaderAssetSummary } from '../../../generated/reader-v5';
 import { fetchLibraryResource } from '../../books/public';
 import { parseReaderV5PositionReport, parseReaderV5ProgressSnapshot, type ReaderV5ProgressSnapshot } from '../../../lib/reader';
 import type { ReaderBookmark } from './bookmarks';
@@ -64,6 +65,12 @@ export type ReaderPage = Readonly<{
   safetyError?: ReaderSafetyFailure;
 }>;
 
+type ReaderBootstrapAsset = Readonly<Pick<ReaderAssetSummary, 'id' | 'role' | 'mimeType' | 'sizeBytes' | 'sortOrder' | 'url'> & {
+  durationMs: number | null;
+  discNumber: number | null;
+  trackNumber: number | null;
+}>;
+
 export type ReaderBootstrap = Readonly<{
   requestedChapterKey?: string;
   schemaVersion: 5;
@@ -74,7 +81,8 @@ export type ReaderBootstrap = Readonly<{
   resource: ReaderResource;
   resourceCompleted: boolean;
   availableResources: ReaderResource[];
-  assets: ReadonlyArray<Readonly<{ id: string; kind: string; mimeType: string; sizeBytes: number; durationMs: number | null; discNumber: number | null; trackNumber: number | null; sortOrder: number; url: string }>>;
+  assets: ReadonlyArray<ReaderBootstrapAsset>;
+  primaryAsset: ReaderBootstrapAsset | null;
   units: ReaderUnit[];
   pages: ReaderPage[];
   comicRevision: string | null;
@@ -293,25 +301,21 @@ export async function fetchReaderBootstrap(resourceId: string, signal: AbortSign
   }
   const units = mapUnits(data.units);
   const publicationAccess = record(data.publication);
-  const assets = (Array.isArray(data.assets) ? data.assets : []).flatMap((raw) => {
+  const assets: ReaderBootstrapAsset[] = (Array.isArray(data.assets) ? data.assets : []).flatMap((raw) => {
     const asset = record(raw);
     const id = stringValue(asset.id).trim();
     if (!id) return [];
-    return [{ id, kind: stringValue(asset.kind), mimeType: stringValue(asset.mimeType), sizeBytes: numberValue(asset.sizeBytes), durationMs: nullableNumber(asset.durationMs), discNumber: nullableNumber(asset.discNumber), trackNumber: nullableNumber(asset.trackNumber), sortOrder: numberValue(asset.sortOrder), url: withBasePath(stringValue(asset.url, `/api/assets/${encodeURIComponent(id)}`)) }];
+    return [{ id, role: stringValue(asset.role), mimeType: stringValue(asset.mimeType), sizeBytes: numberValue(asset.sizeBytes), durationMs: nullableNumber(asset.durationMs), discNumber: nullableNumber(asset.discNumber), trackNumber: nullableNumber(asset.trackNumber), sortOrder: numberValue(asset.sortOrder), url: withBasePath(stringValue(asset.url, `/api/assets/${encodeURIComponent(id)}`)) }];
   });
+  const primaryAsset = assets.find((asset) => asset.role === 'PRIMARY' && asset.url) ?? null;
   if (readerType === 'pdf') {
-    const pdfAsset = assets.find((asset) => asset.kind === 'CONTENT' && asset.url);
-    if (!pdfAsset || pdfAsset.sizeBytes <= 0) {
+    if (!primaryAsset || primaryAsset.sizeBytes <= 0) {
       throw new ReaderBootstrapError('PDF_INVALID', 'PDF 阅读信息缺少准确大小');
     }
   }
   const requiresContentAsset = readerType === 'pdf'
     || (readerType === 'comic' && format !== 'image_dir');
-  const contentAsset = readerType === 'pdf'
-    ? assets.find((asset) => asset.kind === 'CONTENT' && asset.url)
-    : readerType === 'comic'
-      ? assets.find((asset) => asset.kind === 'CONTENT' && asset.url)
-      : null;
+  const contentAsset = requiresContentAsset ? primaryAsset : null;
   if (requiresContentAsset && assets.length > 0 && !contentAsset) {
     rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_EXACT_FORMAT_MIME);
   }
@@ -400,6 +404,7 @@ export async function fetchReaderBootstrap(resourceId: string, signal: AbortSign
     resourceCompleted: resource.resourceCompleted,
     availableResources: (Array.isArray(data.availableResources) ? data.availableResources : []).map(mapResource).filter((item): item is ReaderResource => item !== null),
     assets,
+    primaryAsset,
     units,
     pages,
     comicRevision: comicManifest?.revision ?? null,

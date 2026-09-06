@@ -1,5 +1,7 @@
 # 1.0 发布验收矩阵
 
+2026-09-06增量：RG-03 PDF正常69页Chrome真实导入后打开FAIL，登记READER-04；COM-CBZ相同PRIMARY契约选择错误在受控真实wire回归复现。基于3d798902的候选已通过针对性和完整Web静态/单元检查，真实PDF及漫画相邻待复测，不填PASS。样本SHA、真实UI、只读资产事实和RED/GREEN日志见release-evidence最新恢复点；不能据此声称复杂/异常或原生平台完成。
+
 最新覆盖`7e207c38`：POS-03 Chrome桌面/移动视口MP3暂停且已确认后强杀、同profile重启及真实重登录恢复子项PASS，误差0/205.804ms。登录前完整IDB保留、401后既有隐私清理、随后原服务端快照和实际播放器恢复分别验证；不覆盖未确认/播放中强杀、免重登录及其他引擎/原生平台。证据和历史测试预期修正见release-evidence首节，达到该子场景停止条件。
 
 最新覆盖 `02d6ea2d`：POS-04 Chrome桌面/移动视口EPUB离线pending跨页面关闭/重建完整保留，重连ACK、IDB清pending与独立GET分别965ms/959ms内一致，实际恢复第二章；这两个子项PASS。原live生产Chrome相邻PASS，MP3恢复误差440ms；源码/样本/无5xx/清理复核通过。仅补当前必测用例，共用原setup owner，达到DEC-07停止条件，不继续扩工具。POS-03进程强杀及POS-04原生/另端异常交接仍待执行，不由页面重建结果覆盖；证据见release-evidence首节。

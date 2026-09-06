@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import type { ReaderAssetSummary } from '../../../generated/reader-v5';
 import { fetchReaderBootstrap, ReaderBootstrapError } from './api';
 
 const cases = [
@@ -86,6 +87,13 @@ test('PDF and comic remain streamed while audio never enters the Reader download
         }
         const format = readerType === 'pdf' ? 'pdf' : 'cbz';
         const mimeType = readerType === 'pdf' ? 'application/pdf' : 'application/vnd.comicbook+zip';
+        const assets = [{
+          id: `${readerType}-page`, title: 'Page', resourceId, sourceNodeId: `${readerType}-page-source`,
+          role: 'PAGE', mimeType: 'image/png', sizeBytes: 7, sortOrder: 0, url: `/api/assets/${readerType}-page`
+        }, {
+          id: `${readerType}-asset`, title: 'Original', resourceId, sourceNodeId: `${readerType}-source`,
+          role: 'PRIMARY', mimeType, sizeBytes: 42, sortOrder: 0, url: `/api/assets/${readerType}-asset`
+        }] satisfies ReaderAssetSummary[];
         return Response.json({ ok: true, data: {
           schemaVersion: 5,
           userId: 'user-1',
@@ -95,7 +103,7 @@ test('PDF and comic remain streamed while audio never enters the Reader download
           book: { id: 'book-1', title: 'Book' },
           resource: { id: resourceId, bookId: 'book-1', title: 'Resource', format, readerType, sortOrder: 0 },
           availableResources: [],
-          assets: [{ id: `${readerType}-asset`, kind: 'CONTENT', mimeType, sizeBytes: 42, url: `/api/assets/${readerType}-asset` }],
+          assets,
           units: readerType === 'comic' ? [{ id: 'page-0', index: 0, title: '1', metadata: { pageIndex: 0 } }] : [],
           publication: readerType === 'comic' ? {
             kind: 'comic',
@@ -109,6 +117,10 @@ test('PDF and comic remain streamed while audio never enters the Reader download
       };
       const bootstrap = await fetchReaderBootstrap(resourceId, new AbortController().signal);
       assert.equal(bootstrap.source.kind, readerType);
+      assert.equal(bootstrap.primaryAsset?.id, `${readerType}-asset`);
+      assert.equal(bootstrap.primaryAsset?.role, 'PRIMARY');
+      assert.equal(bootstrap.primaryAsset?.sizeBytes, 42);
+      assert.equal(bootstrap.primaryAsset?.url, `/api/assets/${readerType}-asset`);
       assert.equal(bootstrap.comicRevision, readerType === 'comic' ? `sha256:${'a'.repeat(64)}` : null);
       if (readerType === 'comic') {
         assert.equal(bootstrap.pages.length, 2);
@@ -137,6 +149,27 @@ test('PDF and comic remain streamed while audio never enters the Reader download
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('PDF requires a positive-size PRIMARY asset from the v5 contract', async () => {
+  const originalFetch = globalThis.fetch;
+  const primary = {
+    id: 'pdf-asset', title: 'PDF', resourceId: 'resource-1', sourceNodeId: 'pdf-source',
+    role: 'PRIMARY', mimeType: 'application/pdf', sizeBytes: 42, sortOrder: 0, url: '/api/assets/pdf-asset'
+  } satisfies ReaderAssetSummary;
+  try {
+    for (const asset of [{ ...primary, role: 'PAGE' }, { ...primary, sizeBytes: 0 }]) {
+      const payload = bootstrapPayload('pdf');
+      globalThis.fetch = async () => Response.json({ ...payload, data: {
+        ...payload.data, readerType: 'pdf',
+        resource: { ...payload.data.resource, readerType: 'pdf' }, assets: [asset]
+      } });
+      await assert.rejects(
+        fetchReaderBootstrap('resource-1', new AbortController().signal),
+        (reason: unknown) => reason instanceof ReaderBootstrapError && reason.code === 'PDF_INVALID'
+      );
+    }
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test('IMAGE_DIR bootstraps from PAGE assets and the comic manifest without a directory content asset', async () => {
@@ -260,7 +293,6 @@ test('comic archive bootstrap preserves content when its MIME metadata is unfami
           title: 'Not an archive',
           resourceId,
           sourceNodeId: 'wrong-source',
-          kind: 'CONTENT',
           role: 'PRIMARY',
           mimeType: 'application/pdf',
           sizeBytes: 68,

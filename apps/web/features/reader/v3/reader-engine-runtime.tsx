@@ -265,9 +265,7 @@ export function ReaderEngineRuntime({
         });
       } else {
         const adapterModule = await import('./adapters/pdf-adapter');
-        const pdfAsset = bootstrap.assets.find((asset) => (
-          asset.kind === 'CONTENT' && asset.url && asset.sizeBytes > 0
-        ));
+        const pdfAsset = bootstrap.primaryAsset;
         if (!pdfAsset || pdfAsset.sizeBytes <= 0) throw new Error('PDF_INVALID');
         created = adapterModule.createPdfAdapter({
           container,
@@ -296,7 +294,7 @@ export function ReaderEngineRuntime({
       if (created) void created.dispose();
       container.replaceChildren();
     };
-  }, [bootstrap.availableResources, bootstrap.requestedChapterKey, bootstrap.book.title, bootstrap.assets, bootstrap.comicRevision, bootstrap.pages, bootstrap.readerType, bootstrap.source, bootstrap.units, bootstrap.userId, bootstrap.resource.id, container, i18nAttribute, onOriginalProgress, onStorageWarning]);
+  }, [bootstrap.availableResources, bootstrap.requestedChapterKey, bootstrap.book.title, bootstrap.primaryAsset, bootstrap.comicRevision, bootstrap.pages, bootstrap.readerType, bootstrap.source, bootstrap.units, bootstrap.userId, bootstrap.resource.id, container, i18nAttribute, onOriginalProgress, onStorageWarning]);
 
   const session = useReaderSession({
     adapter,

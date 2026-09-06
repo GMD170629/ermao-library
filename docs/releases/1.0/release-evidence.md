@@ -4,6 +4,12 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+最新恢复点（基于`3d798902`的READER-04修复候选，真实回归未完成）：RG-03 PDF正常69页样本在真实Chrome从全新账户、FLAT书库自动导入后打开，bootstrap两次HTTP200却显示“PDF 阅读信息缺少准确大小”，未渲染页面。原FAIL位于`D:/www/ermao-release-android-formats/artifacts/releases/1.0/ac25497d3a4ee29383ddc97ac27c0a7230a5d078/rg03-pdf-69-20260906/development-r2/`。样本711671字节、SHA-256 `f6dd04bcb9cf62087625edc5a38f091e6fe7edbf5cb39d612479bb332f5dbbd3`；原件及应用源码不变，原fixture已退出、18085/3106关闭。该工作区production构建因跨工作区依赖链接失败留在同目录`production/next-build.log`，实际FAIL来自development，不混称production运行。
+
+只读SQLAlchemy核验同一测试库及实际repository输出：唯一READY主资产role=PRIMARY、sizeBytes=711671，和生成ReaderAssetSummary契约一致；真实HTTP响应体未独立捕获，不以DB输出冒充响应体。Web却读取旧kind=CONTENT，旧mock同样用旧字段而掩盖缺陷。先仅纠正mock为真实契约，原生产代码出现PDF_INVALID和漫画PUBLICATION_MIME_MISMATCH两个受控失败，再修复唯一bootstrap映射owner按PRIMARY选取并让PDF运行时复用其结果；保留原流式路径、大小/安全校验、IMAGE_DIR行为及未知MIME保护，不改生成文件或安全策略。
+
+候选验证位于`artifacts/releases/1.0/3d798902/pdf-primary-role/`：`red-real-wire.log`保留原失败，`green-real-wire.log`针对性7 PASS，增加PAGE在前仍选PRIMARY以及无PRIMARY/零大小拒绝回归；完整Web `full-web-test-python-explicit.log` 477 PASS、0 skip，typecheck/lint/i18n均PASS。首次`full-web-test.log`为Node调用python3入口9009的环境失败，测试尚未运行；使用生成器已有PYTHON_EXECUTABLE配置指向现有3.11虚拟环境后通过，无工具改动。两个既有E2E mock同步改用role=PRIMARY，断言不删减。DEC-07：仅新增此具体缺陷的针对性回归，不扩展通用工具；真实PDF原场景、漫画相邻和必要回归完成后停止。接下来在主分支生产fixture进行真实阅读验证；本缺陷仍待回归，未冻结RC。
+
 最新恢复点`7e207c3821abc522b7ff19a91f02b7bd6800a5f2`：POS-03 Chrome桌面/移动视口“MP3暂停且已确认后强杀、同profile重启、必要时真实同账号重登录恢复”子项均PASS。桌面5892ms/r3→实际5892ms（误差0）；移动视口5862ms/r3→6067.804ms（误差205.804ms），阈值仍2秒。杀前完整PUT/ACK/GET、pending=0及杀后登录前完整IDB等值已验证；CDP/CIM精确profile/创建时间核验后直接SIGKILL，杀前无页面关闭或播放器关闭。两次重启均未保留session cookie、首次GET401，真实UI登录按既有隐私策略清空两store，随后fresh GET必须完整等于原ACK，实际引擎恢复通过。此结论不覆盖免重登录、未确认pending、播放中强杀、其他引擎或原生平台。
 
 证据：`artifacts/releases/1.0/7e207c38/process-recovery/r1788705237079-w0/`（桌面）与`r1788705279829-w1/`（移动视口），含强杀前记录、browser-observations、截图、shutdown及post-run-verification。主已核验源/目标进程与实际结果，独立审查已复核桌面实际证据、测试修正及边界。杀后GET未单独序列化响应体，其完整比较由实际运行的必经断言证明；`source.fresh`仅是杀前GET，不能混称杀后响应。
