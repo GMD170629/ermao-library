@@ -1,6 +1,7 @@
 package com.ermao.library
 
 import android.app.Application
+import androidx.media3.common.util.UnstableApi
 import com.ermao.library.platform.persistence.AndroidServerProfileStore
 import com.ermao.library.platform.persistence.AndroidLoginCredentialStore
 import com.ermao.library.platform.persistence.LoginCredentialStore
@@ -24,7 +25,6 @@ import com.ermao.library.features.audio.application.AndroidAudioPlaybackRuntime
 import com.ermao.library.features.audio.infrastructure.AndroidAudioTransportRegistry
 import com.ermao.library.features.audio.infrastructure.AuthenticatedAudioDataSourceProvider
 import com.ermao.library.features.audio.infrastructure.RegisteredAuthenticatedAudioDataSourceProvider
-
 class ErmaoLibraryApplication : Application() {
     private val downloadsViewModelStore = androidx.lifecycle.ViewModelStore()
     private var downloadsNamespace: String? = null
@@ -89,6 +89,7 @@ class ErmaoLibraryApplication : Application() {
      * Supplied by the shared Audio composition when that capability is available. The default
      * fails closed for remote media and never bypasses the shared Cookie/TLS transport policy.
      */
+    @UnstableApi
     lateinit var audioTransportProvider: AuthenticatedAudioDataSourceProvider
         private set
     lateinit var audioTransportRegistry: AndroidAudioTransportRegistry
@@ -96,6 +97,7 @@ class ErmaoLibraryApplication : Application() {
     lateinit var audioPlaybackRuntime: AndroidAudioPlaybackRuntime
         private set
 
+    @UnstableApi
     override fun onCreate() {
         super.onCreate()
         AndroidMobileStorageContract.initialize(this)

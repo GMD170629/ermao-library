@@ -3,6 +3,7 @@ package com.ermao.library.features.audio.infrastructure
 import android.content.Context
 import android.net.Uri
 import androidx.media3.common.C
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
@@ -23,6 +24,7 @@ import kotlinx.coroutines.runBlocking
  * headers. The KMP/network composition root supplies this port and retains ownership of all
  * response validation.
  */
+@UnstableApi
 data class AuthenticatedAudioDataSourceRequest(
     val namespaceKey: String,
     val uri: Uri,
@@ -36,6 +38,7 @@ data class AuthenticatedAudioDataSourceRequest(
     }
 }
 
+@UnstableApi
 fun interface AuthenticatedAudioDataSourceProvider {
     /** Creates one request-scoped source while preserving shared cancellation and Range rules. */
     fun create(request: AuthenticatedAudioDataSourceRequest): DataSource
@@ -89,6 +92,7 @@ class AndroidAudioTransportRegistry {
 }
 
 /** Media3 adapter over the shared KMP incremental authenticated-stream port. */
+@UnstableApi
 class RegisteredAuthenticatedAudioDataSourceProvider(
     private val registry: AndroidAudioTransportRegistry,
 ) : AuthenticatedAudioDataSourceProvider {
@@ -107,6 +111,7 @@ class RegisteredAuthenticatedAudioDataSourceProvider(
  * Fail-closed composition fallback used before a verified session registers a KMP transport.
  * Local `file://`, `content://`, and `asset://` artifacts remain available through the factory.
  */
+@UnstableApi
 object RejectingAuthenticatedAudioDataSourceProvider : AuthenticatedAudioDataSourceProvider {
     override fun create(request: AuthenticatedAudioDataSourceRequest): DataSource {
         throw AuthenticatedAudioTransportUnavailableException()
@@ -117,6 +122,7 @@ object RejectingAuthenticatedAudioDataSourceProvider : AuthenticatedAudioDataSou
  * Adapts shared authenticated streams to Media3 while leaving local artifact handling to the
  * platform. Each engine read awaits only one bounded chunk; the response is never fully buffered.
  */
+@UnstableApi
 class LocalOrAuthenticatedAudioDataSourceFactory(
     private val context: Context,
     private val provider: AuthenticatedAudioDataSourceProvider,
@@ -129,6 +135,7 @@ class LocalOrAuthenticatedAudioDataSourceFactory(
     )
 }
 
+@UnstableApi
 private class LocalOrAuthenticatedAudioDataSource(
     private val localFactory: DataSource.Factory,
     private val provider: AuthenticatedAudioDataSourceProvider,
@@ -183,6 +190,7 @@ private class LocalOrAuthenticatedAudioDataSource(
     }
 }
 
+@UnstableApi
 private class KmpAudioMediaDataSource(
     private val transport: AudioMediaTransport,
     private val asset: AudioAsset,

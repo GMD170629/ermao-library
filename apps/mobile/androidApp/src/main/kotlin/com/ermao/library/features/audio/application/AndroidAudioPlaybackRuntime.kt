@@ -77,6 +77,7 @@ import kotlinx.coroutines.launch
  * runtime only maps that public contract to a service-backed Android player and reports engine
  * observations back through [progressSink].
  */
+@AndroidXOptIn(markerClass = [UnstableApi::class])
 class AndroidAudioPlaybackRuntime private constructor(
     private val appContext: Context?,
     private val transportRegistry: AndroidAudioTransportRegistry?,

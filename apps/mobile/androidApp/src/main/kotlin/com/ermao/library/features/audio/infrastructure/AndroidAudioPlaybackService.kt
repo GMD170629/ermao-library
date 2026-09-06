@@ -5,6 +5,7 @@ import android.content.Intent
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.DefaultMediaNotificationProvider
@@ -19,6 +20,7 @@ import com.ermao.library.ErmaoLibraryApplication
  * Media3 owns audio focus, noisy-route handling, notification lifecycle and system transport
  * controls; KMP owns the application playback contract and progress synchronization.
  */
+@UnstableApi
 class AndroidAudioPlaybackService : MediaSessionService() {
     private var player: ExoPlayer? = null
     private var mediaSession: MediaSession? = null
