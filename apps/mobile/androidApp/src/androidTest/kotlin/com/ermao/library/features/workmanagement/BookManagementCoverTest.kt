@@ -50,6 +50,7 @@ import android.view.KeyEvent
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -92,7 +93,15 @@ class BookManagementCoverTest {
             val registryOwner = requireNotNull(androidx.activity.compose.LocalActivityResultRegistryOwner.current)
             val base = LocalContext.current
             val configuration = Configuration(LocalConfiguration.current).apply { setLocale(Locale.forLanguageTag(if (chinese) "zh-CN" else "en-US")) }
-            CompositionLocalProvider(androidx.activity.compose.LocalActivityResultRegistryOwner provides registryOwner, LocalContext provides base.createConfigurationContext(configuration), LocalConfiguration provides configuration) {
+            val localizedContext = base.createConfigurationContext(configuration)
+            // Pinned Compose 1.11 stringResource consumes LocalResources directly.
+            // Overriding only LocalContext leaves popup labels in the device locale.
+            CompositionLocalProvider(
+                androidx.activity.compose.LocalActivityResultRegistryOwner provides registryOwner,
+                LocalContext provides localizedContext,
+                LocalConfiguration provides configuration,
+                LocalResources provides localizedContext.resources,
+            ) {
                 WarmPageTheme(darkTheme = chinese) {
                     BookManagementHost(repository, context, admin, {}, {}, {}, {}, {}) {
                         LazyColumn {
@@ -121,21 +130,24 @@ class BookManagementCoverTest {
 
     @Test fun menuUsesPressPointInsteadOfCoverBoundsAndReopensWithoutRequests() {
         show()
-        compose.onNodeWithTag("cover-0").performTouchInput { longClick(Offset(20f, 20f)) }
-        val first = compose.onNodeWithTag("management-menu").fetchSemanticsNode().boundsInWindow
-        compose.onNodeWithTag("management-menu").assertWidthIsEqualTo(280.dp)
+        // Stay away from Material's screen-edge clamping. A Popup owns a separate
+        // window, so boundsInWindow cannot measure its movement across the screen.
+        compose.onNodeWithTag("cover-0").performTouchInput { longClick(Offset(160f, 160f)) }
+        val first = compose.onNodeWithTag("management-menu").fetchSemanticsNode().positionOnScreen
+        // Existing Android platform menu geometry is 224dp (WarmPageComponentMetrics).
+        compose.onNodeWithTag("management-menu").assertWidthIsEqualTo(224.dp)
         InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-        compose.onNodeWithTag("cover-0").performTouchInput { longClick(Offset(80f, 80f)) }
-        val second = compose.onNodeWithTag("management-menu").fetchSemanticsNode().boundsInWindow
-        assertEquals(60f, second.left - first.left, 2f)
-        assertEquals(60f, second.top - first.top, 2f)
+        compose.onNodeWithTag("cover-0").performTouchInput { longClick(Offset(220f, 220f)) }
+        val second = compose.onNodeWithTag("management-menu").fetchSemanticsNode().positionOnScreen
+        assertEquals(60f, second.x - first.x, 2f)
+        assertEquals(60f, second.y - first.y, 2f)
         compose.runOnIdle { assertTrue(targets.isEmpty()); assertEquals(0, taps) }
     }
 
     @Test fun longTitleCannotExpandTheNativeMenu() {
         show(longTitle = true)
         compose.onNodeWithTag("cover-0").performTouchInput { longClick() }
-        compose.onNodeWithTag("management-menu").assertWidthIsEqualTo(280.dp)
+        compose.onNodeWithTag("management-menu").assertWidthIsEqualTo(224.dp)
         compose.onNodeWithText("Edit").assertIsDisplayed()
     }
 

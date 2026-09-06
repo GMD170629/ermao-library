@@ -429,7 +429,8 @@ class ReaderScreenContentsInstrumentedTest {
 
     @Test
     fun reflowableProgressArrowsNavigateChaptersInsteadOfPages() {
-        val controller = DeferredContentsController()
+        // Chapter navigation follows the engine's explicit TOC identity, not href guessing.
+        val controller = DeferredContentsController(initialNavigationEntryId = "chapter-1.xhtml")
         val previousChapter = instrumentation.targetContext.getString(R.string.reader_previous_chapter)
         val nextChapter = instrumentation.targetContext.getString(R.string.reader_next_chapter)
         compose.setContent {

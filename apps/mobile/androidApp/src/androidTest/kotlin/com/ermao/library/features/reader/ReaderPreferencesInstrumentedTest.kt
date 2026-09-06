@@ -68,19 +68,21 @@ class ReaderPreferencesInstrumentedTest {
             comic = ReaderPreferences().comic.copy(spreadMode = ReaderComicSpreadMode.Double),
             pdf = ReaderPreferences().pdf.copy(fit = ReaderPdfFit.Width),
         )
-        val supported = stored.copy(
-            comic = stored.comic.copy(spreadMode = ReaderComicSpreadMode.Single),
-        )
-
         AndroidReaderPreferencesStore(context, "server-$suffix", "user-a").save(stored)
 
+        // The shared comic engine supports double spreads. Persistence must preserve
+        // the requested preference; effective layout is decided by the engine.
         assertEquals(
-            supported,
+            stored,
             AndroidReaderPreferencesStore(context, "server-$suffix", "user-a").load(),
         )
         assertEquals(
             ReaderPreferences(),
             AndroidReaderPreferencesStore(context, "server-$suffix", "user-b").load(),
+        )
+        assertEquals(
+            ReaderPreferences(),
+            AndroidReaderPreferencesStore(context, "other-server-$suffix", "user-a").load(),
         )
     }
 

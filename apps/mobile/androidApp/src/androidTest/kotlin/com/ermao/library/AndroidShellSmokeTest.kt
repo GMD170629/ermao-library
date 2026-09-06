@@ -2,6 +2,7 @@ package com.ermao.library
 
 import android.content.Context
 import android.content.res.Configuration
+import android.graphics.Color
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
@@ -23,6 +24,7 @@ import com.ermao.library.bootstrap.ErmaoLibraryRoot
 import com.ermao.library.bootstrap.LoginFormState
 import com.ermao.library.bootstrap.MainActions
 import com.ermao.library.bootstrap.MainUiState
+import com.ermao.library.design.GeneratedDesignTokens
 import com.ermao.library.features.shell.MainShell
 import com.ermao.library.shared.createAndroidContentRepository
 import com.ermao.library.shared.modules.auth.domain.AppSession
@@ -40,7 +42,6 @@ import com.ermao.library.features.me.platform.AndroidXAppLocaleController
 import com.ermao.library.ui.theme.WarmPageTheme
 import java.util.Locale
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -326,15 +327,22 @@ class AndroidShellSmokeTest {
     }
 
     @Test
-    fun lightDarkAndSupportedLocalesResolveFromResources() {
+    fun lightOnlyShellAndSupportedLocalesResolveFromResources() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val lightContext = context.withNightMode(Configuration.UI_MODE_NIGHT_NO)
         val darkContext = context.withNightMode(Configuration.UI_MODE_NIGHT_YES)
         val englishContext = context.withLocale(Locale.forLanguageTag("en-US"))
         val chineseContext = context.withLocale(Locale.forLanguageTag("zh-CN"))
 
-        assertNotEquals(
+        // The application shell is light-only under the shared visual contract.
+        // Reader system-theme behavior is verified by ReaderPreferencesInstrumentedTest.
+        val canvas = Color.parseColor(GeneratedDesignTokens.App.Canvas)
+        assertEquals(
+            canvas,
             ContextCompat.getColor(lightContext, R.color.window_background),
+        )
+        assertEquals(
+            canvas,
             ContextCompat.getColor(darkContext, R.color.window_background),
         )
         assertEquals("Home", englishContext.getString(R.string.tab_home))

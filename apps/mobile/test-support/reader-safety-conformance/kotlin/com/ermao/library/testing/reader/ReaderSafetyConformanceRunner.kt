@@ -379,8 +379,7 @@ class ReaderSafetyConformanceRunner private constructor(
             "COMIC_REVISION" -> detected =
                 ReaderSafetyPolicy.comicProfile.manifestRevisionRequired &&
                     values["manifestRevision"] != values["requestRevision"]
-            "AUDIO_CONTAINER_MIME" -> detected =
-                false
+            "AUDIO_CONTAINER_MIME" -> return allowedDecision(ruleId, "BOUNDARY_ALLOW", source)
             "AUDIO_CODEC" -> detected =
                 ReaderSafetyPolicy.audioProfile.codecDecision == "ENGINE_CAPABILITY" &&
                     values["codec"] == "unsupported"

@@ -10,6 +10,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.platform.app.InstrumentationRegistry
+import com.ermao.library.ErmaoLibraryApplication
+import com.ermao.library.features.workmanagement.BookManagementHost
 import com.ermao.library.features.content.model.BookCard
 import com.ermao.library.features.content.model.BookDetailContent
 import com.ermao.library.features.content.model.ResourceContent
@@ -39,6 +41,7 @@ class DirectoryContentPresentationTest(private val resourceCount: Int, private v
     @Test
     fun onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact() {
         val androidContext = InstrumentationRegistry.getInstrumentation().targetContext
+        val application = androidContext.applicationContext as ErmaoLibraryApplication
         val repository = createAndroidContentRepository(androidContext)
         val parsed = ServerBaseUrl.parse("https://directory-test.invalid")
         check(parsed is ServerBaseUrlParseResult.Valid)
@@ -67,6 +70,18 @@ class DirectoryContentPresentationTest(private val resourceCount: Int, private v
         var downloadedResource: String? = null
         composeRule.setContent {
             WarmPageTheme(darkTheme = false) {
+                // Directory actions now use the same management host as the real Shell.
+                // The download extra dispatches the tested callback without a repository request.
+                BookManagementHost(
+                    repository = application.workManagementRepository,
+                    context = context,
+                    canManage = false,
+                    onUnauthorized = { error("Unexpected authorization request") },
+                    onRefreshAuthorization = { error("Unexpected authorization refresh") },
+                    onChanged = { error("Unexpected management mutation") },
+                    onOpenKindleSettings = { error("Unexpected Kindle settings") },
+                    onOpenKindleQueue = { error("Unexpected Kindle queue") },
+                ) {
                 WorkDetailScreen(
                     state = WorkDetailUiState(
                         isBookRoot = isRoot, isLoading = false, contents = page,
@@ -89,6 +104,7 @@ class DirectoryContentPresentationTest(private val resourceCount: Int, private v
                     onSelectReadingStatus = { scope, _ -> readingStatusScope = scope },
                     onDownloadResource = { downloadedResource = it },
                 )
+                }
             }
         }
         composeRule.onNodeWithText("50%").assertDoesNotExist()

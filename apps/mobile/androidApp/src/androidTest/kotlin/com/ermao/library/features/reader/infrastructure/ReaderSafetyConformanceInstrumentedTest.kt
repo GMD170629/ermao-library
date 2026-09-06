@@ -21,6 +21,7 @@ import com.ermao.library.testing.reader.ReaderSafetyConformanceRunner
 import java.io.File
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.jsonArray
+import org.apache.commons.compress.archivers.zip.ZipFile
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -137,13 +138,16 @@ class ReaderSafetyConformanceInstrumentedTest {
             archive.writeBytes(Base64.decode(source.removePrefix("base64:"), Base64.DEFAULT))
             val safety = runBlocking { AndroidEpubArchiveSafetyPreflight.verify(archive) }
             val expected = requireNotNull(safety.expectedFor("unused.bin"))
+            val resourceBytes = ZipFile.builder().setPath(archive.toPath()).get().use { zip ->
+                zip.getInputStream(requireNotNull(zip.getEntry("unused.bin"))).use { it.readBytes() }
+            }
             return try {
-                // This is the same byte verifier used by the protected Readium Container. The
-                // fixture's original resource bytes are represented directly here because the
-                // SDK ZIP stream does not expose the corrupted-entry CRC check as a public API.
+                // Consume the fixture's actual corrupted bytes. A hard-coded original payload
+                // matches the stored CRC and would never exercise the protected Container's
+                // byte verifier, even though the archive fixture itself is corrupt.
                 AndroidEpubArchiveSafetyPreflight.verifyResourceBytes(
                     expected,
-                    "unused-entry-crc-payload".encodeToByteArray(),
+                    resourceBytes,
                 )
                 error("Android EPUB archive preflight accepted a CRC mismatch")
             } catch (failure: ReaderSafetyException) {
