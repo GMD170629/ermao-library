@@ -4,6 +4,12 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 
 ## R1 状态覆盖与外部条件
 
+AUDIO-03（待分类的真实用例FAIL）：`audio-soak/runs-30/r1788686654444-w0/` 长MP3新增短观测后，跳转/暂停/关闭重开位置误差438000ms（要求≤2000ms），最后PUT为37479ms。持续观察本身已通过；不能确定是产品异步跳转/保存问题还是测试入口问题，原失败保留并补实际引擎事件诊断，不放宽断言。正式30分钟尚未运行。
+
+ANDROID-03聚焦复现：同包单项1 PASS、整类19 PASS、截图单项1 PASS，均零skip；原全套1 FAIL保留。当前SDK确认手势height已裁剪、断言会waitForIdle，不能以这两点误判原因。第一swipe仅检查top变小，尚不能证明稳定Expanded；下一步仅补测试逐步几何/原生语义诊断，保留滚动、回缩及不翻页原断言。
+
+300k取消已完成：122342部分文件保留、无完整manifest；自有生成/监督进程均退出，见DEC-06取消终态，不再列为运行中或等待大规模结果。
+
 DEC-06 已获用户明确决定：本轮导入性能以已有 1 万规模实测为依据，大规模/完整时长测试交由独立脚本按需执行。LOAD-01 已关闭的事实保持；100k/300k 压测、完整时长和三端混合压力不再阻塞本轮代码收敛，不伪填这些未执行场景 PASS。300k 样本准备已请求安全停止，必须以所属进程实际终态为准；100k 完成样本与300k部分输出保留，不删除。iOS 的其他功能与正式交付阻塞不受此决定影响。
 
 ANDROID-03 / RUN-01 当前自动真机结论：`227e09f1` 移动生产源码完整148项运行 **147 PASS / 1 FAIL / 0 skipped**（346.265s），失败为 `ReaderScreenContentsInstrumentedTest.nativeSheetExpandsBeforeScrollingAndCollapsesAtListStartWithoutTurningPages:326`：第二次手势后仍存在第一章节点。`preflight-mobile/mobile-full-227e09f1-20260906/09-instrumentation-summary.json` 和原始stdout留证；当前尚未确定产品缺陷、手势/动画测试问题或用例间状态影响。授权同包单项/同class重现，不改超时/断言，不用重跑一次PASS关闭不稳定性。shared429/Android unit218/lint通过不覆盖此失败。

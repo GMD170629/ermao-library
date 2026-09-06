@@ -7,6 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { expect, test, type Page } from '@playwright/test';
 import timingFixture from '../../../packages/reader-contracts/fixtures/reader-progress-timing-v1.json';
 import { revealReaderControls, visibleReaderFrame } from './reader-controls';
+import { audioSoakSeconds, observeAudioSoak, startAudioProbe } from './release-audio-soak';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -206,6 +207,7 @@ async function startFixture(testInfo: { workerIndex: number }): Promise<FixtureR
       '--api-port', String(apiPort),
       '--web-port', String(webPort),
       '--web-runtime', productionWeb ? 'production' : 'development',
+      '--lifetime-seconds', String(audioSoakSeconds() + 600),
       ...(productionWeb ? ['--web-hostname', 'release-live.localhost'] : [])
     ],
     {
@@ -383,7 +385,7 @@ async function openDetailResource(page: Page, action: '打开阅读器' | '打�
 const requestedAudioMime = process.env.RELEASE_LIVE_AUDIO_MIME ?? 'audio/mpeg';
 
 test(`release live fresh install resumes EPUB and ${requestedAudioMime} through Reader v5`, async ({ page, context }, testInfo) => {
-  test.setTimeout(300_000);
+  test.setTimeout(300_000 + audioSoakSeconds() * 1_000);
 
   const password = process.env.RELEASE_LIVE_PASSWORD;
   if (!password || password.length < 10) throw new Error('RELEASE_LIVE_PASSWORD must be a local-only password of at least 10 characters');
@@ -437,7 +439,7 @@ test(`release live fresh install resumes EPUB and ${requestedAudioMime} through 
       expect(sample?.fixtureSha256, `${format} fixture hash`).toBeTruthy();
       expect(sample?.sourceExtension, `${format} source extension`).toBe(extension);
       expect(sample?.corpusManifest, `${format} corpus manifest`).toBeTruthy();
-      expect(sample?.durationClaim).toContain('short format fixture');
+      expect(sample?.durationClaim).toContain('duration must be verified by the actual engine');
     }
     await mkdir(resolve(manifest.artifactDir, 'screenshots'), { recursive: true });
 
@@ -643,6 +645,20 @@ test(`release live fresh install resumes EPUB and ${requestedAudioMime} through 
       previousSavedPosition = savedMillis;
     }
 
+    if (audioSoakSeconds() > 0) {
+      await observeAudioSoak(page, audioSoakSeconds(), resolve(manifest.artifactDir, 'audio-soak.jsonl'), async () => {
+        const enginePosition = await page.locator('audio').evaluate((element: HTMLAudioElement) => element.currentTime * 1_000);
+        const readback = responseData(await requestJson(page, webOrigin, audioProgressPath, apiResponses), audioProgressPath);
+        const snapshot = record(readback.progressSnapshot);
+        const savedMillis = numberValue(record(record(record(snapshot.position).presentation).playback).positionMillis, 'soak saved position');
+        expect(savedMillis).toBeGreaterThan(previousSavedPosition);
+        expect(enginePosition - savedMillis).toBeLessThanOrEqual(timingFixture.maxCaptureAgeMillis);
+        continuousSaves.push({ checkpoint: Date.now() - continuousStartedAt, enginePositionMillis: enginePosition, savedPositionMillis: savedMillis, revision: snapshot.revision });
+        previousSavedPosition = savedMillis;
+      });
+    }
+
+    audioObservation = { resourceId: audio.resourceId, continuousSaves, soakSeconds: audioSoakSeconds() };
     const audioSlider = player.getByRole('slider', { name: '有声书播放进度' });
     await expect(audioSlider).toBeVisible();
     const audioMaximum = Number(await audioSlider.getAttribute('max'));
@@ -651,11 +667,22 @@ test(`release live fresh install resumes EPUB and ${requestedAudioMime} through 
       1_000,
       Math.min(audioMaximum - 1_000, Math.round(audioMaximum * 0.25 / 1_000) * 1_000)
     );
-    await audioSlider.fill(String(targetAudioPosition));
-    await expect.poll(async () => Number(await audioSlider.inputValue()), { timeout: 10_000 })
-      .toBe(targetAudioPosition);
-    await audioToggle.click();
-    await expect(audioToggle).toHaveAttribute('aria-label', '播放');
+    const seekProbe = await startAudioProbe(page);
+    const seekObservations: JsonRecord[] = [];
+    try {
+      seekObservations.push({ stage: 'before-seek', targetAudioPosition, ...await seekProbe.evaluate((value) => value.read()) });
+      await audioSlider.fill(String(targetAudioPosition));
+      await expect.poll(async () => Number(await audioSlider.inputValue()), { timeout: 10_000 })
+        .toBe(targetAudioPosition);
+      seekObservations.push({ stage: 'slider-target', ...await seekProbe.evaluate((value) => value.read()) });
+      await audioToggle.click();
+      await expect(audioToggle).toHaveAttribute('aria-label', '播放');
+      seekObservations.push({ stage: 'paused', ...await seekProbe.evaluate((value) => value.read()) });
+    } finally {
+      await seekProbe.evaluate((value) => value.stop());
+      await seekProbe.dispose();
+      await writeFile(resolve(manifest.artifactDir, 'audio-seek-observations.json'), JSON.stringify(seekObservations, null, 2), 'utf8');
+    }
     const audioProgressWrites = () => progressWrites.filter((write) => write.path === audioProgressPath);
     await expect.poll(() => audioProgressWrites().length, { timeout: 45_000 }).toBeGreaterThan(0);
     const latestAudioWrite = record(audioProgressWrites().at(-1)?.body);

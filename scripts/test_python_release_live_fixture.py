@@ -3,7 +3,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from python_release_live_fixture import _build_production_web, _next_command
+from python_release_live_fixture import (
+    _build_production_web,
+    _next_command,
+    _wait_for_stop,
+)
 
 
 def test_runtime_commands_keep_production_opt_in_and_loopback_bound() -> None:
@@ -56,3 +60,27 @@ def test_build_uses_existing_script_and_always_reaps_its_process(
         assert start.call_args.kwargs["env"] == env
         build.wait.assert_called_once_with(timeout=600)
         build.stop.assert_called_once_with(timeout=12)
+
+
+@pytest.mark.parametrize("lifetime", [599, 7801])
+def test_fixture_rejects_unbounded_lifetime(tmp_path: Path, lifetime: int) -> None:
+    with pytest.raises(ValueError, match="lifetime"):
+        _wait_for_stop(tmp_path / "stop", {}, tmp_path / "events.log", lifetime)
+
+
+def test_long_fixture_still_enforces_deadline_and_detects_early_exit(
+    tmp_path: Path,
+) -> None:
+    with (
+        patch("python_release_live_fixture.time.monotonic", side_effect=[0, 2401]),
+        pytest.raises(TimeoutError, match="2400"),
+    ):
+        _wait_for_stop(tmp_path / "stop", {}, tmp_path / "events.log", 2400)
+    with patch("python_release_live_fixture.start_logged_process") as start:
+        process = start.return_value
+        process.poll.return_value = 2
+        process.returncode = 2
+        with pytest.raises(RuntimeError, match="exited before"):
+            _wait_for_stop(
+                tmp_path / "stop", {"api": process}, tmp_path / "events.log", 2400
+            )

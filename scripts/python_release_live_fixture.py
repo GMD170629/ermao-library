@@ -72,6 +72,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--api-port", type=int, default=0)
     parser.add_argument("--web-port", type=int, default=DEFAULT_WEB_PORT)
+    parser.add_argument("--lifetime-seconds", type=int, default=600)
     parser.add_argument(
         "--web-runtime", choices=("development", "production"), default="development"
     )
@@ -171,7 +172,7 @@ def _build_audio_samples(
                 "sourceExtension": source_path.suffix.lower(),
                 "expectedMime": expected_mime,
                 "corpusManifest": str(manifest_path),
-                "durationClaim": "short format fixture; no long-duration claim",
+                "durationClaim": "format fixture; duration must be verified by the actual engine",
                 **_source_metadata(source_path, fixture_path),
             }
         )
@@ -273,15 +274,24 @@ def _stop_process(
         return False
 
 
+def _validate_lifetime(lifetime_seconds: int) -> None:
+    if not 600 <= lifetime_seconds <= 7_800:
+        raise ValueError("fixture lifetime must be between 600 and 7800 seconds")
+
+
 def _wait_for_stop(
     stop_file: Path,
     processes: dict[str, LoggedProcess],
     event_log: Path,
+    lifetime_seconds: int = 600,
 ) -> None:
-    deadline = time.monotonic() + 600
+    _validate_lifetime(lifetime_seconds)
+    deadline = time.monotonic() + lifetime_seconds
     while not stop_file.is_file():
         if time.monotonic() >= deadline:
-            raise TimeoutError("browser fixture exceeded its 600 second lifetime")
+            raise TimeoutError(
+                f"browser fixture exceeded its {lifetime_seconds} second lifetime"
+            )
         for label, process in processes.items():
             if process.poll() is not None:
                 raise RuntimeError(
@@ -342,6 +352,7 @@ def main() -> int:
         raise RuntimeError("This fixture is opt-in; set RELEASE_LIVE_E2E=1")
 
     args = _parse_args()
+    _validate_lifetime(args.lifetime_seconds)
     artifact_dir = args.artifact_dir.resolve()
     manifest_path = args.manifest.resolve()
     stop_file = args.stop_file.resolve()
@@ -570,6 +581,7 @@ def main() -> int:
             stop_file,
             {"api": api_process, "worker": worker_process, "next": next_process},
             event_log,
+            args.lifetime_seconds,
         )
         return 0
     finally:
