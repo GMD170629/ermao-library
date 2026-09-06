@@ -1,5 +1,11 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 POS-10活跃会话子项PASS：源码34d4a24e，新隔离库、Chrome production与已核验32d16edc开发APK，真实普通MP3播放。Chrome暂停5.054691s，专用标签实际离线期间Android确认15034ms/r8；恢复网络后出现“其他设备已阅读至50%”，引擎仍5.054691s/paused，显式跳转后15.034s/paused且提示清除。Android保留暂停15034ms会话进入后台，Chrome普通后退15秒确认34ms/r10；原任务回前台收到0%提示，系统MediaSession仍15034ms，点击“跳转至最新位置”后才34ms。无直接API位置写入、JS引擎修改或合成可见性事件。辅助标签切前台未产生hidden，故使用真实网络重连，不声称visibilitychange通过。
+
+证据`artifacts/releases/1.0/34d4a24e/pos10-active-session-20260907/`：normal-ui-observations明确为实际CUA/ADB观察转录；两个source-confirmed独立GET、Android原始XML/MediaSession、manifest及prestop-hashes可追溯。931项源码/原件hash全部匹配；11次进度PUT均200，10个401全部在Android新库重新登录前，后续无4xx/5xx，Chrome error为空。恢复专用标签网络并Network.disable，正常退出测试账号，主/辅助标签关闭；早期未使用空白tab35842965仍报告Debugger unattached，未访问用户其他标签。独立包强停、reverse移除、fixture exit0/cleanupErrors空、端口释放、Web配置恢复及原工作区15改动保留见cleanup-verification。未新增业务、回归测试或工具。
+
+当前恢复点：POS-10仅上述MP3活动会话双端子项通过，服务受控重启/重开及其他引擎仍NOT_RUN；POS-09显式目标只应用一次等未覆盖项继续使用现有入口。无活动fixture，未冻结RC；ENV-11/12、iOS/容器条件和正式APK/IPA暂缓不变，五组最终门禁尚未整体放行。
+
 2026-09-07 POS-06本轮收尾：`5b967260`同一测试代码/开发APK的原online相邻在另一全新隔离库实际PASS（13.045s）：5秒3899ms/r2、10秒7900ms/r3、暂停9904ms/r4，关闭重开实际9904ms，误差0；本地/独立GET最终r7一致。证据`artifacts/releases/1.0/5b967260/pos06-online-adjacent-20260907/`的device-online、online-evidence、fixture manifest、api-observations及cleanup-verification。935项校验全部匹配（929应用源码/原件和6最终测试源码/配置/APK），7次PUT200，无4xx/5xx；正常stop/exit0、Web配置恢复、18084/3105释放、自有reverse移除、独立包强停、输入消费、原App元数据及原工作区15改动不变。独立审查、POS-06实际原用例与必要相邻齐备，本工具补口结束，不再扩展。以下“尚待相邻/进行中”是历史。
 
 当前恢复点：SYNC-03已关闭；POS-06的Android同步owner/HTTP/SQLite晚ACK和owner/DB重建重试子项PASS。仍需Chrome及其他引擎对应缺口，POS-05真实丢ACK/重试、POS-07真实客户端迟到提交、POS-08账号/服务器切换及POS-09/10等未覆盖场景按原矩阵继续；不能把本例当作SYNC-02的Chrome启动竞态回归。ENV-11/12执行限制、iOS和容器条件及正式APK/IPA暂缓分别保留，当前没有活动fixture/子代理；安装的releasecheck开发包含标准测试宿主，仅供后续隔离验收。下一项优先复用现有入口补进度异常或其他仍可执行门禁，不因缺少入口自动记外部BLOCKED；必要最小辅助须继续按DEC-07登记。尚未冻结RC，五组最终放行与正式发布均未完成。

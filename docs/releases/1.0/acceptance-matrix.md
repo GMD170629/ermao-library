@@ -252,7 +252,7 @@ POS-08新增AUDIO-08（原RISK-06）：真实Android引擎+SQLite单次IO门控�
 | POS-07 | P3；双端并发、离线首次提交 | A/B分别写并控制事务完成顺序；再让离线未提交C在N后首次到达；主动回读 | 按服务端最后事务提交生效；C可成为新当前位置，区别成功mutation重放；明确记录用户可见回退，不自创最大百分比算法 | artifacts/releases/1.0/62377271/pos07-late-first-submit-20260907/ | 首次迟到C生效、旧成功M重放及异payload409的真实API/ORM子项PASS（e39e6de2）；双端受控事务顺序及真实离线客户端NOT_RUN，iOS BLOCKED |
 | POS-08 | P3；两账号/服务器/资源 | 在途保存时切账号/服务器/资源，释放旧请求；尝试无权资源和同mutation跨namespace | 无串写、越权、错误清pending；业务身份以资源为准 | release-evidence中AUDIO-08/09实际RED/GREEN与93100b06证据 | Android音频资源切换restore挂起时旧捕获身份、Stop取消迟到恢复子项PASS，AUDIO-08/09已关闭；账号/服务器切换、其他引擎和传输在途组合仍NOT_RUN，iOS BLOCKED |
 | POS-09 | P3；有章/页入口的各格式 | 从目录显式目标A进入→读到B保存→旋转/重建/重进 | 显式入口只应用一次，回到后来B | E/POS-09/ | NOT_RUN（原生/缺样本子项BLOCKED）；ENV-06 |
-| POS-10 | P3；各引擎 | 确认位置→服务受控重启→重开；另保持目标端正在阅读，远端写入 | 已确认位置保留；活动会话不被强行跳转 | E/POS-10/ | NOT_RUN（原生/缺样本子项BLOCKED）；ENV-03 |
+| POS-10 | P3；各引擎 | 确认位置→服务受控重启→重开；另保持目标端正在阅读，远端写入 | 已确认位置保留；活动会话不被强行跳转 | E/POS-10/；34d4a24e/pos10-active-session-20260907 | PARTIAL：MP3 Chrome实际重连/Android ON_RESUME活动暂停会话远端提示不自动跳转、显式跳转PASS；服务重启/其他引擎NOT_RUN，iOS缺设备BLOCKED |
 | POS-11 | P3；各格式 | 标记已读/取消已读→主动回读→检查首页/详情/目录/Reader | 已读状态独立；不制造恢复位置；展示与实际语义一致 | artifacts/releases/1.0/938afd24/pos11-status-projection-20260907/ | API/SQLite公开投影及批量身份相邻PASS：无位置标已读不造Locator、取消已读保留完整37%位置；实际各端各格式界面/Reader仍NOT_RUN，iOS BLOCKED |
 
 以上NOT_RUN异常组若执行到缺设备/样本的具体子项则为BLOCKED；Android 9e896bbc已有授权，可用子项直接执行，不再等待旧ENV-03交接。原生iOS缺口仍单列。辅助自动测试 C-09 单独记录，不替代真机和竞态网络证据。

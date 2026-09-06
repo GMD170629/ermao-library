@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-07 POS-10 MP3活动会话双端子项已补齐：Chrome实际重连收到15034ms远端更新仍停5054.691ms；Android原任务回前台收到34ms更新仍停15034ms；两端只有显式跳转才采用远端位置。证据与清理见release-evidence首条。未发现本场景产品缺陷，未扩工具；不关闭整个POS-10，服务重启/其他引擎及POS-09等可执行缺口仍待验收。当前无活动fixture，原用户工作树保留；未冻结RC、未整体GO。
+
 2026-09-07 POS-06 Android晚ACK执行缺口已补齐：实际HTTP、独立SQLite、完整N/pending保留及owner/DB重建原mutation重试PASS，必要原online相邻9904→9904ms PASS；测试接入的编译/缺Compose宿主失败已分类、原日志保留并实际解除，未发现新业务缺陷。独立审查、源码/样本/安装包hash、配置/服务/设备清理见release-evidence。本次最小工具补口停止；不能把“现有工具没有入口”直接当外部阻塞，也不外推该用例到Chrome、socket丢包、其他引擎或SYNC-02。仍按矩阵推进未测异常，既有ENV-11/12、iOS/容器和正式产物暂缓保留，无整体GO。
 
 2026-09-07 最新覆盖：SYNC-03已关闭。ead1ba20新库真实Chrome↔Android原场景：Web5000→Android5015ms、Android15000/r8→Chrome重载详情直接50%/0:15（尚未打开播放器），实际播放器恢复15000ms；完整服务端presentation含非空章节一致，原生正常详情相邻通过。原失败、针对性RED/GREEN、完整Web及后端相邻、独立审查、931项hash和服务/设备清理见release-evidence。停止该缺陷的工具完善。剩余可执行项为POS-04～10异常/生命周期缺口；ENV-11/12、iOS、容器及正式产物暂缓仍分项保留，未冻结RC、未整体GO。以下较早SYNC-03 OPEN/PARTIAL保留为历史。
