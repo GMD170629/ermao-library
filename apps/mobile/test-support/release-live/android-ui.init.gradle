@@ -6,6 +6,7 @@ gradle.beforeProject { project ->
         project.plugins.withId('com.android.application') {
             project.extensions.getByName('androidComponents').finalizeDsl { android ->
                 android.defaultConfig.applicationId = 'com.ermao.library.releasecheck'
+                android.testBuildType = 'release'
                 def acceptanceBuild = android.buildTypes.getByName('release')
                 acceptanceBuild.signingConfig = android.signingConfigs.getByName('debug')
                 acceptanceBuild.debuggable = true

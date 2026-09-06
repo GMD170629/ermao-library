@@ -16,8 +16,14 @@ private fixture, and their initial server-progress requirements differ.
 Host compile, from `apps/mobile`:
 
 ```
-gradlew.bat :androidApp:compileDebugAndroidTestKotlin -PenableReleaseLiveProbe=true --offline --console=plain
+gradlew.bat -I test-support/release-live/android-ui.init.gradle :androidApp:assembleReleaseAndroidTest -PenableReleaseLiveProbe=true --offline --console=plain
 ```
+
+The opt-in init script selects the existing release source set with empty login
+defaults, debug signing, and the isolated `com.ermao.library.releasecheck` UID.
+Its release-named APKs are development acceptance artifacts, not formal delivery.
+The provisioner targets only that package; install the matching test APK without
+clearing either app's data. Never run this probe against `com.ermao.library`.
 
 The primary operator owns real backend setup/import, exact port authorization,
 device provisioning and execution. Use `scripts/python_android_release_live_fixture.py`,

@@ -35,7 +35,8 @@ from python_backend_sample_smoke import (
     wait_for_task_api,
 )
 
-PACKAGE = "com.ermao.library"
+# Match the opt-in acceptance APK's isolated UID; never provision the user's app.
+PACKAGE = "com.ermao.library.releasecheck"
 
 
 def require_string(value: object, field: str) -> str:

@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 POS-06最小执行补口进行中：独立只读核实已有单测/本地SQLite和正常在线仪器不能覆盖“真实HTTP提交M后，N已持久化才处理M的ACK”。依DEC-07例外，仅在现有Android online仪器中加入该用例：复用实际引擎已捕获的完整报告、KMP coordinator、真实HTTP port和生产Android SQLite，在测试拥有的port返回边界扣留实际ACK；不是伪造响应或声称网络丢包。释放旧ACK后核对完整N仍在，重建同步owner并真实重试确认。尚未编译/执行，不计PASS。辅助入口现有硬编码仍指向原App，必须改为现有独立releasecheck包；现有隔离init选择release测试variant，以免仪器误用含本地默认值的debug源码集。这两项仅服务设备数据隔离，不增加任意包名/平台配置。停止条件为本用例及必要原在线相邻实际通过、精确清理，无通用框架扩展。
+
+POS-11相邻补验（938afd24）：本次详情投影改动后，复用现有`test_reading_status_public_projection.py`及`test_request_mutations.py`真实API/SQLite三项通过；无位置标已读仍无Locator、取消已读保持37%完整进度/公开投影及书籍身份批量状态保护保留。证据`artifacts/releases/1.0/938afd24/pos11-status-projection-20260907/regression.log`。仅此API保护，不替代首页/Reader真实客户端各格式完整验收，未新增测试或工具。
+
 2026-09-07 SYNC-03已关闭（当前应用源码 `ead1ba20dce37e941d952d711cee7f72aa76bf42`）：在全新隔离库、Chrome production 与现有 f8847633 Android 独立开发包中重新执行原链路。Web确认5000ms→Android首页首次Playing5015ms；Android普通暂停/滑块确认15000ms/r8后，Chrome fresh reload在播放器尚未打开（audio空src/time0/paused）时直接显示50%和“当前收听 0:15”；正常打开播放器首个实际Playing为15秒，同一resource/asset，误差0ms。reading-units完整presentation与独立v5 GET相同，实际非空Chapter 2亦保留。Android再从首页新导入封面进入真实详情，reading-units pageSize=100返回200、继续收听可用、无无关能力提示。`android-detail-adjacent.xml`实际为首页，不用它证明详情；真正相邻证据为`android-adjacent-detail-cover-entry.xml`。
 
 证据根 `artifacts/releases/1.0/ead1ba20/sync03-complete-20260907/`：inputs、bootstrap、web-confirmed、android-first-playing、android-confirmed、server-reading-units-before-reload及原生XML为实际记录；`chrome-observations.json`明确为实际CUA AX/DOM观察的人工转录，不冒充浏览器网络导出。931项hash复核全部一致（914应用源码及17样本/原件），设备已安装APK实测SHA-256仍为`c7c1fbed6ce9795f8c8d5ed68865e1dcd6c8800925056f8a6de3530bb576654b`。API有10次重新登录前401，全部位于Android正常登录行69之前；之后无4xx/5xx，12次进度PUT为200；浏览器关闭播放器后error日志为空。正常退出测试账号、关闭自有tab、强停独立包、移除自有reverse、fixture exit0/stopped、18084/3105释放及配置恢复均核验，见cleanup-verification。首次保存空pid输出没有生成文件，随后重查pidof退出1/空输出并显式保存，不把缺文件当作进程已退出证据。原仓库15项用户改动保留。
