@@ -48,6 +48,7 @@ def _synchronize_concurrent_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _request_concurrently(source: Path, settings: Settings) -> list[bytes]:
     original_source = source.read_bytes()
+
     def request_cover() -> bytes:
         response = http_streaming.small_cover_response(
             source, _request(), "user-1", settings
