@@ -263,7 +263,12 @@ private class PositionObservations(
                 val after = read()
                 if (after == observed && remote != null && remote.revision == observed.sync.confirmedRevision &&
                     remote.clientId == local.clientId && remote.capturedAtEpochMillis == local.capturedAtEpochMillis &&
-                    remote.position == local.position && SystemClock.elapsedRealtime() <= deadline) {
+                    remote.position.presentation == local.position.presentation &&
+                    // The server sorts opaque-object keys; the engine retains insertion order.
+                    // Compare the complete JSON value without changing any Locator member.
+                    Json.parseToJsonElement(remote.position.locator.canonicalJson) ==
+                        Json.parseToJsonElement(local.position.locator.canonicalJson) &&
+                    SystemClock.elapsedRealtime() <= deadline) {
                     assertTrue("RG04_SERVER_RESOURCE_ID", remote.resourceId == fixture.resourceId)
                     val locator = Json.parseToJsonElement(remote.position.locator.canonicalJson).jsonObject
                     assertTrue("RG04_CANONICAL_AUDIO_LOCATOR",

@@ -12,6 +12,7 @@ R0 实际分支/HEAD：`develop@9a4901edba41fab786bd28ff92144ff802ddfab3`（2026
 
 ### 2026-09-06 执行决策
 
+- opaque Locator 的网络往返验收比较完整 JSON 对象值，保留所有未知引擎成员，不要求对象键的输出顺序；完整展示字段、身份、捕获时间、revision、确认状态和已冻结时限分别验证。不得以百分比或部分 Locator 字段替代完整位置比较。
 - Android 真实 HTTP 验收使用显式 `-PenableReleaseLiveProbe=true` 的独立测试入口，普通仪器套件数量和该项结果分开登记。新增入口编译成功或测试进程退出成功不代表门禁通过，以 JUnit 结果、实际服务端确认和原文件校验为准；当前两次 bootstrap 失败保留，不跳过该链路。
 - 用户明确批准：1.0 暂不支持第三方进度同步。OPDS 保留目录、搜索、下载；关闭 Progression 入口及能力声明并验证无进度写入。OPDS-04 原双向同步验收改为 N/A（DEC-05）；入口关闭回归仍必须通过，第一方跨端同步范围不变。
 - 从实际已提交 `develop@197e81a808ba32595a8a6ffeda62422b3a7d3473` 开始；初始工作树干净。隔离工作区 `D:/www/ermao-release-1.0`，分支 `codex/release-1.0-convergence`。尚未冻结 RC。

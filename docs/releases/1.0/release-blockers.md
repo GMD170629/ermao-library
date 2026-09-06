@@ -4,6 +4,8 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 
 ## R1 状态覆盖与外部条件
 
+最新结果覆盖：ANDROID-02由 `227e09f1` 修复，真实 `AUDIO` 响应经唯一 `fromWireValue` 映射并保留精确类别/形态校验，20项host回归及第四次真机真实MP3闭环通过。SYNC-01在此链路确认5/10秒实际ACK落盘、暂停及重开后outbox收敛，本批两项缺陷关闭，跨端/长时范围仍未完成。新增TEST-08：第三次真实运行被Locator对象键序字符串比较误报；只修测试为完整JSON值比较，第四次PASS，原FAIL与诊断保留。NATIVE-01已在 `dc8381f7` 独立提交；READER-03仍有raw-text实体语义缺口，不能整体关闭。
+
 最新覆盖：`d1fc48a9` 已修复 SYNC-01 的正常 ACK 重复解包，32 项 host 回归 PASS，实际在线闭环仍待完成。新增 ANDROID-02：两次全新库真机运行 bootstrap 200 后失败，第二次报 `READER_BOOTSTRAP_INVALID`，尚无媒体请求，证据 `android-live/android-1788681827033/` 与 `android-live/android-1788682483508/`；正在以真实 `audio/AUDIO` 响应复现共享格式映射，不能归因于解码器。NATIVE-01 新库真实 options 回归已通过，READER-03 仍因第二轮 HTML 独立审查的 noscript、正文 tail 与 raw-text 三项问题继续修复。`c5157d71` 仅完成负载工具 88 项验证，100k/300k 运行仍 NOT_RUN。
 
 最新RUN-01增量：`7c6c991c`后端完整Linux1284 PASS+Windows平台2项补测PASS、coverage77%、Ruff689/mypy492通过；Android当前完整148/共享416/单元218/lint通过，旧失败数量仅保留历史。安静10k短时实测已完成；新MOBI/移动端位置修复后须更新受影响证据，整套门禁未放行。

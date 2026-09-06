@@ -61,6 +61,13 @@ reads bracket both concurrent local writes and the GET. HTTP time consumes the
 checkpoint deadline. The player must still be playing, with confirmed Locator
 at most five seconds behind. Pause must also confirm within five seconds.
 
+Locator comparison uses the complete JSON object value, including unknown engine
+members, while presentation keeps typed equality. The server canonicalizes object
+key order and the engine preserves insertion order; byte-string equality would
+reject a valid round trip. Identity, capture time, revision, pending-state and all
+timing checks remain mandatory. The original failed run is retained in release
+evidence; no production serialization is changed to match this observation.
+
 Reopening constructs a new runtime and calls `launchRemote` without an explicit
 chapter/position. Restored paused playback must be within two seconds of the
 confirmed original pause, and its outbox/GET must converge through production

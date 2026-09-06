@@ -4,6 +4,12 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+当前增量：`dc8381f7` native options 与 `227e09f1` 共享 AUDIO bootstrap 修复已推送。Android 第四次全新库真实 MP3 在线用例 **PASS，1 test / 13.106s**：`android-live/android-1788684078319/`。5秒确认3897ms/revision2，10秒确认7906ms/revision3，暂停9930ms/revision4，关闭留下 Stop pending，重开恢复9930ms并确认到revision7。`instrumentation.log`、`online-evidence.log`、`apk-hashes.json`、`mobile-tested.patch` 与 `post-run-verification.json` 关联源码/开发包/结果；7份源文件hash不变、API 5xx=0、一次性凭据已消费、测试服务和reverse已退出。仅覆盖短时单轨 MP3、真实 Media3/HTTP/SQLite/ACK/重开，不替代后台/30分钟/逐编码/跨设备/正式 APK。
+
+第三次运行 `android-live/android-1788683629933/` 保留 FAIL：已通过bootstrap与Range媒体请求，服务端与设备均确认revision2，但新测试按 Locator 字符串顺序比较，拒绝后端按键排序后的等价 JSON；620ms 的捕获→接收延迟与 Stop 后pending留在 `position-diagnostic.json`。测试改用完整 JSON 对象相等及完整typed presentation相等，身份、捕获时间、revision、pending及5秒时限不变，未更改产品序列化；第四次通过验证了修正。共享真实捕获的 AUDIO 响应先RED后GREEN，20项含负例的host检查通过，`preflight-mobile/bootstrap-format-20260906/` 保留原始响应hash与仅替换随机身份的映射；主增量构建/复验见 `50-bootstrap-format-device-build.log`、`51-online-json-value-observation-build.log`。
+
+MOBI noscript/tail 修复后主49项针对性回归通过：`backend-baseline/mobi-noscript-tail-primary.log`，XML/HTML正文尾随文本均保留。raw-text实体语义缺口仍待SDK范围适配原型，不关闭READER-03。100k样本正在已有监督进程中生成，恢复入口为 `local-load/prepare-100k-supervision-20260906-083049/execution.json`；约半数的中间进度不是准备完成或性能通过。
+
 最新恢复点：已推送 `d1fc48a9`；下文旧检查点仅保留历史效力。当前继续 Android bootstrap 格式映射与 MOBI HTML 修复；100k 真实紧凑文件准备独立执行。没有冻结 RC、正式产物或整体 GO。
 
 - Android 独立真实 HTTP 用例两次 FAIL：`android-live/android-1788681827033/`、`android-live/android-1788682483508/` 的 `instrumentation.log`。实际新库 setup/import/login 和初始空进度读取通过，bootstrap HTTP 200 后本地拒绝，第二次稳定错误码 `READER_BOOTSTRAP_INVALID`；媒体请求尚未发生。各目录 `post-run-verification.json` 核实 7 份原文件 hash 不变、私有一次性凭据已消费、fixture 已退出；18080 reverse 已移除，18080/3101 无监听。APK hash、源码差异及日志留在各自目录，不把 adb 的退出码 0 当 JUnit PASS。
