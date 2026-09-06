@@ -203,6 +203,41 @@ def test_named_svg_resource_uses_markup_sanitizer_before_delivery(
     assert result.media_type == descriptor.media_type
 
 
+def test_legacy_html_remains_readable_and_sanitized_without_rewriting_source(
+    tmp_path: Path,
+) -> None:
+    content = (
+        b"<html><head><title>Legacy book</title></head><body>"
+        b"<!-- authored comment --><mbp:pagebreak/><p id=chapter>Readable &amp; safe"
+        b"<br>next line<script>bad()</script><img src='https://invalid.test/pixel' "
+        b"onerror='bad()'><a href='javascript:bad()'>link</a>"
+        b"<svg><script>bad()</script><path d='M0 0'/></svg></body></html>"
+    )
+    descriptor = _MobiResourceDescriptor(
+        index=0,
+        href="part00000.html",
+        media_type="text/html",
+        category=1,
+        decoded_length=len(content),
+    )
+    adapter = MobiPublicationAdapter(tmp_path, core=cast(_MobiCore, _ReadCore(content)))
+    source = _source(tmp_path)
+    before = Path(source.path).read_bytes()
+    snapshot = _snapshot_for(descriptor, required=True)
+    with patch.object(adapter, "_snapshot", _patched_snapshot(snapshot)):
+        result = adapter.read_resource(source, descriptor.href)
+
+    assert result.media_type == "text/html"
+    assert b"Readable &amp; safe" in result.content
+    assert b"next line" in result.content
+    assert b"mbp:pagebreak" in result.content
+    assert b"path" in result.content
+    for forbidden in (b"<script", b"onerror", b"javascript:", b"invalid.test"):
+        assert forbidden not in result.content
+    assert Path(source.path).read_bytes() == before
+    assert list(tmp_path.iterdir()) == [Path(source.path)]
+
+
 @pytest.mark.parametrize(
     ("required", "error_type", "rule_id"),
     [

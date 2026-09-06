@@ -6,8 +6,13 @@ import hashlib
 import json
 import re
 import unicodedata
+from collections.abc import Callable
+from typing import Literal
 from urllib.parse import urlsplit
 from xml.etree import ElementTree
+
+# The pinned html5lib has no PEP 561 metadata; its results are checked here.
+import html5lib  # type: ignore[import-untyped]
 
 from app.contracts.reader_safety_policy_generated import (
     READER_SAFETY_POLICY_DIGEST,
@@ -33,7 +38,13 @@ from app.modules.publications.domain.security import (
     WEB_SECURITY_PROFILE,
     PublicationSecurityProfile,
 )
+from app.modules.publications.infrastructure.html_serialization import (
+    PublicationHTMLSerializer,
+    html_serialization_tokens,
+)
+from app.modules.publications.infrastructure.html_syntax import prepare_html_markup
 from app.modules.publications.infrastructure.xml_policy import (
+    MarkupPreparer,
     XmlPolicyDecodeError,
     XmlPolicyExpansionLimitError,
     XmlPolicyPreparationError,
@@ -118,6 +129,16 @@ def parse_safe_markup_root(content: bytes) -> tuple[str, ElementTree.Element]:
     Navigation documents use this boundary because their XML tree is useful even
     when optional XHTML document structure such as ``head`` is absent.
     """
+    return _parse_safe_markup_root(content, ElementTree.fromstring)
+
+
+def _parse_safe_markup_root(
+    content: bytes,
+    parser: Callable[[str], ElementTree.Element],
+    *,
+    prepare_markup: MarkupPreparer | None = None,
+) -> tuple[str, ElementTree.Element]:
+    """Keep preparation, budgets and sanitization shared across parser syntaxes."""
 
     if not content:
         raise PublicationMarkupError("publication markup is empty")
@@ -127,8 +148,12 @@ def parse_safe_markup_root(content: bytes) -> tuple[str, ElementTree.Element]:
             "publication markup exceeds the size limit",
         )
     try:
-        projection = prepare_xml(content, expansion_limit_bytes=MAXIMUM_MARKUP_BYTES)
-        root = ElementTree.fromstring(projection.parser_source)
+        projection = prepare_xml(
+            content,
+            expansion_limit_bytes=MAXIMUM_MARKUP_BYTES,
+            prepare_markup=prepare_markup,
+        )
+        root = parser(projection.parser_source)
     except (ElementTree.ParseError, UnicodeDecodeError) as error:
         raise PublicationMarkupError("publication XHTML is not well formed") from error
     except XmlPolicyExpansionLimitError as error:
@@ -153,8 +178,75 @@ def _attribute_local_name(name: str) -> str:
     return name.rsplit("}", 1)[-1].rsplit(":", 1)[-1].lower()
 
 
-def sanitize_markup_resource(content: bytes) -> bytes:
+def _remove_child_preserving_tail(
+    parent: ElementTree.Element,
+    child: ElementTree.Element,
+    previous: ElementTree.Element | None,
+) -> None:
+    """Remove a subtree while retaining the following text in document order."""
+    if child.tail:
+        if previous is None:
+            parent.text = (parent.text or "") + child.tail
+        else:
+            previous.tail = (previous.tail or "") + child.tail
+    parent.remove(child)
+
+
+def _parse_html_root(source: str) -> ElementTree.Element:
+    # Match raw-text treatment of noscript in the serializer so escaped text
+    # cannot become active markup on the next parse. This executes no scripts.
+    parsed: object = html5lib.parse(source, treebuilder="etree", scripting=True)
+    if not isinstance(parsed, ElementTree.Element):
+        raise publication_native_parser_implementation_failure(
+            ReaderSafetyRuleId.REFLOWABLE_SANITIZE_MARKUP,
+            parser="html5lib",
+            operation="parse",
+            reason="publication HTML parser returned no tree",
+        )
+    # The ElementTree XML parser omits comments and processing instructions.
+    # Match that projection before passing the HTML tree to the same sanitizer.
+    for parent in parsed.iter():
+        previous: ElementTree.Element | None = None
+        for child in list(parent):
+            if not isinstance(child.tag, str):
+                _remove_child_preserving_tail(parent, child, previous)
+            else:
+                previous = child
+    return parsed
+
+
+def sanitize_markup_resource(
+    content: bytes, *, syntax: Literal["xml", "html"] = "xml"
+) -> bytes:
     """Return the shared protected tree as an in-memory resource projection."""
+    if syntax == "html":
+        _source, root = _parse_safe_markup_root(
+            content, _parse_html_root, prepare_markup=prepare_html_markup
+        )
+        serializer = PublicationHTMLSerializer(
+            omit_optional_tags=False,
+            quote_attr_values="always",
+            escape_lt_in_attrs=True,
+        )
+        try:
+            serialized: object = serializer.render(
+                html_serialization_tokens(html5lib.getTreeWalker("etree")(root))
+            )
+        except TypeError as error:
+            raise publication_native_parser_implementation_failure(
+                ReaderSafetyRuleId.REFLOWABLE_SANITIZE_MARKUP,
+                parser="html5lib",
+                operation="serialize",
+                reason="publication HTML serializer returned inconsistent tokens",
+            ) from error
+        if not isinstance(serialized, str):
+            raise publication_native_parser_implementation_failure(
+                ReaderSafetyRuleId.REFLOWABLE_SANITIZE_MARKUP,
+                parser="html5lib",
+                operation="serialize",
+                reason="publication HTML serializer returned no text",
+            )
+        return serialized.encode("utf-8")
     _source, root = parse_safe_markup_root(content)
     return ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)
 
@@ -383,6 +475,7 @@ def _sanitize_markup_tree(root: ElementTree.Element) -> None:
     def sanitize(element: ElementTree.Element, *, inside_svg: bool) -> None:
         local_name = _local_name(element.tag)
         current_svg = inside_svg or local_name == "svg"
+        previous: ElementTree.Element | None = None
         for child in list(element):
             child_name = _local_name(child.tag)
             http_equiv = next(
@@ -398,9 +491,10 @@ def _sanitize_markup_tree(root: ElementTree.Element) -> None:
                 or (current_svg and child_name in svg_elements)
                 or (child_name == "meta" and http_equiv in blocked_http_equiv)
             ):
-                element.remove(child)
+                _remove_child_preserving_tail(element, child, previous)
                 continue
             sanitize(child, inside_svg=current_svg)
+            previous = child
 
         for key, value in list(element.attrib.items()):
             attribute = _attribute_local_name(key)
