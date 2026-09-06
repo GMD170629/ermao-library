@@ -3,9 +3,15 @@
 This source directory is included only with `-PenableReleaseLiveProbe=true`.
 It is a separate release acceptance gate; its result must not be added to the
 ordinary instrumentation suite's count. There are no assumptions, skips or
-weakened default tests. Build and run the exact class separately:
+weakened default tests. Build separately and select one exact method:
 
-`com.ermao.library.release.live.AndroidAudioOnlineConfirmationInstrumentedTest`
+- Fresh-server confirmation and runtime reopen:
+  `com.ermao.library.release.live.AndroidAudioOnlineConfirmationInstrumentedTest#realHttpConfirmsPlaybackAtFiveAndTenSecondsAndRestoresAfterReopen`
+- MP3 Web-to-Android handoff:
+  `com.ermao.library.release.live.AndroidAudioOnlineConfirmationInstrumentedTest#restoresWebMp3ProgressAndConfirmsPlaybackForWebHandoff`
+
+Do not run the whole class with one input: each method consumes its own fresh
+private fixture, and their initial server-progress requirements differ.
 
 Host compile, from `apps/mobile`:
 
@@ -76,8 +82,35 @@ retry. `close()` can create a Stop pending capture; the report records
 This verifies the real restore owner's choice, not exclusively server-only
 restoration when Stop leaves a local pending capture.
 
+For the MP3 handoff method, provision first, then use the real Web player under
+the same isolated account to play, pause and close the selected MP3 before
+Android consumes the fixture. The primary privately supplies that account's
+credentials to the isolated browser; `android-probe.json` contains no password.
+Confirm the final Web write with a fresh GET. Choose a Web position clearly
+above zero with enough sample remaining for the unchanged 10-second playback
+and pause checks. Do not synthesize a progress PUT.
+
+The handoff method keeps the same fresh local DB/prefs requirements, requires a
+nonzero remote MP3 position from a different client, and opens with
+`autoplay=false` and no chapter/position target. `WEB_RESTORE_OBSERVATION` records
+the actual engine value before the mandatory two-second comparison. Playback
+then uses the same 5/10-second and pause-confirmation owner as the fresh-server
+test, with the Web snapshot as the initial position/capture/revision baseline.
+`ANDROID_HANDOFF_CONFIRMED` records the Android client, capture time, position and
+revision; close still records any Stop pending state without manual ACK.
+
+`ANDROID_HANDOFF_PASS` and this method's JUnit PASS cover only the Android leg.
+After Android closes, the primary must fresh-GET the latest confirmed Android
+snapshot, reopen the same resource in the real Web player without a direct
+chapter/asset target, and verify the restored position within two seconds. Gate
+RG04 bidirectional SYNC requires that actual Web-to-Android-to-Web result plus
+one fresh-server run of the original online method. Compilation cannot satisfy
+that stop condition. There are no new fixture fields, phase options or
+force-stop steps.
+
 `online-evidence.log` and the matching `RG04ReleaseLive` logcat tag contain only
-result codes, resource/asset IDs, positions and revisions. The isolated DB and
+result codes, resource/asset/client IDs and scalar capture, position, revision
+and engine observations. The isolated DB and
 prefixed encrypted preferences remain private for collection; no cleanup clears
 app settings, sessions, keystore or other directories. A PASS is the JUnit result,
 not merely a log line. Host compilation is not real HTTP/device evidence.
