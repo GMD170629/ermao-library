@@ -369,7 +369,9 @@ async function openDetailResource(page: Page, action: '打开阅读器' | '打�
   await open.click();
 }
 
-test('release live fresh install imports formats and resumes an EPUB through Reader v5', async ({ page, context }, testInfo) => {
+const requestedAudioMime = process.env.RELEASE_LIVE_AUDIO_MIME ?? 'audio/mpeg';
+
+test(`release live fresh install resumes EPUB and ${requestedAudioMime} through Reader v5`, async ({ page, context }, testInfo) => {
   test.setTimeout(300_000);
 
   const password = process.env.RELEASE_LIVE_PASSWORD;
@@ -571,9 +573,10 @@ test('release live fresh install imports formats and resumes an EPUB through Rea
 
     const audio = catalog.find((entry) => (
       entry.readerType === 'audio'
-      && entry.assetMimeTypes.includes('audio/mpeg')
+      && entry.assetMimeTypes.includes(requestedAudioMime)
     ));
-    if (!audio) throw new Error('real catalog did not contain the required MP3 audio resource');
+    expect(manifest.samples.some((sample) => sample.expectedMime === requestedAudioMime)).toBe(true);
+    if (!audio) throw new Error(`real catalog did not contain the required ${requestedAudioMime} resource`);
     expect(audio.readerType).toBe('audio');
     await page.goto(
       `${webOrigin}/books/${encodeURIComponent(audio.bookId)}?resourceId=${encodeURIComponent(audio.resourceId)}`,
@@ -720,7 +723,7 @@ test('release live fresh install imports formats and resumes an EPUB through Rea
           allCorpusAudioRequired: manifest?.ffprobeAvailable ?? false
         },
         scope: result === 'PASS'
-          ? 'fresh setup/admin, real login, FLAT library creation, real scan/worker import of EPUB/PDF/CBZ and MP3/AAC/WAV/FLAC, EPUB Reader v5 chapter progression and reopen, MIME-selected MP3 UI play/pause/seek, continuous server persistence and v5 reopen'
+          ? `fresh setup/admin, real login, FLAT library creation, real scan/worker import of EPUB/PDF/CBZ and MP3/AAC/WAV/FLAC, EPUB Reader v5 chapter progression and reopen, MIME-selected ${requestedAudioMime} UI play/pause/seek, continuous server persistence and v5 reopen`
           : 'live fixture started or partially completed; inspect failure and process logs before assigning product, fixture, or environment ownership',
         repoHead: manifest?.repoHead ?? null,
         apiOrigin: manifest?.apiOrigin ?? null,
