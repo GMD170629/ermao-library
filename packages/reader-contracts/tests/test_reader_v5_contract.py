@@ -38,6 +38,24 @@ def _is_json_number(value: object) -> bool:
     )
 
 
+def _matches_json_type(value: object, expected_type: str) -> bool:
+    if expected_type == "object":
+        return isinstance(value, dict)
+    if expected_type == "array":
+        return isinstance(value, list)
+    if expected_type == "string":
+        return isinstance(value, str)
+    if expected_type == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected_type == "number":
+        return _is_json_number(value)
+    if expected_type == "boolean":
+        return isinstance(value, bool)
+    if expected_type == "null":
+        return value is None
+    raise SchemaValidationError(f"unsupported JSON Schema type: {expected_type!r}")
+
+
 def _validate_json_schema(
     value: object,
     schema: dict[str, Any],
@@ -64,9 +82,25 @@ def _validate_json_schema(
         raise SchemaValidationError(f"{path}: expected constant {schema['const']!r}")
 
     expected_type = schema.get("type")
-    if expected_type == "object":
-        if not isinstance(value, dict):
-            raise SchemaValidationError(f"{path}: expected object")
+    if isinstance(expected_type, str):
+        expected_types = (expected_type,)
+    elif isinstance(expected_type, list):
+        if not expected_type or not all(
+            isinstance(item, str) for item in expected_type
+        ):
+            raise SchemaValidationError(f"{path}: invalid JSON Schema type declaration")
+        expected_types = tuple(expected_type)
+    elif expected_type is None:
+        expected_types = ()
+    else:
+        raise SchemaValidationError(f"{path}: invalid JSON Schema type declaration")
+
+    if expected_types and not any(
+        _matches_json_type(value, candidate) for candidate in expected_types
+    ):
+        raise SchemaValidationError(f"{path}: expected one of {expected_types!r}")
+
+    if "object" in expected_types and isinstance(value, dict):
         required = schema.get("required", [])
         missing = [name for name in required if name not in value]
         if missing:
@@ -92,12 +126,7 @@ def _validate_json_schema(
                 raise SchemaValidationError(
                     f"{path}: compact JSON exceeds {maximum_bytes} UTF-8 bytes"
                 )
-    elif expected_type == "array":
-        if not isinstance(value, list):
-            raise SchemaValidationError(f"{path}: expected array")
-    elif expected_type == "string":
-        if not isinstance(value, str):
-            raise SchemaValidationError(f"{path}: expected string")
+    if "string" in expected_types and isinstance(value, str):
         if len(value) < schema.get("minLength", 0):
             raise SchemaValidationError(f"{path}: string is too short")
         if len(value) > schema.get("maxLength", len(value)):
@@ -117,17 +146,11 @@ def _validate_json_schema(
                 datetime.fromisoformat(value.replace("Z", "+00:00"))
             except ValueError as error:
                 raise SchemaValidationError(f"{path}: invalid date-time") from error
-    elif expected_type == "integer":
-        if not isinstance(value, int) or isinstance(value, bool):
-            raise SchemaValidationError(f"{path}: expected integer")
-    elif expected_type == "number":
-        if not _is_json_number(value):
-            raise SchemaValidationError(f"{path}: expected finite JSON number")
-    elif expected_type == "null":
-        if value is not None:
-            raise SchemaValidationError(f"{path}: expected null")
 
-    if expected_type in {"integer", "number"}:
+    if (
+        ("integer" in expected_types or "number" in expected_types)
+        and _is_json_number(value)
+    ):
         numeric_value = float(value) if _is_json_number(value) else math.nan
         if "minimum" in schema and numeric_value < schema["minimum"]:
             raise SchemaValidationError(f"{path}: below minimum")
@@ -199,6 +222,12 @@ class ReaderV5ContractTest(unittest.TestCase):
         )
         invalid_values = []
 
+        valid_type_array_value = json.loads(json.dumps(valid))
+        valid_type_array_value["position"]["presentation"]["chapter"][
+            "navigationKey"
+        ] = "chapter-20"
+        _validate_json_schema(valid_type_array_value, self.schema, self.schema)
+
         non_object = json.loads(json.dumps(valid))
         non_object["position"]["locator"] = []
         invalid_values.append(non_object)
@@ -214,6 +243,12 @@ class ReaderV5ContractTest(unittest.TestCase):
         non_finite_progression = json.loads(json.dumps(valid))
         non_finite_progression["position"]["presentation"]["totalProgression"] = math.nan
         invalid_values.append(non_finite_progression)
+
+        invalid_type_array_value = json.loads(json.dumps(valid))
+        invalid_type_array_value["position"]["presentation"]["chapter"][
+            "navigationKey"
+        ] = 123
+        invalid_values.append(invalid_type_array_value)
 
         for invalid in invalid_values:
             with self.subTest(invalid=invalid["position"]):
