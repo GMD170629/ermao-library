@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.database.DatabaseErrorHandler
 import android.database.sqlite.SQLiteDatabase
+import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.WindowManager
@@ -35,6 +36,9 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.MessageDigest
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -54,6 +58,248 @@ class AndroidAudioPlaybackInstrumentedTest {
     @get:Rule
     val compose = createComposeRule()
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+    @Test
+    fun pausingActiveResourceDuringReplacementRestoreKeepsWriterIdentity() {
+        val context = instrumentation.targetContext
+        val app = context.applicationContext as ErmaoLibraryApplication
+        assertFalse("An existing audio session must remain untouched", app.audioPlaybackRuntime.snapshot.value.hasSession)
+        prepareFixtureActivity()
+        val fixtureId = "rg04-writer-${UUID.randomUUID()}"
+        val directory = File(context.filesDir, fixtureId).apply { check(mkdir()) }
+        check(directory.canonicalFile.parentFile == context.filesDir.canonicalFile)
+        val report = File(directory, "writer-identity-evidence.log")
+        fun record(message: String) {
+            report.appendText("$message\n")
+            Log.i("RG04WriterIdentity", message)
+            println("RG04WriterIdentity: $message")
+        }
+        val gate = AudioRestoreOpenGate()
+        val isolated = AudioPersistenceContext(context, directory, beforeOpen = gate::beforeOpen)
+        val sourceA = File(directory, "a.wav").also { writeSilentPcm(it, durationSeconds = 24) }
+        // Deliberately invalid from creation; never corrupt a readable source to force an outcome.
+        val sourceB = File(directory, "b.wav").apply { writeText("RG04 invalid PCM fixture") }
+        val sourceAHash = hash(sourceA)
+        val sourceBHash = hash(sourceB)
+        val parsed = ServerBaseUrl.parse("http://127.0.0.1:18741")
+        check(parsed is ServerBaseUrlParseResult.Valid)
+        val profile = ServerProfile(fixtureId, "RG04 writer fixture", parsed.baseUrl, fixtureId, false, TlsMode.SystemTrust)
+        val namespace = AndroidAudioNamespace(fixtureId, fixtureId, 1)
+        val clientId = AndroidReaderDeviceIdentity(isolated).stableDeviceId()
+        val identityA = ReaderLocalProgressIdentity(
+            ReaderSyncNamespace(fixtureId, fixtureId, 1), clientId, "$fixtureId-book-a", "$fixtureId-a",
+        )
+        val identityB = ReaderLocalProgressIdentity(
+            ReaderSyncNamespace(fixtureId, fixtureId, 1), clientId, "$fixtureId-book-b", "$fixtureId-b",
+        )
+        val assetA = "$fixtureId-asset-a"
+        val assetB = "$fixtureId-asset-b"
+        val hrefA = "/api/assets/$assetA"
+        val hrefB = "/api/assets/$assetB"
+        fun readPosition(identity: ReaderLocalProgressIdentity): ReaderPositionLocalState? = runBlocking {
+            val database = AndroidReaderV5Database(isolated, identity)
+            try {
+                database.loadPosition(identity.resourceId)
+            } finally {
+                database.close()
+            }
+        }
+        fun href(position: ReaderPositionLocalState): String =
+            Json.parseToJsonElement(position.position.locator.canonicalJson).jsonObject
+                .getValue("href").jsonPrimitive.content
+        var runtime: AndroidAudioPlaybackRuntime? = null
+        try {
+            assertEquals(null, readPosition(identityA))
+            assertEquals(null, readPosition(identityB))
+            lateinit var player: AndroidAudioPlaybackRuntime
+            instrumentation.runOnMainSync {
+                player = AndroidAudioPlaybackRuntime(isolated)
+                runtime = player
+                player.launchLocal(
+                    namespace = namespace, bookId = identityA.bookId, resourceId = identityA.resourceId,
+                    title = "RG04 writer A", author = null, assetId = assetA, localFile = sourceA,
+                    mimeType = "audio/wav", sourceApiPath = hrefA, profile = profile, positionMillis = 0,
+                )
+            }
+            awaitPlayer(player) { it.phase == AndroidAudioPhase.Playing && it.positionMillis >= 2_000 }
+            gate.armed.set(true)
+            instrumentation.runOnMainSync {
+                player.launchLocal(
+                    namespace = namespace, bookId = identityB.bookId, resourceId = identityB.resourceId,
+                    title = "RG04 writer B", author = null, assetId = assetB, localFile = sourceB,
+                    mimeType = "audio/wav", sourceApiPath = hrefB, profile = profile, positionMillis = null,
+                )
+            }
+            assertTrue("RG04_POS08_B_RESTORE_GATE_NOT_ENTERED", gate.entered.await(5, TimeUnit.SECONDS))
+            assertFalse("RG04_POS08_RESTORE_GATE_ON_MAIN", gate.onMain.get())
+            val active = player.snapshot.value
+            assertEquals(identityA.resourceId, active.resourceId)
+            assertEquals(assetA, active.assetId)
+            assertEquals(AndroidAudioPhase.Playing, active.phase)
+            record("fixtureId=$fixtureId gate=B_restore_io activeResource=${active.resourceId} " +
+                "activeAsset=${active.assetId} phase=${active.phase} position=${active.positionMillis}")
+            val pauseRequestedAt = System.currentTimeMillis()
+            instrumentation.runOnMainSync { player.pause() }
+            awaitPlayer(player) { it.phase == AndroidAudioPhase.Paused && it.resourceId == identityA.resourceId }
+            val paused = player.snapshot.value
+            assertEquals(assetA, paused.assetId)
+            assertFalse("RG04_POS08_RESTORE_GATE_TIMEOUT", gate.timedOut.get())
+            record("pausedResource=${paused.resourceId} pausedAsset=${paused.assetId} " +
+                "pausedPosition=${paused.positionMillis} pausedPhase=${paused.phase}")
+            gate.release.countDown()
+
+            var wrongB: ReaderPositionLocalState? = null
+            val errorDeadline = SystemClock.elapsedRealtime() + 10_000
+            while (SystemClock.elapsedRealtime() < errorDeadline) {
+                val observedB = readPosition(identityB)
+                if (observedB != null && href(observedB) == hrefA && wrongB == null) {
+                    wrongB = observedB
+                    record("wrongResource=${observedB.resourceId} locatorAsset=$assetA " +
+                        "position=${locatorTimeMillis(observedB)} capturedAt=${observedB.capturedAtEpochMillis}")
+                }
+                val current = player.snapshot.value
+                if (current.resourceId == identityB.resourceId && current.phase == AndroidAudioPhase.Error) break
+                Thread.sleep(25)
+            }
+            val failedB = player.snapshot.value
+            record("decoderResource=${failedB.resourceId} decoderAsset=${failedB.assetId} " +
+                "decoderPhase=${failedB.phase} decoderCode=${failedB.error?.code}")
+            assertFalse("RG04_POS08_RESTORE_GATE_TIMEOUT", gate.timedOut.get())
+            assertEquals("RG04_POS08_BAD_B_DID_NOT_REACH_ENGINE", identityB.resourceId, failedB.resourceId)
+            assertEquals("RG04_POS08_BAD_B_DID_NOT_REACH_ENGINE", assetB, failedB.assetId)
+            assertEquals("RG04_POS08_BAD_B_DID_NOT_FAIL", AndroidAudioPhase.Error, failedB.phase)
+            assertTrue("RG04_POS08_BAD_B_ERROR_CODE_REQUIRED", failedB.error != null)
+            val savedA = readPosition(identityA)
+            val savedB = readPosition(identityB)
+            val aPauseStored = savedA != null && href(savedA) == hrefA &&
+                savedA.capturedAtEpochMillis >= pauseRequestedAt &&
+                abs(locatorTimeMillis(savedA) - paused.positionMillis) <= 100
+            val bContainsA = wrongB != null || savedB?.let { href(it) == hrefA } == true
+            record("aPauseStored=$aPauseStored aPosition=${savedA?.let(::locatorTimeMillis)} " +
+                "aCapturedAt=${savedA?.capturedAtEpochMillis} bContainsA=$bContainsA " +
+                "bPosition=${savedB?.let(::locatorTimeMillis)} bCapturedAt=${savedB?.capturedAtEpochMillis}")
+            assertEquals(sourceAHash, hash(sourceA))
+            assertEquals(sourceBHash, hash(sourceB))
+            assertTrue("RG04_POS08_WRITER_IDENTITY bContainsA=$bContainsA aPauseStored=$aPauseStored", !bContainsA && aPauseStored)
+        } finally {
+            gate.close()
+            instrumentation.runOnMainSync { runtime?.close() }
+            // Preserve only this test's unique fixture directory for evidence.
+        }
+    }
+
+    @Test
+    fun stoppingDuringReplacementRestoreDoesNotRestartPlayback() {
+        val context = instrumentation.targetContext
+        val app = context.applicationContext as ErmaoLibraryApplication
+        assertFalse("An existing audio session must remain untouched", app.audioPlaybackRuntime.snapshot.value.hasSession)
+        prepareFixtureActivity()
+        val fixtureId = "rg04-stop-${UUID.randomUUID()}"
+        val directory = File(context.filesDir, fixtureId).apply { check(mkdir()) }
+        check(directory.canonicalFile.parentFile == context.filesDir.canonicalFile)
+        val report = File(directory, "stop-restore-evidence.log")
+        fun record(message: String) {
+            report.appendText("$message\n")
+            Log.i("RG04StopRestore", message)
+            println("RG04StopRestore: $message")
+        }
+        val gate = AudioRestoreOpenGate()
+        val isolated = AudioPersistenceContext(context, directory, beforeOpen = gate::beforeOpen)
+        val sourceA = File(directory, "a.wav").also { writeSilentPcm(it, durationSeconds = 24) }
+        val sourceB = File(directory, "b.wav").also { writeSilentPcm(it, durationSeconds = 24) }
+        val sourceAHash = hash(sourceA)
+        val sourceBHash = hash(sourceB)
+        val parsed = ServerBaseUrl.parse("http://127.0.0.1:18741")
+        check(parsed is ServerBaseUrlParseResult.Valid)
+        val profile = ServerProfile(fixtureId, "RG04 stop fixture", parsed.baseUrl, fixtureId, false, TlsMode.SystemTrust)
+        val namespace = AndroidAudioNamespace(fixtureId, fixtureId, 1)
+        val resourceA = "$fixtureId-a"
+        val resourceB = "$fixtureId-b"
+        val assetA = "$fixtureId-asset-a"
+        val assetB = "$fixtureId-asset-b"
+        var runtime: AndroidAudioPlaybackRuntime? = null
+        try {
+            lateinit var player: AndroidAudioPlaybackRuntime
+            instrumentation.runOnMainSync {
+                player = AndroidAudioPlaybackRuntime(isolated)
+                runtime = player
+                player.launchLocal(
+                    namespace = namespace, bookId = "$fixtureId-book-a", resourceId = resourceA,
+                    title = "RG04 stop A", author = null, assetId = assetA, localFile = sourceA,
+                    mimeType = "audio/wav", sourceApiPath = "/api/assets/$assetA", profile = profile, positionMillis = 0,
+                )
+            }
+            awaitPlayer(player) { it.phase == AndroidAudioPhase.Playing && it.positionMillis >= 2_000 }
+            gate.armed.set(true)
+            instrumentation.runOnMainSync {
+                player.launchLocal(
+                    namespace = namespace, bookId = "$fixtureId-book-b", resourceId = resourceB,
+                    title = "RG04 stop B", author = null, assetId = assetB, localFile = sourceB,
+                    mimeType = "audio/wav", sourceApiPath = "/api/assets/$assetB", profile = profile, positionMillis = null,
+                )
+            }
+            assertTrue("RG04_POS08_B_RESTORE_GATE_NOT_ENTERED", gate.entered.await(5, TimeUnit.SECONDS))
+            assertFalse("RG04_POS08_RESTORE_GATE_ON_MAIN", gate.onMain.get())
+            val active = player.snapshot.value
+            assertEquals(resourceA, active.resourceId)
+            assertEquals(assetA, active.assetId)
+            assertEquals(AndroidAudioPhase.Playing, active.phase)
+            record("fixtureId=$fixtureId gate=B_restore_io activeResource=${active.resourceId} " +
+                "activeAsset=${active.assetId} phase=${active.phase} position=${active.positionMillis}")
+            instrumentation.runOnMainSync { player.stop() }
+            val stopped = player.snapshot.value
+            assertEquals("RG04_POS08_STOP_NOT_IDLE", AndroidAudioPhase.Idle, stopped.phase)
+            assertFalse("RG04_POS08_STOP_SESSION_REMAINED", stopped.hasSession)
+            assertTrue("RG04_POS08_STOP_QUEUE_REMAINED", player.currentTracks().isEmpty())
+            assertFalse("RG04_POS08_RESTORE_GATE_TIMEOUT", gate.timedOut.get())
+            record("beforeRelease phase=${stopped.phase} hasSession=${stopped.hasSession} tracks=0")
+            val releasedAt = SystemClock.elapsedRealtime()
+            gate.release.countDown()
+            // Observe the same bounded 10s engine window used by awaitPlayer; Idle alone at
+            // release would pass before the suspended replacement had a chance to resume.
+            val observationDeadline = releasedAt + 10_000
+            var restarted: com.ermao.library.features.audio.model.AndroidAudioPlaybackSnapshot? = null
+            var restartedAtEngine: com.ermao.library.features.audio.model.AndroidAudioPlaybackSnapshot? = null
+            var gateExitRecorded = false
+            while (SystemClock.elapsedRealtime() < observationDeadline) {
+                if (!gateExitRecorded && gate.exited.count == 0L) {
+                    record("gateHookExited=true elapsed=${SystemClock.elapsedRealtime() - releasedAt}")
+                    gateExitRecorded = true
+                }
+                val current = player.snapshot.value
+                if (restarted == null && (current.phase != AndroidAudioPhase.Idle || current.hasSession)) {
+                    restarted = current
+                }
+                if (current.resourceId == resourceB &&
+                    (current.phase == AndroidAudioPhase.Playing || current.phase == AndroidAudioPhase.Error)) {
+                    restartedAtEngine = current
+                    break
+                }
+                Thread.sleep(25)
+            }
+            val observed = restartedAtEngine ?: player.snapshot.value
+            record("afterRelease elapsed=${SystemClock.elapsedRealtime() - releasedAt} " +
+                "gateHookExited=${gate.exited.count == 0L} firstRestartPhase=${restarted?.phase} " +
+                "phase=${observed.phase} errorCode=${observed.error?.code} hasSession=${observed.hasSession} " +
+                "resource=${observed.resourceId} asset=${observed.assetId} tracks=${player.currentTracks().size}")
+            assertEquals("RG04_POS08_RESTORE_GATE_NOT_EXITED", 0L, gate.exited.count)
+            assertFalse("RG04_POS08_RESTORE_GATE_TIMEOUT", gate.timedOut.get())
+            assertEquals(sourceAHash, hash(sourceA))
+            assertEquals(sourceBHash, hash(sourceB))
+            if (restarted != null) {
+                assertEquals("RG04_POS08_UNEXPECTED_RESTART_RESOURCE", resourceB, restarted.resourceId)
+                assertEquals("RG04_POS08_UNEXPECTED_RESTART_ASSET", assetB, restarted.assetId)
+                assertTrue("RG04_POS08_RESTART_DID_NOT_REACH_ENGINE phase=${observed.phase}", restartedAtEngine != null)
+            }
+            assertTrue("RG04_POS08_STOP_RESTARTED phase=${observed.phase} hasSession=${observed.hasSession}",
+                restarted == null && observed.phase == AndroidAudioPhase.Idle && !observed.hasSession &&
+                    player.currentTracks().isEmpty())
+        } finally {
+            gate.close()
+            instrumentation.runOnMainSync { runtime?.close() }
+            // Preserve only this test's unique fixture directory for evidence.
+        }
+    }
 
     @Test
     fun continuousPlaybackPersistsLocatorWithinFiveSecondsAndRestoresPausedPosition() {
@@ -309,11 +555,43 @@ class AndroidAudioPlaybackInstrumentedTest {
         MessageDigest.getInstance("SHA-256").digest(source.readBytes()).toList()
 }
 
+/** One-shot SQLite-open gate shared only by these two replacement-restore regressions. */
+private class AudioRestoreOpenGate {
+    val armed = AtomicBoolean(false)
+    val entered = CountDownLatch(1)
+    val release = CountDownLatch(1)
+    val exited = CountDownLatch(1)
+    val timedOut = AtomicBoolean(false)
+    val onMain = AtomicBoolean(false)
+
+    fun beforeOpen() {
+        if (armed.compareAndSet(true, false)) {
+            onMain.set(Looper.myLooper() == Looper.getMainLooper())
+            entered.countDown()
+            check(!onMain.get()) { "RG04_POS08_RESTORE_GATE_ON_MAIN" }
+            val released = release.await(10, TimeUnit.SECONDS)
+            timedOut.set(!released)
+            check(released) { "RG04_POS08_RESTORE_GATE_TIMEOUT" }
+            exited.countDown()
+        }
+    }
+
+    fun close() {
+        armed.set(false)
+        release.countDown()
+    }
+}
+
 /** Path adapter only: SQLite schema, transactions and codecs stay with the production owner. */
-private class AudioPersistenceContext(base: Context, private val directory: File) : ContextWrapper(base) {
+private class AudioPersistenceContext(
+    base: Context,
+    private val directory: File,
+    private val beforeOpen: (() -> Unit)? = null,
+) : ContextWrapper(base) {
     override fun getApplicationContext(): Context = this
 
     override fun getDatabasePath(name: String): File = File(directory, name).also {
+        beforeOpen?.invoke()
         check(it.canonicalFile.parentFile == directory.canonicalFile)
     }
 
