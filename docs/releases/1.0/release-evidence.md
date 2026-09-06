@@ -4,9 +4,19 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+当前主基线`d6a34cf0`已推送；READER-05/06/07代码检查通过、真实浏览器回归仍待ENV-12，SYNC-02对照仍待ENV-11。此次另补RG-03 AUD-01/AUD-08及RG-04 POS-01/02的Android真实运行时子项：M4A/MPEG-4 AAC-LC与Ogg/Opus分别在独立全新数据上完成播放、5/10秒实际服务端确认、暂停及关闭重开，均PASS。M4A确认3898ms/r2、7901ms/r3，暂停9899ms/r4→实际重开9899ms；Opus确认3887ms/r2、7892ms/r3，暂停9909ms/r4→实际重开9909ms，两者恢复误差0，阈值未改变。不覆盖长时、多轨、后台中断、其他内部编码、普通界面完整入口或最终RC。
+
+证据根`D:/www/ermao-release-android-formats/artifacts/releases/1.0/ac25497d3a4ee29383ddc97ac27c0a7230a5d078/android-m4a-opus-20260906/`：各`m4a/`与`opus/`的instrumentation.log（各1 PASS，13.136s/14.613s）、online-evidence.log、真实bootstrap、result.json和shutdown；根source-verification.json及final-handoff.json保留源码/设备/清理。主已实际核对两仪器终态、完整记录、各7次GET/PUT200、API5xx=0、当前测试PID无fatal日志、每组8个样本源/fixture不变、三个配置和两个工具未变、准备后manifest不变及服务退出。909应用文件每组无差异，2623移动文件无差异。
+
+运行设备为已授权9e896bbc Android12/API31，复用已安装开发APK（main SHA-256 `2fb7cb3214b1c19353f082b724c55981c095533cf9bbacd901fae80df07826f6`，test `531ae5c92e2879f87d8ff23d48c4f03e6d65a8ae52c7e686457f28efff5620c9`），未构建/安装新包。实际源码/后端环境为ac25497d，移动Git tree与主同`22dbef16551bedec32b987e4f9349da837074aa1`；完整backend tree不同，主多出READER-03 HTML/MOBI/XML相关5生产文件和3测试，不能声称完整环境同主。此为明确基线的开发验收，不合并成最终RC证据。
+
+本次样本准备未改工具：既有fixture固定7样本，原CLI仅可按唯一MIME筛选已导入资源。每次在API仍未初始化时，在专用library追加一个原M4A或Opus文件，保留manifest.generated.json并显式登记manualSampleAdditions、前后manifest hash及8文件/8样本一致，随后复用原provisioner和仪器用例。manual-preparation.json证明原7样本未改、目标MIME唯一、准备前后均未初始化。M4A源SHA `3ee91a25eeb4fd8c6261db8c660d2e84d0d624e8686499c35d0c06fbab6c6833`，Opus源SHA `e51f852204dde95bfe66e9770eacc327a25ffe08ae7b1dc226cb077850cf23f4`；ffprobe分别AAC-LC/22050Hz单声道30s、Opus/48000Hz单声道30.0065s，实际引擎时长30000/30006ms。已达到这两个短时子项的停止条件，不扩工具或重复执行，继续其他未完成格式与异常场景。
+
 READER-07（原RISK-07）已在实际链接生成owner边界复现：`23ae8c2e`的resourceDetailItemHref把漫画展示第1页生成`?page=1`，而Reader现有入口按零基pageIndex解析；正常6页末页同样会超出索引范围。新增受控回归原代码3 PASS/1 FAIL，首次断言实际得到page=1而期望page=0，证据`artifacts/releases/1.0/23ae8c2e/comic-detail-entry/red.log`。这不是已经完成真实点击后引擎恢复，原真实6页详情展示与源码链作为相邻事实保留。
 
-候选仅在resourceDetailItemHref的漫画页链接边界把pageNumber减一，PDF仍一基数，章节/音轨路径不变；所有ResourceDetailPreviewCard/Grid调用同一owner，无新URL协议或辅助工具。CBZ及IMAGE_DIR的第1/3/6页和PDF相邻5 PASS，完整Web478 PASS/0 skip、typecheck-final/lint/i18n通过。首次typecheck因新增测试字面量数组推断为string失败，保留typecheck.log；仅增加as const保持ResourceFormat类型后通过，不改阈值/规则。READER-07待真实详情点击首/末页及POS-09恢复，不能由链接边界GREEN关闭；ENV-12、其他格式/进度和外部条件不变。
+候选仅在resourceDetailItemHref的漫画页链接边界把pageNumber减一，PDF仍一基数，章节/音轨路径不变；页面预览PreviewTile与已有章节入口仍调用同一owner，无新URL协议或辅助工具。CBZ及IMAGE_DIR的第1/3/6页和PDF相邻5 PASS，完整Web478 PASS/0 skip、typecheck-final/lint/i18n通过。首次typecheck因新增测试字面量数组推断为string失败，保留typecheck.log；仅增加as const保持ResourceFormat类型后通过，不改阈值/规则。READER-07待真实详情点击首/末页及POS-09恢复，不能由链接边界GREEN关闭；ENV-12、其他格式/进度和外部条件不变。
+
+`d6a34cf0`已提交推送上述修复；现有后端`tests/unit/modules/library/test_resource_details.py`相邻7 PASS，明确验证PDF展示页号与IMAGE_DIR自然顺序后的一基page_number，日志`comic-detail-entry/backend-page-contract.log`。该受控后端契约不是实际浏览器点击证据。
 
 最终控制栏候选检查完成：`reader-console-regression/web-test-final.log`477 PASS/0 skip，typecheck-final/lint-final/i18n-final均退出0；独立只读审查通过四处按钮、漫画index边界、双页owner、EPUB与RTL保留。真实浏览器回归仍受ENV-12限制，READER-05/06不关闭。自有服务均已结束，无后台测试仍在运行。
 
@@ -17,7 +27,9 @@ Set-Location D:\www\ermao-release-1.0\apps\web
 $env:PATH='C:\Users\gamer\.cache\codex-runtimes\shuku-mobile-toolchain-22.23.1\node-v22.23.1-win-x64;D:\www\ermao-release-1.0\.tmp\release-bin;'+$env:PATH
 $env:PYTHON_EXECUTABLE='D:\www\ermao-release-1.0\.venv-windows-1.0\Scripts\python.exe'
 $env:PLAYWRIGHT_BASE_URL=''
-pnpm exec playwright test --reporter line *> 'D:\www\ermao-release-1.0\artifacts\releases\1.0\1d298ce6\reader-console-regression\manual-chrome.log'
+git rev-parse HEAD *> 'D:\www\ermao-release-1.0\artifacts\releases\1.0\1d298ce6\reader-console-regression\manual-chrome.log'
+git status --short *>> 'D:\www\ermao-release-1.0\artifacts\releases\1.0\1d298ce6\reader-console-regression\manual-chrome.log'
+pnpm exec playwright test --reporter line *>> 'D:\www\ermao-release-1.0\artifacts\releases\1.0\1d298ce6\reader-console-regression\manual-chrome.log'
 $LASTEXITCODE
 ```
 
@@ -147,8 +159,8 @@ DEC-07已纳入执行：停止已关闭AUDIO-03和ANDROID-03周边工具完善�
 |---|---|---|
 | RG-01 交付 | NOT_RUN / 部分BLOCKED | APK/IPA正式构建用户暂缓；Docker引擎、Mac/iOS条件仍缺 |
 | RG-02 初始化/连接 | 第一方新库及正常两种组织模式子项PASS；OPDS客户端负责人放行（DEC-08） | 其余导入/连接异常和平台子项继续；双客户端由用户自测，不虚构代理实测 |
-| RG-03 格式 | READER-03、AAC回零已关闭；MP3/WAV/AAC/FLAC列明短时场景及TEST-11完整长播放PASS | 其余格式、复杂/异常媒体及原生iOS矩阵未完成 |
-| RG-04 进度 | 已关闭保存、捕获、串写及Stop迟到重启缺陷；MP3 W↔A正常交接、Chrome EPUB离线页面重建、MP3确认后强杀并重登录恢复子项PASS | 未确认/其他引擎强杀及其余异常组合继续；SYNC-02真实浏览器受ENV-11阻塞；尚无同RC整体PASS |
+| RG-03 格式 | READER-03/04、AAC回零已关闭；MP3/WAV/AAC/FLAC及新增M4A AAC-LC/Ogg Opus按具体短时子项通过，TEST-11完整长播放PASS | READER-05/06/07候选待真实浏览器回归；其余格式、复杂/异常媒体及原生iOS矩阵未完成 |
+| RG-04 进度 | 已关闭保存、捕获、串写及Stop迟到重启缺陷；MP3 W↔A正常交接、Chrome EPUB离线页面重建、MP3确认后强杀重登及新增M4A/Opus暂停重开子项PASS | 未确认/其他引擎强杀、其余跨端/异常及指定页入口继续；SYNC-02受ENV-11、控制栏浏览器回归受ENV-12阻塞；尚无同RC整体PASS |
 | RG-05 导入性能 | 本轮本机1万导入预检PASS（DEC-06） | 大规模/长时压力独立脚本按需运行，不作为当前阻塞；不外推NAS或30万表现 |
 
 持续播放最近恢复点：`audio-soak/production-1800-execution.json`，run `r1788689717566-w0`，启动源版本 `a5ac3b8b`，已以AUDIO-04 FAIL结束并安全清理。后续从原事件/HTTP日志定位，不假定它仍在运行。此工作属于音频功能稳定性，不是已停止的超大书库压测。

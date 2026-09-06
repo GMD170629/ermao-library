@@ -1,5 +1,7 @@
 # 1.0 发布验收矩阵
 
+Android增量（ac25497d及已核验开发APK）：AUD-01 M4A/MPEG-4 AAC-LC单声道30s、AUD-08 Ogg/Opus单声道30.0065s的真实运行时播放、5/10秒确认及暂停重开子项PASS，分别9899→9899ms与9909→9909ms；不扩展到M4B/M4R/ALAC/Vorbis、长时/多轨/后台或普通界面完整入口。每项独立新库与8个真实样本，原件/源码/配置/清理通过，详见release-evidence首节。
+
 READER-07增量：漫画详情页指定页链接边界实际复现一基/零基偏移，最小候选及CBZ/IMAGE_DIR首中末页、PDF相邻回归通过；真实点击后页面与POS-09仍未完成。PDF/漫画整体仍FAIL/待回归，不能用本次链接单测替代ENV-12浏览器验收。
 
 最新覆盖：`1d298ce6`真实PDF/CBZ主资产启动失败已关闭READER-04；PDF69页的目录无关翻页按钮、CBZ6页的页号/末页上一页分别新增READER-05/06，故两格式整项仍FAIL。两个候选共用控制栏现有owner修复，完整Web/typecheck/lint/i18n通过；浏览器回归命令被自动审批拒绝（ENV-12），不得标PASS。真实CBZ退出重开第6页通过，不外推全部恢复/缩放/方向。运行清理、原件与源码hash已核验，证据见release-evidence首节。
@@ -137,8 +139,8 @@ R1 / DEC-05：用户批准 1.0 不支持第三方进度同步，OPDS-04 原互�
 | REF-PRC | PRC-N/C：实际PRC/PalmDB与复杂资源来源证明 | W/A/I；P2 | R，不能由改扩展名证明全部变体 | PRC-X：截断/DRM | BLOCKED；ENV-06、RISK-02 |
 | REF-FB2 | FB2-N/C：多section、嵌套目录与内嵌图片 | W/A/I；P2 | R，文本/图像/章节正确 | FB2-X：坏XML、可恢复active/具体实体风险 | BLOCKED；ENV-06 |
 | REF-TXT | TXT-N/C：中文UTF-8、BOM UTF-16LE/BE、GB18030、混合换行、长章 | W/A/I；P2 | R；逐实际编码登记，不能一份英文UTF8代替 | TXT-X：损坏/超预算，失败类别正确 | BLOCKED；ENV-06 |
-| PDF | PDF-N/C：文本目录+复杂大页/扫描图像PDF | W/A/I；P2 | F；真实物理页与内容可读，有界传输 | PDF-X：截断、密码/超预算 | BLOCKED；ENV-06 |
-| COM-CBZ | CBZ-N/C：真实ZIP漫画、嵌套路径/自然排序/长图 | W/A/I；P2 | F；图片顺序与页数正确 | CBZ-X：加密/损坏/超预算 | BLOCKED；ENV-06 |
+| PDF | PDF-N/C：文本目录+复杂大页/扫描图像PDF | W/A/I；P2 | F；真实物理页与内容可读，有界传输 | PDF-X：截断、密码/超预算 | FAIL：W正常69页已读首页/中页，READER-05候选待真实回归；复杂/异常及原生子项按各自证据展开，不再以正常样本缺失概括 |
+| COM-CBZ | CBZ-N/C：真实ZIP漫画、嵌套路径/自然排序/长图 | W/A/I；P2 | F；图片顺序与页数正确 | CBZ-X：加密/损坏/超预算 | FAIL：W真实6页可读及末页重开，READER-06/07候选待真实回归；复杂/异常及原生子项仍分别待验收 |
 | COM-ZIP | ZIP-N/C：独立ZIP源及含非图片条目 | W/A/I；P2 | F；正确筛图，顺序不漏重复 | ZIP-X：遍历/损坏/解压预算 | BLOCKED；ENV-06 |
 | COM-CBR | CBR-N/C：实际RAR容器与承诺变体 | W/A/I；P2 | F；不能用ZIP改名 | CBR-X：加密/损坏 | BLOCKED；ENV-06 |
 | COM-RAR | RAR-N/C：真实RAR4/RAR5分别登记适配能力 | W/A/I；P2 | F；变体失败记风险不删支持 | RAR-X：损坏/扩展预算 | BLOCKED；ENV-06 |
