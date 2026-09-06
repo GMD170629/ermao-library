@@ -258,19 +258,20 @@ internal class AndroidReaderV5Database(
 
         /**
          * Returns only the presentation sibling of each current-device v5
-         * position.  The opaque Locator is decoded only to validate the v5
-         * document and is never returned to library surfaces.
+         * pending mutation. The opaque Locator is decoded only to validate the
+         * v5 sync document and is never returned to library surfaces.
          */
         internal suspend fun loadPresentationSnapshots(
             context: Context,
             namespace: com.ermao.library.shared.modules.reader.ReaderSyncNamespace,
             clientId: String,
             bookIds: Set<String> = emptySet(),
+            databaseName: String = DATABASE_NAME,
         ): List<ReaderPositionPresentationSnapshot> {
             require(clientId.isNotBlank()) { "Reader presentation client id is blank" }
             require(bookIds.all(String::isNotBlank)) { "Reader presentation book id is blank" }
-            val helper = ReaderV5DatabaseHelper(context.applicationContext, DATABASE_NAME)
-            val codec = ReaderPositionJson()
+            val helper = ReaderV5DatabaseHelper(context.applicationContext, databaseName)
+            val codec = ReaderPositionSyncStateJson()
             val prefix = "${readerAccountStorageKey(namespace)}:${lengthPrefixed(
                 namespace.serverIdentity,
                 namespace.userId,
@@ -279,8 +280,8 @@ internal class AndroidReaderV5Database(
             return try {
                 withContext(Dispatchers.IO) {
                     helper.readableDatabase.query(
-                        POSITION_TABLE,
-                        arrayOf(POSITION_OWNER_KEY, POSITION_DOCUMENT),
+                        POSITION_SYNC_TABLE,
+                        arrayOf(POSITION_SYNC_OWNER_KEY, POSITION_SYNC_DOCUMENT),
                         null,
                         null,
                         null,
@@ -296,14 +297,15 @@ internal class AndroidReaderV5Database(
                                 if (bookIds.isNotEmpty() && owner.first !in bookIds) continue
                                 runCatching { codec.decode(cursor.getString(1)) }
                                     .getOrNull()
+                                    ?.pending
                                     ?.takeIf { it.clientId == clientId && it.resourceId == owner.second }
-                                    ?.let { state ->
+                                    ?.let { pending ->
                                         add(
                                             ReaderPositionPresentationSnapshot(
                                                 bookId = owner.first,
-                                                resourceId = state.resourceId,
-                                                capturedAtEpochMillis = state.capturedAtEpochMillis,
-                                                presentation = state.position.presentation,
+                                                resourceId = pending.resourceId,
+                                                capturedAtEpochMillis = pending.capturedAtEpochMillis,
+                                                presentation = pending.position.presentation,
                                             ),
                                         )
                                     }

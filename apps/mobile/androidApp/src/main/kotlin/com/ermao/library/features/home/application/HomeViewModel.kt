@@ -44,7 +44,7 @@ class HomeViewModel(
     private val mutableUiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = mutableUiState.asStateFlow()
     private val latestProgressUpdatesByResourceId = mutableMapOf<String, ReaderProgressPresentationUpdate>()
-    private val durablePresentationsByResourceId = mutableMapOf<String, ReaderPositionPresentationSnapshot>()
+    private var pendingPresentationsByResourceId = emptyMap<String, ReaderPositionPresentationSnapshot>()
 
     init {
         viewModelScope.launch {
@@ -119,12 +119,9 @@ class HomeViewModel(
                 clientId = AndroidReaderDeviceIdentity(appContext).stableDeviceId(),
             )
         }.getOrDefault(emptyList())
-        snapshots.forEach { snapshot ->
-            val previous = durablePresentationsByResourceId[snapshot.resourceId]
-            if (previous == null || previous.capturedAtEpochMillis <= snapshot.capturedAtEpochMillis) {
-                durablePresentationsByResourceId[snapshot.resourceId] = snapshot
-            }
-        }
+        // Replace the pending projection after every server read so an acknowledged
+        // local position cannot survive here and override newer server facts.
+        pendingPresentationsByResourceId = snapshots.associateBy(ReaderPositionPresentationSnapshot::resourceId)
     }
 
     private fun applyLocalPresentations(content: HomeContent): HomeContent {
@@ -136,7 +133,7 @@ class HomeViewModel(
                 presentation = update.presentation,
             )
         }
-        return (durablePresentationsByResourceId.values + inMemory)
+        return (pendingPresentationsByResourceId.values + inMemory)
             .groupBy(ReaderPositionPresentationSnapshot::resourceId)
             .values
             .mapNotNull { values -> values.maxByOrNull(ReaderPositionPresentationSnapshot::capturedAtEpochMillis) }

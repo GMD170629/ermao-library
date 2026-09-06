@@ -228,7 +228,7 @@ class WorkDetailViewModel(
     private var loadGeneration = 0
     private var surfaceGeneration = 0
     private val latestProgressUpdatesByResourceId = mutableMapOf<String, ReaderProgressPresentationUpdate>()
-    private val durablePresentationsByResourceId = mutableMapOf<String, ReaderPositionPresentationSnapshot>()
+    private var pendingPresentationsByResourceId = emptyMap<String, ReaderPositionPresentationSnapshot>()
 
     init {
         viewModelScope.launch {
@@ -497,12 +497,9 @@ class WorkDetailViewModel(
                 bookIds = setOf(bookId),
             )
         }.getOrDefault(emptyList())
-        snapshots.forEach { snapshot ->
-            val previous = durablePresentationsByResourceId[snapshot.resourceId]
-            if (previous == null || previous.capturedAtEpochMillis <= snapshot.capturedAtEpochMillis) {
-                durablePresentationsByResourceId[snapshot.resourceId] = snapshot
-            }
-        }
+        // Replace the pending projection after every server read so an acknowledged
+        // local position cannot survive here and override newer server facts.
+        pendingPresentationsByResourceId = snapshots.associateBy(ReaderPositionPresentationSnapshot::resourceId)
     }
 
     private fun applyLocalPresentations(
@@ -517,7 +514,7 @@ class WorkDetailViewModel(
                 presentation = update.presentation,
             )
         }
-        return (durablePresentationsByResourceId.values + inMemory)
+        return (pendingPresentationsByResourceId.values + inMemory)
             .groupBy(ReaderPositionPresentationSnapshot::resourceId)
             .values
             .mapNotNull { values -> values.maxByOrNull(ReaderPositionPresentationSnapshot::capturedAtEpochMillis) }

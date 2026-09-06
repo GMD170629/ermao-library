@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+SYNC-04候选已有主diff审查、host/lint及真实隔离SQLite两项PASS，普通新包原首页场景尚NOT_RUN，仍OPEN；不以自动结果关单。AUDIO-14正在稳定reading-units请求标识，独立原流程回归待执行。当前无测试服务，设备仪器已结束并强停；最新可恢复候选及接入边界见release-evidence首节。
+
 2026-09-07新增确证显示缺陷：SYNC-04（RG-04/POS-01/07，P1）Android冷启动首页以已确认旧本地位置显示57%，而完整服务端C/r9及首页API均约16%；普通播放器恢复5015ms正确但不抵销首页失败。AUDIO-14（RG-03/AUD-X，P2）Chrome音轨列表离线错误后重连仍0轨/原始Failed to fetch，在线API1轨、reload恢复。原证据在9e017394/pos07-real-late-first-submit-20260907，详见release-evidence；两项OPEN，立即最小修复及原场景/必要相邻回归，不扩通用工具。POS-07真实首次C晚于N提交的协议与实际恢复窄组合通过；无整体GO或新范围决定。
 
 当前下一项：POS-07真实客户端首次迟到C在N后提交，已有工具与Chrome/Android环境可执行，尚NOT_RUN；d58d0792的POS-05窄组合已经主与独立复核闭环，不重复扩展其测试工具。此恢复点覆盖下文历史“下一项POS-05”；外部阻塞和正式包暂缓保持。

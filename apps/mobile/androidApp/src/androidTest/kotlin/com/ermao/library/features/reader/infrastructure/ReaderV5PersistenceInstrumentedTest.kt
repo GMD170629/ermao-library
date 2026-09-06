@@ -72,6 +72,18 @@ class ReaderV5PersistenceInstrumentedTest {
         )
         assertEquals(latest, database.loadPosition(identity.resourceId))
         assertEquals(latestMutation, database.loadPositionSyncState().pending)
+        val pendingProjection = AndroidReaderV5Database.loadPresentationSnapshots(
+            context = context,
+            namespace = namespace.copy(authorizationVersion = 2),
+            clientId = identity.clientId,
+            bookIds = setOf(identity.bookId),
+            databaseName = databaseName,
+        )
+        assertEquals(1, pendingProjection.size)
+        assertEquals(identity.bookId, pendingProjection.single().bookId)
+        assertEquals(latestMutation.resourceId, pendingProjection.single().resourceId)
+        assertEquals(latestMutation.capturedAtEpochMillis, pendingProjection.single().capturedAtEpochMillis)
+        assertEquals(latestMutation.position.presentation, pendingProjection.single().presentation)
 
         val otherBook = AndroidReaderV5Database(
             context,
@@ -101,6 +113,16 @@ class ReaderV5PersistenceInstrumentedTest {
             afterOlderAck.pending,
         )
         assertNotNull(database.loadPosition(identity.resourceId))
+        assertEquals(
+            latestMutation.position.presentation,
+            AndroidReaderV5Database.loadPresentationSnapshots(
+                context = context,
+                namespace = namespace,
+                clientId = identity.clientId,
+                bookIds = setOf(identity.bookId),
+                databaseName = databaseName,
+            ).single().presentation,
+        )
 
         val latestResponse = olderResponse.copy(
             acceptedMutationId = latestMutation.mutationId,
@@ -109,6 +131,73 @@ class ReaderV5PersistenceInstrumentedTest {
         )
         database.acknowledgePosition(latestResponse.acceptedMutationId, latestResponse)
         assertEquals(null, database.loadPositionSyncState().pending)
+        assertEquals(
+            0,
+            AndroidReaderV5Database.loadPresentationSnapshots(
+                context = context,
+                namespace = namespace,
+                clientId = identity.clientId,
+                bookIds = setOf(identity.bookId),
+                databaseName = databaseName,
+            ).size,
+        )
+        assertEquals(latest, database.loadPosition(identity.resourceId))
+    }
+
+    @Test
+    fun presentationQueryFiltersAdjacentNamespaceClientAndBookPendingRows() = runBlocking {
+        val matching = local(1_000L)
+        database.commitPositionAndPending(matching, matching.toMutation(UUID.randomUUID().toString()))
+
+        val adjacentIdentities = listOf(
+            identity.copy(
+                namespace = namespace.copy(serverIdentity = "another-server"),
+                resourceId = "resource-other-namespace",
+            ),
+            identity.copy(
+                namespace = namespace.copy(userId = "another-user"),
+                resourceId = "resource-other-user",
+            ),
+            identity.copy(
+                clientId = "another-client",
+                resourceId = "resource-other-client",
+            ),
+            identity.copy(
+                bookId = "another-book",
+                resourceId = "resource-other-book",
+            ),
+        )
+        val adjacentStores = adjacentIdentities.map { owner ->
+            AndroidReaderV5Database(context, owner, databaseName)
+        }
+        try {
+            adjacentStores.forEachIndexed { index, store ->
+                val owner = adjacentIdentities[index]
+                val capturedAt = 2_000L + index
+                val position = ReaderPositionLocalState(
+                    resourceId = owner.resourceId,
+                    clientId = owner.clientId,
+                    capturedAtEpochMillis = capturedAt,
+                    position = ReaderPositionReportFixture.report(capturedAt.toDouble() / 10_000.0),
+                )
+                store.commitPositionAndPending(position, position.toMutation(UUID.randomUUID().toString()))
+            }
+
+            val snapshots = AndroidReaderV5Database.loadPresentationSnapshots(
+                context = context,
+                namespace = namespace,
+                clientId = identity.clientId,
+                bookIds = setOf(identity.bookId),
+                databaseName = databaseName,
+            )
+            assertEquals(1, snapshots.size)
+            assertEquals(identity.bookId, snapshots.single().bookId)
+            assertEquals(identity.resourceId, snapshots.single().resourceId)
+            assertEquals(matching.capturedAtEpochMillis, snapshots.single().capturedAtEpochMillis)
+            assertEquals(matching.position.presentation, snapshots.single().presentation)
+        } finally {
+            adjacentStores.forEach { it.close() }
+        }
     }
 
     private fun local(capturedAt: Long) = ReaderPositionLocalState(
