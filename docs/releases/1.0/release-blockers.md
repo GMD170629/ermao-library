@@ -8,7 +8,7 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 
 | ID | 类型 / 证据 | 当前处理 |
 |---|---|---|
-| DEC-05 / RISK-01 / ENV-05 | 全新测试库复现 OPDS 与 v5 各自持久化、双向不可见；`opds-investigation/`。用户批准 1.0 暂不支持第三方进度同步 | 原互通范围 N/A；端点和能力声明关闭待回归，目录/搜索/下载继续验收 |
+| DEC-05 / RISK-01 / ENV-05 | 全新测试库复现 OPDS 与 v5 各自持久化、双向不可见；`opds-investigation/`。用户批准 1.0 暂不支持第三方进度同步 | 原互通范围 N/A；`f3748d58` 端点和能力声明关闭，主代理独立41项 OPDS/v5 回归 PASS，零进度写入；真实客户端目录/搜索/下载继续验收 |
 | TEST-01 | schema 验证器不支持合法 nullable type union；原 33 tests 中 2 errors | 已修复 `6cfbf7bb`，33 PASS；新增正反例，未改 schema 或弱化断言 |
 | TEST-02 | 后端同名测试模块收集冲突且锁中缺 coverage 执行依赖 | 已修复 `aa02e0ae`，完整收集 1255；仍有运行失败，另行处理 |
 | TEST-03 | Web Reader 测试强制 SDK 不承诺的 selector 字段、移动视口硬编码点击/桌面间距假设 | Chrome 两视口专项 42 PASS；SDK round-trip、原有真实段落恢复与新增缓存重开保护保留，详见 evidence |
@@ -19,7 +19,7 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 | WEB-01 | Chrome 移动视口新增书库弹窗 max-height 限制下 overflow-visible，底部提交不可达 | 仅调整弹窗 overflow-y-auto；初始化完整向导与桌面/移动布局回归通过；最终 Chrome 全套随后执行 |
 | TEST-06 | Web 详情 fixture 缺 canonical chapter fields；封面 mock 不匹配 size 查询串；触摸端套用精确指针菜单假设；旧按钮/目录交互过期 | 修正 fixtures/真实入口，保留封面比例、触摸可达、键盘管理、当前章节和翻页断言；生产封面/菜单视觉未改，Chrome 全套随后留完整日志 |
 | READER-01 | 共享 C 章节核未识别“第 1 章”含数词空白的合法标题，Chrome TXT 实际失败 | `854712bb` 修复唯一 C owner、针对性正负例与 WASM 同步；C warning-as-error 测试及 Chrome 全套 PASS |
-| ANDROID-01 | 真机漫画目录截图显示按钮 0/1、第二页摘要仍称第 1 页；长目录 Row 无滚动入口 | 已复现页码错误：`preflight-mobile/reader-controls/comic-contents.png`；新增千页目录行为测试，修复与回归中；不将 EPUB 早期截图空白推定为已复现产品缺陷 |
+| ANDROID-01 | 真机漫画目录截图显示按钮 0/1、第二页摘要仍称第 1 页；长目录 Row 无滚动入口 | `805be838` 修复，千页目录与全套目录19项真机 PASS；截图复核继续。早期新测试自身目录 fixture 问题已纠正并保留失败日志；不将 EPUB 早期截图空白推定为产品缺陷 |
 
 | ID | 当前事实与证据 | 当前处理 |
 |---|---|---|
@@ -31,7 +31,7 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 | DEC-04 | 用户接受门禁现有建议阈值；低功耗 NAS 暂缓、本轮本机预检即可 | 阈值冻结；记录本机配置/实际范围，不外推 NAS 结果 |
 | ENV-08 | Docker Desktop 已尝试启动但引擎仍不可达；宿主日志确认 Inference manager socket 访问错误 | ART-02 容器路径 BLOCKED；不执行 factory reset 或系统级修复，继续宿主隔离 API/Worker/Web |
 
-尚未解除：真实第三方客户端及 Progression 客户端（ENV-04/05）、逐格式完整样本与平台播放承诺（ENV-06/DEC-02）、iOS 执行条件。先检查现有素材与可安全补齐的测试样本，不把旧缺项一概视为无法推进。
+尚未解除：真实第三方目录客户端（ENV-04）、逐格式完整样本与平台播放承诺（ENV-06/DEC-02）、iOS 执行条件。Progression 客户端不再是 1.0 前提。先检查现有素材与可安全补齐的测试样本，不把旧缺项一概视为无法推进。
 
 ## 已确认阻塞项（只登记本轮确证事实）
 

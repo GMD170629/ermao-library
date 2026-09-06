@@ -23,7 +23,7 @@ R1 用户范围调整：Web 仅 Chrome（桌面/移动视口），Firefox、WebK
 
 ## 2. 发布、初始化与接入
 
-R1 / DEC-05：用户批准 1.0 不支持第三方进度同步，下面 OPDS-04 原互通要求为 N/A。新增同 ID 的范围关闭验证：目录不发布 Progression 链接、旧 GET/PUT 不再提供同步且不写进度、目录/搜索/下载及权限回归通过；该验证当前 NOT_RUN，不能因范围决定直接计 PASS。
+R1 / DEC-05：用户批准 1.0 不支持第三方进度同步，OPDS-04 原互通要求为 N/A。关闭验证以 `f3748d58` 执行：目录不发布 Progression 链接，旧 GET/PUT 不再同步且无进度/DML写入；OPDS/v5 五个测试文件41项 PASS，见 evidence R1-OPDS-CLOSURE。真实第三方目录/下载仍按 OPDS-01..03 执行。
 
 命令编号 C-* 见 §7，人工操作依据 release-gate.md §6 的实际 UI/API；所列命令本轮均未运行。
 
@@ -48,7 +48,7 @@ R1 / DEC-05：用户批准 1.0 不支持第三方进度同步，下面 OPDS-04 �
 | OPDS-01 / RG-02 | P2；静读天下+第二独立客户端，名称版本待补 | 先在Web OPDS设置启用并填写可达publicBaseUrl；每个应用添加实际返回的 /opds/v1.2/catalog，先错误密码再正确凭据；记录认证challenge和客户端行为 | 两真实应用可认证，错误凭据不可访问；认证文档/Content-Type正确 | E/OPDS-01/ | BLOCKED；ENV-04 |
 | OPDS-02 / RG-02 | P2；两个客户端各支持的合法格式 | 各应用浏览→分页→搜索→封面→下载→在该应用打开内容中段 | 不仅目录首页成功；分页/检索正确，原文件可读 | E/OPDS-02/ | BLOCKED；ENV-04、ENV-06 |
 | OPDS-03 / RG-02 | P2；代理HTTP/HTTPS/端口；两账号 | 沿真实返回链接下载与取封面，记录公开URL/认证；对原文件SHA-256；用有Range的实际链接请求有效/越界区间，核对206/Content-Range/416及无权路径 | 链接不泄漏内网地址、权限不丢；完整文件一致；区间语义正确 | E/OPDS-03/ | BLOCKED；ENV-03、ENV-04；协议辅助可单独 NOT_RUN |
-| OPDS-04 / RG-02+04 | P3；全新资源+支持Progression真实客户端 | C-09辅助；检查 /opds/v1.2/resources/{resource_id}/progression 的真实GET/PUT、未授权和重复写；第一方写→第三方读，第三方写→第一方重开；记录精确位置/仅比例/无Locator边界 | 扩展承诺可验证，不以目录替代；所有失败保留，不能隐去新数据链路问题 | E/OPDS-04/ | BLOCKED；ENV-05、RISK-01 |
+| OPDS-04 / RG-02+04 | DEC-05 关闭验证；全新测试库 | 检查目录、搜索和详情无同步链接；授权 GET/PUT 为410、未授权401；不写旧/v5进度表或其他DML | 原同步互通 N/A；关闭入口且保留目录权限及下载 | R1-OPDS-CLOSURE | 开发回归 PASS；最终 RC 重验 |
 
 ## 3. 格式与样本计划
 
@@ -202,4 +202,3 @@ P4的冻结表必须填写：CPU/架构、RAM、磁盘/文件系统/挂载、数
 | 大库可慢但不崩溃或拖死前台 | RG-05 / LOAD全组，联动RG-04确认位置 |
 
 单条实测记录使用 release-evidence.md 的必填字段；失败绑定台账ID，样本/命令/预期变动必须先留痕再重跑。所有来源尚未运行的用例保持NOT_RUN或因明确前提缺失BLOCKED；当前无PASS/N/A记录。
-

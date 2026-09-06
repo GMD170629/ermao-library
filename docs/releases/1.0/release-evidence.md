@@ -5,7 +5,7 @@
 ## R1 当前执行与恢复入口（2026-09-06）
 
 - 当前已推送检查点 `854712bb`；后续工作树修改按逻辑审查提交。正式 RC 未冻结。Chrome 全量使用该提交的 Web/C/WASM 源码，运行期间 Android/OPDS 工作树仍有并行修改，不能作为整体冻结验收。
-- 用户批准 DEC-05：1.0 暂不支持第三方进度同步；OPDS 目录、搜索、下载保留。原双向互通不再属于 1.0，端点/声明关闭及负面副作用测试待实施。
+- 用户批准 DEC-05：1.0 暂不支持第三方进度同步；OPDS 目录、搜索、下载保留。`f3748d58` 删除同步实现和声明，授权 GET/PUT 返回 410，未授权仍 401；阴性测试验证旧表、v5 表及所有 DML 均无写入。
 - 起点：`develop@197e81a808ba32595a8a6ffeda62422b3a7d3473`，初始 `git status --short` 无输出；没有用户未提交改动被纳入或排除。原工作区不修改。
 - 隔离工作区：`D:/www/ermao-release-1.0`；分支 `codex/release-1.0-convergence`。正式 RC 未冻结，无 tag/公开发布。用户追加授权及时 commit/push；已检查三个工作流，push 仅匹配 develop/prod 或版本 tag，专用分支不触发发布。只推专用分支，不创建 PR/触发工作流。
 - 实际证据根：`artifacts/releases/1.0/197e81a808ba32595a8a6ffeda62422b3a7d3473/`。这是开发基线证据，后续修复须另记源码差异/提交；不能直接用于冻结 RC 放行。
@@ -31,6 +31,9 @@
 | R1-ANDROID-SAFETY / RG-03 | 真机生成报告后 `verify-reader-safety-conformance.py --require-consumer ANDROID` | PASS：66 cases，0 omissions；`preflight-mobile/android-conformance.json`；SDK31 / PDFium `875172eae557a308d0c5b2be43822814c8a885bb` | `ae1275cd` 测试修正；不代替 Web/backend/iOS 独立报告 |
 | R1-ANDROID-READER / RG-03 | `ReaderEpubInstrumentedTest`、`ReaderControlsVisualInstrumentedTest` 真机执行 | PASS：7 tests；`preflight-mobile/17-reader-panels-rebuild.log`、`18-reader-panels-device.log`；单项滚动诊断 `16-epub-scroll-device.log` | `0066f2c2` 加后续两测试修改；滚动保留 Double 偏好、真实布局无横向溢出、视口前后翻与原生 swipe 保留；面板关闭验证 workspace 消失，标准底部控制台保持。仅测试修正，不改 Reader 产品行为 |
 | R1-ANDROID-FIXTURES / RG-03/ART-01 | 增量 assembleDebug/assembleDebugAndroidTest，保留数据安装；设备 `9e896bbc`，7 个类/选定方法 | PASS：32 tests；`preflight-mobile/12-test-fixture-rebuild.log`、`13-test-fixture-artifacts.txt`（APK SHA-256）、`14-test-fixture-device.log`；首轮 20 中 2 FAIL 另存 `10-test-fixture-device.log` | `7847cdd2` 加后续测试修正及并行未提交源码的开发快照；正式 RC 全量须重跑。instrumentation 尾部 `INSTRUMENTATION_CODE=-1` 为 runner 结束码，本次 `OK (32 tests)`；不能单凭 adb exit 或该码判定失败/通过 |
+| R1-OPDS-CLOSURE / OPDS-04 | 主代理独立执行 OPDS HTTP/protocol 与 v5 progress/contract 五个文件 | PASS：41 tests，0 skipped；`opds-investigation/closure-primary-regression.log` | `f3748d58` 后端源码；目录/搜索/详情不发布同步链接，原 GET/PUT 不写任一进度 owner。原 44 项中的已退出范围同步正例被关闭行为正负例取代；真实第三方客户端目录验收仍待执行 |
+| R1-ANDROID-COMIC-TOC / RG-03 | 千页目录首/末页、摘要、真实导航回调与全部目录交互；授权真机 | PASS：19 tests；`preflight-mobile/30-comic-toc-contract-build.log`、`31-comic-toc-contract-device.log` | `805be838` 修复一基显示页码及 LazyRow 可达性。最初新测错误沿用 EPUB 异步目录夹具，日志 22/25/27/29 保留，不计为长漫画已复现证据；页码原缺陷以真实 comic-contents.png 为据；最终夹具复用漫画同步目录契约 |
+| R1-NATIVE-CROSS-HOST / RG-03 | Linux 同一 C patch + GCC `.so`、Python TXT/章节71项；Windows平台专属pipe2项 | PASS：71 + 2；`backend-baseline/linux-614b5fed/native-854712bb/`、`backend-baseline/windows-pipe-tests-20260906/` | Linux 原完整套件两个 Windows-only skip 已在真实 win32 各自 PASS；非无条件跳过 |
 
 Android 测试修正依据：CRC 使用 fixture 的实际损坏 bytes，禁止传入写死的完好原文；音频 MIME 一致性案例按既有 v2 manifest 的 ALLOW 输出（未改规则/期望）；漫画双页偏好按共享设置持久化，增加同用户跨服务器隔离；章节按钮提供显式引擎 TOC identity；书库目录挂载实际 Shell 所需管理宿主并校验仅下载回调；Compose 1.11.3 的 `stringResource` 实际读取 `LocalResources`，双语 fixture 补全该上下文；菜单按现有 224dp 平台几何校验，以 `positionOnScreen` 验证 60px 移动且保持 2px 容差；应用浅色外壳按 design-contracts README 校验两个系统模式的 canonical canvas，Reader 自身日夜主题测试保留。均未修改产品视觉或降低验收阈值。
 
