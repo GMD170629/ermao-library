@@ -4,6 +4,10 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+2026-09-07最新恢复点：主基线c560d1a2，DEC-09按用户明确名单仅保留M4B、MP3、AAC、M4A四种有声书格式；不继续Vorbis及其他编码矩阵，既有产品能力、有效断言和历史证据保持。用户告知子代理用量恢复，已安排独立只读核验四格式缺口。下一步优先补M4B实际源文件的原生播放/确认/重开，再继续范围内后台中断及进度异常；不把已有M4A结果当作M4B通过，不扩通用工具。
+
+Vorbis中断收尾（均非播放验收）：`D:/www/ermao-release-android-formats/artifacts/releases/1.0/ac25497d3a4ee29383ddc97ac27c0a7230a5d078/android-vorbis-20260906/`保留原600秒寿命超时，shutdown报告processesStopped=true、cleanupErrors=[]；子代理用量中断后未完成样本准备/仪器运行。`android-vorbis-20260907-recovery/`曾启动全新fixture，收到DEC-09后写入其既有stop文件，shutdown报告status=stopped、primaryError=null、cleanupErrors=[]、processesStopped=true，launcher exitCode=0；原7样本manifest保留，未追加Vorbis、未provision设备或启动仪器。主代理核实18084/3105无监听、adb reverse为空、Androidformats工作树干净。两个目录保留为中断/范围取消证据，不能登记Vorbis PASS；正式构建仍暂缓、RC未冻结。
+
 本轮收尾恢复点`64b966aa`（业务修复d6a34cf0，均已推送）：两音频子项与清理已由主复核，链接修复另经独立只读审查通过，确认PreviewTile调用、漫画page=0可消费和PDF链接不变；READER-07仍待真实浏览器。主/Androidformats工作树清洁，自有fixture/instrumentation均结束，reverse为空、相关测试端口释放；设备原有测试包休眠进程28816保留，无主App进程。下一项继续其余已获样本的原生格式及进度异常；ENV-11/12等待已提出的外部执行条件，不重复请求授权、不绕过工具拒绝。正式产物仍暂缓，RC未冻结。
 
 当前主基线`d6a34cf0`已推送；READER-05/06/07代码检查通过、真实浏览器回归仍待ENV-12，SYNC-02对照仍待ENV-11。此次另补RG-03 AUD-01/AUD-08及RG-04 POS-01/02的Android真实运行时子项：M4A/MPEG-4 AAC-LC与Ogg/Opus分别在独立全新数据上完成播放、5/10秒实际服务端确认、暂停及关闭重开，均PASS。M4A确认3898ms/r2、7901ms/r3，暂停9899ms/r4→实际重开9899ms；Opus确认3887ms/r2、7892ms/r3，暂停9909ms/r4→实际重开9909ms，两者恢复误差0，阈值未改变。不覆盖长时、多轨、后台中断、其他内部编码、普通界面完整入口或最终RC。
