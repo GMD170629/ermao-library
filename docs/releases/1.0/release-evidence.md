@@ -1,3 +1,9 @@
+2026-09-08 后端集成检查点完成，IMPORT-08 CLOSED（修复`eaa96c19`；R2未冻结）。从当前已提交`c03cb730`独立git archive运行，较最近完整基线`e0299fda`已有导入、资源详情、进度契约等多项集成修改；复用既有Ubuntu24.04/Python3.11锁定环境，56项依赖一致、应用导入均来自本次归档。MOBI因`3cf54116`偏移保护变化从当前源码重建，chapters也按既有入口构建；精确hash、命令与结果在`artifacts/releases/1.0/c03cb730/backend-integration-20260908/result.json`、`native-sha256.txt`及原日志。
+
+原Linux完整回归真实结果为1407 PASS / 1 FAIL / 2项既有Windows-only skip（278.11s），两项Windows补测均PASS；Ruff format/check、mypy通过，coverage约78%。唯一FAIL是`test_capability_public_modules_do_not_import_infrastructure`：IMPORT-05修复时将文件系统根路径实现重导出到imports.public。最小修复移除此导出，由现有bootstrap提供原resolver、创建及更新HTTP通过已有Depends机制获取；唯一`infrastructure/library_root.py`字节未改，授权、拓扑检查、错误映射与事务次序未改，无重复验证实现。原架构/根路径/建库冲突/书库隔离65项定向PASS，Ruff、mypy通过，独立diff核对通过。测试只调整适配器import、原断言全部保留；初次格式检查的两处注解换行已修正并核实AST相同。原全量FAIL保留，未在补丁后重跑全量，不拼为新版本全量或最终RC PASS。
+
+本轮未扩展仓库测试工具。旧完整runner不会传入MOBI库，故直接复用现有构建/pytest命令；run.sh/resume.sh仅保存本次执行。初始清单命令因uv环境无pip在测试前退出，保留失败后改用既有uv pip freeze继续，无安装或重复构建。归档4177文件运行后hash全部相同，自有执行句柄均结束、任务路径进程0，无应用服务启动。矩阵INI-03、POS-03/04据原result回填真实任务恢复和Android EPUB/PDF/CBZ待提交冷恢复；这些是历史有效子项，保留原body替换/回前台触发及最终RC限制，不记作本轮重跑。下一项INI-02 Chrome成员权限普通界面，复用既有接入入口；已有Chrome特定工具、iOS、容器等阻塞及正式包暂缓保持。
+
 2026-09-08 RG-03 PDF真实动作输入子项PASS，无产品或通用工具变更。现有conformance只有actions事实输入，无法证明真实PDF普通链路；因此复用PDF-COMPLEX第一页，以现有pypdf构造2062B专用一页样本，真实Catalog OpenAction/Names JavaScript app.launchURL与URI Link均经写后解析核验，原第一页文本保持并参考渲染检查；全部目标仅本机隔离API。实际Android2127a96a普通详情打开正文完整，按PDF注释Rect与实际纸页边界计算屏幕720,2050点击，仍原App且只展开控制栏；普通关闭/重开同页正文，完整local=server位置保持、confirmed2/pending空。原件及HTTP字节/hash不变，固定/javascript与/uri请求全程0。
 
 证据`1636a6c8/pdf-active-20260908/result.json`、sample/原PDF、reference、opened/clicked/reopened原图、link-click、observed-api.log、原件校验及位置DB。宿主HTTP前后positive-control均404且记录，Android本次真实同端口资产请求可见；不是全局网络捕获。三次adb nc正向采集分别空响应/400，均发生行为验收前，原输出保留并排除；停止扩该采集方法，采用现有HTTP客户端控制验证日志。UI未打开外部目标反映现有tap路由未分发URI，不称链接触发后被安全策略拦截；Names与OpenAction同脚本不分别宣称独立验证，不外推PDF /Launch、XFA或所有JavaScript行为。

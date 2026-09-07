@@ -1,3 +1,5 @@
+2026-09-08 当前开发基线eaa96c19，后端集成检查点发现的IMPORT-08已定向修复验证；完整运行与补丁证据分别见release-evidence首条。R2未冻结、五组门禁尚未整体放行；正式包仍按负责人决策暂缓。下一项INI-02 Chrome成员权限普通界面。
+
 2026-09-08 RG-03 Android真实PDF JavaScript OpenAction/URI注释输入子项PASS；正文/点击/重开、固定canary零请求、原件与完整位置证据1636a6c8/pdf-active-20260908/result.json，详见evidence。无新业务缺陷/框架，不外推XFA/Launch。下一项按当前矩阵收敛剩余可执行项与既有外部阻塞，停止扩本安全样本；R2未冻结。
 
 2026-09-08 RG-03当前Android安全模块回归PASS，证据b522f657/android-safety-20260908/result.json；无业务/工具变化。矩阵补回已有EPUB活动内容/损坏包、FB2 XML及PDF页数预算实证，避免重复计为待验。下一项PDF主动动作禁用的实际输入覆盖核对，现有报告投影不替代该行为；R2未冻结及既有外部限制保持。

@@ -1,3 +1,5 @@
+2026-09-08 IMPORT-08 CLOSED：后端完整回归唯一架构失败已由eaa96c19修复，原架构及建库/根路径相邻验证通过；原全量FAIL与补丁定向PASS分开记录，详见evidence首条。下一项INI-02 Chrome成员权限普通界面；R2未冻结，既有外部阻塞/正式包暂缓保持。
+
 2026-09-08 RG-03 Android真实PDF JavaScript OpenAction/URI注释输入子项PASS；正文/点击/重开、固定canary零请求、原件与完整位置证据1636a6c8/pdf-active-20260908/result.json，详见evidence。无新业务缺陷/框架，不外推XFA/Launch。下一项按当前矩阵收敛剩余可执行项与既有外部阻塞，停止扩本安全样本；R2未冻结。
 
 2026-09-08 RG-03当前Android安全模块回归PASS，证据b522f657/android-safety-20260908/result.json；无业务/工具变化。矩阵补回已有EPUB活动内容/损坏包、FB2 XML及PDF页数预算实证，避免重复计为待验。下一项PDF主动动作禁用的实际输入覆盖核对，现有报告投影不替代该行为；R2未冻结及既有外部限制保持。
@@ -386,7 +388,7 @@ ENV-06规模数据子项进展：100k真实紧凑文件已准备并逐文件校�
 | TEST-01 | schema 验证器不支持合法 nullable type union；原 33 tests 中 2 errors | 已修复 `6cfbf7bb`，33 PASS；新增正反例，未改 schema 或弱化断言 |
 | TEST-02 | 后端同名测试模块收集冲突且锁中缺 coverage 执行依赖 | 已修复 `aa02e0ae`，完整收集 1255；仍有运行失败，另行处理 |
 | TEST-03 | Web Reader 测试强制 SDK 不承诺的 selector 字段、移动视口硬编码点击/桌面间距假设 | Chrome 两视口专项 42 PASS；SDK round-trip、原有真实段落恢复与新增缓存重开保护保留，详见 evidence |
-| RUN-01 | Windows 后端 36 个运行失败；Android shared/unit/lint/instrumentation 均有失败 | 正在隔离 Linux 重验和分类修复；不得宣告代码门禁通过 |
+| RUN-01 | Windows 后端 36 个运行失败；Android shared/unit/lint/instrumentation 均有失败 | 历史失败保留；当前c03cb730完整后端仅IMPORT-08架构失败，eaa96c19已修复且定向通过。最终RC全量及其余平台仍待，详见evidence首条 |
 | RUN-02 | Web 原四浏览器回归失败，含环境启动、过期 fixtures/断言、TXT 章节识别等不同原因 | Chrome 全套 126 PASS / 0 skipped，`854712bb` Web/C 源码；前轮两个 Chrome newPage 启动超时另存，不改断言/超时；该批关闭，最终 RC 仍须完整验收 |
 | TEST-04 | Android 仪器 fixture 与已实现契约不符：CRC 完好 bytes、音频 ALLOW 报告、双页偏好、显式章节 identity、目录宿主、双语资源及弹窗坐标等 | 针对性 32 项真机 PASS，见 evidence R1-ANDROID-FIXTURES；其余仪器失败继续，尚未关闭整套 RUN-01 |
 | TEST-05 | 旧后端 smoke 请求退役 v4，并存在 uv/PIPE 子进程清理阻塞 | `76707cce`：共享文件日志/有界进程回收，迁移至 v5 原文件；两个真实 smoke PASS，4 个过程/HTTP 正负测试 PASS |
