@@ -1,5 +1,11 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 RG-02 Chrome接入子项PASS（3a1e4193、development运行）：全新隔离库普通设置页空用户名提示→创建owner→坏根“路径不存在或不可读”→修正路径成功→重复根“书库路径已存在”且仍仅1库→确认启用后真实Worker导入7本。普通详情打开EPUB，iframe出现第一章正文；按真实bootstrap确定MP3资产后普通“开始听”，HTML媒体时钟从5.088361推进至15.118003秒，暂停17.169274秒/error=null，独立GET确认同资产17169ms/r6。普通注销到登录页，错密码显示“邮箱或密码不正确”，仅修正密码恢复原7本书库。本次仅Chrome桌面、HTTP本机、正常EPUB/MP3接入，不外推Android/iOS、HTTPS、所有格式或正式RC。
+
+证据`artifacts/releases/1.0/3a1e4193/rg02-ui-intake-20260907/run/`：manifest、application-source-hashes、api/worker/next日志、catalog-readback、MP3 bootstrap及confirmed-progress；ui-observation-transcription明确为实际CUA DOM/media输出转录，不是截图/HAR/E2E报告。914项源码和全部样本/来源hash一致、API无5xx；播放器已关、UI及只读观察会话均正常注销，自有Chrome tab关闭，fixture退出0，3105/18084释放。最初启动漏显式opt-in及误指原仓库corpus路径两次环境错误保留在父目录日志，按现有配置纠正；未改fixture功能、未重建生产包或全量回归。
+
+ENV-13 / IMP-06上传UI BLOCKED：上传对话框与专用保存目录可操作；原始CDP不支持文件设置并指向filechooser，按工具公开指引调用`chooser.setFiles`后返回`-32000 Not allowed`。无文件提交、保存仍禁用，未发生上传请求；不以既有API单测或手动复制文件冒充UI上传成功，不绕过工具限制。测试文件`rg02-ui-intake-20260907/rg02-upload.epub`已保留；待文件选择能力可用或负责人实际完成该选择后继续这一子项，其他门禁照常推进。当前下一项为剩余权限/服务器隔离或格式异常的既有可执行入口；仍R2，未冻结RC/未整体GO。
+
 2026-09-07 RG-02 / IMP-03、06混合损坏与修复子项PASS：真实Worker先处理损坏CBZ，任务/资源/资产FAILED（ZIP漫画损坏），同扫描合法CBZ仍READY；两原件未被解析修改。仅替换专用坏文件为合法归档，再由原书库重扫入口执行，全部成功且Node/Resource/Asset身份不变。证据`artifacts/releases/1.0/e8c4b555/rg02-mixed-import-20260907/cbz-run/`的mixed/repaired/result/shutdown及执行日志，Python退出0。最初EPUB运行预期有误：入库元数据可选，坏ZIP仅返回无元数据，因此任务成功不代表出版物可打开；保留父目录原失败与expectation-correction，不修改产品或删除失败断言，改用有必需归档检查的CBZ验证同一失败/修复契约。损坏EPUB阅读、DRM、无权文件和外部元数据断网仍独立待验，不外推通过。
 
 IMP-05后端真实中断/恢复子项PASS：`e8c4b555/rg02-worker-live-restart-20260907/`在实际SCAN_LIBRARY为RUNNING时停止自有Worker，退出后SQLite仍RUNNING；独立Worker重启将原任务标为FAILED/WORKER_INTERRUPTED。通过既有书库安全重扫，512份小EPUB全部READY，无其他失败，原件hash不变，旧中断任务保留。此数量仅提供功能中断窗口，不作新增压力/吞吐验收。原execute尝试精确继续无sourceNode的扫描任务被LookupError拒绝，已按ContinueImport及现有HTTP/UI语义修正操作入口；entry-correction、原失败及resume独立日志全部保留，不重演中断取成功，不修改业务断言或把旧失败改成成功。真实进程/任务状态见observed-running、after-stop、after-restart、rescan-request、completed、result及两份shutdown；所有自有Worker已停，resume退出0。调用composition而非实际HTTP/UI；最终同RC及UI接入仍待。

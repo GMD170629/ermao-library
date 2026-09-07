@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-07 Chrome初始化/错误恢复/新库EPUB与MP3读听子项已补齐，详见evidence首节；无新增业务缺陷。新增ENV-13仅阻塞IMP-06实际文件选择上传：已选专用保存目录，工具规定的chooser.setFiles返回-32000 Not allowed，未上传、不计成功；待能力恢复或负责人手动实际选择已备测试文件，无需扩工具。自有tab/服务已关闭，源码及原件hash不变。仍R2；接着处理剩余权限/服务器隔离或格式异常，既有外部阻塞及正式产物暂缓不变。
+
 2026-09-07最新RG-02：混合损坏CBZ失败隔离及修复后同身份重扫通过；真实活跃Worker中断、重启分类与同库安全重扫完成通过。初始EPUB失败预期与扫描任务继续入口不符已按现有契约纠正并保留原记录，未确证新产品缺陷。IMP-03/05/06更新为有明确后端实测的PARTIAL；下一项上传/权限及UI接入。详见evidence首节，不重复扩大已通过行为；所有本轮Worker已停止。
 
 2026-09-07 RG-02增量：IMP-06真实Worker来源缺失/恢复与自动保留、手动清理子项PASS，无新增产品缺陷；IMP-04复用已核对的真实10k重扫完整性证据，不重跑负载。未验收的上传UI、只读权限、损坏修复及队列实际恢复继续分项推进，详见evidence首节；现有环境阻塞及最终RC要求不变。
@@ -203,6 +205,7 @@ RUN-01 最新拆分：`f3748d58` 后端 Linux 完整1250 PASS + 原有平台2 sk
 | DEC-03 | 用户接受 ADR 0028 最后事务提交生效及首次迟到离线写的语义 | 语义决策已完成；仍需真实回归，不凭决策计 PASS |
 | DEC-04 | 用户接受门禁现有建议阈值；低功耗 NAS 暂缓、本轮本机预检即可 | 阈值冻结；记录本机配置/实际范围，不外推 NAS 结果 |
 | ENV-08 | Docker Desktop 已尝试启动但引擎仍不可达；宿主日志确认 Inference manager socket 访问错误 | ART-02 容器路径 BLOCKED；不执行 factory reset 或系统级修复，继续宿主隔离 API/Worker/Web |
+| ENV-13 | Chrome上传已打开真实filechooser，但工具setFiles返回-32000 Not allowed；无上传请求，证据3a1e4193/rg02-ui-intake-20260907/run/ui-observation-transcription.json | 仅IMP-06文件选择上传BLOCKED；待工具能力恢复或负责人实际选择专用rg02-upload.epub，不绕过工具限制、不以API或手动复制冒充UI通过 |
 
 ART-02 的本地构建入口现已补充：既有镜像脚本 `--output-dir` 导出 OCI 与版本/hash manifest，命令边界回归17项 PASS；此项仅解除“必须 push 才能构建”的工程缺口。Docker 引擎与双架构实际运行验收仍未解除。
 

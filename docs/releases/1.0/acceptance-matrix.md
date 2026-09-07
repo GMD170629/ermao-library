@@ -1,6 +1,6 @@
 # 1.0 发布验收矩阵
 
-2026-09-07 RG-03 AUD-X / RG-04 POS-01/07显示缺陷回归补齐：SYNC-04新Android冷首页及详情正确采用服务端C约16%（不再被已确认旧N约57%覆盖），普通首页实际恢复5000→5015ms/969ms；AUDIO-14 Chrome真实离线拖动和重连均保持1条音轨/无Failed to fetch，定向Chrome E2E实际PASS。两缺陷CLOSED，证据见b72b3d83/sync04-audio14-regression-20260907及release-evidence；RISK-08并发返回边界仍待验证，不外推其他引擎/iOS/最终RC。
+2026-09-07 RG-03 AUD-X / RG-04 POS-01/07显示缺陷回归补齐：SYNC-04新Android冷首页及详情正确采用服务端C约16%（不再被已确认旧N约57%覆盖），普通首页实际恢复5000→5015ms/969ms；AUDIO-14 Chrome真实离线拖动和重连均保持1条音轨/无Failed to fetch，定向Chrome E2E实际PASS。两缺陷CLOSED，证据见b72b3d83/sync04-audio14-regression-20260907及release-evidence；RISK-08后续已确证并按SYNC-05在e8c4b555关闭，实际定向真机证据见evidence，不外推其他引擎/iOS/最终RC。
 
 2026-09-07 POS-07真实首次迟到子项PASS（9e017394业务源码同f778eecf）：Chrome离线C=5000ms网络发送失败，Android确认N=17298ms/r8后强停；只读ORM确认C尚无receipt，Chrome重连原body首次到达成为C/r9，旧8条receipt逐字段不变且仅新增C，独立GET完整相同。Android随后普通继续实际恢复5015ms/968ms。另发现SYNC-04首页显示旧57%而API16.6295%，以及AUDIO-14 Chrome音轨列表重连后仍Failed to fetch/0轨；两问题未关闭，不将正常恢复外推为显示通过或整体POS-07。双端受控并发事务排列、其他引擎/iOS/最终RC保持未验。
 
@@ -134,8 +134,8 @@ R1 / DEC-05：用户批准 1.0 不支持第三方进度同步，OPDS-04 原互�
 | ART-03 / RG-01 | P1；Android 正式签名、授权测试设备 | C-07；确认正式签名/包版本后，通过现有安装方式安装至专用测试设备，不清除用户数据；冷启动登录和读听，核对 crash/ANR | 正式 Release APK 可独立安装使用；签名/版本/hash/设备可追溯 | E/ART-03/ | NOT_RUN（用户暂缓正式构建）；DEC-01；开发真机结果独立登记 |
 | ART-04 / RG-01 | P1；iOS Team/证书/描述文件、设备 | C-08；Release Archive→正式 export→IPA；记录合法安装方式并按其安装，在真机冷启动、登录、读听 | IPA 签名有效、设备适用且实际运行；无 Simulator/无签名绕过 | E/ART-04/ | NOT_RUN（用户暂缓正式导出）；DEC-01；原生设备另受ENV-02阻塞 |
 | ART-05 / RG-01 | P0/P1；三产物 | 比对根/Web/Python版本与运行版本、Android/iOS版本build、构建commit及hash；复核包中测试注入/凭据；与全部报告关联 | 同一 RC 版本组合，无测试 URL/账号/秘密混入；测试二进制即待交付二进制 | E/ART-05/ | NOT_RUN；ENV-01、ENV-03 |
-| INI-01 / RG-02 | P1/P2；新库；正常 EPUB+MP3 | Web 打开首次设置、创建管理员→登录→新增根目录→继续导入→列表/详情→三端阅读/播放 | 无默认管理员、手改 DB；初始化至可读闭环顺畅 | E/INI-01/ | NOT_RUN（原生子项 BLOCKED）；ENV-02、ENV-03、ENV-06 |
-| INI-02 / RG-02 | P0；无权/不存在路径、重复请求 | 设置重复提交；普通账号访问设置；新增坏路径，修正后重新提交/导入 | 重复初始化和越权正确失败；路径反馈明确，修正可恢复 | artifacts/releases/1.0/fd26b7aa/rg02-fresh-api-boundaries-20260907/ | PARTIAL：真实API无效/重复setup、坏根修正、重复库409（IMPORT-01 CLOSED）、member系统设置403通过；UI对应错误反馈仍待，不外推全平台 |
+| INI-01 / RG-02 | P1/P2；新库；正常 EPUB+MP3 | Web 打开首次设置、创建管理员→登录→新增根目录→继续导入→列表/详情→三端阅读/播放 | 无默认管理员、手改 DB；初始化至可读闭环顺畅 | 3a1e4193/rg02-ui-intake-20260907/run/；见evidence | PARTIAL：Chrome真实新库普通初始化→入库→EPUB正文/MP3播放与保存PASS（development）；原生及最终同RC仍待 |
+| INI-02 / RG-02 | P0；无权/不存在路径、重复请求 | 设置重复提交；普通账号访问设置；新增坏路径，修正后重新提交/导入 | 重复初始化和越权正确失败；路径反馈明确，修正可恢复 | fd26b7aa/rg02-fresh-api-boundaries-20260907/；3a1e4193/rg02-ui-intake-20260907/run/ | PARTIAL：真实API无效/重复setup、member403及重复库409通过；Chrome空表单、坏根修正和重复根可见错误已PASS；无权路径/普通用户UI及最终RC仍待 |
 | INI-03 / RG-02 | P1；INI-01已完成 | 记录账号/书库/任务/已确认位置，受控重启当前版本服务，再登录与重开 | 新数据持久化，无再次初始化或已确认数据丢失 | artifacts/releases/1.0/fd26b7aa/rg02-fresh-api-boundaries-20260907/ | PARTIAL：1e223e5e真实API重启后owner/library身份保持、setup仍关闭；既有M4B进度服务重启见POS-10；任务恢复及最终同RC仍待 |
 | IMP-01 / RG-02 | P2；FLAT、VOLUMES 各独立根 | 按 UI 分别建库、扫描根文件与含子目录书籍；对照预期清单记录目录和独立资源身份 | 两正式模式 Book/Node/Resource/Asset/页轨计数与层级正确 | E/organization-live/imp01-ui-1788695317426/；database-readback-complete.json | 正常两模式UI+同库持久化/拓扑子项PASS；命令超期/HTTPbody未存见证据，不计最终RC |
 | IMP-02 / RG-02 | P2；中英名、空格、特殊字符、多层、图片/音频目录 | 导入后进入每层，切换排序/分页，打开图片目录与多轨音频 | 不乱码、不漏资源、不用资源数决定页面类型；正常播放/阅读 | E/IMP-02/ | NOT_RUN；ENV-06 |
@@ -144,7 +144,7 @@ R1 / DEC-05：用户批准 1.0 不支持第三方进度同步，OPDS-04 原互�
 | IMP-05 / RG-02 | P2；仍有真实待处理任务 | 扫描活跃时受控服务重启→查看队列→继续导入/安全重扫 | 任务可恢复、有进展、不永久卡住；不要求新暂停接口 | e8c4b555/rg02-worker-live-restart-20260907/；详见evidence | PARTIAL：真实RUNNING中断→新Worker标记WORKER_INTERRUPTED→同库安全重扫512资源READY通过；HTTP/UI入口及最终同RC仍待 |
 | IMP-06 / RG-02 | P2；专用可写/只读根，测试文件 | Web 上传→文件详情；使用已有增删改入口；坏文件修正后资源重扫/继续导入；分别观察自动扫描和手动扫描对缺失项处理 | 仅授权显式写操作变动测试源；自动保留缺失、手动成功完成后按既有语义清理拓扑；失败可重试 | artifacts/releases/1.0/e8c4b555/rg02-source-rescan-20260907/；rg02-mixed-import-20260907/cbz-run/ | PARTIAL：真实Worker自动保留、缺失失败不误删、恢复/损坏CBZ修复同身份重扫、手动清理PASS；上传UI/只读权限及同RC仍待 |
 | CON-01 / RG-02 | P1；W/A/I × HTTP/HTTPS/自定义端口 | 逐地址添加服务器/登录，浏览与读听；HTTPS经受信任代理；非信任证书走现有显式流程；公开链接检查 | 合法配置可连接；无默认关闭TLS；冷/热启动均不依赖localhost | E/CON-01/ | NOT_RUN（原生 BLOCKED）；ENV-02、ENV-03 |
-| CON-02 / RG-02 | P1；管理员、普通账号、两个服务器 | 错密码→修正；服务端使会话失效后重登；切账号/服务器再取无权资源 | 错误反馈正确、权限重验，数据与会话不串用 | artifacts/releases/1.0/fd26b7aa/rg02-fresh-api-boundaries-20260907/ | PARTIAL：1e223e5e真实API错密码修正、member权限、注销后401通过；跨服务器/资源与对应原生UI仍待，iOS BLOCKED |
+| CON-02 / RG-02 | P1；管理员、普通账号、两个服务器 | 错密码→修正；服务端使会话失效后重登；切账号/服务器再取无权资源 | 错误反馈正确、权限重验，数据与会话不串用 | fd26b7aa/rg02-fresh-api-boundaries-20260907/；3a1e4193/rg02-ui-intake-20260907/run/ | PARTIAL：真实API权限/注销后401，Chrome普通注销、错密码可见提示→修正后原库恢复PASS；跨服务器/资源及原生UI仍待，iOS BLOCKED |
 | OPDS-01 / RG-02 | P2；客户端名称版本由负责人自测记录 | 原认证及错误凭据场景交由负责人执行 | 认证及访问控制要求保持 | DEC-08；本次用户决定 | PASS（负责人放行，用户自行测试）；无代理双客户端实测证据 |
 | OPDS-02 / RG-02 | P2；两个客户端各支持的合法格式 | 原浏览、分页、搜索、封面、下载及打开场景交由负责人执行 | 原文件可读要求保持 | DEC-08；本次用户决定 | PASS（负责人放行，用户自行测试）；无代理双客户端实测证据 |
 | OPDS-03 / RG-02 | P2；代理HTTP/HTTPS/端口；两账号 | 实际客户端链接、下载与Range场景交由负责人；既有协议/权限/hash自动回归保留 | 原URL、权限、文件一致及Range要求保持 | DEC-08；协议证据单独按实际运行登记 | 客户端部分PASS（负责人放行，用户自行测试）；协议最终RC回归仍必需 |
