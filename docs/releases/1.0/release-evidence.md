@@ -1,3 +1,7 @@
+2026-09-08 READER-20 Android CLOSED：d2f996d5普通开发APK实际原TXT第一章→第二章标题/终点正文→反向第一章标题/0001，目录面板自动收起；原目录失败及必要相邻已通过。已安装APK读回SHA256 `04480ae910a66d1288ca7d4f2dc4fdeeaabdfeebc9c6785070a40ea91bb8b8f5`，API bf3b1a19。证据 `233ca471/txt-font-20260908/green/interim-result.json`、toc-second/first.png/xml及installed.json，停止本目录缺陷扩验。
+
+READER-21仍OPEN：同普通APK从已保存1137/18px恢复，实际外观改19px后到了章首0001（green/open、appearance、font-changed、after-font及完整前后progress），早先仪器绿不能抵销原UI失败。原偏好已恢复18px。为定位这个具体遗漏，将同一现有字号回归的定位准备改为普通position seek（也PASS，font-position-instrument.log），再补原外观面板条件，未另建工具；恢复入口与面板差异仍在验证，不提前认定原因或写闭环。临时API仅本机18084/既有专用库，owners及1800秒自动收尾；正在使用，完成后显式停止。R2未冻结，其余阻塞保持。
+
 2026-09-08 READER-20 最小候选定向真机通过（原普通UI待复验）：原SDK锚点无丢失；先到章尾1199后，同锚点在已加载资源内重放确实到章首，见 `233ca471/txt-font-20260908/toc-observe-instrument.log`。仅改可见性验证、仅等外层ViewPager idle两个中间候选仍失败，原日志保留；最终复用 SDK currentLocator 的目标资源就绪回报后重放原 Locator，再验证实际目标元素与视口相交，原用例通过 `toc-ready-instrument.log`，编译通过 `toc-ready-build.log`。已移除ViewPager监听候选和临时测试重放诊断；不改共享锚点/章节规则、不伪造位置。字号回归及三个原TOC映射相邻通过 `toc-settle-instrument.log` 的独立结果，该次目录失败不能写整轮PASS。
 
 字号独立审阅确认唯一持久化owner、取消/保存错误及真实语义Locator复用。提出的同值重试恢复建议没有对应现有普通UI入口/已承诺重试契约，单次完成判定后的再次漂移没有候选实测反例；保留显式失败与稳定段落实测，不增加待恢复状态机或理论边界工具。下一项同普通TXT原件的目录往返、18→19px及正常重开；READER-20/21仍待原UI关闭，R2未冻结与其余阻塞不变。
