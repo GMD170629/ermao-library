@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-07 COM-DIR自然排序、静态GIF/WebP、嵌套目录归属/页序、坏页→正常页错误隔离子项已实测补齐，证据60b157c2/image-directory-complex-20260907/result.json。当前实际新缺陷READER-18长图失真仍OPEN、候选处理中；不因其他子项通过关闭。原Chrome/iOS/环境和最终RC缺口保持。
+
 2026-09-07 READER-18 OPEN：Android漫画长图原方形标识实际拉宽5.47倍，已在普通IMAGE_DIR路径复现；最小修复聚焦现有适配尺寸/父约束与必要平移，不改引擎或设置语义。原证据60b157c2/image-directory-complex-20260907/long-full.png、measurement及evidence；GIF/WebP和排序通过不能抵销长图失败，其他可执行坏页继续。
 
 2026-09-07 COM-DIR Android正常阅读/确认后冷恢复子项补齐，无新增产品缺陷或测试工具：六张实际PNG/JPEG顺序、末页边界及冷恢复第5页通过，详见evidence及bbb3fd71/android-image-directory-20260907/result.json。复杂/坏页及W/I保持未验，下一项复用既有入口处理这些缺口；不再将整个IMAGE_DIR记为缺正常样本。Chrome五项原UI、iOS风险/ENV-02、容器与工具限制、正式包暂缓和最终同冻结RC仍未完成。

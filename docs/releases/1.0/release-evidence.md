@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 COM-DIR复杂/异常增量（API60b157c2、普通APK937b325b）：DIR-C按page2.png→page10.gif→page11.webp→page20.jpg自然排序，真实绿色GIF 10/紫色WEBP 11可读；静态样本不宣称动画覆盖。独立DIR-N的part 2/page2、part 2/page10、part 10/page1被识别为一个IMAGE_DIR、三个PAGE资产，普通界面三张不同原图逐页与HTTP对应。DIR-X复用原30字节不可解码JPEG：好1→坏2明确报错→好3错误清除→坏2再次报错→好1正常，页数仍3，不删除坏页制造通过。七张C/X和三张嵌套页HTTP原件字节均匹配源文件，原始hash保持。相邻子项通过不抵销READER-18长图失真。
+
+证据集中`60b157c2/image-directory-complex-20260907/result.json`，包含实际manifest、页序/原件读回、c/n-page及x-bad/after-bad/bad-return/first-return截图与XML（已查看）。样本是既有图片/坏JPEG复用及专用标识GIF/WebP/长JPEG；无工具功能扩展。普通入口无新安装/清数据；设备临时文件、reverse和方向设置已收尾，隔离服务通过同一自有wrapper停止。详细范围见result；不外推W/I、动画、全部变体或最终RC。下一项READER-18最小候选编译、长图原场景与必要图像/翻页相邻，不重演本轮已完成全部流程。
+
 2026-09-07 READER-18 OPEN（RG-03 COM-DIR长图）：60b157c2 API / 937b325b普通Android打开400×3200 JPEG，100%缩放下TOP/MID/END被压入全屏、文字横向失真。源顶部400×400红方块在真实1440×3200截图变1439×263（比例5.47），long-full.png与long-red-measurement.json为原失败；普通外观设置见long-appearance-more.xml。定位现有ComicNavigatorFragment的等比目标尺寸被父约束截断后FillBounds拉伸，候选评估中，不能仅改Contain冒充Width或牺牲长图边界可达性。证据`artifacts/releases/1.0/60b157c2/image-directory-complex-20260907/`。同目录本轮page2→page10→page11→page20自然顺序、实际GIF 10/WebP 11显示与HTTP对应已观察；长图仍FAIL，坏页/嵌套待。现有image_directory导入用例FLAT/VOLUMES定向通过，只有既有Starlette依赖弃用warning，无测试/工具改动；样本准备与UI验收分开记录。
 
 2026-09-07 COM-DIR Android正常子项PASS（API bbb3fd71、普通开发APK937b325b；无业务/测试工具修改）：复用已有CBZ六张不同PNG/JPEG作为独立专用IMAGE-DIR输入，附README.md不作漫画页。真实API/Worker创建资源py_a3f06e0…为IMAGE_DIR、六个PAGE资产；普通首页最近入库→详情→开始阅读，顺序1～6实际图像均查看，HTTP页码逐页对应。末页再点下一页仍6/6，上一页到5/6、确认r7后正常关闭并强停；冷首页80%继续恢复第5张实际图像，服务端r8完整position与关闭前相同。六图片HTTP原件逐字节匹配源文件，全套源hash及API hash不变。
