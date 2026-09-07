@@ -26,7 +26,13 @@ def ensure_default_cover(settings: Settings) -> str:
     asset = DEFAULT_COVER_ASSET_PATH.read_bytes()
     if len(asset) != asset_size:
         raise OSError("default cover asset changed while being read")
-    write_atomic_bytes(target, asset)
+    try:
+        write_atomic_bytes(target, asset)
+    except PermissionError:
+        # Concurrent first requests can publish the same bundled cover before
+        # this writer replaces it. Windows may keep that completed file open.
+        if not target.is_file() or target.read_bytes() != asset:
+            raise
     return str(DEFAULT_COVER_RELATIVE_PATH)
 
 

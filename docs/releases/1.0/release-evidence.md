@@ -1,5 +1,7 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 MEDIA-02最小候选：默认封面仍由唯一write_atomic_bytes发布，不再增加重试；当替换被拒绝时，仅已存在且逐字节等于捆绑封面的结果可视为另一请求已完成发布，缺失/同尺寸异内容继续抛原PermissionError。既有默认封面测试内新增这个明确反例，旧码1 FAIL/4 PASS，新码及共享缓存相邻10 PASS，两个文件ruff format/check通过；无通用工具/锁/配置/重构。证据323be66b/media02-default-cover-20260907，原真实500保留，原HTTP并发冷封面复验尚待，暂不关单。
+
 2026-09-07 IMP-02/04实测增量（66446a45）：Chrome development普通创建含中文/空格/&[]#%的VOLUMES库，24本/管理20+4分页及标题排序重置页码、双页无漏重、多层目录和特殊TXT正文通过；IMAGE_DIR两页解码及第二轨MP3实际资产播放8.268→18.569s、暂停21.133s/服务端r7通过。图片为既有1x1 PNG，仅证实路径/页交付，不是复杂漫画视觉验收。随后用既有POST /api/libraries/{id}/scan显式手动重扫，真实Worker任务SUCCEEDED、普通导入记录完成；24本及其资源/资产、33节点层级、27原件hash和完整TXT r1/MP3 r7进度逐项保持；图片未确认位置null也原样保持，不制造哨兵。文件管理页没有扫描执行按钮，不能称UI发起扫描。证据 `artifacts/releases/1.0/66446a45/imp02-special-paths-20260907/` 的special-samples、ui-observation-transcription（实际CUA转录，非HAR/截图）、before/after-rescan、nodes-*、rescan-task/integrity及run原日志。914应用源码不变、浏览器正常注销关闭、fixture退出0/stopped及端口释放；没有工具扩展。
 
 本轮两个真实问题保留：IMPORT-02图片目录Book/Resource标题被末页stem覆盖，原API/普通UI一致；共享metadata仅识别音频目录，图片页的PATH候选流入资源/Book，PAGE自身名称正确。修复将复用原metadata目录与旁车优先级，分开资源/资产标题，不改ORM/UI。MEDIA-02重新打开：Book20默认封面一次500，WinError5位于ensure_default_cover→write_atomic_bytes→os.replace，旧有限重试未消除本次失败，之后200不能关单；cover-500-original.log与api.log保留，适用范围和必要修复继续。首次完整性命令因发现该5xx正确中止，当前记录保留FAIL，不标全链PASS；首次进度观察误把“打开第一页”当已有图片确认，改为按实际完整GET对账TXT/MP3及null，不宣称图片持久化通过。
