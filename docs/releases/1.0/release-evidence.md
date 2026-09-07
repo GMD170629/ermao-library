@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 POS-03/04 Android EPUB待提交位置强停/离线冷恢复/回前台确认子项PASS（c78a192d，Android实现及普通开发APK ebb4e3ea）：证据`artifacts/releases/1.0/c78a192d/epub-pending-cold-20260907/`。先在线确认第一章r17、设备pending=null，再受控停API并核实进程退出；普通阅读到第二章后复制稳定设备库，确认第二章完整pending、服务器仍第一章r17。强停前后完整local+sync逐字段一致（pending-before/after-kill）。断服务冷启首页显示重试，普通“我的→下载中心→已下载资源”可打开第二章50%（cold-open.xml/png，已查看），无需扩展离线登录。
+
+重开产生同位置新capture，原pending cdede8bc…由64da67db…替代；联网前后证据分别记录，不宣称旧body原样重放。恢复API后12秒观察未见自动提交；使用系统最近任务再返回触发既有onResume重试，真实PUT200，独立GET r18完整位置/client/capturedAt与最新pending一致，本地confirmed18/pending=null，最新mutation唯一receipt且旧mutation无receipt。只覆盖该主动回前台恢复路径，不据此证明服务恢复自动重试时限或另一客户端UI。原件2497B逐字节对照既有fixture、API源码hash不变；只清23个专用设备文件/reverse、仅releasecheck强停；两个API运行会话48433/46001均终止exit0，shutdown已核实。初次诊断导入顺序错误、非导出Activity直接启动被系统拒绝及调整判别前置均见setup-observations/initial-observation-error，未改业务或测试工具。达到该子项停止条件，不重跑已完成音频pending。下一项复用现有入口补EPUB不足5秒退出保存/确认的可执行子项。
+
 2026-09-07 POS-09 Android EPUB目录目标后旋转/冷重开增量PASS（API源码ed009144、普通开发APK ebb4e3ea，未改Android代码）：现有阅读器目录选择第一章A→下一章读到第二章B，独立HTTP确认r12完整位置；实际横屏3200×1440、恢复竖屏和强停后首页继续均显示第二章50%，最终HTTP r15完整Locator与r12相等。证据`artifacts/releases/1.0/ed009144/pos09-epub-external-20260907/`：target-a、read-b、before-rotate、landscape/portrait/reopened及after-reopen/result；两张横屏/重开图已查看。原详情页章节预览由现有RESOURCE_PREVIEW_IS_VISIBLE=false隐藏，原计划外部启动目标未执行，未恢复隐藏功能；目录名称沿用最初计划，不据名称计外部入口PASS。无新增产品缺陷或辅助代码。API源码hash保持，方向设置恢复原值accelerometer_rotation=1/user_rotation=0，15个专用设备文件和reverse清理，仅releasecheck强停；API受控终止且会话19550返回exit0，shutdown.json已核实。
 
 ENV-11原授权命令复核：旧/新各281构建runtime文件及原测试hash匹配后，在本轮完全访问环境执行原3107 next start命令仍于进程创建前被工具拒绝，仅blocked by policy；未尝试3108或其他启动入口。官方codex execpolicy check针对本机default.rules及相同PowerShell命令返回matchedRules=[]，只证明该文件无匹配，不能推定所有策略或拒绝根因。用户授权充足，无需重复确认；记录ed009144/sync02-original-command-20260907/rejection.json/local-rule-check.json。Chrome五项原UI仍待，其他可执行工作继续。下一项剩余Android进度捕获/未确认恢复或格式异常的既有入口；不重复本轮已完成旋转场景。

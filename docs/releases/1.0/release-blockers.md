@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-07 Android EPUB的POS-03/04子项已补：离线第二章pending完整跨强停保留；已下载入口离线冷开实际第二章；恢复服务并回前台后最新capture确认r18、完整位置一致且pending清空。无新增产品缺陷/工具。服务恢复后仅静候12秒未提交，实际PASS路径明确含回前台触发；旧pending被新capture替代，不计旧body原样重放。详见evidence首节及c78a192d/epub-pending-cold-20260907。iOS/Chrome五项/容器及最终RC保持，下一项EPUB不足5秒退出保存/确认，避免重复音频已有pending证据。
+
 2026-09-07 POS-09 Android EPUB内部目录目标后旋转/冷重开子项已补齐，无新增产品缺陷或工具代码；详情章节预览现有隐藏，外部参数启动不计PASS。ENV-11本轮相同原授权3107命令仍被工具blocked by policy；本机default.rules只读规则检查无匹配，具体拒绝来源未知，不能归因用户未授权。证据及清理详见evidence首节。iOS候选ed009144已提交推送但ENV-02未编译/未实测。RC仍未冻结，下一项剩余Android进度捕获/未确认恢复或格式异常既有入口。
 
 2026-09-07 SYNC-06 iOS静态同类风险最小候选已准备：typed recoverable bootstrap失败允许既有三引擎confirmed-local恢复，成功空/不可恢复与既有优先级保持。现有物理EPUB用例补三种bootstrap状态，不新增工具；版本检查PASS。无Xcode/真机，编译和原场景仍ENV-02 BLOCKED，不能标iOS CLOSED。详细证据5755e740/ios-offline-restore-20260907，下一项现环境Chrome既有授权原命令可行性核验。

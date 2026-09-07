@@ -1,5 +1,7 @@
 # 1.0 发布验收矩阵
 
+2026-09-07 POS-03/04 Android EPUB增量PASS：服务器第一章r17、设备离线第二章pending，完整local+sync跨强停一致；断服务冷启经已下载入口实际第二章。恢复服务并回前台重试后r18最新capture的完整位置与本地一致、pending为空、唯一receipt；旧pending在重开被新capture替代，原body重放不作PASS。详见c78a192d/epub-pending-cold-20260907及evidence；不覆盖纯服务恢复自动重试期限、另一端UI/iOS/最终RC。
+
 2026-09-07 POS-09 Android EPUB内部目录后旋转/冷重开子项PASS：目录A第一章→B第二章确认r12→横屏/竖屏→强停冷首页继续仍B，独立HTTP r15完整Locator与r12相等。证据ed009144/pos09-epub-external-20260907/result.json，详见evidence。详情章节预览现有隐藏、外部启动参数路径NOT_RUN，不以此扩功能；iOS/其他引擎/最终RC仍待。
 
 2026-09-07 RG-04/POS-04 Android EPUB可恢复查询失败重开子项PASS，SYNC-06 Android CLOSED：ebb4e3ea普通开发包，服务端r9第二章与设备confirmed9/pending=null前置核实后停API；普通继续仍第二章50%，关闭后本地Locator保持。证据ebb4e3ea/epub-offline-fix-20260907/result.json；首次可读观察10.657s（含网络失败等待），不外推其他格式UI、iOS或最终RC。iOS同类静态风险单列待处理。
