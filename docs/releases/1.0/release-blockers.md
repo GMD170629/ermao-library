@@ -1,3 +1,5 @@
+2026-09-08 RG-03 Android MP3真实连续30分钟、暂停确认及同进程runtime重开子项PASS（5388c1fd/a1040b09），完整时钟/位置/hash及清理证据43f75b02/android-audio-soak-20260908/result.json，详见evidence。不外推普通UI长时、其他格式/多轨或最终RC。下一项POS-01 TXT改字号后的章内语义位置及正常重开；R2未冻结与其余阻塞保持。
+
 2026-09-08 IMPORT-07 CLOSED：d4b027d9真实NTFS拒读的HTTP摘要已脱敏，正常同级/恢复ACL后同身份重扫及原件一致通过，临时服务收尾完成。证据43f75b02/file-permission-20260908/green/result.json；详见evidence。Android长时仍执行，R2未冻结及其余阻塞保持。
 
 2026-09-08 IMPORT-07 OPEN：真实单文件拒读已验证隔离/恢复，但错误摘要带出绝对源路径；最小现有脱敏调用候选定向通过，原API场景待重启复验。Android 30分钟仍执行中，详见evidence。R2/其余阻塞保持。

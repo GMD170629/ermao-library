@@ -1,3 +1,5 @@
+2026-09-08 RG-03 Android MP3真实连续30分钟、暂停确认及同进程runtime重开子项PASS（5388c1fd/a1040b09），完整时钟/位置/hash及清理证据43f75b02/android-audio-soak-20260908/result.json，详见evidence。不外推普通UI长时、其他格式/多轨或最终RC。下一项POS-01 TXT改字号后的章内语义位置及正常重开；R2未冻结与其余阻塞保持。
+
 # 1.0 发布验收矩阵
 
 2026-09-08 AUD-02 Android普通MP3 1.5×及恢复1×子项PASS；AUD-X实际MP3 ID3章节35s越过约30s音轨的解析拒绝/真实导入隔离/普通失败详情子项PASS，原件不变。证据0a8e7da3/android-audio-rate-20260908及audio-chapter-bounds-20260908/result.json，详见evidence；不外推全部倍速/容器异常或最终RC。
