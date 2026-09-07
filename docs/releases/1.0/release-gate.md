@@ -1,3 +1,5 @@
+2026-09-08 RG-03 Android EPUB本地原文件缺失后普通重建子项PASS，无新缺陷/工具；证据74e99bfa/epub-missing-original-20260908/result.json与evidence首条。READER-22已关闭，当前下一项核对原文件下载取消/重试的既有证据与剩余入口；R2未冻结及外部阻塞保持。
+
 2026-09-08 READER-22 CLOSED：2127a96a原普通漫画第4图切连续保持，滑到5/恢复分页LTR/正常关闭及完整持久位置通过；证据7f2f22d7/comic-direction-20260908/green/result.json与evidence首条。原偏好、原件与隔离环境已收尾；R2未冻结，其余阻塞保持。
 
 2026-09-08 READER-22 OPEN：Android漫画第4图切竖向连续实际回首页并保存，证据及最小定位见evidence首条。RTL方向/翻页子项已PASS；原偏好与隔离环境已收尾，正在定向修复，不重复已关闭方向测试。R2未冻结。

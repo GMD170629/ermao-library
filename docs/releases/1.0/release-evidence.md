@@ -1,3 +1,7 @@
+2026-09-08 RG-03 REF-EPUB普通缺文件重建子项PASS，无业务或测试工具代码改动。复用两章2497B测试EPUB，在原正常第二章/r17后停独立App，按当前namespace/catalog的精确resource+asset解析唯一managed原件，确认root内普通文件再移至专用备份；catalog与位置DB完整字节保持、原路径不存在。冷启普通详情继续阅读触发一次真实资产GET200，新taskId且Completed/verified/2497B；新文件与原件/HTTP SHA256 a643ee39426f926dbd7ca62ffcd2ec008d276cd1ac09d6af45f33548bbaa2531相同。实际第二章标题/正文与原锚点一致，正常关闭后完整local=server=原position、confirmed18/pending空。
+
+证据`74e99bfa/epub-missing-original-20260908/result.json`、missing-precondition、初始/新记录、rebuild-http.log及before-open/reopened原图和DB。首次手抄预期hash错误导致准备断言拒绝，未执行移动；后续以原始HTTP字节和完整历史hash核验，不改变验收阈值。APK仍2127a96a/hash c09df54d…，API74e99bfa。已核对备份hash后仅删除该临时备份，保留重建有效原件；自有App/XML/reverse/API均清理，宿主29382终态0，shutdown.json记录子退出3。小文件不声称进度动画/时限、下载取消、损坏或其他平台已验。下一项核对RG-03下载取消/重试现有证据，仅补真实缺口。R2未冻结、正式包暂缓与其他外部条件保持。
+
 2026-09-08 READER-22 CLOSED：2127a96a在原普通Android设置复验，第4图分页→RTL→仅flow改竖向连续后实际仍第4图，完整HTTP位置与修改前相同（pages/3/r88）。正常上滑至第5图/r89，恢复分页/LTR后同第5图，正常关闭后设备完整position=服务端、confirmed89/pending空。原完整偏好与CBZ源/HTTP SHA256 e6723b21…保持；实际看图与所有原始快照见`7f2f22d7/comic-direction-20260908/green/result.json`及引用。定向RED/GREEN与长图相邻/编译见下条，达到停止条件，不扩该缺陷工具。
 
 普通开发APK源码2127a96a（构建时145496de+保存diff），安装回读SHA256 c09df54d586899a3fb5d9fa1c986e9fc4d9531773432e995c126d4558dabfdac；API源码145496de且后端与2127a96a相同。一次临时HTTP采集因重复进入已打开client失败，修正采集用法后取完整数据，无产品影响；失败未计通过。已停止自有App，移除临时XML/reverse，API宿主16839终态0、子进程退出3见shutdown.json。仅R2开发证据，正式包仍暂缓、未冻结RC，不覆盖其他平台。
