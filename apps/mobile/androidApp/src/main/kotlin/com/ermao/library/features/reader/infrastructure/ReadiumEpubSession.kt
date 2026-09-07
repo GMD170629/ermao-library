@@ -27,6 +27,9 @@ import com.ermao.library.shared.modules.reader.ReaderNavigationCompleted
 import com.ermao.library.shared.modules.reader.ReaderNavigationRejected
 import com.ermao.library.shared.modules.reader.ReaderNavigationResult
 import com.ermao.library.shared.modules.reader.ReaderPreferences
+import com.ermao.library.shared.modules.reader.ReaderCommandCompleted
+import com.ermao.library.shared.modules.reader.ReaderCommandRejected
+import com.ermao.library.shared.modules.reader.ReaderCommandResult
 import com.ermao.library.shared.modules.reader.ReaderReadingMode
 import com.ermao.library.shared.modules.reader.ReaderWritingMode
 import com.ermao.library.shared.modules.reader.ReaderReadingProgression
@@ -735,12 +738,58 @@ internal class ReadiumEpubSession(
         return true
     }
 
+    override suspend fun applyPreferences(updated: ReaderPreferences): ReaderCommandResult =
+        viewportNavigationMutex.withLock {
+            if (_preferences.value.epub.fontSize == updated.epub.fontSize) {
+                return@withLock super.applyPreferences(updated)
+            }
+            if (!canApplyPreferences(updated)) {
+                return@withLock ReaderCommandRejected("READER_CONTROL_UNAVAILABLE")
+            }
+            val active = navigator
+                ?: return@withLock ReaderCommandRejected("READER_PREFERENCES_ENGINE_FAILED")
+            try {
+                // Readium 3.3 changes font CSS without retaining the visible block. Capture
+                // its semantic locator before reflow; percentage is not a restore target.
+                val visible = active.firstVisibleElementLocator()
+                    ?: return@withLock ReaderCommandRejected("READER_PREFERENCES_ENGINE_FAILED")
+                val selector = visible.locations["cssSelector"] as? String
+                    ?: return@withLock ReaderCommandRejected("READER_PREFERENCES_ENGINE_FAILED")
+                val result = super.applyPreferences(updated)
+                if (result != ReaderCommandCompleted) return@withLock result
+                val fontScale = preferencesMapper.toReadium(updated, capabilities.supportsWritingMode).fontSize
+                    ?: return@withLock ReaderCommandRejected("READER_PREFERENCES_ENGINE_FAILED")
+                val restored = withTimeoutOrNull(com.ermao.library.features.reader.application.NAVIGATION_VERIFICATION_TIMEOUT_MILLIS) {
+                    while (active.evaluateJavascript("""
+                        Math.abs(parseFloat(getComputedStyle(document.documentElement)
+                          .getPropertyValue('--USER__fontSize')) - ${fontScale * 100.0}) < 0.01
+                    """.trimIndent()) != "true") delay(50)
+                    if (!active.go(visible, animated = false)) return@withTimeoutOrNull false
+                    while (active.evaluateJavascript("""
+                        (() => {
+                          const element = document.querySelector(${org.json.JSONObject.quote(selector)});
+                          return element && [...element.getClientRects()].some(rect =>
+                            rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.bottom > 0 &&
+                            rect.left < window.innerWidth && rect.top < window.innerHeight);
+                        })()
+                    """.trimIndent()) != "true") delay(50)
+                    true
+                } == true
+                if (restored) ReaderCommandCompleted
+                else ReaderCommandRejected("READER_PREFERENCES_ENGINE_FAILED")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: RuntimeException) {
+                ReaderCommandRejected("READER_PREFERENCES_ENGINE_FAILED", error)
+            }
+        }
+
     override fun updatePreferences(updated: ReaderPreferences) {
         val active = checkNotNull(navigator) { "READER_NOT_READY" }
         val previous = _preferences.value
         val supported = updated
         if (previous == supported) return
-        // Persistence precedes SDK submission. Reflow is owned by Readium.
+        // Persistence precedes the single SDK submission; applyPreferences retains its anchor.
         persistPreferences(supported)
         _preferences.value = supported
         val target = preferencesMapper.toReadium(supported, capabilities.supportsWritingMode)

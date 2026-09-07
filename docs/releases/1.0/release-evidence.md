@@ -1,3 +1,7 @@
+2026-09-08 READER-21 最小候选：现有 ReadiumEpubSession 的 suspend applyPreferences 在字号改变前取得 SDK 首可见语义 Locator，复用原偏好校验/持久化/单次 submitPreferences；实际 CSS 应用后用同一 SDK Locator 恢复并检查段落与视口相交。Readium 3.3.0 的字号 CSS 更新本身不保留可见段落，不改变进度协议或构造百分比位置。原普通界面仍待新包复验，不能提前 CLOSED。
+
+针对 READER-20/21（POS-09/01）仅补现有 ReaderTxtInstrumentedTest 两个定向回归：原短章/全文 textContent 断言不能判定章内实际位置；用 UUID 专属 UTF16BE 长章、普通 navigateTo/applyPreferences 和 SDK 可见段落/视口断言。原实现真机红测两失败（目录验证拒绝；字号后1132→1057），字号候选及原 TXT 导航/偏好相邻真机通过，ReaderPreferenceSubmissionTest 与 Android 编译通过。证据 `233ca471/txt-font-20260908/{red-build,red-instrument,font-build,font-instrument}.log`。不扩工具；停止条件为两个原普通 UI 场景及实际受影响相邻通过。目录生产实现仍未改、READER-20 OPEN。R2未冻结及其余阻塞不变。
+
 2026-09-08 READER-20 / READER-21 OPEN（API233ca471、普通开发APK82699429，RG-03 REF-TXT / RG-04 POS-09/01）：现有116122B UTF16BE编号长章经普通目录/外观入口复现两个问题。READER-20：第二章首→目录第一章实际落第一章末尾1195–1200、96.5%，不是章首；TOC fragment仍存在，具体原生定位次序待证。READER-21：章内首可见1137、完整确认r8→字号18px改19px后正文稳定为0726，服务端完整r8未变；普通TXT详情重开在19px恢复1137/r10，因此当前证据限定为原地重排错位，不称持久位置丢失。证据`233ca471/txt-font-20260908/red-result.json`及其中精确截图/完整progress引用。
 
 无业务修改/新工具。第一次首页继续未核对标题而打开旧MP3属于操作偏差，已暂停并排除；随后经已核对的TXT详情完成实际重开，原Home/误开截图及note保留，不推定首页门禁失败或通过。初始异步dump无XML及翻页中截图分别保留，以settled原图为准。原字体已通过普通界面恢复18px，原件与HTTP哈希一致；App/专用XML/reverse/API已清理，session1987终态0。下一步在现有ReadiumEpubSession和SDK定位/偏好提交入口做最小修复，定向原场景及必要相邻回归；不要改共享href语义、伪造progression或增加通用定位框架。其他阻塞与R2未冻结保持。
