@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-08 READER-19 OPEN（RG-03 REF-TXT，文案）：真实本地损坏TXT错误误称在线解析器，最小中英文文案候选已编译，原UI待新包验证。TXT预算拒绝/无下载、编码拒绝/无进度及正常同级隔离实际已通过，详见evidence与c53550ca/txt-errors-20260908；不因文案候选重跑其他格式。R2/外部条件和最终RC保持。
+
 2026-09-08 CON-02 Android旧会话失效→私有界面锁定→错误密码拒绝→正确重登及冷启动子项PASS，无新缺陷或工具。成员原权限/完整进度保持，authz6→8，账号恢复active且管理员会话已恢复，服务及设备清理完成。证据362133f6/android-session-revocation-20260908/result.json，详见evidence。下一项REF-TXT异常/既有内存预算验证；受信任HTTPS、睡眠范围/Chrome五候选/iOS/容器/工具、正式包暂缓与最终RC保持，R2未冻结。
 
 2026-09-08 CON-01 Android真实局域网直连/冷启动/书库及MP3+EPUB读听子项PASS，无ADB reverse，无新增产品缺陷或工具。证据873c2a50/android-lan-20260908/result.json，详见evidence；服务及设备清理完成。受信任HTTPS代理缺已授权/客户端信任的外部测试入口，已集中询问，单项BLOCKED。下一项CON-02原生会话失效后重登；睡眠范围、Chrome五候选/iOS/容器/工具、正式包暂缓及最终RC保持。

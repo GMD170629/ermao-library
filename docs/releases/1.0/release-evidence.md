@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-08 REF-TXT异常/预算实测：c53550ca真实导入67,108,865B TXT（TXT.MEMORY_BUDGET现值+1）、共享txt-decoding-v1中utf16le_bom_truncated_character的5B原输入及93B正常对照，全部READY。b32aac21普通Android超限打开/重新获取均明确过大，实际asset下载请求0；编码损坏打开/重试均拒绝，正常同级TXT正文随后可读、同App PID。后端reading-units分别422/PUBLICATION_PARSER_LIMIT+TXT.MEMORY_BUDGET及422/PUBLICATION_TXT_ENCODING_UNSUPPORTED；两失败resource progressSnapshot为null。三实际HTTP原件均与源hash相同。证据c53550ca/txt-errors-20260908/samples、budget-open/retry、budget-no-download、bad-open/retry、good-open、各units/progress及original-verification。该普通超限入口在下载前拒绝，不能冒称已执行下载后factory保护；不扩64MiB压力或额外编码组合。
+
+READER-19文案候选：实际本地TXT解码失败仍显示“在线解析器”，两条Android中英文资源改为文本编码无效/不支持；不改解码、错误码、重试、阈值或其他平台。Android资源编译/assembleDebug通过copy-build.log；原错误UI待新包复验。无新增工具/测试框架。首次Worker命令误用app.worker包而退出，确认双进程终止后改用仓库现有app.worker.main；initial日志/shutdown保留，无业务测试跳过。
+
 2026-09-08 CON-02 Android服务端会话失效/错密码/重登子项PASS（API362133f6、开发APK b32aac21）：普通登录专用Scope member（py_ff875f955de94dd59abf30e1e749ab51）并退后台；真实管理员API短暂disabled后finally立即active，身份/角色/库范围/管理权限恢复，authz6→8按正常语义保留，不回退版本。独立旧HTTP会话在恢复active后仍401；Android回前台真实显示“私有书库已锁定/会话已过期”和原成员身份，无私有导航。故意错误密码仍拒绝且保留重登页，正确密码后恢复同成员、57%首页及无管理入口，强停冷启动仍成功。独立新/me authz8、完整进度响应与失效前逐字段相同。证据`362133f6/android-session-revocation-20260908/result.json`、member-before/restored、old-session-rejected、expired.png/xml、wrong-enter、correct-enter、reauth-settings/cold、fresh-member、member-progress-before/after；截图已核验。
 
 无业务/测试辅助改动；此测试401 SessionExpired，不冒称ACCOUNT_DISABLED403界面或全部在途请求。另一次正确密码复填因光标/尾部残留25字符仍401保留，后在字段末尾逐次退格、验证空框再填22字符通过；没有反复运行产品流程取成功或修改断言。最终普通退出成员并恢复管理员；专用XML/reverse清理、App/API停止，wrapper终态0。正常退出仅清理测试账号私有缓存，原密码未改，成员仍active；原开发APK与最终冻结RC分别记账。下一项REF-TXT异常/现有TXT.MEMORY_BUDGET样本可行性，复用现有导入和读书入口；已闭环事项停止扩验。受信任HTTPS、睡眠范围及既有Chrome/iOS/容器/正式包/最终RC缺口保持。

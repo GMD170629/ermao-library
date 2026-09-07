@@ -456,7 +456,7 @@
     <string name="reader_error_tls">A secure connection to the server could not be established. Check its certificate and connection settings.</string>
     <string name="reader_error_rate_limited">Too many reading requests. Wait a moment and try again.</string>
     <string name="reader_error_txt_nul">The server\'s TXT parser rejected embedded NUL characters in the text.</string>
-    <string name="reader_error_txt_encoding">The TXT file uses an encoding the online parser does not support.</string>
+    <string name="reader_error_txt_encoding">The TXT file’s text encoding is invalid or unsupported.</string>
     <string name="reader_error_txt_empty">The TXT file has no readable text.</string>
     <string name="reader_error_stage">Failed step: %1$s</string>
     <string name="reader_error_stage_manifest">Reading information</string>
