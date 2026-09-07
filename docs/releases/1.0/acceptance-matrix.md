@@ -1,5 +1,7 @@
 # 1.0 发布验收矩阵
 
+2026-09-07 READER-16 Android原失败CLOSED：9267a034普通开发APK实际打开安全DOCTYPE、可隔离external entity均保留正文，后者显示字面量&canary;；正常FB2相邻可读。测试canary未出现在正文，三个服务端原件及样本hash不变，同PID25985无所捕获崩溃。停止本缺陷Android扩验；iOS候选仍ENV-02待编译/真机，未声明整体原生放行。下一项EPUB损坏/active内容既有入口；原五项Chrome候选保持，未冻结RC。
+
 2026-09-07 READER-16候选定向回归通过，原界面仍待：复用ReaderSafetyFacade XML准备及平台已有解码器，清理声明后交给原解析器；保持原件、预算和外部解析禁用。Android FB2 factory 11/11、shared 9/9、EPUB安全相邻10/10通过；iOS适配与针对性测试已修改，ENV-02下未编译/未执行。未改契约或通用测试工具。新普通APK及DOCTYPE/entity原失败复测为下一项，READER-16保持OPEN，未冻结RC。
 
 2026-09-07 REF-FB2增量PASS：普通Android合成可辨识PNG、表格/诗行/嵌套正文、脚注往返与截断打开/重试拒绝、同库正常恢复已实际验收，失败资源无进度。证据ee5f3b15/fb2-complex-20260907，详见evidence首节；不外推实体/active内容安全、W/I或最终同RC。

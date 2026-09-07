@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 READER-16 Android原失败CLOSED：9267a034普通开发APK实际打开安全DOCTYPE、可隔离external entity均保留正文，后者显示字面量&canary;；正常FB2相邻可读。测试canary未出现在正文，三个服务端原件及样本hash不变，同PID25985无所捕获崩溃。停止本缺陷Android扩验；iOS候选仍ENV-02待编译/真机，未声明整体原生放行。下一项EPUB损坏/active内容既有入口；原五项Chrome候选保持，未冻结RC。
+
+证据：`artifacts/releases/1.0/9267a034/fb2-xml-ui-20260907/` 的 doctype-open、entity-open、control-open XML/PNG已逐张核对，after-http.json保留完整进度及原件摘要，result.json/source.json记录源码与安装身份。APK SHA-256 `0d47ae8b4df8e4a03679c3153f7bdf10442d1993338eb4effa07600ebe47e460`，包com.ermao.library.releasecheck，version1.0.0/code1，adb install -r成功保留数据；它是开发包，正式产物仍暂缓。既有定向factory/shared/EPUB相邻证据见上一节，无新增代码/工具。全部本轮/原轮自有ermao-fb2s文件含canary已按exact名称删除，device-file-cleanup.json留证；偏好未变。隔离API/Worker仍供下一项运行，最终收尾待shutdown.json。
+
 2026-09-07 READER-16候选定向回归通过，原界面仍待：复用ReaderSafetyFacade XML准备及平台已有解码器，清理声明后交给原解析器；保持原件、预算和外部解析禁用。Android FB2 factory 11/11、shared 9/9、EPUB安全相邻10/10通过；iOS适配与针对性测试已修改，ENV-02下未编译/未执行。未改契约或通用测试工具。新普通APK及DOCTYPE/entity原失败复测为下一项，READER-16保持OPEN，未冻结RC。
 
 证据：`artifacts/releases/1.0/43b5ab8d/fb2-xml-policy-20260907/` 的 android-factory.xml、shared-final.xml、epub-adjacent.xml、shared-epub-adjacent-final.log；generator --check及停写后的boundary-final.log退出0。shared初次断言误将parserMarkup数字引用期待为XHTML命名引用，按现有Facade真实输出修正，最终正文/无外部内容保护仍在平台测试覆盖；shared-initial.xml保留。两次Gradle前置失败分别为python入口缺失、未配置已有ERMAO_ZIG，日志保留，配置现有Python/Zig/CMake后成功，无安装/跳过任务。JNI为既有产物增量验证，不声称从零构建。boundary初次报告未改动ReadiumEpubSession:87，原输出见boundary-initial.txt，原因未确证；停止写入后当前检查通过，不据重跑宣称修复该历史观察。API/Worker期限到达正常收尾，shutdown.json确认两子进程停止；下次真机验收须重启隔离服务。
