@@ -1,5 +1,7 @@
 # 1.0 发布证据与最终签收
 
+2026-09-08 READER-19 CLOSED：82699429普通开发APK保留数据安装，原5B截断UTF16LE实际错误页显示“TXT 文件的文本编码无效或不受支持。”，不再误称在线解析器；英中文案资源值核对与Android资源编译通过。实际设备APK读回SHA256 `d8f0c95ae5478f2ed6b5be10990b5cfce16a8a504f1d566a757860b5aa687f13`。功能层超限拒绝/重试无下载、编码拒绝及正常同目录正文、两失败资源无进度与原件一致证据沿用本轮未变处理代码，见下条；不因两条文案重跑全部格式。证据`c53550ca/txt-errors-20260908/result.json`、candidate-bad-open.png/xml、candidate-installed、copy-locale-check/build及cleanup/shutdown。首个冷启动UI dump未产文件，保持进程等待后fresh capture成功，未重复启动取成功；原观察失败保留。双API/Worker自有进程均终止、wrapper终态0，App及reverse/专用XML清理；三测试源和库保留供追溯。停止本缺陷扩验。下一项既有音频长时要求与样本/执行入口核对；受信任HTTPS、睡眠范围、Chrome五候选/iOS/容器/工具限制、正式包暂缓及最终同冻结RC仍待，R2保持。
+
 2026-09-08 REF-TXT异常/预算实测：c53550ca真实导入67,108,865B TXT（TXT.MEMORY_BUDGET现值+1）、共享txt-decoding-v1中utf16le_bom_truncated_character的5B原输入及93B正常对照，全部READY。b32aac21普通Android超限打开/重新获取均明确过大，实际asset下载请求0；编码损坏打开/重试均拒绝，正常同级TXT正文随后可读、同App PID。后端reading-units分别422/PUBLICATION_PARSER_LIMIT+TXT.MEMORY_BUDGET及422/PUBLICATION_TXT_ENCODING_UNSUPPORTED；两失败resource progressSnapshot为null。三实际HTTP原件均与源hash相同。证据c53550ca/txt-errors-20260908/samples、budget-open/retry、budget-no-download、bad-open/retry、good-open、各units/progress及original-verification。该普通超限入口在下载前拒绝，不能冒称已执行下载后factory保护；不扩64MiB压力或额外编码组合。
 
 READER-19文案候选：实际本地TXT解码失败仍显示“在线解析器”，两条Android中英文资源改为文本编码无效/不支持；不改解码、错误码、重试、阈值或其他平台。Android资源编译/assembleDebug通过copy-build.log；原错误UI待新包复验。无新增工具/测试框架。首次Worker命令误用app.worker包而退出，确认双进程终止后改用仓库现有app.worker.main；initial日志/shutdown保留，无业务测试跳过。
