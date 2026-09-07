@@ -1,5 +1,7 @@
 # 1.0 发布证据与最终签收
 
+2026-09-08 IMPORT-05 CLOSED（RG-02 INI-02无权路径）：644b3fef在全新专用NTFS根实际拒读时，列举/文件读取均PermissionError，创建API返回400/INVALID_LIBRARY_PATH且书库列表不变；finally恢复原owner/group/全部ACE后，同一路径201，Worker完成导入、TXT READY且publication与1820B原件逐字节相等。SHA256 c8833d37a03d32d8d0ca22ca1c3174efd0ed018dfe75e7a90018f65c36a384da。证据`20e7246c/unreadable-root-20260908/green/result.json`及denied-probe/http、acl-restored、restored-create/tasks/books、shutdown；目录按初始失败基线命名，受测源码明确为644b3fef。原失败及定向/相邻回归证据保留，未新增工具或扩大测试。仅验证建库准入及权限修正恢复，不外推运行中权限变化或最终RC。API/Worker已停、wrapper终态0，原件/权限保持，停止本缺陷扩验。负责人已确认Android正常解锁，设备UI不再因此阻塞；下一项剩余Android必测场景，Chrome/iOS/容器和最终同RC缺口保持。
+
 2026-09-08 IMPORT-05 OPEN（RG-02 INI-02真实无权路径）：20e7246c的专用Windows目录临时NTFS拒读后，Python列举/读文件均PermissionError，POST /api/libraries却201并创建根。权限在finally移除；原owner/group/全部ACE恢复，Windows仅将DACL标记规范为AI，最初“SDDL字符串完全相等”断言因此失败，独立acl-verification已核对实际权限/原件，不留拒读规则。恢复后原任务自然完成、TXT READY；不将恢复后的成功抵销拒读时误接收。证据20e7246c/unreadable-root-20260908/denied-probe、denied-http、acl-verification、restored-tasks/books。
 
 最小候选复用唯一resolve_library_root_path，实际scandir只取一个条目并关闭以验证目录可读，保留INVALID_LIBRARY_PATH/400及既有无效路径契约；此单个文件系统函数移至imports.infrastructure.library_root，创建/修改两个现有入口经public使用同一owner，旧实现删除，未扩展目录树/上传/数据库行为。原逻辑定向拒读先FAIL，候选与空/非空、原错误边界、句柄/有界读取及创建/修改冲突相邻通过，ruff与局部mypy通过；首轮移动漏接私有import的收集失败保留为unit-red.log，实际原失败见unit-red-2。NTFS+真实API候选复验待完成，尚未关闭；无新权限工具/框架，临时ACL只作用专用测试根。

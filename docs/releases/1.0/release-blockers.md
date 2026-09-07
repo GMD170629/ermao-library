@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-08 IMPORT-05 CLOSED：644b3fef真实NTFS拒读→API400且无写入；恢复权限→正常建库/导入READY/原件一致，服务与ACL已收尾。证据20e7246c/unreadable-root-20260908/green/result.json，详见evidence。负责人已正常解锁Android；下一项剩余普通设备必测，不继续扩验本缺陷。Chrome五候选原UI、iOS/容器/工具限制、正式包暂缓和最终冻结RC仍未完成，R2保持。
+
 2026-09-08 IMPORT-05 OPEN：Windows专用根真实NTFS拒读但创建API201，os.access预检查未识别。候选在现有根校验增加有界实际读取，定向及必要相邻通过，原NTFS/API复验待；详见evidence首条。测试权限已恢复，原件不变。手机正常解锁仍待，其他既有阻塞/最终RC不变。
 
 2026-09-08 Android MP3真实安全锁屏播放/5与10秒持续确认子项已补齐，唤醒暂停后完整local/server一致、pending空，无新增产品缺陷或工具。证据2734ad51/mp3-lockscreen-20260908/result.json，详见evidence。安全锁屏等待负责人正常解锁后再继续普通设备UI；后端核对继续。Chrome五候选原UI、iOS/容器/工具限制、正式包暂缓和最终同冻结RC仍未完成，R2保持。
