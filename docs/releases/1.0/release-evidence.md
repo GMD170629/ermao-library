@@ -1,3 +1,11 @@
+2026-09-08 RG-04 POS-08普通Android注销后跨服重登取消隔离子项PASS，无业务修复。S1真实音频9.656s/r32响应held、完整设备pending匹配，注销点击后约98.5ms断连；同邮箱登录S2（18085、独立user）后普通首页/书库仍空，“我的”确认当前18085，两位置表为空。S2前后完整books与外来资源404 body均不变；S1完整快照仍held/r32。显式放行sent=false，只记取消隔离；B空库没有pending，不声称同资源双服写入或旧ACK送达后的处理。证据`6af47724/pos08-server-inflight-20260908/result.json`及实际UI/HTTP/DB/时序。
+
+原样复用上轮单次真实响应阻留，仅补既有切服证据缺少的在途前置，不扩工具。普通切服实际经注销→登录入口改地址/选历史服务器→loginToServer；switchServer及旧ServerCenter未接普通导航，不新增保持登录切服功能。原服务器A已恢复，MP3原件/HTTP hash保持；设备专用XML/reverse/App及两个API已收尾，宿主42461终态0。恢复时MIUI未弹可选密码保存提示，原辅助断言停止；当时XML已是成功首页，随后直接验证原服务器/账号，未重试登录取绿。
+
+Android普通账号/服务器取消隔离子项至此关闭：Audio注销writer、EPUB正文关闭writer与跨服新会话均有实证。主/子核对ReaderActivity在线599、已下载917的同一数据库/coordinator/store，在createSession注入EPUB/PDF/Comic；关闭/注销共用同一owner，PDF/Comic仅页捕获/资源释放差异，既有早退落盘证据a5d59625/0de4d4fb/937b325b仍保留。不因格式枚举重复同一身份取消测试；这不外推其他POS场景或各引擎位置捕获通过。
+
+API6af47724、普通开发APK69a5ba15/hash4c4cd6ef…，非冻结RC。下一可执行项核对POS-10 Reader活动正文遇远端更新的原UI路径与现有证据，只补尚缺差异。Chrome/iOS与其他已登记外部条件、正式包暂缓、最终同RC仍保持；RG-01～04 PARTIAL/RG-05按已接受范围PASS。
+
 2026-09-08 RG-04 POS-08普通Android Reader关闭在途保存取消隔离子项PASS，无业务修复。既有两章EPUB真实第一→第二章产生200/r12响应held，普通BACK后约3240ms观察到disconnect，仍正常回详情；随后才注销。该时间包含输入/观测开销，不等同内部2500ms预算。关闭后完整pending匹配held，注销后A两表空；B原快照null，普通详情开始实际第一章，再主动翻第二章得到r3、完整local=server/pending空。A服务端仍完整held/r12，无旧行回写。显式放行时sent=false，只记Reader关闭取消隔离，不冒称旧ACK已送达新会话。
 
 证据`e76fefb8/pos08-reader-close-20260908/result.json`及真实UI/HTTP/DB/时序。复用单次真实响应阻留仅换现有授权EPUB资源，不扩通用工具；必要性是Reader独立flush与有限等待路径，音频不能替代。初始直接关闭未变位置时没有held、arm未消费，属于准备未触发（命令实录、unchanged-close-click/close-state/API log保留）；改为真实翻章后才得到有效在途条件，不跳过有效失败。该子项判定完成即停止。
