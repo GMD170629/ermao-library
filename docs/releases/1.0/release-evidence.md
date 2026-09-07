@@ -1,5 +1,7 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 RG-02新库实际HTTP补口：无效初始化422且仍未初始化、首次owner201、重复初始化409通过；缺失根404后修正路径创建201并在API重启后保持同一libraryId。两个临时验收预期先误写400/200，均按实际既有library_paths.py/create_library返回契约纠正，原请求及纠正依据分别保存，不视为产品缺陷、无生产改动。随后重复同根实际500才是IMPORT-01：api-completion.log含500和typed_route ErrorEnvelope[ImportErrorBody]校验栈。最小schema候选增加rootPath明确类型，与原files形成严格union，不改route/SQL/任务/身份；新API契约测试实际原失败后43项相邻GREEN、ruff两项和mypy495 PASS，实际新HTTP复验尚待。原请求、源码hash、三次有界API停止与测试日志在artifacts/releases/1.0/fd26b7aa/rg02-fresh-api-boundaries-20260907。此为既有INI-02/03、CON-02缺口的直接HTTP操作，复用已有进程宿主，无通用工具扩展；不替代UI、Worker、媒体进度或TLS验收。
+
 2026-09-07 RISK-08最小验证接入（DEC-07）：现有三个host测试仅验证纯投影，现有SQLite仪器测试为顺序查询，均不能调度真实ViewModel在查询挂起期间的刷新/取消；具体查询类不可替换。复用既有Reader查询owner，仅引出同参数应用port供两个已有消费者和受控测试使用，数据库规则/调用默认不变；通过现有独立UID Android仪器入口执行真实ViewModel的旧查询、取消、失败与成功空集合相邻。实际RED/必要修复/GREEN后即停止，不加入新依赖、报告框架或通用调度工具。当前只是待执行接入，不据此关闭RISK-08。
 
 2026-09-07 SYNC-04 / AUDIO-14 CLOSED：b72b3d83生产Web/API/Worker与61498daa普通Android独立开发包完成同一次真实MP3原场景回归；两提交之间只有Web修复/文档，Android源码一致，仍非冻结RC。Chrome普通播放后滑块确认13000ms/r8，真实断网再拖至C=5000ms（d44af0f8-987e-448f-9574-ae1694bc445e，捕获1788739148111），实际发送ERR_INTERNET_DISCONNECTED；详情保持17%/0:05/1条音轨，无Failed to fetch，离线窗口无reading-units重请求。Android普通首页43%继续实际13009ms/1031ms，播放暂停确认N=17011ms/r11后强停。只读SQLAlchemy ORM确认11条receipt且C尚不存在；Chrome重连原body首次提交，实际ACK接受C/r12，独立完整GET一致，旧11条receipt逐字段不变且仅新增C。Android冷启动首页及最近阅读均16%，普通详情亦16%，与API16.6295%一致；返回首页普通继续实际5015ms/969ms，恢复偏差15ms。Chrome重连后仍1轨、暂停5s且无音轨请求/原始错误。原SYNC-04旧57%和AUDIO-14旧0轨失败证据保留，不由协议通过抵销展示验收。

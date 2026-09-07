@@ -174,10 +174,14 @@ class ImportFileListDetails(HttpContractModel):
     files: list[str]
 
 
+class ImportLibraryConflictDetails(HttpContractModel):
+    root_path: str = Field(alias="rootPath")
+
+
 class ImportErrorBody(HttpContractModel):
     message: str
     code: str | None = None
-    details: ImportFileListDetails | None = None
+    details: ImportFileListDetails | ImportLibraryConflictDetails | None = None
 
 
 class ImportBadRequestError(HttpContractError[ImportErrorBody]):

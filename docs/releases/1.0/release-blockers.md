@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-07 IMPORT-01（RG-02 / INI-02，P2，真实FAIL，候选待原HTTP回归）：全新专用库实际重复POST /api/libraries返回500，原handler欲返回409/rootPath，但ImportErrorBody.details仅允许files，typed_route校验抛错。原api-completion.log和针对性RED（1 failed/1 passed）留存；候选仅补明确rootPath错误详情类型，旧files及extra-forbid保持，43项API/权限相邻与mypy495通过。无重复库写入已由针对性断言验证，实际修复后原HTTP仍待验，不关单。证据fd26b7aa/rg02-fresh-api-boundaries-20260907。
+
 2026-09-07当前覆盖：SYNC-04、AUDIO-14均CLOSED，b72b3d83新隔离库真实Chrome离线C→Android N→Chrome重连→Android冷首页/详情原场景已通过，普通恢复5015ms/969ms相邻和新增Chrome定向E2E亦PASS，详见release-evidence首节。下文两项OPEN及“下一项原回归”为历史状态。本轮无新增确证产品缺陷、无测试工具扩展；停止已关闭两项的完善。
 
 下一可执行项RISK-08仍为静态风险：独立审查明确Home取消异常被内层吞掉、Detail持久查询后缺generation守卫，但尚无受控调度复现，不能以冷启动PASS关闭，也不能直接宣称持久位置损坏。已有服务/设备/浏览器清理完成，原用户15项改动保留。ENV-11/12、iOS/容器与正式包暂缓继续分项保留；未冻结RC、未整体GO。
