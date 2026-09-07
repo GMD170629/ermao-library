@@ -661,6 +661,8 @@ typealias ReaderProgressMutationV5 = com.ermao.library.shared.modules.reader.dom
 typealias ReaderPositionLocalState = com.ermao.library.shared.modules.reader.domain.ReaderPositionLocalState
 typealias ReaderPositionPresentationSnapshot =
     com.ermao.library.shared.modules.reader.domain.ReaderPositionPresentationSnapshot
+typealias ReaderPositionPresentationQuery =
+    com.ermao.library.shared.modules.reader.application.ReaderPositionPresentationQuery
 typealias ReaderChapterUnit = com.ermao.library.shared.modules.reader.domain.ReaderChapterUnit
 typealias ReaderChapterState = com.ermao.library.shared.modules.reader.domain.ReaderChapterState
 typealias ReaderLocalProgressIdentity = com.ermao.library.shared.modules.reader.domain.ReaderLocalProgressIdentity

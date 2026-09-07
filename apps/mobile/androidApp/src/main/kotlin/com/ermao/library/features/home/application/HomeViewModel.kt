@@ -18,8 +18,11 @@ import com.ermao.library.features.reader.infrastructure.AndroidReaderDeviceIdent
 import com.ermao.library.features.reader.infrastructure.AndroidReaderV5PresentationQuery
 import com.ermao.library.shared.modules.reader.ReaderProgressPresentationUpdate
 import com.ermao.library.shared.modules.reader.ReaderPositionPresentationSnapshot
+import com.ermao.library.shared.modules.reader.ReaderPositionPresentationQuery
 import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,13 +41,12 @@ class HomeViewModel(
     private val context: ContentRequestContext,
     private val appContext: Context,
     private val onSessionUnauthorized: () -> Unit,
-    private val durablePresentationQuery: AndroidReaderV5PresentationQuery =
+    private val durablePresentationQuery: ReaderPositionPresentationQuery =
         AndroidReaderV5PresentationQuery(appContext.applicationContext),
 ) : ViewModel() {
     private val mutableUiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = mutableUiState.asStateFlow()
     private val latestProgressUpdatesByResourceId = mutableMapOf<String, ReaderProgressPresentationUpdate>()
-    private var pendingPresentationsByResourceId = emptyMap<String, ReaderPositionPresentationSnapshot>()
 
     init {
         viewModelScope.launch {
@@ -82,10 +84,13 @@ class HomeViewModel(
         }
         loadJob = viewModelScope.launch {
             try {
-                when (val result = repository.loadHome(context)) {
+                val result = repository.loadHome(context)
+                currentCoroutineContext().ensureActive()
+                when (result) {
                     is ContentResult.Content -> {
-                        loadDurablePresentations()
-                        val content = applyLocalPresentations(result.value.toUiContent())
+                        val pending = loadDurablePresentations()
+                        currentCoroutineContext().ensureActive()
+                        val content = applyLocalPresentations(result.value.toUiContent(), pending)
                         mutableUiState.update { it.copy(
                             isLoading = false,
                             isRefreshing = false,
@@ -101,6 +106,7 @@ class HomeViewModel(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
+                currentCoroutineContext().ensureActive()
                 mutableUiState.update {
                     it.copy(isLoading = false, isRefreshing = false, errorCode = "CONTENT_LOAD_FAILED")
                 }
@@ -108,23 +114,20 @@ class HomeViewModel(
         }
     }
 
-    private suspend fun loadDurablePresentations() {
-        val snapshots = runCatching {
-            durablePresentationQuery.load(
-                namespace = ReaderSyncNamespace(
-                    context.namespace.serverIdentity,
-                    context.namespace.userId,
-                    context.namespace.authorizationVersion,
-                ),
-                clientId = AndroidReaderDeviceIdentity(appContext).stableDeviceId(),
-            )
-        }.getOrDefault(emptyList())
-        // Replace the pending projection after every server read so an acknowledged
-        // local position cannot survive here and override newer server facts.
-        pendingPresentationsByResourceId = snapshots.associateBy(ReaderPositionPresentationSnapshot::resourceId)
-    }
+    private suspend fun loadDurablePresentations(): Map<String, ReaderPositionPresentationSnapshot> =
+        durablePresentationQuery.load(
+            namespace = ReaderSyncNamespace(
+                context.namespace.serverIdentity,
+                context.namespace.userId,
+                context.namespace.authorizationVersion,
+            ),
+            clientId = AndroidReaderDeviceIdentity(appContext).stableDeviceId(),
+        ).associateBy(ReaderPositionPresentationSnapshot::resourceId)
 
-    private fun applyLocalPresentations(content: HomeContent): HomeContent {
+    private fun applyLocalPresentations(
+        content: HomeContent,
+        pendingPresentationsByResourceId: Map<String, ReaderPositionPresentationSnapshot>,
+    ): HomeContent {
         val inMemory = latestProgressUpdatesByResourceId.values.map { update ->
             ReaderPositionPresentationSnapshot(
                 bookId = update.bookId,

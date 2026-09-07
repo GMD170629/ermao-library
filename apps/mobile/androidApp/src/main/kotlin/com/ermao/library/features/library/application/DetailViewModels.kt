@@ -38,6 +38,7 @@ import com.ermao.library.shared.modules.reader.ReaderChapterState
 import com.ermao.library.shared.modules.reader.ReaderChapterUnit
 import com.ermao.library.shared.modules.reader.ReaderProgressPresentationUpdate
 import com.ermao.library.shared.modules.reader.ReaderPositionPresentationSnapshot
+import com.ermao.library.shared.modules.reader.ReaderPositionPresentationQuery
 import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
 import com.ermao.library.features.reader.infrastructure.AndroidReaderDeviceIdentity
 import com.ermao.library.features.reader.infrastructure.AndroidReaderV5PresentationQuery
@@ -49,6 +50,8 @@ import com.ermao.library.shared.modules.shelf.domain.ShelfRequestContext
 import com.ermao.library.shared.modules.shelf.domain.ShelfResult
 import com.ermao.library.shared.modules.shelf.domain.ShelfSummary
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -219,7 +222,7 @@ class WorkDetailViewModel(
     private val onSessionUnauthorized: () -> Unit,
     private val target: BookContentTarget = BookContentTarget.Root,
     private val savedState: SavedStateHandle,
-    private val durablePresentationQuery: AndroidReaderV5PresentationQuery =
+    private val durablePresentationQuery: ReaderPositionPresentationQuery =
         AndroidReaderV5PresentationQuery(appContext.applicationContext),
 ) : ViewModel() {
     private var multiDownloadGeneration = 0L
@@ -228,7 +231,6 @@ class WorkDetailViewModel(
     private var loadGeneration = 0
     private var surfaceGeneration = 0
     private val latestProgressUpdatesByResourceId = mutableMapOf<String, ReaderProgressPresentationUpdate>()
-    private var pendingPresentationsByResourceId = emptyMap<String, ReaderPositionPresentationSnapshot>()
 
     init {
         viewModelScope.launch {
@@ -441,70 +443,84 @@ class WorkDetailViewModel(
             it.copy(isLoading = showBlockingLoading && it.content == null, isSurfaceLoading = true, errorCode = null)
         }
         viewModelScope.launch {
-            when (val result = loadBookContentPage(repository, context, bookId, target, sort, page)) {
-                is ContentResult.Content -> {
-                    if (generation != loadGeneration) return@launch
-                    val snapshot = result.value
-                    val resourceId = (snapshot.target as? BookContentTarget.ResourceDetail)?.resourceId
-                    val base = snapshot.book.toUiContent()
-                    loadDurablePresentations()
-                    val content = applyLocalPresentations(base, resourceId)
-                    mutableUiState.update { state ->
-                        state.copy(
-                            isLoading = false,
-                            isSurfaceLoading = false,
-                            content = content,
-                            isBookRoot = target == BookContentTarget.Root,
-                            rootSourceNodeId = snapshot.book.sourceNodeId,
-                            selectedResourceId = resourceId,
-                            presentation = if (resourceId == null) BookDetailPresentation.ContentBrowser else BookDetailPresentation.ResourceDetail,
-                            contents = snapshot.contents ?: state.contents,
-                            contentsSort = sort,
-                            surfaceErrorCode = null,
+            try {
+                val result = loadBookContentPage(repository, context, bookId, target, sort, page)
+                currentCoroutineContext().ensureActive()
+                when (result) {
+                    is ContentResult.Content -> {
+                        if (generation != loadGeneration) return@launch
+                        val snapshot = result.value
+                        val resourceId = (snapshot.target as? BookContentTarget.ResourceDetail)?.resourceId
+                        val base = snapshot.book.toUiContent()
+                        val pending = loadDurablePresentations()
+                        currentCoroutineContext().ensureActive()
+                        if (generation != loadGeneration) return@launch
+                        val content = applyLocalPresentations(base, resourceId, pending)
+                        mutableUiState.update { state ->
+                            state.copy(
+                                isLoading = false,
+                                isSurfaceLoading = false,
+                                content = content,
+                                isBookRoot = target == BookContentTarget.Root,
+                                rootSourceNodeId = snapshot.book.sourceNodeId,
+                                selectedResourceId = resourceId,
+                                presentation = if (resourceId == null) BookDetailPresentation.ContentBrowser else BookDetailPresentation.ResourceDetail,
+                                contents = snapshot.contents ?: state.contents,
+                                contentsSort = sort,
+                                surfaceErrorCode = null,
+                            )
+                        }
+                        if (resourceId != null) loadReadingUnits(
+                            resourceId, savedState.get<Int>("readingUnitsPage")?.coerceAtLeast(1) ?: 1,
                         )
                     }
-                    if (resourceId != null) loadReadingUnits(
-                        resourceId, savedState.get<Int>("readingUnitsPage")?.coerceAtLeast(1) ?: 1,
-                    )
+                    is ContentResult.Failure -> mutableUiState.update {
+                        if (generation != loadGeneration) return@update it
+                        if (result.error.kind == AppErrorKind.Unauthorized) onSessionUnauthorized()
+                        val inaccessible = result.error.kind in setOf(
+                            AppErrorKind.Forbidden, AppErrorKind.NotFoundOrUnavailable, AppErrorKind.Gone,
+                        )
+                        it.copy(
+                            isLoading = false,
+                            isSurfaceLoading = false,
+                            content = if (inaccessible) null else it.content,
+                            errorCode = result.error.code,
+                            surfaceErrorCode = result.error.code,
+                        )
+                    }
                 }
-                is ContentResult.Failure -> mutableUiState.update {
-                    if (generation != loadGeneration) return@update it
-                    if (result.error.kind == AppErrorKind.Unauthorized) onSessionUnauthorized()
-                    val inaccessible = result.error.kind in setOf(
-                        AppErrorKind.Forbidden, AppErrorKind.NotFoundOrUnavailable, AppErrorKind.Gone,
-                    )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                currentCoroutineContext().ensureActive()
+                if (generation != loadGeneration) return@launch
+                mutableUiState.update {
                     it.copy(
                         isLoading = false,
                         isSurfaceLoading = false,
-                        content = if (inaccessible) null else it.content,
-                        errorCode = result.error.code,
-                        surfaceErrorCode = result.error.code,
+                        errorCode = "CONTENT_LOAD_FAILED",
+                        surfaceErrorCode = "CONTENT_LOAD_FAILED",
                     )
                 }
             }
         }
     }
 
-    private suspend fun loadDurablePresentations() {
-        val snapshots = runCatching {
-            durablePresentationQuery.load(
-                namespace = ReaderSyncNamespace(
-                    context.namespace.serverIdentity,
-                    context.namespace.userId,
-                    context.namespace.authorizationVersion,
-                ),
-                clientId = AndroidReaderDeviceIdentity(appContext).stableDeviceId(),
-                bookIds = setOf(bookId),
-            )
-        }.getOrDefault(emptyList())
-        // Replace the pending projection after every server read so an acknowledged
-        // local position cannot survive here and override newer server facts.
-        pendingPresentationsByResourceId = snapshots.associateBy(ReaderPositionPresentationSnapshot::resourceId)
-    }
+    private suspend fun loadDurablePresentations(): Map<String, ReaderPositionPresentationSnapshot> =
+        durablePresentationQuery.load(
+            namespace = ReaderSyncNamespace(
+                context.namespace.serverIdentity,
+                context.namespace.userId,
+                context.namespace.authorizationVersion,
+            ),
+            clientId = AndroidReaderDeviceIdentity(appContext).stableDeviceId(),
+            bookIds = setOf(bookId),
+        ).associateBy(ReaderPositionPresentationSnapshot::resourceId)
 
     private fun applyLocalPresentations(
         content: BookDetailContent,
         selectedResourceId: String?,
+        pendingPresentationsByResourceId: Map<String, ReaderPositionPresentationSnapshot>,
     ): BookDetailContent {
         val inMemory = latestProgressUpdatesByResourceId.values.map { update ->
             ReaderPositionPresentationSnapshot(

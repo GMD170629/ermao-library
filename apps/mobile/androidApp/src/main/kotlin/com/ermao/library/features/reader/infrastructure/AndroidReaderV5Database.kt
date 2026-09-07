@@ -377,11 +377,12 @@ internal class AndroidReaderV5Database(
 }
 
 /** Public Reader-module query for durable presentation-only projections. */
-class AndroidReaderV5PresentationQuery(private val context: Context) {
-    suspend fun load(
+class AndroidReaderV5PresentationQuery(private val context: Context) :
+    com.ermao.library.shared.modules.reader.ReaderPositionPresentationQuery {
+    override suspend fun load(
         namespace: com.ermao.library.shared.modules.reader.ReaderSyncNamespace,
         clientId: String,
-        bookIds: Set<String> = emptySet(),
+        bookIds: Set<String>,
     ): List<ReaderPositionPresentationSnapshot> = AndroidReaderV5Database.loadPresentationSnapshots(
         context = context,
         namespace = namespace,

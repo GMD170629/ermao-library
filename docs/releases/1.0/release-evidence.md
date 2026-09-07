@@ -1,5 +1,7 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 SYNC-05 / RISK-08 CLOSED：Home/Detail只在当前加载仍有效且查询成功后提交展示；取消不再被吞为成功空集合，Detail查询后复核既有generation，失败沿已有CONTENT_LOAD_FAILED保留旧展示。删除两处跨请求临时pending映射，读取结果局部使用；持久查询仍由原DB owner实现，新增小型应用port仅供已有两个消费者及受控测试，不改存储/ACK/协议。真机同5个ViewModel边界用例由4 FAIL/1 PASS变为5 PASS，包含失败错误状态和成功空结果清旧投影；直接相邻host投影及模块编译/lint通过。证据0219ab9b/risk08-query-order-20260907的原/fixed-instrumentation、source manifest/patch、fixed-host-junit及fixed-verification；原仪器fixture编译错误修正记录保留。此缺陷就在ViewModel提交层复现和验证，不声称普通跨端全流程或服务端位置损坏。按DEC-10停止扩验，无全量重跑；独立测试包已强停，未开服务/转发，原用户工作树保留。
+
 2026-09-07 IMPORT-01 CLOSED（1e223e5e）：实际原POST现返回完整409/rootPath错误，前后GET书库逐字段一致；定向原RED、43项已完成相邻检查、ruff/mypy及独立只读核对支持，停止本缺陷验证。详细原失败/修复后请求和源码在fd26b7aa/rg02-fresh-api-boundaries-20260907的fixed-requests、fixed-source及conflict-*.log。后续CON-02真实API错误密码→正确登录、member设置403、注销后401，以及INI-03 API重启后账户/书库身份一致、setup仍关闭均PASS（auth-restart-*）；临时操作曾漏admin路由前缀导致404，按现有router纠正并保留，不算产品失败。服务按既有宿主有界退出、端口释放；这些结果不外推UI、TLS、Worker恢复或跨服务器。
 
 RISK-08已在真实Android ViewModel受控查询边界复现，登记SYNC-05（RG-04，P2）：Detail旧A覆盖新B及reading-units，Home取消A仍覆盖B，查询失败把73%投影刷成16%且无错误。原5个仪器用例4 FAIL/1 PASS，非数据库/服务端位置损坏或普通界面实操声明。候选在原加载函数处理取消与过期返回，查询结果只在单次请求中持有，失败保留现有展示并使用已有错误状态；原场景定向回归进行中，证据0219ab9b/risk08-query-order-20260907。

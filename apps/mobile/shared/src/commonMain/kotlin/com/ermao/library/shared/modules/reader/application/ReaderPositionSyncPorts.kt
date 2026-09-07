@@ -1,6 +1,8 @@
 package com.ermao.library.shared.modules.reader.application
 
 import com.ermao.library.shared.modules.reader.domain.ReaderPositionLocalState
+import com.ermao.library.shared.modules.reader.domain.ReaderPositionPresentationSnapshot
+import com.ermao.library.shared.modules.reader.domain.ReaderSyncNamespace
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressMutationV5
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSnapshotV5
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSyncTarget
@@ -58,6 +60,15 @@ fun interface ReaderPositionQueryPort {
 }
 
 interface ReaderPositionServerPort : ReaderPositionSyncPort, ReaderPositionQueryPort
+
+/** Reads durable pending presentation projections for the requested account and books. */
+interface ReaderPositionPresentationQuery {
+    suspend fun load(
+        namespace: ReaderSyncNamespace,
+        clientId: String,
+        bookIds: Set<String> = emptySet(),
+    ): List<ReaderPositionPresentationSnapshot>
+}
 
 data class ReaderPositionDurableState(
     val confirmedRevision: Long = 0,

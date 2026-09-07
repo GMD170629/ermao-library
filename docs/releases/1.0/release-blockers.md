@@ -1,6 +1,6 @@
 # 1.0 发布阻塞项
 
-当前覆盖：IMPORT-01已CLOSED，真实409及无重复写入见release-evidence首节，停止扩验。RISK-08经真机真实ViewModel受控边界复现为SYNC-05，候选原场景回归中；无普通UI/持久位置损坏外推。后续按DEC-10最小充分验证，外部阻塞及最终RC要求不变。
+当前覆盖：IMPORT-01和SYNC-05（原RISK-08）均CLOSED；实际HTTP原场景及真实ViewModel旧查询/取消/失败定向回归见release-evidence，已停止扩验。当前无这两项未闭环失败；其他门禁缺口、外部阻塞及最终RC要求保持，后续按DEC-10最小充分验证。
 
 2026-09-07 IMPORT-01（RG-02 / INI-02，P2，真实FAIL，候选待原HTTP回归）：全新专用库实际重复POST /api/libraries返回500，原handler欲返回409/rootPath，但ImportErrorBody.details仅允许files，typed_route校验抛错。原api-completion.log和针对性RED（1 failed/1 passed）留存；候选仅补明确rootPath错误详情类型，旧files及extra-forbid保持，43项API/权限相邻与mypy495通过。无重复库写入已由针对性断言验证，实际修复后原HTTP仍待验，不关单。证据fd26b7aa/rg02-fresh-api-boundaries-20260907。
 
