@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 RG-02 / IMP-06来源重扫子项PASS（e8c4b555）：专用新SQLite、两份真实EPUB，经现有composition命令入队及真实`app.worker.main`解析执行。删除其中测试文件后WATCHER扫描完整保留Book/Node/Resource/Asset；单文件继续导入返回任务FAILED/SOURCE_SCAN_START_UNAVAILABLE且拓扑不变；恢复原文件后继续导入成功、原身份保持；再次删除后MANUAL扫描仅清理缺失拓扑，另一资源及原件SHA-256不变。证据`artifacts/releases/1.0/e8c4b555/rg02-source-rescan-20260907/`的01..05快照、worker.log、result/source/shutdown.json；执行退出0，Worker已停止。本轮无业务或通用工具修改；execute.py仅保存这次操作的可重放命令，复用已有进程管理与入队入口，停止于上述必测行为通过。未通过HTTP/UI触发，不覆盖上传、只读权限、损坏文件修复或最终RC。
+
+IMP-04复用已执行的`197e81a808ba32595a8a6ffeda62422b3a7d3473/local-load/measurement-20260906-065525/`证据：run-config明确源码c7f5d5eb，rescan-integrity七项检查通过，10000份紧凑EPUB/PDF/CBZ的原件、身份、关联和3个进度哨兵保持。当前对比该版本，导入/扫描/Worker及依赖文件未改；imports仅错误详情schema补全，library变更为详情投影/排序及schema，未改重扫持久化owner。沿用该FLAT子项历史有效结果，不重跑大库，不冒充e8c4b555重新实测、VOLUMES全部组合或同冻结RC通过。接下来补齐混合坏文件隔离/修复及队列恢复，其他外部阻塞仍分项保留。
+
 2026-09-07 SYNC-05 / RISK-08 CLOSED：Home/Detail只在当前加载仍有效且查询成功后提交展示；取消不再被吞为成功空集合，Detail查询后复核既有generation，失败沿已有CONTENT_LOAD_FAILED保留旧展示。删除两处跨请求临时pending映射，读取结果局部使用；持久查询仍由原DB owner实现，新增小型应用port仅供已有两个消费者及受控测试，不改存储/ACK/协议。真机同5个ViewModel边界用例由4 FAIL/1 PASS变为5 PASS，包含失败错误状态和成功空结果清旧投影；直接相邻host投影及模块编译/lint通过。证据0219ab9b/risk08-query-order-20260907的原/fixed-instrumentation、source manifest/patch、fixed-host-junit及fixed-verification；原仪器fixture编译错误修正记录保留。此缺陷就在ViewModel提交层复现和验证，不声称普通跨端全流程或服务端位置损坏。按DEC-10停止扩验，无全量重跑；独立测试包已强停，未开服务/转发，原用户工作树保留。
 
 2026-09-07 IMPORT-01 CLOSED（1e223e5e）：实际原POST现返回完整409/rootPath错误，前后GET书库逐字段一致；定向原RED、43项已完成相邻检查、ruff/mypy及独立只读核对支持，停止本缺陷验证。详细原失败/修复后请求和源码在fd26b7aa/rg02-fresh-api-boundaries-20260907的fixed-requests、fixed-source及conflict-*.log。后续CON-02真实API错误密码→正确登录、member设置403、注销后401，以及INI-03 API重启后账户/书库身份一致、setup仍关闭均PASS（auth-restart-*）；临时操作曾漏admin路由前缀导致404，按现有router纠正并保留，不算产品失败。服务按既有宿主有界退出、端口释放；这些结果不外推UI、TLS、Worker恢复或跨服务器。
