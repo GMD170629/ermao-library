@@ -1,3 +1,5 @@
+2026-09-08 READER-20 OPEN：TXT目录反向选章落到章尾；READER-21 OPEN：TXT18→19px原地重排从1137跳0726、正常重开仍恢复1137。真实普通UI/完整位置证据233ca471/txt-font-20260908/red-result.json；原偏好/设备/服务已收尾，最小现有SDK入口修复待执行，详见evidence。R2/其他阻塞不变。
+
 2026-09-08 RG-03 Android MP3真实连续30分钟、暂停确认及同进程runtime重开子项PASS（5388c1fd/a1040b09），完整时钟/位置/hash及清理证据43f75b02/android-audio-soak-20260908/result.json，详见evidence。不外推普通UI长时、其他格式/多轨或最终RC。下一项POS-01 TXT改字号后的章内语义位置及正常重开；R2未冻结与其余阻塞保持。
 
 2026-09-08 IMPORT-07 CLOSED：d4b027d9真实NTFS拒读的HTTP摘要已脱敏，正常同级/恢复ACL后同身份重扫及原件一致通过，临时服务收尾完成。证据43f75b02/file-permission-20260908/green/result.json；详见evidence。Android长时仍执行，R2未冻结及其余阻塞保持。
