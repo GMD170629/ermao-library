@@ -1,3 +1,5 @@
+2026-09-08 READER-21 Android原普通字号增减及正常重开CLOSED（69a5ba15），原件不变/18px偏好与专用环境已收尾；证据233ca471/txt-font-20260908/final/result.json及evidence首条。READER-20已关闭，R2未冻结及其余真实阻塞保持。
+
 2026-09-08 READER-21最小字符锚点候选定向真机/编译PASS，原普通字号增减及重开最后复验中，仍OPEN；测试前置修正及真实拒绝候选保留，详见evidence首条。READER-20 CLOSED与R2未冻结/其余阻塞保持。
 
 2026-09-08 READER-20 Android原普通目录往返CLOSED（d2f996d5）；READER-21原普通字号路径仍失败/OPEN，不能用仪器绿替代。证据及最小差异定位见evidence首条与233ca471/txt-font-20260908/green/interim-result.json。R2未冻结及其余阻塞保持。

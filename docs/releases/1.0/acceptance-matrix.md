@@ -1,3 +1,5 @@
+2026-09-08 READER-21 Android原普通字号增减及正常重开CLOSED（69a5ba15），原件不变/18px偏好与专用环境已收尾；证据233ca471/txt-font-20260908/final/result.json及evidence首条。READER-20已关闭，R2未冻结及其余真实阻塞保持。
+
 2026-09-08 READER-21最小字符锚点候选定向真机/编译PASS，原普通字号增减及重开最后复验中，仍OPEN；测试前置修正及真实拒绝候选保留，详见evidence首条。READER-20 CLOSED与R2未冻结/其余阻塞保持。
 
 2026-09-08 READER-20 Android原普通目录往返CLOSED（d2f996d5）；READER-21原普通字号路径仍失败/OPEN，不能用仪器绿替代。证据及最小差异定位见evidence首条与233ca471/txt-font-20260908/green/interim-result.json。R2未冻结及其余阻塞保持。
@@ -305,7 +307,7 @@ POS-08新增AUDIO-08（原RISK-06）：真实Android引擎+SQLite单次IO门控�
 
 | ID / RG-04 | 前置/平台/样本 | 操作步骤 | 预期 | 证据 | 状态/关联 |
 |---|---|---|---|---|---|
-| POS-01 | P3；W/A/I、全部承诺格式 | 各格式记录唯一文字/物理页/图片/轨时间→保存→退出重开；目标端换字体屏幕 | 精确语义恢复；展示百分比不反推Locator | artifacts/releases/1.0/cff3e689/ordinary-audio-sync-20260907/；既有MP3见release-evidence | MP3及M4B/M4A/AAC正常W↔Android交接开发子项PASS；本轮后三格式误差最大15ms。其余格式/布局组合仍待逐项，iOS BLOCKED；未冻结RC |
+| POS-01 | P3；W/A/I、全部承诺格式 | 各格式记录唯一文字/物理页/图片/轨时间→保存→退出重开；目标端换字体屏幕 | 精确语义恢复；展示百分比不反推Locator | artifacts/releases/1.0/cff3e689/ordinary-audio-sync-20260907/；既有MP3见release-evidence | MP3及M4B/M4A/AAC正常W↔Android交接开发子项PASS；本轮后三格式误差最大15ms。Android TXT长p字号18↔19及19正常重开子项PASS（69a5ba15，READER-21 CLOSED，详见evidence）；其余格式/布局组合仍待逐项，iOS BLOCKED；未冻结RC |
 | POS-02 | P3；各引擎代表样本 | 连续读听，量测捕获/本地持久化/发送/确认；不足5秒即返回/暂停/切后台 | 最后捕获位置按冻结间隔可靠保存，确认延迟单列 | 937b325b/reader-capture-windows-20260907/；2734ad51/mp3-lockscreen-20260908/；见evidence | PARTIAL：Android PDF实际5/10秒持久捕获、EPUB/CBZ连续操作相邻及各引擎早退子项PASS；普通MP3真实锁屏5/10秒持续确认、唤醒暂停完整一致PASS。其余平台/未涵盖组合及最终同RC待，iOS BLOCKED；阈值保持 |
 | POS-03 | P3；各引擎 | 分别在本地持久化前、后、网络确认后强杀；App重启/系统回收/浏览器刷新 | 至少最后已持久化位置恢复；已确认零丢失，未持久化损失不超冻结间隔 | artifacts/releases/1.0/7e207c38/process-recovery/ | Chrome桌面/移动视口MP3已确认暂停后强杀并重登录恢复PASS（0/205.804ms）；Android普通首页已确认AAC四轨与M4B/M4A章节强停恢复PASS（f8847633，0/31/31ms）；Android EPUB确认后阅读中强停、冷首页50%及继续到第二章PASS（00563daf/android-epub-normal-20260907）；Android UTF16BE长章确认后强停/冷首页继续同末章正文PASS（9cb26b94/android-txt-encodings-20260907，耗时未测）；Android PDF确认35/69后强停冷首页继续同第35页正文PASS（64f1bbc1/android-pdf-navigation-20260907，耗时未测）；Android CBZ确认pages/4/5页后强停冷继续同图像PASS（66f5efd5/android-comic-20260907，耗时未测）；Android RAR5/CBR确认4/6后强停冷恢复同图像及完整position PASS（d0126d3e/android-rar-20260907，耗时未测）；未确认/其他引擎子项NOT_RUN；iOS BLOCKED |
 | POS-04 | P3；已合法打开/可本地读取资源 | 断网读到B→观察pending→重启客户端→重连→重试并另端重开 | pending持久保留并最终确认；不扩展离线登录契约 | artifacts/releases/1.0/02d6ea2d/epub-offline-and-adjacent/ 与 epub-offline-mobile/；1d8d0c7c/pos10-native-server-restart-20260907/ | Chrome桌面/移动视口EPUB页面重建及重连子项PASS（965/959ms）；Android M4B离线完整pending持久、冷恢复20226→20247ms及最终r14/完整位置一致/pending空子项PASS；原mutation被新capture替代不证明精确原body重放，具体r12/r13回调不可归因；其他格式/另端交接NOT_RUN，iOS BLOCKED |
