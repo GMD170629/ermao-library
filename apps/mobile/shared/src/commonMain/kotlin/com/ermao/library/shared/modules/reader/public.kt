@@ -439,13 +439,19 @@ fun readerSafetyComicPageDecodeFailure(): ReaderSafetyFailure =
 fun readerSafetyComicArchiveDetectorFailure(stableCode: String): ReaderSafetyFailure? =
     when (stableCode.trim().uppercase()) {
         "ARCHIVE_PATH_INVALID",
+        "ARCHIVE_ENTRY_TYPE_INVALID",
+        -> readerSafetyComicArchiveStructureFailure()
         "ARCHIVE_PATH_DUPLICATE",
         "ARCHIVE_HEADER_INVALID",
         "ARCHIVE_DATA_INVALID",
         "ARCHIVE_DATA_TRUNCATED",
-        "ARCHIVE_ENTRY_TYPE_INVALID",
-        "ARCHIVE_ENCRYPTED",
-        -> readerSafetyComicArchiveStructureFailure()
+        -> readerSafetyFailure(
+            com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId.COMIC_RESOURCE_INTEGRITY,
+        )
+        // Unsupported decryption is a capability result, not a root escape.
+        "ARCHIVE_ENCRYPTED" -> readerSafetyFailure(
+            com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId.COMIC_PAGE_MIME,
+        )
         "ARCHIVE_PAGE_COUNT_EXCEEDED",
         "ARCHIVE_ENTRY_LIMIT_EXCEEDED",
         -> readerSafetyComicPageCountFailure()

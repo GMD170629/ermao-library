@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-07 RISK-09共享分类层已验证并修正：现有ReaderSafetyFacadeTest按唯一机器契约新增检测码反例，23项1FAIL；最小候选将重复/头损坏/数据损坏/截断映射既有COMIC.RESOURCE_INTEGRITY，加密映射既有COMIC.PAGE_MIME能力规则，路径/链接风险仍COMIC.ARCHIVE_STRUCTURE，容量分支不变。候选同两类23项PASS、Android编译及generator --check/安全边界检查PASS；旧加密=结构断言按契约纠正，并用真实路径风险保留其保护。没有改规则/阈值/生成文件或扩工具，证据8c3a22d7/archive-classification-20260907。仅证明共享分类层；实际native检测码/原生输入仍待核验，iOS未执行，不以本轮结果补齐异常矩阵或宣称密码界面已通过。
+
 2026-09-07 IMPORT-04 CLOSED：df17c4ce在新隔离开发包原截断详情、加密详情相邻及正常RAR首图实际通过；只修授权Root未绑定资源时的错误导航，未伪造可读资源、未放宽缺失/隐藏资源检查。证据da46248a/rar-exceptions-20260907。加密/截断正常导入失败隔离子项已补，其他矩阵/原五项Chrome候选/外部条件保持；未冻结RC。
 
 RISK-09：原生归档加密/截断错误分类静态疑点，见evidence；未复现，不计新产品FAIL，下一步现有映射测试核验。

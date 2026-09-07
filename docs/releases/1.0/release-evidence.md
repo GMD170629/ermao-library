@@ -1,5 +1,7 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 RISK-09共享分类层已验证并修正：现有ReaderSafetyFacadeTest按唯一机器契约新增检测码反例，23项1FAIL；最小候选将重复/头损坏/数据损坏/截断映射既有COMIC.RESOURCE_INTEGRITY，加密映射既有COMIC.PAGE_MIME能力规则，路径/链接风险仍COMIC.ARCHIVE_STRUCTURE，容量分支不变。候选同两类23项PASS、Android编译及generator --check/安全边界检查PASS；旧加密=结构断言按契约纠正，并用真实路径风险保留其保护。没有改规则/阈值/生成文件或扩工具，证据8c3a22d7/archive-classification-20260907。仅证明共享分类层；实际native检测码/原生输入仍待核验，iOS未执行，不以本轮结果补齐异常矩阵或宣称密码界面已通过。
+
 2026-09-07 IMPORT-04 CLOSED：df17c4ce在新隔离开发包原截断详情、加密详情相邻及正常RAR首图实际通过；只修授权Root未绑定资源时的错误导航，未伪造可读资源、未放宽缺失/隐藏资源检查。证据da46248a/rar-exceptions-20260907。加密/截断正常导入失败隔离子项已补，其他矩阵/原五项Chrome候选/外部条件保持；未冻结RC。
 
 新包SHA-256 6a7976d98697851d470bc2124f6f40b1fedd6360353d9431aa5503e32ffd95be，apksigner与安装base.apk一致、保留数据安装；fixed-truncated.xml/png实际详情不再报无权限，fixed-password.xml相邻同样正确，两个开始阅读父按钮enabled=false。沿用既有“当前媒介没有可阅读的资源”和空内容展示，未声称移动详情已展示具体密码/损坏原因；具体原因实证来自configured/tasks.json的普通API。正常同级RAR6页READY，新包control-detail/open显示原001兔子图，HTTP首图hash等于原件。原普通截图truncated与content-red 17项1FAIL保留，候选content-green同17项PASS及Android编译/增量打包通过。没有通用测试工具改动；只补实际缺陷定向测试，停止扩验，iOS未执行。

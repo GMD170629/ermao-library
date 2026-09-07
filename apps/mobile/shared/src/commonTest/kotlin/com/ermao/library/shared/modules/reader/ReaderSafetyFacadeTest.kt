@@ -155,7 +155,7 @@ class ReaderSafetyFacadeTest {
     fun archiveCoreFactsMapToGeneratedComicRules() {
         assertEquals(
             facade.failureFor(ReaderSafetyRuleId.COMIC_ARCHIVE_STRUCTURE),
-            readerSafetyComicArchiveDetectorFailure("ARCHIVE_ENCRYPTED"),
+            readerSafetyComicArchiveDetectorFailure("ARCHIVE_PATH_INVALID"),
         )
         assertEquals(
             facade.failureFor(ReaderSafetyRuleId.COMIC_PAGE_MAX_COUNT),
@@ -170,5 +170,23 @@ class ReaderSafetyFacadeTest {
             readerSafetyComicArchiveDetectorFailure("ARCHIVE_PAGE_LIMIT_EXCEEDED"),
         )
         assertNull(readerSafetyComicArchiveDetectorFailure("ARCHIVE_OPEN_FAILED"))
+    }
+
+    @Test
+    fun archiveEncryptionAndDamagedBytesAreNotSecurityFindings() {
+        assertEquals(
+            facade.failureFor(ReaderSafetyRuleId.COMIC_PAGE_MIME),
+            readerSafetyComicArchiveDetectorFailure("ARCHIVE_ENCRYPTED"),
+        )
+        listOf("ARCHIVE_PATH_DUPLICATE", "ARCHIVE_HEADER_INVALID", "ARCHIVE_DATA_INVALID", "ARCHIVE_DATA_TRUNCATED")
+            .forEach { code ->
+                val failure = readerSafetyComicArchiveDetectorFailure(code)
+                assertEquals(facade.failureFor(ReaderSafetyRuleId.COMIC_RESOURCE_INTEGRITY), failure, code)
+                assertEquals(
+                    ReaderErrorCode.ComicArchiveCorrupt,
+                    readerErrorCodeForFailure(requireNotNull(failure).errorCode, recoverable = false),
+                    code,
+                )
+            }
     }
 }
