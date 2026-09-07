@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-08 IMP-03真实元数据不可用/基础导入隔离子项PASS：两次真实socket拒连正确502，已有可读原件及新TXT导入READY/字节完整；无新业务缺陷，配置/顺序恢复，优先级数值规范化和初始收尾断言失败详见evidence。证据7ae823d3/metadata-unavailable-20260908/result.json，服务均停止。下一项剩余音频异常/睡眠定时现成入口，不扩测试基础设施；Chrome五候选原UI、iOS/容器/工具限制、正式包暂缓与最终RC仍未完成，R2保持。
+
 2026-09-08 INI-02/CON-02 Android普通管理员→成员→管理员的权限展示/各自首页进度子项PASS，无新缺陷；证据73031b2e/android-member-ui-20260908/result.json，具体边界见evidence。设备已解锁、管理员登录恢复；正常退出清理了专用测试私有缓存，后续离线样本需显式重新下载。下一项IMP-03真实元数据不可用及合法资源隔离，现成入口已核实、尚未执行。R2未冻结，Chrome五候选/iOS/容器/工具限制、正式包暂缓和最终RC保持。
 
 2026-09-08 IMPORT-05 CLOSED：644b3fef真实NTFS拒读→API400且无写入；恢复权限→正常建库/导入READY/原件一致，服务与ACL已收尾。证据20e7246c/unreadable-root-20260908/green/result.json，详见evidence。负责人已正常解锁Android；下一项剩余普通设备必测，不继续扩验本缺陷。Chrome五候选原UI、iOS/容器/工具限制、正式包暂缓和最终冻结RC仍未完成，R2保持。

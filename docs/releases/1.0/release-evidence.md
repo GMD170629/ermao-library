@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-08 IMP-03外部元数据不可用/基础导入隔离子项PASS（7ae823d3）：隔离API的Bangumi无凭据，临时baseUrl指向已确认拒连的127.0.0.1:65534，运行进程清除代理且NO_PROXY=*。两次全新query走真实源节点metadata/search，均502/METADATA_PROVIDER_UNAVAILABLE，日志保留urllib URLError/WinError10061，界面响应未泄漏栈/路径。第一次失败时已有TXT原件HTTP逐字节不变；同地址仍失败时，新增专用2409B TXT经现有建库/Worker完成READY，原件与publication一致，SHA256 8d76432a4eed6d657f5baa51d1598d30a424e53a9d78a6777ed3e8b8c2d51b09。证据`7ae823d3/metadata-unavailable-20260908/result.json`、search-unavailable/import-search-unavailable、existing-readable/original、created/tasks/books/import-result及API/Worker日志。
+
+原测试库自动整理两开关均false、jobs total0；为隔离公网，导入阶段临时仅启用回环Bangumi，未关闭被测来源，也未访问恢复后的公网地址。恢复前Worker已停止，之后配置/启用状态/凭据存在标记及来源顺序恢复，原policy完全不变；原排序API把默认priority 100/110/900规范为100/200/300，首次严格数值相等断言失败保留于all-providers-restored.json，restoration-verification单独证明实际顺序及配置恢复，不称数据库逐字节还原。不是产品缺陷或回归断言修改，无业务/工具代码新增。API/Worker最终均停止、wrapper终态0。只补手动搜索不可用和默认基础导入/原件隔离，不外推自动整理任务重试、客户端错误UI或最终RC。下一项剩余音频异常/睡眠定时等现有必测入口核对与真机验证；已完成本子项停止扩验。
+
 2026-09-08 INI-02 / CON-02 Android普通账号切换UI子项PASS（API73031b2e、普通开发APK912d0254，设备9e896bbc）：负责人解锁后系统showing=false；普通“我的→账户与安全→退出→登录”从管理员切至已有Scope member，系统管理/用户与权限/OPDS/日志入口消失，个人设置保留；首页为其57%，独立HTTP为成员17169ms/r1。相同普通路径恢复管理员后管理入口恢复，首页34%，HTTP10499ms/r13。APK读回SHA256仍2c0fea81ff93be5fc51dc50be957feae45c0acac07be4e215da2ca1556f62241。证据`73031b2e/android-member-ui-20260908/result.json`、member-auth、member-home/settings、owner-restored-home/settings、progress、cleanup/shutdown；实际截图已查看。不外推跨服务器切换、所有权限深链、W/I或最终RC，无业务/工具修改。两次小米保存密码提示均取消；正常退出按产品契约清除了独立releasecheck内的测试账号私有缓存，原应用/服务端数据不动，后续离线样本须重新显式下载。管理员登录已恢复，13个专用设备文件和reverse清理，测试app与API停止，wrapper终态0。
 
 下一可执行项IMP-03外部元数据不可用：已只读核实隔离实例可经现有GET/PATCH /api/metadata/providers/bangumi临时改baseUrl，并用源节点metadata/search真实触发502/METADATA_PROVIDER_UNAVAILABLE；需先确认enabled、无测试外凭据、回环端口空闲及进程代理绕过，唯一query避免旧缓存，finally恢复原配置，再核对正常导入/可读原件。未执行此场景，不记PASS，不新增工具框架。Chrome五候选原UI、iOS/容器/工具限制、正式包暂缓与最终同冻结RC仍待。
