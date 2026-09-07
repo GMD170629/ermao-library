@@ -14,44 +14,6 @@ class LibraryPathError(ValueError):
         self.code = code
 
 
-def resolve_library_root_path(value: object) -> Path:
-    raw_path = str(value or "").strip()
-    if not raw_path:
-        raise LibraryPathError(
-            "请选择书库路径",
-            status_code=400,
-            code="INVALID_LIBRARY_PATH",
-        )
-    target = Path(raw_path).expanduser()
-    if not target.is_absolute():
-        raise LibraryPathError(
-            "书库路径必须是绝对路径",
-            status_code=400,
-            code="INVALID_LIBRARY_PATH",
-        )
-    try:
-        real_target = target.resolve(strict=True)
-    except (OSError, RuntimeError):
-        raise LibraryPathError(
-            "书库路径不存在或不可读",
-            status_code=404,
-            code="INVALID_LIBRARY_PATH",
-        ) from None
-    if not real_target.is_dir():
-        raise LibraryPathError(
-            "书库路径必须是目录",
-            status_code=400,
-            code="INVALID_LIBRARY_PATH",
-        )
-    if not os.access(real_target, os.R_OK):
-        raise LibraryPathError(
-            "书库路径不可读",
-            status_code=400,
-            code="INVALID_LIBRARY_PATH",
-        )
-    return real_target
-
-
 def is_inside_path(root: Path, target: Path) -> bool:
     try:
         target.relative_to(root)

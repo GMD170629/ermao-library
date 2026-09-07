@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-08 IMPORT-05 OPEN（RG-02 INI-02真实无权路径）：20e7246c的专用Windows目录临时NTFS拒读后，Python列举/读文件均PermissionError，POST /api/libraries却201并创建根。权限在finally移除；原owner/group/全部ACE恢复，Windows仅将DACL标记规范为AI，最初“SDDL字符串完全相等”断言因此失败，独立acl-verification已核对实际权限/原件，不留拒读规则。恢复后原任务自然完成、TXT READY；不将恢复后的成功抵销拒读时误接收。证据20e7246c/unreadable-root-20260908/denied-probe、denied-http、acl-verification、restored-tasks/books。
+
+最小候选复用唯一resolve_library_root_path，实际scandir只取一个条目并关闭以验证目录可读，保留INVALID_LIBRARY_PATH/400及既有无效路径契约；此单个文件系统函数移至imports.infrastructure.library_root，创建/修改两个现有入口经public使用同一owner，旧实现删除，未扩展目录树/上传/数据库行为。原逻辑定向拒读先FAIL，候选与空/非空、原错误边界、句柄/有界读取及创建/修改冲突相邻通过，ruff与局部mypy通过；首轮移动漏接私有import的收集失败保留为unit-red.log，实际原失败见unit-red-2。NTFS+真实API候选复验待完成，尚未关闭；无新权限工具/框架，临时ACL只作用专用测试根。
+
 2026-09-08 AUD-02 / POS-02 Android MP3真实安全锁屏子项PASS（API2734ad51、普通开发APK912d0254）：普通书库搜索Alice→对应MP3详情→播放器，暂停归零并独立确认r10后播放并KEYCODE_SLEEP。第5.375秒与10.375秒系统均SCREEN_STATE_OFF、keyguard showing=true、MediaSession Playing；HTTP分别3834ms/r11、7848ms/r12，继续确认。唤醒后媒体暂停键实际暂停10499ms/r13，锁屏媒体卡已查看；稳定设备库与HTTP完整position/capturedAt相同、confirmed13/pending空，原MP3与HTTP原件逐字节一致，已安装APK hash核实。无业务/测试工具代码新增。
 
 证据`2734ad51/mp3-lockscreen-20260908/result.json`及observations、系统policy/power、wake、final-http/local-sync/verification、original/installed/cleanup。计时含ADB读取开销，不称纯确认延迟；仅短时MP3代表锁屏，不外推来电、长时、其余格式/iOS或最终RC。设备安全锁屏仍启用，已集中请求负责人正常解锁，未绕过或更改锁屏；解锁后普通UI不计本次PASS。7个专用设备文件、reverse、方向1/0已收尾，测试app停止、数据保留，API wrapper终态0/子进程已停。初次UI文件未生成及不支持的库详情GET 405是计时前观察入口问题，改用已存在列表接口；原日志不删。下一项后端无权路径/外部元数据缺口的现成入口核对，等待解锁不停止其他工作。

@@ -46,7 +46,6 @@ from app.modules.imports.application.library_commands import (
 from app.modules.imports.application.library_paths import (
     LibraryPathError,
     library_directory_tree_node,
-    resolve_library_root_path,
 )
 from app.modules.imports.presentation.path_helpers import enabled_library_for_path
 from app.modules.imports.presentation.schemas import (
@@ -66,7 +65,7 @@ from app.modules.imports.presentation.schemas import (
     UpdateLibraryRequest,
 )
 from app.modules.imports.presentation.writes import router as writes_router
-from app.modules.imports.public import parse_release_title
+from app.modules.imports.public import parse_release_title, resolve_library_root_path
 from app.modules.library.public import LibraryOrganizationMode
 from app.schemas.responses import fail, ok
 from app.services.system_events import prepare_system_event

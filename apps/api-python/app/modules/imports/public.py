@@ -10,7 +10,6 @@ from app.modules.imports.application.library_paths import (
     LibraryPathError,
     is_inside_path,
     library_directory_tree_node,
-    resolve_library_root_path,
     target_directory_from_path,
 )
 from app.modules.imports.application.readable_resource.continue_import import (
@@ -46,6 +45,7 @@ from app.modules.imports.application.save_uploaded_files import (
 )
 from app.modules.imports.domain.library_scan_schedule import LibraryScanSettings
 from app.modules.imports.domain.scan_policy import MissingEntryPolicy
+from app.modules.imports.infrastructure.library_root import resolve_library_root_path
 
 __all__ = [
     "SUPPORTED_AUDIO_EXTS",
