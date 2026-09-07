@@ -1,3 +1,9 @@
+2026-09-08 RG-04 POS-08普通Android音频在途切账号取消隔离子项PASS，无业务修复。A真实5.080s保存已提交但响应held，设备pending完整位置及mutation匹配；普通注销点击后94.005ms请求断开，A两表清空。B登录前后完整原快照不变，从自身17.169s恢复（首Playing17.188s），独立保存18.706s/r3，本地完整位置=HTTP且pending空；A仍是原held快照/r29。放行时旧连接已取消、未发送响应，因此只记取消隔离，不声称旧ACK在B执行或B在途pending保护已重演。证据`542f8d13/pos08-account-inflight-20260908/result.json`及所引真实HTTP/DB/UI/时序文件。
+
+本项最小外部诊断`hold_one_ack.py`服务POS-08：既有POS-06只能控制仪器port，无法阻留普通App请求；临时ASGI包装只单次阻留指定专用资源真实已提交响应、最多240秒，其他请求正常，不记录凭据/不进入生产路径。当前取消隔离已判定，停止该音频工具扩展。标题搜索/键盘覆盖及预arm时自然播完属于准备状态偏差，原记录保留且不计产品FAIL/有效验收；没有跳过原断言取绿。
+
+API542f8d13、普通开发APK69a5ba15/hash4c4cd6ef…；原件/HTTP hash保持，A测试登录恢复，自有App/XML/reverse清理、API198308停止/宿主41474终态0。下一项仅补Reader普通关闭的独立路径（最终flush+2500ms有限上传等待），复用已授权两章EPUB，不扩格式；切服务器与其他平台仍独立待验。R2未冻结及其他外部阻塞保持。
+
 2026-09-08 RG-03 Android两个普通必测子项补齐，无业务/测试工具代码改动。EPUB第二章经外观暖色→夜间→白天→恢复暖色，背景与标题/普通文字真实改变、正文可读、完整Locator保持；原作者红绿样式仍保留，不把它误记为主题失败。原件/HTTP hash相同，原偏好已恢复。证据`bd65dd4a/epub-theme-20260908/result.json`及对应原图/完整progress。
 
 现有四轨原件经专用测试VOLUMES库实际导入，普通列表选择03-M4A，播放30秒后不点击下一首，自然进入04-M4B，首次观测30.562s；继续至真实MediaSession暂停7186ms，服务端完整Locator/asset为M4B且位置已确认（最终body见result）。这不宣称无缝接轨/主观音质。四份原件和HTTP字节hash保持，证据`bd65dd4a/audio-m4a-m4b-20260908/result.json`、observations与原UI。新增库只用于专用既有样本，保留供后续复用；Worker导入后即停止。最初普通导航误落桌面记录search.xml，未计播放验收。
