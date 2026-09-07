@@ -1,3 +1,9 @@
+2026-09-08 RG-04 POS-08普通Android Reader关闭在途保存取消隔离子项PASS，无业务修复。既有两章EPUB真实第一→第二章产生200/r12响应held，普通BACK后约3240ms观察到disconnect，仍正常回详情；随后才注销。该时间包含输入/观测开销，不等同内部2500ms预算。关闭后完整pending匹配held，注销后A两表空；B原快照null，普通详情开始实际第一章，再主动翻第二章得到r3、完整local=server/pending空。A服务端仍完整held/r12，无旧行回写。显式放行时sent=false，只记Reader关闭取消隔离，不冒称旧ACK已送达新会话。
+
+证据`e76fefb8/pos08-reader-close-20260908/result.json`及真实UI/HTTP/DB/时序。复用单次真实响应阻留仅换现有授权EPUB资源，不扩通用工具；必要性是Reader独立flush与有限等待路径，音频不能替代。初始直接关闭未变位置时没有held、arm未消费，属于准备未触发（命令实录、unchanged-close-click/close-state/API log保留）；改为真实翻章后才得到有效在途条件，不跳过有效失败。该子项判定完成即停止。
+
+API e76fefb8、普通开发APK69a5ba15/hash4c4cd6ef…；原EPUB/HTTP hash均a643ee39…（与既有原样本一致），A测试登录恢复，自有App/XML/reverse及API收尾，宿主39012终态0。下一可执行项核对POS-08普通切服务器的已有服务/入口，按实际独立路径补验；不重复本轮账号、关闭、音频格式。R2未冻结，RG-01～04 PARTIAL/RG-05按已接受范围PASS；Chrome候选原UI工具限制、iOS/容器/可信HTTPS/睡眠范围外部条件、正式包暂缓及最终同RC仍保留。
+
 2026-09-08 RG-04 POS-08普通Android音频在途切账号取消隔离子项PASS，无业务修复。A真实5.080s保存已提交但响应held，设备pending完整位置及mutation匹配；普通注销点击后94.005ms请求断开，A两表清空。B登录前后完整原快照不变，从自身17.169s恢复（首Playing17.188s），独立保存18.706s/r3，本地完整位置=HTTP且pending空；A仍是原held快照/r29。放行时旧连接已取消、未发送响应，因此只记取消隔离，不声称旧ACK在B执行或B在途pending保护已重演。证据`542f8d13/pos08-account-inflight-20260908/result.json`及所引真实HTTP/DB/UI/时序文件。
 
 本项最小外部诊断`hold_one_ack.py`服务POS-08：既有POS-06只能控制仪器port，无法阻留普通App请求；临时ASGI包装只单次阻留指定专用资源真实已提交响应、最多240秒，其他请求正常，不记录凭据/不进入生产路径。当前取消隔离已判定，停止该音频工具扩展。标题搜索/键盘覆盖及预arm时自然播完属于准备状态偏差，原记录保留且不计产品FAIL/有效验收；没有跳过原断言取绿。
