@@ -1,5 +1,7 @@
 # 1.0 发布验收矩阵
 
+2026-09-07 READER-16候选定向回归通过，原界面仍待：复用ReaderSafetyFacade XML准备及平台已有解码器，清理声明后交给原解析器；保持原件、预算和外部解析禁用。Android FB2 factory 11/11、shared 9/9、EPUB安全相邻10/10通过；iOS适配与针对性测试已修改，ENV-02下未编译/未执行。未改契约或通用测试工具。新普通APK及DOCTYPE/entity原失败复测为下一项，READER-16保持OPEN，未冻结RC。
+
 2026-09-07 REF-FB2增量PASS：普通Android合成可辨识PNG、表格/诗行/嵌套正文、脚注往返与截断打开/重试拒绝、同库正常恢复已实际验收，失败资源无进度。证据ee5f3b15/fb2-complex-20260907，详见evidence首节；不外推实体/active内容安全、W/I或最终同RC。
 
 2026-09-07 REF-AZW3精确锚点增量PASS：Android现有KF8三级目录在字号30px/大行距横屏形成实际分页，卷一根节点与细目甲fragment分别显示卷首/叶正文，root2-selected与leaf2-body图像及XML对应；证据8b80eacf/kf8-anchors-20260907，详见evidence首节。仅此同章跨页子项，无业务/工具修改；其他复杂内容/异常、W/I与最终同RC仍待。

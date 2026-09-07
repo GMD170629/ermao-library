@@ -6,6 +6,7 @@ import com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class Fb2PublicationDecoderTest {
@@ -195,18 +196,29 @@ class Fb2PublicationDecoderTest {
     }
 
     @Test
-    fun legacyLinkRepairRequiresAnExplicitStandardNamespaceAndRejectsDeclarations() {
+    fun legacyLinkRepairRequiresAnExplicitStandardNamespace() {
         val policy = Fb2XmlPolicy()
         val xml = "<FictionBook xmlns:xlink='http://www.w3.org/1999/xlink'><a l:href='#note'/></FictionBook>"
-        assertTrue(policy.prepare(xml).contains("xlink:href='#note'"))
+        assertTrue(policy.prepareMarkup(xml, xml.encodeToByteArray().size.toLong()).contains("xlink:href='#note'"))
         val bound = xml.replace("xmlns:xlink", "xmlns:l")
-        assertEquals(bound, policy.prepare(bound))
+        assertEquals(bound, policy.prepareMarkup(bound, bound.encodeToByteArray().size.toLong()))
         val unbound = "<FictionBook><a l:href='#note'/></FictionBook>"
-        assertEquals(unbound, policy.prepare(unbound))
-        listOf("<!DOCTYPE FictionBook>", "<!ENTITY x 'text'>").forEach { declaration ->
-            assertFailsWith<IllegalArgumentException> { policy.prepare(declaration + xml) }
-            assertFailsWith<IllegalArgumentException> { policy.prepare(declaration.toCharArray().joinToString("\u0000") + xml) }
-        }
+        assertEquals(unbound, policy.prepareMarkup(unbound, unbound.encodeToByteArray().size.toLong()))
+    }
+
+    @Test
+    fun preparesDeclaredEntitiesThroughTheSharedXmlContract() {
+        val policy = Fb2XmlPolicy()
+        val declarations = "<!DOCTYPE FictionBook [<!ENTITY readable '中文'><!ENTITY canary SYSTEM 'urn:ermao:test:canary'>]>"
+        val xml = declarations + "<FictionBook><body><p>BEFORE &readable; &canary; AFTER</p></body></FictionBook>"
+        val prepared = policy.prepareMarkup(xml, xml.encodeToByteArray().size.toLong())
+
+        // Parser projection uses a numeric ampersand reference to keep the entity literal.
+        assertTrue(prepared.contains("BEFORE 中文 &#38;canary; AFTER"))
+        assertFalse(prepared.contains("urn:ermao:test:canary"))
+        assertFalse(prepared.contains("<!ENTITY"))
+        val safeDoctype = "<!DOCTYPE FictionBook><FictionBook><body><p>Readable</p></body></FictionBook>"
+        assertTrue(policy.prepareMarkup(safeDoctype, safeDoctype.length.toLong()).contains("<p>Readable</p>"))
     }
 
     private fun Fb2PublicationDecoder.element(name: String, attributes: Map<String, String> = emptyMap(), content: Fb2PublicationDecoder.() -> Unit) {

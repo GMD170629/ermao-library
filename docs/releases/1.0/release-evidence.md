@@ -1,5 +1,11 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 READER-16候选定向回归通过，原界面仍待：复用ReaderSafetyFacade XML准备及平台已有解码器，清理声明后交给原解析器；保持原件、预算和外部解析禁用。Android FB2 factory 11/11、shared 9/9、EPUB安全相邻10/10通过；iOS适配与针对性测试已修改，ENV-02下未编译/未执行。未改契约或通用测试工具。新普通APK及DOCTYPE/entity原失败复测为下一项，READER-16保持OPEN，未冻结RC。
+
+证据：`artifacts/releases/1.0/43b5ab8d/fb2-xml-policy-20260907/` 的 android-factory.xml、shared-final.xml、epub-adjacent.xml、shared-epub-adjacent-final.log；generator --check及停写后的boundary-final.log退出0。shared初次断言误将parserMarkup数字引用期待为XHTML命名引用，按现有Facade真实输出修正，最终正文/无外部内容保护仍在平台测试覆盖；shared-initial.xml保留。两次Gradle前置失败分别为python入口缺失、未配置已有ERMAO_ZIG，日志保留，配置现有Python/Zig/CMake后成功，无安装/跳过任务。JNI为既有产物增量验证，不声称从零构建。boundary初次报告未改动ReadiumEpubSession:87，原输出见boundary-initial.txt，原因未确证；停止写入后当前检查通过，不据重跑宣称修复该历史观察。API/Worker期限到达正常收尾，shutdown.json确认两子进程停止；下次真机验收须重启隔离服务。
+
+2026-09-07 READER-16真实FAIL：43b5ab8d普通Android既有开发APK分别打开safe-doctype.fb2与external-entity.fb2，均显示“出版物安全策略阻止了活动内容”；doctype-red/entity-red图像及XML位于artifacts/releases/1.0/43b5ab8d/fb2-xml-policy-20260907。样本为专用测试正文，实体只指本次/sdcard/ermao-fb2s-canary.txt，不涉及真实用户文件；samples.json保存原始SHA/大小，三文件经真实API/Worker入库READY。静态与实际失败对应Fb2SourceParser→Fb2XmlPolicy.prepare旧probe→声明即reject，违反当前PREPARE_XML可隔离SANITIZE/保留可读正文要求。候选将平台真实XML解码、共享既有Facade清理与平台禁止外部解析接通；编码必须保留UTF8/UTF16及声明charset，不把Latin1字节probe作为正文。旧实体拒绝断言需按唯一契约纠正，同时保留坏XML/重复id/无绑定前缀拒绝及原件/无外部内容泄漏保护。尚未完成候选回归，不关单；iOS真实验收仍受既有环境阻塞。
+
 2026-09-07 REF-FB2图文/脚注及截断拒绝子项PASS（ee5f3b15，无业务/测试辅助修改）：普通Android真实新库打开显示中英标题、混合行内正文、480×240红蓝标识PNG、表格CDATA的A < B、嵌套子章节与两行诗；点击脚注进入Notes正文，点击返回回到第一章及图片。原文件前500字节截断样本入目录READY，但普通打开/重新获取均明确“格式解析器解析失败，未提供更具体的原因”，无崩溃；关闭后首页继续正常图文可读，截断资源progressSnapshot仍null。READY只表示入目录，不作为坏内容可读证据。
 
 后端同源码既有test_fb2_adapter.py及test_xml_policy.py定向35 PASS/0 skip（上述目录backend-fb2-xml-configured.log/xml），覆盖正文合约、外部实体字面化、未索引资源拒绝、可选坏图隔离与既有XML预算/上下文。首次未设置ERMAO_CHAPTER_CORE_LIBRARY而10 FAIL/25 PASS，backend-fb2-xml.log/xml保留DLL加载失败；补用既有.tmp/chapter-core-windows/ermao_chapters.dll后原命令通过，不改测试/预期、不升级依赖。独立只读与主核对既有Android工厂坏XML测试，普通解析失败提示未构成新确证分类缺陷；不以工厂测试文件存在或历史输出推定本轮原生安全已通过。下一项原生FB2/EPUB安全异常实际路径。

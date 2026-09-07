@@ -17,6 +17,7 @@ import com.ermao.library.shared.modules.reader.readerSafetyFb2EmbeddedImageExten
 import com.ermao.library.shared.modules.reader.readerSafetyFb2TextBudgetFailure
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.StringReader
 import java.security.MessageDigest
 import java.util.Base64
 import javax.xml.parsers.SAXParserFactory
@@ -46,7 +47,9 @@ internal object Fb2SourceParser {
             }
             output.toByteArray()
         }
-        val prepared = Fb2XmlPolicy().prepare(bytes.toString(Charsets.ISO_8859_1)).toByteArray(Charsets.ISO_8859_1)
+        val markup = EpubContentSecurityPolicy.decodeXmlText(bytes)
+            ?: throw IllegalArgumentException("FB2 XML encoding is invalid")
+        val prepared = Fb2XmlPolicy().prepareMarkup(markup, bytes.size.toLong())
         val decoder = Fb2PublicationDecoder()
         val chapterEvents = mutableListOf<ChapterCoreXmlEvent>()
         var sourceOrdinal = 0L
@@ -99,14 +102,14 @@ internal object Fb2SourceParser {
             override fun error(exception: SAXParseException): Nothing = throw exception
             override fun fatalError(exception: SAXParseException): Nothing = throw exception
         }
-        // Android's Expat does not implement Xerces feature URIs. Reject declarations before
-        // parsing and reject all entity resolution instead of depending on optional flags.
+        // Shared preparation removes parser dependencies before Expat sees the XML.
+        // Keep entity resolution prohibited independently of optional Xerces feature flags.
         try {
             SAXParserFactory.newInstance().apply { isNamespaceAware = true }.newSAXParser().xmlReader.apply {
                 entityResolver = org.xml.sax.EntityResolver { _, _ -> throw SAXException("External XML is prohibited") }
                 contentHandler = handler
                 errorHandler = handler
-            }.parse(InputSource(prepared.inputStream()))
+            }.parse(InputSource(StringReader(prepared)))
         } catch (error: SAXException) {
             throw IllegalArgumentException("FB2 XML is invalid", error)
         }

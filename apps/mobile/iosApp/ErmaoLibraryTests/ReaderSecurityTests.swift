@@ -748,14 +748,13 @@ final class ReaderSecurityTests: XCTestCase {
         XCTAssertFalse(decorated.contains("<script>"))
     }
 
-    func testFb2ActualXmlAndBase64ErrorsFailClosed() throws {
+    func testFb2ActualXmlErrorsFailClosed() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let file = directory.appendingPathComponent("original.fb2")
         let examples = [
             "<FictionBook><body><p>broken</body></FictionBook>",
-            "<!DOCTYPE FictionBook [<!ENTITY x SYSTEM 'file:///etc/passwd'>]><FictionBook><body><p>&x;</p></body></FictionBook>",
             "<FictionBook><body><section id='x'/><section id='x'/></body></FictionBook>",
         ]
         for (index, example) in examples.enumerated() {
@@ -822,10 +821,79 @@ final class ReaderSecurityTests: XCTestCase {
     func testFb2Utf16AndUnsectionedBody() throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).fb2")
         defer { try? FileManager.default.removeItem(at: file) }
-        let xml = "<?xml version='1.0' encoding='UTF-16'?><FictionBook><body><p>中文正文</p></body></FictionBook>"
-        try XCTUnwrap(xml.data(using: .utf16)).write(to: file)
-        let parsed = try IosFb2PublicationFactory.read(fileURL: file, fallbackTitle: "Fallback")
-        XCTAssertTrue(try XCTUnwrap(parsed.document.resources.first).xhtml.contains("<p>中文正文</p>"))
+        let encodings: [(String, String.Encoding)] = [
+            ("UTF-8", .utf8), ("UTF-16", .utf16),
+            ("UTF-16LE", .utf16LittleEndian), ("UTF-16BE", .utf16BigEndian),
+        ]
+        for (name, encoding) in encodings {
+            let xml = "<?xml version='1.0' encoding='\(name)'?>" +
+                "<!DOCTYPE FictionBook [<!ENTITY bodyText '中文正文'>]>" +
+                "<FictionBook><body><p>&bodyText;</p></body></FictionBook>"
+            let source = try XCTUnwrap(xml.data(using: encoding))
+            try source.write(to: file)
+            let parsed = try IosFb2PublicationFactory.read(fileURL: file, fallbackTitle: "Fallback")
+            XCTAssertTrue(try XCTUnwrap(parsed.document.resources.first).xhtml.contains("<p>中文正文</p>"), name)
+            XCTAssertEqual(try Data(contentsOf: file), source)
+        }
+    }
+
+    func testFb2SafeDoctypePreservesDeclaredCharsetText() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).fb2")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let examples: [(String, String.Encoding, String)] = [
+            ("windows-1251", .windowsCP1251, "Книга Текст"),
+            ("windows-1252", .windowsCP1252, "Café €"),
+        ]
+        for (name, encoding, text) in examples {
+            let xml = "<?xml version='1.0' encoding='\(name)'?><!DOCTYPE FictionBook>" +
+                "<FictionBook><body><p>\(text)</p></body></FictionBook>"
+            let source = try XCTUnwrap(xml.data(using: encoding))
+            try source.write(to: file)
+            let parsed = try IosFb2PublicationFactory.read(fileURL: file, fallbackTitle: "Book")
+            XCTAssertTrue(try XCTUnwrap(parsed.document.resources.first).xhtml.contains("<p>\(text)</p>"))
+            XCTAssertEqual(try Data(contentsOf: file), source)
+        }
+    }
+
+    func testFb2ExternalEntityIsLiteralizedWithoutCanaryContentOrFileChanges() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("original.fb2")
+        let canary = directory.appendingPathComponent("canary.txt")
+        let canaryText = "FB2_EXTERNAL_ENTITY_CANARY_CONTENT"
+        let canaryBytes = Data(canaryText.utf8)
+        try canaryBytes.write(to: canary)
+        let encodings: [(String, String.Encoding)] = [
+            ("UTF-8", .utf8), ("UTF-16", .utf16),
+            ("UTF-16LE", .utf16LittleEndian), ("UTF-16BE", .utf16BigEndian),
+        ]
+        for (name, encoding) in encodings {
+            for reference in ["", "&x;"] {
+                let xml = "<?xml version='1.0' encoding='\(name)'?>" +
+                    "<!DOCTYPE FictionBook [<!ENTITY x SYSTEM '\(canary.absoluteString)'>]>" +
+                    "<FictionBook><body><p>中文\(reference)END</p></body></FictionBook>"
+                let source = try XCTUnwrap(xml.data(using: encoding))
+                try source.write(to: file)
+                let parsed = try IosFb2PublicationFactory.read(fileURL: file, fallbackTitle: "Book")
+                let xhtml = try XCTUnwrap(parsed.document.resources.first).xhtml
+                let expectedReference = reference.isEmpty ? "" : "&amp;x;"
+                XCTAssertTrue(xhtml.contains("<p>中文\(expectedReference)END</p>"))
+                XCTAssertFalse(xhtml.contains(canaryText))
+                XCTAssertEqual(try Data(contentsOf: file), source)
+            }
+        }
+        XCTAssertEqual(try Data(contentsOf: canary), canaryBytes)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted(), ["canary.txt", "original.fb2"])
+    }
+
+    func testFb2UnsupportedDeclaredEncodingDoesNotFallBackToUtf8() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).fb2")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let source = Data("<?xml version='1.0' encoding='not-a-charset'?><FictionBook><body><p>text</p></body></FictionBook>".utf8)
+        try source.write(to: file)
+        XCTAssertThrowsError(try IosFb2PublicationFactory.read(fileURL: file, fallbackTitle: "Book"))
+        XCTAssertEqual(try Data(contentsOf: file), source)
     }
 
     func testLocatorProjectionMatchesV3GoldenSemantics() throws {

@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 @preconcurrency import ErmaoShared
 
 enum IosPublicationSecurityError: Error, Sendable {
@@ -247,7 +248,7 @@ enum IosPublicationSecurityPolicy {
         return String(data: data, encoding: encoding)
     }
 
-    private static func decode(_ data: Data) throws -> String {
+    static func decode(_ data: Data) throws -> String {
         let decoded: String?
         if data.starts(with: [0xEF, 0xBB, 0xBF]) {
             decoded = String(data: data.dropFirst(3), encoding: .utf8)
@@ -256,9 +257,18 @@ enum IosPublicationSecurityPolicy {
         } else if data.starts(with: [0xFE, 0xFF]) {
             decoded = String(data: data.dropFirst(2), encoding: .utf16BigEndian)
         } else {
-            let prefix = String(decoding: data.prefix(512), as: UTF8.self)
-            let encoding = declaredEncoding(in: prefix) ?? .utf8
-            decoded = String(data: data, encoding: encoding)
+            let signature = Array(data.prefix(4))
+            if signature.count == 4 && signature[0] == 0x3C && signature[1] == 0 && signature[3] == 0 {
+                decoded = String(data: data, encoding: .utf16LittleEndian)
+            } else if signature.count == 4 && signature[0] == 0 && signature[1] == 0x3C && signature[2] == 0 {
+                decoded = String(data: data, encoding: .utf16BigEndian)
+            } else {
+                let prefix = String(decoding: data.prefix(512), as: UTF8.self)
+                guard let encoding = declaredEncoding(in: prefix) else {
+                    throw IosPublicationSecurityError.invalidEncoding
+                }
+                decoded = String(data: data, encoding: encoding)
+            }
         }
         guard let decoded else {
             throw IosPublicationSecurityError.invalidEncoding
@@ -280,15 +290,10 @@ enum IosPublicationSecurityPolicy {
             .replacingOccurrences(of: #"[\"'].*$"#, with: "", options: .regularExpression)
             .lowercased()
             .replacingOccurrences(of: "_", with: "-")
-        switch normalized {
-        case nil, "utf-8", "utf8": return .utf8
-        case "utf-16", "utf16": return .utf16
-        case "utf-16le", "utf16le": return .utf16LittleEndian
-        case "utf-16be", "utf16be": return .utf16BigEndian
-        case "windows-1251", "cp1251": return .windowsCP1251
-        case "iso-8859-1", "latin1": return .isoLatin1
-        default: return nil
-        }
+        guard let normalized else { return .utf8 }
+        let encoding = CFStringConvertIANACharSetNameToEncoding(normalized as CFString)
+        guard encoding != kCFStringEncodingInvalidId else { return nil }
+        return String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(encoding))
     }
 
     private static func parse(_ parserMarkup: String) throws -> [LocatorElementProjection] {
@@ -303,7 +308,7 @@ enum IosPublicationSecurityPolicy {
         return delegate.bodyProjection
     }
 
-    private static func normalizeXmlDeclaration(_ markup: String) -> String {
+    static func normalizeXmlDeclaration(_ markup: String) -> String {
         guard let declaration = markup.range(
             of: #"(?i)<\?xml\b[^?]*\?>"#,
             options: .regularExpression

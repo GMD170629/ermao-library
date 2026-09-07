@@ -29,21 +29,17 @@ data class Fb2PublicationDocument(
 }
 
 class Fb2XmlPolicy {
-    /** An ISO-8859-1 byte-preserving probe, never a decoding of publication text. */
+    /** Platform-decoded XML text; entity preparation has the same owner as EPUB. */
     @Throws(IllegalArgumentException::class)
-    fun prepare(probe: String): String {
-        require(probe.isNotEmpty()) { "FB2 source is empty" }
-        if (Regex("<!DOCTYPE\\b|<!ENTITY\\b", RegexOption.IGNORE_CASE)
-            .containsMatchIn(probe.replace("\u0000", ""))
-        ) {
-            ReaderSafetyFacade().reject(ReaderSafetyRuleId.REFLOWABLE_REJECT_XML_ENTITY)
-        }
-        if (Regex("\\bxmlns:l\\s*=").containsMatchIn(probe) ||
+    fun prepareMarkup(markup: String, sourceByteCount: Long): String {
+        require(markup.isNotEmpty()) { "FB2 source is empty" }
+        val prepared = ReaderSafetyFacade().requirePreparedXmlMarkup(markup, sourceByteCount).parserMarkup
+        if (Regex("\\bxmlns:l\\s*=").containsMatchIn(prepared) ||
             !Regex("\\bxmlns:xlink\\s*=\\s*(['\"])http://www\\.w3\\.org/1999/xlink\\1")
-                .containsMatchIn(probe)
-        ) return probe
+                .containsMatchIn(prepared)
+        ) return prepared
         // The original file stays untouched. Only the documented legacy XLink attribute is repaired.
-        return Regex("(\\s)l:href(\\s*=)").replace(probe) { "${it.groupValues[1]}xlink:href${it.groupValues[2]}" }
+        return Regex("(\\s)l:href(\\s*=)").replace(prepared) { "${it.groupValues[1]}xlink:href${it.groupValues[2]}" }
     }
 }
 

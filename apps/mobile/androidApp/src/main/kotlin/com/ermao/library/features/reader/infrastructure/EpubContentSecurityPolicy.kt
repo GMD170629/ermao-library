@@ -296,11 +296,15 @@ internal object EpubContentSecurityPolicy {
         }
     }
 
-    private fun decodeXmlText(bytes: ByteArray): String? = try {
+    internal fun decodeXmlText(bytes: ByteArray): String? = try {
         when {
             bytes.startsWith(UTF_8_BOM) -> strictDecode(bytes, Charsets.UTF_8, UTF_8_BOM.size)
             bytes.startsWith(UTF_16_LE_BOM) -> strictDecode(bytes, Charsets.UTF_16LE, UTF_16_LE_BOM.size)
             bytes.startsWith(UTF_16_BE_BOM) -> strictDecode(bytes, Charsets.UTF_16BE, UTF_16_BE_BOM.size)
+            bytes.size >= 4 && bytes[0] == 0x3C.toByte() && bytes[1] == 0.toByte() && bytes[3] == 0.toByte() ->
+                strictDecode(bytes, Charsets.UTF_16LE, 0)
+            bytes.size >= 4 && bytes[0] == 0.toByte() && bytes[1] == 0x3C.toByte() && bytes[2] == 0.toByte() ->
+                strictDecode(bytes, Charsets.UTF_16BE, 0)
             else -> {
                 val prefix = bytes.copyOfRange(0, minOf(bytes.size, 512)).toString(Charsets.US_ASCII)
                 val encoding = XML_DECLARATION.find(prefix)

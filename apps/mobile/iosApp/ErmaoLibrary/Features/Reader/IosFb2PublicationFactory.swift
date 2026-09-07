@@ -73,12 +73,15 @@ struct IosFb2PublicationFactory: Sendable {
             ) {
                 throw IosReaderFailure.safety(failure)
             }
-            guard let probe = String(data: data, encoding: .isoLatin1),
-                  let prepared = try ErmaoShared.Fb2XmlPolicy().prepare(probe: probe).data(using: .isoLatin1)
-            else { throw IosFb2PublicationError.invalidXML }
+            let markup = try IosPublicationSecurityPolicy.decode(data)
+            let prepared = try ErmaoShared.Fb2XmlPolicy().prepareMarkup(
+                markup: markup,
+                sourceByteCount: Int64(data.count)
+            )
+            let normalizedUTF8 = Data(IosPublicationSecurityPolicy.normalizeXmlDeclaration(prepared).utf8)
             let decoder = ErmaoShared.Fb2PublicationDecoder()
             let delegate = IosFb2Parser(decoder: decoder)
-            let parser = XMLParser(data: prepared)
+            let parser = XMLParser(data: normalizedUTF8)
             parser.shouldProcessNamespaces = true
             parser.shouldReportNamespacePrefixes = true
             parser.shouldResolveExternalEntities = false

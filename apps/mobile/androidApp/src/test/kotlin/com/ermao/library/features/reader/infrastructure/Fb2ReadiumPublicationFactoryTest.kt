@@ -10,6 +10,7 @@ import java.nio.file.Files
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -50,11 +51,15 @@ class Fb2ReadiumPublicationFactoryTest {
 
     @Test
     fun decodesDeclaredLegacyEncodingUtf16AndBodyWithoutSections() {
-        val xml = """<?xml version="1.0" encoding="windows-1251"?><FictionBook>
+        val xml = """<?xml version="1.0" encoding="windows-1251"?>
+            <!DOCTYPE FictionBook [<!ENTITY bodyText "Текст">]><FictionBook>
             <description><title-info><book-title>Книга</book-title></title-info></description>
-            <body><p>Текст</p></body></FictionBook>""".trimIndent()
-        listOf(xml.toByteArray(Charset.forName("windows-1251")),
-            xml.replace("windows-1251", "UTF-16").toByteArray(Charsets.UTF_16)).forEach { bytes ->
+            <body><p>&bodyText;</p></body></FictionBook>""".trimIndent()
+        listOf(
+            Charset.forName("windows-1251"), Charsets.UTF_8, Charsets.UTF_16,
+            Charsets.UTF_16LE, Charsets.UTF_16BE,
+        ).forEach { charset ->
+            val bytes = xml.replace("windows-1251", charset.name()).toByteArray(charset)
             withSource(bytes) { file ->
                 val parsed = Fb2SourceParser.read(file, "Fallback")
                 assertEquals("Книга", parsed.document.title)
@@ -64,20 +69,65 @@ class Fb2ReadiumPublicationFactoryTest {
     }
 
     @Test
-    fun rejectsActualXmlErrorsAndUnsafeEntities() {
+    fun rejectsActualXmlErrors() {
         val examples = listOf(
             "<FictionBook><body><p>broken</body></FictionBook>",
-            "<!DOCTYPE FictionBook [<!ENTITY x SYSTEM 'file:///etc/passwd'>]><FictionBook><body><p>&x;</p></body></FictionBook>",
             "<FictionBook><body><section id='x'/><section id='x'/></body></FictionBook>",
             "<FictionBook><body><p l:href='#x'>unbound</p></body></FictionBook>",
         )
         examples.forEach { xml ->
-            withSource(xml.toByteArray()) { file ->
-                assertFailsWith<IllegalArgumentException> { Fb2SourceParser.read(file, "Fallback") }
+            listOf(Charsets.UTF_8, Charsets.UTF_16).forEach { charset ->
+                withSource(xml.toByteArray(charset)) { file ->
+                    assertFailsWith<IllegalArgumentException> { Fb2SourceParser.read(file, "Fallback") }
+                }
             }
         }
-        withSource(examples[1].toByteArray(Charsets.UTF_16)) { file ->
-            assertFailsWith<IllegalArgumentException> { Fb2SourceParser.read(file, "Fallback") }
+    }
+
+    @Test
+    fun safeDoctypePreservesUnicodeAndDeclaredCharsetText() {
+        listOf(
+            Triple("UTF-8", "中文正文", Charsets.UTF_8),
+            Triple("windows-1252", "Café €", Charset.forName("windows-1252")),
+        ).forEach { (encoding, text, charset) ->
+            val xml = "<?xml version='1.0' encoding='$encoding'?><!DOCTYPE FictionBook>" +
+                "<FictionBook><body><p>$text</p></body></FictionBook>"
+            withSource(xml.toByteArray(charset)) { file ->
+                assertTrue(Fb2SourceParser.read(file, "Book").document.resources.single().xhtml.contains("<p>$text</p>"))
+            }
+        }
+    }
+
+    @Test
+    fun externalEntityIsLiteralizedWithoutReadingCanaryOrChangingOriginal() {
+        val directory = Files.createTempDirectory("fb2-entity-canary").toFile()
+        val canaryText = "FB2_EXTERNAL_ENTITY_CANARY_CONTENT"
+        val canary = File(directory, "canary.txt").apply { writeText(canaryText) }
+        try {
+            listOf(Charsets.UTF_8, Charsets.UTF_16, Charsets.UTF_16LE, Charsets.UTF_16BE).forEach { charset ->
+                listOf("", "&x;").forEach { reference ->
+                    val xml = "<?xml version='1.0' encoding='${charset.name()}'?>" +
+                        "<!DOCTYPE FictionBook [<!ENTITY x SYSTEM '${canary.toURI()}'>]>" +
+                        "<FictionBook><body><p>中文${reference}END</p></body></FictionBook>"
+                    withSource(xml.toByteArray(charset)) { file ->
+                        val xhtml = Fb2SourceParser.read(file, "Book").document.resources.single().xhtml
+                        val expectedReference = if (reference.isEmpty()) "" else "&amp;x;"
+                        assertTrue(xhtml.contains("<p>中文${expectedReference}END</p>"))
+                        assertFalse(xhtml.contains(canaryText))
+                    }
+                }
+            }
+            assertEquals(canaryText, canary.readText())
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun unsupportedDeclaredEncodingFailsWithoutUtf8Fallback() {
+        val xml = "<?xml version='1.0' encoding='not-a-charset'?><FictionBook><body><p>text</p></body></FictionBook>"
+        withSource(xml.toByteArray()) { file ->
+            assertFailsWith<IllegalArgumentException> { Fb2SourceParser.read(file, "Book") }
         }
     }
 

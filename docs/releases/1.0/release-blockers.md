@@ -1,5 +1,9 @@
 # 1.0 发布阻塞项
 
+2026-09-07 READER-16候选定向回归通过，原界面仍待：复用ReaderSafetyFacade XML准备及平台已有解码器，清理声明后交给原解析器；保持原件、预算和外部解析禁用。Android FB2 factory 11/11、shared 9/9、EPUB安全相邻10/10通过；iOS适配与针对性测试已修改，ENV-02下未编译/未执行。未改契约或通用测试工具。新普通APK及DOCTYPE/entity原失败复测为下一项，READER-16保持OPEN，未冻结RC。
+
+2026-09-07 READER-16 OPEN（RG-03 REF-FB2 / 内容安全一致性）：当前普通Android对安全DOCTYPE及可隔离external entity均整本报“安全策略阻止活动内容”，已真机复现；唯一机器契约REFLOWABLE.PREPARE_XML要求清理依赖并保留正文。直接原因是Fb2XmlPolicy仍见DOCTYPE/ENTITY即拒绝，未接既有Facade清理。最小接线修复与定向回归进行中，保留预算/平台禁止外部解析，不改机器契约；原失败证据43b5ab8d/fb2-xml-policy-20260907，候选尚未验收。
+
 2026-09-07 REF-FB2图文/脚注及截断拒绝子项PASS：Android正常PNG/表格/嵌套正文、脚注跳转和返回、截断打开/重试拒绝及失败后正常图文相邻已实测，无新增产品缺陷或工具代码。证据ee5f3b15/fb2-complex-20260907及evidence首节；截断资源无进度，原件不变。下一项剩余FB2/EPUB安全异常的既有回归；原五项Chrome候选、其他平台/外部条件保持，未冻结RC。
 
 2026-09-07 REF-AZW3章内跨页锚点子项PASS：同一KF8章节的卷首与细目甲在真实分页后准确区分，普通Android目录根/叶对照已完成，无新增缺陷或工具修改。证据8b80eacf/kf8-anchors-20260907，具体范围及设备/服务收尾见evidence首节。下一项剩余可重排格式复杂内容；原五项Chrome候选、其他平台/异常与外部条件保持，未冻结RC。
