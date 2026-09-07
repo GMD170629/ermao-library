@@ -1,5 +1,11 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 SYNC-07 Android CLOSED（源码937b325b）：原PDF连续翻页场景复测，48次/0.25秒输入期间5/10秒真实正文变化且HTTP从r23到r43/r63、最终r71；最大观察确认变化间隔0.75秒。相同仪器用例在旧包第5秒无新capture失败，在新包真实SDK连续导航下第5/10秒SQLite新capture及时保存通过，原PDF页数/重建恢复相邻亦通过。直接原因及最小修复见下条，不再扩验此缺陷。
+
+受影响普通入口相邻：CBZ连续操作HTTP r10→5秒r37→10秒r65→最终r76；EPUB连续切章r21→r28→r35→r37。最大观察确认变化间隔分别0.781/1.0秒。三者最终完整本地/服务端position及capturedAt一致、confirmedRevision对应且pending空；EPUB正常关闭返回资源页。PDF/漫画/EPUB实际正文截图已查看，三个原件逐字节保持。漫画快速输入经过动画访问多个页面，不声称一次点击必定只变一页。PDF活动写入中24次设备副本不稳定未解析，普通路径只使用最终稳定副本；5/10秒本地落盘证据由上述真实SQLite仪器用例提供，不混称同次普通UI采样。
+
+完整证据：`artifacts/releases/1.0/937b325b/reader-capture-windows-20260907/result.json`、rapid/adjacent-verification、三组observations及final设备库、originals和cleanup；定向RED/GREEN及构建日志在`99d3e63b/reader-capture-windows-20260907/`。普通开发APK SHA256 `613466d129070fec99a77562c570c4bbeabd6d16e4de7e72bc4d59e7e94ce083`已从设备读取匹配937b325b构建，API源码hash复核不变。两次相邻前置登录遇有界API到期，均发生于输入前，记录NOT_RUN环境观察，核实原进程终止后才重启；最终三服务均停止，清27个专用设备文件/reverse、强停releasecheck，恢复原方向设置，保留测试数据及用户15改动。观察间隔不等于内部capture到ACK耗时；本轮不计iOS、Chrome或最终冻结RC通过。下一项iOS同类延后保存风险的最小修正评估，ENV-02实际编译/设备阻塞保持。
+
 2026-09-07 SYNC-07候选定向构建PASS：三个Android位置采集器改为串行collect调用现有persist，删除500ms debounce，保留去重/flush/存储/同步owner。新增真实PDF回归在原已安装ebb4e3ea（hash已从设备读取核对）于第5秒明确FAIL：No new capture at checkpoint 1；SDK连续变化及时间前置先通过，非仅调用计数。compile.log/build.log均PASS；instrument-red.log保留。候选普通包及同一仪器测试即将复验，当前仍OPEN；辅助修改边界仍按上条记录，不扩展。
 
 2026-09-07 SYNC-07 OPEN（RG-04/POS-02连续捕获）：普通Android PDF在12秒内48次连续前/后翻页，5/10秒截图正文确实变化，但29次稳定设备库及独立HTTP仍为原第35页/r22，超过已冻结5秒保存上限。最终操作回到35页，不宣称最终数据丢失；缺陷是持续变化期间没有落盘。证据`artifacts/releases/1.0/99d3e63b/reader-capture-windows-20260907/`含rapid-before、rapid-observations、每次稳定db、rapid-5/10图及red-result。直接原因三个Android位置流collectLatest在每次变化后重新delay500；候选改为串行collect即时调用原去重persist，复用既有LocalFirstReaderPositionStore/SQLite及单飞同步队列，保留flush、安全检查和其他collectLatest/滚动等待，无新定时器/框架。候选编译与原场景复验进行中，不能关闭；iOS三个schedule持久化同样存在500ms延后代码线索，仅静态风险，待核对，不计已复现。

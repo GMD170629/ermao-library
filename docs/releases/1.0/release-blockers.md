@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-07 SYNC-07 Android CLOSED：937b325b原PDF持续翻页的5/10秒新位置保存及服务端持续确认通过，受影响EPUB/漫画普通连续操作、最终完整持久状态与PDF重建恢复相邻通过。详见evidence首条及937b325b/reader-capture-windows-20260907/result.json，停止本缺陷Android扩验。iOS同类代码仍为待处理静态风险，ENV-02无法编译/设备验收；Chrome五项原UI及其他矩阵缺项、容器环境、正式包暂缓与最终同RC要求保持。当前R2、RC未冻结。
+
 2026-09-07 SYNC-07 OPEN：Android PDF连续翻页12秒实际正文变化而本地/远端位置始终35/r22，500ms debounce持续重置导致保存超5秒。最小串行保存候选已修改、验证中；EPUB/comic直接同类消费同步处理，iOS仅静态同类风险。证据99d3e63b/reader-capture-windows-20260907，详见evidence。之前已完成早退/冷恢复不抵销本项；无阈值变更。
 
 2026-09-07 Android CBZ待提交恢复及早退必测子项补齐，无新增产品缺陷或工具修改；与本轮PDF合计完成两个引擎的这两类缺口。证据见0de4d4fb/comic-pending-cold-20260907/result.json及evidence。下一项POS-02连续捕获窗口既有证据/入口核对及必要补验；已关闭路径不再扩验。Chrome五项原UI、iOS/容器外部条件、正式包暂缓及最终同冻结RC验收仍未完成，R2保持。
