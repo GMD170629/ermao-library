@@ -1,5 +1,7 @@
 # 1.0 发布验收矩阵
 
+2026-09-07增量：COM-CBR/COM-RAR真实加密和截断导入失败隔离、正常同级6页Android首图子项PASS；IMPORT-04普通详情误报无权限已修复且真机原/相邻闭环。仅此范围，不代替原生异常archive直接打开或iOS；证据da46248a/rar-exceptions-20260907，详见evidence。
+
 2026-09-07 PDF-X页数边界增量：Android真实20000页首末及末页完整确认PASS；ef29559b普通20001页已下载打开/重试正确PDF_PAGE_LIMIT、无v5进度，READER-12错误映射已CLOSED，详见evidence。合成空白内页不作真实复杂巨书性能，未外推Web/iOS或PDF全部异常；下一项漫画异常，未冻结RC。
 
 2026-09-07 RG-03 AUD-X / RG-04 POS-01/07显示缺陷回归补齐：SYNC-04新Android冷首页及详情正确采用服务端C约16%（不再被已确认旧N约57%覆盖），普通首页实际恢复5000→5015ms/969ms；AUDIO-14 Chrome真实离线拖动和重连均保持1条音轨/无Failed to fetch，定向Chrome E2E实际PASS。两缺陷CLOSED，证据见b72b3d83/sync04-audio14-regression-20260907及release-evidence；RISK-08后续已确证并按SYNC-05在e8c4b555关闭，实际定向真机证据见evidence，不外推其他引擎/iOS/最终RC。
@@ -141,7 +143,7 @@ R1 / DEC-05：用户批准 1.0 不支持第三方进度同步，OPDS-04 原互�
 | INI-03 / RG-02 | P1；INI-01已完成 | 记录账号/书库/任务/已确认位置，受控重启当前版本服务，再登录与重开 | 新数据持久化，无再次初始化或已确认数据丢失 | artifacts/releases/1.0/fd26b7aa/rg02-fresh-api-boundaries-20260907/ | PARTIAL：1e223e5e真实API重启后owner/library身份保持、setup仍关闭；既有M4B进度服务重启见POS-10；任务恢复及最终同RC仍待 |
 | IMP-01 / RG-02 | P2；FLAT、VOLUMES 各独立根 | 按 UI 分别建库、扫描根文件与含子目录书籍；对照预期清单记录目录和独立资源身份 | 两正式模式 Book/Node/Resource/Asset/页轨计数与层级正确 | E/organization-live/imp01-ui-1788695317426/；database-readback-complete.json | 正常两模式UI+同库持久化/拓扑子项PASS；命令超期/HTTPbody未存见证据，不计最终RC |
 | IMP-02 / RG-02 | P2；中英名、空格、特殊字符、多层、图片/音频目录 | 导入后进入每层，切换排序/分页，打开图片目录与多轨音频 | 不乱码、不漏资源、不用资源数决定页面类型；正常播放/阅读 | 66446a45/imp02-special-paths-20260907/ | PARTIAL：Chrome特殊路径/多层TXT、24本排序分页、图片目录解码及两轨MP3入口通过；图片目录标题IMPORT-02候选待普通UI复验；MEDIA-02封面500已CLOSED（c4f45456实际冷缓存HTTP回归）；其他平台/复杂布局另计 |
-| IMP-03 / RG-02 | P2；合法+损坏/DRM/无权文件混合 | 隔离根扫描；使外部元数据不可达；核对任务错误与同级合法资源 | 错误隔离可解释，基础入库/已可读内容不被拖死；源文件不变 | e8c4b555/rg02-mixed-import-20260907/cbz-run/；详见evidence | PARTIAL：真实损坏CBZ失败隔离、合法同级READY、原件不变及修复重扫PASS；DRM/权限/外部元数据及阅读层仍待 |
+| IMP-03 / RG-02 | P2；合法+损坏/DRM/无权文件混合 | 隔离根扫描；使外部元数据不可达；核对任务错误与同级合法资源 | 错误隔离可解释，基础入库/已可读内容不被拖死；源文件不变 | e8c4b555/rg02-mixed-import-20260907/cbz-run/；详见evidence | PARTIAL：真实损坏CBZ失败隔离、合法同级READY、原件不变及修复重扫PASS；真实RAR5正文/头加密和256B截断失败隔离、正常同级6页READY/Android首图PASS，IMPORT-04详情误报已关闭；其他DRM/权限/外部元数据及阅读层仍待 |
 | IMP-04 / RG-02 | P2；IMP-01源保持不变 | 记录文件hash/拓扑/进度→再次手动扫描→对账 | 不重复不丢失，未变文件进度保留 | local-load/measurement-20260906-065525/rescan-integrity.json；详见evidence最新记录 | FLAT历史原件/拓扑/进度保留与66446a45真实VOLUMES手动API重扫子项PASS：24本、33节点、27原件及完整TXT/MP3进度不变；普通UI看任务完成，非UI发起。最终同RC待，不重跑大库 |
 | IMP-05 / RG-02 | P2；仍有真实待处理任务 | 扫描活跃时受控服务重启→查看队列→继续导入/安全重扫 | 任务可恢复、有进展、不永久卡住；不要求新暂停接口 | e8c4b555/rg02-worker-live-restart-20260907/；详见evidence | PARTIAL：真实RUNNING中断→新Worker标记WORKER_INTERRUPTED→同库安全重扫512资源READY通过；HTTP/UI入口及最终同RC仍待 |
 | IMP-06 / RG-02 | P2；专用可写/只读根，测试文件 | Web 上传→文件详情；使用已有增删改入口；坏文件修正后资源重扫/继续导入；分别观察自动扫描和手动扫描对缺失项处理 | 仅授权显式写操作变动测试源；自动保留缺失、手动成功完成后按既有语义清理拓扑；失败可重试 | artifacts/releases/1.0/e8c4b555/rg02-source-rescan-20260907/；rg02-mixed-import-20260907/cbz-run/ | PARTIAL：真实Worker自动保留、缺失失败不误删、恢复/损坏CBZ修复同身份重扫、手动清理PASS；上传UI/只读权限及同RC仍待 |

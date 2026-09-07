@@ -1,5 +1,9 @@
 # 1.0 发布阻塞项
 
+2026-09-07 IMPORT-04 CLOSED：df17c4ce在新隔离开发包原截断详情、加密详情相邻及正常RAR首图实际通过；只修授权Root未绑定资源时的错误导航，未伪造可读资源、未放宽缺失/隐藏资源检查。证据da46248a/rar-exceptions-20260907。加密/截断正常导入失败隔离子项已补，其他矩阵/原五项Chrome候选/外部条件保持；未冻结RC。
+
+RISK-09：原生归档加密/截断错误分类静态疑点，见evidence；未复现，不计新产品FAIL，下一步现有映射测试核验。
+
 2026-09-07 IMPORT-04 OPEN（RG-02/IMP-03、RG-03/COM-RAR-X）：真实截断RAR在Android普通首页点击后误报作品不存在/无权限，实际book/contents均200、FILE未绑定可读resource。LoadBookContent把无阅读目标误判inaccessible；最小候选保留授权Root内容页，不伪造资源/目录身份。现有ContentModelsTest新增原反例，17项1 FAIL，候选原场景待验。证据da46248a/rar-exceptions-20260907；加密/截断导入已按既有契约隔离，正常RAR6页READY。首次进程PATH漏WinRAR造成正常/截断环境失败，原日志保留，配置补齐后同库重扫，不计新产品缺陷。
 
 2026-09-07 READER-13/14均CLOSED：漫画坏页后错误卡残留、单/双页切换索引越界分别最小修复且新包原路径及必要相邻通过，详见evidence。CRC/路径隔离必测子项已补；停止上述缺陷扩验。下一项剩余漫画加密/截断或容量边界，原五项Chrome候选/其他矩阵与外部条件保持，未冻结RC。

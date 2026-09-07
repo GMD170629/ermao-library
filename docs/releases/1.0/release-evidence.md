@@ -1,5 +1,13 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 IMPORT-04 CLOSED：df17c4ce在新隔离开发包原截断详情、加密详情相邻及正常RAR首图实际通过；只修授权Root未绑定资源时的错误导航，未伪造可读资源、未放宽缺失/隐藏资源检查。证据da46248a/rar-exceptions-20260907。加密/截断正常导入失败隔离子项已补，其他矩阵/原五项Chrome候选/外部条件保持；未冻结RC。
+
+新包SHA-256 6a7976d98697851d470bc2124f6f40b1fedd6360353d9431aa5503e32ffd95be，apksigner与安装base.apk一致、保留数据安装；fixed-truncated.xml/png实际详情不再报无权限，fixed-password.xml相邻同样正确，两个开始阅读父按钮enabled=false。沿用既有“当前媒介没有可阅读的资源”和空内容展示，未声称移动详情已展示具体密码/损坏原因；具体原因实证来自configured/tasks.json的普通API。正常同级RAR6页READY，新包control-detail/open显示原001兔子图，HTTP首图hash等于原件。原普通截图truncated与content-red 17项1FAIL保留，候选content-green同17项PASS及Android编译/增量打包通过。没有通用测试工具改动；只补实际缺陷定向测试，停止扩验，iOS未执行。
+
+COM-CBR-X/COM-RAR-X与IMP-03：既有WinRAR7.13生成两份真实RAR5正文加密/头加密，UnRAR以专用样本密码校验成功、rarfile确认needsPassword；原正常244345B RAR截至256B、UnRAR证实失败。样本与独立hash见samples.json、reference.log；正常Worker同库重扫后两加密明确需要密码、截断无完整页面，正常对照可读，失败资源公开列表为空且progress GET404，未冒充原生归档引擎已打开失败输入。原PATH遗漏导致解压后端不可用的第一轮保留，配置仅补当前进程PATH后终态改变；样本准备首次UnRAR本地编码解码异常改为保存原始bytes，未改产品或依赖。495 API源及四输入hash保持、无API5xx，checks/final-http为依据。两个API/Worker wrapper均exit0且shutdown全部stopped，App/18084转发与本轮设备临时文件清理；原工作区15改动保留。Git首次LFS网络EOF后重试推送成功。
+
+下一可执行项RISK-09（静态待验证）：当前发布工作区reader/public.kt的readerSafetyComicArchiveDetectorFailure将ARCHIVE_ENCRYPTED及截断归入结构失败，可能与能力/完整性分类不符。只读子任务部分原生引用误指原工作区，未采用其平台结论；主已在发布工作区核实上述映射存在。尚非原生运行复现，不据本轮导入隔离PASS关闭或直接改安全契约；后续复用既有错误映射/安全测试最小核验。漫画容量边界及其余矩阵仍待。
+
 2026-09-07 IMPORT-04 OPEN（RG-02/IMP-03、RG-03/COM-RAR-X）：真实截断RAR在Android普通首页点击后误报作品不存在/无权限，实际book/contents均200、FILE未绑定可读resource。LoadBookContent把无阅读目标误判inaccessible；最小候选保留授权Root内容页，不伪造资源/目录身份。现有ContentModelsTest新增原反例，17项1 FAIL，候选原场景待验。证据da46248a/rar-exceptions-20260907；加密/截断导入已按既有契约隔离，正常RAR6页READY。首次进程PATH漏WinRAR造成正常/截断环境失败，原日志保留，配置补齐后同库重扫，不计新产品缺陷。
 
 2026-09-07 READER-14 CLOSED：79082997已提交推送，新隔离开发包SHA-256 6863b2e57d302cf35ebff9cdd8d301322bf812aeeb7c06e245c3ec3bfadae94f，签名/package/install-r及设备base.apk一致。原末页普通设置单页→双页→单页完整通过，XML父节点checked状态依次正确、当前单页偏好恢复，末页003原图保持；切换后前一坏页仍报错、回末页错误清除，相邻READER-13未回退。完整GET r12pages/2及3/3，原件不变。证据fe90d7b5/comic-exceptions-20260907/layout-settings-full/double/single/switched/bad/after-bad XML/PNG、layout-logcat、final-confirmed-assets、checks/result与build/signature/installed-apk。旧final-logcat的真实FATAL保留，新候选窗口无FATAL/ANR；未通过吞索引越界、空页或缩减双页能力通过。只在实际分组变更重建现有分页器，未新框架；本轮局部编译+原真机/必要相邻实测，没有声称全量自动回归。READER-13/14均停止扩验。
