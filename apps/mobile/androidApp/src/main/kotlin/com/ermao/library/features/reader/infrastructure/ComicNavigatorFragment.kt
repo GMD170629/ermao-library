@@ -9,6 +9,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.rememberScrollable2DState
+import androidx.compose.foundation.gestures.scrollable2D
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -50,9 +52,6 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -393,23 +392,18 @@ internal class ComicNavigatorFragment : Fragment() {
                 totalScale = comicTotalScaleAfterGesture(totalScale, zoomChange)
                 panBy(panChange)
             }
-            val overflowPan = remember(viewportWidthPx, viewportHeightPx, plan.zoom, plan.imageVariant) {
-                object : NestedScrollConnection {
-                    override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                        if (totalScale <= 1.0001f) return Offset.Zero
-                        // At an image edge, finish the existing zoomed-viewport pan.
-                        // Scroll deltas are local to the scaled pager, translation is not.
-                        return panBy(available * totalScale) / totalScale
-                    }
-                }
+            val viewportPan = rememberScrollable2DState { delta ->
+                // This scroller is inside the scaled layer, like its image children.
+                panBy(delta * totalScale) / totalScale
             }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .nestedScroll(overflowPan)
                     .transformable(
                         state = transformableState,
-                        canPan = { totalScale > 1.0001f },
+                        // Let native nested scrolling arbitrate one-finger movement;
+                        // transformable would take it before an overflowing image.
+                        canPan = { false },
                         lockRotationOnZoomPan = true,
                     ),
             ) {
@@ -422,7 +416,8 @@ internal class ComicNavigatorFragment : Fragment() {
                             scaleY = totalScale
                             this.translationX = translationX
                             this.translationY = translationY
-                        },
+                        }
+                        .scrollable2D(viewportPan, enabled = totalScale > 1.0001f),
                     // Once enlarged, one-finger movement pans the spread instead
                     // of leaking through to page navigation.
                     userScrollEnabled = preferences.interaction.swipePageTurn && totalScale <= 1.0001f,

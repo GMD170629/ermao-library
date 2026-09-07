@@ -246,7 +246,15 @@ class ReaderControlsVisualInstrumentedTest {
                     assertTrue("Height compressed END into the viewport", comicColorBounds(Color.BLUE) == null)
                     dragComicToEdge(Color.BLUE, horizontal = true, forward = true)
                     assertComicPage(scenario, 1)
-                    dragComicToEdge(Color.RED, horizontal = true, forward = false)
+                    try {
+                        dragComicToEdge(Color.RED, horizontal = true, forward = false)
+                    } catch (failure: AssertionError) {
+                        captureCurrent(
+                            CaptureRequest("comic-geometry-failure.png", ReaderPanelCapture.PassiveStatus, ReaderTheme.Warm),
+                            checkNotNull(context.getExternalFilesDir("reader-controls")),
+                        )
+                        throw AssertionError("Height return page=${comicPageIndex(scenario)}, red=${comicColorBounds(Color.RED)}", failure)
+                    }
                     assertComicPage(scenario, 1)
 
                     // An ordinary image still fits, and its horizontal swipe turns a page.
@@ -326,14 +334,32 @@ class ReaderControlsVisualInstrumentedTest {
         repeat(32) {
             val marker = comicColorBounds(color)
             val viewport = comicViewportSize()
+            instrumentation.sendStatus(0, android.os.Bundle().apply {
+                val axis = if (horizontal) androidx.compose.ui.semantics.SemanticsProperties.HorizontalScrollAxisRange
+                    else androidx.compose.ui.semantics.SemanticsProperties.VerticalScrollAxisRange
+                val ranges = composeRule.onAllNodes(
+                    androidx.compose.ui.test.SemanticsMatcher.keyIsDefined(axis),
+                    useUnmergedTree = true,
+                ).fetchSemanticsNodes().map { node ->
+                    val range = node.config[axis]
+                    "${range.value()}/${range.maxValue()}"
+                }
+                putString("geometry", "horizontal=$horizontal edge=$color step=$it marker=$marker viewport=$viewport ranges=$ranges")
+            })
             if (marker != null && (if (horizontal) marker.width() else marker.height()) >=
                 minOf(viewport.first, viewport.second) - 4
             ) return
             composeRule.onNodeWithTag("comic-viewport").performTouchInput {
                 if (horizontal) {
-                    if (forward) swipeLeft(durationMillis = 1000) else swipeRight(durationMillis = 1000)
+                    // Start inside the image, not at the viewport's outermost
+                    // pixel, which may be a rounded layout gutter owned by Pager.
+                    if (forward) swipeLeft(startX = right * 0.8f, endX = right * 0.2f, durationMillis = 1000)
+                    else swipeRight(startX = right * 0.2f, endX = right * 0.8f, durationMillis = 1000)
                 } else {
-                    if (forward) swipeUp(durationMillis = 1000) else swipeDown(durationMillis = 1000)
+                    // Leave overlapping viewports so continuous scrolling cannot
+                    // jump entirely past the checkpoint between pixel samples.
+                    if (forward) swipeUp(startY = bottom * 0.7f, endY = bottom * 0.3f, durationMillis = 1000)
+                    else swipeDown(startY = bottom * 0.3f, endY = bottom * 0.7f, durationMillis = 1000)
                 }
             }
             composeRule.waitForIdle()
@@ -356,7 +382,9 @@ class ReaderControlsVisualInstrumentedTest {
                 // not edges against the image boundary, biasing the measured aspect.
                 if (kotlin.math.abs(Color.red(pixel) - Color.red(color)) < 128 &&
                     kotlin.math.abs(Color.green(pixel) - Color.green(color)) < 128 &&
-                    kotlin.math.abs(Color.blue(pixel) - Color.blue(color)) < 128
+                    kotlin.math.abs(Color.blue(pixel) - Color.blue(color)) < 128 &&
+                    maxOf(Color.red(pixel), Color.green(pixel), Color.blue(pixel)) -
+                    minOf(Color.red(pixel), Color.green(pixel), Color.blue(pixel)) > 128
                 ) {
                     val x = index % bitmap.width
                     val y = index / bitmap.width
