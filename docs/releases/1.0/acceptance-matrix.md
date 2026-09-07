@@ -1,5 +1,7 @@
 # 1.0 发布验收矩阵
 
+2026-09-07 RG-03 AUD-X / RG-04 POS-01/07显示缺陷回归补齐：SYNC-04新Android冷首页及详情正确采用服务端C约16%（不再被已确认旧N约57%覆盖），普通首页实际恢复5000→5015ms/969ms；AUDIO-14 Chrome真实离线拖动和重连均保持1条音轨/无Failed to fetch，定向Chrome E2E实际PASS。两缺陷CLOSED，证据见b72b3d83/sync04-audio14-regression-20260907及release-evidence；RISK-08并发返回边界仍待验证，不外推其他引擎/iOS/最终RC。
+
 2026-09-07 POS-07真实首次迟到子项PASS（9e017394业务源码同f778eecf）：Chrome离线C=5000ms网络发送失败，Android确认N=17298ms/r8后强停；只读ORM确认C尚无receipt，Chrome重连原body首次到达成为C/r9，旧8条receipt逐字段不变且仅新增C，独立GET完整相同。Android随后普通继续实际恢复5015ms/968ms。另发现SYNC-04首页显示旧57%而API16.6295%，以及AUDIO-14 Chrome音轨列表重连后仍Failed to fetch/0轨；两问题未关闭，不将正常恢复外推为显示通过或整体POS-07。双端受控并发事务排列、其他引擎/iOS/最终RC保持未验。
 
 2026-09-07 POS-05增量：afe19dca Chrome MP3真实M提交丢ACK→Android新N→Chrome完全相同M重试子项PASS，receipt仍M/r4、当前完整快照N/r7、无新增revision；同M异payload409且N不变。Chrome保留暂停5s并提示远端34%，没有自动seek。详见release-evidence首节；未直接检查IDB或测5秒时限，不覆盖其余引擎/原生方向/iOS或同冻结RC。

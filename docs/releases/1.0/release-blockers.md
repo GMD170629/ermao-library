@@ -1,5 +1,9 @@
 # 1.0 发布阻塞项
 
+2026-09-07当前覆盖：SYNC-04、AUDIO-14均CLOSED，b72b3d83新隔离库真实Chrome离线C→Android N→Chrome重连→Android冷首页/详情原场景已通过，普通恢复5015ms/969ms相邻和新增Chrome定向E2E亦PASS，详见release-evidence首节。下文两项OPEN及“下一项原回归”为历史状态。本轮无新增确证产品缺陷、无测试工具扩展；停止已关闭两项的完善。
+
+下一可执行项RISK-08仍为静态风险：独立审查明确Home取消异常被内层吞掉、Detail持久查询后缺generation守卫，但尚无受控调度复现，不能以冷启动PASS关闭，也不能直接宣称持久位置损坏。已有服务/设备/浏览器清理完成，原用户15项改动保留。ENV-11/12、iOS/容器与正式包暂缓继续分项保留；未冻结RC、未整体GO。
+
 RISK-08 / RG-04待验证：SYNC-04独立审查指出Home/Detail持久查询后的generation/取消与失败边界未覆盖，属于静态风险，尚非已复现产品FAIL；需针对旧查询返回和查询取消做适当验证，不能由冷启动PASS直接关闭。AUDIO-14完整Web静态/单元检查已通过，实际新E2E与普通UI待验，两项显示缺陷仍未关单。
 
 SYNC-04候选已有主diff审查、host/lint及真实隔离SQLite两项PASS，普通新包原首页场景尚NOT_RUN，仍OPEN；不以自动结果关单。AUDIO-14正在稳定reading-units请求标识，独立原流程回归待执行。当前无测试服务，设备仪器已结束并强停；最新可恢复候选及接入边界见release-evidence首节。

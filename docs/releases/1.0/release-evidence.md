@@ -1,5 +1,13 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 SYNC-04 / AUDIO-14 CLOSED：b72b3d83生产Web/API/Worker与61498daa普通Android独立开发包完成同一次真实MP3原场景回归；两提交之间只有Web修复/文档，Android源码一致，仍非冻结RC。Chrome普通播放后滑块确认13000ms/r8，真实断网再拖至C=5000ms（d44af0f8-987e-448f-9574-ae1694bc445e，捕获1788739148111），实际发送ERR_INTERNET_DISCONNECTED；详情保持17%/0:05/1条音轨，无Failed to fetch，离线窗口无reading-units重请求。Android普通首页43%继续实际13009ms/1031ms，播放暂停确认N=17011ms/r11后强停。只读SQLAlchemy ORM确认11条receipt且C尚不存在；Chrome重连原body首次提交，实际ACK接受C/r12，独立完整GET一致，旧11条receipt逐字段不变且仅新增C。Android冷启动首页及最近阅读均16%，普通详情亦16%，与API16.6295%一致；返回首页普通继续实际5015ms/969ms，恢复偏差15ms。Chrome重连后仍1轨、暂停5s且无音轨请求/原始错误。原SYNC-04旧57%和AUDIO-14旧0轨失败证据保留，不由协议通过抵销展示验收。
+
+证据根`artifacts/releases/1.0/b72b3d83/sync04-audio14-regression-20260907/`：fixture manifest/生产构建日志/源码索引、baseline/N/C完整GET、C前后ORM、Android冷首页/详情XML及两次首次Playing、installed-development-hash、integrity-and-cleanup；`cdp-and-ui-observation-transcription.json`明确是实际CUA输出转录，非原始HAR。早期播放网络历史截断，不宣称完整请求总数；离线与重连增量窗口均未截断且无更多页，支持这两个窗口无reading-units请求。实际ACK人工短暂停留不用于5秒确认期限，恢复后的新capture及收尾关闭播放器不混入C/r12断言。新增现有resource-details.spec.ts定向Chrome用例实际PASS（764ms，runner退出0），此前NOT_RUN由此覆盖；保留原有资源用例断言，未新增测试工具或配置。
+
+收尾：fixture正常退出0/shutdown=stopped，3105/18084释放；Chrome恢复网络、移除拦截、正常注销至登录页后关闭自有tab；Android强停独立包、移除自有reverse/XML。929项源码/原件hash一致，安装实测APK SHA-256=d36da7bd99e632e6607ebf66d46292df46760c8d312abc18391af9787dfce58d，开发签名并非正式交付。发布工作树恢复干净，原develop的15项用户改动不变，API无5xx。停止这两个已闭环缺陷的工具完善。
+
+当前下一项RISK-08：独立Boyle已确认真实IO挂起边界与Home吞取消、Detail查询后缺generation守卫的静态链路，但未执行受控调度，仍不得标已复现FAIL或关闭。仅验证旧查询/取消/失败的具体后果，不扩测试框架；既有ENV-11/12、iOS/容器及正式产物暂缓分项保留，仍R2、未冻结RC/未整体GO。子代理已关闭，无运行中fixture/设备测试。
+
 2026-09-07 AUDIO-14候选：BookDetailPage的reading-units effect改为依赖实际bookId/resourceId/pageSize/page标量，进度展示对象引用变化不再重取静态目录；取消与原错误处理保持。新增原resource-details.spec内针对性断言复用mock owner和readerV5ProgressKey，音频wire格式保持AUDIO/mime audio/mpeg。主复核实际两文件差异，纠正测试最初的MP3 wire值和重复key codec后，完整Web lint/typecheck/483单元/i18n通过；首次pretest因Node子进程命中Windows python3别名exit9009，未运行单测，使用既有PYTHON_EXECUTABLE配置指向现有venv后原检查通过，原失败日志保留。证据`artifacts/releases/1.0/61498daa/audio14-stable-reading-units-20260907/`。此处新E2E和普通原场景仍待执行，不冒充已关单或扩为任意详情失败的通用自动重试。
 
 SYNC-04独立James四文件复核：61498daa冷启动pending-only路径未见静态阻塞，原schema/key/ACK与专用数据库保护保持，实际普通UI仍待。另保留RISK-08待验证边界：Detail在持久查询返回后未再次检查generation，旧查询可能越过较新load；Home/Detail的旧runCatching会把查询失败/取消转为空集合。此次不把这些静态推断当作已复现缺陷或无证据关闭，也不由冷启动子项通过覆盖并发/失败路径。新开发UI APK已构建安装，SHA-256=d36da7bd99e632e6607ebf66d46292df46760c8d312abc18391af9787dfce58d，来源61498daa，独立包与开发签名；同轮Chrome/Android实际复验继续。
