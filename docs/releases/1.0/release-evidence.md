@@ -1,5 +1,11 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 SYNC-07候选定向构建PASS：三个Android位置采集器改为串行collect调用现有persist，删除500ms debounce，保留去重/flush/存储/同步owner。新增真实PDF回归在原已安装ebb4e3ea（hash已从设备读取核对）于第5秒明确FAIL：No new capture at checkpoint 1；SDK连续变化及时间前置先通过，非仅调用计数。compile.log/build.log均PASS；instrument-red.log保留。候选普通包及同一仪器测试即将复验，当前仍OPEN；辅助修改边界仍按上条记录，不扩展。
+
+2026-09-07 SYNC-07 OPEN（RG-04/POS-02连续捕获）：普通Android PDF在12秒内48次连续前/后翻页，5/10秒截图正文确实变化，但29次稳定设备库及独立HTTP仍为原第35页/r22，超过已冻结5秒保存上限。最终操作回到35页，不宣称最终数据丢失；缺陷是持续变化期间没有落盘。证据`artifacts/releases/1.0/99d3e63b/reader-capture-windows-20260907/`含rapid-before、rapid-observations、每次稳定db、rapid-5/10图及red-result。直接原因三个Android位置流collectLatest在每次变化后重新delay500；候选改为串行collect即时调用原去重persist，复用既有LocalFirstReaderPositionStore/SQLite及单飞同步队列，保留flush、安全检查和其他collectLatest/滚动等待，无新定时器/框架。候选编译与原场景复验进行中，不能关闭；iOS三个schedule持久化同样存在500ms延后代码线索，仅静态风险，待核对，不计已复现。
+
+针对性回归复用现有ReaderControlsVisualInstrumentedTest的真实PDF生成、ActivityScenario及ReaderV5TestSupport；原样本单页不能触发连续页变化，仅给原builder增加保留默认行为的页数参数供该回归使用。服务于SYNC-07/POS-02，停止条件为原连续翻页失败、5/10秒新capture和受影响相邻真实验证通过，不扩通用工具。Chrome既有EPUB证据只覆盖POS-04重连确认，release-live的5/10秒检查只作用于audio，不能算电子阅读器POS-02通过。旧服务3527已exit0，设备方向/reverse/8个专用文件清理，数据保留。
+
 2026-09-07 POS-02/03/04 Android CBZ增量PASS（API源码0de4d4fb、普通开发APK ebb4e3ea，未改业务/工具）：普通显式下载六页CBZ，在线第5页r8且pending空；停API后普通滑到第4页，服务器仍5/r8。完整local+sync在强停前后及离线冷开后完全一致；普通“我的→下载中心→已下载资源”实际恢复第4页Alice立像，cold-open与offline-b图已查看。首次可读观测8.703s含查询失败/ADB开销，不计引擎内部耗时。
 
 恢复服务后GET仍r8；系统最近任务→返回触发既有onResume，0.875s内观察完整r9（从发出任务切换计，含0.7s后台停留）。原pending 67d5d540…唯一receipt r9，既有owner计算完整载荷hash相等；客户端/捕获时间/完整位置与原pending及本地一致、confirmed9/pending空。随后普通下一页5截图于1.281s取得并已查看，1.391s关闭并读回完整r10；返回已下载资源页，设备confirmed10/pending空且完整位置/capturedAt一致。证据`artifacts/releases/1.0/0de4d4fb/comic-pending-cold-20260907/`含result、verification、稳定设备库、reconnect-observation和early-exit-timing；不宣称纯服务恢复自动重试时限、连续5/10秒捕获或另端UI/iOS/最终RC。

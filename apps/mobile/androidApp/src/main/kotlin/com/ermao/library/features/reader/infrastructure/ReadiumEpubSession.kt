@@ -57,6 +57,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -454,7 +455,7 @@ internal class ReadiumEpubSession(
             }
         }
         locationJob = scope.launch {
-            checkNotNull(navigator).currentLocator.collectLatest { locator ->
+            checkNotNull(navigator).currentLocator.collect { locator ->
                 lastObservedLocator = locator
                 updateCurrentNavigationEntry(locator)
                 val mapped = locatorMapper.toDomain(locator)
@@ -463,18 +464,13 @@ internal class ReadiumEpubSession(
                 _presentationProgress.value = eventReport.presentation.totalProgression
                 if (suppressNextPreferenceLocation) {
                     suppressNextPreferenceLocation = false
-                    return@collectLatest
+                    return@collect
                 }
                 if (_resumeNotice.value != null) {
                     hideResumeNotice()
                 }
-                delay(LOCAL_SAVE_DEBOUNCE_MILLIS)
-                val observedLocation = locatorMapper.toDomain(locator)
-                val observedReport = positionReport(locator)
-                _currentLocation.value = observedLocation
-                _presentationProgress.value = observedReport.presentation.totalProgression
-                currentPageUnreadable = isUnreadablePage(observedLocation)
-                if (!currentPageUnreadable) persist(locator, observedReport)
+                currentPageUnreadable = isUnreadablePage(mapped)
+                if (!currentPageUnreadable) persist(locator, eventReport)
             }
         }
     }
@@ -976,7 +972,6 @@ internal class ReadiumEpubSession(
 
     private companion object {
         val LOGGER: Logger = Logger.getLogger("MobileReader")
-        const val LOCAL_SAVE_DEBOUNCE_MILLIS = 500L
         const val RESTORE_STABLE_OBSERVATIONS = 3
         const val SCROLL_SETTLE_SAMPLE_MILLIS = 16L
         const val SCROLL_SETTLE_SAMPLE_LIMIT = 38

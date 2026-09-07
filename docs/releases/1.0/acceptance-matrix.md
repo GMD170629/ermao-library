@@ -1,5 +1,7 @@
 # 1.0 发布验收矩阵
 
+2026-09-07 POS-02 Android PDF连续捕获FAIL，登记SYNC-07：48次真实翻页约12秒，截图正文变动但本地/HTTP均35/r22，超过5秒上限；串行保存候选待编译/原场景验证。证据99d3e63b/reader-capture-windows-20260907，详见evidence。此前早退、pending恢复子项证据保留但不计本项通过。
+
 2026-09-07 POS-02/03/04 Android CBZ子项PASS：显式下载，第5页r8→停API读4→完整pending/local跨强停及离线冷开一致，实际同第4页图像；恢复服务并回前台后原mutation唯一r9、完整载荷hash一致、pending空。随后第5页1.391s内退出并观察r10，设备完整位置一致/confirmed10/pending空。证据0de4d4fb/comic-pending-cold-20260907，计时/范围详见evidence；另端UI、连续捕获窗口、iOS/最终RC未覆盖。
 
 2026-09-07 POS-02/03/04 Android PDF子项PASS：显式下载后35/r16→断服务读36→完整pending/local跨强停一致→离线冷开实际36；恢复服务原mutation唯一r17且载荷hash匹配，最终r20完整位置一致/pending空。早退35页2.515s内关闭并观察r21，设备confirmed21/pending空。证据a5d59625/pdf-pending-cold-20260907，观察偏差、时限与范围见evidence；不覆盖另端UI、连续捕获窗口、iOS或最终RC。

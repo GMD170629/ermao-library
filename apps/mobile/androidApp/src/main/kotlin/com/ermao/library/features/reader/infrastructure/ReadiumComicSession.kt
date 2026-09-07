@@ -39,10 +39,10 @@ import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -308,13 +308,12 @@ internal class ReadiumComicSession(
             }
         }
         locationJob = scope.launch {
-            currentNavigator.currentLocation.collectLatest { locationValue ->
-                val location = locationValue as? ComicReaderLocation ?: return@collectLatest
-                val locator = locatorForPage(location.pageIndex) ?: return@collectLatest
+            currentNavigator.currentLocation.collect { locationValue ->
+                val location = locationValue as? ComicReaderLocation ?: return@collect
+                val locator = locatorForPage(location.pageIndex) ?: return@collect
                 lastObservedLocator = locator
                 _currentLocation.value = location
                 val presentationProgress = currentNavigator.currentProgress
-                delay(LOCAL_SAVE_DEBOUNCE_MILLIS)
                 persist(locator, location, presentationProgress)
             }
         }
@@ -635,7 +634,4 @@ internal class ReadiumComicSession(
         pageNumber = snapshot.position.presentation.page?.number,
     )
 
-    private companion object {
-        const val LOCAL_SAVE_DEBOUNCE_MILLIS = 500L
-    }
 }

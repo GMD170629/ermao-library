@@ -42,10 +42,10 @@ import androidx.fragment.app.FragmentFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -317,12 +317,11 @@ internal class ReadiumPdfSession(
             }
         }
         locationJob = scope.launch {
-            currentNavigator.currentLocator.collectLatest { locator ->
+            currentNavigator.currentLocator.collect { locator ->
                 lastObservedLocator = locator
-                val page = locator.pageIndex()?.takeIf(::isValidPage) ?: return@collectLatest
+                val page = locator.pageIndex()?.takeIf(::isValidPage) ?: return@collect
                 val location = page.toLocation()
                 _currentLocation.value = location
-                delay(LOCAL_SAVE_DEBOUNCE_MILLIS)
                 persist(locator, location)
             }
         }
@@ -567,7 +566,6 @@ internal class ReadiumPdfSession(
     )
 
     private companion object {
-        const val LOCAL_SAVE_DEBOUNCE_MILLIS = 500L
         val PDF_READER_HREFS = setOf("publication.pdf", "document.pdf")
     }
 }

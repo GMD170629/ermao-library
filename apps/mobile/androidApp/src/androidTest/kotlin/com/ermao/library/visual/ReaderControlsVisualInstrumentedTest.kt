@@ -20,15 +20,19 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.ermao.library.R
+import com.ermao.library.features.reader.application.ReaderScreenController
 import com.ermao.library.features.reader.deleteLocalReaderV5Position
 import com.ermao.library.features.reader.infrastructure.AndroidReaderPublicationStore
 import com.ermao.library.features.reader.keepReaderTestFixtureVisible
+import com.ermao.library.features.reader.loadLocalReaderV5Position
 import com.ermao.library.features.reader.presentation.READER_CONTENTS_TEST_TAG
 import com.ermao.library.features.reader.presentation.READER_PASSIVE_STATUS_TEST_TAG
 import com.ermao.library.features.reader.presentation.READER_PANEL_WORKSPACE_TEST_TAG
 import com.ermao.library.features.reader.presentation.READER_SETTINGS_TEST_TAG
 import com.ermao.library.features.reader.presentation.ReaderActivity
 import com.ermao.library.shared.modules.reader.LocalReaderSource
+import com.ermao.library.shared.modules.reader.PdfReaderLocation
+import com.ermao.library.shared.modules.reader.ReaderProgressTiming
 import com.ermao.library.shared.modules.reader.ReaderTheme
 import com.ermao.library.shared.modules.reader.ComicReaderLocation
 import com.ermao.library.shared.modules.reader.ReaderSourceFormat
@@ -39,7 +43,16 @@ import java.io.FileOutputStream
 import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -47,6 +60,8 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.readium.adapter.pdfium.navigator.PdfiumNavigatorFragment
+import org.readium.r2.shared.ExperimentalReadiumApi
 
 /**
  * Deterministic local Comic/PDF publications for physical-device visual review.
@@ -153,6 +168,123 @@ class ReaderControlsVisualInstrumentedTest {
             captureSource(epubSource, epubRequests, outputDirectory)
 
         assertTrue(captures.all { it.isFile && it.length() > 0 })
+    }
+
+    @OptIn(ExperimentalReadiumApi::class)
+    @Test
+    fun pdfPositionPersistsDuringContinuousNavigation() {
+        val resourceId = "continuous-pdf-${UUID.randomUUID()}"
+        val source = runBlocking {
+            ByteArrayInputStream(buildPdf(pageCount = 3)).use { input ->
+                publicationStore.publishLocalPublication(
+                    resourceId = resourceId,
+                    displayTitle = "Continuous PDF position",
+                    input = input,
+                    sourceFormat = ReaderSourceFormat.Pdf,
+                )
+            }
+        }
+        try {
+            ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { scenario ->
+                scenario.keepReaderTestFixtureVisible()
+                awaitReaderReady(scenario)
+                lateinit var controller: ReaderScreenController
+                lateinit var navigator: PdfiumNavigatorFragment
+                composeRule.waitUntil(READER_READY_TIMEOUT_MILLIS) {
+                    var ready = false
+                    scenario.onActivity { activity ->
+                        val pdf = activity.supportFragmentManager.fragments
+                            .filterIsInstance<PdfiumNavigatorFragment>().singleOrNull()
+                        val currentController = activity.controllerForTesting
+                        if (pdf?.view != null && currentController != null &&
+                            pdf.currentLocator.value.locations.position == 1
+                        ) {
+                            navigator = pdf
+                            controller = currentController
+                            ready = true
+                        }
+                    }
+                    ready
+                }
+                runBlocking {
+                    val windowMillis = ReaderProgressTiming.maxUnsavedIntervalMillis
+                    // Let the initial page save naturally; never flush to satisfy a checkpoint.
+                    val baseline = withTimeout(READER_READY_TIMEOUT_MILLIS) {
+                        var saved = loadLocalReaderV5Position(context, source)
+                        while (saved == null) {
+                            delay(50L)
+                            saved = loadLocalReaderV5Position(context, source)
+                        }
+                        saved
+                    }
+                    var previousCapture = baseline.capturedAtEpochMillis
+                    // All SDK observations are owned/read on Main. The 500 ms bound
+                    // reproduces the removed debounce, not the generated save window.
+                    val observations = mutableListOf<Pair<Long, Int>>()
+                    val observer = launch(Dispatchers.Main) {
+                        navigator.currentLocator.collect { locator ->
+                            val page = checkNotNull(locator.locations.position)
+                            if (observations.lastOrNull()?.second != page) {
+                                observations.add(SystemClock.elapsedRealtime() to page)
+                            }
+                        }
+                    }
+                    val startedAt = SystemClock.elapsedRealtime()
+                    val startedAtEpochMillis = System.currentTimeMillis()
+                    val navigation = launch(Dispatchers.Main) {
+                        var pageIndex = 1
+                        while (isActive) {
+                            assertTrue("PDF navigation was rejected", controller.goTo(PdfReaderLocation(pageIndex, 0.0)))
+                            pageIndex = 3 - pageIndex
+                            delay(200L)
+                        }
+                    }
+                    try {
+                        for (checkpoint in 1..2) {
+                            val deadline = startedAt + checkpoint * windowMillis
+                            delay((deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0L))
+                            val saved = loadLocalReaderV5Position(context, source)
+                            val checkedAtEpochMillis = System.currentTimeMillis()
+                            withContext(Dispatchers.Main) {
+                                val checkedAt = SystemClock.elapsedRealtime()
+                                assertTrue("Navigation stopped before checkpoint $checkpoint", navigation.isActive)
+                                assertTrue("SDK observer stopped", observer.isActive)
+                                assertTrue("Missed checkpoint $checkpoint", checkedAt - deadline < 500L)
+                                assertTrue("SDK did not visit both target pages", observations.map { it.second }.containsAll(listOf(2, 3)))
+                                assertTrue("SDK locator changes started too late", observations.first().first - startedAt < 500L)
+                                assertTrue(
+                                    "SDK locator changes left a debounce-sized idle gap",
+                                    observations.zipWithNext().all { (before, after) -> after.first - before.first < 500L },
+                                )
+                                assertTrue("SDK locator stopped changing", checkedAt - observations.last().first < 500L)
+                                val captured = checkNotNull(saved) { "No durable PDF position at checkpoint $checkpoint" }
+                                assertTrue("No new capture at checkpoint $checkpoint", captured.capturedAtEpochMillis > previousCapture)
+                                assertTrue("Capture predates continuous navigation", captured.capturedAtEpochMillis >= startedAtEpochMillis)
+                                assertTrue(
+                                    "Durable capture exceeds the generated save window",
+                                    checkedAtEpochMillis - captured.capturedAtEpochMillis in 0L..windowMillis,
+                                )
+                                assertTrue("Saved page was not observed by the SDK", captured.position.presentation.page?.number in setOf(2, 3))
+                                previousCapture = captured.capturedAtEpochMillis
+                            }
+                        }
+                    } finally {
+                        withContext(NonCancellable) {
+                            navigation.cancelAndJoin()
+                            observer.cancelAndJoin()
+                        }
+                    }
+                }
+            }
+        } finally {
+            runBlocking {
+                try {
+                    deleteLocalReaderV5Position(context, source)
+                } finally {
+                    publicationStore.delete(resourceId)
+                }
+            }
+        }
     }
 
     private fun captureSource(
@@ -300,10 +432,11 @@ class ReaderControlsVisualInstrumentedTest {
         output.toByteArray()
     }
 
-    private fun buildPdf(): ByteArray = ByteArrayOutputStream().use { output ->
+    private fun buildPdf(pageCount: Int = PDF_PAGE_COLORS.size): ByteArray = ByteArrayOutputStream().use { output ->
         val document = PdfDocument()
         try {
-            PDF_PAGE_COLORS.forEachIndexed { index, background ->
+            repeat(pageCount) { index ->
+                val background = PDF_PAGE_COLORS[index % PDF_PAGE_COLORS.size]
                 val page = document.startPage(PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, index + 1).create())
                 drawIllustratedPage(page.canvas, index + 1, background, "LOCAL PDF")
                 document.finishPage(page)
