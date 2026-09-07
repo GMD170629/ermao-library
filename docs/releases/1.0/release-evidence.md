@@ -1,3 +1,7 @@
+2026-09-08 READER-22 CLOSED：2127a96a在原普通Android设置复验，第4图分页→RTL→仅flow改竖向连续后实际仍第4图，完整HTTP位置与修改前相同（pages/3/r88）。正常上滑至第5图/r89，恢复分页/LTR后同第5图，正常关闭后设备完整position=服务端、confirmed89/pending空。原完整偏好与CBZ源/HTTP SHA256 e6723b21…保持；实际看图与所有原始快照见`7f2f22d7/comic-direction-20260908/green/result.json`及引用。定向RED/GREEN与长图相邻/编译见下条，达到停止条件，不扩该缺陷工具。
+
+普通开发APK源码2127a96a（构建时145496de+保存diff），安装回读SHA256 c09df54d586899a3fb5d9fa1c986e9fc4d9531773432e995c126d4558dabfdac；API源码145496de且后端与2127a96a相同。一次临时HTTP采集因重复进入已打开client失败，修正采集用法后取完整数据，无产品影响；失败未计通过。已停止自有App，移除临时XML/reverse，API宿主16839终态0、子进程退出3见shutdown.json。仅R2开发证据，正式包仍暂缓、未冻结RC，不覆盖其他平台。
+
 2026-09-08 READER-22最小候选定向真机PASS：旧普通APK69a5原回归index3→0失败保留；仅为连续模式尚未解码图片保留现有视口高度，成功解码后维持原几何，避免短占位布局回缩。新同一回归第4图可见/当前位置/完整持久Locator保持，既有长图边缘及连续滚动相邻PASS，App/Test编译PASS。证据`7f2f22d7/comic-direction-20260908/`中red/green-instrument、green-adjacent-instrument、green-build和green-source.diff；新增针对性回归的必要性见此前READER-22记录，无工具扩展。普通原设置界面尚待复验，READER-22仍OPEN、R2未冻结。
 
 2026-09-08 READER-22 OPEN（RG-03 COM-CBZ模式切换）：普通Android六页CBZ第4图，设置仅flow从分页改竖向连续后实际回第1图，并写入pages/0/r84；原RTL第4图完整快照与新画面/HTTP均保留。API7f2f22d7、普通APK69a5ba15/hash4c4cd6ef…；证据`7f2f22d7/comic-direction-20260908/red-result.json`、rtl-return-four与continuous-same-page/observed-position。
