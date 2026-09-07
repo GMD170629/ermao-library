@@ -1,3 +1,5 @@
+2026-09-08 RG-03 Android真实PDF JavaScript OpenAction/URI注释输入子项PASS；正文/点击/重开、固定canary零请求、原件与完整位置证据1636a6c8/pdf-active-20260908/result.json，详见evidence。无新业务缺陷/框架，不外推XFA/Launch。下一项按当前矩阵收敛剩余可执行项与既有外部阻塞，停止扩本安全样本；R2未冻结。
+
 2026-09-08 RG-03当前Android安全模块回归PASS，证据b522f657/android-safety-20260908/result.json；无业务/工具变化。矩阵补回已有EPUB活动内容/损坏包、FB2 XML及PDF页数预算实证，避免重复计为待验。下一项PDF主动动作禁用的实际输入覆盖核对，现有报告投影不替代该行为；R2未冻结及既有外部限制保持。
 
 2026-09-08 RG-03 Android EPUB网络中断后普通重试子项PASS，无新业务缺陷；证据f95ffe6e/epub-download-retry-20260908/result.json与evidence首条。缺文件/取消续传/网络失败重试三个已验恢复子项停止扩验，下一项核对RG-03既有原生内容安全异常证据，复用既有入口补未验项；R2未冻结及其余阻塞保持。

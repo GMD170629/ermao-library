@@ -1,3 +1,9 @@
+2026-09-08 RG-03 PDF真实动作输入子项PASS，无产品或通用工具变更。现有conformance只有actions事实输入，无法证明真实PDF普通链路；因此复用PDF-COMPLEX第一页，以现有pypdf构造2062B专用一页样本，真实Catalog OpenAction/Names JavaScript app.launchURL与URI Link均经写后解析核验，原第一页文本保持并参考渲染检查；全部目标仅本机隔离API。实际Android2127a96a普通详情打开正文完整，按PDF注释Rect与实际纸页边界计算屏幕720,2050点击，仍原App且只展开控制栏；普通关闭/重开同页正文，完整local=server位置保持、confirmed2/pending空。原件及HTTP字节/hash不变，固定/javascript与/uri请求全程0。
+
+证据`1636a6c8/pdf-active-20260908/result.json`、sample/原PDF、reference、opened/clicked/reopened原图、link-click、observed-api.log、原件校验及位置DB。宿主HTTP前后positive-control均404且记录，Android本次真实同端口资产请求可见；不是全局网络捕获。三次adb nc正向采集分别空响应/400，均发生行为验收前，原输出保留并排除；停止扩该采集方法，采用现有HTTP客户端控制验证日志。UI未打开外部目标反映现有tap路由未分发URI，不称链接触发后被安全策略拦截；Names与OpenAction同脚本不分别宣称独立验证，不外推PDF /Launch、XFA或所有JavaScript行为。
+
+API/Worker源码1636a6c8、普通APK2127a96a/hash c09df54d…；只新增专用测试源/书库/样本记录，没有生产诊断或测试框架。原测试源保持，自有App/XML/reverse已清理，宿主25602终态0；API退出3、Worker3221225786见shutdown.json。已满足该输入停止条件，不继续扩安全样本；下一项从现有矩阵核实剩余可执行门禁与真实外部阻塞，优先沿用已有共享owner证据。R2、Chrome原UI受限/iOS/容器/可信HTTPS/睡眠范围及正式包暂缓、最终同RC要求保持。
+
 2026-09-08 RG-03 R2当前Android安全适配器模块回归PASS：原样运行ReaderSafetyConformanceInstrumentedTest及EpubContentSecurityPolicyInstrumentedTest，实际2类通过，设备报告66项/0 omissions经既有--require-consumer ANDROID校验；generator --check及安全边界检查PASS。policyVersion4/digest edfc4aeef6a2f40316dcf38b5727559921ecd7af68da79f349718e2021d108f5，SDK31/PDFium875172…；源码b522f657，确认Android及契约自APK2127a96a后无变更，设备App/Test读回hash分别c09df54d…/2ebf0e0d…。证据`b522f657/android-safety-20260908/result.json`、instrument、报告/校验日志和start身份。设备报告复制后仅删除该文件、自有App停止，无API/新构建。
 
 此为多项XML/归档分类修复后的既定模块验证，不重开已关闭缺陷。报告含生成事实/生产探针，PDF_ACTIVE_ACTIONS检查native版本与策略投影，不等于真实PDF恶意动作执行已验，亦不代替iOS/最终RC。实际文件复核9120453e/epub-active、9267a034/fb2-xml-ui、88f45fb9/epub-errors、c87d2fc8/pdf-page-budget的result后补回矩阵既有子项；均保留原源码与限制，不冒充本轮重跑。PDF当前supportsPdfRotation默认false、普通设置禁用、mapper固定水平轴，撤回由catalog存在推导旋转必测的错误建议，不新增功能或标通过。下一项核对PDF主动动作真实输入现有覆盖；其他未验项目仍按台账继续。
