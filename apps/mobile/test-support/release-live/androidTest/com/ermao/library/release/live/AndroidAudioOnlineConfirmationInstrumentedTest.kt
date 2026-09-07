@@ -73,6 +73,68 @@ class AndroidAudioOnlineConfirmationInstrumentedTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
 
     @Test
+    fun realHttpPlaysForThirtyMinutesAndRestoresAfterReopen() = withOnlineAudioFixture {
+        assertTrue("RG03_SOAK_FRESH_PROGRESS", database.get(SystemClock.elapsedRealtime() + 15_000) == null)
+        prepareActivity()
+        val player = openPlayer(autoplay = true)
+        awaitPlayer(player) { it.phase == AudioPlaybackPhase.Playing && it.durationMillis > 0 }
+        assertFixturePlayer(player, fixture)
+        val initial = player.snapshot.value
+        assertTrue("RG03_SOAK_ENGINE_REMAINING_DURATION",
+            initial.durationMillis - initial.positionMillis >= 1_805_000)
+        val started = SystemClock.elapsedRealtime()
+        var previousSampleAt = started
+        var lastAdvanceAt = started
+        var lastPosition = initial.positionMillis
+        var notPlayingSince: Long? = null
+        while (true) {
+            val now = SystemClock.elapsedRealtime()
+            val snapshot = player.snapshot.value
+            // The production snapshot reads the Media3 clock every 500 ms. Use the
+            // previous observation as a conservative bound, never extrapolate position.
+            val advanceGap = now - lastAdvanceAt
+            record("SOAK_SAMPLE elapsed=${now - started} gap=$advanceGap " +
+                "phase=${snapshot.phase} duration=${snapshot.durationMillis} rate=${snapshot.playbackRate}",
+                snapshot.positionMillis)
+            assertTrue("RG03_SOAK_OBSERVER_GAP", now - previousSampleAt <= 2_000)
+            assertTrue("RG03_SOAK_NO_ADVANCE_OVER_TWO_SECONDS", advanceGap <= 2_000)
+            assertTrue("RG03_SOAK_ENGINE_ERROR", snapshot.phase != AudioPlaybackPhase.Error)
+            assertEquals("RG03_SOAK_REAL_TIME_RATE", 1.0f, snapshot.playbackRate, 0.001f)
+            assertTrue("RG03_SOAK_POSITION_REGRESSION", snapshot.positionMillis >= lastPosition)
+            if (snapshot.phase == AudioPlaybackPhase.Playing) {
+                notPlayingSince = null
+            } else {
+                val stoppedAt = notPlayingSince ?: previousSampleAt
+                notPlayingSince = stoppedAt
+                assertTrue("RG03_SOAK_INTERRUPTION_OVER_TWO_SECONDS", now - stoppedAt <= 2_000)
+            }
+            if (snapshot.positionMillis > lastPosition) {
+                lastAdvanceAt = previousSampleAt
+                lastPosition = snapshot.positionMillis
+            }
+            previousSampleAt = now
+            // Preserve the sample that actually crosses 30 minutes before ending.
+            if (now - started >= 1_800_000) break
+            Thread.sleep(100)
+        }
+        val latest = requireNotNull(database.get(SystemClock.elapsedRealtime() + 5_000))
+        assertTrue("RG03_SOAK_CONFIRMED_POSITION_LAG",
+            abs(player.snapshot.value.positionMillis - locatorMillis(latest)) <= 5_000)
+        val pause = confirmPause(player, latest)
+        closePlayerAndObserve()
+        val restored = awaitRestoredPlayer(openPlayer(autoplay = false), fixture)
+        assertTrue("RG03_SOAK_REOPEN_TOLERANCE",
+            abs(restored.positionMillis - pause.engine.positionMillis) <= 2_000 &&
+                abs(restored.positionMillis - locatorMillis(pause.confirmed)) <= 2_000)
+        val confirmed = database.awaitConfirmed(SystemClock.elapsedRealtime() + 5_000) { local, sync ->
+            abs(locatorMillis(local) - pause.engine.positionMillis) <= 2_000 &&
+                sync.confirmedRevision >= pause.confirmed.revision
+        }
+        assertAppSessionUnchanged()
+        record("SOAK_REOPEN_PASS", restored.positionMillis, confirmed.revision)
+    }
+
+    @Test
     fun realHttpConfirmsPlaybackAtFiveAndTenSecondsAndRestoresAfterReopen() = withOnlineAudioFixture {
         assertTrue("RG04_NEW_SERVER_PROGRESS_REQUIRED", database.get(SystemClock.elapsedRealtime() + 15_000) == null)
         record("ISOLATION_PASS")

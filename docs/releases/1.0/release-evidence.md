@@ -1,3 +1,5 @@
+2026-09-08 RG-03 AUD-A Android连续30分钟子项开始：复用已有1898.354秒MP3公开语料派生文件（准备时重复语音，不是播放器循环）。现有Android live用例仅观察5/10秒，MediaSession状态不能直接证明持续真实引擎时钟，因此在同一既有用例类追加固定1800秒实际snapshot观察及原暂停/完整确认/重开owner校验；不新增通用工具或修改生产代码。终止条件为实际末次采样>=1800秒、停顿/观测空窗均<=2秒、真实剩余时长足够且暂停与重开误差<=2秒。仅证明该真实Android单轨子项，不外推锁屏、多轨、其他格式、全量负载或最终RC；通过后停止辅助扩展。当前NOT_RUN，证据目录`43f75b02/android-audio-soak-20260908`。
+
 # 1.0 发布证据与最终签收
 
 2026-09-08 READER-19 CLOSED：82699429普通开发APK保留数据安装，原5B截断UTF16LE实际错误页显示“TXT 文件的文本编码无效或不受支持。”，不再误称在线解析器；英中文案资源值核对与Android资源编译通过。实际设备APK读回SHA256 `d8f0c95ae5478f2ed6b5be10990b5cfce16a8a504f1d566a757860b5aa687f13`。功能层超限拒绝/重试无下载、编码拒绝及正常同目录正文、两失败资源无进度与原件一致证据沿用本轮未变处理代码，见下条；不因两条文案重跑全部格式。证据`c53550ca/txt-errors-20260908/result.json`、candidate-bad-open.png/xml、candidate-installed、copy-locale-check/build及cleanup/shutdown。首个冷启动UI dump未产文件，保持进程等待后fresh capture成功，未重复启动取成功；原观察失败保留。双API/Worker自有进程均终止、wrapper终态0，App及reverse/专用XML清理；三测试源和库保留供追溯。停止本缺陷扩验。下一项既有音频长时要求与样本/执行入口核对；受信任HTTPS、睡眠范围、Chrome五候选/iOS/容器/工具限制、正式包暂缓及最终同冻结RC仍待，R2保持。
