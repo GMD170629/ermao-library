@@ -1,5 +1,11 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 REF-FB2图文/脚注及截断拒绝子项PASS（ee5f3b15，无业务/测试辅助修改）：普通Android真实新库打开显示中英标题、混合行内正文、480×240红蓝标识PNG、表格CDATA的A < B、嵌套子章节与两行诗；点击脚注进入Notes正文，点击返回回到第一章及图片。原文件前500字节截断样本入目录READY，但普通打开/重新获取均明确“格式解析器解析失败，未提供更具体的原因”，无崩溃；关闭后首页继续正常图文可读，截断资源progressSnapshot仍null。READY只表示入目录，不作为坏内容可读证据。
+
+后端同源码既有test_fb2_adapter.py及test_xml_policy.py定向35 PASS/0 skip（上述目录backend-fb2-xml-configured.log/xml），覆盖正文合约、外部实体字面化、未索引资源拒绝、可选坏图隔离与既有XML预算/上下文。首次未设置ERMAO_CHAPTER_CORE_LIBRARY而10 FAIL/25 PASS，backend-fb2-xml.log/xml保留DLL加载失败；补用既有.tmp/chapter-core-windows/ermao_chapters.dll后原命令通过，不改测试/预期、不升级依赖。独立只读与主核对既有Android工厂坏XML测试，普通解析失败提示未构成新确证分类缺陷；不以工厂测试文件存在或历史输出推定本轮原生安全已通过。下一项原生FB2/EPUB安全异常实际路径。
+
+证据artifacts/releases/1.0/ee5f3b15/fb2-complex-20260907/：provenance记录从既有reader-contract.fb2派生的唯一调整（补l:href命名空间、1×1图换成可辨识合成图，原正文不变）；原件e3dd8621…、正常派生1f1f25ec…、截断1e6a297e…的完整SHA在JSON中。两文件经普通API/Worker导入（import/after-scan），open/note/return/bad-open/bad-retry/normal-after图像与XML留存，主已查看正常、脚注、返回、拒绝和恢复图像；normal-after.xml暂缺WebView正文节点，但同次截图完整可读，不记白屏。final-http确认正常完整v5 Locator、截断无进度，两原件HTTP字节与源相同；不将本轮记为精确恢复时限/安全实体验收。verification确认495 API源码、两样本及仓库原件不变，移动源码与3cf54116一致；实际安装开发APK仍7f27878b9390ab4bb36a2080fc027d0c3179d3126c8a6dea09d49970b8d5e701。截断前后App PID23306相同，API无5xx；session62849终态exit0、两自有子进程stopped，App强停、18084转发及本轮确切ermao-fb2c设备文件已清理，未改设备偏好，原用户15改动保留。其他安全异常、W/I与最终同RC仍待；下一项复用既有FB2/EPUB安全回归，缺外部执行条件仍只阻塞对应项。
+
 2026-09-07 REF-AZW3章内跨页锚点子项PASS（8b80eacf，未改业务/测试辅助代码）：普通Android阅读器以现有07-complex-toc.azw3，在横屏、字号30px、行距大时，目录“卷一”显示卷首与TOC_LEVEL_2_A，细目甲/TOC_LEVEL_3_A在另一页；点击“细目甲”实际定位该叶正文，卷首内容退出可见页。补齐同一HTML内根节点与fragment的实际分页对照，不再仅凭跨章跳转或一屏短样判断精确锚点。
 
 证据artifacts/releases/1.0/8b80eacf/kf8-anchors-20260907/：root2-selected.xml/png → leaf2-selected.png、leaf2-ready.xml → leaf2-body.xml/png，主已查看图像，XML记录两组正文可见bounds互换；fixture-expectations.json对应part00000.html与part00000.html#part-a-1。首次root-body/root-settled含目录已关闭后的额外正文点击，误触翻页，保留但不采为根节点对照；后续按实际面板状态分步操作。30px竖屏仍整章一页，故使用现有横屏/行距设置，不生成新样本或修改生产布局。只证明甲叶锚点及同章根节点相邻，不外推乙叶、其他格式/平台、冷恢复或持久化时限。

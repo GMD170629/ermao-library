@@ -1,5 +1,7 @@
 # 1.0 发布验收矩阵
 
+2026-09-07 REF-FB2增量PASS：普通Android合成可辨识PNG、表格/诗行/嵌套正文、脚注往返与截断打开/重试拒绝、同库正常恢复已实际验收，失败资源无进度。证据ee5f3b15/fb2-complex-20260907，详见evidence首节；不外推实体/active内容安全、W/I或最终同RC。
+
 2026-09-07 REF-AZW3精确锚点增量PASS：Android现有KF8三级目录在字号30px/大行距横屏形成实际分页，卷一根节点与细目甲fragment分别显示卷首/叶正文，root2-selected与leaf2-body图像及XML对应；证据8b80eacf/kf8-anchors-20260907，详见evidence首节。仅此同章跨页子项，无业务/工具修改；其他复杂内容/异常、W/I与最终同RC仍待。
 
 2026-09-07 MOBI-X普通Android错误反馈及READER-15集成验证PASS（3cf54116，无新增业务修改）：真实DRM、96B截断、坏偏移分别明确受保护/内容损坏；DRM重新获取仍拒绝，关闭后同库正常MOBI正文可读。三种失败进度均null，坏偏移前后同PID18255且无崩溃，停止本缺陷扩验；其他格式/锚点与原五项Chrome候选保持，未冻结RC。
@@ -181,7 +183,7 @@ R1 / DEC-05：用户批准 1.0 不支持第三方进度同步，OPDS-04 原互�
 | REF-AZW | AZW-N/C：独立实际AZW来源与内部变体证明；不只MOBI改名 | W/A/I；P2 | R，实际变体按承诺可读 | AZW-X：DRM/损坏 | BLOCKED；ENV-06、RISK-02 |
 | REF-AZW3 | AZW3-N/C：实际KF8、复杂章节图文 | W/A/I；P2 | R，目录/跨章/锚点正确 | AZW3-X：损坏/DRM | PARTIAL：6f73ef35 Android KF8三章正文/层级目录、卷二确认后冷恢复与内嵌PNG/JPEG显示PASS；精确锚点/其他复杂异常及W/I仍待，详见evidence |
 | REF-PRC | PRC-N/C：实际PRC/PalmDB与复杂资源来源证明 | W/A/I；P2 | R，不能由改扩展名证明全部变体 | PRC-X：截断/DRM | BLOCKED；ENV-06、RISK-02 |
-| REF-FB2 | FB2-N/C：多section、嵌套目录与内嵌图片 | W/A/I；P2 | R，文本/图像/章节正确 | FB2-X：坏XML、可恢复active/具体实体风险 | PARTIAL：READER-08已CLOSED；055a36c1新包原前置标题及嵌套目录正文子项PASS，证据bea858b9/android-fb2-20260907；图像/异常/iOS仍待 |
+| REF-FB2 | FB2-N/C：多section、嵌套目录与内嵌图片 | W/A/I；P2 | R，文本/图像/章节正确 | FB2-X：坏XML、可恢复active/具体实体风险 | PARTIAL：READER-08已CLOSED；原前置标题/嵌套目录见bea858b9/android-fb2-20260907；ee5f3b15/fb2-complex-20260907补齐Android图像/表格/诗行、脚注往返与截断拒绝/正常相邻PASS；其余安全异常、W/I及最终RC仍待 |
 | REF-TXT | TXT-N/C：中文UTF-8、BOM UTF-16LE/BE、GB18030、混合换行、长章 | W/A/I；P2 | R；逐实际编码登记，不能一份英文UTF8代替 | TXT-X：损坏/超预算，失败类别正确 | PARTIAL：9cb26b94 Android UTF8/BOM UTF16LE/BE/GB18030正常中文正文PASS；UTF16BE混合换行/58060字符长章目录到末章及确认后冷恢复PASS（耗时未测），详见evidence；异常/其他平台仍待 |
 | PDF | PDF-N/C：文本目录+复杂大页/扫描图像PDF | W/A/I；P2 | F；真实物理页与内容可读，有界传输 | PDF-X：截断、密码/超预算 | PARTIAL/FAIL：Android一页PDF首次本地切换打开READER-09已CLOSED，69页普通首页相邻PASS（0271edd4；a389944e/android-pdf-20260907）；Android普通滑动/按钮、35中页/69末页边界及确认后冷恢复35正文子项PASS（64f1bbc1/android-pdf-navigation-20260907，耗时未测）；双指放大/缩回及横竖屏重建保持35/69和完整位置PASS（9a13322c/android-pdf-layout-20260907）；728a0cf8复杂PDF文字/纯图像两页可读、截断明确错误子项PASS；密码错误分类READER-10已CLOSED（cfec37f7新包原场景通过）；READER-11已CLOSED（554120b6新包新会话1→2→3实际三页/完整位置一致），大页四角正文可读，outline暂无章节不计通过，详见evidence。阅读方向设置/其余异常仍待。W正常69页首页/中页已读，READER-05候选待真实回归；iOS BLOCKED |
 | COM-CBZ | CBZ-N/C：真实ZIP漫画、嵌套路径/自然排序/长图 | W/A/I；P2 | F；图片顺序与页数正确 | CBZ-X：加密/损坏/超预算 | PARTIAL/FAIL：Android正常6页/目录指定页/末页边界、设置缩放及确认后冷恢复5/6子项PASS（66f5efd5/android-comic-20260907，耗时未测）；W真实6页可读及末页重开，READER-06/07候选仍待真实回归；CRC坏中页隔离后两图实际PASS；不可解码中页后错误卡READER-13、单/双页切换崩溃READER-14均已CLOSED（79082997，见evidence），10000/10001页真实容量及超单页/压缩比原生子项PASS（d7ab754f，详见evidence）；方向/其余复杂异常及其他平台另计 |
