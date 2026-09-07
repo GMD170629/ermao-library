@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-07 SYNC-07 iOS静态风险保留（未复现、未修改实现）：取消/500ms延后与异步保存次序需要共同处理，实际编译/验证受ENV-02阻塞，不能仅删延迟后标修复。架构文档过时尾部防抖要求已按现有门禁纠正；Docker info仍为Linux引擎管道缺失，ENV-08保持。下一可执行项Android IMAGE_DIR，其他平台缺失不阻塞其执行，详见evidence。
+
 2026-09-07 SYNC-07 Android CLOSED：937b325b原PDF持续翻页的5/10秒新位置保存及服务端持续确认通过，受影响EPUB/漫画普通连续操作、最终完整持久状态与PDF重建恢复相邻通过。详见evidence首条及937b325b/reader-capture-windows-20260907/result.json，停止本缺陷Android扩验。iOS同类代码仍为待处理静态风险，ENV-02无法编译/设备验收；Chrome五项原UI及其他矩阵缺项、容器环境、正式包暂缓与最终同RC要求保持。当前R2、RC未冻结。
 
 2026-09-07 SYNC-07 OPEN：Android PDF连续翻页12秒实际正文变化而本地/远端位置始终35/r22，500ms debounce持续重置导致保存超5秒。最小串行保存候选已修改、验证中；EPUB/comic直接同类消费同步处理，iOS仅静态同类风险。证据99d3e63b/reader-capture-windows-20260907，详见evidence。之前已完成早退/冷恢复不抵销本项；无阈值变更。

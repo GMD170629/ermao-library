@@ -1,5 +1,7 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 SYNC-07 iOS只读核对：三个Ios*ReaderSession的位置事件均取消pendingSave再延后500ms；EPUB还在save前await资源检查，存储actor/KMP上传单飞并不替Swift事件排序。因此不可仅去掉sleep并放任多Task并发保存；flush/close需与在途本地保存顺序一起验证。此为代码风险，尚未真机复现，也未修改iOS实现；ENV-02缺Mac/Xcode/真机，保留待修正/定向编译与原场景验收，禁止用Android通过关闭。现有ReaderPersistenceTests和ReaderSecurityTests可承担定向相邻，不开发通用调度/测试框架。架构文档§7/§11过时“500ms trailing debounce”已按冻结保存上限纠正，机器阈值/协议未改。Docker只读info再次确认dockerDesktopLinuxEngine管道不存在，ENV-08保持；下一项Android IMAGE_DIR普通阅读，复用既有样本。
+
 2026-09-07 SYNC-07 Android CLOSED（源码937b325b）：原PDF连续翻页场景复测，48次/0.25秒输入期间5/10秒真实正文变化且HTTP从r23到r43/r63、最终r71；最大观察确认变化间隔0.75秒。相同仪器用例在旧包第5秒无新capture失败，在新包真实SDK连续导航下第5/10秒SQLite新capture及时保存通过，原PDF页数/重建恢复相邻亦通过。直接原因及最小修复见下条，不再扩验此缺陷。
 
 受影响普通入口相邻：CBZ连续操作HTTP r10→5秒r37→10秒r65→最终r76；EPUB连续切章r21→r28→r35→r37。最大观察确认变化间隔分别0.781/1.0秒。三者最终完整本地/服务端position及capturedAt一致、confirmedRevision对应且pending空；EPUB正常关闭返回资源页。PDF/漫画/EPUB实际正文截图已查看，三个原件逐字节保持。漫画快速输入经过动画访问多个页面，不声称一次点击必定只变一页。PDF活动写入中24次设备副本不稳定未解析，普通路径只使用最终稳定副本；5/10秒本地落盘证据由上述真实SQLite仪器用例提供，不混称同次普通UI采样。

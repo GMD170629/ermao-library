@@ -158,7 +158,10 @@ rows are left untouched and are never read by v5.
 All clients implement the same lifecycle:
 
 1. The engine emits a real location change.
-2. A 500 ms trailing debounce coalesces continuous movement.
+2. The adapter persists real movement without indefinitely resetting a trailing
+   debounce. Continuous movement must retain a new local capture within
+   `reader-progress-timing.json`'s `maxUnsavedIntervalMillis`; duplicate-position
+   suppression and the existing latest-only upload slot remain separate concerns.
 3. One timestamp is created.
 4. The complete position report is committed locally.
 5. The position report and latest-only pending mutation commit atomically.
@@ -319,7 +322,8 @@ Automated contracts must cover:
 - deterministic non-blocking startup restoration: explicit target, local pending v5 report, server v5 report, then publication start;
 - absence of `baseRevision`, revision-conflict `409`, local/cloud/cancel dialogs and remote exactness arbitration (mutation-id reuse still returns its dedicated `409`);
 - progress GET null/200/304 and revision ETag;
-- 500 ms burst coalescing;
+- continuous movement reaching durable local storage within the generated maximum
+  unsaved interval, plus an early exit flushing the last captured position;
 - single-flight latest-slot behavior;
 - network failure preserving the latest durable pending mutation;
 - all four Locator JSON round trips preserving empty, null and unknown values;
