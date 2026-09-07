@@ -1,5 +1,7 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 RISK-08最小验证接入（DEC-07）：现有三个host测试仅验证纯投影，现有SQLite仪器测试为顺序查询，均不能调度真实ViewModel在查询挂起期间的刷新/取消；具体查询类不可替换。复用既有Reader查询owner，仅引出同参数应用port供两个已有消费者和受控测试使用，数据库规则/调用默认不变；通过现有独立UID Android仪器入口执行真实ViewModel的旧查询、取消、失败与成功空集合相邻。实际RED/必要修复/GREEN后即停止，不加入新依赖、报告框架或通用调度工具。当前只是待执行接入，不据此关闭RISK-08。
+
 2026-09-07 SYNC-04 / AUDIO-14 CLOSED：b72b3d83生产Web/API/Worker与61498daa普通Android独立开发包完成同一次真实MP3原场景回归；两提交之间只有Web修复/文档，Android源码一致，仍非冻结RC。Chrome普通播放后滑块确认13000ms/r8，真实断网再拖至C=5000ms（d44af0f8-987e-448f-9574-ae1694bc445e，捕获1788739148111），实际发送ERR_INTERNET_DISCONNECTED；详情保持17%/0:05/1条音轨，无Failed to fetch，离线窗口无reading-units重请求。Android普通首页43%继续实际13009ms/1031ms，播放暂停确认N=17011ms/r11后强停。只读SQLAlchemy ORM确认11条receipt且C尚不存在；Chrome重连原body首次提交，实际ACK接受C/r12，独立完整GET一致，旧11条receipt逐字段不变且仅新增C。Android冷启动首页及最近阅读均16%，普通详情亦16%，与API16.6295%一致；返回首页普通继续实际5015ms/969ms，恢复偏差15ms。Chrome重连后仍1轨、暂停5s且无音轨请求/原始错误。原SYNC-04旧57%和AUDIO-14旧0轨失败证据保留，不由协议通过抵销展示验收。
 
 证据根`artifacts/releases/1.0/b72b3d83/sync04-audio14-regression-20260907/`：fixture manifest/生产构建日志/源码索引、baseline/N/C完整GET、C前后ORM、Android冷首页/详情XML及两次首次Playing、installed-development-hash、integrity-and-cleanup；`cdp-and-ui-observation-transcription.json`明确是实际CUA输出转录，非原始HAR。早期播放网络历史截断，不宣称完整请求总数；离线与重连增量窗口均未截断且无更多页，支持这两个窗口无reading-units请求。实际ACK人工短暂停留不用于5秒确认期限，恢复后的新capture及收尾关闭播放器不混入C/r12断言。新增现有resource-details.spec.ts定向Chrome用例实际PASS（764ms，runner退出0），此前NOT_RUN由此覆盖；保留原有资源用例断言，未新增测试工具或配置。
@@ -541,11 +543,11 @@ Android 测试修正依据：CRC 使用 fixture 的实际损坏 bytes，禁止�
 |---|---|---|---|
 | RG-01 | PARTIAL；正式产物NOT_RUN | 现有后端/Web构建与Android开发包有验证；最终同RC后端/APK/IPA交付尚未执行 | ENV-02 iOS、ENV-08容器；ENV-07正式包由负责人暂缓，不能用开发包代替 |
 | RG-02 | PARTIAL | 新库API/Worker、两组织模式正常导入及部分第一方实际连接有开发证据；OPDS客户端为DEC-08负责人PASS | 未覆盖的初始化/导入异常/网络/权限与iOS子项继续；DEC-05已移除第三方进度同步，原ENV-04不再阻塞 |
-| RG-03 | PARTIAL；有未闭环FAIL | 逐格式开发验收推进中；AUDIO-10/11/12关闭，四音频格式普通短时、章节/多轨部分场景通过 | READER-05/06/07真实回归受ENV-12限制；其余格式/异常/生命周期及iOS仍有缺口；音频仅DEC-09四格式 |
-| RG-04 | PARTIAL；有未闭环FAIL | 四音频格式正常Chrome↔Android有开发证据；SYNC-03关闭；POS-03/04/07及其他子项部分通过 | SYNC-02真实时序回归受ENV-11限制；POS异常组合、其他格式及iOS方向继续；不再要求OPDS进度互通 |
+| RG-03 | PARTIAL；有未闭环FAIL | 逐格式开发验收推进中；AUDIO-10..14关闭，四音频格式普通短时、章节/多轨及部分生命周期场景通过 | READER-05/06/07真实回归受ENV-12限制；其余格式/异常/生命周期及iOS仍有缺口；音频仅DEC-09四格式 |
+| RG-04 | PARTIAL；有未闭环FAIL | 四音频格式正常Chrome↔Android有开发证据；SYNC-03/04及STATUS-01关闭；POS-03..07/10/11等子项部分通过 | SYNC-02真实时序回归受ENV-11限制；RISK-08旧查询/取消待受控验证；POS异常组合、其他格式及iOS方向继续；不再要求OPDS进度互通 |
 | RG-05 | 本机预检PASS；最终RC NOT_RUN | DEC-06既有安静10K导入/前台可用性/重扫完整性预检通过，原始测量保留 | 100K/300K和低功耗NAS按负责人决定暂缓，不继续AI压测；不外推本机结果到NAS或未冻结RC |
 
-以上汇总按2026-09-07 fbe61f89时点的开发证据更新，替换R0整组NOT_RUN概述；每个具体子项仍以矩阵和原始结果为准。五组最终同RC完整验收均尚未完成，不能把PARTIAL、负责人暂缓或环境阻塞转成整体PASS。下方原始最终签收占位表保持未签收。
+以上汇总按2026-09-07 0219ab9b时点的开发证据更新，替换R0整组NOT_RUN概述；每个具体子项仍以矩阵和原始结果为准。五组最终同RC完整验收均尚未完成，不能把PARTIAL、负责人暂缓或环境阻塞转成整体PASS。下方原始最终签收占位表保持未签收。
 
 ## RC 与产物清单（全部待填）
 
