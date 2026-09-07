@@ -7,15 +7,17 @@ from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Event
 
 import pytest
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import Connection, create_engine, event, select
+from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
 
 from app.core.auth import hash_password
 from app.db.base import Base
 from app.models import (
     Library,
+    ReaderProgressMutationV5,
     ReaderResourceProgress,
     ReaderResourceProgressV5,
     ReaderResourceReadingStatusV5,
@@ -556,7 +558,10 @@ def test_v5_storage_failure_rolls_back_application_transaction() -> None:
     assert unit_of_work.rolled_back == 1
 
 
-def test_v5_concurrent_writes_allocate_monotonic_revisions(tmp_path: Path) -> None:
+@pytest.mark.parametrize("first_mutation", [_MUTATION_A, _MUTATION_B], ids=["A", "B"])
+def test_v5_concurrent_writes_allocate_monotonic_revisions(
+    tmp_path: Path, first_mutation: str
+) -> None:
     engine = create_engine(
         f"sqlite+pysqlite:///{tmp_path / 'reader-v5-concurrency.sqlite3'}",
         connect_args={"timeout": 10, "check_same_thread": False},
@@ -593,16 +598,19 @@ def test_v5_concurrent_writes_allocate_monotonic_revisions(tmp_path: Path) -> No
     finally:
         seed.close()
 
-    def write(mutation_id: str, display_percent: float) -> int:
-        session = SessionLocal()
-        try:
-            service = ResourceReaderV5Service(
-                SqlAlchemyReaderV5Repository(session),
-                session,
-                SystemReaderClock(),
-                SqlAlchemyReaderV5LibraryPresentationQueries(session),
-            )
-            position = ReaderV5PositionDto(
+    commands = {
+        mutation_id: SaveProgressV5Command(
+            user_id="concurrent-reader-user",
+            resource_id="concurrent-reader-resource",
+            access_scope=ReaderAccessScope(
+                is_admin=True,
+                can_view_manual_imports=True,
+                library_ids=(),
+            ),
+            client_id="concurrent-client",
+            mutation_id=mutation_id,
+            captured_at_epoch_millis=0,
+            position=ReaderV5PositionDto(
                 locator=OpaqueLocator.from_object({"mutation": mutation_id}),
                 presentation=ReaderV5PresentationDto(
                     display_percent=display_percent,
@@ -612,46 +620,151 @@ def test_v5_concurrent_writes_allocate_monotonic_revisions(tmp_path: Path) -> No
                     page=None,
                     playback=None,
                 ),
-            )
-            result = service.save_progress(
-                SaveProgressV5Command(
-                    user_id="concurrent-reader-user",
-                    resource_id="concurrent-reader-resource",
-                    access_scope=ReaderAccessScope(
-                        is_admin=True,
-                        can_view_manual_imports=True,
-                        library_ids=(),
-                    ),
-                    client_id="concurrent-client",
-                    mutation_id=mutation_id,
-                    captured_at_epoch_millis=0,
-                    position=position,
+            ),
+        )
+        for mutation_id, display_percent in ((_MUTATION_A, 10.0), (_MUTATION_B, 20.0))
+    }
+    second_mutation = _MUTATION_B if first_mutation == _MUTATION_A else _MUTATION_A
+    first_written = Event()
+    second_begun = Event()
+    first_commit_recorded = Event()
+    transaction_events: list[tuple[str, str]] = []
+
+    def write(mutation_id: str) -> int:
+        session = SessionLocal()
+
+        @event.listens_for(session, "after_begin")
+        def after_begin(
+            writer_session: Session,
+            transaction: SessionTransaction,
+            connection: Connection,
+        ) -> None:
+            assert writer_session is session
+            assert not transaction.nested
+            assert connection.in_transaction()
+            transaction_events.append(("after_begin", mutation_id))
+            if mutation_id == second_mutation:
+                assert first_written.is_set()
+                assert not first_commit_recorded.is_set()
+                second_begun.set()
+
+        @event.listens_for(session, "before_commit")
+        def before_commit(writer_session: Session) -> None:
+            if mutation_id == first_mutation:
+                # The real repository has already executed its SQLite upsert.
+                # Read without autoflush so the service still owns receipt flush.
+                with writer_session.no_autoflush:
+                    written = SqlAlchemyReaderV5Repository(
+                        writer_session
+                    ).get_v5_progress(
+                        commands[mutation_id].user_id, commands[mutation_id].resource_id
+                    )
+                assert written is not None
+                assert written.mutation_id == first_mutation
+                assert written.revision == 1
+                transaction_events.append(("before_commit", mutation_id))
+                first_written.set()
+                assert second_begun.wait(10), (
+                    "second writer never began its transaction"
                 )
+            else:
+                # SQLite's write lock orders commits. This acknowledgement only
+                # prevents callback scheduling from reversing their observation.
+                assert first_commit_recorded.wait(10), "first commit was not recorded"
+                transaction_events.append(("before_commit", mutation_id))
+
+        @event.listens_for(session, "after_commit")
+        def after_commit(writer_session: Session) -> None:
+            assert writer_session is session
+            transaction_events.append(("after_commit", mutation_id))
+            if mutation_id == first_mutation:
+                first_commit_recorded.set()
+
+        try:
+            if mutation_id == second_mutation:
+                assert first_written.wait(10), "first writer never reached pre-commit"
+            service = ResourceReaderV5Service(
+                SqlAlchemyReaderV5Repository(session),
+                session,
+                SystemReaderClock(),
+                SqlAlchemyReaderV5LibraryPresentationQueries(session),
             )
-            return result.accepted_revision
+            return service.save_progress(commands[mutation_id]).accepted_revision
         finally:
             session.close()
+            event.remove(session, "after_begin", after_begin)
+            event.remove(session, "before_commit", before_commit)
+            event.remove(session, "after_commit", after_commit)
 
     try:
         with ThreadPoolExecutor(max_workers=2) as executor:
-            revisions = list(
-                executor.map(
-                    write,
-                    (_MUTATION_A, _MUTATION_B),
-                    (10.0, 20.0),
-                )
-            )
+            futures = {
+                mutation_id: executor.submit(write, mutation_id)
+                for mutation_id in (first_mutation, second_mutation)
+            }
+            try:
+                revisions = {
+                    mutation_id: future.result(timeout=30)
+                    for mutation_id, future in futures.items()
+                }
+            finally:
+                first_written.set()
+                second_begun.set()
+                first_commit_recorded.set()
 
-        assert sorted(revisions) == [1, 2]
+        assert transaction_events == [
+            ("after_begin", first_mutation),
+            ("before_commit", first_mutation),
+            ("after_begin", second_mutation),
+            ("after_commit", first_mutation),
+            ("before_commit", second_mutation),
+            ("after_commit", second_mutation),
+        ]
+        commit_order = [
+            mutation_id
+            for stage, mutation_id in transaction_events
+            if stage == "after_commit"
+        ]
+        assert commit_order == [first_mutation, second_mutation]
+        assert revisions == {commit_order[0]: 1, commit_order[1]: 2}
+        winner = commands[commit_order[-1]]
         verify = SessionLocal()
         try:
-            row = verify.scalar(
-                select(ReaderResourceProgressV5).where(
-                    ReaderResourceProgressV5.resource_id == "concurrent-reader-resource"
-                )
+            final_progress = SqlAlchemyReaderV5Repository(verify).get_v5_progress(
+                winner.user_id, winner.resource_id
             )
-            assert row is not None
-            assert row.revision == 2
+            assert final_progress is not None
+            assert final_progress.revision == 2
+            assert final_progress.position == winner.position
+            assert (
+                final_progress.user_id,
+                final_progress.resource_id,
+                final_progress.client_id,
+                final_progress.mutation_id,
+            ) == (
+                winner.user_id,
+                winner.resource_id,
+                winner.client_id,
+                winner.mutation_id,
+            )
+            receipts = verify.scalars(
+                select(ReaderProgressMutationV5).where(
+                    ReaderProgressMutationV5.user_id == winner.user_id,
+                    ReaderProgressMutationV5.resource_id == winner.resource_id,
+                )
+            ).all()
+            assert len(receipts) == 2
+            assert {
+                receipt.mutation_id: receipt.accepted_revision for receipt in receipts
+            } == revisions
+            logging.getLogger(__name__).info(
+                "POS07 service/SQLite events=%s receipts=%s final_mutation=%s "
+                "final_percent=%s complete_position_and_identity=verified",
+                transaction_events,
+                revisions,
+                final_progress.mutation_id,
+                final_progress.position.presentation.display_percent,
+            )
         finally:
             verify.close()
     finally:
