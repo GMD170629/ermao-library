@@ -1,3 +1,9 @@
+2026-09-08 RG-03 REF-EPUB普通网络中断后重试子项PASS，无业务/工具功能改动。原样复用上条单次资产阻留脚本，普通Reader已显示1024/2497B后受控停止自有API；客户端实际显示网络中断及“重试／继续”，记录FailedRetryable/NETWORK_UNAVAILABLE、transferred0，part已清理、无完成记录。KtorDownloadsGateway非取消失败abort、DownloadResourceRuntime失败从0重试的既有契约及原断言一致，不误报为取消断点续传丢失。
+
+确认原服务终止后，同源码/存储重启API，服务端完整r19未变；点击原错误页重试，同taskId真实GET200无Range，Completed/verified/2497B，新原件SHA256 a643ee39426f926dbd7ca62ffcd2ec008d276cd1ac09d6af45f33548bbaa2531保持。实际第二章标题/正文恢复，正常关闭后完整local=server=原position、confirmed20/pending空。证据`f95ffe6e/epub-download-retry-20260908/result.json`及partial/network-failed/retried原图、原始任务/HTTP/DB、part列表/终态日志。API f95ffe6e、普通APK2127a96a/hash c09df54d…，未重建包；辅助脚本字节不变，只换证据目录避免覆盖已通过取消结果。
+
+注入阶段宿主75807终态0、子进程因在途连接按既有8秒收尾升级终止而退出1；恢复阶段宿主65619终态0、子退出3。测试备份hash核验后仅清理该备份，新有效下载原件保留；自有App/XML/reverse及服务均清理。已完成三项恢复场景不再扩验；下一项核对RG-03既有Android内容安全异常实证，只补未验范围，不新建测试框架。R2未冻结，Chrome既有受限原UI、iOS/容器/受信任HTTPS/睡眠范围及暂缓正式包、最终同RC要求保持。
+
 2026-09-08 RG-03 REF-EPUB普通部分下载取消/继续子项PASS，无产品修复。普通Reader实际显示1024/2497B、41%、正在下载后点击“取消并返回”，返回原详情，约103ms观察到网络断连且余量未发送；真实任务Paused/unverified、1024B part字节等于原件前缀，未生成完成记录，服务端完整r18未变。再次普通继续阅读，以同taskId发送Range bytes=1024-，真实API206/Content-Range 1024-2496/2497，完成2497B且sha a643ee39426f926dbd7ca62ffcd2ec008d276cd1ac09d6af45f33548bbaa2531与原件相同；实际第二章正文，正常关闭完整local=server=原position、confirmed19/pending空。
 
 证据`38212927/epub-download-cancel-20260908/result.json`及partial/resumed原图、partial/paused/completed记录、part hash、响应日志/断连时序、前后HTTP/DB。固定小文件响应阻留的必要性见下条，仅客户端部分下载证据，不称服务端流式读取；已达到停止条件，不扩此工具。源码API38212927、普通APK2127a96a/hash c09df54d…，无包重建。原测试备份核对后清理，新完整文件保留；自有App/XML/reverse/API收尾，宿主41504终态0，子退出3见shutdown.json。下一项网络中断后的既有重试按钮；本项不覆盖其网络失败语义或最终RC。R2及其他限制保持。

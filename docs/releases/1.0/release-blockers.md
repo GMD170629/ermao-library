@@ -1,3 +1,5 @@
+2026-09-08 RG-03 Android EPUB网络中断后普通重试子项PASS，无新业务缺陷；证据f95ffe6e/epub-download-retry-20260908/result.json与evidence首条。缺文件/取消续传/网络失败重试三个已验恢复子项停止扩验，下一项核对RG-03既有原生内容安全异常证据，复用既有入口补未验项；R2未冻结及其余阻塞保持。
+
 2026-09-08 RG-03 Android EPUB普通部分下载取消/同任务续传子项PASS；无业务修复，证据38212927/epub-download-cancel-20260908/result.json与evidence首条。下一项现有网络中断重试入口，取消已完成不再扩验；R2未冻结，其余阻塞保持。
 
 2026-09-08 RG-03 Android EPUB本地原文件缺失后普通重建子项PASS，无新缺陷/工具；证据74e99bfa/epub-missing-original-20260908/result.json与evidence首条。READER-22已关闭，当前下一项核对原文件下载取消/重试的既有证据与剩余入口；R2未冻结及外部阻塞保持。
