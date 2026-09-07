@@ -1,5 +1,7 @@
 # 1.0 发布验收矩阵
 
+2026-09-07漫画预算增量：Android既有超页字节隔离/高压缩比拒绝及正常RAR相邻PASS；真实10000页CBZ新库导入/普通打开/末页完整确认与10001页导入拒绝/不可读界面PASS。重复小图仅作容量，不外推视觉/性能/其他平台或最终RC，证据d7ab754f/comic-budgets-20260907，详见evidence。
+
 2026-09-07 RISK-09：真实Android ARM64归档引擎加密/截断检测码前后及共享分类定向验证已闭环，具体层级/限制见evidence；不据此覆盖普通新APK异常界面、iOS或完整格式矩阵。
 
 2026-09-07增量：COM-CBR/COM-RAR真实加密和截断导入失败隔离、正常同级6页Android首图子项PASS；IMPORT-04普通详情误报无权限已修复且真机原/相邻闭环。仅此范围，不代替原生异常archive直接打开或iOS；证据da46248a/rar-exceptions-20260907，详见evidence。
@@ -174,7 +176,7 @@ R1 / DEC-05：用户批准 1.0 不支持第三方进度同步，OPDS-04 原互�
 | REF-FB2 | FB2-N/C：多section、嵌套目录与内嵌图片 | W/A/I；P2 | R，文本/图像/章节正确 | FB2-X：坏XML、可恢复active/具体实体风险 | PARTIAL：READER-08已CLOSED；055a36c1新包原前置标题及嵌套目录正文子项PASS，证据bea858b9/android-fb2-20260907；图像/异常/iOS仍待 |
 | REF-TXT | TXT-N/C：中文UTF-8、BOM UTF-16LE/BE、GB18030、混合换行、长章 | W/A/I；P2 | R；逐实际编码登记，不能一份英文UTF8代替 | TXT-X：损坏/超预算，失败类别正确 | PARTIAL：9cb26b94 Android UTF8/BOM UTF16LE/BE/GB18030正常中文正文PASS；UTF16BE混合换行/58060字符长章目录到末章及确认后冷恢复PASS（耗时未测），详见evidence；异常/其他平台仍待 |
 | PDF | PDF-N/C：文本目录+复杂大页/扫描图像PDF | W/A/I；P2 | F；真实物理页与内容可读，有界传输 | PDF-X：截断、密码/超预算 | PARTIAL/FAIL：Android一页PDF首次本地切换打开READER-09已CLOSED，69页普通首页相邻PASS（0271edd4；a389944e/android-pdf-20260907）；Android普通滑动/按钮、35中页/69末页边界及确认后冷恢复35正文子项PASS（64f1bbc1/android-pdf-navigation-20260907，耗时未测）；双指放大/缩回及横竖屏重建保持35/69和完整位置PASS（9a13322c/android-pdf-layout-20260907）；728a0cf8复杂PDF文字/纯图像两页可读、截断明确错误子项PASS；密码错误分类READER-10已CLOSED（cfec37f7新包原场景通过）；READER-11已CLOSED（554120b6新包新会话1→2→3实际三页/完整位置一致），大页四角正文可读，outline暂无章节不计通过，详见evidence。阅读方向设置/其余异常仍待。W正常69页首页/中页已读，READER-05候选待真实回归；iOS BLOCKED |
-| COM-CBZ | CBZ-N/C：真实ZIP漫画、嵌套路径/自然排序/长图 | W/A/I；P2 | F；图片顺序与页数正确 | CBZ-X：加密/损坏/超预算 | PARTIAL/FAIL：Android正常6页/目录指定页/末页边界、设置缩放及确认后冷恢复5/6子项PASS（66f5efd5/android-comic-20260907，耗时未测）；W真实6页可读及末页重开，READER-06/07候选仍待真实回归；CRC坏中页隔离后两图实际PASS；不可解码中页后错误卡READER-13、单/双页切换崩溃READER-14均已CLOSED（79082997，见evidence），方向/其余复杂异常及其他平台另计 |
+| COM-CBZ | CBZ-N/C：真实ZIP漫画、嵌套路径/自然排序/长图 | W/A/I；P2 | F；图片顺序与页数正确 | CBZ-X：加密/损坏/超预算 | PARTIAL/FAIL：Android正常6页/目录指定页/末页边界、设置缩放及确认后冷恢复5/6子项PASS（66f5efd5/android-comic-20260907，耗时未测）；W真实6页可读及末页重开，READER-06/07候选仍待真实回归；CRC坏中页隔离后两图实际PASS；不可解码中页后错误卡READER-13、单/双页切换崩溃READER-14均已CLOSED（79082997，见evidence），10000/10001页真实容量及超单页/压缩比原生子项PASS（d7ab754f，详见evidence）；方向/其余复杂异常及其他平台另计 |
 | COM-ZIP | ZIP-N/C：独立ZIP源及含非图片条目 | W/A/I；P2 | F；正确筛图，顺序不漏重复 | ZIP-X：遍历/损坏/解压预算 | PARTIAL；IMPORT-03已关闭，148e0634真实六图+TXT全新导入/Android首末及前页PASS；ZIP逃逸/链接隔离及可规范化普通路径两图真实HTTP/Android PASS（fe90d7b5/comic-exceptions-20260907）；W/I与其他复杂异常待验 |
 | COM-CBR | CBR-N/C：实际RAR容器与承诺变体 | W/A/I；P2 | F；不能用ZIP改名 | CBR-X：加密/损坏 | PARTIAL；d0126d3e真实RAR5压缩同字节CBR、Android首图/翻至4页/确认后冷恢复PASS；W/I与复杂异常待验 |
 | COM-RAR | RAR-N/C：真实RAR4/RAR5分别登记适配能力 | W/A/I；P2 | F；变体失败记风险不删支持 | RAR-X：损坏/扩展预算 | PARTIAL；d0126d3e真实RAR5压缩Android首图/前翻及3/6确认PASS；RAR4、W/I及复杂异常待验 |

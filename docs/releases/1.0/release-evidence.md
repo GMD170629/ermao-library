@@ -1,5 +1,13 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07漫画容量边界子项PASS（d7ab754f，无新增业务缺陷）：复用现有ReaderRarInstrumentedTest真机三项通过，超单页字节隔离且保留可读页、高压缩比拒绝、RAR5/CBR原生正常读取相邻有效；原backend comic_archives单文件20项通过，确认页/封面预算在读取前执行。未扩任何通用工具或新增测试入口。
+
+页数实际边界：机器契约读取上限10000，复用现有RAR4 fixture中经PIL校验的16×16/1279B PNG，按原字节重复成10000/10001 ZIP_STORED页，原件约13.73MB，SHA见samples.json。正常API新建专用库/Worker：LIMIT READY10000页，OVER明确页数超限失败，不影响正常同级。manifest真实wire1376919B，HTTP首/末图均与原件一致；新隔离开发APK SHA-256 45bde42d300f4c8798c5f0c1398203b91e679c77d34d203da473be07a86a439d已包含d7ab754f原生分类修复，实际详情10000页、普通打开图像、拖至末页后完整确认r2/pages/9999/page10000of10000。OVER普通详情无可读资源且开始按钮enabled=false，公开进度GET404。证据d7ab754f/comic-budgets-20260907的android/backend日志与XML、samples/tasks/catalog/manifest/http-pages、ready/last图像与XML、last-progress/final-http/checks/installed-apk/signature。
+
+限制与执行记录：重复小图仅验页数容量，不作不同页画面身份、真实长漫画性能或冷恢复时限证据；原生预算测试里的1B页仅验证原生读取，不计图片解码PASS。Gradle connectedDebugAndroidTest复用此前现成独立UID与debug选择init，结束时清掉隔离com.ermao.library.releasecheck包；随后重新安装同构建并通过普通界面登录本机合成账号，因此不称保留客户端数据或升级/冷恢复通过。首次读取安装路径为空形成空输入SHA，保留命令事实，不采纳该值；重装后实际pm path/base.apk与保存APK hash一致。初始Debug预填项在提交前全改为专用localhost账号，系统密码存储提示选择取消。后续仪器使用现有assemble+精确adb方式，避免connected任务清理已有隔离App。原件/API原资产hash保持，无API5xx/本次App FATAL；API/Worker wrapper终态exit0/shutdown stopped，App/18084及本轮设备文件清理，原用户15改动继续排除。
+
+停止此容量组扩验。当前原五项Chrome候选待原场景、iOS/容器/上传阻塞与正式包暂缓保持，未冻结RC；下一可执行项尚未完成的Android可重排格式正常/复杂实际阅读，不重复本组或闭合缺陷。
+
 2026-09-07 RISK-09分类缺陷闭环（仅本次层级）：真实Android ARM64 archive-core诊断确认RAR5头加密原ARCHIVE_HEADER_INVALID、正文加密页原ARCHIVE_DATA_INVALID；截断同为DATA_INVALID。最小原生补丁仅在既有set_reader_error识别固定libarchive3.8.9的加密报错，保留既有分卷映射和所有拒绝/读写行为。NDK将现有源码链接现成同版本libarchive，-Wall/-Wextra/-Werror编译通过；同四输入复测头加密ARCHIVE_ENCRYPTED、两加密页ARCHIVE_ENCRYPTED、截断仍DATA_INVALID、正常全部7归档条目可读（6图片+README，不是产品7漫画页）。与59e93d8b共享facade的能力/完整性/安全规则映射定向结果对应，未改机器规则、预算或引擎支持范围。证据8c3a22d7/archive-classification-20260907/native-before/after、native-build-sources及两份cleanup；停止该分类缺陷扩验。
 
 诊断必要性/停止条件：服务于RG-03/COM-RAR-X与RISK-09，现有host runner不可在Windows执行、现有instrumentation无加密/截断输入；用现成NDK/静态库和上轮已验证四个样本，仅在/data/local/tmp/ermao-archive-classification-8c3a22d7执行一个局部C观察程序。观察实际检测码及同字节前后后立即删除设备程序/样本与目录，未进生产路径或通用工具。原始日志与SHA完整保留。该诊断不是新APK原UI、iOS或最终RC证据；安装包仍上一轮df17c4ce开发包，最终候选须包含新native源码重建。普通导入拒绝事实与原生直接打开分别登记，不虚填完整格式PASS。下一可执行项漫画容量边界/其余矩阵；原五项Chrome待实测和外部条件保持。

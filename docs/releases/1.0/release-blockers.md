@@ -1,5 +1,9 @@
 # 1.0 发布阻塞项
 
+2026-09-07漫画容量边界子项PASS（d7ab754f，无新增业务缺陷）：复用现有ReaderRarInstrumentedTest真机三项通过，超单页字节隔离且保留可读页、高压缩比拒绝、RAR5/CBR原生正常读取相邻有效；原backend comic_archives单文件20项通过，确认页/封面预算在读取前执行。未扩任何通用工具或新增测试入口。
+
+当前原五项Chrome候选/其他矩阵和外部条件保持，未冻结RC；下一项剩余Android可重排格式实际阅读，不扩漫画容量工具。
+
 2026-09-07 RISK-09分类缺陷闭环（仅本次层级）：真实Android ARM64 archive-core诊断确认RAR5头加密原ARCHIVE_HEADER_INVALID、正文加密页原ARCHIVE_DATA_INVALID；截断同为DATA_INVALID。最小原生补丁仅在既有set_reader_error识别固定libarchive3.8.9的加密报错，保留既有分卷映射和所有拒绝/读写行为。NDK将现有源码链接现成同版本libarchive，-Wall/-Wextra/-Werror编译通过；同四输入复测头加密ARCHIVE_ENCRYPTED、两加密页ARCHIVE_ENCRYPTED、截断仍DATA_INVALID、正常全部7归档条目可读（6图片+README，不是产品7漫画页）。与59e93d8b共享facade的能力/完整性/安全规则映射定向结果对应，未改机器规则、预算或引擎支持范围。证据8c3a22d7/archive-classification-20260907/native-before/after、native-build-sources及两份cleanup；停止该分类缺陷扩验。
 
 下一项漫画容量边界/其余矩阵；原五项Chrome待实测、iOS/容器/上传限制与正式包暂缓保持，未冻结RC。
