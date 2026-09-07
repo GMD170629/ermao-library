@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 MOBI-X普通Android错误反馈及READER-15集成验证PASS（3cf54116，无新增业务修改）：真实DRM、96B截断、坏偏移分别明确受保护/内容损坏；DRM重新获取仍拒绝，关闭后同库正常MOBI正文可读。三种失败进度均null，坏偏移前后同PID18255且无崩溃，停止本缺陷扩验；其他格式/锚点与原五项Chrome候选保持，未冻结RC。
+
+证据artifacts/releases/1.0/3cf54116/mobi-ui-errors-20260907/：通过既有android-ui.init.gradle增量assembleDebug、adb install -r保留隔离应用数据，开发APK/安装文件SHA-256均7f27878b9390ab4bb36a2080fc027d0c3179d3126c8a6dea09d49970b8d5e701，包含3cf54116原生补丁；非正式签名交付。对应源码的Windows DLL重新构建/ABI1加载，source.json留原生与API散列。四份fixture新目录/普通API建库与Worker均READY；READY是目录入库状态，不意味着坏内容可读。普通首页→详情→阅读的drm/truncated/offset-detail/open图像与XML、drm-retry、normal-open与android-process.log证明UI稳定码PUBLICATION_DRM_UNSUPPORTED/CORRUPT_FILE及正常正文。主已逐张检查，子任务只读核对直接映射。final-http记录三失败publication读取422、正常200，失败progressSnapshot均null、正常已有真实位置；HTTP原件SHA一致，495 API源与四样本不变、无5xx。自有服务session7032退出0、两子PID stopped；App强停、18084转发及本轮明确设备临时文件清理完成，原用户15改动保持。未测iOS或新增跨页锚点/时限；完整同RC验收仍待。
+
 2026-09-07 READER-15原生层CLOSED：真实损坏MOBI记录偏移导致Android FORTIFY/SIGABRT，read.c在相减/分配前检查记录偏移不超EOF且不逆序；原真机失败与正常语料/ABI/关闭相邻均通过。TEST-14过时Android负例预期同步现有共享C契约，拒绝断言保留并补真实目录输入的Unsupported分支。证据5a9ab746/mobi-errors-20260907；未冻结RC。
 
 原失败：现有MobiCoreInstrumentedTest三项先出现两个预期失败；按早已生效的host_tests.c规则把no-content/pseudo/KFX/AZW4损坏字节预期纠正后，继续到negative-corrupt-record-offset.mobi实际崩溃。源10196B，首offset14292、next9048，uint32长度下溢4294962052；Android libc后续报read count 2^64−5244而SIGABRT。Windows普通DLL返回Corrupt不能代替Android原失败。原android.log/android-red.xml、android-green.log/android-crash.xml和仅本次测试进程native-crash/negative-crash-testlog保留；green为原候选日志文件名，结果实际FAIL，不采纳为成功。
