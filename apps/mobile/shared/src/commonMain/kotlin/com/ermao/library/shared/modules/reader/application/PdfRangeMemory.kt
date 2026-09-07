@@ -71,7 +71,9 @@ class PdfRangeMemory {
     }
 
     fun activateUnit(pageIndex: Int) {
-        state.update { if (it.unit == pageIndex) it else it.copy(unit = pageIndex, chunks = emptyMap()) }
+        // PDFium retains document availability and parsed objects across pages.
+        // Keep their bytes within the existing LRU budget until session close.
+        state.update { if (it.unit == pageIndex) it else it.copy(unit = pageIndex) }
     }
 
     fun activateNamespace(namespace: ReaderSyncNamespace) {

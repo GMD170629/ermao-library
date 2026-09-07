@@ -172,13 +172,15 @@ final class PdfReaderTests: XCTestCase {
         XCTAssertNil(store.load(resourceID: "another-resource"))
     }
 
-    func testChangingReadingUnitReleasesPreviousBodyBytes() throws {
+    func testChangingReadingUnitRetainsDocumentBytesUntilClose() throws {
         let cache = ErmaoShared.PdfRangeMemory()
         let source = try remoteSource()
         let identity = ErmaoShared.PdfRangeCacheIdentity(namespace: source.namespace_, resourceId: source.resourceId)
         cache.activateUnit(pageIndex: 0)
         try cache.writeAlignedRange(identity: identity, begin: 0, bytes: KotlinByteArray(size: 32), expectedEpoch: nil)
         cache.activateUnit(pageIndex: 1)
+        XCTAssertNotNil(cache.readCached(identity: identity, offset: 0, count: 1))
+        cache.clear()
         XCTAssertNil(cache.readCached(identity: identity, offset: 0, count: 1))
     }
 

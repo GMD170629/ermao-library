@@ -31,7 +31,7 @@ class PdfRangeLoaderTest {
     private val identity = PdfRangeCacheIdentity(namespace, "resource")
 
     @Test
-    fun concurrentRequestsCoalesceAndChangingPageDropsPreviousBytes(): Unit = runBlocking {
+    fun concurrentRequestsCoalesceAndChangingPageRetainsDocumentBytes(): Unit = runBlocking {
         val server = RecordingServer()
         val loader = PdfRangeLoader(source, identity, PdfRangeMemory(), server)
         loader.activateUnit(0)
@@ -39,11 +39,28 @@ class PdfRangeLoaderTest {
         assertEquals(listOf(PdfByteRange(0, PDF_RANGE_CHUNK_BYTES.toLong())), server.ranges)
         assertTrue(loader.isCached(1, 10))
         loader.activateUnit(1)
-        assertFalse(loader.isCached(1, 10))
+        // PDFium retains parsed objects and availability across page changes.
+        assertTrue(loader.isCached(1, 10))
         loader.awaitRange(1, 10)
-        assertEquals(2, server.ranges.size)
+        assertEquals(1, server.ranges.size)
         loader.close()
         assertFalse(loader.isCached(1, 10))
+    }
+
+    @Test
+    fun pageChangesRetainOnlyTheExistingBoundedCache(): Unit = runBlocking {
+        val cache = PdfRangeMemory()
+        val chunk = PDF_RANGE_CHUNK_BYTES
+        val chunksAtLimit = PDF_RANGE_MEMORY_CACHE_BYTES / chunk
+        repeat(chunksAtLimit + 1) { page ->
+            cache.activateUnit(page)
+            cache.writeAlignedRange(identity, page.toLong() * chunk, ByteArray(chunk) { 7 })
+        }
+        assertFalse(cache.isCached(identity, 0, 1))
+        assertTrue(cache.isCached(identity, chunk.toLong(), 1))
+        assertTrue(cache.isCached(identity, chunksAtLimit.toLong() * chunk, 1))
+        cache.clear()
+        assertFalse(cache.isCached(identity, chunk.toLong(), 1))
     }
 
     @Test
