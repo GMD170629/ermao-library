@@ -268,7 +268,7 @@ fun MainShell(
         createAndroidReaderBootstrapGateway(appContext)
     }
     val audioMediaTransport = remember(
-        session.profile.id,
+        session.profile,
         session.identity.namespace.authorizationVersion,
     ) {
         createAndroidAudioMediaTransport(appContext, session.profile)
@@ -281,6 +281,10 @@ fun MainShell(
         session.identity.namespace.serverIdentity,
         session.identity.namespace.userId,
         session.identity.namespace.authorizationVersion,
+        // These models capture the connection, not just the account's data namespace.
+        session.profile.id,
+        session.profile.baseUrl.value,
+        session.profile.tlsMode,
     ).joinToString("-")
     var audioChromeState by rememberSaveable { mutableStateOf(AudioChromeState.Hidden) }
     val audioNowPlayingVisible = audioChromeState == AudioChromeState.NowPlaying

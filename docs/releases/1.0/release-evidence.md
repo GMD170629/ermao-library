@@ -1,5 +1,7 @@
 # 1.0 发布证据与最终签收
 
+2026-09-08 CON-01非信任TLS默认拒绝/取消/显式接受/冷启动子项通过，但HTTP恢复相邻发现CONNECTION-01 OPEN：普通Android7ac595aa在同serverIdentity的HTTPS→退出→HTTP重新登录后，HTTP login/me已200，“我的”仍显示旧HTTPS，设置GET也发往旧TLS端点。MainShell的Activity级ViewModel键仅含namespace，复用捕获旧profile的Me/管理等模型。最小候选在现有contentKey加入profile id/baseUrl/tlsMode，音频remember也用完整profile；不改数据namespace、TLS语义或协议，不新增工具。原证据f936f99f/android-tls-20260908/red-result.json、restored.xml、http/tls.log；首次收尾断言失败保留。证书SAN匹配127.0.0.1，默认信任失败、确认前无HTTP请求；风险提示及取消/重试、显式接受后的首页与冷开分别留证。临时配置通过UI删除、回HTTP认证成功但设置仍旧；测试app/reverse/设备XML、双服务和临时密钥已清理（shutdown.json），未改系统信任。候选Android增量编译/assembleDebug及现有MainShellNavigationTest 3/3通过（candidate-build.log/XML）；原UI复验下一步，不能标整体CON-01通过。
+
 2026-09-08 CON-02 Android普通退出后跨服务器重登子项PASS（API987ece6b、普通APK7ac595aa）：复用既有隔离A(18084，62作品，发布接入验收)与B(18085，0作品，Server B isolated owner)，同邮箱但HTTP userId不同。实际“我的→账户与安全→退出并清除私有数据→登录页改B地址→登录”后B首页无A继续项、书库0、我的显示B名称/18085；强停冷开仍B空首页。再普通退出B→登录页“切换服务器”选择已存A→登录，A名称/18084/62作品/原52%继续项恢复。UI截图已查看，双HTTP用户身份、作品列表和书库结果前后相同。证据`987ece6b/android-server-switch-20260908/result.json`、before/after、b-home/library/settings/cold、select-a/return-form/return-enter/a-restored及API日志。
 
 现有“我的→服务器”只是只读展示，ServerCenterScreen/switchServer未接生产导航，未以直调代替UI；本证据不宣称保持登录/在途直接切服或切服保留缓存。两次正常退出按产品语义清理独立测试namespace私有缓存，未清真实应用或服务端数据；A已重新登录，B profile保留。小米保存密码提示取消，23个专用设备文件、两条reverse已清理，app及两API停止，wrapper终态0。无业务/工具修改、未重建包，不外推HTTPS或最终RC。下一可执行项CON-01现有HTTPS/非信任证书路径可行性核验；睡眠能力范围仍待负责人，Chrome五候选/iOS/容器/工具限制与正式包暂缓/最终同RC保持。

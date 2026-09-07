@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-08 CONNECTION-01 OPEN（RG-02 CON-01/02）：同服务器身份换地址重新登录后，Android设置模型保留旧地址/TLS请求上下文，普通UI及双API日志已复现。最小现有缓存键候选处理中；证据f936f99f/android-tls-20260908/red-result.json，详见evidence。非信任TLS显式流程子项通过不抵销此相邻失败；R2及其余阻塞保持。
+
 2026-09-08 CON-02 Android可达UI的退出后A→B→A重登隔离及B冷启动子项PASS；同邮箱不同身份，A62/B0及回A身份/进度恢复，后端内容不变。证据987ece6b/android-server-switch-20260908/result.json，详见evidence。没有新增产品缺陷或工具；不把未接线的保持登录切服算通过。下一项CON-01 HTTPS/非信任证书现有路径；睡眠范围待负责人、Chrome五候选/iOS/容器/工具限制、正式包暂缓与最终RC仍待，R2保持。
 
 2026-09-08 Android普通MP3倍速1.5×/恢复1×、实际越界ID3章节的导入失败隔离与详情提示两个必测子项已补齐，无新增产品缺陷或工具代码。证据0a8e7da3/android-audio-rate-20260908与audio-chapter-bounds-20260908/result.json；详细边界和清理见evidence。下一项剩余音频四格式异常/平台入口；睡眠范围待负责人、原Chrome五候选/iOS/容器/工具限制、正式包暂缓和最终RC仍未完成，R2保持。
