@@ -1,3 +1,7 @@
+2026-09-08 IMPORT-07 CLOSED（d4b027d9，RG-02 IMP-03）：在独立空库按prestart→setup→真实API/Worker完整准备，原NTFS单文件拒读仍FAILED，实际任务HTTP摘要为`[Errno 13] Permission denied: '[已隐藏]'`，不含绝对路径或文件名。正常同级READY/原件HTTP可读；finally恢复owner/group/全部ACE后，正常扫描使原两本身份均保持并得到READY/2页资源，两原件/HTTP SHA256保持335e1f51e94e46ee2d6d7d73446f53c1f4c057e2578ddf22b4876ea2097f31c5。证据`43f75b02/file-permission-20260908/green/result.json`及denied-probe/tasks/books、acl-restored、restored-scan/tasks/books；原失败与12项定向/相邻回归另见父目录。仅改现有导入摘要脱敏调用，停止本缺陷扩验。
+
+独立服务18087及Worker均已停止、宿主session39337终态0。首次直接uvicorn漏prestart导致新库目录不存在，初始API退出3/尚未创建Worker；initial-api/initial-shutdown保留，补执行项目原app.bootstrap.prestart后才运行上述有效场景，非产品缺陷/反复重跑取绿。复验两份346B小文件的临时服务与导入为本次Android长时观察的已知并行活动；普通Android UI未重演（该修复仅HTTP错误内容），其他格式/权限及最终冻结RC不由此覆盖。长时播放仍执行，现有外部阻塞保持。
+
 2026-09-08 IMPORT-07 OPEN（RG-02 IMP-03错误信息保护）：a1040b09真实可读NTFS根内单个CBZ拒读时任务FAILED，正常同级READY/原件可读；恢复ACL后同一书身份重扫两项READY/2页，原件SHA均335e1f51e94e46ee2d6d7d73446f53c1f4c057e2578ddf22b4876ea2097f31c5。owner/group/全部ACE恢复已核验。但任务errorSummary直接暴露绝对源路径，原HTTP实证`43f75b02/file-permission-20260908/denied-tasks.json`；恢复成功不抵销该错误信息问题。
 
 最小候选仅在唯一RegistryResourceAdapterExecutor的漫画/音频现有异常映射调用core.safe_errors.safe_error_message，传入原路径和OS异常转义形式；原分类/正常解析/持久化流程不变、不新增脱敏实现。三类真实错误表达的针对性测试先3FAIL后PASS，既有正常/缺文件及部分失败保留READY相邻合计12PASS，ruff及单模块mypy通过。无通用工具改动；原NTFS+HTTP场景待长时播放后重启现有服务复验，状态为“修复已准备、原场景待验证”，不可CLOSED。两份346B小样本导入与0.41秒定向测试在Android soak期间执行，计入并行活动；当前API/Worker未重载，仍是a1040b09。

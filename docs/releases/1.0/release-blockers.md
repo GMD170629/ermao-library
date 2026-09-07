@@ -1,3 +1,5 @@
+2026-09-08 IMPORT-07 CLOSED：d4b027d9真实NTFS拒读的HTTP摘要已脱敏，正常同级/恢复ACL后同身份重扫及原件一致通过，临时服务收尾完成。证据43f75b02/file-permission-20260908/green/result.json；详见evidence。Android长时仍执行，R2未冻结及其余阻塞保持。
+
 2026-09-08 IMPORT-07 OPEN：真实单文件拒读已验证隔离/恢复，但错误摘要带出绝对源路径；最小现有脱敏调用候选定向通过，原API场景待重启复验。Android 30分钟仍执行中，详见evidence。R2/其余阻塞保持。
 
 2026-09-08 当前下一项RG-03 Android连续30分钟实际播放，现有短时方法不足的最小补充及停止条件见evidence；尚未执行，不计PASS。其余真实阻塞和R2未冻结状态保持。
