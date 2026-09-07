@@ -1,3 +1,9 @@
+2026-09-08 RG-03 REF-EPUB普通部分下载取消/继续子项PASS，无产品修复。普通Reader实际显示1024/2497B、41%、正在下载后点击“取消并返回”，返回原详情，约103ms观察到网络断连且余量未发送；真实任务Paused/unverified、1024B part字节等于原件前缀，未生成完成记录，服务端完整r18未变。再次普通继续阅读，以同taskId发送Range bytes=1024-，真实API206/Content-Range 1024-2496/2497，完成2497B且sha a643ee39426f926dbd7ca62ffcd2ec008d276cd1ac09d6af45f33548bbaa2531与原件相同；实际第二章正文，正常关闭完整local=server=原position、confirmed19/pending空。
+
+证据`38212927/epub-download-cancel-20260908/result.json`及partial/resumed原图、partial/paused/completed记录、part hash、响应日志/断连时序、前后HTTP/DB。固定小文件响应阻留的必要性见下条，仅客户端部分下载证据，不称服务端流式读取；已达到停止条件，不扩此工具。源码API38212927、普通APK2127a96a/hash c09df54d…，无包重建。原测试备份核对后清理，新完整文件保留；自有App/XML/reverse/API收尾，宿主41504终态0，子退出3见shutdown.json。下一项网络中断后的既有重试按钮；本项不覆盖其网络失败语义或最终RC。R2及其他限制保持。
+
+2026-09-08 RG-03 REF-EPUB普通下载取消/续传子项准备：现有Runtime fake取消/Range契约测试不能证明普通UI与实际部分文件；已有2497B原件瞬时完成，原hold_one_ack仅支持JSON PUT。仅在本轮隔离artifacts沿用其单次arm/有界等待/断连观测方法，改为目标资产GET先发送1024B、暂缓余量，并记录真实Range与响应；不进入生产代码、不新增配置/通用框架。停止条件：实际0<part<总量后普通取消、Paused/无完成原件，原task按实际偏移续传206、完整hash/正文与位置正确；网络失败重试另计。当前NOT_RUN，证据38212927/epub-download-cancel-20260908。
+
 2026-09-08 RG-03 REF-EPUB普通缺文件重建子项PASS，无业务或测试工具代码改动。复用两章2497B测试EPUB，在原正常第二章/r17后停独立App，按当前namespace/catalog的精确resource+asset解析唯一managed原件，确认root内普通文件再移至专用备份；catalog与位置DB完整字节保持、原路径不存在。冷启普通详情继续阅读触发一次真实资产GET200，新taskId且Completed/verified/2497B；新文件与原件/HTTP SHA256 a643ee39426f926dbd7ca62ffcd2ec008d276cd1ac09d6af45f33548bbaa2531相同。实际第二章标题/正文与原锚点一致，正常关闭后完整local=server=原position、confirmed18/pending空。
 
 证据`74e99bfa/epub-missing-original-20260908/result.json`、missing-precondition、初始/新记录、rebuild-http.log及before-open/reopened原图和DB。首次手抄预期hash错误导致准备断言拒绝，未执行移动；后续以原始HTTP字节和完整历史hash核验，不改变验收阈值。APK仍2127a96a/hash c09df54d…，API74e99bfa。已核对备份hash后仅删除该临时备份，保留重建有效原件；自有App/XML/reverse/API均清理，宿主29382终态0，shutdown.json记录子退出3。小文件不声称进度动画/时限、下载取消、损坏或其他平台已验。下一项核对RG-03下载取消/重试现有证据，仅补真实缺口。R2未冻结、正式包暂缓与其他外部条件保持。

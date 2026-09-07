@@ -1,3 +1,5 @@
+2026-09-08 RG-03 Android EPUB普通部分下载取消/同任务续传子项PASS；无业务修复，证据38212927/epub-download-cancel-20260908/result.json与evidence首条。下一项现有网络中断重试入口，取消已完成不再扩验；R2未冻结，其余阻塞保持。
+
 2026-09-08 RG-03 Android EPUB本地原文件缺失后普通重建子项PASS，无新缺陷/工具；证据74e99bfa/epub-missing-original-20260908/result.json与evidence首条。READER-22已关闭，当前下一项核对原文件下载取消/重试的既有证据与剩余入口；R2未冻结及外部阻塞保持。
 
 2026-09-08 READER-22 CLOSED：2127a96a原普通漫画第4图切连续保持，滑到5/恢复分页LTR/正常关闭及完整持久位置通过；证据7f2f22d7/comic-direction-20260908/green/result.json与evidence首条。原偏好、原件与隔离环境已收尾；R2未冻结，其余阻塞保持。
@@ -234,7 +236,7 @@ R1 / DEC-05：用户批准 1.0 不支持第三方进度同步，OPDS-04 原互�
 
 | 组 ID（RG-03） | 源格式 / N与C真实样本要求（ID槽） | 平台/前置 | 步骤与预期 | X样本 | 状态/关联 |
 |---|---|---|---|---|---|
-| REF-EPUB | EPUB-N：真实章节；EPUB-C：嵌套目录、图文、非平凡布局 | W/A/I；P2 | R，正文/目录/锚点均正确 | EPUB-X：损坏包、active markup可恢复、具体外部实体风险 | PARTIAL：Android reader-v2普通打开/翻章/确认后强停恢复PASS（00563daf/android-epub-normal-20260907）；Chrome新库正文见3a1e4193/rg02-ui-intake-20260907；Android保留下载记录/位置、移走唯一原文件后普通详情重新下载、同第二章正文/完整位置/原件hash子项PASS（74e99bfa/epub-missing-original-20260908）；其余复杂/异常仍待，iOS BLOCKED |
+| REF-EPUB | EPUB-N：真实章节；EPUB-C：嵌套目录、图文、非平凡布局 | W/A/I；P2 | R，正文/目录/锚点均正确 | EPUB-X：损坏包、active markup可恢复、具体外部实体风险 | PARTIAL：Android reader-v2普通打开/翻章/确认后强停恢复PASS（00563daf/android-epub-normal-20260907）；Chrome新库正文见3a1e4193/rg02-ui-intake-20260907；Android保留下载记录/位置、移走唯一原文件后普通详情重新下载、同第二章正文/完整位置/原件hash子项PASS（74e99bfa/epub-missing-original-20260908）；普通下载1024/2497B取消后Paused/part保留、同task Range1024/206续传完整原件与原位置子项PASS（38212927/epub-download-cancel-20260908）；其余复杂/异常仍待，iOS BLOCKED |
 | REF-MOBI | MOBI-N/C：实际MOBI7与复杂PalmDB/图片目录 | W/A/I；P2 | R，libmobi原格式内存出版物可读 | MOBI-X：截断/DRM | PARTIAL：6f73ef35 Android真实MOBI6普通三章正文/目录显示PASS；3cf54116真DRM/截断/坏偏移普通错误UI与无位置写入PASS；复杂跨页锚点/其他异常及W/I仍待，详见evidence |
 | REF-AZW | AZW-N/C：独立实际AZW来源与内部变体证明；不只MOBI改名 | W/A/I；P2 | R，实际变体按承诺可读 | AZW-X：DRM/损坏 | BLOCKED；ENV-06、RISK-02 |
 | REF-AZW3 | AZW3-N/C：实际KF8、复杂章节图文 | W/A/I；P2 | R，目录/跨章/锚点正确 | AZW3-X：损坏/DRM | PARTIAL：6f73ef35 Android KF8三章正文/层级目录、卷二确认后冷恢复与内嵌PNG/JPEG显示PASS；精确锚点/其他复杂异常及W/I仍待，详见evidence |
