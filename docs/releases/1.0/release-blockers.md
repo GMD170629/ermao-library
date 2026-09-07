@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-07当前覆盖：READER-08已CLOSED，055a36c1新开发包普通首页恢复首标题及嵌套正文原场景通过，证据见evidence首节；下文OPEN为历史。停止此缺陷扩验，继续剩余Android TXT编码/格式项。IMPORT-02仍待Chrome扩展弹窗解除后的普通UI复测，既有外部阻塞和正式包暂缓不变；未冻结RC。
+
 2026-09-07新增READER-08 OPEN（RG-03/REF-FB2）：Android真实FB2首屏空白，body直属标题在KMP渲染时被误跳过；普通显式选章/嵌套正文可读。原截图及XML见bea858b9/android-fb2-20260907，最小修复与定向回归进行中；不扩大引擎架构或测试工具。
 
 2026-09-07 IMPORT-02：19e9a944已提交推送，真实新库HTTP/Worker标题回归PASS；普通Chrome原场景被扩展弹窗占用阻塞（工具明确拒绝操作，见evidence），已请求关闭。尚不CLOSED，不重复HTTP回归或扩大修复。MEDIA-02 CLOSED。

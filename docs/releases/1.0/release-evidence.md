@@ -1,5 +1,7 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 READER-08 CLOSED：055a36c1两行KMP修复已推送，一次现有隔离UID开发包构建成功，保留数据install -r及冷启动通过。新包SHA-256 a5778b74b3815fa73125835ad456bb62adfa7900da420959da23eeac3ec7b7df（非正式交付）；普通首页继续同资源/原body-1-part-1位置，实际显示“This is a title”，fixed-open.png/XML对照原空白；普通嵌套目录仍显示h1/h2/h3及Yet more copy。证据bea858b9/android-fb2-20260907/result、fixed-*、start/nested-progress及fb2-body-title-20260907的RED/GREEN XML、apk-build/source/signature/installed-apk。原相邻章节可读、新包嵌套正文通过，停止该缺陷扩验。宿主API运行源码与样本不变、无5xx；记录的源码差异仅获准两文件，API/Worker/App/转发及自有临时XML/PNG均已停止清理。MIUI主题配置与旧WebView系统日志噪声保留，无本次应用FATAL/ANR标记。此项只关闭前置标题丢失，不覆盖FB2图片/异常/iOS或最终RC；下一项剩余Android TXT编码路径。
+
 2026-09-07 READER-08候选：KMP Fb2Renderer的loose body直接复用renderElement，title不再作为应丢弃节点；renderSection原章节标题去重保持。仅两行生产改动，无新框架/安全/目录协议变更。原码8项中2 FAIL（首资源空白、尾部title丢失），新码本类8 PASS/0 skip，主复核实际diff及RED/GREEN XML；首个hostTest任务名不存在保留，改用现有:shared:testAndroidHostTest，无工具配置修改。证据bea858b9/fb2-body-title-20260907。原真机场景待一次新包复验，尚不关单；iOS实测仍BLOCKED。
 
 2026-09-07 READER-08（RG-03/REF-FB2）真实FAIL：已核对同开发APK 62dd15de…，普通Android首页→Sample FB2 book详情→开始阅读，首屏长时间空白/0%；bea858b9/android-fb2-20260907的reader-ready.png/XML留证。样本是既有sectioned-namespaced.fb2（e75e57a6…，仅修补原样本缺xmlns:l，来源provenance保留）；其body直属标题“This is a title”被KMP renderer资源拆分保留，却被renderContent统一跳过title，生成空白前置页。显式目录Test Header h1实际显示两段正文；选择嵌套A Test Header h2后实际显示h1/h2/h3及Yet more copy，章节链可读，首屏失败不能计PASS。最小修复仅处理body标题与section标题去重，原资源href/顺序及安全契约保持；尚未修复闭环。无图片、无完整XSD或iOS结论。
