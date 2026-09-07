@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-07 Android PDF正常导航及确认后冷恢复子项PASS：64f1bbc1同开发包普通首页、滑动/前后按钮、35中页/69末页、末页不越界及返回68、确认r11后冷启恢复35正文与完整位置一致（r12）。无新增缺陷、无业务或工具修改。证据evidence首节，缩放/方向/复杂异常与Web READER-05继续单列；下一项Android漫画普通路径。既有五项候选待原场景、外部条件与正式包暂缓保持，未冻结RC。
+
 2026-09-07 READER-09 CLOSED：0271edd4新开发包原小PDF缓存重开、同字节新resource首次打开（真实materialization/local source安装）及69页首页相邻均PASS；证据evidence首节。停止此缺陷扩验。当前仍R2，RG-05负责人接受的导入预检完成，RG-01～04未整组放行；明确五项候选待原场景闭环SYNC-02、READER-05/06/07、IMPORT-02。格式/接入/位置剩余必测不能计作新bug或五个测试。下一可执行项为Android PDF正常翻页/位置及漫画路径；原Chrome、iOS、Docker阻塞与正式包暂缓分别保留，未冻结RC。
 
 2026-09-07 READER-09（RG-03/PDF，原生小文件）OPEN：464-byte reading-notes.pdf普通打开报PDF_RANGE_INVALID，完整下载/本地source安装已成功；69页原PDF正常显示首页。候选让AndroidRemotePdfiumDataSource在本地source安装后委托既有acquireRequested，不再提前false。定向原码1 FAIL/4 PASS→候选5 PASS；真机原场景待新包复验，尚不关单。证据a389944e/android-pdf-20260907，原件保留，未扩工具或阈值。
