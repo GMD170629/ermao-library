@@ -165,7 +165,7 @@ R1 / DEC-05：用户批准 1.0 不支持第三方进度同步，OPDS-04 原互�
 | REF-AZW | AZW-N/C：独立实际AZW来源与内部变体证明；不只MOBI改名 | W/A/I；P2 | R，实际变体按承诺可读 | AZW-X：DRM/损坏 | BLOCKED；ENV-06、RISK-02 |
 | REF-AZW3 | AZW3-N/C：实际KF8、复杂章节图文 | W/A/I；P2 | R，目录/跨章/锚点正确 | AZW3-X：损坏/DRM | BLOCKED；ENV-06 |
 | REF-PRC | PRC-N/C：实际PRC/PalmDB与复杂资源来源证明 | W/A/I；P2 | R，不能由改扩展名证明全部变体 | PRC-X：截断/DRM | BLOCKED；ENV-06、RISK-02 |
-| REF-FB2 | FB2-N/C：多section、嵌套目录与内嵌图片 | W/A/I；P2 | R，文本/图像/章节正确 | FB2-X：坏XML、可恢复active/具体实体风险 | BLOCKED；ENV-06 |
+| REF-FB2 | FB2-N/C：多section、嵌套目录与内嵌图片 | W/A/I；P2 | R，文本/图像/章节正确 | FB2-X：坏XML、可恢复active/具体实体风险 | FAIL：Android真实body前置标题首屏空白，READER-08 OPEN；普通目录/嵌套正文子项已实测可读，证据bea858b9/android-fb2-20260907；图像/异常/iOS仍待 |
 | REF-TXT | TXT-N/C：中文UTF-8、BOM UTF-16LE/BE、GB18030、混合换行、长章 | W/A/I；P2 | R；逐实际编码登记，不能一份英文UTF8代替 | TXT-X：损坏/超预算，失败类别正确 | BLOCKED；ENV-06 |
 | PDF | PDF-N/C：文本目录+复杂大页/扫描图像PDF | W/A/I；P2 | F；真实物理页与内容可读，有界传输 | PDF-X：截断、密码/超预算 | FAIL：W正常69页已读首页/中页，READER-05候选待真实回归；复杂/异常及原生子项按各自证据展开，不再以正常样本缺失概括 |
 | COM-CBZ | CBZ-N/C：真实ZIP漫画、嵌套路径/自然排序/长图 | W/A/I；P2 | F；图片顺序与页数正确 | CBZ-X：加密/损坏/超预算 | FAIL：W真实6页可读及末页重开，READER-06/07候选待真实回归；复杂/异常及原生子项仍分别待验收 |

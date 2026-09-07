@@ -1,5 +1,7 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 READER-08（RG-03/REF-FB2）真实FAIL：已核对同开发APK 62dd15de…，普通Android首页→Sample FB2 book详情→开始阅读，首屏长时间空白/0%；bea858b9/android-fb2-20260907的reader-ready.png/XML留证。样本是既有sectioned-namespaced.fb2（e75e57a6…，仅修补原样本缺xmlns:l，来源provenance保留）；其body直属标题“This is a title”被KMP renderer资源拆分保留，却被renderContent统一跳过title，生成空白前置页。显式目录Test Header h1实际显示两段正文；选择嵌套A Test Header h2后实际显示h1/h2/h3及Yet more copy，章节链可读，首屏失败不能计PASS。最小修复仅处理body标题与section标题去重，原资源href/顺序及安全契约保持；尚未修复闭环。无图片、无完整XSD或iOS结论。
+
 2026-09-07 IMPORT-02真实HTTP增量（19e9a944已推送）：全新专用库通过正常setup/create-library API及实际Worker导入两张原有PNG，Book/Resource均为“图片目录 Images [01]”，PAGE仍为“第 01/02 页 & image”，原标题故障在HTTP链路已修复。证据19e9a944/import02-ui-20260907的samples、library/tasks/books/book、http-requests/result及run日志。Chrome首次设置可见，但首次fill detached后工具明确报扩展UI占用，无法继续；已请求负责人关闭弹窗，未绕过限制。普通列表/详情原场景仍BLOCKED，不关IMPORT-02；API准备不冒充UI操作。无新业务改动、无新增通用测试工具。 自有fixture已exit0/stopped、18084/3105关闭、914源码和两原件校验不变（shutdown.json）；保留专用DB供恢复。扩展阻塞的tab35843118未操作关闭，未完成浏览器登录。
 
 2026-09-07 MEDIA-02 CLOSED：c4f45456在同一专用库清除唯一且内容已核对的默认封面缓存后，24个真实并发冷缓存HTTP请求全部200，图片校验通过，无5xx/遗留临时文件；API已停止，源代码核对不变。证据323be66b/media02-default-cover-20260907/http-{source,responses,result,shutdown}.json和http-api.log；与受控相同/不同/缺失发布结果单测共同闭环，不声称本次实际触发Windows拒绝分支，停止扩验。
