@@ -35,6 +35,24 @@ class AndroidEpubArchiveSafetyPreflightTest {
     }
 
     @Test
+    fun `invalid and truncated archives report corruption without changing the original`() = runTest {
+        withArchive("mimetype" to "application/epub+zip", "OPS/chapter.xhtml" to "readable") { archive ->
+            val truncated = archive.readBytes().copyOf(24)
+            for (bytes in listOf("Truncated publication; no zip directory".toByteArray(), truncated)) {
+                archive.writeBytes(bytes)
+                try {
+                    AndroidEpubArchiveSafetyPreflight.verify(archive)
+                    fail("Expected corrupt archive rejection")
+                } catch (error: ReaderSafetyException) {
+                    assertEquals(readerSafetyEpubArchiveIntegrityFailure(), error.failure)
+                    assertTrue(error.cause != null)
+                }
+                assertTrue(bytes.contentEquals(archive.readBytes()))
+            }
+        }
+    }
+
+    @Test
     fun `classifies fatal paths and archive integrity with their generated rules`() = runTest {
         val structureFailure = readerSafetyEpubArchiveStructureFailure()
         val integrityFailure = readerSafetyEpubArchiveIntegrityFailure()

@@ -1,5 +1,13 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 READER-17 Android原失败CLOSED：归档预检IO/解码异常改用既有EPUB.RESOURCE_INTEGRITY，保留拒绝与cause；39B非ZIP及24B截断ZIP定向先FAIL后PASS，原路径/链接风险、容量及正常归档相邻全通过。新普通APK打开/重新获取损坏EPUB均为既有格式解析失败提示（PUBLICATION_CORRUPT映射ParseFailed），不再误报活动内容；同PID28438正常EPUB首章可读，坏资源进度/receipt均0。iOS同源修复已提交682b2679但ENV-02未编译/未执行。停止本分类问题扩验；下一项EPUB active正文/缓存重开及必要现有副作用用例，未冻结RC。
+
+证据：`artifacts/releases/1.0/88f45fb9/epub-errors-20260907/`；bad-open与bad-retry保留原安全误报，after-open XML/PNG及after-retry对应修复后实际提示，good-open对应正常首章（不是active第二章）。preflight-red/green XML与日志保留原失败及6项定向结果；原有效断言未删，未改契约/阈值/工具。候选APK SHA-256 `aea79893e59e28cde407cee4861fb4ac2cd17bce33b8f4d0f1f0815a897bf79f`，基于88f45fb9加唯一Android分类补丁，candidate-source.json/ android-candidate.diff固定实际构建源码，未受同期仅iOS提交影响；开发包install-r保留数据。generator --check、boundary.log及diff检查通过。
+
+细节限制：初始临时导入观测误读Book.importStatus触发KeyError，API真实字段位于resources[].importStatus，原记录intake-observation.json；未改产品或把脚本异常当产品失败。good-detail第一次点击处于页面过渡，实际仍home，保留而不计通过，good-detail-ready为有效目标。隔离服务到900s期限正常退出，事后HTTP连接拒绝，因此after-orm.json改为真实原SQLite ORM只读核对两个专用资源，未声称独立HTTP PASS。result.json记录样本/原件与495个API源码hash不变、无坏进度/receipt、截图精确清理、App停止和reverse移除；共享服务9267a034/fb2-xml-ui-20260907/shutdown.json两子进程已停。本轮不扩active内容测试或构建工具；active第二章/现有仪器用例为下一项。
+
+2026-09-07 READER-17 OPEN（RG-03 EPUB异常）：现有39B非ZIP样本普通Android打开/重新获取均显示“安全策略阻止活动内容”，已实际复现；应保持拒绝但报告内容损坏。直接原因归档预检将IO/解码异常映射EPUB.ARCHIVE_STRUCTURE，现有EPUB.RESOURCE_INTEGRITY已提供PUBLICATION_CORRUPT。仅修正catch映射及针对性反例，路径风险与预算拒绝保留，不改契约/工具。证据88f45fb9/epub-errors-20260907/bad-open、bad-retry；下一项原失败及正常EPUB相邻。
+
 2026-09-07 READER-16 Android原失败CLOSED：9267a034普通开发APK实际打开安全DOCTYPE、可隔离external entity均保留正文，后者显示字面量&canary;；正常FB2相邻可读。测试canary未出现在正文，三个服务端原件及样本hash不变，同PID25985无所捕获崩溃。停止本缺陷Android扩验；iOS候选仍ENV-02待编译/真机，未声明整体原生放行。下一项EPUB损坏/active内容既有入口；原五项Chrome候选保持，未冻结RC。
 
 证据：`artifacts/releases/1.0/9267a034/fb2-xml-ui-20260907/` 的 doctype-open、entity-open、control-open XML/PNG已逐张核对，after-http.json保留完整进度及原件摘要，result.json/source.json记录源码与安装身份。APK SHA-256 `0d47ae8b4df8e4a03679c3153f7bdf10442d1993338eb4effa07600ebe47e460`，包com.ermao.library.releasecheck，version1.0.0/code1，adb install -r成功保留数据；它是开发包，正式产物仍暂缓。既有定向factory/shared/EPUB相邻证据见上一节，无新增代码/工具。全部本轮/原轮自有ermao-fb2s文件含canary已按exact名称删除，device-file-cleanup.json留证；偏好未变。隔离API/Worker仍供下一项运行，最终收尾待shutdown.json。

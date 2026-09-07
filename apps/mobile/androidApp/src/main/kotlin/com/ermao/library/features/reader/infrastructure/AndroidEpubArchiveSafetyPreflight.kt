@@ -44,11 +44,11 @@ internal object AndroidEpubArchiveSafetyPreflight {
         } catch (error: ReaderSafetyImplementationException) {
             throw error
         } catch (error: IOException) {
-            throw ReaderSafetyException(readerSafetyEpubArchiveStructureFailure()).also {
+            throw ReaderSafetyException(readerSafetyEpubArchiveIntegrityFailure()).also {
                 it.initCause(error)
             }
         } catch (error: IllegalArgumentException) {
-            throw ReaderSafetyException(readerSafetyEpubArchiveStructureFailure()).also {
+            throw ReaderSafetyException(readerSafetyEpubArchiveIntegrityFailure()).also {
                 it.initCause(error)
             }
         }
