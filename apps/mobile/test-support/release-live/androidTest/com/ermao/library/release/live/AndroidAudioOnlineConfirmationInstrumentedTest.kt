@@ -113,8 +113,10 @@ class AndroidAudioOnlineConfirmationInstrumentedTest {
                 lastPosition = snapshot.positionMillis
             }
             previousSampleAt = now
-            // Preserve the sample that actually crosses 30 minutes before ending.
-            if (now - started >= 1_800_000) break
+            // Keep the final sample; both observation time and actual media advance
+            // must reach 30 minutes. A frozen/slow clock cannot extend this indefinitely.
+            assertTrue("RG03_SOAK_BOUNDED_WINDOW", now - started <= initial.durationMillis)
+            if (now - started >= 1_800_000 && snapshot.positionMillis - initial.positionMillis >= 1_800_000) break
             Thread.sleep(100)
         }
         val latest = requireNotNull(database.get(SystemClock.elapsedRealtime() + 5_000))
