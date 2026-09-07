@@ -1,3 +1,7 @@
+2026-09-08 RG-03 R2当前Android安全适配器模块回归PASS：原样运行ReaderSafetyConformanceInstrumentedTest及EpubContentSecurityPolicyInstrumentedTest，实际2类通过，设备报告66项/0 omissions经既有--require-consumer ANDROID校验；generator --check及安全边界检查PASS。policyVersion4/digest edfc4aeef6a2f40316dcf38b5727559921ecd7af68da79f349718e2021d108f5，SDK31/PDFium875172…；源码b522f657，确认Android及契约自APK2127a96a后无变更，设备App/Test读回hash分别c09df54d…/2ebf0e0d…。证据`b522f657/android-safety-20260908/result.json`、instrument、报告/校验日志和start身份。设备报告复制后仅删除该文件、自有App停止，无API/新构建。
+
+此为多项XML/归档分类修复后的既定模块验证，不重开已关闭缺陷。报告含生成事实/生产探针，PDF_ACTIVE_ACTIONS检查native版本与策略投影，不等于真实PDF恶意动作执行已验，亦不代替iOS/最终RC。实际文件复核9120453e/epub-active、9267a034/fb2-xml-ui、88f45fb9/epub-errors、c87d2fc8/pdf-page-budget的result后补回矩阵既有子项；均保留原源码与限制，不冒充本轮重跑。PDF当前supportsPdfRotation默认false、普通设置禁用、mapper固定水平轴，撤回由catalog存在推导旋转必测的错误建议，不新增功能或标通过。下一项核对PDF主动动作真实输入现有覆盖；其他未验项目仍按台账继续。
+
 2026-09-08 RG-03 REF-EPUB普通网络中断后重试子项PASS，无业务/工具功能改动。原样复用上条单次资产阻留脚本，普通Reader已显示1024/2497B后受控停止自有API；客户端实际显示网络中断及“重试／继续”，记录FailedRetryable/NETWORK_UNAVAILABLE、transferred0，part已清理、无完成记录。KtorDownloadsGateway非取消失败abort、DownloadResourceRuntime失败从0重试的既有契约及原断言一致，不误报为取消断点续传丢失。
 
 确认原服务终止后，同源码/存储重启API，服务端完整r19未变；点击原错误页重试，同taskId真实GET200无Range，Completed/verified/2497B，新原件SHA256 a643ee39426f926dbd7ca62ffcd2ec008d276cd1ac09d6af45f33548bbaa2531保持。实际第二章标题/正文恢复，正常关闭后完整local=server=原position、confirmed20/pending空。证据`f95ffe6e/epub-download-retry-20260908/result.json`及partial/network-failed/retried原图、原始任务/HTTP/DB、part列表/终态日志。API f95ffe6e、普通APK2127a96a/hash c09df54d…，未重建包；辅助脚本字节不变，只换证据目录避免覆盖已通过取消结果。
