@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-07 Android PDF未确认恢复及早退两个必测子项已补齐，无新增产品缺陷/工具代码；详见evidence及a5d59625/pdf-pending-cold-20260907/result.json。临时观察“恰好r17”假设与已到r20事实不符，已保留限制并核对原mutation收据完整hash，不登记产品失败。下一项CBZ未确认恢复/早退，复用既有六页样本先显式下载；Chrome五项原UI、iOS/容器外部条件及正式包暂缓保持，R2未冻结RC。
+
 2026-09-07 POS-02 Android EPUB不足5秒退出子项补齐：实际新章节→2.469s点击关闭→2.484s已观察服务端r20确认；回首页及完整本地/远端一致、pending空。无新增产品缺陷或工具，证据7c0baabb/epub-early-exit-20260907，计时边界见evidence。下一项核对并补剩余PDF/comic引擎持久化/异常恢复；Chrome五候选、iOS/容器环境和正式包暂缓保持，未冻结RC。
 
 2026-09-07 Android EPUB的POS-03/04子项已补：离线第二章pending完整跨强停保留；已下载入口离线冷开实际第二章；恢复服务并回前台后最新capture确认r18、完整位置一致且pending清空。无新增产品缺陷/工具。服务恢复后仅静候12秒未提交，实际PASS路径明确含回前台触发；旧pending被新capture替代，不计旧body原样重放。详见evidence首节及c78a192d/epub-pending-cold-20260907。iOS/Chrome五项/容器及最终RC保持，下一项EPUB不足5秒退出保存/确认，避免重复音频已有pending证据。

@@ -1,5 +1,7 @@
 # 1.0 发布验收矩阵
 
+2026-09-07 POS-02/03/04 Android PDF子项PASS：显式下载后35/r16→断服务读36→完整pending/local跨强停一致→离线冷开实际36；恢复服务原mutation唯一r17且载荷hash匹配，最终r20完整位置一致/pending空。早退35页2.515s内关闭并观察r21，设备confirmed21/pending空。证据a5d59625/pdf-pending-cold-20260907，观察偏差、时限与范围见evidence；不覆盖另端UI、连续捕获窗口、iOS或最终RC。
+
 2026-09-07 POS-02 Android EPUB早退子项PASS：真实翻到第一章后2.469s点击关闭，2.484s观察到服务端r20完整位置；首页返回及本地confirmed20/pending空、完整位置一致。详见7c0baabb/epub-early-exit-20260907/timing.json和evidence；不外推5/10秒连续捕获或其他引擎/最终RC。
 
 2026-09-07 POS-03/04 Android EPUB增量PASS：服务器第一章r17、设备离线第二章pending，完整local+sync跨强停一致；断服务冷启经已下载入口实际第二章。恢复服务并回前台重试后r18最新capture的完整位置与本地一致、pending为空、唯一receipt；旧pending在重开被新capture替代，原body重放不作PASS。详见c78a192d/epub-pending-cold-20260907及evidence；不覆盖纯服务恢复自动重试期限、另一端UI/iOS/最终RC。

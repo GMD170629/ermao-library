@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 POS-02/03/04 Android PDF增量PASS（API源码a5d59625，普通开发APK ebb4e3ea，未改业务/工具）：普通显式下载69页PDF，在线第35页r16且pending空；受控停API后滑到第36页，服务器仍35/r16，完整local+sync跨强停一致。断服务冷启经“我的→下载中心→已下载资源”实际恢复第36页正文（cold-open.xml/png已查看，8.609s观测上界含查询失败/ADB开销）。恢复服务后原pending df6f98f9…唯一receipt r17，其完整载荷hash经既有owner核对相等；随后同页capture达到r20，独立HTTP与设备完整position/capturedAt一致、confirmed20/pending空。首个重连观察错误预期恰好r17，但回前台前GET已r20；保留observation-limit及真实快照，不重跑取成功，不据此声明重连时限或中间r18/r19的具体来源。
+
+顺用同一会话补早退：上一页实际第35页于2.406s被观察，2.515s完成关闭点击并观察HTTP r21；回到已下载资源页，强停后完整本地位置/capturedAt一致、confirmed21/pending空。时间从发出翻页ADB指令计入观测成本，不冒充引擎内部耗时或5/10秒连续捕获。证据`artifacts/releases/1.0/a5d59625/pdf-pending-cold-20260907/`含result、verification、receipts、各稳定设备库及early-exit-timing。原件711671B逐字节一致、API源码hash与APKhash核实；仅清21个专用设备文件/reverse、releasecheck强停，两个API会话64123/72009均exit0且shutdown已核实。另端UI/iOS及最终冻结RC保持未验；下一项CBZ同类未确认恢复和早退，现有六页样本可用、尚无显式下载证明，不重做已确认冷恢复或已关闭缺陷。
+
 2026-09-07 POS-02 Android EPUB不足5秒退出保存子项PASS（API源码7c0baabb、普通开发APK ebb4e3ea，未改业务/工具）：原第二章r19→普通上一章点击，实际第一章正文XML于2.359s被观察，2.469s完成点击关闭阅读器动作，2.484s独立HTTP观察到第一章完整快照r20；时间均从发出翻章指令计入ADB/UI观测开销，系观测上界，不伪报引擎内部精确耗时。after-close.xml确认回到普通首页；强停后设备库本地完整position/capturedAt与HTTP一致、confirmed20/pending=null。证据`artifacts/releases/1.0/7c0baabb/epub-early-exit-20260907/`含before、first-body、timing、after-close、device-final/result；未替代5/10秒连续捕获或其他引擎的用例。API源码hash不变、仅清5个专用设备文件/reverse、releasecheck强停；服务会话24753已exit0，shutdown已核实。下一项为剩余PDF/comic引擎的持久化/异常恢复代表路径，先核对现有证据，不重复已完成EPUB或音频子项。
 
 2026-09-07 POS-03/04 Android EPUB待提交位置强停/离线冷恢复/回前台确认子项PASS（c78a192d，Android实现及普通开发APK ebb4e3ea）：证据`artifacts/releases/1.0/c78a192d/epub-pending-cold-20260907/`。先在线确认第一章r17、设备pending=null，再受控停API并核实进程退出；普通阅读到第二章后复制稳定设备库，确认第二章完整pending、服务器仍第一章r17。强停前后完整local+sync逐字段一致（pending-before/after-kill）。断服务冷启首页显示重试，普通“我的→下载中心→已下载资源”可打开第二章50%（cold-open.xml/png，已查看），无需扩展离线登录。
