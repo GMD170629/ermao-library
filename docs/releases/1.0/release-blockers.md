@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-07新增IMPORT-02（RG-02/IMP-02，P2，OPEN）：图片目录元数据被末次PAGE文件标题覆盖，真实Chrome/API与共享owner链确认，最小修复进行中。MEDIA-02 REOPENED：当前Windows默认封面又出现一次os.replace/WinError5实际500，原有限重试不能据旧PASS关单；证据66446a45/imp02-special-paths-20260907。路径/分页/深层TXT、图片解码和MP3播放子项及VOLUMES手动API重扫完整性均已补齐，详见evidence；无整RG-02放行，服务/自有页已停，下一项关闭这两个具体问题。
+
 当前收敛摘要（2026-09-07）：仍R2，未冻结RC。RG-05已完成负责人接受的本机导入预检；RG-01～04尚未整组放行。明确已修代码但原场景未闭环的主要缺陷为SYNC-02、READER-05/06/07（ENV-11/12执行限制）；另有矩阵中未验收的接入/格式/位置异常子项，不等同新增bug。iOS环境、Docker容器路径、Chrome上传filechooser分别按ENV-02/08/13阻塞；正式APK/IPA按DEC-01暂缓。不得将这些缺口概括为只差打包或估算未经展开核对的完成百分比。
 
 2026-09-07 Android EPUB普通目录A→继续B→确认后冷重开B子项PASS，详见evidence首节，无新业务缺陷。POS-07真实服务/SQLite两种受控提交次序及完整最终位置已通过，详见evidence；停止此测试扩展。下一项继续剩余接入/格式验收，优先核对IMP-02已有样本及普通目录路径，不重复已通过组合。正式产物暂缓及原外部阻塞保持。
@@ -192,7 +194,7 @@ ENV-06规模数据子项进展：100k真实紧凑文件已准备并逐文件校�
 | AUDIO-01 | 真实Chrome快速播放/暂停后，迟到的play Promise拒绝覆盖当前正常暂停状态；`release-live/r1788672824257-w0/` | `c14b3033` 已修复并推送，3项顺序测试PASS；第二次真实运行经过该步骤，完整闭环仍待回归 |
 | AUDIO-02 | KMP/Android注入5秒播放没有自动捕获，Web原间隔15秒；`preflight-mobile/rg04-audio-autosave-repro-20260906/` | `c6b3e802`修复；Web459 PASS、Chrome实际5/10秒读回断言通过；`d6b11360`真机生产SQLite落盘及重开误差8ms通过，完整148/共享416/Android218/lint PASS。在线确认/后台/长时/iOS仍未覆盖，不整体关闭RG-04 |
 | MEDIA-01 | Windows真实Chrome请求缩略封面出现500；cache/covers临时文件替换报WinError32/5 | `8a4ed3fb`修复与5项独立回归PASS；最新实际失败位于另一default-cover owner，另列MEDIA-02 |
-| MEDIA-02 | MP3两视口因默认封面500失败，`release-live/r1788675527007-w0/api.log:104` 指`services/default_cover.py`的原子替换，非缩略缓存 | `7c6c991c`修复并推送；两个入口复用唯一原子发布owner，7项回归PASS，`chrome-live-default-cover.log`严格两视口2 PASS且无API 5xx，此缺陷本批关闭；最终RC需重验 |
+| MEDIA-02 | MP3两视口因默认封面500失败，`release-live/r1788675527007-w0/api.log:104` 指`services/default_cover.py`的原子替换，非缩略缓存 | `7c6c991c`修复并推送；两个入口复用唯一原子发布owner，7项回归PASS，`chrome-live-default-cover.log`严格两视口2 PASS且无API 5xx，历史子项曾关闭；66446a45本轮同默认封面WinError5/500真实复发，REOPENED，见首节 |
 | LOAD-01 | 实际10k预检列表/命中搜索随progress增长变慢，随后pool耗尽及进度读回超时；原始目录见最新证据 | `c13a7034`/`68c02047`修复后，`c7f5d5eb`安静10k实测19685请求全部成功、p95均达标、进度零丢失及原文/身份校验PASS，`local-load/measurement-20260906-065525/`；本批已复现缺陷关闭。完整时长/大规模/三端并发仍未覆盖，RG-05不整体放行 |
 | ENV-09 | 真实Chrome EPUB详情reading-units 503；测试Windows缺canonical native章核 | 同C源码已隔离编译DLL并加载，最新MP3两视口无该503；测试入口新增native预检，不将环境缺失改为产品格式拒绝 |
 | ENV-10 | 59语料中MOBI/AZW/PRC/AZW3的目录返回PUBLICATION_UNSUPPORTED；本机探针未配置ERMAO_MOBI_CORE_LIBRARY | Windows runtime子项BLOCKED，正在检查现有DLL/构建入口；其导入/原文下载成功不能替代目录通过，不能据此判读物损坏 |
