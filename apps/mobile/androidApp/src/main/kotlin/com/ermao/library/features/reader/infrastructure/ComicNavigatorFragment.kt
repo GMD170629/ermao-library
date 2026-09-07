@@ -599,7 +599,14 @@ internal class ComicNavigatorFragment : Fragment() {
         BoxWithConstraints(
             modifier = modifier
                 .clip(RectangleShape)
-                .heightIn(min = 1.dp),
+                // Keep the initial scroll anchor while images are decoding. Spinner-sized
+                // placeholders can collapse the whole list and clamp it back to page one.
+                .heightIn(
+                    min = if (
+                        bitmap == null &&
+                        plan.flow == com.ermao.library.shared.modules.reader.ReaderReadingMode.ContinuousScroll
+                    ) plan.decodeMaxHeight.dp else 1.dp,
+                ),
             contentAlignment = Alignment.Center,
         ) {
             if (bitmap == null) {

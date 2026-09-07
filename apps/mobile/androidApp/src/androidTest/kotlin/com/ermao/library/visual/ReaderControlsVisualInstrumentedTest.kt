@@ -46,6 +46,8 @@ import com.ermao.library.shared.modules.reader.ComicReaderLocation
 import com.ermao.library.shared.modules.reader.ReaderComicDirection
 import com.ermao.library.shared.modules.reader.ReaderComicImageFit
 import com.ermao.library.shared.modules.reader.ReaderComicPreferences
+import com.ermao.library.shared.modules.reader.ReaderComicSpreadMode
+import com.ermao.library.shared.modules.reader.ReaderCommandCompleted
 import com.ermao.library.shared.modules.reader.ReaderReadingMode
 import com.ermao.library.shared.modules.reader.ReaderSourceFormat
 import java.io.ByteArrayInputStream
@@ -66,6 +68,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -268,6 +271,86 @@ class ReaderControlsVisualInstrumentedTest {
                 setComicGeometryPage(scenario, ReaderComicPreferences(pageWidth = 600, flow = ReaderReadingMode.ContinuousScroll), 0)
                 assertComicSquare(checkNotNull(comicColorBounds(Color.RED)), "Continuous TOP")
                 dragComicToEdge(Color.BLUE, horizontal = false, forward = true)
+            }
+        } finally {
+            runBlocking {
+                try {
+                    deleteLocalReaderV5Position(context, source)
+                } finally {
+                    publicationStore.delete(resourceId)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun comicContinuousModeKeepsCurrentPage() {
+        val resourceId = "comic-flow-${UUID.randomUUID()}"
+        val source = runBlocking {
+            val pages = (0 until 6).map { index ->
+                createIllustratedPage(index + 1, if (index == 3) Color.RED else Color.BLUE)
+            }
+            ByteArrayInputStream(buildComicArchive(pages)).use { input ->
+                publicationStore.publishLocalPublication(
+                    resourceId = resourceId,
+                    displayTitle = "Comic flow position regression",
+                    input = input,
+                    sourceFormat = ReaderSourceFormat.Cbz,
+                )
+            }
+        }
+        try {
+            ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { scenario ->
+                scenario.keepReaderTestFixtureVisible()
+                awaitReaderReady(scenario)
+                lateinit var controller: ReaderScreenController
+                scenario.onActivity { activity -> controller = checkNotNull(activity.controllerForTesting) }
+                val paginated = controller.preferences.value.let { preferences ->
+                    preferences.copy(
+                        comic = preferences.comic.copy(
+                            direction = ReaderComicDirection.RightToLeft,
+                            spreadMode = ReaderComicSpreadMode.Single,
+                            flow = ReaderReadingMode.Paged,
+                        ),
+                    )
+                }
+                runBlocking {
+                    withContext(Dispatchers.Main) {
+                        assertEquals(ReaderCommandCompleted, controller.applyPreferences(paginated))
+                        assertTrue(controller.goTo(ComicReaderLocation(resourceHref = "pages/3", pageIndex = 3)))
+                    }
+                }
+                composeRule.waitUntil(READER_READY_TIMEOUT_MILLIS) {
+                    comicPageIndex(scenario) == 3 && comicColorBounds(Color.RED) != null &&
+                        runBlocking { loadLocalReaderV5Position(context, source) }
+                            ?.position?.presentation?.currentHref == "pages/3"
+                }
+                // The regression changes only flow; a second goTo would repair the lost anchor.
+                val continuous = paginated.copy(comic = paginated.comic.copy(flow = ReaderReadingMode.ContinuousScroll))
+                runBlocking {
+                    withContext(Dispatchers.Main) {
+                        assertEquals(ReaderCommandCompleted, controller.applyPreferences(continuous))
+                    }
+                }
+                composeRule.waitUntil(READER_READY_TIMEOUT_MILLIS) {
+                    comicColorBounds(Color.RED) != null ||
+                        (comicPageIndex(scenario) != 3 && comicColorBounds(Color.BLUE) != null)
+                }
+                // Allow decoded images to settle, while checking that the fourth image stays visible.
+                repeat(10) {
+                    composeRule.waitForIdle()
+                    assertEquals("Changing flow moved away from the fourth image", 3, comicPageIndex(scenario))
+                    assertTrue("The fourth image is not visible after changing flow", comicColorBounds(Color.RED) != null)
+                    SystemClock.sleep(100L)
+                }
+                val persisted = runBlocking { loadLocalReaderV5Position(context, source) }
+                assertEquals("Flow change persisted a different image", "pages/3", persisted?.position?.presentation?.currentHref)
+                assertEquals("Flow change persisted a different page number", 4, persisted?.position?.presentation?.page?.number)
+                assertEquals(
+                    "Flow change persisted a different locator",
+                    "pages/3",
+                    org.json.JSONObject(checkNotNull(persisted).position.locator.canonicalJson).getString("href"),
+                )
             }
         } finally {
             runBlocking {
