@@ -640,6 +640,7 @@
     <string name="reader_error_publication_too_large">单个出版物的阅读上限为 2 GiB。</string>
     <string name="reader_error_security">出版物安全策略阻止了活动内容。</string>
     <string name="reader_error_pdf_engine_limit">PDF 引擎达到加载步骤上限。</string>
+    <string name="reader_error_pdf_page_limit">PDF 页数或页面尺寸超出支持范围。</string>
     <string name="reader_error_read">阅读器无法读取所请求的图书资源。</string>
     <string name="reader_preferences_save_failed">无法保存此设备的阅读设置，请重试。</string>
     <string name="reader_preferences_engine_failed">无法应用阅读设置，请重试。</string>

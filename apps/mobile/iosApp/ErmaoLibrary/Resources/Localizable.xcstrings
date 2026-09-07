@@ -13077,6 +13077,23 @@
         }
       }
     },
+    "reader.error.PDF_PAGE_LIMIT": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PDF 页数或页面尺寸超出支持范围。"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The PDF page count or page dimensions exceed the supported limits."
+          }
+        }
+      }
+    },
     "reader.error.PDF_ENGINE_PROGRESS_LIMIT": {
       "extractionState": "manual",
       "localizations": {

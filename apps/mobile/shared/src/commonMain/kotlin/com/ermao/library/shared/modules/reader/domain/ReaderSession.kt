@@ -38,6 +38,7 @@ enum class ReaderErrorCode(val wireValue: String) {
     RangeUnsupported("PDF_RANGE_UNSUPPORTED"),
     RangeInvalid(ReaderSafetyErrorCode.PDF_RANGE_INVALID.name),
     PdfEngineLimit("PDF_ENGINE_PROGRESS_LIMIT"),
+    PdfPageLimit(ReaderSafetyErrorCode.PDF_PAGE_LIMIT.name),
     ResourceChanged("PDF_RESOURCE_CHANGED"),
     CacheIo("PDF_CACHE_IO"),
     Invalid("PDF_INVALID"),
@@ -106,7 +107,7 @@ private fun readerErrorCodeForSafetyFailure(code: String): ReaderErrorCode? =
             ReaderSafetyErrorCode.PUBLICATION_RESOURCE_BLOCKED -> ReaderErrorCode.ResourceMissing
             ReaderSafetyErrorCode.PUBLICATION_SECURITY_REJECTED -> ReaderErrorCode.SecurityRejected
             ReaderSafetyErrorCode.PUBLICATION_TOO_LARGE -> ReaderErrorCode.PublicationTooLarge
-            ReaderSafetyErrorCode.PDF_PAGE_LIMIT -> ReaderErrorCode.PdfEngineLimit
+            ReaderSafetyErrorCode.PDF_PAGE_LIMIT -> ReaderErrorCode.PdfPageLimit
             ReaderSafetyErrorCode.PDF_RANGE_INVALID -> ReaderErrorCode.RangeInvalid
             ReaderSafetyErrorCode.PDF_RENDER_LIMIT -> ReaderErrorCode.OutOfMemoryRisk
             ReaderSafetyErrorCode.COMIC_MIME_MISMATCH,

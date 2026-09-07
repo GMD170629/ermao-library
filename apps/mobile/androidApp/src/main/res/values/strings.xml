@@ -656,6 +656,7 @@
     <string name="reader_error_publication_too_large">The reading limit is 2 GiB per publication.</string>
     <string name="reader_error_security">The publication security policy blocked active content.</string>
     <string name="reader_error_pdf_engine_limit">The PDF engine reached its loading step limit.</string>
+    <string name="reader_error_pdf_page_limit">The PDF page count or page dimensions exceed the supported limits.</string>
     <string name="reader_error_read">The reader could not read the requested book resource.</string>
     <string name="reader_preferences_save_failed">Could not save reading settings on this device. Try again.</string>
     <string name="reader_preferences_engine_failed">Unable to apply the reading settings. Try again.</string>

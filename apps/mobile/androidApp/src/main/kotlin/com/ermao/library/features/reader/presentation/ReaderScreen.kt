@@ -2490,6 +2490,7 @@ private fun KeepScreenAwake(enabled: Boolean) {
         ReaderErrorCode.RangeUnsupported -> R.string.reader_error_pdf_range_unsupported
         ReaderErrorCode.RangeInvalid -> R.string.reader_error_pdf_range_invalid
         ReaderErrorCode.PdfEngineLimit -> R.string.reader_error_pdf_engine_limit
+        ReaderErrorCode.PdfPageLimit -> R.string.reader_error_pdf_page_limit
         ReaderErrorCode.ResourceChanged -> R.string.reader_error_pdf_resource_changed
         ReaderErrorCode.CacheIo -> R.string.reader_error_pdf_cache
         ReaderErrorCode.Invalid -> R.string.reader_error_pdf_invalid

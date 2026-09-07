@@ -5,6 +5,20 @@ import kotlin.test.assertEquals
 
 class ReaderFailureMappingTest {
     @Test
+    fun `PDF page budget failures remain distinct from engine progress limits`() {
+        for (recoverable in listOf(false, true)) {
+            assertEquals(
+                ReaderSafetyErrorCode.PDF_PAGE_LIMIT.name,
+                readerErrorCodeForFailure(ReaderSafetyErrorCode.PDF_PAGE_LIMIT.name, recoverable).wireValue,
+            )
+            assertEquals(
+                ReaderErrorCode.PdfEngineLimit,
+                readerErrorCodeForFailure(ReaderErrorCode.PdfEngineLimit.wireValue, recoverable),
+            )
+        }
+    }
+
+    @Test
     fun `server failures are distinct from unavailable network`() {
         assertEquals(
             ReaderErrorCode.ServerUnavailable,
