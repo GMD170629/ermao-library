@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 IMPORT-01 CLOSED（1e223e5e）：实际原POST现返回完整409/rootPath错误，前后GET书库逐字段一致；定向原RED、43项已完成相邻检查、ruff/mypy及独立只读核对支持，停止本缺陷验证。详细原失败/修复后请求和源码在fd26b7aa/rg02-fresh-api-boundaries-20260907的fixed-requests、fixed-source及conflict-*.log。后续CON-02真实API错误密码→正确登录、member设置403、注销后401，以及INI-03 API重启后账户/书库身份一致、setup仍关闭均PASS（auth-restart-*）；临时操作曾漏admin路由前缀导致404，按现有router纠正并保留，不算产品失败。服务按既有宿主有界退出、端口释放；这些结果不外推UI、TLS、Worker恢复或跨服务器。
+
+RISK-08已在真实Android ViewModel受控查询边界复现，登记SYNC-05（RG-04，P2）：Detail旧A覆盖新B及reading-units，Home取消A仍覆盖B，查询失败把73%投影刷成16%且无错误。原5个仪器用例4 FAIL/1 PASS，非数据库/服务端位置损坏或普通界面实操声明。候选在原加载函数处理取消与过期返回，查询结果只在单次请求中持有，失败保留现有展示并使用已有错误状态；原场景定向回归进行中，证据0219ab9b/risk08-query-order-20260907。
+
 2026-09-07 RG-02新库实际HTTP补口：无效初始化422且仍未初始化、首次owner201、重复初始化409通过；缺失根404后修正路径创建201并在API重启后保持同一libraryId。两个临时验收预期先误写400/200，均按实际既有library_paths.py/create_library返回契约纠正，原请求及纠正依据分别保存，不视为产品缺陷、无生产改动。随后重复同根实际500才是IMPORT-01：api-completion.log含500和typed_route ErrorEnvelope[ImportErrorBody]校验栈。最小schema候选增加rootPath明确类型，与原files形成严格union，不改route/SQL/任务/身份；新API契约测试实际原失败后43项相邻GREEN、ruff两项和mypy495 PASS，实际新HTTP复验尚待。原请求、源码hash、三次有界API停止与测试日志在artifacts/releases/1.0/fd26b7aa/rg02-fresh-api-boundaries-20260907。此为既有INI-02/03、CON-02缺口的直接HTTP操作，复用已有进程宿主，无通用工具扩展；不替代UI、Worker、媒体进度或TLS验收。
 
 2026-09-07 RISK-08最小验证接入（DEC-07）：现有三个host测试仅验证纯投影，现有SQLite仪器测试为顺序查询，均不能调度真实ViewModel在查询挂起期间的刷新/取消；具体查询类不可替换。复用既有Reader查询owner，仅引出同参数应用port供两个已有消费者和受控测试使用，数据库规则/调用默认不变；通过现有独立UID Android仪器入口执行真实ViewModel的旧查询、取消、失败与成功空集合相邻。实际RED/必要修复/GREEN后即停止，不加入新依赖、报告框架或通用调度工具。当前只是待执行接入，不据此关闭RISK-08。
