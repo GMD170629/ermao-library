@@ -32,6 +32,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -279,7 +280,9 @@ internal class ComicNavigatorFragment : Fragment() {
             }
             if (units.isEmpty()) return@BoxWithConstraints
             when (currentPlan.flow) {
-                com.ermao.library.shared.modules.reader.ReaderReadingMode.Paged ->
+                com.ermao.library.shared.modules.reader.ReaderReadingMode.Paged -> key(units) {
+                    // Keep the pager's count, item keys and remembered position
+                    // in the same layout when single/spread grouping changes.
                     PaginatedComic(
                         fragment = fragment,
                         units = units,
@@ -287,6 +290,7 @@ internal class ComicNavigatorFragment : Fragment() {
                         animated = currentPresentation.animated,
                         preferences = preferences,
                     )
+                }
                 com.ermao.library.shared.modules.reader.ReaderReadingMode.ContinuousScroll ->
                     ContinuousComic(
                         fragment = fragment,
