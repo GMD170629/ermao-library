@@ -16,6 +16,7 @@ from xml.etree import ElementTree
 import rarfile  # type: ignore[import-not-found,import-untyped]
 
 from app.contracts.reader_safety_policy_generated import (
+    READER_SAFETY_FORMATS,
     ReaderSafetyAction,
     ReaderSafetyBudgetName,
     ReaderSafetyDecision,
@@ -179,6 +180,10 @@ def _ignored_entry(name: str) -> bool:
         "__MACOSX" in parts
         or last in {".DS_Store", "Thumbs.db"}
         or last.startswith("._")
+        # Recognized text attachments are not comic pages. Unknown extensions
+        # remain candidates for the client decoder, as before.
+        or Path(last).suffix.casefold()
+        == READER_SAFETY_FORMATS[ReaderSafetyFormat.TXT].extension
     )
 
 

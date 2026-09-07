@@ -58,6 +58,24 @@ def test_unknown_page_extension_is_left_for_the_decoder(tmp_path: Path) -> None:
     assert parsed["pages"][0]["mediaType"] == "application/octet-stream"
 
 
+@pytest.mark.parametrize("extension", ["zip", "cbz"])
+def test_comic_text_attachments_are_not_pages(tmp_path: Path, extension: str) -> None:
+    archive = tmp_path / f"attachments.{extension}"
+    with zipfile.ZipFile(archive, "w") as output:
+        output.writestr("001.png", _tiny_png())
+        output.writestr("002.page", _tiny_png())
+        output.writestr("README.txt", "This is a comic attachment, not a page.")
+        output.writestr("extras/NOTES.TXT", "Nested text attachment.")
+    original = archive.read_bytes()
+
+    parsed = inspect_comic_archive(archive)
+
+    assert parsed["pageCount"] == 2
+    assert [page["entryPath"] for page in parsed["pages"]] == ["001.png", "002.page"]
+    assert parsed["pages"][1]["mediaType"] == "application/octet-stream"
+    assert archive.read_bytes() == original
+
+
 def test_corrupt_optional_page_is_quarantined_when_another_page_is_readable(
     tmp_path: Path,
 ) -> None:

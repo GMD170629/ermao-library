@@ -169,7 +169,7 @@ R1 / DEC-05：用户批准 1.0 不支持第三方进度同步，OPDS-04 原互�
 | REF-TXT | TXT-N/C：中文UTF-8、BOM UTF-16LE/BE、GB18030、混合换行、长章 | W/A/I；P2 | R；逐实际编码登记，不能一份英文UTF8代替 | TXT-X：损坏/超预算，失败类别正确 | PARTIAL：9cb26b94 Android UTF8/BOM UTF16LE/BE/GB18030正常中文正文PASS；UTF16BE混合换行/58060字符长章目录到末章及确认后冷恢复PASS（耗时未测），详见evidence；异常/其他平台仍待 |
 | PDF | PDF-N/C：文本目录+复杂大页/扫描图像PDF | W/A/I；P2 | F；真实物理页与内容可读，有界传输 | PDF-X：截断、密码/超预算 | PARTIAL/FAIL：Android一页PDF首次本地切换打开READER-09已CLOSED，69页普通首页相邻PASS（0271edd4；a389944e/android-pdf-20260907）；Android普通滑动/按钮、35中页/69末页边界及确认后冷恢复35正文子项PASS（64f1bbc1/android-pdf-navigation-20260907，耗时未测）；缩放/方向/复杂异常仍待。W正常69页首页/中页已读，READER-05候选待真实回归；iOS BLOCKED |
 | COM-CBZ | CBZ-N/C：真实ZIP漫画、嵌套路径/自然排序/长图 | W/A/I；P2 | F；图片顺序与页数正确 | CBZ-X：加密/损坏/超预算 | PARTIAL/FAIL：Android正常6页/目录指定页/末页边界、设置缩放及确认后冷恢复5/6子项PASS（66f5efd5/android-comic-20260907，耗时未测）；W真实6页可读及末页重开，READER-06/07候选仍待真实回归；方向/复杂异常及其他平台另计 |
-| COM-ZIP | ZIP-N/C：独立ZIP源及含非图片条目 | W/A/I；P2 | F；正确筛图，顺序不漏重复 | ZIP-X：遍历/损坏/解压预算 | BLOCKED；ENV-06 |
+| COM-ZIP | ZIP-N/C：独立ZIP源及含非图片条目 | W/A/I；P2 | F；正确筛图，顺序不漏重复 | ZIP-X：遍历/损坏/解压预算 | FAIL；IMPORT-03：六图+TXT误计七页，Android末页解码失败；候选待原场景 |
 | COM-CBR | CBR-N/C：实际RAR容器与承诺变体 | W/A/I；P2 | F；不能用ZIP改名 | CBR-X：加密/损坏 | BLOCKED；ENV-06 |
 | COM-RAR | RAR-N/C：真实RAR4/RAR5分别登记适配能力 | W/A/I；P2 | F；变体失败记风险不删支持 | RAR-X：损坏/扩展预算 | BLOCKED；ENV-06 |
 | COM-DIR | DIR-N/C：实际图片目录，多层/自然排序/非图片/已有图片类型 | W/A/I；P2 | F；图片文件数与Resource/Book数分开 | DIR-X：损坏图、单页失败隔离 | BLOCKED；ENV-06 |
