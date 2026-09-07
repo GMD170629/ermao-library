@@ -128,6 +128,28 @@ class AndroidPdfiumByteSourceTest {
     }
 
     @Test
+    fun cachedAvailabilityStepWithoutNewHintsCanAdvanceWithoutAnotherTransfer() = runTest {
+        val expectedSize = 56_367L
+        val identity = PdfRangeCacheIdentity(namespace(), "resource-1")
+        val server = RecordingServer()
+        val loader = PdfRangeLoader(source(expectedSize), identity, PdfRangeMemory(), server)
+        val dataSource = AndroidRemotePdfiumDataSource(expectedSize, loader, "resource-1") {
+            error("An already cached availability step must not materialize the file")
+        }
+        try {
+            dataSource.requestRange(0, 512)
+            assertTrue(dataSource.acquireRequested())
+            assertTrue(dataSource.isRangeCached(0, expectedSize))
+            // PDFium can yield NEED_DATA while advancing its parser state without
+            // issuing another hint, then report the actual password outcome.
+            assertTrue(dataSource.acquireRequested())
+            assertEquals(listOf(PdfByteRange(0, expectedSize)), server.ranges)
+        } finally {
+            dataSource.close()
+        }
+    }
+
+    @Test
     fun failedMaterializationIsTerminalForTheCurrentPdfiumSession() = runTest {
         val expectedSize = 16_395_773L
         val identity = PdfRangeCacheIdentity(namespace(), "resource-1")

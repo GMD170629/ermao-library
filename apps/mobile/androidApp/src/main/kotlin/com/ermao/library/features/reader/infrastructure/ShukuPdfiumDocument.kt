@@ -70,7 +70,9 @@ internal class AndroidRemotePdfiumDataSource(
         localByteSource?.let { return it.acquireRequested() }
         materializationFailure?.let { throw it }
         return when (loader.drainRequested()) {
-            PdfRangeDrainResult.NoPendingRequest -> false
+            // Availability can yield between parser states without new byte
+            // hints. Let the bounded engine loop obtain the actual outcome.
+            PdfRangeDrainResult.NoPendingRequest -> true
             PdfRangeDrainResult.RangesAvailable -> true
             PdfRangeDrainResult.CompleteOriginalRequired -> installCompleteOriginal()
         }
