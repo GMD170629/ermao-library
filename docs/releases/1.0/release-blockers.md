@@ -1,5 +1,9 @@
 # 1.0 发布阻塞项
 
+2026-09-07 SYNC-06 Android候选：实际createOfflineManagedProgressStore将query Failure丢成null，而Start禁止读取已确认本地位置。现有selector新增LocalFallback，仅Failure.recoverable启用；显式目标/pending/server快照优先，Current(null)及非recoverable不启用。EPUB/PDF/comic既有本地恢复分支接入同一选择结果，不造远端snapshot/百分比位置，不改持久化或同步协议。原选择相邻及新增反例6PASS、Android编译通过（startup-targeted.xml/log）；原失败证据保留，候选真机仍待，SYNC-06保持OPEN。
+
+2026-09-07 RISK-10已确证为SYNC-06 OPEN（RG-04/POS-04 EPUB API不可达重开）：普通Android与独立HTTP确认r7/OEBPS/chapter2.xhtml/50%后，受控只停API并确认进程终止，返回首页50%→继续→最终第一章0%，同样本可重复原观察。证据041bf084/epub-service-offline-20260907 的 confirmed-before-stop、online、shutdown、offline-home/open/settled及设备位置库副本。需区分网络不可达与服务端明确无进度，定位启动快照选择并最小修复；目前不关闭或外推其他格式/iOS。
+
 2026-09-07 REF-EPUB active内容/原件重开子项PASS，TEST-15 CLOSED：9120453e Android生产实现未改，既有仪器方法补危险链接实际触发、原/parent执行标记、危险节点、样本请求/存储及原件重开断言后真机通过；普通首页进入第二章、点击链接后仍可读，确认r5完整第二章位置再正常重开同章50%。原件hash不变。证据9120453e/epub-active-20260907，详见evidence；不外推其他样本、iOS、全局网络捕获或同冻结RC。
 
 RISK-10 待核实（RG-04 EPUB服务中断重开）：首次重开与本轮600s隔离服务到期退出重合，loading后曾显示首章；当时未在关闭前独立确认第二章位置，不据此认定已确认位置丢失，也不能用随后干净在线重开PASS关闭该观察。原图reopened.png/reopen-state.xml和api.log保留。下一项用现有入口固定已确认第二章后仅复测服务不可达重开，区分启动/同步时序与测试环境；不新增通用工具。

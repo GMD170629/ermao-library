@@ -5,8 +5,8 @@ package com.ermao.library.features.reader.application
  *
  * This is deliberately explicit instead of using a nullable server snapshot
  * as a sentinel. A server snapshot being absent does not mean that a local
- * confirmed position may be used: only an already durable pending mutation
- * owns startup restore (with LocalOnly as the explicit local-file exception).
+ * confirmed position may be used. A recoverable query failure explicitly permits
+ * the same resource's durable local position; an authoritative empty result does not.
  */
 internal enum class ReaderStartupPositionSource {
     ExplicitTarget,
@@ -14,6 +14,7 @@ internal enum class ReaderStartupPositionSource {
     ServerSnapshot,
     Start,
     LocalOnly,
+    LocalFallback,
 }
 
 internal fun selectReaderStartupPositionSource(
@@ -21,10 +22,12 @@ internal fun selectReaderStartupPositionSource(
     hasLocalPending: Boolean,
     hasServerSnapshot: Boolean,
     localOnlySource: Boolean,
+    serverUnavailable: Boolean = false,
 ): ReaderStartupPositionSource = when {
     hasExplicitTarget -> ReaderStartupPositionSource.ExplicitTarget
     localOnlySource -> ReaderStartupPositionSource.LocalOnly
     hasLocalPending -> ReaderStartupPositionSource.LocalPending
     hasServerSnapshot -> ReaderStartupPositionSource.ServerSnapshot
+    serverUnavailable -> ReaderStartupPositionSource.LocalFallback
     else -> ReaderStartupPositionSource.Start
 }

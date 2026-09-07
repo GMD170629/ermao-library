@@ -68,4 +68,29 @@ class ReaderStartupPositionSourceTest {
             ),
         )
     }
+    @Test
+    fun unavailableServerUsesConfirmedLocalPositionWithoutOverridingPendingOrServer() {
+        assertEquals(
+            ReaderStartupPositionSource.LocalFallback,
+            selectReaderStartupPositionSource(false, false, false, false, serverUnavailable = true),
+        )
+        assertEquals(
+            ReaderStartupPositionSource.LocalPending,
+            selectReaderStartupPositionSource(false, true, false, false, serverUnavailable = true),
+        )
+        assertEquals(
+            ReaderStartupPositionSource.ServerSnapshot,
+            selectReaderStartupPositionSource(false, false, true, false, serverUnavailable = true),
+        )
+        assertEquals(
+            ReaderStartupPositionSource.ExplicitTarget,
+            selectReaderStartupPositionSource(true, false, false, false, serverUnavailable = true),
+        )
+        // An authoritative empty response (or a nonrecoverable failure) does not opt in.
+        assertEquals(
+            ReaderStartupPositionSource.Start,
+            selectReaderStartupPositionSource(false, false, false, false, serverUnavailable = false),
+        )
+    }
+
 }

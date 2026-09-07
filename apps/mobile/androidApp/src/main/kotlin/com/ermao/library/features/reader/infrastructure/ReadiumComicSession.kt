@@ -237,6 +237,7 @@ internal class ReadiumComicSession(
             startupPositionSource in setOf(
                 ReaderStartupPositionSource.LocalPending,
                 ReaderStartupPositionSource.LocalOnly,
+                ReaderStartupPositionSource.LocalFallback,
             )
         ) {
             loadPositionSafely()

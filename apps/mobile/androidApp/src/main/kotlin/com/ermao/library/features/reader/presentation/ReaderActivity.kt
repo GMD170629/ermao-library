@@ -919,6 +919,7 @@ class ReaderActivity : AppCompatActivity() {
         val durableState = database.loadPositionSyncState()
         progressEtag = readerProgressEtag(durableState.confirmedRevision)
 
+        var serverUnavailable = false
         val remoteSnapshot = try {
             // A managed local artifact does not have a bootstrap snapshot. Ask
             // for the body unconditionally so an unchanged response cannot
@@ -932,7 +933,10 @@ class ReaderActivity : AppCompatActivity() {
                     progressEtag = result.etag ?: progressEtag
                     null
                 }
-                is PositionQueryResult.Failure -> null
+                is PositionQueryResult.Failure -> {
+                    serverUnavailable = result.recoverable
+                    null
+                }
             }
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
@@ -951,6 +955,7 @@ class ReaderActivity : AppCompatActivity() {
             hasLocalPending = durableState.pending != null,
             hasServerSnapshot = remoteSnapshot != null,
             localOnlySource = false,
+            serverUnavailable = serverUnavailable,
         )
         if (durableState.pending != null) coordinator.retryPending(target)
         return ManagedProgressStoreSetup(

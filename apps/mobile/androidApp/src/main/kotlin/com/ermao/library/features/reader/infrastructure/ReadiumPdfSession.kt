@@ -180,6 +180,7 @@ internal class ReadiumPdfSession(
             startupPositionSource in setOf(
                 ReaderStartupPositionSource.LocalPending,
                 ReaderStartupPositionSource.LocalOnly,
+                ReaderStartupPositionSource.LocalFallback,
             )
         ) {
             loadPositionSafely()
