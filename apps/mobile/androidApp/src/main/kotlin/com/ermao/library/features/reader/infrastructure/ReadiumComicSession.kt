@@ -270,7 +270,17 @@ internal class ReadiumComicSession(
                 pages = canonicalPages,
                 preferences = _preferences.value,
                 initialPageIndex = restorePage?.pageIndex ?: 0,
-                onError = { error -> _contentError.value = error },
+                onError = { error ->
+                    // A readable page recovers a page decoder failure, not a
+                    // publication, authorization, or transport failure.
+                    if (error != null || _contentError.value?.code in setOf(
+                            ReaderErrorCode.ComicPageDecodeFailed,
+                            ReaderErrorCode.ComicOutOfMemoryRisk,
+                        )
+                    ) {
+                        _contentError.value = error
+                    }
+                },
             )
             navigator = it
         }

@@ -88,7 +88,8 @@ import kotlin.math.roundToInt
 internal class ComicNavigatorFragment : Fragment() {
     private var publication: Publication? = null
     private var pages: List<ReaderComicPage> = emptyList()
-    private var onError: (ReaderError) -> Unit = {}
+    private var onError: (ReaderError?) -> Unit = {}
+    private val visiblePageErrors = mutableMapOf<Int, ReaderError>()
 
     private val preferenceState = MutableStateFlow(ReaderPreferences())
     private val _presentation = MutableStateFlow<Presentation?>(null)
@@ -106,7 +107,7 @@ internal class ComicNavigatorFragment : Fragment() {
         pages: List<ReaderComicPage>,
         preferences: ReaderPreferences,
         initialPageIndex: Int,
-        onError: (ReaderError) -> Unit,
+        onError: (ReaderError?) -> Unit,
     ) {
         check(runtime == null) { "Comic navigator is already configured" }
         require(pages.isNotEmpty()) { "Comic navigator requires pages" }
@@ -206,6 +207,8 @@ internal class ComicNavigatorFragment : Fragment() {
     }
 
     private fun publishPlan(next: ComicPresentationPlan, animated: Boolean = false) {
+        visiblePageErrors.keys.retainAll(next.logicalPageIndices.toSet())
+        onError(visiblePageErrors.values.firstOrNull())
         _presentation.value = Presentation(next, animated)
         val pageIndex = focusedPageIndex.takeIf { it in next.logicalPageIndices } ?: next.anchorPageIndex
         focusedPageIndex = pageIndex
@@ -237,8 +240,11 @@ internal class ComicNavigatorFragment : Fragment() {
         }
     }
 
-    private fun requestError(error: ReaderError) {
-        onError(error)
+    private fun reportPageError(pageIndex: Int, error: ReaderError?) {
+        if (pageIndex !in (_presentation.value?.plan?.logicalPageIndices ?: return)) return
+        if (error == null) visiblePageErrors.remove(pageIndex)
+        else visiblePageErrors[pageIndex] = error
+        onError(visiblePageErrors.values.firstOrNull())
     }
 
     data class Presentation(
@@ -543,6 +549,8 @@ internal class ComicNavigatorFragment : Fragment() {
             plan.imageFit,
         ) {
             val opened = fragment.publication ?: return@produceState
+            value = null
+            loadError = null
             value = try {
                 loadComicPageBitmap(
                     opened,
@@ -560,8 +568,10 @@ internal class ComicNavigatorFragment : Fragment() {
                 null
             }
         }
-        LaunchedEffect(loadError) {
-            loadError?.let(fragment::requestError)
+        LaunchedEffect(loadError, bitmap, plan.logicalPageIndices) {
+            if (loadError != null || bitmap != null) {
+                fragment.reportPageError(page.pageIndex, loadError)
+            }
         }
         BoxWithConstraints(
             modifier = modifier
