@@ -1,3 +1,7 @@
+2026-09-08 READER-21 字符锚点候选已完成定向真机及编译，原普通UI最后复验中，仍OPEN。原UTF16BE样本只有3个空段分隔，1200编号行属于一个长p；SDK首可见块文本不能区分该块内部位置，而仅复用其百分比Locator仍1132→1057。现有ReadiumEpubSession在真实可见文字矩形内取字符，复用Readium自己的selection文本上下文与go定位；保留原偏好校验/持久化owner、同步还原临时选区，不修改TXT分段或原件。证据均在`233ca471/txt-font-20260908`。
+
+最小验证说明：原用例保留真实段落可见、稳定字体及完成断言；新增诊断仅服务READER-21。人工注入反向DOM选区后直接调用字号的组合在`font-anchor-final-instrument.log`失败，SDK选区态会抑制滚动，普通入口却先经ActionMode结束再打开外观；它不是原普通场景，日志保留且不计PASS。移除该人为前置与其新断言，改为明确断言普通前置选区已折叠；没有删除原位置保护。真实原长段落在654dffe候选19px重开仍1100附近，但19→18因第一行仅剩“变。”、块中心取点落空而被明确拒绝（`final/appearance18.xml`）；改用实际Range文字矩形中心，取消块中心/行高估计。最终`font-text-rect-build.log`编译/ReaderPreferenceSubmissionTest通过，`font-text-rect-instrument.log`四个TXT定位/字号实际真机PASS。旧currentLocator、awaitFrame及临时面板诊断均未进入最终代码，无通用工具扩展。最终普通字号增减/正常重开及原件核验通过即停止该问题；R2未冻结与其他阻塞保持。
+
 2026-09-08 READER-20 Android CLOSED：d2f996d5普通开发APK实际原TXT第一章→第二章标题/终点正文→反向第一章标题/0001，目录面板自动收起；原目录失败及必要相邻已通过。已安装APK读回SHA256 `04480ae910a66d1288ca7d4f2dc4fdeeaabdfeebc9c6785070a40ea91bb8b8f5`，API bf3b1a19。证据 `233ca471/txt-font-20260908/green/interim-result.json`、toc-second/first.png/xml及installed.json，停止本目录缺陷扩验。
 
 READER-21仍OPEN：同普通APK从已保存1137/18px恢复，实际外观改19px后到了章首0001（green/open、appearance、font-changed、after-font及完整前后progress），早先仪器绿不能抵销原UI失败。原偏好已恢复18px。为定位这个具体遗漏，将同一现有字号回归的定位准备改为普通position seek（也PASS，font-position-instrument.log），再补原外观面板条件，未另建工具；恢复入口与面板差异仍在验证，不提前认定原因或写闭环。临时API仅本机18084/既有专用库，owners及1800秒自动收尾；正在使用，完成后显式停止。R2未冻结，其余阻塞保持。

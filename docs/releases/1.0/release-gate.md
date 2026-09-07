@@ -1,3 +1,5 @@
+2026-09-08 READER-21最小字符锚点候选定向真机/编译PASS，原普通字号增减及重开最后复验中，仍OPEN；测试前置修正及真实拒绝候选保留，详见evidence首条。READER-20 CLOSED与R2未冻结/其余阻塞保持。
+
 2026-09-08 READER-20 Android原普通目录往返CLOSED（d2f996d5）；READER-21原普通字号路径仍失败/OPEN，不能用仪器绿替代。证据及最小差异定位见evidence首条与233ca471/txt-font-20260908/green/interim-result.json。R2未冻结及其余阻塞保持。
 
 2026-09-08 READER-20目录最小候选定向真机通过；READER-20/21均待普通原UI复验才关闭。实际失败候选、SDK就绪依据和原回归结果见evidence首条；无工具扩展，R2未冻结。

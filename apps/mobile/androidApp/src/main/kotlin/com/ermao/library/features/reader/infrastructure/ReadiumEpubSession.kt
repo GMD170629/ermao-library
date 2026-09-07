@@ -742,13 +742,54 @@ internal class ReadiumEpubSession(
             val active = navigator
                 ?: return@withLock ReaderCommandRejected("READER_PREFERENCES_ENGINE_FAILED")
             try {
-                // Readium 3.3 changes font CSS without retaining the visible block. Capture
-                // its semantic locator before reflow; percentage is not a restore target.
-                val visible = active.firstVisibleElementLocator()
+                val block = active.firstVisibleElementLocator()
                     ?: return@withLock ReaderCommandRejected("READER_PREFERENCES_ENGINE_FAILED")
-                if (visible.locations["cssSelector"] !is String) {
-                    return@withLock ReaderCommandRejected("READER_PREFERENCES_ENGINE_FAILED")
-                }
+                val selector = block.locations["cssSelector"] as? String
+                    ?: return@withLock ReaderCommandRejected("READER_PREFERENCES_ENGINE_FAILED")
+                // A TXT paragraph can span hundreds of pages. Ask Readium's existing
+                // selection serializer for a visible text anchor inside that block.
+                // The DOM selection is restored synchronously; no publication is changed.
+                val textJson = active.evaluateJavascript("""
+                    (() => {
+                      const element = document.querySelector(${org.json.JSONObject.quote(selector)});
+                      if (!element) return null;
+                      const content = document.createRange();
+                      content.selectNodeContents(element);
+                      const rect = [...content.getClientRects()].find(r =>
+                        r.width > 0 && r.height > 0 && r.right > 0 && r.bottom > 0 &&
+                        r.left < innerWidth && r.top < innerHeight);
+                      const selection = getSelection();
+                      if (!rect || !selection) return null;
+                      const x = (Math.max(0, rect.left) + Math.min(innerWidth, rect.right)) / 2;
+                      const y = (Math.max(0, rect.top) + Math.min(innerHeight, rect.bottom)) / 2;
+                      const range = document.caretRangeFromPoint(x, y);
+                      if (!range || range.startContainer.nodeType !== Node.TEXT_NODE ||
+                          !element.contains(range.startContainer)) return null;
+                      const node = range.startContainer;
+                      let offset = range.startOffset;
+                      while (offset < node.length && /\s/.test(node.data[offset])) offset++;
+                      if (offset >= node.length) return null;
+                      range.setStart(node, offset);
+                      range.setEnd(node, offset + String.fromCodePoint(node.data.codePointAt(offset)).length);
+                      if (![...range.getClientRects()].some(r => r.width > 0 && r.height > 0 &&
+                          r.right > 0 && r.bottom > 0 && r.left < innerWidth && r.top < innerHeight)) return null;
+                      const saved = Array.from({length: selection.rangeCount}, (_, i) => selection.getRangeAt(i).cloneRange());
+                      const anchor = [selection.anchorNode, selection.anchorOffset, selection.focusNode, selection.focusOffset];
+                      try {
+                        selection.removeAllRanges();
+                        selection.addRange(range);
+                        return readium.getCurrentSelection()?.text ?? null;
+                      } finally {
+                        selection.removeAllRanges();
+                        saved.forEach(r => selection.addRange(r));
+                        if (saved.length === 1) selection.setBaseAndExtent(...anchor);
+                      }
+                    })()
+                """.trimIndent())?.takeUnless { it == "null" }
+                    ?: return@withLock ReaderCommandRejected("READER_PREFERENCES_ENGINE_FAILED")
+                val visible = active.currentLocator.value.copy(
+                    text = Locator.Text.fromJSON(org.json.JSONObject(textJson)),
+                )
                 val result = super.applyPreferences(updated)
                 if (result != ReaderCommandCompleted) return@withLock result
                 val fontScale = preferencesMapper.toReadium(updated, capabilities.supportsWritingMode).fontSize
@@ -759,7 +800,6 @@ internal class ReadiumEpubSession(
                           .getPropertyValue('--USER__fontSize')) - ${fontScale * 100.0}) < 0.01
                     """.trimIndent()) != "true") delay(50)
                     if (!active.go(visible, animated = false)) return@withTimeoutOrNull false
-                    while (!isLocatorVisible(active, visible)) delay(50)
                     true
                 } == true
                 if (restored) ReaderCommandCompleted

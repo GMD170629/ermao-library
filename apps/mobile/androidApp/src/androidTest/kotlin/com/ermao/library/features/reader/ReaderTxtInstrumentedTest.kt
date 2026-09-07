@@ -163,10 +163,16 @@ class ReaderTxtInstrumentedTest {
                 }
             }
             val before = awaitSettledVisibleLocator(navigator, "text/chapter-0001.xhtml", 18)
+            val engineBefore = navigator.currentLocator.value
             val paragraph = requireNotNull(before.text.highlight).trim()
             val number = Regex("^长章段落 (\\d{4}):").find(paragraph)
                 ?.groupValues?.get(1)?.toIntOrNull()
             assertTrue("Expected a visible late numbered paragraph, got: $paragraph", number != null && number in 1100..1200)
+            val selector = requireNotNull(before.locations["cssSelector"] as? String)
+            val selectionCollapsed = runBlocking { withContext(Dispatchers.Main) {
+                navigator.evaluateJavascript("getSelection().isCollapsed") == "true"
+            } }
+            assertTrue("Ordinary appearance changes start after leaving text selection", selectionCollapsed)
 
             // A single ordinary preference submission; do not reopen or navigate afterwards.
             val result = runBlocking {
@@ -177,7 +183,6 @@ class ReaderTxtInstrumentedTest {
             }
             assertEquals(ReaderCommandCompleted, result)
             val after = awaitSettledVisibleLocator(navigator, "text/chapter-0001.xhtml", 19)
-            val selector = requireNotNull(before.locations["cssSelector"] as? String)
             val retained = runBlocking {
                 withContext(Dispatchers.Main) {
                     // Repagination may put an earlier block at the page edge. The captured
@@ -194,7 +199,7 @@ class ReaderTxtInstrumentedTest {
                 }
             }
             assertTrue(
-                "Font reflow lost visible paragraph $number; first visible afterwards: ${after.text.highlight}",
+                "Font reflow lost visible paragraph $number; first visible afterwards: ${after.text.highlight}; SDK before=$engineBefore; SDK after=${navigator.currentLocator.value}",
                 retained,
             )
         }
