@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-08 CON-02 Android服务端会话失效/错密码/重登子项PASS（API362133f6、开发APK b32aac21）：普通登录专用Scope member（py_ff875f955de94dd59abf30e1e749ab51）并退后台；真实管理员API短暂disabled后finally立即active，身份/角色/库范围/管理权限恢复，authz6→8按正常语义保留，不回退版本。独立旧HTTP会话在恢复active后仍401；Android回前台真实显示“私有书库已锁定/会话已过期”和原成员身份，无私有导航。故意错误密码仍拒绝且保留重登页，正确密码后恢复同成员、57%首页及无管理入口，强停冷启动仍成功。独立新/me authz8、完整进度响应与失效前逐字段相同。证据`362133f6/android-session-revocation-20260908/result.json`、member-before/restored、old-session-rejected、expired.png/xml、wrong-enter、correct-enter、reauth-settings/cold、fresh-member、member-progress-before/after；截图已核验。
+
+无业务/测试辅助改动；此测试401 SessionExpired，不冒称ACCOUNT_DISABLED403界面或全部在途请求。另一次正确密码复填因光标/尾部残留25字符仍401保留，后在字段末尾逐次退格、验证空框再填22字符通过；没有反复运行产品流程取成功或修改断言。最终普通退出成员并恢复管理员；专用XML/reverse清理、App/API停止，wrapper终态0。正常退出仅清理测试账号私有缓存，原密码未改，成员仍active；原开发APK与最终冻结RC分别记账。下一项REF-TXT异常/现有TXT.MEMORY_BUDGET样本可行性，复用现有导入和读书入口；已闭环事项停止扩验。受信任HTTPS、睡眠范围及既有Chrome/iOS/容器/正式包/最终RC缺口保持。
+
 2026-09-08 CON-01 Android无localhost依赖子项PASS（API873c2a50、开发APK b32aac21）：电脑WLAN192.168.50.179/手机192.168.50.187，同网段直接访问18084；进入LAN验证前撤销ADB reverse，reverse-before-lan为空。普通登录、62部作品浏览及强停冷首页成功，真实MP3播放（MediaSession Playing/1×，asset206）与EPUB首次下载/第一章正文可读（asset200）均经LAN，二者progress PUT200。服务端实际客户端IP192.168.50.187；MP3 resource py_6848b175c49b47349213a979af42417c，EPUB resource py_ca58196f0de1416785d03b269296a69e/asset py_89e9a15dce82409d95aff7ae4b46332d。证据`873c2a50/android-lan-20260908/result.json`、lan-settings.png、cold-home、audio/media、epub-open.png/xml、device-lan-requests，截图实际已核验。不外推受信任HTTPS/代理、Web公开链接、逐格式或最终RC。
 
 正常退出后恢复原127.0.0.1:18084/SystemTrust并独立读取持久profile核对；原B配置保留。App/设备专用XML/reverse/两API均清理，wrapper终态0；不改防火墙/网络/系统信任、无工具或业务修改。初次toybox手写HTTP报文400仅作可达诊断保留，两次探测不能算应用失败或通过；恢复时紧跟系统密码框取消的首个设置点击未生效，原restored.xml是首页、后续fresh restored-settings正确，不放宽断言。
