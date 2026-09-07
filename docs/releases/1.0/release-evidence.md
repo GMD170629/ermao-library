@@ -1,5 +1,7 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 POS-02 Android EPUB不足5秒退出保存子项PASS（API源码7c0baabb、普通开发APK ebb4e3ea，未改业务/工具）：原第二章r19→普通上一章点击，实际第一章正文XML于2.359s被观察，2.469s完成点击关闭阅读器动作，2.484s独立HTTP观察到第一章完整快照r20；时间均从发出翻章指令计入ADB/UI观测开销，系观测上界，不伪报引擎内部精确耗时。after-close.xml确认回到普通首页；强停后设备库本地完整position/capturedAt与HTTP一致、confirmed20/pending=null。证据`artifacts/releases/1.0/7c0baabb/epub-early-exit-20260907/`含before、first-body、timing、after-close、device-final/result；未替代5/10秒连续捕获或其他引擎的用例。API源码hash不变、仅清5个专用设备文件/reverse、releasecheck强停；服务会话24753已exit0，shutdown已核实。下一项为剩余PDF/comic引擎的持久化/异常恢复代表路径，先核对现有证据，不重复已完成EPUB或音频子项。
+
 2026-09-07 POS-03/04 Android EPUB待提交位置强停/离线冷恢复/回前台确认子项PASS（c78a192d，Android实现及普通开发APK ebb4e3ea）：证据`artifacts/releases/1.0/c78a192d/epub-pending-cold-20260907/`。先在线确认第一章r17、设备pending=null，再受控停API并核实进程退出；普通阅读到第二章后复制稳定设备库，确认第二章完整pending、服务器仍第一章r17。强停前后完整local+sync逐字段一致（pending-before/after-kill）。断服务冷启首页显示重试，普通“我的→下载中心→已下载资源”可打开第二章50%（cold-open.xml/png，已查看），无需扩展离线登录。
 
 重开产生同位置新capture，原pending cdede8bc…由64da67db…替代；联网前后证据分别记录，不宣称旧body原样重放。恢复API后12秒观察未见自动提交；使用系统最近任务再返回触发既有onResume重试，真实PUT200，独立GET r18完整位置/client/capturedAt与最新pending一致，本地confirmed18/pending=null，最新mutation唯一receipt且旧mutation无receipt。只覆盖该主动回前台恢复路径，不据此证明服务恢复自动重试时限或另一客户端UI。原件2497B逐字节对照既有fixture、API源码hash不变；只清23个专用设备文件/reverse、仅releasecheck强停；两个API运行会话48433/46001均终止exit0，shutdown已核实。初次诊断导入顺序错误、非导出Activity直接启动被系统拒绝及调整判别前置均见setup-observations/initial-observation-error，未改业务或测试工具。达到该子项停止条件，不重跑已完成音频pending。下一项复用现有入口补EPUB不足5秒退出保存/确认的可执行子项。
