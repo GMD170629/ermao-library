@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 CON-02 / POS-08后端账号与服务器隔离子项PASS（5b538f2a）：两套独立SQLite/API、同测试session secret及同邮箱不同userId，双方cookie互用均401，自身会话仍200。新member无书库授权时列表为空，Book/Resource/Asset/bootstrap/进度均404；无权与不存在资源的写入错误逐字段一致。普通上传在既有系统管理前置检查403/SYSTEM_MANAGER_REQUIRED，专用目标文件不存在。授权后同一member会话可见7本并取得原文件Range206，初始进度为空；提交与owner相同clientId/mutationId的完整实际位置后仅产生member自己的r1，owner完整r6不变。撤权后旧会话读文件/写进度404，重新授权后仍为原member快照；禁用→启用后旧会话保持401，新登录才恢复，已保存位置仍一致。
+
+证据`artifacts/releases/1.0/5b538f2a/rg02-account-server-scope-20260907/isolated-cookies/`：requests与resume-requests、两份进度输入、source/resume-source、result、API日志、shutdown及integrity-and-cleanup。只接受已实际记录的子项，不将初始脚本整体改写为PASS：父目录首次跨服探测复用了owner的cookie jar，被正常401清cookie响应污染；改用独立探测jar，保留原成功会话反例。第二次执行把上传前置403误预期为资源层404，按main.py已有边界纠正，只继续尚未执行的授权/撤权部分；原失败及说明均保留，不改产品、不弱化禁止写文件的检查。所有自有API已停、端口释放、7个原件及业务源码hash不变；Docker只读复查仍缺dockerDesktopLinuxEngine管道，ENV-08未解除。此证据不覆盖普通客户端在途切账号/服务器、清pending或UI权限页面，不扩测试框架或全量回归。下一项Android普通EPUB入口及读取/恢复，iOS及其他既有外部阻塞保持。
+
 2026-09-07 RG-02 Chrome接入子项PASS（3a1e4193、development运行）：全新隔离库普通设置页空用户名提示→创建owner→坏根“路径不存在或不可读”→修正路径成功→重复根“书库路径已存在”且仍仅1库→确认启用后真实Worker导入7本。普通详情打开EPUB，iframe出现第一章正文；按真实bootstrap确定MP3资产后普通“开始听”，HTML媒体时钟从5.088361推进至15.118003秒，暂停17.169274秒/error=null，独立GET确认同资产17169ms/r6。普通注销到登录页，错密码显示“邮箱或密码不正确”，仅修正密码恢复原7本书库。本次仅Chrome桌面、HTTP本机、正常EPUB/MP3接入，不外推Android/iOS、HTTPS、所有格式或正式RC。
 
 证据`artifacts/releases/1.0/3a1e4193/rg02-ui-intake-20260907/run/`：manifest、application-source-hashes、api/worker/next日志、catalog-readback、MP3 bootstrap及confirmed-progress；ui-observation-transcription明确为实际CUA DOM/media输出转录，不是截图/HAR/E2E报告。914项源码和全部样本/来源hash一致、API无5xx；播放器已关、UI及只读观察会话均正常注销，自有Chrome tab关闭，fixture退出0，3105/18084释放。最初启动漏显式opt-in及误指原仓库corpus路径两次环境错误保留在父目录日志，按现有配置纠正；未改fixture功能、未重建生产包或全量回归。
