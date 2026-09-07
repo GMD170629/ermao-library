@@ -1,3 +1,7 @@
+2026-09-08 RG-03 AUD-A Android长时实测正在执行，尚不计PASS：API/Worker a1040b09（与5388c1fd生产源码一致，差异仅本次测试），开发验收App/Test APK 5388c1fd，SHA分别99f76c9f5c727d47e6304e6e575609eda406d2145146b42a6e047c2abf2c034b、20a9c5ea0fe8c25bba73dae24c118b0bbc18ad5281c5e838ed1ba2660b96c9cd；手机App原包读回hash一致。真实Media3总长1898422ms、1×开始。审查补足实际媒体前进也必须>=1800秒，硬截止为样本时长；主观音质和同进程runtime重开/强杀冷启动边界分开，沿用2秒位置误差。开发签名/测试host不能作为正式包。
+
+恢复位置：`43f75b02/android-audio-soak-20260908`，owners.json记录API204196、Worker209116及宿主209132（session90133，stop文件及3600秒上限负责清理）；instrument-start.json记录确切命令/宿主（session15993，2100秒上限）。设备专用目录`files/rg04-live-ea973141-fd41-44a9-abc5-2b735c69d6bf`，输入已由测试消费，结果为online-evidence.log及instrument.log/exit。重复启动前必须核实进程终态；不得从聊天时间推定通过。完成后拉取证据、清理该目录/对应测试preferences、reverse18084及服务，恢复原普通开发APK82699429；原用户应用不动。下一可执行事项由当前矩阵核对，尚未冻结RC。
+
 2026-09-08 RG-03 AUD-A Android连续30分钟子项开始：复用已有1898.354秒MP3公开语料派生文件（准备时重复语音，不是播放器循环）。现有Android live用例仅观察5/10秒，MediaSession状态不能直接证明持续真实引擎时钟，因此在同一既有用例类追加固定1800秒实际snapshot观察及原暂停/完整确认/重开owner校验；不新增通用工具或修改生产代码。终止条件为实际末次采样>=1800秒、停顿/观测空窗均<=2秒、真实剩余时长足够且暂停与重开误差<=2秒。仅证明该真实Android单轨子项，不外推锁屏、多轨、其他格式、全量负载或最终RC；通过后停止辅助扩展。当前NOT_RUN，证据目录`43f75b02/android-audio-soak-20260908`。
 
 # 1.0 发布证据与最终签收
