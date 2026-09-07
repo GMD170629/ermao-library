@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-08 CON-02 Android普通退出后跨服务器重登子项PASS（API987ece6b、普通APK7ac595aa）：复用既有隔离A(18084，62作品，发布接入验收)与B(18085，0作品，Server B isolated owner)，同邮箱但HTTP userId不同。实际“我的→账户与安全→退出并清除私有数据→登录页改B地址→登录”后B首页无A继续项、书库0、我的显示B名称/18085；强停冷开仍B空首页。再普通退出B→登录页“切换服务器”选择已存A→登录，A名称/18084/62作品/原52%继续项恢复。UI截图已查看，双HTTP用户身份、作品列表和书库结果前后相同。证据`987ece6b/android-server-switch-20260908/result.json`、before/after、b-home/library/settings/cold、select-a/return-form/return-enter/a-restored及API日志。
+
+现有“我的→服务器”只是只读展示，ServerCenterScreen/switchServer未接生产导航，未以直调代替UI；本证据不宣称保持登录/在途直接切服或切服保留缓存。两次正常退出按产品语义清理独立测试namespace私有缓存，未清真实应用或服务端数据；A已重新登录，B profile保留。小米保存密码提示取消，23个专用设备文件、两条reverse已清理，app及两API停止，wrapper终态0。无业务/工具修改、未重建包，不外推HTTPS或最终RC。下一可执行项CON-01现有HTTPS/非信任证书路径可行性核验；睡眠能力范围仍待负责人，Chrome五候选/iOS/容器/工具限制与正式包暂缓/最终同RC保持。
+
 2026-09-08 RG-03 AUD-02普通Android倍速子项PASS（API0a8e7da3、普通APK7ac595aa）：首页继续→播放器暂停归零→现有菜单选择1.5×；UI已查看，系统MediaSession三次为Playing/speed1.5，服务端相邻确认位置5616→11624ms，capturedAt相隔4003ms，位置推进6008ms（观察比1.50087，仅佐证，不新增阈值）。菜单恢复1×后实际Playing/speed1.0，随后暂停。原MP3 HTTP与原件一致；证据`0a8e7da3/android-audio-rate-20260908/result.json`、menu/selected/restored、media-2/5/9与observations/final-progress。仅短时MP3的1.5×及恢复1×，不外推全部预设/格式、主观音质或最终RC；6个专用设备文件/reverse已清理、app/API停止、wrapper终态0，速度已恢复。
 
 2026-09-08 AUD-X / IMP-03实际损坏章节元数据子项PASS（同API/普通APK）：已有正常MP3复制到专用根，用已安装Mutagen仅写ID3 CHAP 29..35秒；Mutagen独立读回音频30.06694秒，ffprobe音频30秒/章节结束35秒，证明实际越界而非文本模拟。样本准备只服务AUDIO.TRACK_AND_CHAPTER_BOUNDS当前必测，既有语料无坏章节实物；实样确认和本项验收通过即停止，无新增辅助代码/框架。真实Worker将坏文件IMPORT_ASSET FAILED并提示“音频章节时间范围超出音轨时长”，现有parse_audio_metadata返回AUDIO_DURATION_INVALID；Android普通该文件详情明确导入失败。正常同级READY/HTTP原件相等，正常相同字节的普通播放证据复用上述同APK，未重复播放新identity。两样本原hash保持；证据`0a8e7da3/audio-chapter-bounds-20260908/result.json`、manifest/ffprobe/parser-error、tasks/bad-books/good-book/detail。3个专用设备文件/reverse清理、app/API/Worker停止，wrapper终态0；不外推其他容器异常、DRM、元数据预算或最终RC。无本轮业务修改。
