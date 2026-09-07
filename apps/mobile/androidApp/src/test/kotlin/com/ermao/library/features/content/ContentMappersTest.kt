@@ -16,6 +16,28 @@ import org.junit.Test
 
 class ContentMappersTest {
     @Test
+    fun emptyBookImportCountsReachDetailWithoutCreatingPlayableContent() {
+        val detail = BookDetailSummary(
+            id = "bad-audio", sourceNodeId = "audio-node", title = "audio-truncated.mp3",
+            author = null, description = null, tags = emptyList(), seriesName = null,
+            seriesIndex = null, coverStatus = "UNKNOWN", coverUrl = "",
+            continueResourceId = null, continueResourceProgress = 0.0, completed = false,
+            resources = emptyList(), failedResourceImportCount = 1,
+        )
+        for ((pending, failed) in listOf(0 to 0, 0 to 1, 2 to 0, 2 to 1)) {
+            val mapped = detail.copy(
+                pendingResourceImportCount = pending,
+                failedResourceImportCount = failed,
+            ).toUiContent()
+            assertEquals(pending, mapped.pendingResourceImportCount)
+            assertEquals(failed, mapped.failedResourceImportCount)
+            assertEquals(emptyList(), mapped.resources)
+            assertEquals(null, mapped.selectedResourceId)
+            assertEquals(null, mapped.continueResource)
+        }
+    }
+
+    @Test
     fun homePreservesTheResumeResourcesDeclaredReaderType() {
         val snapshot = HomeSnapshot(
             continueReading = HomeSection.Content(ContinueReadingItem(

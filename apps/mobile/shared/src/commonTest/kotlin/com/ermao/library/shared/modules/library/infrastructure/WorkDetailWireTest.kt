@@ -5,10 +5,41 @@ import com.ermao.library.shared.core.network.ApiResult
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 
 class WorkDetailWireTest {
     private val decoder = ApiEnvelopeDecoder(Json { ignoreUnknownKeys = false })
+
+    @Test
+    fun emptyBookPreservesFailedAndPendingImportsWithoutInventingAResource() {
+        val summaries = listOf(
+            "" to (0 to 0),
+            """, "resourceImportSummary":{"ready":0,"pending":0,"failed":0}""" to (0 to 0),
+            """, "resourceImportSummary":{"ready":0,"pending":0,"failed":1}""" to (0 to 1),
+            """, "resourceImportSummary":{"ready":0,"pending":2,"failed":0}""" to (2 to 0),
+            """, "resourceImportSummary":{"ready":0,"pending":2,"failed":1}""" to (2 to 1),
+        )
+        for ((summary, counts) in summaries) {
+            val decoded = decoder.decode(
+                statusCode = 200,
+                body = """{"ok":true,"data":{"book":{
+                    "id":"bad-audio", "libraryId":"library-1", "sourceNodeId":"audio-node",
+                    "title":"audio-truncated.mp3", "visibilityState":"ACTIVE", "curationState":"NONE",
+                    "publicationStatus":"UNKNOWN", "trackingStatus":"UNTRACKED", "metadataQuality":0,
+                    "coverStatus":"UNKNOWN", "coverUrl":"", "resources":[] $summary
+                }}}""",
+                dataDeserializer = BookPayloadWire.serializer(),
+            )
+            val book = assertIs<ApiResult.Success<BookPayloadWire>>(decoded).value.toDomain()
+
+            assertEquals(counts.first, book.pendingResourceImportCount)
+            assertEquals(counts.second, book.failedResourceImportCount)
+            assertTrue(book.resources.isEmpty())
+            assertNull(book.continueResourceId)
+        }
+    }
 
     @Test
     fun decodesBookWithResourcesAndAssetsWithoutVersionLayer() {

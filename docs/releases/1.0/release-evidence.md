@@ -1,5 +1,7 @@
 # 1.0 发布证据与最终签收
 
+2026-09-08 IMPORT-06最小候选：BookWire既有resourceImportSummary的pending/failed两计数此前在domain/UI映射丢弃，详情将无resource视作空目录。现透传至现有BookDetailSummary/BookDetailContent，仅作品根且无resource时复用既有导入提示组件与双语文案；子目录、真正空根、正常resource和不可播放约束保持。WorkDetailWireTest及Android ContentMappersTest/WorkDetailLayoutTest定向通过、Android编译通过，日志/XML归cc2579dc/audio-corrupt-20260908；原普通UI仍待新包复验，IMPORT-06保持OPEN。无新API/恢复系统/测试框架。
+
 2026-09-08 AUD-X / IMP-03 MP3截断导入隔离PASS、详情反馈FAIL IMPORT-06（APIcc2579dc、Android912d0254）：同一专用库的完整原MP3与其前96B截断分别正常READY、IMPORT_ASSET FAILED（Mutagen解析失败），后者无可读resource；同级完整MP3原件HTTP逐字节相等，普通详情开始收听→真实MediaSession Playing，相邻通过。失败详情实际显示“当前目录为空/当前媒介没有可阅读的资源”，API book已有resourceImportSummary.failed=1，未向用户表达导入失败；最小既有字段映射/展示候选处理中，不能关闭。证据`cc2579dc/audio-corrupt-20260908/result.json`、source/tasks/books/bad-detail、detail.png/xml、intact-book/open/player/media。两原件hash不变，5个专用设备文件/reverse已清理，test app及API/Worker停止、wrapper终态0。不外推媒体解码中途损坏、其他格式或最终RC。
 
 睡眠定时范围待负责人：当前Android按钮源码明确disabled，912d0254真实player.xml为“睡眠计时暂不可用”且不可点击；README泛称支持、RG-03要求“已有睡眠定时”，Web/iOS已接线。已请求确认补齐Android或明确平台限制，未擅自缩减门禁或新增功能；等待期间继续IMPORT-06。

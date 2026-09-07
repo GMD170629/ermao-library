@@ -87,6 +87,8 @@ fun BookDetailSummary.toUiContent(): BookDetailContent {
         completed = completed,
         readingUnits = emptyList(),
         continueResourceId = continueResourceId,
+        pendingResourceImportCount = pendingResourceImportCount,
+        failedResourceImportCount = failedResourceImportCount,
     )
 }
 

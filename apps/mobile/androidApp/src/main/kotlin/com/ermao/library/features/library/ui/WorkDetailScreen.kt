@@ -656,6 +656,7 @@ private fun WorkDetailBody(
                     bookTitle = state.content?.book?.title.orEmpty(),
                     bookCoverUrl = content.book.coverUrl,
                     resources = content.resources,
+                    emptyImportMessage = workDetailEmptyImportMessage(content, state.isBookRoot),
                     sort = state.contentsSort,
                     loading = state.isSurfaceLoading,
                     errorCode = state.surfaceErrorCode,
@@ -1380,6 +1381,7 @@ private fun WorkContentBrowser(
     bookTitle: String,
     bookCoverUrl: String,
     resources: List<ResourceContent>,
+    emptyImportMessage: Int?,
     sort: BookContentSort,
     loading: Boolean,
     errorCode: String?,
@@ -1501,6 +1503,7 @@ private fun WorkContentBrowser(
                 onRetry = onRetry,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp),
             )
+            items.isEmpty() && emptyImportMessage != null -> WorkResourceImportNotice(emptyImportMessage)
             items.isEmpty() -> WarmPageEmptyState(
                 title = stringResource(R.string.work_contents_empty_title),
                 message = stringResource(R.string.work_contents_empty_message),
@@ -1889,17 +1892,11 @@ private fun WorkResourceDetail(
             }
         }
         if (!resource.importStatus.equals("READY", true)) {
-            Surface(shape = RoundedCornerShape(theme.radii.task), color = theme.colors.surface) {
-                Text(
-                    stringResource(
-                        if (resource.importStatus.equals("FAILED", true)) R.string.work_resource_import_failed
-                        else R.string.work_resource_importing,
-                        resource.importError.orEmpty(),
-                    ),
-                    modifier = Modifier.padding(theme.spacing.oneAndHalf),
-                    style = theme.typography.body,
-                )
-            }
+            WorkResourceImportNotice(
+                message = if (resource.importStatus.equals("FAILED", true)) R.string.work_resource_import_failed
+                else R.string.work_resource_importing,
+                importError = resource.importError.orEmpty(),
+            )
         }
         when {
             loading && page == null -> WarmPageLoadingState(
@@ -2797,6 +2794,26 @@ internal fun workBookDownloadSummary(bookId: String, records: Collection<Android
             WorkDetailDownloadAction.NotDownloaded -> BookDetailDownloadState.NotDownloaded
         }
     })
+
+// The import counts describe the whole book, not an individual child directory.
+internal fun workDetailEmptyImportMessage(content: BookDetailContent, isBookRoot: Boolean): Int? = when {
+    !isBookRoot || content.resources.isNotEmpty() -> null
+    content.pendingResourceImportCount > 0 -> R.string.work_resource_importing
+    content.failedResourceImportCount > 0 -> R.string.work_resource_import_failed
+    else -> null
+}
+
+@Composable
+private fun WorkResourceImportNotice(message: Int, importError: String = "") {
+    val theme = WarmPageThemeValues
+    Surface(shape = RoundedCornerShape(theme.radii.task), color = theme.colors.surface) {
+        Text(
+            stringResource(message, importError).trim(),
+            modifier = Modifier.padding(theme.spacing.oneAndHalf),
+            style = theme.typography.body,
+        )
+    }
+}
 
 internal fun workDetailPageContent(state: WorkDetailUiState): BookDetailContent? {
     val content = state.content ?: return null

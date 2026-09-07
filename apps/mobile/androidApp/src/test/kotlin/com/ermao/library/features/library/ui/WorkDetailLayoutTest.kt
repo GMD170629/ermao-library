@@ -26,6 +26,33 @@ import org.junit.Test
 
 class WorkDetailLayoutTest {
     @Test
+    fun failedEmptyBookShowsImportFailureAndKeepsPlaybackUnavailable() {
+        val content = BookDetailContent(
+            book = BookCard("bad-audio", "audio-truncated.mp3", "", "", null),
+            seriesId = null, seriesName = null, authorFacetId = null, description = null,
+            tags = emptyList(), resources = emptyList(), selectedResourceId = null,
+            failedResourceImportCount = 1,
+        )
+        assertEquals(R.string.work_resource_import_failed, workDetailEmptyImportMessage(content, true))
+        assertEquals(
+            R.string.work_resource_importing,
+            workDetailEmptyImportMessage(content.copy(pendingResourceImportCount = 1), true),
+        )
+        assertEquals(
+            R.string.work_resource_importing,
+            workDetailEmptyImportMessage(content.copy(pendingResourceImportCount = 1, failedResourceImportCount = 0), true),
+        )
+        assertNull(workDetailEmptyImportMessage(content.copy(failedResourceImportCount = 0), true))
+        assertNull(workDetailEmptyImportMessage(content, false))
+        assertNull(workDetailEmptyImportMessage(
+            content.copy(resources = listOf(testResource("audio", "MP3", null))), true,
+        ))
+        val action = workDetailPrimaryActionPresentation(content.continueResource, null)
+        assertFalse(action.enabled)
+        assertEquals(WorkDetailPrimaryActionIntent.Unavailable, action.intent)
+    }
+
+    @Test
     fun resourceMetadataOmitsBlankOptionalRowsAndCanHideTheSection() {
         val resource = ResourceContent(
             id = "resource-1",

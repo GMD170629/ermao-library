@@ -131,6 +131,8 @@ fun BookWire.toBookDetailSummary(): BookDetailSummary {
         continueResourceProgress = continueResourceProgress,
         completed = completed,
         resources = resources.map(ResourceWire::toDomain),
+        pendingResourceImportCount = resourceImportSummary.pending,
+        failedResourceImportCount = resourceImportSummary.failed,
     )
 }
 
