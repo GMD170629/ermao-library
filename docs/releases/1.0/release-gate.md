@@ -1,3 +1,5 @@
+2026-09-08 POS-10普通Android EPUB回前台远端提示/不强跳/显式跳转子项PASS，完整UI与持久位置证据见evidence首条/cb623422结果；无业务/工具改动。下一项漫画普通方向设置既有缺口，R2未冻结及其他限制保持。
+
 2026-09-08 POS-08普通Android账号/服务器取消隔离子项关闭：本轮跨服在途前置PASS，证据与共享owner覆盖边界见evidence首条。无需按PDF/Comic重复同一取消路径；其他POS、Chrome/iOS与最终RC不由此覆盖。下一项POS-10 Reader活动正文远端更新；R2未冻结。
 
 2026-09-08 POS-08 Android普通Reader关闭在途保存后切账号取消隔离子项PASS，无新业务缺陷；原UI/完整位置/清理见evidence首条与e76fefb8结果。音频切账号已PASS，下一项切服务器既有入口；POS-08整体PARTIAL、R2未冻结及其他阻塞保持。

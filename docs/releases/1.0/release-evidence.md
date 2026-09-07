@@ -1,3 +1,9 @@
+2026-09-08 RG-04 POS-10普通Android EPUB活动会话远端更新子项PASS，无业务修复/新测试工具。第一章r14完整local/server确认且pending空后，经最近任务退后台；使用真实API、不同clientId提交此前真机捕获的第二章完整Locator得r15。返回原Reader实际出现“其他设备已阅读至50%”提示，第一章正文与完整本地位置仍保持、服务端仍完整r15。点击普通“跳转至最新位置”后实际第二章标题/正文显示，完整local=server/r16/pending空，正常关闭后位置保持。受控HTTP仅提供远端事件，不记为另一个客户端UI交接或前台主动推送。
+
+证据`cb623422/pos10-reader-active-20260908/result.json`及前后HTTP/DB、remote-notice.png、explicit-jump-settled.png。跳转后的uiautomator XML只含章名/50%、遗漏正文节点，一次辅助断言失败；原两份XML保留，主/子实际看原图确认完整第二章，持久位置亦一致，不误登记显示缺陷、不开发新观测工具。原失败采集不当与真实产品结果分开。
+
+API cb623422、普通开发APK69a5ba15/hash4c4cd6ef…；原件/HTTP hash a643ee39…保持。原账号保留，自有App/XML/reverse及API已清理，宿主59715终态0。下一可执行项核对RG-03漫画普通阅读方向设置的既有结果，只补未验方向与对应翻页语义，不重复本轮已关闭取消/远端提示路径。R2未冻结及Chrome/iOS/容器/可信HTTPS/睡眠范围、正式包暂缓与最终同RC的既有真实限制保持。
+
 2026-09-08 RG-04 POS-08普通Android注销后跨服重登取消隔离子项PASS，无业务修复。S1真实音频9.656s/r32响应held、完整设备pending匹配，注销点击后约98.5ms断连；同邮箱登录S2（18085、独立user）后普通首页/书库仍空，“我的”确认当前18085，两位置表为空。S2前后完整books与外来资源404 body均不变；S1完整快照仍held/r32。显式放行sent=false，只记取消隔离；B空库没有pending，不声称同资源双服写入或旧ACK送达后的处理。证据`6af47724/pos08-server-inflight-20260908/result.json`及实际UI/HTTP/DB/时序。
 
 原样复用上轮单次真实响应阻留，仅补既有切服证据缺少的在途前置，不扩工具。普通切服实际经注销→登录入口改地址/选历史服务器→loginToServer；switchServer及旧ServerCenter未接普通导航，不新增保持登录切服功能。原服务器A已恢复，MP3原件/HTTP hash保持；设备专用XML/reverse/App及两个API已收尾，宿主42461终态0。恢复时MIUI未弹可选密码保存提示，原辅助断言停止；当时XML已是成功首页，随后直接验证原服务器/账号，未重试登录取绿。
