@@ -160,7 +160,7 @@ R1 / DEC-05：用户批准 1.0 不支持第三方进度同步，OPDS-04 原互�
 
 | 组 ID（RG-03） | 源格式 / N与C真实样本要求（ID槽） | 平台/前置 | 步骤与预期 | X样本 | 状态/关联 |
 |---|---|---|---|---|---|
-| REF-EPUB | EPUB-N：真实章节；EPUB-C：嵌套目录、图文、非平凡布局 | W/A/I；P2 | R，正文/目录/锚点均正确 | EPUB-X：损坏包、active markup可恢复、具体外部实体风险 | BLOCKED；ENV-06 |
+| REF-EPUB | EPUB-N：真实章节；EPUB-C：嵌套目录、图文、非平凡布局 | W/A/I；P2 | R，正文/目录/锚点均正确 | EPUB-X：损坏包、active markup可恢复、具体外部实体风险 | PARTIAL：Android reader-v2普通打开/翻章/确认后强停恢复PASS（00563daf/android-epub-normal-20260907）；Chrome新库正文见3a1e4193/ui-intake；复杂/异常仍待，iOS BLOCKED |
 | REF-MOBI | MOBI-N/C：实际MOBI7与复杂PalmDB/图片目录 | W/A/I；P2 | R，libmobi原格式内存出版物可读 | MOBI-X：截断/DRM | BLOCKED；ENV-06 |
 | REF-AZW | AZW-N/C：独立实际AZW来源与内部变体证明；不只MOBI改名 | W/A/I；P2 | R，实际变体按承诺可读 | AZW-X：DRM/损坏 | BLOCKED；ENV-06、RISK-02 |
 | REF-AZW3 | AZW3-N/C：实际KF8、复杂章节图文 | W/A/I；P2 | R，目录/跨章/锚点正确 | AZW3-X：损坏/DRM | BLOCKED；ENV-06 |
@@ -251,7 +251,7 @@ POS-08新增AUDIO-08（原RISK-06）：真实Android引擎+SQLite单次IO门控�
 |---|---|---|---|---|---|
 | POS-01 | P3；W/A/I、全部承诺格式 | 各格式记录唯一文字/物理页/图片/轨时间→保存→退出重开；目标端换字体屏幕 | 精确语义恢复；展示百分比不反推Locator | artifacts/releases/1.0/cff3e689/ordinary-audio-sync-20260907/；既有MP3见release-evidence | MP3及M4B/M4A/AAC正常W↔Android交接开发子项PASS；本轮后三格式误差最大15ms。其余格式/布局组合仍待逐项，iOS BLOCKED；未冻结RC |
 | POS-02 | P3；各引擎代表样本 | 连续读听，量测捕获/本地持久化/发送/确认；不足5秒即返回/暂停/切后台 | 最后捕获位置按冻结间隔可靠保存，确认延迟单列 | E/POS-02/ | NOT_RUN（原生/缺样本子项BLOCKED）；DEC-04 |
-| POS-03 | P3；各引擎 | 分别在本地持久化前、后、网络确认后强杀；App重启/系统回收/浏览器刷新 | 至少最后已持久化位置恢复；已确认零丢失，未持久化损失不超冻结间隔 | artifacts/releases/1.0/7e207c38/process-recovery/ | Chrome桌面/移动视口MP3已确认暂停后强杀并重登录恢复PASS（0/205.804ms）；Android普通首页已确认AAC四轨与M4B/M4A章节强停恢复PASS（f8847633，0/31/31ms）；未确认/其他引擎子项NOT_RUN；iOS BLOCKED |
+| POS-03 | P3；各引擎 | 分别在本地持久化前、后、网络确认后强杀；App重启/系统回收/浏览器刷新 | 至少最后已持久化位置恢复；已确认零丢失，未持久化损失不超冻结间隔 | artifacts/releases/1.0/7e207c38/process-recovery/ | Chrome桌面/移动视口MP3已确认暂停后强杀并重登录恢复PASS（0/205.804ms）；Android普通首页已确认AAC四轨与M4B/M4A章节强停恢复PASS（f8847633，0/31/31ms）；Android EPUB确认后阅读中强停、冷首页50%及继续到第二章PASS（00563daf/android-epub-normal-20260907）；未确认/其他引擎子项NOT_RUN；iOS BLOCKED |
 | POS-04 | P3；已合法打开/可本地读取资源 | 断网读到B→观察pending→重启客户端→重连→重试并另端重开 | pending持久保留并最终确认；不扩展离线登录契约 | artifacts/releases/1.0/02d6ea2d/epub-offline-and-adjacent/ 与 epub-offline-mobile/；1d8d0c7c/pos10-native-server-restart-20260907/ | Chrome桌面/移动视口EPUB页面重建及重连子项PASS（965/959ms）；Android M4B离线完整pending持久、冷恢复20226→20247ms及最终r14/完整位置一致/pending空子项PASS；原mutation被新capture替代不证明精确原body重放，具体r12/r13回调不可归因；其他格式/另端交接NOT_RUN，iOS BLOCKED |
 | POS-05 | P3；同账号同资源两端 | 写mutation M让服务提交但丢回包→另一端新写N→重试M；另测同M不同payload | 重放M不再覆盖N，不递增revision；不同payload受既有冲突处理 | artifacts/releases/1.0/afe19dca/pos05-lost-ack-chrome-android-20260907/；原62377271 API/ORM证据保留 | Chrome MP3真实丢ACK→Android N→Chrome原body重试及异payload409子项PASS，完整N/r7不变；非5秒时限/IDB清pending证据，其余引擎/方向与最终RC未覆盖 |
 | POS-06 | P3；各端读/听writer | 阻留旧M响应→本端生成新pending N→释放M响应→重开/重试N | 旧ACK仅清对应M，N保留；不能回滚本地较新位置 | artifacts/releases/1.0/938afd24/pos06-native-late-ack-20260907/；5b967260/pos06-online-adjacent-20260907/ | Android实际同步owner/HTTP/SQLite子项PASS：M3933ms/r5实际提交后扣留ACK，N9939ms完整pending不被旧ACK清除，重建owner/DB原mutation重试r6；原online相邻PASS。控制点在真实HTTP返回后交付到coordinator，不是socket丢包、普通UI或进程强杀；Chrome/其他引擎NOT_RUN、iOS BLOCKED |
