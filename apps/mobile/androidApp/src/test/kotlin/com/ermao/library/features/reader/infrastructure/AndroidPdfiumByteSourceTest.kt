@@ -113,11 +113,13 @@ class AndroidPdfiumByteSourceTest {
             assertTrue(dataSource.readCachedBlock(expectedSize - 1, lastByte))
             lastByte.flip()
             assertEquals(0x5A.toByte(), lastByte.get())
-            assertFalse(dataSource.acquireRequested())
+            // PDFium can yield NEED_DATA again after the source becomes local.
+            // Keep the existing bounded availability loop running without another download.
+            assertTrue(dataSource.acquireRequested())
             assertEquals(1, materializations.get())
 
             dataSource.requestRange(0, expectedSize)
-            assertFalse(dataSource.acquireRequested())
+            assertTrue(dataSource.acquireRequested())
             assertTrue(server.ranges.isEmpty())
             dataSource.close()
         } finally {

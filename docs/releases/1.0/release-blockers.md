@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-07 READER-09（RG-03/PDF，原生小文件）OPEN：464-byte reading-notes.pdf普通打开报PDF_RANGE_INVALID，完整下载/本地source安装已成功；69页原PDF正常显示首页。候选让AndroidRemotePdfiumDataSource在本地source安装后委托既有acquireRequested，不再提前false。定向原码1 FAIL/4 PASS→候选5 PASS；真机原场景待新包复验，尚不关单。证据a389944e/android-pdf-20260907，原件保留，未扩工具或阈值。
+
 2026-09-07 Android TXT四编码普通中文正文、代表性UTF16BE混合换行长章目录及确认后冷恢复子项已PASS，无新增产品缺陷，证据见evidence首节。TXT不再概括为缺正常编码样本；异常/其他平台及恢复耗时未测仍保留。下一项剩余Android PDF/漫画普通路径；Chrome原受阻项不由原生结果抵销，仍未冻结RC。
 
 2026-09-07当前覆盖：READER-08已CLOSED，055a36c1新开发包普通首页恢复首标题及嵌套正文原场景通过，证据见evidence首节；下文OPEN为历史。停止此缺陷扩验，继续剩余Android TXT编码/格式项。IMPORT-02仍待Chrome扩展弹窗解除后的普通UI复测，既有外部阻塞和正式包暂缓不变；未冻结RC。

@@ -67,7 +67,7 @@ internal class AndroidRemotePdfiumDataSource(
 
     override suspend fun prepare() = loader.probe()
     override suspend fun acquireRequested(): Boolean {
-        if (localByteSource != null) return false
+        localByteSource?.let { return it.acquireRequested() }
         materializationFailure?.let { throw it }
         return when (loader.drainRequested()) {
             PdfRangeDrainResult.NoPendingRequest -> false
