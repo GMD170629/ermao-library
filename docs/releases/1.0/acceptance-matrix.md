@@ -167,7 +167,7 @@ R1 / DEC-05：用户批准 1.0 不支持第三方进度同步，OPDS-04 原互�
 | REF-PRC | PRC-N/C：实际PRC/PalmDB与复杂资源来源证明 | W/A/I；P2 | R，不能由改扩展名证明全部变体 | PRC-X：截断/DRM | BLOCKED；ENV-06、RISK-02 |
 | REF-FB2 | FB2-N/C：多section、嵌套目录与内嵌图片 | W/A/I；P2 | R，文本/图像/章节正确 | FB2-X：坏XML、可恢复active/具体实体风险 | PARTIAL：READER-08已CLOSED；055a36c1新包原前置标题及嵌套目录正文子项PASS，证据bea858b9/android-fb2-20260907；图像/异常/iOS仍待 |
 | REF-TXT | TXT-N/C：中文UTF-8、BOM UTF-16LE/BE、GB18030、混合换行、长章 | W/A/I；P2 | R；逐实际编码登记，不能一份英文UTF8代替 | TXT-X：损坏/超预算，失败类别正确 | PARTIAL：9cb26b94 Android UTF8/BOM UTF16LE/BE/GB18030正常中文正文PASS；UTF16BE混合换行/58060字符长章目录到末章及确认后冷恢复PASS（耗时未测），详见evidence；异常/其他平台仍待 |
-| PDF | PDF-N/C：文本目录+复杂大页/扫描图像PDF | W/A/I；P2 | F；真实物理页与内容可读，有界传输 | PDF-X：截断、密码/超预算 | FAIL：W正常69页已读首页/中页，READER-05候选待真实回归；复杂/异常及原生子项按各自证据展开，不再以正常样本缺失概括 |
+| PDF | PDF-N/C：文本目录+复杂大页/扫描图像PDF | W/A/I；P2 | F；真实物理页与内容可读，有界传输 | PDF-X：截断、密码/超预算 | PARTIAL/FAIL：Android一页PDF首次本地切换打开READER-09已CLOSED，69页普通首页相邻PASS（0271edd4；a389944e/android-pdf-20260907）；原生翻页/缩放/位置与复杂异常仍待。W正常69页首页/中页已读，READER-05候选待真实回归；iOS BLOCKED |
 | COM-CBZ | CBZ-N/C：真实ZIP漫画、嵌套路径/自然排序/长图 | W/A/I；P2 | F；图片顺序与页数正确 | CBZ-X：加密/损坏/超预算 | FAIL：W真实6页可读及末页重开，READER-06/07候选待真实回归；复杂/异常及原生子项仍分别待验收 |
 | COM-ZIP | ZIP-N/C：独立ZIP源及含非图片条目 | W/A/I；P2 | F；正确筛图，顺序不漏重复 | ZIP-X：遍历/损坏/解压预算 | BLOCKED；ENV-06 |
 | COM-CBR | CBR-N/C：实际RAR容器与承诺变体 | W/A/I；P2 | F；不能用ZIP改名 | CBR-X：加密/损坏 | BLOCKED；ENV-06 |
