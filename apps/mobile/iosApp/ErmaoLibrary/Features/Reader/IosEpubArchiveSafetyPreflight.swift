@@ -80,7 +80,7 @@ struct IosEpubArchiveSafetyPreflight {
             )
         } catch {
             throw IosReaderFailure.safety(
-                ErmaoShared.PublicKt.readerSafetyEpubArchiveStructureFailure(),
+                ErmaoShared.PublicKt.readerSafetyEpubArchiveIntegrityFailure(),
                 underlyingError: error as NSError
             )
         }

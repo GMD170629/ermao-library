@@ -1007,7 +1007,11 @@ final class ReaderSecurityTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let store = try IosManagedPublicationStore(root: root.appendingPathComponent("managed"))
         for format: ErmaoShared.ReaderSourceFormat in [.txt, .epub, .fb2, .mobi, .pdf, .cbz] {
-            for (index, bytes) in [Data(), Data("A\0B\0".utf8)].enumerated() {
+            var inputs = [Data(), Data("A\0B\0".utf8)]
+            if format == .epub {
+                inputs.append(Data("Truncated publication; no zip directory".utf8))
+            }
+            for (index, bytes) in inputs.enumerated() {
                 let resourceID = "\(format.wireValue)-\(index)"
                 let file = root.appendingPathComponent(resourceID).appendingPathExtension(format.wireValue)
                 try bytes.write(to: file)
@@ -1016,6 +1020,21 @@ final class ReaderSecurityTests: XCTestCase {
                     parserVersion: "test-parser", normalizationVersion: "test-normalization"
                 )
                 let reopened = try await store.resolve(resourceID: resourceID)
+                if format == .epub {
+                    let expected = ErmaoShared.PublicKt.readerSafetyEpubArchiveIntegrityFailure()
+                    for publication in [managed, reopened] {
+                        do {
+                            _ = try await IosEpubArchiveSafetyPreflight.verify(fileURL: publication.fileURL)
+                            XCTFail("Expected corrupt EPUB rejection")
+                        } catch {
+                            let failure = try XCTUnwrap(error as? IosReaderFailure)
+                            XCTAssertEqual(failure.code, .parseFailed)
+                            XCTAssertEqual(failure.safeContext["ruleId"], expected.ruleId)
+                            XCTAssertEqual(failure.safeContext["errorCode"], expected.errorCode)
+                            XCTAssertNotNil(failure.underlyingError)
+                        }
+                    }
+                }
                 XCTAssertEqual(try Data(contentsOf: managed.fileURL), bytes)
                 XCTAssertEqual(try Data(contentsOf: reopened.fileURL), bytes)
                 XCTAssertEqual(try Data(contentsOf: file), bytes)
