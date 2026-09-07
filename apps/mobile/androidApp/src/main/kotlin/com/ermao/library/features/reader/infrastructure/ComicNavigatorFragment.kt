@@ -19,8 +19,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -41,13 +44,18 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.unit.dp
@@ -266,6 +274,7 @@ internal class ComicNavigatorFragment : Fragment() {
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
+                .testTag("comic-viewport")
                 .background(Color.Transparent),
         ) {
             val width = maxWidth.value.toInt().coerceAtLeast(1)
@@ -370,19 +379,34 @@ internal class ComicNavigatorFragment : Fragment() {
             val density = LocalDensity.current
             val viewportWidthPx = with(density) { maxWidth.toPx() }.coerceAtLeast(1f)
             val viewportHeightPx = with(density) { maxHeight.toPx() }.coerceAtLeast(1f)
-            val transformableState = rememberTransformableState { _, zoomChange, panChange, _ ->
-                val nextScale = comicTotalScaleAfterGesture(totalScale, zoomChange)
-                totalScale = nextScale
-                val maxX = ((viewportWidthPx * nextScale) - viewportWidthPx)
+            fun panBy(panChange: Offset): Offset {
+                val previous = Offset(translationX, translationY)
+                val maxX = ((viewportWidthPx * totalScale) - viewportWidthPx)
                     .coerceAtLeast(0f) / 2f
-                val maxY = ((viewportHeightPx * nextScale) - viewportHeightPx)
+                val maxY = ((viewportHeightPx * totalScale) - viewportHeightPx)
                     .coerceAtLeast(0f) / 2f
                 translationX = (translationX + panChange.x).coerceIn(-maxX, maxX)
                 translationY = (translationY + panChange.y).coerceIn(-maxY, maxY)
+                return Offset(translationX, translationY) - previous
+            }
+            val transformableState = rememberTransformableState { _, zoomChange, panChange, _ ->
+                totalScale = comicTotalScaleAfterGesture(totalScale, zoomChange)
+                panBy(panChange)
+            }
+            val overflowPan = remember(viewportWidthPx, viewportHeightPx, plan.zoom, plan.imageVariant) {
+                object : NestedScrollConnection {
+                    override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                        if (totalScale <= 1.0001f) return Offset.Zero
+                        // At an image edge, finish the existing zoomed-viewport pan.
+                        // Scroll deltas are local to the scaled pager, translation is not.
+                        return panBy(available * totalScale) / totalScale
+                    }
+                }
             }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .nestedScroll(overflowPan)
                     .transformable(
                         state = transformableState,
                         canPan = { totalScale > 1.0001f },
@@ -601,14 +625,29 @@ internal class ComicNavigatorFragment : Fragment() {
                 viewportWidthPx = viewportWidthPx,
                 viewportHeightPx = viewportHeightPx,
             )
-            Image(
-                bitmap = image.asImageBitmap(),
-                contentDescription = null,
-                contentScale = ContentScale.FillBounds,
-                modifier = Modifier
-                    .width(with(density) { imageSize.first.toDp() })
-                    .height(with(density) { imageSize.second.toDp() })
-            )
+            key(page.pageIndex, plan.imageVariant, plan.imageFit, plan.flow, plan.anchorPageIndex) {
+                // Width/Height can exceed one viewport axis even at 100% zoom.
+                // Measure that axis without the viewport cap and let native scroll
+                // expose its edges; clipping width/height separately stretches pixels.
+                var imageModifier: Modifier = Modifier
+                if (imageSize.first > viewportWidthPx) {
+                    imageModifier = imageModifier.horizontalScroll(rememberScrollState())
+                }
+                if (constraints.hasBoundedHeight && imageSize.second > viewportHeightPx) {
+                    imageModifier = imageModifier.verticalScroll(rememberScrollState())
+                }
+                // ContinuousComic supplies unbounded height: its LazyColumn already
+                // owns vertical movement, so no nested vertical scroller is installed.
+                Image(
+                    bitmap = image.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.FillBounds,
+                    modifier = imageModifier.requiredSize(
+                        width = with(density) { imageSize.first.toDp() },
+                        height = with(density) { imageSize.second.toDp() },
+                    ),
+                )
+            }
         }
     }
 

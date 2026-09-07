@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-08 READER-18候选普通原路径已恢复长图等比及首尾可达，正常WebP上一页相邻通过；定向仪器回归观察修正中，仍OPEN，详细原因/失败日志见evidence及087d7aa9/comic-geometry-20260907。未冻结RC，其他Chrome/iOS/环境阻塞不变。
+
 2026-09-07 COM-DIR自然排序、静态GIF/WebP、嵌套目录归属/页序、坏页→正常页错误隔离子项已实测补齐，证据60b157c2/image-directory-complex-20260907/result.json。当前实际新缺陷READER-18长图失真仍OPEN、候选处理中；不因其他子项通过关闭。原Chrome/iOS/环境和最终RC缺口保持。
 
 2026-09-07 READER-18 OPEN：Android漫画长图原方形标识实际拉宽5.47倍，已在普通IMAGE_DIR路径复现；最小修复聚焦现有适配尺寸/父约束与必要平移，不改引擎或设置语义。原证据60b157c2/image-directory-complex-20260907/long-full.png、measurement及evidence；GIF/WebP和排序通过不能抵销长图失败，其他可执行坏页继续。

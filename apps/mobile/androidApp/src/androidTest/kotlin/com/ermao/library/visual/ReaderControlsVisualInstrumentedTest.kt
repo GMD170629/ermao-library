@@ -4,18 +4,26 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import android.app.KeyguardManager
 import android.os.SystemClock
 import android.view.KeyEvent
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipeRight
+import androidx.compose.ui.test.swipeUp
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -35,6 +43,10 @@ import com.ermao.library.shared.modules.reader.PdfReaderLocation
 import com.ermao.library.shared.modules.reader.ReaderProgressTiming
 import com.ermao.library.shared.modules.reader.ReaderTheme
 import com.ermao.library.shared.modules.reader.ComicReaderLocation
+import com.ermao.library.shared.modules.reader.ReaderComicDirection
+import com.ermao.library.shared.modules.reader.ReaderComicImageFit
+import com.ermao.library.shared.modules.reader.ReaderComicPreferences
+import com.ermao.library.shared.modules.reader.ReaderReadingMode
 import com.ermao.library.shared.modules.reader.ReaderSourceFormat
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -168,6 +180,196 @@ class ReaderControlsVisualInstrumentedTest {
             captureSource(epubSource, epubRequests, outputDirectory)
 
         assertTrue(captures.all { it.isFile && it.length() > 0 })
+    }
+
+    @Test
+    fun comicLongPagesPreserveFitAndReachEdges() {
+        val resourceId = "comic-geometry-${UUID.randomUUID()}"
+        val source = runBlocking {
+            val pages = listOf(400 to 3200, 3200 to 400, 400 to 400).map { (width, height) ->
+                Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
+                    val canvas = Canvas(bitmap)
+                    canvas.drawColor(Color.WHITE)
+                    val paint = Paint()
+                    listOf(Color.RED, Color.GREEN, Color.BLUE).forEachIndexed { index, color ->
+                        paint.color = color
+                        // Keep vertical edge markers clear of the real system-bar
+                        // overlays; otherwise PixelCopy measures an occluded square.
+                        val start = if (height > width) {
+                            listOf(200f, 1400f, 2600f)[index]
+                        } else index * 1400f
+                        if (width > height) canvas.drawRect(start, 0f, start + 400f, 400f, paint)
+                        else canvas.drawRect(0f, start, 400f, start + 400f, paint)
+                    }
+                }
+            }
+            ByteArrayInputStream(buildComicArchive(pages, Bitmap.CompressFormat.JPEG)).use { input ->
+                publicationStore.publishLocalPublication(
+                    resourceId = resourceId,
+                    displayTitle = "Comic geometry regression",
+                    input = input,
+                    sourceFormat = ReaderSourceFormat.Cbz,
+                )
+            }
+        }
+        try {
+            ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { scenario ->
+                scenario.keepReaderTestFixtureVisible()
+                awaitReaderReady(scenario)
+                for (direction in ReaderComicDirection.entries) {
+                    val preferences = ReaderComicPreferences(direction = direction, pageWidth = 600)
+                    setComicGeometryPage(scenario, preferences, 0)
+                    val top = checkNotNull(comicColorBounds(Color.RED))
+                    assertComicSquare(top, "Width TOP ($direction)")
+                    assertTrue("Width became Contain", top.width() > comicViewportSize().second / 4)
+                    assertTrue("Width compressed END into the viewport", comicColorBounds(Color.BLUE) == null)
+                    dragComicToEdge(Color.BLUE, horizontal = false, forward = true)
+                    assertComicSquare(checkNotNull(comicColorBounds(Color.BLUE)), "Width END ($direction)")
+                    assertComicPage(scenario, 0)
+                    dragComicToEdge(Color.RED, horizontal = false, forward = false)
+                    assertComicSquare(checkNotNull(comicColorBounds(Color.RED)), "Width TOP return ($direction)")
+
+                    // Non-overflowing fits must still display the entire tall original.
+                    for (fit in listOf(ReaderComicImageFit.Height, ReaderComicImageFit.Contain, ReaderComicImageFit.Original)) {
+                        setComicGeometryPage(scenario, preferences.copy(imageFit = fit), 0)
+                        val red = checkNotNull(comicColorBounds(Color.RED))
+                        assertComicSquare(red, "$fit TOP ($direction)")
+                        assertComicSquare(checkNotNull(comicColorBounds(Color.BLUE)), "$fit END ($direction)")
+                        val expectedSide = if (fit == ReaderComicImageFit.Original) {
+                            minOf(400, comicViewportSize().second / 8)
+                        } else comicViewportSize().second / 8
+                        assertTrue("$fit changed its scale", kotlin.math.abs(red.width() - expectedSide) <= 3)
+                    }
+
+                    // Height fit has the symmetric horizontal-overflow case.
+                    setComicGeometryPage(scenario, preferences.copy(imageFit = ReaderComicImageFit.Height), 1)
+                    assertTrue("Height compressed END into the viewport", comicColorBounds(Color.BLUE) == null)
+                    dragComicToEdge(Color.BLUE, horizontal = true, forward = true)
+                    assertComicPage(scenario, 1)
+                    dragComicToEdge(Color.RED, horizontal = true, forward = false)
+                    assertComicPage(scenario, 1)
+
+                    // An ordinary image still fits, and its horizontal swipe turns a page.
+                    setComicGeometryPage(scenario, preferences, 2)
+                    assertComicSquare(checkNotNull(comicColorBounds(Color.RED)), "Normal Width ($direction)")
+                    composeRule.onNodeWithTag("comic-viewport").performTouchInput {
+                        if (direction == ReaderComicDirection.LeftToRight) swipeRight() else swipeLeft()
+                    }
+                    composeRule.waitUntil(READER_READY_TIMEOUT_MILLIS) { comicPageIndex(scenario) == 1 }
+
+                    // Existing enlarged-page panning must coexist with the new overflow scroll.
+                    setComicGeometryPage(scenario, preferences.copy(zoom = 1.5), 0)
+                    dragComicToEdge(Color.BLUE, horizontal = false, forward = true)
+                    assertComicPage(scenario, 0)
+                    dragComicToEdge(Color.RED, horizontal = false, forward = false)
+                    assertComicPage(scenario, 0)
+                }
+                // LazyColumn remains the sole vertical scroller in continuous mode.
+                setComicGeometryPage(scenario, ReaderComicPreferences(pageWidth = 600, flow = ReaderReadingMode.ContinuousScroll), 0)
+                assertComicSquare(checkNotNull(comicColorBounds(Color.RED)), "Continuous TOP")
+                dragComicToEdge(Color.BLUE, horizontal = false, forward = true)
+            }
+        } finally {
+            runBlocking {
+                try {
+                    deleteLocalReaderV5Position(context, source)
+                } finally {
+                    publicationStore.delete(resourceId)
+                }
+            }
+        }
+    }
+
+    private fun setComicGeometryPage(
+        scenario: ActivityScenario<ReaderActivity>,
+        preferences: ReaderComicPreferences,
+        pageIndex: Int,
+    ) {
+        scenario.onActivity { activity ->
+            val controller = checkNotNull(activity.controllerForTesting)
+            controller.updatePreferences(controller.preferences.value.copy(comic = preferences))
+            controller.goTo(ComicReaderLocation(resourceHref = "pages/$pageIndex", pageIndex = pageIndex))
+        }
+        composeRule.waitForIdle()
+        composeRule.waitUntil(READER_READY_TIMEOUT_MILLIS) {
+            comicPageIndex(scenario) == pageIndex &&
+                composeRule.onAllNodesWithTag("comic-viewport").fetchSemanticsNodes().isNotEmpty() &&
+                comicColorBounds(Color.RED) != null
+        }
+        composeRule.waitForIdle()
+    }
+
+    private fun comicPageIndex(scenario: ActivityScenario<ReaderActivity>): Int? {
+        var pageIndex: Int? = null
+        scenario.onActivity { activity ->
+            pageIndex = (activity.controllerForTesting?.currentLocation?.value as? ComicReaderLocation)?.pageIndex
+        }
+        return pageIndex
+    }
+
+    private fun assertComicPage(scenario: ActivityScenario<ReaderActivity>, pageIndex: Int) {
+        assertTrue("Image pan turned the page", comicPageIndex(scenario) == pageIndex)
+    }
+
+    private fun comicViewportSize(): Pair<Int, Int> {
+        val bounds = composeRule.onNodeWithTag("comic-viewport").fetchSemanticsNode().boundsInRoot
+        return bounds.width.toInt() to bounds.height.toInt()
+    }
+
+    private fun assertComicSquare(bounds: Rect, label: String) {
+        assertTrue("$label distorted: $bounds", kotlin.math.abs(bounds.width() - bounds.height()) <= 3)
+    }
+
+    private fun dragComicToEdge(color: Int, horizontal: Boolean, forward: Boolean) {
+        // Slow drags avoid fling-dependent checkpoints; keep pulling after first
+        // exposure so the entire edge marker, not a clipped sliver, is reached.
+        repeat(32) {
+            val marker = comicColorBounds(color)
+            val viewport = comicViewportSize()
+            if (marker != null && (if (horizontal) marker.width() else marker.height()) >=
+                minOf(viewport.first, viewport.second) - 4
+            ) return
+            composeRule.onNodeWithTag("comic-viewport").performTouchInput {
+                if (horizontal) {
+                    if (forward) swipeLeft(durationMillis = 1000) else swipeRight(durationMillis = 1000)
+                } else {
+                    if (forward) swipeUp(durationMillis = 1000) else swipeDown(durationMillis = 1000)
+                }
+            }
+            composeRule.waitForIdle()
+        }
+        throw AssertionError("Comic edge marker $color is unreachable")
+    }
+
+    private fun comicColorBounds(color: Int): Rect? {
+        val bitmap = composeRule.onNodeWithTag("comic-viewport").captureToImage().asAndroidBitmap()
+        try {
+            val pixels = IntArray(bitmap.width * bitmap.height)
+            bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+            var left = bitmap.width
+            var top = bitmap.height
+            var right = -1
+            var bottom = -1
+            pixels.forEachIndexed { index, pixel ->
+                // Measure the half-coverage edge of the scaled primary-color square.
+                // Counting only fully saturated pixels erodes interpolated edges but
+                // not edges against the image boundary, biasing the measured aspect.
+                if (kotlin.math.abs(Color.red(pixel) - Color.red(color)) < 128 &&
+                    kotlin.math.abs(Color.green(pixel) - Color.green(color)) < 128 &&
+                    kotlin.math.abs(Color.blue(pixel) - Color.blue(color)) < 128
+                ) {
+                    val x = index % bitmap.width
+                    val y = index / bitmap.width
+                    left = minOf(left, x)
+                    top = minOf(top, y)
+                    right = maxOf(right, x)
+                    bottom = maxOf(bottom, y)
+                }
+            }
+            return if (right < left) null else Rect(left, top, right + 1, bottom + 1)
+        } finally {
+            bitmap.recycle()
+        }
     }
 
     @OptIn(ExperimentalReadiumApi::class)
@@ -416,13 +618,16 @@ class ReaderControlsVisualInstrumentedTest {
         composeRule.onNodeWithTag(READER_PANEL_WORKSPACE_TEST_TAG).assertIsDisplayed()
     }
 
-    private fun buildComicArchive(): ByteArray = ByteArrayOutputStream().use { output ->
+    private fun buildComicArchive(
+        pages: List<Bitmap> = COMIC_PAGE_COLORS.mapIndexed { index, color -> createIllustratedPage(index + 1, color) },
+        format: Bitmap.CompressFormat = Bitmap.CompressFormat.PNG,
+    ): ByteArray = ByteArrayOutputStream().use { output ->
         ZipOutputStream(output).use { archive ->
-            COMIC_PAGE_COLORS.forEachIndexed { index, background ->
-                archive.putNextEntry(ZipEntry("pages/page-${index + 1}.png"))
-                val bitmap = createIllustratedPage(index + 1, background)
+            pages.forEachIndexed { index, bitmap ->
+                val extension = if (format == Bitmap.CompressFormat.JPEG) "jpg" else "png"
+                archive.putNextEntry(ZipEntry("pages/page-${index + 1}.$extension"))
                 try {
-                    assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, archive))
+                    assertTrue(bitmap.compress(format, 100, archive))
                 } finally {
                     bitmap.recycle()
                 }

@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-08 READER-18候选已增量构建并完成普通IMAGE_DIR原路径观察：原400×3200 JPEG的TOP→MID→END→TOP均可到达，MID原400×400方块实屏1439×1436（比例1.002，原失败5.47），上一页WebP仍正常。复用原适配计算，以requiredSize保留完整尺寸、仅溢出轴增加原生滚动，放大后剩余拖动复用既有平移边界；未改四种适配/机器契约。原件HTTP与输入逐字节一致，设备安装hash已核实。证据`087d7aa9/comic-geometry-20260907`的build、installed、geometry-measurement、open/mid/end/top-return/adjacent及original；当前定向仪器回归尚未全部通过，保持OPEN。
+
+本次辅助改动仅服务RG-03 COM-DIR/READER-18：现有正常页控件用例无法判定长图比例和超出视口后的首尾可达，复用同一ReaderControlsVisualInstrumentedTest/真实JPEG和触摸入口增加针对性断言，无通用工具。首轮误把系统栏遮挡算作变形（instrument-1），只将合成色块移出遮挡区；第二轮只统计饱和像素导致插值边缘不对称侵蚀（instrument-2），改为颜色半覆盖边缘，原比例容差断言不变。普通原样本未改。停止条件为原失真及首尾可达、实际适配/翻页相邻通过；不扩全量或双平台。独立只读复核无具体阻塞，不能代替真机结果。
+
 2026-09-07 COM-DIR复杂/异常增量（API60b157c2、普通APK937b325b）：DIR-C按page2.png→page10.gif→page11.webp→page20.jpg自然排序，真实绿色GIF 10/紫色WEBP 11可读；静态样本不宣称动画覆盖。独立DIR-N的part 2/page2、part 2/page10、part 10/page1被识别为一个IMAGE_DIR、三个PAGE资产，普通界面三张不同原图逐页与HTTP对应。DIR-X复用原30字节不可解码JPEG：好1→坏2明确报错→好3错误清除→坏2再次报错→好1正常，页数仍3，不删除坏页制造通过。七张C/X和三张嵌套页HTTP原件字节均匹配源文件，原始hash保持。相邻子项通过不抵销READER-18长图失真。
 
 证据集中`60b157c2/image-directory-complex-20260907/result.json`，包含实际manifest、页序/原件读回、c/n-page及x-bad/after-bad/bad-return/first-return截图与XML（已查看）。样本是既有图片/坏JPEG复用及专用标识GIF/WebP/长JPEG；无工具功能扩展。普通入口无新安装/清数据；设备临时文件、reverse和方向设置已收尾，隔离服务通过同一自有wrapper停止。详细范围见result；不外推W/I、动画、全部变体或最终RC。下一项READER-18最小候选编译、长图原场景与必要图像/翻页相邻，不重演本轮已完成全部流程。
