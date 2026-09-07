@@ -1,5 +1,9 @@
 # 1.0 发布验收矩阵
 
+2026-09-07 REF-EPUB active内容/原件重开子项PASS，TEST-15 CLOSED：9120453e Android生产实现未改，既有仪器方法补危险链接实际触发、原/parent执行标记、危险节点、样本请求/存储及原件重开断言后真机通过；普通首页进入第二章、点击链接后仍可读，确认r5完整第二章位置再正常重开同章50%。原件hash不变。证据9120453e/epub-active-20260907，详见evidence；不外推其他样本、iOS、全局网络捕获或同冻结RC。
+
+RISK-10 待核实（RG-04 EPUB服务中断重开）：首次重开与本轮600s隔离服务到期退出重合，loading后曾显示首章；当时未在关闭前独立确认第二章位置，不据此认定已确认位置丢失，也不能用随后干净在线重开PASS关闭该观察。原图reopened.png/reopen-state.xml和api.log保留。下一项用现有入口固定已确认第二章后仅复测服务不可达重开，区分启动/同步时序与测试环境；不新增通用工具。
+
 2026-09-07 READER-17 Android原失败CLOSED：归档预检IO/解码异常改用既有EPUB.RESOURCE_INTEGRITY，保留拒绝与cause；39B非ZIP及24B截断ZIP定向先FAIL后PASS，原路径/链接风险、容量及正常归档相邻全通过。新普通APK打开/重新获取损坏EPUB均为既有格式解析失败提示（PUBLICATION_CORRUPT映射ParseFailed），不再误报活动内容；同PID28438正常EPUB首章可读，坏资源进度/receipt均0。iOS同源修复已提交682b2679但ENV-02未编译/未执行。停止本分类问题扩验；下一项EPUB active正文/缓存重开及必要现有副作用用例，未冻结RC。
 
 2026-09-07 READER-16 Android原失败CLOSED：9267a034普通开发APK实际打开安全DOCTYPE、可隔离external entity均保留正文，后者显示字面量&canary;；正常FB2相邻可读。测试canary未出现在正文，三个服务端原件及样本hash不变，同PID25985无所捕获崩溃。停止本缺陷Android扩验；iOS候选仍ENV-02待编译/真机，未声明整体原生放行。下一项EPUB损坏/active内容既有入口；原五项Chrome候选保持，未冻结RC。

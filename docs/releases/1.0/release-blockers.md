@@ -1,5 +1,11 @@
 # 1.0 发布阻塞项
 
+2026-09-07 REF-EPUB active内容/原件重开子项PASS，TEST-15 CLOSED：9120453e Android生产实现未改，既有仪器方法补危险链接实际触发、原/parent执行标记、危险节点、样本请求/存储及原件重开断言后真机通过；普通首页进入第二章、点击链接后仍可读，确认r5完整第二章位置再正常重开同章50%。原件hash不变。证据9120453e/epub-active-20260907，详见evidence；不外推其他样本、iOS、全局网络捕获或同冻结RC。
+
+RISK-10 待核实（RG-04 EPUB服务中断重开）：首次重开与本轮600s隔离服务到期退出重合，loading后曾显示首章；当时未在关闭前独立确认第二章位置，不据此认定已确认位置丢失，也不能用随后干净在线重开PASS关闭该观察。原图reopened.png/reopen-state.xml和api.log保留。下一项用现有入口固定已确认第二章后仅复测服务不可达重开，区分启动/同步时序与测试环境；不新增通用工具。
+
+2026-09-07 TEST-15（RG-03 REF-EPUB活动内容）：既有仪器用例采样四标记但只判断结果不含true，未断言已采集危险节点数量，也未点击或重开后复查。原用例当前真机PASS仅保留其窄范围证据；为当前必测副作用补原方法内DOM/原危险链接触发、当前/parent标记、fixture专用localStorage/资源请求和已落盘原件重开断言。无通用工具/框架新增，不把静态测试遗漏当产品漏洞。停止条件为该原方法实际通过并完成普通界面重开；证据9120453e/epub-active-20260907。
+
 2026-09-07 READER-17 Android原失败CLOSED：归档预检IO/解码异常改用既有EPUB.RESOURCE_INTEGRITY，保留拒绝与cause；39B非ZIP及24B截断ZIP定向先FAIL后PASS，原路径/链接风险、容量及正常归档相邻全通过。新普通APK打开/重新获取损坏EPUB均为既有格式解析失败提示（PUBLICATION_CORRUPT映射ParseFailed），不再误报活动内容；同PID28438正常EPUB首章可读，坏资源进度/receipt均0。iOS同源修复已提交682b2679但ENV-02未编译/未执行。停止本分类问题扩验；下一项EPUB active正文/缓存重开及必要现有副作用用例，未冻结RC。
 
 2026-09-07 READER-17 OPEN（RG-03 EPUB异常）：现有39B非ZIP样本普通Android打开/重新获取均显示“安全策略阻止活动内容”，已实际复现；应保持拒绝但报告内容损坏。直接原因归档预检将IO/解码异常映射EPUB.ARCHIVE_STRUCTURE，现有EPUB.RESOURCE_INTEGRITY已提供PUBLICATION_CORRUPT。仅修正catch映射及针对性反例，路径风险与预算拒绝保留，不改契约/工具。证据88f45fb9/epub-errors-20260907/bad-open、bad-retry；下一项原失败及正常EPUB相邻。

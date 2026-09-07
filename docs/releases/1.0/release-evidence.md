@@ -1,5 +1,15 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 REF-EPUB active内容/原件重开子项PASS，TEST-15 CLOSED：9120453e Android生产实现未改，既有仪器方法补危险链接实际触发、原/parent执行标记、危险节点、样本请求/存储及原件重开断言后真机通过；普通首页进入第二章、点击链接后仍可读，确认r5完整第二章位置再正常重开同章50%。原件hash不变。证据9120453e/epub-active-20260907，详见evidence；不外推其他样本、iOS、全局网络捕获或同冻结RC。
+
+RISK-10 待核实（RG-04 EPUB服务中断重开）：首次重开与本轮600s隔离服务到期退出重合，loading后曾显示首章；当时未在关闭前独立确认第二章位置，不据此认定已确认位置丢失，也不能用随后干净在线重开PASS关闭该观察。原图reopened.png/reopen-state.xml和api.log保留。下一项用现有入口固定已确认第二章后仅复测服务不可达重开，区分启动/同步时序与测试环境；不新增通用工具。
+
+本轮证据：readium-active.log为原窄断言1PASS；readium-active-targeted/diagnostic/readium-active-final/projection各失败保留。首次误将无DOM storage API的null视为可读对象；下一次将Readium注入本地https://readium_assets样式计为作者远程内容。依据实际异常/节点投影修正为“存储不可用或样本key不存在”和样本真实attacker.invalid URL；无降低契约或允许作者副作用，临时try/catch已移除。readium-active-verified.log明确1PASS，首次及已落盘原件重开都执行增强断言；test APK SHA-256 `5179a1179560208fbf0dd0f11ac1e3b9a72e62f3d0865af435cebd1fd3c7d9ec`。只修改原测试局部函数，无新工具/报告框架；达到停止条件不再扩验。
+
+普通界面clicked/online-reopened XML与PNG已核对；pre-close-progress.json独立HTTP确认r5/OEBPS/chapter2.xhtml/0.5，post-reopen-progress.json保留完整读回，result.json记录源文件及服务原件hash、495个API源码不变和自有文件清理。原600s服务已由句柄58849确认终止，再启动180s只读验收API完成干净重开，句柄50100已终止；两份shutdown.json确认进程停止。测试偏好按字节恢复并在最后再次相等，备份已删除；普通App已停、reverse已移除。原15项用户改动保留。
+
+2026-09-07 TEST-15（RG-03 REF-EPUB活动内容）：既有仪器用例采样四标记但只判断结果不含true，未断言已采集危险节点数量，也未点击或重开后复查。原用例当前真机PASS仅保留其窄范围证据；为当前必测副作用补原方法内DOM/原危险链接触发、当前/parent标记、fixture专用localStorage/资源请求和已落盘原件重开断言。无通用工具/框架新增，不把静态测试遗漏当产品漏洞。停止条件为该原方法实际通过并完成普通界面重开；证据9120453e/epub-active-20260907。
+
 2026-09-07 READER-17 Android原失败CLOSED：归档预检IO/解码异常改用既有EPUB.RESOURCE_INTEGRITY，保留拒绝与cause；39B非ZIP及24B截断ZIP定向先FAIL后PASS，原路径/链接风险、容量及正常归档相邻全通过。新普通APK打开/重新获取损坏EPUB均为既有格式解析失败提示（PUBLICATION_CORRUPT映射ParseFailed），不再误报活动内容；同PID28438正常EPUB首章可读，坏资源进度/receipt均0。iOS同源修复已提交682b2679但ENV-02未编译/未执行。停止本分类问题扩验；下一项EPUB active正文/缓存重开及必要现有副作用用例，未冻结RC。
 
 证据：`artifacts/releases/1.0/88f45fb9/epub-errors-20260907/`；bad-open与bad-retry保留原安全误报，after-open XML/PNG及after-retry对应修复后实际提示，good-open对应正常首章（不是active第二章）。preflight-red/green XML与日志保留原失败及6项定向结果；原有效断言未删，未改契约/阈值/工具。候选APK SHA-256 `aea79893e59e28cde407cee4861fb4ac2cd17bce33b8f4d0f1f0815a897bf79f`，基于88f45fb9加唯一Android分类补丁，candidate-source.json/ android-candidate.diff固定实际构建源码，未受同期仅iOS提交影响；开发包install-r保留数据。generator --check、boundary.log及diff检查通过。

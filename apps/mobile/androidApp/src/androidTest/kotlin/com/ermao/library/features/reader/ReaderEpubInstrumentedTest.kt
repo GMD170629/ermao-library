@@ -113,6 +113,34 @@ class ReaderEpubInstrumentedTest {
 
     @Test
     fun opensRendersNavigatesAndAppliesPreferencesWithReadium() {
+        // This fixture's active markup must remain inert on initial and managed-file opens.
+        fun verifyActiveContentIsInert(scenario: ActivityScenario<ReaderActivity>) {
+            val result = evaluateJavascript(
+                scenario,
+                """
+                    (() => {
+                      const link = [...document.querySelectorAll('a')].find(a => a.textContent.includes('危险链接'));
+                      if (!link) return false;
+                      link.click();
+                      const clean = [document, parent.document].every(doc =>
+                        ['epubScriptExecuted', 'epubHandlerExecuted', 'epubUrlExecuted', 'epubFrameExecuted']
+                          .every(key => !doc.documentElement.dataset[key]));
+                      // This WebView may expose no DOM storage; it must never contain the fixture's write.
+                      const storage = localStorage === null || localStorage.getItem('epub-pwn') === null;
+                      // Match authored fixture URLs, not Readium's injected local https://readium_assets CSS.
+                      const nodes = [...document.querySelectorAll('iframe,[onload],[onclick],a[href^="javascript:"],img[src*="attacker.invalid"],link[href*="attacker.invalid"],meta[http-equiv="refresh"]')]
+                        .map(node => node.outerHTML);
+                      const requests = performance.getEntriesByType('resource').filter(entry =>
+                        entry.name.includes('attacker.invalid') || entry.name.includes('/api/epub-pwn')).map(entry => entry.name);
+                      const locationSafe = !location.href.includes('attacker.invalid');
+                      const readable = document.body.innerText.includes('第二章');
+                      return clean && storage && nodes.length === 0 && requests.length === 0 && locationSafe && readable
+                        ? true : JSON.stringify({clean, storage, nodes, requests, locationSafe, readable});
+                    })()
+                """.trimIndent(),
+            )
+            assertEquals("Active fixture must be inert and readable", "true", result)
+        }
         ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { scenario ->
             scenario.keepReaderTestFixtureVisible()
             waitForReader(scenario)
@@ -228,23 +256,17 @@ class ReaderEpubInstrumentedTest {
             waitUntilValue("security fixture chapter rendering") {
                 renderedText(scenario).contains("第二章")
             }
-            val securityState = evaluateJavascript(
-                scenario,
-                """
-                    JSON.stringify({
-                      authorScript: document.documentElement.dataset.epubScriptExecuted || null,
-                      authorHandler: document.documentElement.dataset.epubHandlerExecuted || null,
-                      authorUrl: document.documentElement.dataset.epubUrlExecuted || null,
-                      authorFrame: document.documentElement.dataset.epubFrameExecuted || null,
-                      frames: document.querySelectorAll('iframe').length,
-                      handlers: document.querySelectorAll('[onload],[onclick]').length,
-                      dangerous: document.querySelectorAll('a[href^="javascript:"]').length,
-                      remoteImages: document.querySelectorAll('img[src^="http"]').length
-                    })
-                """.trimIndent(),
-            )
-            val normalizedSecurityState = securityState.replace("\\\"", "\"")
-            assertFalse(normalizedSecurityState, normalizedSecurityState.contains("true"))
+            verifyActiveContentIsInert(scenario)
+        }
+        ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { reopened ->
+            reopened.keepReaderTestFixtureVisible()
+            waitForReader(reopened)
+            val contents = runBlocking { controller(reopened).loadTableOfContents() }
+            reopened.onActivity { activity ->
+                assertTrue(checkNotNull(activity.controllerForTesting).goTo(contents.last().location))
+            }
+            waitUntilValue("reopened security fixture body") { renderedText(reopened).contains("第二章") }
+            verifyActiveContentIsInert(reopened)
         }
     }
 
