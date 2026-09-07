@@ -1,5 +1,11 @@
 # 1.0 发布证据与最终签收
 
+2026-09-08 CONNECTION-01 CLOSED（b32aac21）：普通开发APK保留数据替换安装，实际读回SHA256 `7bf003fbf71ba064985347250c41822549afece4fcc4c0b17f57188db80e57fd`。同serverIdentity HTTP→退出→HTTPS（默认拒绝后显式接受）→退出→HTTP，绿色复验保留同profile并改回地址，原“我的”旧HTTPS显示恢复为HTTP；首页原52%、62部作品相邻正常。实际管理日志GET200及MP3媒体asset GET206均走当前HTTP，回HTTP后的旧TLS请求0，真实MediaSession Playing/1×；音频为py_6848b175c49b47349213a979af42417c。现有MainShellNavigationTest/编译通过证据复用，独立定向审查未见具体新增问题。证据`f936f99f/android-tls-20260908/green/result.json`、http-restored-settings.png/xml、verified-requests、audio-open/media、installed及restored-profiles。停止本缺陷扩验。
+
+设备profile持久状态独立读取：当前18084/SystemTrust，18086配置不存在、原B18085仍在；数据namespace不变。App停止、两条reverse与专用XML删除、双API停止/临时私钥删除（cleanup/shutdown，wrapper终态0）。本轮仅最小MainShell连接键修复，无新增测试辅助代码/框架。快速批量退格未清空密码导致一次真实401、Ctrl+A无效及后续逐次退格到0再输入22字符成功；初次请求观察误以为缓存设置页必重读、媒体必走publication，实际现有管理日志/asset入口已独立验证；原观察文件与错误说明observation-errors保留，未改业务响应或弱化回归断言。
+
+CON-01非信任证书子项：原7ac595aa已实测默认拒绝/取消/重试/显式接受/冷启动；b32aac21再次默认拒绝至显式接受通过，分别按原源码保留，不混称最终同RC。尚缺受信任CA/代理、非localhost地址与其他平台验收；睡眠范围仍待负责人、Chrome五候选/iOS/容器/工具限制、正式包暂缓及最终冻结RC保持。下一可执行项先核对连接的既有非localhost路径/样本，不新增TLS工具或安装系统信任。
+
 2026-09-08 CON-01非信任TLS默认拒绝/取消/显式接受/冷启动子项通过，但HTTP恢复相邻发现CONNECTION-01 OPEN：普通Android7ac595aa在同serverIdentity的HTTPS→退出→HTTP重新登录后，HTTP login/me已200，“我的”仍显示旧HTTPS，设置GET也发往旧TLS端点。MainShell的Activity级ViewModel键仅含namespace，复用捕获旧profile的Me/管理等模型。最小候选在现有contentKey加入profile id/baseUrl/tlsMode，音频remember也用完整profile；不改数据namespace、TLS语义或协议，不新增工具。原证据f936f99f/android-tls-20260908/red-result.json、restored.xml、http/tls.log；首次收尾断言失败保留。证书SAN匹配127.0.0.1，默认信任失败、确认前无HTTP请求；风险提示及取消/重试、显式接受后的首页与冷开分别留证。临时配置通过UI删除、回HTTP认证成功但设置仍旧；测试app/reverse/设备XML、双服务和临时密钥已清理（shutdown.json），未改系统信任。候选Android增量编译/assembleDebug及现有MainShellNavigationTest 3/3通过（candidate-build.log/XML）；原UI复验下一步，不能标整体CON-01通过。
 
 2026-09-08 CON-02 Android普通退出后跨服务器重登子项PASS（API987ece6b、普通APK7ac595aa）：复用既有隔离A(18084，62作品，发布接入验收)与B(18085，0作品，Server B isolated owner)，同邮箱但HTTP userId不同。实际“我的→账户与安全→退出并清除私有数据→登录页改B地址→登录”后B首页无A继续项、书库0、我的显示B名称/18085；强停冷开仍B空首页。再普通退出B→登录页“切换服务器”选择已存A→登录，A名称/18084/62作品/原52%继续项恢复。UI截图已查看，双HTTP用户身份、作品列表和书库结果前后相同。证据`987ece6b/android-server-switch-20260908/result.json`、before/after、b-home/library/settings/cold、select-a/return-form/return-enter/a-restored及API日志。

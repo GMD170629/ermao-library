@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-08 CONNECTION-01 CLOSED：b32aac21原同身份换地址的普通UI、当前HTTP管理/音频请求及原首页/书库相邻通过；旧TLS请求0，持久配置恢复SystemTrust。证据f936f99f/android-tls-20260908/green/result.json，详见evidence。CON-01非信任TLS显式流程子项补齐，受信任CA/代理、非localhost及其他平台仍待；睡眠范围/Chrome五候选/iOS/容器/工具限制、正式包暂缓与最终RC保持，R2未冻结。下一项现有非localhost连接路径可行性。
+
 2026-09-08 CONNECTION-01 OPEN（RG-02 CON-01/02）：同服务器身份换地址重新登录后，Android设置模型保留旧地址/TLS请求上下文，普通UI及双API日志已复现。最小现有缓存键候选处理中；证据f936f99f/android-tls-20260908/red-result.json，详见evidence。非信任TLS显式流程子项通过不抵销此相邻失败；R2及其余阻塞保持。
 
 2026-09-08 CON-02 Android可达UI的退出后A→B→A重登隔离及B冷启动子项PASS；同邮箱不同身份，A62/B0及回A身份/进度恢复，后端内容不变。证据987ece6b/android-server-switch-20260908/result.json，详见evidence。没有新增产品缺陷或工具；不把未接线的保持登录切服算通过。下一项CON-01 HTTPS/非信任证书现有路径；睡眠范围待负责人、Chrome五候选/iOS/容器/工具限制、正式包暂缓与最终RC仍待，R2保持。
