@@ -216,7 +216,7 @@ R1 / DEC-05：用户批准 1.0 不支持第三方进度同步，OPDS-04 原互�
 | COM-ZIP | ZIP-N/C：独立ZIP源及含非图片条目 | W/A/I；P2 | F；正确筛图，顺序不漏重复 | ZIP-X：遍历/损坏/解压预算 | PARTIAL；IMPORT-03已关闭，148e0634真实六图+TXT全新导入/Android首末及前页PASS；ZIP逃逸/链接隔离及可规范化普通路径两图真实HTTP/Android PASS（fe90d7b5/comic-exceptions-20260907）；W/I与其他复杂异常待验 |
 | COM-CBR | CBR-N/C：实际RAR容器与承诺变体 | W/A/I；P2 | F；不能用ZIP改名 | CBR-X：加密/损坏 | PARTIAL；d0126d3e真实RAR5压缩同字节CBR、Android首图/翻至4页/确认后冷恢复PASS；W/I与复杂异常待验 |
 | COM-RAR | RAR-N/C：真实RAR4/RAR5分别登记适配能力 | W/A/I；P2 | F；变体失败记风险不删支持 | RAR-X：损坏/扩展预算 | PARTIAL；d0126d3e真实RAR5压缩Android首图/前翻及3/6确认PASS；RAR4、W/I及复杂异常待验 |
-| COM-DIR | DIR-N/C：实际图片目录，多层/自然排序/非图片/已有图片类型 | W/A/I；P2 | F；图片文件数与Resource/Book数分开 | DIR-X：损坏图、单页失败隔离 | PARTIAL/FAIL：bbb3fd71 Android六张PNG/JPEG顺序/末页边界、README过滤、确认后冷恢复第5页PASS；60b157c2补静态GIF/WebP、自然排序、嵌套目录一资源三页、坏页往返隔离PASS。长图失真READER-18 OPEN；原件/位置限制见evidence，W/I及最终RC仍待 |
+| COM-DIR | DIR-N/C：实际图片目录，多层/自然排序/非图片/已有图片类型 | W/A/I；P2 | F；图片文件数与Resource/Book数分开 | DIR-X：损坏图、单页失败隔离 | PARTIAL：bbb3fd71 Android六张PNG/JPEG顺序/末页边界、README过滤、确认后冷恢复第5页PASS；60b157c2补静态GIF/WebP、自然排序、嵌套目录一资源三页、坏页往返隔离PASS。READER-18 Android长图等比/首尾及150%内部拖动CLOSED（fa073fab普通、912d0254定向）；原件/位置限制见evidence，W/I及最终RC仍待 |
 
 安全样本优先复用 packages/reader-contracts/fixtures 及现有平台 corpus；这些是测试素材来源，不证明全部真实阅读样本已准备。已有候选SHA-256见§3.1，余下样本及章节/页/轨事实清单待补。引擎与源文件路由见 release-gate.md §6，异常阈值只引用机器策略，不另造规则。
 

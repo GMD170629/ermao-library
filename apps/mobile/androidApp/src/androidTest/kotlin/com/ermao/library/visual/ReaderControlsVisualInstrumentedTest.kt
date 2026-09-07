@@ -246,15 +246,7 @@ class ReaderControlsVisualInstrumentedTest {
                     assertTrue("Height compressed END into the viewport", comicColorBounds(Color.BLUE) == null)
                     dragComicToEdge(Color.BLUE, horizontal = true, forward = true)
                     assertComicPage(scenario, 1)
-                    try {
-                        dragComicToEdge(Color.RED, horizontal = true, forward = false)
-                    } catch (failure: AssertionError) {
-                        captureCurrent(
-                            CaptureRequest("comic-geometry-failure.png", ReaderPanelCapture.PassiveStatus, ReaderTheme.Warm),
-                            checkNotNull(context.getExternalFilesDir("reader-controls")),
-                        )
-                        throw AssertionError("Height return page=${comicPageIndex(scenario)}, red=${comicColorBounds(Color.RED)}", failure)
-                    }
+                    dragComicToEdge(Color.RED, horizontal = true, forward = false)
                     assertComicPage(scenario, 1)
 
                     // An ordinary image still fits, and its horizontal swipe turns a page.
@@ -334,18 +326,6 @@ class ReaderControlsVisualInstrumentedTest {
         repeat(32) {
             val marker = comicColorBounds(color)
             val viewport = comicViewportSize()
-            instrumentation.sendStatus(0, android.os.Bundle().apply {
-                val axis = if (horizontal) androidx.compose.ui.semantics.SemanticsProperties.HorizontalScrollAxisRange
-                    else androidx.compose.ui.semantics.SemanticsProperties.VerticalScrollAxisRange
-                val ranges = composeRule.onAllNodes(
-                    androidx.compose.ui.test.SemanticsMatcher.keyIsDefined(axis),
-                    useUnmergedTree = true,
-                ).fetchSemanticsNodes().map { node ->
-                    val range = node.config[axis]
-                    "${range.value()}/${range.maxValue()}"
-                }
-                putString("geometry", "horizontal=$horizontal edge=$color step=$it marker=$marker viewport=$viewport ranges=$ranges")
-            })
             if (marker != null && (if (horizontal) marker.width() else marker.height()) >=
                 minOf(viewport.first, viewport.second) - 4
             ) return
