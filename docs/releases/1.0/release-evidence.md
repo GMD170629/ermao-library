@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 POS-09 Android EPUB目录目标后旋转/冷重开增量PASS（API源码ed009144、普通开发APK ebb4e3ea，未改Android代码）：现有阅读器目录选择第一章A→下一章读到第二章B，独立HTTP确认r12完整位置；实际横屏3200×1440、恢复竖屏和强停后首页继续均显示第二章50%，最终HTTP r15完整Locator与r12相等。证据`artifacts/releases/1.0/ed009144/pos09-epub-external-20260907/`：target-a、read-b、before-rotate、landscape/portrait/reopened及after-reopen/result；两张横屏/重开图已查看。原详情页章节预览由现有RESOURCE_PREVIEW_IS_VISIBLE=false隐藏，原计划外部启动目标未执行，未恢复隐藏功能；目录名称沿用最初计划，不据名称计外部入口PASS。无新增产品缺陷或辅助代码。API源码hash保持，方向设置恢复原值accelerometer_rotation=1/user_rotation=0，15个专用设备文件和reverse清理，仅releasecheck强停；API受控终止且会话19550返回exit0，shutdown.json已核实。
+
+ENV-11原授权命令复核：旧/新各281构建runtime文件及原测试hash匹配后，在本轮完全访问环境执行原3107 next start命令仍于进程创建前被工具拒绝，仅blocked by policy；未尝试3108或其他启动入口。官方codex execpolicy check针对本机default.rules及相同PowerShell命令返回matchedRules=[]，只证明该文件无匹配，不能推定所有策略或拒绝根因。用户授权充足，无需重复确认；记录ed009144/sync02-original-command-20260907/rejection.json/local-rule-check.json。Chrome五项原UI仍待，其他可执行工作继续。下一项剩余Android进度捕获/未确认恢复或格式异常的既有入口；不重复本轮已完成旋转场景。
+
 2026-09-07 SYNC-06 iOS同类风险候选：IosReaderComposition将已有typed bootstrap Failure传给既有IosReaderProgressSessionCoordination，仅recoverable=true保留confirmed-local恢复许可；EPUB/PDF/comic的既有local分支消费同一许可。显式目标、pending、server优先级及成功空snapshot从起点语义保留，不改变存储/同步协议或安全权限处理。复用原ReaderSecurityTests物理EPUB方法的样本、数据库和窗口，追加可恢复失败/成功空快照/不可恢复失败三个session对照，前置confirmedRevision>0、pending=nil、首末实际Locator不同；原上传完整Locator断言保留。无新通用工具。
 
 证据`artifacts/releases/1.0/5755e740/ios-offline-restore-20260907/`含candidate.json/patch与readium-check.log。主任务及独立只读检查无阻断发现；Readium3.9.0版本/lock/runtime/policy检查PASS仅为静态检查。当前无swift/xcodebuild、ENV-02，未编译、未执行上述测试或真实断服务路径；测试viewport就绪后位置是否已稳定也留待真实运行判定，不以此先扩等待工具。状态为修复候选已提交、原场景待验证；Android已关闭结果保持。下一可执行项：核实现环境下既有Chrome SYNC-02原授权命令是否可运行；仍拒绝则保留对应阻塞，不换入口绕过。

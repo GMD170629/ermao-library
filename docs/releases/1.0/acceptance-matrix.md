@@ -1,5 +1,7 @@
 # 1.0 发布验收矩阵
 
+2026-09-07 POS-09 Android EPUB内部目录后旋转/冷重开子项PASS：目录A第一章→B第二章确认r12→横屏/竖屏→强停冷首页继续仍B，独立HTTP r15完整Locator与r12相等。证据ed009144/pos09-epub-external-20260907/result.json，详见evidence。详情章节预览现有隐藏、外部启动参数路径NOT_RUN，不以此扩功能；iOS/其他引擎/最终RC仍待。
+
 2026-09-07 RG-04/POS-04 Android EPUB可恢复查询失败重开子项PASS，SYNC-06 Android CLOSED：ebb4e3ea普通开发包，服务端r9第二章与设备confirmed9/pending=null前置核实后停API；普通继续仍第二章50%，关闭后本地Locator保持。证据ebb4e3ea/epub-offline-fix-20260907/result.json；首次可读观察10.657s（含网络失败等待），不外推其他格式UI、iOS或最终RC。iOS同类静态风险单列待处理。
 
 2026-09-07 REF-EPUB active内容/原件重开子项PASS，TEST-15 CLOSED：9120453e Android生产实现未改，既有仪器方法补危险链接实际触发、原/parent执行标记、危险节点、样本请求/存储及原件重开断言后真机通过；普通首页进入第二章、点击链接后仍可读，确认r5完整第二章位置再正常重开同章50%。原件hash不变。证据9120453e/epub-active-20260907，详见evidence；不外推其他样本、iOS、全局网络捕获或同冻结RC。

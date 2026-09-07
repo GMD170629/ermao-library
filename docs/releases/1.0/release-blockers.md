@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-07 POS-09 Android EPUB内部目录目标后旋转/冷重开子项已补齐，无新增产品缺陷或工具代码；详情章节预览现有隐藏，外部参数启动不计PASS。ENV-11本轮相同原授权3107命令仍被工具blocked by policy；本机default.rules只读规则检查无匹配，具体拒绝来源未知，不能归因用户未授权。证据及清理详见evidence首节。iOS候选ed009144已提交推送但ENV-02未编译/未实测。RC仍未冻结，下一项剩余Android进度捕获/未确认恢复或格式异常既有入口。
+
 2026-09-07 SYNC-06 iOS静态同类风险最小候选已准备：typed recoverable bootstrap失败允许既有三引擎confirmed-local恢复，成功空/不可恢复与既有优先级保持。现有物理EPUB用例补三种bootstrap状态，不新增工具；版本检查PASS。无Xcode/真机，编译和原场景仍ENV-02 BLOCKED，不能标iOS CLOSED。详细证据5755e740/ios-offline-restore-20260907，下一项现环境Chrome既有授权原命令可行性核验。
 
 2026-09-07 SYNC-06 Android原失败CLOSED（ebb4e3ea）：停止API前独立HTTP确认r9第二章，设备库确认revision9且pending=null；受控API终止后普通首页继续恢复第二章50%，强停后本地完整Locator仍为第二章。原selector优先级/反例6PASS及Android编译证据复用，不扩全量。证据ebb4e3ea/epub-offline-fix-20260907/result.json，详细限制见evidence。iOS对应bootstrap失败折叠及三引擎恢复放弃local的静态同类风险待处理，未真机复现，不因Android通过关闭iOS。
