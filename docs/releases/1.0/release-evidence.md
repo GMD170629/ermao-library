@@ -1,5 +1,11 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 RG-02 / IMP-03、06混合损坏与修复子项PASS：真实Worker先处理损坏CBZ，任务/资源/资产FAILED（ZIP漫画损坏），同扫描合法CBZ仍READY；两原件未被解析修改。仅替换专用坏文件为合法归档，再由原书库重扫入口执行，全部成功且Node/Resource/Asset身份不变。证据`artifacts/releases/1.0/e8c4b555/rg02-mixed-import-20260907/cbz-run/`的mixed/repaired/result/shutdown及执行日志，Python退出0。最初EPUB运行预期有误：入库元数据可选，坏ZIP仅返回无元数据，因此任务成功不代表出版物可打开；保留父目录原失败与expectation-correction，不修改产品或删除失败断言，改用有必需归档检查的CBZ验证同一失败/修复契约。损坏EPUB阅读、DRM、无权文件和外部元数据断网仍独立待验，不外推通过。
+
+IMP-05后端真实中断/恢复子项PASS：`e8c4b555/rg02-worker-live-restart-20260907/`在实际SCAN_LIBRARY为RUNNING时停止自有Worker，退出后SQLite仍RUNNING；独立Worker重启将原任务标为FAILED/WORKER_INTERRUPTED。通过既有书库安全重扫，512份小EPUB全部READY，无其他失败，原件hash不变，旧中断任务保留。此数量仅提供功能中断窗口，不作新增压力/吞吐验收。原execute尝试精确继续无sourceNode的扫描任务被LookupError拒绝，已按ContinueImport及现有HTTP/UI语义修正操作入口；entry-correction、原失败及resume独立日志全部保留，不重演中断取成功，不修改业务断言或把旧失败改成成功。真实进程/任务状态见observed-running、after-stop、after-restart、rescan-request、completed、result及两份shutdown；所有自有Worker已停，resume退出0。调用composition而非实际HTTP/UI；最终同RC及UI接入仍待。
+
+上述恢复另有现有7项定向测试通过（含1条未屏蔽Starlette弃用警告），证据`e8c4b555/rg02-worker-recovery-20260907/`，主核对实际日志/命令与覆盖；元数据模拟lease结果不代替真实导入进程恢复。此轮只保存精确操作记录，未新增通用测试入口、生产代码或管理文档；已有正常重扫和已关闭显示缺陷不再扩验。当前源码仍e8c4b555（84ffa3aa仅文档），下一可执行项为上传/权限与接入界面，外部阻塞和正式产物暂缓不变。
+
 2026-09-07 RG-02 / IMP-06来源重扫子项PASS（e8c4b555）：专用新SQLite、两份真实EPUB，经现有composition命令入队及真实`app.worker.main`解析执行。删除其中测试文件后WATCHER扫描完整保留Book/Node/Resource/Asset；单文件继续导入返回任务FAILED/SOURCE_SCAN_START_UNAVAILABLE且拓扑不变；恢复原文件后继续导入成功、原身份保持；再次删除后MANUAL扫描仅清理缺失拓扑，另一资源及原件SHA-256不变。证据`artifacts/releases/1.0/e8c4b555/rg02-source-rescan-20260907/`的01..05快照、worker.log、result/source/shutdown.json；执行退出0，Worker已停止。本轮无业务或通用工具修改；execute.py仅保存这次操作的可重放命令，复用已有进程管理与入队入口，停止于上述必测行为通过。未通过HTTP/UI触发，不覆盖上传、只读权限、损坏文件修复或最终RC。
 
 IMP-04复用已执行的`197e81a808ba32595a8a6ffeda62422b3a7d3473/local-load/measurement-20260906-065525/`证据：run-config明确源码c7f5d5eb，rescan-integrity七项检查通过，10000份紧凑EPUB/PDF/CBZ的原件、身份、关联和3个进度哨兵保持。当前对比该版本，导入/扫描/Worker及依赖文件未改；imports仅错误详情schema补全，library变更为详情投影/排序及schema，未改重扫持久化owner。沿用该FLAT子项历史有效结果，不重跑大库，不冒充e8c4b555重新实测、VOLUMES全部组合或同冻结RC通过。接下来补齐混合坏文件隔离/修复及队列恢复，其他外部阻塞仍分项保留。
