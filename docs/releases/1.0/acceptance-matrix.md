@@ -1,5 +1,7 @@
 # 1.0 发布验收矩阵
 
+2026-09-07 RISK-09：真实Android ARM64归档引擎加密/截断检测码前后及共享分类定向验证已闭环，具体层级/限制见evidence；不据此覆盖普通新APK异常界面、iOS或完整格式矩阵。
+
 2026-09-07增量：COM-CBR/COM-RAR真实加密和截断导入失败隔离、正常同级6页Android首图子项PASS；IMPORT-04普通详情误报无权限已修复且真机原/相邻闭环。仅此范围，不代替原生异常archive直接打开或iOS；证据da46248a/rar-exceptions-20260907，详见evidence。
 
 2026-09-07 PDF-X页数边界增量：Android真实20000页首末及末页完整确认PASS；ef29559b普通20001页已下载打开/重试正确PDF_PAGE_LIMIT、无v5进度，READER-12错误映射已CLOSED，详见evidence。合成空白内页不作真实复杂巨书性能，未外推Web/iOS或PDF全部异常；下一项漫画异常，未冻结RC。

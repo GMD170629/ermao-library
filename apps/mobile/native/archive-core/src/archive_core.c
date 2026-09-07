@@ -53,7 +53,8 @@ static void set_reader_error(
 ) {
     set_error(
         error,
-        contains_case_insensitive(message, "volume") ? "ARCHIVE_PART_MISSING" : fallback_code,
+        contains_case_insensitive(message, "encrypt") ? "ARCHIVE_ENCRYPTED" :
+            contains_case_insensitive(message, "volume") ? "ARCHIVE_PART_MISSING" : fallback_code,
         message
     );
 }

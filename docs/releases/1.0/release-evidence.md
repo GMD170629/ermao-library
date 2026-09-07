@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 RISK-09分类缺陷闭环（仅本次层级）：真实Android ARM64 archive-core诊断确认RAR5头加密原ARCHIVE_HEADER_INVALID、正文加密页原ARCHIVE_DATA_INVALID；截断同为DATA_INVALID。最小原生补丁仅在既有set_reader_error识别固定libarchive3.8.9的加密报错，保留既有分卷映射和所有拒绝/读写行为。NDK将现有源码链接现成同版本libarchive，-Wall/-Wextra/-Werror编译通过；同四输入复测头加密ARCHIVE_ENCRYPTED、两加密页ARCHIVE_ENCRYPTED、截断仍DATA_INVALID、正常全部7归档条目可读（6图片+README，不是产品7漫画页）。与59e93d8b共享facade的能力/完整性/安全规则映射定向结果对应，未改机器规则、预算或引擎支持范围。证据8c3a22d7/archive-classification-20260907/native-before/after、native-build-sources及两份cleanup；停止该分类缺陷扩验。
+
+诊断必要性/停止条件：服务于RG-03/COM-RAR-X与RISK-09，现有host runner不可在Windows执行、现有instrumentation无加密/截断输入；用现成NDK/静态库和上轮已验证四个样本，仅在/data/local/tmp/ermao-archive-classification-8c3a22d7执行一个局部C观察程序。观察实际检测码及同字节前后后立即删除设备程序/样本与目录，未进生产路径或通用工具。原始日志与SHA完整保留。该诊断不是新APK原UI、iOS或最终RC证据；安装包仍上一轮df17c4ce开发包，最终候选须包含新native源码重建。普通导入拒绝事实与原生直接打开分别登记，不虚填完整格式PASS。下一可执行项漫画容量边界/其余矩阵；原五项Chrome待实测和外部条件保持。
+
 2026-09-07 RISK-09共享分类层已验证并修正：现有ReaderSafetyFacadeTest按唯一机器契约新增检测码反例，23项1FAIL；最小候选将重复/头损坏/数据损坏/截断映射既有COMIC.RESOURCE_INTEGRITY，加密映射既有COMIC.PAGE_MIME能力规则，路径/链接风险仍COMIC.ARCHIVE_STRUCTURE，容量分支不变。候选同两类23项PASS、Android编译及generator --check/安全边界检查PASS；旧加密=结构断言按契约纠正，并用真实路径风险保留其保护。没有改规则/阈值/生成文件或扩工具，证据8c3a22d7/archive-classification-20260907。仅证明共享分类层；实际native检测码/原生输入仍待核验，iOS未执行，不以本轮结果补齐异常矩阵或宣称密码界面已通过。
 
 2026-09-07 IMPORT-04 CLOSED：df17c4ce在新隔离开发包原截断详情、加密详情相邻及正常RAR首图实际通过；只修授权Root未绑定资源时的错误导航，未伪造可读资源、未放宽缺失/隐藏资源检查。证据da46248a/rar-exceptions-20260907。加密/截断正常导入失败隔离子项已补，其他矩阵/原五项Chrome候选/外部条件保持；未冻结RC。
