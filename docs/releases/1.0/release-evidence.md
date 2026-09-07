@@ -1,5 +1,11 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 POS-02/03/04 Android CBZ增量PASS（API源码0de4d4fb、普通开发APK ebb4e3ea，未改业务/工具）：普通显式下载六页CBZ，在线第5页r8且pending空；停API后普通滑到第4页，服务器仍5/r8。完整local+sync在强停前后及离线冷开后完全一致；普通“我的→下载中心→已下载资源”实际恢复第4页Alice立像，cold-open与offline-b图已查看。首次可读观测8.703s含查询失败/ADB开销，不计引擎内部耗时。
+
+恢复服务后GET仍r8；系统最近任务→返回触发既有onResume，0.875s内观察完整r9（从发出任务切换计，含0.7s后台停留）。原pending 67d5d540…唯一receipt r9，既有owner计算完整载荷hash相等；客户端/捕获时间/完整位置与原pending及本地一致、confirmed9/pending空。随后普通下一页5截图于1.281s取得并已查看，1.391s关闭并读回完整r10；返回已下载资源页，设备confirmed10/pending空且完整位置/capturedAt一致。证据`artifacts/releases/1.0/0de4d4fb/comic-pending-cold-20260907/`含result、verification、稳定设备库、reconnect-observation和early-exit-timing；不宣称纯服务恢复自动重试时限、连续5/10秒捕获或另端UI/iOS/最终RC。
+
+初次设备自动横屏使下载点击未生效，保留download.xml；临时固定竖屏后已恢复原accelerometer_rotation=1/user_rotation=0。原件243788B逐字节一致，API源码及APK hash保持；仅清23个专用设备文件/reverse、releasecheck强停；API会话68982/19982均exit0且shutdown已核实。PDF/CBZ本轮两个代表引擎的待提交恢复和早退均达停止条件，不重复扩验。下一项核对POS-02各引擎连续捕获窗口既有证据/入口，仅补有效门禁缺项，不把已完成早退等同整个POS-02通过。
+
 2026-09-07 POS-02/03/04 Android PDF增量PASS（API源码a5d59625，普通开发APK ebb4e3ea，未改业务/工具）：普通显式下载69页PDF，在线第35页r16且pending空；受控停API后滑到第36页，服务器仍35/r16，完整local+sync跨强停一致。断服务冷启经“我的→下载中心→已下载资源”实际恢复第36页正文（cold-open.xml/png已查看，8.609s观测上界含查询失败/ADB开销）。恢复服务后原pending df6f98f9…唯一receipt r17，其完整载荷hash经既有owner核对相等；随后同页capture达到r20，独立HTTP与设备完整position/capturedAt一致、confirmed20/pending空。首个重连观察错误预期恰好r17，但回前台前GET已r20；保留observation-limit及真实快照，不重跑取成功，不据此声明重连时限或中间r18/r19的具体来源。
 
 顺用同一会话补早退：上一页实际第35页于2.406s被观察，2.515s完成关闭点击并观察HTTP r21；回到已下载资源页，强停后完整本地位置/capturedAt一致、confirmed21/pending空。时间从发出翻页ADB指令计入观测成本，不冒充引擎内部耗时或5/10秒连续捕获。证据`artifacts/releases/1.0/a5d59625/pdf-pending-cold-20260907/`含result、verification、receipts、各稳定设备库及early-exit-timing。原件711671B逐字节一致、API源码hash与APKhash核实；仅清21个专用设备文件/reverse、releasecheck强停，两个API会话64123/72009均exit0且shutdown已核实。另端UI/iOS及最终冻结RC保持未验；下一项CBZ同类未确认恢复和早退，现有六页样本可用、尚无显式下载证明，不重做已确认冷恢复或已关闭缺陷。

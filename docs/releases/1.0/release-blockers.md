@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-07 Android CBZ待提交恢复及早退必测子项补齐，无新增产品缺陷或工具修改；与本轮PDF合计完成两个引擎的这两类缺口。证据见0de4d4fb/comic-pending-cold-20260907/result.json及evidence。下一项POS-02连续捕获窗口既有证据/入口核对及必要补验；已关闭路径不再扩验。Chrome五项原UI、iOS/容器外部条件、正式包暂缓及最终同冻结RC验收仍未完成，R2保持。
+
 2026-09-07 Android PDF未确认恢复及早退两个必测子项已补齐，无新增产品缺陷/工具代码；详见evidence及a5d59625/pdf-pending-cold-20260907/result.json。临时观察“恰好r17”假设与已到r20事实不符，已保留限制并核对原mutation收据完整hash，不登记产品失败。下一项CBZ未确认恢复/早退，复用既有六页样本先显式下载；Chrome五项原UI、iOS/容器外部条件及正式包暂缓保持，R2未冻结RC。
 
 2026-09-07 POS-02 Android EPUB不足5秒退出子项补齐：实际新章节→2.469s点击关闭→2.484s已观察服务端r20确认；回首页及完整本地/远端一致、pending空。无新增产品缺陷或工具，证据7c0baabb/epub-early-exit-20260907，计时边界见evidence。下一项核对并补剩余PDF/comic引擎持久化/异常恢复；Chrome五候选、iOS/容器环境和正式包暂缓保持，未冻结RC。
