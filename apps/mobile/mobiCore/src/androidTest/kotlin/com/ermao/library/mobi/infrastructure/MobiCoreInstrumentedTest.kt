@@ -198,27 +198,33 @@ class MobiCoreInstrumentedTest {
         val expectations = mapOf(
             "negative-synthetic-drm-header.mobi" to MobiCoreStatus.DrmProtected,
             "negative-upstream-drm-v1.mobi" to MobiCoreStatus.DrmProtected,
-            "negative-no-content.mobi" to MobiCoreStatus.NoContent,
+            // These malformed fixtures match the shared C host corpus expectations.
+            "negative-no-content.mobi" to MobiCoreStatus.Corrupt,
             "negative-truncated.mobi" to MobiCoreStatus.Corrupt,
             "negative-corrupt-record-offset.mobi" to MobiCoreStatus.Corrupt,
-            "negative-pseudo.mobi" to MobiCoreStatus.Unsupported,
-            "negative-synthetic-kfx.kfx" to MobiCoreStatus.Unsupported,
-            "negative-synthetic-azw4.azw4" to MobiCoreStatus.Unsupported,
+            "negative-pseudo.mobi" to MobiCoreStatus.Corrupt,
+            "negative-synthetic-kfx.kfx" to MobiCoreStatus.Corrupt,
+            "negative-synthetic-azw4.azw4" to MobiCoreStatus.Corrupt,
         )
         expectations.forEach { (fixtureName, expectedStatus) ->
             val failure = runCatching {
                 MobiCoreBook.open(copyAsset(fixtureName), readerSafetyOriginalMaxBytes())
             }.exceptionOrNull()
             assertTrue(failure is MobiCoreException)
-            assertTrue((failure as MobiCoreException).status == expectedStatus)
+            assertEquals(fixtureName, expectedStatus, (failure as MobiCoreException).status)
         }
+        val directoryFailure = runCatching {
+            MobiCoreBook.open(context.cacheDir, readerSafetyOriginalMaxBytes())
+        }.exceptionOrNull()
+        assertTrue(directoryFailure is MobiCoreException)
+        assertEquals(MobiCoreStatus.Unsupported, (directoryFailure as MobiCoreException).status)
     }
 
     @Test
     fun productionFactoryTranslatesNativeFailuresToStableKinds() {
         val expectations = mapOf(
             "negative-truncated.mobi" to MobiPublicationErrorKind.Corrupt,
-            "negative-synthetic-kfx.kfx" to MobiPublicationErrorKind.Unsupported,
+            "negative-synthetic-kfx.kfx" to MobiPublicationErrorKind.Corrupt,
         )
         expectations.forEach { (fixtureName, expectedKind) ->
             val failure = runCatching {
@@ -228,6 +234,15 @@ class MobiCoreInstrumentedTest {
             assertEquals(expectedKind, (failure as MobiPublicationOpenException).kind)
             assertTrue(failure.message?.contains(fixtureName) != true)
         }
+
+        val directoryFailure = runCatching {
+            MobiReadiumPublicationFactory().open(context.cacheDir)
+        }.exceptionOrNull()
+        assertTrue(directoryFailure is MobiPublicationOpenException)
+        assertEquals(
+            MobiPublicationErrorKind.Unsupported,
+            (directoryFailure as MobiPublicationOpenException).kind,
+        )
 
         val drmFailure = runCatching {
             MobiReadiumPublicationFactory().open(copyAsset("negative-synthetic-drm-header.mobi"))

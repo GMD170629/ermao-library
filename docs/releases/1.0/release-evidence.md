@@ -1,5 +1,15 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 READER-15原生层CLOSED：真实损坏MOBI记录偏移导致Android FORTIFY/SIGABRT，read.c在相减/分配前检查记录偏移不超EOF且不逆序；原真机失败与正常语料/ABI/关闭相邻均通过。TEST-14过时Android负例预期同步现有共享C契约，拒绝断言保留并补真实目录输入的Unsupported分支。证据5a9ab746/mobi-errors-20260907；未冻结RC。
+
+原失败：现有MobiCoreInstrumentedTest三项先出现两个预期失败；按早已生效的host_tests.c规则把no-content/pseudo/KFX/AZW4损坏字节预期纠正后，继续到negative-corrupt-record-offset.mobi实际崩溃。源10196B，首offset14292、next9048，uint32长度下溢4294962052；Android libc后续报read count 2^64−5244而SIGABRT。Windows普通DLL返回Corrupt不能代替Android原失败。原android.log/android-red.xml、android-green.log/android-crash.xml和仅本次测试进程native-crash/negative-crash-testlog保留；green为原候选日志文件名，结果实际FAIL，不采纳为成功。
+
+最小修复复用mobi_load_rec：一次取得EOF，curr/next越界或next倒序时返回既有MOBI_DATA_CORRUPT；等offset既有行为、末记录零长拒绝、所有预算/格式/安全规则不变。调用者既有fclose及ermao_free_book释放完整链表，不新增框架或复制检查owner。独立只读复核核对下溢与清理，主复核实际diff。测试调整服务RG-03/MOBI-X与READER-15；旧断言在到达真实坏偏移前停止且与共享host契约冲突，修正后仍逐输入断言稳定拒绝，并以实际目录覆盖Unsupported及factory映射。未删样本、跳过测试或降低阈值；KFX/AZW4仅既有坏字节负例，不扩格式支持/验收范围。
+
+原设备9e896bbc同mobiCore定向负例/factory/关闭+正常语料查询/两个ABI golden共5项PASS、0skip（android-fixed.log/xml）；包含genuine DRM、截断、坏偏移和普通MOBI/KF8/Hybrid的现有保护。mobiCore独立测试包及hash/source在checks.json，不安装/卸载普通releasecheck应用，该应用仍旧开发APK；未把这次native测试当普通新包UI或iOS验收。Linux既有cc按当前CMake源/宏、USE_MINIZ、-UNDEBUG运行原host_tests成功，linux-host-build/log。额外Windows Zig -O0诊断在未修改miniz的x86非对齐字体解压路径触发alignment panic（host.log）；此诊断失败保留，未通过关闭断言/删除样本制造成功。生产Dockerfile显式zlib1g-dev、Android NDK使用libz；该Windows/miniz诊断不能外推为生产通过或已修复，也不开展无关解压库重构。Linux编译保留现有miniz fseeko/ftello声明警告；不声称sanitizer或无警告完整验收。
+
+独立后端实测使用修复前同库源码/DLL：真实上游DRM与96B截断可入目录READY，读取publication分别422/PUBLICATION_DRM_UNSUPPORTED及PUBLICATION_PARSE_FAILED，同级正常MOBI6正文200；三项progressSnapshot均null、原件不变。不是“导入时已拒绝”，普通错误UI仍待。API源码495不变、无5xx，所有自有API/Worker session24176已exit0/shutdown stopped。后续在集成检查点/冻结RC重建普通应用与各消费者，MOBI精确锚点/其他异常和原五项Chrome候选及外部阻塞继续，正式包仍暂缓。
+
 2026-09-07 Android MOBI6/KF8普通阅读子项PASS（6f73ef35，无新增确证业务缺陷）：三份原始fixture正常入库READY；MOBI6三章正文/目录显示，KF8三个独立章节正文、三级目录层级和卷二目标阅读，确认r5后强停/冷首页33%继续恢复卷二且完整position与r6一致；KF8内嵌PNG/JPEG实际显示。详见evidence首节。MOBI/AZW3不再整体按缺样本阻塞；AZW/PRC独立来源、复杂锚点/异常/其他平台仍待，未冻结RC。
 
 证据：artifacts/releases/1.0/6f73ef35/android-mobi-20260907/，samples/source/installed-apk、library-response/tasks/books、first与toc、kf8-first/toc-selected/second/leaf/cold-reader图像和XML、kf8-before-cold/final-http/checks/shutdown。复用已安装开发包45bde42d300f4c8798c5f0c1398203b91e679c77d34d203da473be07a86a439d（d7ab754f业务源码；后续仅文档），未构建或交付正式APK。现有Windows运行环境缺MOBI库，通过Zig0.14.1按仓库CMake同15个源、相同宏及USE_MINIZ构建隔离DLL，ABI1加载成功；native-build.log/native-library.json留证。已有API/Worker以ERMAO_MOBI_CORE_LIBRARY接入，三个实际publication/part00000.html均200 text/html，未改产品或通用工具。

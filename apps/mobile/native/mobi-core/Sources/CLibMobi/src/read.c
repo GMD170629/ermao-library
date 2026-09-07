@@ -134,16 +134,30 @@ MOBI_RET mobi_load_rec(MOBIData *m, FILE *file) {
         debug_print("%s", "Mobi structure not initialized\n");
         return MOBI_INIT_FAILED;
     }
+    if (fseek(file, 0, SEEK_END) != 0) {
+        return MOBI_DATA_CORRUPT;
+    }
+    const long file_end = ftell(file);
+    if (file_end < 0) {
+        return MOBI_DATA_CORRUPT;
+    }
     MOBIPdbRecord *curr = m->rec;
     while (curr != NULL) {
         MOBIPdbRecord *next;
         size_t size;
+        /* Validate offsets before subtraction or allocation of record data. */
+        if ((uint64_t) curr->offset > (uint64_t) file_end) {
+            return MOBI_DATA_CORRUPT;
+        }
         if (curr->next != NULL) {
             next = curr->next;
+            if (next->offset < curr->offset
+                || (uint64_t) next->offset > (uint64_t) file_end) {
+                return MOBI_DATA_CORRUPT;
+            }
             size = next->offset - curr->offset;
         } else {
-            fseek(file, 0, SEEK_END);
-            long diff = ftell(file) - curr->offset;
+            long diff = file_end - curr->offset;
             if (diff <= 0) {
                 debug_print("Wrong record size: %li\n", diff);
                 return MOBI_DATA_CORRUPT;

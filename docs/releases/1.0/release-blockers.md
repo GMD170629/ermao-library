@@ -1,5 +1,9 @@
 # 1.0 发布阻塞项
 
+2026-09-07 READER-15原生层CLOSED：真实损坏MOBI记录偏移导致Android FORTIFY/SIGABRT，read.c在相减/分配前检查记录偏移不超EOF且不逆序；原真机失败与正常语料/ABI/关闭相邻均通过。TEST-14过时Android负例预期同步现有共享C契约，拒绝断言保留并补真实目录输入的Unsupported分支。证据5a9ab746/mobi-errors-20260907；未冻结RC。
+
+普通开发APK尚不包含该native补丁；后续集成重建/最终RC验收单列。Windows/miniz额外诊断失败仅登记对应环境，详见evidence。原五项Chrome候选与外部阻塞保持，下一项MOBI普通错误反馈/锚点。
+
 2026-09-07 Android MOBI6/KF8普通阅读子项PASS（6f73ef35，无新增确证业务缺陷）：三份原始fixture正常入库READY；MOBI6三章正文/目录显示，KF8三个独立章节正文、三级目录层级和卷二目标阅读，确认r5后强停/冷首页33%继续恢复卷二且完整position与r6一致；KF8内嵌PNG/JPEG实际显示。详见evidence首节。MOBI/AZW3不再整体按缺样本阻塞；AZW/PRC独立来源、复杂锚点/异常/其他平台仍待，未冻结RC。
 
 下一项剩余MOBI异常/变体与锚点；原五项Chrome候选及外部条件保持，未冻结RC。
