@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-08 AUD-02 / POS-02 Android MP3真实安全锁屏子项PASS（API2734ad51、普通开发APK912d0254）：普通书库搜索Alice→对应MP3详情→播放器，暂停归零并独立确认r10后播放并KEYCODE_SLEEP。第5.375秒与10.375秒系统均SCREEN_STATE_OFF、keyguard showing=true、MediaSession Playing；HTTP分别3834ms/r11、7848ms/r12，继续确认。唤醒后媒体暂停键实际暂停10499ms/r13，锁屏媒体卡已查看；稳定设备库与HTTP完整position/capturedAt相同、confirmed13/pending空，原MP3与HTTP原件逐字节一致，已安装APK hash核实。无业务/测试工具代码新增。
+
+证据`2734ad51/mp3-lockscreen-20260908/result.json`及observations、系统policy/power、wake、final-http/local-sync/verification、original/installed/cleanup。计时含ADB读取开销，不称纯确认延迟；仅短时MP3代表锁屏，不外推来电、长时、其余格式/iOS或最终RC。设备安全锁屏仍启用，已集中请求负责人正常解锁，未绕过或更改锁屏；解锁后普通UI不计本次PASS。7个专用设备文件、reverse、方向1/0已收尾，测试app停止、数据保留，API wrapper终态0/子进程已停。初次UI文件未生成及不支持的库详情GET 405是计时前观察入口问题，改用已存在列表接口；原日志不删。下一项后端无权路径/外部元数据缺口的现成入口核对，等待解锁不停止其他工作。
+
 2026-09-08 READER-18 Android CLOSED：fa073fab普通IMAGE_DIR原JPEG已验证TOP/MID/END/TOP可达，MID方块1439×1436、比例1.002（原5.47），上一页WebP正常、原件字节保持；912d0254修正150%单指平移抢占后，同一真实JPEG仪器用例通过四种适配、双阅读方向、横向/纵向首尾、普通图翻页、150%内部拖动与连续滚动。最终开发APK从设备读回SHA256 `2c0fea81ff93be5fc51dc50be957feae45c0acac07be4e215da2ca1556f62241`匹配，instrument-12.log实际OK/40.82s。普通100%路径观察与后续受影响zoom回归分别记源，不拼为最终冻结RC。
 
 证据`087d7aa9/comic-geometry-20260907/result.json`、installed-final、geometry-measurement及原始失败/截图/构建日志；仪器10/11真实scroll=0/8312的失败保留。只移除了已完成定位的测试内截图/status诊断，原断言、触摸和清理不变，cleanup-compile通过，复用有效仪器结果，不再扩验本缺陷。API wrapper终态0/子进程已停；11个专用设备文件、reverse清理，方向恢复1/0，releasecheck停止且数据保留。原工作区15项改动不动；不外推新pinch/双页、W/I或正式产物。下一项复用普通MP3入口补真实锁屏播放/5与10秒确认缺口，不新增测试基础设施。
