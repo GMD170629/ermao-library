@@ -1,3 +1,5 @@
+2026-09-08 RG-03 Android EPUB普通主题切换、M4A→M4B自然接轨子项PASS，无新缺陷/工具；证据bd65dd4a两目录result.json及evidence首条，专用环境已收尾。READER-20/21已关闭；下一项POS-08既有普通在途切账号入口核对。R2未冻结及其他阻塞保持。
+
 2026-09-08 READER-21 Android原普通字号增减及正常重开CLOSED（69a5ba15），原件不变/18px偏好与专用环境已收尾；证据233ca471/txt-font-20260908/final/result.json及evidence首条。READER-20已关闭，R2未冻结及其余真实阻塞保持。
 
 2026-09-08 READER-21最小字符锚点候选定向真机/编译PASS，原普通字号增减及重开最后复验中，仍OPEN；测试前置修正及真实拒绝候选保留，详见evidence首条。READER-20 CLOSED与R2未冻结/其余阻塞保持。

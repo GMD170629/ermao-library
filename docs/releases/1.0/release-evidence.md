@@ -1,3 +1,9 @@
+2026-09-08 RG-03 Android两个普通必测子项补齐，无业务/测试工具代码改动。EPUB第二章经外观暖色→夜间→白天→恢复暖色，背景与标题/普通文字真实改变、正文可读、完整Locator保持；原作者红绿样式仍保留，不把它误记为主题失败。原件/HTTP hash相同，原偏好已恢复。证据`bd65dd4a/epub-theme-20260908/result.json`及对应原图/完整progress。
+
+现有四轨原件经专用测试VOLUMES库实际导入，普通列表选择03-M4A，播放30秒后不点击下一首，自然进入04-M4B，首次观测30.562s；继续至真实MediaSession暂停7186ms，服务端完整Locator/asset为M4B且位置已确认（最终body见result）。这不宣称无缝接轨/主观音质。四份原件和HTTP字节hash保持，证据`bd65dd4a/audio-m4a-m4b-20260908/result.json`、observations与原UI。新增库只用于专用既有样本，保留供后续复用；Worker导入后即停止。最初普通导航误落桌面记录search.xml，未计播放验收。
+
+上述APK源码69a5ba15/hash4c4cd6ef…，API/Worker源码bd65dd4a，均为开发验收；所有自有进程/设备XML/reverse收尾完成（API宿主98432终态0），不代表最终同冻结RC。下一可执行项核对RG-04 POS-08普通客户端在途切账号的既有入口/可观测控制点，只补实际尚缺场景；不重复已关闭格式/字号/主题。Chrome五候选原UI工具限制、iOS/容器/可信HTTPS/睡眠范围外部条件、正式包暂缓与最终同RC仍保留，RG-01～04 PARTIAL、RG-05已按负责人接受范围PASS。
+
 2026-09-08 READER-21 Android CLOSED（69a5ba15）：原116122B UTF16BE长p通过普通19→18与18→19px，原首可见文字分别1099/1091仍在重排后的当前页；19px正常退出/继续重开均1085起，服务端r24→25的完整Locator相同。页边缘会随排版改变，不声称首行像素不变。真实长按产生原生选择菜单，普通BACK结束后打开外观通过，未用JS清选区取绿。原件与HTTP SHA256均`ebd97fb51f82421d0a8828c65b4edb875aabef99b468210b348f81c4c2f858e5`；原偏好18px已还原，专用App/XML/reverse/API均收尾。实际安装读回APK SHA256 `4c4cd6ef120cd878e46e811afdea14fbef76ef20641e8e59a3971d84411609a7`，API0b87ba85；完整结果与截图/位置/清理引用：`233ca471/txt-font-20260908/final/result.json`。复用同代码font-text-rect的TXT目录/字号定向及偏好提交检查，不扩已关闭问题。源码修复已提交推送；开发验收不能代替最终同冻结RC。下一项按当前台账补尚未执行的Android/本机必测；Chrome五候选/iOS/容器/可信HTTPS/睡眠范围外部条件与正式包暂缓保持，R2未冻结。
 
 2026-09-08 READER-21 字符锚点候选已完成定向真机及编译，原普通UI最后复验中，仍OPEN。原UTF16BE样本只有3个空段分隔，1200编号行属于一个长p；SDK首可见块文本不能区分该块内部位置，而仅复用其百分比Locator仍1132→1057。现有ReadiumEpubSession在真实可见文字矩形内取字符，复用Readium自己的selection文本上下文与go定位；保留原偏好校验/持久化owner、同步还原临时选区，不修改TXT分段或原件。证据均在`233ca471/txt-font-20260908`。
