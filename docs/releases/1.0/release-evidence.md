@@ -1,5 +1,11 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 REF-AZW3章内跨页锚点子项PASS（8b80eacf，未改业务/测试辅助代码）：普通Android阅读器以现有07-complex-toc.azw3，在横屏、字号30px、行距大时，目录“卷一”显示卷首与TOC_LEVEL_2_A，细目甲/TOC_LEVEL_3_A在另一页；点击“细目甲”实际定位该叶正文，卷首内容退出可见页。补齐同一HTML内根节点与fragment的实际分页对照，不再仅凭跨章跳转或一屏短样判断精确锚点。
+
+证据artifacts/releases/1.0/8b80eacf/kf8-anchors-20260907/：root2-selected.xml/png → leaf2-selected.png、leaf2-ready.xml → leaf2-body.xml/png，主已查看图像，XML记录两组正文可见bounds互换；fixture-expectations.json对应part00000.html与part00000.html#part-a-1。首次root-body/root-settled含目录已关闭后的额外正文点击，误触翻页，保留但不采为根节点对照；后续按实际面板状态分步操作。30px竖屏仍整章一页，故使用现有横屏/行距设置，不生成新样本或修改生产布局。只证明甲叶锚点及同章根节点相邻，不外推乙叶、其他格式/平台、冷恢复或持久化时限。
+
+source.json/verification.json确认495项API源码与原样本SHA-256不变（02b560104675e8f2b10a3379b47f139502780200fcc350701804e457a259c15a）；当前安装普通开发APK仍7f27878b9390ab4bb36a2080fc027d0c3179d3126c8a6dea09d49970b8d5e701，移动源码与3cf54116无差异。API/Worker到既定900秒寿命后停止，session32168终态exit0、shutdown.json保留子进程退出状态；后段只对已打开正文操作，不作服务在线/确认进度结论。API日志无5xx，本次App PID19939日志无fatal。字号18px、行距中及原旋转free均已恢复（font-restored/spacing-restored/restored-rotation）；独立App强停，18084转发与本轮确切ermao-anchor设备临时文件清理完成。原用户15项改动保留，未冻结RC；下一项复用已有样本补剩余可重排格式复杂内容，原五项Chrome候选与外部条件不变。
+
 2026-09-07 MOBI-X普通Android错误反馈及READER-15集成验证PASS（3cf54116，无新增业务修改）：真实DRM、96B截断、坏偏移分别明确受保护/内容损坏；DRM重新获取仍拒绝，关闭后同库正常MOBI正文可读。三种失败进度均null，坏偏移前后同PID18255且无崩溃，停止本缺陷扩验；其他格式/锚点与原五项Chrome候选保持，未冻结RC。
 
 证据artifacts/releases/1.0/3cf54116/mobi-ui-errors-20260907/：通过既有android-ui.init.gradle增量assembleDebug、adb install -r保留隔离应用数据，开发APK/安装文件SHA-256均7f27878b9390ab4bb36a2080fc027d0c3179d3126c8a6dea09d49970b8d5e701，包含3cf54116原生补丁；非正式签名交付。对应源码的Windows DLL重新构建/ABI1加载，source.json留原生与API散列。四份fixture新目录/普通API建库与Worker均READY；READY是目录入库状态，不意味着坏内容可读。普通首页→详情→阅读的drm/truncated/offset-detail/open图像与XML、drm-retry、normal-open与android-process.log证明UI稳定码PUBLICATION_DRM_UNSUPPORTED/CORRUPT_FILE及正常正文。主已逐张检查，子任务只读核对直接映射。final-http记录三失败publication读取422、正常200，失败progressSnapshot均null、正常已有真实位置；HTTP原件SHA一致，495 API源与四样本不变、无5xx。自有服务session7032退出0、两子PID stopped；App强停、18084转发及本轮明确设备临时文件清理完成，原用户15改动保持。未测iOS或新增跨页锚点/时限；完整同RC验收仍待。
