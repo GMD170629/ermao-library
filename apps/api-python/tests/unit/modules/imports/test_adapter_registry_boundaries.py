@@ -11,6 +11,7 @@ from app.modules.imports.application.audio_types import (
     AudioChapterMetadata,
     AudioFileMetadata,
 )
+from app.modules.imports.application.errors import AudioInspectionError
 from app.modules.imports.application.pdf_types import PdfInspection
 from app.modules.imports.domain.pdf_content import PdfContentKind, PdfTextEvidence
 from app.modules.imports.domain.resource_adapters import (
@@ -123,6 +124,38 @@ def test_registry_missing_file(tmp_path: Path) -> None:
     )
     assert result.ok is False
     assert result.error_code == "FILE_MISSING"
+
+
+@pytest.mark.parametrize("error_kind", ["os", "value", "inspection"])
+def test_registry_failure_summary_hides_source_path(
+    tmp_path: Path, error_kind: str
+) -> None:
+    source = tmp_path / "private directory" / "track.mp3"
+    source.parent.mkdir()
+    source.write_bytes(b"fixture")
+
+    class UnreadableAudio:
+        def inspect(self, path: Path) -> AudioFileMetadata:
+            if error_kind == "os":
+                raise PermissionError(13, "Permission denied", str(path))
+            if error_kind == "value":
+                raise ValueError(f"Permission denied: {path}")
+            raise AudioInspectionError(
+                "AUDIO_METADATA_INVALID", f"Permission denied: {path}"
+            )
+
+    adapter = unique_adapter_or_none(match_file_adapters(source.name))
+    assert adapter is not None
+    result = RegistryResourceAdapterExecutor(
+        audio_metadata=UnreadableAudio()
+    ).parse_file(absolute_path=source, adapter=adapter, role=AssetRole.PRIMARY)
+    assert result.ok is False
+    assert result.asset is None
+    assert result.error_code == "AUDIO_METADATA_INVALID"
+    assert result.error_summary is not None
+    assert "Permission denied" in result.error_summary
+    assert str(source) not in result.error_summary
+    assert repr(str(source))[1:-1] not in result.error_summary
 
 
 def test_registry_preserves_inspected_pdf_page_count(

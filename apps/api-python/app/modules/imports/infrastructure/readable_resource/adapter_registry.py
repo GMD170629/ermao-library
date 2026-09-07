@@ -14,6 +14,7 @@ from app.contracts.local_metadata import (
 from app.contracts.media_capabilities import resolve_asset_mime_type
 from app.contracts.publication_metadata import PublicationMetadata
 from app.contracts.publication_titles import titles_from_local_source
+from app.core.safe_errors import safe_error_message
 from app.infrastructure.comic_archives import (
     ComicArchiveError,
     inspect_comic_archive,
@@ -155,6 +156,8 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
                 error_summary="source file is not a regular file",
             )
         pdf_page_count: int | None = None
+        # OS exceptions quote/escape filenames; parser errors may use the plain path.
+        private_path_forms = [str(absolute_path), repr(str(absolute_path))[1:-1]]
         audio_metadata: AudioFileMetadata | None = None
         local_audio_metadata: LocalAudioMetadata | None = None
         embedded: LocalMetadataCandidate | None = None
@@ -175,7 +178,7 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
                     resource_title=None,
                     asset=None,
                     error_code=exc.code,
-                    error_summary=str(exc),
+                    error_summary=safe_error_message(exc, private_path_forms),
                 )
             except (OSError, ValueError) as exc:
                 return FileParseResult(
@@ -184,7 +187,7 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
                     resource_title=None,
                     asset=None,
                     error_code="AUDIO_METADATA_INVALID",
-                    error_summary=str(exc),
+                    error_summary=safe_error_message(exc, private_path_forms),
                 )
             local_audio_metadata = self._map_audio_metadata(audio_metadata)
         effective_resource_path = resource_absolute_path or (
@@ -225,7 +228,7 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
                     resource_title=None,
                     asset=None,
                     error_code="COMIC_ARCHIVE_INVALID",
-                    error_summary=str(exc),
+                    error_summary=safe_error_message(exc, private_path_forms),
                     local_metadata=resolved,
                 )
             title = str(inspection["title"]) or title

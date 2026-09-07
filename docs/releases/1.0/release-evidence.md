@@ -1,3 +1,7 @@
+2026-09-08 IMPORT-07 OPEN（RG-02 IMP-03错误信息保护）：a1040b09真实可读NTFS根内单个CBZ拒读时任务FAILED，正常同级READY/原件可读；恢复ACL后同一书身份重扫两项READY/2页，原件SHA均335e1f51e94e46ee2d6d7d73446f53c1f4c057e2578ddf22b4876ea2097f31c5。owner/group/全部ACE恢复已核验。但任务errorSummary直接暴露绝对源路径，原HTTP实证`43f75b02/file-permission-20260908/denied-tasks.json`；恢复成功不抵销该错误信息问题。
+
+最小候选仅在唯一RegistryResourceAdapterExecutor的漫画/音频现有异常映射调用core.safe_errors.safe_error_message，传入原路径和OS异常转义形式；原分类/正常解析/持久化流程不变、不新增脱敏实现。三类真实错误表达的针对性测试先3FAIL后PASS，既有正常/缺文件及部分失败保留READY相邻合计12PASS，ruff及单模块mypy通过。无通用工具改动；原NTFS+HTTP场景待长时播放后重启现有服务复验，状态为“修复已准备、原场景待验证”，不可CLOSED。两份346B小样本导入与0.41秒定向测试在Android soak期间执行，计入并行活动；当前API/Worker未重载，仍是a1040b09。
+
 2026-09-08 RG-03 AUD-A Android长时实测正在执行，尚不计PASS：API/Worker a1040b09（与5388c1fd生产源码一致，差异仅本次测试），开发验收App/Test APK 5388c1fd，SHA分别99f76c9f5c727d47e6304e6e575609eda406d2145146b42a6e047c2abf2c034b、20a9c5ea0fe8c25bba73dae24c118b0bbc18ad5281c5e838ed1ba2660b96c9cd；手机App原包读回hash一致。真实Media3总长1898422ms、1×开始。审查补足实际媒体前进也必须>=1800秒，硬截止为样本时长；主观音质和同进程runtime重开/强杀冷启动边界分开，沿用2秒位置误差。开发签名/测试host不能作为正式包。
 
 恢复位置：`43f75b02/android-audio-soak-20260908`，owners.json记录API204196、Worker209116及宿主209132（session90133，stop文件及3600秒上限负责清理）；instrument-start.json记录确切命令/宿主（session15993，2100秒上限）。设备专用目录`files/rg04-live-ea973141-fd41-44a9-abc5-2b735c69d6bf`，输入已由测试消费，结果为online-evidence.log及instrument.log/exit。重复启动前必须核实进程终态；不得从聊天时间推定通过。完成后拉取证据、清理该目录/对应测试preferences、reverse18084及服务，恢复原普通开发APK82699429；原用户应用不动。下一可执行事项由当前矩阵核对，尚未冻结RC。
