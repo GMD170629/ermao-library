@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 MEDIA-02 CLOSED：c4f45456在同一专用库清除唯一且内容已核对的默认封面缓存后，24个真实并发冷缓存HTTP请求全部200，图片校验通过，无5xx/遗留临时文件；API已停止，源代码核对不变。证据323be66b/media02-default-cover-20260907/http-{source,responses,result,shutdown}.json和http-api.log；与受控相同/不同/缺失发布结果单测共同闭环，不声称本次实际触发Windows拒绝分支，停止扩验。
+
+2026-09-07 IMPORT-02候选：共享local_metadata owner补齐IMAGE_DIR目录标题/旁车优先级；registry复用directory adapter归属，PAGE仍保留文件stem。旧码原场景1 FAIL，新码定向7 PASS；主复核保留原FLAT并增加VOLUMES的既有集成用例参数，2 PASS，Ruff通过。无ORM/UI/通用工具改动。证据66446a45/import02-image-directory-title-20260907（red/green/modes.log）；普通HTTP/Chrome原场景仍待，暂不关单。
+
 2026-09-07 MEDIA-02最小候选：默认封面仍由唯一write_atomic_bytes发布，不再增加重试；当替换被拒绝时，仅已存在且逐字节等于捆绑封面的结果可视为另一请求已完成发布，缺失/同尺寸异内容继续抛原PermissionError。既有默认封面测试内新增这个明确反例，旧码1 FAIL/4 PASS，新码及共享缓存相邻10 PASS，两个文件ruff format/check通过；无通用工具/锁/配置/重构。证据323be66b/media02-default-cover-20260907，原真实500保留，原HTTP并发冷封面复验尚待，暂不关单。
 
 2026-09-07 IMP-02/04实测增量（66446a45）：Chrome development普通创建含中文/空格/&[]#%的VOLUMES库，24本/管理20+4分页及标题排序重置页码、双页无漏重、多层目录和特殊TXT正文通过；IMAGE_DIR两页解码及第二轨MP3实际资产播放8.268→18.569s、暂停21.133s/服务端r7通过。图片为既有1x1 PNG，仅证实路径/页交付，不是复杂漫画视觉验收。随后用既有POST /api/libraries/{id}/scan显式手动重扫，真实Worker任务SUCCEEDED、普通导入记录完成；24本及其资源/资产、33节点层级、27原件hash和完整TXT r1/MP3 r7进度逐项保持；图片未确认位置null也原样保持，不制造哨兵。文件管理页没有扫描执行按钮，不能称UI发起扫描。证据 `artifacts/releases/1.0/66446a45/imp02-special-paths-20260907/` 的special-samples、ui-observation-transcription（实际CUA转录，非HAR/截图）、before/after-rescan、nodes-*、rescan-task/integrity及run原日志。914应用源码不变、浏览器正常注销关闭、fixture退出0/stopped及端口释放；没有工具扩展。

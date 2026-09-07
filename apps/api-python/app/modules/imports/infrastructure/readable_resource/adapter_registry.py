@@ -188,9 +188,7 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
                 )
             local_audio_metadata = self._map_audio_metadata(audio_metadata)
         effective_resource_path = resource_absolute_path or (
-            absolute_path.parent
-            if adapter.adapter_id is ResourceAdapterId.AUDIOBOOK_DIRECTORY
-            else absolute_path
+            absolute_path.parent if adapter.is_directory_adapter else absolute_path
         )
         resolved = self._local_metadata_inspector.inspect(
             absolute_path,
@@ -258,7 +256,13 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
             )
         # IMAGE_DIRECTORY pages: filename stem is enough; no archive unpack.
         asset = ParsedAssetPayload(
-            title=asset_title if audio_metadata is not None else title,
+            title=(
+                absolute_path.stem
+                if role is AssetRole.PAGE
+                else asset_title
+                if audio_metadata is not None
+                else title
+            ),
             role=role,
             sequence_index=None,
             sort_key=absolute_path.name,

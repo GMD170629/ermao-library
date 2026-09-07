@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-07当前覆盖：MEDIA-02已CLOSED（c4f45456真实24请求冷封面HTTP回归通过，详见evidence），下文REOPENED为历史。IMPORT-02最小修复及两模式导入回归通过，普通HTTP/Chrome标题原场景待验证；仍R2，未冻结RC。下一项仅完成标题界面闭环，不扩封面测试。
+
 2026-09-07新增IMPORT-02（RG-02/IMP-02，P2，OPEN）：图片目录元数据被末次PAGE文件标题覆盖，真实Chrome/API与共享owner链确认，最小修复进行中。MEDIA-02 REOPENED：当前Windows默认封面又出现一次os.replace/WinError5实际500，原有限重试不能据旧PASS关单；证据66446a45/imp02-special-paths-20260907。路径/分页/深层TXT、图片解码和MP3播放子项及VOLUMES手动API重扫完整性均已补齐，详见evidence；无整RG-02放行，服务/自有页已停，下一项关闭这两个具体问题。
 
 当前收敛摘要（2026-09-07）：仍R2，未冻结RC。RG-05已完成负责人接受的本机导入预检；RG-01～04尚未整组放行。明确已修代码但原场景未闭环的主要缺陷为SYNC-02、READER-05/06/07（ENV-11/12执行限制）；另有矩阵中未验收的接入/格式/位置异常子项，不等同新增bug。iOS环境、Docker容器路径、Chrome上传filechooser分别按ENV-02/08/13阻塞；正式APK/IPA按DEC-01暂缓。不得将这些缺口概括为只差打包或估算未经展开核对的完成百分比。

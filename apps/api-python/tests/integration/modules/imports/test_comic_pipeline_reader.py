@@ -6,6 +6,7 @@ import base64
 from pathlib import Path
 from zipfile import ZipFile
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -146,18 +147,21 @@ def test_scan_import_comic_archive_is_readable_end_to_end(
     assert page_response.content
 
 
+@pytest.mark.parametrize("organization_mode", ["FLAT", "VOLUMES"])
 def test_scan_import_image_directory_reuses_comic_manifest_without_download(
     client: TestClient,
     db_session: Session,
     tmp_path: Path,
+    organization_mode: str,
 ) -> None:
     library = db_session.get(Library, "test-library")
     assert library is not None
     root = tmp_path / "image-library"
     root.mkdir()
     library.root_path = str(root)
+    library.organization_mode = organization_mode
     db_session.commit()
-    _write_image_directory(root / "pages")
+    _write_image_directory(root / "图片目录 Images [01]")
 
     pipeline = build_readable_resource_pipeline(db_session)
     pipeline.continue_import.execute(ContinueLibraryImport("test-library"))
@@ -178,6 +182,15 @@ def test_scan_import_image_directory_reuses_comic_manifest_without_download(
     assert len(page_assets) == 2
 
     _login(client, db_session)
+    book_response = client.get(f"/api/books/{resource.book_id}")
+    assert book_response.status_code == 200, book_response.text
+    book = book_response.json()["data"]["book"]
+    assert book["title"] == "图片目录 Images [01]"
+    assert book["resources"][0]["title"] == "图片目录 Images [01]"
+    assert {asset["title"] for asset in book["resources"][0]["assets"]} == {
+        "page2",
+        "page10",
+    }
     bootstrap_response = client.get(f"/api/reader/v5/resources/{resource.id}/bootstrap")
     assert bootstrap_response.status_code == 200, bootstrap_response.text
     bootstrap = bootstrap_response.json()["data"]

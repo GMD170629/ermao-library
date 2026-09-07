@@ -27,7 +27,9 @@ from app.contracts.publication_titles import (
     titles_from_local_source,
 )
 
-_AUDIOBOOK_DIRECTORY_FORMATS = frozenset({"AUDIOBOOK_DIRECTORY", "AUDIOBOOK_DIR"})
+_DIRECTORY_RESOURCE_FORMATS = frozenset(
+    {"AUDIOBOOK_DIRECTORY", "AUDIOBOOK_DIR", "IMAGE_DIR"}
+)
 _AUDIO_FORMATS = frozenset(
     {"AUDIO", "AUDIOBOOK", "AUDIOBOOK_DIRECTORY", "AUDIOBOOK_DIR", "M4A", "M4B"}
 )
@@ -164,9 +166,9 @@ def _parse_local_metadata(
 ) -> ResolvedLocalMetadata:
     """Compose and resolve local metadata for one existing source.
 
-    ``source`` is the inspected file.  For an audiobook directory,
-    ``source_format`` must be ``"AUDIOBOOK_DIRECTORY"`` (or the persisted
-    ``"AUDIOBOOK_DIR"`` label) and ``resource_path``
+    ``source`` is the inspected file.  For an audiobook or image directory,
+    ``source_format`` is ``"AUDIOBOOK_DIRECTORY"``, ``"AUDIOBOOK_DIR"`` or
+    ``"IMAGE_DIR"`` and ``resource_path``
     is the directory whose name and sidecar belong to the resource.  For all
     file adapters, ``resource_path`` is ignored for source naming and the file
     itself supplies the path candidate.
@@ -185,7 +187,7 @@ def _parse_local_metadata(
         raise ValueError("sidecar and sidecar_reader cannot both be supplied")
 
     normalized_format = source_format.strip().upper()
-    is_directory_resource = normalized_format in _AUDIOBOOK_DIRECTORY_FORMATS
+    is_directory_resource = normalized_format in _DIRECTORY_RESOURCE_FORMATS
     has_directory_path = is_directory_resource and resource_path is not None
     metadata_source = (
         resource_path if is_directory_resource and resource_path is not None else source

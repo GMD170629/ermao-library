@@ -169,20 +169,27 @@ def test_registry_preserves_inspected_pdf_page_count(
 
 
 def test_registry_image_page_uses_stem(tmp_path: Path) -> None:
-    path = tmp_path / "001.png"
+    resource_path = tmp_path / "图片目录 Images [01]"
+    resource_path.mkdir()
+    path = resource_path / "第 02 页 & image.png"
     path.write_bytes(b"\x89PNG\r\n\x1a\n")
     adapter = next(
         s for s in ADAPTER_SPECS if s.adapter_id is ResourceAdapterId.IMAGE_DIRECTORY
     )
     result = RegistryResourceAdapterExecutor().parse_file(
         absolute_path=path,
+        resource_absolute_path=resource_path,
         adapter=adapter,
         role=AssetRole.PAGE,
     )
     assert result.ok is True
     assert result.asset is not None
     assert result.asset.role is AssetRole.PAGE
-    assert result.asset.sort_key == "001.png"
+    assert result.asset.sort_key == path.name
+    assert result.asset.title == "第 02 页 & image"
+    assert result.resource_title == resource_path.name
+    assert result.local_metadata is not None
+    assert result.local_metadata.metadata.title == resource_path.name
 
 
 def test_registry_epub_merges_sidecar_embedded_path_and_cover(tmp_path: Path) -> None:
