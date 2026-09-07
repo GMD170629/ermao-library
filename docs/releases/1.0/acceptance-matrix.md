@@ -160,7 +160,7 @@ R1 / DEC-05：用户批准 1.0 不支持第三方进度同步，OPDS-04 原互�
 
 | 组 ID（RG-03） | 源格式 / N与C真实样本要求（ID槽） | 平台/前置 | 步骤与预期 | X样本 | 状态/关联 |
 |---|---|---|---|---|---|
-| REF-EPUB | EPUB-N：真实章节；EPUB-C：嵌套目录、图文、非平凡布局 | W/A/I；P2 | R，正文/目录/锚点均正确 | EPUB-X：损坏包、active markup可恢复、具体外部实体风险 | PARTIAL：Android reader-v2普通打开/翻章/确认后强停恢复PASS（00563daf/android-epub-normal-20260907）；Chrome新库正文见3a1e4193/ui-intake；复杂/异常仍待，iOS BLOCKED |
+| REF-EPUB | EPUB-N：真实章节；EPUB-C：嵌套目录、图文、非平凡布局 | W/A/I；P2 | R，正文/目录/锚点均正确 | EPUB-X：损坏包、active markup可恢复、具体外部实体风险 | PARTIAL：Android reader-v2普通打开/翻章/确认后强停恢复PASS（00563daf/android-epub-normal-20260907）；Chrome新库正文见3a1e4193/rg02-ui-intake-20260907；复杂/异常仍待，iOS BLOCKED |
 | REF-MOBI | MOBI-N/C：实际MOBI7与复杂PalmDB/图片目录 | W/A/I；P2 | R，libmobi原格式内存出版物可读 | MOBI-X：截断/DRM | BLOCKED；ENV-06 |
 | REF-AZW | AZW-N/C：独立实际AZW来源与内部变体证明；不只MOBI改名 | W/A/I；P2 | R，实际变体按承诺可读 | AZW-X：DRM/损坏 | BLOCKED；ENV-06、RISK-02 |
 | REF-AZW3 | AZW3-N/C：实际KF8、复杂章节图文 | W/A/I；P2 | R，目录/跨章/锚点正确 | AZW3-X：损坏/DRM | BLOCKED；ENV-06 |
@@ -257,7 +257,7 @@ POS-08新增AUDIO-08（原RISK-06）：真实Android引擎+SQLite单次IO门控�
 | POS-06 | P3；各端读/听writer | 阻留旧M响应→本端生成新pending N→释放M响应→重开/重试N | 旧ACK仅清对应M，N保留；不能回滚本地较新位置 | artifacts/releases/1.0/938afd24/pos06-native-late-ack-20260907/；5b967260/pos06-online-adjacent-20260907/ | Android实际同步owner/HTTP/SQLite子项PASS：M3933ms/r5实际提交后扣留ACK，N9939ms完整pending不被旧ACK清除，重建owner/DB原mutation重试r6；原online相邻PASS。控制点在真实HTTP返回后交付到coordinator，不是socket丢包、普通UI或进程强杀；Chrome/其他引擎NOT_RUN、iOS BLOCKED |
 | POS-07 | P3；双端并发、离线首次提交 | A/B分别写并控制事务完成顺序；再让离线未提交C在N后首次到达；主动回读 | 按服务端最后事务提交生效；C可成为新当前位置，区别成功mutation重放；明确记录用户可见回退，不自创最大百分比算法 | artifacts/releases/1.0/9e017394/pos07-real-late-first-submit-20260907/；原62377271 API/ORM证据保留 | 真实Chrome MP3离线C→Android N→C首次提交及Android实际恢复子项PASS；完整C/r9仅新增一次receipt。首页SYNC-04、Web列表AUDIO-14已在b72b3d83真实原场景CLOSED（见首节）；双端受控并发事务排列/其他引擎NOT_RUN，iOS BLOCKED |
 | POS-08 | P3；两账号/服务器/资源 | 在途保存时切账号/服务器/资源，释放旧请求；尝试无权资源和同mutation跨namespace | 无串写、越权、错误清pending；业务身份以资源为准 | AUDIO-08/09实际RED/GREEN与93100b06；5b538f2a/rg02-account-server-scope-20260907/isolated-cookies/；见evidence | PARTIAL：Android音频切资源/Stop原缺陷已关闭；真实HTTP无权/撤权写入拒绝、同mutation跨user独立持久且owner不变通过。普通客户端在途切账号/服务器、清pending及其他引擎仍待，iOS BLOCKED |
-| POS-09 | P3；有章/页入口的各格式 | 从目录显式目标A进入→读到B保存→旋转/重建/重进 | 显式入口只应用一次，回到后来B | E/POS-09/；58cff471/pos09-native-explicit-entry-20260907 | PARTIAL：Android M4B播放器章节导航后冷启恢复B子项PASS；AUDIO-13已关闭（582c81fc新包真实播放/暂停旋转保持、注销停止PASS）；带显式启动参数及其他引擎NOT_RUN，iOS BLOCKED |
+| POS-09 | P3；有章/页入口的各格式 | 从目录显式目标A进入→读到B保存→旋转/重建/重进 | 显式入口只应用一次，回到后来B | E/POS-09/；58cff471/pos09-native-explicit-entry-20260907 | PARTIAL：Android M4B播放器章节导航后冷启恢复B子项PASS；AUDIO-13已关闭（582c81fc新包真实播放/暂停旋转保持、注销停止PASS）；Android EPUB阅读器内目录A→继续B→确认后冷重开B子项PASS（4d9e94b9/android-epub-toc-20260907）；带外部显式启动参数/旋转及其他引擎NOT_RUN，iOS BLOCKED |
 | POS-10 | P3；各引擎 | 确认位置→服务受控重启→重开；另保持目标端正在阅读，远端写入 | 已确认位置保留；活动会话不被强行跳转 | E/POS-10/；34d4a24e/pos10-active-session-20260907 | PARTIAL：MP3 Chrome实际重连/Android ON_RESUME活动暂停会话远端提示不自动跳转、显式跳转PASS；1d8d0c7c的API/Worker终止重启后Android M4B同确认位置恢复PASS；其他引擎/完整部署重启NOT_RUN，iOS缺设备BLOCKED |
 | POS-11 | P3；各格式 | 标记已读/取消已读→主动回读→检查首页/详情/目录/Reader | 已读状态独立；不制造恢复位置；展示与实际语义一致 | artifacts/releases/1.0/938afd24/pos11-status-projection-20260907/；180bb697/pos11-native-reading-status-20260907/；f778eecf/status01-native-regression-20260907/ | STATUS-01 CLOSED；Android M4B普通详情67%标已读/强停重开/取消、API完整位置不变、首页冷恢复20247→20247ms子项PASS；API/SQLite公开投影及批量身份相邻PASS；100%未标已读与书/资源owner由自动回归覆盖，其他界面/格式NOT_RUN，iOS BLOCKED |
 

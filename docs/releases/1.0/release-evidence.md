@@ -1,5 +1,7 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 REF-EPUB/POS-09普通目录导航子项PASS：Android阅读器目录明确选第一章A，正文正确；沿原“下一章”到第二章B，独立GET确认真实Locator chapter2/r7；正常关闭后强停冷启，首页继续仍第二章B，没有退回A。证据 `artifacts/releases/1.0/4d9e94b9/android-epub-toc-20260907/` 的toc/toc-target-A、B-confirmed、B-ready.png、cold-home/cold-reader、result/shutdown；B-ready.xml在控件显示时缺WebView正文节点，实际截图证明正文，未把XML遗漏报成白屏。沿用上一项同APK/原件，无业务或工具改动；15原件hash不变、API无5xx、自有App/API/转发停止。仅阅读器内目录及确认后重开，不覆盖外部显式启动参数、旋转/字体或复杂锚点，到此停止本组实测。
+
 2026-09-07 RG-03/REF-EPUB、RG-04/POS-01/03 Android普通EPUB子项PASS：沿用已安装开发包（SHA-256 `62dd15de08ba55a8bb892d0d407db1280082d089c6d1a97e60f040e3b6e81c7a`），普通登录专用新库→详情开始阅读→第一章→滑动第二章；独立GET确认原生Locator `OEBPS/chapter2.xhtml`、position=2、totalProgression=0.5/r3。阅读中强停后冷首页50%，普通继续实际恢复第二章正文与50%；没有用百分比重造位置。证据 `artifacts/releases/1.0/00563daf/android-epub-normal-20260907/` 的chapter2-confirmed、reader-ready/after-turn/cold-home/cold-reader XML、cold-reader.png、installed-apk及result；914源码和15原件hash核验不变，API无5xx，专用App/API/转发已停止清理。首次hash读取因Windows默认GBK中止，启用既有PYTHONUTF8后完成，未改预期。无业务/工具改动，不重构、不重跑全量。仅确认后进程恢复及正常章节链；未覆盖复杂锚点/字体变化、未确认强杀、时限或iOS，样本作者的彩色背景与坏图不作为内容安全通过证据。
 
 2026-09-07 CON-02 / POS-08后端账号与服务器隔离子项PASS（5b538f2a）：两套独立SQLite/API、同测试session secret及同邮箱不同userId，双方cookie互用均401，自身会话仍200。新member无书库授权时列表为空，Book/Resource/Asset/bootstrap/进度均404；无权与不存在资源的写入错误逐字段一致。普通上传在既有系统管理前置检查403/SYSTEM_MANAGER_REQUIRED，专用目标文件不存在。授权后同一member会话可见7本并取得原文件Range206，初始进度为空；提交与owner相同clientId/mutationId的完整实际位置后仅产生member自己的r1，owner完整r6不变。撤权后旧会话读文件/写进度404，重新授权后仍为原member快照；禁用→启用后旧会话保持401，新登录才恢复，已保存位置仍一致。
