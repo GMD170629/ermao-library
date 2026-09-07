@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-08 AUD-X / IMP-03 MP3截断导入隔离PASS、详情反馈FAIL IMPORT-06（APIcc2579dc、Android912d0254）：同一专用库的完整原MP3与其前96B截断分别正常READY、IMPORT_ASSET FAILED（Mutagen解析失败），后者无可读resource；同级完整MP3原件HTTP逐字节相等，普通详情开始收听→真实MediaSession Playing，相邻通过。失败详情实际显示“当前目录为空/当前媒介没有可阅读的资源”，API book已有resourceImportSummary.failed=1，未向用户表达导入失败；最小既有字段映射/展示候选处理中，不能关闭。证据`cc2579dc/audio-corrupt-20260908/result.json`、source/tasks/books/bad-detail、detail.png/xml、intact-book/open/player/media。两原件hash不变，5个专用设备文件/reverse已清理，test app及API/Worker停止、wrapper终态0。不外推媒体解码中途损坏、其他格式或最终RC。
+
+睡眠定时范围待负责人：当前Android按钮源码明确disabled，912d0254真实player.xml为“睡眠计时暂不可用”且不可点击；README泛称支持、RG-03要求“已有睡眠定时”，Web/iOS已接线。已请求确认补齐Android或明确平台限制，未擅自缩减门禁或新增功能；等待期间继续IMPORT-06。
+
 2026-09-08 IMP-03外部元数据不可用/基础导入隔离子项PASS（7ae823d3）：隔离API的Bangumi无凭据，临时baseUrl指向已确认拒连的127.0.0.1:65534，运行进程清除代理且NO_PROXY=*。两次全新query走真实源节点metadata/search，均502/METADATA_PROVIDER_UNAVAILABLE，日志保留urllib URLError/WinError10061，界面响应未泄漏栈/路径。第一次失败时已有TXT原件HTTP逐字节不变；同地址仍失败时，新增专用2409B TXT经现有建库/Worker完成READY，原件与publication一致，SHA256 8d76432a4eed6d657f5baa51d1598d30a424e53a9d78a6777ed3e8b8c2d51b09。证据`7ae823d3/metadata-unavailable-20260908/result.json`、search-unavailable/import-search-unavailable、existing-readable/original、created/tasks/books/import-result及API/Worker日志。
 
 原测试库自动整理两开关均false、jobs total0；为隔离公网，导入阶段临时仅启用回环Bangumi，未关闭被测来源，也未访问恢复后的公网地址。恢复前Worker已停止，之后配置/启用状态/凭据存在标记及来源顺序恢复，原policy完全不变；原排序API把默认priority 100/110/900规范为100/200/300，首次严格数值相等断言失败保留于all-providers-restored.json，restoration-verification单独证明实际顺序及配置恢复，不称数据库逐字节还原。不是产品缺陷或回归断言修改，无业务/工具代码新增。API/Worker最终均停止、wrapper终态0。只补手动搜索不可用和默认基础导入/原件隔离，不外推自动整理任务重试、客户端错误UI或最终RC。下一项剩余音频异常/睡眠定时等现有必测入口核对与真机验证；已完成本子项停止扩验。
