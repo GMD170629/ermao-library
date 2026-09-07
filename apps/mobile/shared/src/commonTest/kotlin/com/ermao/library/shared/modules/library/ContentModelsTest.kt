@@ -98,6 +98,19 @@ class ContentModelsTest {
     }
 
     @Test
+    fun authorizedUnboundRootFileKeepsBookContentsWithoutInventingAResource() = runBlocking {
+        val repository = DetailRepository(emptyList(), node("FILE"))
+        val snapshot = assertIs<ContentResult.Content<BookContentSnapshot>>(
+            loadBookContentPage(repository, requestContext, "book", BookContentTarget.Root, BookContentSort.NameAscending, 1)
+        ).value
+        assertEquals(BookContentTarget.Root, snapshot.target)
+        assertEquals("book", snapshot.book.id)
+        assertEquals(emptyList(), snapshot.book.resources)
+        assertEquals("FILE", snapshot.contents?.currentNode?.kind)
+        assertEquals(0, repository.resourceRequests)
+    }
+
+    @Test
     fun rootResourceUsesItsIdentityEvenWhenAnotherResourceWasRecentlyRead() = runBlocking {
         val repository = DetailRepository(listOf(resource("other"), resource("bound")), node("FOLDER", "bound"))
         val snapshot = assertIs<ContentResult.Content<BookContentSnapshot>>(

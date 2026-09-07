@@ -42,7 +42,10 @@ suspend fun loadBookContent(
         }
     }
     val destination = if (target == BookContentTarget.Root) {
-        contents?.currentNode?.let(::bookContentTarget) ?: return inaccessible()
+        val currentNode = contents?.currentNode ?: return inaccessible()
+        // An authorized file may still be pending or have failed import. Keep
+        // its book contents visible without inventing a readable resource.
+        bookContentTarget(currentNode) ?: BookContentTarget.Root
     } else target
     val requiredIds = buildSet {
         if (target == BookContentTarget.Root) book.continueResourceId?.let(::add)

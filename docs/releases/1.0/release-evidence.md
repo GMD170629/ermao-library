@@ -1,5 +1,7 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 IMPORT-04 OPEN（RG-02/IMP-03、RG-03/COM-RAR-X）：真实截断RAR在Android普通首页点击后误报作品不存在/无权限，实际book/contents均200、FILE未绑定可读resource。LoadBookContent把无阅读目标误判inaccessible；最小候选保留授权Root内容页，不伪造资源/目录身份。现有ContentModelsTest新增原反例，17项1 FAIL，候选原场景待验。证据da46248a/rar-exceptions-20260907；加密/截断导入已按既有契约隔离，正常RAR6页READY。首次进程PATH漏WinRAR造成正常/截断环境失败，原日志保留，配置补齐后同库重扫，不计新产品缺陷。
+
 2026-09-07 READER-14 CLOSED：79082997已提交推送，新隔离开发包SHA-256 6863b2e57d302cf35ebff9cdd8d301322bf812aeeb7c06e245c3ec3bfadae94f，签名/package/install-r及设备base.apk一致。原末页普通设置单页→双页→单页完整通过，XML父节点checked状态依次正确、当前单页偏好恢复，末页003原图保持；切换后前一坏页仍报错、回末页错误清除，相邻READER-13未回退。完整GET r12pages/2及3/3，原件不变。证据fe90d7b5/comic-exceptions-20260907/layout-settings-full/double/single/switched/bad/after-bad XML/PNG、layout-logcat、final-confirmed-assets、checks/result与build/signature/installed-apk。旧final-logcat的真实FATAL保留，新候选窗口无FATAL/ANR；未通过吞索引越界、空页或缩减双页能力通过。只在实际分组变更重建现有分页器，未新框架；本轮局部编译+原真机/必要相邻实测，没有声称全量自动回归。READER-13/14均停止扩验。
 
 COM-CBZ-X/COM-ZIP-X同时补齐：专用三输入来自既有001/002/003原图，COMIC-CRC中间entry真实CRC坏、COMIC-PATHS含归档越界路径/符号链接/可规范化普通路径、COMIC-DECODE中间JPEG字节不可解码但ZIP CRC正确。实际正常建库/Worker分别2/2/3页，前两输入保留原图的HTTP字节及Android两页画面均通过；第三输入触发并关闭上述局部UI问题。sample hashes、manifest、http-pages及paths/crc-open/last XML/PNG为依据。最初直接页HTTP漏revision获412，按现有必填revision修正观察，原API日志保留，不当产品缺陷。495 API源及三输入/HTTP原资产hash均保持，没有outside.png落盘/链接提取，无API5xx。首次1200秒API/Worker已正常有界退出并核实session终态；候选短时API已主动停止，两个wrapper exit0/stopped，App、18084及本轮设备XML/PNG均清理。当前仍原五项候选待Chrome原场景、其他矩阵缺口和外部条件，未冻结RC；下一项真实加密/截断RAR或漫画容量边界，不重复已闭合CRC/路径或这两个UI缺陷。
