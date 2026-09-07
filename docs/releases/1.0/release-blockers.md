@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-08 INI-02/CON-02 Android普通管理员→成员→管理员的权限展示/各自首页进度子项PASS，无新缺陷；证据73031b2e/android-member-ui-20260908/result.json，具体边界见evidence。设备已解锁、管理员登录恢复；正常退出清理了专用测试私有缓存，后续离线样本需显式重新下载。下一项IMP-03真实元数据不可用及合法资源隔离，现成入口已核实、尚未执行。R2未冻结，Chrome五候选/iOS/容器/工具限制、正式包暂缓和最终RC保持。
+
 2026-09-08 IMPORT-05 CLOSED：644b3fef真实NTFS拒读→API400且无写入；恢复权限→正常建库/导入READY/原件一致，服务与ACL已收尾。证据20e7246c/unreadable-root-20260908/green/result.json，详见evidence。负责人已正常解锁Android；下一项剩余普通设备必测，不继续扩验本缺陷。Chrome五候选原UI、iOS/容器/工具限制、正式包暂缓和最终冻结RC仍未完成，R2保持。
 
 2026-09-08 IMPORT-05 OPEN：Windows专用根真实NTFS拒读但创建API201，os.access预检查未识别。候选在现有根校验增加有界实际读取，定向及必要相邻通过，原NTFS/API复验待；详见evidence首条。测试权限已恢复，原件不变。手机正常解锁仍待，其他既有阻塞/最终RC不变。

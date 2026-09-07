@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-08 INI-02 / CON-02 Android普通账号切换UI子项PASS（API73031b2e、普通开发APK912d0254，设备9e896bbc）：负责人解锁后系统showing=false；普通“我的→账户与安全→退出→登录”从管理员切至已有Scope member，系统管理/用户与权限/OPDS/日志入口消失，个人设置保留；首页为其57%，独立HTTP为成员17169ms/r1。相同普通路径恢复管理员后管理入口恢复，首页34%，HTTP10499ms/r13。APK读回SHA256仍2c0fea81ff93be5fc51dc50be957feae45c0acac07be4e215da2ca1556f62241。证据`73031b2e/android-member-ui-20260908/result.json`、member-auth、member-home/settings、owner-restored-home/settings、progress、cleanup/shutdown；实际截图已查看。不外推跨服务器切换、所有权限深链、W/I或最终RC，无业务/工具修改。两次小米保存密码提示均取消；正常退出按产品契约清除了独立releasecheck内的测试账号私有缓存，原应用/服务端数据不动，后续离线样本须重新显式下载。管理员登录已恢复，13个专用设备文件和reverse清理，测试app与API停止，wrapper终态0。
+
+下一可执行项IMP-03外部元数据不可用：已只读核实隔离实例可经现有GET/PATCH /api/metadata/providers/bangumi临时改baseUrl，并用源节点metadata/search真实触发502/METADATA_PROVIDER_UNAVAILABLE；需先确认enabled、无测试外凭据、回环端口空闲及进程代理绕过，唯一query避免旧缓存，finally恢复原配置，再核对正常导入/可读原件。未执行此场景，不记PASS，不新增工具框架。Chrome五候选原UI、iOS/容器/工具限制、正式包暂缓与最终同冻结RC仍待。
+
 2026-09-08 IMPORT-05 CLOSED（RG-02 INI-02无权路径）：644b3fef在全新专用NTFS根实际拒读时，列举/文件读取均PermissionError，创建API返回400/INVALID_LIBRARY_PATH且书库列表不变；finally恢复原owner/group/全部ACE后，同一路径201，Worker完成导入、TXT READY且publication与1820B原件逐字节相等。SHA256 c8833d37a03d32d8d0ca22ca1c3174efd0ed018dfe75e7a90018f65c36a384da。证据`20e7246c/unreadable-root-20260908/green/result.json`及denied-probe/http、acl-restored、restored-create/tasks/books、shutdown；目录按初始失败基线命名，受测源码明确为644b3fef。原失败及定向/相邻回归证据保留，未新增工具或扩大测试。仅验证建库准入及权限修正恢复，不外推运行中权限变化或最终RC。API/Worker已停、wrapper终态0，原件/权限保持，停止本缺陷扩验。负责人已确认Android正常解锁，设备UI不再因此阻塞；下一项剩余Android必测场景，Chrome/iOS/容器和最终同RC缺口保持。
 
 2026-09-08 IMPORT-05 OPEN（RG-02 INI-02真实无权路径）：20e7246c的专用Windows目录临时NTFS拒读后，Python列举/读文件均PermissionError，POST /api/libraries却201并创建根。权限在finally移除；原owner/group/全部ACE恢复，Windows仅将DACL标记规范为AI，最初“SDDL字符串完全相等”断言因此失败，独立acl-verification已核对实际权限/原件，不留拒读规则。恢复后原任务自然完成、TXT READY；不将恢复后的成功抵销拒读时误接收。证据20e7246c/unreadable-root-20260908/denied-probe、denied-http、acl-verification、restored-tasks/books。
