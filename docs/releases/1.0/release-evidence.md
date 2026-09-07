@@ -1,5 +1,11 @@
 # 1.0 发布证据与最终签收
 
+2026-09-08 CON-01 Android无localhost依赖子项PASS（API873c2a50、开发APK b32aac21）：电脑WLAN192.168.50.179/手机192.168.50.187，同网段直接访问18084；进入LAN验证前撤销ADB reverse，reverse-before-lan为空。普通登录、62部作品浏览及强停冷首页成功，真实MP3播放（MediaSession Playing/1×，asset206）与EPUB首次下载/第一章正文可读（asset200）均经LAN，二者progress PUT200。服务端实际客户端IP192.168.50.187；MP3 resource py_6848b175c49b47349213a979af42417c，EPUB resource py_ca58196f0de1416785d03b269296a69e/asset py_89e9a15dce82409d95aff7ae4b46332d。证据`873c2a50/android-lan-20260908/result.json`、lan-settings.png、cold-home、audio/media、epub-open.png/xml、device-lan-requests，截图实际已核验。不外推受信任HTTPS/代理、Web公开链接、逐格式或最终RC。
+
+正常退出后恢复原127.0.0.1:18084/SystemTrust并独立读取持久profile核对；原B配置保留。App/设备专用XML/reverse/两API均清理，wrapper终态0；不改防火墙/网络/系统信任、无工具或业务修改。初次toybox手写HTTP报文400仅作可达诊断保留，两次探测不能算应用失败或通过；恢复时紧跟系统密码框取消的首个设置点击未生效，原restored.xml是首页、后续fresh restored-settings正确，不放宽断言。
+
+CON-01受信任HTTPS/反向代理仍缺外部条件：既有scripts/unified-http-gateway.mjs只提供HTTP、deploy/fnos/README要求外部TLS代理；现有证据只有自签名与显式不安全模式。已请求负责人提供已授权、客户端已信任且只转发隔离实例的HTTPS入口/配置位置，等待期间继续CON-02原生会话失效后重登实际路径；不安装系统CA或公开部署代替条件。R2未冻结，睡眠范围与既有Chrome/iOS/容器/正式包限制保持。
+
 2026-09-08 CONNECTION-01 CLOSED（b32aac21）：普通开发APK保留数据替换安装，实际读回SHA256 `7bf003fbf71ba064985347250c41822549afece4fcc4c0b17f57188db80e57fd`。同serverIdentity HTTP→退出→HTTPS（默认拒绝后显式接受）→退出→HTTP，绿色复验保留同profile并改回地址，原“我的”旧HTTPS显示恢复为HTTP；首页原52%、62部作品相邻正常。实际管理日志GET200及MP3媒体asset GET206均走当前HTTP，回HTTP后的旧TLS请求0，真实MediaSession Playing/1×；音频为py_6848b175c49b47349213a979af42417c。现有MainShellNavigationTest/编译通过证据复用，独立定向审查未见具体新增问题。证据`f936f99f/android-tls-20260908/green/result.json`、http-restored-settings.png/xml、verified-requests、audio-open/media、installed及restored-profiles。停止本缺陷扩验。
 
 设备profile持久状态独立读取：当前18084/SystemTrust，18086配置不存在、原B18085仍在；数据namespace不变。App停止、两条reverse与专用XML删除、双API停止/临时私钥删除（cleanup/shutdown，wrapper终态0）。本轮仅最小MainShell连接键修复，无新增测试辅助代码/框架。快速批量退格未清空密码导致一次真实401、Ctrl+A无效及后续逐次退格到0再输入22字符成功；初次请求观察误以为缓存设置页必重读、媒体必走publication，实际现有管理日志/asset入口已独立验证；原观察文件与错误说明observation-errors保留，未改业务响应或弱化回归断言。
