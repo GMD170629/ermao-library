@@ -1,5 +1,7 @@
 # 1.0 发布证据与最终签收
 
+2026-09-08 IMPORT-06 CLOSED：7ac595aa普通开发APK在同一96B截断MP3原详情实际显示“导入失败”，不再把失败内容当空目录；不可读主按钮仍不可点击，正常同级音频详情“继续收听”相邻保持。真实空根/子目录/等待/有资源反例复用已通过定向回归，不重跑导入/播放全链。已安装APK读回SHA256 7854e595eea99ac0080dd695613e3efc84e970d061b41bf04ac6d835f5161afc，与本地构建一致；两源文件原hash不变。证据`cc2579dc/audio-corrupt-20260908/green/result.json`、detail/intact PNG/XML、cleanup/shutdown，源码明确7ac595aa，非目录名基线。首次冷启uiautomator未生成文件保留为执行观察失败，后续新捕获成功后才判定；无断言放宽。5个专用设备文件/reverse清理、app及API停止，wrapper终态0；用户原15项改动保持。停止本缺陷扩验，无新框架或正式包交付。下一项其余音频必测与范围决定后对应睡眠入口；Chrome五候选原UI/iOS/容器/工具限制及最终同RC仍待。
+
 2026-09-08 IMPORT-06最小候选：BookWire既有resourceImportSummary的pending/failed两计数此前在domain/UI映射丢弃，详情将无resource视作空目录。现透传至现有BookDetailSummary/BookDetailContent，仅作品根且无resource时复用既有导入提示组件与双语文案；子目录、真正空根、正常resource和不可播放约束保持。WorkDetailWireTest及Android ContentMappersTest/WorkDetailLayoutTest定向通过、Android编译通过，日志/XML归cc2579dc/audio-corrupt-20260908；原普通UI仍待新包复验，IMPORT-06保持OPEN。无新API/恢复系统/测试框架。
 
 2026-09-08 AUD-X / IMP-03 MP3截断导入隔离PASS、详情反馈FAIL IMPORT-06（APIcc2579dc、Android912d0254）：同一专用库的完整原MP3与其前96B截断分别正常READY、IMPORT_ASSET FAILED（Mutagen解析失败），后者无可读resource；同级完整MP3原件HTTP逐字节相等，普通详情开始收听→真实MediaSession Playing，相邻通过。失败详情实际显示“当前目录为空/当前媒介没有可阅读的资源”，API book已有resourceImportSummary.failed=1，未向用户表达导入失败；最小既有字段映射/展示候选处理中，不能关闭。证据`cc2579dc/audio-corrupt-20260908/result.json`、source/tasks/books/bad-detail、detail.png/xml、intact-book/open/player/media。两原件hash不变，5个专用设备文件/reverse已清理，test app及API/Worker停止、wrapper终态0。不外推媒体解码中途损坏、其他格式或最终RC。
