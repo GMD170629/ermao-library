@@ -1,5 +1,9 @@
 # 1.0 发布阻塞项
 
+2026-09-07 SYNC-06 Android原失败CLOSED（ebb4e3ea）：停止API前独立HTTP确认r9第二章，设备库确认revision9且pending=null；受控API终止后普通首页继续恢复第二章50%，强停后本地完整Locator仍为第二章。原selector优先级/反例6PASS及Android编译证据复用，不扩全量。证据ebb4e3ea/epub-offline-fix-20260907/result.json，详细限制见evidence。iOS对应bootstrap失败折叠及三引擎恢复放弃local的静态同类风险待处理，未真机复现，不因Android通过关闭iOS。
+
+当前状态：R2、RC未冻结；RG-05按负责人接受的本机导入预检范围PASS，RG-01～04仍PARTIAL。明确五项Chrome候选待原UI：SYNC-02、READER-05/06/07、IMPORT-02；其余矩阵未验项不是五项之内。ENV-02 iOS、ENV-08容器及ENV-11/12/13对应浏览器操作限制保持；正式包用户暂缓。下一可执行项为iOS同类启动恢复路径的最小修正评估，随后继续剩余必测，不重跑已关闭Android原场景。
+
 2026-09-07 SYNC-06 Android候选：实际createOfflineManagedProgressStore将query Failure丢成null，而Start禁止读取已确认本地位置。现有selector新增LocalFallback，仅Failure.recoverable启用；显式目标/pending/server快照优先，Current(null)及非recoverable不启用。EPUB/PDF/comic既有本地恢复分支接入同一选择结果，不造远端snapshot/百分比位置，不改持久化或同步协议。原选择相邻及新增反例6PASS、Android编译通过（startup-targeted.xml/log）；原失败证据保留，候选真机仍待，SYNC-06保持OPEN。
 
 2026-09-07 RISK-10已确证为SYNC-06 OPEN（RG-04/POS-04 EPUB API不可达重开）：普通Android与独立HTTP确认r7/OEBPS/chapter2.xhtml/50%后，受控只停API并确认进程终止，返回首页50%→继续→最终第一章0%，同样本可重复原观察。证据041bf084/epub-service-offline-20260907 的 confirmed-before-stop、online、shutdown、offline-home/open/settled及设备位置库副本。需区分网络不可达与服务端明确无进度，定位启动快照选择并最小修复；目前不关闭或外推其他格式/iOS。

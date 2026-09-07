@@ -1,5 +1,7 @@
 # 1.0 发布验收矩阵
 
+2026-09-07 RG-04/POS-04 Android EPUB可恢复查询失败重开子项PASS，SYNC-06 Android CLOSED：ebb4e3ea普通开发包，服务端r9第二章与设备confirmed9/pending=null前置核实后停API；普通继续仍第二章50%，关闭后本地Locator保持。证据ebb4e3ea/epub-offline-fix-20260907/result.json；首次可读观察10.657s（含网络失败等待），不外推其他格式UI、iOS或最终RC。iOS同类静态风险单列待处理。
+
 2026-09-07 REF-EPUB active内容/原件重开子项PASS，TEST-15 CLOSED：9120453e Android生产实现未改，既有仪器方法补危险链接实际触发、原/parent执行标记、危险节点、样本请求/存储及原件重开断言后真机通过；普通首页进入第二章、点击链接后仍可读，确认r5完整第二章位置再正常重开同章50%。原件hash不变。证据9120453e/epub-active-20260907，详见evidence；不外推其他样本、iOS、全局网络捕获或同冻结RC。
 
 RISK-10 待核实（RG-04 EPUB服务中断重开）：首次重开与本轮600s隔离服务到期退出重合，loading后曾显示首章；当时未在关闭前独立确认第二章位置，不据此认定已确认位置丢失，也不能用随后干净在线重开PASS关闭该观察。原图reopened.png/reopen-state.xml和api.log保留。下一项用现有入口固定已确认第二章后仅复测服务不可达重开，区分启动/同步时序与测试环境；不新增通用工具。

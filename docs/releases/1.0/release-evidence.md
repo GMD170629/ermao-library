@@ -1,5 +1,11 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 SYNC-06 Android原失败CLOSED，候选ebb4e3eaf4af531742d47ee3b9593717a45b1cb6。证据`artifacts/releases/1.0/ebb4e3ea/epub-offline-fix-20260907/`：普通开发APK SHA-256 `e546384a79bdd5f623fa6581aaccadb6fa9bff81a4fd70761d3ae554e1ff0d99`，原选择器6PASS及编译结果见041bf084/epub-service-offline-20260907/startup-targeted.xml/log。
+
+实际原路径：先由普通UI将旧失败留下的第一章pending重新读到第二章；confirmed-before-stop.json独立HTTP确认r9完整第二章；device-before-stop.json/数据库两次一致副本确认本地同章、confirmedRevision9、pending=null。随后受控停API（shutdown.json stopped=true，运行会话已终止），首页50%→继续→offline-settled.xml/png真实第二章50%，已人工查看。首次可读采样10.657s，包含查询失败等待，非精确启动耗时；不将其冒充音频2秒位置阈值。强停后device-after-reopen.json确认完整本地Locator仍第二章；未重启API、不声称离线后产生远端ACK。API495文件hash未变，result.json记录范围及清理：只清16个ermao-epubr专用设备截图/XML、只停止releasecheck、移除18084 reverse，设备库与测试样本保留。原RED和首次界面转场未生成XML的观察均保留，无工具功能扩展。
+
+独立只读复核并由主任务检查iOS真实owner：IosReaderComposition可选bootstrap失败无明确offline信号，EPUB/PDF/comic恢复在有同步协调器、无pending且remote=nil时不选local；记录为静态同类风险，未编译/未实测，不登记为新已复现FAIL。下一步最小处理该可执行代码缺口；ENV-02真实验收仍阻塞。Android原问题达到停止条件。
+
 2026-09-07 SYNC-06 Android候选：实际createOfflineManagedProgressStore将query Failure丢成null，而Start禁止读取已确认本地位置。现有selector新增LocalFallback，仅Failure.recoverable启用；显式目标/pending/server快照优先，Current(null)及非recoverable不启用。EPUB/PDF/comic既有本地恢复分支接入同一选择结果，不造远端snapshot/百分比位置，不改持久化或同步协议。原选择相邻及新增反例6PASS、Android编译通过（startup-targeted.xml/log）；原失败证据保留，候选真机仍待，SYNC-06保持OPEN。
 
 2026-09-07 RISK-10已确证为SYNC-06 OPEN（RG-04/POS-04 EPUB API不可达重开）：普通Android与独立HTTP确认r7/OEBPS/chapter2.xhtml/50%后，受控只停API并确认进程终止，返回首页50%→继续→最终第一章0%，同样本可重复原观察。证据041bf084/epub-service-offline-20260907 的 confirmed-before-stop、online、shutdown、offline-home/open/settled及设备位置库副本。需区分网络不可达与服务端明确无进度，定位启动快照选择并最小修复；目前不关闭或外推其他格式/iOS。
