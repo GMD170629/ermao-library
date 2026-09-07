@@ -45,7 +45,6 @@ import com.ermao.library.shared.modules.reader.ReaderPositionLocalState
 import com.ermao.library.shared.modules.reader.ReaderPositionSyncingStore
 import com.ermao.library.shared.modules.reader.ReaderTocEntry
 import com.ermao.library.shared.modules.reader.ReflowReaderLocation
-import com.ermao.library.shared.modules.reader.matchesReaderNavigationHref
 import java.io.FileNotFoundException
 import java.math.BigDecimal
 import java.util.logging.Level
@@ -639,36 +638,30 @@ internal class ReadiumEpubSession(
         val targetLocator = locatorMapper.navigationLocator(target, openedPublication)
             ?: return ReaderNavigationRejected("READER_NAVIGATION_REJECTED")
 
-        if (matchesReaderNavigationHref(
-                currentHref = activeNavigator.currentLocator.value.href.toString(),
-                expectedHref = targetHref,
-                fragments = activeNavigator.currentLocator.value.locations.fragments.toSet(),
-                cssSelector = activeNavigator.currentLocator.value.locations["cssSelector"] as? String,
-            )
-        ) {
+        if (isLocatorVisible(activeNavigator, targetLocator)) {
             return ReaderNavigationCompleted(moved = false)
         }
         suppressNextPreferenceLocation = false
         dismissResumeNotice()
         requestedNavigationTarget = ReaderNavigationTargetReflowable(targetHref)
+        val changesResource = activeNavigator.currentLocator.value.href != targetLocator.href
         if (!activeNavigator.go(targetLocator, animated = navigationAnimationsEnabled())) {
             return ReaderNavigationRejected("READER_NAVIGATION_REJECTED")
         }
         val verified = withTimeoutOrNull(com.ermao.library.features.reader.application.NAVIGATION_VERIFICATION_TIMEOUT_MILLIS) {
-            activeNavigator.currentLocator.first { locator ->
-                matchesReaderNavigationHref(
-                    currentHref = locator.href.toString(),
-                    expectedHref = targetHref,
-                    fragments = locator.locations.fragments.toSet(),
-                    cssSelector = locator.locations["cssSelector"] as? String,
-                )
+            if (changesResource) {
+                // Readium emits this only after the resource is loaded and its transition
+                // has settled. Its initial page selection may place a backward jump at
+                // the resource end; apply the authored locator after that placement.
+                activeNavigator.currentLocator.first { it.href == targetLocator.href }
+                if (!activeNavigator.go(targetLocator, animated = false)) return@withTimeoutOrNull false
             }
-        }
-        return if (verified != null) {
-            ReaderNavigationCompleted(moved = true)
-        } else {
-            ReaderNavigationRejected("READER_NAVIGATION_VERIFICATION_FAILED")
-        }
+            // The progression stream need not echo the requested HTML anchor.
+            while (!isLocatorVisible(activeNavigator, targetLocator)) delay(50)
+            true
+        } == true
+        return if (verified) ReaderNavigationCompleted(moved = true)
+        else ReaderNavigationRejected("READER_NAVIGATION_VERIFICATION_FAILED")
     }
 
     override fun goToTotalProgression(totalProgression: Double): Boolean {
@@ -753,8 +746,9 @@ internal class ReadiumEpubSession(
                 // its semantic locator before reflow; percentage is not a restore target.
                 val visible = active.firstVisibleElementLocator()
                     ?: return@withLock ReaderCommandRejected("READER_PREFERENCES_ENGINE_FAILED")
-                val selector = visible.locations["cssSelector"] as? String
-                    ?: return@withLock ReaderCommandRejected("READER_PREFERENCES_ENGINE_FAILED")
+                if (visible.locations["cssSelector"] !is String) {
+                    return@withLock ReaderCommandRejected("READER_PREFERENCES_ENGINE_FAILED")
+                }
                 val result = super.applyPreferences(updated)
                 if (result != ReaderCommandCompleted) return@withLock result
                 val fontScale = preferencesMapper.toReadium(updated, capabilities.supportsWritingMode).fontSize
@@ -765,14 +759,7 @@ internal class ReadiumEpubSession(
                           .getPropertyValue('--USER__fontSize')) - ${fontScale * 100.0}) < 0.01
                     """.trimIndent()) != "true") delay(50)
                     if (!active.go(visible, animated = false)) return@withTimeoutOrNull false
-                    while (active.evaluateJavascript("""
-                        (() => {
-                          const element = document.querySelector(${org.json.JSONObject.quote(selector)});
-                          return element && [...element.getClientRects()].some(rect =>
-                            rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.bottom > 0 &&
-                            rect.left < window.innerWidth && rect.top < window.innerHeight);
-                        })()
-                    """.trimIndent()) != "true") delay(50)
+                    while (!isLocatorVisible(active, visible)) delay(50)
                     true
                 } == true
                 if (restored) ReaderCommandCompleted
@@ -783,6 +770,26 @@ internal class ReadiumEpubSession(
                 ReaderCommandRejected("READER_PREFERENCES_ENGINE_FAILED", error)
             }
         }
+
+    private suspend fun isLocatorVisible(active: EpubNavigatorFragment, locator: Locator): Boolean {
+        if (active.currentLocator.value.href != locator.href) return false
+        val selector = locator.locations["cssSelector"] as? String
+        // TOC locators come from locatorFromLink, which preserves the authored URL fragment.
+        val htmlId = locator.locations.fragments.singleOrNull()?.removePrefix("#")
+        val element = when {
+            selector != null -> "document.querySelector(${org.json.JSONObject.quote(selector)})"
+            htmlId != null -> "document.getElementById(${org.json.JSONObject.quote(htmlId)})"
+            else -> return locator.locations.fragments.isEmpty()
+        }
+        return active.evaluateJavascript("""
+            (() => {
+              const element = $element;
+              return element && [...element.getClientRects()].some(rect =>
+                rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.bottom > 0 &&
+                rect.left < window.innerWidth && rect.top < window.innerHeight);
+            })()
+        """.trimIndent()) == "true"
+    }
 
     override fun updatePreferences(updated: ReaderPreferences) {
         val active = checkNotNull(navigator) { "READER_NOT_READY" }

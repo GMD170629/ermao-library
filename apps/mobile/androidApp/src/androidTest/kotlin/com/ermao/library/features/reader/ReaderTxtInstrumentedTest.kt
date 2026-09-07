@@ -136,8 +136,8 @@ class ReaderTxtInstrumentedTest {
                     withContext(Dispatchers.Main) { controller.navigateTo(first) }
                 }
             }
-            assertTrue("Backward TOC selection did not complete: $result", result is ReaderNavigationCompleted)
             val firstVisible = awaitSettledVisibleLocator(navigator, "text/chapter-0001.xhtml", 18)
+            assertTrue("Backward TOC selection did not complete: $result; visible=$firstVisible", result is ReaderNavigationCompleted)
             assertEquals(
                 "TOC must show the heading, not paragraphs at the chapter end",
                 first.title,

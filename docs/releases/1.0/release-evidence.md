@@ -1,3 +1,7 @@
+2026-09-08 READER-20 最小候选定向真机通过（原普通UI待复验）：原SDK锚点无丢失；先到章尾1199后，同锚点在已加载资源内重放确实到章首，见 `233ca471/txt-font-20260908/toc-observe-instrument.log`。仅改可见性验证、仅等外层ViewPager idle两个中间候选仍失败，原日志保留；最终复用 SDK currentLocator 的目标资源就绪回报后重放原 Locator，再验证实际目标元素与视口相交，原用例通过 `toc-ready-instrument.log`，编译通过 `toc-ready-build.log`。已移除ViewPager监听候选和临时测试重放诊断；不改共享锚点/章节规则、不伪造位置。字号回归及三个原TOC映射相邻通过 `toc-settle-instrument.log` 的独立结果，该次目录失败不能写整轮PASS。
+
+字号独立审阅确认唯一持久化owner、取消/保存错误及真实语义Locator复用。提出的同值重试恢复建议没有对应现有普通UI入口/已承诺重试契约，单次完成判定后的再次漂移没有候选实测反例；保留显式失败与稳定段落实测，不增加待恢复状态机或理论边界工具。下一项同普通TXT原件的目录往返、18→19px及正常重开；READER-20/21仍待原UI关闭，R2未冻结与其余阻塞不变。
+
 2026-09-08 READER-21 最小候选：现有 ReadiumEpubSession 的 suspend applyPreferences 在字号改变前取得 SDK 首可见语义 Locator，复用原偏好校验/持久化/单次 submitPreferences；实际 CSS 应用后用同一 SDK Locator 恢复并检查段落与视口相交。Readium 3.3.0 的字号 CSS 更新本身不保留可见段落，不改变进度协议或构造百分比位置。原普通界面仍待新包复验，不能提前 CLOSED。
 
 针对 READER-20/21（POS-09/01）仅补现有 ReaderTxtInstrumentedTest 两个定向回归：原短章/全文 textContent 断言不能判定章内实际位置；用 UUID 专属 UTF16BE 长章、普通 navigateTo/applyPreferences 和 SDK 可见段落/视口断言。原实现真机红测两失败（目录验证拒绝；字号后1132→1057），字号候选及原 TXT 导航/偏好相邻真机通过，ReaderPreferenceSubmissionTest 与 Android 编译通过。证据 `233ca471/txt-font-20260908/{red-build,red-instrument,font-build,font-instrument}.log`。不扩工具；停止条件为两个原普通 UI 场景及实际受影响相邻通过。目录生产实现仍未改、READER-20 OPEN。R2未冻结及其余阻塞不变。
