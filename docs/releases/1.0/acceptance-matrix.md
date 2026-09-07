@@ -1,5 +1,7 @@
 # 1.0 发布验收矩阵
 
+2026-09-08 AUD-02 Android普通MP3 1.5×及恢复1×子项PASS；AUD-X实际MP3 ID3章节35s越过约30s音轨的解析拒绝/真实导入隔离/普通失败详情子项PASS，原件不变。证据0a8e7da3/android-audio-rate-20260908及audio-chapter-bounds-20260908/result.json，详见evidence；不外推全部倍速/容器异常或最终RC。
+
 2026-09-07 POS-02 Android连续捕获增量PASS / SYNC-07 Android CLOSED：937b325b真实PDF 5/10秒SQLite新capture及普通UI持续HTTP确认通过；EPUB/CBZ连续操作相邻及三者最终完整local/server一致、pending空通过。具体计时、稳定副本限制与证据见release-evidence首条；不外推Chrome、iOS或最终冻结RC。此前PDF失败作为RED保留。
 
 2026-09-07 POS-02 Android PDF连续捕获FAIL，登记SYNC-07：48次真实翻页约12秒，截图正文变动但本地/HTTP均35/r22，超过5秒上限；串行保存候选待编译/原场景验证。证据99d3e63b/reader-capture-windows-20260907，详见evidence。此前早退、pending恢复子项证据保留但不计本项通过。

@@ -1,5 +1,11 @@
 # 1.0 发布证据与最终签收
 
+2026-09-08 RG-03 AUD-02普通Android倍速子项PASS（API0a8e7da3、普通APK7ac595aa）：首页继续→播放器暂停归零→现有菜单选择1.5×；UI已查看，系统MediaSession三次为Playing/speed1.5，服务端相邻确认位置5616→11624ms，capturedAt相隔4003ms，位置推进6008ms（观察比1.50087，仅佐证，不新增阈值）。菜单恢复1×后实际Playing/speed1.0，随后暂停。原MP3 HTTP与原件一致；证据`0a8e7da3/android-audio-rate-20260908/result.json`、menu/selected/restored、media-2/5/9与observations/final-progress。仅短时MP3的1.5×及恢复1×，不外推全部预设/格式、主观音质或最终RC；6个专用设备文件/reverse已清理、app/API停止、wrapper终态0，速度已恢复。
+
+2026-09-08 AUD-X / IMP-03实际损坏章节元数据子项PASS（同API/普通APK）：已有正常MP3复制到专用根，用已安装Mutagen仅写ID3 CHAP 29..35秒；Mutagen独立读回音频30.06694秒，ffprobe音频30秒/章节结束35秒，证明实际越界而非文本模拟。样本准备只服务AUDIO.TRACK_AND_CHAPTER_BOUNDS当前必测，既有语料无坏章节实物；实样确认和本项验收通过即停止，无新增辅助代码/框架。真实Worker将坏文件IMPORT_ASSET FAILED并提示“音频章节时间范围超出音轨时长”，现有parse_audio_metadata返回AUDIO_DURATION_INVALID；Android普通该文件详情明确导入失败。正常同级READY/HTTP原件相等，正常相同字节的普通播放证据复用上述同APK，未重复播放新identity。两样本原hash保持；证据`0a8e7da3/audio-chapter-bounds-20260908/result.json`、manifest/ffprobe/parser-error、tasks/bad-books/good-book/detail。3个专用设备文件/reverse清理、app/API/Worker停止，wrapper终态0；不外推其他容器异常、DRM、元数据预算或最终RC。无本轮业务修改。
+
+下一可执行项：按当前音频四格式剩余异常/平台入口继续；Android睡眠定时范围问题仍待负责人，不重复询问。Chrome五候选原UI、iOS/容器/工具限制、正式包暂缓与最终同冻结RC保持。
+
 2026-09-08 IMPORT-06 CLOSED：7ac595aa普通开发APK在同一96B截断MP3原详情实际显示“导入失败”，不再把失败内容当空目录；不可读主按钮仍不可点击，正常同级音频详情“继续收听”相邻保持。真实空根/子目录/等待/有资源反例复用已通过定向回归，不重跑导入/播放全链。已安装APK读回SHA256 7854e595eea99ac0080dd695613e3efc84e970d061b41bf04ac6d835f5161afc，与本地构建一致；两源文件原hash不变。证据`cc2579dc/audio-corrupt-20260908/green/result.json`、detail/intact PNG/XML、cleanup/shutdown，源码明确7ac595aa，非目录名基线。首次冷启uiautomator未生成文件保留为执行观察失败，后续新捕获成功后才判定；无断言放宽。5个专用设备文件/reverse清理、app及API停止，wrapper终态0；用户原15项改动保持。停止本缺陷扩验，无新框架或正式包交付。下一项其余音频必测与范围决定后对应睡眠入口；Chrome五候选原UI/iOS/容器/工具限制及最终同RC仍待。
 
 2026-09-08 IMPORT-06最小候选：BookWire既有resourceImportSummary的pending/failed两计数此前在domain/UI映射丢弃，详情将无resource视作空目录。现透传至现有BookDetailSummary/BookDetailContent，仅作品根且无resource时复用既有导入提示组件与双语文案；子目录、真正空根、正常resource和不可播放约束保持。WorkDetailWireTest及Android ContentMappersTest/WorkDetailLayoutTest定向通过、Android编译通过，日志/XML归cc2579dc/audio-corrupt-20260908；原普通UI仍待新包复验，IMPORT-06保持OPEN。无新API/恢复系统/测试框架。

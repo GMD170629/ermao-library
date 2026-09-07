@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-08 Android普通MP3倍速1.5×/恢复1×、实际越界ID3章节的导入失败隔离与详情提示两个必测子项已补齐，无新增产品缺陷或工具代码。证据0a8e7da3/android-audio-rate-20260908与audio-chapter-bounds-20260908/result.json；详细边界和清理见evidence。下一项剩余音频四格式异常/平台入口；睡眠范围待负责人、原Chrome五候选/iOS/容器/工具限制、正式包暂缓和最终RC仍未完成，R2保持。
+
 2026-09-08 IMPORT-06 CLOSED：7ac595aa原截断MP3真机详情明确导入失败、不可打开，正常详情相邻及定向映射/空目录反例通过；证据cc2579dc/audio-corrupt-20260908/green/result.json，已完成收尾。Android睡眠能力范围问题等待负责人答复，不阻塞其他音频必测；Chrome五候选/iOS/容器/工具限制、正式包暂缓及最终同冻结RC仍未完成，R2保持。
 
 2026-09-08 IMPORT-06 OPEN（RG-02 IMP-03 / RG-03 AUD-X）：96B截断MP3实际导入FAILED，正常同级MP3 READY/原件完整；普通Android详情仅提示当前目录为空/没有可读资源，GET book明确failed=1。现有汇总映射/详情展示最小候选处理中，原场景未关闭。证据cc2579dc/audio-corrupt-20260908/detail.png/xml、bad-detail、tasks、intact-book；不改后端隔离或新建工具。Android睡眠暂不可用与README/门禁平台承诺歧义已集中问负责人，等待期间继续该显示缺陷。
