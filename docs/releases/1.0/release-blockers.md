@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-07 COM-DIR Android正常阅读/确认后冷恢复子项补齐，无新增产品缺陷或测试工具：六张实际PNG/JPEG顺序、末页边界及冷恢复第5页通过，详见evidence及bbb3fd71/android-image-directory-20260907/result.json。复杂/坏页及W/I保持未验，下一项复用既有入口处理这些缺口；不再将整个IMAGE_DIR记为缺正常样本。Chrome五项原UI、iOS风险/ENV-02、容器与工具限制、正式包暂缓和最终同冻结RC仍未完成。
+
 2026-09-07 SYNC-07 iOS静态风险保留（未复现、未修改实现）：取消/500ms延后与异步保存次序需要共同处理，实际编译/验证受ENV-02阻塞，不能仅删延迟后标修复。架构文档过时尾部防抖要求已按现有门禁纠正；Docker info仍为Linux引擎管道缺失，ENV-08保持。下一可执行项Android IMAGE_DIR，其他平台缺失不阻塞其执行，详见evidence。
 
 2026-09-07 SYNC-07 Android CLOSED：937b325b原PDF持续翻页的5/10秒新位置保存及服务端持续确认通过，受影响EPUB/漫画普通连续操作、最终完整持久状态与PDF重建恢复相邻通过。详见evidence首条及937b325b/reader-capture-windows-20260907/result.json，停止本缺陷Android扩验。iOS同类代码仍为待处理静态风险，ENV-02无法编译/设备验收；Chrome五项原UI及其他矩阵缺项、容器环境、正式包暂缓与最终同RC要求保持。当前R2、RC未冻结。

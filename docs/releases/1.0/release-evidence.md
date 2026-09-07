@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 COM-DIR Android正常子项PASS（API bbb3fd71、普通开发APK937b325b；无业务/测试工具修改）：复用已有CBZ六张不同PNG/JPEG作为独立专用IMAGE-DIR输入，附README.md不作漫画页。真实API/Worker创建资源py_a3f06e0…为IMAGE_DIR、六个PAGE资产；普通首页最近入库→详情→开始阅读，顺序1～6实际图像均查看，HTTP页码逐页对应。末页再点下一页仍6/6，上一页到5/6、确认r7后正常关闭并强停；冷首页80%继续恢复第5张实际图像，服务端r8完整position与关闭前相同。六图片HTTP原件逐字节匹配源文件，全套源hash及API hash不变。
+
+证据`artifacts/releases/1.0/bbb3fd71/android-image-directory-20260907/`：source/installed、created/tasks/books、navigation、page2～6与cold-open图、before-close、before-cold.db/json、after-cold.db/json、final-http、originals、result。关闭前本地confirmed7/pending空且capturedAt与r7一致；冷恢复后最终收尾晚于有界服务退出，生命周期另生成同位置pending，本地confirmed8且pending存在，不能宣称最终清空。原临时观察错误假设libraryId可筛/api/books，已按实际签名和精确book/resource身份修正；另after-cold.json被临时解析步骤覆盖为设备local/sync，后续final-http是API重启后的独立读取，不冒充原时点回包。限制详见observation-limit.txt，保留实际截图/数据库，不为补采样重演正常UI。会话80699终态0、API/Worker均停止；单次收尾API正常退出，cleanup记录专用设备文件/reverse清理及方向恢复，用户数据不动。本轮未量测冷启时限，不外推复杂目录/长图/坏图、W/I及同冻结RC；下一项剩余图片目录复杂/坏页必测，优先复用既有素材与入口。
+
 2026-09-07 SYNC-07 iOS只读核对：三个Ios*ReaderSession的位置事件均取消pendingSave再延后500ms；EPUB还在save前await资源检查，存储actor/KMP上传单飞并不替Swift事件排序。因此不可仅去掉sleep并放任多Task并发保存；flush/close需与在途本地保存顺序一起验证。此为代码风险，尚未真机复现，也未修改iOS实现；ENV-02缺Mac/Xcode/真机，保留待修正/定向编译与原场景验收，禁止用Android通过关闭。现有ReaderPersistenceTests和ReaderSecurityTests可承担定向相邻，不开发通用调度/测试框架。架构文档§7/§11过时“500ms trailing debounce”已按冻结保存上限纠正，机器阈值/协议未改。Docker只读info再次确认dockerDesktopLinuxEngine管道不存在，ENV-08保持；下一项Android IMAGE_DIR普通阅读，复用既有样本。
 
 2026-09-07 SYNC-07 Android CLOSED（源码937b325b）：原PDF连续翻页场景复测，48次/0.25秒输入期间5/10秒真实正文变化且HTTP从r23到r43/r63、最终r71；最大观察确认变化间隔0.75秒。相同仪器用例在旧包第5秒无新capture失败，在新包真实SDK连续导航下第5/10秒SQLite新capture及时保存通过，原PDF页数/重建恢复相邻亦通过。直接原因及最小修复见下条，不再扩验此缺陷。
