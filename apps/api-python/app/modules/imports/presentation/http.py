@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Literal
@@ -19,6 +20,7 @@ from app.bootstrap.imports import (
     get_import_task,
     get_library,
     get_library_by_root_path,
+    get_library_root_resolver,
     library_has_topology,
     list_import_tasks_page,
     list_libraries,
@@ -65,7 +67,7 @@ from app.modules.imports.presentation.schemas import (
     UpdateLibraryRequest,
 )
 from app.modules.imports.presentation.writes import router as writes_router
-from app.modules.imports.public import parse_release_title, resolve_library_root_path
+from app.modules.imports.public import parse_release_title
 from app.modules.library.public import LibraryOrganizationMode
 from app.schemas.responses import fail, ok
 from app.services.system_events import prepare_system_event
@@ -227,6 +229,9 @@ def library_tree(
 def create_library(
     payload: CreateLibraryRequest,
     request: Request,
+    resolve_root: Annotated[
+        Callable[[object], Path], Depends(get_library_root_resolver)
+    ],
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
@@ -244,7 +249,7 @@ def create_library(
     if user is None:
         return fail("当前用户无权管理书库", status_code=403)
     try:
-        root_path = str(resolve_library_root_path(payload.root_path))
+        root_path = str(resolve_root(payload.root_path))
     except LibraryPathError as exc:
         return fail(str(exc), status_code=exc.status_code, code=exc.code)
     if get_library_by_root_path(db, root_path) is not None:
@@ -293,6 +298,9 @@ def update_library(
     library_id: str,
     payload: UpdateLibraryRequest,
     request: Request,
+    resolve_root: Annotated[
+        Callable[[object], Path], Depends(get_library_root_resolver)
+    ],
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
@@ -332,7 +340,7 @@ def update_library(
         )
     if "rootPath" in values:
         try:
-            root_path = str(resolve_library_root_path(values["rootPath"]))
+            root_path = str(resolve_root(values["rootPath"]))
         except LibraryPathError as exc:
             return fail(str(exc), status_code=exc.status_code, code=exc.code)
         if get_library_by_root_path(db, root_path, exclude_id=library_id) is not None:

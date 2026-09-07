@@ -6,7 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.modules.imports.public import LibraryPathError, resolve_library_root_path
+from app.modules.imports.infrastructure.library_root import resolve_library_root_path
+from app.modules.imports.public import LibraryPathError
 
 
 def test_scandir_permission_error_overrides_readable_access(tmp_path: Path) -> None:

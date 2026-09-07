@@ -8,6 +8,9 @@ which ORM adapter owns them; task processing is exclusively delegated to
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from pathlib import Path
+
 from sqlalchemy.orm import Session
 
 from app.bootstrap.readable_resource_pipeline import (
@@ -50,6 +53,7 @@ from app.modules.imports.infrastructure.library_queries import (
     list_library_access_user_ids,
     source_node_library_id,
 )
+from app.modules.imports.infrastructure.library_root import resolve_library_root_path
 from app.modules.imports.infrastructure.library_scan_settings import (
     SqlAlchemyLibraryScanSettingsRepository,
 )
@@ -65,6 +69,10 @@ from app.modules.imports.infrastructure.readable_resource.worker import (
 from app.modules.imports.infrastructure.uploaded_file_publication import (
     AtomicUploadedFilePublisher,
 )
+
+
+def get_library_root_resolver() -> Callable[[object], Path]:
+    return resolve_library_root_path
 
 
 def persist_import_library_create(
@@ -136,6 +144,7 @@ __all__ = [
     "get_import_task",
     "get_library",
     "get_library_by_root_path",
+    "get_library_root_resolver",
     "get_library_scan_settings",
     "library_has_topology",
     "list_enabled_library_rows",

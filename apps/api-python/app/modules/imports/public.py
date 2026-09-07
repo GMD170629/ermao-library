@@ -45,7 +45,6 @@ from app.modules.imports.application.save_uploaded_files import (
 )
 from app.modules.imports.domain.library_scan_schedule import LibraryScanSettings
 from app.modules.imports.domain.scan_policy import MissingEntryPolicy
-from app.modules.imports.infrastructure.library_root import resolve_library_root_path
 
 __all__ = [
     "SUPPORTED_AUDIO_EXTS",
@@ -75,7 +74,6 @@ __all__ = [
     "library_directory_tree_node",
     "normalize_identity_part",
     "parse_release_title",
-    "resolve_library_root_path",
     "safe_upload_filename",
     "target_directory_from_path",
 ]
