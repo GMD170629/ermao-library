@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 SYNC-06 iOS同类风险候选：IosReaderComposition将已有typed bootstrap Failure传给既有IosReaderProgressSessionCoordination，仅recoverable=true保留confirmed-local恢复许可；EPUB/PDF/comic的既有local分支消费同一许可。显式目标、pending、server优先级及成功空snapshot从起点语义保留，不改变存储/同步协议或安全权限处理。复用原ReaderSecurityTests物理EPUB方法的样本、数据库和窗口，追加可恢复失败/成功空快照/不可恢复失败三个session对照，前置confirmedRevision>0、pending=nil、首末实际Locator不同；原上传完整Locator断言保留。无新通用工具。
+
+证据`artifacts/releases/1.0/5755e740/ios-offline-restore-20260907/`含candidate.json/patch与readium-check.log。主任务及独立只读检查无阻断发现；Readium3.9.0版本/lock/runtime/policy检查PASS仅为静态检查。当前无swift/xcodebuild、ENV-02，未编译、未执行上述测试或真实断服务路径；测试viewport就绪后位置是否已稳定也留待真实运行判定，不以此先扩等待工具。状态为修复候选已提交、原场景待验证；Android已关闭结果保持。下一可执行项：核实现环境下既有Chrome SYNC-02原授权命令是否可运行；仍拒绝则保留对应阻塞，不换入口绕过。
+
 2026-09-07 SYNC-06 Android原失败CLOSED，候选ebb4e3eaf4af531742d47ee3b9593717a45b1cb6。证据`artifacts/releases/1.0/ebb4e3ea/epub-offline-fix-20260907/`：普通开发APK SHA-256 `e546384a79bdd5f623fa6581aaccadb6fa9bff81a4fd70761d3ae554e1ff0d99`，原选择器6PASS及编译结果见041bf084/epub-service-offline-20260907/startup-targeted.xml/log。
 
 实际原路径：先由普通UI将旧失败留下的第一章pending重新读到第二章；confirmed-before-stop.json独立HTTP确认r9完整第二章；device-before-stop.json/数据库两次一致副本确认本地同章、confirmedRevision9、pending=null。随后受控停API（shutdown.json stopped=true，运行会话已终止），首页50%→继续→offline-settled.xml/png真实第二章50%，已人工查看。首次可读采样10.657s，包含查询失败等待，非精确启动耗时；不将其冒充音频2秒位置阈值。强停后device-after-reopen.json确认完整本地Locator仍第二章；未重启API、不声称离线后产生远端ACK。API495文件hash未变，result.json记录范围及清理：只清16个ermao-epubr专用设备截图/XML、只停止releasecheck、移除18084 reverse，设备库与测试样本保留。原RED和首次界面转场未生成XML的观察均保留，无工具功能扩展。

@@ -287,7 +287,7 @@ final class IosComicReaderSession: NSObject, ObservableObject {
             opaque = local?.position.locator
         } else if let remote {
             opaque = remote.position.locator
-        } else if progressCoordination == nil {
+        } else if progressCoordination == nil || progressCoordination?.allowsConfirmedLocalRestore == true {
             opaque = local?.position.locator
         } else {
             opaque = nil

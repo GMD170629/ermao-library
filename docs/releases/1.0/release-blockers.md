@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-07 SYNC-06 iOS静态同类风险最小候选已准备：typed recoverable bootstrap失败允许既有三引擎confirmed-local恢复，成功空/不可恢复与既有优先级保持。现有物理EPUB用例补三种bootstrap状态，不新增工具；版本检查PASS。无Xcode/真机，编译和原场景仍ENV-02 BLOCKED，不能标iOS CLOSED。详细证据5755e740/ios-offline-restore-20260907，下一项现环境Chrome既有授权原命令可行性核验。
+
 2026-09-07 SYNC-06 Android原失败CLOSED（ebb4e3ea）：停止API前独立HTTP确认r9第二章，设备库确认revision9且pending=null；受控API终止后普通首页继续恢复第二章50%，强停后本地完整Locator仍为第二章。原selector优先级/反例6PASS及Android编译证据复用，不扩全量。证据ebb4e3ea/epub-offline-fix-20260907/result.json，详细限制见evidence。iOS对应bootstrap失败折叠及三引擎恢复放弃local的静态同类风险待处理，未真机复现，不因Android通过关闭iOS。
 
 当前状态：R2、RC未冻结；RG-05按负责人接受的本机导入预检范围PASS，RG-01～04仍PARTIAL。明确五项Chrome候选待原UI：SYNC-02、READER-05/06/07、IMPORT-02；其余矩阵未验项不是五项之内。ENV-02 iOS、ENV-08容器及ENV-11/12/13对应浏览器操作限制保持；正式包用户暂缓。下一可执行项为iOS同类启动恢复路径的最小修正评估，随后继续剩余必测，不重跑已关闭Android原场景。

@@ -360,7 +360,8 @@ final class IosReaderComposition: ObservableObject {
             )
             progressStore = progressRuntime.store
             // The session resolves the fixed v5 priority: explicit target,
-            // durable local pending, server snapshot, then publication start.
+            // durable local pending, server snapshot, then confirmed local
+            // only when the bootstrap query failed recoverably, otherwise start.
             // No conflict rebasing or Locator comparison is performed here.
             progressCoordination = IosReaderProgressSessionCoordination(
                 runtime: progressRuntime,
@@ -368,7 +369,8 @@ final class IosReaderComposition: ObservableObject {
                 target: target,
                 server: serverPort,
                 clientID: localIdentity.clientId,
-                bootstrapSnapshot: remoteSnapshot
+                bootstrapSnapshot: remoteSnapshot,
+                bootstrapFailure: result as? ErmaoShared.ReaderBootstrapResultFailure
             )
         } catch {
             progressStore = IosNonBlockingReaderProgressStore()

@@ -1117,9 +1117,9 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
             selected = pending.position
         } else if let remote {
             selected = remote.position
-        } else if progressCoordination == nil {
-            // Local-only test/import sessions have no server synchronization
-            // authority; their local v5 report is the only possible source.
+        } else if progressCoordination == nil || progressCoordination?.allowsConfirmedLocalRestore == true {
+            // Use local state for local-only sessions or a recoverable query
+            // failure; a successful empty server snapshot still starts fresh.
             selected = local?.position
         } else {
             selected = nil

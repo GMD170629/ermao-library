@@ -250,7 +250,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
             locator = local?.position.locator
         } else if let remote {
             locator = remote.position.locator
-        } else if progressCoordination == nil {
+        } else if progressCoordination == nil || progressCoordination?.allowsConfirmedLocalRestore == true {
             locator = local?.position.locator
         } else {
             locator = nil

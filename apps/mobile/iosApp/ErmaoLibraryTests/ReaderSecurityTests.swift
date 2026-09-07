@@ -146,14 +146,15 @@ final class ReaderSecurityTests: XCTestCase {
             databaseURL: root.appendingPathComponent("ReaderV5.sqlite3")
         )
         let port = PhysicalReaderV5PositionPort()
+        let target = ErmaoShared.ReaderProgressSyncTarget(
+            namespace: namespace,
+            bookId: "reader-v5-book",
+            resourceId: "reader-v5-physical",
+            sourceFormat: .epub
+        )
         let runtime = ErmaoShared.PublicKt.createReaderPositionSyncRuntime(
             stateStore: database,
-            target: ErmaoShared.ReaderProgressSyncTarget(
-                namespace: namespace,
-                bookId: "reader-v5-book",
-                resourceId: "reader-v5-physical",
-                sourceFormat: .epub
-            ),
+            target: target,
             server: port
         )
         let session = IosReflowableReaderSession(
@@ -192,6 +193,7 @@ final class ReaderSecurityTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(100))
         }
         XCTAssertNotNil(session.navigator?.viewport)
+        let firstReadiumLocator = try XCTUnwrap(session.navigator?.currentLocation)
         let movedToLastPage = await session.seekControlProgress(1)
         XCTAssertTrue(movedToLastPage)
         try await Task.sleep(for: .milliseconds(750))
@@ -212,6 +214,61 @@ final class ReaderSecurityTests: XCTestCase {
             try canonicalJSONObjectData(readiumLocator.jsonString()),
             "The upload must contain the same Locator emitted by Readium at the last page"
         )
+
+        // SYNC-06: reuse the real publication and confirmed local report.
+        // No pending mutation may mask the confirmed-local fallback on reopen.
+        let saved = try XCTUnwrap(local)
+        XCTAssertNotNil(firstReadiumLocator.locations.position)
+        XCTAssertNotNil(readiumLocator.locations.position)
+        XCTAssertNotEqual(firstReadiumLocator.locations.position, readiumLocator.locations.position)
+        try await session.close()
+        runtime.close()
+        let failures: [ErmaoShared.ReaderBootstrapResultFailure?] = [
+            ErmaoShared.ReaderBootstrapResultFailure(failureCode: "NETWORK_UNAVAILABLE", recoverable: true),
+            nil, // Successful bootstrap with no remote progress.
+            ErmaoShared.ReaderBootstrapResultFailure(failureCode: "AUTH_REQUIRED", recoverable: false),
+        ]
+        for failure in failures {
+            let reopenedRuntime = ErmaoShared.PublicKt.createReaderPositionSyncRuntime(
+                stateStore: database, target: target, server: port
+            )
+            try await reopenedRuntime.store.save(position: saved)
+            try await reopenedRuntime.store.awaitPendingUpload()
+            let beforeReopen = try await reopenedRuntime.store.syncState()
+            XCTAssertNil(beforeReopen.pending)
+            XCTAssertGreaterThan(beforeReopen.confirmedRevision, 0)
+            let coordination = IosReaderProgressSessionCoordination(
+                runtime: reopenedRuntime, database: database, target: target, server: port,
+                clientID: identity.clientId, bootstrapSnapshot: nil, bootstrapFailure: failure
+            )
+            let reopened = IosReflowableReaderSession(
+                resourceID: "reader-v5-physical",
+                displayTitle: "Reader v5 physical EPUB",
+                sourceFormat: .epub,
+                managedStore: managedStore,
+                progressStore: reopenedRuntime.store,
+                progressCoordination: coordination,
+                namespaceKey: "reader-v5-test",
+                bookID: "reader-v5-book",
+                deviceIdentity: deviceIdentity
+            )
+            addTeardownBlock { try await reopened.close() }
+            window.rootViewController = UIHostingController(
+                rootView: IosReflowableReaderView(session: reopened)
+            )
+            await reopened.open()
+            for _ in 0 ..< 100 where reopened.navigator?.viewport == nil {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            XCTAssertNotNil(reopened.navigator?.viewport)
+            XCTAssertEqual(reopened.phase, .reading)
+            XCTAssertNil(reopened.presentationError)
+            let actual = try XCTUnwrap(reopened.navigator?.currentLocation)
+            let expected = failure?.recoverable == true ? readiumLocator : firstReadiumLocator
+            XCTAssertEqual(actual.href, expected.href)
+            XCTAssertEqual(actual.locations.position, expected.locations.position)
+            try await reopened.close()
+        }
     }
 
     @MainActor

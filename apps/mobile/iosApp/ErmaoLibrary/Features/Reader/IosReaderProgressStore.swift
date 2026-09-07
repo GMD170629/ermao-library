@@ -13,6 +13,8 @@ final class IosReaderProgressSessionCoordination: ObservableObject {
     var noticeHandler: ((ErmaoShared.ReaderProgressSnapshotV5?) -> Void)?
 
     let runtime: ErmaoShared.ReaderPositionSyncRuntime
+    // A failed query is distinct from a successful, empty server snapshot.
+    let allowsConfirmedLocalRestore: Bool
     private let database: IosReaderLocalDatabase
     private let target: ErmaoShared.ReaderProgressSyncTarget
     private let server: ErmaoShared.ReaderPositionServerPort
@@ -29,13 +31,15 @@ final class IosReaderProgressSessionCoordination: ObservableObject {
         target: ErmaoShared.ReaderProgressSyncTarget,
         server: ErmaoShared.ReaderPositionServerPort,
         clientID: String,
-        bootstrapSnapshot: ErmaoShared.ReaderProgressSnapshotV5?
+        bootstrapSnapshot: ErmaoShared.ReaderProgressSnapshotV5?,
+        bootstrapFailure: ErmaoShared.ReaderBootstrapResultFailure? = nil
     ) {
         self.runtime = runtime
         self.database = database
         self.target = target
         self.server = server
         self.clientID = clientID
+        allowsConfirmedLocalRestore = bootstrapFailure?.recoverable == true
         runtime.coordinator.beginSession(snapshot: bootstrapSnapshot)
         networkMonitor.pathUpdateHandler = { [weak self] path in
             guard path.status == .satisfied else { return }
