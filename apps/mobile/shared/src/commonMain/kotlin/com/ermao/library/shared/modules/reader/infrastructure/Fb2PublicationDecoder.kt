@@ -275,7 +275,7 @@ private class Fb2Renderer(private val imageHrefs: Map<String, String>) {
     }
 
     fun render(resource: Fb2Resource): String = resource.section?.let { renderSection(it, 1) }
-        ?: "<section>${renderContent(resource.root.content, emptyList(), 1)}</section>"
+        ?: "<section>${renderElement(resource.root)}</section>"
 
     private fun renderSection(section: Fb2Section, depth: Int): String = buildString {
         val heading = depth.coerceAtMost(6)
@@ -313,7 +313,7 @@ private class Fb2Renderer(private val imageHrefs: Map<String, String>) {
 
     private fun renderElement(element: Fb2Element): String {
         val name = element.name
-        if (name in setOf("section", "title", "binary")) return ""
+        if (name in setOf("section", "binary")) return ""
         if (name == "empty-line") return "<br/>"
         if (name == "image") {
             val href = imageHrefs[element.attribute("href").orEmpty().removePrefix("#")] ?: return ""

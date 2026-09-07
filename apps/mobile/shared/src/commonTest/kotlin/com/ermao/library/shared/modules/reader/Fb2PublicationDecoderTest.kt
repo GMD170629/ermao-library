@@ -10,6 +10,35 @@ import kotlin.test.assertTrue
 
 class Fb2PublicationDecoderTest {
     @Test
+    fun bodyTitleBeforeFirstSectionProducesReadableFirstResource() {
+        val decoder = Fb2PublicationDecoder()
+        decoder.element("FictionBook") {
+            element("body") {
+                element("title") { element("p") { text("This is a title") } }
+                element("section") {
+                    element("title") { element("p") { text("Test Header h1") } }
+                    element("p") { text("A test paragraph.") }
+                }
+            }
+        }
+
+        val publication = decoder.finish("Sample FB2 book", emptyList())
+        assertEquals(
+            listOf("fb2/body-1-part-1.xhtml", "fb2/section-0001.xhtml"),
+            publication.resources.map { it.href },
+        )
+        assertEquals(
+            "<section><p>This is a title</p></section>",
+            publication.resources.first().xhtml.substringAfter("<body>").substringBefore("</body>"),
+        )
+        assertEquals(
+            "<section id=\"chapter-node-4\"><h1>Test Header h1</h1><p>A test paragraph.</p></section>",
+            publication.resources.last().xhtml.substringAfter("<body>").substringBefore("</body>"),
+        )
+        assertTrue(publication.tableOfContents.isEmpty())
+    }
+
+    @Test
     fun nestedSectionAndOriginalIdsKeepGlobalSourceOrdinals() {
         val decoder = Fb2PublicationDecoder()
         decoder.element("FictionBook") {
@@ -59,6 +88,14 @@ class Fb2PublicationDecoderTest {
                     text(" after nested")
                 }
                 text("\nAfter ")
+                element("title") {
+                    element("p") {
+                        text("Title & ")
+                        element("strong") { text("<bold>") }
+                        text(" tail")
+                    }
+                }
+                text("\n")
                 element("p") { text("last") }
             }
         }
@@ -81,8 +118,15 @@ class Fb2PublicationDecoderTest {
         assertTrue(section.indexOf(" tail") < section.indexOf("<section id=\"chapter-node-6\">")
         )
         assertTrue(section.indexOf("nested text") < section.indexOf(" after nested"))
-        assertTrue(last.contains("After "))
-        assertTrue(last.contains("<p>last</p>"))
+        assertEquals(
+            "<section id=\"chapter-node-3\"><h1>One</h1>lead <p>inside</p> tail" +
+                "<section id=\"chapter-node-6\"><h2>Nested</h2>nested text</section> after nested</section>",
+            section.substringAfter("<body>").substringBefore("</body>"),
+        )
+        assertEquals(
+            "<section>\nAfter <p>Title &amp; <strong>&lt;bold&gt;</strong> tail</p>\n<p>last</p></section>",
+            last.substringAfter("<body>").substringBefore("</body>"),
+        )
         assertTrue(publication.tableOfContents.isEmpty())
     }
 
