@@ -1,5 +1,13 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 Android MOBI6/KF8普通阅读子项PASS（6f73ef35，无新增确证业务缺陷）：三份原始fixture正常入库READY；MOBI6三章正文/目录显示，KF8三个独立章节正文、三级目录层级和卷二目标阅读，确认r5后强停/冷首页33%继续恢复卷二且完整position与r6一致；KF8内嵌PNG/JPEG实际显示。详见evidence首节。MOBI/AZW3不再整体按缺样本阻塞；AZW/PRC独立来源、复杂锚点/异常/其他平台仍待，未冻结RC。
+
+证据：artifacts/releases/1.0/6f73ef35/android-mobi-20260907/，samples/source/installed-apk、library-response/tasks/books、first与toc、kf8-first/toc-selected/second/leaf/cold-reader图像和XML、kf8-before-cold/final-http/checks/shutdown。复用已安装开发包45bde42d300f4c8798c5f0c1398203b91e679c77d34d203da473be07a86a439d（d7ab754f业务源码；后续仅文档），未构建或交付正式APK。现有Windows运行环境缺MOBI库，通过Zig0.14.1按仓库CMake同15个源、相同宏及USE_MINIZ构建隔离DLL，ABI1加载成功；native-build.log/native-library.json留证。已有API/Worker以ERMAO_MOBI_CORE_LIBRARY接入，三个实际publication/part00000.html均200 text/html，未改产品或通用工具。
+
+三份源与仓库SHA256SUMS一致，MOBI6 10196B、目录KF8 12101B、图片KF8 330000B；原件HTTP散列一致，495 API源码不变。实际图像资源PNG840×480与JPEG720×540经HTTP/PIL解码，画面上的“420×240/360×270”是作者绘制的文字，不是实际像素；正文仅引用这两张，不能把容器另两图资源计作四张正文已显示。KF8位置为part00001.html/position2/progression0/totalProgression1/3，冷恢复正文包含TOC_LEVEL_3_B，不仅检查百分比；未测恢复时限。MOBI6及单章短正文均可一屏显示，三级锚点精确跨页定位不据此PASS。目录点击异步截图/一次多余右侧点击进入附录的过程保留，非错误跳章证据；原三级叶目标截图仍有spinner，随后无spinner、正文及冷恢复正确，只计目标章节，不据此关闭完整锚点项。
+
+本轮不新增测试辅助代码/业务补丁；只读子任务核对fixture契约，由主代理核对实际截图与HTTP。API无5xx；当前冷启App日志无FATAL EXCEPTION，保留一条WebView network-context sandbox文件不存在的非致命日志，不声称全生命周期日志零警告。API/Worker自有session68247已exit0、两PID stopped；App强停、仅本轮/sdcard/ermao-mobi-*明确文件及18084反向转发清理。原用户改动保留。下一项继续剩余MOBI异常/实际变体及必要锚点；五项Chrome候选待原UI、iOS/容器/上传限制及正式包暂缓保持。
+
 2026-09-07漫画容量边界子项PASS（d7ab754f，无新增业务缺陷）：复用现有ReaderRarInstrumentedTest真机三项通过，超单页字节隔离且保留可读页、高压缩比拒绝、RAR5/CBR原生正常读取相邻有效；原backend comic_archives单文件20项通过，确认页/封面预算在读取前执行。未扩任何通用工具或新增测试入口。
 
 页数实际边界：机器契约读取上限10000，复用现有RAR4 fixture中经PIL校验的16×16/1279B PNG，按原字节重复成10000/10001 ZIP_STORED页，原件约13.73MB，SHA见samples.json。正常API新建专用库/Worker：LIMIT READY10000页，OVER明确页数超限失败，不影响正常同级。manifest真实wire1376919B，HTTP首/末图均与原件一致；新隔离开发APK SHA-256 45bde42d300f4c8798c5f0c1398203b91e679c77d34d203da473be07a86a439d已包含d7ab754f原生分类修复，实际详情10000页、普通打开图像、拖至末页后完整确认r2/pages/9999/page10000of10000。OVER普通详情无可读资源且开始按钮enabled=false，公开进度GET404。证据d7ab754f/comic-budgets-20260907的android/backend日志与XML、samples/tasks/catalog/manifest/http-pages、ready/last图像与XML、last-progress/final-http/checks/installed-apk/signature。

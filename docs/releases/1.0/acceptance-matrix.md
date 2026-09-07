@@ -1,5 +1,7 @@
 # 1.0 发布验收矩阵
 
+2026-09-07 Android MOBI6/KF8普通阅读子项PASS（6f73ef35，无新增确证业务缺陷）：三份原始fixture正常入库READY；MOBI6三章正文/目录显示，KF8三个独立章节正文、三级目录层级和卷二目标阅读，确认r5后强停/冷首页33%继续恢复卷二且完整position与r6一致；KF8内嵌PNG/JPEG实际显示。详见evidence首节。MOBI/AZW3不再整体按缺样本阻塞；AZW/PRC独立来源、复杂锚点/异常/其他平台仍待，未冻结RC。
+
 2026-09-07漫画预算增量：Android既有超页字节隔离/高压缩比拒绝及正常RAR相邻PASS；真实10000页CBZ新库导入/普通打开/末页完整确认与10001页导入拒绝/不可读界面PASS。重复小图仅作容量，不外推视觉/性能/其他平台或最终RC，证据d7ab754f/comic-budgets-20260907，详见evidence。
 
 2026-09-07 RISK-09：真实Android ARM64归档引擎加密/截断检测码前后及共享分类定向验证已闭环，具体层级/限制见evidence；不据此覆盖普通新APK异常界面、iOS或完整格式矩阵。
@@ -169,9 +171,9 @@ R1 / DEC-05：用户批准 1.0 不支持第三方进度同步，OPDS-04 原互�
 | 组 ID（RG-03） | 源格式 / N与C真实样本要求（ID槽） | 平台/前置 | 步骤与预期 | X样本 | 状态/关联 |
 |---|---|---|---|---|---|
 | REF-EPUB | EPUB-N：真实章节；EPUB-C：嵌套目录、图文、非平凡布局 | W/A/I；P2 | R，正文/目录/锚点均正确 | EPUB-X：损坏包、active markup可恢复、具体外部实体风险 | PARTIAL：Android reader-v2普通打开/翻章/确认后强停恢复PASS（00563daf/android-epub-normal-20260907）；Chrome新库正文见3a1e4193/rg02-ui-intake-20260907；复杂/异常仍待，iOS BLOCKED |
-| REF-MOBI | MOBI-N/C：实际MOBI7与复杂PalmDB/图片目录 | W/A/I；P2 | R，libmobi原格式内存出版物可读 | MOBI-X：截断/DRM | BLOCKED；ENV-06 |
+| REF-MOBI | MOBI-N/C：实际MOBI7与复杂PalmDB/图片目录 | W/A/I；P2 | R，libmobi原格式内存出版物可读 | MOBI-X：截断/DRM | PARTIAL：6f73ef35 Android真实MOBI6普通三章正文/目录显示PASS；复杂跨页锚点/异常及W/I仍待，详见evidence |
 | REF-AZW | AZW-N/C：独立实际AZW来源与内部变体证明；不只MOBI改名 | W/A/I；P2 | R，实际变体按承诺可读 | AZW-X：DRM/损坏 | BLOCKED；ENV-06、RISK-02 |
-| REF-AZW3 | AZW3-N/C：实际KF8、复杂章节图文 | W/A/I；P2 | R，目录/跨章/锚点正确 | AZW3-X：损坏/DRM | BLOCKED；ENV-06 |
+| REF-AZW3 | AZW3-N/C：实际KF8、复杂章节图文 | W/A/I；P2 | R，目录/跨章/锚点正确 | AZW3-X：损坏/DRM | PARTIAL：6f73ef35 Android KF8三章正文/层级目录、卷二确认后冷恢复与内嵌PNG/JPEG显示PASS；精确锚点/其他复杂异常及W/I仍待，详见evidence |
 | REF-PRC | PRC-N/C：实际PRC/PalmDB与复杂资源来源证明 | W/A/I；P2 | R，不能由改扩展名证明全部变体 | PRC-X：截断/DRM | BLOCKED；ENV-06、RISK-02 |
 | REF-FB2 | FB2-N/C：多section、嵌套目录与内嵌图片 | W/A/I；P2 | R，文本/图像/章节正确 | FB2-X：坏XML、可恢复active/具体实体风险 | PARTIAL：READER-08已CLOSED；055a36c1新包原前置标题及嵌套目录正文子项PASS，证据bea858b9/android-fb2-20260907；图像/异常/iOS仍待 |
 | REF-TXT | TXT-N/C：中文UTF-8、BOM UTF-16LE/BE、GB18030、混合换行、长章 | W/A/I；P2 | R；逐实际编码登记，不能一份英文UTF8代替 | TXT-X：损坏/超预算，失败类别正确 | PARTIAL：9cb26b94 Android UTF8/BOM UTF16LE/BE/GB18030正常中文正文PASS；UTF16BE混合换行/58060字符长章目录到末章及确认后冷恢复PASS（耗时未测），详见evidence；异常/其他平台仍待 |

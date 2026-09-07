@@ -1,5 +1,9 @@
 # 1.0 发布阻塞项
 
+2026-09-07 Android MOBI6/KF8普通阅读子项PASS（6f73ef35，无新增确证业务缺陷）：三份原始fixture正常入库READY；MOBI6三章正文/目录显示，KF8三个独立章节正文、三级目录层级和卷二目标阅读，确认r5后强停/冷首页33%继续恢复卷二且完整position与r6一致；KF8内嵌PNG/JPEG实际显示。详见evidence首节。MOBI/AZW3不再整体按缺样本阻塞；AZW/PRC独立来源、复杂锚点/异常/其他平台仍待，未冻结RC。
+
+下一项剩余MOBI异常/变体与锚点；原五项Chrome候选及外部条件保持，未冻结RC。
+
 2026-09-07漫画容量边界子项PASS（d7ab754f，无新增业务缺陷）：复用现有ReaderRarInstrumentedTest真机三项通过，超单页字节隔离且保留可读页、高压缩比拒绝、RAR5/CBR原生正常读取相邻有效；原backend comic_archives单文件20项通过，确认页/封面预算在读取前执行。未扩任何通用工具或新增测试入口。
 
 当前原五项Chrome候选/其他矩阵和外部条件保持，未冻结RC；下一项剩余Android可重排格式实际阅读，不扩漫画容量工具。
