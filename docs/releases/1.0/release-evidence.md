@@ -1,3 +1,9 @@
+2026-09-08 READER-22 OPEN（RG-03 COM-CBZ模式切换）：普通Android六页CBZ第4图，设置仅flow从分页改竖向连续后实际回第1图，并写入pages/0/r84；原RTL第4图完整快照与新画面/HTTP均保留。API7f2f22d7、普通APK69a5ba15/hash4c4cd6ef…；证据`7f2f22d7/comic-direction-20260908/red-result.json`、rtl-return-four与continuous-same-page/observed-position。
+
+方向子项本身PASS：3图改RTL保持，右滑4/右点3/左点4/左滑3，实际图片和完整位置相符；首次控制栏展开时边缘点击被既有逻辑屏蔽，原断言/截图保留，收起控制栏后才计有效点击，不误登记产品缺陷。分页/单页/LTR等原偏好已普通UI完整恢复；原件/HTTP hash保持，自有App/XML/reverse/API收尾，宿主23891终态0。
+
+正在现有ComicNavigatorFragment内定位连续列表图片解码前占位过小导致布局回缩的直接原因；现有几何仪器只从第1图切连续且辅助随后goTo会掩盖问题。仅补现有仪器文件中第4图只改flow、真实可见图及持久位置的针对性回归，不扩工具；原失败、必要滚动/返回分页相邻通过即停止。R2未冻结，其余阻塞保持。
+
 2026-09-08 RG-04 POS-10普通Android EPUB活动会话远端更新子项PASS，无业务修复/新测试工具。第一章r14完整local/server确认且pending空后，经最近任务退后台；使用真实API、不同clientId提交此前真机捕获的第二章完整Locator得r15。返回原Reader实际出现“其他设备已阅读至50%”提示，第一章正文与完整本地位置仍保持、服务端仍完整r15。点击普通“跳转至最新位置”后实际第二章标题/正文显示，完整local=server/r16/pending空，正常关闭后位置保持。受控HTTP仅提供远端事件，不记为另一个客户端UI交接或前台主动推送。
 
 证据`cb623422/pos10-reader-active-20260908/result.json`及前后HTTP/DB、remote-notice.png、explicit-jump-settled.png。跳转后的uiautomator XML只含章名/50%、遗漏正文节点，一次辅助断言失败；原两份XML保留，主/子实际看原图确认完整第二章，持久位置亦一致，不误登记显示缺陷、不开发新观测工具。原失败采集不当与真实产品结果分开。
