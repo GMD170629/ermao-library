@@ -1,17 +1,7 @@
 #!/bin/bash
 set -eu
 
-is_running() {
-  container_id="$(
-    docker ps \
-      --filter "label=com.docker.compose.project=ermao-books" \
-      --filter "label=com.docker.compose.service=web" \
-      --filter "status=running" \
-      --quiet 2>/dev/null | head -n 1 || true
-  )"
-
-  [ -n "$container_id" ]
-}
+. "$(dirname "$0")/docker-runtime.sh"
 
 case "${1:-}" in
   start|stop)
@@ -19,7 +9,14 @@ case "${1:-}" in
     exit 0
     ;;
   status)
-    if is_running; then
+    if ! states="$(web_container_states)"; then
+      case "${TRIM_SYS_LANGUAGE:-zh-CN}" in
+        en*) printf '%s\n' 'Cannot query application container status. Check Docker and try again.' ;;
+        *) printf '%s\n' '无法查询应用容器状态，请检查 Docker 后重试。' ;;
+      esac > "${TRIM_TEMP_LOGFILE:-/dev/stderr}"
+      exit 1
+    fi
+    if printf '%s\n' "$states" | grep -qx running; then
       exit 0
     fi
     exit 3

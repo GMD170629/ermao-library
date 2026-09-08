@@ -3,6 +3,23 @@
     "stepTitle": "初始化二毛图书",
     "items": [
       {
+        "type": "radio",
+        "field": "wizard_install_mode",
+        "label": "安装方式 / Installation mode",
+        "initValue": "update",
+        "options": [
+          { "label": "全新安装 / Fresh install", "value": "fresh" },
+          { "label": "更新 / Update", "value": "update" }
+        ],
+        "rules": [
+          { "required": true, "message": "请选择安装方式 / Select an installation mode" }
+        ]
+      },
+      {
+        "type": "tips",
+        "helpText": "全新安装会直接清空应用配置及数据（账户、书库配置、阅读进度、封面、索引、日志和会话密钥），不备份；原始书库文件保留。更新保留原有数据。0.x 无法自动升级到 v1，必须选择全新安装；选择更新将在提交后提示并终止。 / Fresh install permanently erases application settings and data (accounts, library settings, reading progress, covers, indexes, logs and session secrets), without a backup. Original library files are retained. Update preserves existing data. Upgrading from 0.x to v1 requires Fresh install; choosing Update will display an error and stop installation after submission."
+      },
+      {
         "type": "text",
         "field": "wizard_port",
         "label": "Web 访问端口",

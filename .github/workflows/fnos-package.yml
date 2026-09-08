@@ -33,6 +33,7 @@ on:
       - 'scripts/validate-release-notes.mjs'
       - 'scripts/validate-release-notes.test.mjs'
       - 'scripts/build-fnos-package.sh'
+      - 'scripts/test_fnos_installation.py'
       - 'scripts/publish-docker-hub.sh'
       - 'scripts/start-unified-app.sh'
       - 'docker-compose.yml'

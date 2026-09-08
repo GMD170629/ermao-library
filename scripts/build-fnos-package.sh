@@ -39,7 +39,9 @@ find "$PACKAGE_DIR/cmd" -type f -exec chmod 755 {} +
 chmod 755 \
   "$PACKAGE_DIR/app/docker/prepare-storage.sh" \
   "$PACKAGE_DIR/app/docker/validate-port.sh"
-bash -n "$PACKAGE_DIR"/cmd/*
+for lifecycle_script in "$PACKAGE_DIR"/cmd/*; do
+  bash -n "$lifecycle_script"
+done
 bash -n "$PACKAGE_DIR/app/docker/prepare-storage.sh"
 bash -n "$PACKAGE_DIR/app/docker/validate-port.sh"
 
@@ -166,6 +168,26 @@ for wizard_path in (install_wizard_path, upgrade_wizard_path, config_wizard_path
     patterns = [rule.get("pattern") for rule in port_item.get("rules", []) if "pattern" in rule]
     if expected_pattern not in patterns:
         raise SystemExit(f"{wizard_path} does not constrain wizard_port to 1024-65535")
+    mode_item = next(
+        (item for item in items if item.get("field") == "wizard_install_mode"), None
+    )
+    if wizard_path == config_wizard_path:
+        if mode_item is not None:
+            raise SystemExit("fnOS settings must not offer an application data reset")
+        continue
+    if (
+        mode_item is None
+        or mode_item.get("type") != "radio"
+        or mode_item.get("initValue") != "update"
+        or [option.get("value") for option in mode_item.get("options", [])]
+        != ["fresh", "update"]
+        or not any(rule.get("required") is True for rule in mode_item.get("rules", []))
+    ):
+        raise SystemExit(f"{wizard_path} must require fresh/update with an update default")
+    help_text = " ".join(item.get("helpText", "") for item in items)
+    for required_text in ("不备份", "原始书库", "0.x", "v1", "without a backup", "Original library files"):
+        if required_text not in help_text:
+            raise SystemExit(f"{wizard_path} must explain {required_text!r}")
 
 with open(install_wizard_path, encoding="utf-8") as file:
     install_steps = json.load(file)
@@ -216,8 +238,9 @@ for callback in install_callback config_callback upgrade_callback; do
   fi
 done
 
-if ! grep -Fq 'label=com.docker.compose.project=ermao-books' "$PACKAGE_DIR/cmd/main" || \
-   ! grep -Fq 'label=com.docker.compose.service=web' "$PACKAGE_DIR/cmd/main" || \
+if ! grep -Fq 'label=com.docker.compose.project=ermao-books' "$PACKAGE_DIR/cmd/docker-runtime.sh" || \
+   ! grep -Fq 'label=com.docker.compose.service=web' "$PACKAGE_DIR/cmd/docker-runtime.sh" || \
+   ! grep -Fq 'web_container_states' "$PACKAGE_DIR/cmd/main" || \
    ! grep -Fq 'exit 3' "$PACKAGE_DIR/cmd/main"; then
   echo "fnOS cmd/main does not accurately report the Docker service status" >&2
   exit 1
@@ -254,6 +277,8 @@ for invalid_port in 0 80 1023 65536 not-a-port; do
     exit 1
   fi
 done
+
+FNOS_TEMPLATE_DIR="$PACKAGE_DIR" python3 "$ROOT_DIR/scripts/test_fnos_installation.py"
 
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
   validation_dir="$BUILD_ROOT/validation"

@@ -1,7 +1,8 @@
 #!/bin/bash
 set -eu
 
-bash "$TRIM_APPDEST/docker/prepare-storage.sh"
 bash "$TRIM_APPDEST/docker/validate-port.sh"
+bash "$(dirname "$0")/install-policy.sh" apply
+bash "$TRIM_APPDEST/docker/prepare-storage.sh"
 
 exit 0

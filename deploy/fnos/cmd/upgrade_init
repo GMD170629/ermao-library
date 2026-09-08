@@ -1,4 +1,6 @@
 #!/bin/bash
 set -eu
 
+bash "$(dirname "$0")/install-policy.sh" validate
+
 exit 0
