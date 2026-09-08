@@ -1,3 +1,5 @@
+2026-09-08 INI-02/CON-02 Chrome普通权限、旧会话失效及重登子项PASS，无新缺陷/工具；原权限恢复和隔离环境收尾已核验，详见evidence首条。下一项IMP-05原中断任务普通管理入口；既有特定Chrome工具/iOS/容器阻塞、正式包暂缓及R2未冻结保持。
+
 2026-09-08 IMPORT-08 CLOSED：后端完整回归唯一架构失败已由eaa96c19修复，原架构及建库/根路径相邻验证通过；原全量FAIL与补丁定向PASS分开记录，详见evidence首条。下一项INI-02 Chrome成员权限普通界面；R2未冻结，既有外部阻塞/正式包暂缓保持。
 
 2026-09-08 RG-03 Android真实PDF JavaScript OpenAction/URI注释输入子项PASS；正文/点击/重开、固定canary零请求、原件与完整位置证据1636a6c8/pdf-active-20260908/result.json，详见evidence。无新业务缺陷/框架，不外推XFA/Launch。下一项按当前矩阵收敛剩余可执行项与既有外部阻塞，停止扩本安全样本；R2未冻结。
