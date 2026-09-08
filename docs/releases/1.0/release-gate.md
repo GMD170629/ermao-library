@@ -1,3 +1,5 @@
+2026-09-08 负责人要求提交推送当前未完成任务，已保存接续点。发布分支代码/此前证据台账已到c5743f94；R2，RC未冻结，RG-05按已接受本机预检范围PASS，RG-01～04仍PARTIAL，不能正式放行。IMP-05 HTTP/Chrome管理恢复本轮已补齐；POS-10 Android PDF仅完成第35页实读及local=server/revision72/pending空前置，远端提示/显式跳转尚未执行。详见release-evidence最新交接记录；下一项仍为该最小场景，非从R0重启。
+
 2026-09-08 IMP-05/INI-03既有真实中断后的HTTP安全重扫及Chrome管理显示子项PASS；512书/资源/资产ID、READY状态与原件hash一致，失败历史保留。证据17a70f4f/import-recovery-ui-20260908/result.json，详见evidence。无业务/工具变更；下一项Android PDF活动会话远端提示及显式跳转，设备已解锁。R2未冻结、最终同RC与既有外部限制保持。
 
 2026-09-08 RG-02补齐Chrome成员权限及旧会话失效重登的实际UI子项，证据见release-evidence首条；无业务变更。下一项IMP-05中断任务普通管理入口，R2未冻结及既有交付/外部限制保持。
