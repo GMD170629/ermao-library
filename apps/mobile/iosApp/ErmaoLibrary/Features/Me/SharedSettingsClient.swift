@@ -114,7 +114,8 @@ actor SharedSettingsClient: SettingsClient {
             id: value.id,
             displayName: value.displayName,
             email: value.email,
-            avatarURL: value.avatarUrl
+            avatarURL: value.avatarUrl,
+            avatarImageURL: value.avatarImageUrl
         )
     }
 

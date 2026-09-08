@@ -273,15 +273,14 @@ class KtorWorkManagementRepositoryTest {
     }
 
     @Test
-    fun sourceCoverCanBeReplacedOrRemovedAndBlankDescriptionIsPreserved() = runBlocking {
-        val harness = Harness(OK, OK)
-        harness.repository.saveSourcePresentation(context, "book-1", "directory-2", "目录", "", false,
-            CoverUpload("用户.png", "image/png", byteArrayOf(1, 2, 3)))
-        harness.repository.saveSourcePresentation(context, "book-1", "directory-2", "目录", "", true, null)
+    fun directorySavePreservesCoverAndBlankDescriptionWithoutUploadingAFile() = runBlocking {
+        val harness = Harness(OK)
+        harness.repository.saveSourcePresentation(context, "book-1", "directory-2", "目录", "")
         assertTrue(harness.requests.all { it.method == "PUT" && it.path == "/base/api/books/book-1/source-nodes/directory-2" })
-        assertTrue(harness.requests.first().body.contains("filename=\"cover.png\""))
         assertTrue(harness.requests.last().body.contains("name=\"description\""))
-        assertTrue(harness.requests.last().body.contains("true"))
+        val coverPart = harness.requests.single().body.split("--").single { it.contains("name=\"removeCover\"") }
+        assertEquals("false", coverPart.substringAfter("\r\n\r\n").trim())
+        assertFalse(harness.requests.single().body.contains("name=\"cover\""))
         assertFalse(harness.requests.last().body.contains("filename="))
     }
 

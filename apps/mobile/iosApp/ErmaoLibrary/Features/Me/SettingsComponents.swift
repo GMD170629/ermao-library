@@ -45,9 +45,7 @@ struct SettingsAvatarView: View {
                     .resizable()
                     .scaledToFill()
             } else {
-                Image("BrandMark")
-                    .resizable()
-                    .scaledToFill()
+                Color.clear
             }
         }
         .frame(width: size, height: size)

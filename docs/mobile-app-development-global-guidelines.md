@@ -26,6 +26,10 @@ App Shell 使用 light-only 主题；`actionAccent` 是全页唯一实心 CTA �
 
 Android 当前入口包括 `WarmPageTheme`、`WarmPageTokens`、`WarmPageScaffolds`、`WarmPageActions`、`WarmPageNavigation` 和 feature 内容组件；iOS 入口包括 `AppTheme`、`BrandedControls`、`ContentComponents` 和 feature views。Android `WarmPageNavigationSuite` 与 iOS 紧凑 `RootTabControls` 仍需保持系统 inset、返回、键盘和无障碍语义。
 
+Android 操作按钮不得只呈现无样式文字：紧凑操作复用 `WarmPageIconAction`，需要可见说明的操作使用带图标的原生样式按钮；图标保留双语无障碍名称、禁用态及原有回调。导航列表、选项、分页编号和原生系统选择器保持各自控件语义。
+
+个人资料头像只显示账户接口返回的 `avatarImageUrl` 对应图片，默认头像由服务端统一提供；`avatarUrl` 仅标识自定义头像，用于删除入口。旧接口未提供展示字段时仅兼容其自定义头像地址。图片无法加载时不生成首字母、默认插画或自定义头像；本地待上传照片不代替账户头像，上传和删除后重新读取响应指定的图片。
+
 ## 状态、身份与安全
 
 页面必须明确 loading、empty、error、permission、unauthorized、pagination 和 retry；错误分支使用稳定 error code，不按本地化文本分支。请求、缓存和下载按当前 `serverIdentity + userId + authzVersion` namespace 隔离；Reader 进度按 Reader v5 合同的 server/user/client/book/resource 归属维护。无独立离线 Shell；只有完整校验并原子发布的本地工件可进入本地阅读或播放。

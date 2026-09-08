@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi.responses import FileResponse
-from pydantic import EmailStr, Field
+from pydantic import EmailStr, Field, model_validator
 
 from app.contracts.http import HttpContractModel, MessageError, SuccessEnvelope
 from app.contracts.http_errors import HttpContractError
@@ -25,6 +25,13 @@ class AuthUser(HttpContractModel):
         default=None,
         exclude_if=lambda value: value is None,
     )
+
+    avatar_image_url: str = Field(default="/api/auth/avatar", alias="avatarImageUrl")
+
+    @model_validator(mode="after")
+    def resolve_avatar_image(self) -> AuthUser:
+        self.avatar_image_url = self.avatar_url or "/api/auth/avatar"
+        return self
 
 
 class AuthorizationView(HttpContractModel):

@@ -635,8 +635,6 @@ private class FixtureManagementRepository : WorkManagementRepository {
         sourceNodeId: String,
         title: String,
         description: String,
-        removeCover: Boolean,
-        upload: CoverUpload?,
     ): WorkManagementResult<Unit> = error("Unexpected visual-fixture operation: saveSourcePresentation")
 
     override suspend fun regenerateBookImage(

@@ -1,10 +1,16 @@
 package com.ermao.library.features.administrativesettings
 
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -12,8 +18,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.ermao.library.ui.components.SettingsTabRow
@@ -359,7 +365,9 @@ private fun ColumnScope.SmtpSettingsForm(
         )
     }
     val valid = form.host.isNotBlank() && form.senderEmail.isNotBlank() && (form.port.toIntOrNull() ?: 0) in 1..65535
-    TextButton(onClick = { onCommand(AdministrativeCommand.TestSmtp(form.toDraft())) }, enabled = !saving && valid, modifier = Modifier.fillMaxWidth()) {
+    OutlinedButton(onClick = { onCommand(AdministrativeCommand.TestSmtp(form.toDraft())) }, enabled = !saving && valid, modifier = Modifier.fillMaxWidth()) {
+        Icon(Icons.AutoMirrored.Outlined.Send, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
         Text(AdministrativeCopy.SendTestEmail.text(locale))
     }
 }

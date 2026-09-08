@@ -9,6 +9,7 @@ export type AppSessionUser = {
   role: string;
   locale?: string;
   avatarUrl?: string | null;
+  avatarImageUrl?: string | null;
 };
 
 export type AppSessionAuthorization = {

@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -17,6 +18,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -24,9 +30,9 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -35,6 +41,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -54,19 +61,18 @@ import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.shared.modules.shelf.CreateShelfInput
 import com.ermao.library.shared.modules.shelf.ShelfCatalogEntry
 import com.ermao.library.shared.modules.shelf.ShelfCatalogScope
-import com.ermao.library.shared.modules.shelf.ShelfKind
 import com.ermao.library.shared.modules.shelf.ShelfErrorKind
+import com.ermao.library.shared.modules.shelf.ShelfKind
 import com.ermao.library.shared.modules.shelf.catalogPreview
+import com.ermao.library.ui.components.WarmPageCatalogHeader
+import com.ermao.library.ui.components.WarmPageCatalogTab
 import com.ermao.library.ui.components.WarmPageNavigationAction
 import com.ermao.library.ui.components.WarmPageScaffold
 import com.ermao.library.ui.components.WarmPageSearchField
-import com.ermao.library.ui.components.WarmPageCatalogHeader
-import com.ermao.library.ui.components.WarmPageCatalogTab
 import com.ermao.library.ui.components.WarmPageTopBarAction
 import com.ermao.library.ui.components.WarmPageTopBarRole
 import com.ermao.library.ui.theme.WarmPageThemeValues
 import java.text.NumberFormat
-import androidx.compose.ui.platform.LocalConfiguration
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -175,7 +181,9 @@ fun ShelfCatalogScreen(
                             }
                             if (page != null && page.page < page.totalPages) item {
                                 if (state.loadingMore) CircularProgressIndicator(Modifier.padding(16.dp).size(24.dp))
-                                else TextButton(onClick = onLoadMore, modifier = Modifier.fillMaxWidth()) {
+                                else OutlinedButton(onClick = onLoadMore, modifier = Modifier.fillMaxWidth()) {
+                                    Icon(Icons.Outlined.ExpandMore, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                                     Text(stringResource(if (state.paginationError == null) R.string.shelves_load_more else R.string.shelves_load_more_retry))
                                 }
                             }
@@ -243,7 +251,10 @@ private fun ShelfMessage(title: String, message: String, retry: (() -> Unit)? = 
     Column(Modifier.fillMaxWidth().padding(vertical = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(title, style = theme.typography.headline)
         Text(message, style = theme.typography.callout, color = theme.colors.textSecondary)
-        if (retry != null) TextButton(onClick = retry) { Text(stringResource(R.string.retry_action)) }
+        if (retry != null) OutlinedButton(onClick = retry) {
+            Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+            Text(stringResource(R.string.retry_action)) }
     }
 }
 
@@ -263,7 +274,10 @@ private fun ShelfCreateSheet(
             item {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.shelves_create), style = WarmPageThemeValues.typography.headline, modifier = Modifier.weight(1f))
-                    TextButton(onClick = onDismiss, enabled = !saving) { Text(stringResource(R.string.cancel_action)) }
+                    OutlinedButton(onClick = onDismiss, enabled = !saving) {
+                        Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                        Text(stringResource(R.string.cancel_action)) }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = !collection, enabled = !saving, onClick = { collection = false }, label = { Text(stringResource(R.string.tab_shelves)) })
@@ -283,9 +297,11 @@ private fun ShelfCreateSheet(
             }
             if (saveState is ShelfSaveState.Failed) item { Text(stringResource(R.string.shelves_create_failed)) }
             item {
-                TextButton(enabled = !saving && name.isNotBlank(), modifier = Modifier.fillMaxWidth(), onClick = {
+                OutlinedButton(enabled = !saving && name.isNotBlank(), modifier = Modifier.fillMaxWidth(), onClick = {
                     onSubmit(CreateShelfInput(name.trim(), description.trim(), if (collection) ShelfKind.Collection else ShelfKind.Static, if (collection) members else emptyList()))
                 }) {
+                    Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                     if (saving) CircularProgressIndicator(Modifier.size(20.dp)) else Text(stringResource(R.string.shelves_create))
                 }
             }

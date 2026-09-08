@@ -3,16 +3,20 @@ package com.ermao.library.features.administrativesettings
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Science
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -111,11 +115,14 @@ fun MetadataProviderEditScreen(
                 )
             }
             val draft = { MetadataProviderDraft(initial.provider.id, enabled, initial.provider.id.hashCode(), fieldValues, emptySet()) }
-            TextButton(
+            OutlinedButton(
                 onClick = { onCommand(AdministrativeCommand.TestMetadataProvider(initial.provider.id)) },
                 enabled = !state.mutationInFlight,
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text(AdministrativeCopy.TestProviders.text(locale)) }
+            ) {
+                Icon(Icons.Outlined.Science, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(AdministrativeCopy.TestProviders.text(locale)) }
             PrimaryAction(AdministrativeCopy.SaveConfiguration, locale, !state.mutationInFlight) {
                 onCommand(AdministrativeCommand.SaveMetadataProvider(draft()))
             }

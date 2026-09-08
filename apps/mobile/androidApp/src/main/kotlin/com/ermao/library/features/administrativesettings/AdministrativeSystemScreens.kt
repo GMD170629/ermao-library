@@ -4,22 +4,37 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Backup
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Error
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.MonitorHeart
+import androidx.compose.material.icons.outlined.Restore
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -27,15 +42,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.platform.testTag
+import com.ermao.library.ui.components.SettingsTextField
 import com.ermao.library.ui.components.WarmSettingsEmptyState
 import com.ermao.library.ui.components.WarmSettingsFilterBar
 import com.ermao.library.ui.components.WarmSettingsFilterOption
 import com.ermao.library.ui.components.WarmSettingsInlineMessage
-import com.ermao.library.ui.components.SettingsTextField
 
 @Composable
 fun OpdsScreen(
@@ -102,7 +117,10 @@ fun BackupsScreen(
     var deleteBackup by remember { mutableStateOf<BackupRecord?>(null) }
     AdministrativePage(
         AdministrativeCopy.DataAndBackups, locale, onBack, modifier,
-        toolbarActions = { TextButton(enabled = !state.mutationInFlight, onClick = { onCommand(AdministrativeCommand.CreateBackup) }) { Text(AdministrativeCopy.CreateBackup.text(locale)) } },
+        toolbarActions = { OutlinedButton(enabled = !state.mutationInFlight, onClick = { onCommand(AdministrativeCommand.CreateBackup) }) {
+            Icon(Icons.Outlined.Backup, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+            Text(AdministrativeCopy.CreateBackup.text(locale)) } },
     ) {
         PageStateContent(state, locale, onRetry) { snapshot ->
             snapshot.backups.forEach { backup ->
@@ -111,9 +129,18 @@ fun BackupsScreen(
                     Text("${if (backup.automatic) AdministrativeCopy.AutomaticallyOrganize.text(locale) else AdministrativeCopy.Manual.text(locale)} · ${backup.sizeLabel} · ${backup.createdAtLabel}")
                     Text("${backup.workCount} ${AdministrativeCopy.Works.text(locale)} · ${backup.progressCount} ${AdministrativeCopy.Progress.text(locale)} · ${backup.sourceCount} ${AdministrativeCopy.LibrarySources.text(locale)}")
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton({ onCommand(AdministrativeCommand.DownloadBackup(backup.id)) }) { Text(AdministrativeCopy.DownloadFile.text(locale)) }
-                        TextButton({ restoreBackup = backup }) { Text(AdministrativeCopy.Restore.text(locale)) }
-                        TextButton({ deleteBackup = backup }) { Text(AdministrativeCopy.Delete.text(locale), color = MaterialTheme.colorScheme.error) }
+                        OutlinedButton({ onCommand(AdministrativeCommand.DownloadBackup(backup.id)) }) {
+                            Icon(Icons.Outlined.Download, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                            Text(AdministrativeCopy.DownloadFile.text(locale)) }
+                        OutlinedButton({ restoreBackup = backup }) {
+                            Icon(Icons.Outlined.Restore, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                            Text(AdministrativeCopy.Restore.text(locale)) }
+                        OutlinedButton({ deleteBackup = backup }) {
+                            Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                            Text(AdministrativeCopy.Delete.text(locale), color = MaterialTheme.colorScheme.error) }
                     }
                 }
                 AdministrativeDivider()
@@ -152,8 +179,14 @@ private fun RestoreBackupDialog(
                 )
             }
         },
-        confirmButton = { TextButton(enabled = confirmation == "RESTORE", onClick = { onConfirm(confirmation) }) { Text(AdministrativeCopy.Restore.text(locale)) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(AdministrativeCopy.Cancel.text(locale)) } },
+        confirmButton = { OutlinedButton(enabled = confirmation == "RESTORE", onClick = { onConfirm(confirmation) }) {
+            Icon(Icons.Outlined.Restore, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+            Text(AdministrativeCopy.Restore.text(locale)) } },
+        dismissButton = { OutlinedButton(onClick = onDismiss) {
+            Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+            Text(AdministrativeCopy.Cancel.text(locale)) } },
     )
 }
 
@@ -177,8 +210,12 @@ fun DetailOrderScreen(
                     leadingContent = { Text("${index + 1}") },
                     trailingContent = {
                         Row {
-                            TextButton(enabled = index > 0, onClick = { items = items.moved(index, index - 1) }) { Text("↑") }
-                            TextButton(enabled = index < items.lastIndex, onClick = { items = items.moved(index, index + 1) }) { Text("↓") }
+                            IconButton(enabled = index > 0, onClick = { items = items.moved(index, index - 1) }) {
+                        Icon(Icons.Outlined.KeyboardArrowUp, contentDescription = AdministrativeCopy.MoveUp.text(locale))
+                    }
+                            IconButton(enabled = index < items.lastIndex, onClick = { items = items.moved(index, index + 1) }) {
+                        Icon(Icons.Outlined.KeyboardArrowDown, contentDescription = AdministrativeCopy.MoveDown.text(locale))
+                    }
                         }
                     },
                     colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
@@ -213,7 +250,10 @@ fun HealthScreen(
                 supportingContent = { Text("${snapshot.healthyCount} / ${snapshot.totalCount} ${AdministrativeCopy.Healthy.text(locale)}") },
                 colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
             )
-            TextButton({ onCommand(AdministrativeCommand.RunHealthCheck) }, enabled = !state.mutationInFlight, modifier = Modifier.fillMaxWidth()) { Text(AdministrativeCopy.RunHealthCheck.text(locale)) }
+            OutlinedButton({ onCommand(AdministrativeCommand.RunHealthCheck) }, enabled = !state.mutationInFlight, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Outlined.MonitorHeart, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(AdministrativeCopy.RunHealthCheck.text(locale)) }
             HealthGroup.entries.forEach { group ->
                 AdministrativeSection(group.copy(), locale)
                 snapshot.checks.filter { it.group == group }.forEach { check ->
@@ -273,7 +313,10 @@ fun LogsScreen(
     var level by remember(query) { mutableStateOf(query?.level) }
     AdministrativePage(
         AdministrativeCopy.SystemLogs, locale, onBack, modifier,
-        toolbarActions = { TextButton({ manageOpen = true }) { Text(AdministrativeCopy.ManageLogCapacity.text(locale)) } },
+        toolbarActions = { OutlinedButton({ manageOpen = true }) {
+            Icon(Icons.Outlined.Settings, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+            Text(AdministrativeCopy.ManageLogCapacity.text(locale)) } },
         tabs = {
             if (state.snapshot != null) {
                 WarmSettingsFilterBar(
@@ -313,11 +356,14 @@ fun LogsScreen(
                 }
                 AdministrativeDivider()
             }
-            TextButton(
+            OutlinedButton(
                 onClick = { onCommand(AdministrativeCommand.ExportLogs(snapshot.query.copy(search = search, level = level))) },
                 enabled = !state.mutationInFlight,
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text(AdministrativeCopy.ExportFilteredLogs.text(locale)) }
+            ) {
+                Icon(Icons.Outlined.Download, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(AdministrativeCopy.ExportFilteredLogs.text(locale)) }
         }
     }
     if (manageOpen) ManageLogsDialog(state, locale, onDismiss = { manageOpen = false }, onCommand = onCommand)
@@ -351,11 +397,20 @@ private fun ManageLogsDialog(
         text = {
             Column {
                 StepperRow(AdministrativeCopy.CapacityMegabytes.text(locale), locale, capacity, 10..500) { capacity = it }
-                TextButton({ clearConfirm = true }) { Text(AdministrativeCopy.ClearInformationAndWarnings.text(locale), color = MaterialTheme.colorScheme.error) }
+                OutlinedButton({ clearConfirm = true }) {
+                    Icon(Icons.Outlined.DeleteSweep, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                    Text(AdministrativeCopy.ClearInformationAndWarnings.text(locale), color = MaterialTheme.colorScheme.error) }
             }
         },
-        confirmButton = { TextButton({ onCommand(AdministrativeCommand.SaveLogCapacity(capacity)); onDismiss() }) { Text(AdministrativeCopy.SaveCapacity.text(locale)) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(AdministrativeCopy.Cancel.text(locale)) } },
+        confirmButton = { OutlinedButton({ onCommand(AdministrativeCommand.SaveLogCapacity(capacity)); onDismiss() }) {
+            Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+            Text(AdministrativeCopy.SaveCapacity.text(locale)) } },
+        dismissButton = { OutlinedButton(onClick = onDismiss) {
+            Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+            Text(AdministrativeCopy.Cancel.text(locale)) } },
     )
     if (clearConfirm) AdministrativeConfirmDialog(
         AdministrativeCopy.ConfirmClearLogs, AdministrativeCopy.ConfirmClearLogsBody, AdministrativeCopy.Delete, locale,

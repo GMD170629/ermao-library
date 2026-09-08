@@ -24,16 +24,16 @@ fun managementActions(
 ): List<ManagementMenuItem> = when (kind) {
     ManagementObject.Book -> if (canManage) listOf(
         ManagementAction.Edit, ManagementAction.Regenerate, ManagementAction.ReadingStatus,
-        ManagementAction.Recognize, ManagementAction.Rescan, ManagementAction.Delete,
+        ManagementAction.Rescan, ManagementAction.Delete,
     ).map(::ManagementMenuItem) else listOf(ManagementMenuItem(ManagementAction.ReadingStatus))
     ManagementObject.Directory -> if (canManage) listOf(
         ManagementMenuItem(ManagementAction.Edit),
         ManagementMenuItem(ManagementAction.Regenerate, hasRepresentativeResource),
-        ManagementMenuItem(ManagementAction.Recognize), ManagementMenuItem(ManagementAction.Rescan),
+        ManagementMenuItem(ManagementAction.Rescan),
     ) else emptyList()
     ManagementObject.Resource -> buildList {
         if (canManage) addAll(listOf(ManagementAction.Edit, ManagementAction.UploadCover,
-            ManagementAction.Regenerate, ManagementAction.Recognize).map(::ManagementMenuItem))
+            ManagementAction.Regenerate).map(::ManagementMenuItem))
         if (kindleSendAvailable) add(ManagementMenuItem(ManagementAction.Kindle))
         if (canManage) add(ManagementMenuItem(ManagementAction.Delete))
     }
@@ -69,15 +69,13 @@ data class ManagedDirectory(
 
 data class ManagementSnapshot(val book: ManagedBook, val resources: List<ManagedResource>, val directory: ManagedDirectory?)
 
-enum class CoverEdit { Keep, Replace, Remove }
-
 data class RecognizedField(val scope: ManagementObject, val field: ManagementField) {
     val wireValue: String get() = "${if (scope == ManagementObject.Book) "book" else "resource"}.${this.field.wireName}"
 }
 
 data class MetadataApplyOutcome(val appliedFields: List<String>, val skippedFields: List<String>, val coverStatus: String)
 
-enum class ManagementSaveStage { Metadata, Tags, Cover, Refresh }
+enum class ManagementSaveStage { Metadata, Tags, Refresh }
 
 data class ManagementChange(val bookId: String, val resourceId: String?, val deleted: Boolean, val coverChanged: Boolean, val readingStatusChanged: Boolean = false)
 

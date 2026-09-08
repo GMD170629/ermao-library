@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session
 
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.auth import (
+    build_avatar_image_store,
+    build_get_account_avatar,
     persist_account_avatar,
     persist_account_email,
     persist_account_name,
@@ -57,6 +59,7 @@ from app.core.database_errors import (
 from app.core.i18n import configured_locale
 from app.db.session import get_db, get_short_write_db
 from app.models.auth import PasswordResetToken, User, cuid, db_timestamp
+from app.modules.auth.application.avatar_delivery import AvatarUnavailable
 from app.modules.auth.application.password_authentication import normalize_login_email
 from app.modules.auth.presentation.requests import (
     LoginRequest,
@@ -168,13 +171,8 @@ def _request_app_base_url(request: Request) -> str:
 def _resolved_avatar_path(user: User, settings: Settings) -> Path | None:
     if not user.avatar_path:
         return None
-    storage_root = settings.resolved_storage_root
-    candidate = (storage_root / user.avatar_path).resolve()
-    try:
-        candidate.relative_to(storage_root)
-    except ValueError:
-        return None
-    return candidate
+    image = build_avatar_image_store(settings).uploaded_image(user.avatar_path)
+    return Path(image.path) if image is not None else None
 
 
 def _raise_avatar_update_deferred(error: OperationalError) -> None:
@@ -570,11 +568,12 @@ def get_avatar(
     user = _authenticated_user(db, request, settings)
     if user is None:
         raise BasicUnauthorizedError(MessageError(message="UNAUTHORIZED"))
-    path = _resolved_avatar_path(user, settings)
-    if path is None or not path.is_file():
-        raise BasicNotFoundError(MessageError(message="头像不存在"))
-    response = AvatarFileResponse(path, media_type="image/webp")
-    response.headers["Cache-Control"] = "private, max-age=3600"
+    try:
+        image = build_get_account_avatar(db, settings).execute(actor_id=user.id)
+    except AvatarUnavailable as exc:
+        raise BasicNotFoundError(MessageError(message="头像不存在")) from exc
+    response = AvatarFileResponse(image.path, media_type="image/webp")
+    response.headers["Cache-Control"] = "private, no-cache"
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response
 

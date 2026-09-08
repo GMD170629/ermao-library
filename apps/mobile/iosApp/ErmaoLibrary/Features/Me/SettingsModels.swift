@@ -50,6 +50,7 @@ struct SettingsAccount: Equatable, Sendable {
     let displayName: String
     let email: String
     let avatarURL: String?
+    var avatarImageURL: String? = nil
 }
 
 struct SettingsServer: Equatable, Sendable {

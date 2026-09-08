@@ -7,6 +7,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -15,12 +16,20 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Surface
+import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -57,10 +66,11 @@ import com.ermao.library.ui.components.SettingsSaveAction
 import com.ermao.library.ui.components.SettingsTabRow
 import com.ermao.library.ui.components.SettingsTextField
 import com.ermao.library.ui.components.WarmPageChoice
+import com.ermao.library.ui.components.WarmPageIconAction
 import com.ermao.library.ui.components.WarmPageSegmentedControl
-import com.ermao.library.ui.components.WarmSettingsDangerAction
 import com.ermao.library.ui.components.WarmSettingsContentState
 import com.ermao.library.ui.components.WarmSettingsContentStateKind
+import com.ermao.library.ui.components.WarmSettingsDangerAction
 import com.ermao.library.ui.components.WarmSettingsDivider
 import com.ermao.library.ui.components.WarmSettingsIcons
 import com.ermao.library.ui.components.WarmSettingsIdentityHeader
@@ -340,19 +350,23 @@ fun ProfileScreen(
                 title = account.displayName,
                 subtitle = account.email,
                 modifier = Modifier.testTag("settings-identity"),
-                avatar = { Avatar(account.displayName, state.pendingAvatar?.bytes ?: avatarBytes) },
+                avatar = { Avatar(avatarBytes) },
                 actions = {
-                    TextButton(
+                    WarmPageIconAction(
+                        icon = Icons.Outlined.PhotoCamera,
+                        label = stringResource(R.string.me_avatar_choose),
                         onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                         enabled = !state.isSaving,
                         modifier = Modifier.heightIn(min = theme.components.controls.minimumTouchTarget),
-                    ) { Text(stringResource(R.string.me_avatar_choose), style = theme.typography.button) }
+                    )
                     if (account.avatarUrl != null) {
-                        TextButton(
+                        WarmPageIconAction(
+                            icon = Icons.Outlined.Delete,
+                            label = stringResource(R.string.me_avatar_delete),
                             onClick = { confirmDelete = true },
                             enabled = !state.isSaving,
                             modifier = Modifier.heightIn(min = theme.components.controls.minimumTouchTarget),
-                        ) { Text(stringResource(R.string.me_avatar_delete), style = theme.typography.button) }
+                        )
                     }
                 },
             )
@@ -498,11 +512,16 @@ fun SecurityScreen(
         title = { Text(stringResource(R.string.logout_confirm_title)) },
         text = { Text(stringResource(R.string.logout_confirm_message, serverName)) },
         confirmButton = {
-            TextButton(onClick = { confirmLogout = false; onLogout() }) {
+            OutlinedButton(onClick = { confirmLogout = false; onLogout() }) {
+                Icon(Icons.AutoMirrored.Outlined.Logout, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                 Text(stringResource(R.string.logout_confirm_action), color = androidx.compose.material3.MaterialTheme.colorScheme.error)
             }
         },
-        dismissButton = { TextButton(onClick = { confirmLogout = false }) { Text(stringResource(R.string.cancel)) } },
+        dismissButton = { OutlinedButton(onClick = { confirmLogout = false }) {
+            Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+            Text(stringResource(R.string.cancel)) } },
     )
 }
 
@@ -583,25 +602,15 @@ fun AboutScreen(
 }
 
 @Composable
-private fun Avatar(name: String, bytes: ByteArray?) {
+private fun Avatar(bytes: ByteArray?) {
     val image = remember(bytes) { bytes?.let { decodeBoundedAvatarPreview(it) }?.asImageBitmap() }
-    Surface(
-        modifier = Modifier.size(52.dp).clip(CircleShape),
-        color = WarmPageThemeValues.colors.accentSoft,
-        shape = CircleShape,
-    ) {
-        if (image != null) {
-            Image(
-                bitmap = image,
-                contentDescription = stringResource(R.string.me_avatar_content_description),
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                Text(name.trim().take(1).ifEmpty { "?" }, style = WarmPageThemeValues.typography.sectionTitle)
-            }
-        }
+    if (image != null) {
+        Image(
+            bitmap = image,
+            contentDescription = stringResource(R.string.me_avatar_content_description),
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.size(52.dp).clip(CircleShape),
+        )
     }
 }
 
@@ -633,7 +642,10 @@ private fun InlineFailure(onRetry: (() -> Unit)? = null) {
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Text(stringResource(R.string.me_operation_failed), color = androidx.compose.material3.MaterialTheme.colorScheme.error)
-        onRetry?.let { TextButton(onClick = it) { Text(stringResource(R.string.retry_action)) } }
+        onRetry?.let { OutlinedButton(onClick = it) {
+            Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+            Text(stringResource(R.string.retry_action)) } }
     }
 }
 
@@ -649,8 +661,14 @@ private fun ConfirmationDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(title)) },
         text = { Text(stringResource(message)) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(stringResource(action)) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+        confirmButton = { OutlinedButton(onClick = onConfirm) {
+            Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+            Text(stringResource(action)) } },
+        dismissButton = { OutlinedButton(onClick = onDismiss) {
+            Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+            Text(stringResource(R.string.cancel)) } },
     )
 }
 

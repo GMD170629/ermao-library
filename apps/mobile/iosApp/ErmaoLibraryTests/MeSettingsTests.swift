@@ -161,6 +161,17 @@ final class AvatarImageProcessorTests: XCTestCase {
 
 @MainActor
 final class SettingsViewModelTests: XCTestCase {
+    func testServerDefaultLoadsWithoutACustomAvatar() async {
+        let client = SettingsClientSpy()
+        let bytes = Data("server-default-avatar".utf8)
+        await client.configureAvatar(url: "/api/auth/avatar", data: bytes, isDefault: true)
+        let viewModel = makeViewModel(client: client)
+        await viewModel.loadIfNeeded()
+        let requests = await client.requestedAvatarURLs()
+        XCTAssertEqual(requests, ["/api/auth/avatar"])
+        XCTAssertEqual(viewModel.avatarData, bytes)
+    }
+
     func testAvatarDownloadUsesTheURLReturnedByTheAccountInterface() async {
         let client = SettingsClientSpy()
         let avatarURL = "/api/auth/avatar?v=42"
@@ -430,6 +441,7 @@ private actor SettingsClientSpy: SettingsClient {
     private var passwordCalls = 0
     private let events: EventRecorder?
     private var avatarURL: String?
+    private var avatarImageURL: String?
     private var avatarContent = Data()
     private var avatarRequests: [String] = []
 
@@ -453,8 +465,9 @@ private actor SettingsClientSpy: SettingsClient {
         emailCalls
     }
 
-    func configureAvatar(url: String, data: Data) {
-        avatarURL = url
+    func configureAvatar(url: String, data: Data, isDefault: Bool = false) {
+        avatarURL = isDefault ? nil : url
+        avatarImageURL = url
         avatarContent = data
     }
 
@@ -524,7 +537,8 @@ private actor SettingsClientSpy: SettingsClient {
             id: "user-1",
             displayName: name,
             email: "reader@example.com",
-            avatarURL: avatarURL
+            avatarURL: avatarURL,
+            avatarImageURL: avatarImageURL
         )
     }
 }

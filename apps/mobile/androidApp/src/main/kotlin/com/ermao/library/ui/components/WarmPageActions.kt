@@ -14,7 +14,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -99,37 +98,6 @@ fun WarmPageSecondaryAction(
             .loadingDescription(loading, label),
     ) {
         WarmPageActionContent(label, loading, theme.colors.actionAccent, leadingIcon, trailingIcon)
-    }
-}
-
-@Composable
-fun WarmPageTextAction(
-    label: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    leadingIcon: ImageVector? = null,
-) {
-    val theme = WarmPageThemeValues
-    TextButton(
-        onClick = onClick,
-        enabled = enabled,
-        colors = ButtonDefaults.textButtonColors(
-            contentColor = theme.colors.actionAccent,
-            disabledContentColor = theme.colors.textTertiary,
-        ),
-        modifier = modifier.heightIn(min = theme.components.controls.minimumTouchTarget),
-    ) {
-        leadingIcon?.let { icon ->
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier
-                    .padding(end = theme.spacing.one)
-                    .size(theme.components.controls.iconSize),
-            )
-        }
-        Text(text = label, style = theme.typography.label)
     }
 }
 

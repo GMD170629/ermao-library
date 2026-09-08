@@ -20,7 +20,6 @@ import com.ermao.library.shared.modules.workmanagement.domain.ManagementSnapshot
 import com.ermao.library.shared.modules.workmanagement.domain.ManagementFieldValue
 import com.ermao.library.shared.modules.workmanagement.domain.RecognizedField
 import com.ermao.library.shared.modules.workmanagement.domain.MetadataApplyOutcome
-import com.ermao.library.shared.modules.workmanagement.domain.CoverEdit
 import com.ermao.library.shared.modules.workmanagement.domain.ManagementAction
 import com.ermao.library.shared.modules.workmanagement.domain.ManagementObject
 import com.ermao.library.shared.modules.workmanagement.domain.ManagementField
@@ -36,6 +35,7 @@ import com.ermao.library.shared.modules.workmanagement.application.WorkManagemen
 import com.ermao.library.shared.modules.workmanagement.createWorkManagementContext
 import com.ermao.library.shared.modules.library.ContentRequestContext
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -56,6 +56,7 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performClick
@@ -63,6 +64,7 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.unit.dp
 import com.ermao.library.ui.theme.WarmPageTheme
@@ -71,6 +73,7 @@ import org.junit.Test
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import java.util.Locale
+import java.io.File
 
 class BookManagementCoverTest {
     @get:Rule val compose = createComposeRule()
@@ -184,6 +187,53 @@ class BookManagementCoverTest {
         compose.onNodeWithTag("cover-0").performTouchInput { longClick() }
         compose.onNodeWithText("编辑").assertIsDisplayed()
         compose.onNodeWithText("重新生成图片").assertIsDisplayed()
+        compose.onNodeWithText("识别").assertDoesNotExist()
+    }
+
+    @Test fun englishEditorHasNoCoverControls() = assertMetadataOnlyEditor(chinese = false)
+
+    @Test fun chineseEditorHasNoCoverControls() = assertMetadataOnlyEditor(chinese = true)
+
+    private fun assertMetadataOnlyEditor(chinese: Boolean) {
+        show(chinese = chinese)
+        compose.onNodeWithTag("cover-0").performTouchInput { longClick() }
+        compose.onNodeWithText(if (chinese) "识别" else "Recognize").assertDoesNotExist()
+        saveScreenshot(if (chinese) "book-menu-zh" else "book-menu-en")
+        compose.onNodeWithText(if (chinese) "编辑" else "Edit").performClick()
+        compose.onNodeWithText(if (chinese) "标题" else "Title").assertIsDisplayed()
+        listOf("Keep current cover", "Remove custom cover", "Choose from files", "Undo cover change",
+            "保留当前封面", "移除独立封面", "从文件选择", "撤销封面修改").forEach {
+            compose.onNodeWithText(it).assertDoesNotExist()
+        }
+        saveScreenshot(if (chinese) "book-editor-zh" else "book-editor-en")
+        // Expand the native sheet before scrolling its form; scrolling content
+        // alone does not move a partially expanded sheet to its expanded anchor.
+        compose.onAllNodesWithText("Test book").onFirst().performTouchInput {
+            swipe(start = center, end = Offset(center.x, -height * 12f))
+        }
+        compose.onNodeWithText(if (chinese) "保存" else "Save").performScrollTo().assertIsDisplayed()
+        saveScreenshot(if (chinese) "book-editor-bottom-zh" else "book-editor-bottom-en")
+    }
+
+    @Test fun resourceMenuRetainsIndependentCoverActionsWithoutRecognition() {
+        show(resource = true)
+        compose.onNodeWithTag("cover-0").performTouchInput { longClick() }
+        compose.onNodeWithText("Recognize").assertDoesNotExist()
+        compose.onNodeWithText("Upload cover").assertIsDisplayed()
+        compose.onNodeWithText("Regenerate cover").assertIsDisplayed()
+        saveScreenshot("resource-menu-en")
+    }
+
+    private fun saveScreenshot(name: String) {
+        compose.waitForIdle()
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val screenshot = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+        val directory = File(requireNotNull(instrumentation.targetContext.getExternalFilesDir(null)), "detail-menu-qa")
+        check(directory.isDirectory || directory.mkdirs())
+        File(directory, "$name.png").outputStream().use { output ->
+            check(screenshot.compress(Bitmap.CompressFormat.PNG, 100, output))
+        }
+        screenshot.recycle()
     }
 }
 
@@ -193,7 +243,7 @@ private open class UnusedManagementRepository : WorkManagementRepository {
     override suspend fun replaceBookTags(context: BookManagementContext, bookId: String, current: List<String>, next: List<String>): WorkManagementResult<Unit> = error("Unexpected call: replaceBookTags")
     override suspend fun loadManagementSnapshot(context: BookManagementContext, target: ManagementTarget): WorkManagementResult<ManagementSnapshot> = error("Unexpected call: loadManagementSnapshot")
     override suspend fun saveResourceFields(context: BookManagementContext, bookId: String, resourceId: String, fields: List<ManagementFieldValue>): WorkManagementResult<Unit> = error("Unexpected call: saveResourceFields")
-    override suspend fun saveSourcePresentation(context: BookManagementContext, bookId: String, sourceNodeId: String, title: String, description: String, removeCover: Boolean, upload: CoverUpload?): WorkManagementResult<Unit> = error("Unexpected call: saveSourcePresentation")
+    override suspend fun saveSourcePresentation(context: BookManagementContext, bookId: String, sourceNodeId: String, title: String, description: String): WorkManagementResult<Unit> = error("Unexpected call: saveSourcePresentation")
     override suspend fun regenerateBookImage(context: BookManagementContext, bookId: String): WorkManagementResult<Unit> = error("Unexpected call: regenerateBookImage")
     override suspend fun deleteResourceSource(context: BookManagementContext, bookId: String, resourceId: String, confirmation: String, idempotencyKey: String): WorkManagementResult<Unit> = error("Unexpected call: deleteResourceSource")
     override suspend fun applyRecognizedFields(context: BookManagementContext, target: ManagementTarget, candidate: MetadataCandidate, fields: List<RecognizedField>): WorkManagementResult<MetadataApplyOutcome> = error("Unexpected call: applyRecognizedFields")

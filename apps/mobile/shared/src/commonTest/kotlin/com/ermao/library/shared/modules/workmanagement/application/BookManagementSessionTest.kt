@@ -21,7 +21,6 @@ import com.ermao.library.shared.modules.workmanagement.domain.ManagementSnapshot
 import com.ermao.library.shared.modules.workmanagement.domain.ManagementFieldValue
 import com.ermao.library.shared.modules.workmanagement.domain.RecognizedField
 import com.ermao.library.shared.modules.workmanagement.domain.MetadataApplyOutcome
-import com.ermao.library.shared.modules.workmanagement.domain.CoverEdit
 import com.ermao.library.shared.modules.workmanagement.domain.ManagementAction
 import com.ermao.library.shared.modules.workmanagement.domain.ManagementObject
 import com.ermao.library.shared.modules.workmanagement.domain.ManagementField
@@ -64,7 +63,7 @@ class BookManagementSessionTest {
             session.open(target, ManagementMenuContext(completed = false))
             assertEquals(ManagementPhase.Menu, session.current.phase)
             assertEquals(null, session.current.snapshot)
-            assertEquals(6, session.menuItems.size)
+            assertEquals(5, session.menuItems.size)
             assertEquals(0, calls)
             session.close()
         }
@@ -154,11 +153,16 @@ class BookManagementSessionTest {
         assertTrue(managementActions(ManagementObject.Directory, false, true, true).isEmpty())
         assertEquals(listOf(ManagementAction.Kindle), managementActions(ManagementObject.Resource, false, true, false).map { it.action })
         assertTrue(managementActions(ManagementObject.Resource, false, false, false).isEmpty())
-        assertEquals(6, managementActions(ManagementObject.Book, true, false, false).size)
+        assertEquals(5, managementActions(ManagementObject.Book, true, false, false).size)
         val directory = managementActions(ManagementObject.Directory, true, false, false)
         assertFalse(directory.any { it.action == ManagementAction.Delete })
         assertFalse(directory.single { it.action == ManagementAction.Regenerate }.enabled)
-        assertEquals(6, managementActions(ManagementObject.Resource, true, true, false).size)
+        assertEquals(5, managementActions(ManagementObject.Resource, true, true, false).size)
+        ManagementObject.entries.forEach { kind ->
+            listOf(false, true).forEach { admin ->
+                assertFalse(managementActions(kind, admin, true, true).any { it.action == ManagementAction.Recognize })
+            }
+        }
     }
 
     @Test fun ordinaryUserCannotInvokeAdminActionsButCanChangeBookReadingStatus() = runBlocking {
@@ -188,14 +192,14 @@ class BookManagementSessionTest {
                 calls += "metadata:${draft.title}"; return WorkManagementResult.Content(Unit)
             }
             override suspend fun replaceBookTags(context: BookManagementContext, bookId: String, current: List<String>, next: List<String>): WorkManagementResult<Unit> {
-                calls += "tags:${next.joinToString()}"; return failure
+                calls += "tags:${next.joinToString()}"
+                return if (calls.count { it.startsWith("tags:") } == 1) failure else WorkManagementResult.Content(Unit)
             }
         }
         val session = session(repo)
         session.open(target, ManagementMenuContext(completed = false)); session.select(ManagementAction.Edit)
         session.setField(ManagementField.Title, "New title")
         session.setField(ManagementField.Tags, "a,b\nsecond")
-        session.setCover(CoverEdit.Remove, null)
         session.save()
         assertEquals(listOf("metadata:New title", "tags:a,b, second"), calls)
         assertEquals(ManagementPhase.Editing, session.current.phase)
@@ -203,6 +207,11 @@ class BookManagementSessionTest {
         assertEquals("New title", session.current.draft.first { it.field == ManagementField.Title }.value)
         assertEquals("book", session.current.change?.bookId)
         assertEquals(null, session.current.notice)
+        assertEquals(false, session.current.change?.coverChanged)
+        session.save()
+        assertEquals(listOf("metadata:New title", "tags:a,b, second", "metadata:New title", "tags:a,b, second"), calls)
+        assertEquals(ManagementPhase.Closed, session.current.phase)
+        assertEquals(false, session.current.change?.coverChanged)
     }
 
     @Test fun resourceDeletionRequiresExactTitleAndReusesKeyAfterNetworkFailure() = runBlocking {
@@ -303,52 +312,135 @@ class BookManagementSessionTest {
         val repo = object : UnusedManagementRepository() {
             override suspend fun loadManagementSnapshot(context: BookManagementContext, target: ManagementTarget) =
                 WorkManagementResult.Content(snapshot.copy(directory = snapshot.directory?.copy(representativeResourceId = "pressed")))
-            override suspend fun saveSourcePresentation(context: BookManagementContext, bookId: String, sourceNodeId: String, title: String, description: String, removeCover: Boolean, upload: CoverUpload?): WorkManagementResult<Unit> {
-                calls += "$sourceNodeId:$title:$removeCover"; return WorkManagementResult.Content(Unit)
+            override suspend fun saveSourcePresentation(context: BookManagementContext, bookId: String, sourceNodeId: String, title: String, description: String): WorkManagementResult<Unit> {
+                calls += "$sourceNodeId:$title"
+                return if (calls.size == 1) failure else WorkManagementResult.Content(Unit)
             }
         }
         val session = session(repo)
         session.open(ManagementTarget(ManagementObject.Directory, "book", "directory", "Directory"))
         session.select(ManagementAction.Edit)
         assertEquals("Directory", session.current.draft.first { it.field == ManagementField.Title }.value)
-        session.setCover(CoverEdit.Remove, null); session.save()
-        assertEquals(listOf("directory:Directory:true"), calls)
+        session.save()
+        assertEquals(listOf("directory:Directory"), calls)
+        assertEquals(ManagementPhase.Editing, session.current.phase)
+        session.save()
+        assertEquals(listOf("directory:Directory", "directory:Directory"), calls)
+        assertEquals(false, session.current.change?.coverChanged)
     }
 
-    @Test fun successfulBookSaveOrdersMetadataTagsAndIndependentCover() = runBlocking {
+    @Test fun successfulBookSaveOrdersMetadataAndTagsWithoutChangingCover() = runBlocking {
         val calls = mutableListOf<String>()
         val repo = object : UnusedManagementRepository() {
             override suspend fun loadManagementSnapshot(context: BookManagementContext, target: ManagementTarget) = WorkManagementResult.Content(snapshot)
             override suspend fun saveBookFields(context: BookManagementContext, bookId: String, draft: BookMetadataDraft): WorkManagementResult<Unit> { calls += "metadata"; return WorkManagementResult.Content(Unit) }
             override suspend fun replaceBookTags(context: BookManagementContext, bookId: String, current: List<String>, next: List<String>): WorkManagementResult<Unit> { calls += "tags"; return WorkManagementResult.Content(Unit) }
-            override suspend fun saveSourcePresentation(context: BookManagementContext, bookId: String, sourceNodeId: String, title: String, description: String, removeCover: Boolean, upload: CoverUpload?): WorkManagementResult<Unit> { calls += sourceNodeId; return WorkManagementResult.Content(Unit) }
+            override suspend fun saveSourcePresentation(context: BookManagementContext, bookId: String, sourceNodeId: String, title: String, description: String): WorkManagementResult<Unit> { calls += sourceNodeId; return WorkManagementResult.Content(Unit) }
         }
         val session = session(repo)
-        session.open(target, ManagementMenuContext(completed = false)); session.select(ManagementAction.Edit); session.setCover(CoverEdit.Remove, null); session.save()
-        assertEquals(listOf("metadata", "tags", "book-node"), calls)
+        session.open(target, ManagementMenuContext(completed = false)); session.select(ManagementAction.Edit); session.save()
+        assertEquals(listOf("metadata", "tags"), calls)
         assertEquals(ManagementPhase.Closed, session.current.phase)
-        assertEquals(true, session.current.change?.coverChanged)
+        assertEquals(false, session.current.change?.coverChanged)
     }
 
-    @Test fun recognitionKeepsAllResourceFieldsAndDefaultsToChangedNonemptyValues() = runBlocking {
-        val candidate = MetadataCandidate("candidate", "provider", "pressed", "New author", null, emptyList(), null, null, null, null, null, null, 0.8,
-            narrator = "Narrator", abridged = false, resourceIndex = 2.0)
+    @Test fun recognitionIsUnavailableWithoutAnyRepositoryCallsIncludingRetryAndReopening() = runBlocking {
+        val repo = object : UnusedManagementRepository() {}
+        for (admin in listOf(false, true)) for (kind in ManagementObject.entries) {
+            val session = session(repo, admin)
+            repeat(2) {
+                session.open(ManagementTarget(kind, "book", if (kind == ManagementObject.Book) "book" else "pressed", "Title"))
+                session.select(ManagementAction.Recognize)
+                session.loadProviders()
+                session.setQuery("Title")
+                session.search()
+                session.applyRecognition()
+                session.retryPreparation()
+                session.retryAction()
+                assertEquals(ManagementPhase.Menu, session.current.phase)
+                assertEquals(null, session.current.change)
+                session.close()
+                session.loadProviders()
+                session.search()
+                session.applyRecognition()
+                assertEquals(ManagementPhase.Closed, session.current.phase)
+            }
+        }
+    }
+
+    @Test fun standaloneUploadRequiresCurrentUploadInteractionAndRetriesWithoutEnteringEditor() = runBlocking {
+        val calls = mutableListOf<String>()
         val repo = object : UnusedManagementRepository() {
             override suspend fun loadManagementSnapshot(context: BookManagementContext, target: ManagementTarget) = WorkManagementResult.Content(snapshot)
-            override suspend fun loadMetadataProviders(context: BookManagementContext) = WorkManagementResult.Content(listOf(MetadataProvider("provider", "Provider", true)))
-            override suspend fun searchMetadata(context: BookManagementContext, bookId: String, sourceNodeId: String, providerId: String, query: String): WorkManagementResult<MetadataSearchResult> {
-                assertEquals("node-pressed", sourceNodeId); return WorkManagementResult.Content(MetadataSearchResult(listOf(candidate), null))
+            override suspend fun uploadCover(context: BookManagementContext, bookId: String, resourceId: String, upload: CoverUpload): WorkManagementResult<CoverMutationOutcome> {
+                calls += resourceId
+                return if (calls.size == 1) failure else WorkManagementResult.Content(CoverMutationOutcome(resourceId, "/new-cover"))
             }
-            override suspend fun applyRecognizedFields(context: BookManagementContext, target: ManagementTarget, candidate: MetadataCandidate, fields: List<RecognizedField>) =
-                WorkManagementResult.Content(MetadataApplyOutcome(listOf("book.author"), listOf("resource.narrator"), "failed"))
         }
         val session = session(repo)
-        session.open(ManagementTarget(ManagementObject.Resource, "book", "pressed", "pressed")); session.select(ManagementAction.Recognize); session.search()
-        assertEquals(setOf("book.author", "resource.narrator", "resource.abridged", "resource.resourceIndex"), session.current.selectedFields.map { it.wireValue }.toSet())
-        session.applyRecognition()
-        assertEquals(ManagementPhase.Result, session.current.phase)
-        assertEquals("metadataPartial", session.current.notice)
-        assertEquals(listOf("resource.narrator"), session.current.metadataOutcome?.skippedFields)
+        val resourceTarget = ManagementTarget(ManagementObject.Resource, "book", "pressed", "pressed")
+        val upload = CoverUpload("cover.png", "image/png", byteArrayOf(1, 2, 3))
+        session.open(resourceTarget)
+        session.uploadResourceCover(upload, session.interactionId)
+        session.select(ManagementAction.Edit)
+        session.uploadResourceCover(upload, session.interactionId)
+        assertTrue(calls.isEmpty())
+        session.close()
+        session.open(resourceTarget)
+        session.select(ManagementAction.UploadCover)
+        val oldInteraction = session.interactionId
+        session.close()
+        session.uploadResourceCover(upload, oldInteraction)
+        session.open(resourceTarget.copy(id = "first"))
+        session.select(ManagementAction.UploadCover)
+        session.uploadResourceCover(upload, oldInteraction)
+        assertTrue(calls.isEmpty())
+        session.uploadResourceCover(upload, session.interactionId)
+        assertEquals(ManagementPhase.CoverUpload, session.current.phase)
+        session.uploadResourceCover(upload, session.interactionId)
+        assertEquals(listOf("first", "first"), calls)
+        assertEquals(true, session.current.change?.coverChanged)
+        assertEquals(ManagementPhase.Closed, session.current.phase)
+        session.uploadResourceCover(upload, session.interactionId)
+        assertEquals(2, calls.size)
+        val ordinary = session(repo, false)
+        ordinary.open(resourceTarget)
+        ordinary.select(ManagementAction.UploadCover)
+        ordinary.uploadResourceCover(upload, ordinary.interactionId)
+        assertEquals(2, calls.size)
+    }
+
+    @Test fun resourceEditorRetriesMetadataOnlyAndReopeningDiscardsCancelledDraft() = runBlocking {
+        val titles = mutableListOf<String>()
+        val repo = object : UnusedManagementRepository() {
+            override suspend fun loadManagementSnapshot(context: BookManagementContext, target: ManagementTarget) = WorkManagementResult.Content(snapshot)
+            override suspend fun saveResourceFields(context: BookManagementContext, bookId: String, resourceId: String, fields: List<ManagementFieldValue>): WorkManagementResult<Unit> {
+                assertEquals("pressed", resourceId)
+                assertFalse(fields.any { it.field == ManagementField.Cover })
+                titles += fields.single { it.field == ManagementField.Title }.value
+                return if (titles.size == 1) failure else WorkManagementResult.Content(Unit)
+            }
+        }
+        val session = session(repo)
+        val resourceTarget = ManagementTarget(ManagementObject.Resource, "book", "pressed", "pressed")
+        session.open(resourceTarget)
+        session.select(ManagementAction.Edit)
+        assertFalse(session.isDirty)
+        session.setField(ManagementField.Title, "Cancelled")
+        assertTrue(session.isDirty)
+        session.close()
+        session.save()
+        assertTrue(titles.isEmpty())
+        session.open(resourceTarget)
+        session.select(ManagementAction.Edit)
+        assertFalse(session.isDirty)
+        session.setField(ManagementField.Title, "Updated")
+        session.save()
+        assertEquals(ManagementPhase.Editing, session.current.phase)
+        session.save()
+        assertEquals(listOf("Updated", "Updated"), titles)
+        assertEquals(false, session.current.change?.coverChanged)
+        assertEquals(ManagementPhase.Closed, session.current.phase)
     }
 
 }
@@ -359,7 +451,7 @@ private open class UnusedManagementRepository : WorkManagementRepository {
     override suspend fun replaceBookTags(context: BookManagementContext, bookId: String, current: List<String>, next: List<String>): WorkManagementResult<Unit> = error("Unexpected call: replaceBookTags")
     override suspend fun loadManagementSnapshot(context: BookManagementContext, target: ManagementTarget): WorkManagementResult<ManagementSnapshot> = error("Unexpected call: loadManagementSnapshot")
     override suspend fun saveResourceFields(context: BookManagementContext, bookId: String, resourceId: String, fields: List<ManagementFieldValue>): WorkManagementResult<Unit> = error("Unexpected call: saveResourceFields")
-    override suspend fun saveSourcePresentation(context: BookManagementContext, bookId: String, sourceNodeId: String, title: String, description: String, removeCover: Boolean, upload: CoverUpload?): WorkManagementResult<Unit> = error("Unexpected call: saveSourcePresentation")
+    override suspend fun saveSourcePresentation(context: BookManagementContext, bookId: String, sourceNodeId: String, title: String, description: String): WorkManagementResult<Unit> = error("Unexpected call: saveSourcePresentation")
     override suspend fun regenerateBookImage(context: BookManagementContext, bookId: String): WorkManagementResult<Unit> = error("Unexpected call: regenerateBookImage")
     override suspend fun deleteResourceSource(context: BookManagementContext, bookId: String, resourceId: String, confirmation: String, idempotencyKey: String): WorkManagementResult<Unit> = error("Unexpected call: deleteResourceSource")
     override suspend fun applyRecognizedFields(context: BookManagementContext, target: ManagementTarget, candidate: MetadataCandidate, fields: List<RecognizedField>): WorkManagementResult<MetadataApplyOutcome> = error("Unexpected call: applyRecognizedFields")

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -19,15 +20,21 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Dns
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.SwapHoriz
+import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -227,11 +234,13 @@ fun LoginScreen(
                     Icon(Icons.Outlined.SwapHoriz, contentDescription = null)
                     Text(stringResource(R.string.login_switch_server))
                 }
-                TextButton(
+                OutlinedButton(
                     onClick = { showDeleteConfirmation = true },
                     enabled = !isAuthenticating && currentProfileId != null,
                     modifier = Modifier.heightIn(min = 48.dp).testTag("login-delete-server"),
                 ) {
+                    Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                     Text(stringResource(R.string.login_delete_current_server))
                 }
             }
@@ -285,12 +294,18 @@ fun LoginScreen(
             title = { Text(stringResource(R.string.login_delete_confirm_title)) },
             text = { Text(stringResource(R.string.login_delete_confirm_message)) },
             confirmButton = {
-                TextButton(onClick = {
+                OutlinedButton(onClick = {
                     showDeleteConfirmation = false
                     onDeleteCurrentServer()
-                }) { Text(stringResource(R.string.login_delete_confirm_action), color = MaterialTheme.colorScheme.error) }
+                }) {
+                    Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                    Text(stringResource(R.string.login_delete_confirm_action), color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = { TextButton(onClick = { showDeleteConfirmation = false }) { Text(stringResource(R.string.cancel)) } },
+            dismissButton = { OutlinedButton(onClick = { showDeleteConfirmation = false }) {
+                Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(stringResource(R.string.cancel)) } },
         )
     }
 
@@ -313,15 +328,26 @@ fun LoginScreen(
             },
             confirmButton = {
                 when (currentAlert) {
-                    LoginEntryAlert.ServerUnavailable -> TextButton(onClick = onRetry) { Text(stringResource(R.string.server_retry_action)) }
-                    LoginEntryAlert.IncompatibleServer -> TextButton(onClick = onDismissAlert) { Text(stringResource(R.string.cancel)) }
-                    LoginEntryAlert.UnsafeSsl -> TextButton(onClick = onAcceptUnsafeSsl) {
+                    LoginEntryAlert.ServerUnavailable -> OutlinedButton(onClick = onRetry) {
+                        Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                        Text(stringResource(R.string.server_retry_action)) }
+                    LoginEntryAlert.IncompatibleServer -> OutlinedButton(onClick = onDismissAlert) {
+                        Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                        Text(stringResource(R.string.cancel)) }
+                    LoginEntryAlert.UnsafeSsl -> OutlinedButton(onClick = onAcceptUnsafeSsl) {
+                        Icon(Icons.Outlined.Warning, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                         Text(stringResource(R.string.tls_accept_risk_action), color = MaterialTheme.colorScheme.error)
                     }
                 }
             },
             dismissButton = if (currentAlert != LoginEntryAlert.IncompatibleServer) {
-                { TextButton(onClick = onDismissAlert) { Text(stringResource(R.string.cancel)) } }
+                { OutlinedButton(onClick = onDismissAlert) {
+                    Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                    Text(stringResource(R.string.cancel)) } }
             } else null,
         )
     }

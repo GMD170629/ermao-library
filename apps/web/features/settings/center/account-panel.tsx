@@ -1,7 +1,8 @@
 'use client';
 
+import { AccountAvatar } from '../../account-avatar/public';
+
 import { Camera, KeyRound, LogOut, Trash2 } from 'lucide-react';
-import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { clearPrivatePwaStorage } from '../../../components/system/pwa-client';
@@ -9,7 +10,6 @@ import { clearCachedAppSession, useAppSession } from '../../../components/layout
 import { Button } from '../../../components/ui/button';
 import { useToast } from '../../../components/ui/feedback';
 import { withBasePath } from '../../../lib/base-path';
-import { DEFAULT_ACCOUNT_AVATAR_PATH } from '../../../lib/brand';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
@@ -18,6 +18,7 @@ type CurrentUser = {
   email: string;
   name: string;
   avatarUrl?: string | null;
+  avatarImageUrl?: string | null;
 };
 
 type AuthPayload = {
@@ -27,7 +28,6 @@ type AuthPayload = {
 };
 
 const inputClassName = 'mt-1.5 h-10 w-full rounded-[10px] border border-[#DED8D1] bg-white px-3 text-sm text-[#242220] outline-none transition placeholder:text-[#AAA39C] focus:border-[#ED9D86] focus:ring-3 focus:ring-[#FFE4DC]';
-const fallbackAvatar = withBasePath(DEFAULT_ACCOUNT_AVATAR_PATH);
 
 export function AccountPanel() {
   const { t: i18nAttribute } = useAttributeI18n();
@@ -43,7 +43,6 @@ export function AccountPanel() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [busy, setBusy] = useState('');
-  const [avatarFailed, setAvatarFailed] = useState(false);
 
   useEffect(() => {
     const nextUser = sessionUser ?? null;
@@ -51,15 +50,11 @@ export function AccountPanel() {
     setName(nextUser?.name ?? '');
     setEmail(nextUser?.email ?? '');
   }, [sessionUser]);
-
-  const avatarSrc = user?.avatarUrl && !avatarFailed ? withBasePath(user.avatarUrl) : fallbackAvatar;
-
   function applyUser(nextUser: CurrentUser | undefined) {
     if (!nextUser) return;
     setUser(nextUser);
     setName(nextUser.name);
     setEmail(nextUser.email);
-    setAvatarFailed(false);
     window.dispatchEvent(new CustomEvent('shuku:account-changed', { detail: nextUser }));
   }
 
@@ -193,14 +188,10 @@ export function AccountPanel() {
       </div>
 
       <section aria-labelledby="avatar-title" className="mt-4 flex flex-col gap-3 rounded-2xl bg-[#F7F4F0] p-3 sm:flex-row sm:items-center">
-        <Image
-          key={avatarSrc}
-          src={avatarSrc}
+        <AccountAvatar
+          account={user}
+          size={64}
           alt={i18nAttribute("账户头像")}
-          width={64}
-          height={64}
-          unoptimized
-          onError={() => setAvatarFailed(true)}
           className="h-16 w-16 shrink-0 rounded-full border border-black/[0.06] object-cover shadow-sm"
         />
         <div className="min-w-0 flex-1">

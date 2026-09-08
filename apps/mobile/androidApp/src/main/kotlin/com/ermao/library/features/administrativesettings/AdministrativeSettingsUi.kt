@@ -3,19 +3,28 @@ package com.ermao.library.features.administrativesettings
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -258,10 +267,13 @@ private fun InlineAdministrativeFailure(
             color = MaterialTheme.colorScheme.error,
         )
         if (failure.retryable) {
-            TextButton(
+            OutlinedButton(
                 onClick = onRetry,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-            ) { Text(AdministrativeCopy.Retry.text(locale)) }
+            ) {
+                Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(AdministrativeCopy.Retry.text(locale)) }
         }
     }
 }
@@ -395,9 +407,15 @@ internal fun AdministrativeConfirmDialog(
         title = { Text(title.text(locale)) },
         text = { Text(body.text(locale)) },
         confirmButton = {
-            TextButton(onClick = onConfirm) { Text(confirm.text(locale), color = MaterialTheme.colorScheme.error) }
+            OutlinedButton(onClick = onConfirm) {
+                Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(confirm.text(locale), color = MaterialTheme.colorScheme.error) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(AdministrativeCopy.Cancel.text(locale)) } },
+        dismissButton = { OutlinedButton(onClick = onDismiss) {
+            Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+            Text(AdministrativeCopy.Cancel.text(locale)) } },
     )
 }
 
@@ -416,20 +434,24 @@ internal fun AdministrativeActionSheet(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
         )
         actions.forEach { action ->
-            TextButton(
+            OutlinedButton(
                 onClick = {
                     onDismiss()
                     action.onSelect()
                 },
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             ) {
+                Icon(Icons.Outlined.Settings, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                 Text(
                     action.label.text(locale),
                     color = if (action.destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                 )
             }
         }
-        TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+        OutlinedButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+            Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
             Text(AdministrativeCopy.Cancel.text(locale))
         }
     }

@@ -224,7 +224,6 @@
     <string name="work_quick_download_paused">Resume</string>
     <string name="work_quick_download_retry">Retry</string>
     <string name="work_quick_downloaded">Downloaded</string>
-    <string name="work_quick_manage_download">Show download actions</string>
     <string name="work_download_open_offline">Open offline</string>
     <string name="book_download_title">Book downloads</string>
     <string name="download_selection_action">Select</string>
@@ -235,7 +234,6 @@
     <string name="download_management_failed">Failed: %1$d</string>
     <string name="download_selection_select_all">Select all</string>
     <string name="download_selection_clear_all">Clear all</string>
-    <string name="multi_download_title">Download Volumes</string>
     <string name="multi_download_loading">Loading the book resource tree…</string>
     <string name="multi_download_error_title">Unable to load volumes</string>
     <string name="multi_download_error_message">The book’s resource tree couldn’t be loaded.</string>
@@ -248,24 +246,14 @@
         <item quantity="one">%1$d Volume Selected</item>
         <item quantity="other">%1$d Volumes Selected</item>
     </plurals>
-    <string name="multi_download_summary">New %1$d · Resume %2$d · Retry %3$d</string>
-    <string name="multi_download_confirm">Download</string>
     <string name="multi_download_not_downloaded">Not Downloaded</string>
     <string name="multi_download_queued">Queued</string>
     <string name="multi_download_downloading">Downloading</string>
     <string name="multi_download_paused">Paused</string>
-    <string name="multi_download_verifying">Verifying</string>
     <string name="multi_download_downloaded">Downloaded</string>
-    <string name="multi_download_failed">Failed</string>
     <string name="multi_download_unavailable">Unavailable</string>
-    <string name="multi_download_delete_task">Delete Task</string>
     <string name="multi_download_pause">Pause</string>
     <string name="multi_download_resume">Resume</string>
-    <plurals name="multi_download_completed">
-        <item quantity="one">%1$d download action started</item>
-        <item quantity="other">%1$d download actions started</item>
-    </plurals>
-    <string name="multi_download_partial">Started: %1$d · Failed: %2$d</string>
     <string name="multi_download_known_records_warning">Some details could not be refreshed. Known downloads are still shown.</string>
     <string name="multi_download_no_resources">No downloadable resources in this scope.</string>
     <string name="multi_download_folder_error">Could not load this folder (%1$s).</string>
@@ -556,8 +544,6 @@
     <string name="library_remove_filter">Remove filter</string>
     <string name="management_failed">Couldn’t complete the operation (%1$s).</string>
     <string name="management_updated">Changes saved.</string>
-    <string name="work_download_queued">Added to downloads.</string>
-    <string name="work_download_paused">Download paused.</string>
     <string name="work_download_failed">Download failed (%1$s).</string>
     <string name="work_reading_status_updated">Reading status updated.</string>
     <string name="management_cover_updated">Cover updated.</string>
@@ -629,11 +615,6 @@
         <item quantity="other">Permanently delete %2$d source files associated with “%1$s”. Enter its name to confirm. This cannot be undone.</item>
     </plurals>
     <string name="management_tags_lines">One tag per line. Tag text is preserved</string>
-    <string name="management_cover_keep">Keep current cover</string>
-    <string name="management_cover_replace">Replace cover when saving</string>
-    <string name="management_cover_remove">Remove custom cover when saving</string>
-    <string name="management_remove_cover">Remove custom cover</string>
-    <string name="management_undo_cover">Undo cover change</string>
     <string name="management_providers_retry">No available providers. Tap to reload</string>
     <string name="management_no_candidates">No candidates yet. Search or change the query</string>
     <string name="management_field_current">Current: %1$s</string>
@@ -657,7 +638,6 @@
     <string name="management_published_at">Publication date</string>
     <string name="management_abridged">Abridged</string>
     <string name="management_tags_failed">Basic information saved, but tags failed. Cover has not been changed</string>
-    <string name="management_cover_failed">Basic information and tags saved, but cover update failed</string>
     <string name="management_refresh_failed">Saved, but refresh failed. Reload to verify</string>
     <string name="management_publisher">Publisher</string>
     <string name="management_language">Language</string>

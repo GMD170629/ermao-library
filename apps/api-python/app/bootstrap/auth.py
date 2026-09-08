@@ -7,6 +7,7 @@ owned by the Auth infrastructure layer.
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.modules.auth.application.avatar_delivery import GetAccountAvatar
 from app.modules.auth.application.user_management import (
     CreateUser,
     DeleteUser,
@@ -15,6 +16,10 @@ from app.modules.auth.application.user_management import (
     ResetUserPassword,
     UpdateUser,
     UserAdministrationUseCases,
+)
+from app.modules.auth.infrastructure.avatar_delivery import (
+    LocalAvatarImageStore,
+    SqlAlchemyAccountAvatarRepository,
 )
 from app.modules.auth.infrastructure.transactions import (
     build_password_authentication_runtime,
@@ -53,6 +58,17 @@ from app.modules.auth.infrastructure.user_management_queries import (
 )
 
 
+def build_get_account_avatar(db: Session, settings: Settings) -> GetAccountAvatar:
+    return GetAccountAvatar(
+        SqlAlchemyAccountAvatarRepository(db),
+        build_avatar_image_store(settings),
+    )
+
+
+def build_avatar_image_store(settings: Settings) -> LocalAvatarImageStore:
+    return LocalAvatarImageStore(settings.resolved_storage_root)
+
+
 def build_user_administration_use_cases(
     db: Session, settings: Settings
 ) -> UserAdministrationUseCases:
@@ -69,6 +85,8 @@ def build_user_administration_use_cases(
 
 __all__ = [
     "active_admin_count",
+    "build_avatar_image_store",
+    "build_get_account_avatar",
     "build_password_authentication_runtime",
     "build_password_authenticator",
     "build_user_administration_use_cases",

@@ -1057,54 +1057,6 @@
         }
       }
     },
-    "nativeManagement.cover.Keep": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Keep current cover"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "保留当前封面"
-          }
-        }
-      }
-    },
-    "nativeManagement.cover.Replace": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Replace cover when saving"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "保存时更换封面"
-          }
-        }
-      }
-    },
-    "nativeManagement.cover.Remove": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Remove custom cover when saving"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "保存时移除独立封面"
-          }
-        }
-      }
-    },
     "nativeManagement.notice.saved": {
       "localizations": {
         "en": {
@@ -1229,22 +1181,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "基本信息已保存，但标签更新失败，封面尚未处理"
-          }
-        }
-      }
-    },
-    "nativeManagement.failure.Cover": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Basic information and tags saved, but cover update failed"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "基本信息和标签已保存，但封面更新失败"
           }
         }
       }

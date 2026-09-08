@@ -147,10 +147,10 @@ class KtorWorkManagementRepository(
             }
         }.toString())
 
-    override suspend fun saveSourcePresentation(context: BookManagementContext, bookId: String, sourceNodeId: String, title: String, description: String, removeCover: Boolean, upload: CoverUpload?): WorkManagementResult<Unit> =
+    override suspend fun saveSourcePresentation(context: BookManagementContext, bookId: String, sourceNodeId: String, title: String, description: String): WorkManagementResult<Unit> =
         multipart(context, ApiMultipartRequest(ApiMethod.Put, "${bookPath(bookId)}/source-nodes/${sourceNodeId.encodeURLPathPart()}",
-            JsonElement.serializer(), upload?.let { ApiMultipartFile("cover", it.safeFileName(), it.mimeType, it.bytes) },
-            mapOf("title" to title, "description" to description, "removeCover" to removeCover.toString())))
+            JsonElement.serializer(), fields =
+            mapOf("title" to title, "description" to description, "removeCover" to "false")))
 
     override suspend fun regenerateBookImage(context: BookManagementContext, bookId: String): WorkManagementResult<Unit> =
         multipart(context, ApiMultipartRequest(ApiMethod.Post, "/api/library/operations/books/covers", JsonElement.serializer(),

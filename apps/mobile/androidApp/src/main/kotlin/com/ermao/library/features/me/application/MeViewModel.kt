@@ -15,12 +15,12 @@ import com.ermao.library.features.me.model.ProfileEditorState
 import com.ermao.library.features.me.model.SanitizedAvatar
 import com.ermao.library.features.me.model.SecurityEditorState
 import com.ermao.library.shared.modules.personalsettings.PersonalAccount
+import com.ermao.library.shared.modules.personalsettings.PersonalSettingsContent
 import com.ermao.library.shared.modules.personalsettings.PersonalSettingsError
 import com.ermao.library.shared.modules.personalsettings.PersonalSettingsErrorKind
+import com.ermao.library.shared.modules.personalsettings.PersonalSettingsFailure
 import com.ermao.library.shared.modules.personalsettings.PersonalSettingsLocale
 import com.ermao.library.shared.modules.personalsettings.PersonalSettingsResult
-import com.ermao.library.shared.modules.personalsettings.PersonalSettingsContent
-import com.ermao.library.shared.modules.personalsettings.PersonalSettingsFailure
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -230,17 +230,7 @@ class MeViewModel(
                 when (val result = client.load()) {
                     is PersonalSettingsContent -> {
                         val account = result.value.account.toViewState()
-                        val avatarBytes = account.avatarUrl?.let { avatarUrl ->
-                            when (val avatar = client.loadAvatar(avatarUrl)) {
-                                is PersonalSettingsContent -> avatar.value.bytes.takeUnless { avatar.value.notModified }
-                                is PersonalSettingsFailure -> {
-                                    if (avatar.error.kind == PersonalSettingsErrorKind.Unauthorized) {
-                                        sideEffects.requireReauthentication()
-                                    }
-                                    null
-                                }
-                            }
-                        }
+                        val avatarBytes = loadAccountAvatar(account)
                         mutableRootState.update {
                             it.copy(isLoading = false, account = account, locale = result.value.preferences.locale)
                                 .copy(avatarBytes = avatarBytes)
@@ -283,18 +273,21 @@ class MeViewModel(
                                 savedDisplayName = account.displayName,
                                 pendingAvatar = null,
                                 avatarRevision = it.avatarRevision + 1,
-                                isSaving = false,
                             )
                         }
                         mutableSecurityState.update {
                             it.copy(email = account.email, savedEmail = account.email)
                         }
-                        val avatarBytes = when (operation) {
-                            MeOperation.UploadAvatar -> state.pendingAvatar?.bytes
-                            MeOperation.DeleteAvatar -> null
-                            else -> mutableRootState.value.avatarBytes
+                        val avatarBytes = if (
+                            operation == MeOperation.UploadAvatar || operation == MeOperation.DeleteAvatar ||
+                            account.avatarImageUrl != mutableRootState.value.account?.avatarImageUrl
+                        ) {
+                            loadAccountAvatar(account)
+                        } else {
+                            mutableRootState.value.avatarBytes
                         }
                         mutableRootState.update { it.copy(account = account, avatarBytes = avatarBytes, failure = null) }
+                        mutableProfileState.update { it.copy(isSaving = false) }
                         sideEffects.refreshSession()
                     }
                     is PersonalSettingsFailure -> handleProfileFailure(operation, result.error)
@@ -305,6 +298,19 @@ class MeViewModel(
                 mutableProfileState.update {
                     it.copy(isSaving = false, failure = MeFailure(operation, "SETTINGS_OPERATION_FAILED"))
                 }
+            }
+        }
+    }
+
+    private suspend fun loadAccountAvatar(account: MeAccountViewState): ByteArray? {
+        val avatarUrl = account.avatarImageUrl ?: return null
+        return when (val avatar = client.loadAvatar(avatarUrl)) {
+            is PersonalSettingsContent -> avatar.value.bytes.takeUnless { avatar.value.notModified }
+            is PersonalSettingsFailure -> {
+                if (avatar.error.kind == PersonalSettingsErrorKind.Unauthorized) {
+                    sideEffects.requireReauthentication()
+                }
+                null
             }
         }
     }
@@ -349,7 +355,7 @@ class MeViewModel(
     }
 }
 
-private fun PersonalAccount.toViewState() = MeAccountViewState(id, displayName, email, avatarUrl)
+private fun PersonalAccount.toViewState() = MeAccountViewState(id, displayName, email, avatarUrl, avatarImageUrl)
 
 private fun failure(operation: MeOperation, error: PersonalSettingsError): MeFailure = MeFailure(
     operation = operation,

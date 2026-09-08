@@ -5,25 +5,36 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
-import androidx.compose.foundation.layout.absoluteOffset
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.List
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -36,54 +47,53 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
-import kotlin.math.roundToInt
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.isShiftPressed
-import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
 import com.ermao.library.R
 import com.ermao.library.features.workmanagement.infrastructure.AndroidCoverSelectionReader
 import com.ermao.library.features.workmanagement.infrastructure.CoverSelectionResult
-import com.ermao.library.shared.modules.workmanagement.BookManagementSession
-import com.ermao.library.shared.modules.workmanagement.BookManagementContext
-import com.ermao.library.shared.modules.workmanagement.WorkManagementRepository
-import com.ermao.library.shared.modules.workmanagement.ManagementAction
-import com.ermao.library.shared.modules.workmanagement.ManagementObject
-import com.ermao.library.shared.modules.workmanagement.ManagementTarget
-import com.ermao.library.shared.modules.workmanagement.ManagementMenuContext
-import com.ermao.library.shared.modules.workmanagement.ManagementPhase
-import com.ermao.library.shared.modules.workmanagement.ManagementField
-import com.ermao.library.shared.modules.workmanagement.ManagementSessionState
-import com.ermao.library.shared.modules.workmanagement.ManagementChange
-import com.ermao.library.shared.modules.workmanagement.CoverEdit
-import com.ermao.library.shared.modules.workmanagement.WorkManagementErrorKind
-import com.ermao.library.shared.modules.workmanagement.managementCandidateValue
 import com.ermao.library.shared.modules.library.ContentRequestContext
-import com.ermao.library.ui.theme.WarmPageThemeValues
-import com.ermao.library.ui.components.WarmPagePopup
+import com.ermao.library.shared.modules.workmanagement.BookManagementContext
+import com.ermao.library.shared.modules.workmanagement.BookManagementSession
+import com.ermao.library.shared.modules.workmanagement.ManagementAction
+import com.ermao.library.shared.modules.workmanagement.ManagementChange
+import com.ermao.library.shared.modules.workmanagement.ManagementField
+import com.ermao.library.shared.modules.workmanagement.ManagementMenuContext
+import com.ermao.library.shared.modules.workmanagement.ManagementObject
+import com.ermao.library.shared.modules.workmanagement.ManagementPhase
+import com.ermao.library.shared.modules.workmanagement.ManagementSessionState
+import com.ermao.library.shared.modules.workmanagement.ManagementTarget
+import com.ermao.library.shared.modules.workmanagement.WorkManagementErrorKind
+import com.ermao.library.shared.modules.workmanagement.WorkManagementRepository
+import com.ermao.library.shared.modules.workmanagement.managementCandidateValue
 import com.ermao.library.ui.components.WarmPageMenuItem
+import com.ermao.library.ui.components.WarmPagePopup
+import com.ermao.library.ui.theme.WarmPageThemeValues
 import java.util.UUID
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -257,11 +267,12 @@ private fun ManagementPresentation(controller: BookManagementController, state: 
     var pickerInteraction by remember { mutableLongStateOf(-1L) }
     var discard by remember { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null && pickerInteraction == session.interactionId) controller.perform {
-            val expectedInteraction = pickerInteraction
+        val expectedInteraction = pickerInteraction
+        if (uri != null && expectedInteraction == session.interactionId && session.current.phase == ManagementPhase.CoverUpload) controller.perform {
+            if (expectedInteraction != interactionId || current.phase != ManagementPhase.CoverUpload) return@perform
             when (val result = reader.read(uri)) {
-                is CoverSelectionResult.Ready -> if (expectedInteraction != interactionId) Unit else if (current.phase == ManagementPhase.CoverUpload) uploadResourceCover(result.upload) else setCover(CoverEdit.Replace, result.upload)
-                else -> selectionFailed = true
+                is CoverSelectionResult.Ready -> uploadResourceCover(result.upload, expectedInteraction)
+                else -> if (expectedInteraction == interactionId && current.phase == ManagementPhase.CoverUpload) selectionFailed = true
             }
         }
     }
@@ -277,9 +288,14 @@ private fun ManagementPresentation(controller: BookManagementController, state: 
                 OutlinedTextField(state.confirmation, session::setConfirmation, label = { Text(target.title) }, enabled = state.operation == null)
                 if (state.error != null) Text(stringResource(R.string.management_operation_failed), color = MaterialTheme.colorScheme.error)
             }
-        }, confirmButton = { TextButton(onClick = { controller.perform { confirmDelete() } }, enabled = state.confirmation == target.title && state.operation == null) {
+        }, confirmButton = { OutlinedButton(onClick = { controller.perform { confirmDelete() } }, enabled = state.confirmation == target.title && state.operation == null) {
+            Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
             Text(stringResource(R.string.management_delete), color = MaterialTheme.colorScheme.error)
-        } }, dismissButton = { TextButton(onClick = { close() }, enabled = state.operation == null) { Text(stringResource(R.string.cancel_action)) } })
+        } }, dismissButton = { OutlinedButton(onClick = { close() }, enabled = state.operation == null) {
+            Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+            Text(stringResource(R.string.cancel_action)) } })
     }
     if (state.phase in listOf(ManagementPhase.Loading, ManagementPhase.LoadFailed, ManagementPhase.Executing, ManagementPhase.Result, ManagementPhase.Editing, ManagementPhase.Recognizing, ManagementPhase.Kindle, ManagementPhase.CoverUpload)) {
         ModalBottomSheet(onDismissRequest = { close() }) {
@@ -289,7 +305,10 @@ private fun ManagementPresentation(controller: BookManagementController, state: 
                 if (state.operation != null) CircularProgressIndicator()
                 if (state.error != null) Text(stringResource(stageError(state)), color = MaterialTheme.colorScheme.error)
                 when (state.phase) {
-                    ManagementPhase.LoadFailed -> TextButton(onClick = { controller.perform { retryPreparation() } }) { Text(stringResource(R.string.retry_action)) }
+                    ManagementPhase.LoadFailed -> OutlinedButton(onClick = { controller.perform { retryPreparation() } }) {
+                        Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                        Text(stringResource(R.string.retry_action)) }
                     ManagementPhase.Result -> {
                         state.metadataOutcome?.let { outcome ->
                             Text(stringResource(R.string.management_applied_fields))
@@ -309,31 +328,33 @@ private fun ManagementPresentation(controller: BookManagementController, state: 
                     }
                     ManagementPhase.Executing -> {
                         state.pendingAction?.let { Text(actionLabel(it, state)) }
-                        if (state.error != null) TextButton(onClick = { controller.perform { retryAction() } }) { Text(stringResource(R.string.retry_action)) }
+                        if (state.error != null) OutlinedButton(onClick = { controller.perform { retryAction() } }) {
+                            Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                            Text(stringResource(R.string.retry_action)) }
                     }
                     ManagementPhase.Editing -> {
                         state.draft.forEach { field -> OutlinedTextField(field.value, { session.setField(field.field, it) },
                             label = { Text(fieldLabel(field.field)) }, modifier = Modifier.fillMaxWidth(), enabled = state.operation == null,
                             minLines = if (field.field in listOf(ManagementField.Description, ManagementField.Tags)) 3 else 1) }
-                        if (state.target?.kind != ManagementObject.Resource) {
-                            if (state.target?.kind == ManagementObject.Book) Text(stringResource(R.string.management_tags_lines))
-                            Text(stringResource(when (state.coverEdit) { CoverEdit.Keep -> R.string.management_cover_keep; CoverEdit.Replace -> R.string.management_cover_replace; CoverEdit.Remove -> R.string.management_cover_remove }))
-                            state.coverUpload?.fileName?.let { Text(it) }
-                            TextButton(onClick = { pickerInteraction = session.interactionId; picker.launch(arrayOf("image/jpeg", "image/png", "image/webp")) }, enabled = state.operation == null) { Text(stringResource(R.string.management_choose_cover_file)) }
-                            TextButton(onClick = { session.setCover(CoverEdit.Remove, null) }, enabled = state.operation == null) { Text(stringResource(R.string.management_remove_cover)) }
-                            if (state.coverEdit != CoverEdit.Keep) TextButton(onClick = { session.setCover(CoverEdit.Keep, null) }) { Text(stringResource(R.string.management_undo_cover)) }
-                        }
+                        if (state.target?.kind == ManagementObject.Book) Text(stringResource(R.string.management_tags_lines))
                         Button(onClick = { controller.perform { save() } }, enabled = state.operation == null) { Text(stringResource(R.string.management_save)) }
                     }
                     ManagementPhase.CoverUpload -> {
                         Text(stringResource(R.string.management_cover_upload_hint))
-                        Button(onClick = { pickerInteraction = session.interactionId; picker.launch(arrayOf("image/jpeg", "image/png", "image/webp")) }, enabled = state.operation == null) { Text(stringResource(R.string.management_choose_cover_file)) }
+                        OutlinedButton(onClick = { pickerInteraction = session.interactionId; picker.launch(arrayOf("image/jpeg", "image/png", "image/webp")) }, enabled = state.operation == null) {
+                            Icon(Icons.Outlined.PhotoCamera, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                            Text(stringResource(R.string.management_choose_cover_file)) }
                     }
                     ManagementPhase.Recognizing -> {
                         state.providers.forEach { provider ->
                             Row { Checkbox(state.providerId == provider.id, { session.setProvider(provider.id) }, enabled = provider.enabled && state.operation == null); Text(provider.name) }
                         }
-                        if (state.providers.none { it.enabled }) TextButton(onClick = { controller.perform { loadProviders() } }) { Text(stringResource(R.string.management_providers_retry)) }
+                        if (state.providers.none { it.enabled }) OutlinedButton(onClick = { controller.perform { loadProviders() } }) {
+                            Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                            Text(stringResource(R.string.management_providers_retry)) }
                         OutlinedTextField(state.query, session::setQuery, label = { Text(stringResource(R.string.management_query)) }, modifier = Modifier.fillMaxWidth(), enabled = state.operation == null)
                         Button(onClick = { controller.perform { search() } }, enabled = state.operation == null && state.query.isNotBlank() && state.providerId.isNotBlank()) { Text(stringResource(R.string.management_search)) }
                         state.candidates.forEach { candidate ->
@@ -352,30 +373,51 @@ private fun ManagementPresentation(controller: BookManagementController, state: 
                         Text(state.kindleSettings?.recipientEmail.orEmpty())
                         if (state.kindleSettings?.ready != true) {
                             Text(stringResource(R.string.management_kindle_not_ready))
-                            TextButton(onClick = { controller.perform { loadKindle() } }) { Text(stringResource(R.string.retry_action)) }
+                            OutlinedButton(onClick = { controller.perform { loadKindle() } }) {
+                                Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                                Text(stringResource(R.string.retry_action)) }
                         }
                         session.kindleOptions().forEach { resource -> resource.assets.filter { it.role == "PRIMARY" }.forEach { asset ->
                             Row { Checkbox(state.selectedAssetId == asset.id, { session.setAsset(asset.id) }, enabled = state.operation == null)
                                 Text("${resource.title} · ${resource.format} · ${asset.size}") }
                         } }
-                        TextButton(onClick = { session.close(); onSettings() }) { Text(stringResource(R.string.management_kindle_settings)) }
-                        TextButton(onClick = { session.close(); onQueue() }) { Text(stringResource(R.string.management_kindle_queue)) }
+                        OutlinedButton(onClick = { session.close(); onSettings() }) {
+                            Icon(Icons.Outlined.Settings, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                            Text(stringResource(R.string.management_kindle_settings)) }
+                        OutlinedButton(onClick = { session.close(); onQueue() }) {
+                            Icon(Icons.AutoMirrored.Outlined.List, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                            Text(stringResource(R.string.management_kindle_queue)) }
                         Button(onClick = { controller.perform { sendKindle() } }, enabled = state.operation == null && state.kindleSettings?.ready == true && state.selectedAssetId.isNotBlank()) { Text(stringResource(R.string.management_send_kindle)) }
                     }
                     else -> Unit
                 }
                 if (selectionFailed) Text(stringResource(R.string.management_cover_read_failed), color = MaterialTheme.colorScheme.error)
-                TextButton(onClick = { close() }, enabled = state.operation == null || state.phase == ManagementPhase.Loading) { Text(stringResource(R.string.cancel_action)) }
+                OutlinedButton(onClick = { close() }, enabled = state.operation == null || state.phase == ManagementPhase.Loading) {
+                    Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                    Text(stringResource(R.string.cancel_action)) }
             }
         }
     }
     if (discard) AlertDialog(onDismissRequest = { discard = false }, title = { Text(stringResource(R.string.management_discard_title)) },
-        confirmButton = { TextButton(onClick = { discard = false; session.close() }) { Text(stringResource(R.string.management_discard)) } },
-        dismissButton = { TextButton(onClick = { discard = false }) { Text(stringResource(R.string.cancel_action)) } })
+        confirmButton = { OutlinedButton(onClick = { discard = false; session.close() }) {
+            Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+            Text(stringResource(R.string.management_discard)) } },
+        dismissButton = { OutlinedButton(onClick = { discard = false }) {
+            Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+            Text(stringResource(R.string.cancel_action)) } })
     state.notice?.let { notice ->
         // A single accessible success surface; no network response is treated as delivery completion.
         androidx.compose.material3.Snackbar(modifier = Modifier.padding(WarmPageThemeValues.spacing.two),
-            action = { TextButton(onClick = session::clearFeedback) { Text(stringResource(R.string.close_action)) } }) {
+            action = { OutlinedButton(onClick = session::clearFeedback) {
+                Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(stringResource(R.string.close_action)) } }) {
             Text(stringResource(when (notice) { "queued" -> R.string.management_queued; "alreadyQueued" -> R.string.management_already_queued;
                 "refreshFailed" -> R.string.management_refresh_failed; "deleted" -> R.string.management_deleted; "metadataPartial" -> R.string.management_metadata_partial; else -> R.string.management_saved }))
         }
@@ -419,7 +461,6 @@ private fun fieldLabel(field: ManagementField): String = stringResource(when (fi
 
 private fun stageError(state: ManagementSessionState): Int = when (state.saveStage?.name) {
     "Tags" -> R.string.management_tags_failed
-    "Cover" -> R.string.management_cover_failed
     "Refresh" -> R.string.management_refresh_failed
     else -> R.string.management_operation_failed
 }

@@ -3,15 +3,23 @@ package com.ermao.library.features.administrativesettings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.LockReset
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -154,10 +162,19 @@ private fun QueueTaskRow(
             )
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            if (task.status in setOf(QueueStatus.Queued, QueueStatus.Running)) TextButton(onClick = onCancel) { Text(AdministrativeCopy.CancelTask.text(locale)) }
-            if (task.status == QueueStatus.Failed) TextButton(onClick = onRetry) { Text(AdministrativeCopy.RetryTask.text(locale)) }
+            if (task.status in setOf(QueueStatus.Queued, QueueStatus.Running)) OutlinedButton(onClick = onCancel) {
+                Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(AdministrativeCopy.CancelTask.text(locale)) }
+            if (task.status == QueueStatus.Failed) OutlinedButton(onClick = onRetry) {
+                Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(AdministrativeCopy.RetryTask.text(locale)) }
             if (task.status in setOf(QueueStatus.Completed, QueueStatus.Failed, QueueStatus.Cancelled)) {
-                TextButton(onClick = onDelete) { Text(AdministrativeCopy.Delete.text(locale), color = MaterialTheme.colorScheme.error) }
+                OutlinedButton(onClick = onDelete) {
+                    Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                    Text(AdministrativeCopy.Delete.text(locale), color = MaterialTheme.colorScheme.error) }
             }
         }
     }
@@ -390,12 +407,18 @@ private fun ResetPasswordDialog(
             }
         },
         confirmButton = {
-            TextButton(
+            OutlinedButton(
                 enabled = password.length >= 8 && password == confirmation,
                 onClick = { onDismiss(); onCommand(AdministrativeCommand.ResetUserPassword(userId, password)) },
-            ) { Text(AdministrativeCopy.ResetAndRequireLogin.text(locale)) }
+            ) {
+                Icon(Icons.Outlined.LockReset, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(AdministrativeCopy.ResetAndRequireLogin.text(locale)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(AdministrativeCopy.Cancel.text(locale)) } },
+        dismissButton = { OutlinedButton(onClick = onDismiss) {
+            Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+            Text(AdministrativeCopy.Cancel.text(locale)) } },
     )
 }
 

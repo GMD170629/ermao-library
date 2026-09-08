@@ -4,6 +4,20 @@ import ErmaoShared
 @testable import ErmaoLibrary
 
 final class LocalizationTests: XCTestCase {
+    func testCurrentManagementMenusHideRecognitionAndKeepStandaloneCoverActions() {
+        for kind in ManagementObject.entries {
+            for canManage in [false, true] {
+                let actions = PublicKt.managementMenuItems(
+                    kind: kind, canManage: canManage,
+                    kindleSendAvailable: true, hasRepresentativeResource: true
+                ).map { $0.action.name }
+                XCTAssertFalse(actions.contains("Recognize"))
+                XCTAssertEqual(actions.contains("UploadCover"), canManage && kind == .resource)
+                XCTAssertEqual(actions.contains("Regenerate"), canManage)
+            }
+        }
+    }
+
     func testNativeManagementOnlyPresentsSheetForInteractiveActions() {
         let immediateActions = Set(["Regenerate", "ReadingStatus", "Rescan"])
         for action in ManagementAction.entries {
@@ -315,7 +329,6 @@ final class LocalizationTests: XCTestCase {
             "nativeManagement.sourceCount %lld",
         ]
         keys += ManagementField.entries.map { "nativeManagement.field.\($0.wireName)" }
-        keys += CoverEdit.entries.map { "nativeManagement.cover.\($0.name)" }
         keys += ManagementSaveStage.entries.map { "nativeManagement.failure.\($0.name)" }
         keys += ["saved", "queued", "alreadyQueued", "deleted", "metadataPartial"].map { "nativeManagement.notice.\($0)" }
         for kind in ManagementObject.entries {

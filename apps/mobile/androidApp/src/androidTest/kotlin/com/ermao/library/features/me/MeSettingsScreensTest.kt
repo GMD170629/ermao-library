@@ -1,5 +1,12 @@
 package com.ermao.library.features.me
 
+import com.ermao.library.features.me.model.SanitizedAvatarMimeType
+import com.ermao.library.features.me.model.SanitizedAvatar
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.graphics.toPixelMap
+import java.io.ByteArrayOutputStream
+import android.graphics.Color
+import android.graphics.Bitmap
 import android.content.Context
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.LocalContext
@@ -131,6 +138,52 @@ class MeSettingsScreensTest {
             abs(restoredTitleHeight.value - initialTitleHeight.value) <= 0.5f,
         )
         compose.onNodeWithTag("settings-row-about").assertIsDisplayed()
+    }
+
+    @Test
+    fun profileRendersOnlyResponseImageAndKeepsPhotoActionsAccessible() {
+        fun png(color: Int): ByteArray {
+            val bitmap = Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888)
+            bitmap.eraseColor(color)
+            return ByteArrayOutputStream().use { output ->
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+                bitmap.recycle()
+                output.toByteArray()
+            }
+        }
+        val response = mutableStateOf<ByteArray?>(png(Color.RED))
+        val editor = mutableStateOf(ProfileEditorState(
+            displayName = "Reader", savedDisplayName = "Reader",
+            pendingAvatar = SanitizedAvatar(png(Color.BLUE), SanitizedAvatarMimeType.Png),
+        ))
+        lateinit var context: Context
+        compose.setContent {
+            context = LocalContext.current
+            WarmPageTheme {
+                ProfileScreen(
+                    state = editor.value,
+                    account = MeAccountViewState("user-1", "Reader", "reader@example.com", "/api/auth/avatar"),
+                    avatarBytes = response.value,
+                    onBack = {}, onDisplayNameChanged = {}, onAvatarReady = {},
+                    onSaveName = {}, onUploadAvatar = {}, onDeleteAvatar = {},
+                )
+            }
+        }
+        val avatar = compose.onNode(hasContentDescription(context.getString(R.string.me_avatar_content_description)))
+        val pixels = avatar.assertIsDisplayed().captureToImage().toPixelMap()
+        assertEquals(androidx.compose.ui.graphics.Color.Red, pixels[pixels.width / 2, pixels.height / 2])
+        compose.onAllNodesWithText("R").assertCountEquals(0)
+        val choose = context.getString(R.string.me_avatar_choose)
+        compose.onAllNodesWithText(choose).assertCountEquals(0)
+        compose.onNode(hasContentDescription(choose)).assertHasClickAction().assertIsEnabled()
+        compose.runOnIdle { editor.value = editor.value.copy(isSaving = true) }
+        compose.onNode(hasContentDescription(choose)).assertIsNotEnabled()
+        compose.runOnIdle {
+            response.value = null
+            editor.value = editor.value.copy(isSaving = false)
+        }
+        avatar.assertDoesNotExist()
+        compose.onAllNodesWithText("R").assertCountEquals(0)
     }
 
     @Test

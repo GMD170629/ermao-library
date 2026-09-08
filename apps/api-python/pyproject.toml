@@ -41,6 +41,7 @@ where = ["."]
 include = ["app*"]
 
 [tool.setuptools.package-data]
+"app.modules.auth.infrastructure" = ["assets/*.webp"]
 "app.db" = ["alembic.ini", "alembic/**/*.py", "alembic/**/*.mako"]
 
 [tool.pytest.ini_options]

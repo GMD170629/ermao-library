@@ -3,16 +3,24 @@ package com.ermao.library.features.downloads.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,16 +38,16 @@ import com.ermao.library.features.downloads.application.DownloadedBookUiState
 import com.ermao.library.features.downloads.model.AndroidDownloadRecord
 import com.ermao.library.features.downloads.model.DownloadedBookGroup
 import com.ermao.library.features.downloads.model.DownloadedResourceGroup
-import com.ermao.library.ui.components.rememberForwardProgress
 import com.ermao.library.ui.components.WarmPageSearchField
-import com.ermao.library.ui.components.WarmSettingsEmptyState
 import com.ermao.library.ui.components.WarmSettingsContentState
 import com.ermao.library.ui.components.WarmSettingsContentStateKind
 import com.ermao.library.ui.components.WarmSettingsDivider
+import com.ermao.library.ui.components.WarmSettingsEmptyState
 import com.ermao.library.ui.components.WarmSettingsNavigationRow
 import com.ermao.library.ui.components.WarmSettingsScaffold
 import com.ermao.library.ui.components.WarmSettingsScaffoldRole
 import com.ermao.library.ui.components.WarmSettingsSection
+import com.ermao.library.ui.components.rememberForwardProgress
 import com.ermao.library.ui.theme.WarmPageThemeValues
 
 @Composable
@@ -143,13 +151,19 @@ fun DownloadCenterScreen(
             title = { Text(stringResource(R.string.downloads_remove_title)) },
             text = { Text(stringResource(R.string.downloads_remove_message, record.bookTitle)) },
             confirmButton = {
-                TextButton(onClick = {
+                OutlinedButton(onClick = {
                     pendingRemoval = null
                     onRemoveDownload(record)
-                }) { Text(stringResource(R.string.downloads_remove_action)) }
+                }) {
+                    Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                    Text(stringResource(R.string.downloads_remove_action)) }
             },
             dismissButton = {
-                TextButton(onClick = { pendingRemoval = null }) { Text(stringResource(R.string.cancel_action)) }
+                OutlinedButton(onClick = { pendingRemoval = null }) {
+                    Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                    Text(stringResource(R.string.cancel_action)) }
             },
         )
     }
@@ -253,7 +267,10 @@ private fun ActiveRow(record: AndroidDownloadRecord, onCancel: ((String) -> Unit
         )
         LinearProgressIndicator(progress = { animatedProgress }, modifier = Modifier.fillMaxWidth().height(4.dp), color = theme.colors.brandAccent, trackColor = theme.colors.divider)
         if (onCancel != null) {
-            TextButton(onClick = { onCancel(record.resourceId) }) { Text(stringResource(R.string.cancel_action)) }
+            OutlinedButton(onClick = { onCancel(record.resourceId) }) {
+                Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(stringResource(R.string.cancel_action)) }
         }
     }
 }
@@ -297,8 +314,14 @@ private fun FailedRow(
             )
             Text(downloadFailureSummary(record.errorCode), color = theme.colors.textSecondary)
             if (onRetry != null && onRemove != null) Row {
-                TextButton(onClick = onRetry) { Text(stringResource(R.string.retry_action)) }
-                TextButton(onClick = onRemove) { Text(stringResource(R.string.downloads_remove_action)) }
+                OutlinedButton(onClick = onRetry) {
+                    Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                    Text(stringResource(R.string.retry_action)) }
+                OutlinedButton(onClick = onRemove) {
+                    Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                    Text(stringResource(R.string.downloads_remove_action)) }
             }
         }
     }

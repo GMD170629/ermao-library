@@ -32,6 +32,7 @@ data class PersonalAccount(
     val email: String,
     val displayName: String,
     val avatarUrl: String?,
+    val avatarImageUrl: String? = avatarUrl,
 )
 
 data class PersonalPreferences(

@@ -4,23 +4,30 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.CreateNewFolder
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Remove
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -169,11 +176,14 @@ fun LibrarySourceEditScreen(
             AdministrativeSwitchRow(AdministrativeCopy.Enabled.text(locale), ignoreHidden, { ignoreHidden = it }, supporting = "ignoreHidden")
             AdministrativeTextField(minimumFileSize, { minimumFileSize = it.filter(Char::isDigit) }, AdministrativeCopy.Progress, locale)
             AdministrativeTextField(description, { description = it }, AdministrativeCopy.About, locale)
-            if (source != null) TextButton(
+            if (source != null) OutlinedButton(
                 onClick = { onCommand(AdministrativeCommand.RescanLibrarySource(source.id)) },
                 enabled = !state.mutationInFlight,
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text(AdministrativeCopy.RescanNow.text(locale)) }
+            ) {
+                Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(AdministrativeCopy.RescanNow.text(locale)) }
             val selectedDirectory = directory
             PrimaryAction(AdministrativeCopy.SaveSource, locale, !state.mutationInFlight && name.isNotBlank() && selectedDirectory != null) {
                 onCommand(
@@ -238,15 +248,30 @@ fun ImportTasksScreen(
                     }
                     task.statusCode?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        if (task.status == QueueStatus.Failed) TextButton({ onCommand(AdministrativeCommand.RetryImportTask(task.id)) }) { Text(AdministrativeCopy.Retry.text(locale)) }
-                        if (task.status in setOf(QueueStatus.Completed, QueueStatus.Failed, QueueStatus.Cancelled)) TextButton({ deleteTask = task }) { Text(AdministrativeCopy.Delete.text(locale)) }
+                        if (task.status == QueueStatus.Failed) OutlinedButton({ onCommand(AdministrativeCommand.RetryImportTask(task.id)) }) {
+                            Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                            Text(AdministrativeCopy.Retry.text(locale)) }
+                        if (task.status in setOf(QueueStatus.Completed, QueueStatus.Failed, QueueStatus.Cancelled)) OutlinedButton({ deleteTask = task }) {
+                            Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                            Text(AdministrativeCopy.Delete.text(locale)) }
                     }
                 }
                 AdministrativeDivider()
             }
-            TextButton({ onCommand(AdministrativeCommand.RescanAllSources) }, enabled = !state.mutationInFlight, modifier = Modifier.fillMaxWidth()) { Text(AdministrativeCopy.RescanAllSources.text(locale)) }
-            TextButton({ onCommand(AdministrativeCommand.ClearCompletedImports) }, enabled = !state.mutationInFlight, modifier = Modifier.fillMaxWidth()) { Text(AdministrativeCopy.ClearCompleted.text(locale)) }
-            TextButton({ onNavigate(AdministrativeSettingsRoute.ImportScanJobs) }, modifier = Modifier.fillMaxWidth()) { Text(AdministrativeCopy.ScanJobs.text(locale)) }
+            OutlinedButton({ onCommand(AdministrativeCommand.RescanAllSources) }, enabled = !state.mutationInFlight, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(AdministrativeCopy.RescanAllSources.text(locale)) }
+            OutlinedButton({ onCommand(AdministrativeCommand.ClearCompletedImports) }, enabled = !state.mutationInFlight, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Outlined.DeleteSweep, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(AdministrativeCopy.ClearCompleted.text(locale)) }
+            OutlinedButton({ onNavigate(AdministrativeSettingsRoute.ImportScanJobs) }, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(AdministrativeCopy.ScanJobs.text(locale)) }
         }
     }
     deleteTask?.let { task -> AdministrativeConfirmDialog(
@@ -276,11 +301,14 @@ fun ImportTaskDetailScreen(
             AdministrativeValueRow(AdministrativeCopy.Progress.text(locale), "${snapshot.processedAssetCount} / ${snapshot.assetCount}")
             AdministrativeValueRow(AdministrativeCopy.Retry.text(locale), snapshot.attempts.toString())
             snapshot.errorSummary?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp)) }
-            if (snapshot.retryable) TextButton(
+            if (snapshot.retryable) OutlinedButton(
                 onClick = { onCommand(AdministrativeCommand.RetryImportTask(snapshot.task.id)) },
                 enabled = !state.mutationInFlight,
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text(AdministrativeCopy.RetryTask.text(locale)) }
+            ) {
+                Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(AdministrativeCopy.RetryTask.text(locale)) }
             AdministrativeSection(AdministrativeCopy.ImportTaskLogs, locale)
             snapshot.logs.forEach { log ->
                 ListItem(

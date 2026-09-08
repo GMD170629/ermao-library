@@ -1,5 +1,7 @@
 'use client';
 
+import { AccountAvatar } from '../../features/account-avatar/public';
+
 import {
   ArrowLeft,
   BookOpen,
@@ -34,7 +36,7 @@ import {
   UNAUTHORIZED_EVENT
 } from '../../lib/auth-session';
 import { withBasePath } from '../../lib/base-path';
-import { DEFAULT_ACCOUNT_AVATAR_PATH, PRODUCT_NAME } from '../../lib/brand';
+import { PRODUCT_NAME } from '../../lib/brand';
 import { privateCacheNamespace } from '../../lib/pwa/private-cache-namespace';
 import { clearCurrentUserNamespace, setCurrentUserNamespace, userDevicePreferenceKey } from '../../lib/user-preferences';
 import { Cover } from '../book/cover';
@@ -141,7 +143,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppSessionUser | null>(null);
   const [authorization, setAuthorization] = useState<AppSessionAuthorization | null>(null);
   const [pendingSettingsHref, setPendingSettingsHref] = useState<string | null>(null);
-  const [avatarFailed, setAvatarFailed] = useState(false);
   const [shelves, setShelves] = useState<ShelfView[]>([]);
   const visibleShelves = useMemo(() => topLevelShelves(shelves), [shelves]);
   const [librarySources, setLibrarySources] = useState<LibraryNavigationSource[]>([]);
@@ -484,10 +485,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     setSearchFocused(false);
   }, [currentSearchString, pathname]);
-
-  useEffect(() => {
-    setAvatarFailed(false);
-  }, [user?.avatarUrl]);
 
   useEffect(() => {
     function handleHistoryChange() {
@@ -936,15 +933,10 @@ export function AppShell({ children }: { children: ReactNode }) {
             pathname.startsWith('/settings') ? 'text-[var(--visual-color-app-brand-accent)]' : 'text-[var(--visual-color-app-text-primary)]'
           )}
         >
-          <Image
-            key={user?.avatarUrl && !avatarFailed ? user.avatarUrl : DEFAULT_ACCOUNT_AVATAR_PATH}
-            src={withBasePath(user?.avatarUrl && !avatarFailed ? user.avatarUrl : DEFAULT_ACCOUNT_AVATAR_PATH)}
-            width={46}
-            height={46}
+          <AccountAvatar
+            account={user}
+            size={46}
             alt={i18nAttribute("账户头像")}
-            priority
-            unoptimized={Boolean(user?.avatarUrl && !avatarFailed)}
-            onError={() => setAvatarFailed(true)}
             className="h-[46px] w-[46px] shrink-0 rounded-full object-cover shadow-sm"
           />
           <span className="min-w-0 flex-1">
@@ -1106,14 +1098,10 @@ export function AppShell({ children }: { children: ReactNode }) {
               pathname.startsWith('/settings') ? 'text-[var(--visual-color-app-brand-accent)]' : 'text-[var(--visual-color-app-text-primary)]'
             )}
           >
-            <Image
-              key={user?.avatarUrl && !avatarFailed ? user.avatarUrl : DEFAULT_ACCOUNT_AVATAR_PATH}
-              src={withBasePath(user?.avatarUrl && !avatarFailed ? user.avatarUrl : DEFAULT_ACCOUNT_AVATAR_PATH)}
-              width={46}
-              height={46}
+            <AccountAvatar
+              account={user}
+              size={46}
               alt={i18nAttribute("账户头像")}
-              unoptimized={Boolean(user?.avatarUrl && !avatarFailed)}
-              onError={() => setAvatarFailed(true)}
               className="h-[46px] w-[46px] shrink-0 rounded-full object-cover shadow-sm"
             />
             <span className="min-w-0 flex-1">

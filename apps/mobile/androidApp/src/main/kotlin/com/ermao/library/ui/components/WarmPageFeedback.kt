@@ -11,9 +11,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Book
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -62,7 +64,7 @@ fun WarmPageEmptyState(
         )
         WarmPageStateTitle(title)
         WarmPageStateMessage(message)
-        if (actionLabel != null && onAction != null) WarmPageTextAction(actionLabel, onAction)
+        if (actionLabel != null && onAction != null) WarmPageSecondaryAction(actionLabel, onAction, leadingIcon = Icons.AutoMirrored.Outlined.ArrowForward)
     }
 }
 
@@ -84,7 +86,7 @@ fun WarmPageErrorState(
         )
         WarmPageStateTitle(title)
         WarmPageStateMessage(message)
-        if (retryLabel != null && onRetry != null) WarmPageTextAction(retryLabel, onRetry)
+        if (retryLabel != null && onRetry != null) WarmPageSecondaryAction(retryLabel, onRetry, leadingIcon = Icons.Outlined.Refresh)
     }
 }
 
@@ -139,7 +141,7 @@ fun WarmPagePaginationError(
             color = theme.colors.textSecondary,
             modifier = Modifier.weight(1f),
         )
-        WarmPageTextAction(retryLabel, onRetry)
+        WarmPageSecondaryAction(retryLabel, onRetry, leadingIcon = Icons.Outlined.Refresh)
     }
 }
 
@@ -189,7 +191,7 @@ fun WarmPageSectionHeader(
             color = theme.colors.textPrimary,
             modifier = Modifier.weight(1f),
         )
-        if (actionLabel != null && onAction != null) WarmPageTextAction(actionLabel, onAction)
+        if (actionLabel != null && onAction != null) WarmPageSecondaryAction(actionLabel, onAction, leadingIcon = Icons.AutoMirrored.Outlined.ArrowForward)
     }
 }
 

@@ -218,7 +218,6 @@
     <string name="work_quick_download_paused">继续下载</string>
     <string name="work_quick_download_retry">重试下载</string>
     <string name="work_quick_downloaded">已下载</string>
-    <string name="work_quick_manage_download">显示下载操作</string>
     <string name="work_download_open_offline">离线打开</string>
     <string name="book_download_title">本书下载</string>
     <string name="download_selection_action">选择</string>
@@ -229,7 +228,6 @@
     <string name="download_management_failed">失败：%1$d 项</string>
     <string name="download_selection_select_all">全选</string>
     <string name="download_selection_clear_all">取消全选</string>
-    <string name="multi_download_title">下载卷册</string>
     <string name="multi_download_loading">正在加载图书资源树…</string>
     <string name="multi_download_error_title">无法加载卷册</string>
     <string name="multi_download_error_message">无法加载本书的资源树。</string>
@@ -240,23 +238,14 @@
     <plurals name="multi_download_selected_count">
         <item quantity="other">已选 %1$d 卷</item>
     </plurals>
-    <string name="multi_download_summary">新增 %1$d · 继续 %2$d · 重试 %3$d</string>
-    <string name="multi_download_confirm">下载</string>
     <string name="multi_download_not_downloaded">未下载</string>
     <string name="multi_download_queued">排队中</string>
     <string name="multi_download_downloading">下载中</string>
     <string name="multi_download_paused">已暂停</string>
-    <string name="multi_download_verifying">校验中</string>
     <string name="multi_download_downloaded">已下载</string>
-    <string name="multi_download_failed">失败</string>
     <string name="multi_download_unavailable">不可下载</string>
-    <string name="multi_download_delete_task">删除任务</string>
     <string name="multi_download_pause">暂停</string>
     <string name="multi_download_resume">继续</string>
-    <plurals name="multi_download_completed">
-        <item quantity="other">已开始 %1$d 个下载操作</item>
-    </plurals>
-    <string name="multi_download_partial">成功：%1$d · 失败：%2$d</string>
     <string name="multi_download_known_records_warning">部分详情刷新失败，已知下载仍会显示。</string>
     <string name="multi_download_no_resources">当前范围没有可下载资源。</string>
     <string name="multi_download_folder_error">无法加载此目录（%1$s）。</string>
@@ -542,8 +531,6 @@
     <string name="library_remove_filter">移除筛选条件</string>
     <string name="management_failed">操作未完成（%1$s）。</string>
     <string name="management_updated">更改已保存。</string>
-    <string name="work_download_queued">已加入下载。</string>
-    <string name="work_download_paused">下载已暂停。</string>
     <string name="work_download_failed">下载失败（%1$s）。</string>
     <string name="work_reading_status_updated">阅读状态已更新。</string>
     <string name="management_cover_updated">封面已更新。</string>
@@ -612,11 +599,6 @@
         <item quantity="other">永久删除“%1$s”关联的 %2$d 个源文件。请输入名称确认，此操作无法撤销。</item>
     </plurals>
     <string name="management_tags_lines">每行一个标签，标签内容保持原文</string>
-    <string name="management_cover_keep">保留当前封面</string>
-    <string name="management_cover_replace">保存时更换封面</string>
-    <string name="management_cover_remove">保存时移除独立封面</string>
-    <string name="management_remove_cover">移除独立封面</string>
-    <string name="management_undo_cover">撤销封面更改</string>
     <string name="management_providers_retry">无可用来源，点按重新加载</string>
     <string name="management_no_candidates">尚无候选，请搜索或更换关键词</string>
     <string name="management_field_current">当前：%1$s</string>
@@ -640,7 +622,6 @@
     <string name="management_published_at">出版日期</string>
     <string name="management_abridged">删节状态</string>
     <string name="management_tags_failed">基本信息已保存，但标签更新失败，封面尚未处理</string>
-    <string name="management_cover_failed">基本信息和标签已保存，但封面更新失败</string>
     <string name="management_refresh_failed">已保存，但刷新失败，请重试加载</string>
     <string name="management_publisher">出版社</string>
     <string name="management_language">语言</string>

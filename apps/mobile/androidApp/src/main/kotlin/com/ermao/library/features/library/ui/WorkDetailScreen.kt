@@ -1,28 +1,15 @@
 package com.ermao.library.features.library.ui
 
-import com.ermao.library.shared.modules.reader.ReaderFormatSupport
-import com.ermao.library.shared.modules.reader.ReaderDeliveryMode
-
-import com.ermao.library.features.workmanagement.ManagementAnchor
-import com.ermao.library.shared.modules.workmanagement.ManagementMenuContext
-import com.ermao.library.features.workmanagement.ManagementIdentityScope
-import com.ermao.library.shared.modules.workmanagement.ManagementObject
-import com.ermao.library.shared.modules.workmanagement.ManagementTarget
-import androidx.compose.foundation.border
-import androidx.compose.foundation.background
-import androidx.compose.foundation.ExperimentalFoundationApi
+import android.text.Html
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -30,67 +17,82 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material.icons.automirrored.outlined.ViewList
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.ChevronLeft
+import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.CloudDownload
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.GridView
+import androidx.compose.material.icons.outlined.Headphones
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Layers
-import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.CloudDownload
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.Download
-import androidx.compose.material.icons.outlined.Headphones
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PauseCircle
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Source
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.automirrored.outlined.Send
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -98,65 +100,84 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.CustomAccessibilityAction
-import androidx.compose.ui.semantics.customActions
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.foundation.text.selection.SelectionContainer
-import android.text.Html
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ermao.library.R
-import com.ermao.library.features.content.model.LibraryScope
-import com.ermao.library.features.content.model.ChapterReadingState
-import com.ermao.library.features.content.model.ResourceContent
 import com.ermao.library.features.content.model.BookDetailContent
-import com.ermao.library.shared.modules.library.resolveBookDetailActionScope
-import com.ermao.library.shared.modules.library.BookDetailActionScope
-import com.ermao.library.shared.modules.library.BookDetailObjectKind
-import com.ermao.library.shared.modules.library.BookDetailDownloadState
-import com.ermao.library.shared.modules.library.BookDetailDownloadSummary
-import com.ermao.library.shared.modules.library.summarizeBookDetailDownloads
+import com.ermao.library.features.content.model.ChapterReadingState
+import com.ermao.library.features.content.model.LibraryScope
+import com.ermao.library.features.content.model.ResourceContent
+import com.ermao.library.features.content.ui.BookCover
 import com.ermao.library.features.content.ui.ContentCover
 import com.ermao.library.features.content.ui.CoverProgress
 import com.ermao.library.features.content.ui.CoverRole
 import com.ermao.library.features.content.ui.ReadingProgressTrack
-import com.ermao.library.features.content.ui.BookCover
 import com.ermao.library.features.content.ui.compactCoverGridColumnCount
 import com.ermao.library.features.content.ui.compactCoverGridItemWidth
+import com.ermao.library.features.downloads.DownloadRecord as AndroidDownloadRecord
+import com.ermao.library.features.downloads.DownloadStatus as AndroidDownloadStatus
+import com.ermao.library.features.downloads.downloadManagementItem
 import com.ermao.library.features.library.application.WorkDetailUiState
-import com.ermao.library.shared.modules.library.ContentRepository
-import com.ermao.library.shared.modules.library.ContentRequestContext
+import com.ermao.library.features.workmanagement.ManagementAnchor
+import com.ermao.library.features.workmanagement.ManagementIdentityScope
+import com.ermao.library.features.workmanagement.application.WorkManagementCompletion
+import com.ermao.library.features.workmanagement.application.WorkManagementViewModel
+import com.ermao.library.platform.persistence.AndroidCoverCache
+import com.ermao.library.shared.modules.downloads.DownloadManagementAction
+import com.ermao.library.shared.modules.downloads.DownloadManagementOutcome
+import com.ermao.library.shared.modules.downloads.DownloadManagementPolicy
+import com.ermao.library.shared.modules.downloads.DownloadManagementResult
+import com.ermao.library.shared.modules.downloads.DownloadManagementStatus
 import com.ermao.library.shared.modules.library.BookContentEntry
 import com.ermao.library.shared.modules.library.BookContentSort
 import com.ermao.library.shared.modules.library.BookContentsPage
+import com.ermao.library.shared.modules.library.BookDetailActionScope
+import com.ermao.library.shared.modules.library.BookDetailDownloadState
+import com.ermao.library.shared.modules.library.BookDetailDownloadSummary
+import com.ermao.library.shared.modules.library.BookDetailObjectKind
 import com.ermao.library.shared.modules.library.BookDetailPresentation
+import com.ermao.library.shared.modules.library.ContentRepository
+import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.shared.modules.library.ResourceReadingUnitsPage
 import com.ermao.library.shared.modules.library.domain.ReadingUnit
+import com.ermao.library.shared.modules.library.resolveBookDetailActionScope
+import com.ermao.library.shared.modules.library.summarizeBookDetailDownloads
+import com.ermao.library.shared.modules.library.summarizeManagedBookDownloads
+import com.ermao.library.shared.modules.reader.ReaderDeliveryMode
+import com.ermao.library.shared.modules.reader.ReaderFormatSupport
+import com.ermao.library.shared.modules.workmanagement.ManagementMenuContext
+import com.ermao.library.shared.modules.workmanagement.ManagementObject
+import com.ermao.library.shared.modules.workmanagement.ManagementTarget
+import com.ermao.library.shared.modules.workmanagement.domain.ManagedReadingStatus
+import com.ermao.library.ui.components.WarmPageActionMenu
 import com.ermao.library.ui.components.WarmPageChoice
 import com.ermao.library.ui.components.WarmPageEmptyState
 import com.ermao.library.ui.components.WarmPageErrorState
-import com.ermao.library.ui.components.WarmPageLoadingState
 import com.ermao.library.ui.components.WarmPageIconAction
-import com.ermao.library.ui.components.WarmPageActionMenu
+import com.ermao.library.ui.components.WarmPageLoadingState
 import com.ermao.library.ui.components.WarmPageMenuAction
 import com.ermao.library.ui.components.WarmPageMenuItem
 import com.ermao.library.ui.components.WarmPageMenuOption
@@ -164,37 +185,21 @@ import com.ermao.library.ui.components.WarmPageModalBottomSheet
 import com.ermao.library.ui.components.WarmPageNavigationAction
 import com.ermao.library.ui.components.WarmPagePrimaryAction
 import com.ermao.library.ui.components.WarmPageScaffold
-import com.ermao.library.ui.components.WarmPageSingleChoiceMenu
 import com.ermao.library.ui.components.WarmPageSecondaryAction
 import com.ermao.library.ui.components.WarmPageSectionHeader
 import com.ermao.library.ui.components.WarmPageSegmentedControl
+import com.ermao.library.ui.components.WarmPageSingleChoiceMenu
 import com.ermao.library.ui.components.WarmPageSnackbarHost
-import com.ermao.library.ui.components.WarmPageTextAction
 import com.ermao.library.ui.components.WarmPageTopBarRole
 import com.ermao.library.ui.components.warmPageActionHorizontalPadding
 import com.ermao.library.ui.theme.WarmPageThemeValues
-import com.ermao.library.features.downloads.DownloadRecord as AndroidDownloadRecord
-import com.ermao.library.features.downloads.DownloadStatus as AndroidDownloadStatus
-import com.ermao.library.features.downloads.downloadManagementItem
-import com.ermao.library.shared.modules.downloads.DownloadManagementPolicy
-import com.ermao.library.shared.modules.downloads.DownloadManagementStatus
-import com.ermao.library.shared.modules.library.summarizeManagedBookDownloads
-import com.ermao.library.shared.modules.downloads.DownloadManagementAction
-import com.ermao.library.shared.modules.downloads.DownloadManagementOutcome
-import com.ermao.library.shared.modules.downloads.DownloadManagementResult
-import com.ermao.library.features.workmanagement.application.WorkManagementViewModel
-import com.ermao.library.features.workmanagement.application.WorkManagementCompletion
-import com.ermao.library.shared.modules.workmanagement.domain.ManagedReadingStatus
-import com.ermao.library.platform.persistence.AndroidCoverCache
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import java.util.Locale
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
-import kotlinx.coroutines.launch
+import java.util.Locale
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
-import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -611,7 +616,9 @@ private fun WorkDetailBody(
             SelectedResourceMetadata(selectedResource.id, metadataRows)
         }
         if (selectedResource != null && state.contents?.currentNode?.hasChildren == true) item {
-            TextButton(onClick = { onOpenSourceNode(state.contents.currentNode.sourceNodeId) }) {
+            OutlinedButton(onClick = { onOpenSourceNode(state.contents.currentNode.sourceNodeId) }) {
+                Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                 Text(stringResource(R.string.work_contents_open_children))
             }
         }
@@ -1220,10 +1227,12 @@ private fun WorkAboutSection(
             },
         )
         if (workDetailDescriptionActionVisible(expanded, collapsedHasOverflow)) {
-            TextButton(
+            OutlinedButton(
                 onClick = { expanded = !expanded },
                 modifier = Modifier.align(Alignment.End),
             ) {
+                Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                 Text(
                     stringResource(if (expanded) R.string.work_collapse else R.string.work_expand),
                     style = theme.typography.caption,
@@ -1723,7 +1732,10 @@ private fun WorkContentEntryCard(
                     }
                 }
                 if (item.kind == WorkContentItemKind.ReadableResource && item.entry.hasChildren) {
-                    TextButton(onClick = onBrowseChildren) { Text(stringResource(R.string.work_contents_open_children)) }
+                    OutlinedButton(onClick = onBrowseChildren) {
+                        Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                        Text(stringResource(R.string.work_contents_open_children)) }
                 }
                 if (item.kind == WorkContentItemKind.ReadableResource) {
                     Text(
@@ -1772,7 +1784,10 @@ private fun WorkContentEntryCard(
                     }
                 }
                 if (item.kind == WorkContentItemKind.ReadableResource && item.entry.hasChildren) {
-                    TextButton(onClick = onBrowseChildren) { Text(stringResource(R.string.work_contents_open_children)) }
+                    OutlinedButton(onClick = onBrowseChildren) {
+                        Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                        Text(stringResource(R.string.work_contents_open_children)) }
                 }
                 item.entry.sizeBytes?.let {
                     Text(formatWorkContentSize(it), style = theme.typography.caption, color = theme.colors.textSecondary)
@@ -1996,10 +2011,14 @@ private fun PaginationRow(page: Int, totalPages: Int, loading: Boolean, onSelect
             color = theme.colors.textSecondary,
             modifier = Modifier.weight(1f),
         )
-        TextButton(enabled = !loading && page > 1, onClick = { onSelectPage(page - 1) }) {
+        OutlinedButton(enabled = !loading && page > 1, onClick = { onSelectPage(page - 1) }) {
+            Icon(Icons.Outlined.ChevronLeft, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
             Text(stringResource(R.string.reader_previous))
         }
-        TextButton(enabled = !loading && page < totalPages, onClick = { onSelectPage(page + 1) }) {
+        OutlinedButton(enabled = !loading && page < totalPages, onClick = { onSelectPage(page + 1) }) {
+            Icon(Icons.Outlined.ChevronRight, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
             Text(stringResource(R.string.reader_next))
         }
     }
@@ -2091,7 +2110,9 @@ private fun SelectedResourceMetadata(resourceId: String, rows: List<WorkMetadata
                 }
             },
             confirmButton = {
-                TextButton(onClick = { fullPath = null }) {
+                OutlinedButton(onClick = { fullPath = null }) {
+                    Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                     Text(stringResource(R.string.close_action))
                 }
             },

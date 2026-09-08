@@ -79,6 +79,7 @@ internal data class SettingsUserWire(
     val canViewManualImports: Boolean,
     val authzVersion: Long,
     val avatarUrl: String? = null,
+    val avatarImageUrl: String? = avatarUrl,
     val locale: String? = null,
 )
 
@@ -136,6 +137,7 @@ internal fun SettingsUserWire.toDomain(): PersonalAccount =
         email = email,
         displayName = name,
         avatarUrl = avatarUrl,
+        avatarImageUrl = avatarImageUrl,
     )
 
 internal fun SettingsSessionWire.toDomain(): PersonalSettingsSnapshot? {

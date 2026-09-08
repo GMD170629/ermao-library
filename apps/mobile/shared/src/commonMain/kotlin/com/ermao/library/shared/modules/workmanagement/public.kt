@@ -136,8 +136,6 @@ typealias ManagedDirectory = com.ermao.library.shared.modules.workmanagement.dom
 
 typealias ManagementSnapshot = com.ermao.library.shared.modules.workmanagement.domain.ManagementSnapshot
 
-typealias CoverEdit = com.ermao.library.shared.modules.workmanagement.domain.CoverEdit
-
 typealias RecognizedField = com.ermao.library.shared.modules.workmanagement.domain.RecognizedField
 
 typealias MetadataApplyOutcome = com.ermao.library.shared.modules.workmanagement.domain.MetadataApplyOutcome

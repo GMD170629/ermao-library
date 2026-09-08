@@ -1,0 +1,250 @@
+Reusing configuration cache.
+> Task :chapterCore:generateDebugAssets UP-TO-DATE
+> Task :chapterCore:preBuild UP-TO-DATE
+> Task :archiveCore:generateDebugAssets UP-TO-DATE
+> Task :androidApp:generateDebugAssets UP-TO-DATE
+> Task :androidApp:generateDebugAndroidTestAssets UP-TO-DATE
+> Task :mobiCore:preBuild UP-TO-DATE
+> Task :pdfiumNative:preBuild UP-TO-DATE
+> Task :mobiCore:generateDebugAssets UP-TO-DATE
+> Task :pdfiumNative:generateDebugAssets UP-TO-DATE
+> Task :archiveCore:preBuild UP-TO-DATE
+> Task :pdfiumNative:preDebugBuild UP-TO-DATE
+> Task :archiveCore:preDebugBuild UP-TO-DATE
+> Task :androidApp:syncReaderAssets UP-TO-DATE
+> Task :pdfiumNative:generateDebugResources UP-TO-DATE
+> Task :pdfiumNative:javaPreCompileDebug UP-TO-DATE
+> Task :shared:androidPreBuild UP-TO-DATE
+> Task :archiveCore:extractDeepLinksDebug UP-TO-DATE
+> Task :shared:preAndroidHostTestBuild UP-TO-DATE
+> Task :archiveCore:javaPreCompileDebug UP-TO-DATE
+> Task :shared:processAndroidHostTestJavaRes NO-SOURCE
+> Task :shared:androidJar UP-TO-DATE
+> Task :shared:kmpPartiallyResolvedDependenciesChecker
+> Task :archiveCore:mergeDebugJniLibFolders UP-TO-DATE
+> Task :shared:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :archiveCore:mergeDebugAssets UP-TO-DATE
+> Task :chapterCore:preDebugBuild UP-TO-DATE
+> Task :generateDesignTokens UP-TO-DATE
+> Task :mobiCore:preDebugBuild UP-TO-DATE
+> Task :androidApp:syncReaderTestAssets UP-TO-DATE
+> Task :pdfiumNative:mergeDebugAssets UP-TO-DATE
+> Task :pdfiumNative:processDebugNavigationResources UP-TO-DATE
+> Task :androidApp:syncBrandAsset UP-TO-DATE
+> Task :shared:preAndroidMainBuild UP-TO-DATE
+> Task :archiveCore:processDebugNavigationResources UP-TO-DATE
+> Task :archiveCore:writeDebugAarMetadata UP-TO-DATE
+> Task :archiveCore:generateDebugResources UP-TO-DATE
+> Task :chapterCore:processDebugNavigationResources UP-TO-DATE
+> Task :chapterCore:writeDebugAarMetadata UP-TO-DATE
+> Task :pdfiumNative:writeDebugAarMetadata UP-TO-DATE
+> Task :archiveCore:processDebugManifest UP-TO-DATE
+> Task :mobiCore:generateDebugResources UP-TO-DATE
+> Task :mobiCore:writeDebugAarMetadata UP-TO-DATE
+> Task :mobiCore:extractDeepLinksDebug UP-TO-DATE
+> Task :pdfiumNative:extractDeepLinksDebug UP-TO-DATE
+> Task :archiveCore:mapDebugSourceSetPaths UP-TO-DATE
+> Task :shared:processAndroidMainManifest UP-TO-DATE
+> Task :chapterCore:generateDebugResources UP-TO-DATE
+> Task :chapterCore:javaPreCompileDebug UP-TO-DATE
+> Task :chapterCore:extractDeepLinksDebug UP-TO-DATE
+> Task :mobiCore:processDebugNavigationResources UP-TO-DATE
+> Task :mobiCore:mapDebugSourceSetPaths UP-TO-DATE
+> Task :pdfiumNative:mapDebugSourceSetPaths UP-TO-DATE
+> Task :shared:generateAndroidMainEmptyResourceFiles UP-TO-DATE
+> Task :pdfiumNative:packageDebugResources UP-TO-DATE
+> Task :chapterCore:mergeDebugAssets UP-TO-DATE
+> Task :shared:writeAndroidMainAarMetadata UP-TO-DATE
+> Task :mobiCore:processDebugManifest UP-TO-DATE
+> Task :mobiCore:mergeDebugAssets UP-TO-DATE
+> Task :mobiCore:javaPreCompileDebug UP-TO-DATE
+> Task :pdfiumNative:parseDebugLocalResources UP-TO-DATE
+> Task :pdfiumNative:processDebugManifest UP-TO-DATE
+> Task :chapterCore:mergeDebugJniLibFolders UP-TO-DATE
+> Task :pdfiumNative:mergeDebugJniLibFolders UP-TO-DATE
+> Task :mobiCore:packageDebugResources UP-TO-DATE
+> Task :chapterCore:mapDebugSourceSetPaths UP-TO-DATE
+> Task :chapterCore:processDebugManifest UP-TO-DATE
+> Task :pdfiumNative:mergeDebugNativeLibs UP-TO-DATE
+> Task :mobiCore:parseDebugLocalResources UP-TO-DATE
+> Task :pdfiumNative:generateDebugRFile UP-TO-DATE
+> Task :chapterCore:packageDebugResources UP-TO-DATE
+> Task :androidApp:preBuild UP-TO-DATE
+> Task :chapterCore:parseDebugLocalResources UP-TO-DATE
+> Task :androidApp:preDebugUnitTestBuild UP-TO-DATE
+> Task :mobiCore:generateDebugRFile UP-TO-DATE
+> Task :chapterCore:compileDebugLibraryResources UP-TO-DATE
+> Task :archiveCore:packageDebugResources UP-TO-DATE
+> Task :pdfiumNative:compileDebugLibraryResources UP-TO-DATE
+> Task :androidApp:preDebugBuild UP-TO-DATE
+> Task :mobiCore:compileDebugLibraryResources UP-TO-DATE
+> Task :androidApp:preDebugAndroidTestBuild SKIPPED
+> Task :mobiCore:mergeDebugJniLibFolders UP-TO-DATE
+> Task :shared:mergeAndroidMainJniLibFolders UP-TO-DATE
+> Task :archiveCore:compileDebugLibraryResources UP-TO-DATE
+> Task :archiveCore:parseDebugLocalResources UP-TO-DATE
+> Task :chapterCore:generateDebugRFile UP-TO-DATE
+> Task :shared:mergeAndroidMainNativeLibs NO-SOURCE
+> Task :androidApp:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :shared:copyAndroidMainJniLibsProjectOnly UP-TO-DATE
+> Task :androidApp:javaPreCompileDebugUnitTest FROM-CACHE
+> Task :androidApp:javaPreCompileDebug FROM-CACHE
+> Task :androidApp:generateDebugAndroidTestResources FROM-CACHE
+> Task :androidApp:generateDebugBuildConfig FROM-CACHE
+> Task :androidApp:extractDeepLinksDebug FROM-CACHE
+> Task :androidApp:writeDebugAppMetadata
+> Task :androidApp:processDebugAndroidTestNavigationResources FROM-CACHE
+> Task :androidApp:generateDebugResources FROM-CACHE
+> Task :pdfiumNative:compileDebugKotlin NO-SOURCE
+> Task :androidApp:mapDebugSourceSetPaths
+> Task :archiveCore:generateDebugRFile UP-TO-DATE
+> Task :androidApp:mapDebugAndroidTestSourceSetPaths
+> Task :androidApp:javaPreCompileDebugAndroidTest FROM-CACHE
+> Task :androidApp:createDebugCompatibleScreenManifests
+> Task :pdfiumNative:processDebugJavaRes NO-SOURCE
+> Task :androidApp:packageDebugAndroidTestResources FROM-CACHE
+> Task :androidApp:parseDebugAndroidTestLocalResources FROM-CACHE
+> Task :androidApp:compileDebugAndroidTestNavigationResources FROM-CACHE
+> Task :androidApp:generateDebugAndroidTestRFile FROM-CACHE
+> Task :androidApp:writeDebugSigningConfigVersions
+> Task :androidApp:writeDebugAndroidTestSigningConfigVersions
+> Task :androidApp:validateSigningDebugAndroidTest
+> Task :androidApp:validateSigningDebug
+> Task :chapterCore:configureCMakeDebug[x86_64]
+> Task :androidApp:packageDebugResources FROM-CACHE
+> Task :archiveCore:configureCMakeDebug[arm64-v8a]
+> Task :mobiCore:configureCMakeDebug[arm64-v8a]
+> Task :archiveCore:configureCMakeDebug[x86_64]
+> Task :chapterCore:configureCMakeDebug[arm64-v8a]
+> Task :mobiCore:configureCMakeDebug[x86_64]
+> Task :shared:compileAndroidMain UP-TO-DATE
+> Task :chapterCore:compileDebugKotlin FROM-CACHE
+> Task :archiveCore:compileDebugKotlin FROM-CACHE
+> Task :shared:processAndroidMainJavaRes
+> Task :archiveCore:compileDebugJavaWithJavac NO-SOURCE
+> Task :chapterCore:compileDebugJavaWithJavac NO-SOURCE
+> Task :chapterCore:buildCMakeDebug[x86_64]
+> Task :androidApp:mergeDebugAndroidTestJniLibFolders
+> Task :archiveCore:processDebugJavaRes
+> Task :chapterCore:bundleLibRuntimeToJarDebug
+> Task :chapterCore:processDebugJavaRes
+> Task :androidApp:mergeDebugJniLibFolders
+> Task :archiveCore:bundleLibRuntimeToJarDebug
+> Task :pdfiumNative:copyDebugJniLibsProjectOnly
+> Task :shared:bundleAndroidMainClassesToCompileJar
+> Task :chapterCore:bundleLibCompileToJarDebug
+> Task :archiveCore:bundleLibCompileToJarDebug
+> Task :androidApp:processDebugNavigationResources FROM-CACHE
+> Task :androidApp:desugarDebugAndroidTestFileDependencies FROM-CACHE
+> Task :androidApp:compileDebugNavigationResources FROM-CACHE
+> Task :androidApp:parseDebugLocalResources FROM-CACHE
+> Task :archiveCore:bundleLibRuntimeToDirDebug
+> Task :androidApp:generateDebugRFile FROM-CACHE
+> Task :chapterCore:bundleLibRuntimeToDirDebug
+> Task :chapterCore:buildCMakeDebug[arm64-v8a]
+> Task :androidApp:mergeDebugAssets
+> Task :androidApp:checkDebugAndroidTestDuplicateClasses
+> Task :chapterCore:mergeDebugNativeLibs
+> Task :mobiCore:buildCMakeDebug[x86_64]
+> Task :mobiCore:buildCMakeDebug[arm64-v8a]
+> Task :androidApp:checkDebugAndroidTestAarMetadata
+> Task :androidApp:checkDebugAarMetadata
+> Task :mobiCore:mergeDebugNativeLibs
+> Task :chapterCore:copyDebugJniLibsProjectOnly
+> Task :androidApp:mergeDebugAndroidTestAssets
+> Task :androidApp:mergeDebugAndroidTestResources FROM-CACHE
+> Task :mobiCore:copyDebugJniLibsProjectOnly
+> Task :androidApp:processDebugMainManifest FROM-CACHE
+> Task :androidApp:compressDebugAssets FROM-CACHE
+> Task :mobiCore:compileDebugKotlin FROM-CACHE
+> Task :androidApp:processDebugManifest FROM-CACHE
+> Task :mobiCore:compileDebugJavaWithJavac NO-SOURCE
+> Task :androidApp:processDebugManifestForPackage FROM-CACHE
+> Task :mobiCore:processDebugJavaRes
+> Task :mobiCore:bundleLibRuntimeToJarDebug
+> Task :androidApp:mergeDebugResources FROM-CACHE
+> Task :androidApp:checkDebugDuplicateClasses
+> Task :mobiCore:bundleLibCompileToJarDebug
+> Task :shared:bundleAndroidMainClassesToRuntimeJar
+> Task :androidApp:compressDebugAndroidTestAssets FROM-CACHE
+> Task :androidApp:desugarDebugFileDependencies FROM-CACHE
+> Task :pdfiumNative:compileDebugJavaWithJavac FROM-CACHE
+> Task :androidApp:processDebugAndroidTestManifest
+> Task :androidApp:generateDebugAndroidTestBuildConfig FROM-CACHE
+> Task :androidApp:l8DexDesugarLibDebug FROM-CACHE
+> Task :pdfiumNative:bundleLibRuntimeToDirDebug
+> Task :pdfiumNative:bundleLibRuntimeToJarDebug
+> Task :mobiCore:bundleLibRuntimeToDirDebug
+> Task :pdfiumNative:bundleLibCompileToJarDebug
+> Task :androidApp:mergeExtDexDebugAndroidTest FROM-CACHE
+> Task :androidApp:processDebugAndroidTestResources FROM-CACHE
+> Task :androidApp:processDebugResources FROM-CACHE
+> Task :androidApp:mergeExtDexDebug FROM-CACHE
+> Task :archiveCore:buildCMakeDebug[x86_64]
+> Task :archiveCore:buildCMakeDebug[arm64-v8a]
+> Task :archiveCore:mergeDebugNativeLibs
+> Task :archiveCore:copyDebugJniLibsProjectOnly
+> Task :androidApp:mergeDebugNativeLibs
+> Task :androidApp:mergeDebugAndroidTestNativeLibs NO-SOURCE
+> Task :androidApp:stripDebugAndroidTestDebugSymbols NO-SOURCE
+> Task :androidApp:stripDebugDebugSymbols
+
+> Task :chapterCore:buildHostJni
+-- The C compiler identification is Clang 19.1.7
+
+> Task :shared:bundleLibRuntimeToDirAndroidMain
+
+> Task :chapterCore:buildHostJni
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: D:/www/ermao-menu-check/apps/mobile/chapterCore/build/host-jni/windows-x86_64/cmake-host-v2/toolchain/zig-cc.cmd - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Configuring done
+-- Generating done
+-- Build files have been written to: D:/www/ermao-menu-check/apps/mobile/chapterCore/build/host-jni/windows-x86_64/cmake-host-v2
+
+> Task :androidApp:mergeLibDexDebugAndroidTest FROM-CACHE
+> Task :androidApp:mergeLibDexDebug FROM-CACHE
+
+> Task :chapterCore:buildHostJni
+[1/4] Building C object CMakeFiles/ermao_chapter_jni.dir/chapter_jni.c.obj
+[2/4] Building C object chapter-core/CMakeFiles/ermao_chapters.dir/chapters.c.obj
+[3/4] Linking C static library chapter-core\libermao_chapters.a
+[4/4] Linking C shared library D:\www\ermao-menu-check\apps\mobile\chapterCore\build\host-jni\windows-x86_64\ermao_chapter_jni.dll
+host JNI: C:\Users\gamer\AppData\Local\Android\Sdk\cmake\3.22.1\bin\cmake.exe -S D:/www/ermao-menu-check/apps/mobile/chapterCore/src/main/cpp -B D:/www/ermao-menu-check/apps/mobile/chapterCore/build/host-jni/windows-x86_64/cmake-host-v2 -G Ninja -DCMAKE_MAKE_PROGRAM=C:/Users/gamer/AppData/Local/Android/Sdk/cmake/3.22.1/bin/ninja.exe -DCMAKE_C_COMPILER=D:/www/ermao-menu-check/apps/mobile/chapterCore/build/host-jni/windows-x86_64/cmake-host-v2/toolchain/zig-cc.cmd -DCMAKE_AR=D:/www/ermao-menu-check/apps/mobile/chapterCore/build/host-jni/windows-x86_64/cmake-host-v2/toolchain/zig-ar.cmd -DCMAKE_RANLIB=D:/www/ermao-menu-check/apps/mobile/chapterCore/build/host-jni/windows-x86_64/cmake-host-v2/toolchain/zig-ranlib.cmd -DCMAKE_BUILD_TYPE=Debug -DERMAO_CHAPTER_BUILD_HOST=ON -DERMAO_CHAPTER_HOST_OUTPUT_DIR=D:/www/ermao-menu-check/apps/mobile/chapterCore/build/host-jni/windows-x86_64 -DERMAO_CHAPTER_JNI_INCLUDE_DIR=C:/Program Files/JetBrains/PhpStorm 2023.3.8/jbr/include -DERMAO_CHAPTER_JNI_PLATFORM_INCLUDE_DIR=C:/Program Files/JetBrains/PhpStorm 2023.3.8/jbr/include/win32
+host JNI: C:\Users\gamer\AppData\Local\Android\Sdk\cmake\3.22.1\bin\cmake.exe --build D:/www/ermao-menu-check/apps/mobile/chapterCore/build/host-jni/windows-x86_64/cmake-host-v2 --target ermao_chapter_jni --config Debug
+host JNI ready: D:\www\ermao-menu-check\apps\mobile\chapterCore\build\host-jni\windows-x86_64\ermao_chapter_jni.dll (294912 bytes; target x86_64-windows-gnu; JNI win32)
+
+> Task :shared:compileAndroidHostTest
+> Task :shared:testAndroidHostTest
+> Task :androidApp:compileDebugKotlin
+> Task :androidApp:processDebugJavaRes
+> Task :androidApp:compileDebugJavaWithJavac
+> Task :androidApp:bundleDebugClassesToRuntimeJar
+> Task :androidApp:bundleDebugClassesToCompileJar
+> Task :androidApp:mergeDebugJavaResource
+> Task :androidApp:compileDebugUnitTestKotlin
+> Task :androidApp:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :androidApp:processDebugUnitTestJavaRes
+> Task :androidApp:dexBuilderDebug
+> Task :androidApp:mergeDebugGlobalSynthetics
+> Task :androidApp:mergeProjectDexDebug
+> Task :androidApp:testDebugUnitTest
+> Task :androidApp:compileDebugAndroidTestKotlin
+> Task :androidApp:processDebugAndroidTestJavaRes
+> Task :androidApp:mergeDebugAndroidTestJavaResource
+> Task :androidApp:packageDebug
+> Task :androidApp:assembleDebug
+> Task :androidApp:createDebugApkListingFileRedirect
+> Task :androidApp:compileDebugAndroidTestJavaWithJavac
+> Task :androidApp:dexBuilderDebugAndroidTest
+> Task :androidApp:mergeProjectDexDebugAndroidTest
+> Task :androidApp:mergeDebugAndroidTestGlobalSynthetics
+> Task :androidApp:packageDebugAndroidTest
+> Task :androidApp:assembleDebugAndroidTest
+> Task :androidApp:createDebugAndroidTestApkListingFileRedirect
+
+BUILD SUCCESSFUL in 38s
+186 actionable tasks: 84 executed, 38 from cache, 64 up-to-date
+Configuration cache entry reused.

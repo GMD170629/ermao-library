@@ -2,7 +2,6 @@ package com.ermao.library.shared.modules.workmanagement.application
 
 import com.ermao.library.shared.modules.workmanagement.domain.BookManagementContext
 import com.ermao.library.shared.modules.workmanagement.domain.BookMetadataDraft
-import com.ermao.library.shared.modules.workmanagement.domain.CoverEdit
 import com.ermao.library.shared.modules.workmanagement.domain.CoverUpload
 import com.ermao.library.shared.modules.workmanagement.domain.ManagedReadingStatus
 import com.ermao.library.shared.modules.workmanagement.domain.ManagementAction
@@ -39,8 +38,6 @@ data class ManagementSessionState(
     val snapshot: ManagementSnapshot? = null,
     val menuContext: ManagementMenuContext = ManagementMenuContext(),
     val draft: List<ManagementFieldValue> = emptyList(),
-    val coverEdit: CoverEdit = CoverEdit.Keep,
-    val coverUpload: CoverUpload? = null,
     val providers: List<MetadataProvider> = emptyList(),
     val providerId: String = "",
     val query: String = "",
@@ -86,7 +83,7 @@ class BookManagementSession(
     }.orEmpty()
     val recognitionFields get() = current.target?.let { recognizedManagementFields(it.kind) }.orEmpty()
     val isDirty: Boolean get() = current.phase == ManagementPhase.Editing && current.snapshot?.let { snapshot -> current.target?.let { target ->
-        current.draft != initialDraft(snapshot, target) || current.coverEdit != CoverEdit.Keep
+        current.draft != initialDraft(snapshot, target)
     } } == true
 
     /** Opening a native menu is synchronous and never starts network work. */
@@ -115,9 +112,6 @@ class BookManagementSession(
     fun setField(field: ManagementField, value: String) {
         if (current.operation != null) return
         mutableState.value = current.copy(draft = current.draft.map { if (it.field == field) it.copy(value = value) else it }, error = null)
-    }
-    fun setCover(edit: CoverEdit, upload: CoverUpload?) {
-        if (current.operation == null) mutableState.value = current.copy(coverEdit = edit, coverUpload = upload)
     }
     fun setQuery(value: String) { mutableState.value = current.copy(query = value) }
     fun setProvider(value: String) {
@@ -205,6 +199,7 @@ class BookManagementSession(
     }
 
     suspend fun loadProviders() = runOperation(ManagementOperation.Loading) { token ->
+        if (!recognitionAvailable()) return@runOperation
         when (val result = repository.loadMetadataProviders(context)) {
             is WorkManagementResult.Failure -> fail(token, result)
             is WorkManagementResult.Content -> if (token == generation) mutableState.value = current.copy(
@@ -218,6 +213,7 @@ class BookManagementSession(
         }
     }
     suspend fun search() = runOperation(ManagementOperation.Searching) { token ->
+        if (!recognitionAvailable()) return@runOperation
         val target = current.target ?: return@runOperation
         if (current.providerId.isBlank() || current.query.isBlank()) return@runOperation
         when (val result = repository.searchMetadata(context, target.bookId, sourceNodeId(), current.providerId, current.query)) {
@@ -241,16 +237,13 @@ class BookManagementSession(
         if (value(ManagementField.Title).isBlank() || listOf(ManagementField.SeriesIndex, ManagementField.ResourceIndex).any {
             value(it).isNotBlank() && value(it).toDoubleOrNull()?.isFinite() != true
         }) { invalid(token, "MANAGEMENT_FIELDS_INVALID"); return@runOperation }
-        val upload = current.coverUpload
-        val coverEdit = current.coverEdit
-        if (coverEdit == CoverEdit.Replace && upload == null) { invalid(token, "COVER_MISSING"); return@runOperation }
         mutableState.value = current.copy(saveStage = ManagementSaveStage.Metadata)
         val result = when (target.kind) {
             ManagementObject.Book -> repository.saveBookFields(context, target.bookId, BookMetadataDraft(
                 value(ManagementField.Title), value(ManagementField.Author), value(ManagementField.Description),
                 value(ManagementField.SeriesName).ifBlank { null }, value(ManagementField.SeriesIndex).toDoubleOrNull()))
             ManagementObject.Directory -> repository.saveSourcePresentation(context, target.bookId, target.id,
-                value(ManagementField.Title), value(ManagementField.Description), coverEdit == CoverEdit.Remove, upload)
+                value(ManagementField.Title), value(ManagementField.Description))
             ManagementObject.Resource -> repository.saveResourceFields(context, target.bookId, target.id, fields)
         }
         if (!succeeded(token, result)) return@runOperation
@@ -258,22 +251,20 @@ class BookManagementSession(
             mutableState.value = current.copy(saveStage = ManagementSaveStage.Tags)
             val tags = value(ManagementField.Tags).split('\n').map(String::trim).filter(String::isNotEmpty).distinct()
             if (!succeeded(token, repository.replaceBookTags(context, target.bookId, snapshot.book.tags, tags))) { if (token == generation) changed(target, false); return@runOperation }
-            if (coverEdit != CoverEdit.Keep) {
-                mutableState.value = current.copy(saveStage = ManagementSaveStage.Cover)
-                if (!succeeded(token, repository.saveSourcePresentation(context, target.bookId, snapshot.book.sourceNodeId,
-                    value(ManagementField.Title), value(ManagementField.Description), coverEdit == CoverEdit.Remove, upload))) { if (token == generation) changed(target, false); return@runOperation }
-            }
         }
-        complete(token, target, "saved", coverChanged = coverEdit != CoverEdit.Keep)
+        complete(token, target, "saved")
     }
 
-    suspend fun uploadResourceCover(upload: CoverUpload) = runOperation(ManagementOperation.Saving) { token ->
+    suspend fun uploadResourceCover(upload: CoverUpload, expectedInteractionId: Long) = runOperation(ManagementOperation.Saving) { token ->
+        if (expectedInteractionId != generation || current.phase != ManagementPhase.CoverUpload ||
+            menuItems.none { it.action == ManagementAction.UploadCover && it.enabled }) return@runOperation
         val target = current.target ?: return@runOperation
         if (!canManage || target.kind != ManagementObject.Resource) { deny(token); return@runOperation }
         if (succeeded(token, repository.uploadCover(context, target.bookId, target.id, upload))) complete(token, target, "saved", coverChanged = true)
     }
 
     suspend fun applyRecognition() = runOperation(ManagementOperation.Applying) { token ->
+        if (!recognitionAvailable()) return@runOperation
         val target = current.target ?: return@runOperation
         val candidate = current.selectedCandidate ?: return@runOperation
         if (!canManage) { deny(token); return@runOperation }
@@ -351,6 +342,9 @@ class BookManagementSession(
             coverChanged = action == ManagementAction.Regenerate, readingStatusChanged = action == ManagementAction.ReadingStatus)
     }
 
+    private fun recognitionAvailable(): Boolean = current.phase == ManagementPhase.Recognizing &&
+        menuItems.any { it.action == ManagementAction.Recognize && it.enabled }
+
     private fun sourceNodeId(): String {
         val target = requireNotNull(current.target)
         val snapshot = requireNotNull(current.snapshot)
@@ -385,7 +379,7 @@ class BookManagementSession(
         bookMenuCache.invalidate(target.bookId)
         if (readingStatusChanged) bookMenuCache.put(target.bookId, current.menuContext.completed != true)
         changed(target, coverChanged, deleted, readingStatusChanged)
-        mutableState.value = current.copy(phase = ManagementPhase.Closed, notice = notice, saveStage = null, coverUpload = null)
+        mutableState.value = current.copy(phase = ManagementPhase.Closed, notice = notice, saveStage = null)
     }
 }
 

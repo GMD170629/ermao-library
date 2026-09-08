@@ -236,8 +236,10 @@ final class NativeBookManagementStore: ObservableObject {
         }
     }
 
-    func importCover(_ url: URL) {
+    func importCover(_ url: URL, expectedInteractionId: Int64) {
         run { [session] in
+            guard expectedInteractionId == session.interactionId,
+                  session.current.phase.name == "CoverUpload" else { return }
             let secured = url.startAccessingSecurityScopedResource()
             defer { if secured { url.stopAccessingSecurityScopedResource() } }
             let values = try url.resourceValues(forKeys: [.fileSizeKey, .contentTypeKey])
@@ -249,8 +251,7 @@ final class NativeBookManagementStore: ObservableObject {
             let array = KotlinByteArray(size: Int32(bytes.count))
             for (index, byte) in bytes.enumerated() { array.set(index: Int32(index), value: Int8(bitPattern: byte)) }
             let upload = ErmaoShared.CoverUpload(fileName: url.lastPathComponent, mimeType: mime, bytes: array)
-            if session.current.phase.name == "CoverUpload" { try await session.uploadResourceCover(upload: upload) }
-            else { session.setCover(edit: .replace, upload: upload) }
+            try await session.uploadResourceCover(upload: upload, expectedInteractionId: expectedInteractionId)
         }
     }
 }
@@ -892,8 +893,8 @@ private struct NativeManagementSheet: View {
             }
             .interactiveDismissDisabled((store.running && !store.isPreparingPresentedSheet) || session.isDirty)
             .fileImporter(isPresented: $importing, allowedContentTypes: [.jpeg, .png, .webP]) { result in
-                guard pickerInteraction == session.interactionId else { return }
-                switch result { case .success(let url): store.importCover(url); case .failure: store.transportFailed = true }
+                guard pickerInteraction == session.interactionId, session.current.phase.name == "CoverUpload" else { return }
+                switch result { case .success(let url): store.importCover(url, expectedInteractionId: pickerInteraction); case .failure: store.transportFailed = true }
             }
             .confirmationDialog("nativeManagement.discardTitle", isPresented: $discard, titleVisibility: .visible) {
                 Button("nativeManagement.discard", role: .destructive) { store.close() }

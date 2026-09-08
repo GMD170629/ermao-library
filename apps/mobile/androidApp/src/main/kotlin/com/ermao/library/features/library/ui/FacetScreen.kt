@@ -11,13 +11,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -30,8 +31,8 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import com.ermao.library.R
-import com.ermao.library.features.content.model.LibraryScope
 import com.ermao.library.features.content.model.BookCard
+import com.ermao.library.features.content.model.LibraryScope
 import com.ermao.library.features.content.ui.BookGridItem
 import com.ermao.library.features.content.ui.BookListItem
 import com.ermao.library.features.content.ui.responsiveCoverColumnCount
@@ -45,7 +46,7 @@ import com.ermao.library.ui.components.WarmPageNavigationAction
 import com.ermao.library.ui.components.WarmPagePaginationError
 import com.ermao.library.ui.components.WarmPagePaginationLoading
 import com.ermao.library.ui.components.WarmPageScaffold
-import com.ermao.library.ui.components.WarmPageTextAction
+import com.ermao.library.ui.components.WarmPageSecondaryAction
 import com.ermao.library.ui.components.WarmPageTopBarRole
 import com.ermao.library.ui.theme.WarmPageThemeValues
 
@@ -196,8 +197,9 @@ private fun FacetPagination(state: FacetUiState, onLoadNextPage: () -> Unit) {
             retryLabel = stringResource(R.string.retry_action),
             onRetry = onLoadNextPage,
         )
-        state.page < state.totalPages -> WarmPageTextAction(
+        state.page < state.totalPages -> WarmPageSecondaryAction(
             label = stringResource(R.string.load_more_action),
+            leadingIcon = Icons.Outlined.ExpandMore,
             onClick = onLoadNextPage,
             modifier = Modifier.fillMaxWidth(),
         )

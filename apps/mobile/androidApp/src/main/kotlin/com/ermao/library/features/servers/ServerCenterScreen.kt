@@ -9,17 +9,22 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.LockReset
+import androidx.compose.material.icons.outlined.SwapHoriz
+import androidx.compose.material.icons.outlined.VerifiedUser
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -230,8 +235,14 @@ private fun ServerDetailScreen(
             onDismissRequest = { confirmSwitch = false },
             title = { Text(stringResource(R.string.server_switch_confirm_title)) },
             text = { Text(stringResource(R.string.server_switch_confirm_message, profile.displayName)) },
-            confirmButton = { TextButton(onClick = { confirmSwitch = false; onSwitch() }) { Text(stringResource(R.string.server_switch_action)) } },
-            dismissButton = { TextButton(onClick = { confirmSwitch = false }) { Text(stringResource(R.string.cancel)) } },
+            confirmButton = { OutlinedButton(onClick = { confirmSwitch = false; onSwitch() }) {
+                Icon(Icons.Outlined.SwapHoriz, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(stringResource(R.string.server_switch_action)) } },
+            dismissButton = { OutlinedButton(onClick = { confirmSwitch = false }) {
+                Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(stringResource(R.string.cancel)) } },
         )
     }
     if (confirmRemove) {
@@ -240,11 +251,16 @@ private fun ServerDetailScreen(
             title = { Text(stringResource(R.string.server_remove_confirm_title)) },
             text = { Text(stringResource(R.string.server_remove_confirm_message, profile.displayName)) },
             confirmButton = {
-                TextButton(onClick = { confirmRemove = false; onRemove() }) {
+                OutlinedButton(onClick = { confirmRemove = false; onRemove() }) {
+                    Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                     Text(stringResource(R.string.server_remove_confirm_action), color = MaterialTheme.colorScheme.error)
                 }
             },
-            dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text(stringResource(R.string.cancel)) } },
+            dismissButton = { OutlinedButton(onClick = { confirmRemove = false }) {
+                Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(stringResource(R.string.cancel)) } },
         )
     }
     if (confirmRestoreTrust) {
@@ -252,8 +268,14 @@ private fun ServerDetailScreen(
             onDismissRequest = { confirmRestoreTrust = false },
             title = { Text(stringResource(R.string.server_restore_trust_confirm_title)) },
             text = { Text(stringResource(R.string.server_restore_trust_confirm_message, profile.displayName)) },
-            confirmButton = { TextButton(onClick = { confirmRestoreTrust = false; onRestoreSystemTrust() }) { Text(stringResource(R.string.server_restore_trust_action)) } },
-            dismissButton = { TextButton(onClick = { confirmRestoreTrust = false }) { Text(stringResource(R.string.cancel)) } },
+            confirmButton = { OutlinedButton(onClick = { confirmRestoreTrust = false; onRestoreSystemTrust() }) {
+                Icon(Icons.Outlined.VerifiedUser, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(stringResource(R.string.server_restore_trust_action)) } },
+            dismissButton = { OutlinedButton(onClick = { confirmRestoreTrust = false }) {
+                Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(stringResource(R.string.cancel)) } },
         )
     }
 }

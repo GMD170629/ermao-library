@@ -1,0 +1,23 @@
+Calculating task graph as no cached configuration is available for tasks: :shared:testAndroidHostTest --tests *workmanagement*
+> Task :buildSrc:compileJava UP-TO-DATE
+> Task :buildSrc:compileGroovy NO-SOURCE
+> Task :buildSrc:processResources NO-SOURCE
+> Task :buildSrc:classes UP-TO-DATE
+> Task :buildSrc:jar UP-TO-DATE
+> Task :shared:androidPreBuild UP-TO-DATE
+> Task :shared:preAndroidMainBuild UP-TO-DATE
+> Task :shared:preAndroidHostTestBuild UP-TO-DATE
+> Task :shared:kmpPartiallyResolvedDependenciesChecker
+> Task :shared:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :shared:processAndroidHostTestJavaRes NO-SOURCE
+> Task :shared:androidJar UP-TO-DATE
+> Task :shared:compileAndroidMain UP-TO-DATE
+> Task :shared:bundleAndroidMainClassesToRuntimeJar UP-TO-DATE
+> Task :shared:bundleAndroidMainClassesToCompileJar UP-TO-DATE
+> Task :shared:processAndroidMainJavaRes UP-TO-DATE
+> Task :shared:compileAndroidHostTest
+> Task :shared:testAndroidHostTest
+
+BUILD SUCCESSFUL in 10s
+10 actionable tasks: 3 executed, 7 up-to-date
+Configuration cache entry stored.

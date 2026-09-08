@@ -4,18 +4,33 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Undo
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.Merge
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -54,11 +69,20 @@ fun OrganizeQueueScreen(
                     Text(task.status.copy().text(locale))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         if (task.status == OrganizeStatus.AwaitingRecognition) {
-                            TextButton({ onCommand(AdministrativeCommand.StartRecognition(task.id)) }) { Text(AdministrativeCopy.RecognizeNow.text(locale)) }
-                            TextButton({ onCommand(AdministrativeCommand.DeleteOrganizeTask(task.id)) }) { Text(AdministrativeCopy.Delete.text(locale)) }
+                            OutlinedButton({ onCommand(AdministrativeCommand.StartRecognition(task.id)) }) {
+                                Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                                Text(AdministrativeCopy.RecognizeNow.text(locale)) }
+                            OutlinedButton({ onCommand(AdministrativeCommand.DeleteOrganizeTask(task.id)) }) {
+                                Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                                Text(AdministrativeCopy.Delete.text(locale)) }
                         }
                         if (task.status == OrganizeStatus.NeedsConfirmation) {
-                            TextButton({ onNavigate(AdministrativeSettingsRoute.OrganizeCandidates) }) { Text(AdministrativeCopy.ViewCandidates.text(locale)) }
+                            OutlinedButton({ onNavigate(AdministrativeSettingsRoute.OrganizeCandidates) }) {
+                                Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                                Text(AdministrativeCopy.ViewCandidates.text(locale)) }
                         }
                     }
                 }
@@ -120,7 +144,10 @@ fun OrganizeCandidatesScreen(
                 )
                 AdministrativeDivider()
             }
-            TextButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text(AdministrativeCopy.Done.text(locale)) }
+            OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(AdministrativeCopy.Done.text(locale)) }
         }
     }
 }
@@ -185,8 +212,12 @@ private fun ReorderableSourceList(
             leadingContent = { Text("${index + 1}") },
             trailingContent = {
                 Row {
-                    TextButton(enabled = index > 0, onClick = { onChange(sources.moved(index, index - 1)) }) { Text("↑") }
-                    TextButton(enabled = index < sources.lastIndex, onClick = { onChange(sources.moved(index, index + 1)) }) { Text("↓") }
+                    IconButton(enabled = index > 0, onClick = { onChange(sources.moved(index, index - 1)) }) {
+                        Icon(Icons.Outlined.KeyboardArrowUp, contentDescription = AdministrativeCopy.MoveUp.text(locale))
+                    }
+                    IconButton(enabled = index < sources.lastIndex, onClick = { onChange(sources.moved(index, index + 1)) }) {
+                        Icon(Icons.Outlined.KeyboardArrowDown, contentDescription = AdministrativeCopy.MoveDown.text(locale))
+                    }
                 }
             },
             colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
@@ -216,10 +247,13 @@ fun LibraryOperationsScreen(
                     headlineContent = { Text(operation.summary) },
                     supportingContent = { Text("${operation.action} · ${operation.status}") },
                     trailingContent = operation.takeIf { it.undoAvailable }?.let {
-                        ({ TextButton(
+                        ({ OutlinedButton(
                             enabled = !state.mutationInFlight,
                             onClick = { onCommand(AdministrativeCommand.UndoLibraryOperation(it.id)) },
-                        ) { Text(AdministrativeCopy.Undo.text(locale)) } })
+                        ) {
+                            Icon(Icons.AutoMirrored.Outlined.Undo, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                            Text(AdministrativeCopy.Undo.text(locale)) } })
                     },
                     colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
                 )
@@ -265,8 +299,14 @@ fun CategoryGovernanceScreen(
                     leadingContent = { Checkbox(selected.contains(entry.id), null) },
                     trailingContent = {
                         Row {
-                            TextButton({ renameEntry = entry }) { Text(AdministrativeCopy.Rename.text(locale)) }
-                            TextButton({ deleteEntry = entry }) { Text(AdministrativeCopy.Delete.text(locale)) }
+                            OutlinedButton({ renameEntry = entry }) {
+                                Icon(Icons.Outlined.Edit, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                                Text(AdministrativeCopy.Rename.text(locale)) }
+                            OutlinedButton({ deleteEntry = entry }) {
+                                Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                                Text(AdministrativeCopy.Delete.text(locale)) }
                         }
                     },
                     colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
@@ -288,11 +328,17 @@ fun CategoryGovernanceScreen(
                         leadingContent = { RadioButton(target == entry.id, null) },
                         modifier = Modifier.clickable(role = Role.RadioButton) { target = entry.id },
                     ) } } },
-                    confirmButton = { TextButton(enabled = target != null, onClick = {
+                    confirmButton = { OutlinedButton(enabled = target != null, onClick = {
                         target?.let { onCommand(AdministrativeCommand.MergeCategories(snapshot.kind, it, selected - it)) }
                         mergeOpen = false
-                    }) { Text(AdministrativeCopy.ConfirmMerge.text(locale)) } },
-                    dismissButton = { TextButton(onClick = { mergeOpen = false }) { Text(AdministrativeCopy.Cancel.text(locale)) } },
+                    }) {
+                        Icon(Icons.Outlined.Merge, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                        Text(AdministrativeCopy.ConfirmMerge.text(locale)) } },
+                    dismissButton = { OutlinedButton(onClick = { mergeOpen = false }) {
+                        Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                        Text(AdministrativeCopy.Cancel.text(locale)) } },
                 )
             }
         }
@@ -303,11 +349,17 @@ fun CategoryGovernanceScreen(
             onDismissRequest = { renameEntry = null },
             title = { Text(AdministrativeCopy.Rename.text(locale)) },
             text = { AdministrativeTextField(name, { name = it }, AdministrativeCopy.NewName, locale) },
-            confirmButton = { TextButton(enabled = name.isNotBlank(), onClick = {
+            confirmButton = { OutlinedButton(enabled = name.isNotBlank(), onClick = {
                 onCommand(AdministrativeCommand.RenameCategory(state.snapshot?.kind ?: CategoryKind.Author, entry.id, name.trim()))
                 renameEntry = null
-            }) { Text(AdministrativeCopy.Save.text(locale)) } },
-            dismissButton = { TextButton(onClick = { renameEntry = null }) { Text(AdministrativeCopy.Cancel.text(locale)) } },
+            }) {
+                Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(AdministrativeCopy.Save.text(locale)) } },
+            dismissButton = { OutlinedButton(onClick = { renameEntry = null }) {
+                Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(AdministrativeCopy.Cancel.text(locale)) } },
         )
     }
     deleteEntry?.let { entry -> AdministrativeConfirmDialog(

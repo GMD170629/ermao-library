@@ -33,6 +33,21 @@ import kotlinx.serialization.json.Json
 
 class KtorPersonalSettingsRepositoryTest {
     @Test
+    fun mapsServerDefaultWithoutClaimingACustomUpload() = runBlocking {
+        val response = SESSION.replace(
+            "\"avatarUrl\":\"/api/auth/avatar\"",
+            "\"avatarUrl\":null,\"avatarImageUrl\":\"/api/auth/avatar\"",
+        )
+        val harness = Harness(Response(200, response))
+        val result = assertIs<PersonalSettingsResult.Content<*>>(
+            harness.repository.loadSettings(context()),
+        )
+        val settings = assertIs<com.ermao.library.shared.modules.personalsettings.domain.PersonalSettingsSnapshot>(result.value)
+        assertEquals(null, settings.account.avatarUrl)
+        assertEquals("/api/auth/avatar", settings.account.avatarImageUrl)
+    }
+
+    @Test
     fun loadsSessionAndMapsAvatarLocaleWithoutLeakingWireTypes() = runBlocking {
         val harness = Harness(Response(200, SESSION))
 

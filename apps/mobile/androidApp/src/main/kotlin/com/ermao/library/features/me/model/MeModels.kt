@@ -26,6 +26,7 @@ data class MeAccountViewState(
     val displayName: String,
     val email: String,
     val avatarUrl: String?,
+    val avatarImageUrl: String? = avatarUrl,
 )
 
 enum class MeOperation {

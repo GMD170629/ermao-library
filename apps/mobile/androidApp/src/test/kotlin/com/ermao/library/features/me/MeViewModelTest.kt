@@ -23,6 +23,12 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertNull
+import com.ermao.library.features.me.model.SanitizedAvatarMimeType
+import com.ermao.library.shared.modules.personalsettings.PersonalSettingsFailure
+import com.ermao.library.shared.modules.personalsettings.PersonalSettingsError
+import com.ermao.library.shared.modules.personalsettings.PersonalSettingsErrorKind
 import org.junit.Assert.assertFalse
 import org.junit.Before
 import org.junit.Test
@@ -91,6 +97,64 @@ class MeViewModelTest {
         assertEquals(listOf("load", "load-avatar", "email-api", "refresh"), events)
     }
 
+    @Test
+    fun avatarUploadUsesReturnedUrlAndServerBytesAndReopeningUsesSameOwner() = runTest(dispatcher) {
+        val events = mutableListOf<String>()
+        val client = FakeSettingsClient(events)
+        val model = viewModel(client, RecordingSideEffects(events))
+        advanceUntilIdle()
+        model.stageAvatar(SanitizedAvatar(byteArrayOf(9, 9), SanitizedAvatarMimeType.Jpeg))
+        assertArrayEquals(byteArrayOf(1, 2, 3), model.rootState.value.avatarBytes)
+        client.account = ACCOUNT.copy(avatarUrl = "/api/auth/avatar?v=server-version", avatarImageUrl = "/api/auth/avatar?v=server-version")
+        client.avatarResult = PersonalSettingsContent(PersonalAvatar(byteArrayOf(4, 5), "image/webp", null, false))
+        model.uploadAvatar()
+        advanceUntilIdle()
+        assertEquals(client.account.avatarUrl, client.avatarUrls.last())
+        assertArrayEquals(byteArrayOf(4, 5), model.rootState.value.avatarBytes)
+        assertNull(model.profileState.value.pendingAvatar)
+        model.retryLoad()
+        advanceUntilIdle()
+        assertArrayEquals(byteArrayOf(4, 5), model.rootState.value.avatarBytes)
+    }
+
+    @Test
+    fun avatarFailureAfterUploadNeverPublishesLocalSelectionAndCanRetry() = runTest(dispatcher) {
+        val events = mutableListOf<String>()
+        val client = FakeSettingsClient(events)
+        val model = viewModel(client, RecordingSideEffects(events))
+        advanceUntilIdle()
+        model.stageAvatar(SanitizedAvatar(byteArrayOf(9), SanitizedAvatarMimeType.Jpeg))
+        client.avatarResult = PersonalSettingsFailure(PersonalSettingsError(PersonalSettingsErrorKind.Unauthorized, "UNAUTHORIZED"))
+        model.uploadAvatar()
+        advanceUntilIdle()
+        assertNull(model.rootState.value.avatarBytes)
+        assertEquals(1, events.count { it == "reauth" })
+        assertFalse(model.profileState.value.isSaving)
+        client.avatarResult = PersonalSettingsContent(PersonalAvatar(byteArrayOf(4), "image/webp", null, false))
+        model.retryLoad()
+        advanceUntilIdle()
+        assertArrayEquals(byteArrayOf(4), model.rootState.value.avatarBytes)
+    }
+
+    @Test
+    fun avatarDeletionUsesResponseIncludingServerDefaultAndNull() = runTest(dispatcher) {
+        val events = mutableListOf<String>()
+        val client = FakeSettingsClient(events)
+        val model = viewModel(client, RecordingSideEffects(events))
+        advanceUntilIdle()
+        client.deletedAccount = ACCOUNT.copy(avatarUrl = null, avatarImageUrl = "/api/auth/avatar")
+        model.deleteAvatar()
+        advanceUntilIdle()
+        assertEquals(client.deletedAccount.avatarImageUrl, client.avatarUrls.last())
+        assertArrayEquals(byteArrayOf(1, 2, 3), model.rootState.value.avatarBytes)
+        val requests = client.avatarUrls.size
+        client.deletedAccount = ACCOUNT.copy(avatarUrl = null, avatarImageUrl = null)
+        model.deleteAvatar()
+        advanceUntilIdle()
+        assertNull(model.rootState.value.avatarBytes)
+        assertEquals(requests, client.avatarUrls.size)
+    }
+
     private fun viewModel(client: SettingsClient, sideEffects: SettingsSideEffects) = MeViewModel(
         client = client,
         sideEffects = sideEffects,
@@ -104,14 +168,21 @@ class MeViewModelTest {
     private class FakeSettingsClient(
         private val events: MutableList<String>,
     ) : SettingsClient {
+        var account = ACCOUNT
+        var deletedAccount = ACCOUNT.copy(avatarUrl = null, avatarImageUrl = null)
+        val avatarUrls = mutableListOf<String>()
+        var avatarResult: PersonalSettingsResult<PersonalAvatar> = PersonalSettingsContent(
+            PersonalAvatar(byteArrayOf(1, 2, 3), "image/webp", null, false),
+        )
         override suspend fun load(): PersonalSettingsResult<PersonalSettingsSnapshot> {
             events += "load"
-            return PersonalSettingsContent(PersonalSettingsSnapshot(ACCOUNT, PersonalPreferences(PersonalSettingsLocale.EnUs)))
+            return PersonalSettingsContent(PersonalSettingsSnapshot(account, PersonalPreferences(PersonalSettingsLocale.EnUs)))
         }
 
         override suspend fun loadAvatar(avatarUrl: String, etag: String?): PersonalSettingsResult<PersonalAvatar> {
             events += "load-avatar"
-            return PersonalSettingsContent(PersonalAvatar(byteArrayOf(), null, null, false))
+            avatarUrls += avatarUrl
+            return avatarResult
         }
 
         override suspend fun updateName(name: String) = PersonalSettingsContent(ACCOUNT.copy(displayName = name))
@@ -129,8 +200,8 @@ class MeViewModelTest {
             return PersonalSettingsContent(PersonalPasswordChange(requiresLogin = true))
         }
 
-        override suspend fun uploadAvatar(avatar: SanitizedAvatar) = PersonalSettingsContent(ACCOUNT)
-        override suspend fun deleteAvatar() = PersonalSettingsContent(ACCOUNT.copy(avatarUrl = null))
+        override suspend fun uploadAvatar(avatar: SanitizedAvatar) = PersonalSettingsContent(account)
+        override suspend fun deleteAvatar() = PersonalSettingsContent(deletedAccount)
         override suspend fun updateLocale(locale: PersonalSettingsLocale) =
             PersonalSettingsContent(PersonalPreferences(locale))
         override suspend fun loadServerAbout() =
@@ -168,4 +239,4 @@ class MeViewModelTest {
     }
 }
 
-private fun PersonalAccount.toViewState() = MeAccountViewState(id, displayName, email, avatarUrl)
+private fun PersonalAccount.toViewState() = MeAccountViewState(id, displayName, email, avatarUrl, avatarImageUrl)

@@ -13,12 +13,16 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Security
+import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -34,7 +38,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -52,8 +55,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import com.ermao.library.R
 import com.ermao.library.bootstrap.ServerFormError
 import com.ermao.library.bootstrap.ServerFormState
@@ -249,11 +250,13 @@ fun TlsRiskScreen(
                 onClick = onBackToEdit,
                 modifier = Modifier.fillMaxWidth(),
             )
-            TextButton(
+            OutlinedButton(
                 onClick = { showConfirmation = true },
                 modifier = Modifier.heightIn(min = theme.spacing.six),
                 colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
             ) {
+                Icon(Icons.Outlined.Warning, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                 Text(stringResource(R.string.tls_ignore_action))
             }
         }
@@ -265,18 +268,22 @@ fun TlsRiskScreen(
             title = { Text(stringResource(R.string.tls_confirmation_title)) },
             text = { Text(stringResource(R.string.tls_confirmation_message, serverDisplayName)) },
             confirmButton = {
-                TextButton(
+                OutlinedButton(
                     onClick = {
                         showConfirmation = false
                         onPermanentlyIgnore()
                     },
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
                 ) {
+                    Icon(Icons.Outlined.Warning, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                     Text(stringResource(R.string.tls_ignore_action))
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showConfirmation = false }) {
+                OutlinedButton(onClick = { showConfirmation = false }) {
+                    Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                     Text(stringResource(R.string.cancel))
                 }
             },

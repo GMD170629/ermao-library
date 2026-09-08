@@ -71,12 +71,7 @@ final class SettingsViewModel: ObservableObject {
             snapshot.locale = loaded.locale
             hasLoaded = true
 
-            if loaded.account.avatarURL == nil {
-                avatarData = nil
-                avatarETag = nil
-            } else {
-                await loadAvatarIfPresent()
-            }
+            await loadAvatarIfPresent()
             await loadServerVersionIfNeeded()
         } catch {
             handle(error)
@@ -251,6 +246,7 @@ final class SettingsViewModel: ObservableObject {
             snapshot.account = try await client.deleteAvatar()
             avatarData = nil
             avatarETag = nil
+            await loadAvatarIfPresent()
             await lifecycle.refreshSession()
             return true
         } catch {
@@ -298,7 +294,7 @@ final class SettingsViewModel: ObservableObject {
     }
 
     private func loadAvatarIfPresent() async {
-        guard let avatarURL = snapshot.account.avatarURL else {
+        guard let avatarURL = snapshot.account.avatarImageURL ?? snapshot.account.avatarURL else {
             avatarData = nil
             avatarETag = nil
             return

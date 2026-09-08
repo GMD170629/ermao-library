@@ -7,6 +7,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -14,7 +15,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -22,6 +22,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -32,7 +33,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.res.stringResource
 import com.ermao.library.R
 import com.ermao.library.ui.theme.WarmPageThemeValues
 
@@ -116,8 +116,8 @@ fun SettingsTextField(
  * Explicit settings save action.
  *
  * Older callers provide [contentDescription] only, so it remains the default visible label as
- * well as the accessibility description. The text affordance makes the action discoverable in
- * a top bar and remains compatible with existing call sites.
+ * well as the accessibility description. The check icon preserves the compact top-bar action
+ * while the label remains available to accessibility services.
  */
 @Composable
 fun SettingsSaveAction(
@@ -137,7 +137,7 @@ fun SettingsSaveAction(
     } else {
         Modifier
     }
-    TextButton(
+    IconButton(
         onClick = onClick,
         enabled = enabled && !working,
         modifier = modifier
@@ -151,7 +151,11 @@ fun SettingsSaveAction(
                 strokeWidth = 2.dp,
             )
         } else {
-            Text(label, style = theme.typography.button)
+            Icon(
+                imageVector = Icons.Outlined.Check,
+                contentDescription = label.takeIf { it == contentDescription },
+                modifier = Modifier.size(theme.components.controls.iconSize),
+            )
         }
     }
 }

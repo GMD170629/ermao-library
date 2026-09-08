@@ -14,15 +14,15 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
@@ -30,6 +30,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material.icons.automirrored.outlined.ViewList
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.FilterAltOff
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.MoreVert
@@ -40,8 +42,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -62,24 +64,25 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ermao.library.R
+import com.ermao.library.features.content.model.BookCard
 import com.ermao.library.features.content.model.ContentSort
 import com.ermao.library.features.content.model.ContentViewMode
 import com.ermao.library.features.content.model.GroupingCard
 import com.ermao.library.features.content.model.LibraryScope
 import com.ermao.library.features.content.model.ReadingFilter
-import com.ermao.library.features.content.model.BookCard
 import com.ermao.library.features.content.model.WorksFilters
-import com.ermao.library.features.content.ui.CoverRole
 import com.ermao.library.features.content.ui.BookCover
 import com.ermao.library.features.content.ui.BookGridItem
 import com.ermao.library.features.content.ui.BookListItem
+import com.ermao.library.features.content.ui.CoverRole
 import com.ermao.library.features.content.ui.responsiveCoverColumnCount
 import com.ermao.library.features.library.application.LibraryUiState
 import com.ermao.library.features.library.application.ScrollAnchor
 import com.ermao.library.shared.modules.library.ContentRepository
-import com.ermao.library.ui.components.WarmPageModalBottomSheet
 import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.ui.components.WarmPageActionMenu
+import com.ermao.library.ui.components.WarmPageCatalogHeader
+import com.ermao.library.ui.components.WarmPageCatalogTab
 import com.ermao.library.ui.components.WarmPageEmptyState
 import com.ermao.library.ui.components.WarmPageErrorState
 import com.ermao.library.ui.components.WarmPageIconAction
@@ -87,15 +90,14 @@ import com.ermao.library.ui.components.WarmPageInlineFilter
 import com.ermao.library.ui.components.WarmPageLoadingState
 import com.ermao.library.ui.components.WarmPageMenuAction
 import com.ermao.library.ui.components.WarmPageMenuOption
+import com.ermao.library.ui.components.WarmPageModalBottomSheet
 import com.ermao.library.ui.components.WarmPagePaginationError
 import com.ermao.library.ui.components.WarmPagePaginationLoading
 import com.ermao.library.ui.components.WarmPagePermissionGate
 import com.ermao.library.ui.components.WarmPagePrimaryAction
 import com.ermao.library.ui.components.WarmPageScaffold
-import com.ermao.library.ui.components.WarmPageCatalogHeader
-import com.ermao.library.ui.components.WarmPageCatalogTab
+import com.ermao.library.ui.components.WarmPageSecondaryAction
 import com.ermao.library.ui.components.WarmPageSingleChoiceMenu
-import com.ermao.library.ui.components.WarmPageTextAction
 import com.ermao.library.ui.components.WarmPageTopBarRole
 import com.ermao.library.ui.theme.WarmPageThemeValues
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -818,15 +820,17 @@ internal fun LibraryFilterSheetHeader(
                 .testTag("library-filter-title"),
         )
         Row(modifier = Modifier.fillMaxWidth()) {
-            WarmPageTextAction(
+            WarmPageSecondaryAction(
                 label = cancelLabel,
+                leadingIcon = Icons.Outlined.Close,
                 onClick = onCancel,
                 modifier = Modifier
                     .weight(1f)
                     .testTag("library-filter-cancel"),
             )
-            WarmPageTextAction(
+            WarmPageSecondaryAction(
                 label = clearLabel,
+                leadingIcon = Icons.Outlined.FilterAltOff,
                 onClick = onClear,
                 modifier = Modifier
                     .weight(1f)

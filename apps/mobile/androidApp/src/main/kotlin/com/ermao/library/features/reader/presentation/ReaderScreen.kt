@@ -3,48 +3,48 @@ package com.ermao.library.features.reader.presentation
 import android.os.Build
 import android.view.ViewGroup
 import android.view.WindowManager
-import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.border
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
@@ -53,22 +53,27 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
-import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.automirrored.outlined.Notes
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Remove
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.automirrored.outlined.Notes
-import androidx.compose.material.icons.outlined.EditNote
-import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.outlined.Bookmark
+import androidx.compose.material.icons.outlined.EditNote
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.RestartAlt
+import androidx.compose.material.icons.outlined.Restore
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -77,54 +82,52 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SheetValue
-import androidx.compose.material3.BottomSheetScaffold
-import androidx.compose.material3.BottomSheetDefaults
-import androidx.compose.material3.rememberBottomSheetScaffoldState
-import androidx.compose.material3.rememberStandardBottomSheetState
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberBottomSheetScaffoldState
+import androidx.compose.material3.rememberStandardBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.withFrameNanos
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setProgress
@@ -134,45 +137,45 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.fragment.app.FragmentContainerView
 import androidx.core.view.WindowCompat
+import androidx.fragment.app.FragmentContainerView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ermao.library.R
-import com.ermao.library.features.reader.application.ReaderScreenController
+import com.ermao.library.design.GeneratedDesignTokens
 import com.ermao.library.features.reader.application.ReaderAdjacentChapters
+import com.ermao.library.features.reader.application.ReaderScreenController
 import com.ermao.library.features.reader.application.ReaderTocNode
 import com.ermao.library.features.reader.application.flattenTableOfContents
 import com.ermao.library.features.reader.application.resolveAdjacentChapters
-import com.ermao.library.shared.modules.reader.ReaderMorphology
+import com.ermao.library.shared.modules.reader.ComicReaderLocation
+import com.ermao.library.shared.modules.reader.PdfReaderLocation
+import com.ermao.library.shared.modules.reader.ReaderBookmark
 import com.ermao.library.shared.modules.reader.ReaderCapabilities
-import com.ermao.library.shared.modules.reader.ReaderPanel
+import com.ermao.library.shared.modules.reader.ReaderCommandRejected
 import com.ermao.library.shared.modules.reader.ReaderControl
 import com.ermao.library.shared.modules.reader.ReaderControlAvailability
-import com.ermao.library.shared.modules.reader.ReaderSettingDefinition
-import com.ermao.library.shared.modules.reader.ReaderSettingState
-import com.ermao.library.shared.modules.reader.ReaderSettingsCatalog
-import com.ermao.library.shared.modules.reader.resetReaderPreferences
-import com.ermao.library.shared.modules.reader.ComicReaderLocation
-import com.ermao.library.shared.modules.reader.ReaderBookmark
 import com.ermao.library.shared.modules.reader.ReaderError
 import com.ermao.library.shared.modules.reader.ReaderErrorCode
 import com.ermao.library.shared.modules.reader.ReaderLocation
-import com.ermao.library.shared.modules.reader.ReaderCommandRejected
+import com.ermao.library.shared.modules.reader.ReaderMorphology
 import com.ermao.library.shared.modules.reader.ReaderNavigationCompleted
+import com.ermao.library.shared.modules.reader.ReaderPanel
 import com.ermao.library.shared.modules.reader.ReaderPreferences
-import com.ermao.library.shared.modules.reader.ReaderReadingProgression
-import com.ermao.library.shared.modules.reader.PdfReaderLocation
 import com.ermao.library.shared.modules.reader.ReaderProgressStyle
+import com.ermao.library.shared.modules.reader.ReaderReadingProgression
+import com.ermao.library.shared.modules.reader.ReaderSettingDefinition
+import com.ermao.library.shared.modules.reader.ReaderSettingState
+import com.ermao.library.shared.modules.reader.ReaderSettingsCatalog
 import com.ermao.library.shared.modules.reader.ReaderTheme
 import com.ermao.library.shared.modules.reader.ReaderThemeMode
 import com.ermao.library.shared.modules.reader.ReaderTocEntry
 import com.ermao.library.shared.modules.reader.ReflowReaderLocation
-import com.ermao.library.design.GeneratedDesignTokens
+import com.ermao.library.shared.modules.reader.resetReaderPreferences
+import com.ermao.library.ui.components.WarmPageSnackbarHost
+import com.ermao.library.ui.components.WarmSettingsInlineMessage
 import com.ermao.library.ui.theme.ReaderWarmPageTheme
 import com.ermao.library.ui.theme.WarmPageThemeValues
 import com.ermao.library.ui.theme.readerColors
-import com.ermao.library.ui.components.WarmPageSnackbarHost
-import com.ermao.library.ui.components.WarmSettingsInlineMessage
 import java.text.DateFormat
 import java.util.Date
 import kotlin.math.abs
@@ -180,8 +183,8 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -612,7 +615,9 @@ private fun ReaderResumeNoticeCard(
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            TextButton(onClick = onReturn) {
+            OutlinedButton(onClick = onReturn) {
+                Icon(Icons.Outlined.Restore, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                 Text(stringResource(R.string.reader_resume_return))
             }
         }
@@ -1450,7 +1455,7 @@ private fun ReaderCatalogSetting(
         verticalArrangement = Arrangement.spacedBy(theme.spacing.half),
     ) {
         when (setting.kind) {
-            "action" -> TextButton(
+            "action" -> OutlinedButton(
                 onClick = { onUpdate(resetReaderPreferences()) },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1458,6 +1463,8 @@ private fun ReaderCatalogSetting(
                     .testTag("reader-setting-control-${setting.id}"),
                 enabled = available,
             ) {
+                Icon(Icons.Outlined.RestartAlt, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                 Text(
                     text = label,
                     modifier = Modifier.fillMaxWidth(),
@@ -2000,7 +2007,9 @@ private fun ReaderNotesPanel(
                                 border = BorderStroke(1.dp, WarmPageThemeValues.colors.divider),
                             ) {
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    TextButton({ onJump(bookmark.id) }, Modifier.weight(1f)) {
+                                    OutlinedButton({ onJump(bookmark.id) }, Modifier.weight(1f)) {
+                                        Icon(Icons.Outlined.Bookmark, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                                         Column(Modifier.fillMaxWidth()) {
                                             Text(bookmark.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                             Text(
@@ -2229,7 +2238,7 @@ private fun ReaderContentsPanel(
                         ) {
                             itemsIndexed(state.entries, key = { _, node -> node.entry.id }) { index, entry ->
                                 val selected = readerContentsEntrySelected(currentLocation, entry.entry.location)
-                                TextButton(
+                                OutlinedButton(
                                     onClick = { onSelect(entry.entry) },
                                     enabled = pendingEntryId == null,
                                     modifier = Modifier.width(110.dp).height(READER_COMPACT_CONTROL_HEIGHT),
