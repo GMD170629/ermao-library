@@ -885,6 +885,58 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertEqual(replacement.assetID, "asset-new")
     }
 
+    @MainActor
+    func testManagementRemoveAwaitsAndRemovesEveryLocalAssetForResource() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = ManagedDownloadStore(rootDirectory: root)
+        _ = try await makeRecord(store: repository, assetID: "asset-one")
+        _ = try await makeRecord(store: repository, assetID: "asset-two")
+        let context = downloadTestContext()
+        let center = DownloadCenterStore(repository: repository)
+        center.activate(context: context)
+        let resource = BookResource(
+            id: "resource", bookID: "book", sourceNodeID: "source-node-ebook",
+            title: "Resource", format: "EPUB", sizeLabel: "4 bytes", progress: nil,
+            isReadable: true, isSelected: true
+        )
+
+        let results = await center.executeManagement(
+            action: .remove,
+            selectedResourceIDs: [resource.id],
+            resources: [resource],
+            expectedNamespace: context.namespaceKey
+        )
+
+        XCTAssertEqual(results.count, 1)
+        XCTAssertEqual(results.first?.outcome, .completed)
+        let remaining = try await repository.records(namespace: context.namespaceKey)
+        XCTAssertTrue(remaining.isEmpty)
+    }
+
+    @MainActor
+    func testLegacyRecordRemovalKeepsOtherAssetVersionAndUsesItsNamespace() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = ManagedDownloadStore(rootDirectory: root)
+        let first = try await makeRecord(store: repository, assetID: "asset-one")
+        let second = try await makeRecord(store: repository, assetID: "asset-two")
+        let context = downloadTestContext()
+        let center = DownloadCenterStore(repository: repository)
+        center.activate(context: context)
+
+        center.remove(first)
+        var remaining = try await repository.records(namespace: context.namespaceKey)
+        for _ in 0..<100 where remaining.contains(where: { $0.id == first.id }) {
+            try await Task.sleep(nanoseconds: 10_000_000)
+            remaining = try await repository.records(namespace: context.namespaceKey)
+        }
+
+        XCTAssertFalse(remaining.contains(where: { $0.id == first.id }))
+        XCTAssertTrue(remaining.contains(where: { $0.id == second.id }))
+        XCTAssertEqual(remaining.count, 1)
+    }
+
     func testReaderRecordSelectsOnlyTheExactAssetVersion() async throws {
         let repository = ManagedDownloadStore(rootDirectory: temporaryDirectory())
         var stale = try await makeRecord(store: repository)
@@ -1081,6 +1133,14 @@ final class DownloadStoreTests: XCTestCase {
     }
 
     private var namespace: String { "server|user|1" }
+
+    private func downloadTestContext() -> ErmaoLibrary.ContentRequestContext {
+        ErmaoLibrary.ContentRequestContext(
+            profileID: "profile", profileDisplayName: "Books", serverIdentity: "server",
+            userID: "user", authorizationVersion: 1, baseURL: "https://books.example",
+            acceptsInsecureTLS: false
+        )
+    }
 
     private func exactDescriptor(
         for record: ManagedDownloadRecord,

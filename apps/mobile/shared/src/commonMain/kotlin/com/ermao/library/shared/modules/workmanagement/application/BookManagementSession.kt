@@ -322,7 +322,13 @@ class BookManagementSession(
         if (succeeded(token, result)) complete(token, target, "deleted", deleted = true)
     }
 
-    suspend fun retryAction() { current.pendingAction?.let { select(it) } }
+    suspend fun retryAction() {
+        val before = current
+        val action = before.pendingAction ?: return
+        if (before.phase != ManagementPhase.Executing || before.operation != null || before.error == null) return
+        mutableState.value = before.copy(error = null)
+        executeImmediate(action)
+    }
 
     private suspend fun executeImmediate(action: ManagementAction) = runOperation(ManagementOperation.Executing) { token ->
         val target = current.target ?: return@runOperation

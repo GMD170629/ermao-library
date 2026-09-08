@@ -39,7 +39,7 @@ fun reduceAudioChromeState(
     if (
         event == AudioChromeEvent.PlaybackChanged &&
         currentState == AudioChromeState.NowPlaying &&
-        playbackStage == AudioPlaybackStage.Preparing
+        (playbackStage == AudioPlaybackStage.Preparing || playbackStage == AudioPlaybackStage.Error)
     ) {
         return AudioChromeState.NowPlaying
     }

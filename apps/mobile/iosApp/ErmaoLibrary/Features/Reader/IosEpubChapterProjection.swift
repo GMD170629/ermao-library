@@ -57,7 +57,7 @@ internal enum IosEpubChapterProjection {
                     navData,
                     documentPath: navPath,
                     manifestPaths: packageInfo.manifestPaths,
-                    format: UInt32(ERMAO_CHAPTER_EPUB_NAV)
+                    format: ERMAO_CHAPTER_EPUB_NAV.rawValue
                 )
                 if !links.isEmpty { return links }
             } catch is IosEpubChapterProjectionError {
@@ -73,7 +73,7 @@ internal enum IosEpubChapterProjection {
             ncxData,
             documentPath: ncxPath,
             manifestPaths: packageInfo.manifestPaths,
-            format: UInt32(ERMAO_CHAPTER_EPUB_NCX)
+            format: ERMAO_CHAPTER_EPUB_NCX.rawValue
         )
     }
 
@@ -142,7 +142,7 @@ internal enum IosEpubChapterProjection {
                     properties: properties
                 ))
             case "spine":
-                spineToc = attributes["toc"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+                spineToc = (attributes["toc"]?.trimmingCharacters(in: .whitespacesAndNewlines))
                     .flatMap { $0.isEmpty ? nil : $0 }
             default:
                 break
@@ -171,7 +171,7 @@ internal enum IosEpubChapterProjection {
                     resolveTarget(documentPath: documentPath, raw: $0, known: manifestPaths)
                 }
                 events.append(IosChapterCoreXmlEvent(
-                    kind: UInt32(ERMAO_CHAPTER_XML_START),
+                    kind: ERMAO_CHAPTER_XML_START.rawValue,
                     name: name,
                     text: nil,
                     attributes: attributes.map {
@@ -183,7 +183,7 @@ internal enum IosEpubChapterProjection {
             onText: { text in
                 guard !text.isEmpty else { return }
                 events.append(IosChapterCoreXmlEvent(
-                    kind: UInt32(ERMAO_CHAPTER_XML_TEXT),
+                    kind: ERMAO_CHAPTER_XML_TEXT.rawValue,
                     name: nil,
                     text: text,
                     attributes: [],
@@ -192,7 +192,7 @@ internal enum IosEpubChapterProjection {
             },
             onEnd: { name in
                 events.append(IosChapterCoreXmlEvent(
-                    kind: UInt32(ERMAO_CHAPTER_XML_END),
+                    kind: ERMAO_CHAPTER_XML_END.rawValue,
                     name: name,
                     text: nil,
                     attributes: [],
@@ -200,8 +200,8 @@ internal enum IosEpubChapterProjection {
                 ))
             }
         )
-        if format == UInt32(ERMAO_CHAPTER_EPUB_NAV),
-           events.first(where: { $0.kind == UInt32(ERMAO_CHAPTER_XML_START) })?.name != "html"
+        if format == ERMAO_CHAPTER_EPUB_NAV.rawValue,
+           events.first(where: { $0.kind == ERMAO_CHAPTER_XML_START.rawValue })?.name != "html"
         {
             return []
         }

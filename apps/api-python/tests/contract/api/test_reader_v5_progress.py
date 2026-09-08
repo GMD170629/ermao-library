@@ -17,6 +17,7 @@ from app.core.auth import hash_password
 from app.db.base import Base
 from app.models import (
     Library,
+    ReaderBookmarkV5,
     ReaderProgressMutationV5,
     ReaderResourceProgress,
     ReaderResourceProgressV5,
@@ -423,15 +424,21 @@ def test_v5_bootstrap_and_progress_use_the_same_snapshot(
     )
 
 
-def test_v5_reading_status_is_independent_and_does_not_create_locator_snapshot(
+@pytest.mark.parametrize(
+    ("status", "expected_percent"),
+    (("FINISHED", 100), ("UNREAD", 0)),
+)
+def test_v5_reading_status_without_progress_projects_scalar_without_locator_snapshot(
     client,
     db_session: Session,
+    status: str,
+    expected_percent: int,
 ) -> None:
     _seed_reader_resource(client, db_session)
 
     written = client.put(
         f"/api/reader/v5/resources/{_RESOURCE_ID}/reading-status",
-        json={"status": "FINISHED"},
+        json={"status": status},
     )
     read = client.get(f"/api/reader/v5/resources/{_RESOURCE_ID}/reading-status")
 
@@ -439,11 +446,160 @@ def test_v5_reading_status_is_independent_and_does_not_create_locator_snapshot(
     assert read.status_code == 200, read.text
     assert read.json()["data"] == {
         "resourceId": _RESOURCE_ID,
-        "status": "FINISHED",
-        "percent": 0,
+        "status": status,
+        "percent": expected_percent,
     }
     assert db_session.scalar(select(ReaderResourceProgressV5.id)) is None
+    assert db_session.scalar(select(ReaderProgressMutationV5.id)) is None
     assert db_session.scalar(select(ReaderResourceReadingStatusV5.id)) is not None
+
+
+def test_v5_status_reset_is_actor_scoped_and_preserves_bookmarks(
+    client,
+    db_session: Session,
+) -> None:
+    _seed_reader_resource(client, db_session)
+    first = client.put(_progress_url(), json=_payload())
+    assert first.status_code == 200, first.text
+
+    bookmark = client.put(
+        f"/api/reader/v5/resources/{_RESOURCE_ID}/bookmarks",
+        json={
+            "bookmarks": [
+                {
+                    "id": "bookmark-kept",
+                    "position": _payload()["position"],
+                    "label": "Keep this",
+                    "createdAt": "2026-01-01T00:00:00Z",
+                }
+            ]
+        },
+    )
+    assert bookmark.status_code == 200, bookmark.text
+
+    other_user_id = "reader-v5-other-user"
+    other_mutation_id = "00000000-0000-4000-8000-000000000099"
+    other_now = datetime(2026, 1, 1, tzinfo=UTC)
+    db_session.add(
+        User(
+            id=other_user_id,
+            email="reader-v5-other@example.com",
+            name="Other Reader",
+            password_hash="unused",
+            role="admin",
+        )
+    )
+    db_session.add(
+        ReaderResourceProgressV5(
+            id="other-reader-v5-progress",
+            user_id=other_user_id,
+            resource_id=_RESOURCE_ID,
+            client_id="other-client",
+            mutation_id=other_mutation_id,
+            locator_json="{}",
+            presentation_json=json.dumps(_presentation(display_percent=42)),
+            display_percent=42,
+            total_progression=0.42,
+            current_href="OEBPS/Text/chapter.xhtml",
+            captured_at=other_now,
+            received_at=other_now,
+            updated_at=other_now,
+            revision=1,
+        )
+    )
+    db_session.add(
+        ReaderProgressMutationV5(
+            user_id=other_user_id,
+            resource_id=_RESOURCE_ID,
+            mutation_id=other_mutation_id,
+            client_id="other-client",
+            accepted_revision=1,
+            payload_hash="a" * 64,
+            captured_at=other_now,
+            received_at=other_now,
+        )
+    )
+    db_session.commit()
+
+    reset = client.put(
+        f"/api/reader/v5/resources/{_RESOURCE_ID}/reading-status",
+        json={"status": "FINISHED"},
+    )
+    assert reset.status_code == 200, reset.text
+    assert reset.json()["data"]["percent"] == 100
+
+    db_session.expire_all()
+    assert (
+        db_session.scalar(
+            select(ReaderResourceProgressV5.id).where(
+                ReaderResourceProgressV5.user_id == _USER_ID,
+                ReaderResourceProgressV5.resource_id == _RESOURCE_ID,
+            )
+        )
+        is None
+    )
+    assert (
+        db_session.scalar(
+            select(ReaderProgressMutationV5.id).where(
+                ReaderProgressMutationV5.user_id == _USER_ID,
+                ReaderProgressMutationV5.resource_id == _RESOURCE_ID,
+            )
+        )
+        is None
+    )
+    assert (
+        db_session.scalar(
+            select(ReaderBookmarkV5.id).where(
+                ReaderBookmarkV5.user_id == _USER_ID,
+                ReaderBookmarkV5.resource_id == _RESOURCE_ID,
+                ReaderBookmarkV5.bookmark_id == "bookmark-kept",
+            )
+        )
+        is not None
+    )
+    assert (
+        db_session.scalar(
+            select(ReaderResourceProgressV5.id).where(
+                ReaderResourceProgressV5.user_id == other_user_id,
+                ReaderResourceProgressV5.resource_id == _RESOURCE_ID,
+            )
+        )
+        == "other-reader-v5-progress"
+    )
+    assert (
+        db_session.scalar(
+            select(ReaderProgressMutationV5.id).where(
+                ReaderProgressMutationV5.user_id == other_user_id,
+                ReaderProgressMutationV5.resource_id == _RESOURCE_ID,
+            )
+        )
+        is not None
+    )
+
+
+def test_v5_status_reset_removes_receipt_so_replay_is_new_progress(
+    client,
+    db_session: Session,
+) -> None:
+    _seed_reader_resource(client, db_session)
+    payload = _payload()
+    first = client.put(_progress_url(), json=payload)
+    assert first.status_code == 200, first.text
+
+    reset = client.put(
+        f"/api/reader/v5/resources/{_RESOURCE_ID}/reading-status",
+        json={"status": "UNREAD"},
+    )
+    assert reset.status_code == 200, reset.text
+    assert reset.json()["data"]["percent"] == 0
+    assert db_session.scalar(select(ReaderProgressMutationV5.id)) is None
+
+    replay = client.put(_progress_url(), json=payload)
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["data"]["acceptedRevision"] == 1
+    assert replay.json()["data"]["currentSnapshot"]["position"] == payload["position"]
+    assert db_session.scalar(select(ReaderResourceProgressV5.revision)) == 1
+    assert db_session.scalar(select(ReaderResourceReadingStatusV5.id)) is None
 
 
 def test_v5_ignores_legacy_v4_progress_rows(client, db_session: Session) -> None:

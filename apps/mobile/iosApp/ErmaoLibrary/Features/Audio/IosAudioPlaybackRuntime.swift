@@ -1,5 +1,6 @@
 import Foundation
 import MediaPlayer
+import OSLog
 import SwiftUI
 @preconcurrency import ErmaoShared
 
@@ -9,6 +10,7 @@ import SwiftUI
 /// renders the shared snapshot. Chapter, track, timer, completion and progress rules live in KMP.
 @MainActor
 final class AudioPlaybackRuntime: ObservableObject, AudioSystemMediaDelegate {
+    private static let logger = Logger(subsystem: "com.ermao.library", category: "AudioPlayback")
     @Published private(set) var snapshot: AudioPlaybackSnapshot
     @Published private(set) var nowPlayingPresentationRequestID: UUID?
     @Published private(set) var remoteProgressSnapshot: ErmaoShared.ReaderProgressSnapshotV5?
@@ -101,7 +103,6 @@ final class AudioPlaybackRuntime: ObservableObject, AudioSystemMediaDelegate {
             autoplay: intent.autoplay
         )
         lastLaunch = (normalized, namespace)
-        if normalized.autoplay { nowPlayingPresentationRequestID = UUID() }
         bootstrapTask?.cancel()
         let request = stateMachine.beginLaunch(
             namespace: sessionContext.sharedNamespace,
@@ -109,6 +110,7 @@ final class AudioPlaybackRuntime: ObservableObject, AudioSystemMediaDelegate {
             intent: normalized.shared
         )
         apply(request.transition)
+        if normalized.autoplay { nowPlayingPresentationRequestID = UUID() }
         bootstrapTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
@@ -187,7 +189,6 @@ final class AudioPlaybackRuntime: ObservableObject, AudioSystemMediaDelegate {
             autoplay: autoplay
         )
         lastLaunch = nil
-        if autoplay { nowPlayingPresentationRequestID = UUID() }
         bootstrapTask?.cancel()
         let request = stateMachine.beginLaunch(
             namespace: sessionContext.sharedNamespace,
@@ -195,6 +196,7 @@ final class AudioPlaybackRuntime: ObservableObject, AudioSystemMediaDelegate {
             intent: intent.shared
         )
         apply(request.transition)
+        if autoplay { nowPlayingPresentationRequestID = UUID() }
         bootstrapTask = Task { @MainActor [weak self] in
             guard let self else { return }
             let restored: ErmaoShared.AudioReaderLocation?
@@ -695,6 +697,9 @@ final class AudioPlaybackRuntime: ObservableObject, AudioSystemMediaDelegate {
     }
 
     private func render(_ shared: ErmaoShared.AudioPlaybackSnapshot) {
+        if let failure = shared.error, failure != sharedSnapshot.error {
+            Self.logger.error("audio_playback_failed stage=\(shared.stage.name, privacy: .public) code=\(failure.code, privacy: .public) recoverable=\(failure.recoverable)")
+        }
         sharedSnapshot = shared
         snapshot = AudioPlaybackSnapshot(shared: shared) { [localMediaReferences] asset in
             localMediaReferences[mediaKey(resourceID: asset.resourceId, assetID: asset.assetId)]
@@ -748,7 +753,10 @@ final class AudioPlaybackRuntime: ObservableObject, AudioSystemMediaDelegate {
     private func sharedError(for error: Error) -> ErmaoShared.AudioPlaybackError {
         let code: String
         let recoverable: Bool
-        if let adapter = error as? AudioAdapterError {
+        if let bootstrap = error as? AudioBootstrapFailure {
+            code = bootstrap.code
+            recoverable = bootstrap.recoverable
+        } else if let adapter = error as? AudioAdapterError {
             code = adapter.errorCode.rawValue
             recoverable = adapter != .invalidResponse
         } else if (error as NSError).domain == NSURLErrorDomain {

@@ -7,7 +7,14 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalBottomSheetProperties
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -17,6 +24,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.ermao.library.ui.theme.WarmPageThemeValues
+import kotlinx.coroutines.launch
 
 /**
  * Native Material sheet with the Warm Page surface and an explicit system-bar
@@ -29,6 +37,8 @@ fun WarmPageModalBottomSheet(
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
     skipPartiallyExpanded: Boolean = false,
+    onDismissCompleted: (() -> Unit)? = null,
+    canDismiss: () -> Boolean = { true },
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val theme = WarmPageThemeValues
@@ -36,8 +46,20 @@ fun WarmPageModalBottomSheet(
     val sheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = skipPartiallyExpanded,
     )
+    val coroutineScope = rememberCoroutineScope()
+    var dismissRequested by remember { mutableStateOf(false) }
+    val requestDismiss: () -> Unit = {
+        if (canDismiss() && !dismissRequested) {
+            dismissRequested = true
+            coroutineScope.launch {
+                sheetState.hide()
+                onDismissRequest()
+                onDismissCompleted?.invoke()
+            }
+        }
+    }
     ModalBottomSheet(
-        onDismissRequest = onDismissRequest,
+        onDismissRequest = requestDismiss,
         modifier = modifier,
         sheetState = sheetState,
         containerColor = theme.colors.surface,
@@ -46,10 +68,19 @@ fun WarmPageModalBottomSheet(
             isAppearanceLightNavigationBars = useDarkSystemBarIcons,
         ),
     ) {
-        KeepModalSystemBarsVisible(useDarkSystemBarIcons)
-        content()
+        CompositionLocalProvider(LocalWarmPageModalSheetDismiss provides requestDismiss) {
+            KeepModalSystemBarsVisible(useDarkSystemBarIcons)
+            content()
+        }
     }
 }
+
+/**
+ * Dismissal owned by the Material sheet. Consumers that need to chain work
+ * after the close animation can invoke this instead of updating their own
+ * visibility state synchronously.
+ */
+internal val LocalWarmPageModalSheetDismiss = compositionLocalOf<(() -> Unit)?> { null }
 
 internal fun useDarkSystemBarForeground(surface: Color): Boolean =
     surface.luminance() >= SYSTEM_BAR_LIGHT_SURFACE_LUMINANCE

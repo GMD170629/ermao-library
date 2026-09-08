@@ -52,6 +52,27 @@ import kotlinx.io.readByteArray
 import kotlinx.serialization.json.Json
 
 class KtorWorkManagementRepositoryTest {
+    @Test fun successfulManualStatusInvalidatesOnlyItsLocalScope() = runBlocking {
+        val harness = Harness(OK, OK, "invalid-json")
+        val invalidated = mutableListOf<String>()
+        val repository = com.ermao.library.shared.modules.workmanagement.withReadingStatusReset(
+            harness.repository,
+            object : com.ermao.library.shared.modules.workmanagement.ReadingStatusResetPort {
+                override suspend fun resetBook(context: BookManagementContext, bookId: String) {
+                    assertTrue(harness.requests.isNotEmpty())
+                    invalidated += "book:$bookId"
+                }
+                override suspend fun resetResource(context: BookManagementContext, resourceId: String) {
+                    invalidated += "resource:$resourceId"
+                }
+            },
+        )
+        assertIs<WorkManagementResult.Content<Unit>>(repository.setBookReadingStatus(context, "book-1", ManagedReadingStatus.Finished))
+        assertIs<WorkManagementResult.Content<Unit>>(repository.setReadingStatus(context, "resource-1", ManagedReadingStatus.Unread))
+        assertIs<WorkManagementResult.Failure>(repository.setBookReadingStatus(context, "book-2", ManagedReadingStatus.Unread))
+        assertEquals(listOf("book:book-1", "resource:resource-1"), invalidated)
+    }
+
     @Test fun menuStatePreparationReadsOnlyTheBookEndpoint() = runBlocking {
         val harness = Harness("""{"ok":true,"data":{"book":{"id":"book-1","completed":true}}}""")
         val result = assertIs<WorkManagementResult.Content<Boolean>>(harness.repository.loadBookCompleted(context, "book-1"))

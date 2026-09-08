@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Literal, cast
 
@@ -11,6 +12,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.models.common import cuid
 from app.modules.reader.application.dto import (
     ReaderAccessScope,
     ReaderAssetDto,
@@ -123,6 +125,16 @@ def _mutation_dto(mutation: ReaderProgressMutationV5) -> ReaderV5MutationDto:
         payload_hash=mutation.payload_hash,
         captured_at=mutation.captured_at,
         received_at=mutation.received_at,
+    )
+
+
+def _reading_status_dto(
+    status: ReaderResourceReadingStatusV5,
+) -> ReaderV5ReadingStatusDto:
+    return ReaderV5ReadingStatusDto(
+        resource_id=status.resource_id,
+        status=cast(Literal["UNREAD", "FINISHED"], status.status),
+        updated_at=status.updated_at,
     )
 
 
@@ -315,11 +327,7 @@ class SqlAlchemyReaderV5Repository:
         )
         if status is None:
             return None
-        return ReaderV5ReadingStatusDto(
-            resource_id=status.resource_id,
-            status=cast(Literal["UNREAD", "FINISHED"], status.status),
-            updated_at=status.updated_at,
-        )
+        return _reading_status_dto(status)
 
     def set_v5_reading_status(
         self,
@@ -329,14 +337,63 @@ class SqlAlchemyReaderV5Repository:
         status: Literal["UNREAD", "FINISHED"],
         updated_at: datetime,
     ) -> ReaderV5ReadingStatusDto:
-        statement = (
-            sqlite_insert(ReaderResourceReadingStatusV5)
-            .values(
-                user_id=user_id,
-                resource_id=resource_id,
-                status=status,
-                updated_at=updated_at,
+        statuses = self.set_v5_reading_statuses(
+            user_id=user_id,
+            resource_ids=(resource_id,),
+            status=status,
+            updated_at=updated_at,
+        )
+        if not statuses:
+            raise RuntimeError("Reader v5 status upsert returned no row")
+        return statuses[0]
+
+    def set_v5_reading_statuses(
+        self,
+        *,
+        user_id: str,
+        resource_ids: Sequence[str],
+        status: Literal["UNREAD", "FINISHED"],
+        updated_at: datetime,
+    ) -> list[ReaderV5ReadingStatusDto]:
+        """Reset progress and set status for one actor's resources.
+
+        Progress mutation receipts belong to the deleted snapshots, so they
+        are removed in this same transaction.  Bookmarks and other actors'
+        rows stay outside both predicates.
+        """
+
+        if status not in {"UNREAD", "FINISHED"}:
+            raise ValueError("invalid Reader v5 reading status")
+        normalized_ids = tuple(
+            dict.fromkeys(str(resource_id) for resource_id in resource_ids)
+        )
+        if not normalized_ids:
+            return []
+        self._session.execute(
+            delete(ReaderResourceProgressV5).where(
+                ReaderResourceProgressV5.user_id == user_id,
+                ReaderResourceProgressV5.resource_id.in_(normalized_ids),
             )
+        )
+        self._session.execute(
+            delete(ReaderProgressMutationV5).where(
+                ReaderProgressMutationV5.user_id == user_id,
+                ReaderProgressMutationV5.resource_id.in_(normalized_ids),
+            )
+        )
+        values = [
+            {
+                "id": cuid(),
+                "user_id": user_id,
+                "resource_id": resource_id,
+                "status": status,
+                "updated_at": updated_at,
+            }
+            for resource_id in normalized_ids
+        ]
+        self._session.execute(
+            sqlite_insert(ReaderResourceReadingStatusV5)
+            .values(values)
             .on_conflict_do_update(
                 index_elements=[
                     ReaderResourceReadingStatusV5.user_id,
@@ -347,15 +404,25 @@ class SqlAlchemyReaderV5Repository:
                     ReaderResourceReadingStatusV5.updated_at: updated_at,
                 },
             )
-            .returning(ReaderResourceReadingStatusV5)
         )
-        row = self._session.scalar(statement)
-        if row is None:
-            raise RuntimeError("Reader v5 status upsert returned no row")
-        return ReaderV5ReadingStatusDto(
-            resource_id=row.resource_id,
-            status=cast(Literal["UNREAD", "FINISHED"], row.status),
-            updated_at=row.updated_at,
+        rows = self._session.scalars(
+            select(ReaderResourceReadingStatusV5)
+            .where(
+                ReaderResourceReadingStatusV5.user_id == user_id,
+                ReaderResourceReadingStatusV5.resource_id.in_(normalized_ids),
+            )
+            .order_by(ReaderResourceReadingStatusV5.resource_id)
+        ).all()
+        if len(rows) != len(normalized_ids):
+            raise RuntimeError("Reader v5 status upsert returned incomplete rows")
+        return [_reading_status_dto(row) for row in rows]
+
+    def clear_v5_reading_status(self, *, user_id: str, resource_id: str) -> None:
+        self._session.execute(
+            delete(ReaderResourceReadingStatusV5).where(
+                ReaderResourceReadingStatusV5.user_id == user_id,
+                ReaderResourceReadingStatusV5.resource_id == resource_id,
+            )
         )
 
     def list_v5_bookmarks(

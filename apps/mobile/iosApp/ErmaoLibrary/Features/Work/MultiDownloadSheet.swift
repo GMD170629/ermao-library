@@ -2,6 +2,12 @@ import Combine
 import SwiftUI
 @preconcurrency import ErmaoShared
 
+enum DownloadManagementScope: Hashable, Sendable {
+    case book
+    case directory(sourceNodeID: String)
+    case resource(resourceID: String)
+}
+
 @MainActor
 final class MultiDownloadTreeStore: ObservableObject {
     struct Row: Identifiable {
@@ -24,6 +30,9 @@ final class MultiDownloadTreeStore: ObservableObject {
     private let client: any ContentClient
     private let bookID: String
     private let requestedRootSourceNodeID: String?
+    private var generation = UUID()
+    private var loadTask: Task<Void, Never>?
+    private var nodeTasks: [String: Task<Void, Never>] = [:]
 
     init(
         context: ContentRequestContext,
@@ -44,30 +53,61 @@ final class MultiDownloadTreeStore: ObservableObject {
         return flattenedChildren(of: rootNodeID, depth: 0)
     }
 
-    func load() {
-        guard isLoading else { return }
-        Task {
+    func load(hierarchy: Bool) {
+        guard loadTask == nil else { return }
+        let currentGeneration = UUID()
+        generation = currentGeneration
+        isLoading = true
+        loadTask = Task { [weak self] in
+            guard let self else { return }
+            var didFail = false
+
             do {
-                async let root = loadFolder(sourceNodeID: requestedRootSourceNodeID)
-                async let resources = loadAllResources()
-                let (page, loadedResources) = try await (root, resources)
-                apply(page)
-                resourcesByID.merge(loadedResources, uniquingKeysWith: { _, latest in latest })
-                rootNodeID = page.currentNode.sourceNodeID
-                expandedNodeIDs.insert(page.currentNode.sourceNodeID)
-                isLoading = false
-                errorCode = nil
+                let loadedResources = try await loadAllResources()
+                guard isCurrent(currentGeneration) else { return }
+                // A successful full pagination is authoritative. Preserve the
+                // initial detail snapshot only when the request fails, so a
+                // server-side deletion cannot leave a stale selectable row.
+                resourcesByID = loadedResources
+            } catch is CancellationError {
+                return
             } catch {
-                isLoading = false
-                errorCode = "MULTI_DOWNLOAD_TREE_LOAD_FAILED"
+                didFail = true
             }
+
+            if hierarchy {
+                do {
+                    let page = try await loadFolder(sourceNodeID: requestedRootSourceNodeID)
+                    guard isCurrent(currentGeneration) else { return }
+                    apply(page)
+                    rootNodeID = page.currentNode.sourceNodeID
+                    expandedNodeIDs.insert(page.currentNode.sourceNodeID)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    didFail = true
+                }
+            }
+
+            guard isCurrent(currentGeneration) else { return }
+            isLoading = false
+            errorCode = didFail ? "MULTI_DOWNLOAD_TREE_LOAD_FAILED" : nil
+            loadTask = nil
         }
     }
 
-    func retry() {
-        isLoading = true
-        errorCode = nil
-        load()
+    func retry(hierarchy: Bool) {
+        cancel()
+        load(hierarchy: hierarchy)
+    }
+
+    func cancel() {
+        generation = UUID()
+        loadTask?.cancel()
+        loadTask = nil
+        nodeTasks.values.forEach { $0.cancel() }
+        nodeTasks.removeAll()
+        loadingNodeIDs.removeAll()
     }
 
     func toggleExpanded(_ entry: BookContentEntry) {
@@ -87,19 +127,60 @@ final class MultiDownloadTreeStore: ObservableObject {
             return
         }
         guard !loadingNodeIDs.contains(nodeID) else { return }
+        let currentGeneration = generation
         loadingNodeIDs.insert(nodeID)
         failedNodeIDs.remove(nodeID)
-        Task {
+        let task = Task { [weak self] in
+            guard let self else { return }
             do {
                 let page = try await loadFolder(sourceNodeID: nodeID)
+                guard isCurrent(currentGeneration), !Task.isCancelled else { return }
                 apply(page)
                 loadingNodeIDs.remove(nodeID)
+                nodeTasks[nodeID] = nil
                 completion?()
+            } catch is CancellationError {
+                guard isCurrent(currentGeneration) else { return }
+                loadingNodeIDs.remove(nodeID)
+                nodeTasks[nodeID] = nil
             } catch {
+                guard isCurrent(currentGeneration) else { return }
                 loadingNodeIDs.remove(nodeID)
                 failedNodeIDs.insert(nodeID)
+                nodeTasks[nodeID] = nil
             }
         }
+        nodeTasks[nodeID] = task
+    }
+
+    func retryNode(_ entry: BookContentEntry) {
+        failedNodeIDs.remove(entry.sourceNodeID)
+        childrenByNodeID[entry.sourceNodeID] = nil
+        ensureLoaded(entry)
+    }
+
+    func resources(for scope: DownloadManagementScope) -> [BookResource] {
+        let ids: Set<String>
+        switch scope {
+        case .book:
+            ids = Set(resourcesByID.keys)
+        case let .directory(sourceNodeID):
+            let knownDescendants = descendantResourceIDsByNodeID[sourceNodeID] ?? []
+            ids = knownDescendants.isEmpty
+                ? Set(resourcesByID.values.filter { $0.sourceNodeID == sourceNodeID }.map(\.id))
+                : knownDescendants
+        case let .resource(resourceID):
+            ids = [resourceID]
+        }
+        return ids.compactMap { resourcesByID[$0] }
+            .sorted { lhs, rhs in
+                if lhs.sortOrder != rhs.sortOrder { return lhs.sortOrder < rhs.sortOrder }
+                return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+            }
+    }
+
+    private func isCurrent(_ candidate: UUID) -> Bool {
+        generation == candidate && !Task.isCancelled
     }
 
     private func loadFolder(sourceNodeID: String?) async throws -> BookContentsPage {
@@ -114,6 +195,7 @@ final class MultiDownloadTreeStore: ObservableObject {
         guard first.totalPages > 1 else { return first }
         var entries = first.entries
         for pageNumber in 2...first.totalPages {
+            try Task.checkCancellation()
             let page = try await client.fetchBookContents(
                 context: context,
                 bookID: bookID,
@@ -141,9 +223,10 @@ final class MultiDownloadTreeStore: ObservableObject {
     }
 
     private func loadAllResources() async throws -> [String: BookResource] {
-        var result = resourcesByID
+        var result: [String: BookResource] = [:]
         var pageNumber = 1
         while true {
+            try Task.checkCancellation()
             let page = try await client.fetchBookResources(
                 context: context,
                 bookID: bookID,
@@ -177,101 +260,281 @@ final class MultiDownloadTreeStore: ObservableObject {
 }
 
 struct MultiDownloadSheet: View {
+    private enum Mode { case overview, selection }
+
+    private struct PendingRemoval: Identifiable {
+        let ids: Set<String>
+        var id: String { ids.sorted().joined(separator: ",") }
+    }
+
+    private struct ActionFeedback: Identifiable {
+        let id = UUID()
+        let text: String
+        let failureCode: String?
+        let isError: Bool
+    }
+
+    let context: ContentRequestContext
     let detail: BookDetailContent
+    let scope: DownloadManagementScope
     @ObservedObject var downloads: DownloadCenterStore
-    let openReader: (ReaderHandoff) -> Void
+    let requestOpenReader: (ReaderHandoff) -> Void
     let onDismiss: () -> Void
-    let onCompleted: (Int, Int) -> Void
 
     @StateObject private var tree: MultiDownloadTreeStore
+    @State private var mode: Mode = .overview
     @State private var selectedResourceIDs: Set<String> = []
-    @State private var isSubmitting = false
-    @State private var pendingRemoval: ManagedDownloadRecord?
+    @State private var isActing = false
+    @State private var pendingRemoval: PendingRemoval?
+    @State private var actionFeedback: ActionFeedback?
     @Environment(\.appTheme) private var theme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(
         context: ContentRequestContext,
         client: any ContentClient,
         detail: BookDetailContent,
+        scope: DownloadManagementScope = .book,
         rootSourceNodeID: String? = nil,
         downloads: DownloadCenterStore,
-        openReader: @escaping (ReaderHandoff) -> Void,
-        onDismiss: @escaping () -> Void,
-        onCompleted: @escaping (Int, Int) -> Void
+        requestOpenReader: @escaping (ReaderHandoff) -> Void,
+        onDismiss: @escaping () -> Void
     ) {
+        self.context = context
         self.detail = detail
+        self.scope = scope
         self.downloads = downloads
-        self.openReader = openReader
+        self.requestOpenReader = requestOpenReader
         self.onDismiss = onDismiss
-        self.onCompleted = onCompleted
+        let requestedRoot: String?
+        switch scope {
+        case .book:
+            requestedRoot = rootSourceNodeID ?? detail.rootSourceNodeID
+        case let .directory(sourceNodeID):
+            requestedRoot = sourceNodeID
+        case .resource:
+            requestedRoot = nil
+        }
         _tree = StateObject(
             wrappedValue: MultiDownloadTreeStore(
                 context: context,
                 client: client,
                 bookID: detail.book.id,
                 initialResources: detail.resources,
-                rootSourceNodeID: rootSourceNodeID
+                rootSourceNodeID: requestedRoot
             )
         )
+    }
+
+    private var loadsHierarchy: Bool {
+        if case .resource = scope { return false }
+        return true
+    }
+
+    private var catalogResources: [BookResource] {
+        var knownResourceIDs = Set(tree.resourcesByID.keys)
+        let knownDirectoryResourceIDs: Set<String>
+        if case let .directory(sourceNodeID) = scope {
+            let loadedDescendants = tree.descendantResourceIDsByNodeID[sourceNodeID] ?? []
+            let resourcesWithNodeIdentity = tree.resourcesByID.values
+                .filter { $0.sourceNodeID == sourceNodeID }
+                .map(\.id)
+            knownDirectoryResourceIDs = loadedDescendants.union(resourcesWithNodeIdentity)
+        } else {
+            knownDirectoryResourceIDs = []
+        }
+
+        return downloads.records.compactMap { record in
+            guard !knownResourceIDs.contains(record.resourceID) else { return nil }
+            switch scope {
+            case .book:
+                guard record.bookID == detail.book.id else { return nil }
+            case let .resource(resourceID):
+                guard record.bookID == detail.book.id, record.resourceID == resourceID else { return nil }
+            case .directory:
+                // A directory has no persisted source-node identity in the
+                // catalog. Include only IDs already proven to belong to this
+                // subtree by the current server snapshot.
+                guard knownDirectoryResourceIDs.contains(record.resourceID) else { return nil }
+            }
+            knownResourceIDs.insert(record.resourceID)
+            return DownloadManagementAdapter.catalogResource(record)
+        }
+        .sorted { lhs, rhs in
+            lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+        }
+    }
+
+    private var scopedResources: [BookResource] {
+        var byID = Dictionary(uniqueKeysWithValues: tree.resources(for: scope).map { ($0.id, $0) })
+        for resource in catalogResources where byID[resource.id] == nil {
+            byID[resource.id] = resource
+        }
+        return byID.values.sorted { lhs, rhs in
+            if lhs.sortOrder != rhs.sortOrder { return lhs.sortOrder < rhs.sortOrder }
+            return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+        }
+    }
+
+    private var scopedResourceIDs: Set<String> { Set(scopedResources.map(\.id)) }
+    private var projectedResources: [DownloadManagementResource] {
+        downloads.managementResources(for: scopedResources)
     }
 
     var body: some View {
         NavigationStack {
             Group {
-                if tree.isLoading {
-                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if tree.errorCode != nil {
-                    ContentStatusView(
-                        systemImage: "wifi.exclamationmark",
-                        title: "work.multiDownload.error.title",
-                        message: "work.multiDownload.error.message",
-                        actionTitle: "common.retry",
-                        action: tree.retry
-                    )
+                if tree.isLoading && scopedResources.isEmpty {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    List(tree.visibleRows) { row in
-                        nodeRow(row)
+                    List {
+                        bookHeader
+                        if tree.errorCode != nil { loadErrorRow }
+                        if let actionFeedback { actionFeedbackRow(actionFeedback) }
+                        if !tree.visibleRows.isEmpty && loadsHierarchy {
+                            ForEach(tree.visibleRows) { row in
+                                nodeRow(row)
+                            }
+                            ForEach(catalogResources) { resource in
+                                resourceRow(resource, depth: 0)
+                            }
+                        } else {
+                            ForEach(scopedResources) { resource in
+                                resourceRow(resource, depth: 0)
+                            }
+                        }
+                        if scopedResources.isEmpty, !tree.isLoading, tree.errorCode == nil {
+                            emptyScopeRow
+                        }
                     }
                     .listStyle(.plain)
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    VStack(spacing: 1) {
-                        Text("work.multiDownload.title").font(.headline)
-                        Text(detail.book.title)
-                            .font(.caption)
-                            .foregroundStyle(theme.textSecondary)
-                            .lineLimit(1)
-                    }
-                }
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("common.cancel", action: onDismiss)
-                        .disabled(isSubmitting)
-                }
-            }
+            .toolbar { toolbarContent }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                confirmationBar
+                if mode == .selection { selectionBar }
             }
         }
-        .task { tree.load() }
-        .alert(
-            "downloads.remove.confirm.title",
+        .task {
+            tree.load(hierarchy: loadsHierarchy)
+            _ = await downloads.reloadAndAwait(expectedNamespace: context.namespaceKey)
+        }
+        .onDisappear { tree.cancel() }
+        .onReceive(downloads.$records) { _ in pruneSelection() }
+        .onReceive(tree.$resourcesByID) { _ in pruneSelection() }
+        .confirmationDialog(
+            "work.downloadManagement.remove.confirm.title",
             isPresented: Binding(
                 get: { pendingRemoval != nil },
                 set: { if !$0 { pendingRemoval = nil } }
             ),
+            titleVisibility: .visible,
             presenting: pendingRemoval
-        ) { record in
-            Button("downloads.remove.action", role: .destructive) {
-                downloads.remove(record)
+        ) { request in
+            Button("work.downloadManagement.remove.confirm.action", role: .destructive) {
                 pendingRemoval = nil
+                perform(action: .remove, resourceIDs: request.ids)
             }
             Button("common.cancel", role: .cancel) { pendingRemoval = nil }
-        } message: { record in
-            Text("downloads.remove.confirm.message")
+        } message: { _ in
+            Text("work.downloadManagement.remove.confirm.message")
         }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            Button(mode == .selection ? "common.cancel" : "common.done") {
+                if mode == .selection {
+                    leaveSelectionMode()
+                } else {
+                    onDismiss()
+                }
+            }
+            .disabled(isActing)
+            .accessibilityIdentifier(
+                mode == .selection
+                    ? "work.downloadManagement.cancel"
+                    : "work.downloadManagement.close"
+            )
+        }
+        ToolbarItem(placement: .principal) {
+            Text("work.downloadManagement.title")
+                .font(.headline)
+                .accessibilityIdentifier("work.downloadManagement.title")
+        }
+        ToolbarItem(placement: .confirmationAction) {
+            if mode == .overview {
+                Button("work.downloadManagement.select") { mode = .selection }
+                    .accessibilityIdentifier("work.downloadManagement.select")
+            } else {
+                Button("work.downloadManagement.done") { leaveSelectionMode() }
+                    .accessibilityIdentifier("work.downloadManagement.done")
+            }
+        }
+    }
+
+    private var bookHeader: some View {
+        Section {
+            VStack(alignment: .leading, spacing: .spaceHalf) {
+                Text(detail.book.title)
+                    .appTextStyle(.headline)
+                    .lineLimit(2)
+            }
+            .padding(.vertical, .spaceHalf)
+            .listRowSeparator(.hidden)
+        }
+    }
+
+    private var loadErrorRow: some View {
+        HStack(spacing: .space1) {
+            Image(systemName: "wifi.exclamationmark")
+                .foregroundStyle(theme.textTertiary)
+            Text("work.downloadManagement.load.error")
+                .appTextStyle(.caption)
+                .foregroundStyle(theme.textSecondary)
+            Spacer()
+            Button("common.retry") { tree.retry(hierarchy: loadsHierarchy) }
+                .disabled(isActing)
+        }
+        .padding(.vertical, .spaceHalf)
+        .listRowSeparator(.hidden)
+        .accessibilityIdentifier("work.downloadManagement.load.error")
+    }
+
+    private var emptyScopeRow: some View {
+        HStack {
+            Spacer(minLength: 0)
+            Text("work.downloadManagement.empty")
+                .appTextStyle(.body)
+                .foregroundStyle(theme.textSecondary)
+                .multilineTextAlignment(.center)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, .space3)
+        .listRowSeparator(.hidden)
+        .accessibilityIdentifier("work.downloadManagement.empty")
+    }
+
+    private func actionFeedbackRow(_ feedback: ActionFeedback) -> some View {
+        Label {
+            VStack(alignment: .leading, spacing: .spaceHalf) {
+                Text(feedback.text)
+                if let code = feedback.failureCode {
+                    Text(downloadFailureMessage(code))
+                        .appTextStyle(.caption)
+                }
+            }
+        } icon: {
+            Image(systemName: feedback.isError ? "exclamationmark.circle" : "checkmark.circle")
+        }
+        .appTextStyle(.caption)
+        .foregroundStyle(feedback.isError ? .red : theme.textSecondary)
+        .padding(.vertical, .spaceHalf)
+        .listRowSeparator(.hidden)
+        .accessibilityIdentifier("work.downloadManagement.feedback")
     }
 
     @ViewBuilder
@@ -280,13 +543,15 @@ struct MultiDownloadSheet: View {
         if entry.isSourceFolder {
             folderRow(entry, depth: row.depth)
         } else if let resourceID = entry.resourceID,
-                  let resource = tree.resourcesByID[resourceID] {
+                  let resource = tree.resourcesByID[resourceID],
+                  scopedResourceIDs.contains(resourceID) {
             resourceRow(resource, depth: row.depth)
         } else {
             HStack {
                 Text(entry.title).foregroundStyle(theme.textSecondary)
                 Spacer()
-                Text("work.multiDownload.unavailable").appTextStyle(.caption)
+                Text("work.downloadManagement.status.unavailable")
+                    .appTextStyle(.caption)
                     .foregroundStyle(theme.textTertiary)
             }
             .padding(.leading, CGFloat(row.depth) * 20)
@@ -295,144 +560,151 @@ struct MultiDownloadSheet: View {
 
     private func folderRow(_ entry: BookContentEntry, depth: Int) -> some View {
         let descendantIDs = tree.descendantResourceIDsByNodeID[entry.sourceNodeID] ?? []
-        let mark = directoryMark(descendantIDs)
+        let descendantCount = tree.childrenByNodeID[entry.sourceNodeID] == nil ? nil : descendantIDs.count
+        let mark = selectionMark(for: descendantIDs)
         return HStack(spacing: .space1) {
             Button { tree.toggleExpanded(entry) } label: {
                 Image(systemName: tree.expandedNodeIDs.contains(entry.sourceNodeID) ? "chevron.down" : "chevron.right")
-                    .frame(width: 24, height: 44)
+                    .frame(width: .iosMinimumTouchTarget, height: .iosMinimumTouchTarget)
             }
             .buttonStyle(.plain)
-            Button {
-                tree.ensureLoaded(entry) { toggleDirectory(entry.sourceNodeID) }
-            } label: {
-                if tree.loadingNodeIDs.contains(entry.sourceNodeID) {
-                    ProgressView().controlSize(.small).frame(width: 28, height: 44)
-                } else {
-                    Image(systemName: selectionImage(mark))
-                        .foregroundStyle(mark == .unselected ? theme.textSecondary : theme.actionAccent)
-                        .frame(width: 28, height: 44)
+            .accessibilityLabel(Text(tree.expandedNodeIDs.contains(entry.sourceNodeID) ? "work.downloadManagement.folder.collapse" : "work.downloadManagement.folder.expand"))
+
+            if mode == .selection {
+                Button {
+                    tree.ensureLoaded(entry) { toggleDirectory(entry.sourceNodeID) }
+                } label: {
+                    if tree.loadingNodeIDs.contains(entry.sourceNodeID) {
+                        ProgressView().controlSize(.small).frame(width: .iosMinimumTouchTarget, height: .iosMinimumTouchTarget)
+                    } else {
+                        Image(systemName: selectionImage(mark))
+                            .foregroundStyle(mark == .unselected ? theme.textSecondary : theme.actionAccent)
+                            .frame(width: .iosMinimumTouchTarget, height: .iosMinimumTouchTarget)
+                    }
                 }
+                .buttonStyle(.plain)
+                .disabled(isActing || tree.loadingNodeIDs.contains(entry.sourceNodeID))
+                .accessibilityLabel(Text(entry.title))
+                .accessibilityValue(Text(directoryAccessibilityValue(mark, count: descendantCount)))
+                .accessibilityIdentifier("work.downloadManagement.checkbox.folder.\(entry.sourceNodeID)")
+            }
+
+            Button { tree.toggleExpanded(entry) } label: {
+                VStack(alignment: .leading, spacing: .spaceHalf) {
+                    Text(entry.title).appTextStyle(.body)
+                    if let descendantCount {
+                        Text(String(format: String(localized: "work.downloadManagement.volumeCount"), descendantCount))
+                            .appTextStyle(.caption)
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            VStack(alignment: .leading, spacing: .spaceHalf) {
-                Text(entry.title).appTextStyle(.body)
-                Text(String(format: String(localized: "work.multiDownload.volumeCount"), descendantIDs.count))
-                    .appTextStyle(.caption)
-                    .foregroundStyle(theme.textSecondary)
-            }
-            Spacer()
         }
         .padding(.leading, CGFloat(depth) * 20)
         .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
-        .accessibilityValue(Text(directoryAccessibilityValue(mark, count: descendantIDs.count)))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("work.multiDownload.folder.\(entry.sourceNodeID)")
+        .accessibilityValue(Text(directoryAccessibilityValue(mark, count: descendantCount)))
     }
 
     private func resourceRow(_ resource: BookResource, depth: Int) -> some View {
-        let state = resourceState(resource.id)
+        let projected = downloads.managementResource(for: resource)
         let selected = selectedResourceIDs.contains(resource.id)
-        return HStack(spacing: .space1) {
-            Button { toggleResource(resource.id) } label: {
-                Image(systemName: selected ? "checkmark.square.fill" : "square")
-                    .foregroundStyle(selected ? theme.actionAccent : theme.textSecondary)
-                    .frame(width: 28, height: 44)
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: .space1))
+            : AnyLayout(HStackLayout(spacing: .space1))
+        return layout {
+            if mode == .selection {
+                Button { toggleResource(resource.id) } label: {
+                    Image(systemName: selected ? "checkmark.square.fill" : "square")
+                        .foregroundStyle(selected ? theme.actionAccent : theme.textSecondary)
+                        .frame(width: .iosMinimumTouchTarget, height: .iosMinimumTouchTarget)
+                }
+                .buttonStyle(.plain)
+                .disabled(!projected.selectable || isActing)
+                .accessibilityLabel(Text(resource.title))
+                .accessibilityValue(Text(selected ? "work.downloadManagement.selection.all" : "work.downloadManagement.selection.none"))
+                .accessibilityIdentifier("work.downloadManagement.checkbox.\(resource.id)")
             }
-            .buttonStyle(.plain)
-            .disabled(!state.isSelectable || isSubmitting)
+
             VStack(alignment: .leading, spacing: .spaceHalf) {
                 Text(resource.title).appTextStyle(.body).lineLimit(2)
                 Text([resource.format, resource.sizeLabel].compactMap { $0 }.joined(separator: " · "))
                     .appTextStyle(.caption)
                     .foregroundStyle(theme.textSecondary)
-            }
-            Spacer(minLength: .space1)
-            Menu {
-                statusMenu(record: downloads.record(for: resource.id), resource: resource)
-            } label: {
-                Text(statusText(resource.id))
-                    .appTextStyle(.caption)
-                    .foregroundStyle(state == .failedTerminal ? theme.textTertiary : theme.textSecondary)
-                    .frame(minHeight: .iosMinimumTouchTarget)
-            }
-            .disabled(downloads.record(for: resource.id) == nil)
-        }
-        .padding(.leading, CGFloat(depth) * 20 + 24)
-        .contentShape(Rectangle())
-        .onTapGesture { toggleResource(resource.id) }
-        .contextMenu { statusMenu(record: downloads.record(for: resource.id), resource: resource) }
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("work.multiDownload.resource.\(resource.id)")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityValue(Text(statusText(resource.id)))
-    }
-
-    @ViewBuilder
-    private func statusMenu(record: ManagedDownloadRecord?, resource: BookResource) -> some View {
-        if let record {
-            switch record.state {
-            case .queued, .downloading:
-                Button("downloads.pause.action") { downloads.pause(record) }
-                Button("work.multiDownload.cancelTask", role: .destructive) { pendingRemoval = record }
-            case .paused:
-                Button("downloads.resume.action") { downloads.resume(record) }
-                Button("work.multiDownload.cancelTask", role: .destructive) { pendingRemoval = record }
-            case .failedRetryable:
-                Button("common.retry") { downloads.retry(record) }
-                Button("work.multiDownload.deleteTask", role: .destructive) { pendingRemoval = record }
-            case .failedTerminal:
-                Button("work.multiDownload.deleteTask", role: .destructive) { pendingRemoval = record }
-            case .completed:
-                if record.isVerifiedOfflineCopy {
-                    Button("work.download.openOffline") { openOffline(record) }
-                    Button("downloads.remove.action", role: .destructive) { pendingRemoval = record }
-                } else {
-                    Button("common.retry") { downloads.retry(record) }
+                if projected.status != .completed && projected.status != .notdownloaded {
+                    Text(statusText(resource, projected: projected))
+                        .appTextStyle(.caption)
+                        .foregroundStyle(statusColor(projected.status))
+                        .accessibilityIdentifier("work.downloadManagement.status.\(resource.id)")
                 }
             }
-        } else {
-            Button("work.action.download") { toggleResource(resource.id) }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if mode == .selection {
+                    toggleResource(resource.id)
+                } else if projected.actions.contains(.open) {
+                    perform(action: .open, resourceIDs: [resource.id])
+                }
+            }
+
+            if mode == .overview {
+                let isDownloaded = projected.status == .completed
+                Button(role: isDownloaded ? .destructive : nil) {
+                    if projected.listAction == .remove {
+                        pendingRemoval = PendingRemoval(ids: [resource.id])
+                    } else if let action = projected.listAction {
+                        perform(action: action, resourceIDs: [resource.id])
+                    }
+                } label: {
+                    Image(systemName: isDownloaded ? "trash" : "arrow.down.to.line")
+                        .font(.body)
+                        .foregroundStyle(theme.textSecondary)
+                        .frame(width: .iosMinimumTouchTarget, height: .iosMinimumTouchTarget)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(isActing || projected.listAction == nil)
+                .accessibilityLabel(Text(isDownloaded ? "work.downloadManagement.delete" : "work.downloadManagement.download"))
+                .accessibilityIdentifier("work.downloadManagement.primary.\(resource.id)")
+            }
+
         }
+        .padding(.leading, CGFloat(depth) * 20)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("work.multiDownload.resource.\(resource.id)")
+        .accessibilityValue(Text(statusText(resource, projected: projected)))
     }
 
-    private func openOffline(_ record: ManagedDownloadRecord) {
-        guard record.isVerifiedOfflineCopy else {
-            downloads.retry(record)
-            return
-        }
-        openReader(
-            ReaderHandoff(
-                bookID: record.bookID,
-                resourceID: record.resourceID,
-                assetID: record.assetID,
-                title: record.bookTitle,
-                resourceTitle: record.resourceTitle,
-                format: record.format,
-                readerType: record.readerType,
-                source: .verifiedLocal(recordID: record.id)
-            )
-        )
-    }
-
-    private var confirmationBar: some View {
-        let summary = batchSummary
-        return VStack(alignment: .leading, spacing: .space1) {
-            HStack {
-                Text(String(format: String(localized: "work.multiDownload.selectedCount"), summary.selected))
+    private var selectionBar: some View {
+        HStack(spacing: .space1) {
+            VStack(alignment: .leading, spacing: .spaceHalf) {
+                Text(String(format: String(localized: "work.downloadManagement.selectedCount"), selectedResourceIDs.count))
                     .appTextStyle(.headline)
-                Spacer()
-                Text(String(format: String(localized: "work.multiDownload.summary"), summary.enqueue, summary.resume, summary.retry))
+                    .accessibilityIdentifier("work.downloadManagement.selectedCount")
+                Button(selectionControlTitle) { toggleAll() }
                     .appTextStyle(.caption)
-                    .foregroundStyle(theme.textSecondary)
+                    .foregroundStyle(theme.actionAccent)
+                    .disabled(isActing)
+                    .accessibilityIdentifier("work.downloadManagement.selectAll")
             }
-            PrimaryActionButton(
-                "work.multiDownload.confirm",
-                systemImage: "arrow.down",
-                isDisabled: summary.selected == 0 || isSubmitting
-            ) {
-                submit()
+            Spacer()
+            Menu {
+                batchButton(.download)
+                batchButton(.pause)
+                batchButton(.resume)
+                batchButton(.retry)
+                batchButton(.remove)
+            } label: {
+                Label("work.downloadManagement.actions", systemImage: "ellipsis.circle")
             }
-            .frame(height: 52)
-            .accessibilityIdentifier("work.multiDownload.confirm")
+            .disabled(selectedResourceIDs.isEmpty || isActing)
+            .accessibilityIdentifier("work.downloadManagement.actions")
         }
         .padding(.horizontal, .space2)
         .padding(.vertical, .space1)
@@ -440,57 +712,157 @@ struct MultiDownloadSheet: View {
         .overlay(alignment: .top) { Divider().overlay(theme.divider) }
     }
 
-    private var batchSummary: (selected: Int, enqueue: Int, resume: Int, retry: Int) {
-        var enqueue = 0
-        var resume = 0
-        var retry = 0
-        selectedResourceIDs.forEach { id in
-            switch resourceState(id) {
-            case .enqueue: enqueue += 1
-            case .resume: resume += 1
-            case .retry: retry += 1
-            default: break
+    @ViewBuilder
+    private func batchButton(_ action: DownloadManagementAction) -> some View {
+        let ids = applicableIDs(for: action)
+        if action == .remove {
+            Button(actionLabel(action, count: ids.count), role: .destructive) {
+                guard !ids.isEmpty else { return }
+                pendingRemoval = PendingRemoval(ids: Set(ids))
             }
+            .disabled(ids.isEmpty)
+        } else {
+            Button(actionLabel(action, count: ids.count)) {
+                perform(action: action, resourceIDs: Set(ids))
+            }
+            .disabled(ids.isEmpty)
         }
-        return (selectedResourceIDs.count, enqueue, resume, retry)
     }
 
-    private enum ResourceState { case enqueue, resume, retry, active, completed, failedTerminal, unavailable
-        var isSelectable: Bool { self == .enqueue || self == .resume || self == .retry }
+    private var selectionControlTitle: LocalizedStringKey {
+        let mark = selectionMark(for: scopedResourceIDs)
+        return mark == .selected ? "work.downloadManagement.clearSelection" : "work.downloadManagement.selectAll"
     }
 
-    private func resourceState(_ resourceID: String) -> ResourceState {
-        guard tree.resourcesByID[resourceID] != nil else { return .unavailable }
-        guard let record = downloads.record(for: resourceID) else { return .enqueue }
-        switch record.state {
-        case .queued, .downloading: return .active
-        case .paused: return .resume
-        case .failedRetryable: return .retry
-        case .failedTerminal: return .failedTerminal
-        case .completed: return record.isVerifiedOfflineCopy ? .completed : .retry
+    private func applicableIDs(for action: DownloadManagementAction) -> [String] {
+        DownloadManagementPolicy.shared.applicable(
+            action: action,
+            selectedResourceIds: selectedResourceIDs,
+            resources: projectedResources
+        )
+    }
+
+    private func perform(action: DownloadManagementAction, resourceIDs: Set<String>) {
+        guard !resourceIDs.isEmpty, !isActing, downloads.isCurrent(context) else { return }
+        isActing = true
+        actionFeedback = nil
+        Task { @MainActor in
+            guard downloads.isCurrent(context) else {
+                isActing = false
+                return
+            }
+            let results = await downloads.executeManagement(
+                action: action,
+                selectedResourceIDs: resourceIDs,
+                resources: scopedResources,
+                expectedNamespace: context.namespaceKey
+            )
+            guard !Task.isCancelled, downloads.isCurrent(context) else {
+                isActing = false
+                return
+            }
+            let accepted = results.filter { $0.outcome == .accepted }.count
+            let completed = results.filter { $0.outcome == .completed }.count
+            let skipped = results.filter { $0.outcome == .skipped }.count
+            let failed = results.filter { $0.outcome == .failed }.count
+            let failedCode = results.first(where: { $0.outcome == .failed })?.failureCode
+            if mode == .selection, action == .remove {
+                selectedResourceIDs.subtract(results.filter { $0.outcome == .completed }.map(\.resourceId))
+                pruneSelection()
+            }
+
+            if action == .open {
+                guard let result = results.first,
+                      result.outcome == .completed,
+                      let handoff = await downloads.verifiedReaderHandoff(
+                          resourceID: result.resourceId,
+                          expectedNamespace: context.namespaceKey
+                      )
+                else {
+                    actionFeedback = ActionFeedback(
+                        text: String(format: String(localized: "work.downloadManagement.feedback.failed"), 1),
+                        failureCode: failedCode ?? "DOWNLOAD_LOCAL_FILE_INVALID",
+                        isError: true
+                    )
+                    isActing = false
+                    return
+                }
+                isActing = false
+                requestOpenReader(handoff)
+                return
+            }
+
+            var outcomeSummaries: [String] = []
+            if accepted > 0 {
+                outcomeSummaries.append(String(format: String(localized: "work.downloadManagement.feedback.accepted"), accepted))
+            }
+            if completed > 0 {
+                outcomeSummaries.append(String(format: String(localized: "work.downloadManagement.feedback.completed"), completed))
+            }
+            if skipped > 0 {
+                outcomeSummaries.append(String(format: String(localized: "work.downloadManagement.feedback.skipped"), skipped))
+            }
+            if failed > 0 {
+                outcomeSummaries.append(String(format: String(localized: "work.downloadManagement.feedback.failed"), failed))
+            }
+            if !outcomeSummaries.isEmpty {
+                actionFeedback = ActionFeedback(
+                    text: outcomeSummaries.joined(separator: " · "),
+                    failureCode: failedCode,
+                    isError: failed > 0 || skipped > 0
+                )
+            }
+            isActing = false
         }
+    }
+
+    private func leaveSelectionMode() {
+        selectedResourceIDs.removeAll()
+        mode = .overview
+    }
+
+    private func toggleAll() {
+        selectedResourceIDs = DownloadManagementPolicy.shared.toggleSelection(
+            selected: selectedResourceIDs,
+            candidates: scopedResourceIDs,
+            resources: projectedResources
+        )
     }
 
     private func toggleResource(_ resourceID: String) {
-        guard resourceState(resourceID).isSelectable else { return }
-        if !selectedResourceIDs.insert(resourceID).inserted { selectedResourceIDs.remove(resourceID) }
+        guard mode == .selection else { return }
+        let candidates: Set<String> = [resourceID]
+        selectedResourceIDs = DownloadManagementPolicy.shared.toggleSelection(
+            selected: selectedResourceIDs,
+            candidates: candidates,
+            resources: projectedResources
+        )
     }
 
     private func toggleDirectory(_ nodeID: String) {
-        let descendants = tree.descendantResourceIDsByNodeID[nodeID] ?? []
-        let selectable = descendants.filter { resourceState($0).isSelectable }
-        guard !selectable.isEmpty else { return }
-        if selectable.allSatisfy(selectedResourceIDs.contains) {
-            selectedResourceIDs.subtract(selectable)
-        } else {
-            selectedResourceIDs.formUnion(selectable)
-        }
+        guard mode == .selection else { return }
+        let candidates = tree.descendantResourceIDsByNodeID[nodeID] ?? []
+        selectedResourceIDs = DownloadManagementPolicy.shared.toggleSelection(
+            selected: selectedResourceIDs,
+            candidates: candidates,
+            resources: projectedResources
+        )
     }
 
-    private func directoryMark(_ descendants: Set<String>) -> MultiDownloadSelectionMark {
-        let selectable = descendants.filter { resourceState($0).isSelectable }
-        guard !selectable.isEmpty, selectable.contains(where: selectedResourceIDs.contains) else { return .unselected }
-        return selectable.allSatisfy(selectedResourceIDs.contains) ? .selected : .mixed
+    private func pruneSelection() {
+        selectedResourceIDs = DownloadManagementPolicy.shared.toggleSelection(
+            selected: selectedResourceIDs,
+            candidates: [],
+            resources: projectedResources
+        )
+    }
+
+    private func selectionMark(for candidates: Set<String>) -> MultiDownloadSelectionMark {
+        DownloadManagementPolicy.shared.selectionMark(
+            selected: selectedResourceIDs,
+            candidates: candidates,
+            resources: projectedResources
+        )
     }
 
     private func selectionImage(_ mark: MultiDownloadSelectionMark) -> String {
@@ -502,38 +874,57 @@ struct MultiDownloadSheet: View {
         }
     }
 
-    private func statusText(_ resourceID: String) -> String {
-        guard let record = downloads.record(for: resourceID) else { return String(localized: "work.multiDownload.notDownloaded") }
-        switch record.state {
-        case .queued: return String(localized: "work.multiDownload.queued")
-        case .downloading:
-            return record.progress.map { "\(Int($0 * 100))%" } ?? String(localized: "work.multiDownload.downloading")
-        case .paused: return String(localized: "work.multiDownload.paused")
-        case .completed: return String(localized: "work.multiDownload.downloaded")
-        case .failedRetryable, .failedTerminal: return String(localized: "work.multiDownload.failed")
-        }
-    }
-
-    private func directoryAccessibilityValue(_ mark: MultiDownloadSelectionMark, count: Int) -> String {
+    private func directoryAccessibilityValue(_ mark: MultiDownloadSelectionMark, count: Int?) -> String {
         let state: String
         switch mark {
-        case .unselected: state = String(localized: "work.multiDownload.selection.none")
-        case .selected: state = String(localized: "work.multiDownload.selection.all")
-        case .mixed: state = String(localized: "work.multiDownload.selection.mixed")
-        default: state = String(localized: "work.multiDownload.selection.none")
+        case .unselected: state = String(localized: "work.downloadManagement.selection.none")
+        case .selected: state = String(localized: "work.downloadManagement.selection.all")
+        case .mixed: state = String(localized: "work.downloadManagement.selection.mixed")
+        default: state = String(localized: "work.downloadManagement.selection.none")
         }
-        return "\(state), \(String(format: String(localized: "work.multiDownload.volumeCount"), count))"
+        guard let count else { return state }
+        return "\(state), \(String(format: String(localized: "work.downloadManagement.volumeCount"), count))"
     }
 
-    private func submit() {
-        let resources = selectedResourceIDs.compactMap { tree.resourcesByID[$0] }
-        guard !resources.isEmpty else { return }
-        isSubmitting = true
-        downloads.performBatch(book: detail.book, resources: resources) { result in
-            isSubmitting = false
-            selectedResourceIDs = result.failedResourceIDs
-            onCompleted(result.succeededCount, result.failedCount)
-            if result.failedCount == 0 { onDismiss() }
+    private func statusText(_ resource: BookResource, projected: DownloadManagementResource) -> String {
+        let status: String
+        switch projected.status {
+        case .notdownloaded: status = String(localized: "work.downloadManagement.status.notDownloaded")
+        case .queued: status = String(localized: "work.downloadManagement.status.queued")
+        case .downloading: status = String(localized: "work.downloadManagement.status.downloading")
+        case .paused: status = String(localized: "work.downloadManagement.status.paused")
+        case .completed: status = String(localized: "work.downloadManagement.status.completed")
+        case .invalidlocal: status = String(localized: "work.downloadManagement.status.invalidLocal")
+        case .failedretryable: status = String(localized: "work.downloadManagement.status.failedRetryable")
+        case .failedterminal: status = String(localized: "work.downloadManagement.status.failedTerminal")
+        case .unavailable: status = String(localized: "work.downloadManagement.status.unavailable")
+        default: status = String(localized: "work.downloadManagement.status.unavailable")
         }
+        guard projected.status == .downloading,
+              let progress = downloads.record(for: resource.id)?.progress else { return status }
+        return "\(status) \(Int(progress * 100))%"
+    }
+
+    private func statusColor(_ status: DownloadManagementStatus) -> Color {
+        switch status {
+        case .completed: theme.brandAccent
+        case .failedretryable, .failedterminal, .invalidlocal: .red
+        default: theme.textSecondary
+        }
+    }
+
+    private func actionLabel(_ action: DownloadManagementAction, count: Int? = nil) -> String {
+        let format: String
+        switch action {
+        case .download: format = count == nil ? String(localized: "work.downloadManagement.download") : String(localized: "work.downloadManagement.download.count")
+        case .pause: format = count == nil ? String(localized: "work.downloadManagement.pause") : String(localized: "work.downloadManagement.pause.count")
+        case .resume: format = count == nil ? String(localized: "work.downloadManagement.resume") : String(localized: "work.downloadManagement.resume.count")
+        case .retry: format = count == nil ? String(localized: "work.downloadManagement.retry") : String(localized: "work.downloadManagement.retry.count")
+        case .remove: format = count == nil ? String(localized: "work.downloadManagement.remove") : String(localized: "work.downloadManagement.remove.count")
+        case .open: format = String(localized: "work.downloadManagement.open")
+        default: format = String(localized: "work.downloadManagement.more")
+        }
+        guard let count else { return format }
+        return String(format: format, count)
     }
 }

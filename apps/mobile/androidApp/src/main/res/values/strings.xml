@@ -226,6 +226,15 @@
     <string name="work_quick_downloaded">Downloaded</string>
     <string name="work_quick_manage_download">Show download actions</string>
     <string name="work_download_open_offline">Open offline</string>
+    <string name="book_download_title">Book downloads</string>
+    <string name="download_selection_action">Select</string>
+    <string name="download_selection_done">Done</string>
+    <string name="download_management_accepted">Accepted: %1$d</string>
+    <string name="download_management_completed">Completed: %1$d</string>
+    <string name="download_management_skipped">Skipped: %1$d</string>
+    <string name="download_management_failed">Failed: %1$d</string>
+    <string name="download_selection_select_all">Select all</string>
+    <string name="download_selection_clear_all">Clear all</string>
     <string name="multi_download_title">Download Volumes</string>
     <string name="multi_download_loading">Loading the book resource tree…</string>
     <string name="multi_download_error_title">Unable to load volumes</string>
@@ -257,6 +266,24 @@
         <item quantity="other">%1$d download actions started</item>
     </plurals>
     <string name="multi_download_partial">Started: %1$d · Failed: %2$d</string>
+    <string name="multi_download_known_records_warning">Some details could not be refreshed. Known downloads are still shown.</string>
+    <string name="multi_download_no_resources">No downloadable resources in this scope.</string>
+    <string name="multi_download_folder_error">Could not load this folder (%1$s).</string>
+    <string name="multi_download_invalid_local">Local file unavailable</string>
+    <string name="multi_download_failed_retryable">Failed · retry available</string>
+    <string name="multi_download_failed_terminal">Failed</string>
+    <string name="multi_download_download">Download</string>
+    <string name="multi_download_retry">Retry</string>
+    <string name="multi_download_batch_download">Download (%1$d)</string>
+    <string name="multi_download_batch_pause">Pause (%1$d)</string>
+    <string name="multi_download_batch_resume">Resume (%1$d)</string>
+    <string name="multi_download_batch_retry">Retry (%1$d)</string>
+    <string name="multi_download_batch_remove">Remove (%1$d)</string>
+    <string name="multi_download_remove_title">Remove downloads?</string>
+    <plurals name="multi_download_remove_message">
+        <item quantity="one">Remove this download from this device?</item>
+        <item quantity="other">Remove %1$d downloads from this device?</item>
+    </plurals>
     <string name="work_quick_reading_unread">Unread</string>
     <string name="work_quick_reading_in_progress">Reading</string>
     <string name="work_quick_reading_read">Read</string>
@@ -665,4 +692,5 @@
     <string name="audio_chapters_title">Chapters</string>
     <string name="audio_chapters_empty">No explicit chapters</string>
     <string name="audio_chapter_current">Current chapter</string>
+    <string name="download_management_delete">Delete</string>
 </resources>

@@ -43,9 +43,9 @@ import com.ermao.library.features.content.model.ReadingUnitContent
 import com.ermao.library.features.content.model.WorksFilters
 import com.ermao.library.features.home.application.HomeUiState
 import com.ermao.library.features.home.ui.HomeScreen
+import com.ermao.library.features.downloads.DownloadRecord as AndroidDownloadRecord
+import com.ermao.library.features.downloads.DownloadStatus as AndroidDownloadStatus
 import com.ermao.library.features.downloads.model.AndroidDownloadNamespace
-import com.ermao.library.features.downloads.model.AndroidDownloadRecord
-import com.ermao.library.features.downloads.model.AndroidDownloadStatus
 import com.ermao.library.features.library.application.LibraryUiState
 import com.ermao.library.features.library.application.ScopeUiState
 import com.ermao.library.features.library.application.WorkDetailUiState
@@ -474,6 +474,7 @@ private fun FixtureBookDetail(
                 selectedShelfIds = setOf(fixtureShelves.first().id),
                 isShelfPickerVisible = showShelfPicker,
                 isMultiDownloadVisible = showMultiDownload,
+                multiDownloadScope = com.ermao.library.features.library.application.DownloadPanelScope.Book.takeIf { showMultiDownload },
                 multiDownloadRootNodeId = multiDownloadRootNodeId.takeIf { showMultiDownload },
                 multiDownloadChildrenByNodeId = multiDownloadChildren.takeIf { showMultiDownload }.orEmpty(),
                 multiDownloadDescendantResourceIdsByNodeId = multiDownloadDescendants.takeIf { showMultiDownload }.orEmpty(),
@@ -501,7 +502,6 @@ private fun FixtureBookDetail(
             onDismissMultiDownload = { showMultiDownload = false },
             onToggleMultiDownloadFolder = {},
             onEnsureMultiDownloadFolderLoaded = {},
-            onPerformDownloadBatch = { _, completion -> completion(com.ermao.library.shared.modules.downloads.DownloadBatchResult(emptyList())) },
             managementViewModel = managementViewModel,
             downloadRecordsByResource = selectedResource?.let { resource ->
                 mapOf(resource.id to fixtureCompletedDownload(renderedContent, resource))

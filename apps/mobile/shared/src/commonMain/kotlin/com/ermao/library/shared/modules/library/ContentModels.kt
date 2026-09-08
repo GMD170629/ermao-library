@@ -65,6 +65,18 @@ data class LibraryOption(
     }
 }
 
+data class LibraryTagOption(
+    val value: String,
+    val label: String,
+    val count: Int,
+)
+
+data class LibraryTagOptionPage(
+    val options: List<LibraryTagOption>,
+    val hasMore: Boolean,
+    val indexReady: Boolean,
+)
+
 data class GroupingQuery(
     val kind: FacetKind,
     val query: String = "",
@@ -297,6 +309,13 @@ interface ContentRepository {
     suspend fun loadBooks(context: ContentRequestContext, query: BooksQuery): ContentResult<LibraryPage<BookSummary>>
     suspend fun loadLibraryOptions(context: ContentRequestContext): ContentResult<List<LibraryOption>> =
         ContentResult.Content(emptyList())
+    suspend fun loadTagOptions(
+        context: ContentRequestContext,
+        query: String,
+        limit: Int = 20,
+    ): ContentResult<LibraryTagOptionPage> = ContentResult.Content(
+        LibraryTagOptionPage(emptyList(), hasMore = false, indexReady = true),
+    )
     suspend fun loadGroupings(context: ContentRequestContext, query: GroupingQuery): ContentResult<LibraryPage<GroupingSummary>>
     suspend fun loadFacet(context: ContentRequestContext, query: FacetQuery): ContentResult<FacetPage>
     suspend fun loadBookDetail(context: ContentRequestContext, query: BookDetailQuery): ContentResult<BookDetailSummary>

@@ -76,6 +76,18 @@ final class IosReaderLocalDatabase: ErmaoShared.ReaderPositionSyncStateStore, @u
         await worker.close()
     }
 
+    static func clearReadingPosition(
+        identity: ErmaoShared.ReaderLocalProgressIdentity,
+        wholeBook: Bool,
+        databaseURL: URL? = nil
+    ) throws {
+        try IosReaderLocalDatabaseNamespacePurger.purgePrefix(
+            wholeBook ? identity.bookStoragePrefix : identity.clientStoragePrefix,
+            resourceID: wholeBook ? nil : identity.resourceId,
+            databaseURL: databaseURL, fileManager: .default
+        )
+    }
+
     /// Purges all v5 position and pending-sync rows owned by one account.
     /// The DB intentionally omits authorizationVersion from owner keys, so a
     /// reauthentication does not strand the account's local position.
@@ -103,6 +115,10 @@ private enum IosReaderLocalDatabaseNamespacePurger {
         guard let (serverIdentity, userID) = accountComponents(namespace) else {
             throw IosReaderFailure(code: .persistenceFailed)
         }
+        try purgePrefix(lengthPrefixed(serverIdentity, userID), databaseURL: databaseURL, fileManager: fileManager)
+    }
+
+    static func purgePrefix(_ prefix: String, resourceID: String? = nil, databaseURL: URL?, fileManager: FileManager) throws {
         let url: URL
         if let databaseURL {
             url = databaseURL
@@ -151,9 +167,8 @@ private enum IosReaderLocalDatabaseNamespacePurger {
                     state_document TEXT NOT NULL
                 )
                 """)
-            let prefix = lengthPrefixed(serverIdentity, userID)
-            try delete(database, table: "reader_local_v5", prefix: prefix)
-            try delete(database, table: "reader_progress_sync_v5", prefix: prefix)
+            try delete(database, table: "reader_progress_sync_v5", prefix: prefix, resourceID: resourceID)
+            try delete(database, table: "reader_local_v5", prefix: prefix, resourceID: resourceID)
             try exec(database, "COMMIT")
         } catch {
             try? exec(database, "ROLLBACK")
@@ -179,8 +194,9 @@ private enum IosReaderLocalDatabaseNamespacePurger {
         }
     }
 
-    private static func delete(_ database: OpaquePointer?, table: String, prefix: String) throws {
-        let sql = "DELETE FROM \(table) WHERE owner_key LIKE ? ESCAPE '\\'"
+    private static func delete(_ database: OpaquePointer?, table: String, prefix: String, resourceID: String?) throws {
+        let resourceFilter = resourceID == nil ? "" : " AND owner_key IN (SELECT owner_key FROM reader_local_v5 WHERE source_id = ?)"
+        let sql = "DELETE FROM \(table) WHERE owner_key LIKE ? ESCAPE '\\'" + resourceFilter
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK,
               let statement else {
@@ -191,6 +207,11 @@ private enum IosReaderLocalDatabaseNamespacePurger {
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "%", with: "\\%")
             .replacingOccurrences(of: "_", with: "\\_")
+        if let resourceID {
+            guard sqlite3_bind_text(statement, 2, resourceID, -1, transient) == SQLITE_OK else {
+                throw IosReaderFailure(code: .persistenceFailed)
+            }
+        }
         guard sqlite3_bind_text(statement, 1, (escapedPrefix + "%"), -1, transient) == SQLITE_OK,
               sqlite3_step(statement) == SQLITE_DONE else {
             throw IosReaderFailure(code: .persistenceFailed)
@@ -625,4 +646,26 @@ private actor IosReaderLocalDatabaseWorker {
 private enum SQLiteBinding {
     case text(String)
     case int64(Int64)
+}
+
+final class IosReadingStatusResetPort: ErmaoShared.ReadingStatusResetPort, @unchecked Sendable {
+    func resetBook(context: ErmaoShared.BookManagementContext, bookId: String) async throws {
+        try clear(context: context, bookID: bookId, resourceID: nil)
+    }
+
+    func resetResource(context: ErmaoShared.BookManagementContext, resourceId: String) async throws {
+        try clear(context: context, bookID: resourceId, resourceID: resourceId)
+    }
+
+    private func clear(context: ErmaoShared.BookManagementContext, bookID: String, resourceID: String?) throws {
+        let namespace = ErmaoShared.PublicKt.createReaderSyncNamespace(
+            serverIdentity: context.namespace_.serverIdentity, userId: context.namespace_.userId,
+            authorizationVersion: context.namespace_.authorizationVersion
+        )
+        let identity = ErmaoShared.PublicKt.createReaderLocalProgressIdentity(
+            namespace: namespace, clientId: IosReaderDeviceIdentity().stableDeviceId(),
+            bookId: bookID, resourceId: resourceID ?? bookID
+        )
+        try IosReaderLocalDatabase.clearReadingPosition(identity: identity, wholeBook: resourceID == nil)
+    }
 }

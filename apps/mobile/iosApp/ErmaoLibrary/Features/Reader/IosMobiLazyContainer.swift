@@ -1,4 +1,5 @@
 import Foundation
+@preconcurrency import ErmaoShared
 @preconcurrency import ReadiumShared
 
 protocol IosMobiBookAccess: Sendable {
@@ -157,7 +158,7 @@ final class IosMobiLazyContainer: Container, @unchecked Sendable {
         self.lifetime = lifetime
     }
 
-    subscript(url: any URLConvertible) -> Resource? {
+    subscript(url: any URLConvertible) -> ReadiumShared.Resource? {
         guard let path = IosMobiPublicationPath.resourcePath(
             url.anyURL.removingQuery().removingFragment().string
         ) else {
@@ -172,7 +173,7 @@ final class IosMobiLazyContainer: Container, @unchecked Sendable {
 
 }
 
-final class IosMobiLazyResource: Resource, @unchecked Sendable {
+final class IosMobiLazyResource: ReadiumShared.Resource, @unchecked Sendable {
     let sourceURL: AbsoluteURL? = nil
 
     private let descriptor: IosMobiResourceDescriptor

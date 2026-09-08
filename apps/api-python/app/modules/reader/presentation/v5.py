@@ -113,6 +113,7 @@ from app.modules.reader.presentation.v5_schemas import (
     ReaderV5UnauthorizedError,
     ReaderV5ValidationError,
 )
+from app.modules.reader.public import ResourceReadingState, display_percent_for_status
 from app.schemas.responses import fail
 
 router = APIRouter(
@@ -211,12 +212,12 @@ def _resource_summary(
     resource: ReaderResourceDto,
     progress: ReaderV5ProgressDto | None,
     *,
-    completed: bool,
+    reading_state: ResourceReadingState,
 ) -> ReaderResourceSummary:
     reader_type = reader_type_for_format(resource.source_format)
     if reader_type is None:
         raise ReaderV5ResourceFormatUnsupported
-    display_percent = progress.position.presentation.display_percent if progress else 0
+    display_percent = reading_state.display_percent
     return ReaderResourceSummary(
         id=resource.id,
         bookId=resource.book_id,
@@ -231,7 +232,7 @@ def _resource_summary(
         durationMs=resource.duration_ms,
         trackCount=resource.track_count,
         progress=display_percent,
-        resourceCompleted=completed,
+        resourceCompleted=reading_state.completed,
         lastReadAt=progress.captured_at if progress else None,
     )
 
@@ -423,13 +424,13 @@ def reader_bootstrap_v5(
             resource=_resource_summary(
                 context.resource,
                 bootstrap.progress,
-                completed=bootstrap.reading_states[context.resource.id].completed,
+                reading_state=bootstrap.reading_states[context.resource.id],
             ),
             availableResources=[
                 _resource_summary(
                     resource,
                     bootstrap.progress_by_resource_id.get(resource.id),
-                    completed=bootstrap.reading_states[resource.id].completed,
+                    reading_state=bootstrap.reading_states[resource.id],
                 )
                 for resource in bootstrap.available_resources
             ],
@@ -826,7 +827,10 @@ def set_reading_status_v5(
         data=ReaderReadingStatusData(
             resourceId=resource_id,
             status=payload.status,
-            percent=(progress.position.presentation.display_percent if progress else 0),
+            percent=display_percent_for_status(
+                progress.position.presentation.display_percent if progress else 0,
+                payload.status,
+            ),
         )
     )
 
@@ -872,7 +876,14 @@ def get_reading_status_v5(
         data=ReaderReadingStatusData(
             resourceId=resource_id,
             status=status.status if status is not None else "UNREAD",
-            percent=(progress.position.presentation.display_percent if progress else 0),
+            percent=(
+                display_percent_for_status(
+                    progress.position.presentation.display_percent if progress else 0,
+                    status.status,
+                )
+                if status is not None
+                else (progress.position.presentation.display_percent if progress else 0)
+            ),
         )
     )
 

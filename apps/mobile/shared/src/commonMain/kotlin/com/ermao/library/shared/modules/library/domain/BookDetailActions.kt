@@ -1,5 +1,8 @@
 package com.ermao.library.shared.modules.library.domain
 
+import com.ermao.library.shared.modules.downloads.DownloadManagementResource
+import com.ermao.library.shared.modules.downloads.DownloadManagementStatus
+
 /** One action scope for both native detail surfaces; it never changes the navigation destination. */
 enum class BookDetailObjectKind { Book, Resource }
 
@@ -40,3 +43,16 @@ fun bookDetailDownloadSummary(states: List<BookDetailDownloadState>): BookDetail
     }
     return BookDetailDownloadSummary(state, states.count { it == BookDetailDownloadState.Downloaded })
 }
+
+/** Detail entry labels consume the same verified status projection as the management panel. */
+fun managedBookDownloadSummary(resources: List<DownloadManagementResource>): BookDetailDownloadSummary =
+    bookDetailDownloadSummary(resources.distinctBy { it.resourceId }.map { resource ->
+        when (resource.status) {
+            DownloadManagementStatus.Queued, DownloadManagementStatus.Downloading -> BookDetailDownloadState.Downloading
+            DownloadManagementStatus.Paused -> BookDetailDownloadState.Paused
+            DownloadManagementStatus.InvalidLocal, DownloadManagementStatus.FailedRetryable,
+            DownloadManagementStatus.FailedTerminal -> BookDetailDownloadState.Failed
+            DownloadManagementStatus.Completed -> BookDetailDownloadState.Downloaded
+            DownloadManagementStatus.NotDownloaded, DownloadManagementStatus.Unavailable -> BookDetailDownloadState.NotDownloaded
+        }
+    })

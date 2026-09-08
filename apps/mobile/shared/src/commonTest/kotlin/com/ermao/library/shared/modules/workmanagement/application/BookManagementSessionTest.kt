@@ -225,6 +225,45 @@ class BookManagementSessionTest {
         assertEquals(true, session.current.change?.deleted)
     }
 
+    @Test fun failedImmediateRegenerationRetriesTheMutationWithoutReloadingTheSnapshot() = runBlocking {
+        var snapshotCalls = 0
+        var regenerationCalls = 0
+        val repo = object : UnusedManagementRepository() {
+            override suspend fun loadManagementSnapshot(
+                context: BookManagementContext,
+                target: ManagementTarget,
+            ): WorkManagementResult<ManagementSnapshot> {
+                snapshotCalls++
+                return WorkManagementResult.Content(snapshot)
+            }
+
+            override suspend fun regenerateBookImage(
+                context: BookManagementContext,
+                bookId: String,
+            ): WorkManagementResult<Unit> {
+                regenerationCalls++
+                return if (regenerationCalls == 1) failure else WorkManagementResult.Content(Unit)
+            }
+        }
+        val session = session(repo)
+
+        session.open(target)
+        session.select(ManagementAction.Regenerate)
+
+        assertEquals(1, snapshotCalls)
+        assertEquals(1, regenerationCalls)
+        assertEquals(ManagementPhase.Executing, session.current.phase)
+        assertEquals("NETWORK_ERROR", session.current.error?.code)
+
+        session.retryAction()
+
+        assertEquals(1, snapshotCalls)
+        assertEquals(2, regenerationCalls)
+        assertEquals(ManagementPhase.Closed, session.current.phase)
+        assertEquals("queued", session.current.notice)
+        assertEquals(true, session.current.change?.coverChanged)
+    }
+
     @Test fun closingInteractionRejectsPendingSnapshotAndMutationResults() = runBlocking {
         val pending = CompletableDeferred<Unit>()
         val repo = object : UnusedManagementRepository() {

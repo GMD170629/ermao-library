@@ -206,7 +206,16 @@ class VisualFixtureActivityTest {
                 .assertTextEquals(scenario.localizedString(variant, R.string.work_book_download_count, 1))
                 .performClick()
             awaitTagDisplayed("multi-download-sheet")
-            awaitTextDisplayed(scenario.localizedString(variant, R.string.multi_download_title))
+            awaitTextDisplayed(scenario.localizedString(variant, R.string.book_download_title))
+            composeRule.onNodeWithTag("download-panel-close").assertIsDisplayed()
+            composeRule.onNodeWithTag("download-selection-cancel").assertDoesNotExist()
+            composeRule.onNodeWithTag("download-selection-enter").performClick()
+            awaitTagDisplayed("download-selection-cancel")
+            composeRule.onNodeWithTag("download-selection-cancel").performClick()
+            awaitTagDisplayed("download-selection-enter")
+            composeRule.onNodeWithTag("download-panel-close").performClick()
+            composeRule.waitForIdle()
+            composeRule.onNodeWithTag("multi-download-sheet").assertDoesNotExist()
         }
 
         val pathVariant = variant.copy(scenario = VisualFixtureScenario.BookAbout)

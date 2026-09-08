@@ -25,6 +25,8 @@ import com.ermao.library.shared.modules.library.HomeSection
 import com.ermao.library.shared.modules.library.HomeSnapshot
 import com.ermao.library.shared.modules.library.LibraryPage
 import com.ermao.library.shared.modules.library.LibraryOption
+import com.ermao.library.shared.modules.library.LibraryTagOption
+import com.ermao.library.shared.modules.library.LibraryTagOptionPage
 import com.ermao.library.shared.modules.library.ResourceReadingUnitsPage
 import com.ermao.library.shared.modules.library.ResourceReadingUnitsQuery
 import com.ermao.library.shared.modules.library.domain.BookDetailSummary
@@ -112,6 +114,37 @@ class KtorContentRepository(
             ContentResult.Content(libraryField.options.map { LibraryOption(it.value, it.label) })
         }
         is ApiResult.Failure -> ContentResult.Failure(result.error)
+    }
+
+    override suspend fun loadTagOptions(
+        context: ContentRequestContext,
+        query: String,
+        limit: Int,
+    ): ContentResult<LibraryTagOptionPage> {
+        require(limit in 1..50)
+        return when (val result = withClient(context) { client ->
+            client.execute(
+                ApiRequest(
+                    ApiMethod.Get,
+                    "/api/library/filter-options",
+                    LibraryFilterOptionPageWire.serializer(),
+                    queryParameters = mapOf(
+                        "source" to listOf("tags"),
+                        "query" to listOf(query.trim()),
+                        "limit" to listOf(limit.toString()),
+                    ),
+                ),
+            )
+        }) {
+            is ApiResult.Success -> ContentResult.Content(
+                LibraryTagOptionPage(
+                    options = result.value.options.map { LibraryTagOption(it.value, it.label, it.count ?: 0) },
+                    hasMore = result.value.hasMore,
+                    indexReady = result.value.indexReady,
+                ),
+            )
+            is ApiResult.Failure -> ContentResult.Failure(result.error)
+        }
     }
 
     override suspend fun loadGroupings(
@@ -368,6 +401,15 @@ private data class LibraryFilterOptionWire(
     val label: String,
     val count: Int? = null,
     val rootPath: String? = null,
+)
+
+@Serializable
+private data class LibraryFilterOptionPageWire(
+    val source: String,
+    val query: String,
+    val options: List<LibraryFilterOptionWire>,
+    val hasMore: Boolean,
+    val indexReady: Boolean,
 )
 
 @kotlinx.serialization.Serializable

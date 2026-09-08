@@ -14,6 +14,11 @@ import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 import com.ermao.library.shared.modules.servers.domain.TlsMode
 
+fun summarizeManagedBookDownloads(
+    resources: List<com.ermao.library.shared.modules.downloads.DownloadManagementResource>,
+): BookDetailDownloadSummary =
+    com.ermao.library.shared.modules.library.domain.managedBookDownloadSummary(resources)
+
 /** Stable capability boundary; platform code does not import library infrastructure mappers directly. */
 object LibraryContract {
     private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }

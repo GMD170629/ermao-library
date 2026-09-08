@@ -110,7 +110,7 @@ class SqlAlchemyBookshelfItemQueries(BookshelfItemQueryPort):
                 reading_states[resource_id],
                 sort_order=int(row.resource_index or 0),
             )
-            percent_by_resource[resource_id] = state.percent
+            percent_by_resource[resource_id] = state.display_percent
             states_by_book[book_id].append(state)
 
         summaries: list[BookshelfItemSummary] = []

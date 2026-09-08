@@ -2,12 +2,6 @@ import Foundation
 import OSLog
 @preconcurrency import ErmaoShared
 
-struct ManagedDownloadBatchResult: Sendable {
-    let succeededCount: Int
-    let failedResourceIDs: Set<String>
-    var failedCount: Int { failedResourceIDs.count }
-}
-
 @MainActor
 final class DownloadCenterStore: ObservableObject {
     private static let readerMaterializationLogger = Logger(
@@ -18,6 +12,7 @@ final class DownloadCenterStore: ObservableObject {
     @Published private(set) var records: [ManagedDownloadRecord] = []
     @Published private(set) var storageErrorCode: String?
     @Published private(set) var readerFailures: [String: String] = [:]
+    @Published private(set) var activeManagementResourceIDs: Set<String> = []
     @Published var completedSearch = ""
     #if DEBUG
     @Published var uiTestResourceFilterID: String?
@@ -54,6 +49,7 @@ final class DownloadCenterStore: ObservableObject {
         guard self.context?.namespaceKey != context.namespaceKey else { return }
         runningTasks.values.forEach { $0.cancel() }
         runningTasks.removeAll()
+        activeManagementResourceIDs.removeAll()
         runningReaderDescriptors.removeAll()
         self.context = context
         records = []
@@ -65,6 +61,7 @@ final class DownloadCenterStore: ObservableObject {
     func cancelAllTransfers() async {
         let tasks = Array(runningTasks.values)
         runningTasks.removeAll()
+        activeManagementResourceIDs.removeAll()
         runningReaderDescriptors.removeAll()
         tasks.forEach { $0.cancel() }
         for task in tasks { await task.value }
@@ -78,12 +75,121 @@ final class DownloadCenterStore: ObservableObject {
                 guard self.context?.namespaceKey == context.namespaceKey else { return }
                 records = loaded; storageErrorCode = nil
             }
-            catch { storageErrorCode = "DOWNLOAD_MANIFEST_READ_FAILED" }
+            catch {
+                guard self.context?.namespaceKey == context.namespaceKey else { return }
+                storageErrorCode = "DOWNLOAD_MANIFEST_READ_FAILED"
+            }
         }
     }
 
     func record(for resourceID: String, assetID: String? = nil) -> ManagedDownloadRecord? {
         records.first { $0.resourceID == resourceID && (assetID == nil || $0.assetID == assetID) }
+    }
+
+    func managementResource(for resource: BookResource) -> DownloadManagementResource {
+        DownloadManagementAdapter.project(
+            resource: resource,
+            record: record(for: resource.id),
+            active: activeManagementResourceIDs.contains(resource.id)
+        )
+    }
+
+    func managementResources(for resources: [BookResource]) -> [DownloadManagementResource] {
+        var seen = Set<String>()
+        return resources.compactMap { resource in
+            guard seen.insert(resource.id).inserted else { return nil }
+            return managementResource(for: resource)
+        }
+    }
+
+    /// Reloads the current namespace before an action is evaluated. A failed
+    /// read leaves the in-memory records visible so a network or manifest
+    /// failure cannot erase known rows from the management sheet.
+    @discardableResult
+    func reloadAndAwait(expectedNamespace: String? = nil) async -> Bool {
+        guard let currentContext = context else {
+            records = []
+            return false
+        }
+        guard expectedNamespace == nil || expectedNamespace == currentContext.namespaceKey else { return false }
+        let namespace = expectedNamespace ?? currentContext.namespaceKey
+        do {
+            let loaded = try await repository.records(namespace: namespace)
+            guard self.context?.namespaceKey == namespace else { return false }
+            records = loaded
+            storageErrorCode = nil
+            return true
+        } catch {
+            guard self.context?.namespaceKey == namespace else { return false }
+            storageErrorCode = "DOWNLOAD_MANIFEST_READ_FAILED"
+            return false
+        }
+    }
+
+    /// Executes one shared management action for each selected resource. The
+    /// policy is re-evaluated immediately before every item so a batch cannot
+    /// apply a stale action after an earlier item changes the catalog.
+    func executeManagement(
+        action: DownloadManagementAction,
+        selectedResourceIDs: Set<String>,
+        resources: [BookResource],
+        expectedNamespace: String? = nil
+    ) async -> [DownloadManagementResult] {
+        guard !selectedResourceIDs.isEmpty else { return [] }
+        guard let currentContext = context,
+              expectedNamespace == nil || expectedNamespace == currentContext.namespaceKey else {
+            let outcome: DownloadManagementOutcome = .skipped
+            return selectedResourceIDs.sorted().map {
+                managementResult(resourceID: $0, action: action, outcome: outcome)
+            }
+        }
+        let namespace = expectedNamespace ?? currentContext.namespaceKey
+        guard await reloadAndAwait(expectedNamespace: namespace) else {
+            let outcome: DownloadManagementOutcome = context?.namespaceKey == namespace ? .failed : .skipped
+            let code: String? = outcome == .failed ? "DOWNLOAD_MANIFEST_READ_FAILED" : nil
+            return selectedResourceIDs.sorted().map {
+                managementResult(resourceID: $0, action: action, outcome: outcome, failureCode: code)
+            }
+        }
+        var resourceByID: [String: BookResource] = [:]
+        for resource in resources { resourceByID[resource.id] = resource }
+        var results: [DownloadManagementResult] = []
+        for resourceID in selectedResourceIDs.sorted() {
+            guard context?.namespaceKey == namespace else {
+                results.append(managementResult(resourceID: resourceID, action: action, outcome: .skipped))
+                continue
+            }
+            guard await reloadAndAwait(expectedNamespace: namespace) else {
+                let outcome: DownloadManagementOutcome = context?.namespaceKey == namespace ? .failed : .skipped
+                results.append(managementResult(
+                    resourceID: resourceID,
+                    action: action,
+                    outcome: outcome,
+                    failureCode: outcome == .failed ? "DOWNLOAD_MANIFEST_READ_FAILED" : nil
+                ))
+                continue
+            }
+            guard resourceByID[resourceID] != nil else {
+                results.append(managementResult(resourceID: resourceID, action: action, outcome: .skipped))
+                continue
+            }
+            let latestResources = managementResources(for: resources)
+            let applicable = DownloadManagementPolicy.shared.applicable(
+                action: action,
+                selectedResourceIds: [resourceID],
+                resources: latestResources
+            )
+            guard applicable.contains(resourceID) else {
+                results.append(managementResult(resourceID: resourceID, action: action, outcome: .skipped))
+                continue
+            }
+            results.append(await executeApplicableManagementAction(
+                action: action,
+                resourceID: resourceID,
+                expectedNamespace: namespace
+            ))
+        }
+        return results
     }
 
     func enqueue(book: BookCard, resource: BookResource) { start(resourceID: resource.id) }
@@ -238,32 +344,233 @@ final class DownloadCenterStore: ObservableObject {
         return beginReaderDownload(resourceID: resourceID, descriptor: descriptor)
     }
 
-    func performBatch(book: BookCard, resources: [BookResource],
-                      completion: @escaping @MainActor (ManagedDownloadBatchResult) -> Void) {
-        guard context != nil else {
-            completion(ManagedDownloadBatchResult(succeededCount: 0, failedResourceIDs: Set(resources.map(\.id))))
-            return
-        }
-        let result = DownloadBatchResult(results: Set(resources.map(\.id)).sorted().map { resourceID in
-            let record = record(for: resourceID)
-            return DownloadBatchPolicy.shared.decide(resourceId: resourceID, status: record?.state.sharedStatus,
-                failureCode: record?.stableErrorCode, active: runningTasks[resourceID] != nil)
-        })
-        result.requestedResourceIds.forEach { start(resourceID: $0) }
-        completion(ManagedDownloadBatchResult(succeededCount: Int(result.succeededCount), failedResourceIDs: result.failedResourceIds))
-    }
-
     func pause(_ record: ManagedDownloadRecord) { runningTasks[record.resourceID]?.cancel() }
     func resume(_ record: ManagedDownloadRecord) { start(resourceID: record.resourceID) }
     func retry(_ record: ManagedDownloadRecord) { start(resourceID: record.resourceID) }
 
+    func verifiedReaderHandoff(resourceID: String, expectedNamespace: String? = nil) async -> ReaderHandoff? {
+        guard let record = record(for: resourceID),
+              expectedNamespace == nil || record.namespace == expectedNamespace,
+              record.isVerifiedOfflineCopy,
+              await repository.fileURL(for: record) != nil
+        else { return nil }
+        guard expectedNamespace == nil || context?.namespaceKey == expectedNamespace else { return nil }
+        return ManagedReaderAccessPolicy.verifiedLocalHandoff(record: record, resourceID: resourceID)
+    }
+
+    private func executeApplicableManagementAction(
+        action: DownloadManagementAction,
+        resourceID: String,
+        expectedNamespace: String
+    ) async -> DownloadManagementResult {
+        do {
+            switch action {
+            case .download, .resume, .retry:
+                let accepted = start(resourceID: resourceID) != nil
+                return managementResult(
+                    resourceID: resourceID,
+                    action: action,
+                    outcome: accepted ? .accepted : .skipped
+                )
+            case .pause:
+                let completed = try await pauseManagementDownload(resourceID: resourceID, expectedNamespace: expectedNamespace)
+                return managementResult(
+                    resourceID: resourceID,
+                    action: action,
+                    outcome: completed ? .completed : .skipped
+                )
+            case .remove:
+                let result = try await removeManagementDownload(resourceID: resourceID, expectedNamespace: expectedNamespace)
+                return managementResult(
+                    resourceID: resourceID,
+                    action: action,
+                    outcome: result.outcome,
+                    failureCode: result.failureCode
+                )
+            case .open:
+                guard context?.namespaceKey == expectedNamespace else {
+                    return managementResult(resourceID: resourceID, action: action, outcome: .skipped)
+                }
+                let canOpen = await verifiedReaderHandoff(resourceID: resourceID, expectedNamespace: expectedNamespace) != nil
+                guard context?.namespaceKey == expectedNamespace else {
+                    return managementResult(resourceID: resourceID, action: action, outcome: .skipped)
+                }
+                return managementResult(
+                    resourceID: resourceID,
+                    action: action,
+                    outcome: canOpen ? .completed : .failed,
+                    failureCode: canOpen ? nil : "DOWNLOAD_LOCAL_FILE_INVALID"
+                )
+            default:
+                return managementResult(resourceID: resourceID, action: action, outcome: .skipped)
+            }
+        } catch is CancellationError {
+            return managementResult(resourceID: resourceID, action: action, outcome: .skipped)
+        } catch let error as ManagedDownloadTransferError {
+            guard context?.namespaceKey == expectedNamespace else {
+                return managementResult(resourceID: resourceID, action: action, outcome: .skipped)
+            }
+            storageErrorCode = error.stableCode
+            return managementResult(
+                resourceID: resourceID,
+                action: action,
+                outcome: .failed,
+                failureCode: error.stableCode
+            )
+        } catch {
+            guard context?.namespaceKey == expectedNamespace else {
+                return managementResult(resourceID: resourceID, action: action, outcome: .skipped)
+            }
+            storageErrorCode = "DOWNLOAD_MANIFEST_WRITE_FAILED"
+            return managementResult(
+                resourceID: resourceID,
+                action: action,
+                outcome: .failed,
+                failureCode: "DOWNLOAD_MANIFEST_WRITE_FAILED"
+            )
+        }
+    }
+
+    private func pauseManagementDownload(resourceID: String, expectedNamespace: String) async throws -> Bool {
+        guard context?.namespaceKey == expectedNamespace else {
+            throw ManagedDownloadTransferError.unauthorized
+        }
+        if let active = runningTasks[resourceID] {
+            active.cancel()
+            await active.value
+        }
+        guard let context, context.namespaceKey == expectedNamespace, isCurrent(context) else {
+            throw ManagedDownloadTransferError.unauthorized
+        }
+        let loaded = try await repository.records(namespace: expectedNamespace)
+        guard self.context?.namespaceKey == expectedNamespace else {
+            throw ManagedDownloadTransferError.unauthorized
+        }
+        guard let record = loaded.first(where: { $0.resourceID == resourceID }) else { return false }
+        guard let encoded = record.sharedTaskJSON,
+              let task = try? DownloadCatalogCodec.shared.decode(serialized: encoded)
+        else { return record.state == .paused }
+
+        switch task.status {
+        case .paused, .waitingforwifi:
+            return true
+        case .queued, .downloading:
+            let pausedTask = try PublicKt.pauseDownloadTask(task: task)
+            let pausedRecord = try ManagedDownloadRecord.fromSharedTask(
+                pausedTask,
+                previous: record,
+                namespace: expectedNamespace
+            )
+            try await repository.update(pausedRecord)
+            guard self.context?.namespaceKey == expectedNamespace else {
+                throw ManagedDownloadTransferError.unauthorized
+            }
+            project(pausedRecord)
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func removeManagementDownload(
+        resourceID: String,
+        expectedNamespace: String,
+        recordID: String? = nil
+    ) async throws -> (outcome: DownloadManagementOutcome, failureCode: String?) {
+        guard context?.namespaceKey == expectedNamespace else {
+            throw ManagedDownloadTransferError.unauthorized
+        }
+
+        // Read before cancelling so an old Download Center row cannot cancel
+        // a newer task for the same resource. Panel removal passes nil and
+        // intentionally targets every current record for that resource.
+        let beforeCancel = try await repository.records(namespace: expectedNamespace)
+        guard self.context?.namespaceKey == expectedNamespace else {
+            throw ManagedDownloadTransferError.unauthorized
+        }
+        let beforeTargets = beforeCancel.filter { record in
+            record.resourceID == resourceID && (recordID == nil || record.id == recordID)
+        }
+        let hadActiveTask = runningTasks[resourceID] != nil
+        guard !beforeTargets.isEmpty || (recordID == nil && hadActiveTask) else {
+            return (.skipped, nil)
+        }
+
+        let shouldCancel = recordID == nil || beforeTargets.contains {
+            $0.state == .queued || $0.state == .downloading
+        }
+        if shouldCancel, let active = runningTasks[resourceID] {
+            active.cancel()
+            await active.value
+        }
+        guard let context, context.namespaceKey == expectedNamespace, isCurrent(context) else {
+            throw ManagedDownloadTransferError.unauthorized
+        }
+        let loaded = try await repository.records(namespace: expectedNamespace)
+            .filter { record in
+                record.resourceID == resourceID && (recordID == nil || record.id == recordID)
+            }
+        guard self.context?.namespaceKey == expectedNamespace else {
+            throw ManagedDownloadTransferError.unauthorized
+        }
+        guard !loaded.isEmpty else {
+            return hadActiveTask && recordID == nil ? (.completed, nil) : (.skipped, nil)
+        }
+
+        var removedIDs = Set<String>()
+        var failureCode: String?
+        for record in loaded {
+            guard self.context?.namespaceKey == expectedNamespace else {
+                throw ManagedDownloadTransferError.unauthorized
+            }
+            do {
+                try await repository.remove(record)
+                removedIDs.insert(record.id)
+            } catch {
+                failureCode = "DOWNLOAD_REMOVE_FAILED"
+            }
+        }
+        guard self.context?.namespaceKey == expectedNamespace else {
+            throw ManagedDownloadTransferError.unauthorized
+        }
+        records.removeAll { removedIDs.contains($0.id) }
+        guard let failureCode else { return (.completed, nil) }
+        storageErrorCode = failureCode
+        return (.failed, failureCode)
+    }
+
+    private func managementResult(
+        resourceID: String,
+        action: DownloadManagementAction,
+        outcome: DownloadManagementOutcome,
+        failureCode: String? = nil
+    ) -> DownloadManagementResult {
+        DownloadManagementResult(
+            resourceId: resourceID,
+            action: action,
+            outcome: outcome,
+            failureCode: failureCode
+        )
+    }
+
     func remove(_ record: ManagedDownloadRecord) {
-        let active = runningTasks[record.resourceID]
-        active?.cancel()
+        guard context?.namespaceKey == record.namespace else { return }
         Task {
-            await active?.value
-            do { try await repository.remove(record); records.removeAll { $0.id == record.id } }
-            catch { storageErrorCode = "DOWNLOAD_REMOVE_FAILED" }
+            do {
+                let result = try await removeManagementDownload(
+                    resourceID: record.resourceID,
+                    expectedNamespace: record.namespace,
+                    recordID: record.id
+                )
+                if result.outcome == .failed,
+                   self.context?.namespaceKey == record.namespace {
+                    storageErrorCode = result.failureCode
+                }
+            } catch let error as ManagedDownloadTransferError {
+                if self.context?.namespaceKey == record.namespace { storageErrorCode = error.stableCode }
+            } catch {
+                if self.context?.namespaceKey == record.namespace { storageErrorCode = "DOWNLOAD_REMOVE_FAILED" }
+            }
         }
     }
 
@@ -271,14 +578,16 @@ final class DownloadCenterStore: ObservableObject {
     func remove(bookID: String) { records.filter { $0.bookID == bookID }.forEach(remove) }
     func localFileURL(for record: ManagedDownloadRecord) async -> URL? { await repository.fileURL(for: record) }
 
-    private func start(resourceID: String, expectedDescriptor: DownloadDescriptor? = nil) {
-        guard let context, runningTasks[resourceID] == nil else { return }
+    @discardableResult
+    private func start(resourceID: String, expectedDescriptor: DownloadDescriptor? = nil) -> Task<Void, Never>? {
+        guard let context, runningTasks[resourceID] == nil else { return nil }
         readerFailures[resourceID] = nil
         let task = Task { [weak self, repository, transfer] in
             guard let self else { return }
             defer {
                 if self.context?.namespaceKey == context.namespaceKey {
                     self.runningTasks[resourceID] = nil
+                    self.activeManagementResourceIDs.remove(resourceID)
                     if expectedDescriptor != nil { self.runningReaderDescriptors[resourceID] = nil }
                 }
             }
@@ -299,6 +608,8 @@ final class DownloadCenterStore: ObservableObject {
             }
         }
         runningTasks[resourceID] = task
+        activeManagementResourceIDs.insert(resourceID)
+        return task
     }
 
     private func project(_ record: ManagedDownloadRecord) {

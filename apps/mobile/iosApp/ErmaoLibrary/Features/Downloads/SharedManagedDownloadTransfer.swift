@@ -122,24 +122,7 @@ private final class IosDownloadCatalog: NSObject, DownloadCatalogRepository, @un
     func saveTask(task: DownloadTask) async throws {
         try requireNamespace(task.descriptor.identity.namespace_)
         let previous = try await repository.records(namespace: context.namespaceKey).first { $0.id == task.id }
-        let descriptor = task.descriptor
-        guard let readerType = ManagedDownloadReaderType(rawValue: descriptor.readerType.name.lowercased()) else {
-            throw ManagedDownloadTransferError.invalidResponse
-        }
-        let artifact = task.artifact
-        let record = ManagedDownloadRecord(
-            id: task.id, namespace: context.namespaceKey, bookID: descriptor.identity.bookId,
-            bookTitle: descriptor.bookTitle, bookAuthor: descriptor.bookAuthor,
-            resourceID: descriptor.identity.resourceId, resourceTitle: descriptor.resourceTitle,
-            assetID: descriptor.identity.assetId, format: descriptor.format.uppercased(), mimeType: descriptor.source.mimeType,
-            readerType: readerType, state: Self.nativeStatus(task.status),
-            verification: artifact == nil ? .pending : .verified, expectedBytes: descriptor.totalBytes,
-            artifactKind: descriptor.artifactKind == .originalpageset ? .originalPageSet : .singleOriginalAsset,
-            receivedBytes: task.transferredBytes, localRelativePath: artifact?.localReference,
-            stableErrorCode: task.failureCode, createdAt: previous?.createdAt ?? Date(), updatedAt: Date(),
-            completedAt: artifact.map { Date(timeIntervalSince1970: Double($0.completedAtEpochMillis) / 1000) },
-            lastOpenedAt: previous?.lastOpenedAt, sharedTaskJSON: DownloadCatalogCodec.shared.encode(task: task)
-        )
+        let record = try ManagedDownloadRecord.fromSharedTask(task, previous: previous, namespace: context.namespaceKey)
         try await repository.update(record)
         await changed(record)
     }
@@ -161,16 +144,6 @@ private final class IosDownloadCatalog: NSObject, DownloadCatalogRepository, @un
     func clearNamespace(namespace: DownloadNamespace) async throws {
         try requireNamespace(namespace)
         try await repository.removeNamespace(context.namespaceKey)
-    }
-    private static func nativeStatus(_ status: DownloadTaskStatus) -> ManagedDownloadState {
-        switch status {
-        case .queued: .queued
-        case .downloading: .downloading
-        case .completed: .completed
-        case .failedretryable, .insufficientspace: .failedRetryable
-        case .failedterminal: .failedTerminal
-        default: .paused
-        }
     }
 }
 

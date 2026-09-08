@@ -1,26 +1,30 @@
 package com.ermao.library.features.library.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TriStateCheckbox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -30,20 +34,28 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import com.ermao.library.R
 import com.ermao.library.features.content.model.ResourceContent
-import com.ermao.library.features.downloads.model.AndroidDownloadRecord
-import com.ermao.library.features.downloads.model.AndroidDownloadStatus
+import com.ermao.library.features.downloads.DownloadRecord as AndroidDownloadRecord
+import com.ermao.library.features.downloads.downloadManagementItem
+import com.ermao.library.features.downloads.downloadFailureMessage
+import com.ermao.library.features.library.application.DownloadPanelScope
 import com.ermao.library.features.library.application.WorkDetailUiState
-import com.ermao.library.shared.modules.downloads.DownloadBatchResult
+import com.ermao.library.shared.modules.downloads.DownloadManagementAction
+import com.ermao.library.shared.modules.downloads.DownloadManagementOutcome
+import com.ermao.library.shared.modules.downloads.DownloadManagementPolicy
+import com.ermao.library.shared.modules.downloads.DownloadManagementResource
+import com.ermao.library.shared.modules.downloads.DownloadManagementResult
+import com.ermao.library.shared.modules.downloads.MultiDownloadSelectionMark
 import com.ermao.library.shared.modules.library.BookContentEntry
 import com.ermao.library.ui.components.WarmPageErrorState
 import com.ermao.library.ui.components.WarmPageLoadingState
+import com.ermao.library.ui.components.LocalWarmPageModalSheetDismiss
 import com.ermao.library.ui.components.WarmPageModalBottomSheet
 import com.ermao.library.ui.components.WarmPageMenuItem
 import com.ermao.library.ui.components.WarmPagePopup
@@ -54,31 +66,83 @@ private data class MultiDownloadTreeRow(
     val depth: Int,
 )
 
-private enum class MultiDownloadResourceEligibility { Enqueue, Resume, Retry, Active, Completed, Terminal, Unavailable }
-
+/**
+ * One native download manager for Book, Directory and Resource detail pages.
+ * The normal presentation is a status list with explicit primary actions. A
+ * separate selection mode owns checkboxes and the batch action bar.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun MultiDownloadSheet(
     state: WorkDetailUiState,
     recordsByResource: Map<String, AndroidDownloadRecord>,
+    activeResourceIds: Set<String> = emptySet(),
     onDismiss: () -> Unit,
     onRetryTree: () -> Unit,
+    onRetryFolder: (String?) -> Unit = { onRetryTree() },
     onToggleFolder: (String) -> Unit,
     onEnsureFolderLoaded: (String) -> Unit,
-    onPause: (String) -> Unit,
-    onResumeOrRetry: (String) -> Unit,
-    onRemove: (AndroidDownloadRecord) -> Unit,
+    onRefreshLocalFacts: (Set<String>) -> Unit = {},
+    onExecuteAction: (
+        DownloadManagementAction,
+        Set<String>,
+        Set<String>,
+        (List<DownloadManagementResult>) -> Unit,
+    ) -> Unit,
     onOpenDownloaded: (AndroidDownloadRecord) -> Unit,
-    onPerformBatch: (Set<String>, (DownloadBatchResult) -> Unit) -> Unit,
-    onBatchFeedback: (succeeded: Int, failed: Int) -> Unit,
 ) {
     val theme = WarmPageThemeValues
-    var selectedIdsList by rememberSaveable { mutableStateOf(emptyList<String>()) }
-    val selectedIds = selectedIdsList.toSet()
+    var selectionMode by rememberSaveable(state.multiDownloadScope) { mutableStateOf(false) }
+    var selectedIdsList by rememberSaveable(state.multiDownloadScope) { mutableStateOf(emptyList<String>()) }
     var pendingDirectorySelection by remember { mutableStateOf<String?>(null) }
+    var pendingRemovalIds by remember { mutableStateOf<Set<String>?>(null) }
     var isSubmitting by remember { mutableStateOf(false) }
-    val resourcesById = state.multiDownloadResources.associateBy(ResourceContent::id)
+    var actionResults by remember { mutableStateOf<List<DownloadManagementResult>>(emptyList()) }
+    val selectedIds = selectedIdsList.toSet()
+    val panelBookId = state.content?.book?.id
+    val knownDirectoryResourceIds = if (state.multiDownloadScope == DownloadPanelScope.Directory) {
+        state.multiDownloadRootNodeId
+            ?.let { state.multiDownloadDescendantResourceIdsByNodeId[it].orEmpty() }
+            .orEmpty()
+    } else {
+        emptySet()
+    }
+    val panelRecordsByResourceId = recordsByResource.filterValues { record ->
+        when (state.multiDownloadScope) {
+            DownloadPanelScope.Book -> panelBookId != null && record.bookId == panelBookId
+            DownloadPanelScope.Resource -> record.resourceId == state.multiDownloadResourceId &&
+                (panelBookId == null || record.bookId == panelBookId)
+            DownloadPanelScope.Directory -> record.resourceId in knownDirectoryResourceIds &&
+                (panelBookId == null || record.bookId == panelBookId)
+            null -> false
+        }
+    }
+    val panelResources = remember(
+        state.multiDownloadResources,
+        panelRecordsByResourceId,
+    ) {
+        val remoteIds = state.multiDownloadResources.map(ResourceContent::id).toSet()
+        val localOnlyResources = panelRecordsByResourceId.values
+            .filter { it.resourceId !in remoteIds }
+            .map(AndroidDownloadRecord::toPanelResource)
+        state.multiDownloadResources + localOnlyResources
+    }
+    val resourcesById = panelResources.associateBy(ResourceContent::id)
+    val managementById = remember(
+        panelResources,
+        panelRecordsByResourceId,
+        activeResourceIds,
+    ) {
+        panelResources.associate { resource ->
+            resource.id to managementResource(
+                resource,
+                panelRecordsByResourceId[resource.id],
+                resource.id in activeResourceIds,
+            )
+        }
+    }
     val rows = remember(
+        state.multiDownloadScope,
         state.multiDownloadRootNodeId,
         state.multiDownloadChildrenByNodeId,
         state.multiDownloadExpandedNodeIds,
@@ -89,236 +153,759 @@ internal fun MultiDownloadSheet(
             state.multiDownloadExpandedNodeIds,
         )
     }
+    val localBookResourceIds = if (state.multiDownloadScope == DownloadPanelScope.Book) {
+        panelRecordsByResourceId.keys
+    } else {
+        emptySet()
+    }
+    val scopeResourceIds = when (state.multiDownloadScope) {
+        DownloadPanelScope.Resource -> state.multiDownloadResourceId?.let(::setOf).orEmpty()
+        DownloadPanelScope.Book -> {
+            val treeResourceIds = state.multiDownloadRootNodeId
+                ?.let { state.multiDownloadDescendantResourceIdsByNodeId[it].orEmpty() }
+                .orEmpty()
+            when {
+                treeResourceIds.isNotEmpty() -> treeResourceIds + localBookResourceIds
+                state.multiDownloadErrorCode != null -> panelResources.map(ResourceContent::id).toSet()
+                else -> localBookResourceIds
+            }
+        }
+        DownloadPanelScope.Directory -> state.multiDownloadRootNodeId
+            ?.let { state.multiDownloadDescendantResourceIdsByNodeId[it].orEmpty() }
+            .orEmpty()
+        null -> emptySet()
+    }
+    val scopeResources = panelResources.filter { it.id in scopeResourceIds }
+    val scopeManagement = scopeResources.mapNotNull { managementById[it.id] }
+    val availableScopeIds = scopeResources.filter(ResourceContent::readable).map(ResourceContent::id).toSet()
+    val visibleTreeResourceIds = rows.mapNotNull { it.entry.resourceId }.toSet()
+    val loadedTreeResourceIds = state.multiDownloadChildrenByNodeId.values
+        .asSequence()
+        .flatMap { it.asSequence() }
+        .mapNotNull(BookContentEntry::resourceId)
+        .toSet()
+    val localOnlyBookResourceIds = if (state.multiDownloadScope == DownloadPanelScope.Book) {
+        panelRecordsByResourceId.keys - loadedTreeResourceIds
+    } else {
+        emptySet()
+    }
+    val displayedResourceIds = when (state.multiDownloadScope) {
+        DownloadPanelScope.Resource -> state.multiDownloadResourceId?.let(::setOf).orEmpty()
+        else -> visibleTreeResourceIds + localOnlyBookResourceIds
+    }.ifEmpty {
+        if (scopeResourceIds.isNotEmpty() && rows.isEmpty()) {
+            // A root whose direct children are resources can have a valid
+            // currentResourceIds set even when the contents page has no entry
+            // rows. Show that loaded scope without flattening collapsed folders.
+            scopeResourceIds
+        } else {
+            emptySet()
+        }
+    }
+    val displayedResources = panelResources.filter { it.id in displayedResourceIds }
+    val selectableIds = scopeManagement.filter(DownloadManagementResource::selectable)
+        .map(DownloadManagementResource::resourceId)
+        .toSet()
+    val scopedSelectedIds = selectedIds.intersect(selectableIds)
+    val scopeIsReady = when (state.multiDownloadScope) {
+        DownloadPanelScope.Resource -> !state.isMultiDownloadResourcesLoading
+        DownloadPanelScope.Book,
+        DownloadPanelScope.Directory,
+        -> state.multiDownloadRootNodeId != null &&
+            state.multiDownloadRootNodeId in state.multiDownloadDescendantResourceIdsByNodeId &&
+            state.multiDownloadRootNodeId !in state.multiDownloadLoadingNodeIds &&
+            !state.isMultiDownloadResourcesLoading
+        null -> false
+    }
 
-    LaunchedEffect(pendingDirectorySelection, state.multiDownloadDescendantResourceIdsByNodeId) {
+    LaunchedEffect(state.multiDownloadScope, scopeResourceIds) {
+        if (scopeResourceIds.isNotEmpty()) onRefreshLocalFacts(scopeResourceIds)
+    }
+
+    LaunchedEffect(selectedIdsList, selectableIds, scopeIsReady) {
+        if (!scopeIsReady) return@LaunchedEffect
+        if (scopedSelectedIds.size != selectedIds.size) {
+            selectedIdsList = scopedSelectedIds.sorted()
+        }
+    }
+
+    LaunchedEffect(
+        pendingDirectorySelection,
+        state.multiDownloadDescendantResourceIdsByNodeId,
+        scopeManagement,
+        scopeIsReady,
+    ) {
+        if (!scopeIsReady) return@LaunchedEffect
         val nodeId = pendingDirectorySelection ?: return@LaunchedEffect
-        val descendants = state.multiDownloadDescendantResourceIdsByNodeId[nodeId] ?: return@LaunchedEffect
-        selectedIdsList = toggleDirectorySelection(
-            descendants,
-            selectedIds,
-            resourcesById,
-            recordsByResource,
+        val descendants = state.multiDownloadDescendantResourceIdsByNodeId[nodeId]
+            ?: return@LaunchedEffect
+        selectedIdsList = DownloadManagementPolicy.toggleSelection(
+            selected = scopedSelectedIds,
+            candidates = descendants,
+            resources = scopeManagement,
         ).sorted()
         pendingDirectorySelection = null
     }
 
+    fun submitAction(
+        action: DownloadManagementAction,
+        ids: Set<String>,
+        availableIds: Set<String>,
+        onResults: (List<DownloadManagementResult>) -> Unit = {},
+    ) {
+        if (!isSubmitting && ids.isNotEmpty()) {
+            isSubmitting = true
+            actionResults = emptyList()
+            onExecuteAction(action, ids, availableIds) { results ->
+                isSubmitting = false
+                actionResults = results
+                val completed = results.asSequence()
+                    .filter { it.outcome == DownloadManagementOutcome.Completed }
+                    .map(DownloadManagementResult::resourceId)
+                    .toSet()
+                if (action == DownloadManagementAction.Remove && completed.isNotEmpty()) {
+                    selectedIdsList = (selectedIdsList.toSet() - completed).sorted()
+                }
+                if (action == DownloadManagementAction.Remove) pendingRemovalIds = null
+                onResults(results)
+            }
+        }
+    }
+
     WarmPageModalBottomSheet(
         onDismissRequest = { if (!isSubmitting) onDismiss() },
-        modifier = Modifier.testTag("multi-download-sheet"),
+        skipPartiallyExpanded = true,
+        canDismiss = { !isSubmitting },
+        modifier = Modifier
+            .fillMaxWidth()
+            .fillMaxHeight(0.92f)
+            .testTag("multi-download-sheet"),
     ) {
-        Column(Modifier.fillMaxWidth()) {
+        val dismissSheet = LocalWarmPageModalSheetDismiss.current ?: onDismiss
+        fun requestOpen(resource: ResourceContent, record: AndroidDownloadRecord) {
+            submitAction(
+                action = DownloadManagementAction.Open,
+                ids = setOf(resource.id),
+                availableIds = if (resource.readable) setOf(resource.id) else emptySet(),
+            ) { results ->
+                if (results.any {
+                        it.resourceId == resource.id &&
+                            it.action == DownloadManagementAction.Open &&
+                            it.outcome == DownloadManagementOutcome.Completed
+                    }
+                ) {
+                    // The parent queues navigation until the real sheet hide
+                    // callback has completed; this request only starts that
+                    // dismissal after fresh Open validation succeeds.
+                    dismissSheet()
+                    onOpenDownloaded(record)
+                }
+            }
+        }
+        Column(Modifier.fillMaxWidth().fillMaxHeight()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = theme.components.page.compactGutter),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.multi_download_title), style = theme.typography.sectionTitle)
-                    Text(
-                        state.content?.book?.title.orEmpty(),
-                        style = theme.typography.callout,
-                        color = theme.colors.textSecondary,
-                    )
+                TextButton(
+                    onClick = {
+                        if (selectionMode) {
+                            selectionMode = false
+                            selectedIdsList = emptyList()
+                        } else dismissSheet()
+                    },
+                    enabled = !isSubmitting,
+                    modifier = Modifier.testTag("download-panel-close"),
+                ) {
+                    Text(stringResource(if (selectionMode) R.string.cancel_action else R.string.download_selection_done))
                 }
-                TextButton(onClick = onDismiss, enabled = !isSubmitting) {
-                    Text(stringResource(R.string.cancel_action))
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.book_download_title), style = theme.typography.sectionTitle)
+                }
+                if (selectionMode) {
+                    TextButton(
+                        onClick = {
+                            selectionMode = false
+                            selectedIdsList = emptyList()
+                        },
+                        enabled = !isSubmitting,
+                        modifier = Modifier.testTag("download-selection-cancel"),
+                    ) { Text(stringResource(R.string.download_selection_done)) }
+                } else {
+                    TextButton(
+                        onClick = { selectionMode = true },
+                        enabled = !isSubmitting && selectableIds.isNotEmpty(),
+                        modifier = Modifier.testTag("download-selection-enter"),
+                    ) { Text(stringResource(R.string.download_selection_action)) }
                 }
             }
             HorizontalDivider(color = theme.colors.divider)
-            when {
-                state.multiDownloadErrorCode != null -> WarmPageErrorState(
-                    title = stringResource(R.string.multi_download_error_title),
-                    message = stringResource(R.string.multi_download_error_message),
-                    retryLabel = stringResource(R.string.retry_action),
-                    onRetry = onRetryTree,
-                    modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
-                )
-                state.multiDownloadRootNodeId == null -> WarmPageLoadingState(
-                    title = stringResource(R.string.content_loading_title),
-                    message = stringResource(R.string.multi_download_loading),
-                    modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
-                )
-                else -> LazyColumn(
-                    modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+
+            if (actionResults.isNotEmpty()) {
+                val accepted = actionResults.count { it.outcome == DownloadManagementOutcome.Accepted }
+                val completed = actionResults.count { it.outcome == DownloadManagementOutcome.Completed }
+                val skipped = actionResults.count { it.outcome == DownloadManagementOutcome.Skipped }
+                val failed = actionResults.count { it.outcome == DownloadManagementOutcome.Failed }
+                Column(
+                    Modifier.fillMaxWidth()
+                        .padding(horizontal = theme.components.page.compactGutter, vertical = theme.spacing.one)
+                        .testTag("download-management-feedback"),
                 ) {
-                    items(rows, key = { it.entry.sourceNodeId }) { row ->
-                        if (row.entry.isSourceFolder) {
-                            val descendants = state.multiDownloadDescendantResourceIdsByNodeId[row.entry.sourceNodeId]
-                                .orEmpty()
-                            val mark = directoryToggleState(
-                                descendants,
-                                selectedIds,
-                                resourcesById,
-                                recordsByResource,
+                    Text(
+                        listOfNotNull(
+                            if (accepted > 0) stringResource(R.string.download_management_accepted, accepted) else null,
+                            if (completed > 0) stringResource(R.string.download_management_completed, completed) else null,
+                            if (skipped > 0) stringResource(R.string.download_management_skipped, skipped) else null,
+                            if (failed > 0) stringResource(R.string.download_management_failed, failed) else null,
+                        ).joinToString(" · "),
+                        style = theme.typography.callout,
+                        color = theme.colors.textSecondary,
+                    )
+                    actionResults.firstOrNull { it.outcome == DownloadManagementOutcome.Failed }
+                        ?.failureCode?.let { code ->
+                            Text(downloadFailureMessage(code), style = theme.typography.caption,
+                                color = theme.colors.textSecondary)
+                        }
+                }
+            }
+
+            when {
+                state.multiDownloadErrorCode != null && displayedResources.isEmpty() &&
+                    state.multiDownloadScope != DownloadPanelScope.Resource ->
+                    WarmPageErrorState(
+                        title = stringResource(R.string.multi_download_error_title),
+                        message = stringResource(R.string.multi_download_error_message),
+                        retryLabel = stringResource(R.string.retry_action),
+                        onRetry = { onRetryFolder(null) },
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                    )
+                state.multiDownloadScope == DownloadPanelScope.Resource &&
+                    state.isMultiDownloadResourcesLoading ->
+                    WarmPageLoadingState(
+                        title = stringResource(R.string.content_loading_title),
+                        message = stringResource(R.string.multi_download_loading),
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                    )
+                state.multiDownloadScope != DownloadPanelScope.Resource &&
+                    state.multiDownloadRootNodeId == null ->
+                    WarmPageLoadingState(
+                        title = stringResource(R.string.content_loading_title),
+                        message = stringResource(R.string.multi_download_loading),
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                    )
+                else -> {
+                    if (state.multiDownloadErrorCode != null) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = theme.components.page.compactGutter),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                stringResource(R.string.multi_download_known_records_warning),
+                                color = theme.colors.textSecondary,
+                                style = theme.typography.caption,
+                                modifier = Modifier.weight(1f),
                             )
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = (row.depth * 20).dp, end = theme.components.page.compactGutter),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                TextButton(onClick = { onToggleFolder(row.entry.sourceNodeId) }) {
-                                    Icon(
-                                        if (row.entry.sourceNodeId in state.multiDownloadExpandedNodeIds) {
-                                            Icons.Filled.KeyboardArrowDown
-                                        } else {
-                                            Icons.AutoMirrored.Filled.KeyboardArrowRight
-                                        },
-                                        contentDescription = stringResource(R.string.multi_download_toggle_folder),
+                            TextButton(onClick = { onRetryFolder(null) }) {
+                                Text(stringResource(R.string.retry_action))
+                            }
+                        }
+                    }
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(theme.spacing.half),
+                    ) {
+                        state.content?.book?.title
+                            ?.takeIf(String::isNotBlank)
+                            ?.let { title ->
+                                item(key = "download-book-title") {
+                                    Text(
+                                        title,
+                                        style = theme.typography.callout,
+                                        color = theme.colors.textSecondary,
+                                        maxLines = 1,
+                                        modifier = Modifier.padding(horizontal = theme.components.page.compactGutter),
                                     )
                                 }
-                                TriStateCheckbox(
-                                    state = mark,
-                                    onClick = {
-                                        if (state.multiDownloadDescendantResourceIdsByNodeId[row.entry.sourceNodeId] == null) {
-                                            pendingDirectorySelection = row.entry.sourceNodeId
-                                            onEnsureFolderLoaded(row.entry.sourceNodeId)
-                                        } else {
-                                            selectedIdsList = toggleDirectorySelection(
-                                                descendants,
-                                                selectedIds,
-                                                resourcesById,
-                                                recordsByResource,
+                            }
+                        if (state.multiDownloadScope == DownloadPanelScope.Resource) {
+                            displayedResources.forEach { resource ->
+                                item(key = "resource-${resource.id}") {
+                                    DownloadResourceRow(
+                                        resource = resource,
+                                        management = managementById.getValue(resource.id),
+                                        record = panelRecordsByResourceId[resource.id],
+                                        depth = 0,
+                                        selectionMode = selectionMode,
+                                        selected = resource.id in scopedSelectedIds,
+                                        isSubmitting = isSubmitting,
+                                        onToggleSelection = {
+                                            selectedIdsList = DownloadManagementPolicy.toggleSelection(
+                                                scopedSelectedIds,
+                                                setOf(resource.id),
+                                                scopeManagement,
                                             ).sorted()
-                                        }
-                                    },
-                                    enabled = !state.isMultiDownloadResourcesLoading &&
-                                        row.entry.sourceNodeId !in state.multiDownloadLoadingNodeIds,
-                                )
-                                Column(Modifier.weight(1f)) {
-                                    Text(row.entry.title, style = theme.typography.body)
-                                    Text(
-                                        pluralStringResource(
-                                            R.plurals.multi_download_volume_count,
-                                            descendants.size,
-                                            descendants.size,
-                                        ),
-                                        style = theme.typography.caption,
-                                        color = theme.colors.textSecondary,
+                                        },
+                                        onSubmitAction = { action ->
+                                            submitAction(
+                                                action,
+                                                setOf(resource.id),
+                                                if (resource.readable) setOf(resource.id) else emptySet(),
+                                            )
+                                        },
+                                        onRequestRemoval = { pendingRemovalIds = setOf(resource.id) },
+                                        onOpenDownloaded = { recordValue -> requestOpen(resource, recordValue) },
                                     )
+                                    HorizontalDivider(color = theme.colors.divider)
+                                }
+                            }
+                        } else if (rows.isEmpty() && displayedResources.isNotEmpty()) {
+                            // The tree can legitimately contain no entry rows
+                            // while the loaded root still advertises resources
+                            // (including a known snapshot after a network
+                            // failure). Render those scoped resources directly.
+                            displayedResources.forEach { resource ->
+                                item(key = "fallback-resource-${resource.id}") {
+                                    DownloadResourceRow(
+                                        resource = resource,
+                                        management = managementById.getValue(resource.id),
+                                        record = panelRecordsByResourceId[resource.id],
+                                        depth = 0,
+                                        selectionMode = selectionMode,
+                                        selected = resource.id in scopedSelectedIds,
+                                        isSubmitting = isSubmitting,
+                                        onToggleSelection = {
+                                            selectedIdsList = DownloadManagementPolicy.toggleSelection(
+                                                scopedSelectedIds,
+                                                setOf(resource.id),
+                                                scopeManagement,
+                                            ).sorted()
+                                        },
+                                        onSubmitAction = { action ->
+                                            submitAction(
+                                                action,
+                                                setOf(resource.id),
+                                                if (resource.readable) setOf(resource.id) else emptySet(),
+                                            )
+                                        },
+                                        onRequestRemoval = { pendingRemovalIds = setOf(resource.id) },
+                                        onOpenDownloaded = { recordValue -> requestOpen(resource, recordValue) },
+                                    )
+                                    HorizontalDivider(color = theme.colors.divider)
                                 }
                             }
                         } else {
-                            val resource = row.entry.resourceId?.let(resourcesById::get)
-                            if (resource != null) {
-                                val record = recordsByResource[resource.id]
-                                val eligibility = resourceEligibility(resource, record)
-                                var menuExpanded by remember(resource.id) { mutableStateOf(false) }
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .combinedClickable(
-                                            onClick = {
-                                                when {
-                                                    eligibility == MultiDownloadResourceEligibility.Completed &&
-                                                        record?.isReadable == true -> menuExpanded = true
-                                                    eligibility.isSelectable() -> {
-                                                        selectedIdsList = selectedIds.toMutableSet().apply {
-                                                            if (!add(resource.id)) remove(resource.id)
-                                                        }.sorted()
-                                                    }
-                                                }
-                                            },
-                                            onLongClick = { if (record != null) menuExpanded = true },
-                                        )
-                                        .padding(
-                                            start = (row.depth * 20 + 44).dp,
-                                            end = theme.components.page.compactGutter,
-                                            top = theme.spacing.one,
-                                            bottom = theme.spacing.one,
-                                        ),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    androidx.compose.material3.Checkbox(
-                                        checked = resource.id in selectedIds,
-                                        onCheckedChange = {
-                                            if (eligibility.isSelectable()) {
-                                                selectedIdsList = selectedIds.toMutableSet().apply {
-                                                    if (!add(resource.id)) remove(resource.id)
-                                                }.sorted()
+                            items(rows, key = { it.entry.sourceNodeId }) { row ->
+                                if (row.entry.isSourceFolder) {
+                                    DownloadFolderRow(
+                                        row = row,
+                                        state = state,
+                                        management = scopeManagement,
+                                        selected = scopedSelectedIds,
+                                        selectionMode = selectionMode,
+                                        isSubmitting = isSubmitting,
+                                        onToggleFolder = onToggleFolder,
+                                        onEnsureFolderLoaded = onEnsureFolderLoaded,
+                                        onRetryFolder = onRetryFolder,
+                                        onToggleSelection = { candidates ->
+                                            if (state.multiDownloadDescendantResourceIdsByNodeId[row.entry.sourceNodeId] == null) {
+                                                pendingDirectorySelection = row.entry.sourceNodeId
+                                                onEnsureFolderLoaded(row.entry.sourceNodeId)
+                                            } else {
+                                                selectedIdsList = DownloadManagementPolicy.toggleSelection(
+                                                    scopedSelectedIds,
+                                                    candidates,
+                                                    scopeManagement,
+                                                ).sorted()
                                             }
                                         },
-                                        enabled = eligibility.isSelectable() && !isSubmitting,
                                     )
-                                    Column(Modifier.weight(1f)) {
-                                        Text(resource.title, style = theme.typography.body)
-                                        Text(
-                                            listOfNotNull(
-                                                resource.format,
-                                                resource.sizeBytes.takeIf { it > 0 }?.let(::formatBytes),
-                                            ).joinToString(" · "),
-                                            style = theme.typography.caption,
-                                            color = theme.colors.textSecondary,
-                                        )
-                                    }
-                                    TextButton(onClick = { if (record != null) menuExpanded = true }) {
-                                        Text(resourceStatusText(eligibility, record))
-                                    }
-                                    WarmPagePopup(expanded = menuExpanded, onDismiss = { menuExpanded = false }) {
-                                        DownloadStatusMenuItems(
-                                            record = record,
-                                            onDismiss = { menuExpanded = false },
-                                            onPause = onPause,
-                                            onResumeOrRetry = onResumeOrRetry,
-                                            onRemove = onRemove,
-                                            onOpenDownloaded = onOpenDownloaded,
+                                } else {
+                                    val resource = row.entry.resourceId?.let(resourcesById::get)
+                                    if (resource != null) {
+                                        DownloadResourceRow(
+                                            resource = resource,
+                                            management = managementById.getValue(resource.id),
+                                            record = panelRecordsByResourceId[resource.id],
+                                            depth = row.depth,
+                                            selectionMode = selectionMode,
+                                            selected = resource.id in scopedSelectedIds,
+                                            isSubmitting = isSubmitting,
+                                            onToggleSelection = {
+                                                selectedIdsList = DownloadManagementPolicy.toggleSelection(
+                                                    scopedSelectedIds,
+                                                    setOf(resource.id),
+                                                    scopeManagement,
+                                                ).sorted()
+                                            },
+                                            onSubmitAction = { action ->
+                                                submitAction(
+                                                    action,
+                                                    setOf(resource.id),
+                                                    if (resource.readable) setOf(resource.id) else emptySet(),
+                                                )
+                                            },
+                                            onRequestRemoval = { pendingRemovalIds = setOf(resource.id) },
+                                            onOpenDownloaded = { recordValue -> requestOpen(resource, recordValue) },
                                         )
                                     }
                                 }
+                                HorizontalDivider(color = theme.colors.divider)
                             }
                         }
-                        HorizontalDivider(color = theme.colors.divider)
+                        if (displayedResources.isEmpty() && state.multiDownloadErrorCode == null) {
+                            item {
+                                Text(
+                                    stringResource(R.string.multi_download_no_resources),
+                                    color = theme.colors.textSecondary,
+                                    modifier = Modifier.padding(theme.components.page.compactGutter),
+                                )
+                            }
+                        }
                     }
                 }
             }
-            val summary = batchSummary(selectedIds, resourcesById, recordsByResource)
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = theme.components.page.compactGutter, vertical = theme.spacing.one),
-                verticalArrangement = Arrangement.spacedBy(theme.spacing.one),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        pluralStringResource(
-                            R.plurals.multi_download_selected_count,
-                            summary.selected,
-                            summary.selected,
-                        ),
-                        style = theme.typography.headline,
-                    )
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        stringResource(
-                            R.string.multi_download_summary,
-                            summary.enqueue,
-                            summary.resume,
-                            summary.retry,
-                        ),
-                        style = theme.typography.caption,
-                        color = theme.colors.textSecondary,
-                    )
-                }
-                Button(
-                    onClick = {
-                        isSubmitting = true
-                        onPerformBatch(selectedIds) { result ->
-                            isSubmitting = false
-                            selectedIdsList = result.failedResourceIds.sorted()
-                            onBatchFeedback(result.succeededCount, result.failedCount)
-                            if (result.failedCount == 0) onDismiss()
-                        }
+
+            if (selectionMode) {
+                SelectionBatchBar(
+                    selected = scopedSelectedIds,
+                    candidates = selectableIds,
+                    resources = scopeManagement,
+                    isSubmitting = isSubmitting,
+                    onSelectAll = {
+                        selectedIdsList = DownloadManagementPolicy.toggleSelection(
+                            scopedSelectedIds,
+                            selectableIds,
+                            scopeManagement,
+                        ).sorted()
                     },
-                    enabled = selectedIds.isNotEmpty() && !isSubmitting,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = theme.metrics.androidMinimumTouchTarget),
-                ) {
-                    Text(stringResource(R.string.multi_download_confirm))
+                    onRequestRemoval = {
+                        if (scopedSelectedIds.isNotEmpty()) pendingRemovalIds = scopedSelectedIds
+                    },
+                    onExecuteAction = { action ->
+                        val applicable = DownloadManagementPolicy.applicable(
+                            action,
+                            scopedSelectedIds,
+                            scopeManagement,
+                        ).toSet()
+                        submitAction(action, applicable, applicable.intersect(availableScopeIds))
+                    },
+                )
+            }
+        }
+    }
+
+    pendingRemovalIds?.let { ids ->
+        val title = if (ids.size == 1) {
+            stringResource(R.string.downloads_remove_title)
+        } else {
+            stringResource(R.string.multi_download_remove_title)
+        }
+        val message = if (ids.size == 1) {
+            val resource = resourcesById[ids.first()]
+            stringResource(R.string.downloads_remove_message, resource?.title ?: state.content?.book?.title.orEmpty())
+        } else {
+            pluralStringResource(R.plurals.multi_download_remove_message, ids.size, ids.size)
+        }
+        AlertDialog(
+            onDismissRequest = { if (!isSubmitting) pendingRemovalIds = null },
+            title = { Text(title) },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        submitAction(
+                            DownloadManagementAction.Remove,
+                            ids,
+                            ids.intersect(availableScopeIds),
+                        )
+                    },
+                    enabled = !isSubmitting,
+                ) { Text(stringResource(R.string.downloads_remove_action)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRemovalIds = null }, enabled = !isSubmitting) {
+                    Text(stringResource(R.string.cancel_action))
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun DownloadFolderRow(
+    row: MultiDownloadTreeRow,
+    state: WorkDetailUiState,
+    management: List<DownloadManagementResource>,
+    selected: Set<String>,
+    selectionMode: Boolean,
+    isSubmitting: Boolean,
+    onToggleFolder: (String) -> Unit,
+    onEnsureFolderLoaded: (String) -> Unit,
+    onRetryFolder: (String?) -> Unit,
+    onToggleSelection: (Set<String>) -> Unit,
+) {
+    val theme = WarmPageThemeValues
+    val nodeId = row.entry.sourceNodeId
+    val descendantsLoaded = nodeId in state.multiDownloadDescendantResourceIdsByNodeId
+    val descendants = state.multiDownloadDescendantResourceIdsByNodeId[nodeId].orEmpty()
+    val mark = DownloadManagementPolicy.selectionMark(
+        selected = selected,
+        candidates = descendants,
+        resources = management,
+    )
+    Column(
+        Modifier.fillMaxWidth().padding(start = (row.depth * 20).dp, end = theme.components.page.compactGutter),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(
+                onClick = { onToggleFolder(nodeId) },
+                enabled = !isSubmitting,
+                modifier = Modifier.size(theme.components.controls.minimumTouchTarget),
+            ) {
+                Icon(
+                    if (nodeId in state.multiDownloadExpandedNodeIds) Icons.Filled.KeyboardArrowDown
+                    else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = stringResource(R.string.multi_download_toggle_folder),
+                )
+            }
+            if (selectionMode) {
+                Checkbox(
+                    checked = mark == MultiDownloadSelectionMark.Selected,
+                    onCheckedChange = { onToggleSelection(descendants) },
+                    enabled = !descendantsLoaded ||
+                        mark != MultiDownloadSelectionMark.Unselected ||
+                        descendants.any { resourceId -> management.any { it.resourceId == resourceId && it.selectable } },
+                    modifier = Modifier.testTag("download-folder-checkbox-$nodeId"),
+                )
+            }
+            Column(Modifier.weight(1f).padding(vertical = theme.spacing.one)) {
+                Text(row.entry.title, style = theme.typography.body)
+                Text(
+                    pluralStringResource(R.plurals.multi_download_volume_count, descendants.size, descendants.size),
+                    style = theme.typography.caption,
+                    color = theme.colors.textSecondary,
+                )
+            }
+        }
+        state.multiDownloadNodeErrorCodes[nodeId]?.let { code ->
+            Row(
+                Modifier.fillMaxWidth().padding(start = 44.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(R.string.multi_download_folder_error, code),
+                    style = theme.typography.caption,
+                    color = theme.colors.textSecondary,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { onRetryFolder(nodeId) }) {
+                    Text(stringResource(R.string.retry_action))
                 }
             }
         }
     }
 }
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun DownloadResourceRow(
+    resource: ResourceContent,
+    management: DownloadManagementResource,
+    record: AndroidDownloadRecord?,
+    depth: Int,
+    selectionMode: Boolean,
+    selected: Boolean,
+    isSubmitting: Boolean,
+    onToggleSelection: () -> Unit,
+    onSubmitAction: (DownloadManagementAction) -> Unit,
+    onRequestRemoval: () -> Unit,
+    onOpenDownloaded: (AndroidDownloadRecord) -> Unit,
+) {
+    val theme = WarmPageThemeValues
+    val rowAction = management.listAction
+    val isDownloaded = management.status == com.ermao.library.shared.modules.downloads.DownloadManagementStatus.Completed
+    val useStackedActions = LocalDensity.current.fontScale >= MULTI_DOWNLOAD_STACKED_ACTION_FONT_SCALE
+    val actionContent: @Composable RowScope.() -> Unit = {
+        androidx.compose.material3.IconButton(
+            onClick = {
+                if (rowAction == DownloadManagementAction.Remove) onRequestRemoval()
+                else rowAction?.let(onSubmitAction)
+            },
+            enabled = !isSubmitting && rowAction != null,
+            modifier = Modifier.testTag("download-resource-primary-${resource.id}"),
+        ) {
+            Icon(
+                if (isDownloaded) Icons.Outlined.Delete else Icons.Outlined.FileDownload,
+                contentDescription = stringResource(if (isDownloaded) R.string.download_management_delete else R.string.work_quick_download),
+            )
+        }
+    }
+    val rowModifier = Modifier
+        .fillMaxWidth()
+        .clickable(
+            enabled = !isSubmitting,
+            onClick = {
+                when {
+                    selectionMode && management.selectable -> onToggleSelection()
+                    !selectionMode && DownloadManagementAction.Open in management.actions && record != null ->
+                        onOpenDownloaded(record)
+                }
+            },
+        )
+        .padding(
+            start = theme.components.page.compactGutter + (depth * 20).dp,
+            end = theme.components.page.compactGutter,
+            top = theme.spacing.one,
+            bottom = theme.spacing.one,
+        )
+    Row(rowModifier, verticalAlignment = Alignment.CenterVertically) {
+        if (selectionMode) {
+            Checkbox(
+                checked = selected,
+                onCheckedChange = { onToggleSelection() },
+                enabled = management.selectable && !isSubmitting,
+                modifier = Modifier.testTag("download-resource-checkbox-${resource.id}"),
+            )
+        }
+        Column(Modifier.weight(1f)) {
+            Text(resource.title, style = theme.typography.body)
+            Text(
+                listOfNotNull(
+                    resource.format.takeIf(String::isNotBlank),
+                    resource.sizeBytes.takeIf { it > 0 }?.let(::formatBytes),
+                ).joinToString(" · "),
+                style = theme.typography.caption,
+                color = theme.colors.textSecondary,
+            )
+            if (management.status != com.ermao.library.shared.modules.downloads.DownloadManagementStatus.Completed &&
+                management.status != com.ermao.library.shared.modules.downloads.DownloadManagementStatus.NotDownloaded) {
+                Text(
+                    downloadManagementStatusLabel(management.status),
+                    style = theme.typography.caption,
+                    color = theme.colors.textSecondary,
+                    modifier = Modifier.testTag("download-resource-status-${resource.id}"),
+                )
+            }
+            if (!selectionMode && useStackedActions) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    actionContent()
+                }
+            }
+        }
+        if (!selectionMode && !useStackedActions) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                actionContent()
+            }
+        }
+    }
+}
+
+@Composable
+private fun SelectionBatchBar(
+    selected: Set<String>,
+    candidates: Set<String>,
+    resources: List<DownloadManagementResource>,
+    isSubmitting: Boolean,
+    onSelectAll: () -> Unit,
+    onRequestRemoval: () -> Unit,
+    onExecuteAction: (DownloadManagementAction) -> Unit,
+) {
+    val theme = WarmPageThemeValues
+    val mark = DownloadManagementPolicy.selectionMark(selected, candidates, resources)
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = theme.components.page.compactGutter, vertical = theme.spacing.one),
+        verticalArrangement = Arrangement.spacedBy(theme.spacing.half),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onSelectAll, enabled = !isSubmitting) {
+                Text(
+                    stringResource(
+                        if (mark == MultiDownloadSelectionMark.Selected) {
+                            R.string.download_selection_clear_all
+                        } else {
+                            R.string.download_selection_select_all
+                        },
+                    ),
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            Text(
+                pluralStringResource(R.plurals.multi_download_selected_count, selected.size, selected.size),
+                style = theme.typography.caption,
+                color = theme.colors.textSecondary,
+            )
+        }
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(theme.spacing.half),
+        ) {
+            managementBatchActions.forEach { action ->
+                val count = DownloadManagementPolicy.applicable(action, selected, resources).size
+                TextButton(
+                    onClick = if (action == DownloadManagementAction.Remove) onRequestRemoval else { { onExecuteAction(action) } },
+                    enabled = count > 0 && !isSubmitting,
+                    modifier = Modifier.weight(1f).heightIn(min = theme.metrics.androidMinimumTouchTarget),
+                ) {
+                    Text(batchActionLabel(action, count), maxLines = 1)
+                }
+            }
+        }
+    }
+}
+
+private val managementBatchActions = listOf(
+    DownloadManagementAction.Download,
+    DownloadManagementAction.Pause,
+    DownloadManagementAction.Resume,
+    DownloadManagementAction.Retry,
+    DownloadManagementAction.Remove,
+)
+
+private val managementActionOrder = listOf(
+    DownloadManagementAction.Open,
+    DownloadManagementAction.Download,
+    DownloadManagementAction.Pause,
+    DownloadManagementAction.Resume,
+    DownloadManagementAction.Retry,
+    DownloadManagementAction.Remove,
+)
+
+private fun managementResource(
+    resource: ResourceContent,
+    record: AndroidDownloadRecord?,
+    active: Boolean,
+): DownloadManagementResource = DownloadManagementPolicy.project(
+    downloadManagementItem(
+        resourceId = resource.id,
+        record = record,
+        active = active,
+        available = resource.readable,
+    ),
+)
+
+/**
+ * A local catalog row can outlive a failed or incomplete server refresh. Keep
+ * it visible in the panel with unavailable server facts while preserving the
+ * durable record for Open/Remove and status projection.
+ */
+private fun AndroidDownloadRecord.toPanelResource(): ResourceContent = ResourceContent(
+    id = resourceId,
+    sourceNodeId = "",
+    title = resourceTitle.ifBlank { resourceId },
+    format = format,
+    readerType = readerType,
+    coverUrl = coverUrl,
+    sizeBytes = expectedBytes,
+    progressPercent = null,
+    readable = false,
+    selected = false,
+)
 
 private fun flattenMultiDownloadRows(
     rootNodeId: String?,
@@ -331,157 +918,55 @@ private fun flattenMultiDownloadRows(
             val row = MultiDownloadTreeRow(entry, depth)
             if (entry.isSourceFolder && entry.sourceNodeId in expandedNodeIds) {
                 listOf(row) + children(entry.sourceNodeId, depth + 1)
-            } else {
-                listOf(row)
-            }
+            } else listOf(row)
         }
     return children(rootNodeId, 0)
 }
 
-private fun resourceEligibility(
-    resource: ResourceContent,
-    record: AndroidDownloadRecord?,
-): MultiDownloadResourceEligibility {
-    if (!resource.readable) return MultiDownloadResourceEligibility.Unavailable
-    return when (record?.status) {
-        null -> MultiDownloadResourceEligibility.Enqueue
-        AndroidDownloadStatus.Paused -> MultiDownloadResourceEligibility.Resume
-        AndroidDownloadStatus.FailedRetryable -> MultiDownloadResourceEligibility.Retry
-        AndroidDownloadStatus.Queued,
-        AndroidDownloadStatus.Downloading,
-        AndroidDownloadStatus.Verifying,
-        -> MultiDownloadResourceEligibility.Active
-        AndroidDownloadStatus.Completed -> MultiDownloadResourceEligibility.Completed
-        AndroidDownloadStatus.FailedTerminal -> MultiDownloadResourceEligibility.Terminal
-    }
-}
-
-private fun MultiDownloadResourceEligibility.isSelectable() =
-    this in setOf(
-        MultiDownloadResourceEligibility.Enqueue,
-        MultiDownloadResourceEligibility.Resume,
-        MultiDownloadResourceEligibility.Retry,
-    )
-
-private fun toggleDirectorySelection(
-    descendants: Set<String>,
-    selected: Set<String>,
-    resourcesById: Map<String, ResourceContent>,
-    recordsByResource: Map<String, AndroidDownloadRecord>,
-): Set<String> {
-    val selectable = descendants.filter { id ->
-        resourcesById[id]?.let { resourceEligibility(it, recordsByResource[id]).isSelectable() } == true
-    }.toSet()
-    if (selectable.isEmpty()) return selected
-    return selected.toMutableSet().apply {
-        if (selectable.all(::contains)) removeAll(selectable) else addAll(selectable)
-    }
-}
-
-private fun directoryToggleState(
-    descendants: Set<String>,
-    selected: Set<String>,
-    resourcesById: Map<String, ResourceContent>,
-    recordsByResource: Map<String, AndroidDownloadRecord>,
-): ToggleableState {
-    val selectable = descendants.filter { id ->
-        resourcesById[id]?.let { resourceEligibility(it, recordsByResource[id]).isSelectable() } == true
-    }
-    if (selectable.isEmpty() || selectable.none(selected::contains)) return ToggleableState.Off
-    return if (selectable.all(selected::contains)) ToggleableState.On else ToggleableState.Indeterminate
-}
-
-private data class MultiDownloadBatchSummary(
-    val selected: Int,
-    val enqueue: Int,
-    val resume: Int,
-    val retry: Int,
+@Composable
+private fun downloadManagementStatusLabel(
+    status: com.ermao.library.shared.modules.downloads.DownloadManagementStatus,
+): String = stringResource(
+    when (status) {
+        com.ermao.library.shared.modules.downloads.DownloadManagementStatus.NotDownloaded -> R.string.multi_download_not_downloaded
+        com.ermao.library.shared.modules.downloads.DownloadManagementStatus.Queued -> R.string.multi_download_queued
+        com.ermao.library.shared.modules.downloads.DownloadManagementStatus.Downloading -> R.string.multi_download_downloading
+        com.ermao.library.shared.modules.downloads.DownloadManagementStatus.Paused -> R.string.multi_download_paused
+        com.ermao.library.shared.modules.downloads.DownloadManagementStatus.Completed -> R.string.multi_download_downloaded
+        com.ermao.library.shared.modules.downloads.DownloadManagementStatus.InvalidLocal -> R.string.multi_download_invalid_local
+        com.ermao.library.shared.modules.downloads.DownloadManagementStatus.FailedRetryable -> R.string.multi_download_failed_retryable
+        com.ermao.library.shared.modules.downloads.DownloadManagementStatus.FailedTerminal -> R.string.multi_download_failed_terminal
+        com.ermao.library.shared.modules.downloads.DownloadManagementStatus.Unavailable -> R.string.multi_download_unavailable
+    },
 )
 
-private fun batchSummary(
-    selected: Set<String>,
-    resourcesById: Map<String, ResourceContent>,
-    recordsByResource: Map<String, AndroidDownloadRecord>,
-): MultiDownloadBatchSummary {
-    var enqueue = 0
-    var resume = 0
-    var retry = 0
-    selected.forEach { id ->
-        when (resourcesById[id]?.let { resourceEligibility(it, recordsByResource[id]) }) {
-            MultiDownloadResourceEligibility.Enqueue -> enqueue += 1
-            MultiDownloadResourceEligibility.Resume -> resume += 1
-            MultiDownloadResourceEligibility.Retry -> retry += 1
-            else -> Unit
-        }
-    }
-    return MultiDownloadBatchSummary(selected.size, enqueue, resume, retry)
-}
+@Composable
+private fun downloadManagementActionLabel(action: DownloadManagementAction): String = stringResource(
+    when (action) {
+        DownloadManagementAction.Download -> R.string.multi_download_download
+        DownloadManagementAction.Pause -> R.string.multi_download_pause
+        DownloadManagementAction.Resume -> R.string.multi_download_resume
+        DownloadManagementAction.Retry -> R.string.multi_download_retry
+        DownloadManagementAction.Remove -> R.string.downloads_remove_action
+        DownloadManagementAction.Open -> R.string.work_download_open_offline
+    },
+)
 
 @Composable
-private fun resourceStatusText(
-    eligibility: MultiDownloadResourceEligibility,
-    record: AndroidDownloadRecord?,
-): String = when (eligibility) {
-    MultiDownloadResourceEligibility.Enqueue -> stringResource(R.string.multi_download_not_downloaded)
-    MultiDownloadResourceEligibility.Resume -> stringResource(R.string.multi_download_paused)
-    MultiDownloadResourceEligibility.Retry,
-    MultiDownloadResourceEligibility.Terminal,
-    -> stringResource(R.string.multi_download_failed)
-    MultiDownloadResourceEligibility.Completed -> stringResource(R.string.multi_download_downloaded)
-    MultiDownloadResourceEligibility.Unavailable -> stringResource(R.string.multi_download_unavailable)
-    MultiDownloadResourceEligibility.Active -> when (record?.status) {
-        AndroidDownloadStatus.Queued -> stringResource(R.string.multi_download_queued)
-        AndroidDownloadStatus.Verifying -> stringResource(R.string.multi_download_verifying)
-        else -> record?.let { value ->
-            if (value.expectedBytes > 0) "${(value.transferredBytes * 100 / value.expectedBytes).coerceIn(0, 100)}%"
-            else null
-        } ?: stringResource(R.string.multi_download_downloading)
-    }
-}
-
-@Composable
-private fun DownloadStatusMenuItems(
-    record: AndroidDownloadRecord?,
-    onDismiss: () -> Unit,
-    onPause: (String) -> Unit,
-    onResumeOrRetry: (String) -> Unit,
-    onRemove: (AndroidDownloadRecord) -> Unit,
-    onOpenDownloaded: (AndroidDownloadRecord) -> Unit,
-) {
-    if (record == null) return
-    when (record.status) {
-        AndroidDownloadStatus.Queued,
-        AndroidDownloadStatus.Downloading,
-        AndroidDownloadStatus.Verifying,
-        -> WarmPageMenuItem(
-            label = stringResource(R.string.multi_download_pause),
-            onClick = { onDismiss(); onPause(record.resourceId) },
-        )
-        AndroidDownloadStatus.Paused,
-        AndroidDownloadStatus.FailedRetryable,
-        -> WarmPageMenuItem(
-            label = stringResource(R.string.multi_download_resume),
-            onClick = { onDismiss(); onResumeOrRetry(record.resourceId) },
-        )
-        else -> Unit
-    }
-    if (record.status == AndroidDownloadStatus.Completed && record.isReadable) {
-        WarmPageMenuItem(
-            label = stringResource(R.string.work_download_open_offline),
-            onClick = { onDismiss(); onOpenDownloaded(record) },
-        )
-    }
-    WarmPageMenuItem(
-        label = stringResource(
-            if (record.status == AndroidDownloadStatus.Completed) {
-                R.string.downloads_remove_action
-            } else {
-                R.string.multi_download_delete_task
-            },
-        ),
-        onClick = { onDismiss(); onRemove(record) },
+private fun batchActionLabel(action: DownloadManagementAction, count: Int): String =
+    stringResource(
+        when (action) {
+            DownloadManagementAction.Download -> R.string.multi_download_batch_download
+            DownloadManagementAction.Pause -> R.string.multi_download_batch_pause
+            DownloadManagementAction.Resume -> R.string.multi_download_batch_resume
+            DownloadManagementAction.Retry -> R.string.multi_download_batch_retry
+            DownloadManagementAction.Remove -> R.string.multi_download_batch_remove
+            DownloadManagementAction.Open -> R.string.multi_download_batch_download
+        },
+        count,
     )
-}
+
+private const val MULTI_DOWNLOAD_STACKED_ACTION_FONT_SCALE = 1.3f
 
 private fun formatBytes(bytes: Long): String = when {
     bytes >= 1024L * 1024L * 1024L -> "%.1f GB".format(bytes / (1024.0 * 1024.0 * 1024.0))

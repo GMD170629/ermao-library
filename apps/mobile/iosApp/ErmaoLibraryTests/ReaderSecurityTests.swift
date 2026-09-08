@@ -558,7 +558,13 @@ final class ReaderSecurityTests: XCTestCase {
                 XCTAssertTrue(navigated, "Normal TOC navigation must reach original chapter \(index + 44)")
                 try await expectLoadedChapters(scrolled: mode == .continuousScroll, size: size)
                 try await expectRendered("document.body.textContent.includes('Paragraph 240.') && Math.abs(parseFloat(getComputedStyle(document.querySelector('p')).fontSize) - \(size)) < 0.7", "New and revisited chapters must retain full content and typography")
+                try await expectRendered("Math.abs(window.scrollX) <= 1 && Math.abs(document.scrollingElement.scrollTop) <= 1", "TOC navigation must reach the chapter start in either direction")
             }
+            await session.goNext()
+            try await expectRendered("Math.abs(window.scrollX) > 1 || document.scrollingElement.scrollTop > 1", "Advance within the chapter before selecting its TOC entry again")
+            let reselected = await session.goToTOCEntry(session.tableOfContents[1])
+            XCTAssertTrue(reselected)
+            try await expectRendered("Math.abs(window.scrollX) <= 1 && Math.abs(document.scrollingElement.scrollTop) <= 1", "Selecting the current chapter must return to its start")
         }
         func expectChapter(_ index: Int, atEnd: Bool = false) async throws {
             // Input callbacks enqueue work asynchronously; wait for the public

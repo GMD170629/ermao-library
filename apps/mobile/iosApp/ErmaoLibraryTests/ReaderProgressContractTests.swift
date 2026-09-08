@@ -63,7 +63,8 @@ final class ReaderProgressContractTests: XCTestCase {
             chapter: ErmaoShared.ReaderChapterPresentation(
                 href: "OEBPS/Text/backcover.xhtml",
                 title: "封底",
-                index: KotlinInt(int: 19)
+                index: KotlinInt(int: 19),
+                navigationKey: "chapter-backcover"
             ),
             page: nil,
             playback: nil

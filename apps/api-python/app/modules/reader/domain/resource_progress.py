@@ -7,6 +7,19 @@ from datetime import UTC, datetime
 from typing import Literal
 
 
+def display_percent_for_status(
+    percent: float,
+    status: Literal["UNREAD", "FINISHED"] | None,
+) -> float:
+    """Map explicit status to its user-facing progress projection."""
+
+    if status == "FINISHED":
+        return 100.0
+    if status == "UNREAD":
+        return 0.0
+    return min(100.0, max(0.0, float(percent)))
+
+
 @dataclass(frozen=True, slots=True)
 class ResourceReadingState:
     resource_id: str
@@ -26,6 +39,12 @@ class ResourceReadingState:
         if self.explicit_status is not None:
             return self.explicit_status == "FINISHED"
         return self.percent >= 100
+
+    @property
+    def display_percent(self) -> float:
+        """Return the user-facing percent for this effective reading state."""
+
+        return display_percent_for_status(self.percent, self.explicit_status)
 
     @property
     def started(self) -> bool:

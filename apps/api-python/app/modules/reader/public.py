@@ -24,6 +24,7 @@ from app.modules.reader.domain.resource_progress import (
     ResourceReadingState,
     choose_continue_resource_id,
     completed_for_available_resources,
+    display_percent_for_status,
     reading_status_for_available_resources,
 )
 
@@ -42,6 +43,7 @@ __all__ = [
     "SaveExternalProgressCommand",
     "choose_continue_resource_id",
     "completed_for_available_resources",
+    "display_percent_for_status",
     "presentation_json",
     "reading_status_for_available_resources",
 ]

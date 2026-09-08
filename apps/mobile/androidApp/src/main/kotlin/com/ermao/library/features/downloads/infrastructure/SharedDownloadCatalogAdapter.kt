@@ -14,6 +14,7 @@ import com.ermao.library.shared.modules.downloads.DownloadNamespace
 import com.ermao.library.shared.modules.downloads.DownloadSource
 import com.ermao.library.shared.modules.downloads.DownloadTask
 import com.ermao.library.shared.modules.downloads.DownloadTaskStatus
+import com.ermao.library.shared.modules.downloads.DownloadSinkRequest
 import com.ermao.library.shared.modules.downloads.downloadReaderType
 
 class SharedDownloadCatalogAdapter(
@@ -36,15 +37,14 @@ class SharedDownloadCatalogAdapter(
                     it.assetId == identity.assetId &&
                     it.isReadable
             }
-            .forEach { record ->
-                catalog.remove(record.namespace, record.taskId)
-                record.localReference?.let(files::resolveLocalReference)?.deleteManagedFile()
-            }
+            .forEach { record -> removeRecord(record) }
     }
 
     override suspend fun listTasks(namespace: DownloadNamespace): List<DownloadTask> =
         catalog.records(namespace.toAndroid()).map { record ->
-            if (record.isReadable && !files.hasLocalArtifact(record.localReference, record.expectedBytes)) {
+            if (record.status == AndroidDownloadStatus.Completed &&
+                (!record.verified || !files.hasLocalArtifact(record.localReference, record.expectedBytes))
+            ) {
                 record.copy(status = AndroidDownloadStatus.FailedTerminal, verified = false,
                     errorCode = "DOWNLOAD_LOCAL_FILE_INVALID").toTask()
             } else record.toTask()
@@ -58,14 +58,31 @@ class SharedDownloadCatalogAdapter(
     }
 
     override suspend fun deleteTask(namespace: DownloadNamespace, taskId: String) {
-        catalog.remove(namespace.toAndroid(), taskId)?.localReference
-            ?.let(files::resolveLocalReference)?.deleteManagedFile()
+        catalog.record(namespace.toAndroid(), taskId)?.let { removeRecord(it) }
     }
 
     override suspend fun clearNamespace(namespace: DownloadNamespace) {
-        catalog.clear(namespace.toAndroid()).forEach { record ->
-            record.localReference?.let(files::resolveLocalReference)?.deleteManagedFile()
+        catalog.records(namespace.toAndroid()).forEach { removeRecord(it) }
+    }
+
+    /** Keep the durable row until both the published and resumable bytes are removed. */
+    private suspend fun removeRecord(record: AndroidDownloadRecord) {
+        record.localReference?.let { reference ->
+            val artifact = files.resolveLocalReference(reference)
+                ?: throw AndroidDownloadStorageException("Invalid managed download reference")
+            artifact.deleteManagedFile()
         }
+        files.discard(DownloadSinkRequest(
+            namespace = DownloadNamespace(record.namespace.serverIdentity, record.namespace.userId,
+                record.namespace.authorizationVersion),
+            taskId = record.taskId,
+            resourceId = record.resourceId,
+            assetId = record.assetId,
+            expectedTotalBytes = record.expectedBytes,
+            resumeFromBytes = 0,
+            artifactKind = DownloadArtifactKind.valueOf(record.artifactKind),
+        ))
+        catalog.remove(record.namespace, record.taskId)
     }
 
     private suspend fun replaceRecord(record: AndroidDownloadRecord) {
@@ -174,7 +191,7 @@ private fun DownloadTask.toRecord(createdAtEpochMillis: Long, updatedAtEpochMill
     )
 }
 
-internal fun AndroidDownloadStatus.toShared(): DownloadTaskStatus = when (this) {
+fun AndroidDownloadStatus.toShared(): DownloadTaskStatus = when (this) {
     AndroidDownloadStatus.Queued -> DownloadTaskStatus.Queued
     AndroidDownloadStatus.Downloading, AndroidDownloadStatus.Verifying -> DownloadTaskStatus.Downloading
     AndroidDownloadStatus.Paused -> DownloadTaskStatus.Paused

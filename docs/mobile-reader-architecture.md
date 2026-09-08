@@ -384,6 +384,15 @@ navigation controls, table of contents, and preferences. Readium internals are
 engine implementation details and never become an unrestricted application
 bridge.
 
+Typography changes are owned entirely by Readium: the native adapter submits
+preferences using the public SDK API and lets Readium perform layout,
+repagination and position retention. Do not intercept font changes to capture
+text anchors, manipulate selections, seek back, scroll the DOM, poll layout or
+introduce a reflow/loading state. Tests may verify submitted and rendered
+preferences, but must not require custom character/paragraph retention across
+reflow. Existing adapter workarounds are migration debt and must not be copied
+or extended. Explicit TOC navigation remains an application-owned user action.
+
 Mobile TOC selection uses the shared `resolveCurrentReaderNavigationEntryId`
 navigation matcher with native locator href, fragments and selector. An exact
 anchor wins over a resource target; a child wins over its parent for the same

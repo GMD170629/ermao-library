@@ -38,6 +38,7 @@ final class ContentDiscoveryUITests: XCTestCase {
         // The account's Chinese preference must win over an English system language.
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
+        defer { app.terminate() }
         let library = app.buttons["tab-select-library"]
         XCTAssertTrue(library.waitForExistence(timeout: 15))
         library.tap()
@@ -54,13 +55,22 @@ final class ContentDiscoveryUITests: XCTestCase {
         XCTAssertTrue(app.buttons["永久删除"].exists)
         edit.tap()
         XCTAssertTrue(app.textFields["标题"].waitForExistence(timeout: 15))
+        for fieldLabel in ["标题", "作者", "系列名", "系列序号", "标签", "简介"] {
+            XCTAssertTrue(app.staticTexts[fieldLabel].exists, "Missing persistent editor label: \(fieldLabel)")
+        }
         attachScreenshot(named: "live-cover-management-editor-zh", app: app)
         XCTAssertTrue(app.buttons["保存"].exists)
-        XCTAssertTrue(app.staticTexts["保留当前封面"].exists)
-        app.buttons["移除独立封面"].tap()
-        XCTAssertTrue(app.staticTexts["保存时移除独立封面"].waitForExistence(timeout: 3))
-        app.buttons["撤销封面更改"].tap()
-        XCTAssertTrue(app.staticTexts["保留当前封面"].exists)
+        XCTAssertTrue(app.navigationBars.buttons["保存"].exists)
+        XCTAssertFalse(app.buttons["从文件选择"].exists)
+        XCTAssertFalse(app.buttons["移除独立封面"].exists)
+        XCTAssertFalse(app.staticTexts["保留当前封面"].exists)
+        let tagInput = app.textFields["nativeManagement.tags.input"]
+        XCTAssertTrue(tagInput.exists)
+        tagInput.tap()
+        tagInput.typeText("临时标签\n")
+        let removeTemporaryTag = app.buttons["移除标签“临时标签”"]
+        XCTAssertTrue(removeTemporaryTag.waitForExistence(timeout: 3))
+        removeTemporaryTag.tap()
         dismissNotificationBanner()
         app.buttons["取消"].tap()
         XCTAssertTrue(book.wait(for: \.isHittable, toEqual: true, timeout: 5))
@@ -79,6 +89,52 @@ final class ContentDiscoveryUITests: XCTestCase {
         attachScreenshot(named: "live-cover-management-delete-warning-zh", app: app)
         dismissNotificationBanner()
         app.buttons["取消"].tap()
+    }
+
+    func testLiveRegenerateRunsWithoutOpeningManagementSheet() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        defer { app.terminate() }
+
+        let library = app.buttons["tab-select-library"]
+        XCTAssertTrue(library.waitForExistence(timeout: 15))
+        library.tap()
+        let book = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "work.")).firstMatch
+        XCTAssertTrue(book.waitForExistence(timeout: 15))
+        book.tap()
+
+        XCTAssertTrue(app.scrollViews["work.detail.screen"].waitForExistence(timeout: 15))
+        let more = app.buttons["更多"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5))
+        more.tap()
+
+        let popover = app.otherElements["nativeManagement.popover"]
+        XCTAssertTrue(popover.waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(popover.frame.width, 280, "The management popover should stay compact")
+
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.15)).tap()
+        XCTAssertTrue(popover.waitForNonExistence(timeout: 2))
+        more.tap()
+        XCTAssertTrue(popover.waitForExistence(timeout: 2), "The management popover should reopen without delay")
+
+        let regenerate = app.buttons.matching(
+            NSPredicate(format: "label == %@ OR label == %@", "重新生成图片", "重新生成封面")
+        ).firstMatch
+        XCTAssertTrue(regenerate.waitForExistence(timeout: 5))
+        regenerate.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+
+        XCTAssertFalse(
+            app.buttons["取消"].waitForExistence(timeout: 1),
+            "An immediate regenerate request must not open the management sheet"
+        )
+        if popover.exists, !popover.waitForNonExistence(timeout: 30) {
+            XCTAssertTrue(
+                app.descendants(matching: .any)["重试"].exists,
+                "A failed regenerate request should leave a retry action in the popover"
+            )
+        }
+        XCTAssertTrue(app.scrollViews["work.detail.screen"].exists)
     }
 
     private func dismissNotificationBanner() {
@@ -386,6 +442,65 @@ final class ContentDiscoveryUITests: XCTestCase {
         XCTAssertTrue(app.buttons["work.resource.resource-3"].exists)
 
         attachScreenshot(named: "work-detail-hierarchical-contents", app: app)
+    }
+
+    func testDownloadManagementBrowsesAndClearsSelectionWithoutDeletingFixtureData() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["ERMAO_UI_TEST_CONTENT_FIXTURE"] = "1"
+        app.launchEnvironment["ERMAO_UI_TEST_INITIAL_WORK_ID"] = "the-left-hand-of-darkness"
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        defer { app.terminate() }
+
+        XCTAssertTrue(app.scrollViews["work.detail.screen"].waitForExistence(timeout: 10))
+        let download = app.buttons["work.download.action"]
+        XCTAssertTrue(download.waitForExistence(timeout: 10))
+        download.tap()
+
+        let panelTitle = app.descendants(matching: .any)["work.downloadManagement.title"]
+        XCTAssertTrue(panelTitle.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["The Left Hand of Darkness"].exists)
+        XCTAssertTrue(app.buttons["work.downloadManagement.select"].exists)
+        XCTAssertFalse(app.buttons["work.downloadManagement.actions"].exists)
+        XCTAssertFalse(
+            app.descendants(matching: .any).matching(
+                NSPredicate(format: "identifier BEGINSWITH %@", "work.downloadManagement.checkbox.")
+            ).firstMatch.exists
+        )
+
+        let primary = app.buttons["work.downloadManagement.primary.resource-1"]
+        XCTAssertTrue(primary.waitForExistence(timeout: 5))
+        XCTAssertEqual(primary.label, "Download")
+        XCTAssertFalse(app.buttons["work.downloadManagement.more.resource-1"].exists)
+        attachScreenshot(named: "download-management-browse-en", app: app)
+
+        app.buttons["work.downloadManagement.select"].tap()
+        let checkbox = app.buttons["work.downloadManagement.checkbox.resource-1"]
+        XCTAssertTrue(checkbox.waitForExistence(timeout: 5))
+        let selectedCount = app.staticTexts["work.downloadManagement.selectedCount"]
+        XCTAssertTrue(selectedCount.waitForExistence(timeout: 5))
+        XCTAssertTrue(selectedCount.label.contains("0"))
+        let actions = app.buttons["work.downloadManagement.actions"]
+        XCTAssertTrue(actions.exists)
+
+        checkbox.tap()
+        XCTAssertTrue(selectedCount.label.contains("1"))
+        attachScreenshot(named: "download-management-selection-en", app: app)
+        actions.tap()
+        XCTAssertTrue(app.buttons["Download (1)"].waitForExistence(timeout: 5))
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.05)).tap()
+
+        app.buttons["work.downloadManagement.cancel"].tap()
+        XCTAssertTrue(app.buttons["work.downloadManagement.select"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["work.downloadManagement.actions"].exists)
+        XCTAssertFalse(app.buttons["work.downloadManagement.checkbox.resource-1"].exists)
+
+        app.buttons["work.downloadManagement.select"].tap()
+        XCTAssertTrue(selectedCount.waitForExistence(timeout: 5))
+        XCTAssertTrue(selectedCount.label.contains("0"), "Leaving selection mode must clear selected resources")
+        app.buttons["work.downloadManagement.done"].tap()
+        app.buttons["work.downloadManagement.close"].tap()
+        XCTAssertTrue(app.scrollViews["work.detail.screen"].waitForExistence(timeout: 10))
     }
 
     func testLiveEpubOpensFromWorkDetailOnPhysicalDevice() throws {
@@ -722,14 +837,15 @@ final class ContentDiscoveryUITests: XCTestCase {
         XCTAssertTrue(app.scrollViews["work.detail.screen"].waitForExistence(timeout: 30))
         let action = app.buttons["work.download.action"]
         XCTAssertTrue(action.waitForExistence(timeout: 20))
-        let completedLabels = ["Downloaded", "已下载"]
-        if completedLabels.contains(action.label) {
-            app.terminate()
-            return
-        }
         action.tap()
-        let completed = NSPredicate(format: "label == %@ OR label == %@", completedLabels[0], completedLabels[1])
-        let expectation = XCTNSPredicateExpectation(predicate: completed, object: action)
+        XCTAssertTrue(app.descendants(matching: .any)["work.downloadManagement.title"].waitForExistence(timeout: 10))
+        let primary = app.buttons["work.downloadManagement.primary.\(publication.resourceID)"]
+        XCTAssertTrue(primary.waitForExistence(timeout: 30))
+        if ["Download", "Resume", "Retry", "下载", "继续", "重试"].contains(primary.label) {
+            primary.tap()
+        }
+        let completed = NSPredicate(format: "label == %@ OR label == %@", "Delete", "删除")
+        let expectation = XCTNSPredicateExpectation(predicate: completed, object: primary)
         XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 180), .completed, "\(publication.format) download")
         app.terminate()
     }
@@ -741,23 +857,38 @@ final class ContentDiscoveryUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.scrollViews["work.detail.screen"].waitForExistence(timeout: 30))
         app.buttons["work.download.action"].tap()
+        let select = app.buttons["work.downloadManagement.select"]
+        XCTAssertTrue(select.waitForExistence(timeout: 10))
+        select.tap()
         for publication in publications {
             let resource = revealMultiDownloadResource(publication, app: app)
             XCTAssertTrue(resource.exists, "\(publication.format) batch option")
-            resource.tap()
+            app.buttons["work.downloadManagement.checkbox.\(publication.resourceID)"].tap()
         }
-        let confirm = app.buttons["work.multiDownload.confirm"]
-        XCTAssertTrue(confirm.waitForExistence(timeout: 10))
-        if confirm.isEnabled {
-            confirm.tap()
-        } else {
-            let cancel = app.buttons.matching(
-                NSPredicate(format: "label == %@ OR label == %@", "Cancel", "取消")
+        for (english, chinese) in [("Download (", "下载（"), ("Resume (", "继续（"), ("Retry (", "重试（")] {
+            let actions = app.buttons["work.downloadManagement.actions"]
+            XCTAssertTrue(actions.wait(for: \.isEnabled, toEqual: true, timeout: 15))
+            actions.tap()
+            let command = app.buttons.matching(
+                NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@", english, chinese)
             ).firstMatch
-            XCTAssertTrue(cancel.waitForExistence(timeout: 10), "dismiss an already active or completed batch")
-            cancel.tap()
+            XCTAssertTrue(command.waitForExistence(timeout: 5))
+            if command.isEnabled {
+                command.tap()
+            } else {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.05)).tap()
+            }
         }
-        XCTAssertTrue(app.scrollViews["work.detail.screen"].waitForExistence(timeout: 30))
+        // Accepted transfers continue after dismissal; enqueueing must not be
+        // confused with transfer completion or automatically close this panel.
+        XCTAssertTrue(app.descendants(matching: .any)["work.downloadManagement.title"].exists)
+        let done = app.buttons["work.downloadManagement.done"]
+        XCTAssertTrue(done.wait(for: \.isEnabled, toEqual: true, timeout: 15))
+        done.tap()
+        let dismiss = app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Done", "完成")).firstMatch
+        XCTAssertTrue(dismiss.wait(for: \.isEnabled, toEqual: true, timeout: 15))
+        dismiss.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["work.downloadManagement.title"].waitForNonExistence(timeout: 10))
         app.terminate()
     }
 
@@ -770,7 +901,9 @@ final class ContentDiscoveryUITests: XCTestCase {
         ]
         let deadline = Date().addingTimeInterval(30)
         while !resource.exists, Date() < deadline {
-            let collapsedFolder = app.buttons.matching(identifier: "chevron.right").firstMatch
+            let collapsedFolder = app.buttons.matching(
+                NSPredicate(format: "label == %@ OR label == %@", "Expand folder", "展开文件夹")
+            ).firstMatch
             guard collapsedFolder.exists else {
                 _ = resource.waitForExistence(timeout: 1)
                 continue

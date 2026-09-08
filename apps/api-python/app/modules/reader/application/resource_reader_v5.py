@@ -252,6 +252,10 @@ class ResourceReaderV5Service:
                 captured_at=captured_at,
                 received_at=received_at,
             )
+            self._repository.clear_v5_reading_status(
+                user_id=command.user_id,
+                resource_id=command.resource_id,
+            )
             self._unit_of_work.commit()
         except Exception as error:
             self._unit_of_work.rollback()

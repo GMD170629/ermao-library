@@ -161,3 +161,8 @@ fun managementMenuItems(kind: ManagementObject, canManage: Boolean, kindleSendAv
     com.ermao.library.shared.modules.workmanagement.domain.managementActions(kind, canManage, kindleSendAvailable, hasRepresentativeResource)
 
 typealias ManagementMenuContext = com.ermao.library.shared.modules.workmanagement.domain.ManagementMenuContext
+
+typealias ReadingStatusResetPort = com.ermao.library.shared.modules.workmanagement.application.ReadingStatusResetPort
+
+fun withReadingStatusReset(repository: WorkManagementRepository, resetPort: ReadingStatusResetPort): WorkManagementRepository =
+    com.ermao.library.shared.modules.workmanagement.application.ReadingStatusResettingRepository(repository, resetPort)

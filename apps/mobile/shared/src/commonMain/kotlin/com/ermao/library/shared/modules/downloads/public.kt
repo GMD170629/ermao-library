@@ -4,6 +4,7 @@ import com.ermao.library.shared.modules.auth.domain.PrivateDataNamespace
 import com.ermao.library.shared.core.network.ApiClientFactory
 import com.ermao.library.shared.modules.downloads.infrastructure.parseDownloadReaderType
 import com.ermao.library.shared.modules.downloads.domain.matchesVersion
+import com.ermao.library.shared.modules.downloads.domain.transition
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
@@ -37,16 +38,14 @@ typealias DownloadSource = com.ermao.library.shared.modules.downloads.domain.Dow
 typealias DownloadTask = com.ermao.library.shared.modules.downloads.domain.DownloadTask
 typealias DownloadTaskEvent = com.ermao.library.shared.modules.downloads.domain.DownloadTaskEvent
 typealias DownloadTaskStatus = com.ermao.library.shared.modules.downloads.domain.DownloadTaskStatus
-typealias MultiDownloadEligibility = com.ermao.library.shared.modules.downloads.domain.MultiDownloadEligibility
-typealias MultiDownloadResourceState = com.ermao.library.shared.modules.downloads.domain.MultiDownloadResourceState
 typealias MultiDownloadSelectionMark = com.ermao.library.shared.modules.downloads.domain.MultiDownloadSelectionMark
-typealias MultiDownloadSelectionState = com.ermao.library.shared.modules.downloads.domain.MultiDownloadSelectionState
-typealias DownloadBatchPolicy = com.ermao.library.shared.modules.downloads.domain.DownloadBatchPolicy
-typealias DownloadBatchCommand = com.ermao.library.shared.modules.downloads.domain.DownloadBatchCommand
-typealias DownloadBatchOutcomeKind = com.ermao.library.shared.modules.downloads.domain.DownloadBatchOutcomeKind
-typealias DownloadBatchResourceResult = com.ermao.library.shared.modules.downloads.domain.DownloadBatchResourceResult
-typealias DownloadBatchResult = com.ermao.library.shared.modules.downloads.domain.DownloadBatchResult
-typealias DownloadBatchSummary = com.ermao.library.shared.modules.downloads.domain.DownloadBatchSummary
+typealias DownloadManagementAction = com.ermao.library.shared.modules.downloads.domain.DownloadManagementAction
+typealias DownloadManagementStatus = com.ermao.library.shared.modules.downloads.domain.DownloadManagementStatus
+typealias DownloadManagementItem = com.ermao.library.shared.modules.downloads.domain.DownloadManagementItem
+typealias DownloadManagementResource = com.ermao.library.shared.modules.downloads.domain.DownloadManagementResource
+typealias DownloadManagementPolicy = com.ermao.library.shared.modules.downloads.domain.DownloadManagementPolicy
+typealias DownloadManagementOutcome = com.ermao.library.shared.modules.downloads.domain.DownloadManagementOutcome
+typealias DownloadManagementResult = com.ermao.library.shared.modules.downloads.domain.DownloadManagementResult
 typealias DownloadTransferGateway = com.ermao.library.shared.modules.downloads.application.DownloadTransferGateway
 typealias DownloadTransferRequest = com.ermao.library.shared.modules.downloads.application.DownloadTransferRequest
 typealias DownloadTransferResult = com.ermao.library.shared.modules.downloads.application.DownloadTransferResult
@@ -84,12 +83,10 @@ fun downloadReaderType(value: String): DownloadReaderType = parseDownloadReaderT
 fun downloadDescriptorsMatch(expected: DownloadDescriptor, candidate: DownloadDescriptor): Boolean =
     expected.matchesVersion(candidate)
 
-fun summarizeDownloadBatch(
-    selectedResourceIds: Set<String>,
-    resourcesById: Map<String, MultiDownloadResourceState>,
-): DownloadBatchSummary = com.ermao.library.shared.modules.downloads.domain.summarizeDownloadBatch(
-    selectedResourceIds,
-    resourcesById,
+/** Called by the native task owner after cancelling and joining its transfer. */
+@Throws(IllegalArgumentException::class)
+fun pauseDownloadTask(task: DownloadTask): DownloadTask = task.transition(
+    com.ermao.library.shared.modules.downloads.domain.DownloadTaskEvent.Pause,
 )
 
 /** Swift-friendly request context; rejects invalid server identities and namespaces. */

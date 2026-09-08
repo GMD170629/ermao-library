@@ -200,6 +200,81 @@ class ReaderV5PersistenceInstrumentedTest {
         }
     }
 
+    @Test
+    fun targetedBookResetClearsAllResourcesForBookAndLeavesAdjacentAccountsUntouched() = runBlocking {
+        val owners = listOf(
+            identity.copy(resourceId = "resource-book-one"),
+            identity.copy(resourceId = "resource-book-two"),
+            identity.copy(bookId = "another-book", resourceId = "resource-other-book"),
+            identity.copy(namespace = namespace.copy(serverIdentity = "another-server"), resourceId = "resource-other-account"),
+        )
+        val stores = owners.map { owner -> AndroidReaderV5Database(context, owner, databaseName) }
+        try {
+            stores.forEachIndexed { index, store ->
+                val position = local(owners[index], (index + 1) * 1_000L)
+                store.commitPositionAndPending(position, position.toMutation(UUID.randomUUID().toString()))
+            }
+
+            AndroidReaderV5Database.deleteBookPositions(
+                context = context,
+                namespace = namespace,
+                clientId = identity.clientId,
+                bookId = identity.bookId,
+                databaseName = databaseName,
+            )
+
+            assertEquals(null, stores[0].loadPosition(owners[0].resourceId))
+            assertEquals(null, stores[0].loadPositionSyncState().pending)
+            assertEquals(null, stores[1].loadPosition(owners[1].resourceId))
+            assertEquals(null, stores[1].loadPositionSyncState().pending)
+            assertNotNull(stores[2].loadPosition(owners[2].resourceId))
+            assertNotNull(stores[2].loadPositionSyncState().pending)
+            assertNotNull(stores[3].loadPosition(owners[3].resourceId))
+            assertNotNull(stores[3].loadPositionSyncState().pending)
+        } finally {
+            stores.forEach(AndroidReaderV5Database::close)
+        }
+    }
+
+    @Test
+    fun targetedResourceResetFindsResourceWithoutBookAndPreservesOtherClients() = runBlocking {
+        val owners = listOf(
+            identity.copy(bookId = "book-one", resourceId = "resource-shared"),
+            identity.copy(bookId = "book-two", resourceId = "resource-shared"),
+            identity.copy(clientId = "another-client", bookId = "book-one", resourceId = "resource-shared"),
+            identity.copy(namespace = namespace.copy(userId = "another-user"), bookId = "book-one", resourceId = "resource-shared"),
+            identity.copy(bookId = "book-one", resourceId = "resource-untouched"),
+        )
+        val stores = owners.map { owner -> AndroidReaderV5Database(context, owner, databaseName) }
+        try {
+            stores.forEachIndexed { index, store ->
+                val position = local(owners[index], (index + 1) * 1_000L)
+                store.commitPositionAndPending(position, position.toMutation(UUID.randomUUID().toString()))
+            }
+
+            AndroidReaderV5Database.deleteResourcePositions(
+                context = context,
+                namespace = namespace,
+                clientId = identity.clientId,
+                resourceId = "resource-shared",
+                databaseName = databaseName,
+            )
+
+            assertEquals(null, stores[0].loadPosition(owners[0].resourceId))
+            assertEquals(null, stores[0].loadPositionSyncState().pending)
+            assertEquals(null, stores[1].loadPosition(owners[1].resourceId))
+            assertEquals(null, stores[1].loadPositionSyncState().pending)
+            assertNotNull(stores[2].loadPosition(owners[2].resourceId))
+            assertNotNull(stores[2].loadPositionSyncState().pending)
+            assertNotNull(stores[3].loadPosition(owners[3].resourceId))
+            assertNotNull(stores[3].loadPositionSyncState().pending)
+            assertNotNull(stores[4].loadPosition(owners[4].resourceId))
+            assertNotNull(stores[4].loadPositionSyncState().pending)
+        } finally {
+            stores.forEach(AndroidReaderV5Database::close)
+        }
+    }
+
     private fun local(capturedAt: Long) = ReaderPositionLocalState(
         resourceId = identity.resourceId,
         clientId = identity.clientId,
@@ -215,6 +290,13 @@ class ReaderV5PersistenceInstrumentedTest {
         capturedAtEpochMillis = revision * 1_000L,
         receivedAtEpochMillis = revision * 1_000L + 1L,
         position = ReaderPositionReportFixture.report(revision.toDouble() / 10.0),
+    )
+
+    private fun local(owner: ReaderLocalProgressIdentity, capturedAt: Long) = ReaderPositionLocalState(
+        resourceId = owner.resourceId,
+        clientId = owner.clientId,
+        capturedAtEpochMillis = capturedAt,
+        position = ReaderPositionReportFixture.report(capturedAt.toDouble() / 10_000.0),
     )
 }
 
@@ -232,4 +314,5 @@ private object ReaderPositionReportFixture {
             playback = null,
         ),
     )
+
 }

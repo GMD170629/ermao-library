@@ -50,6 +50,7 @@ import com.ermao.library.shared.modules.shelf.domain.ShelfRequestContext
 import com.ermao.library.shared.modules.shelf.domain.ShelfResult
 import com.ermao.library.shared.modules.shelf.domain.ShelfSummary
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -57,6 +58,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+
+private const val MULTI_DOWNLOAD_ROOT_KEY = "__root__"
 
 data class FacetUiState(
     val facetName: String? = null,
@@ -202,16 +205,22 @@ data class WorkDetailUiState(
     val shelfErrorCode: String? = null,
     val shelfSaveCompleted: Boolean = false,
     val isMultiDownloadVisible: Boolean = false,
+    val multiDownloadScope: DownloadPanelScope? = null,
+    val multiDownloadResourceId: String? = null,
     val multiDownloadRootNodeId: String? = null,
     val multiDownloadChildrenByNodeId: Map<String, List<BookContentEntry>> = emptyMap(),
     val multiDownloadDescendantResourceIdsByNodeId: Map<String, Set<String>> = emptyMap(),
     val multiDownloadExpandedNodeIds: Set<String> = emptySet(),
     val multiDownloadLoadingNodeIds: Set<String> = emptySet(),
+    val multiDownloadNodeErrorCodes: Map<String, String> = emptyMap(),
     val isMultiDownloadResourcesLoading: Boolean = false,
     val multiDownloadResources: List<ResourceContent> = emptyList(),
     val multiDownloadErrorCode: String? = null,
 ) {
 }
+
+/** The download panel is scoped to the page object that opened it. */
+enum class DownloadPanelScope { Book, Directory, Resource }
 
 class WorkDetailViewModel(
     private val repository: ContentRepository,
@@ -226,6 +235,8 @@ class WorkDetailViewModel(
         AndroidReaderV5PresentationQuery(appContext.applicationContext),
 ) : ViewModel() {
     private var multiDownloadGeneration = 0L
+    private var multiDownloadResourcesJob: Job? = null
+    private val multiDownloadFolderJobs = mutableMapOf<String, Job>()
     private val mutableUiState = MutableStateFlow(WorkDetailUiState())
     val uiState: StateFlow<WorkDetailUiState> = mutableUiState.asStateFlow()
     private var loadGeneration = 0
@@ -314,34 +325,53 @@ class WorkDetailViewModel(
     fun consumeShelfSaveCompleted() = mutableUiState.update { it.copy(shelfSaveCompleted = false) }
 
     fun openMultiDownload() {
+        cancelMultiDownloadLoads()
         val generation = ++multiDownloadGeneration
+        val scope = when (target) {
+            BookContentTarget.Root -> DownloadPanelScope.Book
+            is BookContentTarget.Directory -> DownloadPanelScope.Directory
+            is BookContentTarget.ResourceDetail -> DownloadPanelScope.Resource
+        }
+        val resourceId = (target as? BookContentTarget.ResourceDetail)?.resourceId
         val resources = mutableUiState.value.content?.resources.orEmpty()
+            .filter { resourceId == null || it.id == resourceId }
         mutableUiState.update {
             it.copy(
                 isMultiDownloadVisible = true,
+                multiDownloadScope = scope,
+                multiDownloadResourceId = resourceId,
                 multiDownloadRootNodeId = null,
                 multiDownloadChildrenByNodeId = emptyMap(),
                 multiDownloadDescendantResourceIdsByNodeId = emptyMap(),
                 multiDownloadExpandedNodeIds = emptySet(),
                 multiDownloadLoadingNodeIds = emptySet(),
+                multiDownloadNodeErrorCodes = emptyMap(),
                 isMultiDownloadResourcesLoading = true,
                 multiDownloadResources = resources,
                 multiDownloadErrorCode = null,
             )
         }
-        loadMultiDownloadResources(generation)
-        loadMultiDownloadFolder(sourceNodeId = mutableUiState.value.contents?.currentSourceNodeId, expand = true, generation = generation)
+        if (scope == DownloadPanelScope.Resource) {
+            mutableUiState.update { it.copy(isMultiDownloadResourcesLoading = false) }
+        } else {
+            loadMultiDownloadResources(generation)
+            loadMultiDownloadFolder(sourceNodeId = mutableUiState.value.contents?.currentSourceNodeId, expand = true, generation = generation)
+        }
     }
 
     fun dismissMultiDownload() {
+        cancelMultiDownloadLoads()
         multiDownloadGeneration += 1
         mutableUiState.update { it.copy(
             isMultiDownloadVisible = false,
+            multiDownloadScope = null,
+            multiDownloadResourceId = null,
             multiDownloadRootNodeId = null,
             multiDownloadChildrenByNodeId = emptyMap(),
             multiDownloadDescendantResourceIdsByNodeId = emptyMap(),
             multiDownloadExpandedNodeIds = emptySet(),
             multiDownloadLoadingNodeIds = emptySet(),
+            multiDownloadNodeErrorCodes = emptyMap(),
             isMultiDownloadResourcesLoading = false,
             multiDownloadResources = emptyList(),
             multiDownloadErrorCode = null,
@@ -349,7 +379,9 @@ class WorkDetailViewModel(
     }
 
     fun retryMultiDownload() {
+        cancelMultiDownloadLoads()
         val generation = ++multiDownloadGeneration
+        val scope = mutableUiState.value.multiDownloadScope
         mutableUiState.update {
             it.copy(
                 multiDownloadRootNodeId = null,
@@ -357,12 +389,51 @@ class WorkDetailViewModel(
                 multiDownloadDescendantResourceIdsByNodeId = emptyMap(),
                 multiDownloadExpandedNodeIds = emptySet(),
                 multiDownloadLoadingNodeIds = emptySet(),
+                multiDownloadNodeErrorCodes = emptyMap(),
                 isMultiDownloadResourcesLoading = true,
                 multiDownloadErrorCode = null,
             )
         }
-        loadMultiDownloadResources(generation)
-        loadMultiDownloadFolder(sourceNodeId = mutableUiState.value.contents?.currentSourceNodeId, expand = true, generation = generation)
+        if (scope == DownloadPanelScope.Resource) {
+            mutableUiState.update { it.copy(isMultiDownloadResourcesLoading = false) }
+        } else {
+            loadMultiDownloadResources(generation)
+            loadMultiDownloadFolder(sourceNodeId = mutableUiState.value.contents?.currentSourceNodeId, expand = true, generation = generation)
+        }
+    }
+
+    fun retryMultiDownloadFolder(sourceNodeId: String?) {
+        // A folder retry replaces only that folder request. Keep the book
+        // resources request alive so a slow resource page cannot be stranded
+        // in its loading state.
+        val generation = multiDownloadGeneration
+        val loadingKey = sourceNodeId ?: MULTI_DOWNLOAD_ROOT_KEY
+        val currentState = mutableUiState.value
+        val childLoadingKeys = if (sourceNodeId == null) {
+            currentState.multiDownloadLoadingNodeIds - MULTI_DOWNLOAD_ROOT_KEY
+        } else {
+            emptySet()
+        }
+        if (sourceNodeId == null) cancelMultiDownloadChildLoads()
+        mutableUiState.update {
+            it.copy(
+                // Keep unrelated folder requests visible while replacing one
+                // request. Retrying the root cancels child jobs so an old
+                // subtree cannot repopulate the refreshed root.
+                // Keep the previous tree on screen while the root refreshes;
+                // if it fails, the known scope remains usable. A successful
+                // root response replaces the tree atomically below.
+                multiDownloadLoadingNodeIds = (it.multiDownloadLoadingNodeIds - childLoadingKeys) + loadingKey,
+                multiDownloadNodeErrorCodes = if (sourceNodeId == null) emptyMap()
+                else it.multiDownloadNodeErrorCodes - loadingKey,
+                multiDownloadErrorCode = if (sourceNodeId == null) null else it.multiDownloadErrorCode,
+            )
+        }
+        loadMultiDownloadFolder(
+            sourceNodeId = sourceNodeId,
+            expand = sourceNodeId != null && sourceNodeId in mutableUiState.value.multiDownloadExpandedNodeIds,
+            generation = generation,
+        )
     }
 
     fun toggleMultiDownloadFolder(sourceNodeId: String) {
@@ -539,19 +610,24 @@ class WorkDetailViewModel(
     }
 
     private fun loadMultiDownloadResources(generation: Long) {
-        viewModelScope.launch {
+        multiDownloadResourcesJob?.cancel()
+        val job = viewModelScope.launch {
+            val resources = mutableListOf<Resource>()
             try {
-                val resources = mutableListOf<Resource>()
                 var pageNumber = 1
                 while (true) {
-                    when (val result = repository.loadBookResources(
+                    currentCoroutineContext().ensureActive()
+                    if (generation != multiDownloadGeneration) return@launch
+                    val result = repository.loadBookResources(
                         context,
                         BookResourcePageQuery(
                             bookId = bookId,
                             page = pageNumber,
                             pageSize = 100,
                         ),
-                    )) {
+                    )
+                    currentCoroutineContext().ensureActive()
+                    when (result) {
                         is ContentResult.Content -> {
                             resources += result.value.resources
                             if (pageNumber >= result.value.totalPages) break
@@ -561,9 +637,12 @@ class WorkDetailViewModel(
                             if (result.error.kind == AppErrorKind.Unauthorized) onSessionUnauthorized()
                             if (generation == multiDownloadGeneration) {
                                 mutableUiState.update {
+                                    val knownResources = (resources.map { it.toUiContent() } + it.multiDownloadResources)
+                                        .distinctBy(ResourceContent::id)
                                     it.copy(
                                         isMultiDownloadResourcesLoading = false,
                                         multiDownloadErrorCode = result.error.code,
+                                        multiDownloadResources = knownResources,
                                     )
                                 }
                             }
@@ -583,31 +662,42 @@ class WorkDetailViewModel(
             } catch (_: Exception) {
                 if (generation == multiDownloadGeneration) {
                     mutableUiState.update {
+                        val knownResources = (resources.map { it.toUiContent() } + it.multiDownloadResources)
+                            .distinctBy(ResourceContent::id)
                         it.copy(
                             isMultiDownloadResourcesLoading = false,
                             multiDownloadErrorCode = "MULTI_DOWNLOAD_RESOURCES_FAILED",
+                            multiDownloadResources = knownResources,
                         )
                     }
                 }
             }
         }
+        multiDownloadResourcesJob = job
+        job.invokeOnCompletion {
+            if (multiDownloadResourcesJob === job) multiDownloadResourcesJob = null
+        }
     }
 
     private fun loadMultiDownloadFolder(sourceNodeId: String?, expand: Boolean, generation: Long) {
-        val loadingKey = sourceNodeId ?: "__root__"
+        val loadingKey = sourceNodeId ?: MULTI_DOWNLOAD_ROOT_KEY
+        multiDownloadFolderJobs[loadingKey]?.cancel()
         mutableUiState.update {
             it.copy(
                 multiDownloadLoadingNodeIds = it.multiDownloadLoadingNodeIds + loadingKey,
-                multiDownloadErrorCode = null,
+                multiDownloadNodeErrorCodes = it.multiDownloadNodeErrorCodes - loadingKey,
+                multiDownloadErrorCode = if (sourceNodeId == null) null else it.multiDownloadErrorCode,
             )
         }
-        viewModelScope.launch {
+        val job = viewModelScope.launch {
             try {
                 var firstPage: BookContentsPage? = null
                 val entries = mutableListOf<BookContentEntry>()
                 var pageNumber = 1
                 while (true) {
-                    when (val result = repository.loadBookContents(
+                    currentCoroutineContext().ensureActive()
+                    if (generation != multiDownloadGeneration) return@launch
+                    val result = repository.loadBookContents(
                         context,
                         BookContentsQuery(
                             bookId = bookId,
@@ -616,7 +706,9 @@ class WorkDetailViewModel(
                             page = pageNumber,
                             pageSize = 200,
                         ),
-                    )) {
+                    )
+                    currentCoroutineContext().ensureActive()
+                    when (result) {
                         is ContentResult.Content -> {
                             if (firstPage == null) firstPage = result.value
                             entries += result.value.entries
@@ -629,7 +721,8 @@ class WorkDetailViewModel(
                             mutableUiState.update {
                                 it.copy(
                                     multiDownloadLoadingNodeIds = it.multiDownloadLoadingNodeIds - loadingKey,
-                                    multiDownloadErrorCode = result.error.code,
+                                    multiDownloadNodeErrorCodes = it.multiDownloadNodeErrorCodes + (loadingKey to result.error.code),
+                                    multiDownloadErrorCode = if (sourceNodeId == null) result.error.code else it.multiDownloadErrorCode,
                                 )
                             }
                             return@launch
@@ -640,18 +733,31 @@ class WorkDetailViewModel(
                 val page = requireNotNull(firstPage)
                 val nodeId = page.currentNode.sourceNodeId
                 mutableUiState.update { state ->
+                    val childrenByNodeId = if (sourceNodeId == null) {
+                        mapOf(nodeId to entries)
+                    } else {
+                        state.multiDownloadChildrenByNodeId + (nodeId to entries)
+                    }
+                    val descendantResourceIdsByNodeId = if (sourceNodeId == null) {
+                        mapOf(nodeId to page.currentResourceIds.toSet())
+                    } else {
+                        state.multiDownloadDescendantResourceIdsByNodeId +
+                            (nodeId to page.currentResourceIds.toSet())
+                    }
+                    val expandedNodeIds = if (sourceNodeId == null) {
+                        if (expand) setOf(nodeId) else emptySet()
+                    } else if (expand) {
+                        state.multiDownloadExpandedNodeIds + nodeId
+                    } else {
+                        state.multiDownloadExpandedNodeIds
+                    }
                     state.copy(
-                        multiDownloadRootNodeId = state.multiDownloadRootNodeId ?: nodeId,
-                        multiDownloadChildrenByNodeId = state.multiDownloadChildrenByNodeId + (nodeId to entries),
-                        multiDownloadDescendantResourceIdsByNodeId =
-                            state.multiDownloadDescendantResourceIdsByNodeId +
-                                (nodeId to page.currentResourceIds.toSet()),
-                        multiDownloadExpandedNodeIds = if (expand) {
-                            state.multiDownloadExpandedNodeIds + nodeId
-                        } else {
-                            state.multiDownloadExpandedNodeIds
-                        },
+                        multiDownloadRootNodeId = if (sourceNodeId == null) nodeId else state.multiDownloadRootNodeId ?: nodeId,
+                        multiDownloadChildrenByNodeId = childrenByNodeId,
+                        multiDownloadDescendantResourceIdsByNodeId = descendantResourceIdsByNodeId,
+                        multiDownloadExpandedNodeIds = expandedNodeIds,
                         multiDownloadLoadingNodeIds = state.multiDownloadLoadingNodeIds - loadingKey - nodeId,
+                        multiDownloadNodeErrorCodes = state.multiDownloadNodeErrorCodes - loadingKey - nodeId,
                     )
                 }
             } catch (cancelled: CancellationException) {
@@ -660,11 +766,33 @@ class WorkDetailViewModel(
                 if (generation == multiDownloadGeneration) mutableUiState.update {
                     it.copy(
                         multiDownloadLoadingNodeIds = it.multiDownloadLoadingNodeIds - loadingKey,
-                        multiDownloadErrorCode = "MULTI_DOWNLOAD_TREE_FAILED",
+                        multiDownloadNodeErrorCodes = it.multiDownloadNodeErrorCodes + (loadingKey to "MULTI_DOWNLOAD_TREE_FAILED"),
+                        multiDownloadErrorCode = if (sourceNodeId == null) "MULTI_DOWNLOAD_TREE_FAILED" else it.multiDownloadErrorCode,
                     )
                 }
             }
         }
+        multiDownloadFolderJobs[loadingKey] = job
+        job.invokeOnCompletion {
+            if (multiDownloadFolderJobs[loadingKey] === job) multiDownloadFolderJobs.remove(loadingKey)
+        }
+    }
+
+    /**
+     * A panel owns its metadata requests. Cancelling these jobs prevents a
+     * dismissed or superseded panel from keeping repository work alive, while
+     * download transfer jobs remain owned by DownloadActionsViewModel.
+     */
+    private fun cancelMultiDownloadLoads() {
+        multiDownloadResourcesJob?.cancel()
+        multiDownloadResourcesJob = null
+        multiDownloadFolderJobs.values.forEach(Job::cancel)
+        multiDownloadFolderJobs.clear()
+    }
+
+    private fun cancelMultiDownloadChildLoads() {
+        val childKeys = multiDownloadFolderJobs.keys.filter { it != MULTI_DOWNLOAD_ROOT_KEY }
+        childKeys.forEach { key -> multiDownloadFolderJobs.remove(key)?.cancel() }
     }
 
     private fun loadReadingUnits(resourceId: String, page: Int) {
@@ -707,6 +835,11 @@ class WorkDetailViewModel(
                 }
             }
         }
+    }
+
+    override fun onCleared() {
+        cancelMultiDownloadLoads()
+        super.onCleared()
     }
 
     private fun readingUnitPageSize(resourceId: String): Int =

@@ -39,7 +39,7 @@ enum AudioCompositionError: Error, Equatable, Sendable {
     case invalidBootstrap
 }
 
-private struct AudioBootstrapFailure: Error, Equatable, Sendable {
+struct AudioBootstrapFailure: Error, Equatable, Sendable {
     let code: String
     let recoverable: Bool
 }

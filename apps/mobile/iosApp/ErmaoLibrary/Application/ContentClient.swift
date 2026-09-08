@@ -94,6 +94,13 @@ struct LibrarySourceOption: Identifiable, Equatable, Hashable, Sendable {
     let name: String
 }
 
+struct LibraryTagSuggestion: Identifiable, Equatable, Hashable, Sendable {
+    var id: String { value }
+    let value: String
+    let label: String
+    let count: Int
+}
+
 struct GroupingsQuery: Equatable, Hashable, Sendable {
     let kind: FacetKind
     let query: String
@@ -194,6 +201,7 @@ struct BookResource: Identifiable, Codable, Equatable, Sendable {
     let identifier: String?
     let narrator: String?
     let pageCount: Int?
+    let chapterCount: Int?
     let metadataSource: String?
     let kindleSendAvailable: Bool
     let assets: [ResourceAsset]
@@ -221,6 +229,7 @@ struct BookResource: Identifiable, Codable, Equatable, Sendable {
         identifier: String? = nil,
         narrator: String? = nil,
         pageCount: Int? = nil,
+        chapterCount: Int? = nil,
         metadataSource: String? = nil,
         kindleSendAvailable: Bool = false,
         assets: [ResourceAsset] = [],
@@ -247,6 +256,7 @@ struct BookResource: Identifiable, Codable, Equatable, Sendable {
         self.identifier = identifier
         self.narrator = narrator
         self.pageCount = pageCount
+        self.chapterCount = chapterCount
         self.metadataSource = metadataSource
         self.kindleSendAvailable = kindleSendAvailable
         self.assets = assets
@@ -530,6 +540,11 @@ protocol ContentClient: Sendable {
     func fetchRecentAdded(context: ContentRequestContext, limit: Int) async throws -> [BookCard]
     func fetchBooks(context: ContentRequestContext, query: BooksQuery) async throws -> BookPage
     func fetchLibraryOptions(context: ContentRequestContext) async throws -> [LibrarySourceOption]
+    func fetchTagSuggestions(
+        context: ContentRequestContext,
+        query: String,
+        limit: Int
+    ) async throws -> [LibraryTagSuggestion]
     func fetchGroupings(context: ContentRequestContext, query: GroupingsQuery) async throws -> GroupingPage
     func fetchFacet(context: ContentRequestContext, query: FacetQuery) async throws -> FacetPage
     func fetchBookDetail(context: ContentRequestContext, query: BookDetailQuery) async throws -> BookDetailContent
@@ -566,6 +581,11 @@ protocol ContentClient: Sendable {
 
 extension ContentClient {
     func fetchLibraryOptions(context: ContentRequestContext) async throws -> [LibrarySourceOption] { [] }
+    func fetchTagSuggestions(
+        context: ContentRequestContext,
+        query: String,
+        limit: Int
+    ) async throws -> [LibraryTagSuggestion] { [] }
 
     func fetchBookResources(
         context: ContentRequestContext,

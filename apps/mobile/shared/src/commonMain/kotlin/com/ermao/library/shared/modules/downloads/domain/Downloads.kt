@@ -212,7 +212,7 @@ fun DownloadTask.transition(event: DownloadTaskEvent): DownloadTask = when (even
         copy(transferredBytes = event.totalTransferredBytes)
     }
     DownloadTaskEvent.Pause -> {
-        require(status == DownloadTaskStatus.Downloading)
+        require(status == DownloadTaskStatus.Queued || status == DownloadTaskStatus.Downloading)
         copy(status = DownloadTaskStatus.Paused)
     }
     DownloadTaskEvent.Resume -> {

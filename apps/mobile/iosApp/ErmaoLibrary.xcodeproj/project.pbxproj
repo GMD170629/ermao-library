@@ -179,6 +179,7 @@
 		A17700000000000000000177 /* ManagedDownloadStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17700000000000000000177 /* ManagedDownloadStore.swift */; };
 		A17800000000000000000178 /* SharedManagedDownloadTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17800000000000000000178 /* SharedManagedDownloadTransfer.swift */; };
 		A13800000000000000000138 /* DownloadStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E13800000000000000000138 /* DownloadStoreTests.swift */; };
+		A13900000000000000000139 /* DownloadManagementAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E13900000000000000000139 /* DownloadManagementAdapterTests.swift */; };
 		C21000000000000000000210 /* reader-contract.fb2 in Resources */ = {isa = PBXBuildFile; fileRef = D21000000000000000000210; };
 		C21100000000000000000211 /* reader-contract-bodies.json in Resources */ = {isa = PBXBuildFile; fileRef = D21100000000000000000211; };
 		C22100000000000000000221 /* txt-decoding-v1.json in Resources */ = {isa = PBXBuildFile; fileRef = D22100000000000000000221; };
@@ -380,6 +381,7 @@
 		E17700000000000000000177 /* ManagedDownloadStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagedDownloadStore.swift; sourceTree = "<group>"; };
 		E17800000000000000000178 /* SharedManagedDownloadTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedManagedDownloadTransfer.swift; sourceTree = "<group>"; };
 		E13800000000000000000138 /* DownloadStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadStoreTests.swift; sourceTree = "<group>"; };
+		E13900000000000000000139 /* DownloadManagementAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadManagementAdapterTests.swift; sourceTree = "<group>"; };
 		D21000000000000000000210 /* reader-contract.fb2 */ = {isa = PBXFileReference; lastKnownFileType = file; name = "reader-contract.fb2"; path = "../../../test-data/library/fb2/reader-contract.fb2"; sourceTree = SOURCE_ROOT; };
 		D21100000000000000000211 /* reader-contract-bodies.json */ = {isa = PBXFileReference; lastKnownFileType = file; name = "reader-contract-bodies.json"; path = "../../../test-data/library/fb2/reader-contract-bodies.json"; sourceTree = SOURCE_ROOT; };
 		D22100000000000000000221 /* txt-decoding-v1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = "txt-decoding-v1.json"; path = "../../../packages/reader-contracts/fixtures/txt-decoding-v1.json"; sourceTree = SOURCE_ROOT; };
@@ -505,6 +507,7 @@
 				F19900000000000000000199 /* 02 雨师借伞.rar */,
 				F18700000000000000000187 /* PdfReaderTests.swift */,
 				E13800000000000000000138 /* DownloadStoreTests.swift */,
+				E13900000000000000000139 /* DownloadManagementAdapterTests.swift */,
 				F09000000000000000000090 /* 01-basic-mobi6.mobi */,
 				F09100000000000000000091 /* 11-upstream-huff-cdic.mobi */,
 				F09200000000000000000092 /* negative-synthetic-drm-header.mobi */,
@@ -1147,6 +1150,7 @@
 				B18300000000000000000183 /* CbzPublicationTests.swift in Sources */,
 				B18700000000000000000187 /* PdfReaderTests.swift in Sources */,
 				A13800000000000000000138 /* DownloadStoreTests.swift in Sources */,
+				A13900000000000000000139 /* DownloadManagementAdapterTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

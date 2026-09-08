@@ -160,7 +160,7 @@ struct MainTabView: View {
 
     @ViewBuilder private func managedTabs(_ context: ContentRequestContext) -> some View {
         if let repository = workManagementRepository {
-            NativeBookManagementHost(repository: repository, context: context,
+            NativeBookManagementHost(repository: repository, context: context, contentClient: contentClient,
                 canManage: store.snapshot.authorization?.canManageSystem == true, cache: cache,
                 onChange: { change in
                     if change.deleted && change.resourceID == nil {

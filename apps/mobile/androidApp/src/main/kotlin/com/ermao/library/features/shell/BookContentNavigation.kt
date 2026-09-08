@@ -14,8 +14,8 @@ import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import com.ermao.library.features.content.model.LibraryScope
 import com.ermao.library.features.content.model.ResourceContent
+import com.ermao.library.features.downloads.DownloadRecord as AndroidDownloadRecord
 import com.ermao.library.features.downloads.application.DownloadActionsViewModel
-import com.ermao.library.features.downloads.model.AndroidDownloadRecord
 import com.ermao.library.features.library.application.WorkDetailViewModel
 import com.ermao.library.features.library.ui.WorkDetailScreen
 import com.ermao.library.features.workmanagement.application.WorkManagementViewModel
@@ -70,6 +70,7 @@ internal fun BookContentNavigation(
     val backStack = rememberNavBackStack(root)
     val records by downloads.recordsByResource.collectAsStateWithLifecycle()
     val failures by downloads.failureByResource.collectAsStateWithLifecycle()
+    val activeDownloadResourceIds by downloads.activeResourceIds.collectAsStateWithLifecycle()
     val appContext = LocalContext.current.applicationContext
     val back = { if (backStack.size > 1) { backStack.removeLastOrNull(); Unit } else onBack() }
     val revision = com.ermao.library.features.workmanagement.managementRevision()
@@ -135,14 +136,17 @@ internal fun BookContentNavigation(
                         else detail.refreshAfterReadingStatusChange(scope.objectId)
                     },
                     downloadRecordsByResource = records, downloadFailuresByResource = failures,
-                    onDownloadResource = downloads::requestDownload,
-                    onCancelDownload = downloads::cancelDownload, onRemoveDownload = downloads::removeDownload,
                     onOpenMultiDownload = detail::openMultiDownload,
                     onDismissMultiDownload = detail::dismissMultiDownload,
                     onRetryMultiDownload = detail::retryMultiDownload,
                     onToggleMultiDownloadFolder = detail::toggleMultiDownloadFolder,
                     onEnsureMultiDownloadFolderLoaded = detail::ensureMultiDownloadFolderLoaded,
-                    onPerformDownloadBatch = downloads::performBatch,
+                    activeDownloadResourceIds = activeDownloadResourceIds,
+                    onRefreshDownloadFacts = downloads::refreshLocalArtifactFacts,
+                    onRetryMultiDownloadFolder = detail::retryMultiDownloadFolder,
+                    onExecuteDownloadAction = { action, resourceIds, availableResourceIds, completion ->
+                        downloads.performManagementAction(action, resourceIds, availableResourceIds, completion)
+                    },
                     onOpenSelectedResource = onOpenResource, onOpenReadingUnit = onOpenReadingUnit,
                     onOpenDownloadedResource = onOpenDownload,
                     managementViewModel = management, canManageSystem = canManageSystem,

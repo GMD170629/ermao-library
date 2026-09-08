@@ -120,12 +120,17 @@ private struct WorkControlAction: Identifiable {
 
 private enum WorkDetailSheet: Identifiable {
     case shelves
-    case downloads
+    case downloads(scope: DownloadManagementScope)
 
     var id: String {
         switch self {
         case .shelves: "shelves"
-        case .downloads: "downloads"
+        case let .downloads(scope):
+            switch scope {
+            case .book: "downloads-book"
+            case let .directory(sourceNodeID): "downloads-directory-\(sourceNodeID)"
+            case let .resource(resourceID): "downloads-resource-\(resourceID)"
+            }
         }
     }
 }
@@ -172,9 +177,8 @@ struct WorkDetailView: View {
     @StateObject private var managementHolder: WorkManagementStoreHolder
     @State private var pendingReadingStatusTarget: WorkControlTarget?
     @State private var feedback: WorkDetailFeedback?
+    @State private var pendingDownloadHandoff: ReaderHandoff?
     @State private var coverRefreshToken = 0
-    @State private var downloadMenuRecord: ManagedDownloadRecord?
-    @State private var pendingDownloadRemoval: ManagedDownloadRecord?
     @State private var fullMetadataPath: String?
     @Environment(\.managementRevision) private var managementRevision
     @Environment(\.managementChange) private var managementChange
@@ -270,40 +274,36 @@ struct WorkDetailView: View {
 
     private var sheetScreen: some View {
         baseScreen
-        .sheet(item: $activeSheet) { sheet in
+        .sheet(item: $activeSheet, onDismiss: handleDownloadSheetDismissal) { sheet in
             switch sheet {
             case .shelves:
                 shelfPicker
                     .interactiveDismissDisabled(isLoadingShelves || isSavingShelves)
-            case .downloads:
+            case let .downloads(scope):
                 if let detail = currentDetail {
                     MultiDownloadSheet(
                         context: context,
                         client: client,
                         detail: detail,
-                        rootSourceNodeID: store.contentsPage?.currentSourceNodeID,
+                        scope: scope,
                         downloads: downloads,
-                        openReader: openReader,
-                        onDismiss: { activeSheet = nil },
-                        onCompleted: { succeeded, failed in
-                            if failed == 0 {
-                                showFeedback(
-                                    String(format: String(localized: "work.multiDownload.completed"), succeeded),
-                                    isError: false
-                                )
-                            } else {
-                                showFeedback(
-                                    String(format: String(localized: "work.multiDownload.partial"), succeeded, failed),
-                                    isError: true
-                                )
-                            }
-                        }
+                        requestOpenReader: { handoff in
+                            pendingDownloadHandoff = handoff
+                            activeSheet = nil
+                        },
+                        onDismiss: { activeSheet = nil }
                     )
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
                 }
             }
         }
+    }
+
+    private func handleDownloadSheetDismissal() {
+        guard let handoff = pendingDownloadHandoff else { return }
+        pendingDownloadHandoff = nil
+        openReader(handoff)
     }
 
     private var availabilityDialogScreen: some View {
@@ -336,44 +336,8 @@ struct WorkDetailView: View {
         }
     }
 
-    private var downloadDialogScreen: some View {
-        availabilityDialogScreen
-        .confirmationDialog(
-            "work.download.manage",
-            isPresented: downloadMenuIsPresented,
-            titleVisibility: .visible,
-            presenting: downloadMenuRecord
-        ) { record in
-            Button("work.download.openOffline") {
-                downloadMenuRecord = nil
-                openOffline(record)
-            }
-            Button("downloads.remove.action", role: .destructive) {
-                downloadMenuRecord = nil
-                pendingDownloadRemoval = record
-            }
-            Button("common.cancel", role: .cancel) { downloadMenuRecord = nil }
-        } message: { record in
-            Text(record.resourceTitle)
-        }
-        .confirmationDialog(
-            "downloads.remove.confirm.title",
-            isPresented: pendingDownloadRemovalIsPresented,
-            titleVisibility: .visible,
-            presenting: pendingDownloadRemoval
-        ) { record in
-            Button("downloads.remove.action", role: .destructive) {
-                downloads.remove(record)
-                pendingDownloadRemoval = nil
-            }
-            Button("common.cancel", role: .cancel) { pendingDownloadRemoval = nil }
-        } message: { _ in
-            Text("downloads.remove.confirm.message")
-        }
-    }
-
     private var observedScreen: some View {
-        downloadDialogScreen
+        availabilityDialogScreen
         .overlay(alignment: .bottom) { feedbackBanner }
         .appCanvas()
         .onChange(of: managementRevision, initial: true) { _, _ in
@@ -414,20 +378,6 @@ struct WorkDetailView: View {
         Binding(
             get: { readerAccessErrorCode != nil },
             set: { if !$0 { readerAccessErrorCode = nil } }
-        )
-    }
-
-    private var downloadMenuIsPresented: Binding<Bool> {
-        Binding(
-            get: { downloadMenuRecord != nil },
-            set: { if !$0 { downloadMenuRecord = nil } }
-        )
-    }
-
-    private var pendingDownloadRemovalIsPresented: Binding<Bool> {
-        Binding(
-            get: { pendingDownloadRemoval != nil },
-            set: { if !$0 { pendingDownloadRemoval = nil } }
         )
     }
 
@@ -713,9 +663,19 @@ struct WorkDetailView: View {
     private func detailActions(_ detail: BookDetailContent) -> some View {
         let selected = readingResource(detail)
         let readingStatus = store.isBookRoot ? (detail.readingStatus ?? .unread) : resourceReadingStatus(selected)
-        let bookDownload = bookDownloadSummary(detail)
+        let downloadResource = selected.map { downloads.managementResource(for: $0) }
+        let downloadTitle: LocalizedStringKey
+        let downloadImage: String
+        if store.isBookRoot {
+            let summary = bookDownloadSummary(detail)
+            downloadTitle = bookDownloadTitle(summary)
+            downloadImage = bookDownloadImage(summary)
+        } else {
+            downloadTitle = resourceDownloadTitle(downloadResource)
+            downloadImage = resourceDownloadImage(downloadResource)
+        }
         let isAudio = selected?.readerType.lowercased() == "audio"
-        let hasProgress = (selected?.progress ?? 0) > 0
+        let hasProgress = (selected?.progress ?? 0) > 0 && (selected?.progress ?? 0) < 100
         let title: LocalizedStringKey = isAudio
             ? (hasProgress ? "work.listener.continue.action" : "work.listener.start.action")
             : (hasProgress ? "work.reader.continue.action" : "work.reader.start.action")
@@ -732,12 +692,14 @@ struct WorkDetailView: View {
             .frame(minHeight: 52)
             .accessibilityIdentifier("work.reader.action")
             HStack(spacing: 0) {
-                quickAction(store.isBookRoot ? bookDownloadTitle(bookDownload) : downloadActionTitle(selected), systemImage: store.isBookRoot ? bookDownloadImage(bookDownload) : (selected.map { downloadSystemImage(resourceID: $0.id) } ?? "arrow.down.circle")) {
-                    if store.isBookRoot { activeSheet = .downloads; return }
-                    guard let selected else { return }
-                    handlePrimaryDownload(selected, detail: detail)
+                quickAction(downloadTitle, systemImage: downloadImage) {
+                    if store.isBookRoot {
+                        openDownloadPanel(scope: .book)
+                    } else if let selected {
+                        openDownloadPanel(scope: .resource(resourceID: selected.id))
+                    }
                 }
-                .disabled(!store.isBookRoot && (selected == nil || (selected?.isReadable != true && selected.flatMap { downloads.record(for: $0.id) } == nil)))
+                .disabled(!store.isBookRoot && selected == nil)
                 .accessibilityIdentifier("work.download.action")
                 quickAction(readingStatus.title, systemImage: readingStatusImage(readingStatus)) {
                     togglePageReadingStatus(detail)
@@ -766,27 +728,19 @@ struct WorkDetailView: View {
     }
 
     private func bookDownloadSummary(_ detail: BookDetailContent) -> ErmaoShared.BookDetailDownloadSummary {
-        let resourceIDs = Set(downloads.records.filter { $0.bookID == detail.book.id }.map(\.resourceID))
-        let states: [ErmaoShared.BookDetailDownloadState] = resourceIDs.compactMap { id in
-            guard let record = downloads.record(for: id) else { return nil }
-            switch record.state {
-            case .queued, .downloading: return .downloading
-            case .paused: return .paused
-            case .failedRetryable, .failedTerminal: return .failed
-            case .completed: return record.isVerifiedOfflineCopy ? .downloaded : .failed
-            }
-        }
-        return ErmaoShared.PublicKt.summarizeBookDetailDownloads(states: states)
+        ErmaoShared.PublicKt.summarizeManagedBookDownloads(
+            resources: downloads.managementResources(for: detail.resources)
+        )
     }
 
     private func bookDownloadTitle(_ summary: ErmaoShared.BookDetailDownloadSummary) -> LocalizedStringKey {
         switch summary.state {
-        case .downloading: return "work.multiDownload.downloading"
-        case .paused: return "work.multiDownload.paused"
-        case .failed: return "work.download.retry"
+        case .downloading: "work.multiDownload.downloading"
+        case .paused: "work.multiDownload.paused"
+        case .failed: "work.download.retry"
         case .downloaded:
-            return LocalizedStringKey(String(format: String(localized: "work.download.bookCount.format"), Int(summary.downloadedResources)))
-        default: return "work.action.download"
+            LocalizedStringKey(String(format: String(localized: "work.download.bookCount.format"), Int(summary.downloadedResources)))
+        default: "work.action.download"
         }
     }
 
@@ -797,6 +751,45 @@ struct WorkDetailView: View {
         case .failed: "arrow.clockwise.circle"
         case .downloaded: "checkmark.circle"
         default: "arrow.down.circle"
+        }
+    }
+
+    private func resourceDownloadTitle(_ projected: DownloadManagementResource?) -> LocalizedStringKey {
+        guard let projected else { return "work.action.download" }
+        switch projected.status {
+        case .queued, .downloading: return "work.multiDownload.downloading"
+        case .paused: return "work.multiDownload.paused"
+        case .invalidlocal, .failedretryable, .failedterminal: return "work.download.retry"
+        case .completed: return "work.download.manage"
+        case .notdownloaded, .unavailable: return "work.action.download"
+        default: return "work.action.download"
+        }
+    }
+
+    private func resourceDownloadImage(_ projected: DownloadManagementResource?) -> String {
+        guard let projected else { return "arrow.down.circle" }
+        switch projected.status {
+        case .queued, .downloading: return "pause.circle"
+        case .paused, .failedretryable, .failedterminal: return "arrow.clockwise.circle"
+        case .invalidlocal: return "exclamationmark.circle"
+        case .completed: return "checkmark.circle"
+        case .notdownloaded, .unavailable: return "arrow.down.circle"
+        default: return "arrow.down.circle"
+        }
+    }
+
+    private func resourceDownloadForeground(_ projected: DownloadManagementResource?) -> Color {
+        projected?.status == .completed ? theme.brandAccent : theme.textSecondary
+    }
+
+    private func resourceDownloadAccessibilityLabel(_ projected: DownloadManagementResource?) -> LocalizedStringKey {
+        guard let projected else { return "work.volume.download.action" }
+        switch projected.status {
+        case .queued, .downloading: return "work.volume.download.pause"
+        case .paused, .invalidlocal, .failedretryable, .failedterminal: return "work.volume.download.retry"
+        case .completed: return "work.volume.download.completed"
+        case .notdownloaded, .unavailable: return "work.volume.download.action"
+        default: return "work.volume.download.action"
         }
     }
 
@@ -815,22 +808,40 @@ struct WorkDetailView: View {
         .accessibilityIdentifier(target == .book ? "work.book.moreMenu" : "work.resource.moreMenu")
     }
 
+    @ViewBuilder
     private func directoryControlMenu() -> some View {
-        Menu {
-            if let node = store.contentsPage?.currentNode, node.isSourceFolder {
-                NativeManagementMenu(target: NativeManagementTarget(kind: .directory, bookID: store.bookIDValue,
-                    id: node.sourceNodeID, title: node.title, hasRepresentative: node.representativeResourceID != nil))
+        if let node = store.contentsPage?.currentNode, node.isSourceFolder {
+            NativeManagementMore(
+                target: NativeManagementTarget(
+                    kind: .directory,
+                    bookID: store.bookIDValue,
+                    id: node.sourceNodeID,
+                    title: node.title,
+                    hasRepresentative: node.representativeResourceID != nil
+                ),
+                supplementalActions: [
+                    NativeManagementSupplementalAction(
+                        id: "download",
+                        title: "work.action.download",
+                        systemImage: "arrow.down",
+                        accessibilityIdentifier: "work.directory.download"
+                    ) {
+                        openDownloadPanel(scope: .directory(sourceNodeID: node.sourceNodeID))
+                    }
+                ]
+            ) {
+                Label("common.more", systemImage: "ellipsis")
+                    .labelStyle(.iconOnly)
             }
-            Button { activeSheet = .downloads } label: {
-                Label("work.action.download", systemImage: "arrow.down")
+            .accessibilityIdentifier("work.directory.moreMenu")
+        } else {
+            Button {} label: {
+                Label("common.more", systemImage: "ellipsis")
+                    .labelStyle(.iconOnly)
             }
-            .accessibilityIdentifier("work.directory.download")
-        } label: {
-            Label("common.more", systemImage: "ellipsis")
-                .labelStyle(.iconOnly)
+            .disabled(true)
+            .accessibilityIdentifier("work.directory.moreMenu")
         }
-        .menuOrder(.fixed)
-        .accessibilityIdentifier("work.directory.moreMenu")
     }
 
     private func controlMenuButtons(_ actions: [WorkControlAction]) -> some View {
@@ -1219,7 +1230,8 @@ struct WorkDetailView: View {
         detail: BookDetailContent,
         displayIndex: String? = nil
     ) -> some View {
-        HStack(spacing: .space1) {
+        let downloadResource = downloads.managementResource(for: resource)
+        return HStack(spacing: .space1) {
             Text(displayIndex ?? resourceDisplayIndex(resource, detail: detail))
                 .appTextStyle(.caption)
                 .monospacedDigit()
@@ -1272,14 +1284,15 @@ struct WorkDetailView: View {
             }
             .buttonStyle(.plain)
 
-            Button { handleDownload(resource, detail: detail) } label: {
-                Image(systemName: downloadSystemImage(resourceID: resource.id))
+            Button { openDownloadPanel(scope: .resource(resourceID: resource.id)) } label: {
+                Image(systemName: resourceDownloadImage(downloadResource))
                     .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(downloadForeground(resourceID: resource.id))
+                    .foregroundStyle(resourceDownloadForeground(downloadResource))
                     .frame(width: .iosMinimumTouchTarget, height: .iosMinimumTouchTarget)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(Text(downloadAccessibilityLabel(resourceID: resource.id)))
+            .accessibilityLabel(Text(resourceDownloadAccessibilityLabel(downloadResource)))
+            .accessibilityValue(Text(resourceDownloadTitle(downloadResource)))
 
             if entry?.hasChildren == true {
                 Button { openDirectory(entry?.sourceNodeID) } label: {
@@ -1587,6 +1600,7 @@ struct WorkDetailView: View {
         detail: BookDetailContent
     ) -> some View {
         let index = resource.displayIndex(position: position)
+        let downloadResource = downloads.managementResource(for: resource)
         return VStack(alignment: .leading, spacing: .space1) {
             ZStack(alignment: .topLeading) {
                 Button {
@@ -1642,19 +1656,19 @@ struct WorkDetailView: View {
                     .accessibilityHidden(true)
 
                 Button {
-                    handleDownload(resource, detail: detail)
+                    openDownloadPanel(scope: .resource(resourceID: resource.id))
                 } label: {
-                    Image(systemName: downloadSystemImage(resourceID: resource.id))
+                    Image(systemName: resourceDownloadImage(downloadResource))
                         .font(.body.weight(.medium))
-                        .foregroundStyle(downloadForeground(resourceID: resource.id))
+                        .foregroundStyle(resourceDownloadForeground(downloadResource))
                         .frame(width: 24, height: 24)
                         .background(theme.surfaceRaised.opacity(0.92))
                         .clipShape(Circle())
                         .frame(width: .iosMinimumTouchTarget, height: .iosMinimumTouchTarget)
                 }
                 .buttonStyle(.plain)
-                .disabled(downloads.record(for: resource.id)?.isVerifiedOfflineCopy == true)
-                .accessibilityLabel(Text(downloadAccessibilityLabel(resourceID: resource.id)))
+                .accessibilityLabel(Text(resourceDownloadAccessibilityLabel(downloadResource)))
+                .accessibilityValue(Text(resourceDownloadTitle(downloadResource)))
                 .frame(maxWidth: .infinity, alignment: .topTrailing)
             }
 
@@ -1749,6 +1763,10 @@ struct WorkDetailView: View {
 
     private func selectedResource(_ detail: BookDetailContent) -> BookResource? {
         store.selectedResourceID.flatMap { id in detail.resources.first(where: { $0.id == id }) }
+    }
+
+    private func openDownloadPanel(scope: DownloadManagementScope) {
+        activeSheet = .downloads(scope: scope)
     }
 
     private func openDirectory(_ sourceNodeID: String?) {
@@ -2068,130 +2086,6 @@ struct WorkDetailView: View {
             return String(localized: "download.bootstrap.invalid")
         }
         return String(format: String(localized: "work.download.failed.format"), code)
-    }
-
-    private func handlePrimaryDownload(_ resource: BookResource, detail: BookDetailContent) {
-        if let record = downloads.record(for: resource.id) {
-            switch record.state {
-            case .queued, .downloading:
-                downloads.pause(record)
-                showFeedback(String(localized: "work.download.paused"), isError: false)
-            case .paused, .failedRetryable, .failedTerminal:
-                downloads.resume(record)
-                showFeedback(String(localized: "work.download.resumed"), isError: false)
-            case .completed:
-                if record.isVerifiedOfflineCopy {
-                    downloadMenuRecord = record
-                } else {
-                    downloads.retry(record)
-                    showFeedback(String(localized: "work.download.resumed"), isError: false)
-                }
-            }
-            return
-        }
-        downloads.enqueue(book: detail.book, resource: resource)
-        showFeedback(String(localized: "work.download.queued"), isError: false)
-    }
-
-    private func downloadActionTitle(_ resource: BookResource?) -> LocalizedStringKey {
-        guard let resource, let record = downloads.record(for: resource.id) else {
-            return "work.action.download"
-        }
-        switch record.state {
-        case .queued, .downloading: return "work.multiDownload.downloading"
-        case .paused: return "work.multiDownload.paused"
-        case .failedRetryable, .failedTerminal: return "work.download.retry"
-        case .completed: return record.isVerifiedOfflineCopy ? "work.download.manage" : "work.download.retry"
-        }
-    }
-
-    private func handleDownload(_ resource: BookResource, detail: BookDetailContent) {
-        if let record = downloads.record(for: resource.id) {
-            switch record.state {
-            case .downloading, .queued: downloads.pause(record)
-            case .paused, .failedRetryable, .failedTerminal: downloads.resume(record)
-            case .completed:
-                if record.isVerifiedOfflineCopy { downloadMenuRecord = record }
-            }
-        } else {
-            downloads.enqueue(book: detail.book, resource: resource)
-        }
-    }
-
-    private func downloadSystemImage(resourceID: String) -> String {
-        guard let record = downloads.record(for: resourceID) else { return "arrow.down.circle" }
-        switch record.state {
-        case .queued, .downloading: return "pause.circle"
-        case .paused, .failedRetryable, .failedTerminal: return "arrow.clockwise.circle"
-        case .completed:
-            return record.isVerifiedOfflineCopy ? "checkmark.circle" : "exclamationmark.circle"
-        }
-    }
-
-    private func downloadForeground(resourceID: String) -> Color {
-        downloads.record(for: resourceID)?.isVerifiedOfflineCopy == true
-            ? theme.brandAccent
-            : theme.textSecondary
-    }
-
-    private func openOffline(_ record: ManagedDownloadRecord) {
-        guard record.isVerifiedOfflineCopy else {
-            downloads.retry(record)
-            showFeedback(String(localized: "downloads.error.invalid"), isError: true)
-            return
-        }
-        if record.readerType == .audio {
-            guard record.namespace == context.namespaceKey,
-                  record.verifiedSharedArtifact != nil,
-                  let expectedBytes = record.expectedBytes,
-                  expectedBytes == record.receivedBytes,
-                  let mimeType = record.mimeType,
-                  let audioPlaybackRuntime else {
-                showFeedback(String(localized: "downloads.error.invalid"), isError: true)
-                return
-            }
-            Task { @MainActor in
-                guard let fileURL = await downloads.localFileURL(for: record) else {
-                    showFeedback(String(localized: "downloads.error.invalid"), isError: true)
-                    return
-                }
-                audioPlaybackRuntime.launchVerifiedLocalArtifact(
-                    namespace: context.namespaceKey,
-                    userID: context.userID,
-                    bookID: record.bookID,
-                    bookTitle: record.bookTitle,
-                    author: record.bookAuthor,
-                    resourceID: record.resourceID,
-                    resourceTitle: record.resourceTitle,
-                    assetID: record.assetID,
-                    fileURL: fileURL,
-                    mimeType: mimeType,
-                    sizeBytes: expectedBytes
-                )
-            }
-            return
-        }
-        openReader(
-            ReaderHandoff(
-                bookID: record.bookID,
-                resourceID: record.resourceID,
-                assetID: record.assetID,
-                title: record.bookTitle,
-                resourceTitle: record.resourceTitle,
-                format: record.format,
-                readerType: record.readerType,
-                source: .verifiedLocal(recordID: record.id)
-            )
-        )
-    }
-
-    private func downloadAccessibilityLabel(resourceID: String) -> LocalizedStringKey {
-        guard let record = downloads.record(for: resourceID) else { return "work.volume.download.action" }
-        switch record.state {
-        case .queued, .downloading: return "work.volume.download.pause"
-        case .paused, .failedRetryable, .failedTerminal: return "work.volume.download.retry"
-        case .completed: return "work.volume.download.completed"
-        }
     }
 
     private var readerAccessErrorMessage: LocalizedStringKey {

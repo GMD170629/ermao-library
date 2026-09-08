@@ -266,6 +266,130 @@ struct CompletedDownloadFile: Sendable {
     let byteCount: Int64
 }
 
+/// Maps iOS-owned catalog facts into the shared download-management policy.
+///
+/// The policy owns status and action semantics. This adapter only supplies the
+/// task status, verification fact, live-transfer ownership, and server
+/// availability observed by iOS.
+enum DownloadManagementAdapter {
+    static func taskStatus(for record: ManagedDownloadRecord?) -> DownloadTaskStatus? {
+        guard let record else { return nil }
+        if let encoded = record.sharedTaskJSON,
+           let task = try? DownloadCatalogCodec.shared.decode(serialized: encoded),
+           task.id == record.id,
+           task.descriptor.identity.bookId == record.bookID,
+           task.descriptor.identity.resourceId == record.resourceID,
+           task.descriptor.identity.assetId == record.assetID {
+            let namespace = task.descriptor.identity.namespace_
+            let taskNamespace = "\(namespace.serverIdentity)|\(namespace.userId)|\(namespace.authorizationVersion)"
+            if taskNamespace == record.namespace {
+                return task.status
+            }
+        }
+        return record.state.sharedStatus
+    }
+
+    static func item(
+        resource: BookResource,
+        record: ManagedDownloadRecord?,
+        active: Bool
+    ) -> DownloadManagementItem {
+        DownloadManagementItem(
+            resourceId: resource.id,
+            status: taskStatus(for: record),
+            verified: record?.verifiedSharedArtifact != nil,
+            active: active,
+            available: resource.isReadable == true,
+            failureCode: record?.stableErrorCode
+        )
+    }
+
+    static func project(
+        resource: BookResource,
+        record: ManagedDownloadRecord?,
+        active: Bool
+    ) -> DownloadManagementResource {
+        DownloadManagementPolicy.shared.project(
+            item: item(resource: resource, record: record, active: active)
+        )
+    }
+
+    /// Creates a display-only resource for a manifest entry absent from the
+    /// current server page. It deliberately remains unavailable so the shared
+    /// policy can expose only actions justified by local facts (Open/Remove).
+    static func catalogResource(_ record: ManagedDownloadRecord) -> BookResource {
+        let byteCount = record.expectedBytes ?? record.receivedBytes
+        return BookResource(
+            id: record.resourceID,
+            bookID: record.bookID,
+            sourceNodeID: "download-catalog",
+            title: record.resourceTitle,
+            format: record.format,
+            readerType: record.readerType.rawValue,
+            sizeLabel: byteCount > 0
+                ? ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file)
+                : nil,
+            progress: record.progress,
+            isReadable: false,
+            isSelected: false,
+            sortOrder: Int.max
+        )
+    }
+}
+
+extension ManagedDownloadRecord {
+    /// The one native manifest mapper used by both transfer callbacks and
+    /// management transitions that persist a shared task.
+    static func fromSharedTask(
+        _ task: DownloadTask,
+        previous: ManagedDownloadRecord?,
+        namespace: String
+    ) throws -> ManagedDownloadRecord {
+        let descriptor = task.descriptor
+        guard let readerType = ManagedDownloadReaderType(rawValue: descriptor.readerType.name.lowercased()) else {
+            throw ManagedDownloadTransferError.invalidResponse
+        }
+        let artifact = task.artifact
+        return ManagedDownloadRecord(
+            id: task.id,
+            namespace: namespace,
+            bookID: descriptor.identity.bookId,
+            bookTitle: descriptor.bookTitle,
+            bookAuthor: descriptor.bookAuthor,
+            resourceID: descriptor.identity.resourceId,
+            resourceTitle: descriptor.resourceTitle,
+            assetID: descriptor.identity.assetId,
+            format: descriptor.format.uppercased(),
+            mimeType: descriptor.source.mimeType,
+            readerType: readerType,
+            state: Self.nativeState(for: task.status),
+            verification: artifact == nil ? .pending : .verified,
+            expectedBytes: descriptor.totalBytes,
+            artifactKind: descriptor.artifactKind == .originalpageset ? .originalPageSet : .singleOriginalAsset,
+            receivedBytes: task.transferredBytes,
+            localRelativePath: artifact?.localReference,
+            stableErrorCode: task.failureCode,
+            createdAt: previous?.createdAt ?? Date(),
+            updatedAt: Date(),
+            completedAt: artifact.map { Date(timeIntervalSince1970: Double($0.completedAtEpochMillis) / 1000) },
+            lastOpenedAt: previous?.lastOpenedAt,
+            sharedTaskJSON: DownloadCatalogCodec.shared.encode(task: task)
+        )
+    }
+
+    private static func nativeState(for status: DownloadTaskStatus) -> ManagedDownloadState {
+        switch status {
+        case .queued: .queued
+        case .downloading: .downloading
+        case .paused, .waitingforwifi: .paused
+        case .completed: .completed
+        case .failedretryable, .insufficientspace: .failedRetryable
+        case .failedterminal, .cancelled: .failedTerminal
+        default: .failedTerminal
+        }
+    }
+}
+
 protocol CompletedDownloadProviding: Sendable {
     func completedFile(recordID: String, namespace: String) async throws -> CompletedDownloadFile?
 }

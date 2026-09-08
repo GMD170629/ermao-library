@@ -80,6 +80,32 @@ class AudioMiniPlayerPresentationPolicyTest {
     }
 
     @Test
+    fun failedFirstLaunchKeepsItsErrorVisibleUntilDismissedOrRetired() {
+        listOf(false, true).forEach { recoverable ->
+            val failed = reduceAudioChromeState(
+                currentState = AudioChromeState.NowPlaying,
+                event = AudioChromeEvent.PlaybackChanged,
+                hasSession = false,
+                playbackStage = AudioPlaybackStage.Error,
+                hasRecoverableError = recoverable,
+            )
+            assertEquals(AudioChromeState.NowPlaying, failed)
+            listOf(AudioChromeEvent.DismissNowPlaying, AudioChromeEvent.SessionRetired).forEach { event ->
+                assertEquals(
+                    AudioChromeState.Hidden,
+                    reduceAudioChromeState(
+                        currentState = failed,
+                        event = event,
+                        hasSession = false,
+                        playbackStage = AudioPlaybackStage.Error,
+                        hasRecoverableError = recoverable,
+                    ),
+                )
+            }
+        }
+    }
+
+    @Test
     fun playbackOutsideNowPlayingRevealsMiniPlayer() {
         assertEquals(
             AudioChromeState.Mini,

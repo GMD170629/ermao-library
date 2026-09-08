@@ -245,7 +245,7 @@ func downloadFailureMessage(_ code: String?) -> LocalizedStringKey {
     case "ASSET_VERSION_CHANGED": "reader.error.PUBLICATION_CHANGED"
     case "DOWNLOAD_INVALID_RESPONSE", "DOWNLOAD_LOCAL_FILE_INVALID": "downloads.error.invalid"
     case "DOWNLOAD_TRANSPORT_UNAVAILABLE": "downloads.error.transportUnavailable"
-    case "DOWNLOAD_MANIFEST_READ_FAILED", "DOWNLOAD_MANIFEST_WRITE_FAILED": "downloads.error.storage"
+    case "DOWNLOAD_MANIFEST_READ_FAILED", "DOWNLOAD_MANIFEST_WRITE_FAILED", "DOWNLOAD_REMOVE_FAILED": "downloads.error.storage"
     default: "downloads.error.generic"
     }
 }

@@ -1,11 +1,31 @@
 package com.ermao.library.shared.modules.library
 
+import com.ermao.library.shared.modules.downloads.DownloadManagementItem
+import com.ermao.library.shared.modules.downloads.DownloadManagementPolicy
+import com.ermao.library.shared.modules.downloads.DownloadTaskStatus
+
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertNotNull
 
 class BookDetailActionsTest {
+    @Test
+    fun managementEntryCountTracksVerifiedCopiesAndRemoval() {
+        val completed = DownloadManagementPolicy.project(DownloadManagementItem(
+            "valid", DownloadTaskStatus.Completed, verified = true, active = false, available = false,
+        ))
+        val invalid = DownloadManagementPolicy.project(DownloadManagementItem(
+            "invalid", DownloadTaskStatus.Completed, verified = false, active = false, available = true,
+        ))
+        assertEquals(BookDetailDownloadSummary(BookDetailDownloadState.Failed, 1),
+            summarizeManagedBookDownloads(listOf(completed, completed, invalid)))
+        assertEquals(BookDetailDownloadSummary(BookDetailDownloadState.Downloaded, 1),
+            summarizeManagedBookDownloads(listOf(completed)))
+        assertEquals(BookDetailDownloadSummary(BookDetailDownloadState.NotDownloaded, 0),
+            summarizeManagedBookDownloads(emptyList()))
+    }
+
     @Test
     fun bookActionsNeverBecomeContinueResourceActions() {
         for (readingId in listOf(null, "last-read", "another-volume")) {

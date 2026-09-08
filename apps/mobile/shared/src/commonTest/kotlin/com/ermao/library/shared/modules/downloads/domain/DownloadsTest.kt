@@ -70,7 +70,9 @@ class DownloadsTest {
 
         assertEquals(DownloadTaskStatus.Completed, completed.status)
         assertEquals(completedArtifact, completed.artifact)
-        assertFailsWith<IllegalArgumentException> { queued.transition(DownloadTaskEvent.Pause) }
+        assertEquals(DownloadTaskStatus.Paused, queued.transition(DownloadTaskEvent.Pause).status)
+        assertEquals(0, queued.transition(DownloadTaskEvent.Pause).transferredBytes)
+        assertFailsWith<IllegalArgumentException> { completed.transition(DownloadTaskEvent.Pause) }
         assertFailsWith<IllegalArgumentException> { paused.transition(DownloadTaskEvent.BytesTransferred(5)) }
         assertFailsWith<IllegalArgumentException> { completed.transition(DownloadTaskEvent.Cancel) }
         assertFailsWith<IllegalArgumentException> {

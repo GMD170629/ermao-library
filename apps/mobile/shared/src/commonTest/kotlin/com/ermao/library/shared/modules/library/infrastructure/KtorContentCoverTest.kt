@@ -34,4 +34,30 @@ class KtorContentCoverTest {
         assertEquals(listOf("https://library.example/base/api/books/book/cover?v=9&size=small",
             "https://library.example/base/api/resources/book/previews/1?size=large"), requests)
     }
+
+    @Test fun tagOptionsUseTheSharedLibraryFilterEndpoint() = runBlocking {
+        val management = createWorkManagementContext("profile", "Test", "https://library.example/base", "server", false, "user", 1)
+        val context = ContentRequestContext(management.profile, management.namespace)
+        val repository = KtorContentRepository { profile ->
+            ApiClient(profile, HttpClient(MockEngine { request ->
+                assertEquals("/base/api/library/filter-options", request.url.encodedPath)
+                assertEquals("tags", request.url.parameters["source"])
+                assertEquals("历史", request.url.parameters["query"])
+                assertEquals("20", request.url.parameters["limit"])
+                respond(
+                    """{"ok":true,"data":{"source":"tags","query":"历史","options":[{"value":"历史","label":"历史","count":4}],"hasMore":false,"indexReady":true}}""",
+                    HttpStatusCode.OK,
+                    headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+            }), Json { ignoreUnknownKeys = false })
+        }
+
+        val page = assertIs<ContentResult.Content<com.ermao.library.shared.modules.library.LibraryTagOptionPage>>(
+            repository.loadTagOptions(context, " 历史 ", 20),
+        ).value
+        assertEquals("历史", page.options.single().value)
+        assertEquals(4, page.options.single().count)
+        assertEquals(false, page.hasMore)
+        assertEquals(true, page.indexReady)
+    }
 }

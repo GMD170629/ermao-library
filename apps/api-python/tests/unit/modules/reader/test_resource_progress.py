@@ -7,6 +7,7 @@ from app.modules.reader.domain.resource_progress import (
     ResourceReadingState,
     choose_continue_resource_id,
     completed_for_available_resources,
+    display_percent_for_status,
     reading_status_for_available_resources,
 )
 
@@ -102,6 +103,22 @@ def test_explicit_status_overrides_completion_without_changing_position(
     assert reading_status_for_available_resources([resource]) == status
     assert resource.completed is (status == "FINISHED")
     assert resource.percent == percent
+
+
+@pytest.mark.parametrize(
+    ("percent", "status", "expected"),
+    ((37, "UNREAD", 0), (37, "FINISHED", 100), (37, None, 37)),
+)
+def test_display_percent_projects_manual_status(
+    percent: int,
+    status: Literal["UNREAD", "FINISHED"] | None,
+    expected: int,
+) -> None:
+    assert display_percent_for_status(percent, status) == expected
+    assert (
+        _resource("one", 0, percent=percent, explicit_status=status).display_percent
+        == expected
+    )
 
 
 def test_mixed_explicit_completion_keeps_unfinished_resource_for_continuation() -> None:

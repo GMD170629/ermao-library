@@ -49,7 +49,7 @@ struct ReaderTOCSheet<Session: IosReaderControlSession>: View {
                                     .font(.caption2)
                                     .foregroundStyle(.red)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                                     .listRowSeparator(.hidden)
                                     .listRowBackground(Color.clear)
                             }
@@ -66,11 +66,13 @@ struct ReaderTOCSheet<Session: IosReaderControlSession>: View {
                                 } label: {
                                     HStack {
                                         Text(entry.title)
+                                            .lineLimit(1)
+                                            .truncationMode(.tail)
                                             .padding(.leading, CGFloat(entry.depth) * 16)
                                         Spacer()
                                         if pendingEntryID == entry.id { ProgressView().tint(.accentColor) }
                                     }
-                                    .font(.caption2)
+                                    .font(.body)
                                     .foregroundStyle(selected ? Color.accentColor : Color.primary)
                                     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                                     .contentShape(Rectangle())
@@ -79,7 +81,7 @@ struct ReaderTOCSheet<Session: IosReaderControlSession>: View {
                                 .disabled(pendingEntryID != nil)
                                 .accessibilityLabel(Text(entry.title))
                                 .accessibilityAddTraits(selected ? .isSelected : [])
-                                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                                 .listRowSeparator(.hidden)
                                 .listRowBackground(selected ? Color.accentColor.opacity(0.12) : Color.clear)
                                 .id(entry.id)

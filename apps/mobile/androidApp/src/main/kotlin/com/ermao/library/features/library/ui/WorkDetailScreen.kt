@@ -102,7 +102,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.disabled
@@ -174,9 +173,15 @@ import com.ermao.library.ui.components.WarmPageTextAction
 import com.ermao.library.ui.components.WarmPageTopBarRole
 import com.ermao.library.ui.components.warmPageActionHorizontalPadding
 import com.ermao.library.ui.theme.WarmPageThemeValues
-import com.ermao.library.features.downloads.model.AndroidDownloadRecord
-import com.ermao.library.features.downloads.model.AndroidDownloadStatus
-import com.ermao.library.shared.modules.downloads.DownloadBatchResult
+import com.ermao.library.features.downloads.DownloadRecord as AndroidDownloadRecord
+import com.ermao.library.features.downloads.DownloadStatus as AndroidDownloadStatus
+import com.ermao.library.features.downloads.downloadManagementItem
+import com.ermao.library.shared.modules.downloads.DownloadManagementPolicy
+import com.ermao.library.shared.modules.downloads.DownloadManagementStatus
+import com.ermao.library.shared.modules.library.summarizeManagedBookDownloads
+import com.ermao.library.shared.modules.downloads.DownloadManagementAction
+import com.ermao.library.shared.modules.downloads.DownloadManagementOutcome
+import com.ermao.library.shared.modules.downloads.DownloadManagementResult
 import com.ermao.library.features.workmanagement.application.WorkManagementViewModel
 import com.ermao.library.features.workmanagement.application.WorkManagementCompletion
 import com.ermao.library.shared.modules.workmanagement.domain.ManagedReadingStatus
@@ -224,8 +229,18 @@ fun WorkDetailScreen(
     onRetryMultiDownload: () -> Unit = {},
     onToggleMultiDownloadFolder: (String) -> Unit = {},
     onEnsureMultiDownloadFolderLoaded: (String) -> Unit = {},
-    onPerformDownloadBatch: (Set<String>, (DownloadBatchResult) -> Unit) -> Unit = { _, completion ->
-        completion(DownloadBatchResult(emptyList()))
+    activeDownloadResourceIds: Set<String> = emptySet(),
+    onRefreshDownloadFacts: (Set<String>) -> Unit = {},
+    onRetryMultiDownloadFolder: (String?) -> Unit = { onRetryMultiDownload() },
+    onExecuteDownloadAction: (
+        DownloadManagementAction,
+        Set<String>,
+        Set<String>,
+        (List<DownloadManagementResult>) -> Unit,
+    ) -> Unit = { action, resourceIds, _, completion ->
+        completion(resourceIds.sorted().map { resourceId ->
+            DownloadManagementResult(resourceId, action, DownloadManagementOutcome.Skipped)
+        })
     },
     onOpenSelectedResource: (ResourceContent) -> Unit = {},
     onOpenReadingUnit: (ResourceContent, com.ermao.library.shared.modules.library.domain.ReadingUnit) -> Unit = { _, _ -> },
@@ -244,7 +259,7 @@ fun WorkDetailScreen(
     var pendingReadingStatusScope by remember(state.content?.book?.id) {
         mutableStateOf<BookDetailActionScope?>(null)
     }
-    var pendingDownloadRemoval by remember { mutableStateOf<AndroidDownloadRecord?>(null) }
+    var pendingDownloadedOpen by remember { mutableStateOf<AndroidDownloadRecord?>(null) }
     var coverRefreshToken by remember { mutableIntStateOf(0) }
     val appContext = LocalContext.current.applicationContext
     val snackbarHostState = remember { SnackbarHostState() }
@@ -255,8 +270,6 @@ fun WorkDetailScreen(
     val coverUpdatedMessage = stringResource(R.string.management_cover_updated)
     val rescanQueuedMessage = stringResource(R.string.management_rescan_queued)
     val metadataAppliedMessage = stringResource(R.string.management_metadata_applied)
-    val downloadQueuedMessage = stringResource(R.string.work_download_queued)
-    val downloadPausedMessage = stringResource(R.string.work_download_paused)
     val viewShelvesLabel = stringResource(R.string.view_shelves_action)
     val shelfPickerSheetStrings = ShelfPickerSheetStrings(
         title = stringResource(R.string.work_shelf_picker_title),
@@ -285,6 +298,14 @@ fun WorkDetailScreen(
         managementState?.errorCode.orEmpty(),
     )
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { onRefresh() }
+    LaunchedEffect(state.isMultiDownloadVisible, pendingDownloadedOpen) {
+        if (!state.isMultiDownloadVisible) {
+            pendingDownloadedOpen?.let { record ->
+                pendingDownloadedOpen = null
+                onOpenDownloadedResource(record)
+            }
+        }
+    }
     val selectedDownloadFailure = selectedResource?.let { downloadFailuresByResource[it.id] }
     val downloadFailureMessage = if (selectedDownloadFailure == "DOWNLOAD_BOOTSTRAP_INVALID") {
         stringResource(R.string.download_bootstrap_invalid)
@@ -394,27 +415,9 @@ fun WorkDetailScreen(
                     },
                     onOpenFacet = onOpenFacet,
                     downloadRecordsByResource = downloadRecordsByResource,
-                    downloadFailuresByResource = downloadFailuresByResource,
-                    onDownloadResource = { resourceId ->
-                        run {
-                            onDownloadResource(resourceId)
-                            snackbarScope.launch {
-                                snackbarHostState.currentSnackbarData?.dismiss()
-                                snackbarHostState.showSnackbar(downloadQueuedMessage)
-                            }
-                        }
-                    },
-                    onCancelDownload = { resourceId ->
-                        onCancelDownload(resourceId)
-                        snackbarScope.launch {
-                            snackbarHostState.currentSnackbarData?.dismiss()
-                            snackbarHostState.showSnackbar(downloadPausedMessage)
-                        }
-                    },
-                    onRequestRemoveDownload = { pendingDownloadRemoval = it },
+                    activeDownloadResourceIds = activeDownloadResourceIds,
                     onOpenSelectedResource = openResource,
                     onOpenReadingUnit = onOpenReadingUnit,
-                    onOpenDownloadedResource = onOpenDownloadedResource,
                     coverRefreshToken = coverRefreshToken,
                     listState = detailListState,
                     modifier = Modifier.padding(padding),
@@ -423,26 +426,6 @@ fun WorkDetailScreen(
         }
     }
 
-    pendingDownloadRemoval?.let { download ->
-        AlertDialog(
-            onDismissRequest = { pendingDownloadRemoval = null },
-            title = { Text(stringResource(R.string.downloads_remove_title)) },
-            text = { Text(stringResource(R.string.downloads_remove_message, download.resourceTitle)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        pendingDownloadRemoval = null
-                        onRemoveDownload(download)
-                    },
-                ) { Text(stringResource(R.string.downloads_remove_action)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDownloadRemoval = null }) {
-                    Text(stringResource(R.string.cancel_action))
-                }
-            },
-        )
-    }
     LaunchedEffect(managementState?.completedMutation) {
         val completion = managementState?.completedMutation ?: return@LaunchedEffect
         if (completion == WorkManagementCompletion.CoverUpdated) {
@@ -490,36 +473,18 @@ fun WorkDetailScreen(
         )
     }
     if (state.isMultiDownloadVisible) {
-        val resources = LocalResources.current
-        val multiDownloadPartial = stringResource(R.string.multi_download_partial)
         MultiDownloadSheet(
             state = state,
             recordsByResource = downloadRecordsByResource,
+            activeResourceIds = activeDownloadResourceIds,
             onDismiss = onDismissMultiDownload,
             onRetryTree = onRetryMultiDownload,
+            onRetryFolder = onRetryMultiDownloadFolder,
             onToggleFolder = onToggleMultiDownloadFolder,
             onEnsureFolderLoaded = onEnsureMultiDownloadFolderLoaded,
-            onPause = onCancelDownload,
-            onResumeOrRetry = onDownloadResource,
-            onRemove = { pendingDownloadRemoval = it },
-            onOpenDownloaded = onOpenDownloadedResource,
-            onPerformBatch = onPerformDownloadBatch,
-            onBatchFeedback = { succeeded, failed ->
-                snackbarScope.launch {
-                    snackbarHostState.currentSnackbarData?.dismiss()
-                    snackbarHostState.showSnackbar(
-                        if (failed == 0) {
-                            resources.getQuantityString(
-                                R.plurals.multi_download_completed,
-                                succeeded,
-                                succeeded,
-                            )
-                        } else {
-                            multiDownloadPartial.format(succeeded, failed)
-                        },
-                    )
-                }
-            },
+            onRefreshLocalFacts = onRefreshDownloadFacts,
+            onExecuteAction = onExecuteDownloadAction,
+            onOpenDownloaded = { pendingDownloadedOpen = it },
         )
     }
 }
@@ -542,12 +507,8 @@ private fun WorkDetailBody(
     onToggleReadingStatus: () -> Unit,
     onOpenFacet: (LibraryScope, String) -> Unit,
     downloadRecordsByResource: Map<String, AndroidDownloadRecord>,
-    downloadFailuresByResource: Map<String, String>,
-    onDownloadResource: (String) -> Unit,
-    onCancelDownload: (String) -> Unit,
-    onRequestRemoveDownload: (AndroidDownloadRecord) -> Unit,
+    activeDownloadResourceIds: Set<String>,
     onOpenSelectedResource: (ResourceContent) -> Unit,
-    onOpenDownloadedResource: (AndroidDownloadRecord) -> Unit,
     onOpenReadingUnit: (ResourceContent, com.ermao.library.shared.modules.library.domain.ReadingUnit) -> Unit,
     coverRefreshToken: Int,
     listState: LazyListState,
@@ -571,6 +532,22 @@ private fun WorkDetailBody(
     ) else null
     val managementMenuContext = ManagementMenuContext(completed = state.content?.completed,
         kindleSendAvailable = selectedResource?.kindleSendAvailable == true)
+    val managedBookDownloads = if (state.isBookRoot) {
+        summarizeManagedBookDownloads(
+            content.resources.map { resource ->
+                DownloadManagementPolicy.project(
+                    downloadManagementItem(
+                        resourceId = resource.id,
+                        record = downloadRecordsByResource[resource.id],
+                        active = resource.id in activeDownloadResourceIds,
+                        available = resource.readable,
+                    ),
+                )
+            },
+        )
+    } else {
+        null
+    }
     LazyColumn(
         state = listState,
         modifier = modifier
@@ -617,17 +594,14 @@ private fun WorkDetailBody(
                 selectedResource = readingResource,
                 showBookActions = actionScope.includesBookActions,
                 selectedDownload = readingResource?.let { downloadRecordsByResource[it.id] },
-                bookDownloads = if (state.isBookRoot) workBookDownloadSummary(content.book.id, downloadRecordsByResource.values) else null,
+                bookDownloads = managedBookDownloads,
+                activeDownloadResourceIds = activeDownloadResourceIds,
                 onOpenBookDownloads = onOpenMultiDownload,
                 onOpenShelfPicker = onOpenShelfPicker,
                 readingStatus = readingStatus,
                 readingStatusBusy = readingStatusBusy,
                 onToggleReadingStatus = onToggleReadingStatus,
-                onDownloadResource = onDownloadResource,
-                onCancelDownload = onCancelDownload,
-                onRequestRemoveDownload = onRequestRemoveDownload,
                 onOpenSelectedResource = onOpenSelectedResource,
-                onOpenDownloadedResource = onOpenDownloadedResource,
             )
         }
         if ((state.isBookRoot || state.presentation == BookDetailPresentation.ResourceDetail) && content.hasDescription) {
@@ -717,16 +691,13 @@ private fun WorkDetailActionRow(
     showBookActions: Boolean,
     selectedDownload: AndroidDownloadRecord?,
     bookDownloads: BookDetailDownloadSummary?,
+    activeDownloadResourceIds: Set<String>,
     onOpenBookDownloads: () -> Unit,
     onOpenShelfPicker: () -> Unit,
     readingStatus: WorkReadingStatus,
     readingStatusBusy: Boolean,
     onToggleReadingStatus: () -> Unit,
-    onDownloadResource: (String) -> Unit,
-    onCancelDownload: (String) -> Unit,
-    onRequestRemoveDownload: (AndroidDownloadRecord) -> Unit,
     onOpenSelectedResource: (ResourceContent) -> Unit,
-    onOpenDownloadedResource: (AndroidDownloadRecord) -> Unit,
 ) {
     val theme = WarmPageThemeValues
     val primaryAction = workDetailPrimaryActionPresentation(
@@ -734,16 +705,46 @@ private fun WorkDetailActionRow(
         download = selectedDownload,
     )
     val primaryLabel = primaryActionLabel(primaryAction.label)
-    val downloadAction = bookDownloads?.state?.let { download ->
-        when (download) {
-            BookDetailDownloadState.NotDownloaded -> WorkDetailDownloadAction.NotDownloaded
-            BookDetailDownloadState.Downloading -> WorkDetailDownloadAction.Downloading
-            BookDetailDownloadState.Paused -> WorkDetailDownloadAction.Paused
-            BookDetailDownloadState.Failed -> WorkDetailDownloadAction.Failed
-            BookDetailDownloadState.Downloaded -> WorkDetailDownloadAction.Downloaded
-        }
-    } ?: workDetailDownloadActionPresentation(selectedDownload)
-    var downloadMenuExpanded by remember(selectedResource?.id, selectedDownload?.assetId) { mutableStateOf(false) }
+    val selectedManagement = selectedResource?.let { resource ->
+        DownloadManagementPolicy.project(
+            downloadManagementItem(
+                resourceId = resource.id,
+                record = selectedDownload,
+                active = resource.id in activeDownloadResourceIds,
+                available = resource.readable,
+            ),
+        )
+    }
+    val entryState = if (showBookActions) bookDownloads?.state else null
+    val entryStatus = selectedManagement?.status
+    val downloadIcon = when {
+        entryState == BookDetailDownloadState.Downloading ||
+            entryStatus == DownloadManagementStatus.Queued ||
+            entryStatus == DownloadManagementStatus.Downloading -> Icons.Outlined.PauseCircle
+        entryState == BookDetailDownloadState.Downloaded ||
+            entryStatus == DownloadManagementStatus.Completed -> Icons.Outlined.CheckCircle
+        else -> Icons.Outlined.Download
+    }
+    val downloadLabel = if (showBookActions && bookDownloads?.downloadedResources ?: 0 > 0) {
+        stringResource(R.string.work_book_download_count, bookDownloads?.downloadedResources ?: 0)
+    } else {
+        stringResource(
+            when {
+                entryState == BookDetailDownloadState.Downloading ||
+                    entryStatus == DownloadManagementStatus.Queued ||
+                    entryStatus == DownloadManagementStatus.Downloading -> R.string.work_quick_downloading
+                entryState == BookDetailDownloadState.Paused ||
+                    entryStatus == DownloadManagementStatus.Paused -> R.string.work_quick_download_paused
+                entryState == BookDetailDownloadState.Failed ||
+                    entryStatus == DownloadManagementStatus.InvalidLocal ||
+                    entryStatus == DownloadManagementStatus.FailedRetryable ||
+                    entryStatus == DownloadManagementStatus.FailedTerminal -> R.string.work_quick_download_retry
+                entryState == BookDetailDownloadState.Downloaded ||
+                    entryStatus == DownloadManagementStatus.Completed -> R.string.work_quick_downloaded
+                else -> R.string.work_quick_download
+            },
+        )
+    }
     Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.one)) {
         WarmPagePrimaryAction(
             label = primaryLabel,
@@ -761,74 +762,15 @@ private fun WorkDetailActionRow(
             modifier = Modifier.fillMaxWidth().testTag("work-reader-action"),
         )
         Row(Modifier.fillMaxWidth().testTag("work-detail-actions")) {
-            Box(Modifier.weight(1f)) {
-                WorkDetailQuickAction(
-                    icon = when (downloadAction) {
-                        WorkDetailDownloadAction.Downloading -> Icons.Outlined.PauseCircle
-                        WorkDetailDownloadAction.Downloaded -> Icons.Outlined.CheckCircle
-                        WorkDetailDownloadAction.NotDownloaded,
-                        WorkDetailDownloadAction.Paused,
-                        WorkDetailDownloadAction.Failed,
-                        -> Icons.Outlined.Download
-                    },
-                    label = if (bookDownloads?.state == BookDetailDownloadState.Downloaded) stringResource(R.string.work_book_download_count, bookDownloads.downloadedResources) else stringResource(
-                        when (downloadAction) {
-                            WorkDetailDownloadAction.NotDownloaded -> R.string.work_quick_download
-                            WorkDetailDownloadAction.Downloading -> R.string.work_quick_downloading
-                            WorkDetailDownloadAction.Paused -> R.string.work_quick_download_paused
-                            WorkDetailDownloadAction.Failed -> R.string.work_quick_download_retry
-                            WorkDetailDownloadAction.Downloaded -> R.string.work_quick_downloaded
-                        },
-                    ),
-                    onClick = downloadClick@{
-                        if (showBookActions) { onOpenBookDownloads(); return@downloadClick }
-                        selectedResource?.let { resource ->
-                            when (downloadAction) {
-                                WorkDetailDownloadAction.Downloading -> onCancelDownload(resource.id)
-                                WorkDetailDownloadAction.NotDownloaded,
-                                WorkDetailDownloadAction.Paused,
-                                WorkDetailDownloadAction.Failed,
-                                -> onDownloadResource(resource.id)
-                                WorkDetailDownloadAction.Downloaded -> downloadMenuExpanded = true
-                            }
-                        }
-                    },
-                    onLongClick = selectedDownload?.takeIf { it.isReadable && !showBookActions }?.let {
-                        { downloadMenuExpanded = true }
-                    },
-                    longClickLabel = stringResource(R.string.work_quick_manage_download),
-                    enabled = showBookActions || (selectedResource != null && (selectedResource.readable || selectedDownload != null)),
-                    modifier = Modifier.fillMaxWidth(),
-                    testTag = "work-download-action",
-                )
-                WarmPageActionMenu(
-                    title = null,
-                    expanded = downloadMenuExpanded,
-                    actions = selectedDownload?.takeIf(AndroidDownloadRecord::isReadable)?.let {
-                        listOf(
-                            WarmPageMenuAction(
-                                value = DownloadMenuAction.OpenOffline,
-                                label = stringResource(R.string.work_download_open_offline),
-                            ),
-                            WarmPageMenuAction(
-                                value = DownloadMenuAction.Remove,
-                                label = stringResource(R.string.downloads_remove_action),
-                                destructive = true,
-                            ),
-                        )
-                    }.orEmpty(),
-                    onSelect = { action ->
-                        downloadMenuExpanded = false
-                        selectedDownload?.takeIf(AndroidDownloadRecord::isReadable)?.let { download ->
-                            when (action) {
-                                DownloadMenuAction.OpenOffline -> onOpenDownloadedResource(download)
-                                DownloadMenuAction.Remove -> onRequestRemoveDownload(download)
-                            }
-                        }
-                    },
-                    onDismiss = { downloadMenuExpanded = false },
-                )
-            }
+            WorkDetailQuickAction(
+                icon = downloadIcon,
+                label = downloadLabel,
+                onClick = onOpenBookDownloads,
+                enabled = showBookActions || (selectedResource != null &&
+                    (selectedResource.readable || selectedDownload != null)),
+                modifier = Modifier.weight(1f),
+                testTag = "work-download-action",
+            )
             WorkDetailQuickAction(
                 icon = Icons.Outlined.Check,
                 label = stringResource(
@@ -870,11 +812,6 @@ private fun WorkDetailActionRow(
             )
         }
     }
-}
-
-private enum class DownloadMenuAction {
-    OpenOffline,
-    Remove,
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -2342,7 +2279,7 @@ internal fun workDetailPrimaryActionPresentation(
     selectedResource: ResourceContent?,
     download: AndroidDownloadRecord?,
 ): WorkDetailPrimaryActionPresentation {
-    val hasProgress = (selectedResource?.progressPercent ?: 0) > 0
+    val hasProgress = (selectedResource?.progressPercent ?: 0) in 1..99
     val readingLabel = if (hasProgress) {
         WorkDetailPrimaryActionLabel.ContinueReading
     } else {
@@ -2592,86 +2529,6 @@ internal fun DirectoryControlMenu(
 
 
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun WorkActionsSheet(
-    content: BookDetailContent,
-    strings: WorkActionsSheetStrings,
-    selectedResource: ResourceContent?,
-    selectedDownload: AndroidDownloadRecord?,
-    selectedReadingStatus: WorkReadingStatus,
-    onOpenShelfPicker: () -> Unit,
-    onDownloadResource: (String) -> Unit,
-    onCancelDownload: (String) -> Unit,
-    onSelectReadingStatus: (WorkReadingStatus) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val theme = WarmPageThemeValues
-    val isDownloading = selectedDownload?.status == AndroidDownloadStatus.Downloading ||
-        selectedDownload?.status == AndroidDownloadStatus.Queued
-    WarmPageModalBottomSheet(
-        onDismissRequest = onDismiss,
-        modifier = Modifier.testTag("work-actions-sheet"),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(
-                    horizontal = theme.components.page.compactGutter,
-                    vertical = theme.spacing.two,
-                ),
-            verticalArrangement = Arrangement.spacedBy(theme.spacing.one),
-        ) {
-            WarmPageSectionHeader(
-                title = strings.title,
-                modifier = Modifier.testTag("work-actions-title"),
-            )
-            Text(
-                listOf(content.book.title, content.book.author).joinToString(" · "),
-                style = theme.typography.callout,
-                color = theme.colors.textSecondary,
-            )
-            HorizontalDivider(
-                thickness = theme.components.dividerThickness,
-                color = theme.colors.divider,
-            )
-            WorkActionRow(
-                icon = Icons.Outlined.BookmarkBorder,
-                label = strings.addToShelf,
-                onClick = onOpenShelfPicker,
-            )
-            if (selectedResource != null && selectedDownload?.isReadable != true) {
-                WorkActionRow(
-                    icon = if (isDownloading) Icons.Outlined.PauseCircle else Icons.Outlined.CloudDownload,
-                    label = if (isDownloading) strings.pauseDownload else strings.download,
-                    onClick = {
-                        if (isDownloading) {
-                            onCancelDownload(selectedResource.id)
-                        } else {
-                            onDownloadResource(selectedResource.id)
-                        }
-                    },
-                )
-            }
-            Text(
-                text = strings.readingStatus,
-                style = theme.typography.sectionTitle,
-                modifier = Modifier.padding(top = theme.spacing.one),
-            )
-            WorkReadingStatusChoices(
-                selected = selectedReadingStatus,
-                strings = strings,
-                onSelect = onSelectReadingStatus,
-            )
-            WarmPageTextAction(
-                label = strings.cancel,
-                onClick = onDismiss,
-                modifier = Modifier.align(Alignment.End),
-            )
-        }
-    }
-}
-
 internal data class WorkActionsSheetStrings(
     val title: String,
     val addToShelf: String,
@@ -2731,43 +2588,6 @@ private fun WorkActionsSheetStrings.label(status: WorkReadingStatus): String = w
     WorkReadingStatus.Unread -> unread
     WorkReadingStatus.Reading -> reading
     WorkReadingStatus.Finished -> finished
-}
-
-@Composable
-private fun WorkActionRow(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    onClick: () -> Unit,
-) {
-    val theme = WarmPageThemeValues
-    Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = theme.components.controls.minimumTouchTarget)
-                .clickable(onClick = onClick)
-                .padding(vertical = theme.spacing.one),
-            horizontalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = theme.colors.textSecondary,
-                modifier = Modifier.size(theme.components.controls.iconSize),
-            )
-            Text(
-                text = label,
-                style = theme.typography.body,
-                color = theme.colors.textPrimary,
-                modifier = Modifier.weight(1f),
-            )
-        }
-        HorizontalDivider(
-            thickness = theme.components.dividerThickness,
-            color = theme.colors.divider,
-        )
-    }
 }
 
 private fun WorkDetailUiState.resolveSelectedResource(): ResourceContent? {

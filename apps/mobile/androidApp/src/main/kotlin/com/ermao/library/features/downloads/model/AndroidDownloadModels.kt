@@ -80,7 +80,11 @@ data class AndroidDownloadRecord(
         require(expectedBytes > 0)
         require((sourceBytes ?: expectedBytes) > 0)
         require(transferredBytes >= 0 && transferredBytes <= expectedBytes)
-        require(verified == (status == AndroidDownloadStatus.Completed))
+        // A completed task whose local artifact no longer passes validation is
+        // retained as an invalid-local task so the management surface can offer
+        // Retry and Remove. Verification is therefore one-way: a verified
+        // record must be completed, while a completed record may be unverified.
+        require(!verified || status == AndroidDownloadStatus.Completed)
         require(!verified || !localReference.isNullOrBlank())
     }
 

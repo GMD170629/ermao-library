@@ -297,7 +297,7 @@ def _reading_summary(
     continue_resource_id = choose_continue_resource_id(resources)
     progress = next(
         (
-            resource.percent
+            resource.display_percent
             for resource in resources
             if resource.resource_id == continue_resource_id
         ),

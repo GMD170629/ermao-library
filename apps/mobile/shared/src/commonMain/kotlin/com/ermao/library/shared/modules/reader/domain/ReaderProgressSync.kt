@@ -28,14 +28,15 @@ data class ReaderLocalProgressIdentity(
         require(resourceId.isNotBlank()) { "Reader local resource id is blank" }
     }
 
+    val clientStoragePrefix: String
+        get() = lengthPrefixed(namespace.serverIdentity, namespace.userId, clientId)
+
+    val bookStoragePrefix: String
+        get() = clientStoragePrefix + lengthPrefixed(bookId)
+
     val stableKey: String
-        get() = lengthPrefixed(
-            namespace.serverIdentity,
-            namespace.userId,
-            clientId,
-            bookId,
-            resourceId,
-        )
+        get() = bookStoragePrefix + lengthPrefixed(resourceId)
+
 }
 
 data class ReaderProgressSyncTarget(

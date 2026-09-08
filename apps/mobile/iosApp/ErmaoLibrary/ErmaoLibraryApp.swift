@@ -55,7 +55,10 @@ struct ErmaoLibraryApp: App {
             : IosCompositionKt.createIosAdministrativeSettingsRepository(cookieStore: cookieStore)
         workManagementRepository = usesContentFixture
             ? nil
-            : IosCompositionKt.createIosWorkManagementRepository(cookieStore: cookieStore)
+            : ErmaoShared.PublicKt.withReadingStatusReset(
+                repository: IosCompositionKt.createIosWorkManagementRepository(cookieStore: cookieStore),
+                resetPort: IosReadingStatusResetPort()
+            )
         settingsClientOverride = usesContentFixture
             ? ContentUITestFixture.makeSettingsClient()
             : nil

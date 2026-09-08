@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import ErmaoChapterCore
 @preconcurrency import ErmaoShared
 @preconcurrency import ReadiumShared
 @preconcurrency import ReadiumStreamer
@@ -119,7 +120,7 @@ struct IosFb2PublicationFactory: Sendable {
             }
             let document = try decoder.finish(fallbackTitle: fallbackTitle, images: links)
             let projection = try IosChapterCore.parseXML(
-                format: UInt32(ERMAO_CHAPTER_FB2),
+                format: ERMAO_CHAPTER_FB2.rawValue,
                 events: delegate.chapterEvents
             )
             let navigation = try Self.navigationEntries(projection.entries)

@@ -93,7 +93,7 @@ enum IosChapterCore {
     }
 
     static func parseXML(format: UInt32, events: [IosChapterCoreXmlEvent]) throws -> IosChapterCoreResult {
-        guard format >= UInt32(ERMAO_CHAPTER_EPUB_NAV), format <= UInt32(ERMAO_CHAPTER_FB2) else {
+        guard format >= ERMAO_CHAPTER_EPUB_NAV.rawValue, format <= ERMAO_CHAPTER_FB2.rawValue else {
             throw IosChapterCoreError.invalidInput
         }
         guard events.count <= Int(UInt32.max) else {

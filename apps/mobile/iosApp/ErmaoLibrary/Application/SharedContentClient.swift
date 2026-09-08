@@ -56,6 +56,22 @@ actor SharedContentClient: ContentClient {
         return values.map { LibrarySourceOption(id: $0.id, name: $0.name) }
     }
 
+    func fetchTagSuggestions(
+        context: ContentRequestContext,
+        query: String,
+        limit: Int
+    ) async throws -> [LibraryTagSuggestion] {
+        let result = try await repository.loadTagOptions(
+            context: sharedContext(context),
+            query: query,
+            limit: Int32(limit)
+        )
+        let page: ErmaoShared.LibraryTagOptionPage = try contentValue(result)
+        return page.options.map {
+            LibraryTagSuggestion(value: $0.value, label: $0.label, count: Int($0.count))
+        }
+    }
+
     func fetchGroupings(context: ContentRequestContext, query: GroupingsQuery) async throws -> GroupingPage {
         let result = try await repository.loadGroupings(context: sharedContext(context), query: sharedGroupingQuery(query))
         let payload: ErmaoShared.LibraryPage<ErmaoShared.GroupingSummary> = try contentValue(result)
@@ -374,7 +390,7 @@ actor SharedContentClient: ContentClient {
             isSelected: value.id == selectedResourceID, sortOrder: Int(value.sortOrder),
             publisher: value.publisher, publishedAt: value.publishedAt, language: value.language,
             isbn: value.isbn, identifier: value.identifier, narrator: value.narrator,
-            pageCount: value.pageCount?.intValue, metadataSource: nil,
+            pageCount: value.pageCount?.intValue, chapterCount: value.chapterCount?.intValue, metadataSource: nil,
             kindleSendAvailable: value.kindleSendAvailable,
             assets: value.assets.map { asset in
                 ResourceAsset(

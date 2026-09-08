@@ -144,7 +144,7 @@ struct IosReaderPreferences: Codable, Equatable, Sendable {
         case .standard: 1.0
         case .wide: 1.5
         }
-        let textAlign: TextAlignment? = switch textAlignment {
+        let textAlign: ReadiumNavigator.TextAlignment? = switch textAlignment {
         case .publisher: nil
         case .left: .start
         case .justify: .justify
@@ -400,10 +400,10 @@ struct IosReaderTocEntry: Identifiable, Equatable, Sendable {
     }
 }
 
-func iosReaderTableOfContents(_ links: [Link]) throws -> [IosReaderTocEntry] {
+func iosReaderTableOfContents(_ links: [ReadiumShared.Link]) throws -> [IosReaderTocEntry] {
     var entries: [IosReaderTocEntry] = []
     var usedKeys: Set<String> = []
-    func append(_ links: [Link], depth: Int) throws {
+    func append(_ links: [ReadiumShared.Link], depth: Int) throws {
         for link in links {
             guard let navigationKey = link.properties["shuku:navigationKey"]?.string,
                   !navigationKey.isEmpty,
@@ -561,7 +561,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
                     }
                     guard matches.count == 1, let href = matches.first?.href,
                           RelativeURL(string: href) != nil,
-                          let locator = await publication.locate(Link(href: href))
+                          let locator = await publication.locate(ReadiumShared.Link(href: href))
                     else {
                         try openedPublication.checkForSafetyFailure()
                         throw IosReaderFailure(code: .locationRestoreFailed)
@@ -571,7 +571,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
                     guard let target = initialTarget as? ErmaoShared.ReaderNavigationTargetReflowable,
                           RelativeURL(string: target.href) != nil
                     else { throw IosReaderFailure(code: .locationRestoreFailed) }
-                    guard let locator = await publication.locate(Link(href: target.href)) else {
+                    guard let locator = await publication.locate(ReadiumShared.Link(href: target.href)) else {
                         try openedPublication.checkForSafetyFailure()
                         throw IosReaderFailure(code: .locationRestoreFailed)
                     }
@@ -849,14 +849,15 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         guard let href = entry.href else { return false }
         return await navigationQueue.enqueue { [weak self] in
             guard let self else { return false }
-            return await self.executeLinkNavigation(Link(href: href, title: entry.title))
+            return await self.executeLinkNavigation(ReadiumShared.Link(href: href, title: entry.title))
         }
     }
 
-    private func executeLinkNavigation(_ link: Link) async -> Bool {
+    private func executeLinkNavigation(_ link: ReadiumShared.Link) async -> Bool {
         let canonicalHref = link.href
         guard controlReady, RelativeURL(string: canonicalHref) != nil else { return false }
-        if await navigationHrefMatches(canonicalHref) { return true }
+        // Selecting a TOC entry must reach its start or authored fragment,
+        // even when the reader already displays the same resource.
         beginUserNavigation()
         pendingLaunchTargetPayload = ErmaoShared.PublicKt.encodeReaderLaunchTarget(target: ErmaoShared.ReaderNavigationTargetReflowable(href: canonicalHref))
         guard await navigator?.go(to: link, options: navigationOptions) == true else {
@@ -897,7 +898,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         for _ in 0 ..< 40 {
             guard !Task.isCancelled else { return false }
             if let visible = await navigator.firstVisibleElementLocator(),
-               visible.href.normalized == target.href.normalized {
+               visible.href.isEquivalentTo(target.href) {
                 if let position = target.locations.position, navigator.viewport?.positions?.contains(position) == true { return true }
                 if let progression = target.locations.progression,
                    navigator.viewport?.resources.first(where: { $0.href.isEquivalentTo(target.href) })?.progression.contains(progression) == true { return true }

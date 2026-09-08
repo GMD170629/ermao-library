@@ -4,6 +4,74 @@ import ErmaoShared
 @testable import ErmaoLibrary
 
 final class LocalizationTests: XCTestCase {
+    func testNativeManagementOnlyPresentsSheetForInteractiveActions() {
+        let immediateActions = Set(["Regenerate", "ReadingStatus", "Rescan"])
+        for action in ManagementAction.entries {
+            let presentation = nativeManagementPresentation(for: action)
+            XCTAssertEqual(
+                presentation.presentsSheet,
+                !immediateActions.contains(action.name),
+                "Unexpected sheet policy for \(action.name)"
+            )
+        }
+        for action in ManagementAction.entries where immediateActions.contains(action.name) {
+            XCTAssertEqual(nativeManagementPresentation(for: action), .none)
+        }
+        XCTAssertEqual(nativeManagementPresentation(for: .edit), .sheet(actionName: "Edit"))
+    }
+
+    func testNativeManagementMenuStatusBelongsOnlyToTheInvokedTargetAndAction() {
+        let target = NativeManagementTarget.book("book-1", "Book")
+        let execution = NativeManagementMenuExecution(
+            key: NativeManagementActionKey(target: target, action: .regenerate),
+            status: .running
+        )
+
+        XCTAssertEqual(
+            nativeManagementMenuItemStatus(execution: execution, target: target, action: .regenerate),
+            .running
+        )
+        XCTAssertEqual(
+            nativeManagementMenuItemStatus(
+                execution: NativeManagementMenuExecution(key: execution.key, status: .failed),
+                target: target,
+                action: .regenerate
+            ),
+            .failed
+        )
+        XCTAssertEqual(
+            nativeManagementMenuItemStatus(execution: execution, target: target, action: .rescan),
+            .idle
+        )
+        XCTAssertEqual(
+            nativeManagementMenuItemStatus(
+                execution: execution,
+                target: .book("book-2", "Other"),
+                action: .regenerate
+            ),
+            .idle
+        )
+    }
+
+    func testNativeManagementTagInputMatchesWebParsingAndDeduplication() {
+        XCTAssertEqual(
+            nativeManagementTagValues("历史, 科幻；新品\n漫画"),
+            ["历史", "科幻", "新品", "漫画"]
+        )
+        XCTAssertEqual(
+            nativeManagementTagValues("Sci-Fi； sci fi；ＳＣＩ－ＦＩ"),
+            ["Sci-Fi"]
+        )
+        XCTAssertEqual(
+            nativeManagementStoredTagValues("带,逗号的标签\n第二个"),
+            ["带,逗号的标签", "第二个"]
+        )
+        XCTAssertEqual(
+            nativeManagementMergedTagValues(current: ["青春文学"], input: "历史，新品"),
+            ["青春文学", "历史", "新品"]
+        )
+    }
+
     func testCompatibilityCopyReflectsTheActualFailure() {
         XCTAssertEqual(
             ServerCompatibilityCopy.resolve(reasonCode: "CLIENT_UPDATE_REQUIRED"),
@@ -179,6 +247,49 @@ final class LocalizationTests: XCTestCase {
             "reader.resume.returnFailed",
             "work.chapter.current",
             "work.chapter.read",
+            "work.downloadManagement.title",
+            "work.downloadManagement.empty",
+            "work.downloadManagement.select",
+            "work.downloadManagement.done",
+            "work.downloadManagement.actions",
+            "work.downloadManagement.clearSelection",
+            "work.downloadManagement.selectedCount",
+            "work.downloadManagement.selectAll",
+            "work.downloadManagement.feedback.accepted",
+            "work.downloadManagement.feedback.completed",
+            "work.downloadManagement.feedback.failed",
+            "work.downloadManagement.feedback.skipped",
+            "work.downloadManagement.folder.collapse",
+            "work.downloadManagement.folder.expand",
+            "work.downloadManagement.load.error",
+            "work.downloadManagement.more",
+            "work.downloadManagement.open",
+            "work.downloadManagement.pause",
+            "work.downloadManagement.pause.count",
+            "work.downloadManagement.remove",
+            "work.downloadManagement.remove.count",
+            "work.downloadManagement.remove.confirm.action",
+            "work.downloadManagement.remove.confirm.message",
+            "work.downloadManagement.remove.confirm.title",
+            "work.downloadManagement.resume",
+            "work.downloadManagement.resume.count",
+            "work.downloadManagement.retry",
+            "work.downloadManagement.retry.count",
+            "work.downloadManagement.download",
+            "work.downloadManagement.download.count",
+            "work.downloadManagement.selection.all",
+            "work.downloadManagement.selection.mixed",
+            "work.downloadManagement.selection.none",
+            "work.downloadManagement.status.completed",
+            "work.downloadManagement.status.downloading",
+            "work.downloadManagement.status.failedRetryable",
+            "work.downloadManagement.status.failedTerminal",
+            "work.downloadManagement.status.invalidLocal",
+            "work.downloadManagement.status.notDownloaded",
+            "work.downloadManagement.status.paused",
+            "work.downloadManagement.status.queued",
+            "work.downloadManagement.status.unavailable",
+            "work.downloadManagement.volumeCount",
             "reader.save.failure.message",
             "reader.error.CORRUPT_FILE",
             "reader.error.PUBLICATION_DRM_UNSUPPORTED",

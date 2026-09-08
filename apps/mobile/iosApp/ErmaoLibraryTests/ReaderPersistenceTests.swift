@@ -641,6 +641,30 @@ final class ReaderPersistenceTests: XCTestCase {
         )
     }
 
+    func testManualStatusClearsLocationAndPendingWithoutTouchingOtherBook() async throws {
+        let url = temporaryRoot.appendingPathComponent("manual-status.sqlite3")
+        let identity = makeIdentity(authorizationVersion: 5, resourceID: "resource-a")
+        let database = try IosReaderLocalDatabase(identity: identity, databaseURL: url)
+        let other = try IosReaderLocalDatabase(identity: makeIdentity(authorizationVersion: 5, bookID: "book-b", resourceID: "resource-b"), databaseURL: url)
+        let position = try makePosition(resourceID: "resource-a", capturedAt: 100, percent: 41)
+        let pending = ErmaoShared.ReaderProgressMutationV5(
+            resourceId: position.resourceId, clientId: position.clientId,
+            mutationId: "f4743f84-16dc-4202-ab50-729e4d036d16",
+            capturedAtEpochMillis: position.capturedAtEpochMillis, position: position.position
+        )
+        try await database.commitPositionAndPending(position: position, pending: pending)
+        try await other.savePosition(position: makePosition(resourceID: "resource-b", capturedAt: 100, percent: 60))
+        try IosReaderLocalDatabase.clearReadingPosition(identity: identity, wholeBook: true, databaseURL: url)
+        let cleared = try await database.loadPosition(resourceId: "resource-a")
+        let state = try await database.loadPositionSyncState()
+        let retained = try await other.loadPosition(resourceId: "resource-b")
+        XCTAssertNil(cleared)
+        XCTAssertNil(state.pending)
+        XCTAssertNotNil(retained)
+        await database.close()
+        await other.close()
+    }
+
     private func makeIdentity(
         authorizationVersion: Int64,
         bookID: String = "book-a",
@@ -694,7 +718,8 @@ final class ReaderPersistenceTests: XCTestCase {
             chapter: ErmaoShared.ReaderChapterPresentation(
                 href: "OEBPS/Text/backcover.xhtml",
                 title: "封底",
-                index: KotlinInt(int: 19)
+                index: KotlinInt(int: 19),
+                navigationKey: "chapter-backcover"
             ),
             page: nil,
             playback: nil

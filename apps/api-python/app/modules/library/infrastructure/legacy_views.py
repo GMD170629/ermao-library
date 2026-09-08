@@ -236,7 +236,7 @@ def _resource_view(
         "coverStatus": metadata.cover_status if metadata else "PENDING",
         "coverPath": metadata.cover_path if metadata else None,
         "coverUrl": _cover_url("resources", resource.id),
-        "progress": float(reading_state.percent),
+        "progress": float(reading_state.display_percent),
         "lastReadAt": reading_state.last_read_at,
         "resourceCompleted": reading_state.completed,
         "hidden": resource.enablement_state != "ENABLED",

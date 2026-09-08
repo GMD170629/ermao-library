@@ -6,8 +6,10 @@ from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models import ReaderProgressMutationV5, ReaderResourceProgressV5
 from app.modules.library.presentation.schemas import (
     BookResponse,
     BooksResponse,
@@ -199,7 +201,7 @@ def test_finished_without_progress_updates_public_projections(
     status = _reader_status(client, resource_id)
     assert status.resource_id == resource_id
     assert status.status == "FINISHED"
-    assert status.percent == 0
+    assert status.percent == 100
 
     bootstrap_response = client.get(f"/api/reader/v5/resources/{resource_id}/bootstrap")
     assert bootstrap_response.status_code == 200
@@ -212,18 +214,18 @@ def test_finished_without_progress_updates_public_projections(
     assert _public_projection(client, book_id) == {
         "detail": {
             "completed": True,
-            "resource": {"progress": 0, "resource_completed": True},
+            "resource": {"progress": 100, "resource_completed": True},
         },
         "full_list": {
             "completed": True,
-            "resource": {"progress": 0, "resource_completed": True},
+            "resource": {"progress": 100, "resource_completed": True},
         },
-        "resource_list": {"progress": 0, "resource_completed": True},
+        "resource_list": {"progress": 100, "resource_completed": True},
         "management_status": "FINISHED",
     }
 
 
-def test_unread_preserves_mid_progress_and_public_status(
+def test_unread_resets_progress_and_public_status_until_new_progress(
     client: TestClient,
     db_session: Session,
 ) -> None:
@@ -252,11 +254,27 @@ def test_unread_preserves_mid_progress_and_public_status(
     status = _reader_status(client, resource_id)
     assert status.resource_id == resource_id
     assert status.status == "UNREAD"
-    assert status.percent == 37
+    assert status.percent == 0
 
     after_unread = _progress_state(client, resource_id)
-    if before_unread.progress_snapshot != after_unread.progress_snapshot:
-        pytest.fail("UNREAD changed progress snapshot")
+    assert after_unread.progress_snapshot is None
+    db_session.expire_all()
+    assert (
+        db_session.scalar(
+            select(ReaderResourceProgressV5.id).where(
+                ReaderResourceProgressV5.resource_id == resource_id
+            )
+        )
+        is None
+    )
+    assert (
+        db_session.scalar(
+            select(ReaderProgressMutationV5.id).where(
+                ReaderProgressMutationV5.resource_id == resource_id
+            )
+        )
+        is None
+    )
 
     post_unread_write_response = client.put(
         _progress_url(resource_id),
@@ -269,10 +287,7 @@ def test_unread_preserves_mid_progress_and_public_status(
         post_unread_write_response.json()
     ).data
     assert post_unread_write.current_snapshot is not None
-    assert (
-        post_unread_write.accepted_revision
-        == after_unread.progress_snapshot.revision + 1
-    )
+    assert post_unread_write.accepted_revision == 1
 
     status_after_new_progress = _reader_status(client, resource_id)
     assert status_after_new_progress.resource_id == resource_id
@@ -289,5 +304,5 @@ def test_unread_preserves_mid_progress_and_public_status(
             "resource": {"progress": 37, "resource_completed": False},
         },
         "resource_list": {"progress": 37, "resource_completed": False},
-        "management_status": "UNREAD",
+        "management_status": "READING",
     }

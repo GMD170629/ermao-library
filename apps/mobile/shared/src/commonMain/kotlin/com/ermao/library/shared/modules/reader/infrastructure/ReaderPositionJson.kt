@@ -20,6 +20,7 @@ class ReaderPositionJson(
         put("position", mapper.encodePosition(position.position))
     }.toString()
 
+    @Throws(IllegalArgumentException::class)
     fun decode(payload: String): ReaderPositionLocalState {
         val root = runCatching { readerV5ServerWireJson.parseToJsonElement(payload) as? JsonObject }
             .getOrNull() ?: throw ReaderServerWireException("Reader v5 position is malformed")

@@ -7,12 +7,10 @@ from datetime import datetime
 from typing import Literal, cast
 
 from sqlalchemy import and_, exists, func, literal, select
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, aliased
 
 from app.core.authorization import AuthorizationContext, resource_visibility_predicate
 from app.models import LibraryReadableResource
-from app.models.common import cuid
 from app.modules.reader.application.v5_library_queries import (
     ReaderV5LibraryPresentationQueryPort,
     ReaderV5PresentationView,
@@ -24,7 +22,10 @@ from app.modules.reader.infrastructure.persistence.models import (
     ReaderResourceProgressV5,
     ReaderResourceReadingStatusV5,
 )
-from app.modules.reader.infrastructure.v5_repository import decode_stored_presentation
+from app.modules.reader.infrastructure.v5_repository import (
+    SqlAlchemyReaderV5Repository,
+    decode_stored_presentation,
+)
 
 
 def _presentation_view(row: ReaderResourceProgressV5) -> ReaderV5PresentationView:
@@ -387,36 +388,11 @@ class SqlAlchemyReaderV5LibraryPresentationQueries(
         status: str,
         updated_at: datetime,
     ) -> None:
-        if status not in {"UNREAD", "FINISHED"}:
-            raise ValueError("invalid Reader v5 reading status")
-        normalized_ids = tuple(
-            dict.fromkeys(str(resource_id) for resource_id in resource_ids)
-        )
-        if not normalized_ids:
-            return
-        values = [
-            {
-                "id": cuid(),
-                "user_id": user_id,
-                "resource_id": resource_id,
-                "status": status,
-                "updated_at": updated_at,
-            }
-            for resource_id in normalized_ids
-        ]
-        self._db.execute(
-            sqlite_insert(ReaderResourceReadingStatusV5)
-            .values(values)
-            .on_conflict_do_update(
-                index_elements=[
-                    ReaderResourceReadingStatusV5.user_id,
-                    ReaderResourceReadingStatusV5.resource_id,
-                ],
-                set_={
-                    ReaderResourceReadingStatusV5.status: status,
-                    ReaderResourceReadingStatusV5.updated_at: updated_at,
-                },
-            )
+        SqlAlchemyReaderV5Repository(self._db).set_v5_reading_statuses(
+            user_id=user_id,
+            resource_ids=resource_ids,
+            status=cast(Literal["UNREAD", "FINISHED"], status),
+            updated_at=updated_at,
         )
 
 

@@ -100,6 +100,10 @@ class SqlAlchemyResourceDetailQueries:
             user_id=self._user_id,
             resource_id=resource.id,
         )
+        reading_state = self._reader_queries.list_reading_states(
+            user_id=self._user_id,
+            resource_ids=[resource.id],
+        )[resource.id]
         current_href = None
         current_page_number = None
         current_position = None
@@ -113,7 +117,7 @@ class SqlAlchemyResourceDetailQueries:
             book_id=resource.book_id,
             format=resource.format,
             page_count=metadata.page_count if metadata is not None else None,
-            progress=float(progress.display_percent if progress is not None else 0),
+            progress=float(reading_state.display_percent),
             current_href=current_href,
             current_page_number=current_page_number,
             current_position=current_position,

@@ -18,6 +18,7 @@ import com.ermao.library.shared.modules.reader.ReaderPositionSyncingStore
 import com.ermao.library.shared.modules.reader.ReaderPositionWriteResponse
 import com.ermao.library.shared.modules.reader.ReaderProgressMutationV5
 import com.ermao.library.shared.modules.reader.ReaderProgressSnapshotV5
+import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -363,16 +364,101 @@ internal class AndroidReaderV5Database(
             }
         }
 
-        private fun SQLiteDatabase.deleteKeysWithPrefix(table: String, column: String, prefix: String) {
-            val keys = query(table, arrayOf(column), null, null, null, null, null, null).use { cursor ->
+        /** Deletes every Reader V5 slot for one account/client/book. */
+        internal suspend fun deleteBookPositions(
+            context: Context,
+            namespace: ReaderSyncNamespace,
+            clientId: String,
+            bookId: String,
+            databaseName: String = DATABASE_NAME,
+        ) {
+            require(clientId.isNotBlank()) { "Reader client id is blank" }
+            require(bookId.isNotBlank()) { "Reader book id is blank" }
+            deleteOwnedPositions(
+                context = context,
+                namespace = namespace,
+                clientId = clientId,
+                databaseName = databaseName,
+            ) { owner -> owner.first == bookId }
+        }
+
+        /** Deletes one resource's Reader V5 slots without assuming a book id. */
+        internal suspend fun deleteResourcePositions(
+            context: Context,
+            namespace: ReaderSyncNamespace,
+            clientId: String,
+            resourceId: String,
+            databaseName: String = DATABASE_NAME,
+        ) {
+            require(clientId.isNotBlank()) { "Reader client id is blank" }
+            require(resourceId.isNotBlank()) { "Reader resource id is blank" }
+            deleteOwnedPositions(
+                context = context,
+                namespace = namespace,
+                clientId = clientId,
+                databaseName = databaseName,
+            ) { owner -> owner.second == resourceId }
+        }
+
+        private suspend fun deleteOwnedPositions(
+            context: Context,
+            namespace: ReaderSyncNamespace,
+            clientId: String,
+            databaseName: String,
+            matches: (Pair<String, String>) -> Boolean,
+        ) {
+            val helper = ReaderV5DatabaseHelper(context.applicationContext, databaseName)
+            try {
+                withContext(Dispatchers.IO) {
+                    val prefix = "${readerAccountStorageKey(namespace)}:${lengthPrefixed(
+                        namespace.serverIdentity,
+                        namespace.userId,
+                        clientId,
+                    )}"
+                    helper.writableDatabase.transaction {
+                        deleteKeysWithPrefix(POSITION_TABLE, POSITION_OWNER_KEY, prefix) { suffix ->
+                            decodeOwnerSuffix(suffix)?.let(matches) == true
+                        }
+                        deleteKeysWithPrefix(POSITION_SYNC_TABLE, POSITION_SYNC_OWNER_KEY, prefix) { suffix ->
+                            decodeOwnerSuffix(suffix)?.let(matches) == true
+                        }
+                    }
+                }
+            } finally {
+                helper.close()
+            }
+        }
+
+        private fun SQLiteDatabase.deleteKeysWithPrefix(
+            table: String,
+            column: String,
+            prefix: String,
+            matchesSuffix: (String) -> Boolean = { true },
+        ) {
+            val keys = query(
+                table,
+                arrayOf(column),
+                "$column LIKE ? ESCAPE '\\'",
+                arrayOf("${prefix.escapeLikePattern()}%"),
+                null,
+                null,
+                null,
+                null,
+            ).use { cursor ->
                 buildList {
                     while (cursor.moveToNext()) {
-                        cursor.getString(0)?.takeIf { it.startsWith(prefix) }?.let(::add)
+                        val key = cursor.getString(0) ?: continue
+                        if (!key.startsWith(prefix)) continue
+                        if (matchesSuffix(key.removePrefix(prefix))) add(key)
                     }
                 }
             }
             keys.forEach { key -> delete(table, "$column = ?", arrayOf(key)) }
         }
+
+        private fun String.escapeLikePattern(): String = replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
     }
 }
 

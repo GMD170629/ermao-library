@@ -11,7 +11,6 @@ import com.ermao.library.shared.createAndroidMobileRuntime
 import com.ermao.library.shared.modules.auth.MobileRuntime
 import com.ermao.library.shared.createAndroidPersonalSettingsRepository
 import com.ermao.library.shared.createAndroidAdministrativeSettingsRepository
-import com.ermao.library.shared.createAndroidWorkManagementRepository
 import com.ermao.library.shared.modules.administrativesettings.AdministrativeSettingsRepository
 import com.ermao.library.shared.modules.personalsettings.PersonalSettingsRepository
 import com.ermao.library.features.downloads.infrastructure.AndroidDownloadCatalog

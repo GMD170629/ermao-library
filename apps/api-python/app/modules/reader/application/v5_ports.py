@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Literal, Protocol
 
@@ -76,6 +77,17 @@ class ReaderV5Repository(Protocol):
         status: Literal["UNREAD", "FINISHED"],
         updated_at: datetime,
     ) -> ReaderV5ReadingStatusDto: ...
+
+    def set_v5_reading_statuses(
+        self,
+        *,
+        user_id: str,
+        resource_ids: Sequence[str],
+        status: Literal["UNREAD", "FINISHED"],
+        updated_at: datetime,
+    ) -> list[ReaderV5ReadingStatusDto]: ...
+
+    def clear_v5_reading_status(self, *, user_id: str, resource_id: str) -> None: ...
 
     def list_v5_bookmarks(
         self, user_id: str, resource_id: str

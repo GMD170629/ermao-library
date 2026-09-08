@@ -402,6 +402,18 @@ class WorkDetailLayoutTest {
         )
 
         assertEquals(
+            WorkDetailPrimaryActionLabel.StartReading,
+            workDetailPrimaryActionPresentation(resource.copy(progressPercent = 100), completedDownload).label,
+        )
+        assertEquals(
+            WorkDetailPrimaryActionLabel.StartListening,
+            workDetailPrimaryActionPresentation(
+                resource.copy(readerType = "audio", progressPercent = 100),
+                completedDownload,
+            ).label,
+        )
+
+        assertEquals(
             WorkDetailPrimaryActionIntent.OpenSelectedVolume,
             workDetailPrimaryActionPresentation(
                 resource.copy(id = "different-resource"),
