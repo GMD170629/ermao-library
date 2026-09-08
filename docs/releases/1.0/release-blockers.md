@@ -1,3 +1,5 @@
+2026-09-08 IMP-05/INI-03既有真实中断后的HTTP安全重扫及Chrome管理显示子项PASS；512书/资源/资产ID、READY状态与原件hash一致，失败历史保留。证据17a70f4f/import-recovery-ui-20260908/result.json，详见evidence。无业务/工具变更；下一项Android PDF活动会话远端提示及显式跳转，设备已解锁。R2未冻结、最终同RC与既有外部限制保持。
+
 2026-09-08 INI-02/CON-02 Chrome普通权限、旧会话失效及重登子项PASS，无新缺陷/工具；原权限恢复和隔离环境收尾已核验，详见evidence首条。下一项IMP-05原中断任务普通管理入口；既有特定Chrome工具/iOS/容器阻塞、正式包暂缓及R2未冻结保持。
 
 2026-09-08 IMPORT-08 CLOSED：后端完整回归唯一架构失败已由eaa96c19修复，原架构及建库/根路径相邻验证通过；原全量FAIL与补丁定向PASS分开记录，详见evidence首条。下一项INI-02 Chrome成员权限普通界面；R2未冻结，既有外部阻塞/正式包暂缓保持。
