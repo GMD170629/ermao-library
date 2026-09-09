@@ -5,7 +5,10 @@ data class OpdsSettings(
     val configured: Boolean,
     val publicBaseUrl: String?,
     val catalogUrl: String?,
-)
+) {
+    fun initialPublicBaseUrl(serverBaseUrl: String): String =
+        publicBaseUrl?.takeIf(String::isNotBlank) ?: serverBaseUrl
+}
 
 data class BackupArchive(
     val id: String,

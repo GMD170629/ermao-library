@@ -536,6 +536,78 @@ class KtorAdministrativeSettingsRepositoryTest {
         assertEquals("STALE_RESPONSE", failure.error.code)
     }
 
+    @Test
+    fun userDetailAndPermissionUpdatesAcceptCurrentAvatarMetadata() = runBlocking {
+        val harness = Harness(Response(200, USER_PAYLOAD), Response(200, USER_PAYLOAD))
+        val current = assertIs<AdministrativeSettingsContent<ManagedUser>>(harness.repository.loadUser(context(), "user-1")).value
+        val updated = assertIs<AdministrativeSettingsContent<ManagedUser>>(harness.repository.updateUser(
+            context(), current.id,
+            UpdateManagedUser(current.name, current.email, current.role, current.status,
+                current.canManageSystem, current.canViewManualImports, current.libraryIds, current.locale),
+        )).value
+        assertEquals(current, updated)
+        assertEquals(HttpMethod.Patch, harness.requests.last().method)
+        assertTrue(harness.requests.last().body.contains("\"libraryIds\":[\"folder-1\"]"))
+    }
+
+    @Test
+    fun userAvatarMetadataIsValidatedWithoutChangingTheStoredAvatar() {
+        val user = Json.parseToJsonElement(USER).toManagedUser()
+        assertEquals(null, user.avatarUrl)
+        val custom = USER.replace("\"avatarUrl\":null", "\"avatarUrl\":\"https://books.example/avatar.png\"")
+            .replace("/api/auth/avatar", "https://books.example/avatar.png")
+        assertEquals("https://books.example/avatar.png", Json.parseToJsonElement(custom).toManagedUser().avatarUrl)
+        val malformed = USER.replace("\"avatarImageUrl\":\"/api/auth/avatar\"", "\"avatarImageUrl\":42")
+        assertEquals("INVALID_avatarImageUrl", assertFailsWith<AdministrativeSettingsWireException> {
+            Json.parseToJsonElement(malformed).toManagedUser()
+        }.stableCode)
+    }
+
+    @Test
+    fun logExportReadsEveryPageAndPreservesFilters() = runBlocking {
+        fun page(number: Int, ids: IntRange): String {
+            val events = ids.joinToString(",") { id ->
+                """{"id":"event-$id","level":"error","source":"auth","actorType":"user","actorId":null,"action":"login","targetType":null,"targetId":null,"message":"Failed login","metadata":{},"createdAt":"2026-09-09T00:00:00Z"}"""
+            }
+            return EVENTS.replace("\"events\":[]", "\"events\":[$events]")
+                .replace("\"page\":1", "\"page\":$number")
+                .replace("\"pageSize\":20", "\"pageSize\":100")
+                .replace("\"total\":0", "\"total\":101")
+                .replace("\"totalPages\":1", "\"totalPages\":2")
+        }
+        val harness = Harness(Response(200, page(1, 1..100)), Response(200, page(2, 101..101)))
+        val exported = assertIs<AdministrativeSettingsContent<List<ManagementEvent>>>(harness.repository.loadAllManagementEventsForExport(
+            context(), ManagementEventFilter(level = "error", source = "auth", search = " reader "),
+        )).value
+        assertEquals((1..101).map { "event-$it" }, exported.map { it.id })
+        assertEquals(listOf("1", "2"), harness.requests.map { it.query["page"] })
+        harness.requests.forEach { request ->
+            assertEquals("100", request.query["pageSize"])
+            assertEquals("error", request.query["level"])
+            assertEquals("auth", request.query["source"])
+            assertEquals("reader", request.query["search"])
+        }
+    }
+
+    @Test
+    fun opdsSaveReturnsTheServerCatalogAndPreservesDeploymentPaths() = runBlocking {
+        val enabled = OPDS.replace("false", "true")
+            .replace("\"publicBaseUrl\":null", "\"publicBaseUrl\":\"https://books.example/base\"")
+            .replace("\"catalogUrl\":null", "\"catalogUrl\":\"https://books.example/base/opds/v1.2/catalog\"")
+        val disabled = enabled.replace("\"enabled\":true", "\"enabled\":false")
+            .replace("\"catalogUrl\":\"https://books.example/base/opds/v1.2/catalog\"", "\"catalogUrl\":null")
+        val harness = Harness(Response(200, enabled), Response(200, enabled), Response(200, disabled))
+        val saved = assertIs<AdministrativeSettingsContent<OpdsSettings>>(
+            harness.repository.updateOpdsSettings(context(), true, "https://books.example/base"),
+        ).value
+        assertEquals("https://books.example/base/opds/v1.2/catalog", saved.catalogUrl)
+        assertEquals(saved, assertIs<AdministrativeSettingsContent<OpdsSettings>>(harness.repository.loadOpdsSettings(context())).value)
+        assertEquals(null, assertIs<AdministrativeSettingsContent<OpdsSettings>>(
+            harness.repository.updateOpdsSettings(context(), false, "https://books.example/base"),
+        ).value.catalogUrl)
+        assertTrue(harness.requests.first().body.contains("https://books.example/base"))
+    }
+
     private fun context(): AdministrativeSettingsContext = createAdministrativeSettingsContext(
         profileId = "profile-1",
         displayName = "Books",
@@ -612,7 +684,7 @@ class KtorAdministrativeSettingsRepositoryTest {
         const val KINDLE_SETTINGS_UPDATED = KINDLE_SETTINGS
         const val EMAIL_SETTINGS = """{"ok":true,"data":{"smtp":{"host":"smtp.example.com","port":587,"security":"starttls","username":"reader","fromEmail":"sender@example.com","fromName":"Library","maxAttachmentMb":25,"passwordConfigured":true},"kindle":{"email":"reader@kindle.com"}}}"""
         const val SMTP_TEST = """{"ok":true,"data":{"connected":true,"message":"ok"}}"""
-        const val USER = """{"id":"user-1","email":"reader@example.com","name":"Reader","role":"member","status":"active","canManageSystem":true,"canViewManualImports":true,"authzVersion":7,"avatarUrl":null,"locale":"en-US","libraryIds":["folder-1"],"authorization":{"isAdmin":false,"canManageSystem":true,"allLibraryScopes":false,"libraryIds":["folder-1"],"canViewManualImports":true,"authzVersion":7},"createdAt":"2026-08-12T00:00:00Z","updatedAt":"2026-08-12T00:00:00Z"}"""
+        const val USER = """{"id":"user-1","email":"reader@example.com","name":"Reader","role":"member","status":"active","canManageSystem":true,"canViewManualImports":true,"authzVersion":7,"avatarUrl":null,"avatarImageUrl":"/api/auth/avatar","locale":"en-US","libraryIds":["folder-1"],"authorization":{"isAdmin":false,"canManageSystem":true,"allLibraryScopes":false,"libraryIds":["folder-1"],"canViewManualImports":true,"authzVersion":7},"createdAt":"2026-08-12T00:00:00Z","updatedAt":"2026-08-12T00:00:00Z"}"""
         const val USERS = """{"ok":true,"data":{"users":[$USER]}}"""
         const val USER_PAYLOAD = """{"ok":true,"data":{"user":$USER}}"""
         const val PASSWORD_CHANGED = """{"ok":true,"data":{"passwordChanged":true,"sessionsRevoked":true}}"""

@@ -28,6 +28,30 @@ class AdministrativeSettingsUiTest {
     val compose = createComposeRule()
 
     @Test
+    fun opdsCopyUsesTheSavedCatalogAddress() {
+        val catalog = "https://books.example/base/opds/v1.2/catalog"
+        var copied: String? = null
+        compose.setContent {
+            WarmPageTheme {
+                OpdsScreen(
+                    state = AdministrativePageState(
+                        phase = AdministrativePagePhase.Content,
+                        snapshot = OpdsSnapshot(true, true, "https://books.example/base", catalog),
+                        failure = null,
+                        mutationInFlight = false,
+                    ),
+                    locale = AdministrativeLocale.EnUs,
+                    onCopy = { copied = it },
+                    onCommand = {}, onRetry = {}, onBack = {},
+                )
+            }
+        }
+        compose.onNodeWithText(catalog).assertIsDisplayed()
+        compose.onNodeWithText("Copy").performClick()
+        org.junit.Assert.assertEquals(catalog, copied)
+    }
+
+    @Test
     fun emailKindleTabsStayInTheSettingsTopBar() {
         compose.setContent {
             WarmPageTheme {

@@ -1,5 +1,6 @@
 package com.ermao.library.shared.modules.workmanagement.application
 
+import com.ermao.library.shared.core.feedback.OperationFeedbackKind
 import com.ermao.library.shared.modules.workmanagement.domain.BookManagementContext
 import com.ermao.library.shared.modules.workmanagement.domain.BookMetadataDraft
 import com.ermao.library.shared.modules.workmanagement.domain.CoverUpload
@@ -50,10 +51,17 @@ data class ManagementSessionState(
     val error: WorkManagementError? = null,
     val saveStage: ManagementSaveStage? = null,
     val notice: String? = null,
+    val feedbackRevision: Long = 0,
     val metadataOutcome: com.ermao.library.shared.modules.workmanagement.domain.MetadataApplyOutcome? = null,
     val change: ManagementChange? = null,
     val revision: Long = 0,
-)
+) {
+    val feedbackKind: OperationFeedbackKind
+        get() = when (notice) {
+            "refreshFailed", "metadataPartial" -> OperationFeedbackKind.PartialSuccess
+            else -> OperationFeedbackKind.Success
+        }
+}
 
 /** Owns one native management interaction. UI dismissal/namespace replacement invalidates pending reads. */
 class BookManagementSession(
@@ -67,6 +75,7 @@ class BookManagementSession(
     val current: ManagementSessionState get() = mutableState.value
     val canManageActions: Boolean get() = canManage
     private var generation = 0L
+    private var feedbackSequence = 0L
     private var deleteKey: String? = null
     val interactionId: Long get() = generation
 
@@ -102,13 +111,18 @@ class BookManagementSession(
 
     fun close() {
         generation++
-        mutableState.value = ManagementSessionState(revision = current.revision, change = current.change)
+        mutableState.value = ManagementSessionState(revision = current.revision, change = current.change,
+            notice = current.notice.takeIf { current.phase == ManagementPhase.Result },
+            feedbackRevision = current.feedbackRevision)
     }
 
     fun reportRefreshFailure() {
-        mutableState.value = current.copy(notice = "refreshFailed")
+        mutableState.value = current.copy(notice = "refreshFailed", feedbackRevision = ++feedbackSequence)
     }
     fun clearFeedback() { mutableState.value = current.copy(error = null, notice = null) }
+    fun clearFeedback(revision: Long) {
+        if (current.feedbackRevision == revision) mutableState.value = current.copy(notice = null)
+    }
     fun setField(field: ManagementField, value: String) {
         if (current.operation != null) return
         mutableState.value = current.copy(draft = current.draft.map { if (it.field == field) it.copy(value = value) else it }, error = null)
@@ -296,7 +310,8 @@ class BookManagementSession(
         when (val result = repository.sendToKindle(context, target.bookId, asset)) {
             is WorkManagementResult.Failure -> fail(token, result)
             is WorkManagementResult.Content -> if (token == generation) mutableState.value = current.copy(phase = ManagementPhase.Closed,
-                notice = if (result.value.alreadyQueued) "alreadyQueued" else "queued")
+                notice = if (result.value.alreadyQueued) "alreadyQueued" else "queued",
+                feedbackRevision = ++feedbackSequence)
         }
     }
 
@@ -379,7 +394,7 @@ class BookManagementSession(
         bookMenuCache.invalidate(target.bookId)
         if (readingStatusChanged) bookMenuCache.put(target.bookId, current.menuContext.completed != true)
         changed(target, coverChanged, deleted, readingStatusChanged)
-        mutableState.value = current.copy(phase = ManagementPhase.Closed, notice = notice, saveStage = null)
+        mutableState.value = current.copy(phase = ManagementPhase.Closed, notice = notice, feedbackRevision = ++feedbackSequence, saveStage = null)
     }
 }
 

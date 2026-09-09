@@ -200,6 +200,7 @@ enum class AdministrativeCopy(
     EnableOpds("启用 OPDS 服务", "Enable OPDS service"),
     PublicAddress("公开地址", "Public address"),
     CatalogAddress("目录地址（只读）", "Catalog address (read only)"),
+    OpdsSaveHint("更改尚未保存。点击右上角保存，生效后将更新目录地址。", "Changes are not saved. Tap Save in the top-right corner to apply them and update the catalog URL."),
     OpdsInstructions(
         "使用支持 OPDS 1.2 的第三方客户端或阅读器，添加上方目录地址后即可同步书库内容。",
         "Use a third-party client or reader that supports OPDS 1.2. Add the catalog address above to sync your library.",
@@ -213,7 +214,7 @@ enum class AdministrativeCopy(
         "Enable and save OPDS, then add the catalog address to an OPDS 1.2-compatible client or reader.",
     ),
     DisableOpdsTitle("关闭 OPDS 服务？", "Turn off OPDS?"),
-    DisableOpdsBody("所有 OPDS 目录地址将立即停止服务，第三方客户端将无法访问。", "All OPDS catalog URLs will stop immediately and third-party clients will lose access."),
+    DisableOpdsBody("保存后，所有 OPDS 目录地址将停止服务，第三方客户端将无法访问。", "After you save, all OPDS catalog URLs will stop serving and third-party clients will lose access."),
     DisableService("关闭服务", "Turn off service"),
     SaveOpds("保存 OPDS 配置", "Save OPDS settings"),
     BackupDirectory("服务备份目录", "Server backup directory"),

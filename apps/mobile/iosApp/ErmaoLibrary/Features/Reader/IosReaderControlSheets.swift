@@ -337,7 +337,7 @@ struct ReaderPreferenceSheet<Session: IosReaderControlSession>: View {
     }
 
     private func catalogText(key: String, chinese: String, english: String) -> String {
-        let localized = localizedReaderOption(key, locale: locale)
+        let localized = localizedAppString(key, locale: locale)
         guard localized == key else { return localized }
         return locale.language.languageCode?.identifier == "zh" ? chinese : english
     }

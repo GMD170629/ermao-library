@@ -21,6 +21,17 @@ class AdministrativeSettingsPublicTest {
     }
 
     @Test
+    fun opdsDraftUsesTheConnectedServerOnlyWhenNoPublicAddressWasConfigured() {
+        val context = createAdministrativeSettingsContext("p", "Books", "https://books.example/library/", "s", false)
+        val unconfigured = OpdsSettings(false, false, null, null)
+        assertEquals("https://books.example/library", initialOpdsPublicBaseUrl(unconfigured, context))
+        assertEquals("https://books.example/library", initialOpdsPublicBaseUrl(unconfigured.copy(publicBaseUrl = " "), context))
+        val configured = unconfigured.copy(publicBaseUrl = "https://public.example/reader")
+        assertEquals("https://public.example/reader", initialOpdsPublicBaseUrl(configured, context))
+        assertEquals(null, unconfigured.catalogUrl)
+    }
+
+    @Test
     fun contextRejectsNonHttpServers() {
         assertFailsWith<IllegalArgumentException> {
             createAdministrativeSettingsContext(

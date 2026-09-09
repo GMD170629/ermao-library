@@ -1,5 +1,6 @@
 package com.ermao.library.features.administrativesettings
 
+import com.ermao.library.shared.modules.administrativesettings.initialOpdsPublicBaseUrl
 import com.ermao.library.shared.modules.administrativesettings.AdministrativeSettingsContent as SharedContent
 import com.ermao.library.shared.modules.administrativesettings.AdministrativeSettingsContext as SharedContext
 import com.ermao.library.shared.modules.administrativesettings.AdministrativeSettingsError as SharedError
@@ -140,7 +141,7 @@ class SharedAdministrativeSettingsAdapter(
         }
         is AdministrativeSettingsRoute.MetadataProviderEdit -> sharedRepository.loadMetadataProvider(sharedContext, route.providerId).map { it.toEditor() }
         AdministrativeSettingsRoute.Opds -> sharedRepository.loadOpdsSettings(sharedContext).map {
-            OpdsSnapshot(it.enabled, it.configured, it.publicBaseUrl.orEmpty(), it.catalogUrl.orEmpty())
+            OpdsSnapshot(it.enabled, it.configured, initialOpdsPublicBaseUrl(it, sharedContext), it.catalogUrl.orEmpty())
         }
         AdministrativeSettingsRoute.Backups -> sharedRepository.listBackups(sharedContext).map { archives ->
             BackupsSnapshot(archives.map { archive ->

@@ -18,6 +18,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.ermao.library.shared.core.feedback.OperationFeedbackKind
 import com.ermao.library.ui.theme.WarmPageTheme
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.launch
@@ -70,4 +71,67 @@ class WarmPageSnackbarHostTest {
         compose.onNodeWithText("Undo").assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(SnackbarResult.ActionPerformed, result.get()) }
     }
+    @Test
+    fun successHasNoCloseActionAndExpiresAfterAFullSecond() {
+        compose.mainClock.autoAdvance = false
+        successFixture()
+        compose.onNodeWithText("Save").performClick()
+        compose.mainClock.advanceTimeBy(300)
+        compose.onNodeWithText("Saved").assertIsDisplayed()
+        compose.onNodeWithText("Close").assertDoesNotExist()
+        compose.mainClock.advanceTimeBy(650)
+        compose.onNodeWithText("Saved").assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(500)
+        compose.onNodeWithText("Saved").assertDoesNotExist()
+    }
+
+    @Test
+    fun identicalSuccessRestartsTheTimerAndOldTimerCannotCloseIt() {
+        compose.mainClock.autoAdvance = false
+        successFixture()
+        compose.onNodeWithText("Save").performClick()
+        compose.mainClock.advanceTimeBy(700)
+        compose.onNodeWithText("Save").performClick()
+        compose.mainClock.advanceTimeBy(650)
+        compose.onNodeWithText("Saved").assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(800)
+        compose.onNodeWithText("Saved").assertDoesNotExist()
+    }
+
+    @Test
+    fun successDoesNotReplaceAnActionThatStillNeedsAttention() {
+        compose.mainClock.autoAdvance = false
+        successFixture()
+        compose.onNodeWithText("Show action").performClick()
+        compose.mainClock.advanceTimeBy(300)
+        compose.onNodeWithText("Save").performClick()
+        compose.mainClock.advanceTimeBy(1600)
+        compose.onNodeWithText("Undo").assertIsDisplayed()
+        compose.onNodeWithText("Saved").assertDoesNotExist()
+        compose.onNodeWithText("Undo").performClick()
+        compose.mainClock.advanceTimeBy(300)
+        compose.onNodeWithText("Bookmark added").assertDoesNotExist()
+    }
+
+    private fun successFixture() {
+        compose.setContent {
+            WarmPageTheme(darkTheme = false) {
+                val host = remember { SnackbarHostState() }
+                val scope = rememberCoroutineScope()
+                Box(Modifier.fillMaxSize()) {
+                    androidx.compose.foundation.layout.Column {
+                        Button(onClick = { scope.launch { host.showFeedback("Saved", OperationFeedbackKind.Success) } }) {
+                            Text("Save")
+                        }
+                        Button(onClick = { scope.launch {
+                            host.showFeedback("Bookmark added", OperationFeedbackKind.Action, actionLabel = "Undo",
+                                duration = SnackbarDuration.Indefinite)
+                        } }) { Text("Show action") }
+                    }
+                    WarmPageSnackbarHost(host, Modifier.align(Alignment.BottomCenter))
+                }
+            }
+        }
+    }
+
 }

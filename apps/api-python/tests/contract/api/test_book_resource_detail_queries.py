@@ -242,7 +242,51 @@ def test_book_detail_is_bounded_and_projects_resource_assets(
     assert selected["assets"][0]["downloadUrl"] == (
         "/api/assets/detail-resource-02-asset?download=true"
     )
-    assert "path" not in selected["assets"][0]
+    assert selected["assets"][0].get("path") is None
+
+
+def test_resource_asset_paths_are_real_files_and_urls_remain_transport_addresses(
+    client, db_session, tmp_path: Path
+) -> None:
+    _login(client, db_session, email="paths@example.com")
+    _, resources = _add_book(db_session, resource_count=2)
+    library = db_session.get(Library, "test-library")
+    assert library is not None
+    library.root_path = str(tmp_path)
+    expected = []
+    for index, resource in enumerate(resources):
+        node = db_session.get(LibrarySourceNode, resource.source_node_id)
+        assert node is not None
+        node.relative_path = f"中文目录/子 目录/图书 {index}.epub"
+        node.path_key = _path_key(node.relative_path)
+        node.name = f"图书 {index}.epub"
+        path = tmp_path / node.relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"original")
+        expected.append(str(path))
+    db_session.commit()
+
+    for endpoint in ["/api/books/detail-book", "/api/books/detail-book/resources"]:
+        response = client.get(endpoint)
+        assert response.status_code == 200, response.text
+        data = response.json()["data"]
+        projected = data["book"]["resources"] if "book" in data else data["resources"]
+        assert [resource["assets"][0]["path"] for resource in projected] == expected
+        for resource in projected:
+            asset = resource["assets"][0]
+            assert asset["url"] == f"/api/assets/{asset['id']}"
+            assert asset["downloadUrl"] == f"/api/assets/{asset['id']}?download=true"
+    assert all(Path(path).read_bytes() == b"original" for path in expected)
+
+    _login(client, db_session, email="paths-denied@example.com", role="member")
+    for endpoint in [
+        "/api/books/detail-book",
+        "/api/books/detail-book/resources",
+        "/api/resources/detail-resource-01",
+    ]:
+        denied = client.get(endpoint)
+        assert denied.status_code == 404
+        assert all(path not in denied.text for path in expected)
 
 
 def test_book_resource_query_pages_deterministically(client, db_session) -> None:

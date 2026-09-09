@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from importlib import import_module
-from pathlib import Path
 from typing import Protocol, cast
 
 from sqlalchemy import (
@@ -36,6 +35,9 @@ from app.modules.library.application.resource_details import (
 from app.modules.library.domain.asset_titles import (
     AssetTitleCandidate,
     resolve_asset_display_titles,
+)
+from app.modules.library.infrastructure.source_paths import (
+    resolve_existing_library_file,
 )
 from app.modules.reader.public import ReaderV5LibraryPresentationQueryPort
 
@@ -259,7 +261,7 @@ class SqlAlchemyResourceDetailQueries:
         ).one_or_none()
         if row is None:
             return None
-        path = self._safe_source_path(str(row.root_path), str(row.relative_path))
+        path = resolve_existing_library_file(str(row.root_path), str(row.relative_path))
         if path is None:
             return None
         document: _PdfDocument | None = None
@@ -272,19 +274,6 @@ class SqlAlchemyResourceDetailQueries:
         finally:
             if document is not None:
                 document.close()
-
-    @staticmethod
-    def _safe_source_path(root_value: str, relative_value: str) -> Path | None:
-        try:
-            root = Path(root_value).expanduser().resolve(strict=True)
-            candidate = root.joinpath(*Path(relative_value).parts)
-            resolved = candidate.resolve(strict=True)
-            resolved.relative_to(root)
-        except (OSError, ValueError):
-            return None
-        if resolved != candidate or not resolved.is_file():
-            return None
-        return resolved
 
     def resolve_current_chapter(
         self,

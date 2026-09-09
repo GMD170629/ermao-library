@@ -204,13 +204,49 @@ struct AdministrativeStatusLabel: View {
 
 struct ActivityOverlayModifier: ViewModifier {
     @ObservedObject var store: AdministrativeSettingsStore
+    @EnvironmentObject private var feedbackPresenter: OperationFeedbackPresenter
+    @State private var feedbackEventID: UUID?
+    @State private var presentedNoticeID: UUID?
 
     func body(content: Content) -> some View {
         content.safeAreaInset(edge: .bottom, spacing: 0) {
-            if let notice = store.notice {
+            if let notice = store.notice, notice.style != .success {
                 AdministrativeNoticeView(notice: notice) { store.replaceNotice(nil) }
             }
         }
+        .onChange(of: store.notice?.id, initial: true) { _, _ in
+            consumeSuccessNoticeIfReady()
+        }
+        .onChange(of: feedbackPresenter.current?.id) { _, _ in
+            consumeSuccessNoticeIfReady()
+        }
+        .onDisappear { clearOwnedFeedback() }
+    }
+
+    private func consumeSuccessNoticeIfReady() {
+        guard let notice = store.notice else { return }
+        guard notice.style == .success else {
+            clearOwnedFeedback()
+            return
+        }
+        guard presentedNoticeID != notice.id else { return }
+        presentedNoticeID = notice.id
+        if let eventID = feedbackPresenter.present(
+            message: notice.message,
+            kind: .success,
+            onDismiss: { [weak store] in
+                guard let store, store.notice?.id == notice.id else { return }
+                store.replaceNotice(nil)
+            }
+        ) {
+            feedbackEventID = eventID
+        }
+    }
+
+    private func clearOwnedFeedback() {
+        guard let feedbackEventID else { return }
+        feedbackPresenter.dismiss(id: feedbackEventID)
+        self.feedbackEventID = nil
     }
 }
 

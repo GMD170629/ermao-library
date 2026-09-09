@@ -287,8 +287,11 @@ struct MultiDownloadSheet: View {
     @State private var isActing = false
     @State private var pendingRemoval: PendingRemoval?
     @State private var actionFeedback: ActionFeedback?
+    @State private var feedbackEventID: UUID?
+    @Environment(\.locale) private var locale
     @Environment(\.appTheme) private var theme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @StateObject private var feedbackPresenter = OperationFeedbackPresenter()
 
     init(
         context: ContentRequestContext,
@@ -411,6 +414,9 @@ struct MultiDownloadSheet: View {
                     .listStyle(.plain)
                 }
             }
+            .overlay(alignment: .bottom) {
+                OperationFeedbackOverlay(presenter: feedbackPresenter, clearsOnDisappear: false)
+            }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -421,7 +427,10 @@ struct MultiDownloadSheet: View {
             tree.load(hierarchy: loadsHierarchy)
             _ = await downloads.reloadAndAwait(expectedNamespace: context.namespaceKey)
         }
-        .onDisappear { tree.cancel() }
+        .onDisappear {
+            clearOwnedFeedback()
+            tree.cancel()
+        }
         .onReceive(downloads.$records) { _ in pruneSelection() }
         .onReceive(tree.$resourcesByID) { _ in pruneSelection() }
         .confirmationDialog(
@@ -745,6 +754,7 @@ struct MultiDownloadSheet: View {
     private func perform(action: DownloadManagementAction, resourceIDs: Set<String>) {
         guard !resourceIDs.isEmpty, !isActing, downloads.isCurrent(context) else { return }
         isActing = true
+        clearOwnedFeedback()
         actionFeedback = nil
         Task { @MainActor in
             guard downloads.isCurrent(context) else {
@@ -780,7 +790,7 @@ struct MultiDownloadSheet: View {
                       )
                 else {
                     actionFeedback = ActionFeedback(
-                        text: String(format: String(localized: "work.downloadManagement.feedback.failed"), 1),
+                        text: String(format: localizedAppString("work.downloadManagement.feedback.failed", locale: locale), locale: locale, 1),
                         failureCode: failedCode ?? "DOWNLOAD_LOCAL_FILE_INVALID",
                         isError: true
                     )
@@ -794,26 +804,46 @@ struct MultiDownloadSheet: View {
 
             var outcomeSummaries: [String] = []
             if accepted > 0 {
-                outcomeSummaries.append(String(format: String(localized: "work.downloadManagement.feedback.accepted"), accepted))
+                outcomeSummaries.append(String(format: localizedAppString("work.downloadManagement.feedback.accepted", locale: locale), locale: locale, accepted))
             }
             if completed > 0 {
-                outcomeSummaries.append(String(format: String(localized: "work.downloadManagement.feedback.completed"), completed))
+                outcomeSummaries.append(String(format: localizedAppString("work.downloadManagement.feedback.completed", locale: locale), locale: locale, completed))
             }
             if skipped > 0 {
-                outcomeSummaries.append(String(format: String(localized: "work.downloadManagement.feedback.skipped"), skipped))
+                outcomeSummaries.append(String(format: localizedAppString("work.downloadManagement.feedback.skipped", locale: locale), locale: locale, skipped))
             }
             if failed > 0 {
-                outcomeSummaries.append(String(format: String(localized: "work.downloadManagement.feedback.failed"), failed))
+                outcomeSummaries.append(String(format: localizedAppString("work.downloadManagement.feedback.failed", locale: locale), locale: locale, failed))
             }
             if !outcomeSummaries.isEmpty {
-                actionFeedback = ActionFeedback(
-                    text: outcomeSummaries.joined(separator: " · "),
-                    failureCode: failedCode,
-                    isError: failed > 0 || skipped > 0
-                )
+                let text = outcomeSummaries.joined(separator: " · ")
+                if failed > 0 || skipped > 0 {
+                    actionFeedback = ActionFeedback(
+                        text: text,
+                        failureCode: failedCode,
+                        isError: true
+                    )
+                } else {
+                    presentSuccessFeedback(text)
+                }
             }
             isActing = false
         }
+    }
+
+    private func presentSuccessFeedback(_ message: String) {
+        guard let eventID = feedbackPresenter.present(
+            message: message,
+            kind: .success,
+            retainedTimeoutMillis: 5_000
+        ) else { return }
+        feedbackEventID = eventID
+    }
+
+    private func clearOwnedFeedback() {
+        guard let feedbackEventID else { return }
+        feedbackPresenter.dismiss(id: feedbackEventID)
+        self.feedbackEventID = nil
     }
 
     private func leaveSelectionMode() {

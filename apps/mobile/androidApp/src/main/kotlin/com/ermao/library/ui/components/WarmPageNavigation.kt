@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -56,6 +57,16 @@ fun <T> WarmPageNavigationSuite(
     bottomAccessory: @Composable () -> Unit = {},
     content: @Composable () -> Unit,
 ) {
+    val pageContent: @Composable () -> Unit = {
+        Box(Modifier.fillMaxSize().imePadding()) {
+            content()
+            WarmPageAppFeedbackHost(
+                Modifier.align(Alignment.BottomCenter).then(
+                    if (showNavigationChrome) Modifier else Modifier.navigationBarsPadding(),
+                ),
+            )
+        }
+    }
     val theme = WarmPageThemeValues
     val itemColors = NavigationSuiteDefaults.itemColors(
         navigationBarItemColors = NavigationBarItemDefaults.colors(
@@ -97,7 +108,7 @@ fun <T> WarmPageNavigationSuite(
                 .fillMaxSize()
                 .testTag("navigation-content-without-chrome"),
         ) {
-            content()
+            pageContent()
         }
     } else {
         BoxWithConstraints(modifier = modifier) {
@@ -107,7 +118,7 @@ fun <T> WarmPageNavigationSuite(
                     selected = selected,
                     onSelect = onSelect,
                     bottomAccessory = bottomAccessory,
-                    content = content,
+                    content = pageContent,
                 )
             } else {
                 NavigationSuiteScaffold(
@@ -145,7 +156,7 @@ fun <T> WarmPageNavigationSuite(
                                     .weight(1f)
                                     .fillMaxWidth(),
                             ) {
-                                content()
+                                pageContent()
                             }
                             Surface(
                                 modifier = Modifier.fillMaxWidth(),

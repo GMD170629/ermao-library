@@ -477,10 +477,12 @@ struct NativeBookManagementHost<Content: View>: View {
     let onUnauthorized: () -> Void
     let onSettings: () -> Void
     let onQueue: () -> Void
+    let bottomObstruction: CGFloat
     let content: Content
     init(repository: any ErmaoShared.WorkManagementRepository, context: ContentRequestContext,
          contentClient: any ContentClient, canManage: Bool,
-         cache: AuthenticatedCoverCache, onChange: @escaping (NativeManagementChange) -> Void,
+         cache: AuthenticatedCoverCache, bottomObstruction: CGFloat = 0,
+         onChange: @escaping (NativeManagementChange) -> Void,
          onUnauthorized: @escaping () -> Void, onSettings: @escaping () -> Void, onQueue: @escaping () -> Void,
          @ViewBuilder content: () -> Content) {
         _store = StateObject(wrappedValue: NativeBookManagementStore(
@@ -490,34 +492,95 @@ struct NativeBookManagementHost<Content: View>: View {
             canManage: canManage,
             cache: cache
         ))
+        self.bottomObstruction = bottomObstruction
         self.onChange = onChange; self.onUnauthorized = onUnauthorized; self.onSettings = onSettings; self.onQueue = onQueue; self.content = content()
     }
+    @Environment(\.locale) private var locale
+    @EnvironmentObject private var feedbackPresenter: OperationFeedbackPresenter
+    @State private var nativeManagementSheetIsVisible = false
+    @State private var presentedFeedbackRevision: Int64 = 0
+
     var body: some View {
         content.environment(\.nativeManagement, store)
             .environment(\.managementRevision, store.change?.revision ?? 0)
             .environment(\.managementChange, store.change)
             .overlay(alignment: .bottom) {
-                if let notice = store.state.notice {
-                    HStack { managementText("nativeManagement.notice.\(notice)"); Button("common.close") { store.edit { store.session.clearFeedback() } } }
-                        .padding(.space2).background(.regularMaterial).accessibilityElement(children: .contain)
-                } else if store.state.phase.name == "Executing", store.state.error != nil {
+                if store.state.phase.name == "Executing", store.state.error != nil {
                     HStack {
                         managementText("nativeManagement.failure.General").foregroundStyle(.red)
                         Button("common.retry") { store.retryImmediateAction() }
                         Button("common.close") { store.close() }
                     }
-                    .padding(.space2).background(.regularMaterial).accessibilityElement(children: .contain)
+                    .padding(.space2)
+                    .padding(.bottom, bottomObstruction)
+                    .background(.regularMaterial)
+                    .accessibilityElement(children: .contain)
                 }
             }
-            .sheet(isPresented: Binding(get: {
-                store.presentation.presentsSheet
-            },
-                                        set: { if !$0 { store.close() } })) {
+            .sheet(
+                isPresented: Binding(get: {
+                    store.presentation.presentsSheet
+                }, set: { if !$0 { store.close() } }),
+                onDismiss: handleNativeManagementSheetDismissal
+            ) {
                 NativeManagementSheet(store: store, onSettings: onSettings, onQueue: onQueue)
+                    .onAppear { nativeManagementSheetIsVisible = true }
+            }
+            .onChange(of: store.presentation.presentsSheet) { _, isPresented in
+                if isPresented { nativeManagementSheetIsVisible = true }
+                consumePendingFeedbackIfReady()
             }
             .onChange(of: store.change) { _, change in if let change { onChange(change) } }
+            .onChange(of: store.state.feedbackRevision) { _, _ in consumePendingFeedbackIfReady() }
+            .onChange(of: store.state.phase.name) { _, _ in consumePendingFeedbackIfReady() }
+            .onChange(of: feedbackPresenter.current?.id) { _, _ in consumePendingFeedbackIfReady() }
             .onChange(of: store.state.error?.kind.name) { _, kind in if kind == "Unauthorized" { store.close(); onUnauthorized() } }
-            .onDisappear { store.close(); store.session.dispose() }
+            .onDisappear {
+                nativeManagementSheetIsVisible = false
+                feedbackPresenter.clear()
+                store.close()
+                store.session.dispose()
+            }
+    }
+
+    private func handleNativeManagementSheetDismissal() {
+        nativeManagementSheetIsVisible = false
+        consumePendingFeedbackIfReady()
+    }
+
+    private func consumePendingFeedbackIfReady() {
+        let state = store.state
+        guard state.phase.name == "Closed",
+              let notice = state.notice,
+              state.feedbackRevision > 0,
+              state.feedbackRevision != presentedFeedbackRevision,
+              !nativeManagementSheetIsVisible else { return }
+        let revision = state.feedbackRevision
+        let key = "nativeManagement.notice.\(notice)"
+        let message = localizedAppString(key, locale: locale)
+        var actions: [OperationFeedbackAction] = []
+        if state.feedbackKind != .success {
+            actions = [OperationFeedbackAction(
+                id: "native-management-feedback-close-\(revision)",
+                title: "common.close",
+                role: .cancel,
+                accessibilityIdentifier: "nativeManagement.feedback.close"
+            ) { [weak store] in
+                guard let store else { return }
+                store.edit { store.session.clearFeedback(revision: revision) }
+            }]
+        }
+        presentedFeedbackRevision = revision
+        _ = feedbackPresenter.present(
+            message: message,
+            kind: state.feedbackKind,
+            actions: actions,
+            retainedTimeoutMillis: Int64.max,
+            onDismiss: { [weak store] in
+                guard let store else { return }
+                store.edit { store.session.clearFeedback(revision: revision) }
+            }
+        )
     }
 }
 

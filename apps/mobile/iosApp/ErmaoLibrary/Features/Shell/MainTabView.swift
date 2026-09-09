@@ -134,6 +134,14 @@ struct RootTabPaths: Equatable {
     }
 }
 
+private struct MainTabBottomChromeHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 struct MainTabView: View {
     @ObservedObject var store: SessionStore
     @ObservedObject var downloads: DownloadCenterStore
@@ -157,11 +165,14 @@ struct MainTabView: View {
     @Environment(\.audioPlaybackRuntime) private var audioPlaybackRuntime
     @Environment(\.appTheme) private var theme
     @EnvironmentObject private var audioPresentation: AudioShellPresentation
+    @EnvironmentObject private var feedbackPresenter: OperationFeedbackPresenter
+    @State private var compactBottomChromeHeight: CGFloat = 0
 
     @ViewBuilder private func managedTabs(_ context: ContentRequestContext) -> some View {
         if let repository = workManagementRepository {
             NativeBookManagementHost(repository: repository, context: context, contentClient: contentClient,
                 canManage: store.snapshot.authorization?.canManageSystem == true, cache: cache,
+                bottomObstruction: horizontalSizeClass == .compact ? compactBottomChromeHeight : 0,
                 onChange: { change in
                     if change.deleted && change.resourceID == nil {
                         for tab in [TabPresentation.home, .library, .shelves, .me] {
@@ -203,6 +214,9 @@ struct MainTabView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .bottom) {
+                OperationFeedbackOverlay(presenter: feedbackPresenter, clearsOnDisappear: false)
+            }
 
             unifiedBottomChrome
         }
@@ -222,7 +236,10 @@ struct MainTabView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            audioMiniPlayer
+            VStack(spacing: 0) {
+                OperationFeedbackOverlay(presenter: feedbackPresenter, clearsOnDisappear: false)
+                audioMiniPlayer
+            }
         }
         .toolbarBackground(theme.surface, for: .tabBar)
         .toolbarBackground(.visible, for: .tabBar)
@@ -245,6 +262,11 @@ struct MainTabView: View {
                 .allowsHitTesting(false)
         }
         .animation(.easeInOut(duration: 0.2), value: audioPresentation.isMiniPlayerVisible)
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(key: MainTabBottomChromeHeightKey.self, value: proxy.size.height)
+            }
+        }
     }
 
     @ViewBuilder
@@ -320,6 +342,10 @@ struct MainTabView: View {
                 openInitialUITestRouteIfNeeded()
             }
         }
+        .onPreferenceChange(MainTabBottomChromeHeightKey.self) { height in
+            compactBottomChromeHeight = height
+        }
+        .onDisappear { feedbackPresenter.clear() }
     }
 
     private var contentContext: ContentRequestContext? {

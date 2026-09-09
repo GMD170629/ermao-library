@@ -135,12 +135,6 @@ private enum WorkDetailSheet: Identifiable {
     }
 }
 
-private struct WorkDetailFeedback: Identifiable, Equatable {
-    let id = UUID()
-    let message: String
-    let isError: Bool
-}
-
 // Keep the existing chapter, page, and track preview implementation available
 // while the product surface is temporarily hidden.
 private let resourcePreviewIsVisible = false
@@ -176,7 +170,8 @@ struct WorkDetailView: View {
     @State private var readerAccessErrorCode: String?
     @StateObject private var managementHolder: WorkManagementStoreHolder
     @State private var pendingReadingStatusTarget: WorkControlTarget?
-    @State private var feedback: WorkDetailFeedback?
+    @State private var feedbackEventID: UUID?
+    @State private var pendingSheetSuccessMessage: String?
     @State private var pendingDownloadHandoff: ReaderHandoff?
     @State private var coverRefreshToken = 0
     @State private var fullMetadataPath: String?
@@ -187,6 +182,7 @@ struct WorkDetailView: View {
     @Environment(\.locale) private var locale
     @Environment(\.dismiss) private var dismiss
     @Environment(\.audioPlaybackRuntime) private var audioPlaybackRuntime
+    @EnvironmentObject private var feedbackPresenter: OperationFeedbackPresenter
 
     init(
         context: ContentRequestContext,
@@ -301,6 +297,10 @@ struct WorkDetailView: View {
     }
 
     private func handleDownloadSheetDismissal() {
+        if let pendingSheetSuccessMessage {
+            self.pendingSheetSuccessMessage = nil
+            showFeedback(pendingSheetSuccessMessage, kind: .success)
+        }
         guard let handoff = pendingDownloadHandoff else { return }
         pendingDownloadHandoff = nil
         openReader(handoff)
@@ -338,7 +338,6 @@ struct WorkDetailView: View {
 
     private var observedScreen: some View {
         availabilityDialogScreen
-        .overlay(alignment: .bottom) { feedbackBanner }
         .appCanvas()
         .onChange(of: managementRevision, initial: true) { _, _ in
             guard let change = managementChange, change.bookID == store.bookIDValue else { return }
@@ -365,6 +364,10 @@ struct WorkDetailView: View {
         .onChange(of: managementStore?.errorCode, initial: false, handleManagementErrorChange)
         .onChange(of: downloads.storageErrorCode, initial: false, handleStorageErrorChange)
         .onChange(of: selectedDownloadErrorCode, initial: false, handleSelectedDownloadErrorChange)
+        .onDisappear {
+            clearOwnedFeedback()
+            pendingSheetSuccessMessage = nil
+        }
     }
 
     private var unavailableFeatureIsPresented: Binding<Bool> {
@@ -391,9 +394,9 @@ struct WorkDetailView: View {
     private func handleManagementErrorChange(_ oldValue: String?, _ code: String?) {
         guard let code else { return }
         pendingReadingStatusTarget = nil
-        let format = String(localized: "management.failed.format")
-        let message = String(format: format, code)
-        showFeedback(message, isError: true)
+        let format = localizedAppString("management.failed.format", locale: locale)
+        let message = String(format: format, locale: locale, code)
+        showFeedback(message, kind: .failure)
     }
 
     private func handleStorageErrorChange(_ oldValue: String?, _ code: String?) {
@@ -406,7 +409,7 @@ struct WorkDetailView: View {
 
     private func handleSelectedDownloadError(_ code: String?) {
         guard let code else { return }
-        showFeedback(downloadFailureMessage(code), isError: true)
+        showFeedback(downloadFailureMessage(code), kind: .failure)
     }
 
     @ViewBuilder
@@ -1817,46 +1820,30 @@ struct WorkDetailView: View {
         return downloads.record(for: resource.id)?.stableErrorCode
     }
 
-    @ViewBuilder
-    private var feedbackBanner: some View {
-        if let feedback {
-            Label(
-                feedback.message,
-                systemImage: feedback.isError ? "exclamationmark.circle.fill" : "checkmark.circle.fill"
-            )
-            .appTextStyle(.callout)
-            .foregroundStyle(feedback.isError ? Color.red : theme.textPrimary)
-            .padding(.horizontal, .space2)
-            .padding(.vertical, .space1Half)
-            .background(theme.surfaceRaised)
-            .clipShape(Capsule())
-            .shadow(color: Color.black.opacity(0.12), radius: 10, y: 4)
-            .padding(.horizontal, .space2)
-            .padding(.bottom, .space2)
-            .transition(.move(edge: .bottom).combined(with: .opacity))
-            .accessibilityAddTraits(.isStaticText)
-        }
+    private func showFeedback(_ message: String, kind: ErmaoShared.OperationFeedbackKind) {
+        guard let eventID = feedbackPresenter.present(
+            message: message,
+            kind: kind,
+            retainedTimeoutMillis: 5_000
+        ) else { return }
+        feedbackEventID = eventID
     }
 
-    private func showFeedback(_ message: String, isError: Bool) {
-        let next = WorkDetailFeedback(message: message, isError: isError)
-        withAnimation(.easeOut(duration: 0.18)) { feedback = next }
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(isError ? 5 : 3))
-            guard feedback?.id == next.id else { return }
-            withAnimation(.easeIn(duration: 0.16)) { feedback = nil }
-        }
+    private func clearOwnedFeedback() {
+        guard let feedbackEventID else { return }
+        feedbackPresenter.dismiss(id: feedbackEventID)
+        self.feedbackEventID = nil
     }
 
     private func managementFeedback(_ action: WorkManagementStore.Action?) -> String {
         switch action {
-        case .readingStatusUpdated: String(localized: "work.readingStatus.updated")
-        case .coverUpdated: String(localized: "management.coverUpdated")
-        case .rescanQueued: String(localized: "management.rescanQueued")
-        case .metadataApplied: String(localized: "management.metadataApplied")
-        case .workUpdated, .resourceUpdated: String(localized: "management.updated")
-        case .kindleQueued: String(localized: "management.kindleQueued")
-        case .bookDeleted, .none: String(localized: "management.updated")
+        case .readingStatusUpdated: localizedAppString("work.readingStatus.updated", locale: locale)
+        case .coverUpdated: localizedAppString("management.coverUpdated", locale: locale)
+        case .rescanQueued: localizedAppString("management.rescanQueued", locale: locale)
+        case .metadataApplied: localizedAppString("management.metadataApplied", locale: locale)
+        case .workUpdated, .resourceUpdated: localizedAppString("management.updated", locale: locale)
+        case .kindleQueued: localizedAppString("management.kindleQueued", locale: locale)
+        case .bookDeleted, .none: localizedAppString("management.updated", locale: locale)
         }
     }
 
@@ -1888,8 +1875,13 @@ struct WorkDetailView: View {
                 await MainActor.run { coverRefreshToken += 1 }
             }
         }
+        let successMessage = managementFeedback(action)
+        if activeSheet == nil {
+            showFeedback(successMessage, kind: .success)
+        } else {
+            pendingSheetSuccessMessage = successMessage
+        }
         activeSheet = nil
-        showFeedback(managementFeedback(action), isError: false)
         managementStore.consumeCompletion()
         if action == .readingStatusUpdated, let target = pendingReadingStatusTarget {
             pendingReadingStatusTarget = nil
@@ -2016,8 +2008,8 @@ struct WorkDetailView: View {
                 shelves = refreshed
                 selectedShelfIDs = Set(refreshed.filter(\.containsWork).map(\.id))
                 isSavingShelves = false
+                pendingSheetSuccessMessage = localizedAppString("work.shelf.saved", locale: locale)
                 activeSheet = nil
-                showFeedback(String(localized: "work.shelf.saved"), isError: false)
             } catch {
                 guard shelfRequestGeneration == generation, case .shelves? = activeSheet else { return }
                 isSavingShelves = false
@@ -2083,9 +2075,9 @@ struct WorkDetailView: View {
 
     private func downloadFailureMessage(_ code: String) -> String {
         if code == "DOWNLOAD_BOOTSTRAP_INVALID" {
-            return String(localized: "download.bootstrap.invalid")
+            return localizedAppString("download.bootstrap.invalid", locale: locale)
         }
-        return String(format: String(localized: "work.download.failed.format"), code)
+        return String(format: localizedAppString("work.download.failed.format", locale: locale), locale: locale, code)
     }
 
     private var readerAccessErrorMessage: LocalizedStringKey {

@@ -181,4 +181,92 @@ class ContentMappersTest {
         assertEquals(null, mappedResource.metadataSource)
         assertEquals("library/golden-dream.epub", mappedResource.assets.single().path)
     }
+
+    @Test
+    fun resourceAssetMappingUsesTheStoredPathAndLeavesUrlOnlyLegacyAssetsEmpty() {
+        val resource = Resource(
+            id = "resource-paths",
+            bookId = "book-paths",
+            sourceNodeId = "source-resource-paths",
+            title = "Book paths",
+            description = null,
+            resourceIndex = null,
+            sortOrder = 0,
+            format = "EPUB",
+            readerType = "reflowable",
+            readable = true,
+            kindleSendAvailable = false,
+            publisher = null,
+            publishedAt = null,
+            language = null,
+            isbn = null,
+            identifier = null,
+            narrator = null,
+            abridged = null,
+            importStatus = "READY",
+            importError = null,
+            coverStatus = "UNKNOWN",
+            coverPath = null,
+            coverUrl = "",
+            sizeBytes = 0,
+            pageCount = null,
+            chapterCount = null,
+            durationMillis = null,
+            trackCount = null,
+            progress = 0.0,
+            lastReadAt = null,
+            hidden = false,
+            completed = false,
+            assets = listOf(
+                Asset(
+                    id = "asset-with-path",
+                    title = "Book 1.epub",
+                    path = "/books/中文目录/Book 1.epub",
+                    resourceId = "resource-paths",
+                    sourceNodeId = "source-asset-1",
+                    role = "PRIMARY",
+                    mimeType = "application/epub+zip",
+                    sizeBytes = 1024,
+                    displaySize = "1 KB",
+                    mtimeMillis = null,
+                    durationMillis = null,
+                    codec = null,
+                    bitrate = null,
+                    sampleRate = null,
+                    channels = null,
+                    discNumber = null,
+                    trackNumber = null,
+                    sortOrder = 0,
+                    url = "/api/assets/asset-with-path/content",
+                    downloadUrl = "/api/assets/asset-with-path/download",
+                ),
+                Asset(
+                    id = "asset-url-only",
+                    title = "Legacy Book 1.epub",
+                    path = null,
+                    resourceId = "resource-paths",
+                    sourceNodeId = "source-asset-2",
+                    role = "PRIMARY",
+                    mimeType = "application/epub+zip",
+                    sizeBytes = 1024,
+                    displaySize = "1 KB",
+                    mtimeMillis = null,
+                    durationMillis = null,
+                    codec = null,
+                    bitrate = null,
+                    sampleRate = null,
+                    channels = null,
+                    discNumber = null,
+                    trackNumber = null,
+                    sortOrder = 1,
+                    url = "/api/assets/asset-url-only/content",
+                    downloadUrl = "/api/assets/asset-url-only/download",
+                ),
+            ),
+        )
+
+        val assets = resource.toUiContent().assets
+
+        assertEquals(listOf("/books/中文目录/Book 1.epub", ""), assets.map { it.path })
+    }
 }

@@ -13,6 +13,7 @@ struct AppRootView: View {
     let workManagementRepository: (any ErmaoShared.WorkManagementRepository)?
     let settingsClientOverride: (any SettingsClient)?
     let readerComposition: IosReaderComposition?
+    @StateObject private var feedbackPresenter = OperationFeedbackPresenter()
 
     init(
         store: SessionStore,
@@ -44,6 +45,7 @@ struct AppRootView: View {
         AudioApplicationHost(runtime: audioRuntime) {
             rootContent
         }
+            .environmentObject(feedbackPresenter)
             .environment(\.appTheme, AppTheme.app)
             .environment(\.locale, activeLocale)
             .tint(AppTheme.app.actionAccent)
@@ -72,6 +74,7 @@ struct AppRootView: View {
                 )
                 if phase != .authenticated {
                     Task { await downloads.cancelAllTransfers() }
+                    feedbackPresenter.clear()
                 }
             }
             .onChange(of: audioSessionContext) { _, session in

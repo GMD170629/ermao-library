@@ -189,6 +189,9 @@ import com.ermao.library.ui.components.WarmPageSecondaryAction
 import com.ermao.library.ui.components.WarmPageSectionHeader
 import com.ermao.library.ui.components.WarmPageSegmentedControl
 import com.ermao.library.ui.components.WarmPageSingleChoiceMenu
+import com.ermao.library.shared.core.feedback.OperationFeedbackKind
+import com.ermao.library.ui.components.rememberWarmPageFeedbackState
+import com.ermao.library.ui.components.showFeedback
 import com.ermao.library.ui.components.WarmPageSnackbarHost
 import com.ermao.library.ui.components.WarmPageTopBarRole
 import com.ermao.library.ui.components.warmPageActionHorizontalPadding
@@ -267,7 +270,7 @@ fun WorkDetailScreen(
     var pendingDownloadedOpen by remember { mutableStateOf<AndroidDownloadRecord?>(null) }
     var coverRefreshToken by remember { mutableIntStateOf(0) }
     val appContext = LocalContext.current.applicationContext
-    val snackbarHostState = remember { SnackbarHostState() }
+    val snackbarHostState = rememberWarmPageFeedbackState()
     val snackbarScope = rememberCoroutineScope()
     val shelvesUpdatedMessage = stringResource(R.string.work_shelves_updated)
     val managementUpdatedMessage = stringResource(R.string.management_updated)
@@ -322,15 +325,14 @@ fun WorkDetailScreen(
     }
     LaunchedEffect(selectedResource?.id, selectedDownloadFailure) {
         if (selectedDownloadFailure != null) {
-            snackbarHostState.currentSnackbarData?.dismiss()
-            snackbarHostState.showSnackbar(downloadFailureMessage)
+            snackbarHostState.showFeedback(downloadFailureMessage, OperationFeedbackKind.Failure)
         }
     }
     LaunchedEffect(state.shelfSaveCompleted) {
         if (state.shelfSaveCompleted) {
-            snackbarHostState.currentSnackbarData?.dismiss()
             snackbarScope.launch {
-                val result = snackbarHostState.showSnackbar(
+                val result = snackbarHostState.showFeedback(
+                    kind = OperationFeedbackKind.Action,
                     message = shelvesUpdatedMessage,
                     actionLabel = viewShelvesLabel,
                     withDismissAction = true,
@@ -431,8 +433,9 @@ fun WorkDetailScreen(
         }
     }
 
-    LaunchedEffect(managementState?.completedMutation) {
-        val completion = managementState?.completedMutation ?: return@LaunchedEffect
+    LaunchedEffect(managementState?.feedbackRevision) {
+        val feedbackState = managementState ?: return@LaunchedEffect
+        val completion = feedbackState.completedMutation ?: return@LaunchedEffect
         if (completion == WorkManagementCompletion.CoverUpdated) {
             val coverPaths = buildSet {
                 state.content?.book?.coverUrl?.takeIf(String::isNotBlank)?.let(::add)
@@ -449,24 +452,30 @@ fun WorkDetailScreen(
             onReadingStatusChanged(requireNotNull(pendingReadingStatusScope))
             pendingReadingStatusScope = null
         } else onRefresh()
-        snackbarHostState.currentSnackbarData?.dismiss()
-        snackbarHostState.showSnackbar(
-            when (completion) {
-                WorkManagementCompletion.ReadingStatusUpdated -> readingStatusUpdatedMessage
-                WorkManagementCompletion.CoverUpdated -> coverUpdatedMessage
-                WorkManagementCompletion.RescanQueued -> rescanQueuedMessage
-                WorkManagementCompletion.MetadataApplied -> metadataAppliedMessage
-                else -> managementUpdatedMessage
-            },
-        )
-        managementViewModel?.consumeFeedback()
+        try {
+            snackbarHostState.showFeedback(
+                kind = OperationFeedbackKind.Success,
+                message = when (completion) {
+                    WorkManagementCompletion.ReadingStatusUpdated -> readingStatusUpdatedMessage
+                    WorkManagementCompletion.CoverUpdated -> coverUpdatedMessage
+                    WorkManagementCompletion.RescanQueued -> rescanQueuedMessage
+                    WorkManagementCompletion.MetadataApplied -> metadataAppliedMessage
+                    else -> managementUpdatedMessage
+                },
+            )
+        } finally {
+            managementViewModel?.consumeFeedback(feedbackState.feedbackRevision)
+        }
     }
-    LaunchedEffect(managementState?.errorCode) {
-        val errorCode = managementState?.errorCode ?: return@LaunchedEffect
+    LaunchedEffect(managementState?.feedbackRevision) {
+        val feedbackState = managementState ?: return@LaunchedEffect
+        val errorCode = feedbackState.errorCode ?: return@LaunchedEffect
         pendingReadingStatusScope = null
-        snackbarHostState.currentSnackbarData?.dismiss()
-        snackbarHostState.showSnackbar(managementFailureMessage)
-        managementViewModel?.consumeFeedback()
+        try {
+            snackbarHostState.showFeedback(managementFailureMessage, OperationFeedbackKind.Failure)
+        } finally {
+            managementViewModel?.consumeFeedback(feedbackState.feedbackRevision)
+        }
     }
     if (state.isShelfPickerVisible) {
         ShelfPickerSheet(

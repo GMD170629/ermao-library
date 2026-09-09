@@ -89,7 +89,13 @@ fun OpdsScreen(
                 supporting = if (initial.running) AdministrativeCopy.Running.text(locale) else AdministrativeCopy.Disabled.text(locale),
             )
             AdministrativeTextField(publicAddress, { publicAddress = it }, AdministrativeCopy.PublicAddress, locale)
-            AdministrativeValueRow(AdministrativeCopy.CatalogAddress.text(locale), initial.catalogUrl, onClick = { onCopy(initial.catalogUrl) })
+            if (initial.catalogUrl.isNotBlank()) {
+                AdministrativeValueRow(AdministrativeCopy.CatalogAddress.text(locale), initial.catalogUrl, onClick = { onCopy(initial.catalogUrl) })
+                OutlinedButton(onClick = { onCopy(initial.catalogUrl) }) {
+                    Text(AdministrativeCopy.Copy.text(locale))
+                }
+            }
+            if (hasChanges) WarmSettingsInlineMessage(AdministrativeCopy.OpdsSaveHint.text(locale))
             val instructions = when {
                 initial.catalogUrl.isBlank() -> AdministrativeCopy.OpdsSetupHint
                 enabled -> AdministrativeCopy.OpdsInstructions

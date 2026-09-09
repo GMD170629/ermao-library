@@ -1,5 +1,6 @@
 package com.ermao.library.features.administrativesettings
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.RowScope
@@ -28,6 +29,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.Alignment
+import com.ermao.library.shared.core.feedback.OperationFeedbackKind
+import com.ermao.library.ui.components.rememberWarmPageFeedbackState
+import com.ermao.library.ui.components.showFeedback
+import com.ermao.library.ui.components.WarmPageSnackbarHost
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -81,12 +90,21 @@ fun AdministrativeSettingsDestination(
             (state.snapshot as? HealthSnapshot)?.let { it.status == HealthStatus.Checking } == true
         ) viewModel.poll(stateRoute)
     }
+    val feedbackHost = rememberWarmPageFeedbackState()
+    val feedbackScope = rememberCoroutineScope()
+    val feedbackLocale by rememberUpdatedState(locale)
     LaunchedEffect(viewModel) {
         viewModel.effects.collectLatest { effect ->
             if (effect is AdministrativeSettingsEffect.ExportReady) systemActions.saveExport(effect.file)
+            if (effect is AdministrativeSettingsEffect.OperationSucceeded) {
+                administrativeSuccessText(effect.operation, feedbackLocale)?.let { message ->
+                    feedbackScope.launch { feedbackHost.showFeedback(message, OperationFeedbackKind.Success) }
+                }
+            }
             onEffect(effect)
         }
     }
+    Box(Modifier.fillMaxSize()) {
     when (route) {
         AdministrativeSettingsRoute.Root -> ManagementIndexScreen(
             state.typed(), locale, capabilities, onNavigate, { viewModel.load(route, true) }, onBack, modifier,
@@ -185,7 +203,26 @@ fun AdministrativeSettingsDestination(
             state.typed(), locale, viewModel::execute, { viewModel.load(route, true) }, onBack, modifier,
         )
     }
+    WarmPageSnackbarHost(feedbackHost, Modifier.align(Alignment.BottomCenter))
+    }
 }
+
+/** Diagnostic results stay in their existing persistent result rows. */
+internal fun administrativeSuccessText(operation: AdministrativeOperation, locale: AdministrativeLocale): String? =
+    when (operation) {
+        AdministrativeOperation.TestSmtp, AdministrativeOperation.TestMetadataProvider,
+        AdministrativeOperation.RunHealthCheck -> null
+        AdministrativeOperation.SaveKindle, AdministrativeOperation.SaveSmtp,
+        AdministrativeOperation.SaveUser, AdministrativeOperation.SaveUserAccess,
+        AdministrativeOperation.SaveLibrarySource, AdministrativeOperation.SaveImportPreferences,
+        AdministrativeOperation.SaveRecognitionPolicy, AdministrativeOperation.SaveMetadataProviders,
+        AdministrativeOperation.SaveMetadataProvider, AdministrativeOperation.SaveOpds,
+        AdministrativeOperation.SaveDetailOrder, AdministrativeOperation.SaveLogCapacity -> AdministrativeCopy.Saved.text(locale)
+        AdministrativeOperation.RetryKindleTask, AdministrativeOperation.RescanLibrarySource,
+        AdministrativeOperation.ScanDirectory, AdministrativeOperation.RetryImportTask,
+        AdministrativeOperation.RescanAllSources, AdministrativeOperation.StartRecognition -> AdministrativeCopy.Queued.text(locale)
+        else -> AdministrativeCopy.Completed.text(locale)
+    }
 
 @Suppress("UNCHECKED_CAST")
 private fun <T : AdministrativePageSnapshot> AdministrativeScreenState.typed(): AdministrativePageState<T> =

@@ -367,7 +367,7 @@ final class LocalizationTests: XCTestCase {
             )
             let bundle = try XCTUnwrap(Bundle(path: localizationPath))
             XCTAssertEqual(
-                localizedReaderOption(expectation.key, bundle: bundle),
+                localizedAppString(expectation.key, bundle: bundle),
                 expectation.value
             )
         }
@@ -387,14 +387,14 @@ final class LocalizationTests: XCTestCase {
         }
 
         for label in labels {
-            let chinese = localizedReaderOption(
+            let chinese = localizedAppString(
                 label.key,
                 locale: Locale(identifier: "zh-Hans-CN")
             )
             XCTAssertEqual(chinese, label.chinese, "Unresolved Simplified Chinese key: \(label.key)")
             XCTAssertNotEqual(chinese, label.key)
 
-            let english = localizedReaderOption(
+            let english = localizedAppString(
                 label.key,
                 locale: Locale(identifier: "en-US")
             )
@@ -402,4 +402,19 @@ final class LocalizationTests: XCTestCase {
             XCTAssertNotEqual(english, label.key)
         }
     }
+    func testOperationFeedbackResolvesRuntimeKeysInTheActiveAppLanguage() {
+        let notices = ["saved", "queued", "alreadyQueued", "deleted", "metadataPartial", "refreshFailed"]
+        for notice in notices {
+            let key = "nativeManagement.notice.\(notice)"
+            for identifier in ["zh-CN", "en-US"] {
+                let message = localizedAppString(key, locale: Locale(identifier: identifier))
+                XCTAssertNotEqual(message, key)
+                XCTAssertFalse(message.contains("%@"))
+                XCTAssertFalse(message.isEmpty)
+            }
+        }
+        XCTAssertEqual(localizedAppString("nativeManagement.notice.saved", locale: Locale(identifier: "zh-CN")), "已保存")
+        XCTAssertEqual(localizedAppString("nativeManagement.notice.saved", locale: Locale(identifier: "en-US")), "Saved")
+    }
+
 }

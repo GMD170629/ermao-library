@@ -5,6 +5,12 @@ import com.ermao.library.shared.modules.administrativesettings.domain.Administra
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
 
+fun initialOpdsPublicBaseUrl(
+    settings: OpdsSettings,
+    context: AdministrativeSettingsContext,
+): String =
+    settings.initialPublicBaseUrl(context.baseUrl)
+
 fun createAdministrativeSettingsContext(
     profileId: String,
     displayName: String,

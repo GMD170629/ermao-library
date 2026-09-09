@@ -89,6 +89,11 @@ import com.ermao.library.shared.modules.workmanagement.ManagementTarget
 import com.ermao.library.shared.modules.workmanagement.WorkManagementErrorKind
 import com.ermao.library.shared.modules.workmanagement.WorkManagementRepository
 import com.ermao.library.shared.modules.workmanagement.managementCandidateValue
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHostState
+import com.ermao.library.shared.core.feedback.OperationFeedbackKind
+import com.ermao.library.ui.components.LocalWarmPageFeedbackState
+import com.ermao.library.ui.components.showFeedback
 import com.ermao.library.ui.components.WarmPageMenuItem
 import com.ermao.library.ui.components.WarmPagePopup
 import com.ermao.library.ui.theme.WarmPageThemeValues
@@ -226,6 +231,7 @@ fun BookManagementHost(
         BookManagementContext(context.profile, context.namespace), canManage) { UUID.randomUUID().toString() } }
     val controller = remember(session, scope) { BookManagementController(session, scope) }
     val state by session.state.collectAsState()
+    val feedbackHost = remember(session) { SnackbarHostState() }
     DisposableEffect(session) { onDispose(session::dispose) }
     var publishedRevision by remember(session) { mutableLongStateOf(0L) }
     LaunchedEffect(state.revision) {
@@ -247,7 +253,37 @@ fun BookManagementHost(
             else -> Unit
         }
     }
-    CompositionLocalProvider(LocalController provides controller, LocalRevision provides publishedRevision) {
+    val noticeMessage = state.notice?.let { notice ->
+        stringResource(when (notice) {
+            "queued" -> R.string.management_queued
+            "alreadyQueued" -> R.string.management_already_queued
+            "refreshFailed" -> R.string.management_refresh_failed
+            "deleted" -> R.string.management_deleted
+            "metadataPartial" -> R.string.management_metadata_partial
+            else -> R.string.management_saved
+        })
+    }
+    var presentedFeedbackRevision by remember(session) { mutableLongStateOf(-1L) }
+    LaunchedEffect(state.feedbackRevision, state.phase, publishedRevision) {
+        if (noticeMessage != null && state.phase == ManagementPhase.Closed &&
+            state.revision <= publishedRevision && presentedFeedbackRevision != state.feedbackRevision) {
+            val revision = state.feedbackRevision
+            val kind = state.feedbackKind
+            presentedFeedbackRevision = revision
+            scope.launch {
+                try {
+                    feedbackHost.showFeedback(noticeMessage, kind,
+                        withDismissAction = kind != OperationFeedbackKind.Success,
+                        duration = if (kind == OperationFeedbackKind.Success) SnackbarDuration.Short
+                            else SnackbarDuration.Indefinite)
+                } finally {
+                    session.clearFeedback(revision)
+                }
+            }
+        }
+    }
+    CompositionLocalProvider(LocalController provides controller, LocalRevision provides publishedRevision,
+        LocalWarmPageFeedbackState provides feedbackHost) {
         Box {
             content()
             Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.BottomCenter) {
@@ -411,17 +447,7 @@ private fun ManagementPresentation(controller: BookManagementController, state: 
             Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
             Spacer(Modifier.size(ButtonDefaults.IconSpacing))
             Text(stringResource(R.string.cancel_action)) } })
-    state.notice?.let { notice ->
-        // A single accessible success surface; no network response is treated as delivery completion.
-        androidx.compose.material3.Snackbar(modifier = Modifier.padding(WarmPageThemeValues.spacing.two),
-            action = { OutlinedButton(onClick = session::clearFeedback) {
-                Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                Text(stringResource(R.string.close_action)) } }) {
-            Text(stringResource(when (notice) { "queued" -> R.string.management_queued; "alreadyQueued" -> R.string.management_already_queued;
-                "refreshFailed" -> R.string.management_refresh_failed; "deleted" -> R.string.management_deleted; "metadataPartial" -> R.string.management_metadata_partial; else -> R.string.management_saved }))
-        }
-    }
+
 }
 
 @Composable

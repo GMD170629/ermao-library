@@ -36,6 +36,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalResources
+import com.ermao.library.shared.core.feedback.OperationFeedbackKind
+import com.ermao.library.ui.components.WarmPageSnackbarHost
+import com.ermao.library.ui.components.showFeedback
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -110,6 +117,9 @@ internal fun MultiDownloadSheet(
     var pendingDirectorySelection by remember { mutableStateOf<String?>(null) }
     var pendingRemovalIds by remember { mutableStateOf<Set<String>?>(null) }
     var isSubmitting by remember { mutableStateOf(false) }
+    val feedbackHost = remember { SnackbarHostState() }
+    val feedbackScope = rememberCoroutineScope()
+    val feedbackResources = LocalResources.current
     var actionResults by remember { mutableStateOf<List<DownloadManagementResult>>(emptyList()) }
     val selectedIds = selectedIdsList.toSet()
     val panelBookId = state.content?.book?.id
@@ -271,7 +281,20 @@ internal fun MultiDownloadSheet(
             actionResults = emptyList()
             onExecuteAction(action, ids, availableIds) { results ->
                 isSubmitting = false
-                actionResults = results
+                val successful = results.isNotEmpty() && results.all {
+                    it.outcome == DownloadManagementOutcome.Accepted || it.outcome == DownloadManagementOutcome.Completed
+                }
+                if (successful && action != DownloadManagementAction.Open) {
+                    val acceptedCount = results.count { it.outcome == DownloadManagementOutcome.Accepted }
+                    val completedCount = results.count { it.outcome == DownloadManagementOutcome.Completed }
+                    val message = listOfNotNull(
+                        if (acceptedCount > 0) feedbackResources.getString(R.string.download_management_accepted, acceptedCount) else null,
+                        if (completedCount > 0) feedbackResources.getString(R.string.download_management_completed, completedCount) else null,
+                    ).joinToString(" · ")
+                    feedbackScope.launch { feedbackHost.showFeedback(message, OperationFeedbackKind.Success) }
+                } else if (!successful) {
+                    actionResults = results
+                }
                 val completed = results.asSequence()
                     .filter { it.outcome == DownloadManagementOutcome.Completed }
                     .map(DownloadManagementResult::resourceId)
@@ -589,6 +612,8 @@ internal fun MultiDownloadSheet(
                     }
                 }
             }
+
+            WarmPageSnackbarHost(feedbackHost)
 
             if (selectionMode) {
                 SelectionBatchBar(

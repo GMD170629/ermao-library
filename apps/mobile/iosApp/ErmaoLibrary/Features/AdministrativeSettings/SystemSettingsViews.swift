@@ -34,13 +34,16 @@ struct OPDSSettingsView: View {
                             TextField(LocalizedStringKey(copy[.publicBaseURL]), text: binding.publicBaseURL)
                                 .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                         }
-                        if let catalog = binding.wrappedValue.catalogURL {
+                        if let catalog = initialConfiguration?.catalogURL {
                             SettingsValueRow(LocalizedStringKey(copy[.catalogURL]), value: catalog)
                             SettingsActionRow(LocalizedStringKey(copy[.copy])) {
                                 UIPasteboard.general.string = catalog
                                 store.replaceNotice(AdministrativeNotice(style: .success, message: copy[.copied]))
                             }
                         }
+                    }
+                    if configuration != initialConfiguration {
+                        Section { Text(copy[.opdsSaveHint]).foregroundStyle(theme.textSecondary) }
                     }
                     Section { Text(copy[.opdsInstructions]).appTextStyle(.callout).foregroundStyle(theme.textSecondary) }
                 }.administrativeNotice(store: store)
@@ -85,7 +88,7 @@ struct OPDSSettingsView: View {
     private func confirmDisable() {
         guard var value = configuration, store.operationInFlight == nil else { return }
         value.enabled = false
-        save(value)
+        configuration = value
     }
 }
 

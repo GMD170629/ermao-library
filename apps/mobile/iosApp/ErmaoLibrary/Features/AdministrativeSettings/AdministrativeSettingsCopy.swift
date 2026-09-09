@@ -51,7 +51,7 @@ enum AdministrativeCopyKey: String, CaseIterable, Sendable {
     case providerConfigurationTitle, apiBaseURL, apiKey, userAgent, accessToken, model, configurationItem, keepSecretHint, countryRegion
     case languageCode, rateLimit, connectionTest, saveAndTest, connected, responseTime
     case opdsTitle, opdsEnabled, serviceStatus, running, stopped, publicBaseURL, catalogURL
-    case opdsInstructions, copy, copied, disableOPDSTitle, disableOPDSMessage, disableService
+    case opdsSaveHint, opdsInstructions, copy, copied, disableOPDSTitle, disableOPDSMessage, disableService
     case backupsTitle, createBackup, backupDirectory, downloadFile, restoreBackup, deleteBackup
     case restoreWarning, restoreConfirmation, enterRestore, restore, deleteBackupTitle
     case deleteBackupMessage, backupBookCount, backupProgressCount, backupLibraryCount
@@ -183,9 +183,10 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .responseTime: "Response Time", .opdsTitle: "OPDS", .opdsEnabled: "Enable OPDS Service",
         .serviceStatus: "Service Status", .running: "Running", .stopped: "Stopped",
         .publicBaseURL: "Public Base URL", .catalogURL: "Generated Catalog URL (Read Only)",
+        .opdsSaveHint: "Changes are not saved. Tap Save in the top-right corner to apply them and update the catalog URL.",
         .opdsInstructions: "Add the catalog URL to an OPDS 1.2 compatible reader. The client will discover and sync library content.",
         .copy: "Copy", .copied: "Copied", .disableOPDSTitle: "Disable OPDS service?",
-        .disableOPDSMessage: "All OPDS catalog addresses will stop serving immediately.", .disableService: "Disable Service",
+        .disableOPDSMessage: "After you save, all OPDS catalog addresses will stop serving.", .disableService: "Disable Service",
         .backupsTitle: "Data & Backups", .createBackup: "Create Backup", .backupDirectory: "Server Backup Directory",
         .downloadFile: "Download to Files", .restoreBackup: "Restore This Backup", .deleteBackup: "Delete Backup",
         .restoreWarning: "Restoring overwrites metadata, tags, progress, and library-root settings. Original book files are not affected.",
@@ -299,9 +300,10 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .languageCode: "语言", .rateLimit: "自动识别限流", .connectionTest: "连接测试", .saveAndTest: "保存并测试",
         .connected: "连接正常", .responseTime: "响应时间", .opdsTitle: "OPDS", .opdsEnabled: "启用 OPDS 服务",
         .serviceStatus: "服务状态", .running: "运行中", .stopped: "已停止", .publicBaseURL: "服务基础地址",
+        .opdsSaveHint: "更改尚未保存。点击右上角保存，生效后将更新目录地址。",
         .catalogURL: "生成的目录地址（只读）", .opdsInstructions: "使用支持 OPDS 1.2 的第三方客户端或阅读器，添加上方目录地址后即可同步书库内容。",
         .copy: "复制", .copied: "已复制", .disableOPDSTitle: "关闭 OPDS 服务？",
-        .disableOPDSMessage: "关闭后，所有 OPDS 目录地址将立即停止服务，第三方客户端将无法访问。", .disableService: "关闭服务",
+        .disableOPDSMessage: "保存后，所有 OPDS 目录地址将停止服务，第三方客户端将无法访问。", .disableService: "关闭服务",
         .backupsTitle: "数据与备份", .createBackup: "创建备份", .backupDirectory: "服务器备份目录", .downloadFile: "下载到文件",
         .restoreBackup: "恢复此备份", .deleteBackup: "删除备份",
         .restoreWarning: "恢复此备份将覆盖当前的所有元数据、标签、进度以及书库根目录设置，但不会影响原始书籍文件。",

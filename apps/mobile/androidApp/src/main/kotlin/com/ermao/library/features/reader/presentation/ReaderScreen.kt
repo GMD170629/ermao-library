@@ -171,6 +171,8 @@ import com.ermao.library.shared.modules.reader.ReaderThemeMode
 import com.ermao.library.shared.modules.reader.ReaderTocEntry
 import com.ermao.library.shared.modules.reader.ReflowReaderLocation
 import com.ermao.library.shared.modules.reader.resetReaderPreferences
+import com.ermao.library.shared.core.feedback.OperationFeedbackKind
+import com.ermao.library.ui.components.showFeedback
 import com.ermao.library.ui.components.WarmPageSnackbarHost
 import com.ermao.library.ui.components.WarmSettingsInlineMessage
 import com.ermao.library.ui.theme.ReaderWarmPageTheme
@@ -330,9 +332,9 @@ internal fun ReaderScreen(
     val toggleCurrentBookmark: () -> Unit = {
         controller?.let { activeController ->
             val change = activeController.toggleCurrentBookmark() ?: return@let
-            snackbarHostState.currentSnackbarData?.dismiss()
             coroutineScope.launch {
-                val result = snackbarHostState.showSnackbar(
+                val result = snackbarHostState.showFeedback(
+                    kind = OperationFeedbackKind.Action,
                     message = if (change.added) bookmarkAddedMessage else bookmarkRemovedMessage,
                     actionLabel = undoLabel,
                     withDismissAction = true,
@@ -461,9 +463,9 @@ internal fun ReaderScreen(
                                 onRemove = { bookmarkId ->
                                     controller?.let { activeController ->
                                         activeController.removeBookmark(bookmarkId)
-                                        snackbarHostState.currentSnackbarData?.dismiss()
                                         coroutineScope.launch {
-                                            val result = snackbarHostState.showSnackbar(
+                                            val result = snackbarHostState.showFeedback(
+                                                kind = OperationFeedbackKind.Action,
                                                 message = bookmarkRemovedMessage,
                                                 actionLabel = undoLabel,
                                                 withDismissAction = true,
@@ -507,9 +509,8 @@ internal fun ReaderScreen(
                     onSeek = { target ->
                         val moved = controller?.goToTotalProgression(target) == true
                         if (!moved) {
-                            snackbarHostState.currentSnackbarData?.dismiss()
                             coroutineScope.launch {
-                                snackbarHostState.showSnackbar(seekFailedMessage, duration = SnackbarDuration.Short)
+                                snackbarHostState.showFeedback(seekFailedMessage, OperationFeedbackKind.Failure, duration = SnackbarDuration.Short)
                             }
                         }
                         moved
@@ -519,9 +520,8 @@ internal fun ReaderScreen(
                             coroutineScope.launch {
                                 navigationMutex.withLock {
                                     if (activeController.navigateTo(entry) !is ReaderNavigationCompleted) {
-                                        snackbarHostState.currentSnackbarData?.dismiss()
-                                        snackbarHostState.showSnackbar(
-                                            navigationFailedMessage,
+                                        snackbarHostState.showFeedback(
+                                            navigationFailedMessage, OperationFeedbackKind.Failure,
                                             duration = SnackbarDuration.Short,
                                         )
                                     }

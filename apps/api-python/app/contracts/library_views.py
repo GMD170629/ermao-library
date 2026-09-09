@@ -9,6 +9,7 @@ from app.contracts.http import HttpContractModel
 
 
 class ResourceAssetView(HttpContractModel):
+    path: str | None = None
     id: str
     title: str
     resource_id: str = Field(alias="resourceId")

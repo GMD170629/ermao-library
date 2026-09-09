@@ -170,6 +170,32 @@ class AdministrativeSettingsViewModelTest {
         assertNull(viewModel.states.value.getValue(route).failure)
     }
 
+    @Test
+    fun failedOpdsSaveKeepsTheLastSavedCatalogAndCanBeRetried() = runTest(dispatcher) {
+        val saved = opds("https://saved.example/base")
+        val repository = RecordingRepository().apply {
+            loadResult = AdministrativeResult.Content(saved)
+            commandResult = AdministrativeResult.Failure(
+                AdministrativeFailure(AdministrativeErrorKind.Unavailable, "NETWORK_ERROR"),
+            )
+        }
+        val viewModel = viewModel(repository, setOf(AdministrativeCapability.ManageOpds))
+        val route = AdministrativeSettingsRoute.Opds
+        viewModel.load(route)
+        advanceUntilIdle()
+        viewModel.execute(AdministrativeCommand.SaveOpds(true, "https://new.example/base"))
+        advanceUntilIdle()
+        assertEquals(saved, viewModel.states.value.getValue(route).snapshot)
+        assertFalse(viewModel.states.value.getValue(route).mutationInFlight)
+        val updated = opds("https://new.example/base")
+        repository.commandResult = AdministrativeResult.Content(AdministrativeCommandReceipt(emptySet()))
+        repository.loadResult = AdministrativeResult.Content(updated)
+        viewModel.execute(AdministrativeCommand.SaveOpds(true, "https://new.example/base"))
+        advanceUntilIdle()
+        assertEquals(updated, viewModel.states.value.getValue(route).snapshot)
+        assertNull(viewModel.states.value.getValue(route).failure)
+    }
+
     private fun viewModel(
         repository: AdministrativeSettingsRepository,
         capabilities: Set<AdministrativeCapability>,

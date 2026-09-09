@@ -18,6 +18,7 @@ from app.contracts.media_capabilities import (
 )
 from app.core.natural_sort import natural_sort_key
 from app.models import (
+    Library,
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
@@ -30,6 +31,9 @@ from app.modules.library.domain.asset_titles import (
     resolve_asset_display_titles,
 )
 from app.modules.library.infrastructure import books as library_books
+from app.modules.library.infrastructure.source_paths import (
+    resolve_existing_library_file,
+)
 from app.modules.reader.public import (
     ReaderV5LibraryPresentationQueryPort,
     ResourceReadingState,
@@ -116,15 +120,17 @@ def _asset_rows(
         LibraryResourceAsset,
         LibraryResourceAssetMetadata | None,
         LibrarySourceNode,
+        str,
     ]
 ]:
     rows = [
-        (row[0], row[1], row[2])
+        (row[0], row[1], row[2], row[3])
         for row in db.execute(
             select(
                 LibraryResourceAsset,
                 LibraryResourceAssetMetadata,
                 LibrarySourceNode,
+                Library.root_path,
             )
             .outerjoin(
                 LibraryResourceAssetMetadata,
@@ -134,6 +140,7 @@ def _asset_rows(
                 LibrarySourceNode,
                 LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
             )
+            .join(Library, Library.id == LibrarySourceNode.library_id)
             .where(
                 LibraryResourceAsset.resource_id == resource_id,
                 LibraryResourceAsset.import_state == "READY",
@@ -171,7 +178,7 @@ def _resource_view(
             metadata_title=asset_metadata.title if asset_metadata else None,
             source_filename=source.name,
         )
-        for asset, asset_metadata, source in assets
+        for asset, asset_metadata, source, _ in assets
     )
     asset_views: list[dict[str, Any]] = [
         {
@@ -180,6 +187,16 @@ def _resource_view(
             "sourceNodeId": asset.source_node_id,
             "role": asset.role,
             "title": asset_titles[asset.id],
+            "path": (
+                str(path)
+                if (
+                    path := resolve_existing_library_file(
+                        root_path, source.relative_path
+                    )
+                )
+                is not None
+                else None
+            ),
             "sourceFormat": format_value,
             "mimeType": resolve_asset_mime_type(
                 resource_format=format_value,
@@ -201,7 +218,7 @@ def _resource_view(
             "url": f"/api/assets/{quote(asset.id, safe='')}",
             "downloadUrl": f"/api/assets/{quote(asset.id, safe='')}?download=true",
         }
-        for asset_index, (asset, asset_metadata, source) in enumerate(assets)
+        for asset_index, (asset, asset_metadata, source, root_path) in enumerate(assets)
     ]
     total_size = sum(
         int(item["sizeBytes"])

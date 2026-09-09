@@ -213,8 +213,10 @@ internal fun JsonElement.toSmtpTestResult(): SmtpTestResult =
 internal fun JsonElement.toManagedUser(): ManagedUser {
     val user = objectValue("INVALID_ADMIN_USER").expectKeys(
         "id", "email", "name", "role", "status", "canManageSystem", "canViewManualImports", "authzVersion",
-        "avatarUrl", "locale", "libraryIds", "authorization", "createdAt", "updatedAt",
+        "avatarUrl", "avatarImageUrl", "locale", "libraryIds", "authorization", "createdAt", "updatedAt",
     )
+    // Rendered avatar URLs are transport metadata; avatarUrl remains the account value.
+    user.optionalString("avatarImageUrl")
     return ManagedUser(
         id = user.requiredString("id"),
         name = user.requiredString("name"),

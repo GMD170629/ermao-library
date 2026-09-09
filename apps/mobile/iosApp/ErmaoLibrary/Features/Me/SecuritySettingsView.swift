@@ -29,6 +29,7 @@ struct SecuritySettingsView: View {
                     Text("settings.security.password.tab").tag(Tab.password)
                 }
                 .disabled(viewModel.isBusy)
+                .listRowBackground(Color.clear)
             }
 
             switch tab {

@@ -45,6 +45,8 @@
 		B01600000000000000000016 /* UserDefaultsServerProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01600000000000000000016 /* UserDefaultsServerProfileStore.swift */; };
 		B01700000000000000000017 /* SharedRuntimeAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01700000000000000000017 /* SharedRuntimeAdapter.swift */; };
 		B01800000000000000000018 /* GeneratedDesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01800000000000000000018 /* GeneratedDesignTokens.swift */; };
+		B01900000000000000000019 /* OperationFeedback.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01900000000000000000019 /* OperationFeedback.swift */; };
+		D11E0BDE325B4E229400C90D /* LocalizedCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB617B6610404AB3B164F8DF /* LocalizedCopy.swift */; };
 		B04000000000000000000040 /* ContentClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04000000000000000000040 /* ContentClient.swift */; };
 		B04100000000000000000041 /* ContentStores.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04100000000000000000041 /* ContentStores.swift */; };
 		B15600000000000000000156 /* ReaderProgressPresentationCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15600000000000000000156 /* ReaderProgressPresentationCenter.swift */; };
@@ -135,6 +137,7 @@
 		B03500000000000000000035 /* ContentDiscoveryUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03500000000000000000035 /* ContentDiscoveryUITests.swift */; };
 		B03600000000000000000036 /* MeSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03600000000000000000036 /* MeSettingsTests.swift */; };
 		B03700000000000000000037 /* AdministrativeSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03700000000000000000037 /* AdministrativeSettingsTests.swift */; };
+		B03800000000000000000038 /* OperationFeedbackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03800000000000000000038 /* OperationFeedbackTests.swift */; };
 		B08100000000000000000081 /* ReaderProgressContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08100000000000000000081 /* ReaderProgressContractTests.swift */; };
 		B08200000000000000000082 /* ReaderPersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08200000000000000000082 /* ReaderPersistenceTests.swift */; };
 		B08300000000000000000083 /* ReaderSecurityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08300000000000000000083 /* ReaderSecurityTests.swift */; };
@@ -252,6 +255,8 @@
 		F01600000000000000000016 /* UserDefaultsServerProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserDefaultsServerProfileStore.swift; sourceTree = "<group>"; };
 		F01700000000000000000017 /* SharedRuntimeAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedRuntimeAdapter.swift; sourceTree = "<group>"; };
 		F01800000000000000000018 /* GeneratedDesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GeneratedDesignTokens.swift; path = "../build/generated/design-tokens/swift/GeneratedDesignTokens.swift"; sourceTree = SOURCE_ROOT; };
+		F01900000000000000000019 /* OperationFeedback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationFeedback.swift; sourceTree = "<group>"; };
+		CB617B6610404AB3B164F8DF /* LocalizedCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizedCopy.swift; sourceTree = "<group>"; };
 		F04000000000000000000040 /* ContentClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentClient.swift; sourceTree = "<group>"; };
 		F04100000000000000000041 /* ContentStores.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentStores.swift; sourceTree = "<group>"; };
 		F15600000000000000000156 /* ReaderProgressPresentationCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderProgressPresentationCenter.swift; sourceTree = "<group>"; };
@@ -340,6 +345,7 @@
 		F03500000000000000000035 /* ContentDiscoveryUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentDiscoveryUITests.swift; sourceTree = "<group>"; };
 		F03600000000000000000036 /* MeSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeSettingsTests.swift; sourceTree = "<group>"; };
 		F03700000000000000000037 /* AdministrativeSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdministrativeSettingsTests.swift; sourceTree = "<group>"; };
+		F03800000000000000000038 /* OperationFeedbackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationFeedbackTests.swift; sourceTree = "<group>"; };
 		F08100000000000000000081 /* ReaderProgressContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderProgressContractTests.swift; sourceTree = "<group>"; };
 		F08200000000000000000082 /* ReaderPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderPersistenceTests.swift; sourceTree = "<group>"; };
 		F08300000000000000000083 /* ReaderSecurityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderSecurityTests.swift; sourceTree = "<group>"; };
@@ -496,6 +502,7 @@
 				F2A100000000000000000004 /* ShelfCatalogTests.swift */,
 				F03600000000000000000036 /* MeSettingsTests.swift */,
 				F03700000000000000000037 /* AdministrativeSettingsTests.swift */,
+				F03800000000000000000038 /* OperationFeedbackTests.swift */,
 				F08100000000000000000081 /* ReaderProgressContractTests.swift */,
 				F08200000000000000000082 /* ReaderPersistenceTests.swift */,
 				F08300000000000000000083 /* ReaderSecurityTests.swift */,
@@ -569,6 +576,8 @@
 				F00600000000000000000006 /* AppTheme.swift */,
 				F00700000000000000000007 /* BrandedControls.swift */,
 				F01800000000000000000018 /* GeneratedDesignTokens.swift */,
+				F01900000000000000000019 /* OperationFeedback.swift */,
+				CB617B6610404AB3B164F8DF /* LocalizedCopy.swift */,
 				F04200000000000000000042 /* ContentComponents.swift */,
 			);
 			path = Design;
@@ -1022,6 +1031,8 @@
 				B00500000000000000000005 /* AppRootView.swift in Sources */,
 				B00600000000000000000006 /* AppTheme.swift in Sources */,
 				B00700000000000000000007 /* BrandedControls.swift in Sources */,
+				B01900000000000000000019 /* OperationFeedback.swift in Sources */,
+				D11E0BDE325B4E229400C90D /* LocalizedCopy.swift in Sources */,
 				B00800000000000000000008 /* ServerFlowView.swift in Sources */,
 				B00900000000000000000009 /* AddServerView.swift in Sources */,
 				B01000000000000000000010 /* TLSRiskView.swift in Sources */,
@@ -1141,6 +1152,7 @@
 				B2A100000000000000000004 /* ShelfCatalogTests.swift in Sources */,
 				B03600000000000000000036 /* MeSettingsTests.swift in Sources */,
 				B03700000000000000000037 /* AdministrativeSettingsTests.swift in Sources */,
+				B03800000000000000000038 /* OperationFeedbackTests.swift in Sources */,
 				B08100000000000000000081 /* ReaderProgressContractTests.swift in Sources */,
 				B08200000000000000000082 /* ReaderPersistenceTests.swift in Sources */,
 				B08300000000000000000083 /* ReaderSecurityTests.swift in Sources */,

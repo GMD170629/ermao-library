@@ -392,15 +392,17 @@ actor SharedContentClient: ContentClient {
             isbn: value.isbn, identifier: value.identifier, narrator: value.narrator,
             pageCount: value.pageCount?.intValue, chapterCount: value.chapterCount?.intValue, metadataSource: nil,
             kindleSendAvailable: value.kindleSendAvailable,
-            assets: value.assets.map { asset in
-                ResourceAsset(
-                    id: asset.id, resourceID: asset.resourceId,
-                    path: asset.url ?? asset.downloadUrl ?? "", role: asset.role, mimeType: asset.mimeType,
-                    sizeBytes: asset.sizeBytes, displaySize: asset.displaySize,
-                    sortOrder: asset.sortOrder?.intValue, url: asset.url, downloadURL: asset.downloadUrl
-                )
-            },
+            assets: value.assets.map { Self.mapResourceAsset($0) },
             importStatus: value.importStatus
+        )
+    }
+
+    nonisolated static func mapResourceAsset(_ asset: ErmaoShared.Asset) -> ResourceAsset {
+        ResourceAsset(
+            id: asset.id, resourceID: asset.resourceId,
+            path: asset.path ?? "", role: asset.role, mimeType: asset.mimeType,
+            sizeBytes: asset.sizeBytes, displaySize: asset.displaySize,
+            sortOrder: asset.sortOrder?.intValue, url: asset.url, downloadURL: asset.downloadUrl
         )
     }
 

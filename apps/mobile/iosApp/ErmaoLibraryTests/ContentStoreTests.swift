@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 @preconcurrency import class ErmaoShared.KotlinInt
+@preconcurrency import class ErmaoShared.Asset
 @preconcurrency import class ErmaoShared.PublicKt
 @preconcurrency import class ErmaoShared.ReaderChapterPresentation
 @preconcurrency import class ErmaoShared.ReaderPositionPresentation
@@ -9,6 +10,52 @@ import XCTest
 
 @MainActor
 final class ContentStoreTests: XCTestCase {
+    func testSharedContentAssetMappingPreservesAbsolutePathAndKeepsUrlOnlyCompatibility() {
+        func asset(path: String?, url: String) -> ErmaoShared.Asset {
+            ErmaoShared.Asset(
+                id: path == nil ? "asset-url-only" : "asset-with-path",
+                title: "Book 1.epub",
+                path: path,
+                resourceId: "resource-paths",
+                sourceNodeId: "source-asset",
+                role: "PRIMARY",
+                mimeType: "application/epub+zip",
+                sizeBytes: 1024,
+                displaySize: "1 KB",
+                mtimeMillis: nil,
+                durationMillis: nil,
+                codec: nil,
+                bitrate: nil,
+                sampleRate: nil,
+                channels: nil,
+                discNumber: nil,
+                trackNumber: nil,
+                sortOrder: nil,
+                url: url,
+                downloadUrl: "\(url)?download=true",
+                sourceFormat: "EPUB"
+            )
+        }
+
+        let mapped = [
+            asset(path: "/books/中文目录/Book 1.epub", url: "/api/assets/asset-with-path/content"),
+            asset(path: nil, url: "/api/assets/asset-url-only/content")
+        ].map { SharedContentClient.mapResourceAsset($0) }
+
+        XCTAssertEqual(mapped.map(\.path), ["/books/中文目录/Book 1.epub", ""])
+        XCTAssertEqual(
+            mapped.map(\.url),
+            ["/api/assets/asset-with-path/content", "/api/assets/asset-url-only/content"]
+        )
+        XCTAssertEqual(
+            mapped.map(\.downloadURL),
+            [
+                "/api/assets/asset-with-path/content?download=true",
+                "/api/assets/asset-url-only/content?download=true"
+            ]
+        )
+    }
+
     func testCoverRequestsAndCacheKeysUseTheSameSmallVariant() {
         let raw = "/api/books/book/cover?v=7&size=medium"
         let small = PublicKt.smallCoverRequestPath(apiPath: raw)

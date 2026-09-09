@@ -1,5 +1,6 @@
 package com.ermao.library.shared.modules.workmanagement.application
 
+import com.ermao.library.shared.core.feedback.OperationFeedbackKind
 import com.ermao.library.shared.modules.workmanagement.domain.BookManagementContext
 import com.ermao.library.shared.modules.workmanagement.domain.BookMetadataDraft
 import com.ermao.library.shared.modules.workmanagement.domain.BookMutationOutcome
@@ -51,6 +52,22 @@ class BookManagementSessionTest {
     private val target = ManagementTarget(ManagementObject.Book, "book", "book", "Book")
     private val failure = WorkManagementResult.Failure(WorkManagementError(WorkManagementErrorKind.Offline, "NETWORK_ERROR"))
     private fun session(repository: WorkManagementRepository, admin: Boolean = true) = BookManagementSession(repository, context, admin) { "operation-key" }
+
+    @Test fun feedbackConsumptionCannotClearANewerOutcome() {
+        val session = session(object : UnusedManagementRepository() {})
+        session.reportRefreshFailure()
+        val oldRevision = session.current.feedbackRevision
+        assertEquals(OperationFeedbackKind.PartialSuccess, session.current.feedbackKind)
+        session.reportRefreshFailure()
+        val newRevision = session.current.feedbackRevision
+        assertTrue(newRevision > oldRevision)
+        session.clearFeedback(oldRevision)
+        assertEquals("refreshFailed", session.current.notice)
+        session.clearFeedback(newRevision)
+        assertEquals(null, session.current.notice)
+        session.close()
+        assertEquals(null, session.current.notice)
+    }
 
     @Test fun openingAndReopeningMenusNeverReadsManagementSnapshot() = runBlocking {
         var calls = 0
@@ -342,6 +359,18 @@ class BookManagementSessionTest {
         assertEquals(listOf("metadata", "tags"), calls)
         assertEquals(ManagementPhase.Closed, session.current.phase)
         assertEquals(false, session.current.change?.coverChanged)
+        val firstFeedbackRevision = session.current.feedbackRevision
+        assertEquals(OperationFeedbackKind.Success, session.current.feedbackKind)
+        assertEquals("saved", session.current.notice)
+        session.open(target, ManagementMenuContext(completed = false)); session.select(ManagementAction.Edit); session.save()
+        val secondFeedbackRevision = session.current.feedbackRevision
+        assertTrue(secondFeedbackRevision > firstFeedbackRevision)
+        session.clearFeedback(firstFeedbackRevision)
+        assertEquals("saved", session.current.notice)
+        session.clearFeedback(secondFeedbackRevision)
+        session.close()
+        session.open(target)
+        assertEquals(null, session.current.notice)
     }
 
     @Test fun recognitionIsUnavailableWithoutAnyRepositoryCallsIncludingRetryAndReopening() = runBlocking {

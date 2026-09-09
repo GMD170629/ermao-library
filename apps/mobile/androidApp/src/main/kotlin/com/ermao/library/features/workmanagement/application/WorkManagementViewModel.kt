@@ -26,6 +26,7 @@ data class WorkManagementUiState(
     val supported: Boolean = true,
     val isBusy: Boolean = false,
     val errorCode: String? = null,
+    val feedbackRevision: Long = 0,
     val completedMutation: WorkManagementCompletion? = null,
     val coverMutation: CoverMutationOutcome? = null,
     val metadataProviders: List<MetadataProvider> = emptyList(),
@@ -47,7 +48,8 @@ class WorkManagementViewModel(
     val uiState: StateFlow<WorkManagementUiState> = mutableUiState.asStateFlow()
 
 
-    fun consumeFeedback() {
+    fun consumeFeedback(revision: Long) {
+        if (mutableUiState.value.feedbackRevision != revision) return
         mutableUiState.value = mutableUiState.value.copy(
             errorCode = null,
             completedMutation = null,
@@ -65,12 +67,13 @@ class WorkManagementViewModel(
 
     private fun run(completion: WorkManagementCompletion, operation: suspend () -> WorkManagementResult<*>) {
         if (mutableUiState.value.isBusy) return
-        mutableUiState.value = mutableUiState.value.copy(isBusy = true, errorCode = null)
+        mutableUiState.value = mutableUiState.value.copy(isBusy = true, errorCode = null, completedMutation = null)
         viewModelScope.launch {
             when (val result = operation()) {
                 is WorkManagementResult.Content -> mutableUiState.value = mutableUiState.value.copy(
                     isBusy = false,
                     completedMutation = completion,
+                    feedbackRevision = mutableUiState.value.feedbackRevision + 1,
                 )
                 is WorkManagementResult.Failure -> fail(result)
             }
@@ -85,6 +88,8 @@ class WorkManagementViewModel(
             capabilityChecked = true,
             isBusy = false,
             errorCode = result.error.code,
+            completedMutation = null,
+            feedbackRevision = mutableUiState.value.feedbackRevision + 1,
         )
     }
 
