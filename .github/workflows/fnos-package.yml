@@ -107,10 +107,18 @@ jobs:
           pnpm --filter @shuku/web i18n:check
           pnpm --filter @shuku/web build
 
+      - name: Set up Python for backend Reader conformance
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: apps/api-python/.python-version
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
       - name: Compare executable Reader safety reports
         run: |
           pnpm --filter @shuku/web conformance:reader-safety
-          python3 apps/api-python/tests/conformance/reader_safety_conformance.py \
+          uv run --project apps/api-python --locked python apps/api-python/tests/conformance/reader_safety_conformance.py \
             --output artifacts/reader-safety-conformance/backend.json
           python3 packages/reader-contracts/verify-reader-safety-conformance.py \
             --require-consumer BACKEND \
