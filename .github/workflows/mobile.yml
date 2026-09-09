@@ -197,6 +197,18 @@ jobs:
             exit 1
           fi
 
+      - name: Install pinned host JNI compiler
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/zig-0.14.1.tar.xz"
+          curl --fail --location --retry 3 \
+            https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz \
+            --output "$archive"
+          printf '24aeeec8af16c381934a6cd7d95c807a8cb2cf7df9fa40d359aa884195c4716c  %s\n' "$archive" | sha256sum --check
+          tar -xf "$archive" -C "$RUNNER_TEMP"
+          echo "ERMAO_ZIG=$RUNNER_TEMP/zig-x86_64-linux-0.14.1/zig" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/zig-x86_64-linux-0.14.1/zig" version
+
       - name: Test, lint, and assemble
         run: |
           ./gradlew --stacktrace \
@@ -277,5 +289,7 @@ jobs:
           name: ermao-library-android-instrumented-results
           path: |
             apps/mobile/androidApp/build/reports/androidTests/manual/instrumentation.txt
+            apps/mobile/androidApp/build/reports/androidTests/manual/startup-*.txt
+            apps/mobile/androidApp/build/reports/androidTests/manual/startup-*.xml
             apps/mobile/androidApp/build/reports/reader-safety-conformance/android.json
           if-no-files-found: warn

@@ -62,6 +62,7 @@ def test_mobile_setup_status_and_setup_contract(
         "canViewManualImports": False,
         "authzVersion": 1,
         "avatarUrl": None,
+        "avatarImageUrl": "/api/auth/avatar",
         "locale": "en-US",
     }
     assert payload["data"]["authorization"]["isAdmin"] is True
