@@ -191,6 +191,7 @@ struct BookResource: Identifiable, Codable, Equatable, Sendable {
     let resourceIndex: Double?
     let cover: CoverReference?
     let sizeLabel: String?
+    let sizeBytes: Int64?
     let progress: Double?
     let isReadable: Bool?
     let isSelected: Bool
@@ -219,6 +220,7 @@ struct BookResource: Identifiable, Codable, Equatable, Sendable {
         resourceIndex: Double? = nil,
         cover: CoverReference? = nil,
         sizeLabel: String?,
+        sizeBytes: Int64? = nil,
         progress: Double?,
         isReadable: Bool?,
         isSelected: Bool,
@@ -246,6 +248,7 @@ struct BookResource: Identifiable, Codable, Equatable, Sendable {
         self.resourceIndex = resourceIndex
         self.cover = cover
         self.sizeLabel = sizeLabel
+        self.sizeBytes = sizeBytes
         self.progress = progress
         self.isReadable = isReadable
         self.isSelected = isSelected

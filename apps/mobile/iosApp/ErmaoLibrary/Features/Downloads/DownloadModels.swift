@@ -329,6 +329,7 @@ enum DownloadManagementAdapter {
             sizeLabel: byteCount > 0
                 ? ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file)
                 : nil,
+            sizeBytes: record.expectedBytes,
             progress: record.progress,
             isReadable: false,
             isSelected: false,

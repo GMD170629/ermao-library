@@ -132,7 +132,7 @@ class DirectoryContentPresentationTest(private val resourceCount: Int, private v
             composeRule.runOnIdle { assertEquals(null, downloadedResource) }
             composeRule.onNodeWithTag("work-detail-list").performScrollToNode(hasText("Book introduction"))
             composeRule.onNodeWithText("Book introduction").assertIsDisplayed()
-            composeRule.onNodeWithTag("work-detail-list").performScrollToNode(hasTestTag("work-contents-breadcrumb-root"))
+            composeRule.onNodeWithTag("work-detail-list").performScrollToNode(hasTestTag("work-contents-sort"))
         } else {
             composeRule.onNodeWithTag("work-reader-action").assertDoesNotExist()
             composeRule.onNodeWithTag("work-book-reading-resource").assertDoesNotExist()
@@ -142,7 +142,9 @@ class DirectoryContentPresentationTest(private val resourceCount: Int, private v
             composeRule.onNodeWithTag("work-shelf-action").assertDoesNotExist()
             composeRule.onNodeWithTag("work-reading-status-action").assertDoesNotExist()
         }
-        composeRule.onNodeWithTag("work-contents-breadcrumb-root").assertIsDisplayed()
+        composeRule.onNodeWithTag("work-contents-breadcrumb-root").assertDoesNotExist()
+        composeRule.onNodeWithTag("work-contents-sort").assertIsDisplayed()
+        composeRule.onNodeWithTag("work-contents-view-toggle").assertIsDisplayed()
         if (resourceCount > 0) {
             if (isRoot) composeRule.onNodeWithTag("work-detail-list").performScrollToNode(hasTestTag("work-resource-resource-1"))
             composeRule.onNodeWithTag("work-resource-resource-1").assertIsDisplayed().performClick()

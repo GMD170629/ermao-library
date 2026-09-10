@@ -1,6 +1,12 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "work.downloadManagement.selection.hint": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Select volumes to download" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "请选择要下载的卷册" } }
+      }
+    },
     "home.continue.reading.format": {
       "localizations": {
         "en": {

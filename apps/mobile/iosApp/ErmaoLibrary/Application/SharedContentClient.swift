@@ -391,6 +391,7 @@ actor SharedContentClient: ContentClient {
             description: value.description_, format: value.format, readerType: value.readerType,
             resourceIndex: value.resourceIndex?.doubleValue, cover: cover(value.coverUrl),
             sizeLabel: ByteCountFormatter.string(fromByteCount: value.sizeBytes, countStyle: .file),
+            sizeBytes: value.sizeBytes,
             progress: value.progress > 0 ? value.progress : nil, isReadable: value.readable,
             isSelected: value.id == selectedResourceID, sortOrder: Int(value.sortOrder),
             publisher: value.publisher, publishedAt: value.publishedAt, language: value.language,

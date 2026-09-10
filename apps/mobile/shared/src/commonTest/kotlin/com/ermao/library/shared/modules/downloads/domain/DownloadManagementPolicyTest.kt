@@ -17,15 +17,15 @@ class DownloadManagementPolicyTest {
     )
 
     @Test
-    fun singleListButtonDeletesCompletedAndOnlyStartsEligibleTransfers() {
-        assertEquals(DownloadManagementAction.Download, resource("new").listAction)
-        assertEquals(DownloadManagementAction.Remove, resource("done", DownloadTaskStatus.Completed, verified = true).listAction)
-        assertEquals(DownloadManagementAction.Resume, resource("paused", DownloadTaskStatus.Paused).listAction)
-        assertEquals(DownloadManagementAction.Retry, resource("failed", DownloadTaskStatus.FailedRetryable).listAction)
-        assertEquals(DownloadManagementAction.Retry, resource("invalid", DownloadTaskStatus.Completed).listAction)
-        assertEquals(null, resource("running", DownloadTaskStatus.Downloading, active = true).listAction)
-        assertEquals(null, resource("queued", DownloadTaskStatus.Queued).listAction)
-        assertEquals(null, resource("offline", available = false).listAction)
+    fun primaryButtonOpensVerifiedCopiesAndControlsEligibleTransfers() {
+        assertEquals(DownloadManagementAction.Download, resource("new").primaryAction)
+        assertEquals(DownloadManagementAction.Open, resource("done", DownloadTaskStatus.Completed, verified = true).primaryAction)
+        assertEquals(DownloadManagementAction.Resume, resource("paused", DownloadTaskStatus.Paused).primaryAction)
+        assertEquals(DownloadManagementAction.Retry, resource("failed", DownloadTaskStatus.FailedRetryable).primaryAction)
+        assertEquals(DownloadManagementAction.Retry, resource("invalid", DownloadTaskStatus.Completed).primaryAction)
+        assertEquals(DownloadManagementAction.Pause, resource("running", DownloadTaskStatus.Downloading, active = true).primaryAction)
+        assertEquals(DownloadManagementAction.Pause, resource("queued", DownloadTaskStatus.Queued).primaryAction)
+        assertEquals(null, resource("offline", available = false).primaryAction)
     }
 
     @Test

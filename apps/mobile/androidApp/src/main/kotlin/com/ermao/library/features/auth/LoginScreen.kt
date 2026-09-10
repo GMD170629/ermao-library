@@ -122,7 +122,12 @@ fun LoginScreen(
                 .fillMaxSize()
                 .padding(contentPadding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = theme.spacing.three, vertical = theme.spacing.four),
+                .padding(
+                    start = theme.spacing.three,
+                    end = theme.spacing.three,
+                    top = theme.spacing.eight,
+                    bottom = theme.spacing.four,
+                ),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             BrandImage(size = 96, shape = BrandImageShape.Circle)
@@ -221,9 +226,10 @@ fun LoginScreen(
                 loading = isAuthenticating,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("login-submit"),
             )
+            Spacer(Modifier.height(theme.spacing.two))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TextButton(
@@ -231,17 +237,18 @@ fun LoginScreen(
                     enabled = !isAuthenticating && otherProfiles.isNotEmpty(),
                     modifier = Modifier.heightIn(min = 48.dp).testTag("login-switch-server"),
                 ) {
-                    Icon(Icons.Outlined.SwapHoriz, contentDescription = null)
+                    Icon(Icons.Outlined.SwapHoriz, contentDescription = null, modifier = Modifier.size(theme.components.controls.iconSize))
+                    Spacer(Modifier.size(theme.spacing.one))
                     Text(stringResource(R.string.login_switch_server))
                 }
-                OutlinedButton(
+                TextButton(
                     onClick = { showDeleteConfirmation = true },
                     enabled = !isAuthenticating && currentProfileId != null,
                     modifier = Modifier.heightIn(min = 48.dp).testTag("login-delete-server"),
                 ) {
-                    Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                    Text(stringResource(R.string.login_delete_current_server))
+                    Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(theme.components.controls.iconSize))
+                    Spacer(Modifier.size(theme.spacing.one))
+                    Text(stringResource(R.string.login_delete_confirm_action))
                 }
             }
             Spacer(Modifier.height(theme.spacing.two))

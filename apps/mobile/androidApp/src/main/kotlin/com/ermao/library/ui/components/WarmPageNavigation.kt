@@ -1,7 +1,6 @@
 package com.ermao.library.ui.components
 
 import androidx.annotation.StringRes
-import androidx.compose.foundation.background
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -15,7 +14,6 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -232,10 +230,6 @@ private fun <T> WarmPageCompactNavigation(
                                         role = Role.Tab,
                                     )
                                     .padding(horizontal = theme.spacing.half, vertical = theme.spacing.half)
-                                    .background(
-                                        color = if (isSelected) theme.colors.accentSoft else Color.Transparent,
-                                        shape = RoundedCornerShape(theme.radii.task),
-                                    )
                                     .padding(vertical = theme.spacing.oneAndHalf / 2),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {

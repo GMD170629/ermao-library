@@ -4,6 +4,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -23,14 +25,17 @@ import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Download
-import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.SelectAll
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
@@ -57,6 +62,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalConfiguration
+import java.text.NumberFormat
 import androidx.compose.ui.unit.dp
 import com.ermao.library.R
 import com.ermao.library.features.content.model.ResourceContent
@@ -76,9 +84,7 @@ import com.ermao.library.ui.components.LocalWarmPageModalSheetDismiss
 import com.ermao.library.ui.components.WarmPageErrorState
 import com.ermao.library.ui.components.WarmPageIconAction
 import com.ermao.library.ui.components.WarmPageLoadingState
-import com.ermao.library.ui.components.WarmPageMenuItem
 import com.ermao.library.ui.components.WarmPageModalBottomSheet
-import com.ermao.library.ui.components.WarmPagePopup
 import com.ermao.library.ui.theme.WarmPageThemeValues
 
 private data class MultiDownloadTreeRow(
@@ -314,7 +320,7 @@ internal fun MultiDownloadSheet(
         canDismiss = { !isSubmitting },
         modifier = Modifier
             .fillMaxWidth()
-            .fillMaxHeight(0.92f)
+            .fillMaxHeight()
             .testTag("multi-download-sheet"),
     ) {
         val dismissSheet = LocalWarmPageModalSheetDismiss.current ?: onDismiss
@@ -345,7 +351,9 @@ internal fun MultiDownloadSheet(
                     .padding(horizontal = theme.components.page.compactGutter),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                OutlinedButton(
+                WarmPageIconAction(
+                    icon = Icons.Outlined.Close,
+                    label = stringResource(if (selectionMode) R.string.cancel_action else R.string.close_action),
                     onClick = {
                         if (selectionMode) {
                             selectionMode = false
@@ -353,29 +361,33 @@ internal fun MultiDownloadSheet(
                         } else dismissSheet()
                     },
                     enabled = !isSubmitting,
-                    modifier = Modifier.testTag("download-panel-close"),
-                ) {
-                    Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                    Text(stringResource(if (selectionMode) R.string.cancel_action else R.string.download_selection_done))
-                }
+                    modifier = Modifier.testTag(if (selectionMode) "download-selection-cancel" else "download-panel-close"),
+                )
                 Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.book_download_title), style = theme.typography.sectionTitle)
+                    Text(
+                        if (selectionMode) pluralStringResource(R.plurals.multi_download_selected_count, scopedSelectedIds.size, scopedSelectedIds.size)
+                        else stringResource(R.string.book_download_title),
+                        style = theme.typography.sectionTitle,
+                    )
                 }
                 if (selectionMode) {
-                    OutlinedButton(
+                    OutlinedButton(colors = ButtonDefaults.outlinedButtonColors(contentColor = theme.colors.textSecondary),
                         onClick = {
-                            selectionMode = false
-                            selectedIdsList = emptyList()
+                            selectedIdsList = DownloadManagementPolicy.toggleSelection(
+                                scopedSelectedIds, selectableIds, scopeManagement,
+                            ).sorted()
                         },
                         enabled = !isSubmitting,
-                        modifier = Modifier.testTag("download-selection-cancel"),
+                        modifier = Modifier.testTag("download-selection-all"),
                     ) {
-                        Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                        Icon(Icons.Outlined.SelectAll, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                         Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                        Text(stringResource(R.string.download_selection_done)) }
+                        Text(stringResource(
+                            if (DownloadManagementPolicy.selectionMark(scopedSelectedIds, selectableIds, scopeManagement) == MultiDownloadSelectionMark.Selected)
+                                R.string.download_selection_clear_all else R.string.download_selection_select_all,
+                        )) }
                 } else {
-                    OutlinedButton(
+                    OutlinedButton(colors = ButtonDefaults.outlinedButtonColors(contentColor = theme.colors.textSecondary),
                         onClick = { selectionMode = true },
                         enabled = !isSubmitting && selectableIds.isNotEmpty(),
                         modifier = Modifier.testTag("download-selection-enter"),
@@ -451,7 +463,7 @@ internal fun MultiDownloadSheet(
                                 style = theme.typography.caption,
                                 modifier = Modifier.weight(1f),
                             )
-                            OutlinedButton(onClick = { onRetryFolder(null) }) {
+                            OutlinedButton(colors = ButtonDefaults.outlinedButtonColors(contentColor = theme.colors.textSecondary), onClick = { onRetryFolder(null) }) {
                                 Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                                 Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                                 Text(stringResource(R.string.retry_action))
@@ -618,18 +630,13 @@ internal fun MultiDownloadSheet(
             if (selectionMode) {
                 SelectionBatchBar(
                     selected = scopedSelectedIds,
-                    candidates = selectableIds,
                     resources = scopeManagement,
+                    selectedResources = panelResources.filter { it.id in scopedSelectedIds },
                     isSubmitting = isSubmitting,
-                    onSelectAll = {
-                        selectedIdsList = DownloadManagementPolicy.toggleSelection(
-                            scopedSelectedIds,
-                            selectableIds,
-                            scopeManagement,
-                        ).sorted()
-                    },
                     onRequestRemoval = {
-                        if (scopedSelectedIds.isNotEmpty()) pendingRemovalIds = scopedSelectedIds
+                        DownloadManagementPolicy.applicable(
+                            DownloadManagementAction.Remove, scopedSelectedIds, scopeManagement,
+                        ).toSet().takeIf { it.isNotEmpty() }?.let { pendingRemovalIds = it }
                     },
                     onExecuteAction = { action ->
                         val applicable = DownloadManagementPolicy.applicable(
@@ -661,7 +668,7 @@ internal fun MultiDownloadSheet(
             title = { Text(title) },
             text = { Text(message) },
             confirmButton = {
-                OutlinedButton(
+                OutlinedButton(colors = ButtonDefaults.outlinedButtonColors(contentColor = theme.colors.textSecondary),
                     onClick = {
                         submitAction(
                             DownloadManagementAction.Remove,
@@ -676,7 +683,7 @@ internal fun MultiDownloadSheet(
                     Text(stringResource(R.string.downloads_remove_action)) }
             },
             dismissButton = {
-                OutlinedButton(onClick = { pendingRemovalIds = null }, enabled = !isSubmitting) {
+                OutlinedButton(colors = ButtonDefaults.outlinedButtonColors(contentColor = theme.colors.textSecondary), onClick = { pendingRemovalIds = null }, enabled = !isSubmitting) {
                     Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                     Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                     Text(stringResource(R.string.cancel_action))
@@ -753,7 +760,7 @@ private fun DownloadFolderRow(
                     color = theme.colors.textSecondary,
                     modifier = Modifier.weight(1f),
                 )
-                OutlinedButton(onClick = { onRetryFolder(nodeId) }) {
+                OutlinedButton(colors = ButtonDefaults.outlinedButtonColors(contentColor = theme.colors.textSecondary), onClick = { onRetryFolder(nodeId) }) {
                     Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                     Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                     Text(stringResource(R.string.retry_action))
@@ -779,22 +786,52 @@ private fun DownloadResourceRow(
     onOpenDownloaded: (AndroidDownloadRecord) -> Unit,
 ) {
     val theme = WarmPageThemeValues
-    val rowAction = management.listAction
-    val isDownloaded = management.status == com.ermao.library.shared.modules.downloads.DownloadManagementStatus.Completed
+    val rowAction = management.primaryAction
     val useStackedActions = LocalDensity.current.fontScale >= MULTI_DOWNLOAD_STACKED_ACTION_FONT_SCALE
+    var moreExpanded by remember(resource.id) { mutableStateOf(false) }
     val actionContent: @Composable RowScope.() -> Unit = {
-        androidx.compose.material3.IconButton(
-            onClick = {
-                if (rowAction == DownloadManagementAction.Remove) onRequestRemoval()
-                else rowAction?.let(onSubmitAction)
-            },
-            enabled = !isSubmitting && rowAction != null,
-            modifier = Modifier.testTag("download-resource-primary-${resource.id}"),
-        ) {
-            Icon(
-                if (isDownloaded) Icons.Outlined.Delete else Icons.Outlined.FileDownload,
-                contentDescription = stringResource(if (isDownloaded) R.string.download_management_delete else R.string.work_quick_download),
-            )
+        rowAction?.let { action ->
+            if (action == DownloadManagementAction.Download) {
+                WarmPageIconAction(
+                    icon = downloadManagementActionIcon(action),
+                    label = downloadManagementActionLabel(action),
+                    onClick = { onSubmitAction(action) },
+                    enabled = !isSubmitting,
+                    modifier = Modifier.testTag("download-resource-primary-${resource.id}"),
+                )
+            } else {
+                OutlinedButton(colors = ButtonDefaults.outlinedButtonColors(contentColor = theme.colors.textSecondary),
+                    onClick = {
+                        if (action == DownloadManagementAction.Open && record != null) onOpenDownloaded(record)
+                        else onSubmitAction(action)
+                    },
+                    enabled = !isSubmitting,
+                    contentPadding = PaddingValues(horizontal = theme.spacing.one),
+                    modifier = Modifier.testTag("download-resource-primary-${resource.id}"),
+                ) {
+                    Icon(downloadManagementActionIcon(action), contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                    Text(downloadManagementActionLabel(action))
+                }
+            }
+        }
+        if (DownloadManagementAction.Remove in management.actions) {
+            Box {
+                WarmPageIconAction(
+                    icon = Icons.Outlined.MoreVert,
+                    label = stringResource(R.string.work_quick_more),
+                    onClick = { moreExpanded = true },
+                    enabled = !isSubmitting,
+                    modifier = Modifier.testTag("download-resource-more-${resource.id}"),
+                )
+                DropdownMenu(expanded = moreExpanded, onDismissRequest = { moreExpanded = false }) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.downloads_remove_action)) },
+                        leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null) },
+                        onClick = { moreExpanded = false; onRequestRemoval() },
+                    )
+                }
+            }
         }
     }
     val rowModifier = Modifier
@@ -825,7 +862,7 @@ private fun DownloadResourceRow(
             )
         }
         Column(Modifier.weight(1f)) {
-            Text(resource.title, style = theme.typography.body)
+            Text(resource.title, style = theme.typography.body, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(
                 listOfNotNull(
                     resource.format.takeIf(String::isNotBlank),
@@ -834,14 +871,36 @@ private fun DownloadResourceRow(
                 style = theme.typography.caption,
                 color = theme.colors.textSecondary,
             )
-            if (management.status != com.ermao.library.shared.modules.downloads.DownloadManagementStatus.Completed &&
-                management.status != com.ermao.library.shared.modules.downloads.DownloadManagementStatus.NotDownloaded) {
-                Text(
-                    downloadManagementStatusLabel(management.status),
-                    style = theme.typography.caption,
+            val showProgress = record != null && management.status in setOf(
+                com.ermao.library.shared.modules.downloads.DownloadManagementStatus.Downloading,
+                com.ermao.library.shared.modules.downloads.DownloadManagementStatus.Paused,
+            )
+            val progress = record?.let { (it.transferredBytes.toDouble() / it.expectedBytes).coerceIn(0.0, 1.0) }
+            if (showProgress && progress != null) {
+                LinearProgressIndicator(
+                    progress = { progress.toFloat() },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = theme.spacing.half),
                     color = theme.colors.textSecondary,
-                    modifier = Modifier.testTag("download-resource-status-${resource.id}"),
+                    trackColor = theme.colors.divider,
                 )
+            }
+            val locale = LocalConfiguration.current.locales[0]
+            val status = downloadManagementStatusLabel(management.status)
+            Text(
+                if (showProgress && progress != null) "$status · ${NumberFormat.getPercentInstance(locale).format(progress)}" else status,
+                style = theme.typography.caption,
+                color = theme.colors.textSecondary,
+                modifier = Modifier.testTag("download-resource-status-${resource.id}"),
+            )
+            if (management.status in setOf(
+                    com.ermao.library.shared.modules.downloads.DownloadManagementStatus.FailedRetryable,
+                    com.ermao.library.shared.modules.downloads.DownloadManagementStatus.FailedTerminal,
+                    com.ermao.library.shared.modules.downloads.DownloadManagementStatus.InvalidLocal,
+                )
+            ) {
+                record?.errorCode?.let { code ->
+                    Text(downloadFailureMessage(code), style = theme.typography.caption, color = androidx.compose.material3.MaterialTheme.colorScheme.error)
+                }
             }
             if (!selectionMode && useStackedActions) {
                 Row(
@@ -864,57 +923,68 @@ private fun DownloadResourceRow(
 @Composable
 private fun SelectionBatchBar(
     selected: Set<String>,
-    candidates: Set<String>,
     resources: List<DownloadManagementResource>,
+    selectedResources: List<ResourceContent>,
     isSubmitting: Boolean,
-    onSelectAll: () -> Unit,
     onRequestRemoval: () -> Unit,
     onExecuteAction: (DownloadManagementAction) -> Unit,
 ) {
     val theme = WarmPageThemeValues
-    val mark = DownloadManagementPolicy.selectionMark(selected, candidates, resources)
+    val availableActions = managementBatchActions.filter {
+        DownloadManagementPolicy.applicable(it, selected, resources).isNotEmpty()
+    }
+    val primary = availableActions.firstOrNull { it != DownloadManagementAction.Remove }
+        ?: availableActions.firstOrNull() ?: DownloadManagementAction.Download
+    val count = DownloadManagementPolicy.applicable(primary, selected, resources).size
+    val secondary = availableActions.filter { it != primary }
+    var moreExpanded by remember { mutableStateOf(false) }
     Column(
         Modifier.fillMaxWidth().padding(horizontal = theme.components.page.compactGutter, vertical = theme.spacing.one),
-        verticalArrangement = Arrangement.spacedBy(theme.spacing.half),
+        verticalArrangement = Arrangement.spacedBy(theme.spacing.one),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(onClick = onSelectAll, enabled = !isSubmitting) {
-                Icon(Icons.Outlined.SelectAll, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                Text(
-                    stringResource(
-                        if (mark == MultiDownloadSelectionMark.Selected) {
-                            R.string.download_selection_clear_all
-                        } else {
-                            R.string.download_selection_select_all
-                        },
-                    ),
-                )
-            }
-            Spacer(Modifier.weight(1f))
-            Text(
+        val sizesKnown = selected.isNotEmpty() && selectedResources.size == selected.size && selectedResources.all { it.sizeBytes > 0 }
+        Text(
+            if (selected.isEmpty()) stringResource(R.string.download_selection_hint)
+            else listOfNotNull(
                 pluralStringResource(R.plurals.multi_download_selected_count, selected.size, selected.size),
-                style = theme.typography.caption,
-                color = theme.colors.textSecondary,
-            )
-        }
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(theme.spacing.half),
-        ) {
-            managementBatchActions.forEach { action ->
-                val count = DownloadManagementPolicy.applicable(action, selected, resources).size
-                WarmPageIconAction(
-                    icon = downloadManagementActionIcon(action),
-                    label = batchActionLabel(action, count),
-                    onClick = if (action == DownloadManagementAction.Remove) onRequestRemoval else { { onExecuteAction(action) } },
-                    enabled = !isSubmitting && count > 0,
-                )
+                if (sizesKnown) formatBytes(selectedResources.sumOf { it.sizeBytes }) else null,
+            ).joinToString(" · "),
+            style = theme.typography.caption,
+            color = theme.colors.textSecondary,
+        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(theme.spacing.one)) {
+            OutlinedButton(colors = ButtonDefaults.outlinedButtonColors(contentColor = theme.colors.textSecondary),
+                onClick = { if (primary == DownloadManagementAction.Remove) onRequestRemoval() else onExecuteAction(primary) },
+                enabled = !isSubmitting && count > 0,
+                modifier = Modifier.weight(1f).heightIn(min = theme.components.controls.actionMinimumHeight)
+                    .testTag("download-batch-primary"),
+            ) {
+                Icon(downloadManagementActionIcon(primary), contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(batchActionLabel(primary, count))
+            }
+            if (secondary.isNotEmpty()) {
+                Box {
+                    WarmPageIconAction(Icons.Outlined.MoreVert, stringResource(R.string.work_quick_more),
+                        onClick = { moreExpanded = true }, enabled = !isSubmitting)
+                    DropdownMenu(expanded = moreExpanded, onDismissRequest = { moreExpanded = false }) {
+                        secondary.forEach { action ->
+                            DropdownMenuItem(
+                                text = { Text(batchActionLabel(action, DownloadManagementPolicy.applicable(action, selected, resources).size)) },
+                                leadingIcon = { Icon(downloadManagementActionIcon(action), contentDescription = null) },
+                                onClick = {
+                                    moreExpanded = false
+                                    if (action == DownloadManagementAction.Remove) onRequestRemoval() else onExecuteAction(action)
+                                },
+                            )
+                        }
+                    }
+                }
             }
         }
     }
 }
-
 private fun downloadManagementActionIcon(action: DownloadManagementAction): ImageVector = when (action) {
     DownloadManagementAction.Open -> Icons.AutoMirrored.Outlined.OpenInNew
     DownloadManagementAction.Download -> Icons.Outlined.Download
@@ -925,15 +995,6 @@ private fun downloadManagementActionIcon(action: DownloadManagementAction): Imag
 }
 
 private val managementBatchActions = listOf(
-    DownloadManagementAction.Download,
-    DownloadManagementAction.Pause,
-    DownloadManagementAction.Resume,
-    DownloadManagementAction.Retry,
-    DownloadManagementAction.Remove,
-)
-
-private val managementActionOrder = listOf(
-    DownloadManagementAction.Open,
     DownloadManagementAction.Download,
     DownloadManagementAction.Pause,
     DownloadManagementAction.Resume,

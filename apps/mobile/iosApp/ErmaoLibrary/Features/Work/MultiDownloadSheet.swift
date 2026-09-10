@@ -423,6 +423,7 @@ struct MultiDownloadSheet: View {
                 if mode == .selection { selectionBar }
             }
         }
+        .tint(theme.textSecondary)
         .task {
             tree.load(hierarchy: loadsHierarchy)
             _ = await downloads.reloadAndAwait(expectedNamespace: context.namespaceKey)
@@ -455,11 +456,14 @@ struct MultiDownloadSheet: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .cancellationAction) {
-            Button(mode == .selection ? "common.cancel" : "common.done") {
+            Button {
+                if mode == .selection { leaveSelectionMode() } else { onDismiss() }
+            } label: {
                 if mode == .selection {
-                    leaveSelectionMode()
+                    Label("common.cancel", systemImage: "xmark")
                 } else {
-                    onDismiss()
+                    Image(systemName: "xmark")
+                        .accessibilityLabel(Text("common.close"))
                 }
             }
             .disabled(isActing)
@@ -470,17 +474,19 @@ struct MultiDownloadSheet: View {
             )
         }
         ToolbarItem(placement: .principal) {
-            Text("work.downloadManagement.title")
+            Text(mode == .selection ? String(format: String(localized: "work.downloadManagement.selectedCount"), selectedResourceIDs.count) : String(localized: "work.downloadManagement.title"))
                 .font(.headline)
                 .accessibilityIdentifier("work.downloadManagement.title")
         }
         ToolbarItem(placement: .confirmationAction) {
             if mode == .overview {
                 Button("work.downloadManagement.select") { mode = .selection }
+                    .disabled(isActing || !projectedResources.contains(where: { $0.selectable }))
                     .accessibilityIdentifier("work.downloadManagement.select")
             } else {
-                Button("work.downloadManagement.done") { leaveSelectionMode() }
-                    .accessibilityIdentifier("work.downloadManagement.done")
+                Button(selectionControlTitle) { toggleAll() }
+                    .disabled(isActing)
+                    .accessibilityIdentifier("work.downloadManagement.selectAll")
             }
         }
     }
@@ -489,7 +495,8 @@ struct MultiDownloadSheet: View {
         Section {
             VStack(alignment: .leading, spacing: .spaceHalf) {
                 Text(detail.book.title)
-                    .appTextStyle(.headline)
+                    .appTextStyle(.caption)
+                    .foregroundStyle(theme.textSecondary)
                     .lineLimit(2)
             }
             .padding(.vertical, .spaceHalf)
@@ -628,7 +635,7 @@ struct MultiDownloadSheet: View {
         return layout {
             if mode == .selection {
                 Button { toggleResource(resource.id) } label: {
-                    Image(systemName: selected ? "checkmark.square.fill" : "square")
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                         .foregroundStyle(selected ? theme.actionAccent : theme.textSecondary)
                         .frame(width: .iosMinimumTouchTarget, height: .iosMinimumTouchTarget)
                 }
@@ -644,11 +651,20 @@ struct MultiDownloadSheet: View {
                 Text([resource.format, resource.sizeLabel].compactMap { $0 }.joined(separator: " · "))
                     .appTextStyle(.caption)
                     .foregroundStyle(theme.textSecondary)
-                if projected.status != .completed && projected.status != .notdownloaded {
-                    Text(statusText(resource, projected: projected))
+                if (projected.status == .downloading || projected.status == .paused),
+                   let progress = downloads.record(for: resource.id)?.progress {
+                    ProgressView(value: progress)
+                        .tint(theme.textSecondary)
+                }
+                Text(statusText(resource, projected: projected))
+                    .appTextStyle(.caption)
+                    .foregroundStyle(statusColor(projected.status))
+                    .accessibilityIdentifier("work.downloadManagement.status.\(resource.id)")
+                if [.failedretryable, .failedterminal, .invalidlocal].contains(projected.status),
+                   let code = downloads.record(for: resource.id)?.stableErrorCode {
+                    Text(downloadFailureMessage(code))
                         .appTextStyle(.caption)
-                        .foregroundStyle(statusColor(projected.status))
-                        .accessibilityIdentifier("work.downloadManagement.status.\(resource.id)")
+                        .foregroundStyle(.red)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -662,26 +678,39 @@ struct MultiDownloadSheet: View {
             }
 
             if mode == .overview {
-                let isDownloaded = projected.status == .completed
-                Button(role: isDownloaded ? .destructive : nil) {
-                    if projected.listAction == .remove {
-                        pendingRemoval = PendingRemoval(ids: [resource.id])
-                    } else if let action = projected.listAction {
-                        perform(action: action, resourceIDs: [resource.id])
+                HStack(spacing: .spaceHalf) {
+                    if let action = projected.primaryAction {
+                        Button {
+                            perform(action: action, resourceIDs: [resource.id])
+                        } label: {
+                            if action == .download {
+                                Image(systemName: actionImage(action))
+                                    .frame(width: .iosMinimumTouchTarget, height: .iosMinimumTouchTarget)
+                            } else {
+                                Label(actionLabel(action), systemImage: actionImage(action))
+                                    .frame(minHeight: .iosMinimumTouchTarget)
+                            }
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(isActing)
+                        .accessibilityLabel(Text(actionLabel(action)))
+                        .accessibilityIdentifier("work.downloadManagement.primary.\(resource.id)")
                     }
-                } label: {
-                    Image(systemName: isDownloaded ? "trash" : "arrow.down.to.line")
-                        .font(.body)
-                        .foregroundStyle(theme.textSecondary)
-                        .frame(width: .iosMinimumTouchTarget, height: .iosMinimumTouchTarget)
-                        .contentShape(Rectangle())
+                    if projected.actions.contains(.remove) {
+                        Menu {
+                            Button("work.downloadManagement.remove", role: .destructive) {
+                                pendingRemoval = PendingRemoval(ids: [resource.id])
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .frame(width: .iosMinimumTouchTarget, height: .iosMinimumTouchTarget)
+                        }
+                        .disabled(isActing)
+                        .accessibilityLabel(Text("work.downloadManagement.more"))
+                        .accessibilityIdentifier("work.downloadManagement.more.\(resource.id)")
+                    }
                 }
-                .buttonStyle(.plain)
-                .disabled(isActing || projected.listAction == nil)
-                .accessibilityLabel(Text(isDownloaded ? "work.downloadManagement.delete" : "work.downloadManagement.download"))
-                .accessibilityIdentifier("work.downloadManagement.primary.\(resource.id)")
             }
-
         }
         .padding(.leading, CGFloat(depth) * 20)
         .contentShape(Rectangle())
@@ -690,30 +719,47 @@ struct MultiDownloadSheet: View {
         .accessibilityValue(Text(statusText(resource, projected: projected)))
     }
 
+    private var availableBatchActions: [DownloadManagementAction] {
+        [.download, .pause, .resume, .retry, .remove].filter { !applicableIDs(for: $0).isEmpty }
+    }
+
     private var selectionBar: some View {
-        HStack(spacing: .space1) {
-            VStack(alignment: .leading, spacing: .spaceHalf) {
-                Text(String(format: String(localized: "work.downloadManagement.selectedCount"), selectedResourceIDs.count))
-                    .appTextStyle(.headline)
-                    .accessibilityIdentifier("work.downloadManagement.selectedCount")
-                Button(selectionControlTitle) { toggleAll() }
-                    .appTextStyle(.caption)
-                    .foregroundStyle(theme.actionAccent)
+        let actions = availableBatchActions
+        let primary = actions.first(where: { $0 != .remove }) ?? actions.first ?? .download
+        let ids = applicableIDs(for: primary)
+        return VStack(spacing: .space1) {
+            Text(selectionSummary)
+                .appTextStyle(.caption)
+                .foregroundStyle(theme.textSecondary)
+                .accessibilityIdentifier("work.downloadManagement.selectedCount")
+            HStack(spacing: .space1) {
+                Button {
+                    executeBatch(primary)
+                } label: {
+                    Label(actionLabel(primary, count: ids.count), systemImage: actionImage(primary))
+                        .frame(maxWidth: .infinity, minHeight: .iosMinimumTouchTarget)
+                }
+                .buttonStyle(.bordered)
+                .disabled(ids.isEmpty || isActing)
+                .accessibilityIdentifier("work.downloadManagement.batchPrimary")
+                if actions.contains(where: { $0 != primary }) {
+                    Menu {
+                        ForEach(actions.filter { $0 != primary }, id: \.self) { action in
+                            Button(role: action == .remove ? .destructive : nil) {
+                                executeBatch(action)
+                            } label: {
+                                Label(actionLabel(action, count: applicableIDs(for: action).count), systemImage: actionImage(action))
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .frame(width: .iosMinimumTouchTarget, height: .iosMinimumTouchTarget)
+                    }
                     .disabled(isActing)
-                    .accessibilityIdentifier("work.downloadManagement.selectAll")
+                    .accessibilityLabel(Text("work.downloadManagement.actions"))
+                    .accessibilityIdentifier("work.downloadManagement.actions")
+                }
             }
-            Spacer()
-            Menu {
-                batchButton(.download)
-                batchButton(.pause)
-                batchButton(.resume)
-                batchButton(.retry)
-                batchButton(.remove)
-            } label: {
-                Label("work.downloadManagement.actions", systemImage: "ellipsis.circle")
-            }
-            .disabled(selectedResourceIDs.isEmpty || isActing)
-            .accessibilityIdentifier("work.downloadManagement.actions")
         }
         .padding(.horizontal, .space2)
         .padding(.vertical, .space1)
@@ -721,23 +767,36 @@ struct MultiDownloadSheet: View {
         .overlay(alignment: .top) { Divider().overlay(theme.divider) }
     }
 
-    @ViewBuilder
-    private func batchButton(_ action: DownloadManagementAction) -> some View {
-        let ids = applicableIDs(for: action)
-        if action == .remove {
-            Button(actionLabel(action, count: ids.count), role: .destructive) {
-                guard !ids.isEmpty else { return }
-                pendingRemoval = PendingRemoval(ids: Set(ids))
-            }
-            .disabled(ids.isEmpty)
-        } else {
-            Button(actionLabel(action, count: ids.count)) {
-                perform(action: action, resourceIDs: Set(ids))
-            }
-            .disabled(ids.isEmpty)
-        }
+    private func executeBatch(_ action: DownloadManagementAction) {
+        let ids = Set(applicableIDs(for: action))
+        guard !ids.isEmpty else { return }
+        if action == .remove { pendingRemoval = PendingRemoval(ids: ids) }
+        else { perform(action: action, resourceIDs: ids) }
     }
 
+    private var selectionSummary: String {
+        guard !selectedResourceIDs.isEmpty else {
+            return String(localized: "work.downloadManagement.selection.hint")
+        }
+        let count = String(format: String(localized: "work.downloadManagement.selectedCount"), selectedResourceIDs.count)
+        let selected = scopedResources.filter { selectedResourceIDs.contains($0.id) }
+        let sizes = selected.compactMap(\.sizeBytes)
+        guard sizes.count == selectedResourceIDs.count, sizes.allSatisfy({ $0 > 0 }) else { return count }
+        let size = sizes.reduce(Int64(0), +).formatted(.byteCount(style: .file).locale(locale))
+        return "\(count) · \(size)"
+    }
+
+    private func actionImage(_ action: DownloadManagementAction) -> String {
+        switch action {
+        case .download: "arrow.down.to.line"
+        case .pause: "pause.circle"
+        case .resume: "play.circle"
+        case .retry: "arrow.clockwise"
+        case .open: "arrow.up.right.square"
+        case .remove: "trash"
+        default: "ellipsis"
+        }
+    }
     private var selectionControlTitle: LocalizedStringKey {
         let mark = selectionMark(for: scopedResourceIDs)
         return mark == .selected ? "work.downloadManagement.clearSelection" : "work.downloadManagement.selectAll"
@@ -930,14 +989,14 @@ struct MultiDownloadSheet: View {
         case .unavailable: status = String(localized: "work.downloadManagement.status.unavailable")
         default: status = String(localized: "work.downloadManagement.status.unavailable")
         }
-        guard projected.status == .downloading,
+        guard (projected.status == .downloading || projected.status == .paused),
               let progress = downloads.record(for: resource.id)?.progress else { return status }
-        return "\(status) \(Int(progress * 100))%"
+        return "\(status) · \(progress.formatted(.percent.precision(.fractionLength(0)).locale(locale)))"
     }
 
     private func statusColor(_ status: DownloadManagementStatus) -> Color {
         switch status {
-        case .completed: theme.brandAccent
+        case .completed: theme.textSecondary
         case .failedretryable, .failedterminal, .invalidlocal: .red
         default: theme.textSecondary
         }

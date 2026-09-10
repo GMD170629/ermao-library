@@ -235,53 +235,6 @@ class WorkDetailLayoutTest {
     }
 
     @Test
-    fun workContentBreadcrumbsUseBookTitleOnceAndOnlyApiBreadcrumbsAfterIt() {
-        fun entry(id: String, title: String) = BookContentEntry(
-            sourceNodeId = id,
-            parentSourceNodeId = if (id == "root") null else "root",
-            name = title,
-            title = title,
-            description = null,
-            kind = "FOLDER",
-            physicalKind = "DIRECTORY",
-            sizeBytes = null,
-            observedAt = "2026-08-26T00:00:00Z",
-            hasChildren = true,
-            resourceId = null,
-            representativeResourceId = null,
-            coverUrl = null,
-        )
-        val root = entry("root", "Star Harbor")
-        val directory = entry("single-volumes", "Single Volumes")
-        val rootPage = BookContentsPage(
-            bookId = "book-1",
-            currentSourceNodeId = root.sourceNodeId,
-            currentResourceId = null,
-            currentNode = root,
-            currentResourceIds = emptyList(),
-            parentSourceNodeId = null,
-            breadcrumbs = emptyList(),
-            entries = emptyList(),
-            page = 1,
-            pageSize = 100,
-            total = 0,
-            totalPages = 1,
-        )
-        val nestedPage = rootPage.copy(
-            currentSourceNodeId = directory.sourceNodeId,
-            currentNode = directory,
-            parentSourceNodeId = root.sourceNodeId,
-            breadcrumbs = listOf(directory),
-        )
-
-        assertEquals(listOf("Star Harbor"), workContentBreadcrumbs("Star Harbor", rootPage).map { it.title })
-        assertEquals(
-            listOf("Star Harbor", "Single Volumes"),
-            workContentBreadcrumbs("Star Harbor", nestedPage).map { it.title },
-        )
-    }
-
-    @Test
     fun selectedVolumePublicationDateUsesTheActiveLocaleAndPreservesUnknownValues() {
         assertEquals("Nov 1, 2010", formatWorkMetadataDate("2010-11-01T00:00:00Z", Locale.US))
         assertEquals("legacy date", formatWorkMetadataDate("legacy date", Locale.US))

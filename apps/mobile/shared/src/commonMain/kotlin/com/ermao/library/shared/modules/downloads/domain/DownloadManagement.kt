@@ -25,15 +25,6 @@ data class DownloadManagementResource(
     val actions: Set<DownloadManagementAction>,
 ) {
     val selectable: Boolean get() = actions.any { it != DownloadManagementAction.Open }
-    /** Single row button; active or unavailable transfers cannot be started again. */
-    val listAction: DownloadManagementAction?
-        get() = if (status == DownloadManagementStatus.Completed) {
-            DownloadManagementAction.Remove.takeIf { it in actions }
-        } else listOf(
-            DownloadManagementAction.Download, DownloadManagementAction.Resume,
-            DownloadManagementAction.Retry,
-        ).firstOrNull { it in actions }
-
     val primaryAction: DownloadManagementAction?
         get() = listOf(
             DownloadManagementAction.Open, DownloadManagementAction.Download,

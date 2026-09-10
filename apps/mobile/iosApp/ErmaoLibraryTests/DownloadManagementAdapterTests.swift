@@ -7,6 +7,15 @@ import XCTest
 final class DownloadManagementAdapterTests: XCTestCase {
     private let namespace = "server|user|1"
 
+    func testCatalogSizeKeepsUnknownTotalUnknown() {
+        var download = record(id: "size", state: .paused)
+        download.expectedBytes = 1_000
+        download.receivedBytes = 400
+        XCTAssertEqual(DownloadManagementAdapter.catalogResource(download).sizeBytes, 1_000)
+        download.expectedBytes = nil
+        XCTAssertNil(DownloadManagementAdapter.catalogResource(download).sizeBytes)
+    }
+
     func testProjectsSharedManagementStatusMatrix() {
         let completed = completedRecord(id: "completed")
         let scenarios: [Scenario] = [

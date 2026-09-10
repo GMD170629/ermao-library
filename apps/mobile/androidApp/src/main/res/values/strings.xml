@@ -573,8 +573,6 @@
     <string name="work_contents_list">List</string>
     <string name="work_contents_file">File</string>
     <string name="work_contents_source_directory">Source directory %1$d</string>
-    <string name="work_contents_path_title">Choose directory</string>
-    <string name="work_contents_current_directory">Current directory</string>
     <string name="work_contents_sort">Sort content</string>
     <string name="work_contents_loading">Loading the source directory…</string>
     <string name="work_contents_error_title">Couldn’t load book contents</string>
@@ -681,4 +679,5 @@
     <string name="book_metadata_online_failed">Online lookup failed; local information was retained</string>
     <string name="book_metadata_completed">Book information updated</string>
     <string name="book_metadata_partial_import">Some files failed to import; available content was retained</string>
+    <string name="download_selection_hint">Select volumes to download</string>
 </resources>

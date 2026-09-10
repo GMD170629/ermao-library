@@ -559,8 +559,6 @@
     <string name="work_contents_list">列表</string>
     <string name="work_contents_file">文件</string>
     <string name="work_contents_source_directory">来源目录 %1$d</string>
-    <string name="work_contents_path_title">选择目录</string>
-    <string name="work_contents_current_directory">当前目录</string>
     <string name="work_contents_sort">内容排序</string>
     <string name="work_contents_loading">正在加载来源目录…</string>
     <string name="work_contents_error_title">图书内容加载失败</string>
@@ -665,4 +663,5 @@
     <string name="book_metadata_online_failed">联网识别失败，已保留本地信息</string>
     <string name="book_metadata_completed">图书信息更新完成</string>
     <string name="book_metadata_partial_import">部分文件导入失败，已保留可用内容</string>
+    <string name="download_selection_hint">请选择要下载的卷册</string>
 </resources>

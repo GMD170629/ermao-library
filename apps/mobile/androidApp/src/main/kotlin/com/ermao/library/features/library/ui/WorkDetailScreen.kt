@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -45,7 +44,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material.icons.automirrored.outlined.ViewList
-import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Check
@@ -657,7 +655,6 @@ private fun WorkDetailBody(
                 WorkContentBrowser(
                     page = state.contents,
                     bookId = content.book.id,
-                    bookTitle = state.content?.book?.title.orEmpty(),
                     resources = content.resources,
                     emptyImportMessage = workDetailEmptyImportMessage(content, state.isBookRoot),
                     sort = state.contentsSort,
@@ -1300,11 +1297,6 @@ internal data class WorkContentItemPresentation(
     val indexLabel: String,
 )
 
-internal data class WorkContentBreadcrumbPresentation(
-    val title: String,
-    val sourceNodeId: String?,
-)
-
 internal fun workContentItemPresentations(
     page: BookContentsPage,
     resources: List<ResourceContent>,
@@ -1344,20 +1336,10 @@ internal fun workContentItemPresentations(
     }
 }
 
-internal fun workContentBreadcrumbs(
-    bookTitle: String,
-    page: BookContentsPage,
-): List<WorkContentBreadcrumbPresentation> = listOf(
-    WorkContentBreadcrumbPresentation(title = bookTitle, sourceNodeId = null),
-) + page.breadcrumbs.map { breadcrumb ->
-    WorkContentBreadcrumbPresentation(title = breadcrumb.title, sourceNodeId = breadcrumb.sourceNodeId)
-}
-
 @Composable
 private fun WorkContentBrowser(
     bookId: String,
     page: BookContentsPage?,
-    bookTitle: String,
     resources: List<ResourceContent>,
     emptyImportMessage: Int?,
     sort: BookContentSort,
@@ -1374,68 +1356,15 @@ private fun WorkContentBrowser(
     val theme = WarmPageThemeValues
     var sortMenuExpanded by remember { mutableStateOf(false) }
     var gridLayout by rememberSaveable(page?.bookId) { mutableStateOf(true) }
-    var pathSheetExpanded by remember(page?.bookId, page?.currentSourceNodeId) {
-        mutableStateOf(false)
-    }
     val items = page?.let { workContentItemPresentations(it, resources) }.orEmpty()
     Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(theme.components.controls.minimumTouchTarget),
-            horizontalArrangement = Arrangement.spacedBy(theme.spacing.half),
+            horizontalArrangement = Arrangement.spacedBy(theme.spacing.half, Alignment.End),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            page?.let { contents ->
-                val path = workContentBreadcrumbs(bookTitle, contents)
-                val currentDirectory = path.lastOrNull()?.title ?: contents.currentNode.title
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .clickable(role = Role.Button) { pathSheetExpanded = true }
-                        .testTag(
-                            if (path.lastOrNull()?.sourceNodeId == null) {
-                                "work-contents-breadcrumb-root"
-                            } else {
-                                "work-contents-breadcrumb-${contents.currentNode.sourceNodeId}"
-                            },
-                        ),
-                    horizontalArrangement = Arrangement.spacedBy(theme.spacing.half),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
-                        Text(
-                            text = currentDirectory,
-                            style = theme.typography.body,
-                            color = theme.colors.textPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            text = pluralStringResource(R.plurals.work_contents_count, contents.total, contents.total),
-                            style = theme.typography.caption,
-                            color = theme.colors.textSecondary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Icon(
-                        imageVector = Icons.Filled.KeyboardArrowDown,
-                        contentDescription = stringResource(R.string.work_contents_path_title),
-                        tint = theme.colors.textSecondary,
-                        modifier = Modifier.size(theme.components.controls.iconSize),
-                    )
-                }
-            } ?: Spacer(Modifier.weight(1f))
-            WorkContentToolbarIconButton(
-                icon = if (gridLayout) Icons.AutoMirrored.Outlined.ViewList else Icons.Outlined.GridView,
-                label = stringResource(
-                    if (gridLayout) R.string.work_contents_list else R.string.work_contents_grid,
-                ),
-                onClick = { gridLayout = !gridLayout },
-                testTag = "work-contents-view-toggle",
-            )
             Box {
                 WorkContentToolbarIconButton(
                     icon = Icons.AutoMirrored.Outlined.Sort,
@@ -1457,15 +1386,13 @@ private fun WorkContentBrowser(
                     onDismiss = { sortMenuExpanded = false },
                 )
             }
-        }
-        if (pathSheetExpanded && page != null) {
-            WorkContentsPathSheet(
-                breadcrumbs = workContentBreadcrumbs(bookTitle, page),
-                onSelectSourceNode = { sourceNodeId ->
-                    pathSheetExpanded = false
-                    onOpenSourceNode(sourceNodeId)
-                },
-                onDismiss = { pathSheetExpanded = false },
+            WorkContentToolbarIconButton(
+                icon = if (gridLayout) Icons.AutoMirrored.Outlined.ViewList else Icons.Outlined.GridView,
+                label = stringResource(
+                    if (gridLayout) R.string.work_contents_list else R.string.work_contents_grid,
+                ),
+                onClick = { gridLayout = !gridLayout },
+                testTag = "work-contents-view-toggle",
             )
         }
         when {
@@ -1582,95 +1509,6 @@ private fun WorkContentToolbarIconButton(
                 tint = theme.colors.textSecondary,
                 modifier = Modifier.size(theme.components.controls.iconSize),
             )
-        }
-    }
-}
-
-@Composable
-internal fun WorkContentsPathSheet(
-    breadcrumbs: List<WorkContentBreadcrumbPresentation>,
-    onSelectSourceNode: (String?) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val theme = WarmPageThemeValues
-    WarmPageModalBottomSheet(
-        onDismissRequest = onDismiss,
-        modifier = Modifier.testTag("work-contents-path-sheet"),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 560.dp)
-                .verticalScroll(rememberScrollState())
-                .padding(
-                    horizontal = theme.components.page.compactGutter,
-                    vertical = theme.spacing.two,
-                ),
-            verticalArrangement = Arrangement.spacedBy(theme.spacing.half),
-        ) {
-            WarmPageSectionHeader(
-                title = stringResource(R.string.work_contents_path_title),
-                modifier = Modifier.testTag("work-contents-path-title"),
-            )
-            Column(Modifier.selectableGroup()) {
-                breadcrumbs.forEachIndexed { index, breadcrumb ->
-                    val isCurrent = index == breadcrumbs.lastIndex
-                    val currentStateDescription = if (isCurrent) {
-                        stringResource(R.string.work_contents_current_directory)
-                    } else {
-                        null
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = theme.components.controls.minimumTouchTarget)
-                            .then(
-                                if (isCurrent) {
-                                    Modifier
-                                } else {
-                                    Modifier.clickable(role = Role.RadioButton) {
-                                        onSelectSourceNode(breadcrumb.sourceNodeId)
-                                    }
-                                },
-                            )
-                            .semantics {
-                                selected = isCurrent
-                                role = Role.RadioButton
-                                currentStateDescription?.let { stateDescription = it }
-                            }
-                            .testTag(
-                                if (breadcrumb.sourceNodeId == null) {
-                                    "work-contents-path-option-root"
-                                } else {
-                                    "work-contents-path-option-${breadcrumb.sourceNodeId}"
-                                },
-                            )
-                            .padding(vertical = theme.spacing.half),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(theme.spacing.one),
-                    ) {
-                        Text(
-                            text = breadcrumb.title,
-                            style = theme.typography.body,
-                            color = if (isCurrent) theme.colors.textPrimary else theme.colors.textSecondary,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Box(
-                            modifier = Modifier.size(theme.components.controls.iconSize),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (isCurrent) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Check,
-                                    contentDescription = null,
-                                    tint = theme.colors.brandAccent,
-                                    modifier = Modifier.fillMaxSize(),
-                                )
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 }
