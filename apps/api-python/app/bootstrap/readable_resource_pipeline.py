@@ -33,7 +33,7 @@ from app.modules.imports.application.readable_resource.scan_source_tree import (
 )
 from app.modules.imports.domain.scan_policy import MissingEntryPolicy
 from app.modules.imports.infrastructure.audio_metadata_inspector import (
-    MutagenFfprobeAudioMetadataInspector,
+    BoundedAudioMetadataInspector,
 )
 from app.modules.imports.infrastructure.local_cover_publication import (
     FilesystemLocalCoverPublication,
@@ -122,7 +122,7 @@ def build_readable_resource_pipeline(
     source_nodes = SqlAlchemySourceNodeRepository(session)
     books_resources = SqlAlchemyBookResourceRepository(session)
     queue = SqlAlchemyLibraryImportTaskQueue(session)
-    adapters = RegistryResourceAdapterExecutor(MutagenFfprobeAudioMetadataInspector())
+    adapters = RegistryResourceAdapterExecutor(BoundedAudioMetadataInspector())
     uow = SqlAlchemyUnitOfWork(session)
     clock = UtcClock()
     log = StructuredPipelineLog()

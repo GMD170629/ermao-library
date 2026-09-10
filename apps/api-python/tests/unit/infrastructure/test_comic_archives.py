@@ -76,7 +76,7 @@ def test_comic_text_attachments_are_not_pages(tmp_path: Path, extension: str) ->
     assert archive.read_bytes() == original
 
 
-def test_corrupt_optional_page_is_quarantined_when_another_page_is_readable(
+def test_corrupt_page_keeps_its_index_until_reading(
     tmp_path: Path,
 ) -> None:
     archive = tmp_path / "partial-corruption.cbz"
@@ -97,8 +97,8 @@ def test_corrupt_optional_page_is_quarantined_when_another_page_is_readable(
 
     parsed = inspect_comic_archive(archive)
 
-    assert parsed["pageCount"] == 1
-    assert [page["entryPath"] for page in parsed["pages"]] == ["001.png"]
+    assert parsed["pageCount"] == 2
+    assert [page["entryPath"] for page in parsed["pages"]] == ["001.png", "002.png"]
 
 
 class _FakeRarInfo:
@@ -345,7 +345,7 @@ def test_cbz_page_budget_is_checked_before_resource_read(
         output.writestr("readable.future", b"okay")
         output.writestr("oversized.future", b"too-large")
     original_budget = comic_archives_module.reader_safety_budget
-    original_read = comic_archives_module.ComicArchive.read
+    original_read = comic_archives_module.ComicArchive.open
     reads: list[str] = []
 
     def budget(name: ReaderSafetyBudgetName) -> int:
@@ -358,12 +358,13 @@ def test_cbz_page_budget_is_checked_before_resource_read(
     def read(
         container: comic_archives_module.ComicArchive,
         entry: str | comic_archives_module.ComicArchiveEntry,
-    ) -> bytes:
+        mode="r",
+    ):
         reads.append(entry if isinstance(entry, str) else entry.filename)
-        return original_read(container, entry)
+        return original_read(container, entry, mode)
 
     monkeypatch.setattr(comic_archives_module, "reader_safety_budget", budget)
-    monkeypatch.setattr(comic_archives_module.ComicArchive, "read", read)
+    monkeypatch.setattr(comic_archives_module.ComicArchive, "open", read)
     parsed = inspect_comic_archive(archive)
     assert [page["entryPath"] for page in parsed["pages"]] == ["readable.future"]
     assert reads == ["readable.future"]
@@ -444,3 +445,15 @@ def test_open_comic_archive_rejects_unsupported_rar_variants(
 
     with pytest.raises(expected_error):
         open_comic_archive(path)
+
+
+def test_rar_import_reads_directory_without_an_extraction_backend(
+    tmp_path, monkeypatch
+):
+    archive = _write_archive(tmp_path, "sample.rar", _RAR5_COMIC)
+    monkeypatch.setattr(
+        rarfile, "tool_setup", lambda: pytest.fail("import cannot start extraction")
+    )
+    result = inspect_comic_archive(archive)
+    assert result["pageCount"] > 0
+    assert result["coverContent"] is None

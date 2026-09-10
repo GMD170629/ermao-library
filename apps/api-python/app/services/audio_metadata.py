@@ -22,7 +22,6 @@ from app.contracts.reader_safety_policy_generated import (
 )
 from app.core.natural_sort import natural_sort_key
 from app.modules.imports.application.audio_types import (
-    LEGACY_AUDIO_EXTS,
     MAX_AUDIO_BUNDLE_TRACKS,
     MAX_AUDIO_CHAPTERS,
     AudioBundleStructure,
@@ -228,49 +227,14 @@ def parse_audio_metadata(
             "音频文件超过安全大小限制",
         )
 
-    parser_errors: list[str] = []
+    # Import never invokes a media-stream probe. Unsupported bounded tag
+    # readers leave optional values unknown and the source remains importable.
     try:
-        mutagen_data = _read_with_mutagen(source)
-    except ValueError as exc:
-        mutagen_data = {}
-        parser_errors.append(str(exc))
-    try:
-        probe_data = _read_with_ffprobe(source, timeout_seconds=timeout_seconds)
-    except AudioInspectionError as exc:
-        if exc.code in {"AUDIO_STREAM_NOT_FOUND", "AUDIO_VIDEO_STREAM_UNSUPPORTED"}:
-            raise
-        probe_data = {}
-        parser_errors.append(str(exc))
-    except ValueError as exc:
-        probe_data = {}
-        parser_errors.append(str(exc))
-    if source.suffix.lower() not in LEGACY_AUDIO_EXTS and not probe_data:
-        if parser_errors:
-            raise AudioInspectionError("AUDIO_METADATA_INVALID", parser_errors[-1])
-        raise AudioInspectionError(
-            "AUDIO_PROBE_REQUIRED",
-            "该音频格式需要服务器安装 ffprobe 后才能导入",
-        )
-    if not mutagen_data and not probe_data:
-        detail = "；".join(parser_errors[-2:])
-        raise AudioInspectionError(
-            "AUDIO_METADATA_INVALID",
-            detail or "无法读取音频元数据：服务器需要 Mutagen 或 ffprobe，请安装后重试",
-        )
-
-    merged = _merge_metadata(mutagen_data, probe_data)
-    raw_codec = str(merged.get("codec") or "").strip().lower()
-    codec = _normalize_audio_codec(raw_codec)
-    if not codec:
-        raise AudioInspectionError(
-            "AUDIO_STREAM_NOT_FOUND", "音频文件没有可识别的音频流"
-        )
+        merged = _read_with_mutagen(source)
+    except ValueError:
+        merged = {}
+    codec = _normalize_audio_codec(str(merged.get("codec") or "")) or None
     duration_ms = _positive_int(merged.get("duration_ms"))
-    if duration_ms is None:
-        raise _audio_policy_error(
-            ReaderSafetyRuleId.AUDIO_TRACK_AND_CHAPTER_BOUNDS,
-            "无法读取音频时长，文件可能损坏或编码不受支持",
-        )
 
     raw_chapters = merged.get("chapters")
     chapter_items = (
@@ -293,7 +257,7 @@ def parse_audio_metadata(
                 ReaderSafetyRuleId.AUDIO_TRACK_AND_CHAPTER_BOUNDS,
                 "音频章节时间范围无效",
             ) from error
-        if start_ms < 0 or end_ms <= start_ms or end_ms > duration_ms:
+        if start_ms < 0 or end_ms <= start_ms or (duration_ms is not None and end_ms > duration_ms):
             raise _audio_policy_error(
                 ReaderSafetyRuleId.AUDIO_TRACK_AND_CHAPTER_BOUNDS,
                 "音频章节时间范围超出音轨时长",
@@ -657,11 +621,25 @@ def _communicate_with_output_limit_on_windows(
 
 def _read_with_mutagen(path: Path) -> dict[str, Any]:
     try:
-        import mutagen  # type: ignore[import-not-found]
-    except ImportError:
-        return {}
-    try:
-        audio = mutagen.File(str(path), easy=False)
+        from mutagen.aiff import AIFF
+        from mutagen.flac import FLAC
+        from mutagen.mp3 import MP3
+        from mutagen.mp4 import MP4
+        from mutagen.wave import WAVE
+
+        from app.modules.imports.infrastructure.limited_read import LimitedReader
+
+        # These readers use tag/header offsets; Ogg and WavPack duration
+        # recovery may traverse the entire stream and are not import readers.
+        reader = {
+            ".mp3": MP3, ".flac": FLAC, ".m4a": MP4, ".m4b": MP4,
+            ".mp4": MP4, ".wav": WAVE, ".wave": WAVE,
+            ".aif": AIFF, ".aiff": AIFF,
+        }.get(path.suffix.lower())
+        if reader is None:
+            return {}
+        with LimitedReader(path) as source:
+            audio = reader(source)
     except Exception as exc:
         raise ValueError(f"Mutagen 读取音频失败：{exc}") from exc
     if audio is None:

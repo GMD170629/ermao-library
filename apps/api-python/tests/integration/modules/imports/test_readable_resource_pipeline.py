@@ -1260,3 +1260,60 @@ def test_pipeline_construction_omits_worker_id_and_continue_import_clock(
             assert not hasattr(worker, "_worker_id")
     finally:
         engine.dispose()
+
+
+def test_reimport_clears_unknown_page_count_without_failing(tmp_path: Path) -> None:
+    class ChangingPdfAdapter(StubPdfPageCountAdapter):
+        known = True
+
+        def parse_file(self, **kwargs):
+            result = super().parse_file(**kwargs)
+            if self.known:
+                return result
+            return replace(
+                result, asset=replace(result.asset, technical=AssetTechnicalMetadata())
+            )
+
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            adapter = ChangingPdfAdapter()
+            pipeline, _ = _pipeline(db, adapters=adapter)
+            path = root / "book.pdf"
+            path.write_bytes(b"%PDF-old")
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            _drain(pipeline)
+            assert db.scalar(select(LibraryReadableResourceMetadata)).page_count == 7
+            adapter.known = False
+            path.write_bytes(b"%PDF-changed-no-page-count")
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            _drain(pipeline)
+            db.expire_all()
+            assert db.scalar(select(LibraryReadableResourceMetadata)).page_count is None
+            assert db.scalar(select(LibraryReadableResource)).import_state == "READY"
+    finally:
+        engine.dispose()
+
+
+def test_unknown_audio_duration_is_not_summed_as_zero(tmp_path: Path) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            album = root / "album"
+            album.mkdir()
+            (album / "01.mp3").write_bytes(b"unknown audio")
+            pipeline, _ = _pipeline(db, adapters=StubAlwaysOkAdapter())
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            _drain(pipeline)
+            metadata = db.scalar(select(LibraryReadableResourceMetadata))
+            assert metadata.track_count == 1
+            assert metadata.duration_ms is None
+            assert db.scalar(select(LibraryReadableResource)).import_state == "READY"
+    finally:
+        engine.dispose()

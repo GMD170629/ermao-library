@@ -627,11 +627,11 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
                 metadata.title = title
         self._session.flush()
 
-    def set_resource_page_count(self, resource_id: str, page_count: int) -> None:
+    def set_resource_page_count(self, resource_id: str, page_count: int | None) -> None:
         metadata = self._session.get(LibraryReadableResourceMetadata, resource_id)
         if metadata is None:
             raise LookupError(resource_id)
-        metadata.page_count = max(0, page_count)
+        metadata.page_count = max(0, page_count) if page_count is not None else None
         self._session.flush()
 
     def apply_local_metadata(
@@ -926,10 +926,14 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         if resource_metadata is None:
             raise LookupError(resource_id)
         resource_metadata.track_count = len(ordered_rows)
-        resource_metadata.duration_ms = sum(
-            asset_metadata.duration_ms or 0
+        durations = [
+            asset_metadata.duration_ms if asset_metadata is not None else None
             for _asset, asset_metadata, _source in ordered_rows
-            if asset_metadata is not None
+        ]
+        resource_metadata.duration_ms = (
+            sum(value for value in durations if value is not None)
+            if durations and all(value is not None for value in durations)
+            else None
         )
         resource_metadata.chapter_count = len(ordered_units)
         self._session.flush()
@@ -947,6 +951,8 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
                 ReadableResourceNavigationUnit.asset_id == asset_id,
             )
         )
+        if not units:
+            return
         current_max = self._session.scalar(
             select(func.max(ReadableResourceNavigationUnit.sort_order)).where(
                 ReadableResourceNavigationUnit.resource_id == resource_id

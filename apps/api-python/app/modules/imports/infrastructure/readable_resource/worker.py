@@ -53,6 +53,7 @@ class ReadableResourceWorkerProcessor:
         with self._uow.transaction():
             task = self._queue.next_queued()
             if task is None:
+                self._process_import.reset_inspection_cache()
                 return "idle"
             self._queue.mark_running(task.id, started_at=self._clock.now())
             task_id = task.id
@@ -62,6 +63,8 @@ class ReadableResourceWorkerProcessor:
             missing_entry_policy = task.missing_entry_policy
 
         try:
+            if kind in {"SCAN_LIBRARY", "CONTINUE_SOURCE"}:
+                self._process_import.reset_inspection_cache()
             if kind == "SCAN_LIBRARY":
                 self._scan.execute_library(
                     library_id,

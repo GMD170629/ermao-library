@@ -1,119 +1,60 @@
 from pathlib import Path
 
-from app.modules.imports.domain.pdf_content import PdfContentKind
+from pypdf import PdfWriter
+from pypdf.generic import DecodedStreamObject, NameObject
+
+from app.modules.imports.infrastructure.limited_read import LimitedReader
 from app.modules.imports.infrastructure.pdf_inspection import inspect_pdf
 
 
-def _write_pdf_with_literal_metadata(
-    path: Path,
-    *,
-    title: bytes,
-    author: bytes,
-    keywords: bytes,
+def test_pdf_metadata_and_navigation_without_page_payload(
+    tmp_path: Path, monkeypatch
 ) -> None:
-    path.write_bytes(
-        b"%PDF-1.4\n"
-        b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
-        b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n"
-        b"3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >> endobj\n"
-        b"4 0 obj << /Title ("
-        + title
-        + b") /Author ("
-        + author
-        + b") /Keywords ("
-        + keywords
-        + b") >> endobj\n"
-        b"trailer << /Root 1 0 R /Info 4 0 R >>\n%%EOF\n"
+    path = tmp_path / "book.pdf"
+    writer = PdfWriter()
+    page = writer.add_blank_page(200, 200)
+    payload = DecodedStreamObject()
+    payload.set_data(b"body must not be inspected " * 200_000)
+    page[NameObject("/Contents")] = writer._add_object(payload)
+    writer.add_metadata(
+        {"/Title": "封面", "/Author": "雷欧幻象", "/Keywords": "fiction,故事"}
     )
+    writer.add_outline_item("第一章", 0)
+    writer.write(path)
+    reads = []
+    original = LimitedReader.read
+
+    def observe(self, size=-1):
+        start = self.tell()
+        data = original(self, size)
+        reads.append((start, self.tell()))
+        return data
+
+    monkeypatch.setattr(LimitedReader, "read", observe)
+    result = inspect_pdf(path)
+    assert result.title == "book"
+    assert result.embedded_author == "雷欧幻象"
+    assert result.tags == ("fiction", "故事")
+    assert result.page_count == 1
+    assert result.chapters[0].page_number == 1
+    assert sum(end - start for start, end in reads) < 100_000
+    assert not any(start <= path.stat().st_size // 2 < end for start, end in reads)
 
 
-def test_pdf_metadata_decodes_utf16_and_rejects_a_generic_title(
-    tmp_path: Path,
-) -> None:
-    pdf_path = tmp_path / "source.pdf"
-    _write_pdf_with_literal_metadata(
-        pdf_path,
-        title=bytes.fromhex("feff5c5c019762"),
-        author=b"\xfe\xff" + "雷欧幻象".encode("utf-16-be"),
-        keywords=b"\xfe\xff" + "接力出版社".encode("utf-16-be"),
-    )
-
-    metadata = inspect_pdf(pdf_path, "怪物大师10冰封的时之轮.pdf")
-
-    assert metadata.title == "怪物大师10冰封的时之轮"
-    assert metadata.author == "雷欧幻象"
-    assert metadata.tags == ("接力出版社",)
-    assert metadata.embedded_title is None
-    assert metadata.raw_metadata["Title"] == "封面"
-    assert metadata.raw_metadata["Author"] == "雷欧幻象"
-    assert metadata.raw_metadata["Keywords"] == "接力出版社"
-    assert metadata.content_kind is PdfContentKind.IMAGE_ONLY
-    assert "�" not in "".join(
-        str(metadata.raw_metadata.get(field) or "")
-        for field in ("Title", "Author", "Subject", "Keywords")
-    )
+def test_invalid_pdf_does_not_repair_or_invent_page_count(tmp_path: Path) -> None:
+    path = tmp_path / "invalid.pdf"
+    path.write_bytes(b"%PDF-1.4\n/Type /Page\n" + b"x" * 100_000)
+    result = inspect_pdf(path)
+    assert result.page_count is None
+    assert result.chapters == ()
 
 
-def test_pdf_metadata_rejects_truncated_utf16_and_decodes_octal_escapes(
-    tmp_path: Path,
-) -> None:
-    pdf_path = tmp_path / "source.pdf"
-    encoded_author = b"\xfe\xff" + "雷欧幻象".encode("utf-16-be")
-    octal_author = b"".join(f"\\{byte:03o}".encode("ascii") for byte in encoded_author)
-    _write_pdf_with_literal_metadata(
-        pdf_path,
-        title=bytes.fromhex("feff4e"),
-        author=octal_author,
-        keywords=b"fiction",
-    )
-
-    metadata = inspect_pdf(pdf_path, "怪物大师10冰封的时之轮.pdf")
-
-    assert metadata.title == "怪物大师10冰封的时之轮"
-    assert metadata.author == "雷欧幻象"
-    assert metadata.tags == ("fiction",)
-    assert metadata.embedded_title is None
-
-
-def test_pdf_inspection_timeout_is_unknown(tmp_path: Path) -> None:
-    pdf_path = tmp_path / "source.pdf"
-    _write_pdf_with_literal_metadata(
-        pdf_path,
-        title=b"manual",
-        author=b"author",
-        keywords=b"fiction",
-    )
-    ticks = iter((0.0, 4.0, 4.0, 4.0, 4.0))
-
-    metadata = inspect_pdf(pdf_path, clock=lambda: next(ticks))
-
-    assert metadata.content_kind is PdfContentKind.UNKNOWN
-    assert metadata.text_evidence.reason == "timeout"
-
-
-def test_invalid_pdf_inspection_is_unknown(tmp_path: Path) -> None:
-    pdf_path = tmp_path / "invalid.pdf"
-    pdf_path.write_bytes(b"not a PDF")
-
-    metadata = inspect_pdf(pdf_path)
-
-    assert metadata.content_kind is PdfContentKind.UNKNOWN
-    assert metadata.text_evidence.reason == "inspection-error"
-
-
-def test_large_image_only_pdf_scans_each_page_without_rendering(tmp_path: Path) -> None:
-    import pypdfium2 as pdfium
-
-    pdf_path = tmp_path / "large-image-only.pdf"
-    document = pdfium.PdfDocument.new()
+def test_large_pdf_counts_pages_without_text_inspection(tmp_path: Path) -> None:
+    path = tmp_path / "large.pdf"
+    writer = PdfWriter()
     for _ in range(500):
-        page = document.new_page(595, 842)
-        page.close()
-    document.save(pdf_path)
-    document.close()
-
-    metadata = inspect_pdf(pdf_path, clock=lambda: 0.0)
-
-    assert metadata.content_kind is PdfContentKind.IMAGE_ONLY
-    assert metadata.text_evidence.inspected_pages == 500
-    assert metadata.text_evidence.maximum_effective_characters == 0
+        writer.add_blank_page(200, 200)
+    writer.write(path)
+    result = inspect_pdf(path)
+    assert result.page_count == 500
+    assert result.text_evidence.inspected_pages == 0

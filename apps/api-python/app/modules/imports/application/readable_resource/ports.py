@@ -272,6 +272,9 @@ class LibraryImportTaskQueuePort(Protocol):
 
 
 class ResourceAdapterExecutorPort(Protocol):
+    def reset_inspection_cache(self) -> None:
+        """Start a new scan round; implementations without caches do nothing."""
+
     def parse_file(
         self,
         *,

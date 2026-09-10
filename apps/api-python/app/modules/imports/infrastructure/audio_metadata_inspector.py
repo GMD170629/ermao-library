@@ -1,4 +1,4 @@
-"""Audio inspection adapter backed by Mutagen and ffprobe."""
+"""Audio inspection adapter using bounded metadata reads only."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ from app.modules.imports.application.audio_types import AudioFileMetadata
 from app.services.audio_metadata import parse_audio_metadata
 
 
-class MutagenFfprobeAudioMetadataInspector:
+class BoundedAudioMetadataInspector:
     def inspect(self, path: Path) -> AudioFileMetadata:
         return parse_audio_metadata(path)
 
 
-__all__ = ["MutagenFfprobeAudioMetadataInspector"]
+__all__ = ["BoundedAudioMetadataInspector"]

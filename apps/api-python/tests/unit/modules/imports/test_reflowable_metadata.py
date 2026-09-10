@@ -38,7 +38,9 @@ def test_txt_inspection_uses_matching_sidecar_cover(tmp_path: Path) -> None:
     assert metadata.raw_metadata["coverSidecar"] is True
 
 
-def test_fb2_inspection_reads_metadata_sections_and_cover(tmp_path: Path) -> None:
+def test_fb2_inspection_reads_description_without_scanning_for_tail_cover(
+    tmp_path: Path,
+) -> None:
     cover = base64.b64encode(b"\x89PNG\r\n\x1a\ncover").decode("ascii")
     source = tmp_path / "book.fb2"
     source.write_text(
@@ -65,8 +67,7 @@ def test_fb2_inspection_reads_metadata_sections_and_cover(tmp_path: Path) -> Non
     assert metadata.authors == ("东野圭吾",)
     assert metadata.publisher == "测试出版社"
     assert "navigationCount" not in metadata.raw_metadata
-    assert metadata.cover is not None
-    assert metadata.cover.media_type == "image/png"
+    assert metadata.cover is None  # Cover is after body; import must not scan for it.
 
 
 def test_mobi_inspection_reads_metadata_without_generating_navigation(
@@ -130,7 +131,9 @@ def test_mobi_source_and_asin_are_not_misclassified_as_series(
     assert metadata.identifier == "B012345678"
 
 
-def _synthetic_mobi(*, extra_exth_records: list[bytes] | None = None) -> bytes:
+def _synthetic_mobi(
+    *, extra_exth_records: list[bytes] | None = None, body: bytes | None = None
+) -> bytes:
     record_zero = bytearray(420)
     struct.pack_into(">H", record_zero, 0, 1)
     struct.pack_into(">H", record_zero, 8, 1)
@@ -160,7 +163,7 @@ def _synthetic_mobi(*, extra_exth_records: list[bytes] | None = None) -> bytes:
         '<a filepos="9999999999">越界章节</a><h1>第二章</h1>'
     ).encode()
     cover = b"\xff\xd8\xff\xe0synthetic-cover"
-    records = [bytes(record_zero), navigation, cover]
+    records = [bytes(record_zero), body if body is not None else navigation, cover]
     header_size = 78 + len(records) * 8
     pdb = bytearray(header_size)
     pdb[60:64] = b"BOOK"
@@ -180,3 +183,48 @@ def _exth_text(record_type: int, value: str) -> bytes:
 
 def _exth_uint(record_type: int, value: int) -> bytes:
     return struct.pack(">III", record_type, 12, value)
+
+
+def test_mobi_reads_metadata_and_far_cover_without_body(tmp_path, monkeypatch):
+    path = tmp_path / "large.mobi"
+    content = _synthetic_mobi(body=b"forbidden body" * 500_000)
+    body_start = struct.unpack_from(">I", content, 86)[0]
+    body_end = struct.unpack_from(">I", content, 94)[0]
+    path.write_bytes(content)
+    original = Path.open
+    reads = []
+
+    class ObservedFile:
+        def __init__(self, source):
+            self.source = source
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.source.close()
+
+        def seek(self, *args):
+            return self.source.seek(*args)
+
+        def read(self, size=-1):
+            start = self.source.tell()
+            assert size >= 0
+            assert start + size <= body_start or start >= body_end
+            data = self.source.read(size)
+            reads.append(len(data))
+            return data
+
+    monkeypatch.setattr(
+        Path,
+        "open",
+        lambda self, *a, **kw: (
+            ObservedFile(original(self, *a, **kw))
+            if self == path
+            else original(self, *a, **kw)
+        ),
+    )
+    result = inspect_reflowable_book(path, "MOBI")
+    assert result.title == "放学后"
+    assert result.cover.content == b"\xff\xd8\xff\xe0synthetic-cover"
+    assert sum(reads) < 2048

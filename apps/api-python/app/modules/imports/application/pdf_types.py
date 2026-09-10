@@ -30,7 +30,7 @@ class PdfInspection:
     embedded_author: str | None
     description: str | None
     tags: tuple[str, ...]
-    page_count: int
+    page_count: int | None
     chapters: tuple[PdfChapter, ...]
     raw_metadata: Mapping[str, object]
     content_kind: PdfContentKind

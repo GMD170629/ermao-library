@@ -68,6 +68,9 @@ class ProcessReadableResourceImportTask:
         self._metadata_priority = metadata_priority
         self._covers = covers
 
+    def reset_inspection_cache(self) -> None:
+        self._adapters.reset_inspection_cache()
+
     def execute(self, task_id: str) -> ProcessTaskResult:
         with self._uow.transaction():
             task = self._queue.get_task(task_id)
@@ -276,18 +279,19 @@ class ProcessReadableResourceImportTask:
                         else None
                     ),
                 )
-            if parsed.asset.navigation_units:
-                self._books_resources.replace_navigation_units(
-                    resource_id=resource_id,
-                    asset_id=asset_id,
-                    units=parsed.asset.navigation_units,
-                )
+            self._books_resources.replace_navigation_units(
+                resource_id=resource_id,
+                asset_id=asset_id,
+                units=parsed.asset.navigation_units,
+            )
             if self._books_resources.count_ready_assets(resource_id) >= 1:
                 self._books_resources.mark_resource_ready(
                     resource_id=resource_id,
                     title=title,
                 )
-                if parsed.asset.technical.page_count is not None:
+                if parsed.asset.role is AssetRole.PRIMARY and not any(
+                    unit.unit_type == "page" for unit in parsed.asset.navigation_units
+                ):
                     self._books_resources.set_resource_page_count(
                         resource_id,
                         parsed.asset.technical.page_count,

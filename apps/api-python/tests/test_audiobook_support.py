@@ -157,7 +157,7 @@ def test_m4a_alac_is_accepted_and_container_extension_never_implies_aac(
     monkeypatch.setattr(
         audio_metadata_module,
         "_read_with_mutagen",
-        lambda _path: {"duration_ms": 1_000, "codec": "aac", "title": "wrong"},
+        lambda _path: {"duration_ms": 1_000, "codec": "alac"},
     )
     monkeypatch.setattr(
         audio_metadata_module,
@@ -249,7 +249,7 @@ def test_ffprobe_output_reader_enforces_windows_stdout_limit() -> None:
         )
 
 
-def test_new_audio_format_requires_ffprobe_confirmation(tmp_path, monkeypatch) -> None:
+def test_missing_audio_metadata_is_unknown_without_ffprobe(tmp_path, monkeypatch) -> None:
     source = tmp_path / "chapter.flac"
     source.write_bytes(b"audio")
     monkeypatch.setattr(audio_metadata_module, "_read_with_mutagen", lambda _path: {})
@@ -259,9 +259,9 @@ def test_new_audio_format_requires_ffprobe_confirmation(tmp_path, monkeypatch) -
         lambda _path, timeout_seconds: {},
     )
 
-    with pytest.raises(audio_metadata_module.AudioInspectionError) as captured:
-        parse_audio_metadata(source)
-    assert captured.value.code == "AUDIO_PROBE_REQUIRED"
+    result = parse_audio_metadata(source)
+    assert result.duration_ms is None
+    assert result.codec is None
 
 
 def test_raw_aptx_duration_is_recovered_from_fixed_bitrate(

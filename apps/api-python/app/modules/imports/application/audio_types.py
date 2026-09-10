@@ -67,8 +67,8 @@ class AudioFileMetadata:
     album: str | None
     author: str | None
     narrator: str | None
-    duration_ms: int
-    codec: str
+    duration_ms: int | None
+    codec: str | None
     bitrate: int | None
     sample_rate: int | None
     channels: int | None

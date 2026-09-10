@@ -155,6 +155,9 @@ class BoomAdapters:
 
 
 class ParseFailAdapters:
+    def reset_inspection_cache(self) -> None:
+        pass
+
     def parse_file(
         self,
         *,

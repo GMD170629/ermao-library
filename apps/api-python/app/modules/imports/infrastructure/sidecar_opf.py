@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from app.contracts.publication_metadata import PublicationMetadata
+from app.modules.imports.infrastructure.limited_read import read_optional_file
 from app.modules.metadata.public import (
     MAX_OPF_BYTES,
     OpfMetadataError,
@@ -50,7 +51,10 @@ def _discover_candidates(candidates: tuple[Path, ...]) -> SidecarOpfResult | Non
         try:
             if candidate.stat().st_size > MAX_OPF_BYTES:
                 continue
-            metadata = parse_opf_metadata(candidate.read_bytes())
+            content = read_optional_file(candidate, MAX_OPF_BYTES)
+            if content is None:
+                continue
+            metadata = parse_opf_metadata(content)
         except (OSError, OpfMetadataError):
             continue
         return SidecarOpfResult(
@@ -75,10 +79,14 @@ def _safe_cover_content(opf_path: Path, href: str | None) -> bytes | None:
         candidate.relative_to(root)
         if not candidate.is_file() or candidate.is_symlink():
             return None
-        content = candidate.read_bytes()
+        content = read_optional_file(candidate, MAX_SIDECAR_COVER_BYTES)
     except (OSError, ValueError):
         return None
-    if not 0 < len(content) <= MAX_SIDECAR_COVER_BYTES or not _image_signature(content):
+    if (
+        content is None
+        or not 0 < len(content) <= MAX_SIDECAR_COVER_BYTES
+        or not _image_signature(content)
+    ):
         return None
     return content
 

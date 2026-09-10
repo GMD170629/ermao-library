@@ -27,6 +27,7 @@ class ComicInfoMetadata(TypedDict, total=False):
 
 
 class ComicArchiveInspection(TypedDict):
+    coverContent: bytes | None
     title: str
     author: str
     description: str | None

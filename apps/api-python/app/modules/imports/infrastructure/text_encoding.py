@@ -33,16 +33,14 @@ def _decode_sample(sample: bytes, continuation: bytes, *, encoding: str) -> str:
     return decoded
 
 
-def _strip_verified_trailing_nul_padding(path: Path, prefix: bytes) -> bytes:
+def _strip_verified_trailing_nul_padding(prefix: bytes) -> bytes:
     first_nul = prefix.find(b"\x00")
     if first_nul < 0:
         return prefix
 
-    with path.open("rb") as source:
-        source.seek(first_nul)
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            if chunk.strip(b"\x00"):
-                raise TextEncodingError("无法可靠识别 TXT 编码")
+    # Only validate the observed sample; never walk the source tail.
+    if prefix[first_nul:].strip(b"\x00"):
+        raise TextEncodingError("无法可靠识别 TXT 编码")
     return prefix[:first_nul]
 
 
@@ -53,19 +51,23 @@ def detect_txt_encoding(path: Path) -> str:
         prefix = source.read(
             TXT_ENCODING_SAMPLE_BYTES + TXT_ENCODING_MAX_SEQUENCE_BYTES - 1
         )
+    return detect_sample_encoding(prefix)
+
+
+def detect_sample_encoding(prefix: bytes) -> str:
     sample = prefix[:TXT_ENCODING_SAMPLE_BYTES]
     continuation = prefix[TXT_ENCODING_SAMPLE_BYTES:]
     if not sample:
         raise TextEncodingError("TXT 文件为空")
     if sample.startswith(codecs.BOM_UTF8):
-        _strip_verified_trailing_nul_padding(path, prefix)
+        _strip_verified_trailing_nul_padding(prefix)
         return "utf-8-sig"
     if sample.startswith(codecs.BOM_UTF16_LE):
         return "utf-16-le"
     if sample.startswith(codecs.BOM_UTF16_BE):
         return "utf-16-be"
     if b"\x00" in sample:
-        prefix = _strip_verified_trailing_nul_padding(path, prefix)
+        prefix = _strip_verified_trailing_nul_padding(prefix)
         sample = prefix[:TXT_ENCODING_SAMPLE_BYTES]
         continuation = prefix[TXT_ENCODING_SAMPLE_BYTES:]
         if not sample:

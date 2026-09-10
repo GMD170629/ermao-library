@@ -19,9 +19,16 @@ from app.modules.imports.application.reflowable_types import (
     ReflowableBookMetadata,
 )
 from app.modules.imports.domain.volume_index import parse_structured_volume_index
+from app.modules.imports.infrastructure.limited_read import (
+    COVER_BYTES,
+    METADATA_BYTES,
+    read_optional_file,
+)
 from app.modules.imports.infrastructure.text_encoding import (
+    TXT_ENCODING_MAX_SEQUENCE_BYTES,
+    TXT_ENCODING_SAMPLE_BYTES,
     TextEncodingError,
-    detect_txt_encoding,
+    detect_sample_encoding,
 )
 
 _MOBI_FAMILY_FORMATS = {"MOBI", "AZW", "AZW3", "PRC"}
@@ -60,8 +67,12 @@ def inspect_reflowable_book(path: Path, source_format: str) -> ReflowableBookMet
 
 def _inspect_txt(path: Path) -> ReflowableBookMetadata:
     try:
-        encoding = detect_txt_encoding(path)
-        text = path.read_text(encoding=encoding, errors="strict")
+        with path.open("rb") as source:
+            sample = source.read(
+                TXT_ENCODING_SAMPLE_BYTES + TXT_ENCODING_MAX_SEQUENCE_BYTES - 1
+            )
+        encoding = detect_sample_encoding(sample)
+        text = sample[:100_000].decode(encoding, errors="ignore")
     except (OSError, UnicodeError, TextEncodingError) as exc:
         raise ReflowableMetadataError("Unable to inspect TXT metadata") from exc
     return ReflowableBookMetadata(
@@ -91,7 +102,30 @@ def _inspect_fb2(path: Path) -> ReflowableBookMetadata:
         huge_tree=False,
     )
     try:
-        root = etree.parse(str(path), parser).getroot()
+        # Description precedes body. Stop at its closing tag, never seek a
+        # binary cover through the body or parse the complete publication.
+        prefix = bytearray()
+        match = None
+        with path.open("rb") as source:
+            while len(prefix) < METADATA_BYTES:
+                chunk = source.read(1)
+                if not chunk:
+                    break
+                prefix.extend(chunk)
+                if chunk != b">":
+                    continue
+                match = re.search(rb"</(?:[\w-]+:)?description\s*>$", prefix[-128:])
+                if match:
+                    break
+                if re.search(rb"<(?:[\w-]+:)?body(?:\s[^>]*)?>$", prefix[-128:]):
+                    raise ReflowableMetadataError("FB2 description unavailable")
+        if not match:
+            raise ReflowableMetadataError("FB2 description unavailable")
+        root_match = re.search(rb"<(?:[\w-]+:)?FictionBook\b[^>]*>", prefix)
+        if root_match is None:
+            raise ReflowableMetadataError("Invalid FB2 root")
+        root_name = root_match.group()[1:].split(None, 1)[0].rstrip(b">")
+        root = etree.fromstring(bytes(prefix) + b"</" + root_name + b">", parser)
     except (OSError, etree.XMLSyntaxError) as exc:
         raise ReflowableMetadataError("Unable to inspect FB2 metadata") from exc
     if _local_name(root) != "FictionBook":
@@ -152,10 +186,25 @@ def _inspect_fb2(path: Path) -> ReflowableBookMetadata:
 
 def _inspect_mobi_family(path: Path, source_format: str) -> ReflowableBookMetadata:
     try:
-        content = path.read_bytes()
+        with path.open("rb") as source:
+            pdb = source.read(78)
+            if len(pdb) != 78:
+                raise ReflowableMetadataError("Invalid PDB header")
+            count = struct.unpack_from(">H", pdb, 76)[0]
+            table = source.read(count * 8)
+            if len(table) != count * 8 or count == 0:
+                raise ReflowableMetadataError("Invalid PDB records")
+            offsets = [struct.unpack_from(">I", table, i * 8)[0] for i in range(count)]
+            offsets.append(path.stat().st_size)
+            if offsets != sorted(offsets) or offsets[0] < 78 + count * 8:
+                raise ReflowableMetadataError("Invalid PDB offsets")
+            if offsets[1] - offsets[0] > METADATA_BYTES:
+                raise ReflowableMetadataError("MOBI metadata exceeds inspection budget")
+            source.seek(offsets[0])
+            header_bytes = source.read(offsets[1] - offsets[0])
+            records = (header_bytes,)
     except OSError as exc:
-        raise ReflowableMetadataError("Unable to read MOBI-family publication") from exc
-    records = _pdb_records(content)
+        raise ReflowableMetadataError("Unable to read MOBI metadata") from exc
     if not records:
         raise ReflowableMetadataError("MOBI-family publication has no records")
     header = records[0]
@@ -199,7 +248,17 @@ def _inspect_mobi_family(path: Path, source_format: str) -> ReflowableBookMetada
     subjects = tuple(
         cleaned for value in exth.get(105, ()) if (cleaned := _clean(value)) is not None
     )
-    cover = _mobi_family_cover(records, resource_start, exth)
+    cover = None
+    raw_cover_offset = _first(exth, 201) or _first(exth, 202)
+    if raw_cover_offset is not None:
+        index = resource_start + int(raw_cover_offset)
+        if (
+            0 <= index < count
+            and 0 < offsets[index + 1] - offsets[index] <= COVER_BYTES
+        ):
+            with path.open("rb") as source:
+                source.seek(offsets[index])
+                cover = _image_cover(source.read(offsets[index + 1] - offsets[index]))
     compression = struct.unpack_from(">H", header, 0)[0]
     return ReflowableBookMetadata(
         title=_clean(html.unescape(title or path.stem)),
@@ -216,7 +275,7 @@ def _inspect_mobi_family(path: Path, source_format: str) -> ReflowableBookMetada
             "sourceFormat": source_format,
             "mobiVersion": version,
             "compression": compression,
-            "recordCount": len(records),
+            "recordCount": count,
             "coverEmbedded": cover is not None,
             "seriesName": series_name,
             "seriesIndex": series_index_raw if has_structured_series else None,
@@ -224,21 +283,6 @@ def _inspect_mobi_family(path: Path, source_format: str) -> ReflowableBookMetada
         series_name=_clean(series_name),
         series_index=series_index,
     )
-
-
-def _pdb_records(content: bytes) -> tuple[bytes, ...]:
-    if len(content) < 78:
-        return ()
-    count = struct.unpack_from(">H", content, 76)[0]
-    if count <= 0 or 78 + count * 8 > len(content):
-        return ()
-    offsets = [
-        struct.unpack_from(">I", content, 78 + index * 8)[0] for index in range(count)
-    ]
-    if offsets != sorted(offsets) or any(offset >= len(content) for offset in offsets):
-        return ()
-    offsets.append(len(content))
-    return tuple(content[offsets[index] : offsets[index + 1]] for index in range(count))
 
 
 def _parse_exth(
@@ -267,21 +311,6 @@ def _parse_exth(
         result.setdefault(record_type, []).append(value)
         cursor += length
     return {key: tuple(values) for key, values in result.items()}
-
-
-def _mobi_family_cover(
-    records: tuple[bytes, ...], resource_start: int, exth: dict[int, tuple[str, ...]]
-) -> EmbeddedBookCover | None:
-    raw_offset = _first(exth, 201) or _first(exth, 202)
-    if raw_offset is None:
-        return None
-    try:
-        index = resource_start + int(raw_offset)
-    except ValueError:
-        return None
-    if not 0 <= index < len(records):
-        return None
-    return _image_cover(records[index])
 
 
 def _image_cover(content: bytes) -> EmbeddedBookCover | None:
@@ -316,7 +345,8 @@ def _sidecar_cover(path: Path) -> EmbeddedBookCover | None:
     for candidate in candidates:
         try:
             if candidate.is_file() and candidate.stat().st_size <= _MAX_COVER_BYTES:
-                cover = _image_cover(candidate.read_bytes())
+                content = read_optional_file(candidate, COVER_BYTES)
+                cover = _image_cover(content) if content else None
                 if cover is not None:
                     return cover
         except OSError:
