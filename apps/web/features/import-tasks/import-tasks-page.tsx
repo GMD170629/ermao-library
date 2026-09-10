@@ -43,7 +43,8 @@ function kindLabel(kind: LibraryImportTask['kind']): string {
   return {
     SCAN_LIBRARY: '扫描书库',
     CONTINUE_SOURCE: '扫描来源',
-    IMPORT_ASSET: '导入资源资产'
+    IMPORT_ASSET: '导入资源资产',
+    IDENTIFY_BOOK: '图书信息识别中'
   }[kind];
 }
 
@@ -76,6 +77,7 @@ function taskContext(task: LibraryImportTask): string[] {
 function completionLabel(kind: LibraryImportTask['kind']): string {
   if (kind === 'SCAN_LIBRARY') return '书库扫描完成';
   if (kind === 'CONTINUE_SOURCE') return '来源扫描完成';
+  if (kind === 'IDENTIFY_BOOK') return '图书信息更新完成';
   return '本项导入完成';
 }
 

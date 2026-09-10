@@ -88,8 +88,12 @@ fun BookDetailSummary.toUiContent(): BookDetailContent {
         completed = completed,
         readingUnits = emptyList(),
         continueResourceId = continueResourceId,
+        metadataPending = metadataPending,
+        metadataState = metadataState,
+        metadataOnlineState = metadataOnlineState,
         pendingResourceImportCount = pendingResourceImportCount,
         failedResourceImportCount = failedResourceImportCount,
+        failedFileImportCount = failedFileImportCount,
     )
 }
 

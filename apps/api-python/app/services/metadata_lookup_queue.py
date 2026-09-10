@@ -31,7 +31,7 @@ from app.modules.imports.public import (
     UNKNOWN_AUTHOR,
     normalize_identity_part,
 )
-from app.modules.library.public import prepare_book_facet
+from app.modules.library.public import prepare_book_facet, protected_metadata_fields
 from app.modules.media.public import versioned_cover_url
 from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
@@ -299,7 +299,6 @@ class _PreparedCandidateApplication:
     book_id: str
     resource_id: str | None
     book_patch: dict[str, Any]
-    resource_patch: dict[str, Any]
     organize_job_id: str | None
     organize_job_status: str
     organize_job_summary: str
@@ -323,7 +322,6 @@ def _prepare_candidate_application(
     if len(facet_projections) != 1:
         raise ValueError("WORK_FACET_PROJECTION_NOT_FOUND")
     resource_id = str(task.get("resourceId") or "") or None
-    resource = lookup_persist.get_resource(db, resource_id) if resource_id else None
     prefer_local = lookup_persist.prefer_local_metadata_enabled(db)
     local_cover_exists = _local_cover_exists(db, book, resource_id, settings)
 
@@ -331,7 +329,6 @@ def _prepare_candidate_application(
     # cover or constructing the prepared SQL statements for the write phase.
     db.close()
     book_patch: dict[str, Any] = {}
-    resource_patch: dict[str, Any] = {}
     applied: list[str] = []
     remote_cover: _PreparedRemoteCover | None = None
 
@@ -382,35 +379,12 @@ def _prepare_candidate_application(
             applied.append("seriesIndex")
         except (TypeError, ValueError):
             pass
-    resource_metadata = candidate.get("resourceMetadata")
-    if not isinstance(resource_metadata, dict):
-        resource_metadata = {
-            key: candidate.get(key)
-            for key in ("publisher", "publishedAt", "language", "isbn")
-        }
-    if resource:
-        if (not prefer_local or resource.get("publishedAt") is None) and isinstance(
-            resource_metadata.get("publishedAt"), str
-        ):
-            try:
-                published_at = datetime.fromisoformat(
-                    str(resource_metadata["publishedAt"])
-                )
-            except ValueError:
-                published_at = None
-            if published_at is not None:
-                resource_patch["publishedAt"] = published_at
-                applied.append("publishedAt")
-        for field in ("publisher", "language", "isbn"):
-            value = str(resource_metadata.get(field) or "").strip()
-            if value and (
-                not prefer_local or not str(resource.get(field) or "").strip()
-            ):
-                resource_patch[field] = value
-                applied.append(field)
-    if (not prefer_local or not local_cover_exists) and str(
-        candidate.get("coverUrl") or ""
-    ).strip():
+    if (
+        "cover_path"
+        not in protected_metadata_fields(str(book.get("protectedFields") or "[]"))
+        and (not prefer_local or not local_cover_exists)
+        and str(candidate.get("coverUrl") or "").strip()
+    ):
         try:
             remote_cover = _download_remote_cover(
                 str(book["id"]), str(candidate["coverUrl"]).strip(), settings
@@ -426,6 +400,20 @@ def _prepare_candidate_application(
                     }
                 )
                 applied.append("cover")
+
+    protected = protected_metadata_fields(str(book.get("protectedFields") or "[]"))
+    aliases = {
+        "seriesName": "series_name",
+        "seriesIndex": "series_index",
+        "coverPath": "cover_path",
+        "coverStatus": "cover_status",
+    }
+    book_patch = {
+        key: value
+        for key, value in book_patch.items()
+        if aliases.get(key, key) not in protected
+    }
+    applied = [field for field in applied if aliases.get(field, field) not in protected]
 
     if "title" in book_patch or "author" in book_patch:
         title = str(book_patch.get("title", book.get("title")) or "").strip()
@@ -451,8 +439,6 @@ def _prepare_candidate_application(
             "updatedAt": now,
         }
     )
-    if resource and resource_patch:
-        resource_patch["updatedAt"] = now
 
     job_id = str(task.get("organizeJobId") or "") or None
     organize_job_summary = (
@@ -482,7 +468,6 @@ def _prepare_candidate_application(
         book_id=str(book["id"]),
         resource_id=resource_id,
         book_patch=book_patch,
-        resource_patch=resource_patch,
         organize_job_id=job_id,
         organize_job_status="APPLIED" if applied else "COMPLETED",
         organize_job_summary=organize_job_summary,
@@ -498,12 +483,6 @@ def _persist_candidate_application(
     prepared: _PreparedCandidateApplication,
 ) -> None:
     lookup_persist.update_book(db, prepared.book_id, prepared.book_patch)
-    if prepared.resource_id and prepared.resource_patch:
-        lookup_persist.update_resource(
-            db,
-            prepared.resource_id,
-            prepared.resource_patch,
-        )
     execute_book_facet_write(db, prepared.facet_write)
     if prepared.organize_job_id:
         lookup_persist.finish_organize_job(
@@ -713,6 +692,10 @@ def process_metadata_lookup_task(
     if not book:
         _finish_without_match(db, task, "FAILED", [], "图书已不存在")
         return "FAILED"
+    metadata_guard = lookup_persist.book_metadata_guard(db, str(book["id"]))
+    if metadata_guard is not None and metadata_guard[-1]:
+        _schedule_retry(db, task, "等待本地导入任务完成", [])
+        return "PENDING"
     context = metadata_context_for_book(db, str(book["id"]))
     if not context:
         _finish_without_match(
@@ -819,6 +802,11 @@ def process_metadata_lookup_task(
             task_id = str(task["id"])
             owner_id = str(task.get("leaseOwnerId") or "") or None
             with MetadataWriteTransaction(db):
+                if (
+                    lookup_persist.book_metadata_guard(db, str(book["id"]))
+                    != metadata_guard
+                ):
+                    raise RuntimeError("BOOK_METADATA_CHANGED")
                 _persist_candidate_application(db, prepared_application)
             if prepared_application.remote_cover is not None:
                 try:

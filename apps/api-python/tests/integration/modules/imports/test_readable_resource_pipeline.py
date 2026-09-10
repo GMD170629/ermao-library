@@ -59,6 +59,7 @@ from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
 )
 from app.modules.library.domain.readable_resource_states import AssetRole
+from app.modules.library.infrastructure.books import resource_import_summaries
 from app.modules.library.infrastructure.persistence.source_tree_repository import (
     SqlAlchemyBookResourceRepository,
     SqlAlchemyLibraryConfigAdapter,
@@ -66,6 +67,7 @@ from app.modules.library.infrastructure.persistence.source_tree_repository impor
 )
 from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryBook,
+    LibraryBookMetadata,
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
@@ -229,6 +231,7 @@ def _pipeline(
         continue_import=base.continue_import,
         scan_library_source_tree=base.scan_library_source_tree,
         process_import_task=process,
+        identify_book=base.identify_book,
         delete_book_sources=base.delete_book_sources,
         delete_source_node=base.delete_source_node,
         change_library_organization_mode=base.change_library_organization_mode,
@@ -448,7 +451,7 @@ def test_scan_requeues_existing_fb2_when_text_adapter_contract_upgrades(
             assert interpretation is not None
             assert interpretation.reason_code == "ADAPTER_CONTRACT_UPGRADED"
 
-            assert _drain(pipeline) == ["ok"]
+            assert _drain(pipeline) == ["ok", "identified"]
             db.expire_all()
             assert db.get(LibraryImportTask, original_task_id).state == "SUCCEEDED"
     finally:
@@ -479,7 +482,7 @@ def test_mobi_family_import_persists_exact_source_format(
             (root / filename).write_bytes(b"mobi-family")
 
             pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
-            assert _drain(pipeline) == ["scan", "ok"]
+            assert _drain(pipeline) == ["scan", "ok", "identified"]
 
             resource = db.scalar(select(LibraryReadableResource))
             assert resource is not None
@@ -583,9 +586,9 @@ def test_changed_file_observation_invalidates_and_requeues_only_once(
             assert requeued is not None
             assert requeued.state == "QUEUED"
 
-            assert _drain(pipeline) == ["ok"]
+            assert _drain(pipeline) == ["ok", "identified"]
             pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
-            assert _drain(pipeline) == ["scan"]
+            assert _drain(pipeline) == ["scan", "identified"]
             db.expire_all()
             assert db.get(LibraryImportTask, original_task_id).state == "SUCCEEDED"
     finally:
@@ -640,7 +643,7 @@ def test_changed_directory_member_preserves_other_ready_assets(tmp_path: Path) -
             assert states == {"01.mp3": "PENDING", "02.mp3": "READY"}
             assert db.get(LibraryReadableResource, resource.id).import_state == "READY"
 
-            assert _drain(pipeline) == ["ok"]
+            assert _drain(pipeline) == ["ok", "identified"]
             db.expire_all()
             assert db.get(LibraryReadableResource, resource.id).import_state == "READY"
             assert (
@@ -787,7 +790,7 @@ def test_shared_scan_converges_existing_audio_file_resources_to_one_directory(
                 directory_node.id,
                 missing_entry_policy=missing_entry_policy,
             )
-            assert _drain(pipeline, limit=500) == ["ok"] * 204
+            assert _drain(pipeline, limit=500) == ["ok"] * 204 + ["identified"]
 
             resources = db.scalars(select(LibraryReadableResource)).all()
             assert len(resources) == 1
@@ -1110,6 +1113,12 @@ def test_partial_asset_failure_keeps_ready_resource(tmp_path: Path) -> None:
             ).all()
             assert len(ready) == 1
             assert len(failed) == 1
+            summary = resource_import_summaries(db, (resource.book_id,))[
+                resource.book_id
+            ]
+            assert (
+                summary.ready == 1 and summary.failed == 0 and summary.failed_files == 1
+            )
     finally:
         engine.dispose()
 
@@ -1317,3 +1326,102 @@ def test_unknown_audio_duration_is_not_summed_as_zero(tmp_path: Path) -> None:
             assert db.scalar(select(LibraryReadableResource)).import_state == "READY"
     finally:
         engine.dispose()
+
+
+def test_book_completion_waits_for_overlapping_scan_and_cancellation_survives_restart(
+    tmp_path: Path,
+) -> None:
+    engine = _bootstrap(tmp_path)
+    with Session(engine) as db:
+        root = tmp_path / "library"
+        _add_volumes_library(db, root)
+        for name in ("Book%_", "Book%_extra"):
+            (root / name).mkdir()
+            (root / name / "one.txt").write_text("readable", encoding="utf-8")
+        db.commit()
+        pipeline, _ = _pipeline(db)
+        worker = build_readable_resource_worker(pipeline)
+        pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+        assert worker.process_once() == "scan"
+        books = db.execute(
+            select(LibraryBook, LibrarySourceNode).join(
+                LibrarySourceNode, LibrarySourceNode.id == LibraryBook.source_node_id
+            )
+        ).all()
+        first, first_node = next(row for row in books if row[1].name == "Book%_")
+        scan = pipeline.queue.enqueue(
+            kind="CONTINUE_SOURCE", library_id="lib-1", source_node_id=first_node.id
+        )
+        db.commit()
+        tasks = db.scalars(
+            select(LibraryImportTask).where(LibraryImportTask.kind == "IMPORT_ASSET")
+        ).all()
+        for task in tasks:
+            pipeline.queue.mark_running(task.id, started_at=datetime.now(UTC))
+            db.commit()
+            assert pipeline.process_import_task.execute(task.id).outcome == "ok"
+        active = db.scalars(
+            select(LibraryImportTask).where(
+                LibraryImportTask.kind == "IDENTIFY_BOOK",
+                LibraryImportTask.state == "QUEUED",
+            )
+        ).all()
+        assert len(active) == 1
+        assert active[0].source_node_id != first_node.id
+        pipeline.queue.mark_failed(
+            scan.id, error_summary="SCAN_FAILED", finished_at=datetime.now(UTC)
+        )
+        db.commit()
+        active = db.scalars(
+            select(LibraryImportTask).where(
+                LibraryImportTask.kind == "IDENTIFY_BOOK",
+                LibraryImportTask.state == "QUEUED",
+            )
+        ).all()
+        assert len(active) == 2
+        pipeline.queue.delete_tasks_for_source_nodes((first_node.id,))
+        db.commit()
+        pipeline.queue.fail_interrupted_tasks_on_startup(finished_at=datetime.now(UTC))
+        db.commit()
+        assert _drain(pipeline) == ["identified"]
+        db.expire_all()
+        metadata = db.get(LibraryBookMetadata, first.id)
+        assert metadata is not None and not metadata.metadata_pending
+        assert metadata.processed_revision == -1
+        assert metadata.metadata_state == "WAITING_IMPORT"
+    engine.dispose()
+
+
+def test_failed_asset_finishes_book_and_retry_identifies_new_revision(
+    tmp_path: Path,
+) -> None:
+    engine = _bootstrap(tmp_path)
+    with Session(engine) as db:
+        root = tmp_path / "library"
+        _add_volumes_library(db, root)
+        (root / "Series").mkdir()
+        for name in ("one.txt", "two.txt"):
+            (root / "Series" / name).write_text("readable", encoding="utf-8")
+        db.commit()
+        pipeline, _ = _pipeline(db, adapters=StubFailOnceAdapter({"two.txt"}))
+        pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+        outcomes = _drain(pipeline)
+        assert outcomes.count("identified") == 1
+        metadata = db.scalar(select(LibraryBookMetadata))
+        assert metadata is not None and metadata.metadata_state == "COMPLETED"
+        old_revision = metadata.processed_revision
+        failed = db.scalar(
+            select(LibraryImportTask).where(
+                LibraryImportTask.kind == "IMPORT_ASSET",
+                LibraryImportTask.state == "FAILED",
+            )
+        )
+        assert failed is not None
+        pipeline.queue.requeue_failed_task(failed.id)
+        db.commit()
+        pipeline, _ = _pipeline(db, adapters=StubAlwaysOkAdapter())
+        assert _drain(pipeline) == ["ok", "identified"]
+        db.expire_all()
+        assert metadata.processed_revision > old_revision
+        assert metadata.metadata_state == "COMPLETED"
+    engine.dispose()

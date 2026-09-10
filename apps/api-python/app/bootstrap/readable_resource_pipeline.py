@@ -9,10 +9,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.infrastructure.local_metadata_policy import SqlAlchemyLocalMetadataPriority
+from app.models import LibraryBook
 from app.modules.imports.application.readable_resource.continue_import import (
     ContinueImport,
     ContinueImportResult,
@@ -40,6 +42,9 @@ from app.modules.imports.infrastructure.local_cover_publication import (
 )
 from app.modules.imports.infrastructure.readable_resource.adapter_registry import (
     RegistryResourceAdapterExecutor,
+)
+from app.modules.imports.infrastructure.readable_resource.book_completion import (
+    active_imports_for_book,
 )
 from app.modules.imports.infrastructure.readable_resource.filesystem import (
     OsSourceTreeFilesystem,
@@ -70,11 +75,19 @@ from app.modules.library.application.commands.manage_source_tree import (
     EnableReadableResource,
     RelocateLibraryRoot,
 )
+from app.modules.library.application.imported_book_metadata import IdentifyImportedBook
+from app.modules.library.infrastructure.imported_book_metadata import (
+    SqlAlchemyImportedBookMetadata,
+)
 from app.modules.library.infrastructure.persistence.source_tree_repository import (
     SqlAlchemyBookResourceRepository,
     SqlAlchemyLibraryConfigAdapter,
     SqlAlchemySourceNodeRepository,
 )
+from app.modules.library.infrastructure.source_node_cover import (
+    FilesystemSourceNodeCoverPublication,
+)
+from app.modules.media.infrastructure.http_streaming import stored_path
 
 __all__ = [
     "ReadableResourcePipeline",
@@ -94,6 +107,7 @@ class ReadableResourcePipeline:
 
     continue_import: ContinueImport
     scan_library_source_tree: ScanLibrarySourceTree
+    identify_book: IdentifyImportedBook
     process_import_task: ProcessReadableResourceImportTask
     delete_book_sources: DeleteBookSources
     delete_source_node: DeleteSourceNode
@@ -181,6 +195,26 @@ def build_readable_resource_pipeline(
         request_library_scan=request_scan,
         scan_library_source_tree=scan,
         process_import_task=process_import,
+        identify_book=IdentifyImportedBook(
+            SqlAlchemyImportedBookMetadata(
+                session,
+                runtime_settings,
+                adapters.inspect_sidecar_local_metadata,
+                lambda book_id: (
+                    session.scalar(
+                        select(LibraryBook.id).where(
+                            LibraryBook.id == book_id, ~active_imports_for_book()
+                        )
+                    )
+                    is not None
+                ),
+                lambda value: stored_path(value, runtime_settings),
+            ),
+            FilesystemSourceNodeCoverPublication(
+                runtime_settings.resolved_storage_root
+            ),
+            session,
+        ),
         delete_book_sources=DeleteBookSources(
             filesystem=filesystem,
             source_nodes=source_nodes,
@@ -285,6 +319,7 @@ def build_readable_resource_worker(
         queue=pipeline.queue,
         scan=pipeline.scan_library_source_tree,
         process_import=pipeline.process_import_task,
+        identify_book=pipeline.identify_book,
         uow=pipeline.uow,
         clock=pipeline.clock,
     )

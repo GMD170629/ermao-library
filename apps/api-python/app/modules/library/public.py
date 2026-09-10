@@ -1,3 +1,8 @@
+from app.modules.library.application.imported_book_metadata import IdentifyImportedBook
+from app.modules.library.application.metadata_ownership import (
+    protected_fields as protected_metadata_fields,
+)
+
 """Stable public contracts for the Book/ReadableResource capability."""
 
 from app.modules.library.application.book_covers import (
@@ -165,6 +170,7 @@ __all__ = [
     "GetCatalogBook",
     "GetLibraryFilterSchema",
     "GetSmartShelfBookIds",
+    "IdentifyImportedBook",
     "InterpretationRecord",
     "InvalidFilterExpression",
     "InvalidSourceNodeRelativePathError",
@@ -223,6 +229,7 @@ __all__ = [
     "parse_source_node_relative_path",
     "parse_target_organization_mode",
     "prepare_book_facet",
+    "protected_metadata_fields",
     "resolve_asset_display_titles",
     "resource_is_openable",
     "resource_root_folder_creates_empty_book_on_discovery",

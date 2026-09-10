@@ -32,6 +32,9 @@ from app.modules.library.domain.asset_titles import (
     resolve_asset_display_titles,
 )
 from app.modules.library.infrastructure import books as library_books
+from app.modules.library.infrastructure.projections import (
+    latest_metadata_lookup_for_book,
+)
 from app.modules.library.infrastructure.source_paths import (
     resolve_existing_library_file,
 )
@@ -325,10 +328,12 @@ def book_view(
         )
         for index, (resource, metadata) in enumerate(rows)
     ]
+    online = latest_metadata_lookup_for_book(db, book_id)
     selected_id = choose_continue_resource_id(states)
     selected = next((item for item in resources if item["id"] == selected_id), None)
     return {
         **book,
+        "metadataOnlineState": online.get("status") if online else None,
         "tags": list(book.get("tags") or []),
         "ignored": book.get("visibilityState") != "VISIBLE",
         "organized": book.get("curationState") not in {None, "PENDING"},

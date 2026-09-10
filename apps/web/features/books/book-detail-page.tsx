@@ -248,7 +248,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   }, [bookId, requestedResourceId, t]);
 
   useEffect(() => {
-    if (!book || book.resourceImportSummary.pending === 0) return;
+    if (!book || (book.resourceImportSummary.pending === 0 && !book.metadataPending && !["PENDING", "RUNNING", "RETRY"].includes(book.metadataOnlineState ?? ""))) return;
     let controller: AbortController | null = null;
     const refreshPendingResources = () => {
       if (document.visibilityState !== 'visible') return;
@@ -627,6 +627,9 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         <div className="flex min-w-0 flex-col py-1">
           {book.completed ? <span className="inline-flex w-fit items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700"><CheckCircle2 size={14} /><I18nText>已完成</I18nText></span> : null}
           <h1 data-i18n-skip className="mt-2 line-clamp-2 text-3xl font-semibold leading-[1.15] tracking-tight text-[var(--visual-color-app-text-primary)] sm:text-[34px]">{book.title}</h1>
+          {book.metadataState ? <p role="status" className="mt-2 text-sm text-[var(--visual-color-app-text-secondary)]">{book.metadataState === 'WAITING_IMPORT' ? t('等待整本导入结束') : book.metadataState === 'QUEUED' ? t('整本导入结束，等待识别图书信息') : book.metadataState === 'RUNNING' ? t('图书信息识别中') : book.metadataState === 'FAILED' ? t('图书信息识别失败') : ['PENDING', 'RUNNING', 'RETRY'].includes(book.metadataOnlineState ?? '') ? t('图书信息联网识别中') : book.metadataOnlineState === 'FAILED' ? t('联网识别失败，已保留本地信息') : t('图书信息更新完成')}</p> : null}
+          {book.resourceImportSummary.failed > 0 ? <p role="status" className="text-sm">{t('部分文件导入失败，已保留可用内容')}</p> : null}
+
           <p data-i18n-skip className="mt-3 text-base text-[var(--visual-color-app-text-secondary)]">{authorDisplayLabel(book.author)}</p>
           {hasBookMetadata ? <div className="mt-4 flex min-w-0 flex-col items-start gap-2 text-sm sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-2">
             {seriesName ? <span className="flex min-w-0 max-w-full items-center gap-2">

@@ -147,8 +147,12 @@ data class BookDetailContent(
     val completed: Boolean = false,
     val readingUnits: List<ReadingUnitContent> = emptyList(),
     val continueResourceId: String? = null,
+    val metadataPending: Boolean = false,
+    val metadataState: String? = null,
+    val metadataOnlineState: String? = null,
     val pendingResourceImportCount: Int = 0,
     val failedResourceImportCount: Int = 0,
+    val failedFileImportCount: Int = 0,
 ) {
     val continueResource: ResourceContent? get() = resources.firstOrNull { it.id == continueResourceId }
     val hasDescription: Boolean get() = !description.isNullOrBlank()

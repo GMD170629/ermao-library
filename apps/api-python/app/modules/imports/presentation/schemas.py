@@ -118,7 +118,7 @@ class LibraryImportTaskView(HttpContractModel):
     """The public, read-only projection of one canonical import task."""
 
     id: str
-    kind: Literal["SCAN_LIBRARY", "CONTINUE_SOURCE", "IMPORT_ASSET"]
+    kind: Literal["SCAN_LIBRARY", "CONTINUE_SOURCE", "IMPORT_ASSET", "IDENTIFY_BOOK"]
     library_id: str = Field(alias="libraryId")
     library_name: str | None = Field(default=None, alias="libraryName")
     resource_id: str | None = Field(default=None, alias="resourceId")

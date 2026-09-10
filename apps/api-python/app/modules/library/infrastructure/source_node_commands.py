@@ -14,6 +14,7 @@ from app.models import (
     LibrarySourceNodeMetadata,
 )
 from app.models.common import db_timestamp
+from app.modules.library.application.metadata_ownership import protect_fields
 from app.modules.library.application.source_node_commands import (
     SourceNodeMetadataChanges,
     SourceNodeMetadataPort,
@@ -57,6 +58,14 @@ class SqlAlchemySourceNodeMetadata(SourceNodeMetadataPort):
         if metadata is None:
             metadata = LibrarySourceNodeMetadata(source_node_id=node.id)
             self._db.add(metadata)
+        metadata.protected_fields = protect_fields(
+            metadata.protected_fields,
+            (
+                "title",
+                "description",
+                *(("cover_path",) if changes.replace_cover else ()),
+            ),
+        )
         metadata.title = changes.title
         metadata.description = changes.description
         if changes.replace_cover:
@@ -71,6 +80,14 @@ class SqlAlchemySourceNodeMetadata(SourceNodeMetadataPort):
                     normalized_title=changes.title.casefold(),
                 )
                 self._db.add(book_metadata)
+            book_metadata.protected_fields = protect_fields(
+                book_metadata.protected_fields,
+                (
+                    "title",
+                    "description",
+                    *(("cover_path",) if changes.replace_cover else ()),
+                ),
+            )
             book_metadata.title = changes.title
             book_metadata.normalized_title = changes.title.casefold()
             book_metadata.description = changes.description

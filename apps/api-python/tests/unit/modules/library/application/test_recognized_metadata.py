@@ -185,7 +185,7 @@ def test_book_apply_normalizes_tags_and_only_writes_changed_selected_fields() ->
         (
             "book-1",
             None,
-            {"author": "新作者"},
+            {"title": "旧标题", "author": "新作者"},
             {},
             ("科幻", "Manga"),
         )

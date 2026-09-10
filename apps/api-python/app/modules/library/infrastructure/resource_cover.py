@@ -11,6 +11,7 @@ from PIL import Image, UnidentifiedImageError
 from sqlalchemy.orm import Session
 
 from app.models import LibraryReadableResourceMetadata
+from app.modules.library.application.metadata_ownership import protect_fields
 from app.modules.library.application.resource_cover import (
     MAX_RESOURCE_COVER_BYTES,
     PreparedResourceCover,
@@ -36,6 +37,9 @@ class SqlAlchemyResourceCover(ResourceCoverPort):
         metadata = self._db.get(LibraryReadableResourceMetadata, resource_id)
         if metadata is None:
             raise LookupError(resource_id)
+        metadata.protected_fields = protect_fields(
+            metadata.protected_fields, ("cover_path",)
+        )
         metadata.cover_path = cover_path
         metadata.cover_status = "READY"
         metadata.updated_at = now
@@ -57,6 +61,10 @@ class FilesystemResourceCoverPublication(ResourceCoverPublicationPort):
         temporary_path = self._cover_root / f".{resource_id}.{uuid4().hex}.part"
         try:
             temporary_path.write_bytes(content)
+        except OSError:
+            temporary_path.unlink(missing_ok=True)
+            raise
+        try:
             with Image.open(temporary_path) as image:
                 image_format = str(image.format or "").upper()
                 image.verify()

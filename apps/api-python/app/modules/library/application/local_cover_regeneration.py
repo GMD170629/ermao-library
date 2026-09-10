@@ -52,6 +52,11 @@ class LocalCoverScope:
     source_node_id: str
     resource_ids: tuple[str, ...]
     is_book_root: bool
+    first_readable_resource_id: str | None = None
+    root_path: Path | None = None
+    relative_path: str = ""
+    is_directory: bool = True
+    cover_protected: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,11 +98,13 @@ class LocalCoverSourcePort(Protocol):
         self,
         *,
         scope: LocalCoverScope,
-        cover_path: str,
+        cover_path: str | None,
     ) -> None: ...
 
 
 class LocalMetadataCoverParserPort(Protocol):
+    def extract_owned_cover(self, scope: LocalCoverScope) -> bytes | None: ...
+
     def extract_cover(
         self, source: ResourceLocalMetadataSource
     ) -> bytes | LocalCoverFailureCode: ...
@@ -223,23 +230,21 @@ class RegenerateLocalMetadataCovers:
                 skipped.append(attempt)
                 continue
             updated.append(resource_id)
-            if first_cover is None:
+            if resource_id == scope.first_readable_resource_id:
                 first_cover = attempt
 
-        if first_cover is None:
-            reason: LocalCoverFailureCode = (
-                skipped[0].reason if skipped else "LOCAL_COVER_NOT_FOUND"
-            )
-            raise LocalCoverUnavailableError(reason)
-
-        self._replace_source_cover(scope=scope, content=first_cover)
+        own_cover = self._parser.extract_owned_cover(scope)
+        cover = own_cover if own_cover is not None else first_cover
+        source_updated = cover is not None or not scope.cover_protected
+        if source_updated:
+            self._replace_source_cover(scope=scope, content=cover)
         return LocalCoverRegenerationResult(
             target_type=target_type,
             target_id=target_id,
             updated_resource_ids=tuple(updated),
             skipped=tuple(skipped),
-            source_node_updated=True,
-            book_updated=scope.is_book_root,
+            source_node_updated=source_updated,
+            book_updated=scope.is_book_root and source_updated,
         )
 
     def _regenerate_one(
@@ -295,31 +300,43 @@ class RegenerateLocalMetadataCovers:
         )
         return extraction
 
-    def _replace_source_cover(self, *, scope: LocalCoverScope, content: bytes) -> None:
+    def _replace_source_cover(
+        self, *, scope: LocalCoverScope, content: bytes | None
+    ) -> None:
         previous_path = self._sources.current_source_cover_path(scope.source_node_id)
         self._release_read_transaction()
-        prepared = self._source_covers.prepare(
-            source_node_id=scope.source_node_id,
-            content=content,
+        prepared = (
+            self._source_covers.prepare(
+                source_node_id=scope.source_node_id,
+                content=content,
+            )
+            if content is not None
+            else None
         )
-        published = self._source_covers.publish(
-            prepared,
-            previous_stored_path=previous_path,
+        published = (
+            self._source_covers.publish(
+                prepared,
+                previous_stored_path=previous_path,
+            )
+            if prepared is not None
+            else None
         )
         try:
             self._sources.mark_source_cover_ready(
                 scope=scope,
-                cover_path=prepared.stored_path,
+                cover_path=prepared.stored_path if prepared else None,
             )
             self._unit_of_work.commit()
         except Exception:
             self._unit_of_work.rollback()
-            self._source_covers.revert(published)
+            if published is not None:
+                self._source_covers.revert(published)
             raise
-        self._source_covers.complete(
-            published,
-            previous_stored_path=previous_path,
-        )
+        if published is not None:
+            self._source_covers.complete(
+                published,
+                previous_stored_path=previous_path,
+            )
 
     def _require_book(self, *, actor: LibraryActor, book_id: str) -> None:
         if not actor.can_manage_system:

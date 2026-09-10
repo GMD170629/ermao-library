@@ -24,6 +24,7 @@ from app.models.organize import (
     OrganizeJob,
     OrganizePolicy,
 )
+from app.modules.library.public import protected_metadata_fields
 
 STALE_RUNNING_MINUTES = 10
 LOOKUP_LEASE_SECONDS = 60
@@ -385,6 +386,7 @@ def get_book(db: Session, book_id: str | None) -> dict[str, Any] | None:
         "coverStatus": metadata.cover_status if metadata else "PENDING",
         "metadataQuality": metadata.metadata_quality if metadata else 0,
         "normalizedTitle": metadata.normalized_title if metadata else "",
+        "protectedFields": metadata.protected_fields if metadata else "[]",
         "normalizedAuthor": metadata.normalized_author if metadata else None,
         "organized": False,
         "organizeStatus": None,
@@ -457,8 +459,10 @@ def update_book(db: Session, book_id: str, patch: dict[str, Any]) -> None:
     metadata = db.get(LibraryBookMetadata, book_id)
     if metadata is None:
         raise LookupError(book_id)
+    protected = protected_metadata_fields(metadata.protected_fields)
     for key, value in mapped.items():
-        setattr(metadata, key, value)
+        if key not in protected:
+            setattr(metadata, key, value)
 
 
 def clear_remote_cover_if_current(
@@ -546,3 +550,24 @@ def mark_organize_job_retry_wait(
             updated_at=now,
         )
     )
+
+
+def book_metadata_guard(
+    db: Session, book_id: str
+) -> tuple[int, str, str, str, bool] | None:
+    row = db.execute(
+        select(
+            LibraryBookMetadata.import_revision,
+            LibraryBookMetadata.updated_at,
+            LibraryBookMetadata.protected_fields,
+            LibraryBookMetadata.metadata_pending,
+        ).where(LibraryBookMetadata.book_id == book_id)
+    ).one_or_none()
+    if row is None:
+        return None
+    priority = db.scalar(
+        select(OrganizePolicy.local_metadata_priority_json).where(
+            OrganizePolicy.id == "default"
+        )
+    )
+    return row[0], row[1].isoformat(), row[2], str(priority or ""), row[3]

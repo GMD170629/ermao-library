@@ -209,6 +209,7 @@ struct WorkDetailView: View {
     @Environment(\.appTheme) private var theme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.locale) private var locale
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
     @Environment(\.audioPlaybackRuntime) private var audioPlaybackRuntime
     @EnvironmentObject private var feedbackPresenter: OperationFeedbackPresenter
@@ -382,6 +383,14 @@ struct WorkDetailView: View {
             store.loadIfNeeded()
         }
         .onAppear { store.refreshIfLoaded() }
+        .task(id: metadataRefreshPending && scenePhase == .active) {
+            guard metadataRefreshPending, scenePhase == .active else { return }
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                guard !Task.isCancelled else { return }
+                store.refreshIfLoaded()
+            }
+        }
         .onChange(of: store.viewState) { _, value in
             if let encoded = try? JSONEncoder().encode(value), let payload = String(data: encoded, encoding: .utf8) {
                 savedPageState = payload
@@ -580,6 +589,23 @@ struct WorkDetailView: View {
         .id("work-cover-\(coverRefreshToken)")
     }
 
+    private var metadataRefreshPending: Bool {
+        currentDetail?.metadataPending == true || ["PENDING", "RUNNING", "RETRY"].contains(currentDetail?.metadataOnlineState ?? "")
+    }
+
+    private func metadataMessage(_ state: String, online: String?) -> String.LocalizationValue {
+        switch state {
+        case "WAITING_IMPORT": return "book.metadata.waiting.import"
+        case "QUEUED": return "book.metadata.queued"
+        case "RUNNING": return "book.metadata.running"
+        case "FAILED": return "book.metadata.failed"
+        default:
+            if ["PENDING", "RUNNING", "RETRY"].contains(online ?? "") { return "book.metadata.online" }
+            if online == "FAILED" { return "book.metadata.online.failed" }
+            return "book.metadata.completed"
+        }
+    }
+
     private func identity(_ detail: BookDetailContent) -> some View {
         VStack(alignment: .center, spacing: .spaceHalf) {
             Text(detail.book.title)
@@ -588,6 +614,14 @@ struct WorkDetailView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             creatorSeriesLine(detail)
+            if let metadataState = detail.metadataState {
+                Text(String(localized: metadataMessage(metadataState, online: detail.metadataOnlineState)))
+                    .appTextStyle(.body)
+            }
+            if (detail.failedResourceImportCount ?? 0) > 0 || (detail.failedFileImportCount ?? 0) > 0 {
+                Text(String(localized: "book.metadata.partial.import")).appTextStyle(.body)
+            }
+
 
             let chips = identityChips(detail)
             if !chips.isEmpty {

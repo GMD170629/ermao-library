@@ -297,6 +297,7 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
             column["name"] for column in inspector.get_columns("LibraryImportTask")
         }
         assert import_task_columns == {
+            "bookMetadataRevision",
             "id",
             "kind",
             "libraryId",
@@ -379,10 +380,11 @@ def test_alembic_script_directory_has_one_linear_head() -> None:
     config = alembic_config_for_engine(create_engine("sqlite+pysqlite:///:memory:"))
     script = ScriptDirectory.from_config(config)
     revisions = list(script.walk_revisions())
-    assert len(revisions) == 9
-    assert script.get_heads() == ["0009_reader_v5_opaque_progress"]
-    assert head_revision() == "0009_reader_v5_opaque_progress"
+    assert len(revisions) == 10
+    assert script.get_heads() == ["0010_book_metadata_completion"]
+    assert head_revision() == "0010_book_metadata_completion"
     assert [revision.revision for revision in revisions] == [
+        "0010_book_metadata_completion",
         "0009_reader_v5_opaque_progress",
         "0008_foreign_key_lookup_indexes",
         "0007_source_node_lookup_indexes",
@@ -393,15 +395,9 @@ def test_alembic_script_directory_has_one_linear_head() -> None:
         "0002_library_scan_queue_uniqueness",
         "0001_library_topology_baseline",
     ]
-    assert revisions[0].down_revision == "0008_foreign_key_lookup_indexes"
-    assert revisions[1].down_revision == "0007_source_node_lookup_indexes"
-    assert revisions[2].down_revision == "0006_import_task_missing_entry_policy"
-    assert revisions[3].down_revision == "0005_asset_navigation_marker"
-    assert revisions[4].down_revision == "0004_remove_media_kind"
-    assert revisions[5].down_revision == "0003_audio_asset_title"
-    assert revisions[6].down_revision == "0002_library_scan_queue_uniqueness"
-    assert revisions[7].down_revision == "0001_library_topology_baseline"
-    assert revisions[8].down_revision is None
+    assert [revision.down_revision for revision in revisions] == [
+        revision.revision for revision in revisions[1:]
+    ] + [None]
 
 
 def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
@@ -410,7 +406,7 @@ def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
     engine = create_sqlite_engine(settings.database_path)
     try:
         runner_module.apply_schema(engine, settings)
-        assert _current_revision(engine) == "0009_reader_v5_opaque_progress"
+        assert _current_revision(engine) == "0010_book_metadata_completion"
         operation_columns = {
             column["name"]: column
             for column in inspect(engine).get_columns("MetadataWritebackOperation")
@@ -451,7 +447,7 @@ def test_source_node_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None
         }
 
         runner_module.apply_schema(engine)
-        assert _current_revision(engine) == "0009_reader_v5_opaque_progress"
+        assert _current_revision(engine) == "0010_book_metadata_completion"
         source_node_indexes = {
             index["name"]: tuple(index["column_names"])
             for index in inspect(engine).get_indexes("LibrarySourceNode")
@@ -502,7 +498,7 @@ def test_foreign_key_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None
             }
 
         runner_module.apply_schema(engine)
-        assert _current_revision(engine) == "0009_reader_v5_opaque_progress"
+        assert _current_revision(engine) == "0010_book_metadata_completion"
         for table_name, index_name in expected_indexes.items():
             assert index_name in {
                 index["name"] for index in inspect(engine).get_indexes(table_name)

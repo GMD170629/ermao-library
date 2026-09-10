@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from sqlalchemy import delete, func, insert, update
+from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.orm import Session
 
+from app.models import LibraryBook, LibraryBookMetadata
 from app.models.auth import User
 from app.models.library import Library
 from app.modules.imports.application.library_commands import (
@@ -35,6 +36,19 @@ class SqlAlchemyLibraryWriteStore:
         write_prepared_system_events(self._db, (prepared.event,))
 
     def cancel_import_tasks(self, library_id: str) -> int:
+        self._db.execute(
+            update(LibraryBookMetadata)
+            .where(
+                LibraryBookMetadata.book_id.in_(
+                    select(LibraryBook.id).where(LibraryBook.library_id == library_id)
+                )
+            )
+            .values(
+                import_revision=LibraryBookMetadata.import_revision + 1,
+                metadata_pending=False,
+                metadata_state="WAITING_IMPORT",
+            )
+        )
         result = self._db.execute(
             delete(LibraryImportTask).where(LibraryImportTask.library_id == library_id)
         )

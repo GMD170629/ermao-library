@@ -35,9 +35,10 @@ class FilesystemLocalCoverPublication:
             raise ValueError("local cover is not a supported image")
         target_dir = self._storage_root / "covers" / "resources"
         target_dir.mkdir(parents=True, exist_ok=True)
-        temporary_path = target_dir / f".{resource_id}.{uuid4().hex}.part"
+        publication_id = uuid4().hex
+        temporary_path = target_dir / f".{resource_id}.{publication_id}.part"
         temporary_path.write_bytes(content)
-        final_path = target_dir / f"{resource_id}{suffix}"
+        final_path = target_dir / f"{resource_id}.{publication_id}{suffix}"
         return PreparedLocalCover(
             temporary_path=temporary_path,
             final_path=final_path,
@@ -49,6 +50,7 @@ class FilesystemLocalCoverPublication:
 
     def discard(self, prepared: PreparedLocalCover) -> None:
         prepared.temporary_path.unlink(missing_ok=True)
+        prepared.final_path.unlink(missing_ok=True)
 
 
 __all__ = ["FilesystemLocalCoverPublication"]

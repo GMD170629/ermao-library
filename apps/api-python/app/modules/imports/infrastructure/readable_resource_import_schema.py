@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Index,
+    Integer,
     String,
     Text,
     and_,
@@ -32,7 +33,9 @@ class LibraryImportTask(Base):
     __tablename__ = "LibraryImportTask"
     __table_args__ = (
         CheckConstraint(
-            column("kind").in_(("SCAN_LIBRARY", "CONTINUE_SOURCE", "IMPORT_ASSET")),
+            column("kind").in_(
+                ("SCAN_LIBRARY", "CONTINUE_SOURCE", "IMPORT_ASSET", "IDENTIFY_BOOK")
+            ),
             name="LibraryImportTask_kind_check",
         ),
         CheckConstraint(
@@ -61,7 +64,7 @@ class LibraryImportTask(Base):
                     column("role").is_(None),
                 ),
                 and_(
-                    column("kind") == "CONTINUE_SOURCE",
+                    column("kind").in_(("CONTINUE_SOURCE", "IDENTIFY_BOOK")),
                     column("sourceNodeId").is_not(None),
                     column("resourceId").is_(None),
                     column("role").is_(None),
@@ -95,6 +98,15 @@ class LibraryImportTask(Base):
             "sourceNodeId",
             unique=True,
             sqlite_where=column("kind") == "IMPORT_ASSET",
+        ),
+        Index(
+            "LibraryImportTask_book_active_key",
+            "sourceNodeId",
+            unique=True,
+            sqlite_where=and_(
+                column("kind") == "IDENTIFY_BOOK",
+                column("state").in_(("QUEUED", "RUNNING")),
+            ),
         ),
         Index("LibraryImportTask_queued_createdAt_idx", "state", "createdAt"),
         Index("LibraryImportTask_sourceNodeId_idx", "sourceNodeId"),
@@ -131,6 +143,9 @@ class LibraryImportTask(Base):
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
     kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    book_metadata_revision: Mapped[int | None] = mapped_column(
+        "bookMetadataRevision", Integer, nullable=True
+    )
     library_id: Mapped[str] = mapped_column(
         "libraryId",
         String(191),

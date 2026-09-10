@@ -15,8 +15,10 @@ from app.models import (
     LibraryBookFacet,
     LibraryBookMetadata,
     LibraryFacet,
+    LibraryImportTask,
     LibraryReadableResource,
 )
+from app.modules.library.application.metadata_ownership import protect_fields
 from app.modules.library.domain.facets import normalize_facet_name
 from app.modules.library.infrastructure.book_covers import SqlAlchemyBookCoverQueries
 
@@ -28,12 +30,14 @@ class ResourceImportSummary:
     ready: int = 0
     pending: int = 0
     failed: int = 0
+    failed_files: int = 0
 
     def as_record(self) -> dict[str, int]:
         return {
             "ready": self.ready,
             "pending": self.pending,
             "failed": self.failed,
+            "failedFiles": self.failed_files,
         }
 
 
@@ -68,11 +72,28 @@ def resource_import_summaries(
         state = str(row.import_state)
         if state in counts[str(row.book_id)]:
             counts[str(row.book_id)][state] = int(row.resource_count or 0)
+    failed_files = dict(
+        db.execute(
+            select(LibraryReadableResource.book_id, func.count(LibraryImportTask.id))
+            .join(
+                LibraryImportTask,
+                LibraryImportTask.resource_id == LibraryReadableResource.id,
+            )
+            .where(
+                LibraryReadableResource.book_id.in_(normalized_ids),
+                LibraryReadableResource.enablement_state == "ENABLED",
+                LibraryImportTask.kind == "IMPORT_ASSET",
+                LibraryImportTask.state == "FAILED",
+            )
+            .group_by(LibraryReadableResource.book_id)
+        ).all()
+    )
     return {
         book_id: ResourceImportSummary(
             ready=state_counts["READY"],
             pending=state_counts["PENDING"],
             failed=state_counts["FAILED"],
+            failed_files=failed_files.get(book_id, 0),
         )
         for book_id, state_counts in counts.items()
     }
@@ -115,6 +136,8 @@ def _book_record(
         if effective_cover_path
         else (metadata.cover_status if metadata else "PENDING"),
         "metadataQuality": metadata.metadata_quality if metadata else 0,
+        "metadataState": metadata.metadata_state if metadata else "WAITING_IMPORT",
+        "metadataPending": metadata.metadata_pending if metadata else False,
         "publicationStatus": metadata.publication_status if metadata else "UNKNOWN",
         "trackingStatus": metadata.tracking_status if metadata else "NOT_TRACKING",
         "resourceImportSummary": import_summary.as_record(),
@@ -268,6 +291,9 @@ def update_book_fields(
                 normalized_title=title.casefold(),
             )
             db.add(metadata)
+        metadata.protected_fields = protect_fields(
+            metadata.protected_fields, metadata_values.keys()
+        )
         for key, value in metadata_values.items():
             setattr(metadata, key, value)
     return get_book(db, book_id)

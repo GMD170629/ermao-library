@@ -16,6 +16,7 @@ export type ResourceImportSummary = Readonly<{
   ready: number;
   pending: number;
   failed: number;
+  failedFiles?: number;
 }>;
 
 export type ResourceAssetView = Readonly<{
@@ -101,6 +102,9 @@ export type BookView = Readonly<{
   completed: boolean;
   resources: ReadableResourceView[];
   resourceImportSummary: ResourceImportSummary;
+  metadataState?: "WAITING_IMPORT" | "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED";
+  metadataPending?: boolean;
+  metadataOnlineState?: string | null;
 }>;
 
 export function allBookResources(book: BookView): ReadableResourceView[] {

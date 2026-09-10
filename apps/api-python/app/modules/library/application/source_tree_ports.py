@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
+from app.contracts.local_metadata_snapshot import LocalMetadataObservation
 from app.contracts.publication_metadata import PublicationMetadata
 from app.modules.library.domain.organization_modes import TargetLibraryOrganizationMode
 from app.modules.library.domain.readable_resource_states import (
@@ -252,7 +253,9 @@ class BookResourceRepositoryPort(Protocol):
         title: str | None = None,
     ) -> None: ...
 
-    def set_resource_page_count(self, resource_id: str, page_count: int | None) -> None: ...
+    def set_resource_page_count(
+        self, resource_id: str, page_count: int | None
+    ) -> None: ...
 
     def apply_local_metadata(
         self,
@@ -260,6 +263,8 @@ class BookResourceRepositoryPort(Protocol):
         resource_id: str,
         metadata: PublicationMetadata,
         cover_path: str | None = None,
+        asset_id: str | None = None,
+        observations: tuple[LocalMetadataObservation, ...] = (),
     ) -> None: ...
 
     def clear_local_cover(self, *, resource_id: str, expected_path: str) -> None: ...

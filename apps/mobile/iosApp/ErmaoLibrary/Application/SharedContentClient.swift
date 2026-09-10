@@ -137,7 +137,12 @@ actor SharedContentClient: ContentClient {
             readingStatus: readingStatus,
             chapters: [],
             rootSourceNodeID: value.sourceNodeId,
-            continueResourceID: value.continueResourceId
+            continueResourceID: value.continueResourceId,
+            metadataPending: value.metadataPending,
+            metadataState: value.metadataState,
+            metadataOnlineState: value.metadataOnlineState,
+            failedResourceImportCount: Int(value.failedResourceImportCount),
+            failedFileImportCount: Int(value.failedFileImportCount)
         )
     }
 

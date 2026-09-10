@@ -1,4 +1,4 @@
-export type ImportTaskKind = 'SCAN_LIBRARY' | 'CONTINUE_SOURCE' | 'IMPORT_ASSET';
+export type ImportTaskKind = 'SCAN_LIBRARY' | 'CONTINUE_SOURCE' | 'IMPORT_ASSET' | 'IDENTIFY_BOOK';
 export type ImportTaskState = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
 export type ImportTaskRole = 'PRIMARY' | 'TRACK' | 'PAGE' | 'SIDECAR' | 'SUPPLEMENT';
 
@@ -75,7 +75,7 @@ function positiveInteger(value: unknown, fallback: number): number {
 }
 
 function taskKind(value: unknown): ImportTaskKind {
-  if (value === 'SCAN_LIBRARY' || value === 'CONTINUE_SOURCE' || value === 'IMPORT_ASSET') return value;
+  if (value === 'SCAN_LIBRARY' || value === 'CONTINUE_SOURCE' || value === 'IMPORT_ASSET' || value === 'IDENTIFY_BOOK') return value;
   throw new Error('导入任务响应包含无效类型');
 }
 

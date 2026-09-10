@@ -2105,5 +2105,13 @@
   "useAudioPlayback 必须在 AudioPlaybackProvider 内使用": "Use AudioPlayback to use in AudioPlaybackProvider",
   "全部书库": "All libraries",
   "关键字筛选": "Filter by keyword",
-  "搜索书名、资源标题、来源名称或路径": "Search book title, resource title, source name or path"
+  "搜索书名、资源标题、来源名称或路径": "Search book title, resource title, source name or path",
+  "等待整本导入结束": "Waiting for book import to finish",
+  "整本导入结束，等待识别图书信息": "Import finished; waiting to identify book information",
+  "图书信息识别中": "Identifying book information",
+  "图书信息识别失败": "Book information identification failed",
+  "图书信息联网识别中": "Looking up book information online",
+  "联网识别失败，已保留本地信息": "Online lookup failed; local information was retained",
+  "图书信息更新完成": "Book information updated",
+  "部分文件导入失败，已保留可用内容": "Some files failed to import; available content was retained"
 }

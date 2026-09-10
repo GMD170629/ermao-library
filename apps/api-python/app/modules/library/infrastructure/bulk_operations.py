@@ -45,6 +45,7 @@ from app.modules.library.application.facet_sync import (
     BookFacetProjection,
     prepare_book_facet,
 )
+from app.modules.library.application.metadata_ownership import protect_fields
 from app.modules.library.application.source_node_commands import (
     PublishedSourceNodeCover,
     SourceNodeMetadataChanges,
@@ -319,6 +320,16 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
             if row is None:
                 continue
             author = row.author
+            row.protected_fields = protect_fields(
+                row.protected_fields,
+                (
+                    *(
+                        {"seriesName": "series_name"}.get(field, field)
+                        for field in command.fields
+                    ),
+                    *(("tags",) if command.add_tags or command.remove_tags else ()),
+                ),
+            )
             series_name = row.series_name
             if "author" in command.fields:
                 author = command.fields["author"].strip() or UNKNOWN_AUTHOR_PLACEHOLDER
@@ -548,16 +559,28 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
                         "updatedAt": resource_metadata.updated_at,
                     }
                 )
+                resource_metadata.protected_fields = protect_fields(
+                    resource_metadata.protected_fields, ("title",)
+                )
                 resource_metadata.title = str(replacement.after)
                 resource_metadata.updated_at = now
                 continue
             row = metadata.get(replacement.book_id)
             if row is None:
                 continue
+            row.protected_fields = protect_fields(
+                row.protected_fields,
+                (
+                    {"seriesName": "series_name"}.get(
+                        replacement.field, replacement.field
+                    ),
+                ),
+            )
             if replacement.field == "title":
                 title = str(replacement.after).strip()
                 if not title:
                     raise InvalidBulkBookOperationError("EMPTY_BOOK_TITLE")
+                row.protected_fields = protect_fields(row.protected_fields, ("title",))
                 row.title = title
                 row.normalized_title = normalize_facet_name(title)
             elif replacement.field == "author":

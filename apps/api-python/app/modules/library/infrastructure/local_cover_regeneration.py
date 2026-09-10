@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TypedDict
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, aliased
@@ -31,9 +32,19 @@ from app.modules.library.application.local_cover_regeneration import (
     LocalCoverSourcePort,
     ResourceLocalMetadataSource,
 )
+from app.modules.library.application.metadata_ownership import protected_fields
 from app.modules.library.application.resource_commands import OperationSummary
 from app.modules.library.infrastructure import operations as operation_store
+from app.modules.library.infrastructure.book_covers import first_readable_resource_id
+from app.modules.library.infrastructure.local_cover_validation import valid_local_cover
 from app.modules.metadata.public import FilesystemLocalMetadataInspector
+
+
+class _OwnedSourceFields(TypedDict):
+    root_path: Path | None
+    relative_path: str
+    is_directory: bool
+    cover_protected: bool
 
 
 class FilesystemLocalMetadataCoverParser:
@@ -41,6 +52,18 @@ class FilesystemLocalMetadataCoverParser:
 
     def __init__(self, inspector: FilesystemLocalMetadataInspector) -> None:
         self._inspector = inspector
+
+    def extract_owned_cover(self, scope: LocalCoverScope) -> bytes | None:
+        if scope.root_path is None:
+            return None
+        root = scope.root_path.resolve()
+        source = (root / scope.relative_path).resolve()
+        source.relative_to(root)
+        candidate = self._inspector.inspect_sidecar(
+            source, directory=scope.is_directory
+        )
+        content = candidate.cover if candidate else None
+        return valid_local_cover(content)
 
     def extract_cover(
         self, source: ResourceLocalMetadataSource
@@ -177,6 +200,12 @@ class SqlAlchemyLocalCoverSources(LocalCoverSourcePort):
                 node=node,
             ),
             is_book_root=node.id == root.id,
+            **self._owned_source_fields(book, node),
+            first_readable_resource_id=first_readable_resource_id(
+                self._db,
+                str(book.id),
+                self._resource_ids_under(book_id=str(book.id), node=node),
+            ),
         )
 
     def book_scope(self, *, book_id: str) -> LocalCoverScope | None:
@@ -199,7 +228,29 @@ class SqlAlchemyLocalCoverSources(LocalCoverSourcePort):
                 node=root,
             ),
             is_book_root=True,
+            **self._owned_source_fields(book, root),
+            first_readable_resource_id=first_readable_resource_id(
+                self._db, str(book.id)
+            ),
         )
+
+    def _owned_source_fields(
+        self, book: LibraryBook, node: LibrarySourceNode
+    ) -> _OwnedSourceFields:
+        library = self._db.get(Library, book.library_id)
+        metadata = (
+            self._db.get(LibraryBookMetadata, book.id)
+            if node.id == book.source_node_id
+            else self._db.get(LibrarySourceNodeMetadata, node.id)
+        )
+        return {
+            "root_path": Path(library.root_path) if library else None,
+            "relative_path": node.relative_path,
+            "is_directory": node.physical_kind == "DIRECTORY",
+            "cover_protected": bool(
+                metadata and "cover_path" in protected_fields(metadata.protected_fields)
+            ),
+        }
 
     def current_resource_cover_path(self, resource_id: str) -> str | None:
         metadata = self._db.get(LibraryReadableResourceMetadata, resource_id)
@@ -214,27 +265,27 @@ class SqlAlchemyLocalCoverSources(LocalCoverSourcePort):
         if metadata is None:
             raise LookupError(resource_id)
         metadata.cover_path = cover_path
-        metadata.cover_status = "READY"
+        metadata.cover_status = "READY" if cover_path else "PENDING"
         self._db.flush()
 
     def mark_source_cover_ready(
         self,
         *,
         scope: LocalCoverScope,
-        cover_path: str,
+        cover_path: str | None,
     ) -> None:
         metadata = self._db.get(LibrarySourceNodeMetadata, scope.source_node_id)
         if metadata is None:
             metadata = LibrarySourceNodeMetadata(source_node_id=scope.source_node_id)
             self._db.add(metadata)
         metadata.cover_path = cover_path
-        metadata.cover_status = "READY"
+        metadata.cover_status = "READY" if cover_path else "PENDING"
         if scope.is_book_root:
             book_metadata = self._db.get(LibraryBookMetadata, scope.book_id)
             if book_metadata is None:
                 raise LookupError(scope.book_id)
             book_metadata.cover_path = cover_path
-            book_metadata.cover_status = "READY"
+            book_metadata.cover_status = "READY" if cover_path else "PENDING"
         self._db.flush()
 
     def _book_node_context(

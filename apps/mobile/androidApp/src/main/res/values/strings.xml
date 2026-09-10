@@ -673,4 +673,12 @@
     <string name="audio_chapters_empty">No explicit chapters</string>
     <string name="audio_chapter_current">Current chapter</string>
     <string name="download_management_delete">Delete</string>
+    <string name="book_metadata_waiting_import">Waiting for book import to finish</string>
+    <string name="book_metadata_queued">Import finished; waiting to identify book information</string>
+    <string name="book_metadata_running">Identifying book information</string>
+    <string name="book_metadata_failed">Book information identification failed</string>
+    <string name="book_metadata_online">Looking up book information online</string>
+    <string name="book_metadata_online_failed">Online lookup failed; local information was retained</string>
+    <string name="book_metadata_completed">Book information updated</string>
+    <string name="book_metadata_partial_import">Some files failed to import; available content was retained</string>
 </resources>

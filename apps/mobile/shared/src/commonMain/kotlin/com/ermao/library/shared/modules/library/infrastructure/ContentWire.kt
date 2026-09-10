@@ -84,6 +84,7 @@ data class ResourceImportSummaryWire(
     val ready: Int = 0,
     val pending: Int = 0,
     val failed: Int = 0,
+    val failedFiles: Int = 0,
 )
 
 internal fun BookPageWire.toPage(): LibraryPage<BookSummary> =

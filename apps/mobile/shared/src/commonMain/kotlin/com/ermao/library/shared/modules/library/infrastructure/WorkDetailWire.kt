@@ -39,6 +39,9 @@ data class BookWire(
     val updatedAt: String? = null,
     val gradient: String = "",
     val resources: List<ResourceWire> = emptyList(),
+    val metadataPending: Boolean = false,
+    val metadataState: String? = null,
+    val metadataOnlineState: String? = null,
     val resourceImportSummary: ResourceImportSummaryWire = ResourceImportSummaryWire(),
     val completed: Boolean = false,
     val continueResourceId: String? = null,
@@ -131,8 +134,12 @@ fun BookWire.toBookDetailSummary(): BookDetailSummary {
         continueResourceProgress = continueResourceProgress,
         completed = completed,
         resources = resources.map(ResourceWire::toDomain),
+        metadataPending = metadataPending,
+        metadataState = metadataState,
+        metadataOnlineState = metadataOnlineState,
         pendingResourceImportCount = resourceImportSummary.pending,
         failedResourceImportCount = resourceImportSummary.failed,
+        failedFileImportCount = resourceImportSummary.failedFiles,
     )
 }
 

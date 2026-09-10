@@ -34,6 +34,10 @@ class FilesystemSourceNodeCoverPublication(SourceNodeCoverPublicationPort):
         temporary_path = self._cover_root / f".{source_node_id}.{uuid4().hex}.part"
         try:
             temporary_path.write_bytes(content)
+        except OSError:
+            temporary_path.unlink(missing_ok=True)
+            raise
+        try:
             with Image.open(temporary_path) as image:
                 image_format = str(image.format or "").upper()
                 image.verify()
@@ -95,6 +99,9 @@ class FilesystemSourceNodeCoverPublication(SourceNodeCoverPublicationPort):
             and previous_stored_path != published.prepared.stored_path
         ):
             self.remove(previous_stored_path)
+
+    def discard(self, prepared: PreparedSourceNodeCover) -> None:
+        prepared.temporary_path.unlink(missing_ok=True)
 
     def remove(self, stored_path: str) -> None:
         candidate = (self._storage_root / stored_path).resolve()

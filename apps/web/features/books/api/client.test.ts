@@ -410,3 +410,13 @@ for (const sample of identityCases) {
     assert.equal(book.resources[0]?.coverUrl, sample.resource.coverUrl);
   });
 }
+
+
+test('maps local identification and online failure independently from import failures', () => {
+  const book = mapBookView({ id: 'book-1', sourceNodeId: 'root', title: 'Book', resources: [], metadataState: 'COMPLETED', metadataPending: false, metadataOnlineState: 'FAILED', resourceImportSummary: { pending: 0, failed: 0, failedFiles: 1, ready: 1 } });
+  assert.equal(book.metadataState, 'COMPLETED');
+  assert.equal(book.metadataPending, false);
+  assert.equal(book.metadataOnlineState, 'FAILED');
+  assert.equal(book.resourceImportSummary.failed, 0);
+  assert.equal(book.resourceImportSummary.failedFiles, 1);
+});

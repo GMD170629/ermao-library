@@ -36,7 +36,8 @@ function resourceImportSummary(value: unknown): ResourceImportSummary {
   return {
     ready: Math.max(0, Math.trunc(finiteNumber(summary.ready))),
     pending: Math.max(0, Math.trunc(finiteNumber(summary.pending))),
-    failed: Math.max(0, Math.trunc(finiteNumber(summary.failed)))
+    failed: Math.max(0, Math.trunc(finiteNumber(summary.failed))),
+    failedFiles: Math.max(0, Math.trunc(finiteNumber(summary.failedFiles)))
   };
 }
 
@@ -181,6 +182,9 @@ export function mapBookView(value: unknown): BookView {
     continueReaderType: root.continueReaderType === 'audio' || root.continueReaderType === 'comic' || root.continueReaderType === 'pdf' || root.continueReaderType === 'reflowable' ? root.continueReaderType : null,
     completed: root.completed === true,
     resourceImportSummary: resourceImportSummary(root.resourceImportSummary),
+    metadataState: root.metadataState === "WAITING_IMPORT" || root.metadataState === "QUEUED" || root.metadataState === "RUNNING" || root.metadataState === "COMPLETED" || root.metadataState === "FAILED" ? root.metadataState : undefined,
+    metadataPending: root.metadataPending === true,
+    metadataOnlineState: nullableString(root.metadataOnlineState),
     resources
   };
 }

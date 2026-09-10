@@ -10,6 +10,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
+from app.models import LibraryBook, LibraryBookMetadata
 from app.models.common import cuid
 from app.modules.imports.application.readable_resource.ports import (
     WORKER_INTERRUPTED,
@@ -18,6 +19,9 @@ from app.modules.imports.application.readable_resource.ports import (
     LibraryImportTaskQueuePort,
     LibraryImportTaskRecord,
     MissingEntryPolicy,
+)
+from app.modules.imports.infrastructure.readable_resource.book_completion import (
+    BookImportCompletion,
 )
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
@@ -28,6 +32,7 @@ from app.modules.library.public import AssetRole
 class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
     def __init__(self, session: Session) -> None:
         self._session = session
+        self._completion = BookImportCompletion(session)
 
     def replace_with_fresh_library_scan(self, library_id: str) -> None:
         """Drop every target task for the library and enqueue one SCAN_LIBRARY."""
@@ -44,6 +49,12 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
     def delete_tasks_for_source_nodes(self, source_node_ids: Sequence[str]) -> None:
         if not source_node_ids:
             return
+        for task in self._session.scalars(
+            select(LibraryImportTask).where(
+                LibraryImportTask.source_node_id.in_(tuple(source_node_ids))
+            )
+        ):
+            self._completion.cancel(task)
         self._session.execute(
             delete(LibraryImportTask).where(
                 LibraryImportTask.source_node_id.in_(tuple(source_node_ids))
@@ -73,6 +84,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         )
         self._session.add(row)
         self._session.flush()
+        self._completion.dirty(row)
         return self._to_record(row)
 
     def request_library_scan(
@@ -140,6 +152,8 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         if row is None:
             raise RuntimeError("queued library scan disappeared after request")
         self._promote_missing_entry_policy(row, missing_entry_policy)
+        if inserted:
+            self._completion.dirty(row)
         return self._to_record(row), inserted
 
     def request_source_scan(
@@ -228,6 +242,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             row.started_at = None
             row.finished_at = None
             row.role = role.value
+            self._completion.dirty(row)
             self._session.flush()
         return self._to_record(row)
 
@@ -259,6 +274,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         row.started_at = None
         row.finished_at = None
         row.role = role.value
+        self._completion.dirty(row)
         self._session.flush()
         return self._to_record(row)
 
@@ -283,6 +299,12 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         if row is None:
             raise LookupError(task_id)
         row.state = "RUNNING"
+        if row.kind == "IDENTIFY_BOOK":
+            row.book_metadata_revision = self._session.scalar(
+                select(LibraryBookMetadata.import_revision)
+                .join(LibraryBook)
+                .where(LibraryBook.source_node_id == row.source_node_id)
+            )
         row.started_at = started_at
         row.error_summary = None
         self._session.flush()
@@ -295,6 +317,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         row.finished_at = finished_at
         row.error_summary = None
         self._session.flush()
+        self._completion.finished(row)
 
     def mark_failed(
         self,
@@ -310,6 +333,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         row.finished_at = finished_at
         row.error_summary = error_summary
         self._session.flush()
+        self._completion.finished(row)
 
     def fail_interrupted_tasks_on_startup(self, *, finished_at: datetime) -> int:
         result = self._session.execute(
@@ -322,6 +346,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             )
         )
         self._session.flush()
+        self._completion.enqueue_ready()
         return int(getattr(result, "rowcount", 0) or 0)
 
     def requeue_failed_task(self, task_id: str) -> tuple[LibraryImportTaskRecord, bool]:
@@ -330,10 +355,33 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             raise LookupError(task_id)
         if row.state != "FAILED":
             return self._to_record(row), False
+        if row.kind == "IDENTIFY_BOOK":
+            active = self._session.scalar(
+                select(LibraryImportTask).where(
+                    LibraryImportTask.kind == "IDENTIFY_BOOK",
+                    LibraryImportTask.source_node_id == row.source_node_id,
+                    LibraryImportTask.state.in_(("QUEUED", "RUNNING")),
+                )
+            )
+            if active is not None:
+                return self._to_record(active), False
         row.state = "QUEUED"
         row.error_summary = None
         row.started_at = None
         row.finished_at = None
+        self._completion.dirty(row)
+        if row.kind == "IDENTIFY_BOOK":
+            self._session.execute(
+                update(LibraryBookMetadata)
+                .where(
+                    LibraryBookMetadata.book_id.in_(
+                        select(LibraryBook.id).where(
+                            LibraryBook.source_node_id == row.source_node_id
+                        )
+                    )
+                )
+                .values(metadata_pending=True, metadata_state="QUEUED")
+            )
         self._session.flush()
         return self._to_record(row), True
 

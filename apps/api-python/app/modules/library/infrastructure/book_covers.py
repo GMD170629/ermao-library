@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from sqlalchemy import ColumnElement, and_, case, func, select
+from sqlalchemy import ColumnElement, and_, case, exists, func, select
 from sqlalchemy.orm import InstrumentedAttribute, Session
 
-from app.models import LibraryBookMetadata
+from app.models import (
+    LibraryBookMetadata,
+    LibraryReadableResource,
+    LibraryResourceAsset,
+    LibrarySourceNode,
+)
 from app.modules.library.application.book_covers import BookCoverCandidate
 
 
@@ -75,3 +80,34 @@ __all__ = [
     "effective_book_cover_exists",
     "effective_book_cover_path",
 ]
+
+
+def first_readable_resource_id(
+    db: Session, book_id: str, resource_ids: tuple[str, ...] | None = None
+) -> str | None:
+    """Select identity before inspecting its cover; missing artwork cannot skip it."""
+    query = (
+        select(LibraryReadableResource.id)
+        .join(
+            LibrarySourceNode,
+            LibrarySourceNode.id == LibraryReadableResource.source_node_id,
+        )
+        .where(
+            LibraryReadableResource.book_id == book_id,
+            LibraryReadableResource.enablement_state == "ENABLED",
+            LibraryReadableResource.import_state == "READY",
+            exists(
+                select(LibraryResourceAsset.id).where(
+                    LibraryResourceAsset.resource_id == LibraryReadableResource.id,
+                    LibraryResourceAsset.import_state == "READY",
+                )
+            ),
+        )
+        .order_by(
+            func.lower(LibrarySourceNode.relative_path), LibraryReadableResource.id
+        )
+        .limit(1)
+    )
+    if resource_ids is not None:
+        query = query.where(LibraryReadableResource.id.in_(resource_ids))
+    return db.scalar(query)

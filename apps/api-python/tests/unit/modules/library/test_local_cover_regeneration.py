@@ -71,6 +71,7 @@ class _Sources:
             source_node_id=source_node_id,
             resource_ids=("r1", "r2", "r3"),
             is_book_root=self.root,
+            first_readable_resource_id="r1",
         )
 
     def book_scope(self, *, book_id: str) -> LocalCoverScope | None:
@@ -98,6 +99,9 @@ class _Parser:
     def __init__(self, results: dict[str, bytes | LocalCoverFailureCode]) -> None:
         self.results = results
         self.calls: list[str] = []
+
+    def extract_owned_cover(self, scope: LocalCoverScope) -> bytes | None:
+        return None
 
     def extract_cover(
         self, source: ResourceLocalMetadataSource
@@ -343,3 +347,26 @@ def test_non_root_directory_does_not_report_a_book_cover_update() -> None:
 
     assert result.source_node_updated is True
     assert result.book_updated is False
+
+
+@pytest.mark.parametrize(
+    "reason",
+    (
+        "LOCAL_COVER_NOT_FOUND",
+        "LOCAL_METADATA_SOURCE_UNAVAILABLE",
+        "LOCAL_COVER_INVALID",
+    ),
+)
+def test_book_regeneration_does_not_skip_first_readable_resource_without_artwork(
+    reason: LocalCoverFailureCode,
+) -> None:
+    sources = _Sources()
+    use_case, resources, source_cover, _ = _use_case(
+        sources, _Parser({"r1": reason, "r2": b"second", "r3": b"third"})
+    )
+    result = use_case.regenerate_book(actor=_actor(), book_id="book")
+    assert result.book_updated
+    assert result.updated_resource_ids == ("r2", "r3")
+    assert source_cover.content is None
+    assert sources.marked_source is not None and sources.marked_source[1] is None
+    assert resources.contents["r2"] == b"second"

@@ -657,4 +657,12 @@
     <string name="audio_chapters_empty">暂无章节</string>
     <string name="audio_chapter_current">当前章节</string>
     <string name="download_management_delete">删除</string>
+    <string name="book_metadata_waiting_import">等待整本导入结束</string>
+    <string name="book_metadata_queued">整本导入结束，等待识别图书信息</string>
+    <string name="book_metadata_running">图书信息识别中</string>
+    <string name="book_metadata_failed">图书信息识别失败</string>
+    <string name="book_metadata_online">图书信息联网识别中</string>
+    <string name="book_metadata_online_failed">联网识别失败，已保留本地信息</string>
+    <string name="book_metadata_completed">图书信息更新完成</string>
+    <string name="book_metadata_partial_import">部分文件导入失败，已保留可用内容</string>
 </resources>

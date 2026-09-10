@@ -34,6 +34,7 @@ from app.modules.library.application.facet_sync import (
     BookFacetProjection,
     prepare_book_facet,
 )
+from app.modules.library.application.metadata_ownership import protect_fields
 from app.modules.library.application.recognized_metadata import (
     BookMetadataChanges,
     BookMetadataState,
@@ -166,6 +167,10 @@ class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetada
         metadata = self._db.get(LibraryBookMetadata, book_id)
         if metadata is None:
             raise LookupError(book_id)
+        metadata.protected_fields = protect_fields(
+            metadata.protected_fields,
+            (*book_changes.keys(), *(("tags",) if tags is not None else ())),
+        )
         for field, value in book_changes.items():
             setattr(metadata, field, value)
         if "title" in book_changes:
@@ -184,6 +189,9 @@ class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetada
             )
             if resource_metadata is None:
                 raise LookupError(resource_id)
+            resource_metadata.protected_fields = protect_fields(
+                resource_metadata.protected_fields, resource_changes.keys()
+            )
             for field, value in resource_changes.items():
                 setattr(resource_metadata, field, value)
             resource_metadata.updated_at = now
@@ -236,6 +244,7 @@ class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetada
                 select(
                     LibraryBook.id,
                     LibraryBookMetadata.cover_path,
+                    LibraryBookMetadata.updated_at,
                 )
                 .join(
                     LibraryBookMetadata,
@@ -250,6 +259,7 @@ class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetada
                 RecognizedCoverState(
                     target_id=str(row[0]),
                     current_cover_path=str(row[1]) if row[1] else None,
+                    updated_at=row[2],
                 )
                 if row is not None
                 else None
@@ -260,6 +270,7 @@ class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetada
             select(
                 LibraryReadableResource.id,
                 LibraryReadableResourceMetadata.cover_path,
+                LibraryReadableResourceMetadata.updated_at,
             )
             .join(
                 LibraryReadableResourceMetadata,
@@ -276,6 +287,7 @@ class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetada
             RecognizedCoverState(
                 target_id=str(row[0]),
                 current_cover_path=str(row[1]) if row[1] else None,
+                updated_at=row[2],
             )
             if row is not None
             else None
@@ -298,6 +310,9 @@ class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetada
             metadata = self._db.get(LibraryReadableResourceMetadata, state.target_id)
             if metadata is None:
                 raise LookupError(state.target_id)
+        metadata.protected_fields = protect_fields(
+            metadata.protected_fields, ("cover_path",)
+        )
         metadata.cover_path = cover_path
         metadata.cover_status = "READY"
         metadata.updated_at = now

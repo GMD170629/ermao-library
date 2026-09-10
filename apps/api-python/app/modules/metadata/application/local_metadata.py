@@ -24,8 +24,8 @@ from app.contracts.local_metadata import (
 from app.contracts.publication_metadata import PublicationMetadata
 from app.contracts.publication_titles import (
     finalize_volume_title,
-    titles_from_local_source,
 )
+from app.modules.metadata.domain.source_name import metadata_from_source_name
 
 _DIRECTORY_RESOURCE_FORMATS = frozenset(
     {"AUDIOBOOK_DIRECTORY", "AUDIOBOOK_DIR", "IMAGE_DIR"}
@@ -52,6 +52,7 @@ class ResolvedLocalMetadata:
     cover: bytes | None
     field_sources: tuple[tuple[str, LocalMetadataSource | Literal["REQUESTED"]], ...]
     source_order: tuple[LocalMetadataSource, ...]
+    candidates: tuple[LocalMetadataCandidate, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +107,15 @@ class FilesystemLocalMetadataInspector:
         self._embedded_reader = embedded_reader
         self._audio_reader = audio_reader
         self._sidecar_reader = sidecar_reader
+
+    def inspect_sidecar(
+        self, source: Path, *, directory: bool
+    ) -> LocalMetadataCandidate | None:
+        return (
+            self._sidecar_reader(source, directory=directory)
+            if self._sidecar_reader
+            else None
+        )
 
     def inspect(
         self,
@@ -214,16 +224,11 @@ def _parse_local_metadata(
             cover=audio.cover_data,
         )
 
-    path_titles = titles_from_local_source(
-        metadata_source.name if has_directory_path else metadata_source.stem
-    )
     candidates: list[LocalMetadataCandidate] = [
         LocalMetadataCandidate(
             source="PATH",
-            metadata=PublicationMetadata(
-                title=path_titles.work_title,
-                volume_title=path_titles.volume_title,
-                volume_index=path_titles.volume_index,
+            metadata=metadata_from_source_name(
+                metadata_source.name, is_directory=has_directory_path
             ),
         )
     ]
@@ -231,10 +236,10 @@ def _parse_local_metadata(
         candidates.append(resolved_embedded)
     if resolved_sidecar is not None:
         candidates.append(resolved_sidecar)
-    return _resolve_local_metadata(tuple(candidates), source_order)
+    return resolve_local_metadata(tuple(candidates), source_order)
 
 
-def _resolve_local_metadata(
+def resolve_local_metadata(
     candidates: tuple[LocalMetadataCandidate, ...],
     source_order: tuple[LocalMetadataSource, ...] = DEFAULT_LOCAL_METADATA_PRIORITY,
 ) -> ResolvedLocalMetadata:
@@ -310,6 +315,7 @@ def _resolve_local_metadata(
         cover=cover,
         field_sources=tuple(sources.items()),
         source_order=order,
+        candidates=candidates,
     )
 
 

@@ -26,8 +26,12 @@ data class BookDetailSummary(
     val continueResourceProgress: Double,
     val completed: Boolean,
     val resources: List<Resource>,
+    val metadataPending: Boolean = false,
+    val metadataState: String? = null,
+    val metadataOnlineState: String? = null,
     val pendingResourceImportCount: Int = 0,
     val failedResourceImportCount: Int = 0,
+    val failedFileImportCount: Int = 0,
 )
 
 data class AppliedFacet(

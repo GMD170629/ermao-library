@@ -218,6 +218,10 @@ class LibrarySourceNodeMetadata(Base):
         default="PENDING",
         server_default="PENDING",
     )
+    protected_fields: Mapped[str] = mapped_column(
+        "protectedFields", Text, nullable=False, default="[]", server_default="[]"
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         "createdAt",
         TimestampMilliseconds(),
@@ -423,6 +427,27 @@ class LibraryBookMetadata(Base):
         default="NOT_TRACKING",
         server_default="NOT_TRACKING",
     )
+    protected_fields: Mapped[str] = mapped_column(
+        "protectedFields", Text, nullable=False, default="[]", server_default="[]"
+    )
+
+    import_revision: Mapped[int] = mapped_column(
+        "importRevision", Integer, nullable=False, default=0, server_default="0"
+    )
+    processed_revision: Mapped[int] = mapped_column(
+        "processedRevision", Integer, nullable=False, default=-1, server_default="-1"
+    )
+    metadata_pending: Mapped[bool] = mapped_column(
+        "metadataPending", Boolean, nullable=False, default=True, server_default="1"
+    )
+    metadata_state: Mapped[str] = mapped_column(
+        "metadataState",
+        String(32),
+        nullable=False,
+        default="WAITING_IMPORT",
+        server_default="WAITING_IMPORT",
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         "createdAt",
         TimestampMilliseconds(),
@@ -596,6 +621,10 @@ class LibraryReadableResourceMetadata(Base):
         default="PENDING",
         server_default="PENDING",
     )
+    protected_fields: Mapped[str] = mapped_column(
+        "protectedFields", Text, nullable=False, default="[]", server_default="[]"
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         "createdAt",
         TimestampMilliseconds(),
@@ -711,6 +740,17 @@ class LibraryResourceAsset(Base):
     failure_reason: Mapped[str | None] = mapped_column(
         "failureReason", Text, nullable=True
     )
+    local_metadata_candidates: Mapped[str] = mapped_column(
+        "localMetadataCandidates",
+        Text,
+        nullable=False,
+        default="[]",
+        server_default="[]",
+    )
+    local_cover_path: Mapped[str | None] = mapped_column(
+        "localCoverPath", Text, nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         "createdAt",
         TimestampMilliseconds(),

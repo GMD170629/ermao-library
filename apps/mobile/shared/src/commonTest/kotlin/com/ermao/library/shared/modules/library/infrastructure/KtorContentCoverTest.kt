@@ -17,6 +17,16 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
 class KtorContentCoverTest {
+    @Test fun bookMetadataPhasesAreIndependentOfPartialImportFailure() {
+        val wire = Json.decodeFromString<BookWire>("""{"id":"book","libraryId":"lib","sourceNodeId":"root","title":"Book","visibilityState":"VISIBLE","curationState":"ACTIVE","publicationStatus":"UNKNOWN","trackingStatus":"NONE","metadataQuality":0,"coverStatus":"PENDING","coverUrl":"","metadataState":"COMPLETED","metadataPending":false,"metadataOnlineState":"FAILED","resourceImportSummary":{"pending":0,"failed":0,"failedFiles":1,"ready":1}}""")
+        val detail = wire.toBookDetailSummary()
+        assertEquals("COMPLETED", detail.metadataState)
+        assertEquals(false, detail.metadataPending)
+        assertEquals("FAILED", detail.metadataOnlineState)
+        assertEquals(0, detail.failedResourceImportCount)
+        assertEquals(1, detail.failedFileImportCount)
+    }
+
     @Test fun unversionedCoversRevalidateAndFallbackIsNotArtwork() = runBlocking {
         val management = createWorkManagementContext("profile", "Test", "https://library.example", "server", false, "user", 1)
         val context = ContentRequestContext(management.profile, management.namespace)

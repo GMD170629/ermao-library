@@ -88,6 +88,13 @@ def select_eligible_books(
         LibraryBook.visibility_state == "VISIBLE",
         LibraryBook.curation_state != "DISMISSED",
     ]
+    if trigger in {"NEW", "SCHEDULE"}:
+        filters.extend(
+            (
+                LibraryBookMetadata.metadata_pending.is_(False),
+                LibraryBookMetadata.metadata_state == "COMPLETED",
+            )
+        )
     if book_ids:
         normalized_ids = list(
             dict.fromkeys(str(item) for item in book_ids if str(item).strip())

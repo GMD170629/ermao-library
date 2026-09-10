@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from datetime import timedelta
 from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile
@@ -19,11 +21,15 @@ from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
 from app.models.library import Library
+from app.models.organize import OrganizePolicy
 from app.modules.imports.application.readable_resource.continue_import import (
     ContinueLibraryImport,
 )
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
+)
+from app.modules.library.infrastructure.imported_book_metadata import (
+    SqlAlchemyImportedBookMetadata,
 )
 from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryBook,
@@ -68,9 +74,11 @@ def _write_epub(
     "import_order",
     (("01.epub", "02.epub"), ("02.epub", "01.epub")),
 )
+@pytest.mark.parametrize("first_cover", ("valid", "empty", "missing", "invalid"))
 def test_real_volumes_import_keeps_book_stable_and_resource_covers_distinct(
     tmp_path: Path,
     import_order: tuple[str, str],
+    first_cover: str,
 ) -> None:
     settings = Settings(storage_root=str(tmp_path / "storage"))
     engine = create_sqlite_engine(settings.database_path)
@@ -175,5 +183,129 @@ def test_real_volumes_import_keeps_book_stable_and_resource_covers_distinct(
                     settings.resolved_storage_root / stored_path
                 ).read_bytes() == covers[name]
             assert all(task.state == "SUCCEEDED" for task in tasks_by_name.values())
+            first_metadata = by_name["01.epub"][1]
+            if first_cover == "empty":
+                first_metadata.cover_path = None
+            elif first_cover == "missing":
+                (settings.resolved_storage_root / first_metadata.cover_path).unlink()
+            elif first_cover == "invalid":
+                (
+                    settings.resolved_storage_root / first_metadata.cover_path
+                ).write_bytes(b"not an image")
+            db.commit()
+            assert worker.process_once() == "identified"
+            db.expire_all()
+            assert book_metadata.metadata_state == "COMPLETED"
+            assert book_metadata.title == "Series"
+            assert book_metadata.author is None
+            if first_cover == "valid":
+                assert book_metadata.cover_path
+                assert (
+                    settings.resolved_storage_root / book_metadata.cover_path
+                ).read_bytes() == covers["01.epub"]
+            else:
+                assert book_metadata.cover_path is None
+                assert book_metadata.cover_status == "PENDING"
+
+            assert worker.process_once() == "idle"
+
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("count,path_first", ((1, False), (1, True), (2, False)))
+def test_completed_book_uses_configured_priority_and_counts_failed_volumes(
+    tmp_path: Path, count: int, path_first: bool
+) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    root = tmp_path / "library"
+    folder = root / "Path Title - Path Author"
+    folder.mkdir(parents=True)
+    _write_epub(
+        folder / "one.epub",
+        title="Embedded Title",
+        author="Embedded Author",
+        cover=_png((1, 2, 3)),
+    )
+    if count == 2:
+        (folder / "two.epub").write_bytes(b"invalid epub")
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            db.add(
+                Library(
+                    id="lib",
+                    name="Library",
+                    root_path=str(root),
+                    organization_mode="VOLUMES",
+                    min_file_size_bytes=0,
+                )
+            )
+            if path_first:
+                policy = db.get(OrganizePolicy, "default")
+                if policy is None:
+                    policy = OrganizePolicy(id="default")
+                    db.add(policy)
+                policy.local_metadata_priority_json = json.dumps(
+                    ["PATH", "EMBEDDED", "SIDECAR_OPF"]
+                )
+            db.commit()
+            pipeline = build_readable_resource_pipeline(db, settings)
+            pipeline.continue_import.execute(ContinueLibraryImport("lib"))
+            worker = build_readable_resource_worker(pipeline)
+            assert worker.process_once() == "scan"
+            if count == 2:
+                (folder / "two.epub").unlink()
+            for _ in range(10):
+                if worker.process_once() == "idle":
+                    break
+            metadata = db.scalar(select(LibraryBookMetadata))
+            assert metadata is not None and metadata.metadata_state == "COMPLETED"
+            expected = "Path" if path_first or count == 2 else "Embedded"
+            assert metadata.title == expected + " Title"
+            assert metadata.author == expected + " Author"
+            if count == 2:
+                assert (
+                    db.scalar(
+                        select(LibraryImportTask.id).where(
+                            LibraryImportTask.kind == "IMPORT_ASSET",
+                            LibraryImportTask.state == "FAILED",
+                        )
+                    )
+                    is not None
+                )
+
+            metadata.metadata_pending = True
+            metadata.protected_fields = '["author"]'
+            metadata.author = None
+            db.commit()
+            book = db.scalar(select(LibraryBook))
+            assert book is not None
+            repository = SqlAlchemyImportedBookMetadata(
+                db,
+                settings,
+                lambda source, directory: None,
+                lambda book_id: True,
+                lambda value: None,
+            )
+            snapshot = repository.load(book.source_node_id)
+            db.commit()
+            assert snapshot is not None
+            result = repository.inspect(snapshot)
+            assert repository.still_current(snapshot)
+            repository.apply(snapshot, result, None)
+            db.commit()
+            assert metadata.author is None
+
+            metadata.metadata_pending = True
+            db.commit()
+            snapshot = repository.load(book.source_node_id)
+            db.commit()
+            assert snapshot is not None and snapshot.metadata_updated_at is not None
+            metadata.author = "User changed again"
+            metadata.updated_at = snapshot.metadata_updated_at + timedelta(seconds=1)
+            db.commit()
+            assert not repository.still_current(snapshot)
     finally:
         engine.dispose()

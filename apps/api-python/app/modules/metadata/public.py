@@ -1,3 +1,5 @@
+from app.modules.metadata.domain.source_name import metadata_from_source_name
+
 """Public metadata capability contracts."""
 
 from app.contracts.publication_metadata import PublicationMetadata
@@ -6,6 +8,7 @@ from app.modules.metadata.application.local_metadata import (
     LocalAudioMetadata,
     LocalMetadataCandidate,
     ResolvedLocalMetadata,
+    resolve_local_metadata,
 )
 from app.modules.metadata.application.opf import (
     MAX_OPF_BYTES,
@@ -59,11 +62,13 @@ __all__ = [
     "ResolvedLocalMetadata",
     "cover_media_type",
     "load_metadata_writeback_projection",
+    "metadata_from_source_name",
     "metadata_writeback_enabled",
     "parse_opf_metadata",
     "persist_metadata_writeback_intents",
     "prepare_metadata_writeback_intents",
     "prepare_source_node_metadata_writeback_intent",
+    "resolve_local_metadata",
     "search_with_metadata_provider",
     "serialize_opf_metadata",
 ]

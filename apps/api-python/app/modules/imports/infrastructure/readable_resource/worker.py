@@ -16,6 +16,7 @@ from app.modules.imports.application.readable_resource.scan_source_tree import (
     ScanLibrarySourceTree,
     SourceScanStartUnavailableError,
 )
+from app.modules.library.public import IdentifyImportedBook
 
 logger = logging.getLogger("ermao.readable_resource_pipeline")
 
@@ -31,12 +32,14 @@ class ReadableResourceWorkerProcessor:
         process_import: ProcessReadableResourceImportTask,
         uow: UnitOfWorkPort,
         clock: ClockPort,
+        identify_book: IdentifyImportedBook | None = None,
     ) -> None:
         self._queue = queue
         self._scan = scan
         self._process_import = process_import
         self._uow = uow
         self._clock = clock
+        self._identify_book = identify_book
 
     def startup(self) -> int:
         with self._uow.transaction():
@@ -89,6 +92,16 @@ class ReadableResourceWorkerProcessor:
                         return "cancelled"
                     self._queue.mark_succeeded(task_id, finished_at=self._clock.now())
                 return "continue_source"
+            if kind == "IDENTIFY_BOOK":
+                if self._identify_book is None or source_node_id is None:
+                    raise RuntimeError("Book metadata processor is not configured")
+                outcome = self._identify_book.execute(source_node_id)
+                with self._uow.transaction():
+                    if self._queue.get_task(task_id) is not None:
+                        self._queue.mark_succeeded(
+                            task_id, finished_at=self._clock.now()
+                        )
+                return outcome
             if kind == "IMPORT_ASSET":
                 outcome = self._process_import.execute(task_id)
                 return outcome.outcome

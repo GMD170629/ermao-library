@@ -74,6 +74,7 @@ class ResourceImportSummary(HttpContractModel):
     ready: int = Field(default=0, ge=0)
     pending: int = Field(default=0, ge=0)
     failed: int = Field(default=0, ge=0)
+    failed_files: int = Field(default=0, ge=0, alias="failedFiles")
 
 
 class BookView(HttpContractModel):
@@ -89,6 +90,11 @@ class BookView(HttpContractModel):
     curation_state: str = Field(alias="curationState")
     publication_status: str = Field(alias="publicationStatus")
     tracking_status: str = Field(alias="trackingStatus")
+    metadata_state: Literal[
+        "WAITING_IMPORT", "QUEUED", "RUNNING", "COMPLETED", "FAILED"
+    ] = Field(default="WAITING_IMPORT", alias="metadataState")
+    metadata_pending: bool = Field(default=False, alias="metadataPending")
+    metadata_online_state: str | None = Field(default=None, alias="metadataOnlineState")
     metadata_quality: int = Field(alias="metadataQuality")
     cover_status: str = Field(alias="coverStatus")
     cover_path: str | None = Field(default=None, alias="coverPath")

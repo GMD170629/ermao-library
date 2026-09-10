@@ -13,6 +13,7 @@ from app.models import (
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
 )
+from app.modules.library.application.metadata_ownership import protect_fields
 from app.modules.library.infrastructure.book_covers import SqlAlchemyBookCoverQueries
 from app.modules.library.infrastructure.books import entity_record
 
@@ -116,6 +117,13 @@ def update_book_covers(
 ) -> int:
     if not rows:
         return 0
+    for row in rows:
+        metadata = db.get(LibraryBookMetadata, str(row["book_id"]))
+        if metadata is not None:
+            metadata.protected_fields = protect_fields(
+                metadata.protected_fields, ("cover_path",)
+            )
+    db.flush()
     db.execute(update(LibraryBookMetadata), list(rows))
     return len(rows)
 

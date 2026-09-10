@@ -16092,6 +16092,134 @@
           }
         }
       }
+    },
+    "book.metadata.waiting.import": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for book import to finish"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待整本导入结束"
+          }
+        }
+      }
+    },
+    "book.metadata.queued": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import finished; waiting to identify book information"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "整本导入结束，等待识别图书信息"
+          }
+        }
+      }
+    },
+    "book.metadata.running": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Identifying book information"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "图书信息识别中"
+          }
+        }
+      }
+    },
+    "book.metadata.failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Book information identification failed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "图书信息识别失败"
+          }
+        }
+      }
+    },
+    "book.metadata.online": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Looking up book information online"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "图书信息联网识别中"
+          }
+        }
+      }
+    },
+    "book.metadata.online.failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Online lookup failed; local information was retained"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "联网识别失败，已保留本地信息"
+          }
+        }
+      }
+    },
+    "book.metadata.completed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Book information updated"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "图书信息更新完成"
+          }
+        }
+      }
+    },
+    "book.metadata.partial.import": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some files failed to import; available content was retained"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "部分文件导入失败，已保留可用内容"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

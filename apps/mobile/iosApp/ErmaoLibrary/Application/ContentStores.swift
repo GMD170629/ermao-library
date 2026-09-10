@@ -1068,7 +1068,12 @@ private extension BookDetailContent {
             readingStatus: readingStatus,
             chapters: chapters,
             rootSourceNodeID: rootSourceNodeID,
-            continueResourceID: continueResourceID
+            continueResourceID: continueResourceID,
+            metadataPending: metadataPending,
+            metadataState: metadataState,
+            metadataOnlineState: metadataOnlineState,
+            failedResourceImportCount: failedResourceImportCount,
+            failedFileImportCount: failedFileImportCount
         )
     }
 
@@ -1090,7 +1095,12 @@ private extension BookDetailContent {
             readingStatus: readingStatus,
             chapters: chapters,
             rootSourceNodeID: rootSourceNodeID,
-            continueResourceID: continueResourceID
+            continueResourceID: continueResourceID,
+            metadataPending: metadataPending,
+            metadataState: metadataState,
+            metadataOnlineState: metadataOnlineState,
+            failedResourceImportCount: failedResourceImportCount,
+            failedFileImportCount: failedFileImportCount
         )
     }
 

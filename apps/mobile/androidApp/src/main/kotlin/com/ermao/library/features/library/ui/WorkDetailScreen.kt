@@ -82,6 +82,7 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -261,6 +262,20 @@ fun WorkDetailScreen(
     // Audio is a first-class player destination. The shell owns the shared bootstrap/engine
     // adapter; this detail surface only emits the same resource intent as other media types.
     val openResource: (ResourceContent) -> Unit = onOpenSelectedResource
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val latestRefresh by androidx.compose.runtime.rememberUpdatedState(onRefresh)
+    val metadataPending = state.content?.let { it.metadataPending || it.metadataOnlineState in setOf("PENDING", "RUNNING", "RETRY") } == true
+    LaunchedEffect(state.content?.book?.id, metadataPending, lifecycleOwner) {
+        if (metadataPending) {
+            lifecycleOwner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                while (true) {
+                    kotlinx.coroutines.delay(2_000)
+                    latestRefresh()
+                }
+            }
+        }
+    }
+
     val selectedResource = state.resolveReadingResource()
     val pageActionScope = state.detailActionScope()
     var pendingReadingStatusScope by remember(state.content?.book?.id) {
@@ -962,7 +977,23 @@ private fun WorkIdentityText(
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                WorkDetailIdentityElement.AuthorAndSeries -> WorkCreatorAndSeriesLine(content, onOpenFacet)
+                WorkDetailIdentityElement.AuthorAndSeries -> {
+                    WorkCreatorAndSeriesLine(content, onOpenFacet)
+                    val metadataMessage = when (content.metadataState) {
+                        "WAITING_IMPORT" -> R.string.book_metadata_waiting_import
+                        "QUEUED" -> R.string.book_metadata_queued
+                        "RUNNING" -> R.string.book_metadata_running
+                        "FAILED" -> R.string.book_metadata_failed
+                        "COMPLETED" -> when (content.metadataOnlineState) {
+                            "PENDING", "RUNNING", "RETRY" -> R.string.book_metadata_online
+                            "FAILED" -> R.string.book_metadata_online_failed
+                            else -> R.string.book_metadata_completed
+                        }
+                        else -> null
+                    }
+                    metadataMessage?.let { Text(stringResource(it), style = theme.typography.body) }
+                    if (content.failedResourceImportCount > 0 || content.failedFileImportCount > 0) Text(stringResource(R.string.book_metadata_partial_import), style = theme.typography.body)
+                }
                 WorkDetailIdentityElement.Tags -> WorkIdentityTags(presentation.tags)
                 WorkDetailIdentityElement.ReadingStatus -> WorkIdentityStatus(
                     status = requireNotNull(presentation.status),

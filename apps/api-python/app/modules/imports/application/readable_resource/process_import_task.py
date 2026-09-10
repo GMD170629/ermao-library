@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.contracts.local_metadata import DEFAULT_LOCAL_METADATA_PRIORITY
+from app.contracts.local_metadata import (
+    DEFAULT_LOCAL_METADATA_PRIORITY,
+    LocalMetadataSource,
+)
+from app.contracts.local_metadata_snapshot import LocalMetadataObservation
 from app.modules.imports.application.readable_resource.ports import (
     BookResourceRepositoryPort,
     ClockPort,
@@ -135,47 +139,85 @@ class ProcessReadableResourceImportTask:
             role=role,
             local_metadata_priority=local_metadata_priority,
         )
-        prepared_cover = None
-        if (
-            parsed.local_metadata is not None
-            and parsed.local_metadata.cover is not None
-            and self._covers is not None
-        ):
+        prepared_covers: dict[LocalMetadataSource, PreparedLocalCover] = {}
+        if parsed.local_metadata is not None and self._covers is not None:
             try:
-                prepared_cover = self._covers.prepare(
-                    resource_id=resource.id,
-                    content=parsed.local_metadata.cover,
-                )
-            except ValueError:
-                self._log.emit(
-                    "readable_resource.local_cover.rejected",
-                    library_id=library_id,
-                    resource_id=resource_id,
-                    task_id=task_id,
-                    stage="local_metadata",
-                    outcome="invalid",
-                )
-                prepared_cover = None
+                for candidate in parsed.local_metadata.candidates:
+                    if candidate.cover is None:
+                        continue
+                    try:
+                        prepared_covers[candidate.source] = self._covers.prepare(
+                            resource_id=f"{resource.id}-{source_node_id}-{candidate.source}",
+                            content=candidate.cover,
+                        )
+                    except ValueError:
+                        self._log.emit(
+                            "readable_resource.local_cover.rejected",
+                            library_id=library_id,
+                            resource_id=resource_id,
+                            task_id=task_id,
+                            stage="local_metadata",
+                            outcome="invalid",
+                        )
+            except Exception:
+                for prepared in prepared_covers.values():
+                    self._covers.discard(prepared)
+                raise
+        prepared_cover = next(
+            (
+                prepared_covers[source]
+                for source in local_metadata_priority
+                if source in prepared_covers
+            ),
+            None,
+        )
+
+        # Publish new immutable versions before exposing their database references.
+        # Failure or cancellation can discard them without touching existing covers.
+        if self._covers is not None:
+            try:
+                for prepared in prepared_covers.values():
+                    self._covers.publish(prepared)
+            except OSError:
+                for prepared in prepared_covers.values():
+                    self._covers.discard(prepared)
+                with self._uow.transaction():
+                    if self._queue.get_task(task_id) is None:
+                        return ProcessTaskResult(task_id=task_id, outcome="cancelled")
+                    self._queue.mark_failed(
+                        task_id,
+                        error_summary="COVER_PUBLISH_FAILED",
+                        finished_at=self._clock.now(),
+                    )
+                return ProcessTaskResult(task_id=task_id, outcome="failed")
 
         import_succeeded = False
         outcome = "cancelled"
-        with self._uow.transaction():
-            current_task = self._queue.get_task(task_id)
-            task_was_cancelled = current_task is None
-            if not task_was_cancelled:
-                import_succeeded, outcome = self._persist_parse_result(
-                    task_id=task_id,
-                    parsed=parsed,
-                    prepared_cover=prepared_cover,
-                    library_id=library_id,
-                    resource_id=resource_id,
-                    source_node_id=source_node_id,
-                    role=role,
-                    sort_key=node.relative_path,
-                )
+        try:
+            with self._uow.transaction():
+                current_task = self._queue.get_task(task_id)
+                task_was_cancelled = current_task is None
+                if not task_was_cancelled:
+                    import_succeeded, outcome = self._persist_parse_result(
+                        task_id=task_id,
+                        parsed=parsed,
+                        prepared_cover=prepared_cover,
+                        cover_candidates=prepared_covers,
+                        library_id=library_id,
+                        resource_id=resource_id,
+                        source_node_id=source_node_id,
+                        role=role,
+                        sort_key=node.relative_path,
+                    )
+        except Exception:
+            if self._covers is not None:
+                for prepared in prepared_covers.values():
+                    self._covers.discard(prepared)
+            raise
         if task_was_cancelled:
-            if prepared_cover is not None and self._covers is not None:
-                self._covers.discard(prepared_cover)
+            if self._covers is not None:
+                for prepared in prepared_covers.values():
+                    self._covers.discard(prepared)
             self._log.emit(
                 "readable_resource.task.cancelled",
                 library_id=library_id,
@@ -186,39 +228,11 @@ class ProcessReadableResourceImportTask:
             )
             return ProcessTaskResult(task_id=task_id, outcome="cancelled")
 
-        if (
-            not import_succeeded
-            and prepared_cover is not None
-            and self._covers is not None
-        ):
-            self._covers.discard(prepared_cover)
+        if not import_succeeded and self._covers is not None:
+            for prepared in prepared_covers.values():
+                self._covers.discard(prepared)
+            prepared_covers.clear()
             prepared_cover = None
-
-        if prepared_cover is not None and self._covers is not None:
-            try:
-                self._covers.publish(prepared_cover)
-            except OSError:
-                self._covers.discard(prepared_cover)
-                with self._uow.transaction():
-                    self._books_resources.clear_local_cover(
-                        resource_id=resource_id,
-                        expected_path=prepared_cover.stored_path,
-                    )
-                    self._queue.mark_failed(
-                        task_id,
-                        error_summary="COVER_PUBLISH_FAILED",
-                        finished_at=self._clock.now(),
-                    )
-                import_succeeded = False
-                outcome = "failed"
-                self._log.emit(
-                    "readable_resource.local_cover.publish_failed",
-                    library_id=library_id,
-                    resource_id=resource_id,
-                    task_id=task_id,
-                    stage="local_metadata",
-                    outcome="infrastructure_failure",
-                )
 
         if import_succeeded:
             with self._uow.transaction():
@@ -240,6 +254,7 @@ class ProcessReadableResourceImportTask:
         task_id: str,
         parsed: FileParseResult,
         prepared_cover: PreparedLocalCover | None,
+        cover_candidates: dict[LocalMetadataSource, PreparedLocalCover],
         library_id: str,
         resource_id: str,
         source_node_id: str,
@@ -269,16 +284,6 @@ class ProcessReadableResourceImportTask:
                 ),
             )
             title = parsed.resource_title
-            if parsed.local_metadata is not None:
-                self._books_resources.apply_local_metadata(
-                    resource_id=resource_id,
-                    metadata=parsed.local_metadata.metadata,
-                    cover_path=(
-                        prepared_cover.stored_path
-                        if prepared_cover is not None
-                        else None
-                    ),
-                )
             self._books_resources.replace_navigation_units(
                 resource_id=resource_id,
                 asset_id=asset_id,
@@ -298,6 +303,27 @@ class ProcessReadableResourceImportTask:
                     )
                 if parsed.asset.role is AssetRole.TRACK:
                     self._books_resources.refresh_audio_resource_aggregates(resource_id)
+            if parsed.local_metadata is not None:
+                self._books_resources.apply_local_metadata(
+                    resource_id=resource_id,
+                    metadata=parsed.local_metadata.metadata,
+                    asset_id=asset_id,
+                    observations=tuple(
+                        LocalMetadataObservation(
+                            c.source,
+                            c.metadata,
+                            cover_candidates[c.source].stored_path
+                            if c.source in cover_candidates
+                            else None,
+                        )
+                        for c in parsed.local_metadata.candidates
+                    ),
+                    cover_path=(
+                        prepared_cover.stored_path
+                        if prepared_cover is not None
+                        else None
+                    ),
+                )
             return (True, "ok")
 
         summary = parsed.error_summary or parsed.error_code or "PARSE_FAILED"

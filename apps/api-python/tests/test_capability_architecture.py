@@ -494,6 +494,7 @@ def test_readable_resource_migrations_are_linear_and_baseline_is_self_contained(
         "0007_source_node_lookup_indexes.py",
         "0008_foreign_key_lookup_indexes.py",
         "0009_reader_v5_opaque_progress.py",
+        "0010_book_metadata_completion.py",
     ]
     path = versions_dir / "0001_library_topology_baseline.py"
     source = path.read_text(encoding="utf-8")

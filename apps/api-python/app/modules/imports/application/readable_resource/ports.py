@@ -73,7 +73,9 @@ __all__ = [
     "adapter_identity",
 ]
 
-ImportTaskKind = Literal["SCAN_LIBRARY", "CONTINUE_SOURCE", "IMPORT_ASSET"]
+ImportTaskKind = Literal[
+    "SCAN_LIBRARY", "CONTINUE_SOURCE", "IMPORT_ASSET", "IDENTIFY_BOOK"
+]
 ImportTaskState = Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED"]
 
 WORKER_INTERRUPTED = "WORKER_INTERRUPTED"

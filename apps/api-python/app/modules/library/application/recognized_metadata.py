@@ -190,6 +190,7 @@ class RecognizedCoverApplication(Protocol):
 class RecognizedCoverState:
     target_id: str
     current_cover_path: str | None
+    updated_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -281,6 +282,12 @@ class ApplyRecognizedCover:
         # End the read transaction before DNS, TLS, and remote I/O.
         self._unit_of_work.rollback()
         content = self._downloader.download(cover_url)
+        current = self._metadata.load_cover_state(
+            actor=actor, book_id=book_id, resource_id=resource_id, scope=scope
+        )
+        if current != state:
+            self._unit_of_work.rollback()
+            raise InvalidRecognizedMetadataError("METADATA_CHANGED")
         published = self._publication.publish(
             scope=scope,
             target_id=state.target_id,
@@ -450,6 +457,9 @@ class ApplyRecognizedMetadata:
                         "selected metadata value is unavailable"
                     )
                 if _same(current, value):
+                    self._assign(field, value, book_changes, resource_changes)
+                    if field is RecognizedMetadataField.BOOK_TAGS:
+                        next_tags = value if isinstance(value, tuple) else None
                     skipped.append(field)
                     continue
                 self._assign(field, value, book_changes, resource_changes)

@@ -17,6 +17,7 @@ from app.models import (
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
 )
+from app.modules.library.application.metadata_ownership import protect_fields
 from app.modules.library.application.resource_commands import (
     LibraryActor,
     ResourceContext,
@@ -131,6 +132,9 @@ class SqlAlchemyResourceMetadata:
             "abridged",
             "resource_index",
         }
+        metadata.protected_fields = protect_fields(
+            metadata.protected_fields, changes.keys()
+        )
         for field, value in changes.items():
             if field in metadata_fields:
                 setattr(metadata, field, value)

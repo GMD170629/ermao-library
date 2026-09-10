@@ -64,6 +64,9 @@ def _seed_lookup_graph(db_session) -> tuple[LibraryBook, LibraryReadableResource
     db_session.add_all(
         [
             LibraryBookMetadata(
+                metadata_pending=False,
+                metadata_state="COMPLETED",
+                processed_revision=0,
                 book_id=book.id,
                 title="黑暗坡食人树",
                 normalized_title="黑暗坡食人树",
@@ -245,7 +248,10 @@ def test_resource_cover_does_not_block_recognition_of_book_cover(
         {"coverUrl": "https://example.test/cover.png"},
     )
     assert prepared.book_patch["coverPath"] == "covers/recognized.png"
-    assert "coverPath" not in prepared.resource_patch
+    assert not any(
+        field in prepared.applied
+        for field in ("publisher", "language", "isbn", "publishedAt")
+    )
     with queue.MetadataWriteTransaction(db_session):
         queue._persist_candidate_application(db_session, prepared)
     if publish_fails:

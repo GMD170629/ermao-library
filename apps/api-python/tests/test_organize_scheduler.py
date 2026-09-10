@@ -62,6 +62,9 @@ def _seed_book(
     db_session.flush()
     db_session.add(
         LibraryBookMetadata(
+            metadata_pending=False,
+            metadata_state="COMPLETED",
+            processed_revision=0,
             book_id=book.id,
             title=f"Book {book_id}",
             normalized_title=f"book {book_id}",

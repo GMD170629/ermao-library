@@ -495,6 +495,12 @@ struct BookDetailContent: Codable, Equatable, Sendable {
     let chapters: [BookChapter]
     let continueResourceID: String?
 
+    let metadataPending: Bool?
+    let metadataState: String?
+    let metadataOnlineState: String?
+    let failedResourceImportCount: Int?
+    let failedFileImportCount: Int?
+
     var continueResource: BookResource? {
         resources.first { $0.id == continueResourceID && $0.bookID == book.id }
     }
@@ -518,8 +524,18 @@ struct BookDetailContent: Codable, Equatable, Sendable {
         readingStatus: LibraryReadingStatus?,
         chapters: [BookChapter],
         rootSourceNodeID: String? = nil,
-        continueResourceID: String? = nil
+        continueResourceID: String? = nil,
+        metadataPending: Bool? = nil,
+        metadataState: String? = nil,
+        metadataOnlineState: String? = nil,
+        failedResourceImportCount: Int? = nil,
+        failedFileImportCount: Int? = nil
     ) {
+        self.metadataPending = metadataPending
+        self.metadataState = metadataState
+        self.metadataOnlineState = metadataOnlineState
+        self.failedResourceImportCount = failedResourceImportCount
+        self.failedFileImportCount = failedFileImportCount
         self.book = book
         self.rootSourceNodeID = rootSourceNodeID
         self.description = description

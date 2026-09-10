@@ -9,13 +9,21 @@ from pathlib import Path
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from app.contracts.local_metadata_snapshot import (
+    LocalMetadataObservation,
+    decode_observations,
+    encode_observations,
+    merge_observations,
+)
 from app.contracts.publication_metadata import PublicationMetadata
 from app.core.natural_sort import natural_sort_key
+from app.infrastructure.local_metadata_policy import SqlAlchemyLocalMetadataPriority
 from app.models.common import cuid
 from app.models.library import Library, ReadableResourceNavigationUnit
 from app.modules.library.application.commands.manage_ports import (
     ManagedBookSourceTarget,
 )
+from app.modules.library.application.metadata_ownership import protected_fields
 from app.modules.library.application.source_tree_ports import (
     AdapterIdentity,
     BookResourceRepositoryPort,
@@ -39,7 +47,6 @@ from app.modules.library.domain.readable_resource_anchors import (
     audiobook_resource_owns_path,
     is_asset_path_within_resource_scope,
     is_resource_anchor_within_book_scope,
-    resource_owns_book_metadata,
     resource_relative_asset_sort_key,
 )
 from app.modules.library.domain.readable_resource_states import (
@@ -70,6 +77,7 @@ from app.modules.library.infrastructure.readable_resource_schema import (
     LibrarySourceNode,
     LibrarySourceNodeInterpretation,
 )
+from app.modules.metadata.public import LocalMetadataCandidate, resolve_local_metadata
 
 
 class SqlAlchemyLibraryConfigAdapter(LibraryConfigPort):
@@ -623,7 +631,7 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
                         resource_id=resource_id, title=title
                     )
                 )
-            else:
+            elif "title" not in protected_fields(metadata.protected_fields):
                 metadata.title = title
         self._session.flush()
 
@@ -640,6 +648,8 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         resource_id: str,
         metadata: PublicationMetadata,
         cover_path: str | None = None,
+        asset_id: str | None = None,
+        observations: tuple[LocalMetadataObservation, ...] = (),
     ) -> None:
         resource = self._session.get(LibraryReadableResource, resource_id)
         if resource is None:
@@ -650,27 +660,41 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         book_metadata = self._session.get(LibraryBookMetadata, resource.book_id)
         if book_metadata is None:
             raise LookupError(resource.book_id)
-        projects_to_book = resource_owns_book_metadata(
-            book_source_node_id=book.source_node_id,
-            resource_source_node_id=resource.source_node_id,
-        )
-        if projects_to_book:
-            if metadata.title:
-                book_metadata.title = metadata.title
-                book_metadata.normalized_title = metadata.title.casefold()
-            if metadata.author:
-                book_metadata.author = metadata.author
-                book_metadata.normalized_author = metadata.author.casefold()
-            if metadata.description:
-                book_metadata.description = metadata.description
-            if metadata.series_name:
-                book_metadata.series_name = metadata.series_name
-            if metadata.series_index is not None:
-                book_metadata.series_index = metadata.series_index
-            book_metadata.metadata_quality = max(
-                book_metadata.metadata_quality,
-                min(100, len(metadata.populated_fields) * 8),
+        if asset_id is not None:
+            asset = self._session.get(LibraryResourceAsset, asset_id)
+            if asset is None or asset.resource_id != resource_id:
+                raise LookupError(asset_id)
+            asset.local_metadata_candidates = encode_observations(observations)
+            asset.local_cover_path = cover_path
+            self._session.flush()
+            assets = self._session.scalars(
+                select(LibraryResourceAsset)
+                .where(
+                    LibraryResourceAsset.resource_id == resource_id,
+                    LibraryResourceAsset.import_state == "READY",
+                )
+                .order_by(
+                    LibraryResourceAsset.sequence_index.asc().nulls_last(),
+                    func.lower(LibraryResourceAsset.sort_key),
+                    LibraryResourceAsset.id,
+                )
+            ).all()
+            grouped = merge_observations(
+                tuple(
+                    candidate
+                    for item in assets
+                    for candidate in decode_observations(item.local_metadata_candidates)
+                )
             )
+            metadata = resolve_local_metadata(
+                tuple(
+                    LocalMetadataCandidate(source=source, metadata=grouped[source])
+                    for source in SqlAlchemyLocalMetadataPriority(self._session).load()
+                    if source in grouped
+                ),
+                SqlAlchemyLocalMetadataPriority(self._session).load(),
+            ).metadata
+            cover_path = assets[0].local_cover_path if assets else None
 
         resource_metadata = self._session.get(
             LibraryReadableResourceMetadata, resource_id
@@ -682,34 +706,32 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
                 title=resource_title,
             )
             self._session.add(resource_metadata)
-        else:
+        protected = protected_fields(resource_metadata.protected_fields)
+        if "title" not in protected:
             resource_metadata.title = resource_title
-        if metadata.description:
+        if "description" not in protected and metadata.description:
             resource_metadata.description = metadata.description
-        if metadata.language:
+        if "language" not in protected and metadata.language:
             resource_metadata.language = metadata.language
-        if metadata.publisher:
+        if "publisher" not in protected and metadata.publisher:
             resource_metadata.publisher = metadata.publisher
-        if metadata.published_at:
+        if "published_at" not in protected and metadata.published_at:
             published_at = _parse_publication_datetime(metadata.published_at)
             if published_at is not None:
                 resource_metadata.published_at = published_at
-        if metadata.identifier:
+        if "identifier" not in protected and metadata.identifier:
             resource_metadata.identifier = metadata.identifier
-        if metadata.isbn:
+        if "isbn" not in protected and metadata.isbn:
             resource_metadata.isbn = metadata.isbn
-        if metadata.narrators:
+        if "narrator" not in protected and metadata.narrators:
             resource_metadata.narrator = " / ".join(metadata.narrators)
-        if metadata.abridged is not None:
+        if "abridged" not in protected and metadata.abridged is not None:
             resource_metadata.abridged = metadata.abridged
-        if metadata.volume_index is not None:
+        if "resource_index" not in protected and metadata.volume_index is not None:
             resource_metadata.resource_index = metadata.volume_index
-        if cover_path is not None:
-            if projects_to_book:
-                book_metadata.cover_path = cover_path
-                book_metadata.cover_status = "READY"
+        if "cover_path" not in protected:
             resource_metadata.cover_path = cover_path
-            resource_metadata.cover_status = "READY"
+            resource_metadata.cover_status = "READY" if cover_path else "PENDING"
         self._session.flush()
 
     def clear_local_cover(self, *, resource_id: str, expected_path: str) -> None:
@@ -719,25 +741,12 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         resource_metadata = self._session.get(
             LibraryReadableResourceMetadata, resource_id
         )
-        book = self._session.get(LibraryBook, resource.book_id)
-        book_metadata = self._session.get(LibraryBookMetadata, resource.book_id)
         if (
             resource_metadata is not None
             and resource_metadata.cover_path == expected_path
         ):
             resource_metadata.cover_path = None
             resource_metadata.cover_status = "FAILED"
-        if (
-            book is not None
-            and book_metadata is not None
-            and resource_owns_book_metadata(
-                book_source_node_id=book.source_node_id,
-                resource_source_node_id=resource.source_node_id,
-            )
-            and book_metadata.cover_path == expected_path
-        ):
-            book_metadata.cover_path = None
-            book_metadata.cover_status = "FAILED"
         self._session.flush()
 
     def mark_resource_failed(self, resource_id: str) -> None:
