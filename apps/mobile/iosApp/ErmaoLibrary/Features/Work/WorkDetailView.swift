@@ -585,7 +585,7 @@ struct WorkDetailView: View {
             if let author = detail.authorFacets.first {
                 facetButton(author, kind: .author)
             } else {
-                Text(detail.book.author ?? "—")
+                Text(detail.book.displayAuthor)
                     .appTextStyle(.body)
                     .foregroundStyle(theme.textSecondary)
             }
@@ -968,16 +968,10 @@ struct WorkDetailView: View {
                         .frame(maxWidth: .infinity, minHeight: 96, alignment: .center)
                 } else if store.contentLayout == .grid {
                     LazyVGrid(
-                        columns: [
-                            GridItem(
-                                .adaptive(
-                                    minimum: BookCoverLayout.horizontalCardWidth,
-                                    maximum: BookCoverLayout.horizontalCardWidth
-                                ),
-                                spacing: .space2,
-                                alignment: .top
-                            )
-                        ],
+                        columns: Array(
+                            repeating: GridItem(.flexible(), spacing: .space2, alignment: .top),
+                            count: 3
+                        ),
                         alignment: .leading,
                         spacing: .space2
                     ) {
@@ -1044,35 +1038,23 @@ struct WorkDetailView: View {
                 }
             } label: {
                 VStack(alignment: .leading, spacing: .space1) {
-                    ZStack(alignment: .topLeading) {
-                        BookCoverView(
-                            reference: item.cover,
-                            title: item.title,
-                            context: context,
-                            client: client,
-                            cache: cache,
-                            managementTarget: nodeManagementTarget(item)
-                        )
-                        .frame(width: BookCoverLayout.horizontalCardWidth)
-                        .overlay(alignment: .bottom) {
-                            if item.kind == .readableResource,
-                               let progress = item.resource?.progress,
-                               progress > 0 {
-                                ResourceCoverProgressView(progress: progress)
-                                    .padding(.horizontal, .space1)
-                                    .padding(.bottom, .spaceHalf)
-                            }
+                    BookCoverView(
+                        reference: item.cover,
+                        title: item.title,
+                        context: context,
+                        client: client,
+                        cache: cache,
+                        managementTarget: nodeManagementTarget(item)
+                    )
+                    .frame(maxWidth: .infinity)
+                    .overlay(alignment: .bottom) {
+                        if item.kind == .readableResource,
+                           let progress = item.resource?.progress,
+                           progress > 0 {
+                            ResourceCoverProgressView(progress: progress)
+                                .padding(.horizontal, .space1)
+                                .padding(.bottom, .spaceHalf)
                         }
-
-                        Text(item.indexLabel)
-                            .appTextStyle(.caption)
-                            .fontWeight(.semibold)
-                            .monospacedDigit()
-                            .foregroundStyle(theme.canvas)
-                            .frame(width: 32, height: 32)
-                            .background(theme.textPrimary.opacity(0.62))
-                            .clipShape(Circle())
-                            .padding(.space1)
                     }
 
                     HStack(alignment: .top, spacing: .spaceHalf) {
@@ -1099,7 +1081,7 @@ struct WorkDetailView: View {
                             .foregroundStyle(theme.textSecondary)
                     }
                 }
-                .frame(width: BookCoverLayout.horizontalCardWidth, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
             .accessibilityElement(children: .ignore)

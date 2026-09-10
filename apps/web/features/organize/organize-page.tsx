@@ -1,5 +1,7 @@
 'use client';
 
+import { authorDisplayLabel } from '@/types/book';
+
 import { ChevronLeft, ChevronRight, RefreshCw, RotateCcw, Search, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -102,7 +104,7 @@ export function normalizeOrganizeJob(job: OrganizeJobView): OrganizeJobView | nu
     book: {
       ...job.book,
       title: job.book.title ?? '未命名图书',
-      author: job.book.author ?? '未知作者',
+      author: authorDisplayLabel(job.book.author),
       tags: Array.isArray(job.book.tags) ? job.book.tags : []
     }
   };
@@ -169,7 +171,7 @@ function normalizeOrganizeJobSummary(job: OrganizeJobSummaryView): OrganizeJobSu
     book: {
       ...job.book,
       title: job.book.title || '未命名图书',
-      author: job.book.author || '未知作者',
+      author: authorDisplayLabel(job.book.author),
     },
   };
 }
@@ -349,7 +351,7 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
                       <Cover book={job.book} className="h-16 w-12 shrink-0 rounded-lg" small />
                       <span data-i18n-skip className="min-w-0 flex-1">
                         <span className="line-clamp-2 font-semibold leading-5 text-slate-900">{job.book.title}</span>
-                        <span className="mt-1 block truncate text-xs text-slate-500">{job.book.author}</span>
+                        <span className="mt-1 block truncate text-xs text-slate-500">{authorDisplayLabel(job.book.author)}</span>
                       </span>
                       <StatusBadge category={category} />
                     </button>
@@ -390,7 +392,7 @@ export function OrganizePage({ embedded = false, jobBasePath = '/organize/jobs' 
                         <td className="px-5 py-4 align-middle">
                           <button type="button" onClick={() => router.push(`${jobBasePath}/${job.id}`)} className="flex w-full min-w-0 items-center gap-3 text-left">
                             <Cover book={job.book} className="h-12 w-9 shrink-0 rounded-lg" small />
-                            <span data-i18n-skip className="min-w-0"><span className="block truncate font-semibold text-slate-900">{job.book.title}</span><span className="mt-1 block truncate text-xs text-slate-500">{job.book.author}</span></span>
+                            <span data-i18n-skip className="min-w-0"><span className="block truncate font-semibold text-slate-900">{job.book.title}</span><span className="mt-1 block truncate text-xs text-slate-500">{authorDisplayLabel(job.book.author)}</span></span>
                           </button>
                         </td>
                         <td className="px-3 py-4 align-middle"><div className="flex min-w-0 flex-wrap gap-1">{reasons.slice(0, 2).map((reason) => <Badge key={reason} tone="slate">{reason}</Badge>)}{reasons.length > 2 ? <span className="text-xs text-slate-400">+{reasons.length - 2}</span> : null}</div></td>

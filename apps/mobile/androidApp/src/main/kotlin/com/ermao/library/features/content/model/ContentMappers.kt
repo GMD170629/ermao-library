@@ -1,5 +1,6 @@
 package com.ermao.library.features.content.model
 
+import com.ermao.library.shared.modules.library.AuthorDisplay
 import com.ermao.library.shared.modules.library.ContentResult
 import com.ermao.library.shared.modules.library.HomeSection
 import com.ermao.library.shared.modules.library.HomeSnapshot
@@ -11,7 +12,7 @@ import java.time.Instant
 fun BookSummary.toCard(): BookCard = BookCard(
     id = id,
     title = title,
-    author = author.orEmpty(),
+    author = AuthorDisplay.label(author),
     coverUrl = coverUrl,
     progressPercent = progress.toInt().takeIf { it > 0 },
     completed = completed,
@@ -36,7 +37,7 @@ fun HomeSnapshot.toUiContent(): HomeContent {
                 book = BookCard(
                     id = it.bookId,
                     title = it.title,
-                    author = it.author.orEmpty(),
+                    author = AuthorDisplay.label(it.author),
                     coverUrl = it.coverUrl,
                     progressPercent = it.progress.toInt().takeIf { percent -> percent > 0 },
                 ),
@@ -71,7 +72,7 @@ fun BookDetailSummary.toUiContent(): BookDetailContent {
         book = BookCard(
             id = id,
             title = title,
-            author = author.orEmpty(),
+            author = AuthorDisplay.label(author),
             coverUrl = coverUrl,
             progressPercent = continueResourceProgress.toInt().takeIf { it > 0 },
             completed = completed,

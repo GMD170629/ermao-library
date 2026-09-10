@@ -1,6 +1,22 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "home.continue.reading.format": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reading: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在阅读：%@"
+          }
+        }
+      }
+    },
     "audio.action.chapters": {
       "localizations": {
         "en": {

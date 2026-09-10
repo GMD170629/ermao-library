@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
-from sqlalchemy import ColumnElement, exists, func, select
+from sqlalchemy import ColumnElement, exists, func, or_, select
 from sqlalchemy.engine import Row
 from sqlalchemy.orm import Session
 
@@ -243,6 +243,7 @@ def list_import_tasks_page(
     page_size: int,
     library_id: str | None = None,
     state: str | None = None,
+    keyword: str | None = None,
 ) -> tuple[list[dict[str, object]], int, dict[str, int]]:
     scope = library_visibility_predicate(
         context,
@@ -255,6 +256,29 @@ def list_import_tasks_page(
     normalized_state = str(state or "").strip().upper()
     if normalized_state and normalized_state != "ALL":
         filters.append(LibraryImportTask.state == normalized_state)
+    normalized_keyword = (keyword or "").strip()
+    if normalized_keyword:
+        matching_task_ids = (
+            _task_projection_statement()
+            .with_only_columns(LibraryImportTask.id)
+            .where(
+                or_(
+                    LibrarySourceNode.name.icontains(
+                        normalized_keyword, autoescape=True
+                    ),
+                    LibrarySourceNode.relative_path.icontains(
+                        normalized_keyword, autoescape=True
+                    ),
+                    LibraryReadableResourceMetadata.title.icontains(
+                        normalized_keyword, autoescape=True
+                    ),
+                    LibraryBookMetadata.title.icontains(
+                        normalized_keyword, autoescape=True
+                    ),
+                )
+            )
+        )
+        filters.append(LibraryImportTask.id.in_(matching_task_ids))
     total = int(
         db.scalar(select(func.count()).select_from(LibraryImportTask).where(*filters))
         or 0

@@ -1,5 +1,7 @@
 'use client';
 
+import { authorDisplayLabel } from '@/types/book';
+
 import {
   READER_SAFETY_RULES,
   READER_SAFETY_RULE_IDS,
@@ -166,7 +168,7 @@ function OpeningCover({ context, ready, background, color, indexProgress, origin
       ) : <LoaderCircle size={30} className="animate-spin motion-reduce:animate-none" />}
       <div className="absolute inset-x-6 bottom-[calc(4rem+var(--shuku-safe-area-bottom))] text-center">
         <div className="line-clamp-2 text-lg font-semibold">{context?.title ?? i18nAttribute("正在打开阅读器")}</div>
-        {context?.author ? <div className="mt-1 text-sm opacity-65">{context.author}</div> : null}
+        {authorDisplayLabel(context?.author) ? <div className="mt-1 text-sm opacity-65">{authorDisplayLabel(context?.author)}</div> : null}
         {originalProgress ? (
           <div className="mx-auto mt-5 w-full max-w-sm">
             <div className="text-sm font-medium"><I18nText>正在加载阅读内容</I18nText></div>

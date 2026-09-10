@@ -124,12 +124,14 @@ def list_library_roots(
     )
 
 
+@router.get("/library-import-tasks", response_model=LibraryImportTaskListResponse)
 @router.get(
     "/libraries/{library_id}/import-tasks", response_model=LibraryImportTaskListResponse
 )
 def list_library_import_tasks(
-    library_id: str,
     request: Request,
+    library_id: str | None = None,
+    keyword: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, alias="pageSize", ge=1, le=100),
     state: Literal["ALL", "QUEUED", "RUNNING", "SUCCEEDED", "FAILED"] | None = Query(
@@ -141,10 +143,12 @@ def list_library_import_tasks(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    if (
-        user is None
-        or get_library(db, library_id) is None
-        or not can_access_library(db, user, library_id)
+    if user is None or (
+        library_id is not None
+        and (
+            get_library(db, library_id) is None
+            or not can_access_library(db, user, library_id)
+        )
     ):
         return fail("书库不存在或无权访问", status_code=404, code="LIBRARY_NOT_FOUND")
 
@@ -156,6 +160,7 @@ def list_library_import_tasks(
         page_size=page_size,
         library_id=library_id,
         state=state,
+        keyword=keyword,
     )
     total_pages = max(1, (total + page_size - 1) // page_size)
     normalized_page = min(max(1, page), total_pages)

@@ -713,13 +713,6 @@ private struct RootTabControls: View {
                     .foregroundStyle(isSelected ? theme.brandAccent : theme.textPrimary)
                     .frame(maxWidth: .infinity, minHeight: .iosMinimumTouchTarget)
                     .padding(.vertical, .spaceHalf)
-                    .background {
-                        if isSelected {
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .fill(theme.accentSoft)
-                                .padding(.horizontal, .spaceHalf)
-                        }
-                    }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -729,7 +722,7 @@ private struct RootTabControls: View {
             }
         }
         .padding(.horizontal, .space1)
-        .padding(.top, .spaceHalf)
+        .padding(.top, .space1)
     }
 }
 

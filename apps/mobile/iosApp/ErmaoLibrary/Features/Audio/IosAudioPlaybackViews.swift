@@ -268,7 +268,8 @@ struct AudioNowPlayingView: View {
                     .multilineTextAlignment(.center)
                     .lineLimit(3)
             }
-            if let author = runtime.snapshot.bootstrap?.book.author, !author.isEmpty {
+            let author = ErmaoShared.AuthorDisplay.shared.label(author: runtime.snapshot.bootstrap?.book.author)
+            if !author.isEmpty {
                 Text(author)
                     .font(.subheadline)
                     .foregroundStyle(theme.textSecondary)

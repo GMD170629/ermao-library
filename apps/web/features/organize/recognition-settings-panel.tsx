@@ -114,7 +114,19 @@ export function RecognitionSettingsPanel({ compact = false, onSaved }: { compact
       const response = await fetch('/api/organize/policy', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(policy)
+        body: JSON.stringify({
+          enabled: policy.enabled,
+          scheduleMode: policy.scheduleMode,
+          intervalMinutes: policy.intervalMinutes,
+          autoRunOnNew: policy.autoRunOnNew,
+          rules: {
+            unrecognized: policy.rules.unrecognized,
+            missingMetadata: policy.rules.missingMetadata
+          },
+          writeMetadataToFiles: policy.writeMetadataToFiles,
+          preferLocalMetadata: policy.preferLocalMetadata,
+          localMetadataPriority: policy.localMetadataPriority
+        })
       });
       const payload = (await response.json()) as PolicyResponse;
       if (!payload.ok || !payload.data?.policy) throw new Error(payload.error?.message ?? '保存识别设置失败');

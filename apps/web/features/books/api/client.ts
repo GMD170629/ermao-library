@@ -160,7 +160,7 @@ export function mapBookView(value: unknown): BookView {
     id,
     sourceNodeId,
     title: stringValue(root.title, '未命名图书'),
-    author: stringValue(root.author, '未知作者'),
+    author: stringValue(root.author, ''),
     description: stringValue(root.description),
     seriesName: nullableString(root.seriesName),
     seriesIndex: nullableNumber(root.seriesIndex),

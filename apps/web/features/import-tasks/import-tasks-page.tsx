@@ -90,6 +90,8 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   const toast = useToast();
   const [libraries, setLibraries] = useState<ImportLibrary[]>([]);
   const [selectedLibraryId, setSelectedLibraryId] = useState('');
+  const [keywordInput, setKeywordInput] = useState('');
+  const [keyword, setKeyword] = useState('');
   const [librariesLoading, setLibrariesLoading] = useState(true);
   const [tasks, setTasks] = useState<LibraryImportTask[]>([]);
   const [summary, setSummary] = useState({ queued: 0, running: 0, completed: 0, failed: 0 });
@@ -110,8 +112,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
       .then((next) => {
         const enabled = next.filter((library) => library.enabled);
         setLibraries(enabled);
-        setSelectedLibraryId((current) => enabled.some((library) => library.id === current) ? current : enabled[0]?.id ?? '');
-        if (enabled.length === 0) setError(t('未找到可访问的书库'));
+        setSelectedLibraryId((current) => enabled.some((library) => library.id === current) ? current : '');
       })
       .catch((reason) => {
         if (controller.signal.aborted) return;
@@ -125,20 +126,20 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
     return () => controller.abort();
   }, [t, toast]);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setKeyword(keywordInput.trim());
+      setPage(1);
+    }, keywordInput.trim() ? 300 : 0);
+    return () => window.clearTimeout(timer);
+  }, [keywordInput]);
+
   const loadTasks = useCallback(async (targetPage: number, signal?: AbortSignal, silent = false) => {
     const requestId = ++requestIdRef.current;
-    if (!selectedLibraryId) {
-      setTasks([]);
-      setSummary({ queued: 0, running: 0, completed: 0, failed: 0 });
-      setTotal(0);
-      setTotalPages(1);
-      setLoading(false);
-      return;
-    }
     if (!silent) setLoading(true);
     try {
-      const result = await fetchImportTasks(selectedLibraryId, targetPage, pageSize, stateFilter === 'ALL' ? null : stateFilter, signal);
-      if (requestId !== requestIdRef.current) return;
+      const result = await fetchImportTasks(selectedLibraryId || null, targetPage, pageSize, stateFilter === 'ALL' ? null : stateFilter, signal, keyword);
+      if (signal?.aborted || requestId !== requestIdRef.current) return;
       const nextPage = Math.min(result.totalPages, Math.max(1, result.page));
       setTasks(result.tasks);
       setSummary(result.summary);
@@ -155,7 +156,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
     } finally {
       if (!silent && !signal?.aborted && requestId === requestIdRef.current) setLoading(false);
     }
-  }, [pageSize, selectedLibraryId, stateFilter, t, toast]);
+  }, [keyword, pageSize, selectedLibraryId, stateFilter, t, toast]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -166,7 +167,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   const activeImportCount = summary.queued + summary.running;
 
   useEffect(() => {
-    if (!selectedLibraryId || activeImportCount === 0) return;
+    if (activeImportCount === 0) return;
     let controller: AbortController | null = null;
     const refreshActiveTasks = () => {
       if (document.visibilityState !== 'visible') return;
@@ -186,7 +187,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
       document.removeEventListener('visibilitychange', refreshWhenVisible);
       window.removeEventListener('focus', refreshActiveTasks);
     };
-  }, [activeImportCount, loadTasks, page, selectedLibraryId]);
+  }, [activeImportCount, loadTasks, page]);
 
   async function continueTask(task: LibraryImportTask) {
     if (task.state !== 'FAILED' || !task.sourceNodeId) return;
@@ -220,57 +221,61 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
         <PageTitle
           title={t('导入任务')}
           desc={t('查看书库扫描、资源继续导入和资源资产导入状态。')}
-          action={(
-            <Button variant="secondary" icon={RefreshCw} loading={loading} loadingText={t('刷新中')} onClick={() => void loadTasks(page)}>
-              <I18nText>刷新</I18nText>
-            </Button>
-          )}
         />
-      ) : (
-        <div className="flex justify-end">
-          <Button variant="secondary" icon={RefreshCw} loading={loading} loadingText={t('刷新中')} onClick={() => void loadTasks(page)}>
-            <I18nText>刷新</I18nText>
-          </Button>
-        </div>
-      )}
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-3 rounded-[20px] border border-[#DEDAD4] bg-[#FAF9F7] p-3">
+        <input
+          type="search"
+          value={keywordInput}
+          onChange={(event) => setKeywordInput(event.target.value)}
+          placeholder={t('搜索书名、资源标题、来源名称或路径')}
+          aria-label={t('关键字筛选')}
+          className="h-10 w-full rounded-xl border border-[#DEDAD4] bg-white px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[#E64A2E] sm:w-72"
+        />
         <Select
           value={selectedLibraryId}
-          options={libraries.map((library) => ({ value: library.id, label: library.name, translate: false }))}
+          options={[{ value: '', label: t('全部书库'), translate: false }, ...libraries.map((library) => ({ value: library.id, label: library.name, translate: false }))]}
           onChange={(value) => { setSelectedLibraryId(value); setPage(1); }}
           ariaLabel={t('书库')}
-          disabled={librariesLoading || libraries.length === 0}
+          disabled={librariesLoading}
           className="min-w-[180px]"
           triggerClassName="h-10"
           menuClassName="min-w-[220px]"
         />
-        <span className="text-sm font-medium text-[#4F4A45]"><I18nText>按状态筛选</I18nText></span>
-        <Select
-          value={stateFilter}
-          options={[
-            { value: 'ALL', label: t('全部状态') },
-            { value: 'QUEUED', label: t('等待中') },
-            { value: 'RUNNING', label: t('导入中') },
-            { value: 'SUCCEEDED', label: t('已完成') },
-            { value: 'FAILED', label: t('失败') }
-          ]}
-          onChange={changeStateFilter}
-          ariaLabel={t('按状态筛选')}
-          className="min-w-[132px]"
-          triggerClassName="h-10"
-          menuClassName="min-w-[160px]"
-        />
-        <span className="text-sm text-[#77716A]"><I18nText>每页显示数量</I18nText></span>
-        <Select
-          value={String(pageSize)}
-          options={pageSizes.map((size) => ({ value: String(size), label: `${size} ${t('条/页')}` }))}
-          onChange={(value) => { setPageSize(Number(value) as PageSize); setPage(1); }}
-          ariaLabel={t('每页显示数量')}
-          className="min-w-[112px]"
-          triggerClassName="h-10"
-          menuClassName="min-w-[128px]"
-        />
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm font-medium text-[#4F4A45]"><I18nText>按状态筛选</I18nText></span>
+          <Select
+            value={stateFilter}
+            options={[
+              { value: 'ALL', label: t('全部状态') },
+              { value: 'QUEUED', label: t('等待中') },
+              { value: 'RUNNING', label: t('导入中') },
+              { value: 'SUCCEEDED', label: t('已完成') },
+              { value: 'FAILED', label: t('失败') }
+            ]}
+            onChange={changeStateFilter}
+            ariaLabel={t('按状态筛选')}
+            className="min-w-[132px]"
+            triggerClassName="h-10"
+            menuClassName="min-w-[160px]"
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm text-[#77716A]"><I18nText>每页显示数量</I18nText></span>
+          <Select
+            value={String(pageSize)}
+            options={pageSizes.map((size) => ({ value: String(size), label: `${size} ${t('条/页')}` }))}
+            onChange={(value) => { setPageSize(Number(value) as PageSize); setPage(1); }}
+            ariaLabel={t('每页显示数量')}
+            className="min-w-[112px]"
+            triggerClassName="h-10"
+            menuClassName="min-w-[128px]"
+          />
+        </div>
+        <Button className="sm:ml-auto" variant="secondary" icon={RefreshCw} loading={loading} loadingText={t('刷新中')} onClick={() => void loadTasks(page)}>
+          <I18nText>刷新</I18nText>
+        </Button>
       </div>
 
       {!embedded ? (

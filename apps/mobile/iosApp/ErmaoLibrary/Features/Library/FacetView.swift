@@ -153,7 +153,7 @@ struct FacetView: View {
                                 .appTextStyle(.headline)
                                 .foregroundStyle(theme.textPrimary)
                                 .lineLimit(2)
-                            Text(work.author ?? "—")
+                            Text(work.displayAuthor)
                                 .appTextStyle(.label)
                                 .foregroundStyle(theme.textSecondary)
                                 .lineLimit(1)
@@ -189,7 +189,7 @@ struct FacetView: View {
             locale: .current,
             index + 1,
             work.title,
-            work.author ?? "—"
+            work.displayAuthor
         )
     }
 }

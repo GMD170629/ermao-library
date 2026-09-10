@@ -1,5 +1,7 @@
 'use client';
 
+import { authorDisplayLabel } from '@/types/book';
+
 import { chapterPresentationSortOrder } from './chapter-reading-state';
 
 import { ArrowLeft, BookOpen, CheckCircle2, Edit3, Ellipsis, Headphones, ImagePlus, Images, LoaderCircle, RefreshCw, ScanSearch, Send, Sparkles, Trash2, X, type LucideIcon } from 'lucide-react';
@@ -626,7 +628,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         <div className="flex min-w-0 flex-col py-1">
           {book.completed ? <span className="inline-flex w-fit items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700"><CheckCircle2 size={14} /><I18nText>已完成</I18nText></span> : null}
           <h1 data-i18n-skip className="mt-2 line-clamp-2 text-3xl font-semibold leading-[1.15] tracking-tight text-[var(--visual-color-app-text-primary)] sm:text-[34px]">{book.title}</h1>
-          <p data-i18n-skip className="mt-3 text-base text-[var(--visual-color-app-text-secondary)]">{book.author}</p>
+          <p data-i18n-skip className="mt-3 text-base text-[var(--visual-color-app-text-secondary)]">{authorDisplayLabel(book.author)}</p>
           {hasBookMetadata ? <div className="mt-4 flex min-w-0 flex-col items-start gap-2 text-sm sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-2">
             {seriesName ? <span className="flex min-w-0 max-w-full items-center gap-2">
               <span className="shrink-0 text-[var(--visual-color-app-text-tertiary)]"><I18nText>系列</I18nText></span>

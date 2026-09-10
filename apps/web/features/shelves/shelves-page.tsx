@@ -1,5 +1,7 @@
 'use client';
 
+import { authorDisplayLabel } from '@/types/book';
+
 import { ArrowLeft, BookOpen, Check, Edit3, Folders, Loader2, Plus, Save, Search, Sparkles, Trash2, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -808,7 +810,7 @@ export function ShelvesPage() {
                       <Cover book={book} className="h-16 w-11 shrink-0" small />
                       <div data-i18n-skip className="min-w-0 flex-1">
                         <div className="line-clamp-1 text-sm font-medium text-[#2A2825]">{book.title}</div>
-                        <div className="mt-1 line-clamp-1 text-xs text-[#8B847E]">{book.author || i18nAttribute("未知作者")}</div>
+                        <div className="mt-1 line-clamp-1 text-xs text-[#8B847E]">{authorDisplayLabel(book.author)}</div>
                       </div>
                       {checked ? <Check size={16} className="shrink-0 text-[#D94724]" /> : null}
                     </label>
@@ -842,7 +844,7 @@ export function ShelvesPage() {
                       <Cover book={book} className="h-[72px] w-12 shrink-0 rounded-lg" small />
                       <div data-i18n-skip className="min-w-0">
                         <div className="line-clamp-1 text-sm font-semibold text-[#2A2825]">{book.title}</div>
-                        <div className="mt-1 line-clamp-1 text-xs text-[#8B847E]">{book.author || i18nAttribute("未知作者")}</div>
+                        <div className="mt-1 line-clamp-1 text-xs text-[#8B847E]">{authorDisplayLabel(book.author)}</div>
                       </div>
                     </div>
                   )) : (

@@ -1430,7 +1430,6 @@
   "未添加组合条件，显示基础筛选结果": "No grouping conditions added to show basic filter results",
   "未填写": "Unfilled",
   "未选择任何范围时，该用户默认看不到书库内容。": "With no scope selected, this user cannot see any library content.",
-  "未找到可访问的书库": "No accessible library was found",
   "未找到可唯一确定的标题精确候选": "No uniquely identifying exact title candidate was found",
   "未知": "Unknown",
   "未知导入规则": "Unknown import rule",
@@ -2104,5 +2103,8 @@
   "TXT 解码器无法解码此文件。": "The TXT decoder could not decode this file.",
   "TXT 解析器未找到可读文本。": "The TXT parser found no readable text.",
   "URL 加 ?debug=0 可关闭持久开关": "URL plus ?debug=0 to close the persistent switch",
-  "useAudioPlayback 必须在 AudioPlaybackProvider 内使用": "Use AudioPlayback to use in AudioPlaybackProvider"
+  "useAudioPlayback 必须在 AudioPlaybackProvider 内使用": "Use AudioPlayback to use in AudioPlaybackProvider",
+  "全部书库": "All libraries",
+  "关键字筛选": "Filter by keyword",
+  "搜索书名、资源标题、来源名称或路径": "Search book title, resource title, source name or path"
 }

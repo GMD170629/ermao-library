@@ -1,3 +1,4 @@
+@preconcurrency import ErmaoShared
 import SwiftUI
 
 struct DownloadCenterView: View {
@@ -82,7 +83,8 @@ struct DownloadCenterView: View {
                 ForEach(store.completedGroups) { group in
                     VStack(alignment: .leading, spacing: .space1) {
                         Text(group.title).appTextStyle(.headline)
-                        if let author = group.author, !author.isEmpty {
+                        let author = ErmaoShared.AuthorDisplay.shared.label(author: group.author)
+                        if !author.isEmpty {
                             Text(author)
                                 .appTextStyle(.caption)
                                 .foregroundStyle(theme.textSecondary)

@@ -1,3 +1,4 @@
+@preconcurrency import ErmaoShared
 @preconcurrency import AVFoundation
 @preconcurrency import Foundation
 @preconcurrency import MediaPlayer
@@ -78,7 +79,8 @@ final class IosAudioSystemMediaController: NSObject, AudioSystemMediaControlling
             MPNowPlayingInfoPropertyDefaultPlaybackRate: snapshot.playbackRate,
             MPNowPlayingInfoPropertyMediaType: NSNumber(value: MPNowPlayingInfoMediaType.audio.rawValue)
         ]
-        if let author = bootstrap.book.author, !author.isEmpty {
+        let author = ErmaoShared.AuthorDisplay.shared.label(author: bootstrap.book.author)
+        if !author.isEmpty {
             info[MPMediaItemPropertyArtist] = author
         }
         if let chapter = snapshot.chapter {

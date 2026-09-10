@@ -10,6 +10,14 @@ import com.ermao.library.shared.modules.library.domain.ReadingUnit
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 import kotlinx.serialization.Serializable
 
+/** Display-only normalization; imported metadata remains untouched. */
+object AuthorDisplay {
+    fun label(author: String?): String {
+        val value = author?.trim().orEmpty()
+        return if (value == "未知作者") "" else value
+    }
+}
+
 enum class LibraryScope { Books, Series, Authors }
 
 enum class LibrarySort(val wireValue: String) {

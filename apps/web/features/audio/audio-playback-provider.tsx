@@ -1,5 +1,7 @@
 'use client';
 
+import { authorDisplayLabel } from '@/types/book';
+
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   READER_PROGRESS_TIMING,
@@ -1066,7 +1068,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     try {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: state.chapter?.title ?? state.track.title,
-        artist: bootstrap.book.author ?? '',
+        artist: authorDisplayLabel(bootstrap.book.author),
         album: bootstrap.book.title,
         artwork: [{ src: cover }]
       });

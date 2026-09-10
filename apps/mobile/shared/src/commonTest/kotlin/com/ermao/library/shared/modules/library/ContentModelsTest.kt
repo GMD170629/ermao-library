@@ -7,6 +7,14 @@ import kotlin.test.assertIs
 import kotlinx.coroutines.runBlocking
 
 class ContentModelsTest {
+    @Test fun missingAuthorsHaveNoDisplayPlaceholder() {
+        listOf(null, "", "  ", "\n\t", "未知作者", " 未知作者 ").forEach {
+            assertEquals("", AuthorDisplay.label(it))
+        }
+        assertEquals("余华", AuthorDisplay.label(" 余华 "))
+        assertEquals("Ursula K. Le Guin", AuthorDisplay.label("Ursula K. Le Guin"))
+    }
+
     @Test fun coverSizeIsCanonicalWithoutChangingOtherAssetsOrQueryValues() {
         listOf("/api/books/a/cover", "/api/resources/a%2Fb/cover", "/api/books/a/source-nodes/node/cover").forEach { path ->
             val expected = "$path?v=7&resourceId=a%2Fb&size=small"

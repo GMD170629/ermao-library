@@ -1,5 +1,7 @@
 'use client';
 
+import { authorDisplayLabel } from '@/types/book';
+
 import { AccountAvatar } from '../../features/account-avatar/public';
 
 import {
@@ -792,7 +794,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     <Cover book={book} size="small" className="h-14 w-10 shrink-0 rounded-md shadow-sm" small />
                     <span data-i18n-skip className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-[var(--visual-color-app-text-primary)]">{book.title}</span>
-                      <span className="mt-1 block truncate text-xs text-[var(--visual-color-app-text-secondary)]">{book.author?.trim() || i18nAttribute("未知作者")}</span>
+                      <span className="mt-1 block truncate text-xs text-[var(--visual-color-app-text-secondary)]">{authorDisplayLabel(book.author)}</span>
                     </span>
                   </button>
                 ))}

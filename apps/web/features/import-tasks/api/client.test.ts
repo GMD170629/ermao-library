@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { continueImportTask, parseContinueImportResult, parseImportLibraries, parseImportTaskDetail, parseImportTasksPage, parseLibraryImportTask } from './client';
+import { fetchImportTasks, continueImportTask, parseContinueImportResult, parseImportLibraries, parseImportTaskDetail, parseImportTasksPage, parseLibraryImportTask } from './client';
 
 const task = {
   id: 'task-1',
@@ -84,6 +84,28 @@ test('continues the exact failed task through the task-scoped endpoint', async (
     const result = await continueImportTask('task-1');
     assert.equal(result.taskId, 'task-1');
     assert.equal(result.requeuedFailed, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+
+test('requests all libraries or one library with combined filters and cancellation', async () => {
+  const originalFetch = globalThis.fetch;
+  const urls: string[] = [];
+  const controller = new AbortController();
+  globalThis.fetch = async (input, init) => {
+    urls.push(String(input));
+    assert.equal(init?.signal, controller.signal);
+    return new Response(JSON.stringify({ ok: true, data: { tasks: [] } }));
+  };
+  try {
+    await fetchImportTasks(null, 2, 20, 'FAILED', controller.signal, '  书%_Title  ');
+    const all = new URL(urls[0] ?? '', 'http://localhost');
+    assert.equal(all.pathname, '/api/library-import-tasks');
+    assert.deepEqual(Object.fromEntries(all.searchParams), { page: '2', pageSize: '20', state: 'FAILED', keyword: '书%_Title' });
+    await fetchImportTasks('library-1', 1, 10, null, controller.signal, '  ');
+    assert.equal(urls[1], '/api/libraries/library-1/import-tasks?page=1&pageSize=10');
   } finally {
     globalThis.fetch = originalFetch;
   }

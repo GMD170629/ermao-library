@@ -1111,7 +1111,7 @@ test('mobile page actions keep labels horizontal and move below long headings', 
   await page.route('**/api/libraries', async (route) => {
     await route.fulfill({ json: { ok: true, data: { libraries: [{ id: 'library-1', name: '主书库', enabled: true }] } } });
   });
-  await page.route('**/api/libraries/library-1/import-tasks**', async (route) => {
+  await page.route('**/api/library-import-tasks**', async (route) => {
     await route.fulfill({ json: { ok: true, data: { tasks: [], queued: 0, running: 0, completed: 0, failed: 0, page: 1, pageSize: 10, total: 0, totalPages: 1 } } });
   });
   await page.goto('/import-tasks');

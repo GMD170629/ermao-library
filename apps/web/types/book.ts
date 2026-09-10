@@ -1,3 +1,9 @@
+/** Keep missing and legacy placeholder authors blank in presentation. */
+export function authorDisplayLabel(author: string | null | undefined): string {
+  const value = author?.trim() ?? '';
+  return value === '未知作者' ? '' : value;
+}
+
 export type ResourceFormat =
   | 'COMIC' | 'CBZ' | 'CBR' | 'RAR' | 'ZIP' | 'EPUB' | 'PDF' | 'AUDIO'
   | 'MP3' | 'M4A' | 'M4B' | 'MOBI' | 'AZW' | 'AZW3' | 'PRC' | 'FB2' | 'TXT'

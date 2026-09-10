@@ -62,6 +62,7 @@ internal data class AuthUserWire(
     val canViewManualImports: Boolean,
     val authzVersion: Long,
     val avatarUrl: String? = null,
+    val avatarImageUrl: String,
     val locale: String? = null,
 )
 

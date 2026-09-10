@@ -1,5 +1,7 @@
 'use client';
 
+import { authorDisplayLabel } from '@/types/book';
+
 import Image from 'next/image';
 import {
   useEffect,
@@ -240,7 +242,7 @@ function ShelfBookMetadata<T extends BookshelfItem>({
   divider?: boolean;
 }) {
   const { t } = useAttributeI18n();
-  const author = book.author?.trim() || t("未知作者");
+  const author = authorDisplayLabel(book.author);
 
   return (
     <div

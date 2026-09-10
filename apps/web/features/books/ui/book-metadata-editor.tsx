@@ -1,5 +1,7 @@
 'use client';
 
+import { authorDisplayLabel } from '@/types/book';
+
 import { ImagePlus, Save, Trash2, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -28,7 +30,7 @@ type BookForm = Readonly<{
 function formForBook(book: BookView): BookForm {
   return {
     title: book.title,
-    author: book.author,
+    author: authorDisplayLabel(book.author),
     description: book.description,
     seriesName: book.seriesName ?? '',
     seriesIndex: book.seriesIndex === null ? '' : String(book.seriesIndex),

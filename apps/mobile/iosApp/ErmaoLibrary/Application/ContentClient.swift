@@ -126,6 +126,7 @@ struct CoverReference: Codable, Equatable, Hashable, Sendable {
 }
 
 struct BookCard: Identifiable, Codable, Equatable, Hashable, Sendable {
+    var displayAuthor: String { ErmaoShared.AuthorDisplay.shared.label(author: author) }
     let id: String
     let title: String
     let author: String?

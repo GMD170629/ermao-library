@@ -1,5 +1,7 @@
 package com.ermao.library.features.administrativesettings
 
+import com.ermao.library.shared.modules.library.AuthorDisplay
+
 import com.ermao.library.shared.modules.administrativesettings.initialOpdsPublicBaseUrl
 import com.ermao.library.shared.modules.administrativesettings.AdministrativeSettingsContent as SharedContent
 import com.ermao.library.shared.modules.administrativesettings.AdministrativeSettingsContext as SharedContext
@@ -112,7 +114,7 @@ class SharedAdministrativeSettingsAdapter(
         }
         AdministrativeSettingsRoute.OrganizeCandidates -> sharedRepository.loadOrganizeCandidates(sharedContext).map { candidates ->
             OrganizeCandidatesSnapshot(candidates.books.map {
-                RecognitionCandidate(it.id, it.title.orEmpty(), it.author.orEmpty(), it.metadataQuality.coerceIn(0, 100))
+                RecognitionCandidate(it.id, it.title.orEmpty(), AuthorDisplay.label(it.author), it.metadataQuality.coerceIn(0, 100))
             })
         }
         AdministrativeSettingsRoute.OrganizeRuns -> sharedRepository.listOrganizeRuns(sharedContext).map { runs ->
@@ -530,7 +532,7 @@ private fun SharedEventMetadataValue?.asText(): String? = when (this) {
 }
 
 private fun com.ermao.library.shared.modules.administrativesettings.OrganizeJob.toLocal() = OrganizeTask(
-    id, book.title, book.author.orEmpty(),
+    id, book.title, AuthorDisplay.label(book.author),
     when (statusCategory) {
         com.ermao.library.shared.modules.administrativesettings.OrganizeStatusCategory.Waiting -> OrganizeStatus.AwaitingRecognition
         com.ermao.library.shared.modules.administrativesettings.OrganizeStatusCategory.Recognizing -> OrganizeStatus.NeedsConfirmation

@@ -1,5 +1,7 @@
 'use client';
 
+import { authorDisplayLabel } from '@/types/book';
+
 import { ExternalLink, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -31,7 +33,7 @@ function metadataChecks(job: OrganizeJobView) {
   const publishedAt = resources.map((resource) => resource.publishedAt).find(Boolean) ?? null;
   return [
     { key: 'title', label: '标题', complete: Boolean(book.title.trim()), value: book.title },
-    { key: 'author', label: '作者', complete: Boolean(book.author.trim() && book.author !== '未知作者'), value: book.author },
+    { key: 'author', label: '作者', complete: Boolean(authorDisplayLabel(book.author)), value: authorDisplayLabel(book.author) },
     { key: 'cover', label: '封面', complete: Boolean(book.coverUrl && book.coverStatus === 'READY'), value: book.coverStatus === 'READY' ? '已生成' : '缺少或待生成' },
     { key: 'seriesName', label: '系列', complete: Boolean(book.seriesName), value: book.seriesName },
     { key: 'seriesIndex', label: '卷号', complete: book.seriesIndex !== null, value: book.seriesIndex },
@@ -94,7 +96,7 @@ export function OrganizeJobDetailPage({ jobId, embedded = false }: { jobId: stri
             <Cover book={job.book} className="h-40 w-28" />
             <div data-i18n-skip className="min-w-0">
               <h2 className="line-clamp-2 text-lg font-semibold text-slate-900">{job.book.title}</h2>
-              <p className="mt-1 text-sm text-slate-500">{job.book.author} · {job.book.resources.map((resource) => resource.format).join(' / ')}</p>
+              <p className="mt-1 text-sm text-slate-500">{[authorDisplayLabel(job.book.author), job.book.resources.map((resource) => resource.format).join(' / ')].filter(Boolean).join(' · ')}</p>
               <div className="mt-3 flex flex-wrap gap-1">
                 <Badge tone={job.statusCategory === 'SUCCESS' ? 'green' : job.statusCategory === 'FAILED' ? 'red' : job.statusCategory === 'RECOGNIZING' ? 'blue' : 'amber'}>{organizeStatusLabel(job.statusCategory ?? organizeStatusCategory(job.status, job.metadataLookupStatus))}</Badge>
                 {!embedded ? <Badge tone={job.book.metadataQuality >= 80 ? 'green' : 'blue'}><I18nText>质量 </I18nText>{job.book.metadataQuality}</Badge> : null}
@@ -121,7 +123,7 @@ export function OrganizeJobDetailPage({ jobId, embedded = false }: { jobId: stri
                   <span className="font-medium text-slate-800">{check.label}</span>
                   <Badge tone={check.complete ? 'green' : 'amber'}>{check.complete ? i18nAttribute("已有") : i18nAttribute("缺失")}</Badge>
                 </div>
-                <div className="mt-2 line-clamp-2 text-xs text-slate-500">{valueLabel(check.value)}</div>
+                <div className="mt-2 line-clamp-2 text-xs text-slate-500">{check.key === 'author' ? check.value : valueLabel(check.value)}</div>
               </div>
             ))}
           </div>

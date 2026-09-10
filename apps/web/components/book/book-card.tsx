@@ -1,5 +1,7 @@
 'use client';
 
+import { authorDisplayLabel } from '@/types/book';
+
 import { Check } from 'lucide-react';
 import type { KeyboardEvent } from 'react';
 import { Progress } from '../ui/progress';
@@ -31,7 +33,7 @@ export function BookCard({
   onSelect?: () => void;
 }) {
   const { t: i18nAttribute } = useAttributeI18n();
-  const authorLabel = book.author.trim() && book.author !== '未知作者' ? book.author.trim() : null;
+  const authorLabel = authorDisplayLabel(book.author);
   const continueResource = resourceById(book, book.continueResourceId);
   const hasProgress = Boolean(continueResource && continueResource.progress > 0 && continueResource.progress < 100);
   const readingLabel = consumptionStatusLabel(book.completed ? 'FINISHED' : allBookResources(book).some((resource) => resource.progress > 0) ? 'READING' : 'UNREAD');

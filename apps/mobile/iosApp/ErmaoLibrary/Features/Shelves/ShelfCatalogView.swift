@@ -1,3 +1,4 @@
+@preconcurrency import ErmaoShared
 import SwiftUI
 
 struct ShelfCatalogView: View {
@@ -125,7 +126,8 @@ struct ShelfCatalogView: View {
                             cover(book, manage: true).frame(width: 64).accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: .spaceHalf) {
                                 Text(book.title).appTextStyle(.headline).foregroundStyle(theme.textPrimary).lineLimit(3)
-                                if let author = book.author {
+                                let author = ErmaoShared.AuthorDisplay.shared.label(author: book.author)
+                                if !author.isEmpty {
                                     Text(author).appTextStyle(.callout).foregroundStyle(theme.textSecondary)
                                 }
                             }.frame(maxWidth: .infinity, alignment: .leading)

@@ -292,7 +292,7 @@ struct LibraryView: View {
                 group.bookCount
             )
         }
-        let author = group.representativeBooks.first?.author?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let author = group.representativeBooks.first?.displayAuthor
         if let author, !author.isEmpty {
             return String(
                 format: String(localized: "library.group.summary.format"),

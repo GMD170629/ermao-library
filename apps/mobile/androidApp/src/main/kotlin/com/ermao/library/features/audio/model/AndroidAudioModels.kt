@@ -1,5 +1,7 @@
 package com.ermao.library.features.audio.model
 
+import com.ermao.library.shared.modules.library.AuthorDisplay
+
 import androidx.compose.runtime.Immutable
 import com.ermao.library.shared.modules.audio.AudioAsset as SharedAudioAsset
 import com.ermao.library.shared.modules.audio.AudioLaunchIntent as SharedAudioLaunchIntent
@@ -129,7 +131,7 @@ data class AndroidAudioLaunchIntent(
                 bookId = publication.bookId,
                 resourceId = publication.resource.resourceId,
                 title = publication.bookTitle,
-                author = publication.author,
+                author = AuthorDisplay.label(publication.author),
                 artworkUri = artworkUri,
                 tracks = publication.assets.map { asset ->
                     AndroidAudioTrack(

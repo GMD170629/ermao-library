@@ -1,5 +1,7 @@
 package com.ermao.library.features.audio.ui
 
+import com.ermao.library.shared.modules.library.AuthorDisplay
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -234,7 +236,7 @@ fun AudioNowPlayingScreen(
     var chaptersVisible by remember { mutableStateOf(false) }
     val title = snapshot.title ?: stringResource(R.string.audio_unknown_title)
     val chapter = snapshot.chapterTitle ?: stringResource(R.string.audio_no_chapter)
-    val author = snapshot.author?.takeIf(String::isNotBlank)
+    val author = AuthorDisplay.label(snapshot.author).takeIf(String::isNotBlank)
     val duration = snapshot.durationMillis
     val current = snapshot.positionMillis.coerceAtMost(duration.takeIf { it > 0 } ?: Long.MAX_VALUE)
     val status = audioStatusLabel(snapshot.phase)

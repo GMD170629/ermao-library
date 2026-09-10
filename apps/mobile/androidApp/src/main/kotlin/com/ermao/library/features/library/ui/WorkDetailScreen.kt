@@ -36,7 +36,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -1706,21 +1705,6 @@ private fun WorkContentEntryCard(
                                 modifier = Modifier.align(Alignment.BottomCenter),
                             )
                         }
-                    }
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(theme.spacing.one)
-                            .size(theme.spacing.four)
-                            .background(theme.colors.textPrimary.copy(alpha = 0.62f), CircleShape),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = item.indexLabel,
-                            color = theme.colors.canvas,
-                            style = theme.typography.caption,
-                            textAlign = TextAlign.Center,
-                        )
                     }
                 }
                 Row(verticalAlignment = Alignment.Top) {

@@ -1,5 +1,7 @@
 package com.ermao.library.features.downloads.infrastructure
 
+import com.ermao.library.shared.modules.library.AuthorDisplay
+
 import com.ermao.library.features.downloads.model.AndroidDownloadNamespace
 import com.ermao.library.features.downloads.model.AndroidDownloadMemberRecord
 import com.ermao.library.features.downloads.model.AndroidDownloadRecord
@@ -155,7 +157,7 @@ private fun DownloadTask.toRecord(createdAtEpochMillis: Long, updatedAtEpochMill
         namespace = descriptor.identity.namespace.toAndroid(),
         bookId = descriptor.identity.bookId,
         bookTitle = descriptor.bookTitle,
-        author = descriptor.bookAuthor.orEmpty(),
+        author = AuthorDisplay.label(descriptor.bookAuthor),
         coverUrl = descriptor.coverApiPath.orEmpty(),
         resourceId = descriptor.identity.resourceId,
         resourceTitle = descriptor.resourceTitle,

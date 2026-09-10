@@ -175,15 +175,18 @@ async function apiJson(path: string, init?: RequestInit): Promise<unknown> {
 }
 
 export async function fetchImportTasks(
-  libraryId: string,
+  libraryId: string | null,
   page: number,
   pageSize: number,
   state: ImportTaskState | null = null,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  keyword = ''
 ): Promise<ImportTasksPage> {
   const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   if (state) query.set('state', state);
-  return parseImportTasksPage(await apiJson(`/api/libraries/${encodeURIComponent(libraryId)}/import-tasks?${query.toString()}`, { signal }));
+  if (keyword.trim()) query.set('keyword', keyword.trim());
+  const path = libraryId ? `/api/libraries/${encodeURIComponent(libraryId)}/import-tasks` : '/api/library-import-tasks';
+  return parseImportTasksPage(await apiJson(`${path}?${query.toString()}`, { signal }));
 }
 
 export async function fetchImportLibraries(signal?: AbortSignal): Promise<ImportLibrary[]> {

@@ -85,7 +85,6 @@ struct CoverProgressView: View {
                 .progressViewStyle(.linear)
                 .tint(theme.brandAccent)
                 .frame(height: 2)
-                .padding(.horizontal, .space1)
                 .accessibilityValue(Text(progress / 100, format: .percent.precision(.fractionLength(0))))
         }
     }
@@ -125,7 +124,7 @@ struct WorkGrid: View {
                             .appTextStyle(.label)
                             .lineLimit(1)
                             .foregroundStyle(theme.textPrimary)
-                        Text(work.author ?? "—")
+                        Text(work.displayAuthor)
                             .appTextStyle(.caption)
                             .lineLimit(1)
                             .foregroundStyle(theme.textSecondary)
@@ -150,11 +149,11 @@ struct WorkGrid: View {
                 format: String(localized: "library.book.accessibility.progress"),
                 locale: .current,
                 work.title,
-                work.author ?? "—",
+                work.displayAuthor,
                 Int(progress)
             )
         }
-        return "\(work.title), \(work.author ?? "—")"
+        return "\(work.title), \(work.displayAuthor)"
     }
 }
 
@@ -184,7 +183,7 @@ struct WorkList: View {
                         .frame(width: 56)
                         VStack(alignment: .leading, spacing: .spaceHalf) {
                             Text(work.title).appTextStyle(.headline).lineLimit(2)
-                            Text(work.author ?? "—")
+                            Text(work.displayAuthor)
                                 .appTextStyle(.label)
                                 .foregroundStyle(theme.textSecondary)
                                 .lineLimit(1)

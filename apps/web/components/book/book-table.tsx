@@ -1,5 +1,7 @@
 'use client';
 
+import { authorDisplayLabel } from '@/types/book';
+
 import { ArrowDown, ArrowUp, ArrowUpDown, Ellipsis } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import type { MouseEvent as ReactMouseEvent } from 'react';
@@ -167,7 +169,7 @@ export function BookTable({
     <>
       <div className="space-y-3 md:hidden">
         {books.map((book) => {
-          const authorLabel = book.author?.trim() && book.author !== '未知作者' ? book.author.trim() : i18nAttribute("未知作者");
+          const authorLabel = authorDisplayLabel(book.author);
 
           return (
             <article key={book.id} data-testid="book-list-mobile-card" onContextMenu={(event) => openContextMenu(event, book)} className={`relative overflow-hidden rounded-2xl border bg-white/70 ${selectedIds.includes(book.id) ? 'border-[#EF4D2F]' : 'border-black/[0.07]'}`}>
@@ -217,7 +219,7 @@ export function BookTable({
         </thead>
         <tbody className="divide-y divide-black/[0.05]">
           {books.map((book, index) => {
-            const authorLabel = book.author?.trim() && book.author !== '未知作者' ? book.author.trim() : i18nAttribute("未知作者");
+            const authorLabel = authorDisplayLabel(book.author);
 
             return (
               <tr

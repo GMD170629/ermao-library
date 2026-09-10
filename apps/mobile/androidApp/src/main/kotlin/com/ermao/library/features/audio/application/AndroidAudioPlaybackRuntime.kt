@@ -1,5 +1,7 @@
 package com.ermao.library.features.audio.application
 
+import com.ermao.library.shared.modules.library.AuthorDisplay
+
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
@@ -1356,7 +1358,7 @@ private fun buildAudioMediaItems(intent: AndroidAudioLaunchIntent): List<MediaIt
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(track.title)
-                    .setArtist(intent.author)
+                    .setArtist(AuthorDisplay.label(intent.author))
                     // Remote cover URLs are authenticated media too. Do not let Media3's
                     // default notification bitmap loader create a second unauthenticated HTTP
                     // path; the Compose surface uses its safe fallback until a shared artwork

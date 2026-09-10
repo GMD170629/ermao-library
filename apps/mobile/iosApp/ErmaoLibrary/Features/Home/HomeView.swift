@@ -114,20 +114,18 @@ struct HomeView: View {
                             .frame(width: BookCoverLayout.horizontalCardWidth)
                             VStack(alignment: .leading, spacing: .spaceHalf) {
                                 Text(item.book.title).appTextStyle(.headline).lineLimit(2)
-                                Text(item.book.author ?? "—")
+                                Text(item.book.displayAuthor)
                                     .appTextStyle(.callout)
                                     .foregroundStyle(theme.textSecondary)
                                     .lineLimit(1)
                                 if let position = item.positionLabel ?? item.resourceTitle {
-                                    Text(position)
+                                    Text(String(format: String(localized: "home.continue.reading.format"), locale: .current, position))
                                         .appTextStyle(.label)
                                         .foregroundStyle(theme.textSecondary)
-                                        .lineLimit(2)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
                                 }
                                 if let progress = item.book.progress {
-                                    Text(progress / 100, format: .percent.precision(.fractionLength(0)))
-                                        .appTextStyle(.caption)
-                                        .monospacedDigit()
                                     CoverProgressView(progress: progress)
                                 }
                             }

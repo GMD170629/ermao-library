@@ -1,5 +1,7 @@
 'use client';
 
+import { authorDisplayLabel } from '@/types/book';
+
 import { CheckCircle2, Search, Sparkles, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '../../components/ui/badge';
@@ -232,7 +234,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
                       <div className="line-clamp-2 font-medium text-slate-900">{candidate.title || i18nAttribute("未命名候选")}</div>
                       <Badge tone={candidate.confidence >= 0.8 ? 'green' : 'blue'}>{Math.round(candidate.confidence * 100)}%</Badge>
                     </div>
-                    <div className="mt-1 line-clamp-1 text-xs text-slate-500">{[candidate.author, candidate.source].filter(Boolean).join(' · ')}</div>
+                    <div className="mt-1 line-clamp-1 text-xs text-slate-500">{[authorDisplayLabel(candidate.author), candidate.source].filter(Boolean).join(' · ')}</div>
                     {candidate.description ? <div className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500">{candidate.description}</div> : null}
                   </div>
                 </div>

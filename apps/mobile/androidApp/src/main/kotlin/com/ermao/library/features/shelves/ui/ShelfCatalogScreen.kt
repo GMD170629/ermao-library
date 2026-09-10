@@ -1,5 +1,7 @@
 package com.ermao.library.features.shelves.ui
 
+import com.ermao.library.shared.modules.library.AuthorDisplay
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -173,7 +175,7 @@ fun ShelfCatalogScreen(
                                     CatalogBookCover(book.id, book.title, book.coverUrl, repository, context, Modifier.width(64.dp))
                                     Column(Modifier.weight(1f)) {
                                         Text(book.title, style = theme.typography.headline, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                                        book.author?.let { Text(it, style = theme.typography.callout, color = theme.colors.textSecondary) }
+                                        AuthorDisplay.label(book.author).takeIf(String::isNotEmpty)?.let { Text(it, style = theme.typography.callout, color = theme.colors.textSecondary) }
                                     }
                                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = theme.colors.textSecondary)
                                 }

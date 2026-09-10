@@ -1,5 +1,7 @@
 'use client';
 
+import { authorDisplayLabel } from '@/types/book';
+
 import { ArrowRight, BookOpen, Headphones, Images, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -70,7 +72,7 @@ export function DashboardPage() {
     };
   }, []);
 
-  const continueAuthor = continueItem?.author.trim() && continueItem.author !== '未知作者' ? continueItem.author : null;
+  const continueAuthor = authorDisplayLabel(continueItem?.author);
 
   return (
     <div className="mx-auto max-w-[1280px]">
@@ -144,7 +146,7 @@ export function DashboardPage() {
                         resourceId,
                         bookId: continueItem.bookId,
                         title: continueItem.title,
-                        author: continueItem.author === '未知作者' ? null : continueItem.author,
+                        author: authorDisplayLabel(continueItem.author),
                         coverUrl: continueItem.coverUrl,
                         resourceTitle: continueItem.resourceTitle,
                         narrator: continueItem.narrator,
