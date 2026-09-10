@@ -189,23 +189,15 @@ exit "$TEST_DOCKER_EXIT"
         self.assertTrue((self.root / "first-install/storage/database").is_dir())
         self.assert_originals_preserved()
 
-    def test_active_or_unqueryable_containers_prevent_erasure(self) -> None:
-        self.environment["wizard_install_mode"] = "fresh"
-        for states, exit_code in (
-            ("running", "0"),
-            ("restarting", "0"),
-            ("paused", "0"),
-            ("exited\nrunning", "0"),
-            ("", "1"),
-        ):
-            for script in ("install_callback", "upgrade_callback"):
-                with self.subTest(states=states, exit_code=exit_code, script=script):
-                    self.environment.update(
-                        TEST_CONTAINER_STATES=states, TEST_DOCKER_EXIT=exit_code
-                    )
-                    self.assertEqual(self.invoke(script).returncode, 1)
-                    self.assertIn("without erasing settings", self.log.read_text())
-                    self.assert_storage_preserved()
+    def test_fresh_callbacks_do_not_require_docker_access(self) -> None:
+        self.environment.update(wizard_install_mode="fresh", TEST_DOCKER_EXIT="126")
+        for script in ("install_callback", "upgrade_callback"):
+            with self.subTest(script=script):
+                self.database.write_bytes(b"existing database")
+                self.assert_success(self.invoke(script))
+                self.assertFalse(self.database.exists())
+                self.assert_originals_preserved()
+                self.assertFalse(self.docker_calls.exists())
 
     def test_invalid_mode_and_port_cannot_erase_storage(self) -> None:
         for mode, port in (("invalid", "3000"), ("", "3000"), ("fresh", "80")):

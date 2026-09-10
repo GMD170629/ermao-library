@@ -28,26 +28,6 @@ validate_installation() {
   esac
 }
 
-require_stopped_containers() {
-  . "$(dirname "${BASH_SOURCE[0]}")/docker-runtime.sh"
-  local states state
-  if ! states="$(web_container_states)"; then
-    installation_error \
-      '无法确认应用容器已停止，全新安装已终止，未清空配置。请检查 Docker 后重试。' \
-      'Cannot verify that the application containers are stopped. Fresh installation was stopped without erasing settings. Check Docker and try again.'
-  fi
-  while IFS= read -r state; do
-    case "$state" in
-      ''|created|exited|dead) ;;
-      *)
-        installation_error \
-          '应用容器尚未停止，全新安装已终止，未清空配置。请在 fnOS 中停止应用后重试。' \
-          'An application container is still active. Fresh installation was stopped without erasing settings. Stop the application in fnOS and try again.'
-        ;;
-    esac
-  done <<< "$states"
-}
-
 reset_application_storage() {
   local package_var storage
   case "${TRIM_PKGVAR:-}" in
@@ -82,7 +62,7 @@ case "${1:-}" in
   validate) ;;
   apply)
     if [ "$wizard_install_mode" = fresh ]; then
-      require_stopped_containers
+      # fnOS owns stopping the application before the upgrade callback.
       reset_application_storage
     fi
     ;;

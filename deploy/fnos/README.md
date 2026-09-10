@@ -64,13 +64,13 @@ Both lifecycle entry points reuse one installation policy and the existing stora
 
 `config/resource` 声明稳定的 `shuku.library` 共享书库目录，fnOS 安装时自动创建为 `/shuku.library`，并通过 `TRIM_DATA_SHARE_PATHS` 注入 Compose。`manifest` 设置 `disable_authorization_path=true`，不再额外申请任意 NAS 目录访问权限。
 
-fnOS 根据 `config/resource` 中的 `docker-project` 统一管理 Compose 项目的创建、启动、停止、升级和配置变更。生命周期回调校验端口、按安装方式处理应用数据，并以应用用户预创建持久化目录；全新安装前只读查询容器状态，不执行 `sudo` 或 `docker compose`，也不动态重写 Compose 文件。`cmd/main` 的 `start/stop` 交给应用中心处理，`status` 则通过 Compose 项目和服务标签准确判断 `web` 容器是否正在运行。Docker 查询失败时返回错误，不将查询失败当作容器已停止。
+fnOS 根据 `config/resource` 中的 `docker-project` 统一管理 Compose 项目的创建、启动、停止、升级和配置变更。生命周期回调校验端口、按安装方式处理应用数据，并以应用用户预创建持久化目录；本安装流程约定由 fnOS 在升级前关闭应用；安装和升级回调不再查询容器状态，不执行 `sudo` 或 `docker compose`，也不动态重写 Compose 文件。`cmd/main` 的 `start/stop` 交给应用中心处理，`status` 则通过 Compose 项目和服务标签准确判断 `web` 容器是否正在运行。Docker 查询失败时返回错误，不将查询失败当作容器已停止。
 
 应用的生命周期脚本通过 `config/privilege` 以 `run-as=package` 模式运行，不使用 root 权限。权限模型参考 fnOS 官方的[应用权限文档](https://developer.fnnas.com/docs/core-concepts/privilege/)，共享目录声明参考[应用资源文档](https://developer.fnnas.com/docs/core-concepts/resource/)。
 
 fnOS 安装及升级向导通过 `wizard_install_mode` 收集 `fresh` 或 `update`，并通过 `wizard_port` 收集端口。端口注入 Compose 并用于宿主机端口映射和桌面 URL。安装模式不进入应用设置向导。管理账户在首次打开 Web 页面时创建，构建、安装和配置回调均不依赖管理员邮箱或密码变量。
 
-`pnpm fnos:validate` 会执行隔离临时目录中的安装行为测试，覆盖版本拦截、清空范围、书库保留、容器检查和失败终止。它不能替代 fnOS 实机验收：发布前还需确认两个向导、错误展示、旧容器停止与清空顺序，以及全新安装后的管理员初始化页面。
+`pnpm fnos:validate` 会执行隔离临时目录中的安装行为测试，覆盖版本拦截、清空范围、书库保留、无 Docker 权限时安装和失败终止。它不能替代 fnOS 实机验收：发布前还需确认两个向导、错误展示、平台关闭应用与清空顺序，以及全新安装后的管理员初始化页面。
 
 使用登录页的“忘记密码”后，应用会在 fnOS 共享书库目录中创建 `reset-password.html`。在文件管理器中打开该文件并点击链接，即可设置新密码。
 
