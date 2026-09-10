@@ -96,7 +96,6 @@ private fun AdministrativeSettingsRoute.group(): ManagementGroup = when (this) {
     AdministrativeSettingsRoute.KindleQueue,
     AdministrativeSettingsRoute.Users,
     is AdministrativeSettingsRoute.UserEdit,
-    is AdministrativeSettingsRoute.UserAccess,
     AdministrativeSettingsRoute.Opds,
     -> ManagementGroup.Services
     AdministrativeSettingsRoute.Root,
@@ -113,7 +112,6 @@ private fun AdministrativeSettingsRoute.title(): AdministrativeCopy = when (this
     AdministrativeSettingsRoute.KindleQueue -> AdministrativeCopy.KindleQueue
     AdministrativeSettingsRoute.Users,
     is AdministrativeSettingsRoute.UserEdit,
-    is AdministrativeSettingsRoute.UserAccess,
     -> AdministrativeCopy.UsersAndPermissions
     AdministrativeSettingsRoute.LibrarySources,
     is AdministrativeSettingsRoute.LibrarySourceEdit,
@@ -145,7 +143,6 @@ private fun AdministrativeSettingsRoute.title(): AdministrativeCopy = when (this
 private fun AdministrativeSettingsRoute.icon(): ImageVector = when (this) {
     AdministrativeSettingsRoute.Users,
     is AdministrativeSettingsRoute.UserEdit,
-    is AdministrativeSettingsRoute.UserAccess,
     -> WarmSettingsIcons.Users
     is AdministrativeSettingsRoute.EmailKindle -> WarmSettingsIcons.EmailAndKindle
     AdministrativeSettingsRoute.KindleQueue -> WarmSettingsIcons.KindleQueue
@@ -382,6 +379,7 @@ internal fun AdministrativeTextField(
     supporting: String? = null,
     placeholder: String? = null,
     textAlign: TextAlign = TextAlign.Start,
+    enabled: Boolean = true,
 ) {
     SettingsTextField(
         value = value,
@@ -391,6 +389,7 @@ internal fun AdministrativeTextField(
         password = password,
         placeholder = placeholder,
         textAlign = textAlign,
+        enabled = enabled,
         showPasswordContentDescription = if (locale == AdministrativeLocale.ZhCn) "显示密码" else "Show password",
         hidePasswordContentDescription = if (locale == AdministrativeLocale.ZhCn) "隐藏密码" else "Hide password",
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
@@ -404,6 +403,7 @@ internal fun <T> EnumChoiceRow(
     selected: T,
     onSelect: (T) -> Unit,
     locale: AdministrativeLocale,
+    enabled: Boolean = true,
     valueText: (T) -> String,
 ) {
     androidx.compose.foundation.layout.Column(
@@ -418,6 +418,7 @@ internal fun <T> EnumChoiceRow(
             options = values.map { value -> WarmPageChoice(value, valueText(value)) },
             selected = selected,
             onSelect = onSelect,
+            enabled = enabled,
             modifier = Modifier.fillMaxWidth(),
         )
     }

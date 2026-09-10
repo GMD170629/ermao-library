@@ -41,7 +41,6 @@ struct AdministrativeSettingsDestination: View {
             case .kindleQueue: KindleQueueView(store: store)
             case .users: UsersSettingsView(store: store)
             case let .userEditor(userID): UserEditorView(store: store, userID: userID)
-            case let .userAccess(userID): UserAccessView(store: store, userID: userID)
             case .opds: OPDSSettingsView(store: store)
             case .logs: SystemLogsView(store: store)
             case .about: AdministrativeAboutView(store: store)

@@ -196,6 +196,60 @@ class AdministrativeSettingsViewModelTest {
         assertNull(viewModel.states.value.getValue(route).failure)
     }
 
+    @Test
+    fun opdsUsesTheUpdateResponseWithoutASecondRead() = runTest(dispatcher) {
+        val saved = opds("https://books.example/base")
+        val disabled = saved.copy(enabled = false, running = false, catalogUrl = "")
+        val repository = RecordingRepository().apply {
+            loadResult = AdministrativeResult.Content(saved)
+            commandResult = AdministrativeResult.Content(AdministrativeCommandReceipt(emptySet(), updatedSnapshot = disabled))
+        }
+        val viewModel = viewModel(repository, setOf(AdministrativeCapability.ManageOpds))
+        viewModel.load(AdministrativeSettingsRoute.Opds)
+        advanceUntilIdle()
+        viewModel.execute(AdministrativeCommand.SaveOpds(false, saved.publicBaseUrl))
+        advanceUntilIdle()
+        assertEquals(disabled, viewModel.states.value.getValue(AdministrativeSettingsRoute.Opds).snapshot)
+        assertEquals(1, repository.loads.size)
+    }
+
+    @Test
+    fun passwordResetRetainsEditorAndSaveInvalidatesBothListAndEditor() = runTest(dispatcher) {
+        val user = AdministrativeUser("target", "Reader", "reader@example.com", UserRole.Member, true, AdministrativeLocale.ZhCn)
+        val snapshot = UserEditorSnapshot(user, false, true, setOf("library-1"))
+        val repository = RecordingRepository().apply { loadResult = AdministrativeResult.Content(snapshot) }
+        val model = viewModel(repository, setOf(AdministrativeCapability.ManageUsers))
+        val route = AdministrativeSettingsRoute.UserEdit(user.id)
+        model.load(route)
+        advanceUntilIdle()
+        model.execute(AdministrativeCommand.ResetUserPassword(user.id, "1234567890"))
+        advanceUntilIdle()
+        assertEquals(1, repository.loads.size)
+        assertEquals(snapshot, model.states.value.getValue(route).snapshot)
+        repository.commandResult = AdministrativeResult.Failure(AdministrativeFailure(AdministrativeErrorKind.Conflict, "EMAIL_IN_USE"))
+        val draft = UserDraft(user.id, "Changed", user.email, user.role, true, null, false, true, setOf("library-1"), user.locale)
+        model.execute(AdministrativeCommand.SaveUser(draft))
+        advanceUntilIdle()
+        assertEquals(snapshot, model.states.value.getValue(route).snapshot)
+        assertEquals("EMAIL_IN_USE", model.states.value.getValue(route).failure?.code)
+        repository.commandResult = AdministrativeResult.Content(AdministrativeCommandReceipt(setOf(AdministrativeSettingsRoute.Users)))
+        model.execute(AdministrativeCommand.SaveUser(draft))
+        advanceUntilIdle()
+        assertNull(model.states.value[route])
+        assertNull(model.states.value[AdministrativeSettingsRoute.Users])
+    }
+
+    @Test
+    fun nativeUserDraftPreservesManualAndLibraryGrants() {
+        val draft = UserDraft(null, "Reader", "reader@example.com", UserRole.Member, true, "1234567890",
+            true, true, setOf("library-1", "library-2"), AdministrativeLocale.ZhCn)
+        val shared = draft.sharedDraft()
+        assertTrue(shared.isValid(true))
+        assertTrue(shared.forCreation().canViewManualImports)
+        assertEquals(listOf("library-1", "library-2"), shared.forCreation().libraryIds)
+        assertEquals(shared.forCreation().libraryIds, shared.forUpdate().libraryIds)
+    }
+
     private fun viewModel(
         repository: AdministrativeSettingsRepository,
         capabilities: Set<AdministrativeCapability>,

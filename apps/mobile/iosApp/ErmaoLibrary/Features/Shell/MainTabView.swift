@@ -566,6 +566,9 @@ struct MainTabView: View {
                     route: route,
                     store: administrativeSettingsStore
                 )
+                .administrativeNavigation { nextRoute in
+                    open(.administrative(nextRoute), in: presentation)
+                }
             } else {
                 Color.clear
                     .navigationTitle("tab.me")
@@ -737,7 +740,6 @@ private extension AdministrativeSettingsRoute {
         case .kindleQueue: "kindle-queue"
         case .users: "users"
         case .userEditor(let userID): "user-editor:\(userID ?? "new")"
-        case .userAccess(let userID): "user-access:\(userID)"
         case .librarySources: "library-sources"
         case .librarySourceEditor(let sourceID): "library-source:\(sourceID ?? "new")"
         case .serverDirectoryPicker(let purpose): "server-directory:\(purpose.identityKey)"

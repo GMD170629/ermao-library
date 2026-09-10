@@ -2,6 +2,10 @@ import Foundation
 @preconcurrency import ErmaoShared
 
 enum AdministrativeInputValidation {
+    static func validDeletion(email: String, confirmation: String) -> Bool {
+        AdministrativeSettingsValidationPublicKt.isValidManagedUserDeletionConfirmation(email: email, confirmation: confirmation)
+    }
+
     static let minimumPasswordLength = Int(
         AdministrativeSettingsValidationPublicKt.administrativeMinimumPasswordLength()
     )
@@ -49,7 +53,6 @@ enum AdministrativeSettingsRoute: Hashable, Sendable {
     case kindleQueue
     case users
     case userEditor(userID: String?)
-    case userAccess(userID: String)
     case librarySources
     case librarySourceEditor(sourceID: String?)
     case serverDirectoryPicker(purpose: ServerDirectoryPurpose)
@@ -115,7 +118,7 @@ struct AdministrativePermission: Equatable, Sendable {
     func permits(_ route: AdministrativeSettingsRoute) -> Bool {
         guard route.isAvailableOnMobile else { return false }
         return switch route {
-        case .users, .userEditor, .userAccess:
+        case .users, .userEditor:
             isAdmin
         case .emailAndKindle, .kindleQueue, .about:
             true
@@ -266,6 +269,7 @@ struct AdministrativeUser: Identifiable, Equatable, Sendable {
     var libraryIDs: Set<String>
     var canViewManualImports: Bool
     var locale: AdministrativeSettingsLocale
+    var createdAt: Date? = nil
 }
 
 struct UserPage: Equatable, Sendable {
@@ -283,6 +287,15 @@ struct UserDraft: Equatable, Sendable {
     var canManageSystem: Bool
     var locale: AdministrativeSettingsLocale
     var initialPassword: String
+    var canViewManualImports = false
+    var libraryIDs = Set<String>()
+
+    var shared: ErmaoShared.ManagedUserDraft {
+        ErmaoShared.ManagedUserDraft(name: displayName, email: email, password: initialPassword,
+            role: role == .administrator ? .admin : .member, status: enabled ? .active : .disabled,
+            canManageSystem: canManageSystem, canViewManualImports: canViewManualImports,
+            libraryIds: libraryIDs.sorted(), locale: locale == .zhCN ? .zhcn : .enus)
+    }
 
     static let empty = UserDraft(
         displayName: "",
@@ -295,16 +308,9 @@ struct UserDraft: Equatable, Sendable {
     )
 }
 
-struct UserAccessSnapshot: Equatable, Sendable {
-    let user: AdministrativeUser
-    let scopes: [AdministrativeLibraryScope]
-}
-
-struct AdministrativeLibraryScope: Identifiable, Equatable, Sendable {
-    let id: String
-    let name: String
-    let serverPath: String
-    let bookCount: Int
+struct UserEditorSnapshot: Equatable, Sendable {
+    let user: AdministrativeUser?
+    let scopes: [LibrarySource]
 }
 
 enum MediaKind: String, CaseIterable, Hashable, Sendable {

@@ -1,8 +1,30 @@
 import Foundation
+import SwiftUI
+import UIKit
 import XCTest
 @testable import ErmaoLibrary
 
 final class AdministrativeSettingsTests: XCTestCase {
+    func testUserDraftDefaultsAndPermissionsMatchSharedForm() {
+        var draft = UserDraft.empty
+        XCTAssertEqual(draft.locale, .zhCN)
+        XCTAssertEqual(draft.role, .member)
+        XCTAssertTrue(draft.enabled)
+        XCTAssertFalse(draft.canViewManualImports)
+        XCTAssertTrue(draft.libraryIDs.isEmpty)
+        draft.displayName = "Reader"
+        draft.email = "reader@example.com"
+        draft.initialPassword = "1234567890"
+        draft.canViewManualImports = true
+        draft.libraryIDs = ["library-1"]
+        XCTAssertTrue(draft.shared.isValid(creating: true))
+        XCTAssertEqual(draft.shared.forCreation().libraryIds, ["library-1"])
+        XCTAssertTrue(draft.shared.forCreation().canViewManualImports)
+        XCTAssertEqual(draft.shared.forUpdate().libraryIds, ["library-1"])
+        XCTAssertTrue(AdministrativeInputValidation.validDeletion(email: draft.email, confirmation: " READER@example.com "))
+        XCTAssertFalse(AdministrativeInputValidation.validDeletion(email: draft.email, confirmation: "DELETE"))
+    }
+
     func testCopyCatalogHasStrictZhEnglishParity() {
         XCTAssertTrue(AdministrativeCopyCatalog.hasCompleteParity())
         let zh = AdministrativeCopyCatalog(locale: .zhCN)
@@ -129,10 +151,134 @@ final class AdministrativeSettingsTests: XCTestCase {
     func testEveryAvailableMobileDestinationHasAStableRoute() {
         let routes: [AdministrativeSettingsRoute] = [
             .emailAndKindle, .kindleQueue, .users, .userEditor(userID: nil),
-            .userAccess(userID: "u"), .opds, .logs, .about
+            .opds, .logs, .about
         ]
         XCTAssertEqual(Set(routes).count, routes.count)
         XCTAssertTrue(routes.allSatisfy { $0.isAvailableOnMobile })
+    }
+
+    @MainActor
+    func testUsersKeepListAndFilterPositionAcrossLoadingAndOutOfOrderResponses() async throws {
+        let requests = UserListRequests()
+        addTeardownBlock { await requests.cancelAll() }
+        let client = AdministrativeSettingsClientFake()
+        client.usersHandler = { _, enabled in try await requests.load(enabled: enabled) }
+        let store = AdministrativeSettingsStore(
+            client: client,
+            permissions: .init(isAdmin: true, canManageSystem: true),
+            locale: .enUS,
+            onUnauthorized: {}
+        )
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let originalWindow = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = UIHostingController(rootView:
+            NavigationStack { UsersSettingsView(store: store) }
+                .environmentObject(OperationFeedbackPresenter())
+                .environment(\.administrativeCopy, store.copy)
+                .environment(\.appTheme, AppTheme.app)
+        )
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            originalWindow?.makeKey()
+        }
+        try await waitForUsersUI { await requests.count == 1 }
+        try await waitForUsersUI { Self.descendant(UISegmentedControl.self, in: window) != nil }
+        let picker = try XCTUnwrap(Self.descendant(UISegmentedControl.self, in: window))
+        let list = try XCTUnwrap(Self.descendant(UICollectionView.self, in: window))
+        let initialY = picker.convert(picker.bounds, to: window).minY
+
+        func rowCount() -> Int { (0..<list.numberOfSections).reduce(0) { $0 + list.numberOfItems(inSection: $1) } }
+        func assertStable(file: StaticString = #filePath, line: UInt = #line) {
+            XCTAssertTrue(Self.descendant(UICollectionView.self, in: window) === list, file: file, line: line)
+            XCTAssertEqual(picker.convert(picker.bounds, to: window).minY, initialY, accuracy: 1, file: file, line: line)
+        }
+        func capture(_ name: String) {
+            let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+            }
+            let attachment = XCTAttachment(image: image)
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+
+        capture("users-initial-loading")
+        await requests.finish(0, result: .success(Self.userPage(count: 3)))
+        try await waitForUsersUI { rowCount() == 3 }
+        assertStable()
+        capture("users-loaded")
+
+        picker.selectedSegmentIndex = 1
+        picker.sendActions(for: .valueChanged)
+        try await waitForUsersUI { await requests.count == 2 }
+        XCTAssertEqual(rowCount(), 3, "Old rows should remain mounted during loading")
+        assertStable()
+        capture("users-switch-loading")
+
+        picker.selectedSegmentIndex = 2
+        picker.sendActions(for: .valueChanged)
+        try await waitForUsersUI { await requests.count == 3 }
+        let filters = await requests.filters
+        XCTAssertEqual(filters, [nil, true, false])
+        await requests.finish(2, result: .success(Self.userPage(count: 1, enabled: false)))
+        try await waitForUsersUI { rowCount() == 1 }
+        // Deliberately complete the cancelled request last, like a transport ignoring cancellation.
+        await requests.finish(1, result: .success(Self.userPage(count: 2)))
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(rowCount(), 1, "A stale response must not replace or clear the current result")
+        assertStable()
+
+        picker.selectedSegmentIndex = 0
+        picker.sendActions(for: .valueChanged)
+        try await waitForUsersUI { await requests.count == 4 }
+        await requests.finish(3, result: .success(Self.userPage(count: 0)))
+        try await waitForUsersUI { rowCount() == 0 }
+        assertStable()
+        capture("users-empty")
+
+        picker.selectedSegmentIndex = 1
+        picker.sendActions(for: .valueChanged)
+        try await waitForUsersUI { await requests.count == 5 }
+        await requests.finish(4, result: .failure(AdministrativeFailure(kind: .transport, code: "fixture")))
+        try await waitForUsersUI { store.notice?.style == .error }
+        assertStable()
+        capture("users-failed")
+
+        picker.selectedSegmentIndex = 2
+        picker.sendActions(for: .valueChanged)
+        try await waitForUsersUI { await requests.count == 6 }
+        await requests.finish(5, result: .success(Self.userPage(count: 1, enabled: false)))
+        try await waitForUsersUI { rowCount() == 1 }
+        assertStable()
+    }
+
+    @MainActor
+    private func waitForUsersUI(_ condition: () async -> Bool) async throws {
+        for _ in 0..<100 {
+            if await condition() { return }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTFail("User list did not reach its expected state")
+        throw AdministrativeFailure(kind: .transport, code: "test-timeout")
+    }
+
+    @MainActor
+    private static func descendant<T: UIView>(_ type: T.Type, in view: UIView) -> T? {
+        if let match = view as? T { return match }
+        for child in view.subviews {
+            if let match = descendant(type, in: child) { return match }
+        }
+        return nil
+    }
+
+    private static func userPage(count: Int, enabled: Bool = true) -> UserPage {
+        UserPage(users: (0..<count).map {
+            AdministrativeUser(id: "user-\($0)", displayName: "User \($0)", email: "user\($0)@example.com", role: .member,
+                               enabled: enabled, canManageSystem: false, libraryIDs: [], canViewManualImports: false, locale: .enUS)
+        }, page: 1, pageCount: 1, total: count)
     }
 
     @MainActor
@@ -156,7 +302,29 @@ final class AdministrativeSettingsTests: XCTestCase {
     }
 }
 
+private actor UserListRequests {
+    private(set) var filters: [Bool?] = []
+    private var pending: [Int: CheckedContinuation<UserPage, Error>] = [:]
+    var count: Int { filters.count }
+
+    func load(enabled: Bool?) async throws -> UserPage {
+        let id = filters.count
+        filters.append(enabled)
+        return try await withCheckedThrowingContinuation { pending[id] = $0 }
+    }
+
+    func finish(_ id: Int, result: Result<UserPage, Error>) {
+        pending.removeValue(forKey: id)?.resume(with: result)
+    }
+
+    func cancelAll() {
+        for continuation in pending.values { continuation.resume(throwing: CancellationError()) }
+        pending.removeAll()
+    }
+}
+
 private final class AdministrativeSettingsClientFake: AdministrativeSettingsClient, @unchecked Sendable {
+    var usersHandler: (@Sendable (String, Bool?) async throws -> UserPage)?
     var nextError: Error?
     var summaryDelay: UInt64 = 0
     var summary = AdministrativeManagementSummary(smtpEnabled: false, failedKindleCount: 0)
@@ -170,14 +338,17 @@ private final class AdministrativeSettingsClientFake: AdministrativeSettingsClie
     func sendSMTPTest(_ settings: SMTPSettings) async throws { try fail() }
     func loadKindleTasks(status: KindleTaskStatus?) async throws -> [KindleSendTask] { try fail(); return [] }
     func cancelKindleTask(id: String) async throws { try fail() }; func retryKindleTask(id: String) async throws { try fail() }; func deleteKindleTask(id: String) async throws { try fail() }
-    func loadUsers(query: String, enabled: Bool?, page: Int) async throws -> UserPage { try fail(); return .init(users: [], page: 1, pageCount: 1, total: 0) }
+    func loadUsers(query: String, enabled: Bool?, page: Int) async throws -> UserPage {
+        if let usersHandler { return try await usersHandler(query, enabled) }
+        try fail()
+        return .init(users: [], page: 1, pageCount: 1, total: 0)
+    }
+    func loadUserEditor(id: String?) async throws -> UserEditorSnapshot { try fail(); return .init(user: nil, scopes: []) }
     func loadUser(id: String) async throws -> AdministrativeUser { try fail(); throw AdministrativeFailure(kind: .notFound, code: "fixture") }
     func createUser(_ draft: UserDraft) async throws -> AdministrativeUser { try fail(); throw AdministrativeFailure(kind: .notFound, code: "fixture") }
     func updateUser(id: String, draft: UserDraft) async throws -> AdministrativeUser { try fail(); throw AdministrativeFailure(kind: .notFound, code: "fixture") }
     func setUserEnabled(id: String, enabled: Bool) async throws -> AdministrativeUser { try fail(); throw AdministrativeFailure(kind: .notFound, code: "fixture") }
-    func deleteUser(id: String) async throws { try fail() }; func resetUserPassword(id: String, newPassword: String) async throws { try fail() }
-    func loadUserAccess(id: String) async throws -> UserAccessSnapshot { try fail(); throw AdministrativeFailure(kind: .notFound, code: "fixture") }
-    func saveUserAccess(id: String, libraryIDs: Set<String>, canViewManualImports: Bool) async throws -> AdministrativeUser { try fail(); throw AdministrativeFailure(kind: .notFound, code: "fixture") }
+    func deleteUser(id: String, confirmation: String) async throws { try fail() }; func resetUserPassword(id: String, newPassword: String) async throws { try fail() }
     func loadLibrarySources() async throws -> LibrarySourcesSnapshot { try fail(); return .init(storage: nil, sources: [], activeScan: nil) }
     func loadLibrarySource(id: String) async throws -> LibrarySource { try fail(); throw AdministrativeFailure(kind: .notFound, code: "fixture") }
     func createLibrarySource(_ source: LibrarySource) async throws -> LibrarySource { try fail(); return source }; func updateLibrarySource(_ source: LibrarySource) async throws -> LibrarySource { try fail(); return source }

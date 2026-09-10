@@ -1,0 +1,9 @@
+---
+description: 移动端当前契约、宿主构建分工与真机执行入口。
+globs: apps/mobile/**/*
+alwaysApply: false
+---
+
+# Mobile 入口
+
+修改前读取 [移动端开发指南](../../docs/mobile-app-development-global-guidelines.md) 的当前原生边界、契约入口及“本地安装包目标与真机执行”。Reader 与导航任务继续按 [AGENTS.md](../../AGENTS.md) 索引读取当前专项来源。验证范围按 [测试执行策略](../../docs/testing/test-execution-policy.md)。

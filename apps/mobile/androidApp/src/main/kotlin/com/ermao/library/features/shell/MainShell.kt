@@ -841,9 +841,6 @@ fun MainShell(
                 entry<AdministrativeSettingsRoute.UserEdit> { route ->
                     AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
                 }
-                entry<AdministrativeSettingsRoute.UserAccess> { route ->
-                    AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
-                }
                 entry<AdministrativeSettingsRoute.Opds> { route ->
                     AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
                 }

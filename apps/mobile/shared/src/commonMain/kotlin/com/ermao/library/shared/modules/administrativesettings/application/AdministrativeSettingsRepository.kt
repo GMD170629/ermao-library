@@ -79,6 +79,7 @@ interface AdministrativeSettingsRepository {
     suspend fun loadUser(context: AdministrativeSettingsContext, userId: String): AdministrativeSettingsResult<ManagedUser>
     suspend fun createUser(context: AdministrativeSettingsContext, user: CreateManagedUser): AdministrativeSettingsResult<ManagedUser>
     suspend fun updateUser(context: AdministrativeSettingsContext, userId: String, user: UpdateManagedUser): AdministrativeSettingsResult<ManagedUser>
+    suspend fun setUserStatus(context: AdministrativeSettingsContext, userId: String, status: com.ermao.library.shared.modules.administrativesettings.domain.ManagedUserStatus): AdministrativeSettingsResult<ManagedUser>
     suspend fun resetUserPassword(context: AdministrativeSettingsContext, userId: String, password: String): AdministrativeSettingsResult<ManagedPasswordChange>
     suspend fun deleteUser(context: AdministrativeSettingsContext, userId: String, confirmation: String): AdministrativeSettingsResult<DeletedManagedUser>
 

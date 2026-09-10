@@ -9,6 +9,12 @@ effort: medium
 
 # PWA Development Skill
 
+## Repository scope and verification
+
+For this repository, follow [AGENTS.md](../../../AGENTS.md) and the [targeted verification policy](../../../docs/testing/test-execution-policy.md). The examples, architecture suggestions, dependency commands and full checklists below are reference material, not mandatory steps for each PWA defect. Use only what the requested behavior and current contracts require.
+
+Fix the existing service-worker/cache owner first. Mentioning offline or caching does not authorize new offline modes, background sync, frameworks, dependencies, telemetry or a full performance project. Reuse existing test entry points and valid evidence; select the original failure and actually affected browser/PWA path. Do not build a new test tool or replay all offline/install/update scenarios for an isolated display fix. Expand and stop according to the linked policy; a checklist item does not override that policy or current product contracts.
+
 
 **Purpose:** Build Progressive Web Apps that work offline, install like native apps, and deliver fast, reliable experiences across all devices.
 
@@ -758,7 +764,7 @@ npx lighthouse https://your-app.com --view
 # - Accessibility
 ```
 
-### Manual Testing Checklist
+### Manual Testing Checklist (select affected scenarios)
 
 - [ ] **Installability**
   - [ ] Install prompt appears on desktop Chrome
@@ -862,7 +868,7 @@ project/
 
 ---
 
-## PWA Development Checklist
+## PWA Development Checklist (reference for applicable release scope)
 
 ### Before Launch
 

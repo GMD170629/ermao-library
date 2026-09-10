@@ -1,5 +1,25 @@
 package com.ermao.library.features.administrativesettings
 
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import com.ermao.library.ui.components.SettingsTextField
+import com.ermao.library.shared.modules.administrativesettings.createOpdsEditState
+import com.ermao.library.shared.modules.administrativesettings.opdsFocusCommitDelayMilliseconds
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -62,49 +82,88 @@ fun OpdsScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var pendingDisable by remember { mutableStateOf(false) }
-    val snapshot = state.snapshot
-    var enabled by remember(snapshot) { mutableStateOf(snapshot?.enabled ?: false) }
-    var publicAddress by remember(snapshot) { mutableStateOf(snapshot?.publicBaseUrl.orEmpty()) }
-    val hasChanges = snapshot?.let { enabled != it.enabled || publicAddress.trim() != it.publicBaseUrl.trim() } == true
-    AdministrativePage(
-        title = AdministrativeCopy.Opds,
-        locale = locale,
-        onBack = onBack,
-        modifier = modifier,
-        toolbarActions = {
-            AdministrativeSaveAction(
-                label = AdministrativeCopy.SaveOpds,
-                locale = locale,
-                enabled = !state.mutationInFlight && publicAddress.isNotBlank() && hasChanges,
-                working = state.mutationInFlight,
-                onClick = { onCommand(AdministrativeCommand.SaveOpds(enabled, publicAddress.trim())) },
-            )
-        },
-    ) {
-        PageStateContent(state, locale, onRetry) { initial ->
-            AdministrativeSwitchRow(
-                AdministrativeCopy.EnableOpds.text(locale), enabled,
-                onCheckedChange = { next -> if (!next && enabled) pendingDisable = true else enabled = next },
-                supporting = if (initial.running) AdministrativeCopy.Running.text(locale) else AdministrativeCopy.Disabled.text(locale),
-            )
-            AdministrativeTextField(publicAddress, { publicAddress = it }, AdministrativeCopy.PublicAddress, locale)
-            if (initial.catalogUrl.isNotBlank()) {
-                AdministrativeValueRow(AdministrativeCopy.CatalogAddress.text(locale), initial.catalogUrl, onClick = { onCopy(initial.catalogUrl) })
-                OutlinedButton(onClick = { onCopy(initial.catalogUrl) }) {
-                    Text(AdministrativeCopy.Copy.text(locale))
+    AdministrativePage(title = AdministrativeCopy.Opds, locale = locale, onBack = onBack, modifier = modifier) {
+        PageStateContent(state, locale, onRetry) { confirmed ->
+            var editor by remember { mutableStateOf(createOpdsEditState(confirmed.enabled, confirmed.publicBaseUrl)) }
+            var addressShown by remember { mutableStateOf(false) }
+            var addressFocused by remember { mutableStateOf(false) }
+            var focusCommit by remember { mutableStateOf<Job?>(null) }
+            val scope = rememberCoroutineScope()
+            val focusManager = LocalFocusManager.current
+            val busy = editor.isSubmitting || state.mutationInFlight
+
+            LaunchedEffect(state.snapshot, state.failure, state.mutationInFlight, state.phase) {
+                if (!state.mutationInFlight) {
+                    editor = if (state.failure != null) editor.reject()
+                    else if (state.phase == AdministrativePagePhase.Content) editor.accept(confirmed.enabled, confirmed.publicBaseUrl)
+                    else editor
+                }
+                if (confirmed.catalogUrl.isBlank()) addressShown = false
+            }
+
+            fun submit() {
+                focusCommit?.cancel()
+                if (editor.isSubmitting || state.mutationInFlight) return
+                val next = editor.beginSubmission()
+                val request = next.submission ?: return
+                editor = next
+                onCommand(AdministrativeCommand.SaveOpds(request.enabled, request.publicBaseUrl))
+            }
+
+            fun commitAfterFocusLoss() {
+                if (editor.isSubmitting) return
+                focusCommit?.cancel()
+                focusCommit = scope.launch {
+                    delay(opdsFocusCommitDelayMilliseconds())
+                    focusCommit = null
+                    submit()
                 }
             }
-            if (hasChanges) WarmSettingsInlineMessage(AdministrativeCopy.OpdsSaveHint.text(locale))
-            val instructions = when {
-                initial.catalogUrl.isBlank() -> AdministrativeCopy.OpdsSetupHint
-                enabled -> AdministrativeCopy.OpdsInstructions
-                else -> AdministrativeCopy.OpdsEnableHint
+
+            AdministrativeSwitchRow(
+                AdministrativeCopy.EnableOpds.text(locale), editor.draft.enabled,
+                onCheckedChange = { next ->
+                    focusCommit?.cancel()
+                    editor = editor.changeEnabled(next)
+                    submit()
+                    focusManager.clearFocus()
+                },
+                enabled = !busy,
+            )
+            SettingsTextField(
+                value = editor.draft.publicBaseUrl,
+                onValueChange = { editor = editor.editAddress(it) },
+                label = AdministrativeCopy.PublicAddress.text(locale),
+                enabled = !busy,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { submit(); focusManager.clearFocus() }),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)
+                    .onFocusChanged { focus ->
+                        val lostFocus = addressFocused && !focus.isFocused
+                        addressFocused = focus.isFocused
+                        if (focus.isFocused) focusCommit?.cancel()
+                        if (lostFocus) commitAfterFocusLoss()
+                    },
+            )
+            if (confirmed.catalogUrl.isNotBlank()) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(AdministrativeCopy.CatalogAddress.text(locale), modifier = Modifier.weight(1f))
+                    IconButton(onClick = { addressShown = true }) {
+                        Icon(Icons.Outlined.Visibility, contentDescription = AdministrativeCopy.ViewCatalogAddress.text(locale))
+                    }
+                    IconButton(onClick = { onCopy(confirmed.catalogUrl) }) {
+                        Icon(Icons.Outlined.ContentCopy, contentDescription = AdministrativeCopy.CopyCatalogAddress.text(locale))
+                    }
+                }
             }
-            WarmSettingsInlineMessage(instructions.text(locale))
-            if (pendingDisable) AdministrativeConfirmDialog(
-                AdministrativeCopy.DisableOpdsTitle, AdministrativeCopy.DisableOpdsBody, AdministrativeCopy.DisableService, locale,
-                onConfirm = { pendingDisable = false; enabled = false }, onDismiss = { pendingDisable = false },
+            WarmSettingsInlineMessage(
+                (if (confirmed.catalogUrl.isNotBlank()) AdministrativeCopy.OpdsInstructions else AdministrativeCopy.OpdsEnableHint).text(locale),
+            )
+            if (addressShown) AlertDialog(
+                onDismissRequest = { addressShown = false },
+                title = { Text(AdministrativeCopy.CatalogAddress.text(locale)) },
+                text = { SelectionContainer { Text(confirmed.catalogUrl) } },
+                confirmButton = { TextButton(onClick = { addressShown = false }) { Text(AdministrativeCopy.Close.text(locale)) } },
             )
         }
     }

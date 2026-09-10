@@ -118,14 +118,30 @@ class AdministrativeSettingsViewModel(
                 when (val result = repository.execute(context, command)) {
                     is AdministrativeResult.Content -> {
                         if (!isCurrent(route, generation)) return@launch
-                        update(route) { it.copy(mutationInFlight = false, failure = null) }
-                        mutableEffects.emit(AdministrativeSettingsEffect.OperationSucceeded(command.operation))
+                        val updated = result.value.updatedSnapshot
+                        if (updated != null && !updated.supports(route)) {
+                            val failure = invalidPayloadFailure()
+                            setFailure(route, failure, retainContent = true)
+                            mutableEffects.emit(AdministrativeSettingsEffect.OperationFailed(command.operation, failure))
+                            return@launch
+                        }
+                        update(route) {
+                            if (updated != null) AdministrativeScreenState(AdministrativePagePhase.Content, updated)
+                            else it.copy(mutationInFlight = false, failure = null)
+                        }
+                        mutableEffects.emit(AdministrativeSettingsEffect.OperationSucceeded(command.operation, route))
                         result.value.exportFile?.let { mutableEffects.emit(AdministrativeSettingsEffect.ExportReady(it)) }
                         val routes = result.value.invalidatedRoutes + route
                         routes.forEach { invalidated ->
                             if (invalidated != route) invalidate(invalidated)
                         }
-                        load(route, force = true)
+                        if (updated == null) {
+                            when (command) {
+                                is AdministrativeCommand.SaveUser, is AdministrativeCommand.DeleteUser -> mutableStates.update { it - route }
+                                is AdministrativeCommand.ResetUserPassword -> Unit
+                                else -> load(route, force = true)
+                            }
+                        }
                     }
                     is AdministrativeResult.Failure -> {
                         if (!isCurrent(route, generation)) return@launch
@@ -219,7 +235,6 @@ private fun AdministrativePageSnapshot.supports(route: AdministrativeSettingsRou
     AdministrativeSettingsRoute.KindleQueue -> this is KindleQueueSnapshot
     AdministrativeSettingsRoute.Users -> this is UsersSnapshot
     is AdministrativeSettingsRoute.UserEdit -> this is UserEditorSnapshot
-    is AdministrativeSettingsRoute.UserAccess -> this is UserAccessSnapshot
     AdministrativeSettingsRoute.LibrarySources -> this is LibrarySourcesSnapshot
     is AdministrativeSettingsRoute.LibrarySourceEdit -> this is LibrarySourceEditorSnapshot
     is AdministrativeSettingsRoute.ServerDirectory -> this is ServerDirectorySnapshot

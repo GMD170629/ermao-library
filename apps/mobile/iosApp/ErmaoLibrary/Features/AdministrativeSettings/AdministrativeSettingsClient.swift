@@ -18,14 +18,9 @@ protocol AdministrativeSettingsClient: Sendable {
     func createUser(_ draft: UserDraft) async throws -> AdministrativeUser
     func updateUser(id: String, draft: UserDraft) async throws -> AdministrativeUser
     func setUserEnabled(id: String, enabled: Bool) async throws -> AdministrativeUser
-    func deleteUser(id: String) async throws
+    func deleteUser(id: String, confirmation: String) async throws
     func resetUserPassword(id: String, newPassword: String) async throws
-    func loadUserAccess(id: String) async throws -> UserAccessSnapshot
-    func saveUserAccess(
-        id: String,
-        libraryIDs: Set<String>,
-        canViewManualImports: Bool
-    ) async throws -> AdministrativeUser
+    func loadUserEditor(id: String?) async throws -> UserEditorSnapshot
 
     func loadLibrarySources() async throws -> LibrarySourcesSnapshot
     func loadLibrarySource(id: String) async throws -> LibrarySource

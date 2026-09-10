@@ -19,6 +19,7 @@ fun interface AdministrativeSettingsSideEffects {
 data class AdministrativeCommandReceipt(
     val invalidatedRoutes: Set<AdministrativeSettingsRoute>,
     val exportFile: AdministrativeExportFile? = null,
+    val updatedSnapshot: AdministrativePageSnapshot? = null,
 )
 
 sealed interface AdministrativeCommand {
@@ -60,11 +61,6 @@ sealed interface AdministrativeCommand {
         override val ownerRoute = AdministrativeSettingsRoute.UserEdit(draft.id)
     }
 
-    data class SaveUserAccess(val userId: String, val allLibraries: Boolean, val sourceIds: Set<String>) : AdministrativeCommand {
-        override val operation = AdministrativeOperation.SaveUserAccess
-        override val ownerRoute = AdministrativeSettingsRoute.UserAccess(userId)
-    }
-
     data class ResetUserPassword(val userId: String, val newPassword: String) : AdministrativeCommand {
         override val operation = AdministrativeOperation.ResetUserPassword
         override val ownerRoute = AdministrativeSettingsRoute.UserEdit(userId)
@@ -75,7 +71,7 @@ sealed interface AdministrativeCommand {
         override val ownerRoute = AdministrativeSettingsRoute.UserEdit(userId)
     }
 
-    data class DeleteUser(val userId: String) : AdministrativeCommand {
+    data class DeleteUser(val userId: String, val confirmation: String) : AdministrativeCommand {
         override val operation = AdministrativeOperation.DeleteUser
         override val ownerRoute = AdministrativeSettingsRoute.UserEdit(userId)
     }
@@ -300,7 +296,6 @@ internal fun AdministrativeSettingsRoute.requiredCapability(): AdministrativeCap
     AdministrativeSettingsRoute.KindleQueue -> AdministrativeCapability.ManageKindleQueue
     AdministrativeSettingsRoute.Users,
     is AdministrativeSettingsRoute.UserEdit,
-    is AdministrativeSettingsRoute.UserAccess,
     -> AdministrativeCapability.ManageUsers
     AdministrativeSettingsRoute.LibrarySources,
     is AdministrativeSettingsRoute.LibrarySourceEdit,
@@ -340,7 +335,6 @@ internal fun AdministrativeCommand.requiredCapability(): AdministrativeCapabilit
     is AdministrativeCommand.DeleteKindleTask,
     -> AdministrativeCapability.ManageKindleQueue
     is AdministrativeCommand.SaveUser,
-    is AdministrativeCommand.SaveUserAccess,
     is AdministrativeCommand.ResetUserPassword,
     is AdministrativeCommand.SetUserEnabled,
     is AdministrativeCommand.DeleteUser,

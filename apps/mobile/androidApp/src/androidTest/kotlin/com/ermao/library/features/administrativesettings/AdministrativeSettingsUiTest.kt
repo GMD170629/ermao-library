@@ -11,7 +11,10 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -26,6 +29,33 @@ import org.junit.runner.RunWith
 class AdministrativeSettingsUiTest {
     @get:Rule
     val compose = createComposeRule()
+
+    @Test
+    fun userCreationIncludesLibraryAndManualImportGrantsInTheSaveCommand() {
+        var command: AdministrativeCommand? = null
+        compose.setContent {
+            WarmPageTheme {
+                UserEditScreen(
+                    state = AdministrativePageState(AdministrativePagePhase.Content,
+                        UserEditorSnapshot(null, false, false, emptySet(), listOf(AccessSource("library-1", "Library one", "/library/one", null, false))),
+                        null, false),
+                    locale = AdministrativeLocale.EnUs, onCommand = { command = it }, onRetry = {}, onBack = {},
+                )
+            }
+        }
+        compose.onNodeWithText("Name").performTextInput("Reader")
+        compose.onNodeWithText("Email").performTextInput("reader@example.com")
+        compose.onNodeWithText("Initial password").performTextInput("1234567890")
+        compose.onNodeWithText(AdministrativeCopy.ManualImports.text(AdministrativeLocale.EnUs)).performScrollTo().performClick()
+        compose.onNodeWithText("Library one").performScrollTo().performClick()
+        compose.onNodeWithTag("administrative-save-SaveUser").performClick()
+        compose.runOnIdle {
+            val saved = command as AdministrativeCommand.SaveUser
+            assertTrue(saved.draft.canViewManualImports)
+            assertTrue(saved.draft.sourceIds == setOf("library-1"))
+            assertTrue(saved.draft.locale == AdministrativeLocale.ZhCn)
+        }
+    }
 
     @Test
     fun opdsCopyUsesTheSavedCatalogAddress() {
@@ -46,9 +76,11 @@ class AdministrativeSettingsUiTest {
                 )
             }
         }
-        compose.onNodeWithText(catalog).assertIsDisplayed()
-        compose.onNodeWithText("Copy").performClick()
+        compose.onNodeWithText(catalog).assertDoesNotExist()
+        compose.onNodeWithContentDescription("Copy catalog URL").performClick()
         org.junit.Assert.assertEquals(catalog, copied)
+        compose.onNodeWithContentDescription("View catalog URL").performClick()
+        compose.onNodeWithText(catalog).assertIsDisplayed()
     }
 
     @Test

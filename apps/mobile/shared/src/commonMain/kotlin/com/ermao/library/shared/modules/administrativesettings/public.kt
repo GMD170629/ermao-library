@@ -96,3 +96,7 @@ typealias EventFacet = com.ermao.library.shared.modules.administrativesettings.d
 typealias ClearedManagementEvents = com.ermao.library.shared.modules.administrativesettings.domain.ClearedManagementEvents
 typealias LogSettings = com.ermao.library.shared.modules.administrativesettings.domain.LogSettings
 typealias PageInfo = com.ermao.library.shared.modules.administrativesettings.domain.PageInfo
+typealias OpdsEditState = com.ermao.library.shared.modules.administrativesettings.application.OpdsEditState
+typealias OpdsEditValues = com.ermao.library.shared.modules.administrativesettings.application.OpdsEditValues
+
+typealias ManagedUserDraft = com.ermao.library.shared.modules.administrativesettings.domain.ManagedUserDraft

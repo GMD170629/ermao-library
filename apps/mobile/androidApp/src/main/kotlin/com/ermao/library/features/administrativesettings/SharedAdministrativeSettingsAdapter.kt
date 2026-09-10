@@ -11,7 +11,6 @@ import com.ermao.library.shared.modules.administrativesettings.AdministrativeSet
 import com.ermao.library.shared.modules.administrativesettings.BackupRestoreConfirmation as SharedRestoreConfirmation
 import com.ermao.library.shared.modules.administrativesettings.CategoryFilter as SharedCategoryFilter
 import com.ermao.library.shared.modules.administrativesettings.CategoryKind as SharedCategoryKind
-import com.ermao.library.shared.modules.administrativesettings.CreateManagedUser as SharedCreateUser
 import com.ermao.library.shared.modules.administrativesettings.HealthCheckStatus as SharedHealthCheckStatus
 import com.ermao.library.shared.modules.administrativesettings.HealthRun as SharedHealthRun
 import com.ermao.library.shared.modules.administrativesettings.HealthRunStatus as SharedHealthRunStatus
@@ -43,7 +42,6 @@ import com.ermao.library.shared.modules.administrativesettings.OrganizeRules as 
 import com.ermao.library.shared.modules.administrativesettings.OrganizeScheduleMode as SharedScheduleMode
 import com.ermao.library.shared.modules.administrativesettings.SmtpSecurity as SharedSmtpSecurity
 import com.ermao.library.shared.modules.administrativesettings.SmtpSettingsUpdate as SharedSmtpUpdate
-import com.ermao.library.shared.modules.administrativesettings.UpdateManagedUser as SharedUpdateUser
 import com.ermao.library.shared.modules.administrativesettings.WorkDetailTab as SharedDetailTab
 import com.ermao.library.shared.modules.administrativesettings.WorkDetailTabOrder as SharedDetailOrder
 import com.ermao.library.shared.modules.administrativesettings.domain.ProviderSettingValue as SharedProviderValue
@@ -73,7 +71,6 @@ class SharedAdministrativeSettingsAdapter(
             UsersSnapshot(users.map(SharedUser::toLocal), 1, 1, users.size)
         }
         is AdministrativeSettingsRoute.UserEdit -> loadUserEditor(route)
-        is AdministrativeSettingsRoute.UserAccess -> loadUserAccess(route.userId)
         AdministrativeSettingsRoute.LibrarySources -> sharedRepository.loadLibraries(sharedContext).map { result ->
             LibrarySourcesSnapshot(result.libraries.map { it.toLocal() })
         }
@@ -170,7 +167,6 @@ class SharedAdministrativeSettingsAdapter(
         is AdministrativeCommand.RetryKindleTask -> sharedRepository.retryKindleTask(sharedContext, command.taskId).receipt(command)
         is AdministrativeCommand.DeleteKindleTask -> sharedRepository.deleteKindleTask(sharedContext, command.taskId).receipt(command)
         is AdministrativeCommand.SaveUser -> saveUser(command)
-        is AdministrativeCommand.SaveUserAccess -> updateUserAccess(command)
         is AdministrativeCommand.ResetUserPassword -> sharedRepository.resetUserPassword(sharedContext, command.userId, command.newPassword).receipt(command)
         is AdministrativeCommand.SetUserEnabled -> updateUserEnabled(command)
         is AdministrativeCommand.DeleteUser -> deleteUser(command)
@@ -196,7 +192,14 @@ class SharedAdministrativeSettingsAdapter(
         is AdministrativeCommand.SaveMetadataProviders -> saveMetadataProviders(command)
         is AdministrativeCommand.SaveMetadataProvider -> saveMetadataProvider(command)
         is AdministrativeCommand.TestMetadataProvider -> sharedRepository.testMetadataProvider(sharedContext, command.providerId).receipt(command)
-        is AdministrativeCommand.SaveOpds -> sharedRepository.updateOpdsSettings(sharedContext, command.enabled, command.publicBaseUrl.ifBlank { null }).receipt(command)
+        is AdministrativeCommand.SaveOpds -> sharedRepository.updateOpdsSettings(
+            sharedContext, command.enabled, command.publicBaseUrl.ifBlank { null },
+        ).map {
+            AdministrativeCommandReceipt(
+                emptySet(),
+                updatedSnapshot = OpdsSnapshot(it.enabled, it.configured, initialOpdsPublicBaseUrl(it, sharedContext), it.catalogUrl.orEmpty()),
+            )
+        }
         AdministrativeCommand.CreateBackup -> sharedRepository.createBackup(sharedContext).receipt(command)
         is AdministrativeCommand.DownloadBackup -> sharedRepository.downloadBackup(sharedContext, command.backupId, maximumBackupBytes).map { file ->
             AdministrativeCommandReceipt(setOf(command.ownerRoute), AdministrativeExportFile(file.fileName, file.contentType, file.bytes))
@@ -242,22 +245,13 @@ class SharedAdministrativeSettingsAdapter(
     }
 
     private suspend fun loadUserEditor(route: AdministrativeSettingsRoute.UserEdit): AdministrativeResult<AdministrativePageSnapshot> {
-        if (route.userId == null) return AdministrativeResult.Content(UserEditorSnapshot(null, false, false, emptySet()))
-        return sharedRepository.loadUser(sharedContext, route.userId).map { user ->
-            UserEditorSnapshot(user.toLocal(), user.canManageSystem, user.canViewManualImports, user.libraryIds.toSet())
-        }
-    }
-
-    private suspend fun loadUserAccess(userId: String): AdministrativeResult<AdministrativePageSnapshot> {
-        val user = when (val result = sharedRepository.loadUser(sharedContext, userId)) {
+        val user = if (route.userId == null) null else when (val result = sharedRepository.loadUser(sharedContext, route.userId)) {
             is SharedContent -> result.value
             is SharedFailure -> return result.toLocalFailure()
         }
         return sharedRepository.loadLibraries(sharedContext).map { folders ->
-            UserAccessSnapshot(
-                user.toLocal(), user.role == SharedUserRole.Admin, user.canViewManualImports,
-                folders.libraries.map { AccessSource(it.id, it.name, it.rootPath, null, it.id in user.libraryIds) },
-            )
+            UserEditorSnapshot(user?.toLocal(), user?.canManageSystem ?: false, user?.canViewManualImports ?: false,
+                user?.libraryIds?.toSet().orEmpty(), folders.libraries.map { AccessSource(it.id, it.name, it.rootPath, null, it.id in user?.libraryIds.orEmpty()) })
         }
     }
 
@@ -336,45 +330,21 @@ class SharedAdministrativeSettingsAdapter(
     }
 
     private suspend fun saveUser(command: AdministrativeCommand.SaveUser): AdministrativeResult<AdministrativeCommandReceipt> {
-        val draft = command.draft
-        return if (draft.id == null) {
-            val password = draft.initialPassword ?: return validationFailure("PASSWORD_REQUIRED")
-            sharedRepository.createUser(
-                sharedContext,
-                SharedCreateUser(
-                    draft.displayName, draft.email, password, draft.role.toShared(), draft.canManageSystem,
-                    draft.canViewManualImports, draft.sourceIds.toList(), draft.locale.toShared(),
-                ),
-            ).receipt(command)
+        val draft = command.draft.sharedDraft()
+        if (!draft.isValid(command.draft.id == null)) return validationFailure("INVALID_USER")
+        return if (command.draft.id == null) {
+            sharedRepository.createUser(sharedContext, draft.forCreation()).receipt(command)
         } else {
-            sharedRepository.updateUser(sharedContext, draft.id, draft.toSharedUpdate()).receipt(command)
+            sharedRepository.updateUser(sharedContext, command.draft.id, draft.forUpdate()).receipt(command)
         }
     }
 
-    private suspend fun updateUserAccess(command: AdministrativeCommand.SaveUserAccess): AdministrativeResult<AdministrativeCommandReceipt> {
-        val user = when (val result = sharedRepository.loadUser(sharedContext, command.userId)) {
-            is SharedContent -> result.value
-            is SharedFailure -> return result.toLocalFailure()
-        }
-        val folderIds = if (command.allLibraries && user.role != SharedUserRole.Admin) return validationFailure("MEMBER_REQUIRES_EXPLICIT_SCOPE") else command.sourceIds.toList()
-        return sharedRepository.updateUser(sharedContext, user.id, user.toUpdate(libraryIds = folderIds)).receipt(command)
-    }
+    private suspend fun updateUserEnabled(command: AdministrativeCommand.SetUserEnabled): AdministrativeResult<AdministrativeCommandReceipt> =
+        sharedRepository.setUserStatus(sharedContext, command.userId,
+            if (command.enabled) SharedUserStatus.Active else SharedUserStatus.Disabled).receipt(command)
 
-    private suspend fun updateUserEnabled(command: AdministrativeCommand.SetUserEnabled): AdministrativeResult<AdministrativeCommandReceipt> {
-        val user = when (val result = sharedRepository.loadUser(sharedContext, command.userId)) {
-            is SharedContent -> result.value
-            is SharedFailure -> return result.toLocalFailure()
-        }
-        return sharedRepository.updateUser(sharedContext, user.id, user.toUpdate(status = if (command.enabled) SharedUserStatus.Active else SharedUserStatus.Disabled)).receipt(command)
-    }
-
-    private suspend fun deleteUser(command: AdministrativeCommand.DeleteUser): AdministrativeResult<AdministrativeCommandReceipt> {
-        val user = when (val result = sharedRepository.loadUser(sharedContext, command.userId)) {
-            is SharedContent -> result.value
-            is SharedFailure -> return result.toLocalFailure()
-        }
-        return sharedRepository.deleteUser(sharedContext, user.id, user.email).receipt(command)
-    }
+    private suspend fun deleteUser(command: AdministrativeCommand.DeleteUser): AdministrativeResult<AdministrativeCommandReceipt> =
+        sharedRepository.deleteUser(sharedContext, command.userId, command.confirmation).receipt(command)
 
     private suspend fun saveLibrarySource(command: AdministrativeCommand.SaveLibrarySource): AdministrativeResult<AdministrativeCommandReceipt> {
         val draft = command.draft.toShared()
@@ -469,7 +439,9 @@ private inline fun <T, R> SharedResult<T>.map(transform: (T) -> R): Administrati
 }
 
 private fun <T> SharedResult<T>.receipt(command: AdministrativeCommand): AdministrativeResult<AdministrativeCommandReceipt> =
-    map { AdministrativeCommandReceipt(setOf(command.ownerRoute)) }
+    map { AdministrativeCommandReceipt(
+        if (command is AdministrativeCommand.SaveUser || command is AdministrativeCommand.DeleteUser || command is AdministrativeCommand.SetUserEnabled)
+            setOf(command.ownerRoute, AdministrativeSettingsRoute.Users) else setOf(command.ownerRoute)) }
 
 private fun SharedFailure.toLocalFailure(): AdministrativeResult.Failure = AdministrativeResult.Failure(error.toLocal())
 
@@ -567,20 +539,15 @@ private fun com.ermao.library.shared.modules.administrativesettings.OrganizeJob.
     },
 )
 
-private fun SharedUser.toLocal() = AdministrativeUser(id, name, email, role.toLocal(), status == SharedUserStatus.Active, locale.toLocal())
+private fun SharedUser.toLocal() = AdministrativeUser(id, name, email, role.toLocal(), status == SharedUserStatus.Active, locale.toLocal(), createdAt)
 private fun SharedUserRole.toLocal() = if (this == SharedUserRole.Admin) UserRole.Administrator else UserRole.Member
 private fun UserRole.toShared() = if (this == UserRole.Administrator) SharedUserRole.Admin else SharedUserRole.Member
 private fun SharedLocale.toLocal() = if (this == SharedLocale.ZhCn) AdministrativeLocale.ZhCn else AdministrativeLocale.EnUs
 private fun AdministrativeLocale.toShared() = if (this == AdministrativeLocale.ZhCn) SharedLocale.ZhCn else SharedLocale.EnUs
 
-private fun SharedUser.toUpdate(
-    status: SharedUserStatus = this.status,
-    libraryIds: List<String> = this.libraryIds,
-) = SharedUpdateUser(name, email, role, status, canManageSystem, canViewManualImports, libraryIds, locale)
-
-private fun UserDraft.toSharedUpdate() = SharedUpdateUser(
-    displayName, email, role.toShared(), if (enabled) SharedUserStatus.Active else SharedUserStatus.Disabled,
-    canManageSystem, canViewManualImports, sourceIds.toList(), locale.toShared(),
+internal fun UserDraft.sharedDraft() = com.ermao.library.shared.modules.administrativesettings.ManagedUserDraft(
+    displayName, email, initialPassword.orEmpty(), role.toShared(), if (enabled) SharedUserStatus.Active else SharedUserStatus.Disabled,
+    canManageSystem, canViewManualImports, sourceIds.sorted(), locale.toShared(),
 )
 
 private fun com.ermao.library.shared.modules.administrativesettings.Library.toLocal() = LibrarySource(

@@ -1,6 +1,8 @@
 import Foundation
 
 enum AdministrativeCopyKey: String, CaseIterable, Sendable {
+    case userStatusActive, userStatusDisabled
+    case userName, initialPassword, initialPasswordHint, interfaceLanguage, managementPermissions, libraryPermissions, adminPermissionsHint, managementPermissionsHint, emptyPermissionsHint, manualImportsHint, createdAt, resetSessionsHint, deleteEmailConfirmation, permanentDeleteHint, discardUserChanges, discardChanges, back
     case managementTitle, librarySection, organizeSection, serviceSection, systemSection
     case librarySources, importTasks, importPreferences, organizeQueue
     case metadataProviders, usersPermissions, emailKindle, kindleQueue, opds, backups
@@ -51,7 +53,7 @@ enum AdministrativeCopyKey: String, CaseIterable, Sendable {
     case providerConfigurationTitle, apiBaseURL, apiKey, userAgent, accessToken, model, configurationItem, keepSecretHint, countryRegion
     case languageCode, rateLimit, connectionTest, saveAndTest, connected, responseTime
     case opdsTitle, opdsEnabled, serviceStatus, running, stopped, publicBaseURL, catalogURL
-    case opdsSaveHint, opdsInstructions, copy, copied, disableOPDSTitle, disableOPDSMessage, disableService
+    case opdsInstructions, copy, copied, viewCatalogURL, copyCatalogURL
     case backupsTitle, createBackup, backupDirectory, downloadFile, restoreBackup, deleteBackup
     case restoreWarning, restoreConfirmation, enterRestore, restore, deleteBackupTitle
     case deleteBackupMessage, backupBookCount, backupProgressCount, backupLibraryCount
@@ -78,6 +80,20 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         values = locale == .zhCN ? Self.chinese : Self.english
     }
 
+    func userFailure(_ code: String) -> String? {
+        switch code {
+        case "EMAIL_IN_USE": return locale == .zhCN ? "该邮箱已被使用。" : "This email address is already in use."
+        case "CANNOT_CHANGE_SELF_ADMIN": return locale == .zhCN ? "不能停用或降级当前登录的管理员。" : "You cannot disable or demote the signed-in administrator."
+        case "LAST_ADMIN_REQUIRED": return locale == .zhCN ? "系统必须至少保留一个有效管理员。" : "At least one active administrator must remain."
+        case "CANNOT_DELETE_SELF": return locale == .zhCN ? "不能删除当前登录的管理员。" : "You cannot delete the signed-in administrator."
+        case "DELETE_CONFIRMATION_MISMATCH": return locale == .zhCN ? "确认邮箱不匹配。" : "The confirmation email does not match."
+        case "INVALID_FOLDER_ACCESS": return locale == .zhCN ? "所选书库权限无效，请重新加载后检查。" : "The selected library grants are invalid. Reload and check them."
+        case "INVALID_PASSWORD": return locale == .zhCN ? "密码长度须为 10–128 个字符。" : "The password must contain 10–128 characters."
+        case "INVALID_USER": return locale == .zhCN ? "请检查姓名、邮箱、密码和书库权限。" : "Check the name, email, password and library grants."
+        default: return nil
+        }
+    }
+
     subscript(_ key: AdministrativeCopyKey) -> String {
         values[key] ?? key.rawValue
     }
@@ -88,6 +104,25 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
     }
 
     private static let english: [AdministrativeCopyKey: String] = [
+        .userStatusActive: "Active", .userStatusDisabled: "Disabled",
+        .userName: "Name",
+        .initialPassword: "Initial password",
+        .initialPasswordHint: "Use at least 10 characters and share it with the user securely.",
+        .interfaceLanguage: "Interface Language",
+        .managementPermissions: "Management permissions",
+        .libraryPermissions: "Library access",
+        .adminPermissionsHint: "Administrators implicitly have access to every library, system settings, and user management. Extra library grants are not stored.",
+        .managementPermissionsHint: "Allows folder configuration, imports, organization, logs, backups, and restores. These capabilities may expose all data.",
+        .emptyPermissionsHint: "With no scope selected, this user cannot see any library content.",
+        .manualImportsHint: "Content that does not belong to a library",
+        .createdAt: "Created",
+        .resetSessionsHint: "Saving will immediately revoke this user's sessions on every device.",
+        .deleteEmailConfirmation: "Enter the user’s email to confirm",
+        .permanentDeleteHint: "This permanently deletes the user's progress, preferences, bookmarks, shelves, grants, and sessions.",
+        .discardUserChanges: "Discard unsaved changes?",
+        .discardChanges: "Discard changes",
+        .back: "Back",
+
         .managementTitle: "Management", .librarySection: "Library", .organizeSection: "Organization",
         .serviceSection: "Services", .systemSection: "System", .librarySources: "Library Sources",
         .importTasks: "Import Tasks", .importPreferences: "Import Preferences", .organizeQueue: "Smart Organization",
@@ -115,13 +150,13 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .deleteKindleMessage: "A deleted task cannot be recovered.", .usersTitle: "Users & Permissions",
         .newUser: "New User", .displayName: "Display Name", .email: "Email", .role: "Role",
         .member: "Member", .administrator: "Administrator", .accountStatus: "Account Status",
-        .enableAccount: "Enable Account", .disableAccount: "Disable Account", .deleteUser: "Delete User",
+        .enableAccount: "Enable Account", .disableAccount: "Disable Account", .deleteUser: "Permanently delete",
         .editUser: "Edit User", .accessScope: "Access Scope", .resetPassword: "Reset Password",
         .newPassword: "New Password", .confirmPassword: "Confirm Password",
-        .resetAndRequireLogin: "Reset and Require Sign In", .deleteUserTitle: "Delete this user?",
+        .resetAndRequireLogin: "Reset and revoke sessions", .deleteUserTitle: "Permanently delete user",
         .deleteUserMessage: "The account will lose access immediately. Private data handling follows the server policy.",
-        .manageSystemPermission: "Manage System Settings", .accountLanguage: "Account Language",
-        .allLibraries: "All Libraries", .manualImports: "Manual Imports", .selectedDirectories: "Selected Directories",
+        .manageSystemPermission: "Allow system management", .accountLanguage: "Account Language",
+        .allLibraries: "All Libraries", .manualImports: "Manual Import", .selectedDirectories: "Selected Directories",
         .saveAccess: "Save Access Scope", .accessHint: "Users can only browse and read content inside their assigned scope.",
         .sourcesTitle: "Library Sources", .storageLocation: "Storage Location", .availableSpace: "Available Space",
         .libraries: "Library Roots", .browseDirectory: "Browse Server Directory",
@@ -182,11 +217,9 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .connectionTest: "Connection Test", .saveAndTest: "Save and Test", .connected: "Connected",
         .responseTime: "Response Time", .opdsTitle: "OPDS", .opdsEnabled: "Enable OPDS Service",
         .serviceStatus: "Service Status", .running: "Running", .stopped: "Stopped",
-        .publicBaseURL: "Public Base URL", .catalogURL: "Generated Catalog URL (Read Only)",
-        .opdsSaveHint: "Changes are not saved. Tap Save in the top-right corner to apply them and update the catalog URL.",
+        .publicBaseURL: "Public Base URL", .catalogURL: "Catalog URL",
         .opdsInstructions: "Add the catalog URL to an OPDS 1.2 compatible reader. The client will discover and sync library content.",
-        .copy: "Copy", .copied: "Copied", .disableOPDSTitle: "Disable OPDS service?",
-        .disableOPDSMessage: "After you save, all OPDS catalog addresses will stop serving.", .disableService: "Disable Service",
+        .copy: "Copy", .copied: "Copied", .viewCatalogURL: "View catalog URL", .copyCatalogURL: "Copy catalog URL",
         .backupsTitle: "Data & Backups", .createBackup: "Create Backup", .backupDirectory: "Server Backup Directory",
         .downloadFile: "Download to Files", .restoreBackup: "Restore This Backup", .deleteBackup: "Delete Backup",
         .restoreWarning: "Restoring overwrites metadata, tags, progress, and library-root settings. Original book files are not affected.",
@@ -224,6 +257,25 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
     )
 
     private static let chineseOverrides: [AdministrativeCopyKey: String] = [
+        .userStatusActive: "有效", .userStatusDisabled: "已停用",
+        .userName: "姓名",
+        .initialPassword: "初始密码",
+        .initialPasswordHint: "至少 10 个字符，由管理员安全地告知用户。",
+        .interfaceLanguage: "界面语言",
+        .managementPermissions: "管理权限",
+        .libraryPermissions: "书库权限",
+        .adminPermissionsHint: "管理员隐式拥有全部书库、系统设置和用户管理权限，不保存额外的书库授权。",
+        .managementPermissionsHint: "可管理目录、导入整理、日志和备份恢复；这些能力可能接触全量数据。",
+        .emptyPermissionsHint: "未选择任何范围时，该用户默认看不到书库内容。",
+        .manualImportsHint: "不属于书库的内容",
+        .createdAt: "创建于",
+        .resetSessionsHint: "保存后会立即撤销该用户在所有设备上的会话。",
+        .deleteEmailConfirmation: "输入用户邮箱以确认",
+        .permanentDeleteHint: "此操作会删除该用户的进度、偏好、书签、书架、授权和会话，且无法恢复。",
+        .discardUserChanges: "放弃未保存的修改？",
+        .discardChanges: "放弃修改",
+        .back: "返回",
+
         .managementTitle: "管理", .librarySection: "书库", .organizeSection: "整理", .serviceSection: "服务",
         .systemSection: "系统", .librarySources: "书库来源", .importTasks: "导入任务", .importPreferences: "导入偏好",
         .organizeQueue: "智能整理", .metadataProviders: "元数据提供者",
@@ -245,13 +297,13 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .sending: "发送中", .sent: "已发送", .queued: "排队中", .taskCancel: "取消任务", .taskRetry: "重试任务",
         .taskDelete: "删除任务", .deleteKindleTitle: "删除此发送任务？", .deleteKindleMessage: "删除后将无法恢复。",
         .usersTitle: "用户与权限", .newUser: "新增", .displayName: "显示名称", .email: "邮箱", .role: "角色",
-        .member: "成员", .administrator: "管理员", .accountStatus: "账户状态", .enableAccount: "启用账户",
-        .disableAccount: "停用账户", .deleteUser: "删除用户", .editUser: "编辑用户", .accessScope: "访问范围",
+        .member: "普通用户", .administrator: "管理员", .accountStatus: "账户状态", .enableAccount: "启用账户",
+        .disableAccount: "停用账户", .deleteUser: "永久删除", .editUser: "编辑用户", .accessScope: "访问范围",
         .resetPassword: "重置密码", .newPassword: "新密码", .confirmPassword: "确认新密码",
-        .resetAndRequireLogin: "重置并要求重新登录", .deleteUserTitle: "删除此用户？",
+        .resetAndRequireLogin: "重置并撤销会话", .deleteUserTitle: "永久删除用户",
         .deleteUserMessage: "账户将立即失去访问权限；私有数据按服务器策略处理。", .allLibraries: "全部书库",
-        .manageSystemPermission: "管理系统设置", .accountLanguage: "账户语言",
-        .manualImports: "手工导入内容", .selectedDirectories: "已选目录", .saveAccess: "保存访问范围",
+        .manageSystemPermission: "允许管理系统", .accountLanguage: "账户语言",
+        .manualImports: "手动导入", .selectedDirectories: "已选目录", .saveAccess: "保存访问范围",
         .accessHint: "用户只能浏览和阅读所选范围内的内容。", .sourcesTitle: "书库来源", .storageLocation: "存储位置",
         .availableSpace: "可用空间", .libraries: "书库", .browseDirectory: "浏览服务器目录",
         .scanDirectory: "扫描指定目录", .sourceName: "显示名称", .serverPath: "服务器路径", .scanningEnabled: "启用扫描",
@@ -300,10 +352,8 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .languageCode: "语言", .rateLimit: "自动识别限流", .connectionTest: "连接测试", .saveAndTest: "保存并测试",
         .connected: "连接正常", .responseTime: "响应时间", .opdsTitle: "OPDS", .opdsEnabled: "启用 OPDS 服务",
         .serviceStatus: "服务状态", .running: "运行中", .stopped: "已停止", .publicBaseURL: "服务基础地址",
-        .opdsSaveHint: "更改尚未保存。点击右上角保存，生效后将更新目录地址。",
-        .catalogURL: "生成的目录地址（只读）", .opdsInstructions: "使用支持 OPDS 1.2 的第三方客户端或阅读器，添加上方目录地址后即可同步书库内容。",
-        .copy: "复制", .copied: "已复制", .disableOPDSTitle: "关闭 OPDS 服务？",
-        .disableOPDSMessage: "保存后，所有 OPDS 目录地址将停止服务，第三方客户端将无法访问。", .disableService: "关闭服务",
+        .catalogURL: "目录地址", .opdsInstructions: "使用支持 OPDS 1.2 的第三方客户端或阅读器，添加上方目录地址后即可同步书库内容。",
+        .copy: "复制", .copied: "已复制", .viewCatalogURL: "查看目录地址", .copyCatalogURL: "复制目录地址",
         .backupsTitle: "数据与备份", .createBackup: "创建备份", .backupDirectory: "服务器备份目录", .downloadFile: "下载到文件",
         .restoreBackup: "恢复此备份", .deleteBackup: "删除备份",
         .restoreWarning: "恢复此备份将覆盖当前的所有元数据、标签、进度以及书库根目录设置，但不会影响原始书籍文件。",

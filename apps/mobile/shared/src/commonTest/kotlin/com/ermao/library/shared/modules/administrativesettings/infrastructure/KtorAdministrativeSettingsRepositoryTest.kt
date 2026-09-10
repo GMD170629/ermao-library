@@ -29,6 +29,90 @@ import kotlinx.serialization.json.Json
 
 class KtorAdministrativeSettingsRepositoryTest {
     @Test
+    fun userDraftDefaultsAndValidationMatchWeb() {
+        val empty = ManagedUserDraft()
+        assertEquals(ManagedLocale.ZhCn, empty.locale)
+        assertEquals(ManagedUserRole.Member, empty.role)
+        assertEquals(ManagedUserStatus.Active, empty.status)
+        assertTrue(empty.libraryIds.isEmpty())
+        assertTrue(!empty.canManageSystem && !empty.canViewManualImports)
+        val valid = empty.copy(name = " Reader ", email = "reader@example.com", password = "1234567890")
+        assertTrue(valid.isValid(creating = true))
+        assertTrue(!valid.copy(name = " ").isValid(true))
+        assertTrue(!valid.copy(name = "n".repeat(41)).isValid(true))
+        assertTrue(!valid.copy(password = "123456789").isValid(true))
+        assertTrue(valid.copy(password = "p".repeat(128)).isValid(true))
+        assertTrue(!valid.copy(password = "p".repeat(129)).isValid(true))
+        assertTrue(valid.copy(password = "").isValid(false))
+        assertTrue(isValidManagedUserDeletionConfirmation("reader@example.com", " READER@example.com "))
+        assertTrue(!isValidManagedUserDeletionConfirmation("reader@example.com", "DELETE"))
+    }
+
+    @Test
+    fun userCreationAndEditingSubmitAllPermissionsInOneRequest() = runBlocking {
+        val harness = Harness(Response(201, USER_PAYLOAD), Response(200, USER_PAYLOAD), Response(200, USER_PAYLOAD))
+        val draft = ManagedUserDraft(name = " Reader ", email = " reader@example.com ", password = "1234567890",
+            canManageSystem = true, canViewManualImports = true, libraryIds = listOf("folder-1"))
+        assertIs<AdministrativeSettingsContent<*>>(harness.repository.createUser(context(), draft.forCreation()))
+        assertIs<AdministrativeSettingsContent<*>>(harness.repository.updateUser(context(), "user-1", draft.forUpdate()))
+        for (request in harness.requests) {
+            assertTrue(request.body.contains("\"name\":\"Reader\""))
+            assertTrue(request.body.contains("\"canManageSystem\":true"))
+            assertTrue(request.body.contains("\"canViewManualImports\":true"))
+            assertTrue(request.body.contains("\"libraryIds\":[\"folder-1\"]"))
+            assertTrue(request.body.contains("\"locale\":\"zh-CN\""))
+        }
+        assertTrue(!harness.requests[1].body.contains("password"))
+        assertIs<AdministrativeSettingsContent<*>>(harness.repository.updateUser(context(), "user-1", draft.copy(role = ManagedUserRole.Admin).forUpdate()))
+        val adminBody = harness.requests.last().body
+        assertTrue(adminBody.contains("\"canManageSystem\":false"))
+        assertTrue(adminBody.contains("\"canViewManualImports\":false"))
+        assertTrue(adminBody.contains("\"libraryIds\":[]"))
+    }
+
+    @Test
+    fun statusPatchDoesNotResubmitStaleUserFieldsAndDeletionForwardsInput() = runBlocking {
+        val harness = Harness(Response(200, USER_PAYLOAD), Response(200, DELETED_USER))
+        assertIs<AdministrativeSettingsContent<*>>(harness.repository.setUserStatus(context(), "user-1", ManagedUserStatus.Disabled))
+        assertEquals(HttpMethod.Patch, harness.requests[0].method)
+        assertEquals("""{"status":"disabled"}""", harness.requests[0].body)
+        assertIs<AdministrativeSettingsContent<*>>(harness.repository.deleteUser(context(), "user-1", " READER@example.com "))
+        assertEquals("""{"confirmation":" READER@example.com "}""", harness.requests[1].body)
+    }
+
+    @Test
+    fun userMutationsRejectFalseSuccessFlagsAndMismatchedDeletionIdentity() = runBlocking {
+        for (body in listOf(DELETED_USER.replace("true", "false"), DELETED_USER.replace("user-1", "user-2"))) {
+            val harness = Harness(Response(200, body))
+            assertEquals(AdministrativeSettingsErrorKind.Protocol,
+                assertIs<AdministrativeSettingsFailure>(harness.repository.deleteUser(context(), "user-1", "reader@example.com")).error.kind)
+        }
+        for (field in listOf("passwordChanged", "sessionsRevoked")) {
+            val body = PASSWORD_CHANGED.replace("\"$field\":true", "\"$field\":false")
+            val harness = Harness(Response(200, body))
+            assertEquals(AdministrativeSettingsErrorKind.Protocol,
+                assertIs<AdministrativeSettingsFailure>(harness.repository.resetUserPassword(context(), "user-1", "1234567890")).error.kind)
+        }
+    }
+
+
+    @Test
+    fun userAdministrationPreservesServerAuthorizationAndConflictErrors() = runBlocking {
+        val cases = listOf(403 to "FORBIDDEN", 401 to "UNAUTHORIZED", 409 to "EMAIL_IN_USE",
+            400 to "CANNOT_CHANGE_SELF_ADMIN", 400 to "LAST_ADMIN_REQUIRED", 400 to "CANNOT_DELETE_SELF",
+            400 to "DELETE_CONFIRMATION_MISMATCH", 400 to "INVALID_FOLDER_ACCESS")
+        for ((status, code) in cases) {
+            val harness = Harness(Response(status, """{"ok":false,"error":{"code":"$code","message":"Rejected"}}"""))
+            val result = harness.repository.deleteUser(context(), "user-1", "reader@example.com")
+            val failure = assertIs<AdministrativeSettingsFailure>(result)
+            assertEquals(code, failure.error.code)
+            if (status == 403) assertEquals(AdministrativeSettingsErrorKind.Forbidden, failure.error.kind)
+            if (status == 401) assertEquals(AdministrativeSettingsErrorKind.Unauthorized, failure.error.kind)
+            assertEquals(1, harness.requests.size)
+        }
+    }
+
+    @Test
     fun messagingAndUserOperationsUseRealContracts() = runBlocking {
         val harness = Harness(
             Response(200, KINDLE_SETTINGS),

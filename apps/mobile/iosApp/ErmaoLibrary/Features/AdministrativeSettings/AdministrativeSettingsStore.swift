@@ -144,7 +144,8 @@ final class AdministrativeSettingsStore: ObservableObject {
     }
 
     func failureMessage(_ failure: AdministrativeFailure) -> String {
-        switch failure.kind {
+        if let message = copy.userFailure(failure.code) { return message }
+        return switch failure.kind {
         case .validation: copy[.invalidInput]
         case .unauthorized: copy[.authorizationRequired]
         case .forbidden: copy[.permissionDenied]

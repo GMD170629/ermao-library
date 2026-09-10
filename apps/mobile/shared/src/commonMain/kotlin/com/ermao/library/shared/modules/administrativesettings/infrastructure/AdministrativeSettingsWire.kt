@@ -242,15 +242,14 @@ internal fun JsonElement.toManagedUsers(): List<ManagedUser> =
 
 internal fun JsonElement.toDeletedManagedUser(): DeletedManagedUser {
     val root = objectValue("INVALID_DELETED_USER").expectKeys("deleted", "userId")
-    return DeletedManagedUser(root.requiredString("userId"), root.requiredBoolean("deleted"))
+    if (!root.requiredBoolean("deleted")) contract("INVALID_DELETED_USER")
+    return DeletedManagedUser(root.requiredString("userId"), true)
 }
 
 internal fun JsonElement.toManagedPasswordChange(): ManagedPasswordChange {
     val root = objectValue("INVALID_PASSWORD_CHANGE").expectKeys("passwordChanged", "sessionsRevoked")
-    return ManagedPasswordChange(
-        passwordChanged = root.requiredBoolean("passwordChanged"),
-        sessionsRevoked = root.requiredBoolean("sessionsRevoked"),
-    )
+    if (!root.requiredBoolean("passwordChanged") || !root.requiredBoolean("sessionsRevoked")) contract("INVALID_PASSWORD_CHANGE")
+    return ManagedPasswordChange(passwordChanged = true, sessionsRevoked = true)
 }
 
 internal fun JsonElement.toDeletedFlag(expectedId: String): Boolean {

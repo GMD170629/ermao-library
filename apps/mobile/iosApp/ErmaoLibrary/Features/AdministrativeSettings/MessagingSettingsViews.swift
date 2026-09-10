@@ -253,7 +253,17 @@ struct KindleQueueView: View {
         .settingsPageSurface()
         .navigationTitle(copy[.kindleQueueTitle])
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(copy[.refresh], action: load).disabled(store.operationInFlight != nil) } }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(action: load) {
+                    Label(copy[.refresh], systemImage: "arrow.clockwise")
+                        .labelStyle(.iconOnly)
+                        .frame(minWidth: .iosMinimumTouchTarget, minHeight: .iosMinimumTouchTarget)
+                }
+                .tint(nil)
+                .disabled(store.operationInFlight != nil)
+            }
+        }
         .confirmationDialog(copy[.deleteKindleTitle], isPresented: Binding(get: { taskToDelete != nil }, set: { if !$0 { taskToDelete = nil } }), titleVisibility: .visible) {
             if let taskToDelete { Button(copy[.delete], role: .destructive) { delete(taskToDelete) }.disabled(store.operationInFlight != nil) }
             Button(copy[.cancel], role: .cancel) { taskToDelete = nil }

@@ -37,3 +37,6 @@ fun administrativeMinimumLogMegabytes(): Int =
 
 fun administrativeMaximumLogMegabytes(): Int =
     AdministrativeSettingsValidation.MAXIMUM_LOG_MEGABYTES
+
+fun isValidManagedUserDeletionConfirmation(email: String, confirmation: String): Boolean =
+    confirmation.length <= 191 && confirmation.trim().equals(email, ignoreCase = true)

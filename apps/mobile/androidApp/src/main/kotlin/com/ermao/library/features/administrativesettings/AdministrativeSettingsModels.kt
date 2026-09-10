@@ -21,9 +21,6 @@ sealed interface AdministrativeSettingsRoute : NavKey {
     data class UserEdit(val userId: String? = null) : AdministrativeSettingsRoute
 
     @Serializable
-    data class UserAccess(val userId: String) : AdministrativeSettingsRoute
-
-    @Serializable
     data object LibrarySources : AdministrativeSettingsRoute
 
     @Serializable
@@ -271,6 +268,7 @@ data class AdministrativeUser(
     val role: UserRole,
     val enabled: Boolean,
     val locale: AdministrativeLocale,
+    val createdAt: String? = null,
 )
 
 enum class UserRole { Administrator, Member }
@@ -280,13 +278,7 @@ data class UserEditorSnapshot(
     val canManageSystem: Boolean,
     val canViewManualImports: Boolean,
     val selectedSourceIds: Set<String>,
-) : AdministrativePageSnapshot
-
-data class UserAccessSnapshot(
-    val user: AdministrativeUser,
-    val allLibraries: Boolean,
-    val canViewManualImports: Boolean,
-    val sources: List<AccessSource>,
+    val sources: List<AccessSource> = emptyList(),
 ) : AdministrativePageSnapshot
 
 data class AccessSource(
@@ -621,7 +613,7 @@ data class AdministrativeExportFile(
 }
 
 sealed interface AdministrativeSettingsEffect {
-    data class OperationSucceeded(val operation: AdministrativeOperation) : AdministrativeSettingsEffect
+    data class OperationSucceeded(val operation: AdministrativeOperation, val ownerRoute: AdministrativeSettingsRoute) : AdministrativeSettingsEffect
     data class OperationFailed(val operation: AdministrativeOperation, val error: AdministrativeFailure) : AdministrativeSettingsEffect
     data class ExportReady(val file: AdministrativeExportFile) : AdministrativeSettingsEffect
 }
@@ -634,7 +626,6 @@ enum class AdministrativeOperation {
     RetryKindleTask,
     DeleteKindleTask,
     SaveUser,
-    SaveUserAccess,
     ResetUserPassword,
     SetUserEnabled,
     DeleteUser,

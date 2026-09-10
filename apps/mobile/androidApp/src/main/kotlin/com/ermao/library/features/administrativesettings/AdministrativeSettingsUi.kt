@@ -26,6 +26,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -90,13 +93,23 @@ fun AdministrativeSettingsDestination(
             (state.snapshot as? HealthSnapshot)?.let { it.status == HealthStatus.Checking } == true
         ) viewModel.poll(stateRoute)
     }
+    var passwordResetRevision by remember(route) { mutableStateOf(0) }
+    val currentRoute by rememberUpdatedState(route)
+    val currentOnBack by rememberUpdatedState(onBack)
     val feedbackHost = rememberWarmPageFeedbackState()
     val feedbackScope = rememberCoroutineScope()
     val feedbackLocale by rememberUpdatedState(locale)
-    LaunchedEffect(viewModel) {
+    LaunchedEffect(viewModel, route) {
         viewModel.effects.collectLatest { effect ->
             if (effect is AdministrativeSettingsEffect.ExportReady) systemActions.saveExport(effect.file)
             if (effect is AdministrativeSettingsEffect.OperationSucceeded) {
+                if (currentRoute is AdministrativeSettingsRoute.UserEdit && effect.ownerRoute == currentRoute) {
+                    when (effect.operation) {
+                        AdministrativeOperation.SaveUser, AdministrativeOperation.DeleteUser -> currentOnBack()
+                        AdministrativeOperation.ResetUserPassword -> passwordResetRevision += 1
+                        else -> Unit
+                    }
+                }
                 administrativeSuccessText(effect.operation, feedbackLocale)?.let { message ->
                     feedbackScope.launch { feedbackHost.showFeedback(message, OperationFeedbackKind.Success) }
                 }
@@ -120,10 +133,7 @@ fun AdministrativeSettingsDestination(
             state.typed(), locale, onNavigate, viewModel::execute, { viewModel.load(route, true) }, onBack, modifier,
         )
         is AdministrativeSettingsRoute.UserEdit -> UserEditScreen(
-            state.typed(), locale, onNavigate, viewModel::execute, { viewModel.load(route, true) }, onBack, modifier,
-        )
-        is AdministrativeSettingsRoute.UserAccess -> UserAccessScreen(
-            state.typed(), locale, viewModel::execute, { viewModel.load(route, true) }, onBack, modifier,
+            state.typed(), locale, viewModel::execute, { viewModel.load(route, true) }, onBack, modifier, passwordResetRevision,
         )
         AdministrativeSettingsRoute.LibrarySources -> LibrarySourcesScreen(
             state.typed(), locale, onNavigate,
@@ -213,7 +223,7 @@ internal fun administrativeSuccessText(operation: AdministrativeOperation, local
         AdministrativeOperation.TestSmtp, AdministrativeOperation.TestMetadataProvider,
         AdministrativeOperation.RunHealthCheck -> null
         AdministrativeOperation.SaveKindle, AdministrativeOperation.SaveSmtp,
-        AdministrativeOperation.SaveUser, AdministrativeOperation.SaveUserAccess,
+        AdministrativeOperation.SaveUser,
         AdministrativeOperation.SaveLibrarySource, AdministrativeOperation.SaveImportPreferences,
         AdministrativeOperation.SaveRecognitionPolicy, AdministrativeOperation.SaveMetadataProviders,
         AdministrativeOperation.SaveMetadataProvider, AdministrativeOperation.SaveOpds,
@@ -315,10 +325,23 @@ private fun InlineAdministrativeFailure(
     }
 }
 
-internal fun failureText(failure: AdministrativeFailure?, locale: AdministrativeLocale): String = when (failure?.kind) {
-    AdministrativeErrorKind.Forbidden -> AdministrativeCopy.PermissionDenied.text(locale)
-    AdministrativeErrorKind.Unauthorized -> AdministrativeCopy.SessionExpired.text(locale)
-    else -> AdministrativeCopy.OperationFailed.text(locale)
+internal fun failureText(failure: AdministrativeFailure?, locale: AdministrativeLocale): String {
+    val userMessage = when (failure?.code) {
+        "EMAIL_IN_USE" -> if (locale == AdministrativeLocale.ZhCn) "该邮箱已被使用。" else "This email address is already in use."
+        "CANNOT_CHANGE_SELF_ADMIN" -> if (locale == AdministrativeLocale.ZhCn) "不能停用或降级当前登录的管理员。" else "You cannot disable or demote the signed-in administrator."
+        "LAST_ADMIN_REQUIRED" -> if (locale == AdministrativeLocale.ZhCn) "系统必须至少保留一个有效管理员。" else "At least one active administrator must remain."
+        "CANNOT_DELETE_SELF" -> if (locale == AdministrativeLocale.ZhCn) "不能删除当前登录的管理员。" else "You cannot delete the signed-in administrator."
+        "DELETE_CONFIRMATION_MISMATCH" -> if (locale == AdministrativeLocale.ZhCn) "确认邮箱不匹配。" else "The confirmation email does not match."
+        "INVALID_FOLDER_ACCESS" -> if (locale == AdministrativeLocale.ZhCn) "所选书库权限无效，请重新加载后检查。" else "The selected library grants are invalid. Reload and check them."
+        "INVALID_PASSWORD" -> if (locale == AdministrativeLocale.ZhCn) "密码长度须为 10–128 个字符。" else "The password must contain 10–128 characters."
+        "INVALID_USER" -> if (locale == AdministrativeLocale.ZhCn) "请检查姓名、邮箱、密码和书库权限。" else "Check the name, email, password and library grants."
+        else -> null
+    }
+    return userMessage ?: when (failure?.kind) {
+        AdministrativeErrorKind.Forbidden -> AdministrativeCopy.PermissionDenied.text(locale)
+        AdministrativeErrorKind.Unauthorized -> AdministrativeCopy.SessionExpired.text(locale)
+        else -> AdministrativeCopy.OperationFailed.text(locale)
+    }
 }
 
 @Composable

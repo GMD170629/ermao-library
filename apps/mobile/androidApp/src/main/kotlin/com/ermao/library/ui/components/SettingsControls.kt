@@ -57,6 +57,7 @@ fun SettingsTextField(
         keyboardType = if (password) KeyboardType.Password else KeyboardType.Text,
         imeAction = ImeAction.Next,
     ),
+    keyboardActions: androidx.compose.foundation.text.KeyboardActions = androidx.compose.foundation.text.KeyboardActions.Default,
     showPasswordContentDescription: String? = null,
     hidePasswordContentDescription: String? = null,
 ) {
@@ -104,6 +105,7 @@ fun SettingsTextField(
         },
         visualTransformation = effectiveTransformation,
         keyboardOptions = keyboardOptions,
+        keyboardActions = keyboardActions,
         shape = WarmPageTextFieldDefaults.shape,
         colors = WarmPageTextFieldDefaults.colors(),
         modifier = modifier

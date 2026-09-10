@@ -99,29 +99,29 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
     }
     func loadUser(id: String) async throws -> AdministrativeUser { let wire: ErmaoShared.ManagedUser = try value(try await repository.loadUser(context: context, userId: id)); let mapped = map(wire); cachedUsers[id] = mapped; return mapped }
     func createUser(_ draft: UserDraft) async throws -> AdministrativeUser {
-        let wire: ErmaoShared.ManagedUser = try value(try await repository.createUser(context: context, user: ErmaoShared.CreateManagedUser(name: draft.displayName, email: draft.email, password: draft.initialPassword, role: map(draft.role), canManageSystem: draft.canManageSystem, canViewManualImports: false, libraryIds: [], locale: map(draft.locale))))
-        let mapped = map(wire); cachedUsers[mapped.id] = mapped; return mapped
+        let wire: ErmaoShared.ManagedUser = try value(try await repository.createUser(context: context, user: draft.shared.forCreation()))
+        let user = map(wire); cachedUsers[user.id] = user; return user
     }
     func updateUser(id: String, draft: UserDraft) async throws -> AdministrativeUser {
-        let existing: AdministrativeUser
-        if let cached = cachedUsers[id] { existing = cached } else { existing = try await loadUser(id: id) }
-        let wire: ErmaoShared.ManagedUser = try value(try await repository.updateUser(context: context, userId: id, user: userUpdate(draft: draft, existing: existing)))
-        let mapped = map(wire); cachedUsers[id] = mapped; return mapped
+        let wire: ErmaoShared.ManagedUser = try value(try await repository.updateUser(context: context, userId: id, user: draft.shared.forUpdate()))
+        let user = map(wire); cachedUsers[id] = user; return user
     }
     func setUserEnabled(id: String, enabled: Bool) async throws -> AdministrativeUser {
-        let existing: AdministrativeUser
-        if let cached = cachedUsers[id] { existing = cached } else { existing = try await loadUser(id: id) }
-        let draft = UserDraft(displayName: existing.displayName, email: existing.email, role: existing.role, enabled: enabled, canManageSystem: existing.canManageSystem, locale: existing.locale, initialPassword: "")
-        return try await updateUser(id: id, draft: draft)
+        let wire: ErmaoShared.ManagedUser = try value(try await repository.setUserStatus(context: context, userId: id, status: enabled ? .active : .disabled))
+        let user = map(wire); cachedUsers[id] = user; return user
     }
-    func deleteUser(id: String) async throws { let wire: ErmaoShared.DeletedManagedUser = try value(try await repository.deleteUser(context: context, userId: id, confirmation: "DELETE")); guard wire.deleted else { throw protocolFailure() }; cachedUsers[id] = nil }
-    func resetUserPassword(id: String, newPassword: String) async throws { let wire: ErmaoShared.ManagedPasswordChange = try value(try await repository.resetUserPassword(context: context, userId: id, password: newPassword)); guard wire.passwordChanged else { throw protocolFailure() } }
-    func loadUserAccess(id: String) async throws -> UserAccessSnapshot { let user = try await loadUser(id: id); let folders = try await loadLibrarySources().sources.map { AdministrativeLibraryScope(id: $0.id, name: $0.displayName, serverPath: $0.serverPath, bookCount: 0) }; return UserAccessSnapshot(user: user, scopes: folders) }
-    func saveUserAccess(id: String, libraryIDs: Set<String>, canViewManualImports: Bool) async throws -> AdministrativeUser {
-        let existing: AdministrativeUser
-        if let cached = cachedUsers[id] { existing = cached } else { existing = try await loadUser(id: id) }
-        let update = ErmaoShared.UpdateManagedUser(name: existing.displayName, email: existing.email, role: map(existing.role), status: existing.enabled ? .active : .disabled, canManageSystem: existing.canManageSystem, canViewManualImports: canViewManualImports, libraryIds: Array(libraryIDs), locale: map(existing.locale))
-        let wire: ErmaoShared.ManagedUser = try value(try await repository.updateUser(context: context, userId: id, user: update)); let mapped = map(wire); cachedUsers[id] = mapped; return mapped
+    func deleteUser(id: String, confirmation: String) async throws {
+        let _: ErmaoShared.DeletedManagedUser = try value(try await repository.deleteUser(context: context, userId: id, confirmation: confirmation))
+        cachedUsers[id] = nil
+    }
+    func resetUserPassword(id: String, newPassword: String) async throws {
+        let _: ErmaoShared.ManagedPasswordChange = try value(try await repository.resetUserPassword(context: context, userId: id, password: newPassword))
+    }
+    func loadUserEditor(id: String?) async throws -> UserEditorSnapshot {
+        let user: AdministrativeUser?
+        if let id { user = try await loadUser(id: id) } else { user = nil }
+        let sources = try await loadLibrarySources()
+        return UserEditorSnapshot(user: user, scopes: sources.sources)
     }
 
     func loadLibrarySources() async throws -> LibrarySourcesSnapshot {

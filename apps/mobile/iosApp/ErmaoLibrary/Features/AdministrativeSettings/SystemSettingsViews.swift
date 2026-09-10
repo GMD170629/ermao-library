@@ -1,94 +1,141 @@
 import SwiftUI
+@preconcurrency import ErmaoShared
 import UniformTypeIdentifiers
 import UIKit
 
 struct OPDSSettingsView: View {
     @ObservedObject var store: AdministrativeSettingsStore
     @State private var state: AdministrativeLoadState<OPDSConfiguration> = .idle
-    @State private var configuration: OPDSConfiguration?
-    @State private var initialConfiguration: OPDSConfiguration?
-    @State private var disableShown = false
+    @State private var editor: OpdsEditState?
+    @State private var catalogURL: String?
+    @State private var addressShown = false
+    @State private var focusCommit: Task<Void, Never>?
+    @State private var updateTask: Task<Void, Never>?
+    @FocusState private var addressFocused: Bool
     @Environment(\.administrativeCopy) private var copy
     @Environment(\.appTheme) private var theme
 
     var body: some View {
         AdministrativeStateView(state: state, retry: load) { _ in
-            if let binding = Binding($configuration) {
+            if let editor {
                 SettingsForm {
-                    Section(copy[.serviceStatus]) {
+                    Section {
                         SettingsToggleRow(
                             LocalizedStringKey(copy[.opdsEnabled]),
-                            isOn: Binding(
-                                get: { binding.wrappedValue.enabled },
-                                set: { enabled in
-                                    if !enabled && binding.wrappedValue.enabled { disableShown = true }
-                                    else { binding.enabled.wrappedValue = enabled }
-                                }
-                            )
+                            isOn: Binding(get: { editor.draft.enabled }, set: { value in changeEnabled(value) })
                         )
-                        .disabled(store.operationInFlight != nil)
-                        AdministrativeStatusLabel(title: binding.wrappedValue.running ? copy[.running] : copy[.stopped], status: binding.wrappedValue.running ? .good : .neutral)
+                        .disabled(editor.isSubmitting || store.operationInFlight != nil)
+                        .accessibilityIdentifier("opds-enabled")
                     }
                     Section(copy[.publicBaseURL]) {
                         SettingsTextInputRow(LocalizedStringKey(copy[.publicBaseURL])) {
-                            TextField(LocalizedStringKey(copy[.publicBaseURL]), text: binding.publicBaseURL)
-                                .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-                        }
-                        if let catalog = initialConfiguration?.catalogURL {
-                            SettingsValueRow(LocalizedStringKey(copy[.catalogURL]), value: catalog)
-                            SettingsActionRow(LocalizedStringKey(copy[.copy])) {
-                                UIPasteboard.general.string = catalog
-                                store.replaceNotice(AdministrativeNotice(style: .success, message: copy[.copied]))
+                            TextField(LocalizedStringKey(copy[.publicBaseURL]), text: Binding(
+                                get: { editor.draft.publicBaseUrl },
+                                set: { self.editor = self.editor?.editAddress(address: $0) }
+                            ))
+                            .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .submitLabel(.done).focused($addressFocused)
+                            .disabled(editor.isSubmitting || store.operationInFlight != nil)
+                            .accessibilityIdentifier("opds-public-url")
+                            .onSubmit { submit(); addressFocused = false }
+                            .onChange(of: addressFocused) { wasFocused, focused in
+                                if wasFocused && !focused { scheduleFocusCommit() }
+                                if focused { focusCommit?.cancel() }
                             }
                         }
-                    }
-                    if configuration != initialConfiguration {
-                        Section { Text(copy[.opdsSaveHint]).foregroundStyle(theme.textSecondary) }
+                        if let catalogURL {
+                            HStack {
+                                Text(copy[.catalogURL])
+                                Spacer()
+                                Button { addressShown = true } label: {
+                                    Image(systemName: "eye").frame(minWidth: 44, minHeight: 44)
+                                }
+                                .accessibilityLabel(copy[.viewCatalogURL])
+                                .accessibilityIdentifier("opds-view-url")
+                                Button {
+                                    UIPasteboard.general.string = catalogURL
+                                    store.replaceNotice(AdministrativeNotice(style: .success, message: copy[.copied]))
+                                } label: {
+                                    Image(systemName: "doc.on.doc").frame(minWidth: 44, minHeight: 44)
+                                }
+                                .accessibilityLabel(copy[.copyCatalogURL])
+                                .accessibilityIdentifier("opds-copy-url")
+                            }
+                            .buttonStyle(.borderless)
+                        }
                     }
                     Section { Text(copy[.opdsInstructions]).appTextStyle(.callout).foregroundStyle(theme.textSecondary) }
                 }.administrativeNotice(store: store)
             }
-        }.navigationTitle(copy[.opdsTitle]).navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if let configuration {
-                ToolbarItem(placement: .confirmationAction) {
-                    AdministrativeToolbarAction(
-                        title: copy[.save],
-                        working: store.operationInFlight == "save-opds",
-                        disabled: saveIsDisabled
-                    ) { save(configuration) }
-                }
-            }
         }
-        .confirmationDialog(copy[.disableOPDSTitle], isPresented: $disableShown, titleVisibility: .visible) {
-            Button(copy[.disableService], role: .destructive) {
-                confirmDisable()
+        .navigationTitle(copy[.opdsTitle]).navigationBarTitleDisplayMode(.inline)
+        .alert(copy[.catalogURL], isPresented: $addressShown) {
+            Button(copy[.close], role: .cancel) {}
+        } message: {
+            Text(verbatim: catalogURL ?? "")
+        }
+        .task { await loadAsync() }
+        .onDisappear {
+            focusCommit?.cancel()
+            updateTask?.cancel()
+            store.cancelPendingRequests()
+        }
+    }
+
+    private func load() { Task { await loadAsync() } }
+
+    private func loadAsync() async {
+        state = .loading
+        let loaded = await store.load(scope: "opds") { try await store.client.loadOPDSConfiguration() }
+        state = loaded
+        if case let .loaded(value) = loaded {
+            editor = OpdsEditingPublicKt.createOpdsEditState(enabled: value.enabled, publicBaseUrl: value.publicBaseURL)
+            catalogURL = value.catalogURL
+        }
+    }
+
+    private func changeEnabled(_ enabled: Bool) {
+        focusCommit?.cancel()
+        editor = editor?.changeEnabled(enabled: enabled)
+        submit()
+        addressFocused = false
+    }
+
+    private func scheduleFocusCommit() {
+        guard editor?.isSubmitting == false else { return }
+        focusCommit?.cancel()
+        focusCommit = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .milliseconds(OpdsEditingPublicKt.opdsFocusCommitDelayMilliseconds()))
+            } catch {
+                // Task.sleep only throws when the focus-delay task is cancelled.
+                return
             }
-            .disabled(store.operationInFlight != nil)
-            Button(copy[.cancel], role: .cancel) {}
-        } message: { Text(copy[.disableOPDSMessage]) }
-        .task { await loadAsync() }.onDisappear { store.cancelPendingRequests() }
+            guard !Task.isCancelled else { return }
+            focusCommit = nil
+            submit()
+        }
     }
-    private var saveIsDisabled: Bool {
-        guard let configuration, let initialConfiguration else { return true }
-        return store.operationInFlight != nil || configuration == initialConfiguration || configuration.publicBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-    private func load() { Task { await loadAsync() } }; private func loadAsync() async { state = .loading; let loaded = await store.load(scope: "opds") { try await store.client.loadOPDSConfiguration() }; state = loaded; if case let .loaded(value) = loaded { configuration = value; initialConfiguration = value } }
-    private func save(_ value: OPDSConfiguration) {
-        guard store.operationInFlight == nil else { return }
-        Task {
-            let result = await store.performValue(id: "save-opds") { try await store.client.saveOPDSConfiguration(value) }
-            if case let .success(updated) = result {
-                configuration = updated
-                initialConfiguration = updated
+
+    private func submit() {
+        focusCommit?.cancel()
+        guard let current = editor, !current.isSubmitting, store.operationInFlight == nil else { return }
+        let next = current.beginSubmission()
+        guard let request = next.submission else { return }
+        editor = next
+        let update = OPDSConfiguration(enabled: request.enabled, publicBaseURL: request.publicBaseUrl, catalogURL: nil, running: false)
+        updateTask = Task {
+            let result = await store.performValue(id: "update-opds") { try await store.client.saveOPDSConfiguration(update) }
+            switch result {
+            case let .success(updated):
+                editor = editor?.accept(enabled: updated.enabled, publicBaseUrl: updated.publicBaseURL)
+                catalogURL = updated.catalogURL
+                if catalogURL == nil { addressShown = false }
                 state = .loaded(updated)
+            case .failed, .cancelled:
+                editor = editor?.reject()
             }
         }
-    }
-    private func confirmDisable() {
-        guard var value = configuration, store.operationInFlight == nil else { return }
-        value.enabled = false
-        configuration = value
     }
 }
 

@@ -6,6 +6,69 @@ final class ContentDiscoveryUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testLiveSettingsIconActionsAndStableUserFilters() throws {
+        let app = XCUIApplication()
+        app.launch()
+        defer { app.terminate() }
+        let me = app.buttons["tab-select-me"]
+        XCTAssertTrue(me.waitForExistence(timeout: 15))
+        me.tap()
+
+        let users = app.buttons.matching(NSPredicate(format: "label CONTAINS %@ OR label CONTAINS %@", "用户与权限", "Users & Permissions")).firstMatch
+        XCTAssertTrue(users.waitForExistence(timeout: 10))
+        if !users.isHittable { app.swipeUp() }
+        users.tap()
+        let picker = app.segmentedControls.firstMatch
+        XCTAssertTrue(picker.waitForExistence(timeout: 10))
+        let initialY = picker.frame.minY
+        let add = app.navigationBars.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "新增", "New User")).firstMatch
+        XCTAssertTrue(add.exists)
+        attachScreenshot(named: "settings-users-plus", app: app)
+        for index in [1, 2, 0, 2, 1, 0] {
+            picker.buttons.element(boundBy: index).tap()
+            XCTAssertEqual(picker.frame.minY, initialY, accuracy: 1)
+        }
+        let loading = app.progressIndicators.matching(NSPredicate(format: "label == %@ OR label == %@", "正在加载…", "Loading…")).firstMatch
+        XCTAssertTrue(loading.waitForNonExistence(timeout: 10))
+        XCTAssertEqual(picker.frame.minY, initialY, accuracy: 1)
+        attachScreenshot(named: "settings-users-after-switching", app: app)
+        // Check the native toolbar's actual hit target, beyond its visual AX frame.
+        for offset in [CGVector(dx: -21.5, dy: 0), CGVector(dx: 21.5, dy: 0), CGVector(dx: 0, dy: -21.5)] {
+            app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: add.frame.midX + offset.dx, dy: add.frame.midY + offset.dy)).tap()
+            XCTAssertTrue(app.textFields.firstMatch.waitForExistence(timeout: 10))
+            app.navigationBars.buttons.matching(NSPredicate(format: "identifier == %@", "BackButton")).firstMatch.tap()
+            XCTAssertTrue(picker.waitForExistence(timeout: 10))
+        }
+        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: add.frame.midX, dy: add.frame.midY + 21.5)).tap()
+        let name = app.textFields.matching(NSPredicate(format: "placeholderValue == %@ OR placeholderValue == %@", "姓名", "Name")).firstMatch
+        XCTAssertTrue(name.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.secureTextFields.firstMatch.exists)
+        attachScreenshot(named: "settings-user-form-fields", app: app)
+        let manual = app.switches.matching(NSPredicate(format: "label CONTAINS %@ OR label CONTAINS %@", "手动导入", "Manual Import")).firstMatch
+        for _ in 0..<4 where !manual.isHittable { app.swipeUp() }
+        XCTAssertTrue(manual.isHittable, "New users must be able to configure library permissions before saving")
+        manual.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+        XCTAssertEqual(manual.value as? String, "1")
+        attachScreenshot(named: "settings-user-form-permissions", app: app)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let discard = app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "放弃修改", "Discard changes")).firstMatch
+        XCTAssertTrue(discard.waitForExistence(timeout: 5))
+        attachScreenshot(named: "settings-user-discard-confirmation", app: app)
+        discard.tap()
+        XCTAssertTrue(picker.waitForExistence(timeout: 10))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        let queue = app.buttons.matching(NSPredicate(format: "label CONTAINS %@ OR label CONTAINS %@", "Kindle 发送队列", "Kindle Send Queue")).firstMatch
+        XCTAssertTrue(queue.waitForExistence(timeout: 10))
+        if !queue.isHittable { app.swipeDown() }
+        queue.tap()
+        let refresh = app.navigationBars.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "刷新", "Refresh")).firstMatch
+        XCTAssertTrue(refresh.waitForExistence(timeout: 10))
+        refresh.tap()
+        XCTAssertTrue(loading.waitForNonExistence(timeout: 10))
+        attachScreenshot(named: "settings-kindle-refresh-icon", app: app)
+    }
+
     func testCompactCustomTabControlsStayVisibleAndSelectable() {
         let app = XCUIApplication()
         app.launchEnvironment["ERMAO_UI_TEST_CONTENT_FIXTURE"] = "1"

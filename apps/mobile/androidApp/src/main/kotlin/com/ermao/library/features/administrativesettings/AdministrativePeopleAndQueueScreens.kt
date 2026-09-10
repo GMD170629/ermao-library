@@ -268,214 +268,136 @@ private fun UserRole.copy(): AdministrativeCopy = when (this) {
 fun UserEditScreen(
     state: AdministrativePageState<UserEditorSnapshot>,
     locale: AdministrativeLocale,
-    onNavigate: (AdministrativeSettingsRoute) -> Unit,
     onCommand: (AdministrativeCommand) -> Unit,
     onRetry: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    passwordResetRevision: Int = 0,
 ) {
+    val snapshot = state.snapshot
+    val initial = remember(snapshot) {
+        UserDraft(snapshot?.user?.id, snapshot?.user?.displayName.orEmpty(), snapshot?.user?.email.orEmpty(),
+            snapshot?.user?.role ?: UserRole.Member, snapshot?.user?.enabled ?: true, null,
+            snapshot?.canManageSystem ?: false, snapshot?.canViewManualImports ?: false,
+            snapshot?.selectedSourceIds.orEmpty(), snapshot?.user?.locale ?: AdministrativeLocale.ZhCn)
+    }
+    var draft by remember(initial) { mutableStateOf(initial) }
     var showReset by remember { mutableStateOf(false) }
     var showDelete by remember { mutableStateOf(false) }
-    val snapshot = state.snapshot
-    val user = snapshot?.user
-    var displayName by remember(user) { mutableStateOf(user?.displayName.orEmpty()) }
-    var email by remember(user) { mutableStateOf(user?.email.orEmpty()) }
-    var role by remember(user) { mutableStateOf(user?.role ?: UserRole.Member) }
-    var enabled by remember(user) { mutableStateOf(user?.enabled ?: true) }
-    var userLocale by remember(user) { mutableStateOf(user?.locale ?: AdministrativeLocale.EnUs) }
-    var initialPassword by remember(user) { mutableStateOf("") }
-    var canManageSystem by remember(snapshot) { mutableStateOf(snapshot?.canManageSystem ?: false) }
-    var canViewManualImports by remember(snapshot) { mutableStateOf(snapshot?.canViewManualImports ?: false) }
-    val hasChanges = snapshot?.let { initial ->
-        val initialUser = initial.user
-        initialUser == null ||
-            displayName.trim() != initialUser.displayName.trim() ||
-            email.trim() != initialUser.email.trim() ||
-            role != initialUser.role ||
-            enabled != initialUser.enabled ||
-            userLocale != initialUser.locale ||
-            canManageSystem != initial.canManageSystem ||
-            canViewManualImports != initial.canViewManualImports ||
-            initialPassword.isNotBlank()
-    } == true
-    val canSave = snapshot != null && !state.mutationInFlight && hasChanges &&
-        displayName.isNotBlank() && email.isNotBlank() && (user != null || initialPassword.length in 10..128)
+    var showDiscard by remember { mutableStateOf(false) }
+    val dirty = snapshot != null && draft != initial
+    val busy = state.mutationInFlight
+    val leave = { if (!busy) { if (dirty) showDiscard = true else onBack() } }
+    androidx.activity.compose.BackHandler(enabled = dirty || busy) { leave() }
+    androidx.compose.runtime.LaunchedEffect(passwordResetRevision) { showReset = false }
     AdministrativePage(
-        title = if (user == null) AdministrativeCopy.NewUser else AdministrativeCopy.EditUser,
-        locale = locale,
-        onBack = onBack,
-        modifier = modifier,
+        title = if (draft.id == null) AdministrativeCopy.NewUser else AdministrativeCopy.EditUser,
+        locale = locale, onBack = leave, modifier = modifier,
         toolbarActions = {
-            AdministrativeSaveAction(
-                label = AdministrativeCopy.SaveUser,
-                locale = locale,
-                enabled = canSave,
-                working = state.mutationInFlight,
-                onClick = {
-                    snapshot?.let { current ->
-                        onCommand(
-                            AdministrativeCommand.SaveUser(
-                                UserDraft(
-                                    current.user?.id,
-                                    displayName.trim(),
-                                    email.trim(),
-                                    role,
-                                    enabled,
-                                    initialPassword.ifBlank { null },
-                                    canManageSystem,
-                                    canViewManualImports,
-                                    current.selectedSourceIds,
-                                    userLocale,
-                                ),
-                            ),
-                        )
-                    }
-                },
-            )
+            AdministrativeSaveAction(AdministrativeCopy.SaveUser, locale,
+                enabled = snapshot != null && !busy && dirty && draft.sharedDraft().isValid(draft.id == null),
+                working = busy, onClick = { onCommand(AdministrativeCommand.SaveUser(draft)) })
         },
     ) {
         PageStateContent(state, locale, onRetry) { current ->
             AdministrativeSection(AdministrativeCopy.Users, locale)
-            AdministrativeTextField(displayName, { displayName = it }, AdministrativeCopy.DisplayName, locale)
-            AdministrativeTextField(email, { email = it }, AdministrativeCopy.Email, locale)
-            EnumChoiceRow(AdministrativeCopy.Role, UserRole.entries, role, { role = it }, locale) { it.copy().text(locale) }
-            EnumChoiceRow(AdministrativeCopy.Language, AdministrativeLocale.entries, userLocale, { userLocale = it }, locale) {
-                when (it) { AdministrativeLocale.ZhCn -> "简体中文"; AdministrativeLocale.EnUs -> "English (United States)" }
+            AdministrativeTextField(draft.displayName, { if (!busy) draft = draft.copy(displayName = it) }, AdministrativeCopy.UserName, locale, enabled = !busy)
+            AdministrativeTextField(draft.email, { if (!busy) draft = draft.copy(email = it) }, AdministrativeCopy.Email, locale, enabled = !busy)
+            if (draft.id == null) {
+                AdministrativeTextField(draft.initialPassword.orEmpty(), { if (!busy) draft = draft.copy(initialPassword = it.ifEmpty { null }) },
+                    AdministrativeCopy.InitialPassword, locale, password = true, supporting = AdministrativeCopy.InitialPasswordHint.text(locale), enabled = !busy)
+            }
+            EnumChoiceRow(AdministrativeCopy.InterfaceLanguage, AdministrativeLocale.entries, draft.locale,
+                { if (!busy) draft = draft.copy(locale = it) }, locale, enabled = !busy) { if (it == AdministrativeLocale.ZhCn) "简体中文" else "English" }
+            EnumChoiceRow(AdministrativeCopy.Role, UserRole.entries, draft.role,
+                { if (!busy) draft = draft.copy(role = it) }, locale, enabled = !busy) { it.copy().text(locale) }
+            if (draft.id != null) {
+                EnumChoiceRow(AdministrativeCopy.AccountStatus, listOf(true, false), draft.enabled,
+                    { if (!busy) draft = draft.copy(enabled = it) }, locale, enabled = !busy) {
+                    (if (it) AdministrativeCopy.UserStatusActive else AdministrativeCopy.UserStatusDisabled).text(locale)
+                }
+                current.user?.createdAt?.let { created ->
+                    val language = if (locale == AdministrativeLocale.ZhCn) java.util.Locale.SIMPLIFIED_CHINESE else java.util.Locale.US
+                    val formatted = java.time.OffsetDateTime.parse(created).atZoneSameInstant(java.time.ZoneId.systemDefault())
+                        .format(java.time.format.DateTimeFormatter.ofLocalizedDateTime(java.time.format.FormatStyle.MEDIUM).withLocale(language))
+                    Text("${AdministrativeCopy.UserCreatedAt.text(locale)} $formatted", Modifier.padding(16.dp))
+                }
+            }
+            if (draft.role == UserRole.Administrator) {
+                Text(AdministrativeCopy.AdminPermissionsHint.text(locale), Modifier.padding(16.dp))
+            } else {
+                AdministrativeSection(AdministrativeCopy.ManagementPermissions, locale)
+                AdministrativeSwitchRow(AdministrativeCopy.ManageSystemPermission.text(locale), draft.canManageSystem,
+                    { draft = draft.copy(canManageSystem = it) }, supporting = AdministrativeCopy.ManageSystemPermissionDescription.text(locale), enabled = !busy)
+                AdministrativeSection(AdministrativeCopy.LibraryPermissions, locale)
+                Text(AdministrativeCopy.EmptyPermissionsHint.text(locale), Modifier.padding(16.dp))
+                AdministrativeSwitchRow(AdministrativeCopy.ManualImports.text(locale), draft.canViewManualImports,
+                    { draft = draft.copy(canViewManualImports = it) }, supporting = AdministrativeCopy.ManualImportsHint.text(locale), enabled = !busy)
+                current.sources.forEach { source ->
+                    AdministrativeSwitchRow(source.name, source.id in draft.sourceIds,
+                        { checked -> draft = draft.copy(sourceIds = if (checked) draft.sourceIds + source.id else draft.sourceIds - source.id) },
+                        supporting = source.path, enabled = !busy)
+                }
             }
             if (current.user != null) {
-                AdministrativeNavigationRow(
-                    AdministrativeCopy.AccessScope.text(locale),
-                    if (current.canManageSystem) AdministrativeCopy.AllLibraries.text(locale) else "${current.selectedSourceIds.size} ${AdministrativeCopy.Items.text(locale)}",
-                    { onNavigate(AdministrativeSettingsRoute.UserAccess(current.user.id)) },
-                )
-                AdministrativeSection(AdministrativeCopy.AccountStatus, locale)
-                AdministrativeSwitchRow(AdministrativeCopy.EnableAccount.text(locale), enabled, { enabled = it })
-                AdministrativeNavigationRow(
-                    title = AdministrativeCopy.ResetPassword.text(locale),
-                    summary = AdministrativeCopy.ResetAndRequireLogin.text(locale),
-                    onClick = { showReset = true },
-                )
-            } else {
-                AdministrativeTextField(initialPassword, { initialPassword = it }, AdministrativeCopy.Password, locale, password = true)
+                OutlinedButton(onClick = { showReset = true }, enabled = !busy, modifier = Modifier.padding(16.dp)) {
+                    Icon(Icons.Outlined.LockReset, contentDescription = null)
+                    Text(AdministrativeCopy.ResetPassword.text(locale))
+                }
+                DangerousAction(AdministrativeCopy.DeleteUser, locale, !busy) { showDelete = true }
             }
-            AdministrativeSwitchRow(
-                AdministrativeCopy.ManageSystemPermission.text(locale),
-                canManageSystem,
-                { canManageSystem = it },
-                supporting = AdministrativeCopy.ManageSystemPermissionDescription.text(locale),
-            )
-            AdministrativeSwitchRow(AdministrativeCopy.ImportTasks.text(locale), canViewManualImports, { canViewManualImports = it })
-            if (current.user != null) DangerousAction(AdministrativeCopy.DeleteUser, locale, !state.mutationInFlight) { showDelete = true }
-            if (showReset) ResetPasswordDialog(current.user?.id.orEmpty(), locale, onCommand) { showReset = false }
-            if (showDelete) AdministrativeConfirmDialog(
-                AdministrativeCopy.DeleteUserTitle, AdministrativeCopy.DeleteUserBody, AdministrativeCopy.DeleteUser, locale,
-                onConfirm = { showDelete = false; onCommand(AdministrativeCommand.DeleteUser(current.user?.id.orEmpty())) },
-                onDismiss = { showDelete = false },
-            )
         }
     }
+    if (showDiscard) AlertDialog(
+        onDismissRequest = { showDiscard = false }, title = { Text(AdministrativeCopy.DiscardUserChanges.text(locale)) },
+        confirmButton = { OutlinedButton(onClick = { showDiscard = false; onBack() }) { Text(AdministrativeCopy.DiscardChanges.text(locale)) } },
+        dismissButton = { OutlinedButton(onClick = { showDiscard = false }) { Text(AdministrativeCopy.Cancel.text(locale)) } },
+    )
+    if (showReset) ResetPasswordDialog(draft.id.orEmpty(), locale, busy, state.failure, onCommand) { showReset = false }
+    if (showDelete && snapshot?.user != null) UserDeletionDialog(snapshot.user, locale, busy, state.failure, onCommand) { showDelete = false }
 }
 
 @Composable
 private fun ResetPasswordDialog(
-    userId: String,
-    locale: AdministrativeLocale,
-    onCommand: (AdministrativeCommand) -> Unit,
-    onDismiss: () -> Unit,
+    userId: String, locale: AdministrativeLocale, busy: Boolean, failure: AdministrativeFailure?,
+    onCommand: (AdministrativeCommand) -> Unit, onDismiss: () -> Unit,
 ) {
     var password by remember { mutableStateOf("") }
-    var confirmation by remember { mutableStateOf("") }
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!busy) onDismiss() },
         title = { Text(AdministrativeCopy.ResetPassword.text(locale)) },
-        text = {
-            Column {
-                AdministrativeTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = AdministrativeCopy.NewPassword,
-                    locale = locale,
-                    password = true,
-                )
-                AdministrativeTextField(
-                    value = confirmation,
-                    onValueChange = { confirmation = it },
-                    label = AdministrativeCopy.ConfirmPassword,
-                    locale = locale,
-                    password = true,
-                )
-            }
-        },
-        confirmButton = {
-            OutlinedButton(
-                enabled = password.length >= 8 && password == confirmation,
-                onClick = { onDismiss(); onCommand(AdministrativeCommand.ResetUserPassword(userId, password)) },
-            ) {
-                Icon(Icons.Outlined.LockReset, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                Text(AdministrativeCopy.ResetAndRequireLogin.text(locale)) }
-        },
-        dismissButton = { OutlinedButton(onClick = onDismiss) {
-            Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-            Text(AdministrativeCopy.Cancel.text(locale)) } },
+        text = { Column {
+            Text(AdministrativeCopy.ResetSessionsHint.text(locale))
+            AdministrativeTextField(password, { if (!busy) password = it }, AdministrativeCopy.NewPassword, locale, password = true, enabled = !busy)
+            if (failure != null) Text(failureText(failure, locale))
+        } },
+        confirmButton = { OutlinedButton(
+            enabled = !busy && com.ermao.library.shared.modules.administrativesettings.isValidAdministrativePassword(password),
+            onClick = { onCommand(AdministrativeCommand.ResetUserPassword(userId, password)) },
+        ) { Text(AdministrativeCopy.ResetAndRequireLogin.text(locale)) } },
+        dismissButton = { OutlinedButton(onClick = onDismiss, enabled = !busy) { Text(AdministrativeCopy.Cancel.text(locale)) } },
     )
 }
 
 @Composable
-fun UserAccessScreen(
-    state: AdministrativePageState<UserAccessSnapshot>,
-    locale: AdministrativeLocale,
-    onCommand: (AdministrativeCommand) -> Unit,
-    onRetry: () -> Unit,
-    onBack: () -> Unit,
-    modifier: Modifier = Modifier,
+private fun UserDeletionDialog(
+    user: AdministrativeUser, locale: AdministrativeLocale, busy: Boolean, failure: AdministrativeFailure?,
+    onCommand: (AdministrativeCommand) -> Unit, onDismiss: () -> Unit,
 ) {
-    val snapshot = state.snapshot
-    var allLibraries by remember(snapshot) { mutableStateOf(snapshot?.allLibraries ?: false) }
-    var selected by remember(snapshot) {
-        mutableStateOf(snapshot?.sources?.filter(AccessSource::selected)?.map(AccessSource::id)?.toSet().orEmpty())
-    }
-    val hasChanges = snapshot?.let {
-        allLibraries != it.allLibraries || selected != it.sources.filter(AccessSource::selected).map(AccessSource::id).toSet()
-    } == true
-    val canSave = snapshot != null && !state.mutationInFlight && hasChanges && (allLibraries || selected.isNotEmpty())
-    AdministrativePage(
-        title = AdministrativeCopy.AccessScope,
-        locale = locale,
-        onBack = onBack,
-        modifier = modifier,
-        toolbarActions = {
-            AdministrativeSaveAction(
-                label = AdministrativeCopy.SaveAccessScope,
-                locale = locale,
-                enabled = canSave,
-                working = state.mutationInFlight,
-                onClick = {
-                    snapshot?.let {
-                        onCommand(AdministrativeCommand.SaveUserAccess(it.user.id, allLibraries, selected))
-                    }
-                },
-            )
-        },
-    ) {
-        PageStateContent(state, locale, onRetry) { current ->
-            WarmSettingsIdentityHeader(
-                title = current.user.displayName,
-                subtitle = current.user.email,
-                avatar = { Icon(WarmSettingsIcons.Users, contentDescription = null) },
-            )
-            AdministrativeSwitchRow(AdministrativeCopy.AllLibraries.text(locale), allLibraries, { allLibraries = it })
-            current.sources.forEach { source ->
-                AdministrativeSwitchRow(
-                    source.name,
-                    allLibraries || selected.contains(source.id),
-                    { checked -> selected = if (checked) selected + source.id else selected - source.id },
-                    source.workCount?.let { "$it ${AdministrativeCopy.Works.text(locale)}" },
-                    enabled = !allLibraries,
-                )
-            }
-            Text(AdministrativeCopy.UserAccessHint.text(locale), Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
+    var confirmation by remember(user.id) { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text(AdministrativeCopy.DeleteUserTitle.text(locale)) },
+        text = { Column {
+            Text(AdministrativeCopy.PermanentDeleteHint.text(locale))
+            Text(user.email)
+            AdministrativeTextField(confirmation, { if (!busy) confirmation = it }, AdministrativeCopy.DeleteEmailConfirmation, locale, enabled = !busy)
+            if (failure != null) Text(failureText(failure, locale))
+        } },
+        confirmButton = { OutlinedButton(
+            enabled = !busy && com.ermao.library.shared.modules.administrativesettings.isValidManagedUserDeletionConfirmation(user.email, confirmation),
+            onClick = { onCommand(AdministrativeCommand.DeleteUser(user.id, confirmation)) },
+        ) { Text(AdministrativeCopy.DeleteUser.text(locale)) } },
+        dismissButton = { OutlinedButton(onClick = onDismiss, enabled = !busy) { Text(AdministrativeCopy.Cancel.text(locale)) } },
+    )
 }

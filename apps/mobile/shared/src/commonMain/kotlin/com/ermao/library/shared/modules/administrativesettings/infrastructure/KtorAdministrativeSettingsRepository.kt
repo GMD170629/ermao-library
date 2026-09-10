@@ -115,6 +115,10 @@ internal class KtorAdministrativeSettingsRepository(
         return idCall(context, ApiMethod.Patch, "/api/admin/users", userId, body = user.toRequest(), transform = JsonElement::toManagedUserPayload)
     }
 
+    override suspend fun setUserStatus(context: AdministrativeSettingsContext, userId: String, status: ManagedUserStatus): AdministrativeSettingsResult<ManagedUser> =
+        idCall(context, ApiMethod.Patch, "/api/admin/users", userId,
+            body = buildJsonObject { put("status", status.wireValue) }, transform = JsonElement::toManagedUserPayload)
+
     override suspend fun resetUserPassword(context: AdministrativeSettingsContext, userId: String, password: String): AdministrativeSettingsResult<ManagedPasswordChange> {
         if (!AdministrativeSettingsValidation.isValidPassword(password)) return invalid("INVALID_PASSWORD", "password")
         return idCall(
@@ -136,7 +140,11 @@ internal class KtorAdministrativeSettingsRepository(
             "/api/admin/users",
             userId,
             body = buildJsonObject { put("confirmation", confirmation) },
-            transform = JsonElement::toDeletedManagedUser,
+            transform = { payload ->
+                payload.toDeletedManagedUser().also {
+                    if (it.userId != userId) throw AdministrativeSettingsWireException("DELETION_ID_MISMATCH")
+                }
+            },
         )
     }
 

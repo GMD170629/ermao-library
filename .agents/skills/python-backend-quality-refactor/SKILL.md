@@ -5,7 +5,7 @@ description: Guide maintainable architecture and bounded refactors for the Shuku
 
 # Python Backend Quality Refactor
 
-Improve the touched backend capability toward the repository's target architecture without turning a bounded change into a flag-day rewrite.
+Follow the repository's [minimum-fix policy](../../../AGENTS.md) and [targeted verification policy](../../../docs/testing/test-execution-policy.md). When failure, cause and scope are clear, fix the existing owner directly; do not start an architecture migration merely because legacy code is touched. Use the refactoring steps below only for requested refactoring or structure changes necessary to fix the direct cause.
 Preserve unrelated user changes in the worktree.
 
 ## Organize by Business Capability
@@ -28,7 +28,7 @@ Preserve unrelated user changes in the worktree.
 
 ## Use SQLAlchemy ORM and Typed Expressions
 
-- All application database access must use SQLAlchemy 2.x ORM models or typed expression APIs. Do not add handwritten SQL, `sqlalchemy.text()`, raw cursors, direct `sqlite3`, or string-built query fragments.
+- New database capabilities use SQLAlchemy 2.x ORM models or typed expressions. A diagnosed legacy SQL defect may receive a necessary in-place correction under the [controlled exception](../../../docs/engineering-standards.md#数据库与受控遗留-sql); do not copy its pipeline, add generic raw-SQL tools, bypass parameter binding or relax authorization. Published migrations remain immutable.
 - Define models with `Mapped[...]` and `mapped_column()`. Express reads with `select()`, relationships, loader options, `Session.scalars()`, and typed projections.
 - Encapsulate persistence behind capability-specific repositories or query objects named after aggregates or use cases. Return domain objects or explicit DTOs; ORM entities must not escape into HTTP schemas or unrelated capabilities.
 - Prevent N+1 access deliberately and give pagination a deterministic order and a documented maximum page size.
@@ -47,8 +47,13 @@ Preserve unrelated user changes in the worktree.
 
 - Inventory the affected entry points, callers, contracts, state changes, authorization, persistence, and side effects before choosing a boundary.
 - Extract pure rules and explicit types first, then introduce capability-specific ports and adapters, move orchestration into an application use case, and leave routes or workers as thin adapters.
-- When touching legacy raw SQL, migrate the affected query to ORM within the same bounded capability. If that would require unsafe scope expansion, stop and explain the conflict instead of extending the raw-SQL path.
-- Treat `app/api/routes/compat.py`, `app/worker/importer.py`, and `app/db/bootstrap.py` as legacy migration surfaces, not templates for new code. Preserve their mounted API paths, import recovery behavior, and supported database upgrade contracts while moving touched responsibilities toward capability modules.
+- For a diagnosed legacy SQL defect, verify the corrected query output, necessary counterexamples and affected contract. Schedule ORM migration separately; it is not a prerequisite for completing a sufficiently verified local fix.
+- Treat `app/api/routes/compat.py`, `app/worker/importer.py`, and `app/db/bootstrap.py` as legacy migration surfaces, not templates for new code. Preserve their mounted API paths, import recovery behavior, and supported database upgrade contracts without automatically moving touched responsibilities into new modules.
 - Preserve API envelopes, authorization behavior, worker coordination, filesystem safety, user data, and `zh-CN`/`en-US` contracts unless the user explicitly requests a contract change.
 
 Judge an improvement by clearer ownership, valid dependency direction, explicit types, and controlled persistence boundaries—not by file count or line count alone.
+
+
+## Targeted Verification and Completion
+
+Reuse existing tests and inspect command prerequisites before running them. Select the original failure, actual affected boundaries and necessary module checks; no new test tooling for each patch. Related small fixes can share one module validation, and unchanged code/dependency/configuration/environment evidence can be reused. Apply the linked verification policy's expansion triggers and stopping conditions; do not equate a local fix with final RC acceptance. Stop once the failure and key adjacent behavior are verified and no concrete related risk remains.

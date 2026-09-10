@@ -1,5 +1,7 @@
 # Reader 安全实现与待验收项
 
+执行范围遵循 [测试执行策略](testing/test-execution-policy.md)：以下清单是按实际影响选择的入口，不是每个补丁的必跑项。复用有效证据；局部修复完成与最终发布验收分别判断。历史结论及专项契约要求不因此改变。
+
 文件名中的 v4 指安全策略版本，不是阅读进度协议。当前进度协议为 Reader v5。
 安全规则唯一源是 [reader-safety-policy.json](../packages/reader-contracts/reader-safety-policy.json)；绑定、样例与检查入口见 [Reader contracts](../packages/reader-contracts/README.md)。
 

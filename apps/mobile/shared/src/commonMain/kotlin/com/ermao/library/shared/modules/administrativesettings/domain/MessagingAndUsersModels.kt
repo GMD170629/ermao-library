@@ -153,3 +153,25 @@ data class ManagedPasswordChange(
     val passwordChanged: Boolean,
     val sessionsRevoked: Boolean,
 )
+
+/** Editable user input shared by both native forms. Wire normalization stays in toRequest(). */
+data class ManagedUserDraft(
+    val name: String = "",
+    val email: String = "",
+    val password: String = "",
+    val role: ManagedUserRole = ManagedUserRole.Member,
+    val status: ManagedUserStatus = ManagedUserStatus.Active,
+    val canManageSystem: Boolean = false,
+    val canViewManualImports: Boolean = false,
+    val libraryIds: List<String> = emptyList(),
+    val locale: ManagedLocale = ManagedLocale.ZhCn,
+) {
+    fun isValid(creating: Boolean): Boolean =
+        AdministrativeSettingsValidation.isValidDisplayName(name) &&
+            AdministrativeSettingsValidation.isValidEmail(email) &&
+            (!creating || AdministrativeSettingsValidation.isValidPassword(password)) &&
+            libraryIds.size <= 500
+
+    fun forCreation() = CreateManagedUser(name, email, password, role, canManageSystem, canViewManualImports, libraryIds, locale)
+    fun forUpdate() = UpdateManagedUser(name, email, role, status, canManageSystem, canViewManualImports, libraryIds, locale)
+}

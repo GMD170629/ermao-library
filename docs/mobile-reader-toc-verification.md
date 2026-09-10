@@ -1,5 +1,7 @@
 # Mobile 目录与原生面板
 
+执行范围遵循 [测试执行策略](testing/test-execution-policy.md)：以下清单是按实际影响选择的入口，不是每个补丁的必跑项。复用有效证据；局部修复完成与最终发布验收分别判断。历史结论及专项契约要求不因此改变。
+
 ## 当前实现
 
 - KMP `ReaderNavigation.kt` 统一解析当前目录项；适配器提供 href、fragment 与 selector，标题和展示百分比不作为选择键。
