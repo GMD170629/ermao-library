@@ -797,7 +797,8 @@ final class ReaderSecurityTests: XCTestCase {
         let parsed = try IosFb2PublicationFactory.read(fileURL: file, fallbackTitle: "Book")
 
         XCTAssertEqual(parsed.images["fb2/images/6105d6cc76af400325e9"], Data("Hello".utf8))
-        XCTAssertEqual(parsed.document.images.single?.mediaType, "image/future-format")
+        XCTAssertEqual(parsed.document.images.count, 1)
+        XCTAssertEqual(parsed.document.images.first?.mediaType, "image/future-format")
         XCTAssertEqual(try Data(contentsOf: file), source)
     }
 

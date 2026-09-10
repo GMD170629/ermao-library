@@ -255,24 +255,26 @@ def get_book(db: Session, book_id: str) -> dict[str, object] | None:
 
 
 def book_view(
-    db: Session, book: dict[str, Any], user_id: str | None = None
+    db: Session, book: dict[str, Any], user_id: str | None = None, *, settings: Settings
 ) -> dict[str, Any]:
     return library_legacy_views.book_view(
         db,
         book,
         user_id,
         reader_queries=reader_v5_library_queries(db),
+        settings=settings,
     )
 
 
 def resource_view(
-    db: Session, resource_id: str, user_id: str | None = None
+    db: Session, resource_id: str, user_id: str | None = None, *, settings: Settings
 ) -> dict[str, Any] | None:
     return library_legacy_views.resource_view(
         db,
         resource_id,
         user_id,
         reader_queries=reader_v5_library_queries(db),
+        settings=settings,
     )
 
 
@@ -283,6 +285,7 @@ def list_resource_views(
     *,
     page: int,
     page_size: int,
+    settings: Settings,
 ) -> tuple[list[dict[str, Any]], int, int, int]:
     return library_legacy_views.list_resource_views(
         db,
@@ -291,6 +294,7 @@ def list_resource_views(
         page=page,
         page_size=page_size,
         reader_queries=reader_v5_library_queries(db),
+        settings=settings,
     )
 
 

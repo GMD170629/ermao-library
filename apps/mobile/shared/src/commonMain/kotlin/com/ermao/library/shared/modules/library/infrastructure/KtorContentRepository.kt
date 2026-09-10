@@ -271,10 +271,13 @@ class KtorContentRepository(
         apiPath: String,
         etag: String?,
     ): ContentResult<AuthenticatedCover> = when (val result = withClient(context) { client ->
-        client.loadAuthenticatedAsset(com.ermao.library.shared.modules.library.domain.smallCoverRequestPath(apiPath), etag)
+        client.loadAuthenticatedAsset(com.ermao.library.shared.modules.library.domain.smallCoverRequestPath(apiPath), etag, revalidate = !com.ermao.library.shared.modules.library.domain.hasVersionedCover(apiPath))
     }) {
         is ApiResult.Success -> ContentResult.Content(
-            AuthenticatedCover(result.value.bytes, result.value.mimeType, result.value.etag, result.value.notModified),
+            AuthenticatedCover(
+                if (result.metadata.firstHeader("X-Shuku-Cover-Fallback") == "1") byteArrayOf() else result.value.bytes,
+                result.value.mimeType, result.value.etag, result.value.notModified,
+            ),
         )
         is ApiResult.Failure -> ContentResult.Failure(result.error)
     }

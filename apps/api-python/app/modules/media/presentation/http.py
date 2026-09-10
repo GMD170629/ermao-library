@@ -65,7 +65,7 @@ from app.modules.media.presentation.schemas import (
     ResourcePagesResponse,
 )
 from app.schemas.responses import fail
-from app.services.default_cover import ensure_default_cover, is_default_cover_path
+from app.services.default_cover import DEFAULT_COVER_ASSET_PATH, is_default_cover_path
 from app.services.metadata_provider_registry import get_metadata_provider
 
 router = APIRouter(tags=["media"], route_class=TypedContractRoute)
@@ -342,8 +342,7 @@ def get_cover(
         or not cover_path.is_file()
         or is_default_cover_path(cover_path_value, settings)
     ):
-        stored_default = ensure_default_cover(settings)
-        cover_path = media_streaming.stored_path(stored_default, settings)
+        cover_path = DEFAULT_COVER_ASSET_PATH
         using_fallback = True
     if request.query_params.get("size") == "small" and cover_path is not None:
         response = media_streaming.small_cover_response(
@@ -351,9 +350,7 @@ def get_cover(
         )
         if response is not None:
             return _mark_cover_fallback(response) if using_fallback else response
-        default_path = media_streaming.stored_path(
-            ensure_default_cover(settings), settings
-        )
+        default_path = DEFAULT_COVER_ASSET_PATH
         if default_path is not None and default_path != cover_path:
             response = media_streaming.small_cover_response(
                 default_path, request, user.id, settings

@@ -1,4 +1,6 @@
 import XCTest
+import SwiftUI
+import UIKit
 @preconcurrency import ErmaoShared
 import MediaPlayer
 import UniformTypeIdentifiers
@@ -119,10 +121,196 @@ final class AudioPlaybackRuntimeStateMachineTests: XCTestCase {
         XCTAssertEqual(system.activationCount, 1)
     }
 
+    func testBothListeningEntrancesPreserveLoadedSessionAcrossPlaybackStates() async throws {
+        let context = makeAudioTestContext()
+        let envelope = makeAudioEnvelope(resourceID: "resource-a", context: context, multipleTracks: true)
+        let gateway = RuntimeFakeBootstrapGateway(envelopes: ["resource-a": envelope])
+        let progress = RuntimeFakeProgressAdapter()
+        let engine = RuntimeFakeAudioEngine()
+        let system = RuntimeFakeSystemMedia()
+        let runtime = makeRuntime(gateway: gateway, progress: progress, engine: engine, system: system)
+        runtime.sessionDidChange(isAuthenticated: true, session: context)
+        runtime.openForListening(AudioLaunchIntent(resourceID: "resource-a", autoplay: true), namespace: context.namespaceKey)
+        try await waitUntil { engine.pendingSourceID != nil }
+        let first = try XCTUnwrap(engine.pendingSourceID)
+        engine.emit(.prepared(sourceID: first, durationMillis: 60_000))
+        engine.confirmCommit()
+        runtime.selectAsset("asset-second")
+        let source = try XCTUnwrap(engine.pendingSourceID)
+        engine.emit(.prepared(sourceID: source, durationMillis: 60_000))
+        engine.confirmCommit()
+        runtime.setPlaybackRate(1.5)
+        engine.emit(.position(sourceID: source, positionMillis: 12_000, durationMillis: 60_000))
+        try await waitUntil { progress.committedResourceIDs.count == 2 }
+        XCTAssertEqual(runtime.snapshot.track?.assetID, "asset-second")
+        XCTAssertEqual(runtime.snapshot.positionMillis, 12_000)
+        XCTAssertEqual(runtime.snapshot.playbackRate, 1.5)
+        XCTAssertEqual(runtime.snapshot.bootstrap?.book.coverReference, "/api/books/book-1/cover")
+
+        let presentation = AudioShellPresentation()
+        let states: [(AudioEngineEvent, AudioPlaybackLifecycle)] = [
+            (.playing(sourceID: source), .playing),
+            (.paused(sourceID: source), .paused),
+            (.buffering(sourceID: source), .buffering)
+        ]
+        for (event, lifecycle) in states {
+            engine.emit(event)
+            XCTAssertEqual(runtime.snapshot.lifecycle, lifecycle)
+            let before = runtime.snapshot
+            let playCount = engine.playCount
+            let pauseCount = engine.pauseCount
+            let prepares = engine.prepareCount
+            let commits = engine.commitRequests.count
+            let seeks = engine.seeks.count
+            let restores = progress.configureCount
+            let activations = system.activationCount
+            for _ in 0..<3 {
+                presentation.handle(.dismissnowplaying, snapshot: runtime.snapshot)
+                let request = runtime.nowPlayingPresentationRequestID
+                // Detail's primary asset must not override the current second track.
+                runtime.openForListening(
+                    AudioLaunchIntent(resourceID: "resource-a", assetID: "asset-resource-a", autoplay: true),
+                    namespace: context.namespaceKey
+                )
+                XCTAssertNotEqual(request, runtime.nowPlayingPresentationRequestID)
+                presentation.handle(.requestnowplaying, snapshot: runtime.snapshot)
+                XCTAssertTrue(presentation.isNowPlayingPresented)
+                presentation.handle(.dismissnowplaying, snapshot: runtime.snapshot)
+                let miniRequest = runtime.nowPlayingPresentationRequestID
+                XCTAssertTrue(runtime.presentCurrentSession(resourceID: "resource-a", namespace: context.namespaceKey))
+                XCTAssertNotEqual(miniRequest, runtime.nowPlayingPresentationRequestID)
+                presentation.handle(.requestnowplaying, snapshot: runtime.snapshot)
+                XCTAssertTrue(presentation.isNowPlayingPresented)
+            }
+            // Let any accidentally scheduled bootstrap/restore work execute.
+            await Task.yield()
+            XCTAssertEqual(runtime.snapshot, before)
+            XCTAssertEqual(engine.currentSourceID, source)
+            XCTAssertNil(engine.pendingSourceID)
+            XCTAssertEqual(gateway.loadCount, 1)
+            XCTAssertEqual(engine.prepareCount, prepares)
+            XCTAssertEqual(engine.commitRequests.count, commits)
+            XCTAssertEqual(engine.playCount, playCount)
+            XCTAssertEqual(engine.pauseCount, pauseCount)
+            XCTAssertEqual(engine.seeks.count, seeks)
+            XCTAssertEqual(progress.configureCount, restores)
+            XCTAssertEqual(system.activationCount, activations)
+        }
+    }
+
+    func testListeningViewsRenderBookCoverFromAuthenticatedCache() async throws {
+        let context = makeAudioTestContext()
+        let envelope = makeAudioEnvelope(resourceID: "resource-a", context: context, multipleTracks: true)
+        let engine = RuntimeFakeAudioEngine()
+        let runtime = makeRuntime(
+            gateway: RuntimeFakeBootstrapGateway(envelopes: ["resource-a": envelope]),
+            progress: RuntimeFakeProgressAdapter(), engine: engine, system: RuntimeFakeSystemMedia()
+        )
+        runtime.sessionDidChange(isAuthenticated: true, session: context)
+        runtime.launch(AudioLaunchIntent(resourceID: "resource-a", autoplay: true), namespace: context.namespaceKey)
+        try await waitUntil { engine.pendingSourceID != nil }
+        let source = try XCTUnwrap(engine.pendingSourceID)
+        engine.emit(.prepared(sourceID: source, durationMillis: 60_000))
+        engine.confirmCommit()
+        let contentContext = ContentRequestContext(
+            profileID: context.profile.id, profileDisplayName: context.profile.displayName,
+            serverIdentity: context.profile.serverIdentity, userID: context.userID,
+            authorizationVersion: context.authorizationVersion,
+            baseURL: context.profile.baseURL, acceptsInsecureTLS: false
+        )
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = AuthenticatedCoverCache(rootDirectory: directory)
+        let cover = UIGraphicsImageRenderer(size: CGSize(width: 80, height: 120)).pngData { canvas in
+            UIColor.magenta.setFill()
+            canvas.fill(CGRect(x: 0, y: 0, width: 80, height: 120))
+        }
+        let coverPath = try XCTUnwrap(runtime.snapshot.bootstrap?.book.coverReference)
+        try await cache.save(cover, namespace: context.namespaceKey,
+                             key: "cover|\(ErmaoShared.PublicKt.smallCoverRequestPath(apiPath: coverPath))")
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let originalWindow = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            originalWindow?.makeKey()
+        }
+        let views: [(String, AnyView)] = [
+            ("audio-now-playing-cover", AnyView(AudioNowPlayingView(
+                runtime: runtime, context: contentContext, client: UnavailableContentClient(), cache: cache
+            ))),
+            ("audio-mini-player-cover", AnyView(AudioMiniPlayer(
+                snapshot: runtime.snapshot, context: contentContext, client: UnavailableContentClient(), cache: cache,
+                onToggle: {}, onRetry: {}, onExpand: {}
+            )))
+        ]
+        for (name, view) in views {
+            window.rootViewController = UIHostingController(rootView: view.environment(\.appTheme, AppTheme.app))
+            window.makeKeyAndVisible()
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            format.preferredRange = .standard
+            func capture() -> UIImage {
+                UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { _ in
+                    window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+                }
+            }
+            try await waitUntil {
+                guard let data = capture().cgImage?.dataProvider?.data,
+                      let pixels = CFDataGetBytePtr(data) else { return false }
+                return stride(from: 0, to: CFDataGetLength(data) - 3, by: 4).contains { index in
+                    pixels[index] > 240 && pixels[index + 1] < 15 && pixels[index + 2] > 240
+                }
+            }
+            let attachment = XCTAttachment(image: capture())
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+
+    func testListeningPresentationRejectsOtherResourcesAndNamespacesButExplicitSelectionLaunches() async throws {
+        let context = makeAudioTestContext()
+        let gateway = RuntimeFakeBootstrapGateway(envelopes: [
+            "resource-a": makeAudioEnvelope(resourceID: "resource-a", context: context, multipleTracks: true),
+            "resource-b": makeAudioEnvelope(resourceID: "resource-b", context: context)
+        ])
+        let progress = RuntimeFakeProgressAdapter()
+        let engine = RuntimeFakeAudioEngine()
+        let system = RuntimeFakeSystemMedia()
+        let runtime = makeRuntime(gateway: gateway, progress: progress, engine: engine, system: system)
+        runtime.sessionDidChange(isAuthenticated: true, session: context)
+        XCTAssertFalse(runtime.presentCurrentSession(resourceID: "resource-a", namespace: context.namespaceKey))
+        runtime.openForListening(AudioLaunchIntent(resourceID: "resource-a", autoplay: true), namespace: context.namespaceKey)
+        try await waitUntil { engine.pendingSourceID != nil }
+        let source = try XCTUnwrap(engine.pendingSourceID)
+        engine.emit(.prepared(sourceID: source, durationMillis: 60_000))
+        engine.confirmCommit()
+        let request = runtime.nowPlayingPresentationRequestID
+        XCTAssertFalse(runtime.presentCurrentSession(resourceID: "resource-b", namespace: context.namespaceKey))
+        XCTAssertFalse(runtime.presentCurrentSession(resourceID: "resource-a", namespace: "another-account"))
+        XCTAssertEqual(request, runtime.nowPlayingPresentationRequestID)
+        runtime.openForListening(
+            AudioLaunchIntent(resourceID: "resource-a", chapterID: "chapter-second", autoplay: true),
+            namespace: context.namespaceKey
+        )
+        try await waitUntil { gateway.loadCount == 2 }
+        try await waitUntil { engine.pendingSourceID != nil }
+        let selected = try XCTUnwrap(engine.pendingSourceID)
+        engine.emit(.prepared(sourceID: selected, durationMillis: 60_000))
+        engine.confirmCommit()
+        XCTAssertEqual(runtime.snapshot.track?.assetID, "asset-second")
+        runtime.openForListening(AudioLaunchIntent(resourceID: "resource-b", autoplay: true), namespace: context.namespaceKey)
+        try await waitUntil { gateway.loadCount == 3 }
+        try await waitUntil { engine.pendingSourceID != nil }
+        XCTAssertEqual(runtime.snapshot.pendingResourceID, "resource-b")
+    }
+
     func testReplacementCommitFailureKeepsOldCommittedPlayer() async throws {
         let context = makeAudioTestContext()
         let gateway = RuntimeFakeBootstrapGateway(envelopes: [
-            "resource-a": makeAudioEnvelope(resourceID: "resource-a", context: context),
+            "resource-a": makeAudioEnvelope(resourceID: "resource-a", context: context, multipleTracks: true),
             "resource-b": makeAudioEnvelope(resourceID: "resource-b", context: context)
         ])
         let progress = RuntimeFakeProgressAdapter()
@@ -673,7 +861,8 @@ private func makeAudioTestContext() -> IosAudioSessionContext {
 @MainActor
 private func makeAudioEnvelope(
     resourceID: String,
-    context: IosAudioSessionContext
+    context: IosAudioSessionContext,
+    multipleTracks: Bool = false
 ) -> AudioBootstrapEnvelope {
     let publication = ErmaoShared.LocalAudioPublicationFactory().create(
         namespace: context.sharedNamespace,
@@ -687,8 +876,27 @@ private func makeAudioEnvelope(
         sizeBytes: 1_000,
         durationMillis: 60_000
     )
+    guard multipleTracks else { return AudioBootstrapEnvelope(publication: publication, remoteSnapshot: nil) }
+    let second = ErmaoShared.AudioAsset(
+        assetId: "asset-second", resourceId: resourceID, title: "Second track",
+        apiPath: "/api/assets/asset-second/content", mimeType: "audio/mp4", sizeBytes: 1_000,
+        durationMillis: KotlinLong(longLong: 60_000), discNumber: nil,
+        trackNumber: nil, sortOrder: 1, codec: nil
+    )
     return AudioBootstrapEnvelope(
-        publication: publication,
+        publication: ErmaoShared.AudioPublication(
+            namespace: publication.namespace_, bookId: publication.bookId,
+            bookTitle: publication.bookTitle, author: publication.author,
+            coverApiPath: "/api/books/book-1/cover", resource: publication.resource,
+            availableResources: publication.availableResources,
+            assets: publication.assets + [second], chapters: [
+                ErmaoShared.AudioChapter(
+                    chapterId: "chapter-second", assetId: "asset-second", index: 0,
+                    title: "Second chapter", startMillis: 5_000,
+                    endMillis: KotlinLong(longLong: 60_000)
+                )
+            ]
+        ),
         remoteSnapshot: nil
     )
 }
@@ -696,12 +904,14 @@ private func makeAudioEnvelope(
 @MainActor
 private final class RuntimeFakeBootstrapGateway: AudioBootstrapGateway {
     let envelopes: [String: AudioBootstrapEnvelope]
+    private(set) var loadCount = 0
 
     init(envelopes: [String: AudioBootstrapEnvelope]) {
         self.envelopes = envelopes
     }
 
     func loadAudioBootstrap(resourceID: String, namespace: String) async throws -> AudioBootstrapEnvelope {
+        loadCount += 1
         guard let envelope = envelopes[resourceID] else { throw AudioAdapterError.resourceUnavailable }
         return envelope
     }
@@ -712,6 +922,7 @@ private final class RuntimeFakeProgressAdapter: AudioProgressAdapter {
     let restored: ErmaoShared.AudioReaderLocation?
     let log: RuntimeAudioEventLog?
     let configureError: AudioAdapterError?
+    private(set) var configureCount = 0
     private(set) var saved: [ErmaoShared.AudioPlaybackEffect] = []
     private(set) var flushedNamespaces: [String] = []
     private(set) var committedResourceIDs: [String] = []
@@ -731,6 +942,7 @@ private final class RuntimeFakeProgressAdapter: AudioProgressAdapter {
     }
 
     func configure(bootstrap: AudioBootstrapEnvelope) async throws -> ErmaoShared.AudioReaderLocation? {
+        configureCount += 1
         if let configureError { throw configureError }
         return restored
     }
@@ -802,6 +1014,7 @@ private final class RuntimeFakeAudioEngine: AudioPlaybackEngine {
     private(set) var pendingSourceID: Int64?
     private(set) var currentSourceID: Int64?
     private(set) var commitRequests: [CommitRequest] = []
+    private(set) var prepareCount = 0
     private(set) var playCount = 0
     private(set) var pauseCount = 0
     private(set) var teardownCount = 0
@@ -820,6 +1033,7 @@ private final class RuntimeFakeAudioEngine: AudioPlaybackEngine {
         namespace: String,
         sourceID: Int64
     ) {
+        prepareCount += 1
         pendingSourceID = sourceID
     }
 

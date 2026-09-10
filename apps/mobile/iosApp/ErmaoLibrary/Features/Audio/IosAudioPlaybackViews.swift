@@ -31,14 +31,23 @@ final class AudioShellPresentation: ObservableObject {
 /// safe-area placement, while this host owns the only Now Playing cover.
 struct AudioApplicationHost<Content: View>: View {
     @ObservedObject var runtime: AudioPlaybackRuntime
+    let context: ContentRequestContext?
+    let client: any ContentClient
+    let cache: AuthenticatedCoverCache
     private let content: Content
     @StateObject private var presentation = AudioShellPresentation()
 
     init(
         runtime: AudioPlaybackRuntime,
+        context: ContentRequestContext?,
+        client: any ContentClient,
+        cache: AuthenticatedCoverCache,
         @ViewBuilder content: () -> Content
     ) {
         self.runtime = runtime
+        self.context = context
+        self.client = client
+        self.cache = cache
         self.content = content()
     }
 
@@ -53,7 +62,7 @@ struct AudioApplicationHost<Content: View>: View {
                     }
                 }
             )) {
-                AudioNowPlayingView(runtime: runtime)
+                AudioNowPlayingView(runtime: runtime, context: context, client: client, cache: cache)
             }
             .environment(\.audioPlaybackRuntime, runtime)
             .onAppear {
@@ -72,6 +81,9 @@ struct AudioApplicationHost<Content: View>: View {
 
 struct AudioMiniPlayer: View {
     let snapshot: AudioPlaybackSnapshot
+    let context: ContentRequestContext?
+    let client: any ContentClient
+    let cache: AuthenticatedCoverCache
     let onToggle: () -> Void
     let onRetry: () -> Void
     let onExpand: () -> Void
@@ -81,7 +93,7 @@ struct AudioMiniPlayer: View {
         HStack(spacing: .space1) {
             Button(action: onExpand) {
                 HStack(spacing: .space1) {
-                    AudioArtworkView(size: 42)
+                    AudioArtworkView(snapshot: snapshot, context: context, client: client, cache: cache, size: 42)
                     VStack(alignment: .leading, spacing: 2) {
                         if let title = snapshot.bootstrap?.book.title, !title.isEmpty {
                             Text(title)
@@ -174,6 +186,9 @@ private extension AudioPlaybackSnapshot {
 
 struct AudioNowPlayingView: View {
     @ObservedObject var runtime: AudioPlaybackRuntime
+    let context: ContentRequestContext?
+    let client: any ContentClient
+    let cache: AuthenticatedCoverCache
     @Environment(\.dismiss) private var dismiss
     @Environment(\.appTheme) private var theme
     @State private var presentation: AudioPresentation?
@@ -184,7 +199,10 @@ struct AudioNowPlayingView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         VStack(spacing: 0) {
-                            AudioArtworkView(size: artworkSize(for: viewport.size))
+                            AudioArtworkView(
+                                snapshot: runtime.snapshot, context: context,
+                                client: client, cache: cache, size: artworkSize(for: viewport.size)
+                            )
                                 .padding(.top, .space2)
                                 .padding(.bottom, .space4)
                             identity
@@ -993,6 +1011,10 @@ struct AudioSleepTimerSheet: View {
 }
 
 private struct AudioArtworkView: View {
+    let snapshot: AudioPlaybackSnapshot
+    let context: ContentRequestContext?
+    let client: any ContentClient
+    let cache: AuthenticatedCoverCache
     let size: CGFloat
     @Environment(\.appTheme) private var theme
 
@@ -1005,15 +1027,24 @@ private struct AudioArtworkView: View {
         ZStack {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(theme.surfaceRaised)
-            Image("BrandMark")
-                .resizable()
-                .scaledToFit()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(size > 100 ? .space3 : .space1)
+            if let context, context.namespaceKey == snapshot.namespace {
+                BookCoverView(
+                    reference: snapshot.bootstrap?.book.coverReference.map { CoverReference(path: $0) },
+                    title: snapshot.bootstrap?.book.title ?? "",
+                    context: context,
+                    client: client,
+                    cache: cache,
+                    cornerRadius: cornerRadius
+                )
+                .id("\(context.namespaceKey)|\(snapshot.bookID ?? "")|\(snapshot.bootstrap?.book.coverReference ?? "")")
+            } else {
+                Image(systemName: "book.closed")
+                    .font(.title2)
+                    .foregroundStyle(theme.textTertiary)
+                    .accessibilityHidden(true)
+            }
         }
-        // Keep a stable square media slot. Real covers can be 1:1, 2:3 or
-        // landscape; when a trusted image is wired in, scaledToFit keeps it
-        // contained without changing the slot height or cropping it.
+        // Keep the media slot stable while the shared cover view fits the full image.
         .frame(width: size, height: size)
         .aspectRatio(1, contentMode: .fit)
         .background(theme.surfaceRaised)

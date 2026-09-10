@@ -161,7 +161,7 @@ class WorkDetailLayoutTest {
             totalPages = 1,
         )
 
-        val items = workContentItemPresentations(page, resources, bookCoverUrl = "/book-cover")
+        val items = workContentItemPresentations(page, resources)
 
         assertEquals(
             listOf(
@@ -177,7 +177,7 @@ class WorkDetailLayoutTest {
             items.map { it.title },
         )
         assertEquals(
-            listOf("/representative-cover", "/entry-cover", "/book-cover", "/resource-cover"),
+            listOf("", "/entry-cover", "", "/resource-cover"),
             items.map { it.coverUrl },
         )
         assertEquals(listOf("01", "02", "03", "07"), items.map { it.indexLabel })
@@ -214,11 +214,20 @@ class WorkDetailLayoutTest {
         assertEquals(listOf("Book tag"), rootPresentation.tags)
         assertNull(rootPresentation.book.progressPercent)
 
+        val boundRoot = assertNotNull(workDetailPageContent(rootState.copy(selectedResourceId = "direct")))
+        assertEquals("Book title", boundRoot.book.title)
+        assertEquals("Book introduction", boundRoot.description)
+        assertEquals("/book-cover", boundRoot.book.coverUrl)
+        val emptyBook = assertNotNull(workDetailPageContent(rootState.copy(
+            selectedResourceId = "direct", content = bookContent.copy(description = null,
+                book = bookContent.book.copy(coverUrl = "")))))
+        assertNull(emptyBook.description)
+        assertEquals("", emptyBook.book.coverUrl)
         val childPresentation = assertNotNull(workDetailPageContent(rootState.copy(isBookRoot = false)))
         assertEquals("Star Harbor", childPresentation.book.title)
         assertNull(childPresentation.description)
         val resourcePresentation = assertNotNull(workDetailPageContent(rootState.copy(
-            presentation = BookDetailPresentation.ResourceDetail, selectedResourceId = "direct",
+            isBookRoot = false, presentation = BookDetailPresentation.ResourceDetail, selectedResourceId = "direct",
         )))
         assertEquals("01 Launch", resourcePresentation.book.title)
         assertEquals("/resource-cover", resourcePresentation.book.coverUrl)

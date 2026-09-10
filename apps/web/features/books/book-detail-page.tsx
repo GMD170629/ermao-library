@@ -210,7 +210,6 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const [metadataResourceId, setMetadataResourceId] = useState<string | null>(null);
   const [kindleOpen, setKindleOpen] = useState(false);
   const [kindleResourceId, setKindleResourceId] = useState<string | null>(null);
-  const [coverRevision, setCoverRevision] = useState(0);
   const [resourceEditorId, setResourceEditorId] = useState<string | null>(null);
   const [resourceMenuPosition, setResourceMenuPosition] = useState<ContextMenuPosition | null>(null);
   const [resourceMenuAnchor, setResourceMenuAnchor] = useState<HTMLButtonElement | null>(null);
@@ -422,7 +421,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         bookId: book.id,
         title: book.title,
         author: book.author || null,
-        coverUrl: resource.coverUrl || book.coverUrl || null,
+        coverUrl: resource.coverUrl || null,
         resourceTitle: resource.title || null,
         narrator: resource.narrator,
         chapterTitle: chapterTitle || null
@@ -545,7 +544,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
           feedback.error(t('封面更新失败，请稍后重试'), skipped || undefined);
           return;
         }
-        setCoverRevision(Date.now());
+
         feedback.success(t('封面已重新生成'));
       } else if (action === 'delete') {
         await deleteResourceSource(book.id, target.resourceId, target.title);
@@ -582,7 +581,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
           feedback.error(t('封面更新失败，请稍后重试'), skipped || t('该来源目录还没有可用于生成封面的可读资源'));
           return;
         }
-        setCoverRevision(Date.now());
+
         if (result.skipped.length > 0) {
           feedback.info(
             t('已处理 {value0} 本图书的封面{value1}', {
@@ -624,7 +623,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     <button type="button" onClick={() => router.push(returnHref)} className="mb-6 inline-flex items-center gap-2 text-sm text-[var(--visual-color-app-text-secondary)] hover:text-[var(--visual-color-app-text-primary)]"><ArrowLeft size={17} /><I18nText>返回全部图书</I18nText></button>
     <section className="rounded-[22px] border border-[var(--visual-color-app-divider)] bg-[var(--visual-color-app-surface)] p-5 sm:p-6">
       <div className="grid gap-6 lg:grid-cols-[150px_minmax(0,1fr)_230px]">
-        <Cover book={{ ...book, coverUrl: coverRevision > 0 && book.coverUrl ? `${book.coverUrl}${book.coverUrl.includes('?') ? '&' : '?'}v=${coverRevision}` : book.coverUrl }} className="mx-auto aspect-[2/3] w-24 max-w-[150px] rounded-xl shadow-md sm:w-[150px] lg:mx-0" size="small" priority />
+        <Cover book={book} className="mx-auto aspect-[2/3] w-24 max-w-[150px] rounded-xl shadow-md sm:w-[150px] lg:mx-0" size="small" priority />
         <div className="flex min-w-0 flex-col py-1">
           {book.completed ? <span className="inline-flex w-fit items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700"><CheckCircle2 size={14} /><I18nText>已完成</I18nText></span> : null}
           <h1 data-i18n-skip className="mt-2 line-clamp-2 text-3xl font-semibold leading-[1.15] tracking-tight text-[var(--visual-color-app-text-primary)] sm:text-[34px]">{book.title}</h1>
@@ -669,7 +668,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       </div>
     </section>
 
-    <input ref={resourceCoverInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; const resourceId = coverUploadResourceId; event.currentTarget.value = ''; if (!file || !resourceId) return; setResourceActionBusy('upload-cover'); void uploadResourceCover(book.id, resourceId, file).then(async () => { setCoverRevision(Date.now()); await refresh(); setContentsRevision((value) => value + 1); feedback.success(t('封面已上传')); }).catch((reason) => feedback.error(reason instanceof Error ? reason.message : t('操作失败'))).finally(() => { setResourceActionBusy(null); setCoverUploadResourceId(null); }); }} />
+    <input ref={resourceCoverInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; const resourceId = coverUploadResourceId; event.currentTarget.value = ''; if (!file || !resourceId) return; setResourceActionBusy('upload-cover'); void uploadResourceCover(book.id, resourceId, file).then(async () => {  await refresh(); setContentsRevision((value) => value + 1); feedback.success(t('封面已上传')); }).catch((reason) => feedback.error(reason instanceof Error ? reason.message : t('操作失败'))).finally(() => { setResourceActionBusy(null); setCoverUploadResourceId(null); }); }} />
 
     {requestedResource ? <ResourceDetailView
       resource={requestedResource}
@@ -747,7 +746,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       onChanged={async (nextBook) => {
         if (nextBook) setBook(nextBook);
         else await refresh();
-        setCoverRevision(Date.now());
+
         setContentsRevision((value) => value + 1);
       }}
       onDeleted={() => { router.push(returnHref); }}
@@ -758,7 +757,6 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       bookId={book.id}
       book={book}
       entry={sourceNodeEditorTarget}
-      fallbackCoverUrl={resources.find((resource) => resource.id === sourceNodeEditorTarget?.representativeResourceId)?.coverUrl ?? book.coverUrl}
       onClose={() => setSourceNodeEditorTarget(null)}
       onSaved={() => setContentsRevision((value) => value + 1)}
     />

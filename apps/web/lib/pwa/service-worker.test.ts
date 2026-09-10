@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { privateCacheName, privateCacheNamespace } from './private-cache-namespace';
 
 const source = readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8');
@@ -84,4 +85,40 @@ test('forced updates only purge versioned frontend resources and preserve reader
 
 test('the backend resource-version contract always bypasses service-worker API caches', () => {
   assert.match(source, /withoutBasePath\(url\.pathname\) === '\/api\/app-config'/);
+});
+
+
+test('cover cache uses complete versions and never persists legacy or default covers', async () => {
+  const entries = new Map<string, Response>();
+  let requests = 0;
+  let fallback = false;
+  const cache = {
+    match: async (request: Request) => entries.get(request.url),
+    put: async (request: Request, response: Response) => { entries.set(request.url, response); },
+    delete: async (request: Request) => entries.delete(request.url),
+    keys: async () => [...entries.keys()].map((url) => new Request(url))
+  };
+  const loadCover = runInNewContext(`${source}; loadCover`, {
+    self: { registration: { scope: 'https://example.test/' }, addEventListener() {} },
+    URL, Request, Response,
+    caches: { open: async () => cache },
+    fetch: async (request: Request) => {
+      assert.equal(request.cache, 'no-cache');
+      requests += 1;
+      return new Response(`image-${requests}`, { headers: fallback ? { 'X-Shuku-Cover-Fallback': '1' } : {} });
+    }
+  }) as (request: Request, cacheName: string) => Promise<Response>;
+  const request = (query: string) => new Request(`https://example.test/api/books/book/cover${query}`);
+  await loadCover(request(''), 'covers');
+  await loadCover(request(''), 'covers');
+  assert.equal(requests, 2);
+  assert.equal(entries.size, 0);
+  await loadCover(request('?v=one&size=small'), 'covers');
+  await loadCover(request('?v=one&size=small'), 'covers');
+  assert.equal(requests, 3);
+  await loadCover(request('?v=two&size=small'), 'covers');
+  assert.equal(requests, 4);
+  fallback = true;
+  await loadCover(request('?v=missing'), 'covers');
+  assert.equal(entries.has(request('?v=missing').url), false);
 });

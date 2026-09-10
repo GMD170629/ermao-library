@@ -20,10 +20,9 @@ type SharedProps = Readonly<{
 
 type EditorProps = SharedProps & Readonly<{
   book: BookView;
-  fallbackCoverUrl: string | null;
 }>;
 
-export function SourceNodeMetadataEditor({ bookId, book, entry, fallbackCoverUrl, onClose, onSaved }: EditorProps) {
+export function SourceNodeMetadataEditor({ bookId, book, entry, onClose, onSaved }: EditorProps) {
   const feedback = useToast();
   const { t } = useI18n();
   const [title, setTitle] = useState('');
@@ -77,7 +76,7 @@ export function SourceNodeMetadataEditor({ bookId, book, entry, fallbackCoverUrl
       <div className="mt-5 grid gap-5 md:grid-cols-[140px_minmax(0,1fr)]">
         <div>
           <div className="text-sm text-stone-600"><I18nText>目录封面</I18nText></div>
-          <Cover book={{ id: entry.sourceNodeId, title: entry.title, author: book.author, coverUrl: coverPreviewUrl || (!removeCover ? entry.coverUrl : null) || fallbackCoverUrl || book.coverUrl, gradient: book.gradient, coverStatus: '' }} className="mt-1.5 aspect-[2/3] w-full rounded-xl shadow-sm" size="small" />
+          <Cover book={{ id: entry.sourceNodeId, title: entry.title, author: book.author, coverUrl: coverPreviewUrl || (!removeCover ? entry.coverUrl : null) || '', gradient: book.gradient, coverStatus: '' }} className="mt-1.5 aspect-[2/3] w-full rounded-xl shadow-sm" size="small" />
           <input ref={coverInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => { const file = event.target.files?.[0] ?? null; setCoverFile(file); if (file) setRemoveCover(false); event.currentTarget.value = ''; }} />
           <div className="mt-3 grid gap-2">
             <Button variant="secondary" icon={ImagePlus} className="!min-h-9 !rounded-lg !px-3 text-xs" onClick={() => coverInputRef.current?.click()}><I18nText>{entry.coverUrl || coverFile ? '更换封面' : '选择封面'}</I18nText></Button>

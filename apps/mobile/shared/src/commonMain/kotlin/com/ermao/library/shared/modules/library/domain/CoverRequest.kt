@@ -9,3 +9,7 @@ fun smallCoverRequestPath(apiPath: String): String {
         .split('&').filter { it.isNotEmpty() && it.substringBefore('=') != "size" }
     return "$path?${(query + "size=small").joinToString("&")}$fragment"
 }
+
+/** Only server-owned versions permit application caches to skip revalidation. */
+fun hasVersionedCover(apiPath: String): Boolean = apiPath.substringBefore('#').substringAfter('?', "")
+    .split('&').any { it.substringBefore('=') == "v" && it.substringAfter('=', "").isNotBlank() }

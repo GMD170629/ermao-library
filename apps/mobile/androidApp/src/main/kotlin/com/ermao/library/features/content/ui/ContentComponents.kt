@@ -24,6 +24,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -184,19 +185,14 @@ internal fun AuthenticatedCoverArtwork(
     val theme = WarmPageThemeValues
     val appContext = LocalContext.current.applicationContext
     val managementRevision = com.ermao.library.features.workmanagement.managementRevision()
-    val image by produceState<ImageBitmap?>(
-        null,
-        contentId,
-        coverUrl,
-        context.namespace,
-        cacheRevision,
-        managementRevision,
-    ) {
-        value = coverUrl.takeIf(String::isNotBlank)?.let { authenticatedPath ->
-            AndroidCoverCache.load(appContext, context, authenticatedPath, repository)
-        }?.let { bytes ->
-            withContext(Dispatchers.Default) {
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+    val image by key(contentId, coverUrl, context.namespace, cacheRevision, managementRevision) {
+        produceState<ImageBitmap?>(null) {
+            value = coverUrl.takeIf(String::isNotBlank)?.let { authenticatedPath ->
+                AndroidCoverCache.load(appContext, context, authenticatedPath, repository)
+            }?.let { bytes ->
+                withContext(Dispatchers.Default) {
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                }
             }
         }
     }

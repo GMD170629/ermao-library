@@ -26,6 +26,7 @@ from app.bootstrap.library import (
     dashboard_queries,
     delete_library_facet,
     delete_resource_asset,
+    effective_book_cover_paths,
     library_catalog,
     library_filter_options,
     library_filter_schema,
@@ -215,6 +216,7 @@ from app.modules.library.presentation.views import (
     management_book_list_view,
     resource_view,
 )
+from app.modules.media.public import versioned_cover_url
 from app.modules.publications.public import (
     PublicationCorruptError,
     PublicationNotFoundError,
@@ -460,7 +462,7 @@ def get_dashboard_recent_books(
     )
     return DashboardBooksResponse(
         data=DashboardBooksPayload.model_validate(
-            {"books": bookshelf_item_views(items)}
+            {"books": bookshelf_item_views(items, settings=settings)}
         )
     )
 
@@ -482,7 +484,7 @@ def get_dashboard_recent_reading(
     )
     return DashboardBooksResponse(
         data=DashboardBooksPayload.model_validate(
-            {"books": bookshelf_item_views(items)}
+            {"books": bookshelf_item_views(items, settings=settings)}
         )
     )
 
@@ -507,7 +509,14 @@ def get_dashboard_continue_reading(
                     bookId=item.book_id,
                     title=item.title,
                     author=item.author,
-                    coverUrl=f"/api/books/{quote(item.book_id, safe='')}/cover?size=medium",
+                    coverUrl=versioned_cover_url(
+                        f"/api/books/{quote(item.book_id, safe='')}/cover",
+                        effective_book_cover_paths(db, (item.book_id,)).get(
+                            item.book_id
+                        ),
+                        settings,
+                        size="medium",
+                    ),
                     resourceFormat=item.resource_format,
                     readerType=item.reader_type,
                     resumeResourceId=item.resource_id,
@@ -912,6 +921,12 @@ def list_library_groupings(
         return _grouping_page_response(
             fail(str(error), status_code=422, code="INVALID_LIBRARY_GROUPING_QUERY")
         )
+    cover_paths = effective_book_cover_paths(
+        db,
+        tuple(
+            book.id for group in result.groups for book in group.representative_books
+        ),
+    )
     return LibraryGroupingPageResponse(
         data=LibraryGroupingPagePayload(
             groups=[
@@ -926,7 +941,12 @@ def list_library_groupings(
                             title=book.title,
                             author=book.author,
                             coverUrl=(
-                                f"/api/books/{quote(book.id, safe='')}/cover?size=medium"
+                                versioned_cover_url(
+                                    f"/api/books/{quote(book.id, safe='')}/cover",
+                                    cover_paths.get(book.id),
+                                    settings,
+                                    size="medium",
+                                )
                             ),
                             updatedAt=book.updated_at,
                         )
@@ -1113,13 +1133,23 @@ def list_library_books(
     books: list[BookView | BookshelfBookSummary | ManagementBookListSummary] = []
     if view in {"bookshelf", "search"}:
         for item in result.books:
-            books.append(_bookshelf_book_contract(bookshelf_book_list_view(item)))
+            books.append(
+                _bookshelf_book_contract(
+                    bookshelf_book_list_view(item, settings=settings)
+                )
+            )
     elif view == "management":
         for item in result.books:
-            books.append(_management_book_contract(management_book_list_view(item)))
+            books.append(
+                _management_book_contract(
+                    management_book_list_view(item, settings=settings)
+                )
+            )
     else:
         for item in result.books:
-            books.append(_book_contract(book_view(db, dict(item), user.id)))
+            books.append(
+                _book_contract(book_view(db, dict(item), user.id, settings=settings))
+            )
     return BooksResponse(
         data=BooksPayload(
             books=books,
@@ -1151,7 +1181,9 @@ def get_library_book(
             fail("图书不存在", status_code=404, code="BOOK_NOT_FOUND")
         )
     return BookResponse(
-        data=BookPayload(book=_book_contract(book_view(db, dict(book), user.id)))
+        data=BookPayload(
+            book=_book_contract(book_view(db, dict(book), user.id, settings=settings))
+        )
     )
 
 
@@ -1191,14 +1223,16 @@ def browse_library_book_contents(
     def entry(node: BookContentNode) -> BookContentEntryView:
         values = asdict(node)
         physical_kind = str(values.pop("physical_kind"))
-        cover_path = values.pop("cover_path", None)
+        values.pop("cover_path", None)
         values["kind"] = "FOLDER" if physical_kind == "DIRECTORY" else "FILE"
         values["physicalKind"] = physical_kind
         values["coverUrl"] = (
-            f"/api/books/{quote(book_id, safe='')}/source-nodes/"
-            f"{quote(str(values['source_node_id']), safe='')}/cover"
-            if cover_path
-            else None
+            versioned_cover_url(
+                f"/api/books/{quote(book_id, safe='')}/source-nodes/{quote(node.source_node_id, safe='')}/cover",
+                node.cover_path,
+                settings,
+            )
+            or None
         )
         values.pop("library_id", None)
         return _book_content_entry(values)
@@ -1529,7 +1563,9 @@ def update_library_book(
             fail("图书不存在", status_code=404, code="BOOK_NOT_FOUND")
         )
     return BookResponse(
-        data=BookPayload(book=_book_contract(book_view(db, dict(book), user.id)))
+        data=BookPayload(
+            book=_book_contract(book_view(db, dict(book), user.id, settings=settings))
+        )
     )
 
 
@@ -1560,6 +1596,7 @@ def list_book_resources(
         user.id,
         page=page,
         page_size=pageSize,
+        settings=settings,
     )
     return ResourcesResponse(
         data=ResourcesPayload(
@@ -1587,7 +1624,7 @@ def get_library_resource(
         return _resource_response(
             fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
         )
-    resource = resource_view(db, resource_id, user.id)
+    resource = resource_view(db, resource_id, user.id, settings=settings)
     if resource is None:
         return _resource_response(
             fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
@@ -1611,7 +1648,7 @@ def list_resource_assets(
         return _assets_response(
             fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
         )
-    resource = resource_view(db, resource_id, user.id)
+    resource = resource_view(db, resource_id, user.id, settings=settings)
     if resource is None:
         return _assets_response(
             fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
@@ -1689,7 +1726,7 @@ def update_library_resource(
         )
     except (LibraryAuthorizationError, InvalidResourceChangeError) as exc:
         return _resource_response(fail(str(exc) or "资源参数无效", status_code=400))
-    updated = resource_view(db, resource_id, user.id)
+    updated = resource_view(db, resource_id, user.id, settings=settings)
     if updated is None:
         return _resource_response(
             fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
@@ -1823,7 +1860,7 @@ async def upload_library_resource_cover(
                 code="INVALID_RESOURCE_COVER",
             )
         )
-    updated = resource_view(db, resource_id, user.id)
+    updated = resource_view(db, resource_id, user.id, settings=settings)
     if updated is None:
         return _resource_response(
             fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")

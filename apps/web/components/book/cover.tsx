@@ -49,21 +49,22 @@ export function Cover({
   const responsiveSize = requestedSize === 'small' ? '48px' : requestedSize === 'large' ? '280px' : '180px';
   const coverUrl = useMemo(() => {
     if (book.coverUrl) return withBasePath(coverUrlWithSize(book.coverUrl, requestedSize));
-    return book.id ? withBasePath(`/api/books/${book.id}/cover?size=${requestedSize}`) : '';
-  }, [book.coverUrl, book.id, requestedSize]);
+    return '';
+  }, [book.coverUrl, requestedSize]);
   const fallbackCoverUrl = withBasePath('/images/fallback-book-cover-v1.png');
-  const [imageFailed, setImageFailed] = useState(false);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    setImageFailed(false);
+    setFailedUrl(null);
   }, [coverUrl]);
 
-  if (coverUrl && !imageFailed) {
+  if (coverUrl && failedUrl !== coverUrl) {
     if (variant === 'bookshelf') {
       return (
         <Image
           data-book-cover="true"
           data-i18n-skip
+          key={coverUrl}
           src={coverUrl}
           alt={book.title}
           width={600}
@@ -74,7 +75,7 @@ export function Cover({
           style={style}
           loading={priority ? 'eager' : 'lazy'}
           priority={priority}
-          onError={() => setImageFailed(true)}
+          onError={() => setFailedUrl(coverUrl)}
         />
       );
     }
@@ -87,6 +88,7 @@ export function Cover({
         style={style}
       >
         <Image
+          key={coverUrl}
           src={coverUrl}
           alt={book.title}
           fill
@@ -95,7 +97,7 @@ export function Cover({
           className="rounded-[inherit] object-contain object-center"
           loading={priority ? 'eager' : 'lazy'}
           priority={priority}
-          onError={() => setImageFailed(true)}
+          onError={() => setFailedUrl(coverUrl)}
         />
       </div>
     );

@@ -108,3 +108,11 @@ suspend fun loadBookContentPage(
 /** Canonical URL for displayed cover bytes and their cache identity. */
 fun smallCoverRequestPath(apiPath: String): String =
     com.ermao.library.shared.modules.library.domain.smallCoverRequestPath(apiPath)
+
+typealias BookDetailIdentitySource = com.ermao.library.shared.modules.library.domain.BookDetailIdentitySource
+
+fun resolveBookDetailIdentitySource(isBookRoot: Boolean, hasSelectedResource: Boolean): BookDetailIdentitySource =
+    com.ermao.library.shared.modules.library.domain.bookDetailIdentitySource(isBookRoot, hasSelectedResource)
+
+fun hasVersionedCover(apiPath: String): Boolean =
+    com.ermao.library.shared.modules.library.domain.hasVersionedCover(apiPath)

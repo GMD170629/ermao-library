@@ -122,7 +122,7 @@ class SqlAlchemyBookshelfItemQueries(BookshelfItemQueryPort):
                     id=book_id,
                     title=str(book.title),
                     author=str(book.author or "未知作者"),
-                    cover_path=book.effective_cover_path or book.cover_path,
+                    cover_path=book.effective_cover_path,
                     updated_at=book.updated_at,
                     progress=(
                         percent_by_resource.get(continue_resource_id, 0.0)

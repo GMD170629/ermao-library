@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import {
   applyRecognizedMetadata,
   assetDownloadUrl,
@@ -396,3 +397,16 @@ test('resource detail validates the canonical server presentation without a prog
     globalThis.fetch = originalFetch;
   }
 });
+
+const identityCases = JSON.parse(readFileSync(new URL('../../../../../docs/testing/fixtures/book-detail-identity.json', import.meta.url), 'utf8'));
+for (const sample of identityCases) {
+  test(`preserves object fields for ${sample.name}`, () => {
+    const book = mapBookView({ id: 'book', sourceNodeId: 'root', ...sample.book, resources: [{ ...resource('resource', 'book'), ...sample.resource }] });
+    assert.equal(book.title, sample.book.title);
+    assert.equal(book.description || null, sample.book.description);
+    assert.equal(book.coverUrl, sample.book.coverUrl);
+    assert.equal(book.resources[0]?.title, sample.resource.title);
+    assert.equal(book.resources[0]?.description || null, sample.resource.description);
+    assert.equal(book.resources[0]?.coverUrl, sample.resource.coverUrl);
+  });
+}

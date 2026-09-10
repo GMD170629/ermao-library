@@ -31,11 +31,13 @@ object AndroidCoverCache {
         apiPath: String,
         repository: ContentRepository,
     ): ByteArray? = withContext(Dispatchers.IO) {
+        if (apiPath.isBlank()) return@withContext null
+        val cacheable = com.ermao.library.shared.modules.library.hasVersionedCover(apiPath)
         val key = cacheKey(requestContext, apiPath)
-        mutex.withLock { memory[key] }?.let { return@withContext it }
+        if (cacheable) mutex.withLock { memory[key] }?.let { return@withContext it }
         val directory = File(appContext.cacheDir, "authenticated-covers/${namespaceKey(requestContext)}")
         val destination = File(directory, key)
-        runCatching { destination.takeIf(File::isFile)?.readBytes() }.getOrNull()?.let { bytes ->
+        runCatching { destination.takeIf { cacheable && it.isFile }?.readBytes() }.getOrNull()?.let { bytes ->
             if (bytes.isNotEmpty()) {
                 mutex.withLock {
                     memory[key] = bytes
@@ -47,6 +49,7 @@ object AndroidCoverCache {
         }
         when (val result = repository.loadCover(requestContext, smallCoverRequestPath(apiPath))) {
             is ContentResult.Content -> result.value.bytes.takeIf(ByteArray::isNotEmpty)?.also { bytes ->
+                if (!cacheable) return@also
                 directory.mkdirs()
                 val temporary = File(directory, "$key.tmp")
                 runCatching {

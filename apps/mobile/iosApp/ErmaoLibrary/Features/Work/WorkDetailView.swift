@@ -1,6 +1,35 @@
 import SwiftUI
 @preconcurrency import ErmaoShared
 
+private func resourceReadingStatus(_ resource: BookResource?) -> LibraryReadingStatus {
+    guard let progress = resource?.progress, progress > 0 else { return .unread }
+    return progress >= 100 ? .finished : .reading
+}
+
+func bookDetailPageIdentity(
+    _ detail: BookDetailContent,
+    isBookRoot: Bool,
+    selectedResourceID: String?,
+    currentNode: BookContentEntry?
+) -> BookDetailContent {
+    let identity = ErmaoShared.PublicKt.resolveBookDetailIdentitySource(isBookRoot: isBookRoot, hasSelectedResource: selectedResourceID != nil)
+    if identity == .book { return detail }
+    let resource = selectedResourceID.flatMap { id in detail.resources.first { $0.id == id } }
+    let node = currentNode
+    return BookDetailContent(
+        book: BookCard(
+            id: detail.book.id, title: identity == .resource ? (resource?.title ?? "") : (node?.title ?? ""),
+            author: nil, cover: identity == .resource ? resource?.cover : node?.cover,
+            progress: resource?.progress
+        ),
+        description: identity == .resource ? resource?.description : node?.description,
+        tags: [], seriesFacet: nil,
+        seriesIndex: nil, authorFacets: [], resources: detail.resources,
+        selectedResourceID: selectedResourceID, readingStatus: resource == nil ? nil : resourceReadingStatus(resource),
+        chapters: detail.chapters, rootSourceNodeID: detail.rootSourceNodeID
+    )
+}
+
 enum WorkDescriptionPlainText {
     private static let blockTags: Set<String> = [
         "article", "blockquote", "br", "div", "h1", "h2", "h3", "h4", "h5", "h6",
@@ -1762,28 +1791,10 @@ struct WorkDetailView: View {
         }
     }
 
-    private func resourceReadingStatus(_ resource: BookResource?) -> LibraryReadingStatus {
-        guard let progress = resource?.progress, progress > 0 else { return .unread }
-        return progress >= 100 ? .finished : .reading
-    }
 
     private func pageDetail(_ detail: BookDetailContent) -> BookDetailContent {
-        if store.isBookRoot && store.selectedResourceID == nil { return detail }
-        let resource = selectedResource(detail)
-        let node = store.contentsPage?.currentNode
-        let representative = node?.representativeResourceID.flatMap { id in detail.resources.first { $0.id == id } }
-        return BookDetailContent(
-            book: BookCard(
-                id: detail.book.id, title: resource?.title ?? node?.title ?? detail.book.title,
-                author: detail.book.author, cover: resource?.cover ?? node?.cover ?? representative?.cover ?? detail.book.cover,
-                progress: resource?.progress
-            ),
-            description: resource != nil ? resource?.description : (node?.description ?? (store.isBookRoot ? detail.description : nil)),
-            tags: store.isBookRoot ? detail.tags : [], seriesFacet: detail.seriesFacet,
-            seriesIndex: detail.seriesIndex, authorFacets: detail.authorFacets, resources: detail.resources,
-            selectedResourceID: store.selectedResourceID, readingStatus: resource == nil ? nil : resourceReadingStatus(resource),
-            chapters: detail.chapters, rootSourceNodeID: detail.rootSourceNodeID
-        )
+        bookDetailPageIdentity(detail, isBookRoot: store.isBookRoot,
+                              selectedResourceID: store.selectedResourceID, currentNode: store.contentsPage?.currentNode)
     }
 
     private func kindleAsset(_ asset: ResourceAsset) -> Bool {
@@ -1852,7 +1863,7 @@ struct WorkDetailView: View {
             )
             Task {
                 for path in paths {
-                    try? await cache.remove(namespace: context.namespaceKey, key: "cover|\(path)")
+                    try? await cache.remove(namespace: context.namespaceKey, key: "cover|\(ErmaoShared.PublicKt.smallCoverRequestPath(apiPath: path))")
                 }
                 await MainActor.run { coverRefreshToken += 1 }
             }
@@ -2012,7 +2023,7 @@ struct WorkDetailView: View {
                 readerAccessErrorCode = "AUDIO_ENGINE_UNAVAILABLE"
                 return
             }
-            audioPlaybackRuntime.launch(
+            audioPlaybackRuntime.openForListening(
                 AudioLaunchIntent(
                     resourceID: resource.id,
                     assetID: resource.primaryAssetID,
@@ -2117,7 +2128,7 @@ func workContentItemPresentations(
             entry: entry,
             kind: .sourceDirectory,
             resource: representative,
-            cover: entry.cover ?? representative?.cover ?? detail.book.cover,
+            cover: entry.cover,
             title: entry.title,
             position: position,
             indexLabel: paddedWorkContentIndex(position)
@@ -2129,7 +2140,7 @@ func workContentItemPresentations(
             entry: entry,
             kind: .readableResource,
             resource: resource,
-            cover: resource?.cover ?? entry.cover,
+            cover: resource?.cover,
             title: resource?.title ?? entry.title,
             position: position,
             indexLabel: resource?.displayIndex(position: position) ?? paddedWorkContentIndex(position)

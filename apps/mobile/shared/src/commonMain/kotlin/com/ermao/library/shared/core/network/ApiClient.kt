@@ -302,6 +302,7 @@ class ApiClient internal constructor(
         apiPath: String,
         etag: String? = null,
         maximumBytes: Int = DEFAULT_MAXIMUM_ASSET_BYTES,
+        revalidate: Boolean = false,
     ): ApiResult<AuthenticatedAsset> {
         try {
             require(apiPath.startsWith("/api/")) { "Asset path must start with /api/" }
@@ -313,6 +314,7 @@ class ApiClient internal constructor(
                 val response = client.request(requestUrl) {
                     method = HttpMethod.Get
                     etag?.let { headers.append(HttpHeaders.IfNoneMatch, it) }
+                    if (revalidate) headers.append(HttpHeaders.CacheControl, "no-cache")
                 }
                 if (response.status.value in REDIRECT_STATUS_CODES) {
                     response.bodyAsText()

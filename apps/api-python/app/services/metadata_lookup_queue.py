@@ -32,6 +32,7 @@ from app.modules.imports.public import (
     normalize_identity_part,
 )
 from app.modules.library.public import prepare_book_facet
+from app.modules.media.public import versioned_cover_url
 from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
 from app.modules.metadata.application.writeback import (
@@ -196,11 +197,17 @@ def _parse_tags(value: Any) -> list[str]:
 
 
 def _local_cover_exists(
-    db: Session, book: dict[str, Any], resource_id: str | None
+    db: Session, book: dict[str, Any], resource_id: str | None, settings: Settings
 ) -> bool:
     del resource_id
     book_id = str(book.get("id") or "").strip()
-    return bool(book_id and effective_book_cover_paths(db, (book_id,)).get(book_id))
+    return bool(
+        versioned_cover_url(
+            "/api/books/cover",
+            effective_book_cover_paths(db, (book_id,)).get(book_id),
+            settings,
+        )
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,8 +303,6 @@ class _PreparedCandidateApplication:
     organize_job_id: str | None
     organize_job_status: str
     organize_job_summary: str
-    library_metadata_json: str | None
-    library_metadata_id: str | None
     now: datetime
     facet_write: PreparedBookFacetWrite
     remote_cover: _PreparedRemoteCover | None
@@ -320,7 +325,7 @@ def _prepare_candidate_application(
     resource_id = str(task.get("resourceId") or "") or None
     resource = lookup_persist.get_resource(db, resource_id) if resource_id else None
     prefer_local = lookup_persist.prefer_local_metadata_enabled(db)
-    local_cover_exists = _local_cover_exists(db, book, resource_id)
+    local_cover_exists = _local_cover_exists(db, book, resource_id, settings)
 
     # End every projection read before parsing provider data, downloading a
     # cover or constructing the prepared SQL statements for the write phase.
@@ -455,14 +460,6 @@ def _prepare_candidate_application(
         if applied
         else f"已从 {provider} 完成识别，现有元数据无需更新"
     )
-    library_metadata_json = (
-        json.dumps(
-            {"candidate": candidate, "appliedFields": applied},
-            ensure_ascii=False,
-        )
-        if resource_id
-        else None
-    )
     final_facet_projection = replace(
         facet_projections[0],
         author=(
@@ -489,8 +486,6 @@ def _prepare_candidate_application(
         organize_job_id=job_id,
         organize_job_status="APPLIED" if applied else "COMPLETED",
         organize_job_summary=organize_job_summary,
-        library_metadata_json=library_metadata_json,
-        library_metadata_id=f"py_{uuid4().hex}" if library_metadata_json else None,
         now=now,
         facet_write=facet_write,
         remote_cover=remote_cover,
@@ -501,7 +496,6 @@ def _prepare_candidate_application(
 def _persist_candidate_application(
     db: Session,
     prepared: _PreparedCandidateApplication,
-    provider: str,
 ) -> None:
     lookup_persist.update_book(db, prepared.book_id, prepared.book_patch)
     if prepared.resource_id and prepared.resource_patch:
@@ -519,19 +513,6 @@ def _persist_candidate_application(
             summary=prepared.organize_job_summary,
             error_summary=None,
             set_finished_at=True,
-            now=prepared.now,
-        )
-    if (
-        prepared.library_metadata_json is not None
-        and prepared.library_metadata_id is not None
-        and prepared.resource_id is not None
-    ):
-        lookup_persist.insert_library_metadata(
-            db,
-            resource_id=prepared.resource_id,
-            source=provider,
-            raw_json=prepared.library_metadata_json,
-            metadata_id=prepared.library_metadata_id,
             now=prepared.now,
         )
 
@@ -838,7 +819,7 @@ def process_metadata_lookup_task(
             task_id = str(task["id"])
             owner_id = str(task.get("leaseOwnerId") or "") or None
             with MetadataWriteTransaction(db):
-                _persist_candidate_application(db, prepared_application, provider)
+                _persist_candidate_application(db, prepared_application)
             if prepared_application.remote_cover is not None:
                 try:
                     _publish_remote_cover(prepared_application.remote_cover)

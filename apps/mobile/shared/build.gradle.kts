@@ -58,6 +58,10 @@ kotlin {
 
 tasks.withType<Test>().configureEach {
     systemProperty(
+        "bookDetailIdentityFixturePath",
+        rootProject.file("../../docs/testing/fixtures/book-detail-identity.json").absolutePath,
+    )
+    systemProperty(
         "readerSafetyFixtureRoot",
         rootProject.layout.projectDirectory.dir(
             "../../packages/reader-contracts/fixtures/reader-safety-v2",

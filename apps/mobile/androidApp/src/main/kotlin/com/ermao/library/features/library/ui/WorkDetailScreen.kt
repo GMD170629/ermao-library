@@ -643,7 +643,6 @@ private fun WorkDetailBody(
                     page = state.contents,
                     bookId = content.book.id,
                     bookTitle = state.content?.book?.title.orEmpty(),
-                    bookCoverUrl = content.book.coverUrl,
                     resources = content.resources,
                     emptyImportMessage = workDetailEmptyImportMessage(content, state.isBookRoot),
                     sort = state.contentsSort,
@@ -1278,7 +1277,6 @@ internal data class WorkContentBreadcrumbPresentation(
 internal fun workContentItemPresentations(
     page: BookContentsPage,
     resources: List<ResourceContent>,
-    bookCoverUrl: String,
 ): List<WorkContentItemPresentation> {
     val entries = buildList {
         addAll(page.entries.filter { it.isSourceFolder || it.isDirectResource })
@@ -1296,9 +1294,7 @@ internal fun workContentItemPresentations(
             entry = entry,
             kind = WorkContentItemKind.SourceDirectory,
             resource = representative,
-            coverUrl = listOfNotNull(entry.coverUrl, representative?.coverUrl, bookCoverUrl)
-                .firstOrNull(String::isNotBlank)
-                .orEmpty(),
+            coverUrl = entry.coverUrl.orEmpty(),
             title = entry.title,
             position = position,
             indexLabel = (position + 1).toString().padStart(2, '0'),
@@ -1309,9 +1305,7 @@ internal fun workContentItemPresentations(
             entry = entry,
             kind = WorkContentItemKind.ReadableResource,
             resource = resource,
-            coverUrl = listOfNotNull(resource?.coverUrl, entry.coverUrl)
-                .firstOrNull(String::isNotBlank)
-                .orEmpty(),
+            coverUrl = resource?.coverUrl.orEmpty(),
             title = resource?.title ?: entry.title,
             position = position,
             indexLabel = resource?.displayIndex(position) ?: (position + 1).toString().padStart(2, '0'),
@@ -1333,7 +1327,6 @@ private fun WorkContentBrowser(
     bookId: String,
     page: BookContentsPage?,
     bookTitle: String,
-    bookCoverUrl: String,
     resources: List<ResourceContent>,
     emptyImportMessage: Int?,
     sort: BookContentSort,
@@ -1353,7 +1346,7 @@ private fun WorkContentBrowser(
     var pathSheetExpanded by remember(page?.bookId, page?.currentSourceNodeId) {
         mutableStateOf(false)
     }
-    val items = page?.let { workContentItemPresentations(it, resources, bookCoverUrl) }.orEmpty()
+    val items = page?.let { workContentItemPresentations(it, resources) }.orEmpty()
     Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf)) {
         Row(
             modifier = Modifier
@@ -2651,21 +2644,24 @@ private fun WorkResourceImportNotice(message: Int, importError: String = "") {
 
 internal fun workDetailPageContent(state: WorkDetailUiState): BookDetailContent? {
     val content = state.content ?: return null
-    if (state.isBookRoot && state.presentation == BookDetailPresentation.ContentBrowser) {
+    val identity = com.ermao.library.shared.modules.library.resolveBookDetailIdentitySource(state.isBookRoot, state.selectedResourceId != null)
+    if (identity == com.ermao.library.shared.modules.library.BookDetailIdentitySource.Book) {
         return content.copy(book = content.book.copy(progressPercent = null), completed = false)
     }
     val resource = state.resolveSelectedResource()
     val node = state.contents?.currentNode
-    val representative = node?.representativeResourceId?.let { id -> content.resources.firstOrNull { it.id == id } }
+    val isResource = identity == com.ermao.library.shared.modules.library.BookDetailIdentitySource.Resource
     return content.copy(
         book = content.book.copy(
-            title = resource?.title ?: node?.title ?: content.book.title,
-            coverUrl = resource?.coverUrl ?: node?.coverUrl ?: representative?.coverUrl ?: content.book.coverUrl,
+            title = if (isResource) resource?.title.orEmpty() else node?.title.orEmpty(),
+            author = "",
+            coverUrl = if (isResource) resource?.coverUrl.orEmpty() else node?.coverUrl.orEmpty(),
             progressPercent = resource?.progressPercent,
         ),
-        description = if (resource != null) resource.description else node?.description ?: content.description.takeIf { state.isBookRoot },
+        description = if (isResource) resource?.description else node?.description,
         completed = resource?.completed == true,
-        tags = content.tags.takeIf { state.isBookRoot }.orEmpty(),
+        seriesId = null, seriesName = null, seriesIndex = null, authorFacetId = null,
+        tags = emptyList(),
     )
 }
 

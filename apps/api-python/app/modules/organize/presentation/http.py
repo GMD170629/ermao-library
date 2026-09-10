@@ -81,9 +81,9 @@ def _load_book(db: Session, book_id: str) -> dict[str, Any] | None:
 
 
 def _book_view(
-    db: Session, book: dict[str, Any], user_id: str | None = None
+    db: Session, book: dict[str, Any], user_id: str | None = None, *, settings: Settings
 ) -> dict[str, Any]:
-    return book_view(db, book, user_id)
+    return book_view(db, book, user_id, settings=settings)
 
 
 def _positive_int(value: Any, fallback: int, maximum: int) -> int:
@@ -118,6 +118,7 @@ def _organize_job_view(
     user_id: str | None,
     pending_only: bool = False,
     *,
+    settings: Settings,
     lookup: dict[str, Any] | None = None,
     executions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
@@ -178,7 +179,7 @@ def _organize_job_view(
         "finishedAt": _dt(job.get("finishedAt")),
         "createdAt": _dt(job.get("createdAt")),
         "updatedAt": _dt(job.get("updatedAt")),
-        "book": _book_view(db, book, user_id),
+        "book": _book_view(db, book, user_id, settings=settings),
     }
 
 
@@ -333,6 +334,7 @@ def list_pending_organize(
                 row,
                 getattr(user, "id", None),
                 pending_only=True,
+                settings=settings,
                 lookup=lookups.get(str(row.get("id") or "")),
                 executions=executions_by_job.get(str(row.get("id") or ""), []),
             )
@@ -359,7 +361,7 @@ def get_organize_job(
     job = organize_runs.get_job_row(db, job_id)
     if not job:
         raise OrganizeNotFoundError(OrganizeErrorBody(message="整理任务不存在"))
-    view = _organize_job_view(db, job, getattr(user, "id", None))
+    view = _organize_job_view(db, job, getattr(user, "id", None), settings=settings)
     if not view:
         raise OrganizeNotFoundError(OrganizeErrorBody(message="整理任务不存在"))
     return OrganizeJobResponse(data=OrganizeJobPayload.model_validate({"job": view}))
@@ -383,7 +385,11 @@ def recognize_organize_job_route(
         job = organize_runs.get_job_row(db, job_id) or {}
         return OrganizeJobResponse(
             data=OrganizeJobPayload.model_validate(
-                {"job": _organize_job_view(db, job, getattr(user, "id", None))}
+                {
+                    "job": _organize_job_view(
+                        db, job, getattr(user, "id", None), settings=settings
+                    )
+                }
             )
         )
     except ValueError as exc:

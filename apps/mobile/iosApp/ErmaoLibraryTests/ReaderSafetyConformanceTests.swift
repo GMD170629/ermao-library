@@ -14,7 +14,7 @@ final class ReaderSafetyConformanceTests: XCTestCase {
         let suite = try load(ConformanceSuite.self, bundle: bundle, resource: "reader-safety-v2-conformance-suite")
         let manifest = try load(ConformanceManifest.self, bundle: bundle, resource: "reader-safety-v2-manifest")
         XCTAssertEqual(suite.policyId, "shuku.reader-safety")
-        XCTAssertEqual(suite.policyVersion, ErmaoShared.PublicKt.readerSafetyPolicyVersion())
+        XCTAssertEqual(suite.policyVersion, Int(ErmaoShared.PublicKt.readerSafetyPolicyVersion()))
         XCTAssertEqual(suite.policyDigest, ErmaoShared.PublicKt.readerSafetyPolicyDigest())
         XCTAssertEqual(manifest.policyDigest, suite.policyDigest)
 

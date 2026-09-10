@@ -546,24 +546,3 @@ def mark_organize_job_retry_wait(
             updated_at=now,
         )
     )
-
-
-def insert_library_metadata(
-    db: Session,
-    *,
-    resource_id: str,
-    source: str,
-    raw_json: str,
-    metadata_id: str,
-    now: datetime,
-) -> None:
-    db.add(
-        LibraryBookMetadata(
-            id=metadata_id,
-            resource_id=resource_id,
-            source=source,
-            raw_json=raw_json,
-            created_at=now,
-            updated_at=now,
-        )
-    )

@@ -13,6 +13,7 @@ from app.modules.media.application.page_index import (
     ResourcePageUnit,
     comic_manifest_policy_failure,
 )
+from app.modules.media.infrastructure.cover_identity import versioned_cover_url
 
 __all__ = [
     "ReadOnlyResourcePageIndex",
@@ -24,4 +25,5 @@ __all__ = [
     "comic_manifest_policy_failure",
     "configured_cover_origins",
     "validate_cover_url",
+    "versioned_cover_url",
 ]

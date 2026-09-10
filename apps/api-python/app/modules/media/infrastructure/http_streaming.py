@@ -503,7 +503,7 @@ def _pse_image_response(
 
 def _small_cover_cache_key(path: Path, stat: os.stat_result) -> str:
     return (
-        f"{path.resolve()}:{stat.st_size}:{stat.st_mtime_ns}:"
+        f"{path.resolve()}:{stat.st_size}:{stat.st_mtime_ns}:{stat.st_ctime_ns}:"
         f"small-cover-v{SMALL_COVER_CACHE_VERSION}:"
         f"max-{SMALL_COVER_MAX_DIMENSION}:bytes-{SMALL_COVER_MAX_BYTES}"
     )
@@ -772,6 +772,12 @@ def _file_response(
             stat.st_size,
             stat.st_mtime_ns,
             f"user:{user_id}",
+        )
+    if route == "cover":
+        headers["ETag"] = _strong_etag(
+            stat.st_size,
+            stat.st_mtime_ns,
+            f"user:{user_id}:path:{path}:ctime:{stat.st_ctime_ns}",
         )
     version = f"{stat.st_size}:{stat.st_mtime_ns // 1_000_000}"
     headers["X-Asset-Version"] = version

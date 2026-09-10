@@ -10,6 +10,30 @@ import XCTest
 
 @MainActor
 final class ContentStoreTests: XCTestCase {
+    func testBookRootIdentitySurvivesItsBoundAudioResource() {
+        let resource = BookResource(id: "audio", bookID: "book", sourceNodeID: "root",
+            title: "Old resource title", format: "AUDIOBOOK_DIR", sizeLabel: nil,
+            progress: 0, isReadable: true, isSelected: true)
+        func detail(description: String?, cover: CoverReference?) -> BookDetailContent {
+            BookDetailContent(book: BookCard(id: "book", title: "Updated book", author: "Author", cover: cover, progress: nil),
+                description: description, tags: [], seriesFacet: nil, authorFacets: [], resources: [resource],
+                selectedResourceID: "audio", readingStatus: .unread, chapters: [])
+        }
+        let original = detail(description: "Updated introduction", cover: CoverReference(path: "/api/books/book/cover?v=new"))
+        let root = bookDetailPageIdentity(original, isBookRoot: true, selectedResourceID: "audio", currentNode: nil)
+        XCTAssertEqual(root.book.title, "Updated book")
+        XCTAssertEqual(root.description, "Updated introduction")
+        XCTAssertEqual(root.book.cover?.path, "/api/books/book/cover?v=new")
+        XCTAssertEqual(root.resources.first?.id, "audio")
+        let explicitResource = bookDetailPageIdentity(original, isBookRoot: false, selectedResourceID: "audio", currentNode: nil)
+        XCTAssertEqual(explicitResource.book.title, "Old resource title")
+        XCTAssertNil(explicitResource.description)
+        XCTAssertNil(explicitResource.book.cover)
+        let empty = bookDetailPageIdentity(detail(description: nil, cover: nil), isBookRoot: true, selectedResourceID: "audio", currentNode: nil)
+        XCTAssertNil(empty.description)
+        XCTAssertNil(empty.book.cover)
+    }
+
     func testSharedContentAssetMappingPreservesAbsolutePathAndKeepsUrlOnlyCompatibility() {
         func asset(path: String?, url: String) -> ErmaoShared.Asset {
             ErmaoShared.Asset(
@@ -233,7 +257,7 @@ final class ContentStoreTests: XCTestCase {
 
         XCTAssertEqual(items.map(\.kind), [.sourceDirectory, .sourceDirectory, .sourceDirectory, .readableResource])
         XCTAssertEqual(items.map(\.title), ["Single Volumes", "Color Edition", "Extras", "01 Launch"])
-        XCTAssertEqual(items.map(\.cover?.path), ["/representative-cover", "/entry-cover", "/book-cover", "/resource-cover"])
+        XCTAssertEqual(items.map(\.cover?.path), [nil, "/entry-cover", nil, "/resource-cover"])
         XCTAssertEqual(items.map(\.indexLabel), ["01", "02", "03", "07"])
     }
 
@@ -884,7 +908,8 @@ final class ContentStoreTests: XCTestCase {
                 chapter: ReaderChapterPresentation(
                     href: currentHref,
                     title: "Chapter \(chapterIndex + 1)",
-                    index: KotlinInt(int: Int32(chapterIndex))
+                    index: KotlinInt(int: Int32(chapterIndex)),
+                    navigationKey: nil
                 ),
                 page: nil,
                 playback: nil

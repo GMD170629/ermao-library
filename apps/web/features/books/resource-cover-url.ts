@@ -1,5 +1,6 @@
-export function smallResourceCoverUrl(resourceId: string, coverUrl: string): string {
-  const sourceUrl = coverUrl || `/api/resources/${encodeURIComponent(resourceId)}/cover`;
+export function smallResourceCoverUrl(coverUrl: string): string {
+  if (!coverUrl) return '';
+  const sourceUrl = coverUrl;
   const fragmentIndex = sourceUrl.indexOf('#');
   const urlWithoutFragment = fragmentIndex >= 0 ? sourceUrl.slice(0, fragmentIndex) : sourceUrl;
   const fragment = fragmentIndex >= 0 ? sourceUrl.slice(fragmentIndex) : '';

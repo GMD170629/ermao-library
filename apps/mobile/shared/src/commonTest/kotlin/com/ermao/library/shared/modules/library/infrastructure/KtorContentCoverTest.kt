@@ -17,6 +17,21 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
 class KtorContentCoverTest {
+    @Test fun unversionedCoversRevalidateAndFallbackIsNotArtwork() = runBlocking {
+        val management = createWorkManagementContext("profile", "Test", "https://library.example", "server", false, "user", 1)
+        val context = ContentRequestContext(management.profile, management.namespace)
+        val repository = KtorContentRepository { profile ->
+            ApiClient(profile, HttpClient(MockEngine { request ->
+                assertEquals("no-cache", request.headers[HttpHeaders.CacheControl])
+                respond(byteArrayOf(1, 2, 3), HttpStatusCode.OK,
+                    headersOf(HttpHeaders.ContentType to listOf("image/png"), "X-Shuku-Cover-Fallback" to listOf("1")))
+            }), Json { ignoreUnknownKeys = true })
+        }
+        val result = assertIs<ContentResult.Content<com.ermao.library.shared.modules.library.AuthenticatedCover>>(
+            repository.loadCover(context, "/api/books/b/cover", null))
+        assertEquals(0, result.value.bytes.size)
+    }
+
     @Test fun coverRequestsUseSmallVariantAndKeepBasePathAndValidators() = runBlocking {
         val management = createWorkManagementContext("profile", "Test", "https://library.example/base", "server", false, "user", 1)
         val context = ContentRequestContext(management.profile, management.namespace)

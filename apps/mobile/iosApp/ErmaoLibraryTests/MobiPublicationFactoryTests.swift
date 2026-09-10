@@ -125,7 +125,6 @@ final class MobiPublicationFactoryTests: XCTestCase {
 
     func testLegacyMarkupAndCssAreSanitizedBeforeReadiumDelivery() async throws {
         let book = FixedMobiBook.fixture(
-            markupMediaType: nil,
             markup: """
             <html xmlns="http://www.w3.org/1999/xhtml"><head></head><body onload="steal()">
             <script src="https://evil.example/a.js">steal()</script>
@@ -137,7 +136,8 @@ final class MobiPublicationFactoryTests: XCTestCase {
             @import url("https://evil.example/theme.css");
             body { background: url(//evil.example/pixel.png); }
             p { background: url('../images/local.png'); }
-            """
+            """,
+            markupMediaType: nil
         )
         let result = try await IosMobiPublicationFactory().build(
             book: book,

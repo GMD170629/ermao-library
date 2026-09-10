@@ -277,6 +277,9 @@ struct MainTabView: View {
             let snapshot = audioPlaybackRuntime.snapshot
             AudioMiniPlayer(
                 snapshot: snapshot,
+                context: contentContext,
+                client: contentClient,
+                cache: cache,
                 onToggle: {
                     if snapshot.isPlaying {
                         audioPresentation.handle(.pausefrommini, snapshot: snapshot)
@@ -285,7 +288,9 @@ struct MainTabView: View {
                 },
                 onRetry: audioPlaybackRuntime.retry,
                 onExpand: {
-                    audioPresentation.handle(.requestnowplaying, snapshot: snapshot)
+                    guard let resourceID = snapshot.resourceID,
+                          let namespace = snapshot.namespace else { return }
+                    audioPlaybackRuntime.presentCurrentSession(resourceID: resourceID, namespace: namespace)
                 }
             )
             .transition(.move(edge: .bottom).combined(with: .opacity))

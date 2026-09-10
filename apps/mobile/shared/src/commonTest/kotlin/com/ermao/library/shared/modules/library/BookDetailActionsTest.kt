@@ -10,6 +10,17 @@ import kotlin.test.assertNull
 import kotlin.test.assertNotNull
 
 class BookDetailActionsTest {
+    @Test fun detailIdentityDoesNotFollowTheReadingTarget() {
+        assertEquals(BookDetailIdentitySource.Book, resolveBookDetailIdentitySource(true, true))
+        assertEquals(BookDetailIdentitySource.Book, resolveBookDetailIdentitySource(true, false))
+        assertEquals(BookDetailIdentitySource.Resource, resolveBookDetailIdentitySource(false, true))
+        assertEquals(BookDetailIdentitySource.Directory, resolveBookDetailIdentitySource(false, false))
+        assertEquals(false, hasVersionedCover("/api/books/b/cover"))
+        assertEquals(false, hasVersionedCover("/api/books/b/cover?v="))
+        assertEquals(true, hasVersionedCover("/api/books/b/cover?size=small&v=revision"))
+        assertEquals("/api/books/b/cover?v=revision&size=small", smallCoverRequestPath("/api/books/b/cover?size=large&v=revision"))
+    }
+
     @Test
     fun managementEntryCountTracksVerifiedCopiesAndRemoval() {
         val completed = DownloadManagementPolicy.project(DownloadManagementItem(

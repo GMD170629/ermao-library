@@ -20,11 +20,13 @@ struct BookCoverView: View {
 
     @Environment(\.appTheme) private var theme
     @State private var image: UIImage?
+    @State private var imageIdentity: String?
+    private var requestIdentity: String { "\(context.namespaceKey)|\(reference?.path ?? "")|\(managementRevision)" }
     @State private var coverLoadIssue: ContentClientError?
 
     var body: some View {
         ZStack {
-            if let image {
+            if imageIdentity == requestIdentity, let image {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
@@ -41,12 +43,17 @@ struct BookCoverView: View {
         .shadow(color: theme.textPrimary.opacity(0.10), radius: 4, x: 0, y: 2)
         .accessibilityLabel(Text(title))
         .modifier(OptionalManagementCover(target: managementTarget))
-        .task(id: "\(reference?.path ?? "")|\(managementRevision)") {
-            guard let reference else { return }
+        .task(id: requestIdentity) {
+            image = nil
+            imageIdentity = requestIdentity
+            coverLoadIssue = nil
+            guard let reference, !reference.path.isEmpty else { return }
+            let cacheable = ErmaoShared.PublicKt.hasVersionedCover(apiPath: reference.path)
             let key = "cover|\(ErmaoShared.PublicKt.smallCoverRequestPath(apiPath: reference.path))"
             do {
-                if let cached = try await cache.load(namespace: context.namespaceKey, key: key),
+                if cacheable, let cached = try await cache.load(namespace: context.namespaceKey, key: key),
                    let decoded = UIImage(data: cached) {
+                    guard !Task.isCancelled else { return }
                     image = decoded
                     return
                 }
@@ -65,7 +72,7 @@ struct BookCoverView: View {
             }
             guard !Task.isCancelled, let decoded = UIImage(data: data) else { return }
             image = decoded
-            try? await cache.save(data, namespace: context.namespaceKey, key: key)
+            if cacheable { try? await cache.save(data, namespace: context.namespaceKey, key: key) }
         }
     }
 }

@@ -56,3 +56,12 @@ fun managedBookDownloadSummary(resources: List<DownloadManagementResource>): Boo
             DownloadManagementStatus.NotDownloaded, DownloadManagementStatus.Unavailable -> BookDetailDownloadState.NotDownloaded
         }
     })
+
+/** Root bindings control readable content, never the identity shown above it. */
+enum class BookDetailIdentitySource { Book, Resource, Directory }
+
+fun bookDetailIdentitySource(isBookRoot: Boolean, hasSelectedResource: Boolean): BookDetailIdentitySource = when {
+    isBookRoot -> BookDetailIdentitySource.Book
+    hasSelectedResource -> BookDetailIdentitySource.Resource
+    else -> BookDetailIdentitySource.Directory
+}

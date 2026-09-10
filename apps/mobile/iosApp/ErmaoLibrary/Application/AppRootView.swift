@@ -42,7 +42,10 @@ struct AppRootView: View {
     }
 
     var body: some View {
-        AudioApplicationHost(runtime: audioRuntime) {
+        AudioApplicationHost(
+            runtime: audioRuntime, context: audioContentContext,
+            client: contentClient, cache: coverCache
+        ) {
             rootContent
         }
             .environmentObject(feedbackPresenter)
@@ -197,6 +200,19 @@ struct AppRootView: View {
             profile: profile,
             userID: userID,
             authorizationVersion: authorizationVersion
+        )
+    }
+
+    private var audioContentContext: ContentRequestContext? {
+        guard let session = audioSessionContext else { return nil }
+        return ContentRequestContext(
+            profileID: session.profile.id,
+            profileDisplayName: session.profile.displayName,
+            serverIdentity: session.profile.serverIdentity,
+            userID: session.userID,
+            authorizationVersion: session.authorizationVersion,
+            baseURL: session.profile.baseURL,
+            acceptsInsecureTLS: session.profile.tlsMode == .insecureSkipAllValidation
         )
     }
 

@@ -1,0 +1,82 @@
+[
+  {
+    "name": "root-bound-resource",
+    "isBookRoot": true,
+    "hasSelectedResource": true,
+    "source": "Book",
+    "book": {
+      "title": "Updated book",
+      "description": "Updated introduction",
+      "coverUrl": "/api/books/book/cover?v=new"
+    },
+    "resource": {
+      "title": "Resource title",
+      "description": null,
+      "coverUrl": ""
+    }
+  },
+  {
+    "name": "root-directory",
+    "isBookRoot": true,
+    "hasSelectedResource": false,
+    "source": "Book",
+    "book": {
+      "title": "Updated book",
+      "description": "Updated introduction",
+      "coverUrl": "/api/books/book/cover?v=new"
+    },
+    "resource": {
+      "title": "Resource title",
+      "description": null,
+      "coverUrl": ""
+    }
+  },
+  {
+    "name": "explicit-resource",
+    "isBookRoot": false,
+    "hasSelectedResource": true,
+    "source": "Resource",
+    "book": {
+      "title": "Updated book",
+      "description": "Updated introduction",
+      "coverUrl": "/api/books/book/cover?v=new"
+    },
+    "resource": {
+      "title": "Resource title",
+      "description": null,
+      "coverUrl": ""
+    }
+  },
+  {
+    "name": "explicit-directory",
+    "isBookRoot": false,
+    "hasSelectedResource": false,
+    "source": "Directory",
+    "book": {
+      "title": "Updated book",
+      "description": "Updated introduction",
+      "coverUrl": "/api/books/book/cover?v=new"
+    },
+    "resource": {
+      "title": "Resource title",
+      "description": null,
+      "coverUrl": ""
+    }
+  },
+  {
+    "name": "empty-book-with-resource-metadata",
+    "isBookRoot": true,
+    "hasSelectedResource": true,
+    "source": "Book",
+    "book": {
+      "title": "Book",
+      "description": null,
+      "coverUrl": ""
+    },
+    "resource": {
+      "title": "Resource",
+      "description": "Resource introduction",
+      "coverUrl": "/api/resources/resource/cover?v=other"
+    }
+  }
+]

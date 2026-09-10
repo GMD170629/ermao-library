@@ -88,6 +88,29 @@ final class AudioPlaybackRuntime: ObservableObject, AudioSystemMediaDelegate {
 
     // MARK: Small Runtime command surface
 
+    /// Opening the resource's listening screen is distinct from selecting a chapter.
+    /// The detail page's primary asset is a launch fallback, not a seek request.
+    func openForListening(_ intent: AudioLaunchIntent, namespace: String) {
+        if intent.chapterID?.trimmedNonEmpty == nil,
+           intent.positionMillis == nil,
+           presentCurrentSession(resourceID: intent.resourceID, namespace: namespace) {
+            return
+        }
+        launch(intent, namespace: namespace)
+    }
+
+    @discardableResult
+    func presentCurrentSession(resourceID: String, namespace: String) -> Bool {
+        guard !isShuttingDown, !isStopping,
+              sessionContext?.namespaceKey == namespace,
+              snapshot.namespace == namespace,
+              snapshot.hasSession,
+              snapshot.resourceID == resourceID.trimmingCharacters(in: .whitespacesAndNewlines)
+        else { return false }
+        nowPlayingPresentationRequestID = UUID()
+        return true
+    }
+
     func launch(_ intent: AudioLaunchIntent, namespace: String) {
         guard !isShuttingDown, !isStopping,
               !userCommandsLocked,

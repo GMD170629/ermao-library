@@ -115,7 +115,7 @@ function isReaderFont(pathname) {
 
 function isCoverRequest(pathname) {
   pathname = withoutBasePath(pathname);
-  return /\/api\/books\/[^/]+\/cover(\/|$)/.test(pathname)
+  return /\/api\/books\/[^/]+(?:\/source-nodes\/[^/]+)?\/cover(\/|$)/.test(pathname)
     || /\/api\/resources\/[^/]+\/cover(\/|$)/.test(pathname);
 }
 
@@ -193,19 +193,21 @@ async function networkFirstApi(request) {
   }
 }
 
-async function staleWhileRevalidate(request, cacheName) {
-  const refreshRequest = new Request(request, { cache: 'no-store' });
-  if (!cacheName) return fetch(refreshRequest);
+async function loadCover(request, cacheName) {
+  const refreshRequest = new Request(request, { cache: 'no-cache' });
+  const version = new URL(request.url).searchParams.get('v');
+  if (!cacheName || !version?.trim()) return fetch(refreshRequest);
   const cache = await caches.open(cacheName);
   const cached = await cache.match(request);
-  const refresh = fetch(refreshRequest).then(async (response) => {
-    if (response.ok && response.headers.get('X-Shuku-Cover-Fallback') !== '1') {
-      await cache.put(request, response.clone());
-      await trimCache(cacheName, 'cover');
-    }
-    return response;
-  }).catch(() => cached);
-  return cached || refresh;
+  if (cached && cached.headers.get('X-Shuku-Cover-Fallback') !== '1') return cached;
+  const response = await fetch(refreshRequest);
+  if (response.ok && response.headers.get('X-Shuku-Cover-Fallback') !== '1') {
+    await cache.put(request, response.clone());
+    await trimCache(cacheName, 'cover');
+  } else {
+    await cache.delete(request);
+  }
+  return response;
 }
 
 async function clearPrivateCaches() {
@@ -277,7 +279,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   if (isCoverRequest(url.pathname)) {
-    event.respondWith(staleWhileRevalidate(event.request, privateCacheName('cover')));
+    event.respondWith(loadCover(event.request, privateCacheName('cover')));
     return;
   }
   if (withoutBasePath(url.pathname).startsWith('/api/')) {

@@ -513,7 +513,9 @@ def test_source_node_edit_respects_opf_setting_and_publishes_its_own_cover(
     entry = next(
         item for item in contents["entries"] if item["sourceNodeId"] == folder.id
     )
-    assert entry["coverUrl"] == (f"/api/books/{book.id}/source-nodes/{folder.id}/cover")
+    assert entry["coverUrl"].startswith(
+        f"/api/books/{book.id}/source-nodes/{folder.id}/cover?v="
+    )
     cover_response = client.get(entry["coverUrl"])
     assert cover_response.status_code == 200
     assert cover_response.headers["content-type"] == "image/png"
@@ -1134,4 +1136,113 @@ def test_openapi_exposes_only_canonical_book_resource_reader_paths() -> None:
     assert not any(
         path.startswith("/api/works") or "/versions" in path or "/volumes" in path
         for path in paths
+    )
+
+
+def test_book_metadata_and_versioned_cover_never_inherit_resource(
+    client, db_session, test_settings
+):
+    from app.services.metadata_lookup_queue import _local_cover_exists
+
+    book, resources = _add_book(db_session, resource_count=1)
+    metadata = db_session.get(LibraryBookMetadata, book.id)
+    resource_metadata = db_session.get(LibraryReadableResourceMetadata, resources[0].id)
+    cover = test_settings.resolved_storage_root / "covers" / "own.png"
+    cover.parent.mkdir(parents=True, exist_ok=True)
+    cover.write_bytes(_png_cover())
+    resource_metadata.cover_path = "covers/own.png"
+    resource_metadata.cover_status = "READY"
+    resource_metadata.description = None
+    metadata.description = "Book introduction"
+    db_session.commit()
+    _login(client, db_session)
+
+    def read():
+        response = client.get(f"/api/books/{book.id}")
+        assert response.status_code == 200
+        return response.json()["data"]["book"]
+
+    initial = read()
+    assert initial["title"] == "Detail book"
+    assert initial["description"] == "Book introduction"
+    assert initial["coverUrl"] == ""
+    assert initial["resources"][0]["description"] is None
+    assert "?v=" in initial["resources"][0]["coverUrl"]
+    assert not _local_cover_exists(
+        db_session, {"id": book.id}, resources[0].id, test_settings
+    )
+    missing = client.get(
+        "/api/books",
+        params={
+            "filters": json.dumps(
+                {
+                    "combinator": "ALL",
+                    "conditions": [{"field": "hasCover", "operator": "is_false"}],
+                }
+            )
+        },
+    ).json()["data"]["books"]
+    assert book.id in {item["id"] for item in missing}
+    fallback = client.get(f"/api/books/{book.id}/cover")
+    assert fallback.headers["X-Shuku-Cover-Fallback"] == "1"
+    assert fallback.headers["cache-control"] == "no-store"
+
+    metadata.cover_path = "covers/own.png"
+    metadata.cover_status = "READY"
+    db_session.commit()
+    first = read()["coverUrl"]
+    assert "?v=" in first
+    assert _local_cover_exists(
+        db_session, {"id": book.id}, resources[0].id, test_settings
+    )
+    assert client.get(first).status_code == 200
+    missing = client.get(
+        "/api/books",
+        params={
+            "filters": json.dumps(
+                {
+                    "combinator": "ALL",
+                    "conditions": [{"field": "hasCover", "operator": "is_false"}],
+                }
+            )
+        },
+    ).json()["data"]["books"]
+    assert book.id not in {item["id"] for item in missing}
+    metadata.description = "Another introduction"
+    db_session.commit()
+    assert read()["coverUrl"] == first
+    import os
+
+    old_small = client.get(first.replace("size=medium", "size=small"))
+    original_stat = cover.stat()
+    old_large = client.get(first)
+    Image.new("RGB", (32, 48), "red").save(cover)
+    os.utime(cover, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+    replaced = read()["coverUrl"]
+    assert replaced != first
+    assert (
+        client.get(
+            replaced, headers={"If-None-Match": old_large.headers["etag"]}
+        ).status_code
+        == 200
+    )
+    assert (
+        client.get(replaced.replace("size=medium", "size=small")).content
+        != old_small.content
+    )
+    Image.new("RGB", (32, 48), "blue").save(cover)
+    second = read()["coverUrl"]
+    assert second != first
+    metadata.cover_path = None
+    metadata.cover_status = "PENDING"
+    db_session.commit()
+    assert read()["coverUrl"] == ""
+    assert "?v=" in read()["resources"][0]["coverUrl"]
+    metadata.cover_path = "covers/own.png"
+    metadata.cover_status = "READY"
+    db_session.commit()
+    cover.unlink()
+    assert read()["coverUrl"] == ""
+    assert not _local_cover_exists(
+        db_session, {"id": book.id}, resources[0].id, test_settings
     )

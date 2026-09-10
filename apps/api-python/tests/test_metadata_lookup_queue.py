@@ -4,6 +4,7 @@ import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import select, update
 
 from app.models import (
@@ -214,4 +215,59 @@ def test_cancelled_lookup_cannot_be_reopened_by_a_stale_worker(db_session) -> No
     assert (
         db_session.scalar(select(OrganizeJob.id).where(OrganizeJob.book_id == book.id))
         is None
+    )
+
+
+@pytest.mark.parametrize("publish_fails", [False, True])
+def test_resource_cover_does_not_block_recognition_of_book_cover(
+    db_session, test_settings, monkeypatch, publish_fails
+):
+    book, resource = _seed_lookup_graph(db_session)
+    book_id, resource_id = book.id, resource.id
+    metadata = db_session.get(LibraryReadableResourceMetadata, resource_id)
+    metadata.cover_path = "covers/resource.png"
+    metadata.cover_status = "READY"
+    db_session.commit()
+    monkeypatch.setattr(
+        queue.lookup_persist, "prefer_local_metadata_enabled", lambda db: True
+    )
+    target = test_settings.resolved_storage_root / "covers" / "recognized.png"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix(".part")
+    temporary.write_bytes(b"recognized-image")
+    remote = queue._PreparedRemoteCover(temporary, target, "covers/recognized.png")
+    monkeypatch.setattr(queue, "_download_remote_cover", lambda *args: remote)
+    prepared = queue._prepare_candidate_application(
+        db_session,
+        test_settings,
+        {"bookId": book_id, "resourceId": resource_id},
+        "test",
+        {"coverUrl": "https://example.test/cover.png"},
+    )
+    assert prepared.book_patch["coverPath"] == "covers/recognized.png"
+    assert "coverPath" not in prepared.resource_patch
+    with queue.MetadataWriteTransaction(db_session):
+        queue._persist_candidate_application(db_session, prepared)
+    if publish_fails:
+
+        def fail_publish(*args):
+            raise OSError("test publish failure")
+
+        monkeypatch.setattr(queue.os, "replace", fail_publish)
+        with pytest.raises(OSError):
+            queue._publish_remote_cover(remote)
+        queue._compensate_remote_cover_publish_failure(db_session, prepared)
+        assert not target.exists()
+        assert not temporary.exists()
+        assert db_session.get(LibraryBookMetadata, book_id).cover_path is None
+    else:
+        queue._publish_remote_cover(remote)
+        assert target.read_bytes() == b"recognized-image"
+        assert (
+            db_session.get(LibraryBookMetadata, book_id).cover_path
+            == "covers/recognized.png"
+        )
+    assert (
+        db_session.get(LibraryReadableResourceMetadata, resource_id).cover_path
+        == "covers/resource.png"
     )
