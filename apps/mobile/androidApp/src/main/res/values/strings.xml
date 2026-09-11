@@ -101,7 +101,6 @@
     <string name="login_switch_server">Switch server</string>
     <string name="login_switch_sheet_title">Switch server</string>
     <string name="login_server_option_description">%1$s, %2$s</string>
-    <string name="login_delete_current_server">Delete current server</string>
     <string name="login_delete_confirm_title">Delete this server?</string>
     <string name="login_delete_confirm_message">Its saved login and local server information will be removed from this device. The fields will be cleared.</string>
     <string name="login_delete_confirm_action">Delete</string>
@@ -227,7 +226,6 @@
     <string name="work_download_open_offline">Open offline</string>
     <string name="book_download_title">Book downloads</string>
     <string name="download_selection_action">Select</string>
-    <string name="download_selection_done">Done</string>
     <string name="download_management_accepted">Accepted: %1$d</string>
     <string name="download_management_completed">Completed: %1$d</string>
     <string name="download_management_skipped">Skipped: %1$d</string>
@@ -565,10 +563,6 @@
     <string name="management_cover_read_failed">The selected image couldn’t be read.</string>
     <string name="management_delete">Delete book</string>
     <string name="work_no_readable_resources_message">No online-readable resource is available for this book.</string>
-    <plurals name="work_contents_count">
-        <item quantity="one">%1$d item</item>
-        <item quantity="other">%1$d items</item>
-    </plurals>
     <string name="work_contents_grid">Grid</string>
     <string name="work_contents_list">List</string>
     <string name="work_contents_file">File</string>
@@ -670,7 +664,6 @@
     <string name="audio_chapters_title">Chapters</string>
     <string name="audio_chapters_empty">No explicit chapters</string>
     <string name="audio_chapter_current">Current chapter</string>
-    <string name="download_management_delete">Delete</string>
     <string name="book_metadata_waiting_import">Waiting for book import to finish</string>
     <string name="book_metadata_queued">Import finished; waiting to identify book information</string>
     <string name="book_metadata_running">Identifying book information</string>
