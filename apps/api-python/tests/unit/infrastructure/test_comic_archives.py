@@ -457,3 +457,129 @@ def test_rar_import_reads_directory_without_an_extraction_backend(
     result = inspect_comic_archive(archive)
     assert result["pageCount"] > 0
     assert result["coverContent"] is None
+
+
+@pytest.mark.parametrize("extension", ["zip", "cbz"])
+def test_zip_import_reads_only_directory_cover_and_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extension: str
+) -> None:
+    path = tmp_path / f"many-pages.{extension}"
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_STORED) as output:
+        # Deliberately reverse directory order to also exercise natural page sorting.
+        for index in range(200, 0, -1):
+            output.writestr(f"{index}.png", _tiny_png() + bytes(8192))
+        output.writestr("ComicInfo.xml", "<ComicInfo><Title>Example</Title></ComicInfo>")
+    with zipfile.ZipFile(path) as source:
+        infos = source.infolist()
+    ordinary_spans = [
+        (info.header_offset, info.header_offset + 30 + len(info.filename.encode()) + info.compress_size)
+        for info in infos if info.filename not in {"1.png", "ComicInfo.xml"}
+    ]
+    reads: list[tuple[int, int]] = []
+
+    class RecordingReader(comic_archives_module.ZipInspectionReader):
+        def read(self, size: int | None = -1) -> bytes:
+            start = self.tell()
+            result = super().read(size)
+            reads.append((start, start + len(result)))
+            return result
+
+    with (
+        RecordingReader(path) as source,
+        comic_archives_module.ComicArchive(path, source=source) as archive,
+    ):
+        reads.clear()
+        assert len(archive.infolist()) == 201
+        assert archive.getinfo("2.png").filename == "2.png"
+        assert reads == []
+
+    reads.clear()
+    monkeypatch.setattr(comic_archives_module, "ZipInspectionReader", RecordingReader)
+    parsed = inspect_comic_archive(path)
+    assert parsed["pageCount"] == 200
+    assert [page["entryPath"] for page in parsed["pages"]] == [
+        f"{index}.png" for index in range(1, 201)
+    ]
+    assert parsed["coverContent"] is not None
+    assert parsed["title"] == "Example"
+    assert reads
+    assert not any(
+        start < member_end and member_start < end
+        for start, end in reads
+        for member_start, member_end in ordinary_spans
+    ), "import must not read ordinary page local headers or payloads"
+
+
+@pytest.mark.parametrize("damage", ["overlap", "crc", "local-header"])
+def test_zip_member_integrity_is_enforced_on_read_and_page_delivery(
+    tmp_path: Path, test_settings: Settings, damage: str
+) -> None:
+    path = tmp_path / f"{damage}.cbz"
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_STORED) as output:
+        for name in ("001.png", "002.png", "003.png"):
+            output.writestr(name, _tiny_png())
+    with zipfile.ZipFile(path) as source:
+        info = source.getinfo("002.png")
+        central_start = source.start_dir
+    raw = bytearray(path.read_bytes())
+    payload_start = info.header_offset + 30 + len(info.filename.encode())
+    if damage == "crc":
+        raw[payload_start] ^= 1
+    elif damage == "local-header":
+        raw[info.header_offset] ^= 1
+    else:
+        # Extend the second member's declared data into the next member header.
+        cursor = central_start
+        while raw[cursor:cursor + 4] == b"PK\x01\x02":
+            name_size, extra_size, comment_size = struct.unpack_from("<HHH", raw, cursor + 28)
+            if raw[cursor + 46:cursor + 46 + name_size] == b"002.png":
+                struct.pack_into("<I", raw, cursor + 20, info.compress_size + 1)
+                break
+            cursor += 46 + name_size + extra_size + comment_size
+        else:
+            pytest.fail("missing second member in fixture directory")
+    path.write_bytes(raw)
+
+    parsed = inspect_comic_archive(path)
+    assert [page["entryPath"] for page in parsed["pages"]] == ["001.png", "002.png", "003.png"]
+    assert parsed["pageCount"] == 3
+    with open_comic_archive(path) as archive:
+        with pytest.raises(ComicArchiveInvalidError) as failure:
+            archive.read("002.png")
+        assert failure.value.code == "COMIC_RESOURCE_CORRUPT"
+        assert isinstance(failure.value.__cause__, zipfile.BadZipFile)
+        assert archive.read("003.png") == _tiny_png()
+
+    app = FastAPI()
+
+    @app.get("/page/{name}")
+    def page(name: str, request: Request):
+        return http_streaming.send_pse_page_zip_entry(
+            path, name, request, "reader-1", test_settings,
+            max_width=None, asset_id="comic-asset", output_media_type="image/png",
+        )
+
+    with TestClient(app) as client:
+        broken = client.get("/page/002.png")
+        assert broken.status_code == 422
+        assert broken.json()["error"]["code"] == "COMIC_RESOURCE_CORRUPT"
+        assert client.get("/page/003.png").status_code == 200
+    assert path.read_bytes() == raw
+
+
+def test_zip_broken_cover_keeps_pages_and_returns_no_cover(tmp_path: Path) -> None:
+    path = tmp_path / "broken-cover.cbz"
+    with zipfile.ZipFile(path, "w") as output:
+        output.writestr("001.png", _tiny_png())
+        output.writestr("002.png", _tiny_png())
+    raw = bytearray(path.read_bytes())
+    raw[0] ^= 1  # Corrupt only the first member's local header signature.
+    path.write_bytes(raw)
+
+    parsed = inspect_comic_archive(path)
+
+    assert parsed["coverContent"] is None
+    assert parsed["coverEntryPath"] == "001.png"
+    assert [page["entryPath"] for page in parsed["pages"]] == ["001.png", "002.png"]
+    with open_comic_archive(path) as archive:
+        assert archive.read("002.png") == _tiny_png()

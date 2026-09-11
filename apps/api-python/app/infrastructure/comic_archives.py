@@ -33,7 +33,6 @@ from app.core.natural_sort import natural_sort_key
 from app.infrastructure.archive_integrity import (
     UnsafeArchivePathError,
     normalize_archive_path,
-    zip_entry_data_span,
 )
 from app.modules.imports.application.comic_types import (
     ComicArchiveInspection,
@@ -253,7 +252,6 @@ class ComicArchiveEntry:
     compressed_size: int
     encrypted: bool
     unix_mode: int
-    data_span: tuple[int, int] | None = None
 
     def is_dir(self) -> bool:
         return self.directory
@@ -397,6 +395,7 @@ class ComicArchive:
         self._archive.close()
 
     def infolist(self) -> list[ComicArchiveEntry]:
+        # Directory facts only; local headers are checked when a member is opened.
         return [self._entry(info) for info in self._archive.infolist()]
 
     def getinfo(self, name: str) -> ComicArchiveEntry:
@@ -478,12 +477,6 @@ class ComicArchive:
     ) -> ComicArchiveEntry:
         flag_bits = int(getattr(info, "flag_bits", 0))
         external_attr = int(getattr(info, "external_attr", 0))
-        data_span = (
-            zip_entry_data_span(self._archive, info)
-            if isinstance(self._archive, zipfile.ZipFile)
-            and isinstance(info, zipfile.ZipInfo)
-            else None
-        )
         return ComicArchiveEntry(
             filename=info.filename,
             file_size=int(info.file_size),
@@ -492,7 +485,6 @@ class ComicArchive:
             compressed_size=int(getattr(info, "compress_size", info.file_size)),
             encrypted=bool(flag_bits & 0x1),
             unix_mode=(external_attr >> 16) & 0xFFFF,
-            data_span=data_span,
         )
 
 
@@ -666,7 +658,6 @@ def _validate_comic_entries(
     encrypted_entries: set[str] = set()
     quarantined_entries: set[str] = set()
     total_size = 0
-    spans: list[tuple[int, int, str]] = []
     for entry in entries:
         total_size += entry.file_size
         if total_size > MAX_COMIC_UNCOMPRESSED_BYTES:
@@ -696,17 +687,6 @@ def _validate_comic_entries(
             encrypted_entries.add(canonical_name)
         if entry.unix_mode and stat.S_ISLNK(entry.unix_mode):
             quarantined_entries.add(canonical_name)
-        if entry.data_span is not None and entry.data_span[0] < entry.data_span[1]:
-            spans.append((*entry.data_span, canonical_name))
-    spans.sort(key=lambda item: (item[0], item[1]))
-    previous_end = -1
-    for start, end, canonical_name in spans:
-        if start < previous_end:
-            integrity_entries.add(canonical_name)
-            for previous_start, previous_end_value, previous_name in spans:
-                if previous_start < end and start < previous_end_value:
-                    integrity_entries.add(previous_name)
-        previous_end = max(previous_end, end)
     return _ComicArchiveValidation(
         integrity_entries=frozenset(integrity_entries),
         encrypted_entries=frozenset(encrypted_entries),
