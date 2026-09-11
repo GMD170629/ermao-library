@@ -284,16 +284,19 @@ class ProcessReadableResourceImportTask:
                 ),
             )
             title = parsed.resource_title
+            resource_ready = self._books_resources.count_ready_assets(resource_id) >= 1
+            if resource_ready:
+                # Create resource metadata before navigation updates its page count.
+                self._books_resources.mark_resource_ready(
+                    resource_id=resource_id,
+                    title=title,
+                )
             self._books_resources.replace_navigation_units(
                 resource_id=resource_id,
                 asset_id=asset_id,
                 units=parsed.asset.navigation_units,
             )
-            if self._books_resources.count_ready_assets(resource_id) >= 1:
-                self._books_resources.mark_resource_ready(
-                    resource_id=resource_id,
-                    title=title,
-                )
+            if resource_ready:
                 if parsed.asset.role is AssetRole.PRIMARY and not any(
                     unit.unit_type == "page" for unit in parsed.asset.navigation_units
                 ):

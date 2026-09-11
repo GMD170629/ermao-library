@@ -91,3 +91,29 @@ test('management projection rejects a malformed media summary at the API boundar
     /LIBRARY_BOOK_SUMMARY_INVALID/
   );
 });
+
+for (const projection of ['bookshelf', 'management'] as const) {
+  const summary = {
+    id: 'book-no-cover', title: 'No cover', author: null,
+    coverStatus: 'PENDING', statusValue: 'UNREAD', progress: 0
+  };
+
+  test(`${projection} accepts empty cover content and preserves available cover URLs`, () => {
+    for (const coverUrl of ['', '/api/books/book-no-cover/cover?size=medium']) {
+      const book = mapLibraryBookSummary({ ...summary, coverUrl }, projection);
+      assert.equal(book.coverUrl, coverUrl);
+      assert.equal(book.id, summary.id);
+    }
+  });
+
+  test(`${projection} rejects malformed cover fields and empty book identity`, () => {
+    for (const coverUrl of [undefined, null, 42, {}, []]) {
+      assert.throws(() => mapLibraryBookSummary({ ...summary, coverUrl }, projection),
+        /LIBRARY_BOOK_SUMMARY_INVALID_coverUrl/);
+    }
+    for (const field of ['id', 'title']) {
+      assert.throws(() => mapLibraryBookSummary({ ...summary, coverUrl: '', [field]: '' }, projection),
+        new RegExp(`LIBRARY_BOOK_SUMMARY_INVALID_${field}`));
+    }
+  });
+}

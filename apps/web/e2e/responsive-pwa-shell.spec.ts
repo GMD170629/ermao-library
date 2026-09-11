@@ -1519,3 +1519,25 @@ test('desktop book list opens details from both the cover and title', async ({ p
   await page.goto('/library');
   await expect(page.getByTestId('book-list-mobile-card').first().getByRole('button', { name: /管理《/ })).toBeVisible();
 });
+
+test('all-books displays books without covers in bookshelf and management views', async ({ page }) => {
+  await page.route('**/api/books?**', async (route) => {
+    await route.fulfill({ json: { ok: true, data: {
+      books: [{
+        id: 'book-without-cover', title: '暂无封面的图书', author: null,
+        coverUrl: '', coverStatus: 'PENDING', progress: 0, statusValue: 'UNREAD',
+        resourceImportSummary: { ready: 1, pending: 0, failed: 0 }
+      }], total: 1, page: 1, pageSize: 50, totalPages: 1
+    } } });
+  });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/library');
+  const shelves = page.getByTestId('library-book-bookshelves');
+  await expect(shelves.locator('[data-book-cover="true"]')).toHaveCount(1);
+  await expect(shelves.getByAltText('暂无封面的图书的缺省封面')).toBeVisible();
+  await page.getByRole('button', { name: '管理图书', exact: true }).click();
+  const table = page.getByTestId('book-list-desktop-table');
+  await expect(table.getByText('暂无封面的图书', { exact: true })).toBeVisible();
+  await expect(table.getByAltText('暂无封面的图书的缺省封面')).toBeVisible();
+  await expect(page.getByText('LIBRARY_BOOK_SUMMARY_INVALID_coverUrl')).toHaveCount(0);
+});

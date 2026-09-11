@@ -56,6 +56,13 @@ function optionalString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
 }
 
+function parseCoverUrl(value: unknown): string {
+  if (typeof value !== 'string') {
+    throw new Error('LIBRARY_BOOK_SUMMARY_INVALID_coverUrl');
+  }
+  return value;
+}
+
 function finiteNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
@@ -83,7 +90,7 @@ function mapBookshelfBook(value: unknown): BookshelfBookSummary {
     id: requiredString(item.id, 'id'),
     title: requiredString(item.title, 'title'),
     author: optionalString(item.author),
-    coverUrl: requiredString(item.coverUrl, 'coverUrl'),
+    coverUrl: parseCoverUrl(item.coverUrl),
     resourceImportSummary: parseResourceImportSummary(item.resourceImportSummary),
     progress: progressPercent(item.progress)
   };
@@ -102,7 +109,7 @@ function mapManagementBook(value: unknown): ManagementBookSummary {
     author: optionalString(item.author),
     gradient: optionalString(item.gradient) ?? '',
     coverStatus: requiredString(item.coverStatus, 'coverStatus'),
-    coverUrl: requiredString(item.coverUrl, 'coverUrl'),
+    coverUrl: parseCoverUrl(item.coverUrl),
     seriesName: optionalString(item.seriesName),
     tags: Array.isArray(item.tags)
       ? item.tags.filter((tag): tag is string => typeof tag === 'string')

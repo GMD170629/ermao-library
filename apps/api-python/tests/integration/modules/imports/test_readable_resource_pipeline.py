@@ -7,6 +7,7 @@ import os
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 from sqlalchemy import func, select
@@ -1425,3 +1426,64 @@ def test_failed_asset_finishes_book_and_retry_identifies_new_revision(
         assert metadata.processed_revision > old_revision
         assert metadata.metadata_state == "COMPLETED"
     engine.dispose()
+
+
+@pytest.mark.parametrize("retry_failed", [False, True])
+def test_comic_import_creates_metadata_before_page_navigation(
+    tmp_path: Path, retry_failed: bool
+) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            archive = root / "comic.zip"
+            with ZipFile(archive, "w") as comic:
+                comic.writestr("01.png", b"page payload is not read during inspection")
+                comic.writestr("02.png", b"page payload is not read during inspection")
+            db.commit()
+            real_adapters = build_readable_resource_pipeline(db).adapters
+            pipeline, _ = _pipeline(
+                db, adapters=StubFailOnceAdapter({"comic.zip"}) if retry_failed else real_adapters
+            )
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            outcomes = _drain(pipeline)
+            if retry_failed:
+                assert "failed" in outcomes
+                failed = db.scalar(select(LibraryImportTask).where(
+                    LibraryImportTask.kind == "IMPORT_ASSET",
+                    LibraryImportTask.state == "FAILED",
+                ))
+                assert failed is not None
+                assert db.scalar(select(LibraryReadableResourceMetadata)) is None
+                pipeline.queue.requeue_failed_task(failed.id)
+                db.commit()
+                pipeline, _ = _pipeline(db, adapters=real_adapters)
+                outcomes = _drain(pipeline)
+            assert "ok" in outcomes
+            assert "failed" not in outcomes
+            db.expire_all()
+            resource = db.scalar(select(LibraryReadableResource))
+            assert resource is not None and resource.import_state == "READY"
+            metadata = db.get(LibraryReadableResourceMetadata, resource.id)
+            assert metadata is not None and metadata.page_count == 2
+            units = db.scalars(select(ReadableResourceNavigationUnit).where(
+                ReadableResourceNavigationUnit.resource_id == resource.id
+            )).all()
+            assert len(units) == 2
+            assert all(unit.unit_type == "page" for unit in units)
+
+            # A changed archive replaces navigation rather than duplicating pages.
+            with ZipFile(archive, "w") as comic:
+                comic.writestr("01.png", b"changed archive with one page")
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            outcomes = _drain(pipeline)
+            assert "ok" in outcomes
+            assert "failed" not in outcomes
+            db.expire_all()
+            assert metadata.page_count == 1
+            assert db.scalar(select(func.count()).select_from(
+                ReadableResourceNavigationUnit
+            ).where(ReadableResourceNavigationUnit.resource_id == resource.id)) == 1
+    finally:
+        engine.dispose()
