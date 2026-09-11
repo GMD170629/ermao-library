@@ -81,7 +81,8 @@ def test_directory_inspector_passes_resource_directory_to_sidecar_reader(
         resource_path=resource,
         source_format=source_format,
     )
-    assert path_only.metadata.title == resource.name
+    assert path_only.metadata.title == "图片目录 Images"
+    assert path_only.metadata.author == "01"
     assert dict(path_only.field_sources)["title"] == "PATH"
     seen: list[tuple[Path, bool]] = []
 
@@ -106,5 +107,5 @@ def test_directory_inspector_passes_resource_directory_to_sidecar_reader(
     assert resolved.metadata.title == "旁车标题"
     assert dict(resolved.field_sources)["title"] == "SIDECAR_OPF"
     assert resolved.metadata.authors == (
-        ("作者",) if source_format == "AUDIOBOOK_DIR" else ()
+        ("作者",) if source_format == "AUDIOBOOK_DIR" else ("01",)
     )

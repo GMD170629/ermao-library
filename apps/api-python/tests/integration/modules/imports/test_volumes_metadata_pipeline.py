@@ -309,3 +309,40 @@ def test_completed_book_uses_configured_priority_and_counts_failed_volumes(
             assert not repository.still_current(snapshot)
     finally:
         engine.dispose()
+
+
+def test_multi_volume_comic_identifies_bracketed_directory_title_and_author(tmp_path: Path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    root = tmp_path / "library"
+    folder = root / "[在超市后门吸烟的二人][地主][Vol.01-Vol.07][东立][电子版]"
+    folder.mkdir(parents=True)
+    for index in (1, 7):
+        with ZipFile(folder / f"Vol.{index:02d}.cbz", "w") as archive:
+            archive.writestr("001.png", _png((1, 2, 3)))
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            db.add(Library(
+                id="lib", name="Library", root_path=str(root),
+                organization_mode="VOLUMES", min_file_size_bytes=0,
+            ))
+            db.commit()
+            pipeline = build_readable_resource_pipeline(db, settings)
+            pipeline.continue_import.execute(ContinueLibraryImport("lib"))
+            worker = build_readable_resource_worker(pipeline)
+            outcomes = []
+            for _ in range(10):
+                outcome = worker.process_once()
+                if outcome == "idle":
+                    break
+                outcomes.append(outcome)
+            assert outcomes.count("ok") == 2
+            assert outcomes.count("identified") == 1
+            metadata = db.scalar(select(LibraryBookMetadata))
+            assert metadata is not None
+            assert metadata.metadata_state == "COMPLETED"
+            assert metadata.title == "在超市后门吸烟的二人"
+            assert metadata.author == "地主"
+    finally:
+        engine.dispose()
