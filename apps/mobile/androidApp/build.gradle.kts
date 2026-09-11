@@ -24,6 +24,20 @@ android {
         localeFilters += setOf("en", "zh-rCN")
     }
 
+    buildTypes {
+        create("beta") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".beta"
+            val buildNumber = providers.gradleProperty("betaBuildNumber").orElse("1").get().toInt()
+            require(buildNumber in 1..2_099_899_999) { "Invalid betaBuildNumber" }
+            versionNameSuffix = "-beta.$buildNumber"
+            isDebuggable = false
+            ndk.abiFilters += listOf("arm64-v8a", "x86_64")
+            signingConfig = null // CI signs the verified artifact with the persistent beta key.
+            matchingFallbacks += "release"
+        }
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true
@@ -44,6 +58,10 @@ android {
         )
         res.directories.add(layout.buildDirectory.dir("generated/brand-res").get().asFile.absolutePath)
         assets.directories.add(layout.buildDirectory.dir("generated/reader-assets").get().asFile.absolutePath)
+    }
+
+    sourceSets.named("beta") {
+        kotlin.directories.add("src/release/kotlin")
     }
 
     sourceSets.named("test") {
@@ -82,6 +100,15 @@ android {
     lint {
         abortOnError = true
         warningsAsErrors = true
+    }
+}
+
+androidComponents {
+    onVariants(selector().withBuildType("beta")) { variant ->
+        val buildNumber = providers.gradleProperty("betaBuildNumber").orElse("1").map(String::toInt)
+        variant.outputs.forEach { output ->
+            output.versionCode.set(buildNumber.map { 100_000 + it })
+        }
     }
 }
 

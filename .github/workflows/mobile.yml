@@ -31,6 +31,9 @@ on:
       - 'docs/testing/test-execution-policy.md'
       - 'docs/manual-acceptance.md'
       - '.github/workflows/mobile.yml'
+      - 'scripts/*android-beta*'
+      - 'apps/web/public/brand/ermao-library-app-icon-v1.png'
+      - 'apps/web/public/fonts/reader/android-legacy/**'
   push:
     branches:
       - develop
@@ -64,6 +67,9 @@ on:
       - 'docs/testing/test-execution-policy.md'
       - 'docs/manual-acceptance.md'
       - '.github/workflows/mobile.yml'
+      - 'scripts/*android-beta*'
+      - 'apps/web/public/brand/ermao-library-app-icon-v1.png'
+      - 'apps/web/public/fonts/reader/android-legacy/**'
   workflow_dispatch:
     inputs:
       run_full_android_regression:
@@ -77,7 +83,8 @@ permissions:
 
 concurrency:
   group: mobile-stage-1-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a develop run while it may be updating the beta Release.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/develop' }}
 
 jobs:
   backend-contract:
@@ -219,6 +226,20 @@ jobs:
             :androidApp:lintDebug \
             :androidApp:assembleDebug
 
+      - name: Check beta publishing policy
+        run: node --test ../../scripts/android-beta-release.test.mjs
+
+      - name: Assemble and lint unsigned beta
+        run: ./gradlew --stacktrace :androidApp:assembleBeta :androidApp:lintBeta -PbetaBuildNumber=${{ github.run_number }}
+
+      - name: Upload unsigned beta for this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-beta-unsigned
+          path: apps/mobile/androidApp/build/outputs/apk/beta/*.apk
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Verify executable KMP Reader safety report
         run: |
           python3 ../../packages/reader-contracts/verify-reader-safety-conformance.py \
@@ -237,6 +258,51 @@ jobs:
             apps/mobile/shared/build/test-results/*/*.xml
             apps/mobile/shared/build/reports/reader-safety-conformance/*.json
           if-no-files-found: warn
+
+  publish-android-beta:
+    name: Publish Android beta
+    needs: [backend-contract, android, android-emulator]
+    if: github.ref == 'refs/heads/develop' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: android-beta-release
+      cancel-in-progress: false
+    steps:
+      - name: Check out tested revision
+        uses: actions/checkout@v6
+
+      - name: Download this run's unsigned beta
+        uses: actions/download-artifact@v4
+        with:
+          name: android-beta-unsigned
+          path: unsigned-beta
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install signing tools
+        run: sdkmanager 'build-tools;36.0.0'
+
+      - name: Sign and verify beta APK
+        env:
+          BETA_KEYSTORE_BASE64: ${{ secrets.BETA_KEYSTORE_BASE64 }}
+          BETA_KEYSTORE_PASSWORD: ${{ secrets.BETA_KEYSTORE_PASSWORD }}
+          BETA_KEY_ALIAS: ${{ secrets.BETA_KEY_ALIAS }}
+          BETA_KEY_PASSWORD: ${{ secrets.BETA_KEY_PASSWORD }}
+        run: bash scripts/sign-android-beta.sh unsigned-beta dist/android-beta
+
+      - name: Update Android beta prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/publish-android-beta.mjs dist/android-beta
 
   android-emulator:
     name: Android emulator smoke and safety conformance
