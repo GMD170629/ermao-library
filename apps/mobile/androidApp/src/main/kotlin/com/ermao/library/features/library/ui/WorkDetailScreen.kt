@@ -984,7 +984,7 @@ private fun WorkIdentityText(
                         "COMPLETED" -> when (content.metadataOnlineState) {
                             "PENDING", "RUNNING", "RETRY" -> R.string.book_metadata_online
                             "FAILED" -> R.string.book_metadata_online_failed
-                            else -> R.string.book_metadata_completed
+                            else -> null
                         }
                         else -> null
                     }

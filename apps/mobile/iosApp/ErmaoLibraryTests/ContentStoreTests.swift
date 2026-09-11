@@ -326,6 +326,132 @@ final class ContentStoreTests: XCTestCase {
         )
     }
 
+    func testLibraryRefreshKeepsVisibleContentWhenCancelled() async throws {
+        let client = RefreshContentClient()
+        let store = LibraryStore(context: contentContext, client: client, onUnauthorized: {})
+        store.reload()
+        try await waitUntil { await client.bookCount == 1 }
+        await client.finishBooks(0)
+        try await waitUntil { if case .ready = store.current.results { return true }; return false }
+        let refresh = Task { await store.refresh() }
+        try await waitUntil { await client.hasRequests(options: 1, books: 2) }
+        guard case .ready = store.current.results else {
+            return XCTFail("Refreshing must keep the visible list")
+        }
+        refresh.cancel()
+        await client.finishOptions(0, options: [])
+        await client.finishBooks(1)
+        await refresh.value
+        guard case .ready = store.current.results else {
+            return XCTFail("Cancelling refresh must keep the visible list")
+        }
+    }
+
+    func testLibraryRefreshRecoversFailedOptionsAndWaitsForBothRequests() async throws {
+        let client = RefreshContentClient()
+        let store = LibraryStore(context: contentContext, client: client, onUnauthorized: {})
+        let initialOptions = Task { await store.loadLibraryOptionsIfNeeded() }
+        defer { initialOptions.cancel() }
+        try await waitUntil { await client.optionCount == 1 }
+        await client.finishOptions(0, error: .offline)
+        var finished = false
+        let refresh = Task { await store.refresh(); finished = true }
+        try await waitUntil { await client.hasRequests(options: 2, books: 1 )}
+        await client.finishBooks(0)
+        try await waitUntil { if case .ready = store.current.results { return true }; return false }
+        XCTAssertFalse(finished)
+        await client.finishOptions(1, options: [LibrarySourceOption(id: "comic", name: "漫画")])
+        await refresh.value
+        XCTAssertTrue(finished)
+        XCTAssertEqual(store.libraryOptions.map(\.id), ["comic"])
+    }
+
+    func testLibraryRefreshUpdatesLoadedOptionsAndPreservesQuery() async throws {
+        let client = RefreshContentClient()
+        let store = LibraryStore(context: contentContext, client: client, onUnauthorized: {})
+        let initialOptions = Task { await store.loadLibraryOptionsIfNeeded() }
+        defer { initialOptions.cancel() }
+        try await waitUntil { await client.optionCount == 1 }
+        await client.finishOptions(0, options: [LibrarySourceOption(id: "old", name: "旧库"), LibrarySourceOption(id: "keep", name: "旧名")])
+        try await waitUntil { store.libraryOptions.count == 2 }
+        store.setQuery("keyword")
+        store.applyFilters(LibraryFilters(readingStatus: .reading))
+        try await waitUntil { await client.bookCount >= 1 }
+        // Let the existing search debounce settle before measuring the refresh.
+        try await Task.sleep(for: .milliseconds(350))
+        let previousCount = await client.bookCount
+        for index in 0..<previousCount { await client.finishBooks(index) }
+        let refresh = Task { await store.refresh() }
+        try await waitUntil { await client.hasRequests(options: 2, books: previousCount + 1 )}
+        let query = await client.queries[previousCount]
+        XCTAssertEqual(query.query, "keyword")
+        XCTAssertEqual(query.filters.readingStatus, .reading)
+        XCTAssertEqual(query.sort, .recentAdded)
+        XCTAssertEqual(query.page, 1)
+        await client.finishOptions(1, options: [LibrarySourceOption(id: "keep", name: "新名"), LibrarySourceOption(id: "new", name: "新库")])
+        await client.finishBooks(previousCount)
+        await refresh.value
+        XCTAssertEqual(store.libraryOptions.map(\.name), ["新名", "新库"])
+    }
+
+    func testLibraryRefreshFailuresKeepIndependentSuccessfulState() async throws {
+        let client = RefreshContentClient()
+        let store = LibraryStore(context: contentContext, client: client, onUnauthorized: {})
+        let first = Task { await store.refresh() }
+        try await waitUntil { await client.hasRequests(options: 1, books: 1 )}
+        await client.finishOptions(0, options: [LibrarySourceOption(id: "comic", name: "漫画")])
+        await client.finishBooks(0, error: .offline)
+        await first.value
+        XCTAssertEqual(store.libraryOptions.map(\.id), ["comic"])
+        let second = Task { await store.refresh() }
+        try await waitUntil { await client.hasRequests(options: 2, books: 2 )}
+        await client.finishOptions(1, error: .offline)
+        await client.finishBooks(1)
+        await second.value
+        XCTAssertEqual(store.libraryOptions.map(\.id), ["comic"])
+        guard case .ready = store.current.results else { return XCTFail("Books must refresh independently") }
+    }
+
+    func testLibraryRefreshRejectsOldOptions() async throws {
+        let client = RefreshContentClient()
+        let store = LibraryStore(context: contentContext, client: client, onUnauthorized: {})
+        let initialOptions = Task { await store.loadLibraryOptionsIfNeeded() }
+        defer { initialOptions.cancel() }
+        try await waitUntil { await client.optionCount == 1 }
+        let refresh = Task { await store.refresh() }
+        try await waitUntil { await client.hasRequests(options: 2, books: 1 )}
+        await client.finishOptions(1, options: [LibrarySourceOption(id: "new", name: "新库")])
+        await client.finishBooks(0)
+        await refresh.value
+        await client.finishOptions(0, options: [LibrarySourceOption(id: "old", name: "旧库")])
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(store.libraryOptions.map(\.id), ["new"])
+        let cancelled = await client.cancelledOptions
+        XCTAssertEqual(cancelled, 0)
+    }
+
+    func testLibraryRefreshRemovedSelectionReloadsAllAndRejectsOldFailure() async throws {
+        let client = RefreshContentClient()
+        let store = LibraryStore(context: contentContext, client: client, onUnauthorized: {})
+        store.selectLibrary("removed")
+        try await waitUntil { await client.bookCount == 1 }
+        await client.finishBooks(0)
+        var finished = false
+        let refresh = Task { await store.refresh(); finished = true }
+        try await waitUntil { await client.hasRequests(options: 1, books: 2 )}
+        await client.finishOptions(0, options: [])
+        try await waitUntil { await client.bookCount == 3 }
+        XCTAssertNil(store.selectedLibraryID)
+        let query = await client.queries[2]
+        XCTAssertNil(query.libraryID)
+        await client.finishBooks(2)
+        try await waitUntil { if case .ready = store.current.results { return true }; return false }
+        XCTAssertFalse(finished)
+        await client.finishBooks(1, error: .offline)
+        await refresh.value
+        guard case .ready = store.current.results else { return XCTFail("All-library result must win") }
+    }
+
     func testLibraryScopesKeepIndependentQueriesAndFilters() async {
         let client = ContentClientStub()
         let store = LibraryStore(
@@ -1331,4 +1457,57 @@ private func work(_ id: String) -> BookCard {
         cover: nil,
         progress: nil
     )
+}
+
+private actor RefreshContentClient: ContentClient {
+    func fetchContinueReading(context: ContentRequestContext) async throws -> ContinueReadingItem? { nil }
+    func fetchRecentReading(context: ContentRequestContext, limit: Int) async throws -> [BookCard] { [] }
+    func fetchRecentAdded(context: ContentRequestContext, limit: Int) async throws -> [BookCard] { [] }
+    private(set) var queries: [BooksQuery] = []
+    private var bookContinuations: [Int: CheckedContinuation<BookPage, Error>] = [:]
+    private var optionContinuations: [Int: CheckedContinuation<[LibrarySourceOption], Error>] = [:]
+    private(set) var optionCount = 0
+    private(set) var cancelledOptions = 0
+    var bookCount: Int { queries.count }
+    func hasRequests(options: Int, books: Int) -> Bool { optionCount == options && queries.count == books }
+
+    func fetchLibraryOptions(context: ContentRequestContext) async throws -> [LibrarySourceOption] {
+        let index = optionCount
+        optionCount += 1
+        let result: [LibrarySourceOption] = try await withCheckedThrowingContinuation { optionContinuations[index] = $0 }
+        if Task.isCancelled { cancelledOptions += 1 }
+        return result
+    }
+    func fetchBooks(context: ContentRequestContext, query: BooksQuery) async throws -> BookPage {
+        let index = queries.count
+        queries.append(query)
+        return try await withCheckedThrowingContinuation { bookContinuations[index] = $0 }
+    }
+    func finishOptions(_ index: Int, options: [LibrarySourceOption] = [], error: ContentClientError? = nil) {
+        guard let continuation = optionContinuations.removeValue(forKey: index) else { return }
+        if let error { continuation.resume(throwing: error) } else { continuation.resume(returning: options) }
+    }
+    func finishBooks(_ index: Int, error: ContentClientError? = nil) {
+        guard let continuation = bookContinuations.removeValue(forKey: index) else { return }
+        if let error { continuation.resume(throwing: error) } else {
+            continuation.resume(returning: BookPage(books: [work("fresh")], page: 1, pageSize: 24, total: 1, totalPages: 1))
+        }
+    }
+    func fetchGroupings(context: ContentRequestContext, query: GroupingsQuery) async throws -> GroupingPage {
+        GroupingPage(groups: [], page: query.page, pageSize: query.pageSize, total: 0, totalPages: 1)
+    }
+    func fetchFacet(context: ContentRequestContext, query: FacetQuery) async throws -> FacetPage {
+        FacetPage(
+            facet: FacetIdentity(id: query.facetID, kind: query.kind, name: "Facet"),
+            books: [],
+            page: query.page,
+            pageSize: query.pageSize,
+            total: 0,
+            totalPages: 1
+        )
+    }
+    func fetchBookDetail(context: ContentRequestContext, query: BookDetailQuery) async throws -> BookDetailContent {
+        throw ContentClientError.inaccessible
+    }
+    func fetchCoverData(context: ContentRequestContext, reference: CoverReference) async throws -> Data { Data() }
 }

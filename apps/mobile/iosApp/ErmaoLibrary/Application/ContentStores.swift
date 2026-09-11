@@ -172,6 +172,7 @@ final class LibraryStore: ObservableObject {
     private let onUnauthorized: @MainActor () -> Void
     private let discoveryRuntime = ErmaoShared.LibraryDiscoveryRuntime()
     private var searchTask: Task<Void, Never>?
+    private var libraryOptionsGeneration = UUID()
 
     init(
         context: ContentRequestContext,
@@ -202,22 +203,25 @@ final class LibraryStore: ObservableObject {
         reload()
     }
 
-    func loadLibraryOptionsIfNeeded() {
+    func loadLibraryOptionsIfNeeded() async {
         guard libraryOptions.isEmpty else { return }
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                let options = try await client.fetchLibraryOptions(context: context)
-                libraryOptions = options
-                if let selectedLibraryID, !options.contains(where: { $0.id == selectedLibraryID }) {
-                    self.selectedLibraryID = nil
-                    reload()
-                }
-            } catch ContentClientError.unauthorized {
-                onUnauthorized()
-            } catch {
-                // The unfiltered library remains usable if source labels cannot be loaded.
+        await loadLibraryOptions()
+    }
+
+    private func loadLibraryOptions() async {
+        let generation = UUID()
+        libraryOptionsGeneration = generation
+        do {
+            let options = try await client.fetchLibraryOptions(context: context)
+            guard !Task.isCancelled, libraryOptionsGeneration == generation else { return }
+            libraryOptions = options
+            if let selectedLibraryID, !options.contains(where: { $0.id == selectedLibraryID }) {
+                self.selectedLibraryID = nil
+                await refreshContent()
             }
+        } catch {
+            guard !Task.isCancelled, libraryOptionsGeneration == generation else { return }
+            if case ContentClientError.unauthorized = error { onUnauthorized() }
         }
     }
 
@@ -301,8 +305,16 @@ final class LibraryStore: ObservableObject {
         }
     }
 
-    func refresh() {
-        revalidate(selectedScope)
+    func refreshContent() async {
+        let scope = selectedScope
+        let token = discoveryRuntime.beginInitialRequest(scope: sharedScope(scope))
+        await load(scope: scope, page: 1, token: token)
+    }
+
+    func refresh() async {
+        async let options: Void = loadLibraryOptions()
+        async let content: Void = refreshContent()
+        _ = await (options, content)
     }
 
     func refreshAfterManagement() {
@@ -336,6 +348,13 @@ final class LibraryStore: ObservableObject {
     }
 
     private func revalidate(_ scope: LibraryScope) {
+        let token = prepareRevalidation(scope)
+        Task { [weak self] in
+            await self?.load(scope: scope, page: 1, token: token)
+        }
+    }
+
+    private func prepareRevalidation(_ scope: LibraryScope) -> ErmaoShared.LibraryRequestToken {
         update(scope) {
             $0.results = .loading
             $0.loadedPage = 0
@@ -344,10 +363,7 @@ final class LibraryStore: ObservableObject {
             $0.hasPaginationError = false
             $0.paginationRequestKey = nil
         }
-        let token = discoveryRuntime.beginInitialRequest(scope: sharedScope(scope))
-        Task { [weak self] in
-            await self?.load(scope: scope, page: 1, token: token)
-        }
+        return discoveryRuntime.beginInitialRequest(scope: sharedScope(scope))
     }
 
     func loadNextPageIfNeeded(visibleItemID: String) {
@@ -404,12 +420,13 @@ final class LibraryStore: ObservableObject {
         guard let state = scopeStates[scope] else { return }
         do {
             let response = try await fetch(scope: scope, state: state, page: page)
-            guard discoveryRuntime.acceptPage(
+            guard !Task.isCancelled, discoveryRuntime.acceptPage(
                 token: token,
                 isEmpty: response.isEmpty
             ) else { return }
             apply(response, scope: scope, page: page)
         } catch {
+            guard !Task.isCancelled, discoveryRuntime.fail(token: token, errorCode: "CONTENT_LOAD_FAILED") else { return }
             if case ContentClientError.unauthorized = error {
                 discoveryRuntime.beginPermissionRevalidation()
                 scopeStates = scopeStates.mapValues { state in
@@ -432,14 +449,12 @@ final class LibraryStore: ObservableObject {
                 return
             }
             if page > 1 {
-                _ = discoveryRuntime.fail(token: token, errorCode: "CONTENT_LOAD_FAILED")
                 update(scope) {
                     $0.isLoadingNextPage = false
                     $0.hasPaginationError = true
                     $0.paginationRequestKey = nil
                 }
-            } else {
-                _ = discoveryRuntime.fail(token: token, errorCode: "CONTENT_LOAD_FAILED")
+            } else if state.readyItems == nil {
                 update(scope) { $0.results = .failure }
             }
         }

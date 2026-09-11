@@ -670,7 +670,6 @@
     <string name="book_metadata_failed">Book information identification failed</string>
     <string name="book_metadata_online">Looking up book information online</string>
     <string name="book_metadata_online_failed">Online lookup failed; local information was retained</string>
-    <string name="book_metadata_completed">Book information updated</string>
     <string name="book_metadata_partial_import">Some files failed to import; available content was retained</string>
     <string name="download_selection_hint">Select volumes to download</string>
 </resources>

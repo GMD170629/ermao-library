@@ -593,7 +593,7 @@ struct WorkDetailView: View {
         currentDetail?.metadataPending == true || ["PENDING", "RUNNING", "RETRY"].contains(currentDetail?.metadataOnlineState ?? "")
     }
 
-    private func metadataMessage(_ state: String, online: String?) -> String.LocalizationValue {
+    private func metadataMessage(_ state: String, online: String?) -> String.LocalizationValue? {
         switch state {
         case "WAITING_IMPORT": return "book.metadata.waiting.import"
         case "QUEUED": return "book.metadata.queued"
@@ -602,7 +602,7 @@ struct WorkDetailView: View {
         default:
             if ["PENDING", "RUNNING", "RETRY"].contains(online ?? "") { return "book.metadata.online" }
             if online == "FAILED" { return "book.metadata.online.failed" }
-            return "book.metadata.completed"
+            return nil
         }
     }
 
@@ -614,8 +614,9 @@ struct WorkDetailView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             creatorSeriesLine(detail)
-            if let metadataState = detail.metadataState {
-                Text(String(localized: metadataMessage(metadataState, online: detail.metadataOnlineState)))
+            if let metadataState = detail.metadataState,
+               let message = metadataMessage(metadataState, online: detail.metadataOnlineState) {
+                Text(String(localized: message))
                     .appTextStyle(.body)
             }
             if (detail.failedResourceImportCount ?? 0) > 0 || (detail.failedFileImportCount ?? 0) > 0 {

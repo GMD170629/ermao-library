@@ -655,7 +655,6 @@
     <string name="book_metadata_failed">图书信息识别失败</string>
     <string name="book_metadata_online">图书信息联网识别中</string>
     <string name="book_metadata_online_failed">联网识别失败，已保留本地信息</string>
-    <string name="book_metadata_completed">图书信息更新完成</string>
     <string name="book_metadata_partial_import">部分文件导入失败，已保留可用内容</string>
     <string name="download_selection_hint">请选择要下载的卷册</string>
 </resources>

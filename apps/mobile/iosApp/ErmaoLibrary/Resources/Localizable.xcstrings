@@ -13740,22 +13740,6 @@
         }
       }
     },
-    "book.metadata.completed": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Book information updated"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "图书信息更新完成"
-          }
-        }
-      }
-    },
     "book.metadata.partial.import": {
       "localizations": {
         "en": {

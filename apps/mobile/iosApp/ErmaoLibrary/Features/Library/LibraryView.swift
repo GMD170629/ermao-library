@@ -47,7 +47,7 @@ struct LibraryView: View {
             .padding(.horizontal, .space2)
             .padding(.bottom, .space4)
         }
-        .refreshable { store.refresh() }
+        .refreshable { await store.refresh() }
         .navigationTitle("tab.library")
         .navigationBarTitleDisplayMode(.large)
         .accessibilityIdentifier("library.screen")
@@ -73,8 +73,8 @@ struct LibraryView: View {
         .appCanvas()
         .onChange(of: managementRevision, initial: true) { _, _ in guard managementRevision > 0 else { return }; store.refreshAfterManagement() }
         .task {
-            store.loadLibraryOptionsIfNeeded()
             store.reloadIfNeeded()
+            await store.loadLibraryOptionsIfNeeded()
         }
     }
 
@@ -410,7 +410,7 @@ struct WorkCollectionView: View {
         }
         .navigationTitle(kind == .recentReading ? "home.recentReading.title" : "home.recentAdded.title")
         .navigationBarTitleDisplayMode(.inline)
-        .refreshable { store.refresh() }
+        .refreshable { await store.refreshContent() }
         .appCanvas()
         .task {
             store.setSort(kind == .recentReading ? .recentRead : .recentAdded)
