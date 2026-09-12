@@ -1105,7 +1105,6 @@
   "删除分类失败": "Failed to delete category",
   "删除合集": "Delete collection",
   "删除合集“{value0}”？": "Delete the collection “{value0}”?",
-  "删除确认不能为空": "Deletion confirmation cannot be empty",
   "删除失败": "Failed to delete",
   "删除书架": "Remove shelf",
   "删除书架“{value0}”？书架中的图书仍会保留在书库中。": "Delete the shelf {value0}? Books in the bookshelf will remain in the library.",
