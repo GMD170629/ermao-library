@@ -548,3 +548,27 @@ def test_manager_metadata_action_rejects_member_and_legacy_routes_stay_absent(
     assert "eventLogSizeBytes" in overview_data["cards"]
     assert "database" in overview_data["checks"]
     assert isinstance(overview_data["recentEvents"], list)
+
+
+def test_resource_delete_without_name_and_legacy_body(client, db_session) -> None:
+    _login(client, db_session)
+    for index, body in [(71, None), (72, {"confirmation": "old client title"})]:
+        _add_book(db_session, index=index)
+        db_session.commit()
+        kwargs = {} if body is None else {"json": body}
+        response = client.request("DELETE", f"/api/books/bulk-book-{index}/resources/bulk-resource-{index}/source", **kwargs)
+        assert response.status_code == 200, response.text
+        assert response.json()["data"]["deleted"] is True
+        db_session.expire_all()
+        assert db_session.get(LibraryReadableResource, f"bulk-resource-{index}") is None
+
+
+def test_resource_delete_preserves_book_resource_ownership_check(client, db_session) -> None:
+    _login(client, db_session)
+    _add_book(db_session, index=73)
+    _add_book(db_session, index=74)
+    db_session.commit()
+    response = client.request("DELETE", "/api/books/bulk-book-73/resources/bulk-resource-74/source")
+    assert response.status_code == 404
+    db_session.expire_all()
+    assert db_session.get(LibraryReadableResource, "bulk-resource-74") is not None

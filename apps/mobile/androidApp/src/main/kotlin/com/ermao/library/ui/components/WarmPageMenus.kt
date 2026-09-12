@@ -328,6 +328,7 @@ fun WarmPageMenuItem(
     selected: Boolean? = null,
     enabled: Boolean = true,
     destructive: Boolean = false,
+    loading: Boolean = false,
 ) {
     val theme = WarmPageThemeValues
     val foreground = when {
@@ -352,7 +353,14 @@ fun WarmPageMenuItem(
                 }
             }
         } else null,
-        trailingIcon = if (selected != null) {
+        trailingIcon = if (loading) {
+            {
+                androidx.compose.material3.CircularProgressIndicator(
+                    modifier = Modifier.size(theme.components.menu.iconSlotSize),
+                    color = theme.colors.textSecondary,
+                )
+            }
+        } else if (selected != null) {
             {
                 Box(Modifier.size(theme.components.menu.iconSlotSize), contentAlignment = Alignment.Center) {
                     if (selected) {

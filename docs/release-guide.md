@@ -46,3 +46,8 @@ The mutable `android-beta` prerelease is never Latest and does not update stable
 该脚本当前覆盖根/Web/reader-core/reader-contracts/readium-web-poc 包版本、Python 包与运行时、service-worker 资源版本、uv lock 元数据，以及 Android `versionName`、iOS `MARKETING_VERSION`。保持这份实际覆盖范围，不因宿主构建分工排除另一端版本。涉及的其他锁文件或产物元数据变化也需一致；以现有脚本与本次发布流程为执行入口，不在普通修复中顺手升级版本。
 
 发布说明遵循现有脚本的双语文档与索引契约；GitHub Release 填写简短且有实际用户价值的修复/改进摘要，禁止空说明或只留自动生成列表。创建 tag 前完成版本来源同步与校验，发布前完成最终门禁；不得发布仍有版本冲突或实际验收阻塞的 RC。
+
+
+### 图书／卷册单次删除确认兼容顺序
+
+发布取消名称输入确认的客户端前，先部署后端卷册源文件删除接口调整：`DELETE /api/books/{book_id}/resources/{resource_id}/source` 不再要求请求体，旧客户端发送的 `confirmation` 字段可继续接受，但不参与名称校验。随后发布 Web、Android 和 iOS 客户端；新版客户端不再发送该字段。整本图书删除仍保留固定协议值 `DELETE_SOURCE_FILES`，权限、资源归属、幂等处理和实际删除范围不变，无数据库迁移。

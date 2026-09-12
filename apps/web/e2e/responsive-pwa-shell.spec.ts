@@ -322,12 +322,24 @@ test('book detail resource covers support selection, keyboard-accessible context
     combinator: 'ALL',
     conditions: [{ field: 'tag', operator: 'equals', value: '奇幻' }]
   });
+  let deletionRequests = 0;
+  page.on('request', (request) => {
+    if (request.url().includes('/delete-sources') || (request.method() === 'DELETE' && request.url().endsWith('/source'))) deletionRequests++;
+  });
   const topBookActions = page.getByRole('button', { name: '管理图书 右键菜单测试图书', exact: true });
   await topBookActions.click();
   const topBookMenu = page.getByRole('menu', { name: '管理图书' });
   await expect(topBookMenu.getByRole('menuitem')).toHaveCount(6);
   await expect(topBookMenu.getByRole('menuitem')).toHaveText(['编辑', '重新生成图片', '设为已读', '识别', '重新扫描文件', '删除']);
   await expectMenuHorizontallyAlignedToAnchor(page, topBookActions, topBookMenu);
+  await topBookMenu.getByRole('menuitem', { name: '删除', exact: true }).click();
+  const bookDeletion = page.getByRole('dialog', { name: '删除图书和源文件' });
+  await expect(bookDeletion).toBeVisible();
+  await expect(bookDeletion.getByRole('textbox')).toHaveCount(0);
+  await expect(bookDeletion.getByRole('button', { name: '删除', exact: true })).toBeEnabled();
+  await bookDeletion.getByRole('button', { name: '取消' }).click();
+  expect(deletionRequests).toBe(0);
+  await topBookActions.click();
   await topBookMenu.getByRole('menuitem', { name: '编辑', exact: true }).click();
   const bookEditor = page.getByRole('dialog', { name: '编辑图书元数据' });
   const tagInput = bookEditor.getByRole('combobox', { name: '图书标签' });
@@ -418,6 +430,15 @@ test('book detail resource covers support selection, keyboard-accessible context
   await expect(cardMenu.getByRole('menuitem', { name: '识别', exact: true })).toBeVisible();
   await expect(cardMenu.getByRole('menuitem', { name: '发送到 Kindle', exact: true })).toBeVisible();
   await expect(cardMenu.getByRole('menuitem', { name: '永久删除源文件', exact: true })).toBeVisible();
+  await cardMenu.getByRole('menuitem', { name: '永久删除源文件', exact: true }).click();
+  const resourceDeletion = page.getByRole('dialog', { name: '永久删除源文件' });
+  await expect(resourceDeletion).toBeVisible();
+  await expect(resourceDeletion.getByRole('textbox')).toHaveCount(0);
+  await expect(resourceDeletion.getByRole('button', { name: '永久删除', exact: true })).toBeEnabled();
+  await resourceDeletion.getByRole('button', { name: '取消' }).click();
+  expect(deletionRequests).toBe(0);
+  await page.locator('[data-resource-card="true"]').filter({ hasText: '第一资源' }).hover();
+  await firstActions.click();
   await cardMenu.getByRole('menuitem', { name: '编辑', exact: true }).click();
   const resourceEditor = page.getByRole('dialog', { name: '编辑可读资源' });
   await expect(resourceEditor.getByRole('textbox', { name: '卷标题' })).toHaveValue('第一资源');

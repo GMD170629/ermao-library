@@ -5,6 +5,7 @@ import {
   applyRecognizedMetadata,
   assetDownloadUrl,
   deleteBookSources,
+  deleteResourceSource,
   fetchBook,
   fetchResourceDetail,
   mapBookView,
@@ -419,4 +420,21 @@ test('maps local identification and online failure independently from import fai
   assert.equal(book.metadataOnlineState, 'FAILED');
   assert.equal(book.resourceImportSummary.failed, 0);
   assert.equal(book.resourceImportSummary.failedFiles, 1);
+});
+
+
+test('resource deletion needs no typed confirmation and preserves idempotency', async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async (input, init) => {
+    calls++;
+    assert.equal(String(input), '/api/books/book-1/resources/resource-1/source');
+    assert.equal(init?.method, 'DELETE');
+    assert.equal(init?.body, undefined);
+    assert.ok(new Headers(init?.headers).get('Idempotency-Key'));
+    return new Response(JSON.stringify({ ok: true, data: {} }), { status: 200 });
+  };
+  try { await deleteResourceSource('book-1', 'resource-1'); }
+  finally { globalThis.fetch = originalFetch; }
+  assert.equal(calls, 1);
 });

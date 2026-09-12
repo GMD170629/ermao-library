@@ -10,7 +10,6 @@ BODY_OPERATIONS = (
     ("POST", "/api/books/import"),
     ("PATCH", "/api/books/book-id"),
     ("PATCH", "/api/books/book-id/resources/resource-id"),
-    ("DELETE", "/api/books/book-id/resources/resource-id/source"),
     ("POST", "/api/shelves"),
     ("PATCH", "/api/shelves/shelf-id"),
 )
@@ -22,7 +21,6 @@ def test_library_and_shelf_write_bodies_are_documented() -> None:
         ("post", "/api/books/import"),
         ("patch", "/api/books/{book_id}"),
         ("patch", "/api/books/{book_id}/resources/{resource_id}"),
-        ("delete", "/api/books/{book_id}/resources/{resource_id}/source"),
         ("post", "/api/shelves"),
         ("patch", "/api/shelves/{shelf_id}"),
     )
@@ -73,3 +71,23 @@ def test_missing_request_body_is_a_validation_error(
 
     expected_status = 400 if path == "/api/books/import" else 422
     assert response.status_code == expected_status, (method, path, response.text)
+
+
+@pytest.mark.parametrize("body", [None, {"confirmation": "old title"}, {"confirmation": ""}])
+@pytest.mark.parametrize("role, expected", [("admin", 404), ("member", 403), (None, 401)])
+def test_resource_delete_accepts_no_body_and_legacy_body_without_bypassing_access(
+    client, db_session, body, role, expected
+) -> None:
+    if role is not None:
+        db_session.add(User(id="delete-contract", email="delete-contract@example.com",
+                            name="Delete contract", password_hash=hash_password("starshipnas"), role=role))
+        db_session.commit()
+        assert client.post("/api/auth/login", json={"email": "delete-contract@example.com", "password": "starshipnas"}).status_code == 200
+    kwargs = {} if body is None else {"json": body}
+    response = client.request("DELETE", "/api/books/book-id/resources/resource-id/source", **kwargs)
+    assert response.status_code == expected, response.text
+
+
+def test_resource_delete_no_longer_requires_request_body() -> None:
+    operation = create_app().openapi()["paths"]["/api/books/{book_id}/resources/{resource_id}/source"]["delete"]
+    assert "requestBody" not in operation

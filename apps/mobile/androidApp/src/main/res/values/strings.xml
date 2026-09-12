@@ -601,10 +601,10 @@
     <string name="work_contents_open_children">Browse child content</string>
     <string name="management_open_actions">Manage %1$s</string>
     <string name="management_operation_failed">Operation failed. Check your input or connection and retry</string>
-    <string name="management_delete_book_warning">Permanently delete “%1$s”, its source files, resources and reading records. Enter its name to confirm. This cannot be undone.</string>
+    <string name="management_delete_book_warning">Permanently delete “%1$s”, its source files, resources and reading records. This cannot be undone.</string>
     <plurals name="management_delete_resource_warning">
-        <item quantity="one">Permanently delete %2$d source file associated with “%1$s”. Enter its name to confirm. This cannot be undone.</item>
-        <item quantity="other">Permanently delete %2$d source files associated with “%1$s”. Enter its name to confirm. This cannot be undone.</item>
+        <item quantity="one">Permanently delete %2$d source file associated with “%1$s”. This cannot be undone.</item>
+        <item quantity="other">Permanently delete %2$d source files associated with “%1$s”. This cannot be undone.</item>
     </plurals>
     <string name="management_tags_lines">One tag per line. Tag text is preserved</string>
     <string name="management_providers_retry">No available providers. Tap to reload</string>
@@ -672,4 +672,5 @@
     <string name="book_metadata_online_failed">Online lookup failed; local information was retained</string>
     <string name="book_metadata_partial_import">Some files failed to import; available content was retained</string>
     <string name="download_selection_hint">Select volumes</string>
+    <string name="management_delete_resource_pending_warning">Permanently delete the source files associated with “%1$s”. This cannot be undone.</string>
 </resources>

@@ -65,6 +65,9 @@ import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.swipe
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.unit.dp
 import com.ermao.library.ui.theme.WarmPageTheme
@@ -84,9 +87,30 @@ class BookManagementCoverTest {
         listOf(ManagementFieldValue(ManagementField.Title, "Volume two")), "", listOf(ManagedAsset("asset-two", "two.epub", "PRIMARY", "1 MB")))), null)
     private val targets = mutableListOf<ManagementTarget>()
     private var taps = 0
+    private var preparationGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+    private var actionGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+    private var failAction = false
+    private var actionCalls = 0
     private val repository = object : UnusedManagementRepository() {
+        private suspend fun immediate(): WorkManagementResult<Unit> {
+            actionCalls++
+            actionGate?.await()
+            return if (failAction) WorkManagementResult.Failure(WorkManagementError(WorkManagementErrorKind.Validation, "TEST_FAILED"))
+                else WorkManagementResult.Content(Unit)
+        }
+        override suspend fun regenerateBookImage(context: BookManagementContext, bookId: String) = immediate()
+        override suspend fun setBookReadingStatus(context: BookManagementContext, bookId: String, status: ManagedReadingStatus) = immediate()
+        override suspend fun rescanBook(context: BookManagementContext, sourceNodeId: String) = immediate()
+        override suspend fun deleteBook(context: BookManagementContext, bookId: String): WorkManagementResult<BookDeletionOutcome> {
+            actionCalls++
+            actionGate?.await()
+            return WorkManagementResult.Content(BookDeletionOutcome(listOf(bookId)))
+        }
+        override suspend fun deleteResourceSource(context: BookManagementContext, bookId: String, resourceId: String, idempotencyKey: String) = immediate()
+
         override suspend fun loadManagementSnapshot(context: BookManagementContext, target: ManagementTarget): WorkManagementResult<ManagementSnapshot> {
             targets += target
+            preparationGate?.await()
             return WorkManagementResult.Content(snapshot)
         }
     }
@@ -120,6 +144,71 @@ class BookManagementCoverTest {
                 }
             }
         }
+    }
+
+    @Test fun bookDeletionUsesOneConfirmationWithoutTyping() = assertSingleDeletion(resource = false)
+    @Test fun resourceDeletionUsesOneConfirmationWithoutTyping() = assertSingleDeletion(resource = true)
+
+    private fun assertSingleDeletion(resource: Boolean) {
+        preparationGate = kotlinx.coroutines.CompletableDeferred()
+        actionGate = kotlinx.coroutines.CompletableDeferred()
+        show(resource = resource)
+        compose.onNodeWithTag("cover-0").performTouchInput { longClick() }
+        compose.onNodeWithTag("management-action-Delete").performClick()
+        compose.onNodeWithTag("management-delete-confirmation").assertIsDisplayed()
+        compose.onNodeWithTag("management-menu").assertDoesNotExist()
+        compose.onAllNodes(hasSetTextAction()).assertCountEquals(0)
+        compose.onNodeWithTag("management-delete-submit").assertIsNotEnabled()
+        compose.runOnIdle { assertEquals(0, actionCalls) }
+        compose.onNodeWithText("Cancel").performClick()
+        compose.runOnIdle { preparationGate!!.complete(Unit) }
+        compose.onNodeWithTag("management-delete-confirmation").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(0, actionCalls) }
+        compose.onNodeWithTag("cover-0").performTouchInput { longClick() }
+        compose.onNodeWithTag("management-action-Delete").performClick()
+        compose.onNodeWithTag("management-delete-confirmation").assertIsDisplayed()
+        compose.onAllNodes(hasSetTextAction()).assertCountEquals(0)
+        saveScreenshot(if (resource) "resource-delete-single" else "book-delete-single")
+        compose.onNodeWithTag("management-delete-submit").performClick()
+        compose.onNodeWithTag("management-delete-submit").assertIsNotEnabled()
+        compose.runOnIdle { assertEquals(1, actionCalls); actionGate!!.complete(Unit) }
+        compose.onNodeWithTag("management-delete-confirmation").assertDoesNotExist()
+    }
+
+    @Test fun immediateActionsStayInMenuWhilePreparingAndExecuting() {
+        show()
+        for (action in listOf(ManagementAction.Regenerate, ManagementAction.ReadingStatus, ManagementAction.Rescan)) {
+            preparationGate = kotlinx.coroutines.CompletableDeferred()
+            actionGate = kotlinx.coroutines.CompletableDeferred()
+            compose.onNodeWithTag("cover-0").performTouchInput { longClick() }
+            compose.onNodeWithTag("management-action-${action.name}").performClick()
+            compose.onNodeWithTag("management-menu").assertIsDisplayed()
+            compose.onNodeWithText("Cancel").assertDoesNotExist()
+            compose.onNodeWithTag("management-action-${action.name}").assertIsNotEnabled()
+            compose.runOnIdle { preparationGate!!.complete(Unit) }
+            compose.waitForIdle()
+            compose.onNodeWithTag("management-menu").assertIsDisplayed()
+            compose.onNodeWithText("Cancel").assertDoesNotExist()
+            compose.onNodeWithTag("management-action-${action.name}").assertIsNotEnabled()
+            saveScreenshot("inline-${action.name}")
+            compose.runOnIdle { actionGate!!.complete(Unit) }
+            compose.waitForIdle()
+            compose.onNodeWithTag("management-menu").assertDoesNotExist()
+        }
+        compose.runOnIdle { assertEquals(3, actionCalls) }
+    }
+
+    @Test fun immediateFailureRetriesFromOriginalMenu() {
+        failAction = true
+        show()
+        compose.onNodeWithTag("cover-0").performTouchInput { longClick() }
+        compose.onNodeWithTag("management-action-Regenerate").performClick()
+        compose.onNodeWithTag("management-menu").assertIsDisplayed()
+        compose.onNodeWithText("Cancel").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(1, actionCalls); failAction = false }
+        compose.onNodeWithTag("management-action-Regenerate").performClick()
+        compose.onNodeWithTag("management-menu").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(2, actionCalls) }
     }
 
     @Test fun tapAndScrollKeepTheirOwnersWhileLongPressOpensMenu() {
@@ -175,8 +264,8 @@ class BookManagementCoverTest {
         compose.onNodeWithText("Edit").performClick()
         compose.runOnIdle { assertEquals("book", targets.single().id) }
         compose.onNodeWithText("Title").performTextReplacement("Changed title")
-        // Back is equivalent to dragging the sheet closed and keeps the form until confirmed.
-        compose.onNodeWithText("Cancel").performScrollTo().performClick()
+        // Header cancellation keeps a dirty form until discard is confirmed.
+        compose.onNodeWithText("Cancel").performClick()
         compose.onNodeWithText("Discard unsaved changes?").assertIsDisplayed()
         compose.onNodeWithText("Discard changes").performClick()
         compose.onNodeWithText("Changed title").assertDoesNotExist()
@@ -205,13 +294,16 @@ class BookManagementCoverTest {
             "保留当前封面", "移除独立封面", "从文件选择", "撤销封面修改").forEach {
             compose.onNodeWithText(it).assertDoesNotExist()
         }
+        compose.onNodeWithText(if (chinese) "保存" else "Save").assertIsDisplayed()
+        compose.onNodeWithText(if (chinese) "取消" else "Cancel").assertIsDisplayed()
         saveScreenshot(if (chinese) "book-editor-zh" else "book-editor-en")
         // Expand the native sheet before scrolling its form; scrolling content
         // alone does not move a partially expanded sheet to its expanded anchor.
         compose.onAllNodesWithText("Test book").onFirst().performTouchInput {
             swipe(start = center, end = Offset(center.x, -height * 12f))
         }
-        compose.onNodeWithText(if (chinese) "保存" else "Save").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(if (chinese) "保存" else "Save").assertIsDisplayed()
+        compose.onNodeWithText(if (chinese) "取消" else "Cancel").assertIsDisplayed()
         saveScreenshot(if (chinese) "book-editor-bottom-zh" else "book-editor-bottom-en")
     }
 
@@ -245,7 +337,7 @@ private open class UnusedManagementRepository : WorkManagementRepository {
     override suspend fun saveResourceFields(context: BookManagementContext, bookId: String, resourceId: String, fields: List<ManagementFieldValue>): WorkManagementResult<Unit> = error("Unexpected call: saveResourceFields")
     override suspend fun saveSourcePresentation(context: BookManagementContext, bookId: String, sourceNodeId: String, title: String, description: String): WorkManagementResult<Unit> = error("Unexpected call: saveSourcePresentation")
     override suspend fun regenerateBookImage(context: BookManagementContext, bookId: String): WorkManagementResult<Unit> = error("Unexpected call: regenerateBookImage")
-    override suspend fun deleteResourceSource(context: BookManagementContext, bookId: String, resourceId: String, confirmation: String, idempotencyKey: String): WorkManagementResult<Unit> = error("Unexpected call: deleteResourceSource")
+    override suspend fun deleteResourceSource(context: BookManagementContext, bookId: String, resourceId: String, idempotencyKey: String): WorkManagementResult<Unit> = error("Unexpected call: deleteResourceSource")
     override suspend fun applyRecognizedFields(context: BookManagementContext, target: ManagementTarget, candidate: MetadataCandidate, fields: List<RecognizedField>): WorkManagementResult<MetadataApplyOutcome> = error("Unexpected call: applyRecognizedFields")
     override suspend fun applyDirectoryMetadata(context: BookManagementContext, bookId: String, sourceNodeId: String, title: String, description: String): WorkManagementResult<Unit> = error("Unexpected call: applyDirectoryMetadata")
 

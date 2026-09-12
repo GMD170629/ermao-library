@@ -336,10 +336,6 @@ class UpdateResourceRequest(HttpContractModel):
     resource_index: float | None = Field(default=None, alias="resourceIndex")
 
 
-class ResourceSourceDeleteRequest(HttpContractModel):
-    confirmation: str
-
-
 class BooksPayload(HttpContractModel):
     books: list[BookView | BookshelfBookSummary | ManagementBookListSummary]
     page: int

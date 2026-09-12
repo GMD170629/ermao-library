@@ -91,8 +91,7 @@ export function BookActionController({
         title: '删除图书和源文件',
         description: t('将永久删除《{value0}》及其源文件、资源和阅读记录，此操作无法恢复。', { value0: currentRequest.target.title }),
         confirmLabel: '删除',
-        tone: 'danger',
-        confirmationText: currentRequest.target.title
+        tone: 'danger'
       });
       if (!confirmed) return;
     }

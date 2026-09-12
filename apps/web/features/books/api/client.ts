@@ -633,11 +633,10 @@ export async function uploadResourceCover(bookId: string, resourceId: string, co
   });
 }
 
-export async function deleteResourceSource(bookId: string, resourceId: string, confirmation: string): Promise<void> {
+export async function deleteResourceSource(bookId: string, resourceId: string): Promise<void> {
   await apiJson(`/api/books/${encodeURIComponent(bookId)}/resources/${encodeURIComponent(resourceId)}/source`, {
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
-    body: JSON.stringify({ confirmation })
+    headers: { 'Idempotency-Key': crypto.randomUUID() }
   });
 }
 

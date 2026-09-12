@@ -47,7 +47,6 @@ data class ManagementSessionState(
     val selectedFields: List<RecognizedField> = emptyList(),
     val kindleSettings: KindleSettings? = null,
     val selectedAssetId: String = "",
-    val confirmation: String = "",
     val error: WorkManagementError? = null,
     val saveStage: ManagementSaveStage? = null,
     val notice: String? = null,
@@ -105,7 +104,7 @@ class BookManagementSession(
     }
 
     suspend fun retryPreparation() {
-        if (current.phase != ManagementPhase.LoadFailed) return
+        if (current.phase != ManagementPhase.LoadFailed && !(current.phase == ManagementPhase.DeleteConfirmation && current.snapshot == null && current.error != null)) return
         current.pendingAction?.let { select(it) }
     }
 
@@ -132,7 +131,6 @@ class BookManagementSession(
         if (current.operation == null && current.providers.any { it.id == value && it.enabled })
             mutableState.value = current.copy(providerId = value, candidates = emptyList(), selectedCandidate = null, selectedFields = emptyList())
     }
-    fun setConfirmation(value: String) { mutableState.value = current.copy(confirmation = value) }
     fun setAsset(value: String) {
         if (kindleOptions().any { resource -> resource.assets.any { it.id == value && it.role == "PRIMARY" } })
             mutableState.value = current.copy(selectedAssetId = value)
@@ -160,18 +158,21 @@ class BookManagementSession(
 
     suspend fun select(action: ManagementAction) {
         val before = current
-        if (before.phase !in listOf(ManagementPhase.Menu, ManagementPhase.LoadFailed) ||
+        val retryingDelete = action == ManagementAction.Delete && before.phase == ManagementPhase.DeleteConfirmation && before.snapshot == null && before.error != null
+        if ((!retryingDelete && before.phase !in listOf(ManagementPhase.Menu, ManagementPhase.LoadFailed)) ||
             before.operation != null || menuItems.none { it.action == action && it.enabled }) return
         val requestedTarget = before.target ?: return
         val token = generation
         // Capture the user's displayed reading-state intention before a server refresh.
         val intendedCompleted = before.menuContext.completed ?: bookCompleted(requestedTarget.bookId)
-        mutableState.value = before.copy(phase = ManagementPhase.Loading, operation = ManagementOperation.Loading,
+        val preparingPhase = if (action == ManagementAction.Delete) ManagementPhase.DeleteConfirmation else ManagementPhase.Loading
+        val failedPhase = if (action == ManagementAction.Delete) ManagementPhase.DeleteConfirmation else ManagementPhase.LoadFailed
+        mutableState.value = before.copy(phase = preparingPhase, operation = ManagementOperation.Loading,
             pendingAction = action, error = null, notice = null, saveStage = null,
             menuContext = before.menuContext.copy(completed = intendedCompleted))
         val snapshot = when (val result = repository.loadManagementSnapshot(context, requestedTarget)) {
             is WorkManagementResult.Failure -> {
-                if (token == generation) mutableState.value = current.copy(phase = ManagementPhase.LoadFailed, operation = null, error = result.error)
+                if (token == generation) mutableState.value = current.copy(phase = failedPhase, operation = null, error = result.error)
                 return
             }
             is WorkManagementResult.Content -> result.value
@@ -181,7 +182,7 @@ class BookManagementSession(
             snapshot.resources.find { it.id == requestedTarget.id }?.kindleSendAvailable == true,
             snapshot.directory?.representativeResourceId != null)
         if (allowed.none { it.action == action && it.enabled }) {
-            mutableState.value = current.copy(phase = ManagementPhase.LoadFailed, operation = null,
+            mutableState.value = current.copy(phase = failedPhase, operation = null,
                 error = WorkManagementError(WorkManagementErrorKind.Forbidden, "MANAGEMENT_FORBIDDEN"))
             return
         }
@@ -196,7 +197,7 @@ class BookManagementSession(
         when (action) {
             ManagementAction.Edit -> mutableState.value = current.copy(phase = ManagementPhase.Editing, draft = initialDraft(snapshot, target))
             ManagementAction.UploadCover -> mutableState.value = current.copy(phase = ManagementPhase.CoverUpload)
-            ManagementAction.Delete -> { deleteKey = newOperationId(); mutableState.value = current.copy(phase = ManagementPhase.DeleteConfirmation, confirmation = "") }
+            ManagementAction.Delete -> { deleteKey = newOperationId(); mutableState.value = current.copy(phase = ManagementPhase.DeleteConfirmation) }
             ManagementAction.Recognize -> {
                 mutableState.value = current.copy(phase = ManagementPhase.Recognizing, query = target.title)
                 loadProviders()
@@ -315,17 +316,19 @@ class BookManagementSession(
         }
     }
 
-    suspend fun confirmDelete() = runOperation(ManagementOperation.Executing) { token ->
-        if (current.phase != ManagementPhase.DeleteConfirmation) return@runOperation
+    suspend fun confirmDelete() {
+        if (current.phase != ManagementPhase.DeleteConfirmation || current.snapshot == null) return
+        runOperation(ManagementOperation.Executing) { token ->
         val target = current.target ?: return@runOperation
         if (!canManage) { deny(token); return@runOperation }
-        if (current.confirmation != target.title) { invalid(token, "CONFIRMATION_MISMATCH"); return@runOperation }
         val result = when (target.kind) {
             ManagementObject.Book -> repository.deleteBook(context, target.bookId)
-            ManagementObject.Resource -> repository.deleteResourceSource(context, target.bookId, target.id, current.confirmation, requireNotNull(deleteKey))
+            ManagementObject.Resource -> repository.deleteResourceSource(context, target.bookId, target.id, requireNotNull(deleteKey))
             ManagementObject.Directory -> { deny(token); return@runOperation }
         }
         if (succeeded(token, result)) complete(token, target, "deleted", deleted = true)
+    }
+
     }
 
     suspend fun retryAction() {

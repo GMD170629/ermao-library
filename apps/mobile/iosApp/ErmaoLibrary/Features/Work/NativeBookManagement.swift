@@ -27,6 +27,7 @@ struct NativeManagementChange: Equatable {
 enum NativeManagementPresentation: Equatable {
     case none
     case sheet(actionName: String)
+    case deleteConfirmation
 
     var presentsSheet: Bool {
         if case .sheet = self { return true }
@@ -157,13 +158,13 @@ final class NativeBookManagementStore: ObservableObject {
         let requestedPresentation = nativeManagementPresentation(for: action)
         let actionKey = NativeManagementActionKey(target: target, action: action)
         presentation = requestedPresentation
-        menuExecution = requestedPresentation.presentsSheet
+        menuExecution = requestedPresentation != .none
             ? nil
             : NativeManagementMenuExecution(key: actionKey, status: .running)
         session.open(target: target.shared, menuContext: menuContext(target))
         run({ [session] in try await session.select(action: action) }) { [weak self] outcome in
             guard let self else { return }
-            if !requestedPresentation.presentsSheet, menuExecution?.key == actionKey {
+            if requestedPresentation == .none, menuExecution?.key == actionKey {
                 menuExecution = outcome == .succeeded
                     ? nil
                     : NativeManagementMenuExecution(key: actionKey, status: .failed)
@@ -444,7 +445,7 @@ struct NativeManagementMore<Label: View>: View {
     }
 
     private func select(_ action: ErmaoShared.ManagementAction, store: NativeBookManagementStore) {
-        if nativeManagementPresentation(for: action).presentsSheet {
+        if nativeManagementPresentation(for: action) != .none {
             pendingSheetAction = action
             isPresented = false
             return
@@ -498,6 +499,7 @@ struct NativeBookManagementHost<Content: View>: View {
     @Environment(\.locale) private var locale
     @EnvironmentObject private var feedbackPresenter: OperationFeedbackPresenter
     @State private var nativeManagementSheetIsVisible = false
+    @State private var deleteAlertPresented = false
     @State private var presentedFeedbackRevision: Int64 = 0
 
     var body: some View {
@@ -516,6 +518,34 @@ struct NativeBookManagementHost<Content: View>: View {
                     .background(.regularMaterial)
                     .accessibilityElement(children: .contain)
                 }
+            }
+            .alert("nativeManagement.action.Delete", isPresented: $deleteAlertPresented) {
+                if store.state.snapshot == nil && (store.state.error != nil || store.transportFailed) {
+                    Button("common.retry") { store.retry() }.disabled(store.running)
+                } else {
+                    Button("nativeManagement.action.Delete", role: .destructive) {
+                        store.run { try await store.session.confirmDelete() }
+                    }
+                    .disabled(store.running || store.state.snapshot == nil)
+                }
+                Button("common.cancel", role: .cancel) { store.close() }
+                    .disabled(store.running && store.state.snapshot != nil)
+            } message: {
+                Text(store.state.target?.title ?? "")
+                Text(LocalizedStringKey(store.state.target?.kind == .book ? "nativeManagement.deleteBookWarning" : "nativeManagement.deleteResourceWarning"))
+                if let target = store.state.target, target.kind == .resource,
+                   let resource = store.state.snapshot?.resources.first(where: { $0.id == target.id }) {
+                    Text("nativeManagement.sourceCount \(resource.assets.count)")
+                }
+                Text("nativeManagement.deleteIrreversible")
+                if store.running { Text("common.loading") }
+                if store.state.error != nil || store.transportFailed { managementText("nativeManagement.failure.General") }
+            }
+            .onChange(of: store.presentation) { _, presentation in
+                deleteAlertPresented = presentation == .deleteConfirmation
+            }
+            .onChange(of: store.running) { _, running in
+                if !running && store.presentation == .deleteConfirmation { deleteAlertPresented = true }
             }
             .sheet(
                 isPresented: Binding(get: {
@@ -893,7 +923,6 @@ private struct NativeManagementSheet: View {
     @State private var importing = false
     @State private var pickerInteraction: Int64 = -1
     @State private var discard = false
-    @State private var deleteConfirmation = false
     private var session: ErmaoShared.BookManagementSession { store.session }
     private var state: ErmaoShared.ManagementSessionState { store.state }
     var body: some View {
@@ -922,17 +951,6 @@ private struct NativeManagementSheet: View {
                 case "CoverUpload":
                     Text("management.coverUploadHint")
                     Button("management.chooseCoverFile") { pickerInteraction = session.interactionId; importing = true }.disabled(store.running)
-                case "DeleteConfirmation":
-                    Text(LocalizedStringKey(state.target?.kind == .book ? "nativeManagement.deleteBookWarning" : "nativeManagement.deleteResourceWarning"))
-                    Text(state.target?.title ?? "")
-                    if let target = state.target, target.kind == .resource,
-                       let resource = state.snapshot?.resources.first(where: { $0.id == target.id }) {
-                        Text("nativeManagement.sourceCount \(resource.assets.count)")
-                    }
-                    TextField(state.target?.title ?? "", text: Binding(get: { state.confirmation }, set: { value in store.edit { session.setConfirmation(value: value) } }))
-                        .disabled(store.running)
-                    Button("nativeManagement.action.Delete", role: .destructive) { deleteConfirmation = true }
-                        .disabled(store.running || state.confirmation != state.target?.title)
                 case "Loading", "Menu": EmptyView()
                 default:
                     Button("common.retry") { store.retry() }.disabled(store.running)
@@ -962,10 +980,7 @@ private struct NativeManagementSheet: View {
             .confirmationDialog("nativeManagement.discardTitle", isPresented: $discard, titleVisibility: .visible) {
                 Button("nativeManagement.discard", role: .destructive) { store.close() }
             }
-            .alert("nativeManagement.action.Delete", isPresented: $deleteConfirmation) {
-                Button("nativeManagement.action.Delete", role: .destructive) { store.run { try await session.confirmDelete() } }
-                Button("common.cancel", role: .cancel) {}
-            } message: { Text("nativeManagement.deleteIrreversible") }
+
         }
     }
 
@@ -1056,7 +1071,8 @@ private struct NativeManagementSheet: View {
 }
 
 func nativeManagementPresentation(for action: ErmaoShared.ManagementAction) -> NativeManagementPresentation {
-    ["Regenerate", "ReadingStatus", "Rescan"].contains(action.name)
+    if action == .delete { return .deleteConfirmation }
+    return ["Regenerate", "ReadingStatus", "Rescan"].contains(action.name)
         ? .none
         : .sheet(actionName: action.name)
 }

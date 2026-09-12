@@ -231,21 +231,60 @@ class BookManagementSessionTest {
         assertEquals(false, session.current.change?.coverChanged)
     }
 
-    @Test fun resourceDeletionRequiresExactTitleAndReusesKeyAfterNetworkFailure() = runBlocking {
+    @Test fun deleteConfirmationIsImmediateAndCancellationRejectsLatePreparation() = runBlocking {
+        for (kind in listOf(ManagementObject.Book, ManagementObject.Resource)) {
+            val gate = CompletableDeferred<Unit>()
+            val repo = object : UnusedManagementRepository() {
+                override suspend fun loadManagementSnapshot(context: BookManagementContext, target: ManagementTarget): WorkManagementResult<ManagementSnapshot> {
+                    gate.await()
+                    return WorkManagementResult.Content(snapshot)
+                }
+            }
+            val session = session(repo)
+            session.open(if (kind == ManagementObject.Book) target else ManagementTarget(kind, "book", "pressed", "pressed"))
+            val job = launch(start = CoroutineStart.UNDISPATCHED) { session.select(ManagementAction.Delete) }
+            assertEquals(ManagementPhase.DeleteConfirmation, session.current.phase)
+            assertEquals(ManagementOperation.Loading, session.current.operation)
+            session.confirmDelete() // No mutation while preparation is incomplete.
+            session.close()
+            gate.complete(Unit); job.join()
+            assertEquals(ManagementPhase.Closed, session.current.phase)
+            assertEquals(null, session.current.snapshot)
+        }
+    }
+
+    @Test fun deletePreparationFailureRetriesWithinConfirmation() = runBlocking {
+        var loads = 0
+        val repo = object : UnusedManagementRepository() {
+            override suspend fun loadManagementSnapshot(context: BookManagementContext, target: ManagementTarget) =
+                if (++loads == 1) failure else WorkManagementResult.Content(snapshot)
+        }
+        val session = session(repo)
+        session.open(target); session.select(ManagementAction.Delete)
+        assertEquals(ManagementPhase.DeleteConfirmation, session.current.phase)
+        assertEquals(null, session.current.snapshot)
+        session.confirmDelete()
+        session.retryPreparation()
+        assertEquals(2, loads)
+        assertEquals(ManagementPhase.DeleteConfirmation, session.current.phase)
+        assertEquals(snapshot, session.current.snapshot)
+        assertEquals(null, session.current.error)
+    }
+
+    @Test fun resourceDeletionNeedsOnlyConfirmationAndReusesKeyAfterNetworkFailure() = runBlocking {
         val keys = mutableListOf<String>()
         val repo = object : UnusedManagementRepository() {
             override suspend fun loadManagementSnapshot(context: BookManagementContext, target: ManagementTarget) = WorkManagementResult.Content(snapshot)
-            override suspend fun deleteResourceSource(context: BookManagementContext, bookId: String, resourceId: String, confirmation: String, idempotencyKey: String): WorkManagementResult<Unit> {
-                assertEquals("pressed", resourceId); assertEquals("pressed", confirmation)
+            override suspend fun deleteResourceSource(context: BookManagementContext, bookId: String, resourceId: String, idempotencyKey: String): WorkManagementResult<Unit> {
+                assertEquals("pressed", resourceId)
                 keys += idempotencyKey
                 return if (keys.size == 1) failure else WorkManagementResult.Content(Unit)
             }
         }
         val session = session(repo)
         session.open(ManagementTarget(ManagementObject.Resource, "book", "pressed", "stale title")); session.select(ManagementAction.Delete)
-        session.setConfirmation("stale title"); session.confirmDelete()
         assertTrue(keys.isEmpty())
-        session.setConfirmation("pressed"); session.confirmDelete(); session.confirmDelete()
+        session.confirmDelete(); session.confirmDelete(); session.confirmDelete()
         assertEquals(listOf("operation-key", "operation-key"), keys)
         assertEquals("pressed", session.current.change?.resourceId)
         assertEquals(true, session.current.change?.deleted)
@@ -482,7 +521,7 @@ private open class UnusedManagementRepository : WorkManagementRepository {
     override suspend fun saveResourceFields(context: BookManagementContext, bookId: String, resourceId: String, fields: List<ManagementFieldValue>): WorkManagementResult<Unit> = error("Unexpected call: saveResourceFields")
     override suspend fun saveSourcePresentation(context: BookManagementContext, bookId: String, sourceNodeId: String, title: String, description: String): WorkManagementResult<Unit> = error("Unexpected call: saveSourcePresentation")
     override suspend fun regenerateBookImage(context: BookManagementContext, bookId: String): WorkManagementResult<Unit> = error("Unexpected call: regenerateBookImage")
-    override suspend fun deleteResourceSource(context: BookManagementContext, bookId: String, resourceId: String, confirmation: String, idempotencyKey: String): WorkManagementResult<Unit> = error("Unexpected call: deleteResourceSource")
+    override suspend fun deleteResourceSource(context: BookManagementContext, bookId: String, resourceId: String, idempotencyKey: String): WorkManagementResult<Unit> = error("Unexpected call: deleteResourceSource")
     override suspend fun applyRecognizedFields(context: BookManagementContext, target: ManagementTarget, candidate: MetadataCandidate, fields: List<RecognizedField>): WorkManagementResult<MetadataApplyOutcome> = error("Unexpected call: applyRecognizedFields")
     override suspend fun applyDirectoryMetadata(context: BookManagementContext, bookId: String, sourceNodeId: String, title: String, description: String): WorkManagementResult<Unit> = error("Unexpected call: applyDirectoryMetadata")
 

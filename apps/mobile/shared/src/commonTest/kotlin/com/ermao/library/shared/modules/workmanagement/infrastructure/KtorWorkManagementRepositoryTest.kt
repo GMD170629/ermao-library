@@ -296,14 +296,14 @@ class KtorWorkManagementRepositoryTest {
     }
 
     @Test
-    fun resourceDeleteCarriesTypedConfirmationAndStableIdempotencyKey() = runBlocking {
+    fun resourceDeleteHasNoConfirmationBodyAndKeepsStableIdempotencyKey() = runBlocking {
         val harness = Harness(OK)
-        assertIs<WorkManagementResult.Content<Unit>>(harness.repository.deleteResourceSource(context, "book-1", "resource-2", "卷二", "delete-123"))
+        assertIs<WorkManagementResult.Content<Unit>>(harness.repository.deleteResourceSource(context, "book-1", "resource-2", "delete-123"))
         val request = harness.requests.single()
         assertEquals("DELETE", request.method)
         assertEquals("/base/api/books/book-1/resources/resource-2/source", request.path)
         assertEquals("delete-123", request.idempotencyKey)
-        assertEquals("{\"confirmation\":\"卷二\"}", request.body)
+        assertEquals("", request.body)
     }
 
     @Test

@@ -646,7 +646,6 @@ private class FixtureManagementRepository : WorkManagementRepository {
         context: BookManagementContext,
         bookId: String,
         resourceId: String,
-        confirmation: String,
         idempotencyKey: String,
     ): WorkManagementResult<Unit> = error("Unexpected visual-fixture operation: deleteResourceSource")
 

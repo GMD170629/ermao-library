@@ -8,6 +8,7 @@ import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.absoluteOffset
@@ -20,6 +21,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.List
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.PhotoCamera
@@ -28,6 +30,7 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -38,6 +41,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -183,19 +187,36 @@ fun ManagementAnchor(
     val menu: @Composable () -> Unit = {
         if (controller != null && controller.anchor === anchor && state != null) {
             WarmPagePopup(
-                expanded = state.phase == ManagementPhase.Menu && (controller.session.menuItems.isNotEmpty() || menuExtras != null),
-                onDismiss = { if (controller.session.current.phase == ManagementPhase.Menu) controller.session.close() },
+                expanded = (state.phase == ManagementPhase.Menu || state.isInlineAction) && (controller.session.menuItems.isNotEmpty() || menuExtras != null),
+                onDismiss = { if (controller.session.current.operation == null) controller.session.close() },
                 modifier = Modifier.width(menuWidth).testTag("management-menu"),
                 title = target.title,
             ) {
-                menuExtras?.invoke(controller.session::close)
+                if (!state.isInlineAction) menuExtras?.invoke(controller.session::close)
+                if (state.isInlineAction && state.error != null) {
+                    Text(stringResource(stageError(state)), color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(WarmPageThemeValues.spacing.two))
+                }
                 controller.session.menuItems.forEach { item ->
+                    val active = state.isInlineAction && item.action == state.pendingAction
+                    val retry = active && state.error != null && state.operation == null
+                    val label = actionLabel(item.action, state.copy(menuContext = resolvedContext))
                     WarmPageMenuItem(
-                        label = actionLabel(item.action, state.copy(menuContext = resolvedContext)),
+                        label = if (retry) "$label · ${stringResource(R.string.retry_action)}" else label,
+                        modifier = Modifier.testTag("management-action-${item.action.name}"),
+                        loading = active && state.error == null,
                         destructive = item.action == ManagementAction.Delete,
                         hasLeadingSlot = menuExtras != null,
-                        enabled = item.enabled,
-                        onClick = { controller.perform { select(item.action) } })
+                        enabled = item.enabled && (state.phase == ManagementPhase.Menu || retry),
+                        onClick = {
+                            controller.perform {
+                                when {
+                                    retry && current.phase == ManagementPhase.LoadFailed -> retryPreparation()
+                                    retry -> retryAction()
+                                    else -> select(item.action)
+                                }
+                            }
+                        })
                 }
             }
         }
@@ -312,30 +333,62 @@ private fun ManagementPresentation(controller: BookManagementController, state: 
             }
         }
     }
-    val close = { if (state.operation == null || state.phase == ManagementPhase.Loading) { if (session.isDirty) discard = true else session.close() } }
+    val close = { if (state.operation == null || state.phase == ManagementPhase.Loading || (state.phase == ManagementPhase.DeleteConfirmation && state.snapshot == null)) { if (session.isDirty) discard = true else session.close() } }
     if (state.phase == ManagementPhase.DeleteConfirmation) {
         val target = state.target ?: return
         val resource = state.snapshot?.resources?.find { it.id == target.id }
-        AlertDialog(onDismissRequest = { close() }, title = { Text(actionLabel(ManagementAction.Delete, state)) }, text = {
+        AlertDialog(modifier = Modifier.testTag("management-delete-confirmation"), onDismissRequest = { close() }, title = { Text(actionLabel(ManagementAction.Delete, state)) }, text = {
             Column(verticalArrangement = Arrangement.spacedBy(WarmPageThemeValues.spacing.two)) {
                 Text(if (target.kind == ManagementObject.Book) stringResource(R.string.management_delete_book_warning, target.title)
+                    else if (resource == null) stringResource(R.string.management_delete_resource_pending_warning, target.title)
                     else androidx.compose.ui.res.pluralStringResource(R.plurals.management_delete_resource_warning,
-                        resource?.assets?.size ?: 0, target.title, resource?.assets?.size ?: 0))
-                OutlinedTextField(state.confirmation, session::setConfirmation, label = { Text(target.title) }, enabled = state.operation == null)
+                        resource.assets.size, target.title, resource.assets.size))
+                if (state.operation != null) CircularProgressIndicator()
+                if (state.snapshot == null && state.error != null) {
+                    TextButton(onClick = { controller.perform { retryPreparation() } }, enabled = state.operation == null) {
+                        Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                        Text(stringResource(R.string.retry_action))
+                    }
+                }
                 if (state.error != null) Text(stringResource(R.string.management_operation_failed), color = MaterialTheme.colorScheme.error)
             }
-        }, confirmButton = { OutlinedButton(onClick = { controller.perform { confirmDelete() } }, enabled = state.confirmation == target.title && state.operation == null) {
+        }, confirmButton = { OutlinedButton(modifier = Modifier.testTag("management-delete-submit"), onClick = { controller.perform { confirmDelete() } }, enabled = state.snapshot != null && state.operation == null) {
             Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
             Spacer(Modifier.size(ButtonDefaults.IconSpacing))
             Text(stringResource(R.string.management_delete), color = MaterialTheme.colorScheme.error)
-        } }, dismissButton = { OutlinedButton(onClick = { close() }, enabled = state.operation == null) {
+        } }, dismissButton = { OutlinedButton(onClick = { close() }, enabled = state.operation == null || state.snapshot == null) {
             Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
             Spacer(Modifier.size(ButtonDefaults.IconSpacing))
             Text(stringResource(R.string.cancel_action)) } })
     }
-    if (state.phase in listOf(ManagementPhase.Loading, ManagementPhase.LoadFailed, ManagementPhase.Executing, ManagementPhase.Result, ManagementPhase.Editing, ManagementPhase.Recognizing, ManagementPhase.Kindle, ManagementPhase.CoverUpload)) {
+    if (!state.isInlineAction && state.phase in listOf(ManagementPhase.Loading, ManagementPhase.LoadFailed, ManagementPhase.Executing, ManagementPhase.Result, ManagementPhase.Editing, ManagementPhase.Recognizing, ManagementPhase.Kindle, ManagementPhase.CoverUpload)) {
         ModalBottomSheet(onDismissRequest = { close() }) {
-            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(WarmPageThemeValues.spacing.two),
+            Column(Modifier.fillMaxWidth()) {
+                if (state.phase == ManagementPhase.Editing) {
+                    CenterAlignedTopAppBar(
+                        title = { Text(actionLabel(ManagementAction.Edit, state)) },
+                        navigationIcon = {
+                            TextButton(onClick = { close() }, enabled = state.operation == null,
+                                colors = ButtonDefaults.textButtonColors(contentColor = WarmPageThemeValues.colors.textSecondary)) {
+                                Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                                Text(stringResource(R.string.cancel_action))
+                            }
+                        },
+                        actions = {
+                            TextButton(onClick = { controller.perform { save() } }, enabled = state.operation == null,
+                                colors = ButtonDefaults.textButtonColors(contentColor = WarmPageThemeValues.colors.textSecondary)) {
+                                Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                                Text(stringResource(R.string.management_save))
+                            }
+                        },
+                        windowInsets = WindowInsets(0, 0, 0, 0),
+                        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                    )
+                }
+            Column(Modifier.weight(1f, fill = false).fillMaxWidth().verticalScroll(rememberScrollState()).padding(WarmPageThemeValues.spacing.two),
                 verticalArrangement = Arrangement.spacedBy(WarmPageThemeValues.spacing.two)) {
                 Text(state.target?.title.orEmpty(), style = MaterialTheme.typography.titleLarge)
                 if (state.operation != null) CircularProgressIndicator()
@@ -374,7 +427,6 @@ private fun ManagementPresentation(controller: BookManagementController, state: 
                             label = { Text(fieldLabel(field.field)) }, modifier = Modifier.fillMaxWidth(), enabled = state.operation == null,
                             minLines = if (field.field in listOf(ManagementField.Description, ManagementField.Tags)) 3 else 1) }
                         if (state.target?.kind == ManagementObject.Book) Text(stringResource(R.string.management_tags_lines))
-                        Button(onClick = { controller.perform { save() } }, enabled = state.operation == null) { Text(stringResource(R.string.management_save)) }
                     }
                     ManagementPhase.CoverUpload -> {
                         Text(stringResource(R.string.management_cover_upload_hint))
@@ -431,12 +483,13 @@ private fun ManagementPresentation(controller: BookManagementController, state: 
                     else -> Unit
                 }
                 if (selectionFailed) Text(stringResource(R.string.management_cover_read_failed), color = MaterialTheme.colorScheme.error)
-                OutlinedButton(onClick = { close() }, enabled = state.operation == null || state.phase == ManagementPhase.Loading) {
+                if (state.phase != ManagementPhase.Editing) OutlinedButton(onClick = { close() }, enabled = state.operation == null || state.phase == ManagementPhase.Loading) {
                     Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                     Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                     Text(stringResource(R.string.cancel_action)) }
             }
         }
+    }
     }
     if (discard) AlertDialog(onDismissRequest = { discard = false }, title = { Text(stringResource(R.string.management_discard_title)) },
         confirmButton = { OutlinedButton(onClick = { discard = false; session.close() }) {
@@ -449,6 +502,11 @@ private fun ManagementPresentation(controller: BookManagementController, state: 
             Text(stringResource(R.string.cancel_action)) } })
 
 }
+
+private val ManagementSessionState.isInlineAction: Boolean
+    get() = pendingAction in listOf(ManagementAction.Regenerate, ManagementAction.ReadingStatus, ManagementAction.Rescan) && phase in listOf(
+        ManagementPhase.Loading, ManagementPhase.LoadFailed, ManagementPhase.Executing,
+    )
 
 @Composable
 private fun actionLabel(action: ManagementAction, state: ManagementSessionState): String = stringResource(when (action) {

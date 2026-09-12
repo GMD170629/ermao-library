@@ -24,7 +24,7 @@ final class LocalizationTests: XCTestCase {
             let presentation = nativeManagementPresentation(for: action)
             XCTAssertEqual(
                 presentation.presentsSheet,
-                !immediateActions.contains(action.name),
+                !immediateActions.contains(action.name) && action != .delete,
                 "Unexpected sheet policy for \(action.name)"
             )
         }
@@ -32,6 +32,7 @@ final class LocalizationTests: XCTestCase {
             XCTAssertEqual(nativeManagementPresentation(for: action), .none)
         }
         XCTAssertEqual(nativeManagementPresentation(for: .edit), .sheet(actionName: "Edit"))
+        XCTAssertEqual(nativeManagementPresentation(for: .delete), .deleteConfirmation)
     }
 
     func testNativeManagementMenuStatusBelongsOnlyToTheInvokedTargetAndAction() {

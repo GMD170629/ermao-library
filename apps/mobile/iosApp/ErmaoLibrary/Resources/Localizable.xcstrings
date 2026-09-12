@@ -822,13 +822,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Permanently delete this book, its source files, resources and reading records. Enter the book name to confirm."
+            "value": "Permanently delete this book, its source files, resources and reading records."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "将永久删除此图书及其源文件、资源和阅读记录。请输入图书名称确认。"
+            "value": "将永久删除此图书及其源文件、资源和阅读记录。"
           }
         }
       }
@@ -838,13 +838,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Permanently delete the source files associated with this resource. Enter the resource name to confirm."
+            "value": "Permanently delete the source files associated with this resource."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "将永久删除此资源关联的源文件。请输入资源名称确认。"
+            "value": "将永久删除此资源关联的源文件。"
           }
         }
       }

@@ -530,8 +530,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         title: '永久删除源文件',
         description: t('将永久删除“{value0}”关联的 {value1} 个源文件，此操作无法恢复。', { value0: target.title, value1: target.assetCount }),
         confirmLabel: '永久删除',
-        tone: 'danger',
-        confirmationText: target.title
+        tone: 'danger'
       });
       if (!confirmed) return;
     }
@@ -547,7 +546,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
 
         feedback.success(t('封面已重新生成'));
       } else if (action === 'delete') {
-        await deleteResourceSource(book.id, target.resourceId, target.title);
+        await deleteResourceSource(book.id, target.resourceId);
         feedback.success(t('源文件已永久删除'));
       }
       await refresh();

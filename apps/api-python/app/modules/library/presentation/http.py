@@ -193,7 +193,6 @@ from app.modules.library.presentation.schemas import (
     ResourceDeletedResponse,
     ResourcePayload,
     ResourceResponse,
-    ResourceSourceDeleteRequest,
     ResourcesPayload,
     ResourcesResponse,
     ResourceView,
@@ -1875,7 +1874,6 @@ async def upload_library_resource_cover(
 def delete_library_resource_source(
     book_id: str,
     resource_id: str,
-    payload: ResourceSourceDeleteRequest,
     request: Request,
     db: DatabaseSession,
     settings: ApplicationSettings,
@@ -1886,10 +1884,6 @@ def delete_library_resource_source(
     manager_error = _require_manager(user)
     if manager_error:
         return _deleted_response(manager_error)
-    if not payload.confirmation.strip():
-        return _deleted_response(
-            fail("删除确认不能为空", status_code=400, code="CONFIRMATION_REQUIRED")
-        )
     if not can_access_book(db, user, book_id) or not can_access_resource(
         db, user, resource_id
     ):

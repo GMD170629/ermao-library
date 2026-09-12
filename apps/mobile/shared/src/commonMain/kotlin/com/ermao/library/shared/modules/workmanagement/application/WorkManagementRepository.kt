@@ -30,7 +30,7 @@ interface WorkManagementRepository {
     suspend fun saveResourceFields(context: BookManagementContext, bookId: String, resourceId: String, fields: List<ManagementFieldValue>): WorkManagementResult<Unit>
     suspend fun saveSourcePresentation(context: BookManagementContext, bookId: String, sourceNodeId: String, title: String, description: String): WorkManagementResult<Unit>
     suspend fun regenerateBookImage(context: BookManagementContext, bookId: String): WorkManagementResult<Unit>
-    suspend fun deleteResourceSource(context: BookManagementContext, bookId: String, resourceId: String, confirmation: String, idempotencyKey: String): WorkManagementResult<Unit>
+    suspend fun deleteResourceSource(context: BookManagementContext, bookId: String, resourceId: String, idempotencyKey: String): WorkManagementResult<Unit>
     suspend fun applyRecognizedFields(context: BookManagementContext, target: ManagementTarget, candidate: MetadataCandidate, fields: List<RecognizedField>): WorkManagementResult<MetadataApplyOutcome>
     suspend fun applyDirectoryMetadata(context: BookManagementContext, bookId: String, sourceNodeId: String, title: String, description: String): WorkManagementResult<Unit>
 

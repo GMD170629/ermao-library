@@ -156,9 +156,9 @@ class KtorWorkManagementRepository(
         multipart(context, ApiMultipartRequest(ApiMethod.Post, "/api/library/operations/books/covers", JsonElement.serializer(),
             fields = mapOf("ids" to encoder.encodeToString(listOf(bookId)), "action" to "regenerate", "ratio" to "2:3", "quality" to "82", "maxDimension" to "1600")))
 
-    override suspend fun deleteResourceSource(context: BookManagementContext, bookId: String, resourceId: String, confirmation: String, idempotencyKey: String): WorkManagementResult<Unit> =
+    override suspend fun deleteResourceSource(context: BookManagementContext, bookId: String, resourceId: String, idempotencyKey: String): WorkManagementResult<Unit> =
         call(context, ApiMethod.Delete, "${resourcePath(bookId, resourceId)}/source",
-            buildJsonObject { put("confirmation", confirmation) }.toString(), idempotencyKey = idempotencyKey) { WorkManagementResult.Content(Unit) }
+            idempotencyKey = idempotencyKey) { WorkManagementResult.Content(Unit) }
 
     override suspend fun applyDirectoryMetadata(context: BookManagementContext, bookId: String, sourceNodeId: String, title: String, description: String): WorkManagementResult<Unit> =
         callUnit(context, ApiMethod.Patch, "${bookPath(bookId)}/source-nodes/${sourceNodeId.encodeURLPathPart()}",
