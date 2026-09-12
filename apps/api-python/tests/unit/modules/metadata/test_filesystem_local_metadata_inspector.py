@@ -82,7 +82,8 @@ def test_directory_inspector_passes_resource_directory_to_sidecar_reader(
         source_format=source_format,
     )
     assert path_only.metadata.title == "图片目录 Images"
-    assert path_only.metadata.author == "01"
+    assert path_only.metadata.volume_title == resource.name
+    assert path_only.metadata.author is None
     assert dict(path_only.field_sources)["title"] == "PATH"
     seen: list[tuple[Path, bool]] = []
 
@@ -107,5 +108,54 @@ def test_directory_inspector_passes_resource_directory_to_sidecar_reader(
     assert resolved.metadata.title == "旁车标题"
     assert dict(resolved.field_sources)["title"] == "SIDECAR_OPF"
     assert resolved.metadata.authors == (
-        ("作者",) if source_format == "AUDIOBOOK_DIR" else ("01",)
+        ("作者",) if source_format == "AUDIOBOOK_DIR" else ()
     )
+
+
+@pytest.mark.parametrize(
+    "source_format", ["AUDIOBOOK_DIR", "IMAGE_DIR", "EPUB", "PDF", "CBZ", "AUDIO"]
+)
+def test_resource_title_preserves_path_for_every_format(tmp_path, source_format):
+    name = "鬼吹灯I-1-精绝古城 (全50集)"
+    directory = source_format in {"AUDIOBOOK_DIR", "IMAGE_DIR"}
+    resource = tmp_path / name
+    source = resource / "01.mp3" if directory else tmp_path / f"{name}.epub"
+    resolved = FilesystemLocalMetadataInspector().inspect(
+        source,
+        resource_path=resource,
+        source_format=source_format,
+    )
+    assert resolved.metadata.volume_title == name
+    assert resolved.metadata.title == "鬼吹灯I"
+    assert resolved.metadata.authors == ()
+
+
+@pytest.mark.parametrize("kind", ["SIDECAR_OPF", "EMBEDDED"])
+@pytest.mark.parametrize("volume_title", [None, "明确卷标题"])
+def test_higher_priority_title_beats_path_volume(tmp_path, kind, volume_title):
+    candidate = LocalMetadataCandidate(
+        source=kind,
+        metadata=PublicationMetadata(title="元数据标题", volume_title=volume_title),
+    )
+    resolved = FilesystemLocalMetadataInspector().inspect(
+        tmp_path / "路径-副标题.epub",
+        source_format="EPUB",
+        sidecar=candidate if kind == "SIDECAR_OPF" else None,
+        embedded=candidate if kind == "EMBEDDED" else None,
+    )
+    assert resolved.metadata.volume_title == (volume_title or "元数据标题")
+    assert dict(resolved.field_sources)["volumeTitle"] == kind
+
+
+def test_path_first_preserves_volume_even_with_embedded_index(tmp_path):
+    resolved = FilesystemLocalMetadataInspector().inspect(
+        tmp_path / "完整标题.epub",
+        source_format="EPUB",
+        embedded=LocalMetadataCandidate(
+            source="EMBEDDED",
+            metadata=PublicationMetadata(title="内嵌标题", volume_index=2),
+        ),
+        source_order=("PATH", "EMBEDDED", "SIDECAR_OPF"),
+    )
+    assert resolved.metadata.volume_title == "完整标题"
+    assert resolved.metadata.volume_index == 2

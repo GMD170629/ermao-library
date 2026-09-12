@@ -18,6 +18,7 @@ from app.bootstrap.readable_resource_pipeline import (
     build_readable_resource_pipeline,
     build_readable_resource_worker,
 )
+from app.contracts.local_metadata_snapshot import decode_observations
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
@@ -44,6 +45,9 @@ from app.modules.imports.domain.resource_adapters import (
     unique_adapter_or_none,
 )
 from app.modules.imports.domain.scan_policy import MissingEntryPolicy
+from app.modules.imports.infrastructure.readable_resource.adapter_registry import (
+    RegistryResourceAdapterExecutor,
+)
 from app.modules.imports.infrastructure.readable_resource.filesystem import (
     OsSourceTreeFilesystem,
 )
@@ -59,6 +63,7 @@ from app.modules.imports.infrastructure.readable_resource.task_queue import (
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
 )
+from app.modules.library.application.metadata_ownership import protect_fields
 from app.modules.library.domain.readable_resource_states import AssetRole
 from app.modules.library.infrastructure.books import resource_import_summaries
 from app.modules.library.infrastructure.persistence.source_tree_repository import (
@@ -885,6 +890,133 @@ def test_volumes_audiobook_creates_one_book_and_eight_bounded_resources(
                 source.relative_path.startswith("鬼吹灯-全八册/")
                 for _resource, source in resources
             )
+    finally:
+        engine.dispose()
+
+
+def test_audiobook_volume_titles_survive_import_and_reprocessing(
+    tmp_path: Path,
+) -> None:
+    class AudioInspector:
+        def inspect(self, path: Path) -> AudioFileMetadata:
+            return AudioFileMetadata(
+                path=path,
+                title="第一集",
+                album="音轨专辑",
+                author=None,
+                narrator=None,
+                duration_ms=60_000,
+                codec="mp3",
+                bitrate=None,
+                sample_rate=None,
+                channels=None,
+                disc_number=None,
+                track_number=1,
+            )
+
+    names = (
+        "鬼吹灯I-1-精绝古城 (全50集)",
+        "鬼吹灯I-2-龙岭迷窟 (全42集)",
+        "鬼吹灯I-3-云南虫谷 (全45集)",
+        "鬼吹灯I-4-昆仑神宫 (全42集)",
+        "鬼吹灯II-1-黄皮子坟 (全57集)",
+        "鬼吹灯II-2-南海归墟 (全58集)",
+        "鬼吹灯II-3-怒晴湘西 (全56集)",
+        "鬼吹灯II-4-巫峡棺山 (全78集)",
+    )
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_volumes_library(db, root)
+            work = root / "鬼吹灯-全八册"
+            for name in names:
+                volume = work / name
+                volume.mkdir(parents=True)
+                (volume / "01.mp3").write_bytes(b"audio")
+            opf = '<package xmlns="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>{}</dc:title><dc:creator>天下霸唱</dc:creator></metadata></package>'
+            (work / "metadata.opf").write_text(
+                opf.format("鬼吹灯全集"), encoding="utf-8"
+            )
+            db.commit()
+            pipeline, _ = _pipeline(
+                db,
+                adapters=RegistryResourceAdapterExecutor(
+                    audio_metadata=AudioInspector()
+                ),
+            )
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            _drain(pipeline)
+            rows = db.execute(
+                select(
+                    LibraryReadableResource,
+                    LibrarySourceNode,
+                    LibraryReadableResourceMetadata,
+                )
+                .join(
+                    LibrarySourceNode,
+                    LibrarySourceNode.id == LibraryReadableResource.source_node_id,
+                )
+                .join(LibraryReadableResourceMetadata)
+                .order_by(LibrarySourceNode.relative_path)
+            ).all()
+            assert len(rows) == 8
+            assert {metadata.title for _, _, metadata in rows} == set(names)
+            book = db.scalar(select(LibraryBookMetadata))
+            assert book is not None
+            assert (book.title, book.author) == ("鬼吹灯全集", "天下霸唱")
+
+            # Simulate existing bad titles, then re-run the existing asset jobs.
+            for index, (resource, node, metadata) in enumerate(rows):
+                metadata.title = "旧错误标题"
+                if index == 0:
+                    metadata.title = "手工卷标题"
+                    metadata.protected_fields = protect_fields(
+                        metadata.protected_fields, ("title",)
+                    )
+                if index == 1:
+                    (work / node.name / "metadata.opf").write_text(
+                        opf.format("卷册OPF标题"), encoding="utf-8"
+                    )
+                asset = db.scalar(
+                    select(LibraryResourceAsset).where(
+                        LibraryResourceAsset.resource_id == resource.id
+                    )
+                )
+                assert asset is not None
+                pipeline.queue.requeue_import_asset_task(
+                    library_id="lib-1",
+                    resource_id=resource.id,
+                    source_node_id=asset.source_node_id,
+                    role=AssetRole.TRACK,
+                )
+            db.commit()
+            _drain(pipeline)
+            db.expire_all()
+            for index, (resource, node, _) in enumerate(rows):
+                metadata = db.get(LibraryReadableResourceMetadata, resource.id)
+                assert metadata is not None
+                assert metadata.title == (
+                    "手工卷标题"
+                    if index == 0
+                    else "卷册OPF标题"
+                    if index == 1
+                    else node.name
+                )
+                asset = db.scalar(
+                    select(LibraryResourceAsset).where(
+                        LibraryResourceAsset.resource_id == resource.id
+                    )
+                )
+                assert asset is not None
+                path = next(
+                    item
+                    for item in decode_observations(asset.local_metadata_candidates)
+                    if item.source == "PATH"
+                )
+                assert path.metadata.volume_title == node.name
+                assert path.metadata.authors == ()
+            assert (book.title, book.author) == ("鬼吹灯全集", "天下霸唱")
     finally:
         engine.dispose()
 

@@ -64,6 +64,15 @@ def _title_author(name: str) -> tuple[str, str | None] | None:
         return None
     if not parts:
         return name, None
+    explicit = _explicit_title_author(name, parts)
+    if explicit is not None:
+        return explicit
+    return parts[0].text.strip(), parts[1].text.strip() if len(parts) > 1 else None
+
+
+def _explicit_title_author(
+    name: str, parts: list[_NamePart]
+) -> tuple[str, str] | None:
     for part in parts:
         marker = _AUTHOR.search(part.text)
         if marker is None:
@@ -79,7 +88,7 @@ def _title_author(name: str) -> tuple[str, str | None] | None:
         if len(title_parts) == 1 and title_parts[0].wrapped:
             title = title_parts[0].text.strip()
         return title, author
-    return parts[0].text.strip(), parts[1].text.strip() if len(parts) > 1 else None
+    return None
 
 
 _EXTENSIONS = frozenset(
@@ -117,9 +126,7 @@ _EXTENSIONS = frozenset(
 
 def metadata_from_source_name(name: str, *, is_directory: bool) -> PublicationMetadata:
     """Prefer explicit authors, otherwise use the first two structural parts."""
-    title = name.strip()
-    if not is_directory and title.rpartition(".")[2].lower() in _EXTENSIONS:
-        title = title.rpartition(".")[0]
+    title = _source_title(name, is_directory=is_directory)
     parsed = _title_author(title)
     if parsed is None:
         return PublicationMetadata(title=title)
@@ -131,3 +138,25 @@ def metadata_from_source_name(name: str, *, is_directory: bool) -> PublicationMe
         volume_index=titles.volume_index,
         authors=(author,) if author else (),
     )
+
+
+def metadata_from_volume_name(name: str, *, is_directory: bool) -> PublicationMetadata:
+    """Keep the complete volume name unless an explicit author is identified."""
+    title = _source_title(name, is_directory=is_directory)
+    parts = _name_parts(title)
+    explicit = _explicit_title_author(title, parts) if parts is not None else None
+    volume_title, author = explicit if explicit is not None else (title, None)
+    book = metadata_from_source_name(name, is_directory=is_directory)
+    return PublicationMetadata(
+        title=book.title,
+        volume_title=volume_title,
+        volume_index=book.volume_index,
+        authors=(author,) if author else (),
+    )
+
+
+def _source_title(name: str, *, is_directory: bool) -> str:
+    title = name.strip()
+    if not is_directory and title.rpartition(".")[2].lower() in _EXTENSIONS:
+        title = title.rpartition(".")[0].strip()
+    return title

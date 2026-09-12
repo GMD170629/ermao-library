@@ -25,7 +25,7 @@ from app.contracts.publication_metadata import PublicationMetadata
 from app.contracts.publication_titles import (
     finalize_volume_title,
 )
-from app.modules.metadata.domain.source_name import metadata_from_source_name
+from app.modules.metadata.domain.source_name import metadata_from_volume_name
 
 _DIRECTORY_RESOURCE_FORMATS = frozenset(
     {"AUDIOBOOK_DIRECTORY", "AUDIOBOOK_DIR", "IMAGE_DIR"}
@@ -227,7 +227,7 @@ def _parse_local_metadata(
     candidates: list[LocalMetadataCandidate] = [
         LocalMetadataCandidate(
             source="PATH",
-            metadata=metadata_from_source_name(
+            metadata=metadata_from_volume_name(
                 metadata_source.name, is_directory=has_directory_path
             ),
         )
@@ -271,6 +271,15 @@ def resolve_local_metadata(
         for source in order:
             candidate = by_source.get(source)
             value = getattr(candidate.metadata, field) if candidate else None
+            # A source's plain publication title is also its volume fallback.
+            # Resolve it before a lower-priority path supplies a full filename.
+            if (
+                field == "volume_title"
+                and not value
+                and candidate
+                and source != "PATH"
+            ):
+                value = candidate.metadata.title
             if _valid_field_value(field, value):
                 values[field] = value
                 sources[_public_field_name(field)] = source
@@ -306,8 +315,13 @@ def resolve_local_metadata(
     )
     metadata = replace(
         metadata,
-        volume_title=finalize_volume_title(
-            metadata.title, metadata.volume_title, metadata.volume_index
+        # The path supplies a literal volume title, not a generated label.
+        volume_title=(
+            metadata.volume_title
+            if sources.get("volumeTitle") == "PATH"
+            else finalize_volume_title(
+                metadata.title, metadata.volume_title, metadata.volume_index
+            )
         ),
     )
     return ResolvedLocalMetadata(
