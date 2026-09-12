@@ -283,6 +283,9 @@ struct MultiDownloadSheet: View {
 
     @StateObject private var tree: MultiDownloadTreeStore
     @State private var mode: Mode = .overview
+    @State private var bookTitleExpanded = false
+    @State private var fullBookTitleHeight: CGFloat = 0
+    @State private var collapsedBookTitleHeight: CGFloat = 0
     @State private var selectedResourceIDs: Set<String> = []
     @State private var isActing = false
     @State private var pendingRemoval: PendingRemoval?
@@ -290,7 +293,6 @@ struct MultiDownloadSheet: View {
     @State private var feedbackEventID: UUID?
     @Environment(\.locale) private var locale
     @Environment(\.appTheme) private var theme
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @StateObject private var feedbackPresenter = OperationFeedbackPresenter()
 
     init(
@@ -460,7 +462,7 @@ struct MultiDownloadSheet: View {
                 if mode == .selection { leaveSelectionMode() } else { onDismiss() }
             } label: {
                 if mode == .selection {
-                    Label("common.cancel", systemImage: "xmark")
+                    Label("common.cancel", systemImage: "xmark").labelStyle(.titleAndIcon)
                 } else {
                     Image(systemName: "xmark")
                         .accessibilityLabel(Text("common.close"))
@@ -480,11 +482,15 @@ struct MultiDownloadSheet: View {
         }
         ToolbarItem(placement: .confirmationAction) {
             if mode == .overview {
-                Button("work.downloadManagement.select") { mode = .selection }
+                Button { mode = .selection } label: {
+                    Label("work.downloadManagement.select", systemImage: "checklist").labelStyle(.titleAndIcon)
+                }
                     .disabled(isActing || !projectedResources.contains(where: { $0.selectable }))
                     .accessibilityIdentifier("work.downloadManagement.select")
             } else {
-                Button(selectionControlTitle) { toggleAll() }
+                Button { toggleAll() } label: {
+                    Label(selectionControlTitle, systemImage: "checkmark.square").labelStyle(.titleAndIcon)
+                }
                     .disabled(isActing)
                     .accessibilityIdentifier("work.downloadManagement.selectAll")
             }
@@ -497,9 +503,29 @@ struct MultiDownloadSheet: View {
                 Text(detail.book.title)
                     .appTextStyle(.caption)
                     .foregroundStyle(theme.textSecondary)
-                    .lineLimit(2)
+                    .lineLimit(bookTitleExpanded ? nil : 2)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                        if !bookTitleExpanded { collapsedBookTitleHeight = height }
+                    }
+                    .background(alignment: .topLeading) {
+                        Text(detail.book.title)
+                            .appTextStyle(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .hidden()
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullBookTitleHeight = $0 }
+                    }
+                if bookTitleExpanded || fullBookTitleHeight > collapsedBookTitleHeight {
+                Button {
+                    bookTitleExpanded.toggle()
+                } label: {
+                    Label(bookTitleExpanded ? "work.description.collapse" : "work.description.expand",
+                          systemImage: bookTitleExpanded ? "chevron.up" : "chevron.down")
+                }
+                .buttonStyle(.borderless)
+                .frame(maxWidth: .infinity, minHeight: .iosMinimumTouchTarget, alignment: .trailing)
+                }
             }
-            .padding(.vertical, .spaceHalf)
+            .padding(.vertical, .space1)
             .listRowSeparator(.hidden)
         }
     }
@@ -512,7 +538,10 @@ struct MultiDownloadSheet: View {
                 .appTextStyle(.caption)
                 .foregroundStyle(theme.textSecondary)
             Spacer()
-            Button("common.retry") { tree.retry(hierarchy: loadsHierarchy) }
+            Button { tree.retry(hierarchy: loadsHierarchy) } label: {
+                Label("common.retry", systemImage: "arrow.clockwise")
+            }
+                .buttonStyle(.borderless)
                 .disabled(isActing)
         }
         .padding(.vertical, .spaceHalf)
@@ -629,10 +658,7 @@ struct MultiDownloadSheet: View {
     private func resourceRow(_ resource: BookResource, depth: Int) -> some View {
         let projected = downloads.managementResource(for: resource)
         let selected = selectedResourceIDs.contains(resource.id)
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: .space1))
-            : AnyLayout(HStackLayout(spacing: .space1))
-        return layout {
+        return HStack(alignment: .center, spacing: .spaceHalf) {
             if mode == .selection {
                 Button { toggleResource(resource.id) } label: {
                     Image(systemName: selected ? "checkmark.circle.fill" : "circle")
@@ -647,27 +673,41 @@ struct MultiDownloadSheet: View {
             }
 
             VStack(alignment: .leading, spacing: .spaceHalf) {
-                Text(resource.title).appTextStyle(.body).lineLimit(2)
-                Text([resource.format, resource.sizeLabel].compactMap { $0 }.joined(separator: " · "))
-                    .appTextStyle(.caption)
-                    .foregroundStyle(theme.textSecondary)
+                Text("Ag")
+                        .appTextStyle(.body)
+                        .hidden()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .overlay(alignment: .leading) {
+                            Text(DownloadManagementPolicy.shared.displayTitle(bookTitle: detail.book.title, resourceTitle: resource.title))
+                                .appTextStyle(.body)
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .accessibilityLabel(Text(resource.title))
+                        }
+                        .clipped()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: .spaceHalf) {
+                        resourceMetadata(resource).fixedSize()
+                        Text("·").appTextStyle(.caption).foregroundStyle(theme.textSecondary)
+                        resourceStatus(resource, projected: projected).fixedSize()
+                    }
+                    VStack(alignment: .leading, spacing: .spaceHalf) {
+                        resourceMetadata(resource)
+                        resourceStatus(resource, projected: projected)
+                    }
+                }
                 if (projected.status == .downloading || projected.status == .paused),
                    let progress = downloads.record(for: resource.id)?.progress {
-                    ProgressView(value: progress)
-                        .tint(theme.textSecondary)
+                    ProgressView(value: progress).tint(theme.textSecondary)
                 }
-                Text(statusText(resource, projected: projected))
-                    .appTextStyle(.caption)
-                    .foregroundStyle(statusColor(projected.status))
-                    .accessibilityIdentifier("work.downloadManagement.status.\(resource.id)")
                 if [.failedretryable, .failedterminal, .invalidlocal].contains(projected.status),
                    let code = downloads.record(for: resource.id)?.stableErrorCode {
-                    Text(downloadFailureMessage(code))
-                        .appTextStyle(.caption)
-                        .foregroundStyle(.red)
+                    Text(downloadFailureMessage(code)).appTextStyle(.caption).foregroundStyle(.red)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: CGFloat.iosMinimumTouchTarget + .spaceHalf, alignment: .leading)
             .contentShape(Rectangle())
             .onTapGesture {
                 if mode == .selection {
@@ -676,20 +716,14 @@ struct MultiDownloadSheet: View {
                     perform(action: .open, resourceIDs: [resource.id])
                 }
             }
-
             if mode == .overview {
                 HStack(spacing: .spaceHalf) {
-                    if let action = projected.primaryAction {
+                    if let action = projected.primaryAction, action != .open {
                         Button {
                             perform(action: action, resourceIDs: [resource.id])
                         } label: {
-                            if action == .download {
-                                Image(systemName: actionImage(action))
-                                    .frame(width: .iosMinimumTouchTarget, height: .iosMinimumTouchTarget)
-                            } else {
-                                Label(actionLabel(action), systemImage: actionImage(action))
-                                    .frame(minHeight: .iosMinimumTouchTarget)
-                            }
+                            Image(systemName: actionImage(action))
+                                .frame(width: .iosMinimumTouchTarget, height: .iosMinimumTouchTarget)
                         }
                         .buttonStyle(.borderless)
                         .disabled(isActing)
@@ -697,26 +731,46 @@ struct MultiDownloadSheet: View {
                         .accessibilityIdentifier("work.downloadManagement.primary.\(resource.id)")
                     }
                     if projected.actions.contains(.remove) {
-                        Menu {
-                            Button("work.downloadManagement.remove", role: .destructive) {
-                                pendingRemoval = PendingRemoval(ids: [resource.id])
-                            }
+                        Button {
+                            pendingRemoval = PendingRemoval(ids: [resource.id])
                         } label: {
-                            Image(systemName: "ellipsis")
+                            Image(systemName: "trash")
                                 .frame(width: .iosMinimumTouchTarget, height: .iosMinimumTouchTarget)
                         }
+                        .buttonStyle(.borderless)
                         .disabled(isActing)
-                        .accessibilityLabel(Text("work.downloadManagement.more"))
-                        .accessibilityIdentifier("work.downloadManagement.more.\(resource.id)")
+                        .accessibilityLabel(Text("work.downloadManagement.remove"))
+                        .accessibilityIdentifier("work.downloadManagement.remove.\(resource.id)")
                     }
                 }
             }
         }
         .padding(.leading, CGFloat(depth) * 20)
+        .listRowInsets(EdgeInsets(top: .space1, leading: mode == .selection ? .space1 : .space2,
+                                 bottom: .space1, trailing: .space2))
+        .alignmentGuide(.listRowSeparatorLeading) { _ in
+            CGFloat(depth) * 20 + (mode == .selection ? CGFloat.iosMinimumTouchTarget + .spaceHalf : 0)
+        }
         .contentShape(Rectangle())
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("work.multiDownload.resource.\(resource.id)")
         .accessibilityValue(Text(statusText(resource, projected: projected)))
+    }
+
+    private func resourceMetadata(_ resource: BookResource) -> some View {
+        Text([resource.format, resource.sizeLabel].compactMap { $0 }.joined(separator: " · "))
+            .appTextStyle(.caption)
+            .foregroundStyle(theme.textSecondary)
+    }
+
+    private func resourceStatus(_ resource: BookResource, projected: DownloadManagementResource) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: .spaceHalf) {
+            if projected.status == .completed { Image(systemName: "checkmark") }
+            Text(statusText(resource, projected: projected))
+                .accessibilityIdentifier("work.downloadManagement.status.\(resource.id)")
+        }
+        .appTextStyle(.caption)
+        .foregroundStyle(statusColor(projected.status))
     }
 
     private var availableBatchActions: [DownloadManagementAction] {
@@ -740,6 +794,13 @@ struct MultiDownloadSheet: View {
                         .frame(maxWidth: .infinity, minHeight: .iosMinimumTouchTarget)
                 }
                 .buttonStyle(.bordered)
+                .buttonBorderShape(.roundedRectangle(radius: CGFloat(GeneratedDesignTokens.Radii.control)))
+                .background {
+                    if ids.isEmpty || isActing {
+                        RoundedRectangle(cornerRadius: CGFloat(GeneratedDesignTokens.Radii.control))
+                            .fill(Color(hex: GeneratedDesignTokens.App.navigation))
+                    }
+                }
                 .disabled(ids.isEmpty || isActing)
                 .accessibilityIdentifier("work.downloadManagement.batchPrimary")
                 if actions.contains(where: { $0 != primary }) {

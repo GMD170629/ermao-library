@@ -6,6 +6,20 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class DownloadManagementPolicyTest {
+    @Test
+    fun displayTitlesOnlyRemoveAnExactDelimitedBookPrefix() {
+        val book = "辣妹因为惩罚游戏才向我这个边缘人告白，但显然是真心爱上我了"
+        assertEquals("01", DownloadManagementPolicy.displayTitle(book, "$book 01"))
+        assertEquals("番外：暑假", DownloadManagementPolicy.displayTitle(book, "$book：番外：暑假"))
+        assertEquals("Volume 02", DownloadManagementPolicy.displayTitle("A Long Book", "A Long Book — Volume 02"))
+        assertEquals("Bookish 01", DownloadManagementPolicy.displayTitle("Book", "Bookish 01"))
+        assertEquals("Book01", DownloadManagementPolicy.displayTitle("Book", "Book01"))
+        assertEquals("Another title", DownloadManagementPolicy.displayTitle(book, "Another title"))
+        assertEquals(book, DownloadManagementPolicy.displayTitle(book, book))
+        assertEquals("$book — ", DownloadManagementPolicy.displayTitle(book, "$book — "))
+        assertEquals("01", DownloadManagementPolicy.displayTitle("", "01"))
+    }
+
     private fun resource(
         id: String,
         status: DownloadTaskStatus? = null,

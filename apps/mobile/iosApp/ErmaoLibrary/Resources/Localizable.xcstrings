@@ -6,13 +6,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Select volumes to download"
+            "value": "Select volumes"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "请选择要下载的卷册"
+            "value": "请选择卷册"
           }
         }
       }

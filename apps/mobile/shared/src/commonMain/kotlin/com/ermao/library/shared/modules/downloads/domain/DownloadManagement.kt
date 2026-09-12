@@ -35,6 +35,16 @@ data class DownloadManagementResource(
 
 /** Shared presentation and action policy for both native download managers. */
 object DownloadManagementPolicy {
+    /** Display only: never alters resource identity or infers a volume number. */
+    fun displayTitle(bookTitle: String, resourceTitle: String): String {
+        val prefix = bookTitle.trim()
+        if (prefix.isEmpty() || !resourceTitle.startsWith(prefix)) return resourceTitle
+        val suffix = resourceTitle.substring(prefix.length)
+        fun separator(char: Char) = char.isWhitespace() || char in "-–—:：·|｜"
+        if (suffix.isEmpty() || !separator(suffix.first())) return resourceTitle
+        return suffix.dropWhile(::separator).takeIf { it.isNotBlank() } ?: resourceTitle
+    }
+
     fun project(item: DownloadManagementItem): DownloadManagementResource {
         val status = when {
             item.active -> if (item.status == DownloadTaskStatus.Queued) {
