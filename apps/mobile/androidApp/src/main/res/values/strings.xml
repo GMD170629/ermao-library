@@ -64,7 +64,7 @@
     <string name="server_display_name_label">Name</string>
     <string name="server_display_name_placeholder">Home library</string>
     <string name="server_url_label">Server address</string>
-    <string name="server_url_placeholder">https://books.example.com/library</string>
+    <string name="server_url_placeholder">https://books.example.com</string>
     <string name="server_url_supporting_text">Enter the full address, including any deployment path.</string>
     <string name="server_system_trust_title">System certificate validation</string>
     <string name="server_system_trust_description">Default and recommended</string>

@@ -64,7 +64,7 @@
     <string name="server_display_name_label">名称</string>
     <string name="server_display_name_placeholder">家庭书库</string>
     <string name="server_url_label">服务器地址</string>
-    <string name="server_url_placeholder">https://books.example.com/library</string>
+    <string name="server_url_placeholder">https://books.example.com</string>
     <string name="server_url_supporting_text">请输入完整地址，包括部署路径。</string>
     <string name="server_system_trust_title">系统证书验证</string>
     <string name="server_system_trust_description">默认且推荐</string>
