@@ -70,9 +70,11 @@ class LibraryDirectoryChild(HttpContractModel):
     name: str
     path: str
     readable: bool
+    mount_root: str | None = Field(default=None, alias="mountRoot")
 
 
 class LibraryDirectoryNode(LibraryDirectoryChild):
+    mounted_only: bool = Field(default=False, alias="mountedOnly")
     error: str | None
     children: list[LibraryDirectoryChild]
 

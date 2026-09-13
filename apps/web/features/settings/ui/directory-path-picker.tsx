@@ -3,6 +3,7 @@
 import { ChevronDown, ChevronRight, FolderOpen, RotateCcw } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { cn } from '../../../components/ui/cn';
+import { DirectoryMountBadge } from '../../../components/directory/directory-mount-badge';
 import { I18nText, useI18n } from '@/i18n/provider';
 import { loadLibraryDirectory } from '../api/libraries-client';
 import type { DirectoryNode } from '../api/libraries-client';
@@ -94,7 +95,10 @@ export function DirectoryPathPicker({
       setDisplayNode(exactNode);
       setExpanded((current) => ({ ...current, [exactNode.path]: true }));
     } else {
-      const matchingChildren = parentNode.children.filter((child) => child.name.startsWith(namePrefix));
+      const matchingChildren = parentNode.children.filter((child) =>
+        parentNode.mountedOnly && parentNode.path === '/'
+          ? child.path.startsWith(normalizedPath)
+          : child.name.startsWith(namePrefix));
       if (matchingChildren.length === 0) {
         setDisplayNode(null);
         setTreeError(t('路径不存在或不可读'));
@@ -244,7 +248,7 @@ export function DirectoryPathPicker({
         )}>
           <div className="mb-2 flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className={cn('font-semibold', setup ? 'text-[#606C38]' : 'text-slate-950')}><I18nText>可访问目录</I18nText></div>
+              <div className={cn('font-semibold', setup ? 'text-[#606C38]' : 'text-slate-950')}>{rootNode?.mountedOnly ? t('已挂载目录') : t('可访问目录')}</div>
               <div className={cn('truncate text-xs', setup ? 'text-[#606C38]/65' : 'text-slate-500')}>{value.trim() || rootPath || t('读取中')}</div>
             </div>
             <button
@@ -357,9 +361,10 @@ function DirectoryNodeRow({
           className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-not-allowed"
         >
           <FolderOpen size={15} className="shrink-0" />
-          <span className="truncate">{node.name || node.path}</span>
+          <span className="truncate">{node.mountedOnly && node.path === '/' ? t('已挂载目录') : node.name || node.path}</span>
         </button>
-        {!node.readable ? <span className="text-xs opacity-60"><I18nText>不可读取</I18nText></span> : null}
+        {!node.readable && !(node.mountedOnly && node.path === '/') ? <span className="text-xs opacity-60"><I18nText>不可读取</I18nText></span> : null}
+        <DirectoryMountBadge path={node.path} mountRoot={node.mountRoot} />
         {loadingPath === node.path ? <span className="text-xs opacity-60"><I18nText>读取中</I18nText></span> : null}
       </div>
       {isExpanded ? (

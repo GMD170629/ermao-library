@@ -1,9 +1,11 @@
 export type DirectoryNode = {
+  mountedOnly?: boolean;
   name: string;
   path: string;
   readable: boolean;
+  mountRoot?: string | null;
   error?: string | null;
-  children: Array<{ name: string; path: string; readable: boolean }>;
+  children: Array<{ name: string; path: string; readable: boolean; mountRoot?: string | null }>;
 };
 
 export class LibraryApiError extends Error {
@@ -24,13 +26,18 @@ function parseDirectoryNode(value: unknown): DirectoryNode | null {
   const children = value.children.map((child) => {
     if (!isRecord(child) || typeof child.name !== 'string'
       || typeof child.path !== 'string' || typeof child.readable !== 'boolean') return null;
-    return { name: child.name, path: child.path, readable: child.readable };
+    if (child.mountRoot != null && typeof child.mountRoot !== 'string') return null;
+    return { name: child.name, path: child.path, readable: child.readable, mountRoot: child.mountRoot ?? null };
   });
   if (children.some((child) => child === null)) return null;
+  if (value.mountRoot != null && typeof value.mountRoot !== 'string') return null;
+  if (value.mountedOnly != null && typeof value.mountedOnly !== 'boolean') return null;
   return {
     name: value.name,
+    mountedOnly: value.mountedOnly === true,
     path: value.path,
     readable: value.readable,
+    mountRoot: value.mountRoot ?? null,
     error: typeof value.error === 'string' || value.error === null ? value.error : null,
     children: children.filter((child) => child !== null)
   };

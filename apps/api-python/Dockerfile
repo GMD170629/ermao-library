@@ -16,7 +16,8 @@ RUN cmake -S /src/chapters -B /build/chapters -DBUILD_TESTING=OFF \
 
 FROM python:3.11.15-slim-bookworm AS runtime
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
+ENV SHUKU_CONTAINER=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
   PYTHONUNBUFFERED=1 \
   ERMAO_MOBI_CORE_LIBRARY=/usr/local/lib/libermao_mobi_core.so \
   ERMAO_CHAPTER_CORE_LIBRARY=/usr/local/lib/libermao_chapters.so \

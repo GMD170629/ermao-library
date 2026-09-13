@@ -1,5 +1,7 @@
 'use client';
 
+import { DirectoryMountBadge } from './directory-mount-badge';
+
 import { ChevronDown, ChevronRight, FolderOpen, RotateCcw } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { cn } from '../ui/cn';
@@ -19,14 +21,17 @@ type Library = {
 };
 
 type DirectoryNode = {
+  mountedOnly?: boolean;
   name: string;
   path: string;
   readable: boolean;
+  mountRoot?: string | null;
   error?: string | null;
   children: Array<{
     name: string;
     path: string;
     readable: boolean;
+    mountRoot?: string | null;
   }>;
 };
 
@@ -315,10 +320,11 @@ function TargetDirectoryNodeRow({
         </button>
         <button type="button" disabled={!node.readable} onClick={() => onSelect(node.path)} className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-not-allowed disabled:opacity-50">
           <FolderOpen size={15} className="shrink-0" />
-          <span className="truncate">{node.path}</span>
+          <span className="truncate">{node.mountedOnly && node.path === '/' ? i18nExpression('已挂载目录') : node.path}</span>
         </button>
         {autoImport ? <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700"><I18nText>自动入库</I18nText></span> : null}
-        {!node.readable ? <span className="shrink-0 text-xs text-slate-400"><I18nText>不可读取</I18nText></span> : null}
+        <DirectoryMountBadge path={node.path} mountRoot={node.mountRoot} />
+        {!node.readable && !(node.mountedOnly && node.path === '/') ? <span className="shrink-0 text-xs text-slate-400"><I18nText>不可读取</I18nText></span> : null}
         {loadingPath === node.path ? <span className="shrink-0 text-xs text-slate-400"><I18nText>读取中</I18nText></span> : null}
       </div>
       {isExpanded ? (

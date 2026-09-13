@@ -4,6 +4,7 @@ import { ChevronRight, Folder, FolderOpen, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '../../../components/ui/button';
 import { cn } from '../../../components/ui/cn';
+import { DirectoryMountBadge } from '../../../components/directory/directory-mount-badge';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 import { useI18n as useExpressionI18n } from '@/i18n/provider';
@@ -16,11 +17,13 @@ type Library = {
 };
 
 type DirectoryNode = {
+  mountedOnly?: boolean;
   name: string;
   path: string;
   readable: boolean;
+  mountRoot?: string | null;
   error?: string | null;
-  children: Array<{ name: string; path: string; readable: boolean }>;
+  children: Array<{ name: string; path: string; readable: boolean; mountRoot?: string | null }>;
 };
 
 function normalizePath(value: string) {
@@ -166,7 +169,8 @@ function DirectoryRow({ node, level, nodes, expanded, selectedPath, loadingPath,
         </button>
         <button type="button" onClick={() => onSelect(node.path)} disabled={!node.readable} className="flex min-w-0 flex-1 items-center gap-2 py-2 text-left disabled:opacity-45">
           {isExpanded ? <FolderOpen size={17} className="shrink-0" /> : <Folder size={17} className="shrink-0" />}
-          <span className="truncate">{node.name}</span>
+          <span className="truncate">{node.mountedOnly && node.path === '/' ? i18nExpression('已挂载目录') : node.name}</span>
+          <DirectoryMountBadge path={node.path} mountRoot={node.mountRoot} />
           {loadingPath === node.path ? <span className="text-xs text-[#8A847D]"><I18nText>读取中</I18nText></span> : null}
         </button>
       </div>

@@ -29,6 +29,7 @@ from app.modules.imports.application.library_commands import (
     PreparedLibraryUpdate,
     UpdateLibrary,
 )
+from app.modules.imports.application.library_paths import DirectoryMountSnapshot
 from app.modules.imports.application.library_scan_settings import (
     GetLibraryScanSettings,
     UpdateLibraryScanSettings,
@@ -42,6 +43,7 @@ from app.modules.imports.application.save_uploaded_files import (
     SaveUploadedFilesCommand,
 )
 from app.modules.imports.domain.library_scan_schedule import LibraryScanSettings
+from app.modules.imports.infrastructure.directory_mounts import directory_mount_resolver
 from app.modules.imports.infrastructure.library_queries import (
     get_import_task,
     get_library,
@@ -73,6 +75,10 @@ from app.modules.imports.infrastructure.uploaded_file_publication import (
 
 def get_library_root_resolver() -> Callable[[object], Path]:
     return resolve_library_root_path
+
+
+def get_library_mount_resolver() -> DirectoryMountSnapshot:
+    return directory_mount_resolver()
 
 
 def persist_import_library_create(

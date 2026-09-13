@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
-test('an uninitialized installation opens the account setup wizard', async ({ page }) => {
+for (const mountedOnly of [false, true]) {
+test(`an uninitialized installation opens the account setup wizard (mountedOnly=${mountedOnly})`, async ({ page }) => {
   let accountCreated = false;
   let createdLibraries = 0;
   const activatedLibraries: string[] = [];
@@ -80,8 +81,12 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
         ok: true,
         data: {
           node: requestedPath === '/library' || requestedPath === '/comics'
-            ? { name: requestedPath.slice(1), path: requestedPath, readable: true, error: null, children: [] }
-            : { name: '/', path: '/', readable: true, error: null, children: [{ name: 'home', path: '/home', readable: true }, { name: 'library', path: '/library', readable: true }, { name: 'comics', path: '/comics', readable: true }] },
+            ? { name: requestedPath.slice(1), path: requestedPath, readable: true, error: null, mountRoot: requestedPath, children: [{ name: 'novels', path: `${requestedPath}/novels`, readable: true, mountRoot: requestedPath }] }
+            : { name: '/', path: '/', readable: !mountedOnly, mountedOnly, error: null, children: [
+                ...(!mountedOnly ? [{ name: 'home', path: '/home', readable: true }] : []),
+                { name: mountedOnly ? '/library' : 'library', path: '/library', readable: true, mountRoot: '/library' },
+                { name: mountedOnly ? '/comics' : 'comics', path: '/comics', readable: true, mountRoot: '/comics' }
+              ] },
         }
       }
     });
@@ -121,11 +126,22 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
   await expect(addDialog).toHaveCSS('overflow-y', 'auto');
   await page.getByLabel('书库名称').fill('电子书');
   const folderPath = page.getByRole('combobox', { name: '书库路径' });
+  if (mountedOnly) {
+    await page.getByRole('button', { name: '展开文件夹路径树' }).click();
+    await expect(page.locator('[data-directory-path="/home"]')).toHaveCount(0);
+    await expect(page.getByRole('tree').getByRole('button', { name: '已挂载目录', exact: true })).toBeDisabled();
+    await folderPath.fill('/lib');
+    await expect(page.locator('[data-directory-path="/library"]')).toBeVisible();
+    await expect(page.locator('[data-directory-path="/comics"]')).toHaveCount(0);
+  } else {
   await folderPath.fill('/home/liu');
   await expect(page.locator('[data-directory-path="/home"]')).toHaveAttribute('aria-selected', 'false');
   await expect(page.locator('[data-directory-path="/home/liumianti"]')).toBeVisible();
   await expect(page.locator('[data-directory-path="/home/liufeng"]')).toBeVisible();
   await expect(page.locator('[data-directory-path="/home/Android"]')).toHaveCount(0);
+  await expect(addDialog.getByText('挂载目录', { exact: true })).toHaveCount(0);
+  }
+  await expect(addDialog.getByText(/fnOS/)).toHaveCount(0);
   await folderPath.fill('/missing/path');
   await expect(addDialog.getByText('路径不存在')).toBeVisible();
   consoleErrors.length = 0;
@@ -134,6 +150,9 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
   const selectedLibrary = page.locator('[data-directory-path="/library"]');
   await expect(selectedLibrary).toHaveAttribute('aria-selected', 'true');
   await expect(selectedLibrary).toBeInViewport();
+  await expect(selectedLibrary.getByText('挂载目录', { exact: true })).toBeVisible();
+  await expect(page.locator('[data-directory-path="/library/novels"]').getByText('挂载目录内', { exact: true })).toBeVisible();
+  await expect(selectedLibrary.getByText('挂载目录', { exact: true })).toHaveAttribute('title', '挂载点：/library');
   const treeBox = await directoryTree.boundingBox();
   const selectedLibraryBox = await selectedLibrary.boundingBox();
   expect((selectedLibraryBox?.y ?? 0) - (treeBox?.y ?? 0)).toBeLessThan(20);
@@ -186,6 +205,7 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
   expect(activatedLibraries).toHaveLength(2);
   await expect(page.getByRole('heading', { name: '你的私人书库已准备好' })).toHaveCount(0);
 });
+}
 
 test('an initialized installation cannot reopen the setup wizard', async ({ page }) => {
   await page.route('**/api/auth/setup/status', async (route) => {

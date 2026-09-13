@@ -20,6 +20,7 @@ from app.bootstrap.imports import (
     get_import_task,
     get_library,
     get_library_by_root_path,
+    get_library_mount_resolver,
     get_library_root_resolver,
     library_has_topology,
     list_import_tasks_page,
@@ -46,6 +47,7 @@ from app.modules.imports.application.library_commands import (
     prepare_library_update_values,
 )
 from app.modules.imports.application.library_paths import (
+    DirectoryMountSnapshot,
     LibraryPathError,
     library_directory_tree_node,
 )
@@ -203,6 +205,9 @@ def get_library_import_task(
 @router.get("/libraries/tree", response_model=LibraryDirectoryResponse)
 def library_tree(
     request: Request,
+    mount_root_for_path: Annotated[
+        DirectoryMountSnapshot, Depends(get_library_mount_resolver)
+    ],
     path: str | None = None,
     purpose: Literal["upload"] | None = Query(default=None),
     db: Session = Depends(get_db),
@@ -224,7 +229,10 @@ def library_tree(
                 status_code=404,
                 code="LIBRARY_NOT_FOUND",
             )
-    node, error, status_code = library_directory_tree_node(path)
+    node, error, status_code = library_directory_tree_node(
+        path, mount_root_for_path=mount_root_for_path,
+        browse_roots=mount_root_for_path.browse_roots,
+    )
     if error:
         return fail(error, status_code=status_code)
     return ok({"node": node})

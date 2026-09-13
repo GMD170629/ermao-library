@@ -32,7 +32,8 @@ RUN cmake -S /src/chapters -B /build/chapters -DBUILD_TESTING=OFF \
 
 FROM python:3.11.15-slim-bookworm AS runner
 WORKDIR /app
-ENV NODE_ENV=production \
+ENV SHUKU_CONTAINER=1 \
+    NODE_ENV=production \
   NEXT_TELEMETRY_DISABLED=1 \
   HOSTNAME=0.0.0.0 \
   PORT=3000 \

@@ -1,4 +1,8 @@
 {
+  "已挂载目录": "Mounted folders",
+  "挂载目录": "Mounted folder",
+  "挂载目录内": "Inside mounted folder",
+  "挂载点：{path}": "Mount point: {path}",
   " {value0} 分钟": " {value0} min",
   " 至 ": "to",
   "，当前{value0}": "Current {value0}",
