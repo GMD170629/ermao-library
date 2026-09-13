@@ -16,6 +16,7 @@ from app.bootstrap.readable_resource_pipeline import (
     build_readable_resource_worker,
 )
 from app.core.auth import hash_password
+from app.core.config import Settings
 from app.models.auth import User
 from app.models.library import Library
 from app.modules.imports.application.readable_resource.continue_import import (
@@ -76,6 +77,7 @@ def _login(client: TestClient, db_session: Session) -> None:
 def test_scan_import_comic_archive_is_readable_end_to_end(
     client: TestClient,
     db_session: Session,
+    test_settings: Settings,
     tmp_path: Path,
     source_format: str,
 ) -> None:
@@ -92,7 +94,7 @@ def test_scan_import_comic_archive_is_readable_end_to_end(
             archive.writestr("README.txt", "Text attachment, not a comic page.")
     original = source.read_bytes()
 
-    pipeline = build_readable_resource_pipeline(db_session)
+    pipeline = build_readable_resource_pipeline(db_session, test_settings)
     pipeline.continue_import.execute(ContinueLibraryImport("test-library"))
     _drain_worker(pipeline)
     db_session.expire_all()
@@ -159,6 +161,7 @@ def test_scan_import_comic_archive_is_readable_end_to_end(
 def test_scan_import_image_directory_reuses_comic_manifest_without_download(
     client: TestClient,
     db_session: Session,
+    test_settings: Settings,
     tmp_path: Path,
     organization_mode: str,
 ) -> None:
@@ -171,7 +174,7 @@ def test_scan_import_image_directory_reuses_comic_manifest_without_download(
     db_session.commit()
     _write_image_directory(root / "图片目录 Images [01]")
 
-    pipeline = build_readable_resource_pipeline(db_session)
+    pipeline = build_readable_resource_pipeline(db_session, test_settings)
     pipeline.continue_import.execute(ContinueLibraryImport("test-library"))
     _drain_worker(pipeline)
     db_session.expire_all()
@@ -193,7 +196,7 @@ def test_scan_import_image_directory_reuses_comic_manifest_without_download(
     book_response = client.get(f"/api/books/{resource.book_id}")
     assert book_response.status_code == 200, book_response.text
     book = book_response.json()["data"]["book"]
-    assert book["title"] == "图片目录 Images [01]"
+    assert book["title"] == "图片目录 Images"
     assert book["resources"][0]["title"] == "图片目录 Images [01]"
     assert {asset["title"] for asset in book["resources"][0]["assets"]} == {
         "page2",

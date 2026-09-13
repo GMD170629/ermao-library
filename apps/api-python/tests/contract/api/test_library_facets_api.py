@@ -202,9 +202,7 @@ def test_groupings_expose_canonical_series_facets_and_representative_books(
     assert payload["groups"][0]["name"] == "旧丛书"
     assert payload["groups"][0]["bookCount"] == 1
     assert payload["groups"][0]["representativeBooks"][0]["id"] == "facet-book-1"
-    assert payload["groups"][0]["representativeBooks"][0]["coverUrl"].startswith(
-        "/api/books/facet-book-1/cover"
-    )
+    assert payload["groups"][0]["representativeBooks"][0]["coverUrl"] == ""
     assert client.get("/api/series").status_code == 404
 
     schema = client.get("/api/library/filter-schema")

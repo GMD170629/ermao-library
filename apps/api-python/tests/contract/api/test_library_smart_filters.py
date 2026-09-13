@@ -195,8 +195,13 @@ def test_book_list_projections_expose_nullable_author_and_ready_resource(
         "id": "ready-book",
         "title": "Ready Book",
         "author": None,
-        "coverUrl": "/api/books/ready-book/cover?size=medium",
-        "resourceImportSummary": {"ready": 1, "pending": 0, "failed": 0},
+        "coverUrl": "",
+        "resourceImportSummary": {
+            "ready": 1,
+            "pending": 0,
+            "failed": 0,
+            "failedFiles": 0,
+        },
         "progress": 0.0,
     }
 
@@ -218,6 +223,7 @@ def test_book_list_projections_expose_nullable_author_and_ready_resource(
         "ready": 1,
         "pending": 0,
         "failed": 0,
+        "failedFiles": 0,
     }
     assert management_item["statusValue"] == "UNREAD"
     assert management_item["gradient"] == ""
@@ -232,6 +238,7 @@ def test_book_list_projections_expose_nullable_author_and_ready_resource(
         "ready": 1,
         "pending": 0,
         "failed": 0,
+        "failedFiles": 0,
     }
 
 

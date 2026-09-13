@@ -16,7 +16,6 @@ from app.contracts.media_capabilities import (
     require_reader_type_for_format,
     resolve_asset_mime_type,
 )
-from app.core.config import Settings
 from app.core.natural_sort import natural_sort_key
 from app.models import (
     Library,
@@ -38,7 +37,7 @@ from app.modules.library.infrastructure.projections import (
 from app.modules.library.infrastructure.source_paths import (
     resolve_existing_library_file,
 )
-from app.modules.media.public import versioned_cover_url
+from app.modules.media.public import CoverUrlResolver
 from app.modules.reader.public import (
     ReaderV5LibraryPresentationQueryPort,
     ResourceReadingState,
@@ -69,15 +68,13 @@ def _cover_url(
     book: dict[str, Any] | None = None,
     *,
     size: str | None = None,
-    settings: Settings,
+    cover_url_resolver: CoverUrlResolver,
 ) -> str:
     path = f"/api/{kind}/{quote(identity, safe='')}/cover"
     cover_path = book.get("coverPath") if book else None
     if book and book.get("coverStatus") != "READY":
         return ""
-    return versioned_cover_url(
-        path, str(cover_path) if cover_path else None, settings, size=size
-    )
+    return cover_url_resolver(path, str(cover_path) if cover_path else None, size=size)
 
 
 def get_book(db: Session, book_id: str) -> dict[str, Any] | None:
@@ -178,7 +175,7 @@ def _resource_view(
     metadata: LibraryReadableResourceMetadata | None,
     *,
     reading_state: ResourceReadingState,
-    settings: Settings,
+    cover_url_resolver: CoverUrlResolver,
     include_assets: bool = True,
 ) -> dict[str, Any]:
     format_value = str(resource.format)
@@ -270,7 +267,7 @@ def _resource_view(
             {"coverPath": metadata.cover_path, "coverStatus": metadata.cover_status}
             if metadata
             else None,
-            settings=settings,
+            cover_url_resolver=cover_url_resolver,
         ),
         "progress": float(reading_state.display_percent),
         "lastReadAt": reading_state.last_read_at,
@@ -297,7 +294,7 @@ def book_view(
     user_id: str | None = None,
     *,
     reader_queries: ReaderV5LibraryPresentationQueryPort,
-    settings: Settings,
+    cover_url_resolver: CoverUrlResolver,
 ) -> dict[str, Any]:
     book_id = str(book["id"])
     rows = _resource_rows(db, book_id)
@@ -324,7 +321,7 @@ def book_view(
             resource,
             metadata,
             reading_state=states[index],
-            settings=settings,
+            cover_url_resolver=cover_url_resolver,
         )
         for index, (resource, metadata) in enumerate(rows)
     ]
@@ -341,7 +338,7 @@ def book_view(
         "updatedAt": book.get("updatedAt"),
         "gradient": "",
         "coverUrl": _cover_url(
-            "books", book_id, book, size="medium", settings=settings
+            "books", book_id, book, size="medium", cover_url_resolver=cover_url_resolver
         ),
         "resources": resources,
         "completed": completed_for_available_resources(states),
@@ -357,7 +354,7 @@ def resource_view(
     user_id: str | None = None,
     *,
     reader_queries: ReaderV5LibraryPresentationQueryPort,
-    settings: Settings,
+    cover_url_resolver: CoverUrlResolver,
 ) -> dict[str, Any] | None:
     row = db.execute(
         select(LibraryReadableResource, LibraryReadableResourceMetadata)
@@ -379,7 +376,7 @@ def resource_view(
         row[0],
         row[1],
         reading_state=state,
-        settings=settings,
+        cover_url_resolver=cover_url_resolver,
     )
 
 
@@ -391,7 +388,7 @@ def list_resource_views(
     page: int,
     page_size: int,
     reader_queries: ReaderV5LibraryPresentationQueryPort,
-    settings: Settings,
+    cover_url_resolver: CoverUrlResolver,
 ) -> tuple[list[dict[str, Any]], int, int, int]:
     """Return one deterministic Resource page with actor-scoped progress."""
 
@@ -417,7 +414,7 @@ def list_resource_views(
                 db,
                 resource,
                 metadata,
-                settings=settings,
+                cover_url_resolver=cover_url_resolver,
                 reading_state=replace(
                     reading_states.get(
                         resource.id, ResourceReadingState(resource.id, 0)
@@ -434,7 +431,7 @@ def list_resource_views(
 
 
 def bookshelf_item_view(
-    item: BookshelfItemSummary, *, settings: Settings
+    item: BookshelfItemSummary, *, cover_url_resolver: CoverUrlResolver
 ) -> dict[str, Any]:
     return {
         "id": item.id,
@@ -445,7 +442,7 @@ def bookshelf_item_view(
             item.id,
             {"coverPath": item.cover_path, "coverStatus": "READY"},
             size="medium",
-            settings=settings,
+            cover_url_resolver=cover_url_resolver,
         ),
         "progress": float(item.progress),
     }
@@ -454,13 +451,16 @@ def bookshelf_item_view(
 def bookshelf_item_views(
     items: tuple[BookshelfItemSummary, ...] | list[BookshelfItemSummary],
     *,
-    settings: Settings,
+    cover_url_resolver: CoverUrlResolver,
 ) -> list[dict[str, Any]]:
-    return [bookshelf_item_view(item, settings=settings) for item in items]
+    return [
+        bookshelf_item_view(item, cover_url_resolver=cover_url_resolver)
+        for item in items
+    ]
 
 
 def bookshelf_book_list_view(
-    item: dict[str, object], *, settings: Settings
+    item: dict[str, object], *, cover_url_resolver: CoverUrlResolver
 ) -> dict[str, object]:
     """Map the ORM list projection to the public bookshelf wire shape."""
 
@@ -471,7 +471,11 @@ def bookshelf_book_list_view(
         "title": str(item["title"]),
         "author": item.get("author"),
         "coverUrl": _cover_url(
-            "books", book_id, dict(item), size="medium", settings=settings
+            "books",
+            book_id,
+            dict(item),
+            size="medium",
+            cover_url_resolver=cover_url_resolver,
         ),
         "resourceImportSummary": item.get("resourceImportSummary"),
         "progress": (
@@ -481,7 +485,7 @@ def bookshelf_book_list_view(
 
 
 def management_book_list_view(
-    item: dict[str, object], *, settings: Settings
+    item: dict[str, object], *, cover_url_resolver: CoverUrlResolver
 ) -> dict[str, object]:
     """Map the ORM list projection to the public management wire shape."""
 
@@ -494,7 +498,11 @@ def management_book_list_view(
         "gradient": str(item.get("gradient") or ""),
         "coverStatus": str(item.get("coverStatus") or "PENDING"),
         "coverUrl": _cover_url(
-            "books", book_id, dict(item), size="medium", settings=settings
+            "books",
+            book_id,
+            dict(item),
+            size="medium",
+            cover_url_resolver=cover_url_resolver,
         ),
         "seriesName": item.get("seriesName"),
         "tags": list(tags) if isinstance(tags, (list, tuple)) else [],

@@ -32,6 +32,7 @@ on:
       - 'docs/manual-acceptance.md'
       - '.github/workflows/mobile.yml'
       - 'scripts/*android-beta*'
+      - 'scripts/sign-android-apk.sh'
       - 'apps/web/public/brand/ermao-library-app-icon-v1.png'
       - 'apps/web/public/fonts/reader/android-legacy/**'
   push:
@@ -68,8 +69,17 @@ on:
       - 'docs/manual-acceptance.md'
       - '.github/workflows/mobile.yml'
       - 'scripts/*android-beta*'
+      - 'scripts/sign-android-apk.sh'
       - 'apps/web/public/brand/ermao-library-app-icon-v1.png'
       - 'apps/web/public/fonts/reader/android-legacy/**'
+  workflow_call:
+    inputs:
+      stable_release:
+        type: boolean
+        default: false
+      run_full_android_regression:
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       run_full_android_regression:
@@ -232,6 +242,18 @@ jobs:
       - name: Assemble and lint unsigned beta
         run: ./gradlew --stacktrace :androidApp:assembleBeta :androidApp:lintBeta -PbetaBuildNumber=${{ github.run_number }}
 
+      - name: Assemble and lint stable Android APK
+        if: inputs.stable_release == true
+        run: ./gradlew --stacktrace :androidApp:assembleRelease :androidApp:lintRelease
+
+      - name: Upload unsigned stable APK for unified publication
+        if: inputs.stable_release == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-stable-unsigned
+          path: apps/mobile/androidApp/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
       - name: Upload unsigned beta for this run
         uses: actions/upload-artifact@v4
         with:
@@ -297,7 +319,7 @@ jobs:
           BETA_KEYSTORE_PASSWORD: ${{ secrets.BETA_KEYSTORE_PASSWORD }}
           BETA_KEY_ALIAS: ${{ secrets.BETA_KEY_ALIAS }}
           BETA_KEY_PASSWORD: ${{ secrets.BETA_KEY_PASSWORD }}
-        run: bash scripts/sign-android-beta.sh unsigned-beta dist/android-beta
+        run: bash scripts/sign-android-apk.sh unsigned-beta dist/android-beta
 
       - name: Update Android beta prerelease
         env:

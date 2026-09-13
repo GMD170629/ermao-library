@@ -8,6 +8,12 @@ On September 13, 2026, the project owner confirmed completed acceptance and auth
 
 ## Android 正式 APK / Stable Android APK
 
+从 v1.0.1 起，正式发布统一使用 `.github/workflows/fnos-package.yml`：复用移动工作流完成检查及 Release 构建，后端测试前构建原生章节库；使用 `scripts/sign-android-apk.sh` 的 `stable` 渠道签名，随后构建版本镜像与 FPK。仓库 Secrets 使用持久正式密钥的 `RELEASE_KEYSTORE_BASE64`、`RELEASE_KEYSTORE_PASSWORD`、`RELEASE_KEY_ALIAS`、`RELEASE_KEY_PASSWORD`。Beta 与正式渠道共用签名实现，各自保留独立密钥和包名。
+
+禁止单独上传正式 APK 作为一次正式发布。APK、FPK 与各自 SHA-256 必须同时存在且校验通过，统一上传至草稿并核对远端附件摘要，再提升镜像的 `prod/latest` 标签、公开 Release 和更新 feed。任一构建、检查或附件校验失败即停止，不公开不完整版本。正式发布前可在 `main` 手动运行同一工作流构建候选 bundle；下载其中最终签名 APK 完成真机验收后，再创建正式标签。已公开的版本标签不移动，源码修复使用新的补丁版本。
+
+Starting with v1.0.1, the fnOS workflow coordinates mobile checks, the signed stable APK, backend tests with the native chapter library, the versioned Docker image, and the FPK. Configure the four `RELEASE_*` signing secrets using the persistent stable key. The shared signer keeps stable and beta identities separate. Never publish a stable APK alone: validate both packages and checksums, upload the complete draft bundle, verify remote digests, then promote stable image tags and publish the Release/feed. A manual run on `main` produces the same candidate bundle for physical-device acceptance before tagging. Preserve published tags and use a new patch version for source fixes.
+
 正式包使用 `com.ermao.library`，v1.0.0 为 `versionName=1.0.0`、`versionCode=1`，最低 Android 8.0（API 26）。后续正式更新保持包名与签名密钥，并递增 versionCode。独立 Beta 包与密钥不用于替代正式身份。
 
 在 `apps/mobile` 执行 `./gradlew :androidApp:assembleRelease :androidApp:lintRelease`，产物为 `androidApp/build/outputs/apk/release/androidApp-release-unsigned.apk`。使用 Android build-tools 的 `zipalign -P 16 -f 4` 对齐后，由 `apksigner sign` 使用正式密钥签名，再执行 `apksigner verify --verbose --print-certs` 和 `zipalign -c -P 16 4`。密码通过环境变量传递，不放在命令行字面量或日志中。对最终已签名文件生成 SHA-256，附件命名为 `ermao-library-v<version>-android.apk` 与同名 `.sha256`。

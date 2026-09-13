@@ -22,7 +22,7 @@ test('formal publishing has no generated-note or manual-release bypass', () => {
 
 test('Draft Release publication and release-feed updates have a strict order', () => {
   const draft = releaseWorkflow.indexOf('Prepare strict bilingual Draft Release');
-  const upload = releaseWorkflow.indexOf('Upload fnOS package to Draft Release');
+  const upload = releaseWorkflow.indexOf('Upload complete APK and fnOS bundle to Draft Release');
   const publish = releaseWorkflow.indexOf('Verify and publish strict bilingual Release');
   const feed = releaseWorkflow.indexOf('Publish verified release feed');
   assert.ok(draft >= 0 && draft < upload);
@@ -30,6 +30,19 @@ test('Draft Release publication and release-feed updates have a strict order', (
   assert.ok(publish < feed);
   assert.match(releaseWorkflow, /gh release edit "\$RELEASE_TAG" --draft=false/u);
   assert.match(releaseWorkflow, /Release body differs from the authoritative bilingual release note/u);
+});
+
+test('stable releases wait for mobile checks and publish both packages before image promotion', () => {
+  const packageJob = releaseWorkflow.split('\n  package:')[1];
+  assert.match(packageJob, /needs: \[validate, mobile-release\]/);
+  assert.match(releaseWorkflow, /uses: \.\/\.github\/workflows\/mobile.yml/);
+  assert.match(releaseWorkflow, /run_full_android_regression: true/);
+  assert.match(packageJob, /sign-android-apk.sh unsigned-android dist\/android stable/);
+  assert.match(packageJob, /gh release upload[^\n]*dist\/fnos\/\*\.fpk[^\n]*dist\/android\/\*\.apk/);
+  const verify = packageJob.indexOf('"$RUNNER_TEMP/release-assets.json"\n');
+  const promote = packageJob.indexOf('Promote verified release Docker image');
+  const publish = packageJob.indexOf('Verify and publish strict bilingual Release');
+  assert.ok(verify > 0 && verify < promote && promote < publish);
 });
 
 test('maintenance synchronization edits published history but cannot create or publish Releases', () => {

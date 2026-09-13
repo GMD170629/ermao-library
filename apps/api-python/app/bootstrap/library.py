@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.bootstrap.media import build_cover_url_resolver
 from app.bootstrap.reader import reader_v5_library_queries
 from app.core.config import Settings
 from app.models import LibraryBook, MetadataLookupTask
@@ -262,7 +263,7 @@ def book_view(
         book,
         user_id,
         reader_queries=reader_v5_library_queries(db),
-        settings=settings,
+        cover_url_resolver=build_cover_url_resolver(settings),
     )
 
 
@@ -274,7 +275,7 @@ def resource_view(
         resource_id,
         user_id,
         reader_queries=reader_v5_library_queries(db),
-        settings=settings,
+        cover_url_resolver=build_cover_url_resolver(settings),
     )
 
 
@@ -294,7 +295,7 @@ def list_resource_views(
         page=page,
         page_size=page_size,
         reader_queries=reader_v5_library_queries(db),
-        settings=settings,
+        cover_url_resolver=build_cover_url_resolver(settings),
     )
 
 

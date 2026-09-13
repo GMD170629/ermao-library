@@ -182,6 +182,7 @@ def test_mobile_library_routes_emit_current_wire_shapes(
         "ready": 0,
         "pending": 0,
         "failed": 0,
+        "failedFiles": 0,
     }
 
     recent_reading = client.get("/api/dashboard/recent-reading", params={"limit": 10})
@@ -231,13 +232,15 @@ def test_mobile_library_routes_emit_current_wire_shapes(
         "ready": 1,
         "pending": 0,
         "failed": 0,
+        "failedFiles": 0,
     }
     assert "availableMediaKinds" not in detail_book
     detail_resource = detail_book["resources"][0]
     assert "mediaKind" not in detail_resource
     assert "classification" not in detail_resource
     assert detail_resource["assets"][0]["title"] == "mobile-contract-resource.pdf"
-    assert "path" not in detail_resource["assets"][0]
+    # A source path is exposed only for an existing authorized library file.
+    assert detail_resource["assets"][0]["path"] is None
 
     resources = client.get(f"/api/books/{book.id}/resources")
     assert resources.status_code == 200, resources.text
@@ -247,4 +250,4 @@ def test_mobile_library_routes_emit_current_wire_shapes(
     assert resource_payload["resources"][0]["assets"][0]["title"] == (
         "mobile-contract-resource.pdf"
     )
-    assert "path" not in resource_payload["resources"][0]["assets"][0]
+    assert resource_payload["resources"][0]["assets"][0]["path"] is None

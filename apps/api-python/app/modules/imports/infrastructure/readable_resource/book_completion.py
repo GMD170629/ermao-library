@@ -123,8 +123,9 @@ class BookImportCompletion:
         )
         if library_id is not None:
             query = query.where(LibraryBook.library_id == library_id)
+        pending_tasks = []
         for book, metadata in self._db.execute(query):
-            self._db.add(
+            pending_tasks.append(
                 LibraryImportTask(
                     id=cuid(),
                     kind="IDENTIFY_BOOK",
@@ -135,6 +136,7 @@ class BookImportCompletion:
                 )
             )
             metadata.metadata_state = "QUEUED"
+        self._db.add_all(pending_tasks)
         self._db.flush()
 
     def finished(self, task: LibraryImportTask) -> None:

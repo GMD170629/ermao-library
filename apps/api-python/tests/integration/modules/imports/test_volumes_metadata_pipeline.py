@@ -284,10 +284,10 @@ def test_completed_book_uses_configured_priority_and_counts_failed_volumes(
             assert book is not None
             repository = SqlAlchemyImportedBookMetadata(
                 db,
-                settings,
                 lambda source, directory: None,
                 lambda book_id: True,
                 lambda value: None,
+                lambda endpoint, cover_path, **kwargs: "",
             )
             snapshot = repository.load(book.source_node_id)
             db.commit()
@@ -311,7 +311,9 @@ def test_completed_book_uses_configured_priority_and_counts_failed_volumes(
         engine.dispose()
 
 
-def test_multi_volume_comic_identifies_bracketed_directory_title_and_author(tmp_path: Path) -> None:
+def test_multi_volume_comic_identifies_bracketed_directory_title_and_author(
+    tmp_path: Path,
+) -> None:
     settings = Settings(storage_root=str(tmp_path / "storage"))
     engine = create_sqlite_engine(settings.database_path)
     root = tmp_path / "library"
@@ -323,10 +325,15 @@ def test_multi_volume_comic_identifies_bracketed_directory_title_and_author(tmp_
     try:
         bootstrap_database(engine, settings)
         with Session(engine) as db:
-            db.add(Library(
-                id="lib", name="Library", root_path=str(root),
-                organization_mode="VOLUMES", min_file_size_bytes=0,
-            ))
+            db.add(
+                Library(
+                    id="lib",
+                    name="Library",
+                    root_path=str(root),
+                    organization_mode="VOLUMES",
+                    min_file_size_bytes=0,
+                )
+            )
             db.commit()
             pipeline = build_readable_resource_pipeline(db, settings)
             pipeline.continue_import.execute(ContinueLibraryImport("lib"))

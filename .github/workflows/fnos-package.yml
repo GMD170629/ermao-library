@@ -33,6 +33,8 @@ on:
       - 'scripts/validate-release-notes.mjs'
       - 'scripts/validate-release-notes.test.mjs'
       - 'scripts/build-fnos-package.sh'
+      - 'scripts/sign-android-apk.sh'
+      - 'scripts/validate-release-assets*'
       - 'scripts/test_fnos_installation.py'
       - 'scripts/publish-docker-hub.sh'
       - 'scripts/start-unified-app.sh'
@@ -69,7 +71,7 @@ jobs:
           submodules: recursive
 
       - name: Test strict bilingual release-note validation
-        run: node --test scripts/validate-release-notes.test.mjs
+        run: node --test scripts/validate-release-notes.test.mjs scripts/validate-release-assets.test.mjs scripts/release-workflow-policy.test.mjs
 
       - name: Validate application version and bilingual release notes
         env:
@@ -222,10 +224,20 @@ jobs:
           cache-from: type=gha,scope=develop-image
           cache-to: type=gha,mode=max,scope=develop-image
 
+  mobile-release:
+    if: github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/prod' && github.ref != 'refs/heads/develop')
+    needs: validate
+    permissions:
+      contents: write
+    uses: ./.github/workflows/mobile.yml
+    with:
+      stable_release: true
+      run_full_android_regression: true
+
   package:
     name: Build fnOS FPK
     if: github.event_name != 'pull_request' && github.ref != 'refs/heads/prod' && github.ref != 'refs/heads/develop'
-    needs: validate
+    needs: [validate, mobile-release]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -288,8 +300,40 @@ jobs:
         uses: astral-sh/setup-uv@v6
 
       - name: Test Python backend with production runtime version
+        # The production image builds this same native library; host tests need it too.
+        # Keep this prerequisite before pytest instead of replacing chapter adapters.
         working-directory: apps/api-python
-        run: uv run --extra dev --locked pytest -q
+        run: |
+          cmake -S ../../packages/reader-core/native/chapters -B ../../packages/reader-core/native/chapters/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build ../../packages/reader-core/native/chapters/build --config Release
+          ctest --test-dir ../../packages/reader-core/native/chapters/build -C Release --output-on-failure
+          uv run --extra dev --locked pytest -q
+
+      - name: Download checked stable Android APK
+        uses: actions/download-artifact@v4
+        with:
+          name: android-stable-unsigned
+          path: unsigned-android
+
+      - name: Set up JDK for stable signing
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK for stable signing
+        uses: android-actions/setup-android@v3
+
+      - name: Install signing tools
+        run: sdkmanager 'build-tools;36.0.0'
+
+      - name: Sign and verify stable Android APK
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: bash scripts/sign-android-apk.sh unsigned-android dist/android stable
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -311,8 +355,6 @@ jobs:
           flavor: latest=false
           tags: |
             type=raw,value=${{ steps.version.outputs.app_version }}
-            type=raw,value=prod,enable=${{ github.ref_type == 'tag' }}
-            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
 
       - name: Build and push release Docker image
         uses: docker/build-push-action@v6
@@ -343,19 +385,43 @@ jobs:
           APP_VERSION: ${{ steps.version.outputs.app_version }}
         run: scripts/build-fnos-package.sh
 
-      - name: Upload fnOS package artifact
+      - name: Hash fnOS packages
+        run: |
+          cd dist/fnos
+          for package in *.fpk; do sha256sum "$package" > "$package.sha256"; done
+
+      - name: Validate complete release bundle
+        run: node scripts/validate-release-assets.mjs dist '${{ steps.version.outputs.release_tag }}'
+
+      - name: Upload complete release bundle artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ermao-books-fnos-${{ steps.version.outputs.app_version }}-all
-          path: dist/fnos/*.fpk
+          name: ermao-library-${{ steps.version.outputs.app_version }}-bundle
+          path: |
+            dist/fnos/*
+            dist/android/*
           if-no-files-found: error
 
-      - name: Upload fnOS package to Draft Release
+      - name: Upload complete APK and fnOS bundle to Draft Release
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
-        run: gh release upload "$RELEASE_TAG" dist/fnos/*.fpk --clobber
+        run: |
+          node scripts/validate-release-assets.mjs dist "$RELEASE_TAG"
+          gh release upload "$RELEASE_TAG" dist/fnos/*.fpk dist/fnos/*.sha256 dist/android/*.apk dist/android/*.sha256 --clobber
+          gh release view "$RELEASE_TAG" --json assets > "$RUNNER_TEMP/release-assets.json"
+          node scripts/validate-release-assets.mjs dist "$RELEASE_TAG" "$RUNNER_TEMP/release-assets.json"
+
+      - name: Promote verified release Docker image
+        if: github.ref_type == 'tag'
+        env:
+          APP_VERSION: ${{ steps.version.outputs.app_version }}
+        run: |
+          docker buildx imagetools create \
+            --tag gamersgu/shuku-starship-web:prod \
+            --tag gamersgu/shuku-starship-web:latest \
+            "gamersgu/shuku-starship-web:$APP_VERSION"
 
       - name: Verify and publish strict bilingual Release
         if: github.ref_type == 'tag'
@@ -379,7 +445,7 @@ jobs:
           NODE
           is_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)"
           if [[ "$is_draft" == 'true' ]]; then
-            gh release edit "$RELEASE_TAG" --draft=false
+            gh release edit "$RELEASE_TAG" --draft=false --latest
           fi
 
       - name: Publish verified release feed

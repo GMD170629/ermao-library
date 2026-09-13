@@ -287,7 +287,7 @@ def test_direct_file_rescan_refreshes_observation_and_reimports_asset(
             db.refresh(node)
             db.refresh(asset_task)
 
-            assert outcomes == ["continue_source", "ok"]
+            assert outcomes == ["continue_source", "ok", "identified"]
             assert (node.id, asset.id, asset_task.id) == original_ids
             assert node.observed_size_bytes == len(b"v2-longer")
             assert node.observed_mtime_ns == 2_000_000_000
@@ -456,7 +456,7 @@ def test_direct_rescan_of_missing_file_fails_without_deleting_data(
                 )
             )
             assert result.enqueued_scan is True
-            assert _drain(pipeline) == ["error"]
+            assert _drain(pipeline) == ["error", "identified"]
             db.commit()
 
             assert db.get(LibrarySourceNode, node.id) is not None
@@ -506,7 +506,7 @@ def test_direct_rescan_of_missing_directory_fails_without_deleting_subtree(
                 )
             )
             assert result.enqueued_scan is True
-            assert _drain(pipeline) == ["error"]
+            assert _drain(pipeline) == ["error", "identified"]
             db.commit()
 
             assert db.get(LibrarySourceNode, directory_node.id) is not None
@@ -540,7 +540,7 @@ def test_manual_scan_of_missing_library_root_fails_without_deleting_data(
 
             result = pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
             assert result.enqueued_scan is True
-            assert _drain(pipeline) == ["error"]
+            assert _drain(pipeline) == ["error", "identified"]
             db.commit()
 
             assert db.get(LibrarySourceNode, node.id) is not None
@@ -690,7 +690,8 @@ def test_exact_path_spellings_create_distinct_source_nodes(tmp_path: Path) -> No
             (root / "Case.epub").write_bytes(b"a")
             (root / "case.epub").write_bytes(b"b")
             slash_name = "slash\\name.epub"
-            (root / slash_name).write_bytes(b"c")
+            if os.name != "nt":
+                (root / slash_name).write_bytes(b"c")
 
             if os.path.samefile(root / "Case.epub", root / "case.epub"):
                 repository = SqlAlchemySourceNodeRepository(db)

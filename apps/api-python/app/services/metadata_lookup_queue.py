@@ -24,6 +24,7 @@ from app.bootstrap.library import (
     load_book_facet_projections,
     prepare_book_facet_write,
 )
+from app.bootstrap.media import versioned_cover_url
 from app.core.config import Settings
 from app.core.database_errors import is_database_busy_error
 from app.models.common import db_timestamp
@@ -32,7 +33,6 @@ from app.modules.imports.public import (
     normalize_identity_part,
 )
 from app.modules.library.public import prepare_book_facet, protected_metadata_fields
-from app.modules.media.public import versioned_cover_url
 from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
 from app.modules.metadata.application.writeback import (
@@ -801,9 +801,10 @@ def process_metadata_lookup_task(
             )
             task_id = str(task["id"])
             owner_id = str(task.get("leaseOwnerId") or "") or None
+            guarded_book_id = str(book["id"])
             with MetadataWriteTransaction(db):
                 if (
-                    lookup_persist.book_metadata_guard(db, str(book["id"]))
+                    lookup_persist.book_metadata_guard(db, guarded_book_id)
                     != metadata_guard
                 ):
                     raise RuntimeError("BOOK_METADATA_CHANGED")

@@ -6,8 +6,8 @@
 
 数据库、账户、阅读进度和系统设置均保存在自己的设备上；原始读物保留在指定目录中，不依赖第三方云端托管。
 
-- 当前版本：`1.0.0`
-- [v1.0.0 发布说明](release-notes/v1.0.0.md) · [Wiki](https://github.com/GMD170629/ermao-library/wiki) · [发布与 Android 下载](https://github.com/GMD170629/ermao-library/releases)
+- 当前版本：`1.0.1`
+- [v1.0.1 发布说明](release-notes/v1.0.1.md) · [Wiki](https://github.com/GMD170629/ermao-library/wiki) · [发布与 Android 下载](https://github.com/GMD170629/ermao-library/releases)
 - 支持语言：简体中文、English
 - 许可证：[MIT](LICENSE)
 - 交流与反馈：QQ 群 `154560969`

@@ -401,7 +401,7 @@ def test_book_and_resource_library_and_anchor_scope(tmp_path: Path) -> None:
         engine.dispose()
 
 
-def test_local_metadata_projects_to_flat_book_with_same_source_anchor(
+def test_local_resource_metadata_waits_for_separate_book_identification(
     tmp_path: Path,
 ) -> None:
     engine = _bootstrap(tmp_path)
@@ -443,16 +443,15 @@ def test_local_metadata_projects_to_flat_book_with_same_source_anchor(
 
             book_metadata = db.get(LibraryBookMetadata, book_id)
             assert book_metadata is not None
-            assert book_metadata.title == "Embedded Title"
-            assert book_metadata.normalized_title == "embedded title"
-            assert book_metadata.author == "Author One / Author Two"
-            assert book_metadata.normalized_author == "author one / author two"
-            assert book_metadata.description == "Description"
-            assert book_metadata.series_name == "Series"
-            assert book_metadata.series_index == 2.0
-            assert book_metadata.metadata_quality > 0
-            assert book_metadata.cover_path == "covers/solo.jpg"
-            assert book_metadata.cover_status == "READY"
+            # Resource parsing must not bypass the separate, revision-guarded
+            # IDENTIFY_BOOK stage (covered by test_volumes_metadata_pipeline).
+            assert book_metadata.title == "solo"
+            assert book_metadata.author is None
+            assert book_metadata.description is None
+            assert book_metadata.series_name is None
+            assert book_metadata.cover_path is None
+            assert book_metadata.cover_status == "PENDING"
+            assert db.get(LibraryBook, book_id).source_node_id == source.id
 
             resource_metadata = db.get(LibraryReadableResourceMetadata, resource.id)
             assert resource_metadata is not None
@@ -468,7 +467,7 @@ def test_local_metadata_projects_to_flat_book_with_same_source_anchor(
                 resource_id=resource.id,
                 expected_path="covers/stale.jpg",
             )
-            assert book_metadata.cover_path == "covers/solo.jpg"
+            assert book_metadata.cover_path is None
             assert resource_metadata.cover_path == "covers/solo.jpg"
 
             books.clear_local_cover(
@@ -476,7 +475,7 @@ def test_local_metadata_projects_to_flat_book_with_same_source_anchor(
                 expected_path="covers/solo.jpg",
             )
             assert book_metadata.cover_path is None
-            assert book_metadata.cover_status == "FAILED"
+            assert book_metadata.cover_status == "PENDING"
             assert resource_metadata.cover_path is None
             assert resource_metadata.cover_status == "FAILED"
     finally:

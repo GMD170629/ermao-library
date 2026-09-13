@@ -47,6 +47,7 @@ from app.bootstrap.library_resource_actions import (
     regenerate_local_metadata_covers,
     upload_resource_cover,
 )
+from app.bootstrap.media import build_cover_url_resolver, versioned_cover_url
 from app.bootstrap.readable_resource_pipeline import build_readable_resource_pipeline
 from app.core.authorization import (
     authorization_context,
@@ -215,7 +216,6 @@ from app.modules.library.presentation.views import (
     management_book_list_view,
     resource_view,
 )
-from app.modules.media.public import versioned_cover_url
 from app.modules.publications.public import (
     PublicationCorruptError,
     PublicationNotFoundError,
@@ -461,7 +461,11 @@ def get_dashboard_recent_books(
     )
     return DashboardBooksResponse(
         data=DashboardBooksPayload.model_validate(
-            {"books": bookshelf_item_views(items, settings=settings)}
+            {
+                "books": bookshelf_item_views(
+                    items, cover_url_resolver=build_cover_url_resolver(settings)
+                )
+            }
         )
     )
 
@@ -483,7 +487,11 @@ def get_dashboard_recent_reading(
     )
     return DashboardBooksResponse(
         data=DashboardBooksPayload.model_validate(
-            {"books": bookshelf_item_views(items, settings=settings)}
+            {
+                "books": bookshelf_item_views(
+                    items, cover_url_resolver=build_cover_url_resolver(settings)
+                )
+            }
         )
     )
 
@@ -1134,14 +1142,18 @@ def list_library_books(
         for item in result.books:
             books.append(
                 _bookshelf_book_contract(
-                    bookshelf_book_list_view(item, settings=settings)
+                    bookshelf_book_list_view(
+                        item, cover_url_resolver=build_cover_url_resolver(settings)
+                    )
                 )
             )
     elif view == "management":
         for item in result.books:
             books.append(
                 _management_book_contract(
-                    management_book_list_view(item, settings=settings)
+                    management_book_list_view(
+                        item, cover_url_resolver=build_cover_url_resolver(settings)
+                    )
                 )
             )
     else:

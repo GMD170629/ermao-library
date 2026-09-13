@@ -86,7 +86,7 @@ test('CI gates signing/publication behind all existing mobile checks', () => {
   assert.match(job, /cancel-in-progress: false/);
   assert.equal((workflow.match(/contents: write/g) ?? []).length, 1);
   assert.match(workflow, /:androidApp:lintBeta/);
-  const signer = readFileSync(new URL('./sign-android-beta.sh', import.meta.url), 'utf8');
-  assert.match(signer, /Required beta signing input is missing/);
+  const signer = readFileSync(new URL('./sign-android-apk.sh', import.meta.url), 'utf8');
+  assert.match(signer, /Required signing input is missing/);
   assert.doesNotMatch(signer, /genkey|debug.keystore|set -x/);
 });

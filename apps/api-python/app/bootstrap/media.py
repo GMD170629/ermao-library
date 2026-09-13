@@ -1,5 +1,7 @@
 """Composition root for media queries and original-asset delivery."""
 
+from functools import partial
+
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
@@ -13,6 +15,7 @@ from app.modules.media.application.page_index import (
 from app.modules.media.application.resource_preview import GetResourcePreview
 from app.modules.media.application.resource_query import MediaResourceQuery
 from app.modules.media.infrastructure import http_streaming as media_streaming
+from app.modules.media.infrastructure.cover_identity import versioned_cover_url
 from app.modules.media.infrastructure.page_index import (
     get_page_unit,
     get_resource_asset,
@@ -26,6 +29,7 @@ from app.modules.media.infrastructure.resource_preview import (
 from app.modules.media.infrastructure.resource_repository import (
     SqlAlchemyMediaResourceRepository,
 )
+from app.modules.media.public import CoverUrlResolver
 
 
 def load_read_only_resource_page_index(
@@ -78,3 +82,7 @@ __all__ = [
     "resolve_read_only_resource_page_index",
     "resource_preview",
 ]
+
+
+def build_cover_url_resolver(settings: Settings) -> CoverUrlResolver:
+    return partial(versioned_cover_url, settings=settings)

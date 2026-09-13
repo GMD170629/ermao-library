@@ -16,7 +16,6 @@ from app.contracts.local_metadata_snapshot import (
     merge_observations,
 )
 from app.contracts.publication_metadata import PublicationMetadata
-from app.core.config import Settings
 from app.infrastructure.local_metadata_policy import SqlAlchemyLocalMetadataPriority
 from app.models import (
     Library,
@@ -42,7 +41,7 @@ from app.modules.library.infrastructure.facet_sync import (
     prepare_book_facet_write,
 )
 from app.modules.library.infrastructure.local_cover_validation import valid_local_cover
-from app.modules.media.public import versioned_cover_url
+from app.modules.media.public import CoverUrlResolver
 from app.modules.metadata.public import (
     LocalMetadataCandidate,
     metadata_from_source_name,
@@ -60,13 +59,13 @@ class SqlAlchemyImportedBookMetadata:
     def __init__(
         self,
         db: Session,
-        settings: Settings,
         source_reader: BookSidecarReader,
         idle_check: Callable[[str], bool],
         resolve_cover_path: Callable[[str | None], Path | None],
+        cover_url_resolver: CoverUrlResolver,
     ) -> None:
         self._db = db
-        self._settings = settings
+        self._cover_url_resolver = cover_url_resolver
         self._read_sidecar = source_reader
         self._idle_check = idle_check
         self._resolve_cover_path = resolve_cover_path
@@ -172,7 +171,7 @@ class SqlAlchemyImportedBookMetadata:
         return IdentifiedBookMetadata(result.metadata, cover)
 
     def _read_cover(self, stored_path: str | None) -> bytes | None:
-        if not versioned_cover_url("/cover", stored_path, self._settings):
+        if not self._cover_url_resolver("/cover", stored_path):
             return None
         path = self._resolve_cover_path(stored_path)
         if path is None:
