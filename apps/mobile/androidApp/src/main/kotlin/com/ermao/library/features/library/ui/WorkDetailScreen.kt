@@ -301,13 +301,15 @@ fun WorkDetailScreen(
         workReadingStatus(
             completed = state.content?.completed == true,
             progressPercent = state.content?.resources
-                ?.firstOrNull { (it.progressPercent ?: 0) > 0 }
+                ?.firstOrNull { it.hasReadingProgress }
                 ?.progressPercent,
+            hasReadingProgress = state.content?.resources?.any { it.hasReadingProgress } == true,
         )
     } else selectedResource?.let { resource ->
         workReadingStatus(
             completed = resource.completed,
             progressPercent = resource.progressPercent,
+            hasReadingProgress = resource.hasReadingProgress,
         )
     } ?: WorkReadingStatus.Unread
     val managementState by managementViewModel?.uiState?.collectAsStateWithLifecycle()
@@ -609,7 +611,7 @@ private fun WorkDetailBody(
                 }
             }
         }
-        if (state.isBookRoot && state.presentation == BookDetailPresentation.ContentBrowser && (readingResource?.progressPercent ?: 0) > 0) item {
+        if (state.isBookRoot && state.presentation == BookDetailPresentation.ContentBrowser && readingResource?.hasReadingProgress == true) item {
             BookReadingProgress(readingResource)
         }
         if (actionScope != null) item {
@@ -694,7 +696,7 @@ private fun BookReadingProgress(resource: ResourceContent?) {
     val theme = WarmPageThemeValues
     val isAudio = resource?.readerType.equals("audio", ignoreCase = true)
     Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.one)) {
-        if (resource != null && (resource.progressPercent ?: 0) > 0) {
+        if (resource != null && resource.hasReadingProgress) {
             Text(
                 stringResource(if (isAudio) R.string.work_book_listening else R.string.work_book_reading, resource.title),
                 style = theme.typography.callout,
@@ -702,8 +704,8 @@ private fun BookReadingProgress(resource: ResourceContent?) {
                 modifier = Modifier.testTag("work-book-reading-resource"),
             )
             ReadingProgressTrack(
-                progressPercent = requireNotNull(resource.progressPercent),
-                stateDescription = stringResource(R.string.work_resource_accessibility_progress, resource.progressPercent),
+                progressPercent = resource.progressPercent ?: 0,
+                stateDescription = detailProgressLabel(resource.progressPercent ?: 0),
             )
         }
     }
@@ -1105,8 +1107,8 @@ private fun FacetLink(
 @Composable
 private fun ReadingSummary(content: BookDetailContent) {
     val theme = WarmPageThemeValues
-    val progress = content.book.progressPercent ?: 0
-    if (progress <= 0) return
+    val progress = content.book.progressPercent ?: return
+    if (progress <= 0 && content.resources.none { it.id == content.selectedResourceId && it.hasReadingProgress }) return
     val currentPosition = content.readingUnits
         .firstOrNull { it.readingState == ChapterReadingState.Current }
         ?.title
@@ -1141,7 +1143,7 @@ private fun ReadingSummary(content: BookDetailContent) {
         }
         ReadingProgressTrack(
             progressPercent = progress,
-            stateDescription = stringResource(R.string.work_resource_accessibility_progress, progress),
+            stateDescription = detailProgressLabel(progress),
         )
     }
 }
@@ -1156,11 +1158,18 @@ private fun ReadingProgressHeading(progress: Int) {
             color = theme.colors.textSecondary,
         )
         Text(
-            stringResource(R.string.reader_progress_percent, progress),
+            detailProgressLabel(progress),
             style = theme.typography.headline,
             modifier = Modifier.padding(start = theme.spacing.one),
         )
     }
+}
+
+@Composable
+private fun detailProgressLabel(progress: Int): String = if (progress == 0) {
+    stringResource(R.string.work_progress_less_than_one_percent)
+} else {
+    stringResource(R.string.reader_progress_percent, progress)
 }
 
 @Composable
@@ -1565,7 +1574,7 @@ private fun WorkContentEntryCard(
                         role = CoverRole.Compact,
                         modifier = Modifier.fillMaxWidth(),
                         progressPercent = item.resource?.progressPercent?.takeIf {
-                            item.kind == WorkContentItemKind.ReadableResource && it > 0
+                            item.kind == WorkContentItemKind.ReadableResource
                         },
                     )
                 }
@@ -1629,8 +1638,8 @@ private fun WorkContentEntryCard(
                     }
                 }
                 if (item.kind == WorkContentItemKind.ReadableResource) {
-                    item.resource?.progressPercent?.takeIf { it > 0 }?.let {
-                        Text("$it%", style = theme.typography.caption, color = theme.colors.textSecondary)
+                    item.resource?.progressPercent?.let {
+                        Text(detailProgressLabel(it), style = theme.typography.caption, color = theme.colors.textSecondary)
                     }
                 }
                 if (item.kind == WorkContentItemKind.ReadableResource && item.entry.hasChildren) {
@@ -2132,9 +2141,10 @@ internal fun workDetailDescriptionActionVisible(
 internal fun workReadingStatus(
     completed: Boolean,
     progressPercent: Int?,
+    hasReadingProgress: Boolean = (progressPercent ?: 0) > 0,
 ): WorkReadingStatus = when {
     completed -> WorkReadingStatus.Finished
-    (progressPercent ?: 0) > 0 -> WorkReadingStatus.Reading
+    hasReadingProgress -> WorkReadingStatus.Reading
     else -> WorkReadingStatus.Unread
 }
 
@@ -2150,7 +2160,7 @@ internal fun workDetailPrimaryActionPresentation(
     selectedResource: ResourceContent?,
     download: AndroidDownloadRecord?,
 ): WorkDetailPrimaryActionPresentation {
-    val hasProgress = (selectedResource?.progressPercent ?: 0) in 1..99
+    val hasProgress = selectedResource?.hasReadingProgress == true && (selectedResource.progressPercent ?: 0) < 100
     val readingLabel = if (hasProgress) {
         WorkDetailPrimaryActionLabel.ContinueReading
     } else {
@@ -2198,7 +2208,7 @@ internal fun workDetailVolumePresentation(
     download: AndroidDownloadRecord?,
 ): WorkDetailVolumePresentation {
     val progress = resource.progressPercent?.coerceIn(0, 100) ?: 0
-    val readingState = when (workReadingStatus(resource.completed, progress)) {
+    val readingState = when (workReadingStatus(resource.completed, progress, resource.hasReadingProgress)) {
         WorkReadingStatus.Finished -> WorkDetailVolumeReadingState.Finished
         WorkReadingStatus.Reading -> WorkDetailVolumeReadingState.Reading
         WorkReadingStatus.Unread -> WorkDetailVolumeReadingState.Unread

@@ -95,6 +95,9 @@ data class ResourceContent(
     val readable: Boolean,
     val selected: Boolean,
 ) {
+    // Null means unstarted; zero retains a positive position below one percent.
+    val hasReadingProgress: Boolean get() = progressPercent != null
+
     fun displayIndex(position: Int): String {
         val explicitIndex = resourceIndex?.takeIf { it.isFinite() && it > 0 }
         val value = when {

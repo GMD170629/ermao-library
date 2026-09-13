@@ -258,19 +258,19 @@ test('library import sections fetch only when their tab mounts and refresh after
   expect(requestCount(counts, '/api/libraries')).toBeGreaterThan(0);
   expect(requestCount(counts, '/api/system-settings')).toBe(0);
 
-  await page.getByRole('tab', { name: '文件管理' }).click();
-  await expect.poll(() => requestCount(counts, '/api/libraries/tree')).toBeGreaterThan(0);
+  await expect(page.getByRole('tab', { name: '文件管理' })).toHaveCount(0);
+  await expect(page.getByRole('tab')).toHaveCount(4);
   await page.getByRole('tab', { name: '书库' }).click();
   await expect.poll(() => requestCount(counts, '/api/libraries')).toBeGreaterThan(0);
   await page.getByRole('tab', { name: '偏好设置' }).click();
   await expect.poll(() => requestCount(counts, '/api/system-settings')).toBeGreaterThan(0);
   await page.getByRole('tab', { name: '导入记录' }).click();
   await expect.poll(() => requestCount(counts, '/api/library-import-tasks')).toBeGreaterThan(initialImportTaskRequests);
+  expect(requestCount(counts, '/api/libraries/tree')).toBe(0);
 });
 
 test('new library shows expanded scan rules with a 10 KB minimum by default', async ({ page }) => {
   await page.goto('/settings/library');
-  await page.getByRole('tab', { name: '文件管理' }).click();
   await page.getByRole('tab', { name: '书库' }).click();
   await page.getByRole('button', { name: '新增书库' }).click();
 
@@ -284,6 +284,160 @@ test('new library shows expanded scan rules with a 10 KB minimum by default', as
   const scanRules = page.getByRole('button', { name: /扫描规则/ });
   await expect(scanRules).toHaveAttribute('aria-expanded', 'true');
   await expect(page.getByRole('spinbutton', { name: '最小文件大小 KB' })).toHaveValue('10');
+
+  const form = page.locator('form').filter({ has: folderPath });
+  for (const width of [1920, 1440, 834, 390]) {
+    await page.setViewportSize({ width, height: 1100 });
+    const formBounds = await form.boundingBox();
+    const tabBounds = await page.getByRole('tablist').boundingBox();
+    expect(formBounds).not.toBeNull();
+    expect(tabBounds).not.toBeNull();
+    expect(formBounds?.x).toBe(tabBounds?.x);
+    expect(formBounds?.width).toBe(tabBounds?.width);
+    const controls = [
+      form.getByRole('textbox', { name: '名称', exact: true }),
+      form.getByRole('button', { name: '组织方式' }),
+      folderPath.locator('..'),
+      form.getByRole('spinbutton').locator('..'),
+      form.getByRole('checkbox').locator('..'),
+      form.getByRole('button', { name: '保存', exact: true })
+    ];
+    for (const control of controls) {
+      const bounds = await control.boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(bounds?.height).toBe(44);
+      expect(bounds?.x).toBeGreaterThanOrEqual(0);
+      expect((bounds?.x ?? 0) + (bounds?.width ?? 0)).toBeLessThanOrEqual(width);
+    }
+    await expect(controls[5]).toHaveCSS('width', '120px');
+    await page.screenshot({ path: test.info().outputPath(`library-form-${width}.png`), fullPage: true });
+  }
+  await scanRules.click();
+  await expect(scanRules).toHaveAttribute('aria-expanded', 'false');
+  await expect(form.getByRole('button', { name: '保存', exact: true })).toBeVisible();
+});
+
+test('new library form labels and compact save fit in English on a narrow screen', async ({ page }) => {
+  await mockSettingsApi(page, 'en-US');
+  await page.setViewportSize({ width: 390, height: 1100 });
+  await page.goto('/settings/library');
+  await page.getByRole('tab', { name: 'Library', exact: true }).click();
+  await page.getByRole('button', { name: 'Add library', exact: true }).click();
+  const form = page.locator('form');
+  await expect(form.getByText('Minimum file size', { exact: true })).toBeVisible();
+  await expect(form.getByText('Filter options', { exact: true })).toBeVisible();
+  await expect(form.getByRole('button', { name: 'Close Add Form' })).toHaveText('Collapse');
+  await expect(form.getByRole('button', { name: 'Save', exact: true })).toHaveCSS('width', '120px');
+  await expect(form.getByRole('checkbox').locator('..')).toHaveCSS('height', '44px');
+});
+
+for (const locale of ['zh-CN', 'en-US'] as const) {
+  test(`library editor reuses create layout and saves existing values (${locale})`, async ({ page }) => {
+    await mockSettingsApi(page, locale);
+    const chinese = locale === 'zh-CN';
+    const library = { id: 'library-1', name: 'Existing library', rootPath: '/library', enabled: true,
+      organizationMode: 'FLAT', ignorePatterns: '*.tmp', ignoreHidden: true, minFileSizeBytes: 20480 };
+    await page.route('**/api/libraries', (route) => route.fulfill({ json: { ok: true, data: { libraries: [library] } } }));
+    const submitted: unknown[] = [];
+    await page.route('**/api/libraries/library-1', async (route) => {
+      submitted.push(route.request().postDataJSON());
+      await route.fulfill({ json: { ok: true, data: {} } });
+    });
+    await page.goto('/settings/library');
+    await page.getByRole('tab', { name: chinese ? '书库' : 'Library', exact: true }).click();
+    await page.getByRole('button', { name: chinese ? '新增书库' : 'Add library', exact: true }).click();
+    await page.getByRole('button', { name: chinese ? '设置' : 'Settings', exact: true }).click();
+    const forms = page.locator('form').filter({ has: page.getByRole('combobox') });
+    await expect(forms).toHaveCount(2);
+    const create = forms.nth(0);
+    const edit = forms.nth(1);
+    const name = edit.getByRole('textbox', { name: chinese ? '名称' : 'Name', exact: true });
+    await expect(name).toHaveValue('Existing library');
+    await expect(edit.getByRole('combobox')).toHaveValue('/library');
+    await expect(edit.getByRole('spinbutton')).toHaveValue('20');
+    await expect(edit.locator('textarea')).toHaveValue('*.tmp');
+    await expect(edit.getByRole('checkbox')).toBeChecked();
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 1100 });
+      for (const selector of ['input[type="number"]', 'textarea']) {
+        await expect(edit.locator(selector)).toHaveCSS('height', await create.locator(selector).evaluate((node) => getComputedStyle(node).height));
+      }
+      await expect(edit.getByRole('button', { name: chinese ? '保存' : 'Save', exact: true })).toHaveCSS('width', '120px');
+      await page.screenshot({ path: test.info().outputPath(`library-editor-${width}.png`), fullPage: true });
+    }
+    await name.fill('Renamed library');
+    await edit.getByRole('button', { name: chinese ? '保存' : 'Save', exact: true }).click();
+    await expect.poll(() => submitted.length).toBe(1);
+    expect(submitted[0]).toEqual({ name: 'Renamed library', rootPath: '/library', organizationMode: 'FLAT',
+      ignorePatterns: '*.tmp', ignoreHidden: true, minFileSizeBytes: 20480 });
+  });
+}
+
+test('provider configuration matches recognition order width', async ({ page }) => {
+  await page.route('**/api/metadata/providers', (route) => route.fulfill({ json: { ok: true, data: { providers: [{
+    id: 'douban', sourceId: null, name: '豆瓣图书', version: 'builtin', description: '通过豆瓣读书网页获取图书信息。',
+    mode: 'builtin', configFields: [], automaticRateLimit: null, config: {}, configuredSecrets: {},
+    enabled: true, priority: 1, lastTestAt: null, lastTestStatus: null, lastError: null
+  }] } } }));
+  await page.goto('/settings/organize?tab=providers');
+  const order = page.getByRole('region', { name: '识别数据源', exact: true }).locator('article');
+  const configuration = page.getByRole('region', { name: '数据源配置', exact: true });
+  await expect(order).toBeVisible();
+  for (const width of [1440, 834, 390]) {
+    await page.setViewportSize({ width, height: 1100 });
+    const orderBounds = await order.boundingBox();
+    const configBounds = await configuration.boundingBox();
+    expect(orderBounds).not.toBeNull();
+    expect(configBounds).not.toBeNull();
+    expect(configBounds?.x).toBe(orderBounds?.x);
+    expect(configBounds?.width).toBe(orderBounds?.width);
+    await expect(configuration.getByRole('button', { name: '配置', exact: true })).toBeVisible();
+    await page.screenshot({ path: test.info().outputPath(`provider-width-${width}.png`), fullPage: true });
+  }
+});
+
+test('automatic scan switch keeps its thumb inside the track in both states', async ({ page }) => {
+  await page.route('**/api/system-settings/library-scan', (route) => route.fulfill({
+    json: { ok: true, data: { watchEnabled: true, intervalMinutes: 30 } }
+  }));
+  await page.goto('/settings/library');
+  await page.getByRole('tab', { name: '自动扫描' }).click();
+  const toggle = page.getByRole('switch', { name: '实时监听', exact: true });
+  const thumb = toggle.locator('[aria-hidden="true"]');
+  await expect(toggle).toBeEnabled();
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1100 });
+    const intervalSection = page.getByRole('region', { name: '周期扫描间隔', exact: true });
+    const description = intervalSection.locator('p').first();
+    const frequency = page.getByRole('button', { name: '扫描频率', exact: true });
+    const descriptionBounds = await description.boundingBox();
+    const frequencyBounds = await frequency.boundingBox();
+    expect(descriptionBounds).not.toBeNull();
+    expect(frequencyBounds).not.toBeNull();
+    if (width >= 768) {
+      expect(frequencyBounds?.x).toBeGreaterThan((descriptionBounds?.x ?? 0) + (descriptionBounds?.width ?? 0));
+    } else {
+      expect(frequencyBounds?.y).toBeGreaterThan((descriptionBounds?.y ?? 0) + (descriptionBounds?.height ?? 0));
+    }
+    for (const enabled of [true, false]) {
+      await expect(toggle).toHaveAttribute('aria-checked', String(enabled));
+      await expect.poll(async () => {
+        const trackBounds = await toggle.boundingBox();
+        const thumbBounds = await thumb.boundingBox();
+        if (!trackBounds || !thumbBounds) return null;
+        return {
+          left: Math.round(thumbBounds.x - trackBounds.x),
+          top: Math.round(thumbBounds.y - trackBounds.y),
+          right: Math.round(trackBounds.x + trackBounds.width - thumbBounds.x - thumbBounds.width),
+          bottom: Math.round(trackBounds.y + trackBounds.height - thumbBounds.y - thumbBounds.height)
+        };
+      }).toEqual({ left: enabled ? 24 : 4, top: 4, right: enabled ? 4 : 24, bottom: 4 });
+      await toggle.focus();
+      await expect(toggle).toBeFocused();
+      await page.screenshot({ path: test.info().outputPath(`scan-switch-${width}-${enabled}.png`), fullPage: true });
+      await toggle.press('Space');
+    }
+  }
 });
 
 test('library import preferences save after editing ignore patterns', async ({ page }) => {

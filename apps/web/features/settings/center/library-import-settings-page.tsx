@@ -1,6 +1,6 @@
 'use client';
 
-import { FileClock, FolderCog, FolderSync, FolderTree, SlidersHorizontal } from 'lucide-react';
+import { FileClock, FolderCog, FolderSync, SlidersHorizontal } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { useState } from 'react';
 import { ImportTasksPage } from '../../import-tasks/import-tasks-page';
@@ -8,17 +8,15 @@ import { cn } from '../../../components/ui/cn';
 import { SettingsCenterShell } from './settings-center-shell';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
-const ImportFileManager = dynamic(() => import('./import-file-manager').then((module) => module.ImportFileManager));
 const SettingsPage = dynamic(() => import('../settings-page').then((module) => module.SettingsPage));
 const ImportPreferencesPanel = dynamic(() => import('./import-preferences-panel').then((module) => module.ImportPreferencesPanel));
 const LibraryScanSettingsPanel = dynamic(() => import('./library-scan-settings-panel').then((module) => module.LibraryScanSettingsPanel));
 
 export function LibraryImportSettingsPage() {
   const { t: i18nAttribute } = useAttributeI18n();
-  const [activeTab, setActiveTab] = useState<'history' | 'files' | 'folders' | 'scan' | 'preferences'>('history');
+  const [activeTab, setActiveTab] = useState<'history' | 'folders' | 'scan' | 'preferences'>('history');
   const tabs = [
     { id: 'history' as const, label: '导入记录', icon: FileClock },
-    { id: 'files' as const, label: '文件管理', icon: FolderTree },
     { id: 'folders' as const, label: '书库', icon: FolderCog },
     { id: 'scan' as const, label: '自动扫描', icon: FolderSync },
     { id: 'preferences' as const, label: '偏好设置', icon: SlidersHorizontal }
@@ -51,8 +49,7 @@ export function LibraryImportSettingsPage() {
         </div>
         <section role="tabpanel" aria-label={tabs.find((tab) => tab.id === activeTab)?.label}>
           {activeTab === 'history' ? <ImportTasksPage embedded /> : null}
-          {activeTab === 'files' ? <ImportFileManager /> : null}
-          {activeTab === 'folders' ? <SettingsPage embedded initialSection={i18nAttribute("书库")} /> : null}
+          {activeTab === 'folders' ? <SettingsPage embedded initialSection="书库" /> : null}
           {activeTab === 'scan' ? <LibraryScanSettingsPanel /> : null}
           {activeTab === 'preferences' ? <ImportPreferencesPanel /> : null}
         </section>

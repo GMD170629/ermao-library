@@ -310,6 +310,9 @@ class WorkDetailLayoutTest {
 
     @Test
     fun audiobookActionOpensOnlinePlayerWithoutACompletedDownload() {
+        val earlyAudio = testResource(readerType = "audio", format = "M4B", progressPercent = 0)
+        assertEquals(WorkDetailPrimaryActionLabel.ContinueListening, workDetailPrimaryActionPresentation(earlyAudio, null).label)
+        assertEquals(WorkReadingStatus.Reading, workReadingStatus(false, earlyAudio.progressPercent, earlyAudio.hasReadingProgress))
         val audiobook = testResource(readerType = "audio", format = "M4B", progressPercent = 12)
 
         assertEquals(

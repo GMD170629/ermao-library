@@ -1,7 +1,7 @@
 'use client';
 
-import { CheckCircle2, ChevronDown, ChevronRight, Database, Download, FolderOpen, RotateCcw, Save, Settings2, SlidersHorizontal, Trash2 } from 'lucide-react';
-import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { ChevronDown, ChevronRight, Database, Download, FolderOpen, RotateCcw, Save, Settings2, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
 import { useConfirm, useToast } from '../../components/ui/feedback';
@@ -317,62 +317,32 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
           {!embedded ? <h1 className="text-xl font-semibold">{active}</h1> : null}
           {active === '书库' ? (
             <div className="mt-6 space-y-5">
-              <div className="flex justify-end">
+              {!showCreateFolder ? <div className="flex justify-end">
                 <Button type="button" variant="secondary" icon={FolderOpen} onClick={toggleCreateFolderForm}>
-                  {showCreateFolder ? i18nAttribute("收起添加表单") : i18nAttribute("新增书库")}
+                  {i18nAttribute("新增书库")}
                 </Button>
-              </div>
-              {showCreateFolder ? <form onSubmit={savePath} className="grid grid-cols-1 gap-3 rounded-[20px] border border-slate-200 bg-slate-50 p-4 md:grid-cols-12 md:items-end">
-                <label className="md:col-span-3">
-                  <span className="text-sm font-medium text-slate-700"><I18nText>名称</I18nText></span>
-                  <input value={name} onChange={(event) => setName(event.target.value)} className="mt-1.5 h-10 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-[#F19B84] focus:ring-2 focus:ring-[#FCE5DE]" />
-                </label>
-                <div className="md:col-span-7">
-                  <span className="text-sm font-medium text-slate-700"><I18nText>书库路径</I18nText></span>
-                  <SharedDirectoryPathPicker value={rootPath} onChange={setRootPath} compact />
+              </div> : null}
+              {showCreateFolder ? <form onSubmit={savePath} className={libraryFormClassName}>
+                <div className="flex items-center justify-between gap-4 md:col-span-2">
+                  <h2 className="text-xl font-semibold text-slate-900"><I18nText>新增书库</I18nText></h2>
+                  <Button type="button" variant="ghost" onClick={toggleCreateFolderForm} aria-label={i18nAttribute("收起添加表单")}>
+                    <ChevronDown size={16} className="rotate-180" /><I18nText>收起</I18nText>
+                  </Button>
                 </div>
-                <div className="md:col-span-2">
-                  <Button className="h-10 w-full" icon={FolderOpen} loading={pathBusy === 'create'} loadingText={i18nAttribute("保存中")}><I18nText>保存</I18nText></Button>
+                <LibraryFormFields
+                  name={name} setName={setName} rootPath={rootPath} setRootPath={setRootPath}
+                  organizationMode={organizationMode} setOrganizationMode={setOrganizationMode}
+                  ignorePatterns={ignorePatterns} setIgnorePatterns={setIgnorePatterns}
+                  ignoreHidden={ignoreHidden} setIgnoreHidden={setIgnoreHidden}
+                  minFileSizeKb={minFileSizeKb} setMinFileSizeKb={setMinFileSizeKb}
+                  showRules={showCreateRules} onToggleRules={() => setShowCreateRules((current) => !current)}
+                  rulesSummary={<I18nText>默认忽略隐藏文件，小于 10 KB 跳过</I18nText>}
+                />
+                {message ? <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700 md:col-span-2">{message}</div> : null}
+                {error ? <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700 md:col-span-2">{error}</div> : null}
+                <div className="flex justify-end border-t border-slate-200 pt-5 md:col-span-2">
+                  <Button className="h-11 w-[120px]" icon={FolderOpen} loading={pathBusy === 'create'} loadingText={i18nAttribute("保存中")}><I18nText>保存</I18nText></Button>
                 </div>
-                <label className="md:col-span-4">
-                  <span className="text-sm font-medium text-slate-700"><I18nText>组织方式</I18nText></span>
-                  <Select value={organizationMode} onChange={(value) => setOrganizationMode(value as OrganizationMode)} ariaLabel="组织方式" className="mt-1.5 w-full" size="sm" options={ORGANIZATION_MODES.map((option) => ({ value: option.value, label: option.label }))} />
-                </label>
-                <div className="self-end text-xs leading-5 text-slate-500 md:col-span-8">{i18nAttribute(organizationModeDescription(organizationMode))}</div>
-                <div className="text-xs leading-5 text-slate-500 md:col-span-12"><I18nText>图书会进入书库；每位用户可按来源文件夹创建自己的智能书架。</I18nText></div>
-                <button
-                  type="button"
-                  aria-expanded={showCreateRules}
-                  onClick={() => setShowCreateRules((current) => !current)}
-                  className="flex min-h-9 items-center gap-2 text-left text-sm font-medium text-slate-600 hover:text-[#D94724] md:col-span-12"
-                >
-                  <SlidersHorizontal size={15} />
-                  <I18nText>扫描规则</I18nText><ChevronDown size={15} className={cn('transition-transform', showCreateRules && 'rotate-180')} />
-                  <span className="font-normal text-slate-400"><I18nText>默认忽略隐藏文件，小于 10 KB 跳过</I18nText></span>
-                </button>
-                {showCreateRules ? (
-                  <div className="grid gap-3 border-t border-slate-200 pt-3 md:col-span-12 md:grid-cols-12">
-                    <label className="md:col-span-7">
-                      <span className="text-sm font-medium text-slate-700"><I18nText>自定义忽略规则</I18nText></span>
-                      <textarea
-                        value={ignorePatterns}
-                        onChange={(event) => setIgnorePatterns(event.target.value)}
-                        rows={2}
-                        placeholder={i18nAttribute("每行一条 glob 规则，例如 **/temp/**")}
-                        className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-sm outline-none focus:border-[#F19B84] focus:ring-2 focus:ring-[#FCE5DE]"
-                      />
-                    </label>
-                    <label className="md:col-span-3">
-                      <span className="text-sm font-medium text-slate-700"><I18nText>最小文件大小 KB</I18nText></span>
-                      <input type="number" min={0} value={minFileSizeKb} onChange={(event) => setMinFileSizeKb(event.target.value)} className="mt-1.5 h-10 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-[#F19B84] focus:ring-2 focus:ring-[#FCE5DE]" />
-                    </label>
-                    <label className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 md:col-span-2 md:mt-[26px]">
-                      <input type="checkbox" checked={ignoreHidden} onChange={(event) => setIgnoreHidden(event.target.checked)} />
-                      <I18nText>忽略隐藏文件</I18nText></label>
-                  </div>
-                ) : null}
-                {message ? <div className="md:col-span-12 rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{message}</div> : null}
-                {error ? <div className="md:col-span-12 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
               </form> : null}
               <div className="space-y-3">
                 {folders.map((path) => (
@@ -401,7 +371,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                     </div>
                     {expandedRules[path.id] ? (
                       <div className="mt-4 border-t border-slate-100 pt-4">
-                        <LibraryEditor path={path} saving={ruleBusy === path.id} onSave={saveFolderSettings} compact />
+                        <LibraryEditor path={path} saving={ruleBusy === path.id} onSave={saveFolderSettings} onClose={() => setExpandedRules((current) => ({ ...current, [path.id]: false }))} />
                       </div>
                     ) : null}
                   </div>
@@ -461,12 +431,12 @@ function LibraryEditor({
   path,
   saving,
   onSave,
-  compact = false
+  onClose
 }: {
   path: Library;
   saving: boolean;
   onSave: (path: Library, updates: Pick<Library, 'name' | 'rootPath' | 'ignorePatterns' | 'ignoreHidden' | 'minFileSizeBytes' | 'organizationMode'>) => Promise<void>;
-  compact?: boolean;
+  onClose: () => void;
 }) {
   const { t: i18nAttribute } = useAttributeI18n();
   const [folderName, setFolderName] = useState(path.name);
@@ -475,6 +445,7 @@ function LibraryEditor({
   const [hidden, setHidden] = useState(path.ignoreHidden);
   const [minSizeKb, setMinSizeKb] = useState(String(Math.round((path.minFileSizeBytes ?? 0) / 1024)));
   const [mode, setMode] = useState<OrganizationMode>(path.organizationMode);
+  const [showRules, setShowRules] = useState(true);
   useEffect(() => {
     setFolderName(path.name);
     setFolderPath(path.rootPath);
@@ -485,64 +456,111 @@ function LibraryEditor({
   }, [path]);
 
   return (
-    <div className={cn(!compact && 'rounded-3xl border border-slate-200 bg-slate-50 p-5')}>
-      <div className="grid gap-4 md:grid-cols-12">
-        <label className="md:col-span-4">
-          <span className="text-sm font-medium text-slate-700"><I18nText>名称</I18nText></span>
-          <input value={folderName} onChange={(event) => setFolderName(event.target.value)} className="mt-1.5 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#F19B84] focus:ring-2 focus:ring-[#FCE5DE]" />
-        </label>
-        <div className="md:col-span-8">
-          <span className="text-sm font-medium text-slate-700"><I18nText>书库路径</I18nText></span>
-          <SharedDirectoryPathPicker value={folderPath} onChange={setFolderPath} compact />
-        </div>
-        <label className="flex h-10 items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 md:col-span-4 md:mt-[26px]">
-          <input type="checkbox" checked={hidden} onChange={(event) => setHidden(event.target.checked)} />
-          <I18nText>忽略隐藏文件</I18nText></label>
-        <label className="md:col-span-4">
-          <span className="text-sm font-medium text-slate-700"><I18nText>最小文件大小 KB</I18nText></span>
-          <input
-            type="number"
-            min={0}
-            value={minSizeKb}
-            onChange={(event) => setMinSizeKb(event.target.value)}
-            className="mt-1.5 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#F19B84] focus:ring-2 focus:ring-[#FCE5DE]"
-          />
-        </label>
-        <label className="md:col-span-4">
-          <span className="text-sm font-medium text-slate-700"><I18nText>组织方式</I18nText></span>
-          <Select value={mode} onChange={(value) => setMode(value as OrganizationMode)} ariaLabel="组织方式" className="mt-1.5 w-full" size="sm" options={ORGANIZATION_MODES.map((option) => ({ value: option.value, label: option.label }))} />
-        </label>
+    <form className={libraryFormClassName} onSubmit={(event) => {
+      event.preventDefault();
+      if (saving || !folderName.trim() || !folderPath.trim()) return;
+      void onSave(path, {
+        name: folderName.trim(), rootPath: folderPath, ignorePatterns: patterns,
+        ignoreHidden: hidden, organizationMode: mode,
+        minFileSizeBytes: Math.max(0, Math.round(Number(minSizeKb || 0) * 1024))
+      });
+    }}>
+      <div className="flex items-center justify-between gap-4 md:col-span-2">
+        <h2 className="text-xl font-semibold text-slate-900"><I18nText>编辑书库</I18nText></h2>
+        <Button type="button" variant="ghost" onClick={onClose}>
+          <ChevronDown size={16} className="rotate-180" /><I18nText>收起</I18nText>
+        </Button>
       </div>
-      <div className="mt-2 text-xs leading-5 text-slate-500">{i18nAttribute(organizationModeDescription(mode))}</div>
-      <label className="mt-4 block">
-        <span className="text-sm font-medium text-slate-700"><I18nText>自定义忽略规则</I18nText></span>
-        <textarea
-          value={patterns}
-          onChange={(event) => setPatterns(event.target.value)}
-          rows={4}
-          placeholder={i18nAttribute("每行一条 glob 规则，例如 **/temp/**")}
-          className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-sm outline-none focus:border-[#F19B84] focus:ring-2 focus:ring-[#FCE5DE]"
-        />
+      <LibraryFormFields
+        name={folderName} setName={setFolderName} rootPath={folderPath} setRootPath={setFolderPath}
+        organizationMode={mode} setOrganizationMode={setMode}
+        ignorePatterns={patterns} setIgnorePatterns={setPatterns}
+        ignoreHidden={hidden} setIgnoreHidden={setHidden}
+        minFileSizeKb={minSizeKb} setMinFileSizeKb={setMinSizeKb}
+        showRules={showRules} onToggleRules={() => setShowRules((current) => !current)}
+      />
+      <div className="flex justify-end border-t border-slate-200 pt-5 md:col-span-2">
+        <Button className="h-11 w-[120px]" icon={FolderOpen} loading={saving}
+          loadingText={i18nAttribute("保存中")} disabled={!folderName.trim() || !folderPath.trim()}>
+          <I18nText>保存</I18nText>
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+const libraryFormClassName = "grid w-full grid-cols-1 gap-5 rounded-[20px] border border-slate-200 bg-slate-50 p-4 md:grid-cols-2 md:gap-6 md:p-8";
+
+function LibraryFormFields({
+  name, setName, rootPath, setRootPath, organizationMode, setOrganizationMode,
+  ignorePatterns, setIgnorePatterns, ignoreHidden, setIgnoreHidden,
+  minFileSizeKb, setMinFileSizeKb, showRules, onToggleRules, rulesSummary
+}: {
+  name: string; setName: (value: string) => void;
+  rootPath: string; setRootPath: (value: string) => void;
+  organizationMode: OrganizationMode; setOrganizationMode: (value: OrganizationMode) => void;
+  ignorePatterns: string; setIgnorePatterns: (value: string) => void;
+  ignoreHidden: boolean; setIgnoreHidden: (value: boolean) => void;
+  minFileSizeKb: string; setMinFileSizeKb: (value: string) => void;
+  showRules: boolean; onToggleRules: () => void;
+  rulesSummary?: ReactNode;
+}) {
+  const { t: i18nAttribute } = useAttributeI18n();
+  return (
+    <>
+      <label className="min-w-0">
+        <span className="text-sm font-medium text-slate-700"><I18nText>名称</I18nText></span>
+        <input value={name} onChange={(event) => setName(event.target.value)} className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-[#F19B84] focus:ring-2 focus:ring-[#FCE5DE]" />
       </label>
-      <div className="mt-2 text-xs leading-5 text-slate-500"><I18nText>默认忽略 *.cover.jpg/jpeg/png/webp、cover.jpg/jpeg/png/webp 和 .opf 文件；这里填写额外规则，每行一条。</I18nText></div>
-      <div className="mt-3 flex justify-end">
-        <Button
-          type="button"
-          icon={CheckCircle2}
-          loading={saving}
-          loadingText={i18nAttribute("保存中")}
-          disabled={!folderName.trim() || !folderPath.trim()}
-          onClick={() => onSave(path, {
-            name: folderName.trim(),
-            rootPath: folderPath,
-            ignorePatterns: patterns,
-            ignoreHidden: hidden,
-            organizationMode: mode,
-            minFileSizeBytes: Math.max(0, Math.round(Number(minSizeKb || 0) * 1024))
-          })}
-        >
-          <I18nText>保存设置</I18nText></Button>
+      <div className="min-w-0">
+        <span className="text-sm font-medium text-slate-700"><I18nText>组织方式</I18nText></span>
+        <Select value={organizationMode} onChange={(value) => setOrganizationMode(value as OrganizationMode)} ariaLabel="组织方式" className="mt-1.5 w-full" options={ORGANIZATION_MODES.map((option) => ({ value: option.value, label: option.label }))} />
+        <p className="mt-1.5 text-xs leading-5 text-slate-500">{i18nAttribute(organizationModeDescription(organizationMode))}</p>
       </div>
-    </div>
+      <div className="min-w-0 md:col-span-2">
+        <span className="text-sm font-medium text-slate-700"><I18nText>书库路径</I18nText></span>
+        <SharedDirectoryPathPicker value={rootPath} onChange={setRootPath} compact controlClassName="!h-11" />
+        <p className="mt-1.5 text-xs leading-5 text-slate-500"><I18nText>图书会进入书库；每位用户可按来源文件夹创建自己的智能书架。</I18nText></p>
+      </div>
+      <button
+        type="button"
+        aria-expanded={showRules}
+        onClick={() => onToggleRules()}
+        className="flex min-h-11 flex-wrap items-center gap-2 border-t border-slate-200 pt-5 text-left text-sm font-medium text-slate-600 hover:text-[#D94724] md:col-span-2"
+      >
+        <SlidersHorizontal size={15} />
+        <I18nText>扫描规则</I18nText><ChevronDown size={15} className={cn('transition-transform', showRules && 'rotate-180')} />
+        {rulesSummary ? <span className="basis-full text-xs font-normal leading-5 text-slate-500 md:basis-auto">{rulesSummary}</span> : null}
+      </button>
+      {showRules ? (
+        <div className="grid min-w-0 grid-cols-1 gap-5 md:col-span-2 md:grid-cols-2 md:gap-6">
+          <label className="min-w-0 md:col-span-2">
+            <span className="text-sm font-medium text-slate-700"><I18nText>自定义忽略规则</I18nText></span>
+            <textarea
+              value={ignorePatterns}
+              onChange={(event) => setIgnorePatterns(event.target.value)}
+              rows={2}
+              placeholder={i18nAttribute("每行一条 glob 规则，例如 **/temp/**")}
+              className="mt-1.5 block min-h-24 w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-sm outline-none focus:border-[#F19B84] focus:ring-2 focus:ring-[#FCE5DE]"
+            />
+            <p className="mt-1.5 text-xs leading-5 text-slate-500"><I18nText>默认忽略 *.cover.jpg/jpeg/png/webp、cover.jpg/jpeg/png/webp 和 .opf 文件；这里填写额外规则，每行一条。</I18nText></p>
+          </label>
+          <label className="min-w-0">
+            <span className="text-sm font-medium text-slate-700"><I18nText>最小文件大小</I18nText></span>
+            <span className="mt-1.5 flex h-11 overflow-hidden rounded-xl border border-slate-200 bg-white focus-within:border-[#F19B84] focus-within:ring-2 focus-within:ring-[#FCE5DE]">
+              <input type="number" min={0} aria-label={i18nAttribute("最小文件大小 KB")} value={minFileSizeKb} onChange={(event) => setMinFileSizeKb(event.target.value)} className="h-full min-w-0 flex-1 bg-transparent px-3 text-sm outline-none" />
+              <span aria-hidden="true" className="flex items-center border-l border-slate-200 bg-slate-50 px-3 text-sm text-slate-500">KB</span>
+            </span>
+          </label>
+          <div className="min-w-0">
+            <span className="text-sm font-medium text-slate-700"><I18nText>过滤选项</I18nText></span>
+            <label className="mt-1.5 flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700">
+              <input type="checkbox" checked={ignoreHidden} onChange={(event) => setIgnoreHidden(event.target.checked)} />
+              <I18nText>忽略隐藏文件</I18nText>
+            </label>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }

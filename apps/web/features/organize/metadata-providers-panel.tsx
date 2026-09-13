@@ -178,7 +178,7 @@ export function MetadataProvidersPanel() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="w-full max-w-3xl space-y-8">
       {error ? <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
       {loading ? <div className="shuku-loading-panel p-8 text-sm"><I18nText>正在读取数据源...</I18nText></div> : null}
 
@@ -187,7 +187,7 @@ export function MetadataProvidersPanel() {
           <h2 id="recognition-sources-title" className="text-xl font-semibold text-[#2C2926]"><I18nText>识别数据源</I18nText></h2>
           <p className="mt-1 text-sm leading-6 text-[#77716A]"><I18nText>所有读物共用同一套数据源顺序。系统会按从上到下的顺序识别，只调用已启用的项目。</I18nText></p>
         </div>
-        <article className="max-w-3xl overflow-visible rounded-[24px] border border-[#E2DDD7] bg-white shadow-sm shadow-stone-900/[0.03]">
+        <article className="overflow-visible rounded-[24px] border border-[#E2DDD7] bg-white shadow-sm shadow-stone-900/[0.03]">
           <header className="flex items-center justify-between gap-3 border-b border-[#EEEAE5] px-5 py-5">
             <div className="flex min-w-0 gap-3"><span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#FFF0EA] text-[#D94A2B]"><Database size={20} /></span><div><h3 className="font-semibold text-[#2C2926]"><I18nText>全局识别顺序</I18nText></h3><p className="mt-1 text-xs leading-5 text-[#817A73]"><I18nText>元数据筛选和识别不区分读物类型</I18nText></p></div></div>
             <Badge tone="slate">{providers.filter((provider) => provider.enabled).length}/{providers.length} <I18nText>启用</I18nText></Badge>

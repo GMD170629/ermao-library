@@ -178,6 +178,11 @@ class ContentMappersTest {
         val content = detail.toUiContent()
         val mappedResource = content.resources.single()
 
+        for (progress in listOf(0.0, 0.4, 75.0, 100.0)) {
+            val resource = completedResource.copy(readerType = "audio", progress = progress).toUiContent()
+            assertEquals(progress > 0.0, resource.hasReadingProgress)
+        }
+
         assertEquals(75, content.book.progressPercent)
         assertEquals("resource-completed", content.resources.single().id)
         assertEquals("2010-11-01", mappedResource.publishedAt)

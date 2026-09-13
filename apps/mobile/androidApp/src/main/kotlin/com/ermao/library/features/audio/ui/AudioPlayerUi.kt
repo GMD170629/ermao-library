@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -63,6 +62,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -76,6 +76,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
@@ -91,6 +92,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
 import com.ermao.library.R
 import com.ermao.library.features.audio.application.AndroidAudioPlaybackRuntime
 import com.ermao.library.features.audio.model.AndroidAudioPhase
@@ -101,6 +104,7 @@ import com.ermao.library.features.content.AuthenticatedBookArtwork
 import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.ui.theme.WarmPageThemeValues
+import com.ermao.library.ui.components.useDarkSystemBarForeground
 import java.text.DateFormat
 import java.text.NumberFormat
 import java.util.Date
@@ -869,6 +873,7 @@ private fun AudioToolButton(
 }
 
 @Composable
+@Suppress("DEPRECATION") // Transparent system bars remain necessary on supported pre-35 devices.
 fun AudioNowPlayingDialog(
     visible: Boolean,
     snapshot: AndroidAudioPlaybackSnapshot,
@@ -884,12 +889,27 @@ fun AudioNowPlayingDialog(
     }
     Dialog(
         onDismissRequest = dismissPlayer,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
+        val window = (LocalView.current.parent as? DialogWindowProvider)?.window
+        val useDarkForeground = useDarkSystemBarForeground(WarmPageThemeValues.colors.surfaceRaised)
+        SideEffect {
+            window?.let { dialogWindow ->
+                dialogWindow.statusBarColor = android.graphics.Color.TRANSPARENT
+                dialogWindow.navigationBarColor = android.graphics.Color.TRANSPARENT
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    dialogWindow.isStatusBarContrastEnforced = false
+                    dialogWindow.isNavigationBarContrastEnforced = false
+                }
+                WindowCompat.getInsetsController(dialogWindow, dialogWindow.decorView).apply {
+                    isAppearanceLightStatusBars = useDarkForeground
+                    isAppearanceLightNavigationBars = useDarkForeground
+                }
+            }
+        }
         Surface(
-            modifier = Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.safeDrawing),
+            // Scaffold owns content insets; the surface also paints behind both system bars.
+            modifier = Modifier.fillMaxSize(),
             color = WarmPageThemeValues.colors.surfaceRaised,
         ) {
             BackHandler(onBack = dismissPlayer)

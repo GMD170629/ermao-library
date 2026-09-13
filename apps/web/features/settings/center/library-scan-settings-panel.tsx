@@ -82,33 +82,35 @@ export function LibraryScanSettingsPanel() {
             aria-checked={settings.watchEnabled}
             disabled={loading}
             onClick={() => setSettings((current) => ({ ...current, watchEnabled: !current.watchEnabled }))}
-            className={`relative mt-1 h-7 w-12 shrink-0 rounded-full transition-colors disabled:opacity-50 ${settings.watchEnabled ? 'bg-[#E64A2E]' : 'bg-[#C8C2BB]'}`}
+            className={`relative mt-1 h-7 w-12 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--visual-color-app-focus-ring)] focus-visible:ring-offset-2 motion-reduce:transition-none disabled:opacity-50 ${settings.watchEnabled ? 'bg-[#E64A2E]' : 'bg-[#C8C2BB]'}`}
           >
-            <span className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-transform ${settings.watchEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+            <span aria-hidden="true" className={`absolute left-1 top-1 h-5 w-5 rounded-full bg-white transition-transform motion-reduce:transition-none ${settings.watchEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
             <span className="sr-only"><I18nText>实时监听</I18nText></span>
           </button>
         </div>
       </section>
 
       <section aria-labelledby="interval-title">
-        <div className="flex gap-3">
-          <Clock3 className="mt-0.5 text-[#D94724]" size={20} aria-hidden="true" />
-          <div>
-            <h3 id="interval-title" className="text-lg font-semibold text-[#2A2825]"><I18nText>周期扫描间隔</I18nText></h3>
-            <p className="mt-1 text-sm leading-6 text-[#77716A]"><I18nText>所有启用书库共用一个周期扫描，用于补回停机或监听不可用期间遗漏的新增内容。</I18nText></p>
+        <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between md:gap-6">
+          <div className="flex min-w-0 gap-3">
+            <Clock3 className="mt-0.5 text-[#D94724]" size={20} aria-hidden="true" />
+            <div>
+              <h3 id="interval-title" className="text-lg font-semibold text-[#2A2825]"><I18nText>周期扫描间隔</I18nText></h3>
+              <p className="mt-1 text-sm leading-6 text-[#77716A]"><I18nText>所有启用书库共用一个周期扫描，用于补回停机或监听不可用期间遗漏的新增内容。</I18nText></p>
+            </div>
           </div>
+          <label className="block w-full text-sm font-medium text-[#4F4B47] md:w-48 md:shrink-0">
+            <span className="mb-2 block"><I18nText>扫描频率</I18nText></span>
+            <Select
+              value={String(settings.intervalMinutes)}
+              disabled={loading}
+              onChange={(value) => setSettings((current) => ({ ...current, intervalMinutes: Number(value) }))}
+              ariaLabel="扫描频率"
+              className="w-full"
+              options={intervalOptions.map((minutes) => ({ value: String(minutes), label: intervalLabel(minutes, t), translate: false }))}
+            />
+          </label>
         </div>
-        <label className="mt-5 block max-w-xs text-sm font-medium text-[#4F4B47]">
-          <span className="mb-2 block"><I18nText>扫描频率</I18nText></span>
-          <Select
-            value={String(settings.intervalMinutes)}
-            disabled={loading}
-            onChange={(value) => setSettings((current) => ({ ...current, intervalMinutes: Number(value) }))}
-            ariaLabel="扫描频率"
-            className="w-full"
-            options={intervalOptions.map((minutes) => ({ value: String(minutes), label: intervalLabel(minutes, t), translate: false }))}
-          />
-        </label>
         <p className="mt-4 rounded-xl bg-[#F7F4F1] px-4 py-3 text-sm leading-6 text-[#6F6963]"><I18nText>实时监听关闭后，周期扫描仍会继续运行。普通文件修改、移出和删除暂不会触发同步。</I18nText></p>
       </section>
 

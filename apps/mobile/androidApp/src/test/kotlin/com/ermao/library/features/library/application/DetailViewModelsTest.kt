@@ -110,6 +110,17 @@ class DetailViewModelsTest {
         assertEquals(100, unmarkedAtEnd.resources.single().progressPercent)
     }
 
+    @Test
+    fun fractionalProgressSurvivesLocalProjectionAndZeroResetsIt() {
+        for (selectedId in listOf(null, "resource-1")) {
+            val started = contentWithChapters().applying(presentationSnapshot(0.4), selectedId)
+            assertEquals(true, started.resources.single().hasReadingProgress)
+            assertEquals(0, started.resources.single().progressPercent)
+            val reset = started.applying(presentationSnapshot(0.0), selectedId)
+            assertEquals(false, reset.resources.single().hasReadingProgress)
+        }
+    }
+
     private fun presentationSnapshot(displayPercent: Double) = ReaderPositionPresentationSnapshot(
         bookId = "book-1",
         resourceId = "resource-1",

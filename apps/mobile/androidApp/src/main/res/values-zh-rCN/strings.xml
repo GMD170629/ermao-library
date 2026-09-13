@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="work_progress_less_than_one_percent">不足 1%</string>
     <string name="shelves_all">全部</string>
     <string name="shelves_collections">合集</string>
     <string name="shelves_scope">筛选书架</string>

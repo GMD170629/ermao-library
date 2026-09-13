@@ -14,12 +14,14 @@ export function DirectoryPathPicker({
   value,
   onChange,
   compact = false,
+  controlClassName,
   disabled = false,
   variant = 'default'
 }: {
   value: string;
   onChange: (value: string) => void;
   compact?: boolean;
+  controlClassName?: string;
   disabled?: boolean;
   variant?: DirectoryPathPickerVariant;
 }) {
@@ -190,6 +192,7 @@ export function DirectoryPathPicker({
           ? 'rounded-2xl border-[#B08B6E]/55 bg-[#E8DCC7] text-[#606C38] focus-within:border-[#C66B3D] focus-within:ring-[#C66B3D]/15'
           : 'border-slate-200 bg-white text-slate-900 focus-within:border-[#F19B84] focus-within:ring-[#FCE5DE]',
         compact ? 'h-10 rounded-xl' : 'h-12 rounded-2xl',
+        controlClassName,
         disabled && 'cursor-not-allowed opacity-60'
       )}>
         <FolderOpen size={17} className={cn('ml-4 shrink-0', setup ? 'text-[#8B9D83]' : 'text-slate-500')} />

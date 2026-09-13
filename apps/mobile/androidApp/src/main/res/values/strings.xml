@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="work_progress_less_than_one_percent">Less than 1%</string>
     <string name="shelves_all">All</string>
     <string name="shelves_collections">Collections</string>
     <string name="shelves_scope">Filter shelves</string>

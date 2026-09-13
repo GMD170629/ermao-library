@@ -888,7 +888,10 @@ internal fun BookDetailContent.applying(
         continueResourceId = snapshot.resourceId,
         resources = resources.map { resource ->
             if (resource.id == snapshot.resourceId) {
-                resource.copy(progressPercent = snapshot.presentation.displayPercent.toInt().coerceIn(0, 100))
+                resource.copy(
+                    progressPercent = snapshot.presentation.displayPercent.toInt().coerceIn(0, 100)
+                        .takeIf { snapshot.presentation.displayPercent > 0.0 },
+                )
             } else resource
         },
     )
@@ -908,7 +911,9 @@ internal fun BookDetailContent.applying(
     return copy(
         book = book.copy(progressPercent = progress),
         continueResourceId = snapshot.resourceId,
-        resources = resources.map { resource -> if (resource.id == snapshot.resourceId) resource.copy(progressPercent = progress) else resource },
+        resources = resources.map { resource -> if (resource.id == snapshot.resourceId) resource.copy(
+            progressPercent = progress.takeIf { snapshot.presentation.displayPercent > 0.0 },
+        ) else resource },
         readingUnits = readingUnits.mapIndexed { index, unit ->
             unit.copy(
                 progressPercent = progress.takeIf { states.getOrNull(index) == ReaderChapterState.Current },
