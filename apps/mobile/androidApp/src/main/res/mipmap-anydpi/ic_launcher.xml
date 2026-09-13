@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/launcher_background" />
-    <foreground android:drawable="@drawable/ermao_library_brand" />
-    <monochrome android:drawable="@drawable/ic_launcher_monochrome" />
+    <foreground>
+        <!-- Adaptive layers are 108dp; the visible viewport is 72dp. Keep the
+             shared PWA/iOS artwork inside that viewport instead of cropping it. -->
+        <inset
+            android:drawable="@drawable/ermao_library_brand"
+            android:inset="16.666667%" />
+    </foreground>
 </adaptive-icon>
