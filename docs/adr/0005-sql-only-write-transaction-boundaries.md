@@ -27,8 +27,13 @@ All ordinary write use cases follow this sequence:
 5. Commit before response mapping or external publication.
 
 Set-based writes use a 900-bind-parameter budget. Background maintenance uses a separate
-connection with a 500ms SQLite busy timeout and a 500ms budget measured from its first
-DML statement. Busy work is deferred without dropping its persistent intent. Foreground
+connection with a 500ms SQLite busy timeout and a separate 2s execution budget per SQL
+statement, including its result fetching. SQL execution budgets do not accumulate across
+statements or include application pauses between execute/fetch calls. Native executemany
+bindings each start a fresh SQL budget. No cumulative transaction timeout is imposed.
+This replaces the original 500ms first-DML transaction deadline at the user's explicit
+request on 2026-09-13; ordinary foreground and backup restore connections retain their
+existing timeout policy. Busy work is deferred without dropping its persistent intent. Foreground
 write intervals longer than 100ms emit a structured duration/outcome log without SQL or
 payload content.
 

@@ -351,7 +351,7 @@ def test_session_refresh_defers_in_250ms_when_another_engine_holds_writer_lock(
     short_write_engine = create_sqlite_engine(
         settings.database_path,
         timeout_seconds=0.25,
-        transaction_time_budget_seconds=0.25,
+        statement_time_budget_seconds=2.0,
     )
     bootstrap_database(regular_engine, settings)
     with Session(regular_engine) as seed_db:
@@ -560,7 +560,7 @@ def test_avatar_write_contention_preserves_published_file_and_database_reference
     short_write_engine = create_sqlite_engine(
         settings.database_path,
         timeout_seconds=0.25,
-        transaction_time_budget_seconds=0.25,
+        statement_time_budget_seconds=2.0,
     )
     bootstrap_database(regular_engine, settings)
     with Session(regular_engine) as seed_db:

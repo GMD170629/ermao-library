@@ -1,6 +1,9 @@
 import logging
+import sqlite3
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from time import monotonic
+from typing import Protocol, Self, TypeVar, cast, overload
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import URL, Engine
@@ -12,7 +15,122 @@ from app.db.maintenance import (
 
 logger = logging.getLogger(__name__)
 
-SHORT_WRITE_OPERATION_LIMIT_SECONDS = 0.5
+SHORT_WRITE_LOCK_TIMEOUT_SECONDS = 0.5
+SQLITE_STATEMENT_TIMEOUT_SECONDS = 2.0
+
+_Result = TypeVar("_Result")
+_Cursor = TypeVar("_Cursor", bound=sqlite3.Cursor)
+
+
+class _PositionalParameters(Protocol):
+    def __len__(self) -> int: ...
+
+    def __getitem__(self, index: int, /) -> object: ...
+
+
+_Parameters = _PositionalParameters | Mapping[str, object]
+
+
+class _StatementBudgetCursor(sqlite3.Cursor):
+    """Budget SQLite execution and fetching, excluding time between DBAPI calls."""
+
+    _remaining_seconds: float | None = None
+    _deadline: float | None = None
+    _started_at: float = 0
+
+    def _start_statement(self) -> None:
+        self._remaining_seconds = cast(
+            _StatementBudgetConnection, self.connection
+        ).statement_time_budget_seconds
+        self._started_at = monotonic()
+        self._deadline = (
+            self._started_at + self._remaining_seconds
+            if self._remaining_seconds is not None
+            else None
+        )
+
+    def _expired(self) -> int:
+        return int(self._deadline is not None and monotonic() >= self._deadline)
+
+    def _check_budget(self) -> None:
+        if self._expired():
+            # Short statements and blocking functions can complete before the next
+            # SQLite progress callback. Still report failure to the owning UoW.
+            error = sqlite3.OperationalError("interrupted")
+            error.sqlite_errorcode = sqlite3.SQLITE_INTERRUPT
+            error.sqlite_errorname = "SQLITE_INTERRUPT"
+            raise error
+
+    def _run(self, operation: Callable[[], _Result]) -> _Result:
+        if self._remaining_seconds is None:
+            return operation()
+        self._started_at = monotonic()
+        self._deadline = self._started_at + self._remaining_seconds
+        self.connection.set_progress_handler(self._expired, 1_000)
+        try:
+            self._check_budget()
+            result = operation()
+            self._check_budget()
+            return result
+        finally:
+            self._remaining_seconds -= monotonic() - self._started_at
+            self._deadline = None
+            self.connection.set_progress_handler(None, 0)
+
+    def execute(self, sql: str, parameters: _Parameters = (), /) -> Self:
+        self._start_statement()
+        return self._run(
+            lambda: super(_StatementBudgetCursor, self).execute(sql, parameters)
+        )
+
+    def executemany(
+        self, sql: str, seq_of_parameters: Iterable[_Parameters], /
+    ) -> Self:
+        def budgeted_parameters() -> Iterable[_Parameters]:
+            for parameters in seq_of_parameters:
+                # DBAPI executemany executes a distinct statement for each set of
+                # bindings; keep native batching/rowcount and reset only its timer.
+                self._start_statement()
+                yield parameters
+                self._check_budget()
+
+        self._start_statement()
+        return self._run(
+            lambda: super(_StatementBudgetCursor, self).executemany(
+                sql, budgeted_parameters()
+            )
+        )
+
+    def fetchone(self) -> object:
+        return self._run(super().fetchone)
+
+    def fetchmany(self, size: int | None = None) -> list[object]:
+        return self._run(
+            lambda: super(_StatementBudgetCursor, self).fetchmany(
+                self.arraysize if size is None else size
+            )
+        )
+
+    def fetchall(self) -> list[object]:
+        return self._run(super().fetchall)
+
+    def __next__(self) -> object:
+        return self._run(super().__next__)
+
+
+class _StatementBudgetConnection(sqlite3.Connection):
+    statement_time_budget_seconds: float | None = None
+
+    @overload
+    def cursor(self, factory: None = None) -> sqlite3.Cursor: ...
+
+    @overload
+    def cursor(self, factory: Callable[[sqlite3.Connection], _Cursor]) -> _Cursor: ...
+
+    def cursor(
+        self, factory: Callable[[sqlite3.Connection], sqlite3.Cursor] | None = None
+    ) -> sqlite3.Cursor:
+        return super().cursor(factory or _StatementBudgetCursor)
 
 
 class SQLiteWalModeRequiredError(RuntimeError):
@@ -23,12 +141,15 @@ def create_sqlite_engine(
     database_path: Path,
     *,
     timeout_seconds: float = 10,
-    transaction_time_budget_seconds: float | None = None,
+    statement_time_budget_seconds: float | None = None,
     slow_write_threshold_seconds: float | None = 0.1,
 ) -> Engine:
     engine = create_engine(
         URL.create("sqlite+pysqlite", database=str(database_path)),
-        connect_args={"timeout": timeout_seconds},
+        connect_args={
+            "timeout": timeout_seconds,
+            "factory": _StatementBudgetConnection,
+        },
         pool_pre_ping=True,
     )
 
@@ -54,17 +175,7 @@ def create_sqlite_engine(
             cursor.execute("PRAGMA synchronous = NORMAL")
         finally:
             cursor.close()
-        if transaction_time_budget_seconds is not None:
-            connection_record.info["transaction_deadline"] = None
-
-            def interrupt_expired_transaction() -> int:
-                deadline = connection_record.info.get("transaction_deadline")
-                return int(deadline is not None and monotonic() >= deadline)
-
-            dbapi_connection.set_progress_handler(
-                interrupt_expired_transaction,
-                1_000,
-            )
+        dbapi_connection.statement_time_budget_seconds = statement_time_budget_seconds
 
     @event.listens_for(engine, "before_cursor_execute")
     def observe_first_transaction_dml(
@@ -95,17 +206,12 @@ def create_sqlite_engine(
             return
         started_at = monotonic()
         connection.info["transaction_write_started_at"] = started_at
-        if transaction_time_budget_seconds is not None:
-            connection.info["transaction_deadline"] = (
-                started_at + transaction_time_budget_seconds
-            )
 
     def finish_observed_transaction(connection, *, outcome: str) -> None:
         release_database_maintenance_lock(
             connection.info.pop("database_writer_lease", None)
         )
         started_at = connection.info.pop("transaction_write_started_at", None)
-        connection.info["transaction_deadline"] = None
         if started_at is None or slow_write_threshold_seconds is None:
             return
         duration_seconds = monotonic() - started_at
@@ -129,7 +235,6 @@ def create_sqlite_engine(
             connection_record.info.pop("database_writer_lease", None)
         )
         connection_record.info.pop("transaction_write_started_at", None)
-        connection_record.info["transaction_deadline"] = None
 
     event.listen(engine, "commit", observe_commit)
     event.listen(engine, "rollback", observe_rollback)
