@@ -57,6 +57,8 @@ kotlin {
 }
 
 tasks.withType<Test>().configureEach {
+    val readerSafetyReport = layout.buildDirectory.file("reports/reader-safety-conformance/kmp.json")
+    outputs.file(readerSafetyReport).withPropertyName("readerSafetyReport")
     systemProperty(
         "bookDetailIdentityFixturePath",
         rootProject.file("../../docs/testing/fixtures/book-detail-identity.json").absolutePath,
@@ -69,7 +71,7 @@ tasks.withType<Test>().configureEach {
     )
     systemProperty(
         "readerSafetyReportPath",
-        layout.buildDirectory.file("reports/reader-safety-conformance/kmp.json").get().asFile.absolutePath,
+        readerSafetyReport.get().asFile.absolutePath,
     )
     systemProperty(
         "readerComicSemanticsFixturePath",
