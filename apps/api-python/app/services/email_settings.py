@@ -31,6 +31,7 @@ SETTING_KEYS = {
     "kindleEmail": "kindle.email",
 }
 SMTP_SECURITY_VALUES = {"starttls", "ssl", "none"}
+MAXIMUM_ATTACHMENT_MB = 50.0
 
 
 class EmailSettingsError(ValueError):
@@ -82,15 +83,17 @@ def _port(value: Any) -> int:
     return port
 
 
-def _max_attachment_mb(value: Any) -> float | None:
+def _max_attachment_mb(value: Any, *, stored: bool = False) -> float:
     if value in (None, ""):
-        return None
+        return MAXIMUM_ATTACHMENT_MB
     try:
         size = float(value)
     except (TypeError, ValueError):
         raise EmailSettingsError("附件大小上限必须是数字") from None
-    if not 1 <= size <= 1000:
-        raise EmailSettingsError("附件大小上限必须在 1 MB 到 1000 MB 之间")
+    if stored and 1 <= size <= 1000:
+        size = min(size, MAXIMUM_ATTACHMENT_MB)
+    if not 1 <= size <= MAXIMUM_ATTACHMENT_MB:
+        raise EmailSettingsError("附件大小上限必须在 1 MB 到 50 MB 之间")
     return round(size, 2)
 
 
@@ -137,6 +140,9 @@ def get_email_settings(
 ) -> dict[str, Any]:
     stored = _load_values(db)
     values = {name: stored.get(key) for name, key in SETTING_KEYS.items()}
+    values["maxAttachmentMb"] = _max_attachment_mb(
+        values["maxAttachmentMb"], stored=True
+    )
     normalized = _normalized(values)
     if not include_password:
         normalized.pop("password", None)

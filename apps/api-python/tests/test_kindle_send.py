@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from email.message import EmailMessage
 from pathlib import Path
 
+import pytest
 from sqlalchemy import select
 
 from app.bootstrap.kindle import recover_interrupted_kindle_tasks_command
@@ -22,6 +23,7 @@ from app.models import (
 from app.models.auth import User
 from app.models.import_pipeline import KindleSendTask
 from app.models.settings import SystemEvent
+from app.modules.system.infrastructure.settings import upsert_setting
 from app.services import kindle_queue
 from app.services.kindle_queue import (
     process_next_kindle_send_task,
@@ -273,6 +275,78 @@ def test_enqueue_deduplicates_and_rejects_unsupported_assets(
     )
     assert unsupported.status_code == 400
     assert "EPUB 和 PDF" in unsupported.json()["error"]["message"]
+
+
+@pytest.mark.parametrize(
+    "stored, expected", [(None, 50), (1000, 50), (50, 50), (12.5, 12.5)]
+)
+def test_attachment_limit_reads_legacy_settings(
+    client, db_session, test_settings, stored, expected
+):
+    _prepare(client, db_session, test_settings)
+    upsert_setting(db_session, "email.smtp.maxAttachmentMb", stored)
+    db_session.commit()
+    response = client.get("/api/email-settings")
+    assert response.status_code == 200
+    assert response.json()["data"]["smtp"]["maxAttachmentMb"] == expected
+
+
+@pytest.mark.parametrize(
+    "limit, status", [(None, 200), (1, 200), (50, 200), (50.01, 400), (0.99, 400)]
+)
+def test_attachment_limit_setting_boundaries(
+    client, db_session, test_settings, limit, status
+):
+    _prepare(client, db_session, test_settings)
+    response = client.put(
+        "/api/email-settings", json={"smtp": {"maxAttachmentMb": limit}}
+    )
+    assert response.status_code == status
+    if status == 200:
+        assert response.json()["data"]["smtp"]["maxAttachmentMb"] == (
+            50 if limit is None else limit
+        )
+
+
+@pytest.mark.parametrize("extra, status", [(0, 201), (1, 400)])
+def test_enqueue_enforces_attachment_size_boundary(
+    client, db_session, test_settings, extra, status
+):
+    _prepare(client, db_session, test_settings)
+    node = db_session.get(LibrarySourceNode, "kindle-resource-node")
+    node.observed_size_bytes = 50 * 1024 * 1024 + extra
+    db_session.commit()
+    response = client.post(
+        "/api/kindle-send-tasks",
+        json={"bookId": "book-kindle", "assetId": "asset-kindle"},
+    )
+    assert response.status_code == status
+    if status == 400:
+        assert response.json()["error"]["code"] == "KINDLE_ATTACHMENT_TOO_LARGE"
+
+
+@pytest.mark.parametrize("lower_limit", [False, True])
+def test_worker_rechecks_actual_size_and_current_limit(
+    client, db_session, test_settings, monkeypatch, lower_limit
+):
+    _prepare(client, db_session, test_settings)
+    task = _enqueue(client)
+    path = test_settings.resolved_storage_root / "books" / "book-kindle" / "book.epub"
+    with path.open("r+b") as stream:
+        stream.truncate((2 if lower_limit else 50) * 1024 * 1024 + 1)
+    if lower_limit:
+        upsert_setting(db_session, "email.smtp.maxAttachmentMb", 1)
+        db_session.commit()
+
+    def unexpected_smtp(_config):
+        pytest.fail("Oversize attachment must never reach SMTP")
+
+    monkeypatch.setattr(kindle_queue, "open_smtp_connection", unexpected_smtp)
+    assert process_next_kindle_send_task(db_session, test_settings)
+    db_session.expire_all()
+    stored = db_session.get(KindleSendTask, task["id"])
+    assert stored.status == "failed"
+    assert "大小上限" in stored.error_message
 
 
 def test_worker_submits_resource_asset_and_masks_recipient_in_events(

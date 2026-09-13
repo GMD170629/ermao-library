@@ -375,6 +375,7 @@ def create_kindle_send_task(
         return fail(
             f"附件超过已配置的 {smtp_config.max_attachment_mb:g} MB 大小上限",
             status_code=400,
+            code="KINDLE_ATTACHMENT_TOO_LARGE",
         )
 
     existing = find_active_kindle_task(db, asset_id=asset_id, recipient_email=recipient)
