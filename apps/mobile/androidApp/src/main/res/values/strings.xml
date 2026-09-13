@@ -120,7 +120,6 @@
     <string name="retry_action">Retry</string>
     <string name="clear_action">Clear</string>
     <string name="clear_search_action">Clear search</string>
-    <string name="clear_all_action">Clear all</string>
     <string name="apply_action">Apply</string>
     <string name="load_more_action">Load more</string>
     <string name="cover_content_description">Cover of %1$s</string>
@@ -131,6 +130,7 @@
     <string name="home_loading_message">Loading your reading activity.</string>
     <string name="home_continue_title">Continue reading</string>
     <string name="home_view_detail_action">Continue Reading</string>
+    <string name="home_listening_progress">%1$s listened</string>
     <string name="home_last_read_today">Today %1$s</string>
     <string name="home_last_read_yesterday">Yesterday %1$s</string>
     <string name="home_last_read_absolute">%1$s %2$s</string>
@@ -192,7 +192,6 @@
     <string name="library_view_action">View style</string>
     <string name="close_action">Close</string>
     <string name="library_filter_title">Filter works</string>
-    <string name="library_filter_draft_description">Changes take effect after you apply them.</string>
     <string name="library_filter_reading">Reading status</string>
     <string name="library_permission_revalidating_title">Checking access</string>
     <string name="library_permission_revalidating_message">Private results are hidden while access is checked again.</string>
@@ -539,7 +538,7 @@
     <string name="management_description">Description</string>
     <string name="management_series">Series</string>
     <string name="management_series_index">Series number</string>
-    <string name="management_tags">Tags, separated by commas</string>
+    <string name="management_tags">Tags</string>
     <string name="management_save">Save</string>
     <string name="management_query">Title or keyword</string>
     <string name="management_search">Search</string>
@@ -552,7 +551,6 @@
     <string name="work_no_readable_resources_message">No online-readable resource is available for this book.</string>
     <string name="work_contents_grid">Grid</string>
     <string name="work_contents_list">List</string>
-    <string name="work_contents_file">File</string>
     <string name="work_contents_source_directory">Source directory %1$d</string>
     <string name="work_contents_sort">Sort content</string>
     <string name="work_contents_loading">Loading the source directory…</string>
@@ -593,7 +591,14 @@
         <item quantity="one">Permanently delete %2$d source file associated with “%1$s”. This cannot be undone.</item>
         <item quantity="other">Permanently delete %2$d source files associated with “%1$s”. This cannot be undone.</item>
     </plurals>
-    <string name="management_tags_lines">One tag per line. Tag text is preserved</string>
+    <string name="management_tags_placeholder">Type or select tags</string>
+    <string name="management_tags_add">Add “%1$s”</string>
+    <string name="management_tags_remove">Remove tag “%1$s”</string>
+    <string name="management_tags_loading">Searching tags…</string>
+    <string name="management_tags_suggestions_failed">Suggestions unavailable. You can still add tags.</string>
+    <string name="management_tags_indexing">Tags are being indexed. You can still add tags.</string>
+    <string name="management_tags_more">Type more to narrow down tags</string>
+    <string name="management_tags_empty">No tags to select. Type to add a tag.</string>
     <string name="management_providers_retry">No available providers. Tap to reload</string>
     <string name="management_no_candidates">No candidates yet. Search or change the query</string>
     <string name="management_field_current">Current: %1$s</string>

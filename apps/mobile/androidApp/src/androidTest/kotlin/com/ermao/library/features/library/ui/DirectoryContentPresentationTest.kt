@@ -74,6 +74,7 @@ class DirectoryContentPresentationTest(private val resourceCount: Int, private v
                 // The download extra dispatches the tested callback without a repository request.
                 BookManagementHost(
                     repository = application.workManagementRepository,
+                    loadTagOptions = { query -> repository.loadTagOptions(context, query) },
                     context = context,
                     canManage = false,
                     onUnauthorized = { error("Unexpected authorization request") },

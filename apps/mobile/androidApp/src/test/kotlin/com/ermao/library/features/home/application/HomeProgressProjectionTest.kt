@@ -50,5 +50,12 @@ class HomeProgressProjectionTest {
         assertEquals(100, updated.recentReading.single().progressPercent)
         assertEquals(100, updated.recentAdded.single().progressPercent)
         assertEquals(home, home.applying(update.copy(resourceId = "another-resource")))
+
+        val audioHome = home.copy(continueReading = home.continueReading!!.copy(readerType = "audio"))
+        val earlyAudio = update.copy(position = update.position.copy(
+            presentation = update.presentation.copy(displayPercent = 0.4, totalProgression = 0.004),
+        ))
+        assertEquals(0, audioHome.applying(earlyAudio).continueReading?.book?.progressPercent)
+        assertEquals(null, home.applying(earlyAudio).continueReading?.book?.progressPercent)
     }
 }

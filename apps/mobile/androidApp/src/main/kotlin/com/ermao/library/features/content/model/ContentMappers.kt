@@ -39,7 +39,9 @@ fun HomeSnapshot.toUiContent(): HomeContent {
                     title = it.title,
                     author = AuthorDisplay.label(it.author),
                     coverUrl = it.coverUrl,
-                    progressPercent = it.progress.toInt().takeIf { percent -> percent > 0 },
+                    progressPercent = it.progress.toInt().coerceIn(0, 100).takeIf { percent ->
+                        percent > 0 || it.readerType.equals("audio", ignoreCase = true)
+                    },
                 ),
                 resourceTitle = it.resourceTitle,
                 positionLabel = it.chapter,

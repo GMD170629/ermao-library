@@ -62,6 +62,8 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performImeAction
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.swipeUp
@@ -96,7 +98,15 @@ class BookManagementCoverTest {
     private val kindleAssets = mutableListOf<String>()
     private var kindleReady = true
     private var kindleTitle: String? = null
+    private var savedTags: List<String>? = null
+    private var suggestionsFail = false
     private val repository = object : UnusedManagementRepository() {
+        override suspend fun saveBookFields(context: BookManagementContext, bookId: String, draft: BookMetadataDraft) =
+            WorkManagementResult.Content(Unit)
+        override suspend fun replaceBookTags(context: BookManagementContext, bookId: String, current: List<String>, next: List<String>): WorkManagementResult<Unit> {
+            savedTags = next
+            return WorkManagementResult.Content(Unit)
+        }
         override suspend fun loadBookMenuContext(context: BookManagementContext, bookId: String) =
             WorkManagementResult.Content(ManagementMenuContext(completed = false, kindleSendAvailable = true))
         override suspend fun loadKindleSettings(context: BookManagementContext) =
@@ -144,7 +154,15 @@ class BookManagementCoverTest {
                 LocalResources provides localizedContext.resources,
             ) {
                 WarmPageTheme(darkTheme = chinese) {
-                    BookManagementHost(repository, context, admin, {}, {}, {}, {}, {}) {
+                    BookManagementHost(repository, context, admin, {}, {}, {}, {}, {},
+                        loadTagOptions = { query ->
+                            if (suggestionsFail) com.ermao.library.shared.modules.library.ContentResult.Failure(
+                                com.ermao.library.shared.core.network.AppError(com.ermao.library.shared.core.network.AppErrorKind.NetworkUnavailable, "TEST_FAILED"))
+                            else com.ermao.library.shared.modules.library.ContentResult.Content(
+                                com.ermao.library.shared.modules.library.LibraryTagOptionPage(listOf(
+                                    com.ermao.library.shared.modules.library.LibraryTagOption("Sci-Fi", "Sci-Fi", 3),
+                                ).filter { it.value.contains(query, ignoreCase = true) }, false, true))
+                        }) {
                         LazyColumn {
                             items(20) { index ->
                                 val target = if (resource) ManagementTarget(ManagementObject.Resource, "book", "resource-two", "Volume two")
@@ -381,6 +399,42 @@ class BookManagementCoverTest {
     }
 
     @Test fun englishEditorHasNoCoverControls() = assertMetadataOnlyEditor(chinese = false)
+
+    @Test fun tagsCanSelectRemoveAndSavePendingInput() {
+        show()
+        compose.onNodeWithTag("cover-0").performTouchInput { longClick() }
+        compose.onNodeWithText("Edit").performClick()
+        compose.onNodeWithTag("management-form").performTouchInput { swipeUp() }
+        compose.onNodeWithTag("management-tags-input").performScrollTo().performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Sci-Fi").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Sci-Fi").performClick()
+        compose.onNodeWithTag("management-tags-input").assertIsDisplayed()
+        compose.onNodeWithTag("management-tags-input").performTextReplacement("sci fi;")
+        compose.onAllNodesWithText("Sci-Fi").assertCountEquals(1)
+        compose.onNodeWithContentDescription("Remove tag “Sci-Fi”").performClick()
+        compose.onNodeWithTag("management-tags-input").performTextReplacement("Fantasy")
+        compose.onNodeWithText("Add “Fantasy”").assertIsDisplayed()
+        // Save must include pending input without requiring Enter or a suggestion tap first.
+        compose.onNodeWithText("Save").performClick()
+        compose.runOnIdle { assertEquals(listOf("Fantasy"), savedTags) }
+    }
+
+    @Test fun tagsCanBeAddedWhenSuggestionsFailAndDiscarded() {
+        suggestionsFail = true
+        show(chinese = true)
+        compose.onNodeWithTag("cover-0").performTouchInput { longClick() }
+        compose.onNodeWithText("编辑").performClick()
+        compose.onNodeWithTag("management-form").performTouchInput { swipeUp() }
+        compose.onNodeWithTag("management-tags-input").performScrollTo().performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("标签建议加载失败，可继续输入新标签").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("management-tags-input").performTextReplacement("科幻，短篇")
+        compose.onNodeWithTag("management-tags-input").performImeAction()
+        compose.onNodeWithContentDescription("移除标签“科幻”").assertExists()
+        compose.onNodeWithContentDescription("移除标签“短篇”").assertExists()
+        compose.onNodeWithText("取消").performClick()
+        compose.onNodeWithText("放弃更改").performClick()
+        compose.runOnIdle { assertEquals(null, savedTags) }
+    }
 
     @Test fun chineseEditorHasNoCoverControls() = assertMetadataOnlyEditor(chinese = true)
 

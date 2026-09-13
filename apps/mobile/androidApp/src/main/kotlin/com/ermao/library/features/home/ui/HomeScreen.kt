@@ -31,7 +31,6 @@ import com.ermao.library.R
 import com.ermao.library.features.content.model.ContinueReadingCard
 import com.ermao.library.features.content.model.BookCard
 import com.ermao.library.features.content.ui.CoverRole
-import com.ermao.library.features.content.ui.ReadingProgressTrack
 import com.ermao.library.features.content.ui.BookCover
 import com.ermao.library.features.content.ui.BookGridItem
 import com.ermao.library.features.content.ui.BookListItem
@@ -199,6 +198,7 @@ private fun HomeSingleRecentReading(
             book = book,
             repository = repository,
             context = context,
+            progressOnCover = true,
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { onOpenBook(book.id) },
@@ -228,10 +228,13 @@ private fun ContinueReadingTask(
         zoneId = lastReadClock.zone,
     )?.localizedLabel(lastReadClock.zone)
     val progress = item.book.progressPercent?.coerceIn(0, 100)
+    val isAudio = item.readerType.equals("audio", ignoreCase = true)
     val progressLabel = progress?.let {
         NumberFormat.getPercentInstance(locale).apply {
             maximumFractionDigits = 0
-        }.format(it / 100.0)
+        }.format(it / 100.0).let { percent ->
+            if (isAudio) stringResource(R.string.home_listening_progress, percent) else percent
+        }
     }
     val progressAndTimeLabel = when {
         progressLabel != null && lastReadLabel != null -> stringResource(
@@ -267,6 +270,10 @@ private fun ContinueReadingTask(
                         context = context,
                         role = CoverRole.Compact,
                         modifier = Modifier.width(theme.components.covers.continueWidth),
+                        showProgress = true,
+                        progressStateDescription = if (isAudio) progressLabel else progress?.let {
+                            stringResource(R.string.progress_percent, it)
+                        },
                     )
                     Column(
                         modifier = Modifier.weight(1f),
@@ -305,16 +312,10 @@ private fun ContinueReadingTask(
                                 modifier = Modifier.testTag("home-continue-progress-summary"),
                             )
                         }
-                        progress?.let {
-                            ReadingProgressTrack(
-                                progressPercent = it,
-                                stateDescription = stringResource(R.string.progress_percent, it),
-                            )
-                        }
                     }
                 }
                 WarmPagePrimaryAction(
-                    label = stringResource(R.string.home_view_detail_action),
+                    label = stringResource(if (isAudio) R.string.work_primary_listen_action else R.string.home_view_detail_action),
                     onClick = { onContinueReading(item) },
                     modifier = Modifier
                         .fillMaxWidth()

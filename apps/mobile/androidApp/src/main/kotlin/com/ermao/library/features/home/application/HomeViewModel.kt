@@ -169,7 +169,9 @@ internal fun HomeContent.applying(update: ReaderProgressPresentationUpdate): Hom
 internal fun HomeContent.applying(snapshot: ReaderPositionPresentationSnapshot): HomeContent {
     val current = continueReading ?: return this
     if (current.book.id != snapshot.bookId || current.resumeResourceId != snapshot.resourceId) return this
-    val progress = snapshot.presentation.displayPercent.toInt().coerceIn(0, 100).takeIf { it > 0 }
+    val progress = snapshot.presentation.displayPercent.toInt().coerceIn(0, 100).takeIf {
+        it > 0 || current.readerType.equals("audio", ignoreCase = true)
+    }
     return copy(
         continueReading = current.copy(book = current.book.copy(progressPercent = progress)),
         recentReading = recentReading.map { book ->

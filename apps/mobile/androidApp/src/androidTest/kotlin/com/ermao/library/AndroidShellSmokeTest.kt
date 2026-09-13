@@ -81,6 +81,8 @@ class AndroidShellSmokeTest {
         val state = mutableStateOf(LibraryUiState())
         val applied = mutableStateOf(WorksFilters())
         var applications = 0
+        var selectedSort: com.ermao.library.features.content.model.ContentSort? = null
+        var selectedView: com.ermao.library.features.content.model.ContentViewMode? = null
         composeRule.setContent {
             WarmPageTheme(darkTheme = false) {
                 LibraryScreen(
@@ -88,11 +90,10 @@ class AndroidShellSmokeTest {
                     repository = application.contentRepository,
                     context = ContentRequestContext(session.profile, session.identity.namespace),
                     onSelectLibrary = {}, onQueryChanged = {}, onClearQuery = {},
-                    onSelectSort = {}, onSelectViewMode = {},
+                    onSelectSort = { selectedSort = it }, onSelectViewMode = { selectedView = it },
                     onOpenFilter = { state.value = state.value.copy(filterDraft = applied.value) },
                     onUpdateFilterDraft = { state.value = state.value.copy(filterDraft = it) },
                     onRemoveReadingFilter = {},
-                    onClearFilters = { state.value = state.value.copy(filterDraft = WorksFilters()) },
                     onApplyFilter = {
                         applied.value = requireNotNull(state.value.filterDraft)
                         applications += 1
@@ -113,7 +114,10 @@ class AndroidShellSmokeTest {
         composeRule.onNodeWithTag("library-filter-sheet").assertIsDisplayed()
         composeRule.onNodeWithText(filterLabel).assertDoesNotExist()
         composeRule.onNodeWithText(unreadLabel).performClick()
-        composeRule.onNodeWithTag("library-filter-cancel").performClick()
+        composeRule.onNodeWithTag("library-filter-cancel").assertDoesNotExist()
+        composeRule.onNodeWithTag("library-filter-clear").assertDoesNotExist()
+        InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        composeRule.waitForIdle()
         composeRule.runOnIdle { assertEquals(0, applications); assertEquals(WorksFilters(), applied.value) }
         composeRule.onNodeWithTag("library-more").performClick()
         composeRule.onNodeWithText(filterLabel).performClick()
@@ -125,9 +129,19 @@ class AndroidShellSmokeTest {
         }
         composeRule.onNodeWithTag("library-more").performClick()
         composeRule.onNodeWithText(filterLabel).performClick()
-        composeRule.onNodeWithTag("library-filter-clear").performClick()
+        composeRule.onNodeWithText(unreadLabel).performClick()
         composeRule.onNodeWithTag("library-filter-apply").performClick()
         composeRule.runOnIdle { assertEquals(2, applications); assertEquals(WorksFilters(), applied.value) }
+        composeRule.onNodeWithTag("library-more").performClick()
+        composeRule.onNodeWithText(application.getString(R.string.library_sort_action)).performClick()
+        composeRule.onNodeWithText(application.getString(R.string.close_action)).assertDoesNotExist()
+        composeRule.onNodeWithText(application.getString(R.string.library_sort_title)).performClick()
+        composeRule.runOnIdle { assertEquals(com.ermao.library.features.content.model.ContentSort.Title, selectedSort) }
+        composeRule.onNodeWithTag("library-more").performClick()
+        composeRule.onNodeWithText(application.getString(R.string.library_view_action)).performClick()
+        composeRule.onNodeWithText(application.getString(R.string.close_action)).assertDoesNotExist()
+        composeRule.onNodeWithText(application.getString(R.string.library_view_list)).performClick()
+        composeRule.runOnIdle { assertEquals(com.ermao.library.features.content.model.ContentViewMode.List, selectedView) }
     }
 
     @Test

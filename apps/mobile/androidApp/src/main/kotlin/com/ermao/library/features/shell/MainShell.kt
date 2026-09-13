@@ -201,6 +201,11 @@ data class ReaderUnavailableRoute(
     val accessKind: String,
 ) : NavKey
 
+internal fun popShellDestination(backStack: MutableList<NavKey>) {
+    // A delayed or repeated back callback must never remove a tab's root destination.
+    if (backStack.size > 1) backStack.removeLastOrNull()
+}
+
 internal fun <T : NavKey> navigateToShelvesRoot(
     shelvesBackStack: MutableList<T>,
     selectTab: (TabId) -> Unit,
@@ -496,7 +501,6 @@ fun MainShell(
             onOpenFilter = libraryViewModel::openFilter,
             onUpdateFilterDraft = libraryViewModel::updateFilterDraft,
             onRemoveReadingFilter = libraryViewModel::removeReadingFilter,
-            onClearFilters = libraryViewModel::clearFilters,
             onApplyFilter = libraryViewModel::applyFilter,
             onDismissFilter = libraryViewModel::dismissFilter,
             onOpenWork = openBook,
@@ -549,6 +553,7 @@ fun MainShell(
     }
     com.ermao.library.features.workmanagement.BookManagementHost(
         repository = workManagementRepository, context = contentContext,
+        loadTagOptions = remember(contentRepository, contentContext) { { query -> contentRepository.loadTagOptions(contentContext, query) } },
         canManage = session.authorization.canManageSystem,
         onUnauthorized = onSessionUnauthorized, onRefreshAuthorization = onRefreshSession,
         onChanged = { change ->
@@ -600,7 +605,7 @@ fun MainShell(
     ) {
         NavDisplay(
                     backStack = currentBackStack,
-                    onBack = { currentBackStack.removeLastOrNull() },
+                    onBack = { popShellDestination(currentBackStack) },
                     entryProvider = entryProvider {
                 entry<HomeRoot> {
                     val homeViewModel: HomeViewModel = viewModel(
@@ -864,7 +869,7 @@ fun MainShell(
                                     bookId = route.bookId, repository = contentRepository, shelfRepository = shelfRepository,
                                     context = contentContext, managementRepository = workManagementRepository,
                                     downloads = downloadActionsViewModel, canManageSystem = session.authorization.canManageSystem,
-                                    onBack = { currentBackStack.removeLastOrNull() }, onUnauthorized = onSessionUnauthorized,
+                                    onBack = { popShellDestination(currentBackStack) }, onUnauthorized = onSessionUnauthorized,
                                     onViewShelves = onViewShelves,
                                     onOpenFacet = { kind, id -> currentBackStack.add(FacetRoute(kind.name, id)) },
                                     onOpenResource = { resource ->
@@ -903,7 +908,7 @@ fun MainShell(
                         state = facetState,
                         repository = contentRepository,
                         context = contentContext,
-                        onBack = { currentBackStack.removeLastOrNull() },
+                        onBack = { popShellDestination(currentBackStack) },
                         onOpenWork = { bookId ->
                             val route = BookDetailRoute(bookId)
                             val existingIndex = currentBackStack.indexOf(route)

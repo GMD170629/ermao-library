@@ -59,7 +59,6 @@ class LibraryFilterSheetTest {
                         filters = WorksFilters(),
                         copy = copy,
                         onChange = {},
-                        onClear = {},
                         onApply = {},
                         onDismiss = {},
                     )
@@ -68,8 +67,9 @@ class LibraryFilterSheetTest {
         }
 
         compose.onNodeWithText("Filter works").assertIsDisplayed()
-        compose.onNodeWithText("Clear all").assertIsDisplayed()
-        compose.onNodeWithText("Changes take effect after you apply them.").assertIsDisplayed()
+        compose.onNodeWithText("Cancel").assertDoesNotExist()
+        compose.onNodeWithText("Clear all").assertDoesNotExist()
+        compose.onNodeWithText("Changes take effect after you apply them.").assertDoesNotExist()
         compose.onNodeWithText("Apply").assertIsDisplayed()
         compose.onNodeWithText("筛选作品").assertDoesNotExist()
     }
@@ -94,9 +94,7 @@ class LibraryFilterSheetTest {
                             filters = WorksFilters(),
                             copy = englishFilterSheetCopy(),
                             onChange = {},
-                            onClear = {},
                             onApply = {},
-                            onDismiss = {},
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
@@ -144,9 +142,7 @@ class LibraryFilterSheetTest {
                             filters = WorksFilters(),
                             copy = englishFilterSheetCopy(),
                             onChange = {},
-                            onClear = {},
                             onApply = {},
-                            onDismiss = {},
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
@@ -162,9 +158,6 @@ class LibraryFilterSheetTest {
 
 private fun englishFilterSheetCopy(): LibraryFilterSheetCopy = LibraryFilterSheetCopy(
     title = "Filter works",
-    description = "Changes take effect after you apply them.",
-    cancelAction = "Cancel",
-    clearAction = "Clear all",
     readingHeading = "Reading status",
     unread = "Unread",
     reading = "Reading",

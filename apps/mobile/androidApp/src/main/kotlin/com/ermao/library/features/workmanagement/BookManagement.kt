@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.rememberOverscrollEffect
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -63,6 +64,8 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -73,7 +76,12 @@ import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.TextFieldValue
+import com.ermao.library.shared.modules.library.ContentResult
+import com.ermao.library.shared.modules.library.LibraryTagOptionPage
+import com.ermao.library.shared.modules.library.TagInput
 import com.ermao.library.R
 import com.ermao.library.features.workmanagement.infrastructure.AndroidCoverSelectionReader
 import com.ermao.library.features.workmanagement.infrastructure.CoverSelectionResult
@@ -244,6 +252,7 @@ fun BookManagementHost(
     onChanged: suspend (ManagementChange) -> Unit,
     onOpenKindleSettings: () -> Unit,
     onOpenKindleQueue: () -> Unit,
+    loadTagOptions: suspend (String) -> ContentResult<LibraryTagOptionPage>,
     content: @Composable () -> Unit,
 ) {
     val appContext = LocalContext.current.applicationContext
@@ -308,7 +317,7 @@ fun BookManagementHost(
         Box {
             content()
             Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.BottomCenter) {
-                ManagementPresentation(controller, state, onOpenKindleSettings, onOpenKindleQueue)
+                ManagementPresentation(controller, state, onOpenKindleSettings, onOpenKindleQueue, loadTagOptions)
             }
         }
     }
@@ -316,13 +325,22 @@ fun BookManagementHost(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ManagementPresentation(controller: BookManagementController, state: ManagementSessionState, onSettings: () -> Unit, onQueue: () -> Unit) {
+private fun ManagementPresentation(controller: BookManagementController, state: ManagementSessionState, onSettings: () -> Unit, onQueue: () -> Unit,
+    loadTagOptions: suspend (String) -> ContentResult<LibraryTagOptionPage>) {
     val session = controller.session
     val context = LocalContext.current
     val reader = remember(context) { AndroidCoverSelectionReader(context.contentResolver) }
     var selectionFailed by remember(state.target) { mutableStateOf(false) }
     var pickerInteraction by remember { mutableLongStateOf(-1L) }
     var discard by remember { mutableStateOf(false) }
+    var tagQuery by remember(session.interactionId) { mutableStateOf(TextFieldValue()) }
+    val commitTags: (String) -> Unit = { input ->
+        val current = session.current.draft.find { it.field == ManagementField.Tags }
+        if (current != null && state.operation == null) {
+            session.setField(ManagementField.Tags, TagInput.append(TagInput.stored(current.value), input).joinToString("\n"))
+            tagQuery = TextFieldValue()
+        }
+    }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val expectedInteraction = pickerInteraction
         if (uri != null && expectedInteraction == session.interactionId && session.current.phase == ManagementPhase.CoverUpload) controller.perform {
@@ -333,7 +351,7 @@ private fun ManagementPresentation(controller: BookManagementController, state: 
             }
         }
     }
-    val close = { if (state.operation == null || state.phase == ManagementPhase.Loading) { if (session.isDirty) discard = true else session.close() } }
+    val close = { if (state.operation == null || state.phase == ManagementPhase.Loading) { if (session.isDirty || TagInput.parse(tagQuery.text).isNotEmpty()) discard = true else session.close() } }
     if (state.presentation == ManagementPresentation.DeleteConfirmation) {
         val target = state.target ?: return
         val resource = state.snapshot?.resources?.find { it.id == target.id }
@@ -376,7 +394,7 @@ private fun ManagementPresentation(controller: BookManagementController, state: 
                             }
                         },
                         actions = {
-                            TextButton(onClick = { controller.perform { save() } }, enabled = state.operation == null,
+                            TextButton(onClick = { commitTags(tagQuery.text); controller.perform { save() } }, enabled = state.operation == null,
                                 colors = ButtonDefaults.textButtonColors(contentColor = WarmPageThemeValues.colors.textSecondary)) {
                                 Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                                 Spacer(Modifier.size(ButtonDefaults.IconSpacing))
@@ -387,7 +405,18 @@ private fun ManagementPresentation(controller: BookManagementController, state: 
                         colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                     )
                 }
-            Column(Modifier.weight(1f, fill = false).fillMaxWidth().verticalScroll(rememberScrollState()).padding(WarmPageThemeValues.spacing.two),
+            val editorFlingBoundary = remember {
+                object : NestedScrollConnection {
+                    override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity =
+                        Velocity(0f, available.y.coerceAtMost(0f))
+                }
+            }
+            // Keep unused upward inertia from springing the expanded sheet past its anchor.
+            // Downward sheet gestures and the form's own fling remain native.
+            Column(Modifier.weight(1f, fill = false).fillMaxWidth().testTag("management-form")
+                .then(if (state.phase == ManagementPhase.Editing) Modifier.nestedScroll(editorFlingBoundary) else Modifier)
+                .verticalScroll(rememberScrollState(), overscrollEffect = if (state.phase == ManagementPhase.Editing) null else rememberOverscrollEffect())
+                .padding(WarmPageThemeValues.spacing.two),
                 verticalArrangement = Arrangement.spacedBy(WarmPageThemeValues.spacing.two)) {
                 Text(state.target?.title.orEmpty(), style = MaterialTheme.typography.titleLarge)
                 if (state.operation != null) CircularProgressIndicator()
@@ -411,10 +440,14 @@ private fun ManagementPresentation(controller: BookManagementController, state: 
                         }
                     }
                     ManagementPhase.Editing -> {
-                        state.draft.forEach { field -> OutlinedTextField(field.value, { session.setField(field.field, it) },
+                        state.draft.forEach { field ->
+                            if (field.field == ManagementField.Tags) ManagementTagEditor(
+                                value = field.value, query = tagQuery, onQueryChange = { tagQuery = it },
+                                onChange = { session.setField(ManagementField.Tags, it) }, commitInput = commitTags,
+                                enabled = state.operation == null, loadOptions = loadTagOptions,
+                            ) else OutlinedTextField(field.value, { session.setField(field.field, it) },
                             label = { Text(fieldLabel(field.field)) }, modifier = Modifier.fillMaxWidth(), enabled = state.operation == null,
-                            minLines = if (field.field in listOf(ManagementField.Description, ManagementField.Tags)) 3 else 1) }
-                        if (state.target?.kind == ManagementObject.Book) Text(stringResource(R.string.management_tags_lines))
+                            minLines = if (field.field == ManagementField.Description) 3 else 1) }
                     }
                     ManagementPhase.CoverUpload -> {
                         Text(stringResource(R.string.management_cover_upload_hint))

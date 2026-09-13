@@ -412,7 +412,6 @@ private fun FixtureLibrary(showFilter: Boolean) {
         onOpenFilter = {},
         onUpdateFilterDraft = {},
         onRemoveReadingFilter = {},
-        onClearFilters = {},
         onApplyFilter = {},
         onDismissFilter = {},
         onOpenWork = {},
@@ -457,6 +456,7 @@ private fun FixtureBookDetail(
     )
     BookManagementHost(
         repository = managementRepository,
+        loadTagOptions = remember(fixtureRepository, fixtureRequestContext) { { query -> fixtureRepository.loadTagOptions(fixtureRequestContext, query) } },
         context = fixtureRequestContext,
         canManage = true,
         onUnauthorized = {},

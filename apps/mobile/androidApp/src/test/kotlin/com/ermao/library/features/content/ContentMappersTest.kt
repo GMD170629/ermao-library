@@ -53,6 +53,12 @@ class ContentMappersTest {
         assertEquals("audio", mapped?.readerType)
         assertEquals("audio-resource", mapped?.resumeResourceId)
         assertEquals("book-1", mapped?.book?.id)
+        assertEquals(88, mapped?.book?.progressPercent)
+        val audio = (snapshot.continueReading as HomeSection.Content).value!!
+        for (progress in listOf(0.0, 0.4)) {
+            val earlyProgress = snapshot.copy(continueReading = HomeSection.Content(audio.copy(progress = progress)))
+            assertEquals(0, earlyProgress.toUiContent().continueReading?.book?.progressPercent)
+        }
     }
 
     @Test

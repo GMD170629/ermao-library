@@ -161,7 +161,7 @@ class WorkDetailLayoutTest {
             totalPages = 1,
         )
 
-        val items = workContentItemPresentations(page, resources)
+        val items = workContentItemPresentations(page, resources, bookTitle = "Star Harbor")
 
         assertEquals(
             listOf(
@@ -181,6 +181,26 @@ class WorkDetailLayoutTest {
             items.map { it.coverUrl },
         )
         assertEquals(listOf("01", "02", "03", "07"), items.map { it.indexLabel })
+
+        val original = resources.last().copy(title = "Star Harbor — Volume 01")
+        val shortened = workContentItemPresentations(page, resources.dropLast(1) + original, "Star Harbor").last()
+        assertEquals("Volume 01", shortened.displayTitle)
+        assertEquals(original.title, shortened.title)
+        assertEquals(original, shortened.resource)
+        assertEquals("direct", shortened.entry.resourceId)
+        assertEquals("Single Volumes", items.first().displayTitle)
+        for (title in listOf("Star Harbor", "Star Harbor — ", "Star Harbor01", "Other book 01")) {
+            val unchanged = workContentItemPresentations(page, listOf(original.copy(title = title)), "Star Harbor").last()
+            assertEquals(title, unchanged.displayTitle)
+            assertEquals(title, unchanged.title)
+        }
+        val unloaded = workContentItemPresentations(
+            page.copy(entries = listOf(page.entries.first().copy(title = "Star Harbor 02"))),
+            emptyList(),
+            "Star Harbor",
+        ).single()
+        assertEquals("02", unloaded.displayTitle)
+        assertEquals("Star Harbor 02", unloaded.title)
 
         val bookContent = BookDetailContent(
             book = BookCard("book-1", "Book title", "Book author", "/book-cover", 50),

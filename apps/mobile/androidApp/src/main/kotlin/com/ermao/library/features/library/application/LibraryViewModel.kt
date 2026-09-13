@@ -167,9 +167,6 @@ class LibraryViewModel(
         mutableUiState.update { it.copy(filterDraft = null) }
         if (mutableUiState.value.selectedScope == LibraryScope.Books) loadScope(LibraryScope.Books, reset = true)
     }
-
-    fun clearFilters() = updateFilterDraft(WorksFilters())
-
     fun removeReadingFilter(readingFilter: ReadingFilter) {
         val filters = mutableUiState.value.scopes.getValue(LibraryScope.Books).filters.let {
             it.copy(reading = if (it.reading == readingFilter) null else it.reading)

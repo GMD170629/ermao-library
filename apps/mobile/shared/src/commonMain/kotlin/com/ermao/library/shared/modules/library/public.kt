@@ -14,6 +14,8 @@ import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 import com.ermao.library.shared.modules.servers.domain.TlsMode
 
+typealias TagInput = com.ermao.library.shared.modules.library.domain.TagInput
+
 fun summarizeManagedBookDownloads(
     resources: List<com.ermao.library.shared.modules.downloads.DownloadManagementResource>,
 ): BookDetailDownloadSummary =

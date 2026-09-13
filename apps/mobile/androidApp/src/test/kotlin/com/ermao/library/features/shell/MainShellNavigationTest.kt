@@ -12,6 +12,14 @@ import org.junit.Test
 
 class MainShellNavigationTest {
     @Test
+    fun repeatedBackAfterClosingADetailKeepsTheRootDestination() {
+        listOf(HomeRoot, LibraryRoot, ShelvesRoot, MeRoot).forEach { root ->
+            val stack = mutableListOf<NavKey>(root, BookDetailRoute("book"))
+            repeat(3) { popShellDestination(stack) }
+            assertEquals(listOf<NavKey>(root), stack)
+        }
+    }
+    @Test
     fun continueReadingOpensTheDeclaredResourceWithItsPlayerAndNeverTheOtherEngine() {
         val item = ContinueReadingCard(
             book = BookCard("book-1", "Title", "Author", "/cover", 88),

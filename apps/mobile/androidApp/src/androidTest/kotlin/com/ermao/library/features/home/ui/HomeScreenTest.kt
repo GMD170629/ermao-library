@@ -11,6 +11,15 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.test.platform.app.InstrumentationRegistry
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.ermao.library.R
@@ -51,6 +60,92 @@ import org.junit.runner.RunWith
 class HomeScreenTest {
     @get:Rule
     val compose = createComposeRule()
+
+    @Test
+    fun audioContinueShowsListeningProgressIncludingZeroAndKeepsResumeTarget() =
+        assertAudioContinue(java.util.Locale.SIMPLIFIED_CHINESE)
+
+    @Test
+    fun englishAudioContinueShowsListeningProgressAndKeepsResumeTarget() =
+        assertAudioContinue(java.util.Locale.US)
+
+    private fun assertAudioContinue(locale: java.util.Locale) {
+        var continuedResourceId: String? = null
+        val targetContext = InstrumentationRegistry.getInstrumentation().targetContext
+        val configuration = android.content.res.Configuration(targetContext.resources.configuration).apply { setLocale(locale) }
+        val context = targetContext.createConfigurationContext(configuration)
+        val home = dailyHomeContent()
+        val audio = home.continueReading!!.copy(
+            readerType = "AuDiO",
+            book = home.continueReading.book.copy(progressPercent = 0),
+        )
+        compose.setContent {
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.ui.platform.LocalContext provides context,
+                androidx.compose.ui.platform.LocalConfiguration provides configuration,
+            ) {
+                WarmPageTheme {
+                    HomeScreen(
+                        state = HomeUiState(isLoading = false, content = home.copy(continueReading = audio)),
+                        repository = StubContentRepository,
+                        context = contentRequestContext(),
+                        onOpenBook = {},
+                        onContinueReading = { continuedResourceId = it.resumeResourceId },
+                        onOpenLibrary = {}, onRetry = {}, onRefresh = {},
+                        lastReadClock = FixedHomeTestClock,
+                    )
+                }
+            }
+        }
+        val percent = java.text.NumberFormat.getPercentInstance(context.resources.configuration.locales[0]).format(0)
+        compose.onNodeWithTag("home-continue-progress-summary", useUnmergedTree = true)
+            .assertTextContains(context.getString(R.string.home_listening_progress, percent), substring = true)
+        compose.onNodeWithTag("home-continue-action")
+            .assertTextContains(context.getString(R.string.work_primary_listen_action))
+            .performClick()
+        assertEquals("resume-resource", continuedResourceId)
+        compose.onAllNodes(
+            SemanticsMatcher.keyIsDefined(SemanticsProperties.ProgressBarRangeInfo) and
+                hasAnyAncestor(hasTestTag("home-continue")),
+            useUnmergedTree = true,
+        ).assertCountEquals(1)
+        val screenshot = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+        try {
+            java.io.File(targetContext.getExternalFilesDir(null), "home-listening-${locale.toLanguageTag()}.png")
+                .outputStream().use { screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        } finally {
+            screenshot.recycle()
+        }
+    }
+
+    @Test
+    fun gridLongTitleIsSingleLineEllipsizedAndProgressIsAboveTitle() {
+        val title = "A deliberately long book title that cannot fit on a single grid line"
+        val home = dailyHomeContent().copy(
+            continueReading = null,
+            recentReading = listOf(book("long-grid", title, 37), book("other-grid", "Other", null)),
+        )
+        compose.setContent {
+            WarmPageTheme {
+                HomeScreen(
+                    state = HomeUiState(isLoading = false, content = home),
+                    repository = StubContentRepository, context = contentRequestContext(),
+                    onOpenBook = {}, onContinueReading = {}, onOpenLibrary = {}, onRetry = {}, onRefresh = {},
+                )
+            }
+        }
+        val titleNode = compose.onNodeWithText(title, useUnmergedTree = true)
+        val layouts = mutableListOf<TextLayoutResult>()
+        titleNode.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertEquals(1, layouts.single().lineCount)
+        assertTrue(layouts.single().isLineEllipsized(0))
+        val progress = compose.onNode(
+            SemanticsMatcher.keyIsDefined(SemanticsProperties.ProgressBarRangeInfo) and
+                hasAnyAncestor(hasTestTag("book-long-grid")),
+            useUnmergedTree = true,
+        ).getUnclippedBoundsInRoot()
+        assertTrue(progress.bottom <= titleNode.getUnclippedBoundsInRoot().top)
+    }
 
     @Test
     fun dailyStateUsesCompactGutterThreeScanTargetsAndOneTruthfulPrimaryAction() {

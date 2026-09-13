@@ -130,7 +130,6 @@ import com.ermao.library.features.content.model.LibraryScope
 import com.ermao.library.features.content.model.ResourceContent
 import com.ermao.library.features.content.ui.BookCover
 import com.ermao.library.features.content.ui.ContentCover
-import com.ermao.library.features.content.ui.CoverProgress
 import com.ermao.library.features.content.ui.CoverRole
 import com.ermao.library.features.content.ui.ReadingProgressTrack
 import com.ermao.library.features.content.ui.compactCoverGridColumnCount
@@ -655,6 +654,7 @@ private fun WorkDetailBody(
                 WorkContentBrowser(
                     page = state.contents,
                     bookId = content.book.id,
+                    bookTitle = content.book.title,
                     resources = content.resources,
                     emptyImportMessage = workDetailEmptyImportMessage(content, state.isBookRoot),
                     sort = state.contentsSort,
@@ -1293,6 +1293,7 @@ internal data class WorkContentItemPresentation(
     val resource: ResourceContent?,
     val coverUrl: String,
     val title: String,
+    val displayTitle: String,
     val position: Int,
     val indexLabel: String,
 )
@@ -1300,6 +1301,7 @@ internal data class WorkContentItemPresentation(
 internal fun workContentItemPresentations(
     page: BookContentsPage,
     resources: List<ResourceContent>,
+    bookTitle: String,
 ): List<WorkContentItemPresentation> {
     val entries = buildList {
         addAll(page.entries.filter { it.isSourceFolder || it.isDirectResource })
@@ -1319,6 +1321,7 @@ internal fun workContentItemPresentations(
             resource = representative,
             coverUrl = entry.coverUrl.orEmpty(),
             title = entry.title,
+            displayTitle = entry.title,
             position = position,
             indexLabel = (position + 1).toString().padStart(2, '0'),
         )
@@ -1330,6 +1333,7 @@ internal fun workContentItemPresentations(
             resource = resource,
             coverUrl = resource?.coverUrl.orEmpty(),
             title = resource?.title ?: entry.title,
+            displayTitle = DownloadManagementPolicy.displayTitle(bookTitle, resource?.title ?: entry.title),
             position = position,
             indexLabel = resource?.displayIndex(position) ?: (position + 1).toString().padStart(2, '0'),
         )
@@ -1339,6 +1343,7 @@ internal fun workContentItemPresentations(
 @Composable
 private fun WorkContentBrowser(
     bookId: String,
+    bookTitle: String,
     page: BookContentsPage?,
     resources: List<ResourceContent>,
     emptyImportMessage: Int?,
@@ -1356,7 +1361,7 @@ private fun WorkContentBrowser(
     val theme = WarmPageThemeValues
     var sortMenuExpanded by remember { mutableStateOf(false) }
     var gridLayout by rememberSaveable(page?.bookId) { mutableStateOf(true) }
-    val items = page?.let { workContentItemPresentations(it, resources) }.orEmpty()
+    val items = page?.let { workContentItemPresentations(it, resources, bookTitle) }.orEmpty()
     Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf)) {
         Row(
             modifier = Modifier
@@ -1541,7 +1546,7 @@ private fun WorkContentEntryCard(
                     "work-resource-${item.resource?.id ?: item.entry.resourceId ?: item.entry.sourceNodeId}"
                 },
             ),
-        shape = RoundedCornerShape(theme.radii.task),
+        shape = if (grid) androidx.compose.ui.graphics.RectangleShape else RoundedCornerShape(theme.radii.task),
         color = Color.Transparent,
     ) {
         if (grid) {
@@ -1559,22 +1564,17 @@ private fun WorkContentEntryCard(
                         context = context,
                         role = CoverRole.Compact,
                         modifier = Modifier.fillMaxWidth(),
+                        progressPercent = item.resource?.progressPercent?.takeIf {
+                            item.kind == WorkContentItemKind.ReadableResource && it > 0
+                        },
                     )
-                    if (item.kind == WorkContentItemKind.ReadableResource) {
-                        item.resource?.progressPercent?.takeIf { it > 0 }?.let { progress ->
-                            CoverProgress(
-                                progressPercent = progress,
-                                modifier = Modifier.align(Alignment.BottomCenter),
-                            )
-                        }
-                    }
                 }
                 Row(verticalAlignment = Alignment.Top) {
                     Text(
-                        item.title,
-                        modifier = Modifier.weight(1f),
+                        item.displayTitle,
+                        modifier = Modifier.weight(1f).semantics { contentDescription = item.title },
                         style = theme.typography.body,
-                        maxLines = 3,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     if (item.kind == WorkContentItemKind.SourceDirectory) {
@@ -1591,14 +1591,6 @@ private fun WorkContentEntryCard(
                         Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                         Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                         Text(stringResource(R.string.work_contents_open_children)) }
-                }
-                if (item.kind == WorkContentItemKind.ReadableResource) {
-                    Text(
-                        item.resource?.format?.uppercase(Locale.ROOT)
-                            ?: stringResource(R.string.work_contents_file),
-                        style = theme.typography.caption,
-                        color = theme.colors.textSecondary,
-                    )
                 }
             }
         } else {
@@ -1621,17 +1613,20 @@ private fun WorkContentEntryCard(
                     modifier = Modifier.width(theme.spacing.five),
                 )
                 Column(Modifier.weight(1f)) {
-                    Text(item.title, style = theme.typography.body, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(
-                        if (item.kind == WorkContentItemKind.SourceDirectory) {
-                            stringResource(R.string.work_contents_source_directory, item.position + 1)
-                        } else {
-                            item.resource?.format?.uppercase(Locale.ROOT)
-                                ?: stringResource(R.string.work_contents_file)
-                        },
-                        style = theme.typography.caption,
-                        color = theme.colors.textSecondary,
+                        item.displayTitle,
+                        style = theme.typography.body,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.semantics { contentDescription = item.title },
                     )
+                    if (item.kind == WorkContentItemKind.SourceDirectory) {
+                        Text(
+                            stringResource(R.string.work_contents_source_directory, item.position + 1),
+                            style = theme.typography.caption,
+                            color = theme.colors.textSecondary,
+                        )
+                    }
                 }
                 if (item.kind == WorkContentItemKind.ReadableResource) {
                     item.resource?.progressPercent?.takeIf { it > 0 }?.let {

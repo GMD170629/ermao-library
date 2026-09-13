@@ -30,8 +30,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material.icons.automirrored.outlined.ViewList
-import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.FilterAltOff
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.MoreVert
@@ -96,7 +94,6 @@ import com.ermao.library.ui.components.WarmPagePaginationLoading
 import com.ermao.library.ui.components.WarmPagePermissionGate
 import com.ermao.library.ui.components.WarmPagePrimaryAction
 import com.ermao.library.ui.components.WarmPageScaffold
-import com.ermao.library.ui.components.WarmPageSecondaryAction
 import com.ermao.library.ui.components.WarmPageSingleChoiceMenu
 import com.ermao.library.ui.components.WarmPageTopBarRole
 import com.ermao.library.ui.theme.WarmPageThemeValues
@@ -123,7 +120,6 @@ fun LibraryScreen(
     onOpenFilter: () -> Unit,
     onUpdateFilterDraft: (WorksFilters) -> Unit,
     onRemoveReadingFilter: (ReadingFilter) -> Unit,
-    onClearFilters: () -> Unit,
     onApplyFilter: () -> Unit,
     onDismissFilter: () -> Unit,
     onOpenWork: (String) -> Unit,
@@ -220,7 +216,6 @@ fun LibraryScreen(
             filters = draft,
             copy = filterSheetCopy,
             onChange = onUpdateFilterDraft,
-            onClear = onClearFilters,
             onApply = onApplyFilter,
             onDismiss = onDismissFilter,
         )
@@ -229,9 +224,6 @@ fun LibraryScreen(
 
 internal data class LibraryFilterSheetCopy(
     val title: String,
-    val description: String,
-    val cancelAction: String,
-    val clearAction: String,
     val readingHeading: String,
     val unread: String,
     val reading: String,
@@ -248,9 +240,6 @@ internal data class LibraryFilterSheetCopy(
 @Composable
 internal fun resolveLibraryFilterSheetCopy(): LibraryFilterSheetCopy = LibraryFilterSheetCopy(
     title = stringResource(R.string.library_filter_title),
-    description = stringResource(R.string.library_filter_draft_description),
-    cancelAction = stringResource(R.string.cancel_action),
-    clearAction = stringResource(R.string.clear_all_action),
     readingHeading = stringResource(R.string.library_filter_reading),
     unread = stringResource(R.string.reading_unread),
     reading = stringResource(R.string.reading_reading),
@@ -675,7 +664,6 @@ private fun LibraryOverflowMenus(
         selected = state.current.sort,
         onSelect = onSelectSort,
         onDismiss = onDismiss,
-        dismissLabel = stringResource(R.string.close_action),
     )
     WarmPageSingleChoiceMenu(
         title = stringResource(R.string.library_view_heading),
@@ -690,7 +678,6 @@ private fun LibraryOverflowMenus(
         selected = state.current.viewMode,
         onSelect = onSelectViewMode,
         onDismiss = onDismiss,
-        dismissLabel = stringResource(R.string.close_action),
     )
 }
 
@@ -700,7 +687,6 @@ internal fun FilterSheet(
     filters: WorksFilters,
     copy: LibraryFilterSheetCopy,
     onChange: (WorksFilters) -> Unit,
-    onClear: () -> Unit,
     onApply: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -713,9 +699,7 @@ internal fun FilterSheet(
             filters = filters,
             copy = copy,
             onChange = onChange,
-            onClear = onClear,
             onApply = onApply,
-            onDismiss = onDismiss,
         )
     }
 }
@@ -725,9 +709,7 @@ internal fun LibraryFilterSheetContent(
     filters: WorksFilters,
     copy: LibraryFilterSheetCopy,
     onChange: (WorksFilters) -> Unit,
-    onClear: () -> Unit,
     onApply: () -> Unit,
-    onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val theme = WarmPageThemeValues
@@ -738,21 +720,7 @@ internal fun LibraryFilterSheetContent(
     ) {
         LibraryFilterSheetHeader(
             title = copy.title,
-            cancelLabel = copy.cancelAction,
-            clearLabel = copy.clearAction,
-            onCancel = onDismiss,
-            onClear = onClear,
             modifier = Modifier.padding(horizontal = theme.components.page.compactGutter),
-        )
-        Text(
-            text = copy.description,
-            style = theme.typography.body,
-            color = theme.colors.textSecondary,
-            modifier = Modifier
-                .padding(
-                    horizontal = theme.components.page.compactGutter,
-                    vertical = theme.spacing.one,
-                ),
         )
         Column(
             modifier = Modifier
@@ -799,10 +767,6 @@ internal fun LibraryFilterSheetContent(
 @Composable
 internal fun LibraryFilterSheetHeader(
     title: String,
-    cancelLabel: String,
-    clearLabel: String,
-    onCancel: () -> Unit,
-    onClear: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val theme = WarmPageThemeValues
@@ -819,24 +783,6 @@ internal fun LibraryFilterSheetHeader(
                 .semantics { heading() }
                 .testTag("library-filter-title"),
         )
-        Row(modifier = Modifier.fillMaxWidth()) {
-            WarmPageSecondaryAction(
-                label = cancelLabel,
-                leadingIcon = Icons.Outlined.Close,
-                onClick = onCancel,
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("library-filter-cancel"),
-            )
-            WarmPageSecondaryAction(
-                label = clearLabel,
-                leadingIcon = Icons.Outlined.FilterAltOff,
-                onClick = onClear,
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("library-filter-clear"),
-            )
-        }
     }
 }
 

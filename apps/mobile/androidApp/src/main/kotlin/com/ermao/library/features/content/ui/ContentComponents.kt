@@ -5,6 +5,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -98,17 +99,23 @@ fun BookCover(
     modifier: Modifier = Modifier,
     cacheRevision: Int = 0,
     managementEnabled: Boolean = true,
+    showProgress: Boolean = false,
+    progressStateDescription: String? = null,
 ) {
-    val cover: @Composable () -> Unit = { ContentCover(
-        contentId = book.id,
-        title = book.title,
-        coverUrl = book.coverUrl,
-        repository = repository,
-        context = context,
-        role = role,
-        modifier = if (managementEnabled) Modifier else modifier,
-        cacheRevision = cacheRevision,
-    ) }
+    val cover: @Composable () -> Unit = {
+        ContentCover(
+            contentId = book.id,
+            title = book.title,
+            coverUrl = book.coverUrl,
+            repository = repository,
+            context = context,
+            role = role,
+            modifier = if (managementEnabled) Modifier else modifier,
+            cacheRevision = cacheRevision,
+            progressPercent = book.progressPercent.takeIf { showProgress },
+            progressStateDescription = progressStateDescription,
+        )
+    }
     if (managementEnabled) com.ermao.library.features.workmanagement.ManageableBookCover(book.id, book.title, modifier, completed = book.completed, content = cover) else cover()
 }
 
@@ -141,6 +148,8 @@ fun ContentCover(
     role: CoverRole,
     modifier: Modifier = Modifier,
     cacheRevision: Int = 0,
+    progressPercent: Int? = null,
+    progressStateDescription: String? = null,
 ) {
     val theme = WarmPageThemeValues
     Box(
@@ -167,6 +176,8 @@ fun ContentCover(
             context = context,
             modifier = Modifier.fillMaxSize(),
             cacheRevision = cacheRevision,
+            progressPercent = progressPercent,
+            progressStateDescription = progressStateDescription,
         )
     }
 }
@@ -181,6 +192,8 @@ internal fun AuthenticatedCoverArtwork(
     context: ContentRequestContext,
     modifier: Modifier = Modifier,
     cacheRevision: Int = 0,
+    progressPercent: Int? = null,
+    progressStateDescription: String? = null,
 ) {
     val theme = WarmPageThemeValues
     val appContext = LocalContext.current.applicationContext
@@ -196,21 +209,38 @@ internal fun AuthenticatedCoverArtwork(
             }
         }
     }
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        if (image != null) {
-            Image(
-                bitmap = image!!,
-                contentDescription = stringResource(R.string.cover_content_description, title),
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize(),
-            )
+    BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
+        val artwork = image
+        val artworkRatio = artwork?.let { it.width.toFloat() / it.height }
+        val artworkModifier = if (artworkRatio != null) {
+            Modifier.width(minOf(maxWidth, maxHeight * artworkRatio))
+                .height(minOf(maxHeight, maxWidth / artworkRatio))
         } else {
-            Icon(
-                imageVector = Icons.Outlined.Book,
-                contentDescription = stringResource(R.string.cover_content_description, title),
-                tint = theme.colors.textTertiary,
-                modifier = Modifier.size(theme.spacing.four),
-            )
+            Modifier.fillMaxSize()
+        }
+        Box(modifier = artworkModifier, contentAlignment = Alignment.Center) {
+            if (artwork != null) {
+                Image(
+                    bitmap = artwork,
+                    contentDescription = stringResource(R.string.cover_content_description, title),
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Outlined.Book,
+                    contentDescription = stringResource(R.string.cover_content_description, title),
+                    tint = theme.colors.textTertiary,
+                    modifier = Modifier.size(theme.spacing.four),
+                )
+            }
+            progressPercent?.let { progress ->
+                CoverProgress(
+                    progressPercent = progress,
+                    stateDescription = progressStateDescription,
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
+            }
         }
     }
 }
@@ -251,11 +281,12 @@ fun BookGridItem(
             context = context,
             role = CoverRole.Compact,
             modifier = Modifier.fillMaxWidth(),
+            showProgress = book.progressPercent in 1..100,
         )
         Text(
             text = book.title,
             style = theme.typography.callout,
-            maxLines = 2,
+            maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = theme.spacing.one),
         )
@@ -268,12 +299,6 @@ fun BookGridItem(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        book.progressPercent?.takeIf { it in 1..100 }?.let { progress ->
-            CoverProgress(
-                progressPercent = progress,
-                modifier = Modifier.padding(top = theme.spacing.one),
-            )
-        }
     }
 }
 
@@ -283,6 +308,7 @@ fun BookListItem(
     repository: ContentRepository,
     context: ContentRequestContext,
     modifier: Modifier = Modifier,
+    progressOnCover: Boolean = false,
 ) {
     val theme = WarmPageThemeValues
     Row(
@@ -296,6 +322,7 @@ fun BookListItem(
             context = context,
             role = CoverRole.Compact,
             modifier = Modifier.width(theme.spacing.eight),
+            showProgress = progressOnCover && book.progressPercent in 1..100,
         )
         Column(
             modifier = Modifier.weight(1f),
@@ -316,7 +343,7 @@ fun BookListItem(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            book.progressPercent?.takeIf { it in 1..100 }?.let { progress ->
+            book.progressPercent?.takeIf { !progressOnCover && it in 1..100 }?.let { progress ->
                 ReadingProgress(progressPercent = progress)
             }
         }
