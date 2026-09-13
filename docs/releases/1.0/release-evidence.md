@@ -1,3 +1,18 @@
+## 2026-09-13 v1.0.0 Android 正式签名候选
+
+本次用户要求准备 v1.0.0、同步发布说明/Wiki/版本并发布 Android APK；随后确认首次正式发布无密钥，并明确授权卸载真机旧开发版后安装正式包。旧“暂缓准备正式包”由本次要求取代；既有门禁未通过项未被自动放行，候选仅进入 Release 草稿，不标记正式发布完成。
+
+- 源码基线：develop 的 4f5cd11b，加本次提交内三处 Android lint 修正（移除无消费者的 management_kindle_settings 双语资源；Kindle 颜色转换改用等价 toColorInt），其余为发布文档。最终候选提交以包含本节的发布提交及草稿 target_commitish 为准。
+- 版本：复用 pnpm release:validate --tag v1.0.0，根/Web/reader-core/reader-contracts/readium-web-poc/Python/runtime/SW/uv lock/Android/iOS 全部 1.0.0；design-contracts 同为 1.0.0，Android versionCode 与 iOS build 均为 1。无需无意义重写已一致的版本字段。发布索引日期更新为 2026-09-13，公开发布前需再核对实际日期。
+- 检查：assembleRelease、lintRelease、androidApp:testDebugUnitTest、shared:testAndroidHostTest、verifyMobileOfflineContract、verifyDesignTokens PASS；两组单元测试合计 732，failure/error 0。发布说明/工作流/OCI 导出测试 17/17 PASS。初次 lint 的三个错误已修正；初次发布脚本测试因 PATH 选到 Windows/WSL bash 失败，改用既有 Git Bash 后原断言全通过，未修改测试或放宽门槛。该项目没有 testReleaseUnitTest 任务，实际使用既有 Debug 单测入口，不将它声称为 Release 仪器验收。
+- 工具链：Node 22.23.1、pnpm 9.12.2、本机 Android Studio JBR、Android build-tools 36.0.0。Release 构建日志在本地 .tmp/release-v1.0.0-build.log。
+- 最终 APK：artifacts/v1.0.0/ermao-library-v1.0.0-android.apk，75,944,908 bytes；SHA-256：0b3b979a5625762e71b54d7fe2b58e3afc7887b76293f3d978fdb0811ecbf6aa。同名 .sha256 为附件校验文件。
+- 元数据：com.ermao.library，versionName 1.0.0，versionCode 1，minSdk 26，targetSdk 37；非 debuggable；ABI 为 arm64-v8a、armeabi-v7a、x86、x86_64。
+- 签名：首次生成独立 RSA 4096 正式密钥（仓库外，随机密码使用当前 Windows 用户 DPAPI 加密保存）；v2/v3 签名验证及 zipalign -c -P 16 4 PASS。证书 SHA-256：e0fcb9fc77cba0383bb9b012537336e0ca5b91e30eb7dff317981d00658d7443。密钥未上传附件或入库，跨机器安全备份仍需持有人安排。
+- 真机：9e896bbc，Xiaomi M2102K1AC。首次保留数据覆盖因签名不同返回 INSTALL_FAILED_UPDATE_INCOMPATIBLE；获用户明确授权后仅卸载旧 com.ermao.library，正式 APK 安装成功，Beta 保留。冷启动 MainActivity PASS（首次 372ms，复核 253ms），安装版本及 resumed Activity 一致。观察登录页，启动时间边界之后 crash 与 ANR 日志为空；截图和启动记录在本地 artifacts/v1.0.0。未登录真实书库，未将启动冒烟外推为读听、导入或同步通过。
+- Wiki：2099ed0782b1b31367d368bf57caa0d657609464 已推送，20 个页面同步候选说明、Android 安装、当前资源组织、Reader v5、Kindle/删除及双语导航，25 页本地链接和 Markdown 围栏检查通过；旧发布摘要保留为历史。
+- 放行缺口：既有 RG-01～04 完整同 RC 验收没有完成；本次没有构建/部署后端双架构产物或 iOS IPA，也未完成正式签名包读听与进度业务验收。当前只交付可追溯 Android 候选及文档，不将历史 PARTIAL 变成 PASS，不创建公开 v1.0.0 标签或切换 Latest。
+
 2026-09-08 提交推送交接（应负责人要求）：当前发布源c5743f94，R2/RC未冻结；本轮无未提交业务或测试工具代码。真实远端ls-remote核验7个release-1.0分支均与本地HEAD一致：convergence c5743f94、android-formats ac25497d、audio-capture 567909e4、html 5a0a3add、startup-progress d35c7585、web-epub-pending 23001a68、web-process-recovery 92b240ca。这里核对的是源码已远端保存，不将子分支HEAD不在主分支祖先链推定为已合并或未集成（历史可为cherry-pick）。各隔离工作区无未提交源码；startup-progress仅4个既有.next构建缓存未跟踪，保持原状、不提交。原D:/www/ermao-library develop的15项用户改动完整保留并仍未纳入验收；不批量提交或推develop，避免触发镜像发布。此次推送仅专用发布分支，不创建正式Release或执行生产操作。
 
 当前五组进度：RG-01产物/同版本校验未完成，正式APK/IPA负责人暂缓，Docker引擎与iOS环境受阻；RG-02导入中断后的真实HTTP安全重扫/Chrome状态追溯已补齐（17a70f4f/result详见下条），可信HTTPS入口及其余矩阵项仍待；RG-03格式实测与已复现修复持续收敛，Chrome原场景/iOS/样本及音频睡眠范围等限制保留；RG-04已有多项真实位置、持久化、离线恢复与账号隔离通过，独立引擎活动提示及最终RC仍待；RG-05按负责人已接受的本机导入预检范围PASS，不恢复NAS/10万/30万AI压测。五个明确候选SYNC-02、READER-05/06/07、IMPORT-02仍待各自Chrome原UI验证，既有ENV-11/12/13特定工具限制未被普通Chrome成功替代。五候选不是全部剩余测试项。最近关闭IMPORT-08，原后端完整FAIL与补丁定向PASS分别保留，不能拼成补丁后全量PASS。

@@ -25,6 +25,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.graphics.toColorInt
 import com.ermao.library.R
 import com.ermao.library.design.GeneratedDesignTokens
 import com.ermao.library.shared.modules.workmanagement.ManagementSessionState
@@ -45,8 +46,8 @@ internal fun KindleSendSheetContent(
     val spacing = WarmPageThemeValues.spacing
     val shape = RoundedCornerShape(WarmPageThemeValues.radii.control)
     val busy = state.operation != null
-    val selectedSurface = Color(android.graphics.Color.parseColor(GeneratedDesignTokens.App.AccentSofter))
-    val warningSurface = Color(android.graphics.Color.parseColor(GeneratedDesignTokens.App.Warning)).copy(alpha = 0.10f)
+    val selectedSurface = Color(GeneratedDesignTokens.App.AccentSofter.toColorInt())
+    val warningSurface = Color(GeneratedDesignTokens.App.Warning.toColorInt()).copy(alpha = 0.10f)
     Column(Modifier.fillMaxWidth().fillMaxHeight()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = spacing.half),
             verticalAlignment = Alignment.CenterVertically) {

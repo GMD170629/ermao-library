@@ -586,7 +586,6 @@
     <string name="management_field_current">当前：%1$s</string>
     <string name="management_field_candidate">候选：%1$s</string>
     <string name="management_kindle_not_ready">请先补全 SMTP 和 Kindle 邮箱设置</string>
-    <string name="management_kindle_settings">前往邮件与 Kindle 设置</string>
     <string name="management_kindle_queue">查看发送队列</string>
     <string name="management_send_kindle">加入发送队列</string>
     <string name="management_discard_title">放弃未保存的更改？</string>

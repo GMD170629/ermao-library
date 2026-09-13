@@ -1,5 +1,21 @@
 # 发布执行指南
 
+## Android 正式 APK / Stable Android APK
+
+正式包使用 `com.ermao.library`，v1.0.0 为 `versionName=1.0.0`、`versionCode=1`，最低 Android 8.0（API 26）。后续正式更新保持包名与签名密钥，并递增 versionCode。独立 Beta 包与密钥不用于替代正式身份。
+
+在 `apps/mobile` 执行 `./gradlew :androidApp:assembleRelease :androidApp:lintRelease`，产物为 `androidApp/build/outputs/apk/release/androidApp-release-unsigned.apk`。使用 Android build-tools 的 `zipalign -P 16 -f 4` 对齐后，由 `apksigner sign` 使用正式密钥签名，再执行 `apksigner verify --verbose --print-certs` 和 `zipalign -c -P 16 4`。密码通过环境变量传递，不放在命令行字面量或日志中。对最终已签名文件生成 SHA-256，附件命名为 `ermao-library-v<version>-android.apk` 与同名 `.sha256`。
+
+The stable package and signing identity must remain consistent for future updates. Build the unsigned Release variant, align it for 16 KB pages, sign with the persistent release key, verify both signature and alignment, and hash the final signed APK. Supply passwords through environment references rather than command-line literals.
+
+首次正式密钥在受控的仓库外目录生成，只生成一次；密钥库与密码须独立安全备份。Windows DPAPI 密码文件只能由原机器/用户解密，不是跨机器可恢复备份。不要提交私钥或密码，也不要用 Debug/Beta 签名代替正式签名。
+
+Keep the keystore and password in protected storage outside Git and back them up securely. A DPAPI-encrypted password is tied to its original Windows user and machine. Never substitute Debug or Beta signing for the stable key.
+
+使用最终签名 APK 在指定真机安装、冷启动并检查包名、版本、前台 Activity、crash/ANR 与相关业务路径。同包名开发版签名不匹配时，先取得明确授权才可卸载旧版。发布门禁未完成时仅创建 GitHub Release 草稿并上传候选附件，不创建公开正式标签、不切换 Latest；草稿不是已发布版本。公开发布时再核对发布索引日期和实际发布时间。
+
+Validate the final signed APK on a physical device. Replacing a differently signed development installation requires explicit authorization before uninstalling it. Incomplete gates permit a draft with candidate assets only; a draft is not a published stable release. Reconcile the release-index date with the actual publication date before publishing.
+
 ## Android 持续测试版 / Continuous Android beta
 
 `Mobile Stage 1` 在 `develop` 的相关变更推送后执行现有移动检查并构建独立 Beta APK。也可在 Actions 选择该工作流、选择 `develop` 后手动运行；其他分支与 PR 不发布。所有既有移动检查成功后才签名并更新 [Android Beta](https://github.com/GMD170629/ermao-library/releases/tag/android-beta) 的 APK 与 SHA-256 附件。旧构建不覆盖新构建，检查或签名失败不替换上一版。

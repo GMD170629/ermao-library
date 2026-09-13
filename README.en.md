@@ -2,11 +2,12 @@
 
 English | [简体中文](README.md)
 
-Ermao Books is a self-hosted digital library for individuals and families. It organizes ebooks, PDFs, comics, and audiobooks stored on a NAS, home server, or local drive. Library-root directory structure is the source of truth for works, versions, and volumes; the system provides scanning, metadata organization, online reading and listening, progress synchronization, OPDS, Send to Kindle, and data backup.
+Ermao Books is a self-hosted digital library for individuals and families. It organizes ebooks, PDFs, comics, and audiobooks stored on a NAS, home server, or local drive. Library-root directory structure is the source of truth for books and readable resources; the system provides scanning, metadata organization, online reading and listening, progress synchronization, OPDS, Send to Kindle, and data backup.
 
 The database, accounts, reading progress, and system settings remain on your own device. Original books stay in the directories you specify, with no dependency on third-party cloud hosting.
 
 - Current version: `1.0.0`
+- [v1.0.0 release notes](release-notes/v1.0.0.md) · [Wiki](https://github.com/GMD170629/ermao-library/wiki) · [Releases and Android downloads](https://github.com/GMD170629/ermao-library/releases)
 - Languages: Simplified Chinese and English
 - License: [MIT](LICENSE)
 - Community and feedback: QQ group `154560969`
@@ -15,11 +16,11 @@ The database, accounts, reading progress, and system settings remain on your own
 
 ### Library and Organization
 
-- Configure independent library roots and scan new files in flat, volume, or audiobook layouts.
+- Configure independent library roots with flat or volume organization; audiobook resources are detected by their resource adapter.
 - Search and filter by title, author, media type, format, tag, series, and reading status.
 - Organize books with custom shelves, smart shelves, reading statuses, and series.
 - Identify titles, authors, covers, and chapters automatically, with manual editing and metadata completion.
-- File and directory locations directly define Work, Version, and Volume; the system does not group, merge, or move structure by title similarity or metadata.
+- File and directory locations determine source nodes, books, readable resources, and assets; the system does not group, merge, or move structure by title similarity or metadata.
 - Review import progress and failure reasons, then retry, rescan, or clean up tasks in bulk.
 
 ### Reading and Listening
@@ -36,7 +37,7 @@ The database, accounts, reading progress, and system settings remain on your own
 - Import activity, Kindle delivery history, system events, health checks, and log export.
 - Responsive Web access and PWA installation.
 - Optional OPDS 1.2 catalog access for browsing, search, and downloads in compatible readers; OPDS does not provide third-party reading-progress synchronization.
-- A native iOS and Android client is under active development. Server connection, sign-in, library browsing, shelves, and imports are available; the native reader is still in progress.
+- Native Android and iOS clients provide server connection, sign-in, libraries, reading, listening, downloads, and management. See release notes for available packages and acceptance status.
 
 ## Supported Formats
 

@@ -599,7 +599,6 @@
     <string name="management_field_current">Current: %1$s</string>
     <string name="management_field_candidate">Candidate: %1$s</string>
     <string name="management_kindle_not_ready">Complete SMTP and Kindle email settings first</string>
-    <string name="management_kindle_settings">Email and Kindle settings</string>
     <string name="management_kindle_queue">View sending queue</string>
     <string name="management_send_kindle">Add to sending queue</string>
     <string name="management_discard_title">Discard unsaved changes?</string>
