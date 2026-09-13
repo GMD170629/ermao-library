@@ -16,7 +16,11 @@ Book 自有封面缺失时先选定按路径排序的第一个可读资源，再
 
 名称解析也支持完整的 `[书名][作者]` 文件名或目录名：去除已知文件扩展名后匹配两个非空方括号字段，允许字段内外空白，再沿用卷号解析。多组括号或缺失字段不按该格式猜测作者。
 
-复用 `LibraryImportTask`，新增 `IDENTIFY_BOOK`。BookMetadata 记录 `importRevision`、`processedRevision`、`metadataPending`、`metadataState`；活动识别任务对 Book 根节点有唯一约束，并记录执行修订。终态检查与识别入队同事务协调，写回前校验修订、人工编辑时间和本地来源优先级。
+复用 `LibraryImportTask`，新增 `IDENTIFY_BOOK`。BookMetadata 记录 `importRevision`、`processedRevision`、`metadataPending`、`metadataState`；活动识别任务对 Book 根节点有唯一约束，并记录执行修订。写回前校验修订、人工编辑时间和本地来源优先级。
+
+2026-09-13 收尾失败修复：任务终态独立提交，不调用整库识别入队。终态写入失败时，单消费者保留已执行结果，按现有轮询间隔重试状态持久化，在成功或任务被删除前不重跑业务、不领取下一任务。进程重启后，既有启动恢复先独立收尾遗留 RUNNING；识别补偿不能使这笔恢复回滚。
+
+识别入队复用 `metadataPending` 作为持久意图：Worker 每轮在写事务外准备至多 50 本书的候选与任务 ID，释放读取事务后，用独立的 SQL 写事务校验当前修订、活动导入、取消及重复任务并提交。批次失败保留待识别状态，后续轮询或重启继续补偿；不新增队列、提交回调或业务事务循环。事务限时遵循修订后的 ADR 0005，单条 SQL 预算 2 秒，不累计整笔事务耗时。
 
 Book 响应继续使用原查询入口，新增 `metadataState`（WAITING_IMPORT／QUEUED／RUNNING／COMPLETED／FAILED）、`metadataPending` 与 `metadataOnlineState`。既有 `resourceImportSummary` 新增 `failedFiles`，表示失败的文件任务数；它与卷册 `failed` 独立，覆盖卷册已可读但部分音轨失败的情况。
 

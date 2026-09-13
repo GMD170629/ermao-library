@@ -95,7 +95,7 @@ def main() -> None:
                 readable_worker.recover_after_loop_failure()
                 logger.exception("readable_resource.worker.loop_failure")
                 outcome = "error"
-            if outcome == "idle":
+            if outcome in {"idle", "error", "deferred"}:
                 stop_event.wait(settings.import_queue_interval_seconds)
     finally:
         ready_file.unlink(missing_ok=True)

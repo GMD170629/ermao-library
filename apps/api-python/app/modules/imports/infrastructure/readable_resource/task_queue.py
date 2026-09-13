@@ -19,6 +19,7 @@ from app.modules.imports.application.readable_resource.ports import (
     LibraryImportTaskQueuePort,
     LibraryImportTaskRecord,
     MissingEntryPolicy,
+    PreparedBookIdentification,
 )
 from app.modules.imports.infrastructure.readable_resource.book_completion import (
     BookImportCompletion,
@@ -290,6 +291,14 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         )
         return None if row is None else self._to_record(row)
 
+    def prepare_book_identifications(self) -> tuple[PreparedBookIdentification, ...]:
+        return self._completion.prepare_ready()
+
+    def enqueue_book_identifications(
+        self, prepared: tuple[PreparedBookIdentification, ...]
+    ) -> int:
+        return self._completion.persist_ready(prepared)
+
     def get_task(self, task_id: str) -> LibraryImportTaskRecord | None:
         row = self._session.get(LibraryImportTask, task_id)
         return None if row is None else self._to_record(row)
@@ -317,7 +326,6 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         row.finished_at = finished_at
         row.error_summary = None
         self._session.flush()
-        self._completion.finished(row)
 
     def mark_failed(
         self,
@@ -346,7 +354,6 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             )
         )
         self._session.flush()
-        self._completion.enqueue_ready()
         return int(getattr(result, "rowcount", 0) or 0)
 
     def requeue_failed_task(self, task_id: str) -> tuple[LibraryImportTaskRecord, bool]:

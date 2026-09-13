@@ -57,6 +57,7 @@ __all__ = [
     "ObservedSourceEntry",
     "ParsedAssetPayload",
     "PipelineLogPort",
+    "PreparedBookIdentification",
     "PreparedLocalCover",
     "ReadableResourceRecord",
     "RegularFileObservation",
@@ -107,6 +108,15 @@ class LibraryImportTaskRecord:
     role: AssetRole | None
     error_summary: str | None
     missing_entry_policy: MissingEntryPolicy = MissingEntryPolicy.PRESERVE
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedBookIdentification:
+    task_id: str
+    book_id: str
+    library_id: str
+    source_node_id: str
+    import_revision: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -251,6 +261,14 @@ class LibraryImportTaskQueuePort(Protocol):
         """Requeue an asset after its source version or adapter contract changes."""
 
     def next_queued(self) -> LibraryImportTaskRecord | None: ...
+
+    def prepare_book_identifications(self) -> tuple[PreparedBookIdentification, ...]:
+        """Read a bounded batch and prepare identification intent before writes."""
+
+    def enqueue_book_identifications(
+        self, prepared: tuple[PreparedBookIdentification, ...]
+    ) -> int:
+        """Persist prepared intent conditionally; the caller owns the transaction."""
 
     def get_task(self, task_id: str) -> LibraryImportTaskRecord | None: ...
 

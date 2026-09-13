@@ -1493,6 +1493,12 @@ def test_book_completion_waits_for_overlapping_scan_and_cancellation_survives_re
             pipeline.queue.mark_running(task.id, started_at=datetime.now(UTC))
             db.commit()
             assert pipeline.process_import_task.execute(task.id).outcome == "ok"
+        # Asset completion commits independently; a worker maintenance pass
+        # prepares book identification outside the write transaction.
+        prepared = pipeline.queue.prepare_book_identifications()
+        pipeline.uow.release_before_io()
+        with pipeline.uow.transaction():
+            pipeline.queue.enqueue_book_identifications(prepared)
         active = db.scalars(
             select(LibraryImportTask).where(
                 LibraryImportTask.kind == "IDENTIFY_BOOK",
@@ -1505,6 +1511,10 @@ def test_book_completion_waits_for_overlapping_scan_and_cancellation_survives_re
             scan.id, error_summary="SCAN_FAILED", finished_at=datetime.now(UTC)
         )
         db.commit()
+        prepared = pipeline.queue.prepare_book_identifications()
+        pipeline.uow.release_before_io()
+        with pipeline.uow.transaction():
+            pipeline.queue.enqueue_book_identifications(prepared)
         active = db.scalars(
             select(LibraryImportTask).where(
                 LibraryImportTask.kind == "IDENTIFY_BOOK",

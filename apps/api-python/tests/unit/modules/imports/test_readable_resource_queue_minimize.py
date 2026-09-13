@@ -99,6 +99,12 @@ class FakeQueue:
     def next_queued(self) -> LibraryImportTaskRecord | None:
         return self._snapshot()
 
+    def prepare_book_identifications(self) -> tuple[()]:
+        return ()
+
+    def enqueue_book_identifications(self, prepared: tuple[()]) -> int:
+        raise AssertionError("no pending books in this queue fixture")
+
     def get_task(self, task_id: str) -> LibraryImportTaskRecord | None:
         if task_id != self._base.id or self.cancelled:
             return None
