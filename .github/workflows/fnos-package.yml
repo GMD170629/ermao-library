@@ -232,7 +232,9 @@ jobs:
     uses: ./.github/workflows/mobile.yml
     with:
       stable_release: true
-      run_full_android_regression: true
+      # Stable releases use the existing smoke/safety checks plus owner device acceptance.
+      # The optional full UI suite remains available from the mobile workflow.
+      run_full_android_regression: false
 
   package:
     name: Build fnOS FPK

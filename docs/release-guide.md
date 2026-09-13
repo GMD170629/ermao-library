@@ -8,6 +8,10 @@ On September 13, 2026, the project owner confirmed completed acceptance and auth
 
 ## Android 正式 APK / Stable Android APK
 
+v1.0.1 放行范围：项目负责人于 2026-09-13 确认继续正式发布，沿用既有 Android 冒烟、安全检查、构建和已完成的真机验收。额外执行的可选全量 UI 回归出现 9 项失败，不计为通过，也不纳入本次修复范围；该套件继续保留为移动工作流的可选入口。对应运行记录为 [34741501220](https://github.com/GMD170629/ermao-library/actions/runs/34741501220)。
+
+For v1.0.1, the owner authorized publication on September 13, 2026 using the existing Android smoke, safety, build checks and completed physical-device acceptance. The additional optional full UI run reported nine failures; these are not represented as passes or included in this repair scope. The full suite remains available from the mobile workflow.
+
 从 v1.0.1 起，正式发布统一使用 `.github/workflows/fnos-package.yml`：复用移动工作流完成检查及 Release 构建，后端测试前构建原生章节库；使用 `scripts/sign-android-apk.sh` 的 `stable` 渠道签名，随后构建版本镜像与 FPK。仓库 Secrets 使用持久正式密钥的 `RELEASE_KEYSTORE_BASE64`、`RELEASE_KEYSTORE_PASSWORD`、`RELEASE_KEY_ALIAS`、`RELEASE_KEY_PASSWORD`。Beta 与正式渠道共用签名实现，各自保留独立密钥和包名。
 
 禁止单独上传正式 APK 作为一次正式发布。APK、FPK 与各自 SHA-256 必须同时存在且校验通过，统一上传至草稿并核对远端附件摘要，再提升镜像的 `prod/latest` 标签、公开 Release 和更新 feed。任一构建、检查或附件校验失败即停止，不公开不完整版本。正式发布前可在 `main` 手动运行同一工作流构建候选 bundle；下载其中最终签名 APK 完成真机验收后，再创建正式标签。已公开的版本标签不移动，源码修复使用新的补丁版本。

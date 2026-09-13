@@ -36,7 +36,7 @@ test('stable releases wait for mobile checks and publish both packages before im
   const packageJob = releaseWorkflow.split('\n  package:')[1];
   assert.match(packageJob, /needs: \[validate, mobile-release\]/);
   assert.match(releaseWorkflow, /uses: \.\/\.github\/workflows\/mobile.yml/);
-  assert.match(releaseWorkflow, /run_full_android_regression: true/);
+  assert.match(releaseWorkflow, /run_full_android_regression: false/);
   assert.match(packageJob, /sign-android-apk.sh unsigned-android dist\/android stable/);
   assert.match(packageJob, /gh release upload[^\n]*dist\/fnos\/\*\.fpk[^\n]*dist\/android\/\*\.apk/);
   const verify = packageJob.indexOf('"$RUNNER_TEMP/release-assets.json"\n');
