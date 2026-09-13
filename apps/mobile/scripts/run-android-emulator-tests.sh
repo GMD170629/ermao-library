@@ -71,8 +71,11 @@ test "$app_started" = true
 
 package_dump="$(adb shell dumpsys package com.ermao.library)"
 startup_stage=package-version
-grep 'versionCode=1' <<<"$package_dump" >/dev/null
-grep 'versionName=1.0.0' <<<"$package_dump" >/dev/null
+expected_code="$(sed -n 's/^[[:space:]]*versionCode = \([0-9]*\).*/\1/p' androidApp/build.gradle.kts)"
+expected_version="$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)".*/\1/p' androidApp/build.gradle.kts)"
+test -n "$expected_code" && test -n "$expected_version"
+grep -E "versionCode=$expected_code([[:space:]]|$)" <<<"$package_dump" >/dev/null
+grep -Fx "    versionName=$expected_version" <<<"$package_dump" >/dev/null
 
 app_ready=false
 startup_stage=login-screen
