@@ -1,5 +1,11 @@
 # 发布执行指南
 
+## v1.0.0 放行 / v1.0.0 acceptance
+
+2026-09-13，项目负责人确认已完成验收，要求执行正式发布，并将此前未完成的验收记录设为过时、直接删除。原 `docs/releases/1.0` 下的门禁、矩阵、阻塞项和证据台账已移除，不再代表当前放行状态。此结论来自负责人验收，不是代理补跑了旧台账全部场景。
+
+On September 13, 2026, the project owner confirmed completed acceptance and authorized the stable release and deletion of obsolete incomplete acceptance records. The former v1.0 gate, matrix, blocker, and evidence documents no longer represent current release status. This is owner acceptance, not a claim that the agent reran every historical scenario.
+
 ## Android 正式 APK / Stable Android APK
 
 正式包使用 `com.ermao.library`，v1.0.0 为 `versionName=1.0.0`、`versionCode=1`，最低 Android 8.0（API 26）。后续正式更新保持包名与签名密钥，并递增 versionCode。独立 Beta 包与密钥不用于替代正式身份。

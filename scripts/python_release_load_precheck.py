@@ -2113,7 +2113,7 @@ def run_measurement(args: argparse.Namespace) -> Path:
             "searchP95Ms": 3_000,
             "v5SaveP95Ms": 2_000,
             "coreApiSuccessRate": 0.999,
-            "p99": "recorded; release-gate.md contains no numeric P99 threshold",
+            "p99": "recorded; no numeric P99 threshold is enforced",
         },
         "localSafetyGuardrails": {
             "combinedApiWorkerRssSoftBytes": 8 * 1024**3,
