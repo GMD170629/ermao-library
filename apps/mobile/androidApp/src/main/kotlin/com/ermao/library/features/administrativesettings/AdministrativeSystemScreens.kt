@@ -378,10 +378,13 @@ fun LogsScreen(
     var level by remember(query) { mutableStateOf(query?.level) }
     AdministrativePage(
         AdministrativeCopy.SystemLogs, locale, onBack, modifier,
-        toolbarActions = { OutlinedButton({ manageOpen = true }) {
-            Icon(Icons.Outlined.Settings, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-            Text(AdministrativeCopy.ManageLogCapacity.text(locale)) } },
+        toolbarActions = {
+            com.ermao.library.ui.components.WarmPageIconAction(
+                icon = Icons.Outlined.Settings,
+                label = AdministrativeCopy.ManageLogCapacity.text(locale),
+                onClick = { manageOpen = true },
+            )
+        },
         tabs = {
             if (state.snapshot != null) {
                 WarmSettingsFilterBar(
