@@ -20,11 +20,19 @@
 - 书库身份为 SourceNode／Book／ReadableResource／ResourceAsset，见[书库结构](library-root-layout.md)。
 - 导入的发现、资源识别和任务处理由 imports 能力与 bootstrap 装配协作，HTTP 与 Worker 复用应用入口。
 - 第一方阅读进度使用 Reader v5。引擎 Locator 保持不透明，展示进度另行传递，见[Reader 架构](mobile-reader-architecture.md)。
-- 章节识别复用[共享章节核心](reader-chapter-consistency.md)，不在详情页和各端 Reader 各写一套解析规则。
+- 章节识别复用[共享章节核心](mobile-reader-architecture.md#统一章节核心)，不在详情页和各端 Reader 各写一套解析规则。
 - Reader 安全规则唯一源为 `packages/reader-contracts/reader-safety-policy.json`；生成绑定不手改。
 
 ## 修改与验证
 
 先寻找同一行为的现有实现与调用方，再在其所属能力内扩展。跨能力通过公开 API 或应用端口协作；依赖装配放在 composition root。不能借局部修复引入新的同义实现，也不能因为目录已经存在就认定依赖方向正确。
 
-[测试执行分层](testing/test-execution-policy.md) 说明检查入口；[手工验收](manual-acceptance.md) 说明运行路径。当前工作区的编译、单元测试结果与物理设备验收分开记录；历史通过次数不能作为当前版本通过的依据。
+[测试执行分层](testing/test-execution-policy.md) 说明检查入口；[手工验收](testing/test-execution-policy.md#手工验收) 说明运行路径。当前工作区的编译、单元测试结果与物理设备验收分开记录；历史通过次数不能作为当前版本通过的依据。
+
+## 运行入口
+
+生产统一镜像由 scripts/start-unified-app.sh 启动 Web、FastAPI、Worker 和单端口网关，存储位于 STORAGE_ROOT，原书目录单独挂载。API/Worker 开始工作前验证 schema，初始化与升级遵循架构决策，不在 Web 路由建立第二套后端。
+
+Windows 使用 start-windows.cmd 或 pnpm dev:test:windows，基础解释器在 .runtime-windows/python，环境在 apps/api-python/.venv-windows，日志与 PID 在 .tmp/windows-dev；启动前检查依赖再停止旧实例，Ctrl+C 结束全部服务，不调用 WSL。按 apps/api-python/.python-version 用 uv 安装基础 Python，再设置 UV_PROJECT_ENVIRONMENT 同步 --extra dev --locked；移动目录或删除基础解释器后重建环境，不能只复制 python.exe。独立后端设置见[API README](../apps/api-python/README.md)。
+
+移动 Web 调试用 pnpm dev:ios，Service Worker 调试用 pnpm pwa:ios 的 production 服务，SW 仅 production 注册且需 HTTPS/localhost。真机用服务器局域网地址／HTTPS，不能用设备 localhost；?debug=1/0 控制调试面板，网络与存储通过 Safari Web Inspector 查看。仅启动 Web 不足以验证登录与 API。

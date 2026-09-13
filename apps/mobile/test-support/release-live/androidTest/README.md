@@ -107,7 +107,7 @@ nonzero remote MP3 position from a different client, and opens with
 the actual engine value before the mandatory two-second comparison. Playback
 then uses the same 5/10-second and pause-confirmation owner as the fresh-server
 test, with the Web snapshot as the initial position/revision baseline.
-Per [ADR0028](../../../../../docs/adr/0028-reader-v5-opaque-position-report.md),
+Per [ADR0028](../../../../../docs/architecture-decisions.md#reader-v5-进度),
 different clients are ordered by committed server revision; their capture clocks
 need not agree. Capture time must still increase for subsequent same-client
 checkpoints, and the original empty-server case retains its positive initial

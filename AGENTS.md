@@ -4,7 +4,7 @@
 
 本文件规定全仓代理行为、工程底线和专项文档入口。细则按任务读取，不把所有专项规格重复加载为全局规则。用户当前明确要求优先；专项行为以当前机器契约、已接受且未被取代的 ADR 和对应规范为准，旧计划、截图、历史测试和遗留实现不能覆盖新要求。若当前权威来源仍冲突，先定位冲突并说明，不自行发明兼容规则。
 
-目标架构不代表存量代码已经合规。新增能力遵守目标；遗留缺陷优先在现有职责位置最小修复，不因触及旧代码自动迁移。必要重构须与直接原因或明确需求相关。实现细则见 [工程实现规范](docs/engineering-standards.md)，实际能力入口见 [当前代码结构](docs/business-code-layering-and-refactoring.md)。Cursor 规则只作读取入口，不维护第二套细则。
+目标架构不代表存量代码已经合规。新增能力遵守目标；遗留缺陷优先在现有职责位置最小修复，不因触及旧代码自动迁移。必要重构须与直接原因或明确需求相关。有效 ADR 统一见[当前架构决策](docs/architecture-decisions.md)，实现细则见 [工程实现规范](docs/engineering-standards.md)，实际能力入口见 [当前代码结构](docs/business-code-layering-and-refactoring.md)。Cursor 规则只作读取入口，不维护第二套细则。
 
 ## 默认执行与停止条件
 
@@ -62,6 +62,6 @@
 | 移动端 UI、平台构建、真机验收 | [移动端开发指南](docs/mobile-app-development-global-guidelines.md)，视觉数值读取 [视觉契约](packages/design-contracts/visual-tokens.json) |
 | Mobile 目录与资源导航 | [内容导航规范](docs/mobile-book-content-navigation.md) |
 | Reader 引擎、SDK、进度与设置 | [当前 Reader 架构](docs/mobile-reader-architecture.md) 及其链接的已接受 ADR、机器契约 |
-| 原文件下载与阅读、PDF 交付 | [ADR 0025](docs/adr/0025-reflowable-original-download-before-reading.md)、[ADR 0027](docs/adr/0027-pdfium-transparent-original-materialization.md) |
-| Reader 安全规则与一致性验证 | [ADR 0026](docs/adr/0026-versioned-reader-safety-policy-contract.md) 和机器契约 |
-| 版本发布 | [发布指南](docs/release-guide.md) 与本次发布门禁 |
+| 原文件下载与阅读、PDF 交付 | [ADR 0025](docs/architecture-decisions.md#reader-原件与章节)、[ADR 0027](docs/architecture-decisions.md#pdf-原件物化与串行执行) |
+| Reader 安全规则与一致性验证 | [ADR 0026](docs/architecture-decisions.md#reader-安全) 和机器契约 |
+| 版本发布 | [发布指南](docs/architecture-decisions.md#发布与版本) 与本次发布门禁 |

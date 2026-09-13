@@ -6,4 +6,4 @@ alwaysApply: false
 
 # 发布入口
 
-发布前读取 [发布指南](../../docs/release-guide.md)，执行版本一致性和发布说明检查。回归范围按 [测试执行策略](../../docs/testing/test-execution-policy.md) 及本次发布门禁，不在此维护第二份版本文件清单。
+发布前读取 [发布指南](../../docs/architecture-decisions.md#发布与版本)，执行版本一致性和发布说明检查。回归范围按 [测试执行策略](../../docs/testing/test-execution-policy.md) 及本次发布门禁，不在此维护第二份版本文件清单。

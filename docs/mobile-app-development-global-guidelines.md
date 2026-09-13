@@ -42,7 +42,7 @@ Reader 平台代码只能检测事实、调用生成 rule ID 并执行生成的 
 
 每个可见功能完成 `zh-CN`/`en-US`；用户标题、作者、系列、标签、路径和文件名不翻译。iOS 触控目标至少 44pt，Android 至少 48dp；支持 Dynamic Type/字体缩放、VoiceOver/TalkBack、键盘、焦点、Reduced Motion 和系统安全区。
 
-Android 默认用真机做功能、Reader 和视觉验收，模拟器仅作补充；iOS 的 build、Reader、系统控件和视觉验收使用真机，不以 Simulator 代替。无网络视觉夹具在 `apps/mobile/androidApp/.../visual/VisualFixtureActivity.kt`，回归运行记录在 `apps/mobile/design-qa`。从成功、空态、失败、重试、未授权、切换命名空间和重新进入中选择实际受影响路径；不宣称仅编译通过即界面或设备验收完成。
+Android 默认用真机做功能、Reader 和视觉验收，模拟器仅作补充；iOS 的 build、Reader、系统控件和视觉验收使用真机，不以 Simulator 代替。无网络视觉夹具在 `apps/mobile/androidApp/.../visual/VisualFixtureActivity.kt`。从成功、空态、失败、重试、未授权、切换命名空间和重新进入中选择实际受影响路径；不宣称仅编译通过即界面或设备验收完成。
 
 ## Review 要求
 
@@ -76,3 +76,41 @@ iOS 平台构建使用 `iphoneos`/`iosArm64` 工具链，设备测试和运行�
 - 设备安装、设备测试或运行验收前确认连接/配对、Developer Mode、解锁可用性和有效签名 Team。需要服务器的场景确认设备可访问测试服务器，不使用设备自身的 `localhost` 代指开发主机。
 - 按实际影响选择 XCTest、UI、Keychain/TLS/网络/进程恢复、无障碍、截图或运行冒烟，不为一个显示问题重演所有流程；仅设备目标编译不等于运行验收。
 - 无合适设备时停止所需运行门禁并报告缺口，继续可独立进行的检查，不使用 Simulator、降低门禁或宣称运行通过。脚本、CI 和验收记录不得新增 Simulator 执行作为替代证据。
+
+## 管理设置
+
+- 用户列表、详情、新增、编辑继续复用 KMP `toManagedUser`；仅增加头像展示元数据的显式字段接纳及字符串校验，不放宽全局响应检查，也不改变 `avatarUrl` 语义。
+- `OpdsSettings.initialPublicBaseUrl` 统一管理默认地址规则，通过 `initialOpdsPublicBaseUrl` 公共接口供两端调用；已有公开地址优先，否则使用当前服务器地址并保留部署路径。后端是目录地址唯一生成者，不在 Swift 或 Android 另写规则。
+- 两端开关切换后立即提交，删除关闭确认弹窗、顶部保存按钮、未保存提示与运行状态展示。公开 URL 在键盘完成或失焦时提交，未修改的值不请求。
+- KMP `OpdsEditState` 是编辑、提交去重、提交期间锁定以及失败回退的唯一规则实现，两端通过公共接口复用。失焦提交短暂延后 150 ms，让同一次点击开关携带最新 URL 合并提交；键盘完成和开关直接提交并取消待执行的失焦任务。离开页面取消待执行任务，使用已有请求生命周期隔离过期结果。
+- 提交失败恢复已确认的开关状态并保留输入；成功采用后端返回的状态与目录地址。Android 的既有命令结果扩展为可携带已更新快照，OPDS 不再丢弃更新响应后额外 GET；其他命令保持原刷新流程。
+- “目录地址”行仅显示查看、复制图标，并提供中英文无障碍名称。查看使用系统居中弹窗展示完整地址，复制沿用系统剪贴板及已有反馈。关闭成功后隐藏此行，失败保留最近确认的地址。
+- 系统日志、整理任务和分类每页最多 100，Kindle 保留 200；系统日志导出复用 `loadAllManagementEventsForExport` 逐页读取。
+
+## 操作反馈
+
+KMP `OperationFeedbackPolicy` 唯一拥有 Success/PartialSuccess/Failure/Action 分类、优先级和成功停留时间。普通成功完整显示 1,000ms 后淡出，可访问性可延长；不带关闭按钮或模态遮罩，不替换需要处理的错误／部分成功／Action，受抑成功消费后不补播。其他类型保留操作窗口或既有关闭方式。
+
+Android 复用 WarmPageSnackbars/SnackbarHostState，iOS 复用 OperationFeedback 胶囊；Shell 避开底部导航和音频附件，Reader／模态用自身反馈宿主。每次呈现有独立事件 ID，替换取消旧计时，过期／消费只作用匹配事件，离开所属页面／会话清理，不持久化。
+
+BookManagementSession 拥有结果及 notice revision，关闭元数据结果面板把待反馈交给下层。下载接受只表示入队，不表示传输完成。iOS 动态文案作为完整运行时键，由 LocalizedCopy 按当前 locale 解析；保留已有双语字典与原位部分失败详情，不复制变更用例。
+
+## Shell 与页面职责
+
+- 固定 Home、Library、Shelves、Me 四个 Tab，各自拥有持久导航栈；重选当前 Tab 返回根路径。Reader 隐藏 Shell chrome，Now Playing 属根级呈现。Android 用 MainShell/ErmaoLibraryRoot，iOS 用 MainTabView/AppPathStore/AppRootView，深链和通知先校验会话与内容权限，不复制详情或导航状态。
+- 首页呈现继续阅读、最近阅读、最近加入，复用既有内容入口；Me 提供个人资料、语言、安全、关于和下载中心，管理设置按服务端 capability 过滤。移动端内容编辑仅元数据（Book 含标签），不在编辑表单管理封面；独立资源封面动作按权限保留。详情管理隐藏识别，共享会话同时禁止识别加载、搜索、应用；Web 与管理设置识别配置不受此限制。
+- 首次登录点击后才探测服务器，区分 setup、TLS、不兼容、无效凭据、停用和网络错误。选 profile 只回填地址与账号、不自动登录，成功后用规范 hostname 更新名称；TLS 信任失败后才允许风险确认。登出由平台停止音频、等待下载取消、清理当前 namespace，再移除会话/Cookie；删 profile 不等于删除所有本地文件。会话恢复遵循合并 ADR。
+- 页面保持稳定左轴、连续内容区和一个最高对比主动作；次要动作用原生菜单／面板。加载、空、错误、权限、分页状态原位恢复，不增加装饰渐变、封面模糊背景或重复进度。主题与度量依机器契约，不再使用历史设计图作为规范。
+
+## 书库发现
+
+ContentRepository 与 ContentModels 唯一拥有 Books/Series/Authors、LibrarySort/ViewMode/ReadingStatus、GroupingQuery/FacetQuery 和有界服务端分页。Books 提供搜索、排序、Grid/List、阅读状态、可移除筛选摘要；默认三列封面，窄屏或显式选择改 List。Series/Authors 为分组列表，系列 facet 按 SeriesIndex、作者按 RecentlyRead，返回保留查询上下文，不在 UI 推断身份或总数。
+
+Android 用页面搜索，iOS 用 searchable；状态筛选位于 overflow menu，关闭筛选面板后焦点返回菜单。首次／刷新失败清除旧 GET 结果并原位重试，下一页失败保留本轮页；取消或 generation 变化拒绝旧响应。授权变化先隔离旧标题、封面、进度与筛选，再按当前 namespace 请求。
+
+## 书架与合集
+
+- 根页有搜索与 All/Shelves/Collections，使用 GET /api/shelves 的完整授权摘要及服务端顺序。Shelves 包含 STATIC/SMART（含已有合集成员），Collections 仅 COLLECTION；每个 scope 独立搜索名称／描述，不搜索图书或只筛已加载页。
+- 连续行布局左侧名称／数量，右侧最多三张完整 2:3 封面和 chevron，细分隔线，无卡片／裁切；大字号减少封面以保留文字与触控目标。实际名称／封面来自服务器。
+- 合集二级显示成员书架，不直接显示图书；成员按 collectionIds 投影并重新验证详情身份。预览从成员书架取图按 bookId 去重，不逐封面请求详情。普通／智能书架用既有详情接口 pageSize=24、includeBookIds=false 顺序分页，点击图书进入来源 Tab 的既有 Book 页面。
+- 智能书架只读，未知规则引导 Web，不创建／编辑或转成普通书架；新建仅普通书架、合集及成员选择，POST 成功后刷新并进入对象。无自动创建或乐观假成功，不扩展批量整理、合集编辑／删除或离线目录缓存。空／错／无权限保留导航壳，错误原位重试。

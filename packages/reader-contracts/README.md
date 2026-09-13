@@ -62,7 +62,7 @@ for older servers; new parsers never emit it. Remove this compatibility entry
 only when support for those server versions ends.
 
 See [Reader architecture](../../docs/mobile-reader-architecture.md) for current
-adapters and [acceptance gaps](../../docs/reader-safety-v4-verification.md) for
+adapters and [acceptance requirements](../../docs/testing/test-execution-policy.md#专项场景) for
 outstanding security/SDK verification.
 
 ## Reader safety policy
@@ -182,7 +182,7 @@ must not use membership in those tables to refuse content.
 
 ## Chapter identity
 
-The [shared chapter core](../../docs/reader-chapter-consistency.md) owns chapter
+The [shared chapter core](../../docs/mobile-reader-architecture.md#统一章节核心) owns chapter
 recognition and final `chapter-N` preorder keys. Reader chapter presentation carries
 `navigationKey` (nullable); Book Detail matches it within the same resource.
 Cross-binding fixtures live in `fixtures/chapters-v1`. Empty TOCs stay empty.

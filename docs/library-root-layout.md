@@ -20,7 +20,7 @@
 
 例如 `三体/中文版/精校/02.epub` 在 `VOLUMES` 下属于 Book“三体”；`中文版/精校` 是导航目录，`02.epub` 是独立资源。在 `FLAT` 下，该资源独立成书。
 
-有声书普通目录分别划分资源；`CD`、`Disc`、`Disk`、`碟`、`盘` 及编号形式可作为透明音轨目录。普通子目录不会被父级有声书吞并。具体规则见[有声书目录资源边界](adr/0022-audiobook-directory-resource-boundaries.md)。
+有声书普通目录分别划分资源；`CD`、`Disc`、`Disk`、`碟`、`盘` 及编号形式可作为透明音轨目录。普通子目录不会被父级有声书吞并。具体规则见[有声书目录资源边界](architecture-decisions.md#书库身份与有声书)。
 
 ## 扫描与文件生命周期
 
@@ -35,3 +35,13 @@ SourceNode 是扫描快照，不是文件系统实时镜像；移动或重命名
 - [来源节点身份](../apps/api-python/app/modules/library/domain/source_nodes.py)
 - [图书归属](../apps/api-python/app/modules/library/domain/book_placement.py)
 - [导入能力](../apps/api-python/app/modules/imports)
+
+## 资源文件路径
+
+Asset.path 是服务端所见的书库内真实文件路径（Docker 使用容器路径），可为空；url/downloadUrl 仅用于传输，不作路径回退。Library 投影与资源详情共用 infrastructure/source_paths.py，保留缺失文件和越根检查，通过关联书库根目录查询，避免逐资产额外查询。
+
+KMP 传递 Asset.path；为空时 iOS 显示破折号，Android 隐藏行，完整查看与截断行使用同一值。文件名不翻译、不 URL 编码，选择与首资产顺序不因展示路径变化。旧服务端未提供字段时保持空路径展示。
+
+## 部署挂载
+
+Docker 入口与完整示例见[项目 README](../README.md)。生产 Compose 支持 LIBRARY_HOST_PATH（默认 ./library）、STORAGE_PATH（默认 ./data/storage）和 PUID/PGID；每个宿主书库映射独立容器路径后，在应用添加该容器路径，不能填写未挂载的宿主路径。应用数据必须可写；扫描只需读取，上传目标须可写。持久化 /app/storage 保留数据库、封面、日志与会话密钥；未提供 SESSION_SECRET 时启动脚本在 secrets/session-secret 生成并复用。

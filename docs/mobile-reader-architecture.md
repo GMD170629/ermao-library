@@ -1,7 +1,6 @@
 # Mobile Reader Architecture
 
-Status: Reader v5 implementation in progress; cross-platform physical-device conformance pending
-Last updated: 2026-09-04
+Status: Current architecture contract; acceptance requires evidence for the tested revision
 
 This document is the authoritative architecture contract for the native Reader
 and Reader v5 cross-platform progress integration. ADR 0028 owns the position
@@ -51,7 +50,7 @@ normalization change does not create a new progress slot or block restoration.
 
 Parser and normalization identifiers are diagnostics defined by the current
 format adapters and generated contracts. Chapter structure, target hrefs and
-identity follow [Unified chapter parsing](reader-chapter-consistency.md); this
+identity follow [Unified chapter parsing](mobile-reader-architecture.md#统一章节核心); this
 page does not maintain a second catalog of version strings.
 
 The original library file is immutable and is the only persisted Reader artifact.
@@ -267,7 +266,7 @@ and Reader metadata. See ADR 0025.
 
 FB2 adapters retain mixed content, nested navigation, inline formatting,
 images and internal links in memory. Chapter targets and body partitioning follow
-the [shared chapter core](reader-chapter-consistency.md), with cross-binding
+the [shared chapter core](mobile-reader-architecture.md#统一章节核心), with cross-binding
 fixtures under `packages/reader-contracts/fixtures`. XML and Base64 decoding
 remain adapter responsibilities under the generated safety policy.
 
@@ -539,11 +538,11 @@ open an original with another parser merely to predict readability. A zero-byte
 original is not above the size limit; the actual parser reports its empty/invalid
 result. Storage owns containment, account isolation and atomic publication, not
 format parsing. SDK versions follow the approved baseline in section 10; SDK
-sources remain unmodified. Historical 3.8.0 acceptance records are not current pins.
+sources remain unmodified.
 
 Original bytes, in-memory TXT/FB2/MOBI Publications and native preference submission
 are preserved. Chapter boundaries and identity follow
-[Unified chapter parsing](reader-chapter-consistency.md); client-specific chapter
+[Unified chapter parsing](mobile-reader-architecture.md#统一章节核心); client-specific chapter
 rules and reading-order fallbacks are removed for fresh installations. Reflowable reading requires the
 verified complete original, but no conversion artifact, persisted unpacked publication,
 synthetic chapter or typography validation is permitted.
@@ -564,6 +563,34 @@ readable output and absence of dangerous side effects; production code does not
 collect rule-event histories solely for conformance reporting. CSP, XML parser flags, scheme handlers, PDFium and
 WebView/WKWebView isolation remain implementation mechanisms, not semantic rule
 owners. A fixed iOS decoder or SDK limitation remains unaccepted until physical-
-device conformance demonstrates the required generated action. Historical
-implementation evidence remains useful but is superseded where it describes a
-platform-owned policy.
+device conformance demonstrates the required generated action.
+
+## 原生目录面板
+
+- KMP `ReaderNavigation.kt` 统一解析当前目录项；适配器提供 href、fragment 与 selector，标题和展示百分比不作为选择键。
+- Android 用 `ReadiumLocatorMapper` 保留启动和目录目标的锚点，`LazyColumn` 在每次打开后对同一当前项定位一次。
+- Android 使用一个 Material3 `BottomSheetScaffold`，紧凑态显示进度与四个 Tab；选择 Tab 后面板内容替换进度，关闭恢复进度。原生状态拥有拖动、停靠和嵌套滚动，测量阶段读取其 offset 保持底部控件位置。
+- iOS 使用 `List`／`ScrollViewReader`，等待定位数据就绪后执行一次打开定位，使用原生 medium／large sheet。
+- 两端保留原始标题、连续目录行与层级缩进；手动滚动及调整面板高度不会重复居中。
+
+章节生成与键值规则见[统一章节解析](mobile-reader-architecture.md#统一章节核心)，进度和面板边界见[Reader 架构](mobile-reader-architecture.md)。
+
+## 统一章节核心
+
+详情与各端 Reader 从同一原资源经 `packages/reader-core/native/chapters` C99 核心得到章节。核心拥有识别、标题、嵌套、过滤与最终先序身份；Python、Web WASM、原生适配器提供解码 UTF-8、源序 XML 事件或已有 MOBI 导航节点，归档／编码／安全／渲染仍由适配器拥有。TXT 识别标题，EPUB 读 NAV/NCX，FB2 读 section/title，MOBI 用已有 parser；不按渲染位置推断章节或另造通用 parser、过滤器和父级校验。
+
+- chapter-N 为资源内零基最终先序键，数据库行以 resourceId:chapter-N 隔离。分组保留标题和子项但无目标、不计章节；无章节即空目录，reading order 不补造章节。
+- TXT 前言可读不算章，正文重复的开头标题列表不重复计数；范围使用核心规范 UTF-8 字节。章节资源 text/chapter-0001.xhtml#heading-000001，每个资源独立从 heading-000001 开始。
+- FB2 目标 chapter-node-N 为源 XML 零基起始元素序号，无名父级提升有名子级但保留正文；零散正文保持 fb2/body-B-part-P.xhtml 原位置。核心仅一份源序文本，Web 复用已有事件，不重建边界／段落索引。音频内嵌章节独立于音轨队列，无章节不造章。
+- 详情传 chapterKey，Reader 打开原件后在本地核心结果解析；未知键／分组键不静默跳到其他章。presentation.chapter.navigationKey 可为空，详情按投影解析，不读 Locator；引擎不能区分同资源多章时保持未知，不按 reading-order 索引猜测。无旧链接解码、迁移或替代 parser。
+- 核心通过 CMake 构建与 CTest 验证；后端加载 ERMAO_CHAPTER_CORE_LIBRARY 或本地构建，Docker 打包共享库。Web 固定 Emscripten 3.1.74，经 build:chapters-wasm/verify:chapters-wasm，产物缺失明确失败；语义变化同步重建消费者。无 Windows SDK 时可用 Zig C 编译同一源码，不新增实现。
+- 跨绑定样例为 packages/reader-contracts/fixtures/chapters-v1/manifest.json，验证标题、键、父级、目标、TXT 范围及真实格式适配器；接口检查直接跳转、空目录、分组不可跳与当前章节身份。样例／编译不代替实际平台验收。
+
+## 音频会话
+
+- 四 Tab 共用根级音频会话，唯一全屏入口 audio.now-playing(resourceId, assetId?, location?)。明确开始／继续才播放，冷启动、进程／认证／中断恢复只恢复暂停。收起、返回、切 Tab 不释放引擎，Reader 打开时音频继续且隐藏 mini player，回 Shell 恢复。新 bootstrap 和 engine source 均成功才提交资源切换，失败保留旧会话。
+- 全屏层级：收起／标题／更多 → 封面 → 书名／音轨／章节 → 时间轴与已播／剩余时长 → 上一章、后退15秒、播放／暂停、前进30秒、下一章 → 倍速／章节／睡眠／查看作品。无波形、旋转封面、装饰渐变和持续动画。停止先保存进度再清理引擎／会话／mini player，无确认；系统 Stop 仅暂停并保存。
+- Compact mini player 与 Tab 共用底部容器，有封面、标题／章节、轻量进度、播放／暂停和展开，无关闭按钮。首个未提交 loading 不显示，主控暂不可用；buffering 保留时间轴，可暂停但不重复 load；可恢复错误提供重试，codec 错误不转码，重新认证先暂停保存且成功不自动播放，同步 pending 不阻断播放，ended 固定结尾并允许重播。
+- 章节／音轨 Sheet 选择后保持展开并更新位置；倍速 Menu 为 0.75/1/1.25/1.5/1.75/2/2.5/3。睡眠 Sheet 为关闭、15/30/45/60分钟、本章／本音轨结束；无章节时本章等于音轨，计时器进程死亡不恢复。
+- 本地媒体匹配 serverIdentity/userId/authzVersion/bookId/resourceId/assetId、completed 和原始长度。缺失／损坏／身份不符停在暂停或重试，不自动重下载、不伪装在线播放成功；安全、DRM、codec 错误不回退其他 parser 或转码。网络失败仅有精确匹配完整工件时可切本地。
+- 可访问顺序为标题、身份、章节、时间轴、主控、次级；按钮随状态命名，缓冲单独播报不抢焦点，seek 提供当前／总时长及调整动作，边界章节禁用。大字体允许换行，Reduced Motion 无装饰动画；后台、锁屏、通知、恢复与设备运行单独验收。
