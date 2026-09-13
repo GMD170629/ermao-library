@@ -1,5 +1,6 @@
 package com.ermao.library.shared.modules.workmanagement.application
 
+import com.ermao.library.shared.modules.workmanagement.domain.ManagementMenuContext
 import com.ermao.library.shared.modules.workmanagement.domain.BookManagementContext
 import com.ermao.library.shared.modules.workmanagement.domain.WorkManagementResult
 import kotlinx.coroutines.CompletableDeferred
@@ -16,28 +17,28 @@ internal class BookMenuStateCache(
     private val repository: WorkManagementRepository,
     private val context: BookManagementContext,
 ) {
-    private val values = MutableStateFlow<Map<String, Boolean?>>(emptyMap())
+    private val values = MutableStateFlow<Map<String, ManagementMenuContext?>>(emptyMap())
     val state = values.asStateFlow()
     private val lock = Mutex()
     private val permits = Semaphore(4)
-    private val pending = mutableMapOf<String, CompletableDeferred<Boolean?>>()
+    private val pending = mutableMapOf<String, CompletableDeferred<ManagementMenuContext?>>()
 
-    suspend fun prepare(bookId: String): Boolean? {
+    suspend fun prepare(bookId: String): ManagementMenuContext? {
         var ownsRequest = false
         val request = lock.withLock {
             if (values.value.containsKey(bookId)) return values.value[bookId]
-            pending[bookId] ?: CompletableDeferred<Boolean?>().also { pending[bookId] = it; ownsRequest = true }
+            pending[bookId] ?: CompletableDeferred<ManagementMenuContext?>().also { pending[bookId] = it; ownsRequest = true }
         }
         if (!ownsRequest) return request.await()
-        var completed: Boolean? = null
+        var completed: ManagementMenuContext? = null
         try {
             completed = permits.withPermit {
-                when (val result = repository.loadBookCompleted(context, bookId)) {
+                when (val result = repository.loadBookMenuContext(context, bookId)) {
                     is WorkManagementResult.Content -> result.value
                     is WorkManagementResult.Failure -> null
                 }
             }
-            if (pending[bookId] === request && completed != null) put(bookId, completed)
+            if (pending[bookId] === request && completed != null) put(bookId, completed.completed, completed.kindleSendAvailable)
             return completed
         } finally {
             request.complete(completed)
@@ -46,9 +47,9 @@ internal class BookMenuStateCache(
         }
     }
 
-    fun put(bookId: String, completed: Boolean?) {
+    fun put(bookId: String, completed: Boolean?, kindleSendAvailable: Boolean = values.value[bookId]?.kindleSendAvailable == true) {
         values.update { previous ->
-            val next = (previous - bookId) + (bookId to completed)
+            val next = (previous - bookId) + (bookId to ManagementMenuContext(completed = completed, kindleSendAvailable = kindleSendAvailable))
             if (next.size > 256) next - next.keys.first() else next
         }
     }

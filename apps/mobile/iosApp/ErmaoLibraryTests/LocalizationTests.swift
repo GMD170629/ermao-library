@@ -18,21 +18,16 @@ final class LocalizationTests: XCTestCase {
         }
     }
 
-    func testNativeManagementOnlyPresentsSheetForInteractiveActions() {
-        let immediateActions = Set(["Regenerate", "ReadingStatus", "Rescan"])
-        for action in ManagementAction.entries {
-            let presentation = nativeManagementPresentation(for: action)
-            XCTAssertEqual(
-                presentation.presentsSheet,
-                !immediateActions.contains(action.name) && action != .delete,
-                "Unexpected sheet policy for \(action.name)"
-            )
+    func testNativeManagementPresentationFollowsSharedState() {
+        for phase in ManagementPhase.entries {
+            let native = nativeManagementPresentation(for: phase.presentation)
+            XCTAssertEqual(native.presentsSheet, phase.presentation == .sheet)
         }
-        for action in ManagementAction.entries where immediateActions.contains(action.name) {
-            XCTAssertEqual(nativeManagementPresentation(for: action), .none)
+        for phase in [ManagementPhase.menu, .loading, .loadFailed, .executing, .closed] {
+            XCTAssertEqual(nativeManagementPresentation(for: phase.presentation), .none)
         }
-        XCTAssertEqual(nativeManagementPresentation(for: .edit), .sheet(actionName: "Edit"))
-        XCTAssertEqual(nativeManagementPresentation(for: .delete), .deleteConfirmation)
+        XCTAssertEqual(nativeManagementPresentation(for: ManagementPhase.editing.presentation), .sheet)
+        XCTAssertEqual(nativeManagementPresentation(for: ManagementPhase.deleteConfirmation.presentation), .deleteConfirmation)
     }
 
     func testNativeManagementMenuStatusBelongsOnlyToTheInvokedTargetAndAction() {

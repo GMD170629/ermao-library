@@ -1,5 +1,7 @@
 package com.ermao.library.shared.modules.workmanagement.infrastructure
 
+import com.ermao.library.shared.modules.workmanagement.domain.ManagementMenuContext
+
 import com.ermao.library.shared.core.network.ApiClient
 import com.ermao.library.shared.core.network.ApiClientFactory
 import com.ermao.library.shared.core.network.ApiMethod
@@ -62,12 +64,17 @@ class KtorWorkManagementRepository(
     private val encoder = Json { explicitNulls = false; encodeDefaults = true }
     private val nullableEncoder = Json { explicitNulls = true; encodeDefaults = true }
 
-    override suspend fun loadBookCompleted(context: BookManagementContext, bookId: String): WorkManagementResult<Boolean> =
+    override suspend fun loadBookMenuContext(context: BookManagementContext, bookId: String): WorkManagementResult<ManagementMenuContext> =
         call(context, ApiMethod.Get, bookPath(bookId)) { payload ->
             val book = payload.objectValue("book") ?: return@call protocolFailure("BOOK_MISSING")
             if (book.string("id") != bookId) return@call protocolFailure("BOOK_IDENTITY_MISMATCH")
             val completed = book.boolean("completed") ?: return@call protocolFailure("BOOK_READING_STATUS_MISSING")
-            WorkManagementResult.Content(completed)
+            WorkManagementResult.Content(ManagementMenuContext(completed = completed, kindleSendAvailable =
+                book.array("resources").orEmpty().any { value ->
+                    val resource = value as? JsonObject
+                    resource?.boolean("kindleSendAvailable") == true && resource.string("format") in listOf("EPUB", "PDF") &&
+                        resource.array("assets").orEmpty().any { (it as? JsonObject)?.string("role") == "PRIMARY" }
+                }))
         }
 
     override suspend fun loadManagementSnapshot(context: BookManagementContext, target: ManagementTarget): WorkManagementResult<ManagementSnapshot> {

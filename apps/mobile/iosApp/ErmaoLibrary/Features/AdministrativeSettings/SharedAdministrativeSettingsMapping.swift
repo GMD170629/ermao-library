@@ -41,12 +41,13 @@ extension SharedAdministrativeSettingsClient {
             title: value.bookTitle,
             recipientMasked: mask(email: value.recipientEmail),
             status: map(value.status),
-            progress: value.status == .sending ? 0.5 : nil,
+            progress: nil,
             createdAt: date(value.createdAt) ?? .distantPast,
             errorCode: value.errorMessage,
             canCancel: value.canCancel,
             canRetry: value.canRetry,
-            canDelete: value.canDelete
+            canDelete: value.canDelete,
+            coverPath: ErmaoShared.PublicKt.bookCoverRequestPath(bookId: value.bookId)
         )
     }
     nonisolated func map(_ value: ErmaoShared.KindleTaskStatus) -> KindleTaskStatus { switch value.name { case "Queued": .queued; case "Sending": .sending; case "Sent": .sent; case "Failed": .failed; case "Cancelled": .cancelled; default: .unknown } }

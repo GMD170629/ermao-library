@@ -220,6 +220,7 @@ enum KindleTaskStatus: String, CaseIterable, Hashable, Sendable {
 struct KindleSendTask: Identifiable, Equatable, Sendable {
     let id: String
     let title: String
+    let coverPath: String?
     let recipientMasked: String
     let status: KindleTaskStatus
     let progress: Double?
@@ -239,10 +240,12 @@ struct KindleSendTask: Identifiable, Equatable, Sendable {
         errorCode: String?,
         canCancel: Bool? = nil,
         canRetry: Bool? = nil,
-        canDelete: Bool? = nil
+        canDelete: Bool? = nil,
+        coverPath: String? = nil
     ) {
         self.id = id
         self.title = title
+        self.coverPath = coverPath
         self.recipientMasked = recipientMasked
         self.status = status
         self.progress = progress

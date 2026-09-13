@@ -115,6 +115,7 @@ struct EmailKindleSettingsView: View {
                         TextField(LocalizedStringKey(copy[.maximumAttachment]), value: binding.maximumAttachmentMegabytes, format: .number)
                             .keyboardType(.decimalPad)
                     }
+                    Text("management.attachmentHint").font(.footnote).foregroundStyle(.secondary)
                     SettingsTextInputRow(LocalizedStringKey(copy[.password])) {
                         SecureField(
                             LocalizedStringKey(binding.wrappedValue.hasPassword ? copy[.passwordConfigured] : copy[.password]),
@@ -230,6 +231,7 @@ struct EmailKindleSettingsView: View {
 }
 
 struct KindleQueueView: View {
+    var cover: (String?, String) -> AnyView = { _, _ in AnyView(Image(systemName: "book.closed").foregroundStyle(.secondary)) }
     enum Filter: Hashable { case all, sending, failed }
     @ObservedObject var store: AdministrativeSettingsStore
     @State private var state: AdministrativeLoadState<[KindleSendTask]> = .idle
@@ -274,28 +276,28 @@ struct KindleQueueView: View {
     }
 
     private func taskRow(_ task: KindleSendTask) -> some View {
-        VStack(alignment: .leading, spacing: .space1) {
-            HStack { Text(task.title).appTextStyle(.headline); Spacer(); status(task) }
-            Text(task.recipientMasked).foregroundStyle(theme.textSecondary).textSelection(.enabled)
-            if let progress = task.progress, task.status == .sending { ProgressView(value: progress).tint(theme.brandAccent) }
-            HStack {
-                Text(task.createdAt.administrativeFormatted(locale: copy.locale)).appTextStyle(.caption).foregroundStyle(theme.textTertiary)
-                Spacer()
-                if task.canCancel { Button(copy[.cancel]) { cancel(task) } }
-                if task.canRetry { Button(copy[.retry]) { retry(task) } }
-                if task.canDelete { Button(copy[.delete], role: .destructive) { taskToDelete = task } }
+        ContentListRow(title: task.title, cover: { cover(task.coverPath, task.title) }, actions: {
+            if task.canCancel { queueAction(copy[.cancel], image: "xmark") { cancel(task) } }
+            if task.canRetry { queueAction(copy[.retry], image: "arrow.clockwise") { retry(task) } }
+            if task.canDelete { queueAction(copy[.delete], image: "trash") { taskToDelete = task } }
+        }, description: {
+            if task.status == .failed, let error = task.errorCode, !error.isEmpty {
+                Text(error).foregroundStyle(.red).lineLimit(1).truncationMode(.tail)
+            } else if let progress = task.progress, task.status == .sending {
+                ProgressView(value: progress).tint(theme.actionAccent)
             }
-            .buttonStyle(.borderless)
-            .disabled(store.operationInFlight != nil)
-        }
-        .padding(.vertical, .spaceHalf)
+        })
+        .accessibilityIdentifier("kindle.task.\(task.id)")
     }
 
-    private func status(_ task: KindleSendTask) -> some View {
-        let title: String; let color: Color
-        switch task.status { case .queued: title = copy[.queued]; color = .secondary; case .sending: title = copy[.sending]; color = theme.actionAccent; case .sent: title = copy[.sent]; color = .green; case .failed: title = copy[.failed]; color = .red; case .cancelled: title = copy[.cancelled]; color = .secondary; case .unknown: title = copy[.unknown]; color = .secondary }
-        return Text(title).appTextStyle(.label).foregroundStyle(color)
+    private func queueAction(_ label: String, image: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: image).frame(width: .iosMinimumTouchTarget, height: .iosMinimumTouchTarget)
+        }
+        .buttonStyle(.borderless).foregroundStyle(theme.textPrimary)
+        .accessibilityLabel(Text(label)).disabled(store.operationInFlight != nil)
     }
+
     private func filtered(_ tasks: [KindleSendTask]) -> [KindleSendTask] {
         switch filter { case .all: tasks; case .sending: tasks.filter { $0.status == .sending || $0.status == .queued }; case .failed: tasks.filter { $0.status == .failed } }
     }

@@ -17,6 +17,13 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
 class KtorContentCoverTest {
+    @Test fun queueCoverPathPreservesBookIdentityAndMissingReferences() {
+        assertEquals(null, com.ermao.library.shared.modules.library.bookCoverRequestPath(null))
+        assertEquals(null, com.ermao.library.shared.modules.library.bookCoverRequestPath(" "))
+        assertEquals("/api/books/book%2Fone%3Fv=2/cover",
+            com.ermao.library.shared.modules.library.bookCoverRequestPath("book/one?v=2"))
+    }
+
     @Test fun bookMetadataPhasesAreIndependentOfPartialImportFailure() {
         val wire = Json.decodeFromString<BookWire>("""{"id":"book","libraryId":"lib","sourceNodeId":"root","title":"Book","visibilityState":"VISIBLE","curationState":"ACTIVE","publicationStatus":"UNKNOWN","trackingStatus":"NONE","metadataQuality":0,"coverStatus":"PENDING","coverUrl":"","metadataState":"COMPLETED","metadataPending":false,"metadataOnlineState":"FAILED","resourceImportSummary":{"pending":0,"failed":0,"failedFiles":1,"ready":1}}""")
         val detail = wire.toBookDetailSummary()

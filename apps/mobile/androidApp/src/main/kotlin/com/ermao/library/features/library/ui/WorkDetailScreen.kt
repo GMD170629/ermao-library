@@ -557,7 +557,7 @@ private fun WorkDetailBody(
         content.book.id, if (state.isBookRoot) content.book.id else state.selectedResourceId.orEmpty(), content.book.title,
     ) else null
     val managementMenuContext = ManagementMenuContext(completed = state.content?.completed,
-        kindleSendAvailable = selectedResource?.kindleSendAvailable == true)
+        kindleSendAvailable = if (state.isBookRoot) content.resources.any { it.kindleSendAvailable } else selectedResource?.kindleSendAvailable == true)
     val managedBookDownloads = if (state.isBookRoot) {
         summarizeManagedBookDownloads(
             content.resources.map { resource ->

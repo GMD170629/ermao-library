@@ -981,7 +981,7 @@ final class DownloadStoreTests: XCTestCase {
         let reloaded = try await store.records(namespace: namespace)
         XCTAssertEqual(Set(reloaded.map(\.assetID)), ["asset-1", "asset-2"])
 
-        let groups = ManagedDownloadGrouping.completed(
+        let groups = ManagedDownloadGrouping.books(
             records: [firstCompleted, secondCompleted],
             query: "Book"
         )
@@ -990,13 +990,28 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertEqual(groups.single?.resources.flatMap(\.records).count, 2)
     }
 
+    func testDownloadLibraryIncludesMixedStatesAndSearchesResources() async throws {
+        let store = ManagedDownloadStore(rootDirectory: temporaryDirectory())
+        let queued = try await makeRecord(store: store, resourceID: "queued", assetID: "queued-asset")
+        var failed = try await makeRecord(store: store, resourceID: "failed", assetID: "failed-asset")
+        failed.state = .failedRetryable
+        let completed = try await complete(try await makeRecord(store: store, resourceID: "done", assetID: "done-asset"), in: store)
+        let groups = ManagedDownloadGrouping.books(records: [queued, failed, completed], query: "")
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups.single?.resources.count, 3)
+        XCTAssertEqual(ManagedDownloadGrouping.books(records: [failed], query: failed.resourceTitle).count, 1)
+        XCTAssertFalse(queued.isVerifiedOfflineCopy)
+        XCTAssertFalse(failed.isVerifiedOfflineCopy)
+        XCTAssertNil(ManagedReaderAccessPolicy.verifiedLocalHandoff(record: failed, resourceID: failed.resourceID))
+    }
+
     func testDownloadLocalizationKeepsStorageAndImplicitVersionKeys() throws {
         for locale in ["en", "zh-Hans"] {
             let localizationPath = try XCTUnwrap(
                 Bundle.main.path(forResource: locale, ofType: "lproj")
             )
             let bundle = try XCTUnwrap(Bundle(path: localizationPath))
-            for key in ["downloads.storage.used", "downloads.version.implicit"] {
+            for key in ["downloads.storage.used", "downloads.version.implicit", "downloads.resourceCount", "downloads.search.clear"] {
                 let localized = bundle.localizedString(forKey: key, value: nil, table: nil)
                 XCTAssertNotEqual(localized, key, "Missing \(key) in \(locale)")
                 XCTAssertFalse(localized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

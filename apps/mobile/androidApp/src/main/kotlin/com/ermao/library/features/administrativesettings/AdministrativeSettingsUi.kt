@@ -78,6 +78,7 @@ fun AdministrativeSettingsDestination(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     onEffect: (AdministrativeSettingsEffect) -> Unit = {},
+    kindleCover: @Composable (KindleTask) -> Unit = { com.ermao.library.ui.components.ContentListCoverPlaceholder() },
 ) {
     if (route.isRetiredMobileRoute()) return
     val states by viewModel.states.collectAsState()
@@ -127,7 +128,7 @@ fun AdministrativeSettingsDestination(
             onCommand = viewModel::execute, onRetry = { viewModel.load(stateRoute, true) }, onBack = onBack, modifier = modifier,
         )
         AdministrativeSettingsRoute.KindleQueue -> KindleQueueScreen(
-            state.typed(), locale, viewModel::execute, { viewModel.load(route, true) }, onBack, modifier,
+            state.typed(), locale, viewModel::execute, { viewModel.load(route, true) }, onBack, modifier, cover = kindleCover,
         )
         AdministrativeSettingsRoute.Users -> UsersScreen(
             state.typed(), locale, onNavigate, viewModel::execute, { viewModel.load(route, true) }, onBack, modifier,

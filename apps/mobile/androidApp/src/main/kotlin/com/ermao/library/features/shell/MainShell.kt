@@ -751,9 +751,9 @@ fun MainShell(
                         onClearQuery = downloadsViewModel::clearQuery,
                         onOpenBook = { bookId -> meBackStack.add(DownloadedBookRoute(bookId)) },
                         onRetry = downloadsViewModel::retry,
-                        onCancelDownload = downloadActionsViewModel::cancelDownload,
-                        onRemoveDownload = downloadActionsViewModel::removeDownload,
-                        onRetryDownload = downloadActionsViewModel::requestDownload,
+                        cover = { book -> com.ermao.library.features.content.ui.ContentCover(
+                            book.bookId, book.title, book.coverUrl, contentRepository, contentContext,
+                            com.ermao.library.features.content.ui.CoverRole.Compact) },
                     )
                 }
                 entry<DownloadedBookRoute> { route ->
@@ -766,6 +766,8 @@ fun MainShell(
                     val downloadedBookState by downloadedBookViewModel.uiState.collectAsStateWithLifecycle()
                     DownloadedBookScreen(
                         state = downloadedBookState,
+                        onRetry = downloadedBookViewModel::retry,
+                        onAction = downloadActionsViewModel::executeCatalogAction,
                         onBack = { meBackStack.removeLastOrNull() },
                         onOpenResource = { record ->
                             if (record.readerType.equals("audio", ignoreCase = true)) {
@@ -833,7 +835,10 @@ fun MainShell(
                     AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
                 }
                 entry<AdministrativeSettingsRoute.KindleQueue> { route ->
-                    AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
+                    AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack,
+                        kindleCover = { task -> com.ermao.library.features.content.ui.ContentCover(
+                            task.id, task.title, com.ermao.library.shared.modules.library.bookCoverRequestPath(task.bookId).orEmpty(),
+                            contentRepository, contentContext, com.ermao.library.features.content.ui.CoverRole.Compact) })
                 }
                 entry<AdministrativeSettingsRoute.Users> { route ->
                     AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
@@ -1011,6 +1016,7 @@ private fun AdministrativeDestination(
     capabilities: Set<AdministrativeCapability>,
     systemActions: AdministrativeSettingsSystemActions,
     backStack: MutableList<NavKey>,
+    kindleCover: @Composable (com.ermao.library.features.administrativesettings.KindleTask) -> Unit = { com.ermao.library.ui.components.ContentListCoverPlaceholder() },
 ) {
     AdministrativeSettingsDestination(
         route = route,
@@ -1018,6 +1024,7 @@ private fun AdministrativeDestination(
         locale = locale,
         capabilities = capabilities,
         systemActions = systemActions,
+        kindleCover = kindleCover,
         onNavigate = { destination ->
             if (backStack.lastOrNull() != destination) backStack.add(destination)
         },

@@ -93,7 +93,7 @@ data class AndroidDownloadRecord(
 
 }
 
-/** A completed Book projection used by the Android Downloads screen. */
+/** A Book projection used by the Android Downloads screen, independent of task state. */
 data class DownloadedBookGroup(
     val bookId: String,
     val title: String,
@@ -115,15 +115,10 @@ data class DownloadedResourceGroup(
     val totalBytes: Long get() = artifacts.sumOf(AndroidDownloadRecord::expectedBytes)
 }
 
-fun groupReadableDownloads(
-    records: List<AndroidDownloadRecord>,
-    query: String,
-    localArtifactIsValid: (AndroidDownloadRecord) -> Boolean,
-): List<DownloadedBookGroup> {
+/** Visibility never grants permission to open a local artifact. */
+fun groupDownloads(records: List<AndroidDownloadRecord>, query: String): List<DownloadedBookGroup> {
     val normalizedQuery = query.trim()
     return records.asSequence()
-        .filter(AndroidDownloadRecord::isReadable)
-        .filter(localArtifactIsValid)
         .filter { record ->
             normalizedQuery.isEmpty() || sequenceOf(record.bookTitle, record.author, record.resourceTitle)
                 .any { it.contains(normalizedQuery, ignoreCase = true) }

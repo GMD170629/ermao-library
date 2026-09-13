@@ -1,6 +1,159 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "management.kindle_hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Send one EPUB or PDF at a time. Send each volume separately."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一次发送一个 EPUB 或 PDF，多卷册请逐册发送。"
+          }
+        }
+      }
+    },
+    "management.kindle_recipient": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recipient email"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收件邮箱"
+          }
+        }
+      }
+    },
+    "management.kindle_unconfigured": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not configured"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未配置"
+          }
+        }
+      }
+    },
+    "management.kindle_choose": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose an attachment"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择附件"
+          }
+        }
+      }
+    },
+    "management.kindle_empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This book has no EPUB or PDF files available to send."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这本图书没有可发送的 EPUB 或 PDF 文件。"
+          }
+        }
+      }
+    },
+    "management.kindle_too_large": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The attachment exceeds the configured size limit. Choose another file or check email settings."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "附件超过已配置的大小上限，请选择其他文件或检查邮件设置。"
+          }
+        }
+      }
+    },
+    "management.attachmentHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Default and maximum: 50 MB. Lower this limit if required by your email provider. Email encoding increases the transmitted size."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "默认 50 MB，最高 50 MB，可根据邮件服务商限制调低。邮件编码会增加传输体积，实际可发送大小仍受发件服务商限制。"
+          }
+        }
+      }
+    },
+    "downloads.search.clear": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear search"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清除搜索"
+          }
+        }
+      }
+    },
+    "downloads.resourceCount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resources: %ld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%ld 个资源"
+          }
+        }
+      }
+    },
     "work.downloadManagement.selection.hint": {
       "localizations": {
         "en": {
@@ -2195,22 +2348,24 @@
       }
     },
     "downloads.empty.message": {
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Download a resource from its book page to read it on this device."
+            "value": "Your downloads will appear here."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "从图书详情下载资源，即可在此设备阅读。"
+            "value": "下载的图书会显示在这里。"
           }
         }
       }
     },
     "downloads.empty.title": {
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -2221,7 +2376,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "暂无下载"
+            "value": "暂无下载记录"
           }
         }
       }
@@ -2483,49 +2638,52 @@
       }
     },
     "downloads.search.empty.message": {
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Only completed and verified local books are searched."
+            "value": "Try another book, author or resource name."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "这里只搜索已完成并通过校验的本地图书。"
+            "value": "试试其他书名、作者或资源名。"
           }
         }
       }
     },
     "downloads.search.empty.title": {
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "No downloaded books found"
+            "value": "No matching books"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "未找到已下载图书"
+            "value": "没有匹配的图书"
           }
         }
       }
     },
     "downloads.search.prompt": {
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Search downloaded books"
+            "value": "Search books, authors or resources"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "搜索已下载图书"
+            "value": "搜索书名、作者或资源"
           }
         }
       }

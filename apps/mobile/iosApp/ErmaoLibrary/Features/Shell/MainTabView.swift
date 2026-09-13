@@ -524,6 +524,8 @@ struct MainTabView: View {
             )
         case .downloads:
             DownloadCenterView(
+                cover: { path, title in AnyView(BookCoverView(reference: path.map { CoverReference(path: $0) },
+                    title: title, context: context, client: contentClient, cache: cache)) },
                 store: downloads,
                 openAudio: { openAudioDownload($0, context: context) },
                 openReader: { openReader($0, context: context, fallbackTab: presentation) }
@@ -568,6 +570,8 @@ struct MainTabView: View {
             if let administrativeSettingsStore,
                administrativeSettingsStore.permissions.permits(route) {
                 AdministrativeSettingsDestination(
+                    cover: { path, title in AnyView(BookCoverView(reference: path.map { CoverReference(path: $0) },
+                        title: title, context: context, client: contentClient, cache: cache)) },
                     route: route,
                     store: administrativeSettingsStore
                 )

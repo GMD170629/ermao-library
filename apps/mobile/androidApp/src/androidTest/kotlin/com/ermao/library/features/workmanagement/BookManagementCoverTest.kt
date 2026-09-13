@@ -1,5 +1,6 @@
 package com.ermao.library.features.workmanagement
 
+
 import com.ermao.library.shared.modules.workmanagement.domain.BookManagementContext
 import com.ermao.library.shared.modules.workmanagement.domain.BookMetadataDraft
 import com.ermao.library.shared.modules.workmanagement.domain.BookMutationOutcome
@@ -83,15 +84,27 @@ class BookManagementCoverTest {
     private val sharedContext = createWorkManagementContext("test", "Test", "https://library.example", "server", false, "user", 1)
     private val context = ContentRequestContext(sharedContext.profile, sharedContext.namespace)
     private val book = ManagedBook("book", "root", "Test book", "Author", "Description", "", null, emptyList(), "", false)
-    private val snapshot = ManagementSnapshot(book, listOf(ManagedResource("resource-two", "book", "node-two", "Volume two", "", "EPUB", true,
+    private var snapshot = ManagementSnapshot(book, listOf(ManagedResource("resource-two", "book", "node-two", "Volume two", "", "EPUB", true,
         listOf(ManagementFieldValue(ManagementField.Title, "Volume two")), "", listOf(ManagedAsset("asset-two", "two.epub", "PRIMARY", "1 MB")))), null)
     private val targets = mutableListOf<ManagementTarget>()
     private var taps = 0
     private var preparationGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+    private var failPreparation = false
     private var actionGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
     private var failAction = false
     private var actionCalls = 0
+    private val kindleAssets = mutableListOf<String>()
+    private var kindleReady = true
+    private var kindleTitle: String? = null
     private val repository = object : UnusedManagementRepository() {
+        override suspend fun loadBookMenuContext(context: BookManagementContext, bookId: String) =
+            WorkManagementResult.Content(ManagementMenuContext(completed = false, kindleSendAvailable = true))
+        override suspend fun loadKindleSettings(context: BookManagementContext) =
+            WorkManagementResult.Content(KindleSettings("reader@kindle.com", kindleReady, "sender@example.com"))
+        override suspend fun sendToKindle(context: BookManagementContext, bookId: String, assetId: String): WorkManagementResult<KindleSendOutcome> {
+            kindleAssets += assetId
+            return WorkManagementResult.Content(KindleSendOutcome(false))
+        }
         private suspend fun immediate(): WorkManagementResult<Unit> {
             actionCalls++
             actionGate?.await()
@@ -111,6 +124,7 @@ class BookManagementCoverTest {
         override suspend fun loadManagementSnapshot(context: BookManagementContext, target: ManagementTarget): WorkManagementResult<ManagementSnapshot> {
             targets += target
             preparationGate?.await()
+            if (failPreparation) return WorkManagementResult.Failure(WorkManagementError(WorkManagementErrorKind.Validation, "TEST_FAILED"))
             return WorkManagementResult.Content(snapshot)
         }
     }
@@ -134,7 +148,7 @@ class BookManagementCoverTest {
                         LazyColumn {
                             items(20) { index ->
                                 val target = if (resource) ManagementTarget(ManagementObject.Resource, "book", "resource-two", "Volume two")
-                                    else ManagementTarget(ManagementObject.Book, "book", "book", if (longTitle) "A very long title ".repeat(30) else "Test book")
+                                    else ManagementTarget(ManagementObject.Book, "book", "book", kindleTitle ?: if (longTitle) "A very long title ".repeat(30) else "Test book")
                                 ManagementAnchor(target, Modifier.testTag("cover-$index"), menuContext = ManagementMenuContext(completed = false, kindleSendAvailable = resource)) {
                                     Box(Modifier.size(160.dp).clickable { taps++ }) { Text("Cover $index") }
                                 }
@@ -147,6 +161,94 @@ class BookManagementCoverTest {
     }
 
     @Test fun bookDeletionUsesOneConfirmationWithoutTyping() = assertSingleDeletion(resource = false)
+    @Test fun bookMenuSendsSelectedKindleAttachmentForMember() = assertKindleEntry(resource = false)
+    @Test fun resourceMenuSendsSelectedKindleAttachmentForMember() = assertKindleEntry(resource = true)
+
+    @Test fun bookKindlePreparationAndRetryStayInMenu() = assertKindlePreparation(resource = false)
+    @Test fun resourceKindlePreparationAndRetryStayInMenu() = assertKindlePreparation(resource = true)
+
+    private fun assertKindlePreparation(resource: Boolean) {
+        preparationGate = kotlinx.coroutines.CompletableDeferred()
+        failPreparation = true
+        show(admin = false, resource = resource)
+        compose.onNodeWithTag("cover-0").performTouchInput { longClick() }
+        compose.onNodeWithTag("management-action-Kindle").performClick()
+        compose.onNodeWithTag("management-menu").assertIsDisplayed()
+        compose.onNodeWithTag("management-action-Kindle").assertIsNotEnabled()
+        compose.onNodeWithTag("management-modal").assertDoesNotExist()
+        saveScreenshot(if (resource) "kindle-preparing-resource" else "kindle-preparing-book")
+        compose.runOnIdle { preparationGate!!.complete(Unit) }
+        compose.onNodeWithTag("management-menu").assertIsDisplayed()
+        compose.onNodeWithText("Send to Kindle · Retry").assertIsDisplayed()
+        compose.onNodeWithTag("management-modal").assertDoesNotExist()
+        compose.runOnIdle {
+            failPreparation = false
+            preparationGate = kotlinx.coroutines.CompletableDeferred()
+        }
+        compose.onNodeWithTag("management-action-Kindle").performClick()
+        compose.onNodeWithTag("management-action-Kindle").assertIsNotEnabled()
+        compose.onNodeWithTag("management-modal").assertDoesNotExist()
+        compose.runOnIdle { preparationGate!!.complete(Unit) }
+        compose.onNodeWithTag("management-menu").assertDoesNotExist()
+        compose.onNodeWithTag("management-modal").assertIsDisplayed()
+        compose.onNodeWithText("reader@kindle.com").assertIsDisplayed()
+        compose.onNodeWithText("Add to sending queue").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(2, targets.size); assertTrue(kindleAssets.isEmpty()) }
+    }
+
+    @Test fun kindleChineseCardsSelectOneVolume() {
+        kindleTitle = "三体"
+        val titles = listOf("三体 I · 地球往事", "三体 II · 黑暗森林", "三体 III · 死神永生")
+        snapshot = snapshot.copy(book = book.copy(title = "三体"), resources = titles.mapIndexed { index, title ->
+            snapshot.resources.first().copy(id = "resource-$index", title = title,
+                assets = listOf(ManagedAsset("asset-$index", "$index.epub", "PRIMARY", "${index + 2} MB")))
+        })
+        show(admin = false, chinese = true)
+        compose.onNodeWithTag("cover-0").performTouchInput { longClick() }
+        compose.onNodeWithTag("management-action-Kindle").performClick()
+        compose.onNodeWithText(titles[1]).performClick()
+        compose.mainClock.advanceTimeBy(600)
+        compose.onNodeWithText("加入发送队列").assertIsDisplayed()
+        saveScreenshot("kindle-ready-zh")
+        compose.onNodeWithText("加入发送队列").performClick()
+        compose.waitForIdle()
+        assertEquals(listOf("asset-1"), kindleAssets)
+    }
+
+    @Test fun kindleLongListKeepsFooterVisible() {
+        kindleReady = false
+        kindleTitle = "一部用于验证多卷册发送排版的长标题图书：星空之下的旅程与远方的故事"
+        val titles = (1..10).map { "$kindleTitle ${it.toString().padStart(2, '0')}" }
+        snapshot = snapshot.copy(book = book.copy(title = requireNotNull(kindleTitle)), resources = titles.mapIndexed { index, title ->
+            snapshot.resources.first().copy(id = "resource-$index", title = title,
+                assets = listOf(ManagedAsset("asset-$index", "$index.epub", "PRIMARY", "8 MB")))
+        })
+        show(admin = false, chinese = true)
+        compose.onNodeWithTag("cover-0").performTouchInput { longClick() }
+        compose.onNodeWithTag("management-action-Kindle").performClick()
+        compose.onNodeWithText("加入发送队列").assertIsDisplayed().assertIsNotEnabled()
+        saveScreenshot("kindle-long-top-zh")
+        compose.onNodeWithText(titles.last()).performScrollTo().performClick()
+        compose.mainClock.advanceTimeBy(600)
+        compose.onNodeWithText("加入发送队列").assertIsDisplayed().assertIsNotEnabled()
+        compose.onNodeWithText("邮件设置").assertIsDisplayed()
+        compose.onNodeWithText("查看发送队列").assertIsDisplayed()
+        saveScreenshot("kindle-long-bottom-zh")
+        assertTrue(kindleAssets.isEmpty())
+    }
+
+    private fun assertKindleEntry(resource: Boolean) {
+        show(admin = false, resource = resource)
+        compose.waitForIdle()
+        compose.onNodeWithTag("cover-0").performTouchInput { longClick() }
+        compose.onNodeWithTag("management-action-Kindle").performClick()
+        compose.onNodeWithText("reader@kindle.com").assertIsDisplayed()
+        compose.onNodeWithText("Send one EPUB or PDF at a time. Send each volume separately.").assertIsDisplayed()
+        saveScreenshot(if (resource) "kindle-resource-en" else "kindle-book-en")
+        compose.onNodeWithText("Add to sending queue").assertIsDisplayed().performClick()
+        compose.waitForIdle()
+        assertEquals(listOf("asset-two"), kindleAssets)
+    }
     @Test fun resourceDeletionUsesOneConfirmationWithoutTyping() = assertSingleDeletion(resource = true)
 
     private fun assertSingleDeletion(resource: Boolean) {
@@ -155,13 +257,12 @@ class BookManagementCoverTest {
         show(resource = resource)
         compose.onNodeWithTag("cover-0").performTouchInput { longClick() }
         compose.onNodeWithTag("management-action-Delete").performClick()
+        compose.onNodeWithTag("management-menu").assertIsDisplayed()
+        compose.onNodeWithTag("management-delete-confirmation").assertDoesNotExist()
+        compose.onNodeWithTag("management-modal").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(0, actionCalls); preparationGate!!.complete(Unit) }
         compose.onNodeWithTag("management-delete-confirmation").assertIsDisplayed()
-        compose.onNodeWithTag("management-menu").assertDoesNotExist()
-        compose.onAllNodes(hasSetTextAction()).assertCountEquals(0)
-        compose.onNodeWithTag("management-delete-submit").assertIsNotEnabled()
-        compose.runOnIdle { assertEquals(0, actionCalls) }
         compose.onNodeWithText("Cancel").performClick()
-        compose.runOnIdle { preparationGate!!.complete(Unit) }
         compose.onNodeWithTag("management-delete-confirmation").assertDoesNotExist()
         compose.runOnIdle { assertEquals(0, actionCalls) }
         compose.onNodeWithTag("cover-0").performTouchInput { longClick() }
@@ -330,7 +431,7 @@ class BookManagementCoverTest {
 }
 
 private open class UnusedManagementRepository : WorkManagementRepository {
-    override suspend fun loadBookCompleted(context: BookManagementContext, bookId: String): WorkManagementResult<Boolean> = error("Unexpected call: loadBookCompleted")
+    override suspend fun loadBookMenuContext(context: BookManagementContext, bookId: String): WorkManagementResult<ManagementMenuContext> = error("Unexpected call: loadBookMenuContext")
     override suspend fun saveBookFields(context: BookManagementContext, bookId: String, draft: BookMetadataDraft): WorkManagementResult<Unit> = error("Unexpected call: saveBookFields")
     override suspend fun replaceBookTags(context: BookManagementContext, bookId: String, current: List<String>, next: List<String>): WorkManagementResult<Unit> = error("Unexpected call: replaceBookTags")
     override suspend fun loadManagementSnapshot(context: BookManagementContext, target: ManagementTarget): WorkManagementResult<ManagementSnapshot> = error("Unexpected call: loadManagementSnapshot")

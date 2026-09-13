@@ -35,6 +35,10 @@ import com.ermao.library.ui.components.WarmSettingsFilterOption
 import com.ermao.library.ui.components.WarmSettingsIcons
 import com.ermao.library.ui.components.WarmSettingsIdentityHeader
 import com.ermao.library.ui.components.WarmSettingsNavigationRow
+import com.ermao.library.ui.components.ContentListRow
+import com.ermao.library.ui.components.ContentListCoverPlaceholder
+import com.ermao.library.ui.components.WarmPageIconAction
+import com.ermao.library.ui.theme.WarmPageThemeValues
 import com.ermao.library.ui.components.rememberForwardProgress
 
 private enum class QueueFilter { All, Running, Failed }
@@ -47,10 +51,10 @@ fun KindleQueueScreen(
     onRetry: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    cover: @Composable (KindleTask) -> Unit = { ContentListCoverPlaceholder() },
 ) {
     var filter by remember { mutableStateOf(QueueFilter.All) }
     var deleteTask by remember { mutableStateOf<KindleTask?>(null) }
-    var selectedTask by remember { mutableStateOf<KindleTask?>(null) }
     AdministrativePage(
         title = AdministrativeCopy.KindleQueue,
         locale = locale,
@@ -83,7 +87,8 @@ fun KindleQueueScreen(
                     onCancel = { onCommand(AdministrativeCommand.CancelKindleTask(task.id)) },
                     onRetry = { onCommand(AdministrativeCommand.RetryKindleTask(task.id)) },
                     onDelete = { deleteTask = task },
-                    onMore = { selectedTask = task },
+                    cover = { cover(task) },
+                    enabled = !state.mutationInFlight,
                 )
             }
         }
@@ -95,20 +100,7 @@ fun KindleQueueScreen(
             onDismiss = { deleteTask = null },
         )
     }
-    selectedTask?.let { task ->
-        val actions = buildList {
-            if (task.status in setOf(QueueStatus.Queued, QueueStatus.Running)) {
-                add(AdministrativeSheetAction(AdministrativeCopy.CancelTask) { onCommand(AdministrativeCommand.CancelKindleTask(task.id)) })
-            }
-            if (task.status == QueueStatus.Failed) {
-                add(AdministrativeSheetAction(AdministrativeCopy.RetryTask) { onCommand(AdministrativeCommand.RetryKindleTask(task.id)) })
-            }
-            if (task.status in setOf(QueueStatus.Completed, QueueStatus.Failed, QueueStatus.Cancelled)) {
-                add(AdministrativeSheetAction(AdministrativeCopy.DeleteTask, destructive = true) { deleteTask = task })
-            }
-        }
-        AdministrativeActionSheet(task.title, locale, actions, onDismiss = { selectedTask = null })
-    }
+
 }
 
 @Composable
@@ -132,50 +124,31 @@ private fun QueueFilterRow(filter: QueueFilter, onSelect: (QueueFilter) -> Unit,
 
 @Composable
 private fun QueueTaskRow(
-    task: KindleTask,
-    locale: AdministrativeLocale,
-    onCancel: () -> Unit,
-    onRetry: () -> Unit,
-    onDelete: () -> Unit,
-    onMore: () -> Unit,
+    task: KindleTask, locale: AdministrativeLocale,
+    onCancel: () -> Unit, onRetry: () -> Unit, onDelete: () -> Unit,
+    cover: @Composable () -> Unit, enabled: Boolean,
 ) {
-    Column(Modifier.fillMaxWidth()) {
-        WarmSettingsNavigationRow(
-            title = task.title,
-            summary = listOf(task.maskedRecipient, task.status.copy().text(locale)).joinToString(" · "),
-            modifier = Modifier.testTag("administrative-kindle-task-${task.id}"),
-            onClick = onMore,
-        )
-        task.progress?.let { progress ->
+    val theme = WarmPageThemeValues
+    ContentListRow(
+        title = task.title, cover = cover,
+        modifier = Modifier.padding(horizontal = theme.components.page.compactGutter)
+            .testTag("administrative-kindle-task-${task.id}"),
+        actions = {
+            if (task.status in setOf(QueueStatus.Queued, QueueStatus.Running))
+                WarmPageIconAction(Icons.Outlined.Close, AdministrativeCopy.CancelTask.text(locale), onCancel, enabled = enabled)
+            if (task.status == QueueStatus.Failed)
+                WarmPageIconAction(Icons.Outlined.Refresh, AdministrativeCopy.RetryTask.text(locale), onRetry, enabled = enabled)
+            if (task.status in setOf(QueueStatus.Completed, QueueStatus.Failed, QueueStatus.Cancelled))
+                WarmPageIconAction(Icons.Outlined.Delete, AdministrativeCopy.Delete.text(locale), onDelete, enabled = enabled)
+        },
+    ) {
+        if (task.status == QueueStatus.Failed && !task.statusCode.isNullOrBlank()) {
+            Text(task.statusCode, style = theme.typography.caption, color = MaterialTheme.colorScheme.error,
+                maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        } else if (task.status == QueueStatus.Running) task.progress?.let { progress ->
             val animatedProgress = rememberForwardProgress(progress, progressIdentity = task.id)
-            LinearProgressIndicator(
-                progress = { animatedProgress },
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            )
-        }
-        task.statusCode?.let {
-            Text(
-                it,
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(horizontal = 16.dp),
-            )
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            if (task.status in setOf(QueueStatus.Queued, QueueStatus.Running)) OutlinedButton(onClick = onCancel) {
-                Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                Text(AdministrativeCopy.CancelTask.text(locale)) }
-            if (task.status == QueueStatus.Failed) OutlinedButton(onClick = onRetry) {
-                Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                Text(AdministrativeCopy.RetryTask.text(locale)) }
-            if (task.status in setOf(QueueStatus.Completed, QueueStatus.Failed, QueueStatus.Cancelled)) {
-                OutlinedButton(onClick = onDelete) {
-                    Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                    Text(AdministrativeCopy.Delete.text(locale), color = MaterialTheme.colorScheme.error) }
-            }
+            LinearProgressIndicator(progress = { animatedProgress }, modifier = Modifier.fillMaxWidth(),
+                color = theme.colors.actionAccent, trackColor = theme.colors.divider)
         }
     }
     AdministrativeDivider()
@@ -188,13 +161,6 @@ internal fun QueueStatus.copy(): AdministrativeCopy = when (this) {
     QueueStatus.Failed -> AdministrativeCopy.Failed
     QueueStatus.Cancelled -> AdministrativeCopy.Cancelled
     QueueStatus.Unknown -> AdministrativeCopy.Unknown
-}
-
-@Composable
-private fun QueueStatus.color() = when (this) {
-    QueueStatus.Failed -> MaterialTheme.colorScheme.error
-    QueueStatus.Completed -> MaterialTheme.colorScheme.primary
-    else -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
 @Composable

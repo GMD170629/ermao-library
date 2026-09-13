@@ -10,7 +10,7 @@ import com.ermao.library.features.downloads.model.AndroidDownloadNamespace
 import com.ermao.library.features.downloads.model.AndroidDownloadRecord
 import com.ermao.library.features.downloads.model.AndroidDownloadStatus
 import com.ermao.library.features.downloads.model.DownloadedBookGroup
-import com.ermao.library.features.downloads.model.groupReadableDownloads
+import com.ermao.library.features.downloads.model.groupDownloads
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,9 +23,7 @@ import kotlinx.coroutines.launch
 data class DownloadCenterUiState(
     val query: String = "",
     val isLoading: Boolean = true,
-    val active: List<AndroidDownloadRecord> = emptyList(),
-    val completedBooks: List<DownloadedBookGroup> = emptyList(),
-    val failed: List<AndroidDownloadRecord> = emptyList(),
+    val books: List<DownloadedBookGroup> = emptyList(),
     val totalCompletedBytes: Long = 0,
     val errorCode: String? = null,
 )
@@ -70,28 +68,18 @@ class DownloadCenterViewModel(
 
     private fun project() {
         val query = mutableUiState.value.query
-        val completed = groupReadableDownloads(records, query, localArtifactIsValid)
+        val projected = records.map { it.withLocalValidity(localArtifactIsValid) }
         mutableUiState.update { current ->
             current.copy(
                 isLoading = false,
-                active = records.filter { it.status in ACTIVE_STATUSES }.sortedBy(AndroidDownloadRecord::createdAtEpochMillis),
-                completedBooks = completed,
-                failed = records.filter { it.status in FAILED_STATUSES }.sortedByDescending(AndroidDownloadRecord::updatedAtEpochMillis),
-                totalCompletedBytes = completed.sumOf(DownloadedBookGroup::totalBytes),
+                books = groupDownloads(projected, query),
+                totalCompletedBytes = projected.filter(AndroidDownloadRecord::isReadable).sumOf(AndroidDownloadRecord::expectedBytes),
                 errorCode = null,
             )
         }
     }
 
     companion object {
-        private val ACTIVE_STATUSES = setOf(
-            AndroidDownloadStatus.Queued,
-            AndroidDownloadStatus.Downloading,
-            AndroidDownloadStatus.Paused,
-            AndroidDownloadStatus.Verifying,
-        )
-        private val FAILED_STATUSES = setOf(AndroidDownloadStatus.FailedRetryable, AndroidDownloadStatus.FailedTerminal)
-
         fun factory(
             catalog: AndroidDownloadCatalog,
             namespace: AndroidDownloadNamespace,
@@ -117,11 +105,18 @@ class DownloadedBookViewModel(
     private val mutableUiState = MutableStateFlow(DownloadedBookUiState())
     val uiState: StateFlow<DownloadedBookUiState> = mutableUiState.asStateFlow()
 
-    init {
-        viewModelScope.launch {
+    private var observation: Job? = null
+
+    init { retry() }
+
+    fun retry() {
+        observation?.cancel()
+        mutableUiState.value = DownloadedBookUiState()
+        observation = viewModelScope.launch {
             try {
                 catalog.observe(namespace).collectLatest { records ->
-                    val book = groupReadableDownloads(records, "", localArtifactIsValid).firstOrNull { it.bookId == bookId }
+                    val book = groupDownloads(records.filter { it.bookId == bookId }
+                        .map { it.withLocalValidity(localArtifactIsValid) }, "").firstOrNull()
                     mutableUiState.value = DownloadedBookUiState(isLoading = false, book = book)
                 }
             } catch (cancelled: CancellationException) {
@@ -143,3 +138,6 @@ class DownloadedBookViewModel(
         }
     }
 }
+
+private fun AndroidDownloadRecord.withLocalValidity(validate: (AndroidDownloadRecord) -> Boolean): AndroidDownloadRecord =
+    if (isReadable && !validate(this)) copy(verified = false, errorCode = "DOWNLOAD_LOCAL_FILE_INVALID") else this

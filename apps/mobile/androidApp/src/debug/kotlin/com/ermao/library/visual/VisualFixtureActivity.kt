@@ -1,5 +1,7 @@
 package com.ermao.library.visual
 
+import com.ermao.library.shared.modules.workmanagement.domain.ManagementMenuContext
+
 import android.app.Activity
 import android.annotation.SuppressLint
 import android.content.Context
@@ -597,11 +599,11 @@ private class FixtureManagementRepository : WorkManagementRepository {
     private val mutableBookReadingStatuses = MutableStateFlow<Map<String, ManagedReadingStatus>>(emptyMap())
     val bookReadingStatuses: StateFlow<Map<String, ManagedReadingStatus>> = mutableBookReadingStatuses.asStateFlow()
 
-    override suspend fun loadBookCompleted(
+    override suspend fun loadBookMenuContext(
         context: BookManagementContext,
         bookId: String,
-    ): WorkManagementResult<Boolean> = WorkManagementResult.Content(
-        mutableBookReadingStatuses.value[bookId] == ManagedReadingStatus.Finished,
+    ): WorkManagementResult<ManagementMenuContext> = WorkManagementResult.Content(
+        ManagementMenuContext(completed = mutableBookReadingStatuses.value[bookId] == ManagedReadingStatus.Finished),
     )
 
     override suspend fun saveBookFields(

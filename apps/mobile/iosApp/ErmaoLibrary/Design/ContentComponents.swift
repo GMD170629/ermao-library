@@ -286,3 +286,30 @@ struct PaginationStatusView: View {
         .padding(.vertical, .space2)
     }
 }
+
+/// Shared, stateless layout for content identity, inline actions and supporting text.
+struct ContentListRow<Cover: View, Actions: View, Description: View>: View {
+    let title: String
+    @ViewBuilder var cover: () -> Cover
+    @ViewBuilder var actions: () -> Actions
+    @ViewBuilder var description: () -> Description
+    @Environment(\.appTheme) private var theme
+
+    var body: some View {
+        HStack(alignment: .center, spacing: .space1 + .spaceHalf) {
+            cover()
+                .frame(width: .iosMinimumTouchTarget)
+                .aspectRatio(BookCoverLayout.aspectRatio, contentMode: .fit)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: .spaceHalf) {
+                Text(title).appTextStyle(.headline).foregroundStyle(theme.textPrimary)
+                    .lineLimit(1).truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: .spaceHalf) { description() }
+                    .appTextStyle(.caption).foregroundStyle(theme.textSecondary)
+            }
+            HStack(spacing: 0) { actions() }
+        }
+        .padding(.vertical, .space1)
+    }
+}

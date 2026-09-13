@@ -22,10 +22,12 @@ fun managementActions(
     kindleSendAvailable: Boolean,
     hasRepresentativeResource: Boolean,
 ): List<ManagementMenuItem> = when (kind) {
-    ManagementObject.Book -> if (canManage) listOf(
-        ManagementAction.Edit, ManagementAction.Regenerate, ManagementAction.ReadingStatus,
-        ManagementAction.Rescan, ManagementAction.Delete,
-    ).map(::ManagementMenuItem) else listOf(ManagementMenuItem(ManagementAction.ReadingStatus))
+    ManagementObject.Book -> buildList {
+        if (canManage) addAll(listOf(ManagementAction.Edit, ManagementAction.Regenerate).map(::ManagementMenuItem))
+        add(ManagementMenuItem(ManagementAction.ReadingStatus))
+        if (kindleSendAvailable) add(ManagementMenuItem(ManagementAction.Kindle))
+        if (canManage) addAll(listOf(ManagementAction.Rescan, ManagementAction.Delete).map(::ManagementMenuItem))
+    }
     ManagementObject.Directory -> if (canManage) listOf(
         ManagementMenuItem(ManagementAction.Edit),
         ManagementMenuItem(ManagementAction.Regenerate, hasRepresentativeResource),

@@ -1,5 +1,7 @@
 package com.ermao.library.shared.modules.workmanagement.application
 
+import com.ermao.library.shared.modules.workmanagement.domain.ManagementMenuContext
+
 import com.ermao.library.shared.modules.workmanagement.domain.BookManagementContext
 import com.ermao.library.shared.modules.workmanagement.domain.BookMetadataDraft
 import com.ermao.library.shared.modules.workmanagement.domain.BookMutationOutcome
@@ -22,7 +24,7 @@ import com.ermao.library.shared.modules.workmanagement.domain.RecognizedField
 import com.ermao.library.shared.modules.workmanagement.domain.MetadataApplyOutcome
 
 interface WorkManagementRepository {
-    suspend fun loadBookCompleted(context: BookManagementContext, bookId: String): WorkManagementResult<Boolean>
+    suspend fun loadBookMenuContext(context: BookManagementContext, bookId: String): WorkManagementResult<ManagementMenuContext>
 
     suspend fun saveBookFields(context: BookManagementContext, bookId: String, draft: BookMetadataDraft): WorkManagementResult<Unit>
     suspend fun replaceBookTags(context: BookManagementContext, bookId: String, current: List<String>, next: List<String>): WorkManagementResult<Unit>

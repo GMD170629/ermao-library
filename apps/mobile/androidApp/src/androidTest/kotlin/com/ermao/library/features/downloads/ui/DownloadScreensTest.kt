@@ -1,6 +1,8 @@
 package com.ermao.library.features.downloads.ui
 
 import androidx.compose.runtime.mutableStateOf
+import android.graphics.Bitmap
+import java.io.File
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -30,6 +32,72 @@ class DownloadScreensTest {
     val compose = createComposeRule()
 
     @Test
+    fun mixedLibraryNavigatesDirectlyToResourcesAndKeepsActionsScoped() {
+        val done = sampleRecord().copy(bookTitle = "三体", author = "刘慈欣", resourceTitle = "三体")
+        val running = done.copy(taskId = "running", resourceId = "running", assetId = "running",
+            resourceTitle = "三体 II：黑暗森林", status = AndroidDownloadStatus.Downloading,
+            verified = false, localReference = null, transferredBytes = 1269)
+        val failed = running.copy(taskId = "failed", resourceId = "failed", assetId = "failed",
+            resourceTitle = "三体 III：死神永生", status = AndroidDownloadStatus.FailedRetryable)
+        val records = listOf(done, running, failed)
+        val book = sampleBook(done).copy(title = "三体", author = "刘慈欣", resources = records.map {
+            DownloadedResourceGroup(it.resourceId, it.resourceTitle, listOf(it))
+        })
+        val selected = mutableStateOf(false)
+        val query = mutableStateOf("")
+        val actions = mutableListOf<Pair<com.ermao.library.shared.modules.downloads.DownloadManagementAction, String>>()
+        var opened = 0
+        compose.setContent {
+            WarmPageTheme {
+                if (!selected.value) DownloadCenterScreen(
+                    state = DownloadCenterUiState(isLoading = false, query = query.value, books = listOf(book), totalCompletedBytes = done.expectedBytes),
+                    onBack = {}, onQueryChanged = { query.value = it }, onClearQuery = { query.value = "" },
+                    onOpenBook = { selected.value = true }, onRetry = {},
+                ) else DownloadedBookScreen(
+                    state = DownloadedBookUiState(isLoading = false, book = book),
+                    onBack = { selected.value = false }, onRetry = {}, onOpenResource = { opened++ },
+                    onAction = { action, id ->
+                        actions += action to id.resourceId
+                        com.ermao.library.shared.modules.downloads.DownloadManagementResult(id.resourceId, action,
+                            com.ermao.library.shared.modules.downloads.DownloadManagementOutcome.Completed)
+                    },
+                )
+            }
+        }
+        compose.onNodeWithTag("downloads-search").performTextInput("三体")
+        capture("download-center")
+        compose.onNodeWithTag("settings-row-book-book-1").performClick()
+        compose.onNodeWithTag("download-resource-status-running", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("download-resource-status-failed", useUnmergedTree = true).assertIsDisplayed()
+        capture("download-book")
+        compose.onNodeWithTag("settings-row-resource-running").performClick()
+        compose.onNodeWithTag("settings-row-resource-failed").performClick()
+        compose.runOnIdle { assertEquals(0, opened) }
+        compose.onNodeWithTag("download-resource-primary-failed", useUnmergedTree = true).performClick()
+        compose.waitForIdle()
+        compose.runOnIdle { assertEquals("failed", actions.single().second) }
+        compose.onNodeWithTag("download-resource-remove-resource-1", useUnmergedTree = true).performClick()
+        compose.onNodeWithText(string(R.string.cancel_action)).performClick()
+        compose.runOnIdle { assertEquals(1, actions.size) }
+        compose.onNodeWithTag("settings-row-resource-asset-1").performClick()
+        compose.waitForIdle()
+        compose.runOnIdle { assertEquals(1, opened) }
+        compose.onNodeWithTag("warm-page-navigation").performClick()
+        compose.onNodeWithTag("downloads-search").assertIsDisplayed()
+        compose.runOnIdle { assertEquals("三体", query.value) }
+    }
+
+    private fun capture(name: String) {
+        compose.waitForIdle()
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val directory = File(instrumentation.targetContext.getExternalFilesDir(null), "download-ui")
+        directory.mkdirs()
+        val bitmap = instrumentation.uiAutomation.takeScreenshot()
+        File(directory, "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        bitmap.recycle()
+    }
+
+    @Test
     fun emptyDownloadCenterKeepsSearchAndSecondaryNavigationVisible() {
         var backCount = 0
         val query = mutableStateOf("")
@@ -43,9 +111,9 @@ class DownloadScreensTest {
                     onClearQuery = { query.value = "" },
                     onOpenBook = {},
                     onRetry = {},
-                    onCancelDownload = {},
-                    onRetryDownload = {},
-                    onRemoveDownload = {},
+
+
+
                 )
             }
         }
@@ -72,9 +140,9 @@ class DownloadScreensTest {
                     onClearQuery = {},
                     onOpenBook = {},
                     onRetry = { retryCount++ },
-                    onCancelDownload = {},
-                    onRetryDownload = {},
-                    onRemoveDownload = {},
+
+
+
                 )
             }
         }
@@ -106,7 +174,7 @@ class DownloadScreensTest {
                 DownloadCenterScreen(
                     state = DownloadCenterUiState(
                         isLoading = false,
-                        completedBooks = listOf(book),
+                        books = listOf(book),
                         totalCompletedBytes = book.totalBytes,
                     ),
                     onBack = {},
@@ -114,9 +182,9 @@ class DownloadScreensTest {
                     onClearQuery = {},
                     onOpenBook = { openedBook = it },
                     onRetry = {},
-                    onCancelDownload = {},
-                    onRetryDownload = {},
-                    onRemoveDownload = {},
+
+
+
                 )
             }
         }
@@ -140,6 +208,8 @@ class DownloadScreensTest {
                         book = sampleBook(record),
                     ),
                     onBack = {},
+                    onRetry = {},
+                    onAction = { action, id -> com.ermao.library.shared.modules.downloads.DownloadManagementResult(id.resourceId, action, com.ermao.library.shared.modules.downloads.DownloadManagementOutcome.Completed) },
                     onOpenResource = { openedAsset = it.assetId },
                 )
             }
@@ -161,6 +231,8 @@ class DownloadScreensTest {
                 DownloadedBookScreen(
                     state = DownloadedBookUiState(isLoading = false, book = null),
                     onBack = {},
+                    onRetry = {},
+                    onAction = { action, id -> com.ermao.library.shared.modules.downloads.DownloadManagementResult(id.resourceId, action, com.ermao.library.shared.modules.downloads.DownloadManagementOutcome.Completed) },
                     onOpenResource = {},
                 )
             }

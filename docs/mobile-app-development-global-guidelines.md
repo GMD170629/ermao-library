@@ -30,6 +30,8 @@ Android 操作按钮不得只呈现无样式文字：紧凑操作复用 `WarmPag
 
 个人资料头像只显示账户接口返回的 `avatarImageUrl` 对应图片，默认头像由服务端统一提供；`avatarUrl` 仅标识自定义头像，用于删除入口。旧接口未提供展示字段时仅兼容其自定义头像地址。图片无法加载时不生成首字母、默认插画或自定义头像；本地待上传照片不代替账户头像，上传和删除后重新读取响应指定的图片。
 
+图书、卷册和目录管理操作的展示位置统一读取 KMP `ManagementSessionState.presentation`。准备、执行、失败和重试默认留在操作菜单，不得按按钮名称维护“不弹框”名单，也不得把新增操作默认映射为模态框；只有明确的业务交互状态可以展示表单或确认界面。删除在准备完成后展示一次确认。已打开业务界面内的异步操作保持原界面，平台仅负责菜单关闭与业务弹层展示的原生转场顺序。
+
 ## 状态、身份与安全
 
 页面明确实际适用的 loading、empty、error、permission、unauthorized、pagination 和 retry，不创建无业务意义的状态或 UI；错误分支使用稳定 error code，不按本地化文本分支。请求、缓存和下载按当前 `serverIdentity + userId + authzVersion` namespace 隔离；Reader 进度按 Reader v5 合同的 server/user/client/book/resource 归属维护。无独立离线 Shell；只有完整校验并原子发布的本地工件可进入本地阅读或播放。

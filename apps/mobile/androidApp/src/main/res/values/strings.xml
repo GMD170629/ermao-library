@@ -493,18 +493,10 @@
     <string name="downloads_title">Downloads</string>
     <string name="downloads_loading">Loading managed downloads…</string>
     <string name="downloads_error">Downloaded content could not be read from private device storage.</string>
-    <string name="downloads_storage">Storage</string>
-    <string name="downloads_used_space">Downloaded books use %1$s</string>
-    <string name="downloads_active">In progress</string>
-    <string name="downloads_completed">Downloaded books</string>
-    <string name="downloads_failed">Failed</string>
-    <string name="downloads_search">Search downloaded books</string>
-    <string name="downloads_empty">No complete downloaded books on this device.</string>
-    <string name="downloads_search_empty">No downloaded books match this search.</string>
-    <plurals name="downloads_book_summary">
-        <item quantity="one">%1$d resource · %2$s</item>
-        <item quantity="other">%1$d resources · %2$s</item>
-    </plurals>
+    <string name="downloads_used_space">Storage used: %1$s</string>
+    <string name="downloads_search">Search books, authors or resources</string>
+    <string name="downloads_empty">No downloads on this device.</string>
+    <string name="downloads_search_empty">No books match this search.</string>
     <string name="downloads_failed_generic">The download was not completed.</string>
     <string name="downloads_failed_interrupted">The app closed before this download finished. Retry to start it again.</string>
     <string name="downloads_failed_storage">There is not enough private device storage for this download.</string>
@@ -512,11 +504,6 @@
     <string name="downloads_remove_title">Remove download?</string>
     <string name="downloads_remove_message">Remove the managed download for “%1$s” from this device?</string>
     <string name="downloads_remove_action">Remove</string>
-    <plurals name="downloads_resource_summary">
-        <item quantity="one">%1$d resource · %2$s</item>
-        <item quantity="other">%1$d resources · %2$s</item>
-    </plurals>
-    <string name="downloads_task_context">%1$s · %2$s</string>
     <string name="downloads_unavailable_title">Download unavailable</string>
     <string name="downloads_unavailable_message">This downloaded book is missing, incomplete, or no longer available to this account.</string>
     <string name="reader_not_implemented_title">Reader unavailable</string>
@@ -673,4 +660,17 @@
     <string name="book_metadata_partial_import">Some files failed to import; available content was retained</string>
     <string name="download_selection_hint">Select volumes</string>
     <string name="management_delete_resource_pending_warning">Permanently delete the source files associated with “%1$s”. This cannot be undone.</string>
+    <plurals name="downloads_resource_count">
+        <item quantity="one">%d resource</item>
+        <item quantity="other">%d resources</item>
+    </plurals>
+    <string name="management_kindle_hint">Send one EPUB or PDF at a time. Send each volume separately.</string>
+    <string name="management_kindle_recipient">Recipient email</string>
+    <string name="management_kindle_unconfigured">Not configured</string>
+    <string name="management_kindle_choose">Choose an attachment</string>
+    <string name="management_kindle_empty">This book has no EPUB or PDF files available to send.</string>
+    <string name="management_kindle_too_large">The attachment exceeds the configured size limit. Choose another file or check email settings.</string>
+    <string name="management_kindle_settings_short">Email settings</string>
+    <string name="management_kindle_book_context">Choose one attachment from “%1$s”</string>
+    <string name="downloads_view_resources">View resources</string>
 </resources>

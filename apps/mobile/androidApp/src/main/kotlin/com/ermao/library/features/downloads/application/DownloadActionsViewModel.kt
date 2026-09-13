@@ -435,8 +435,23 @@ class DownloadActionsViewModel(
         super.onCleared()
     }
 
-    fun removeDownload(record: AndroidDownloadRecord) {
-        viewModelScope.launch {
+    /** Catalog rows retain exact task identity; removing one format must not remove its siblings. */
+    suspend fun executeCatalogAction(action: DownloadManagementAction, record: AndroidDownloadRecord): DownloadManagementResult {
+        if (record.namespace != namespace) return DownloadManagementResult(record.resourceId, action, DownloadManagementOutcome.Skipped)
+        if (action != DownloadManagementAction.Remove && action != DownloadManagementAction.Open) {
+            return executeManagementAction(action, record.resourceId)
+        }
+        return try {
+            val current = withContext(transferDispatcher) {
+                androidCatalog.records(namespace).firstOrNull { it.taskId == record.taskId && it.assetId == record.assetId }
+            }
+            if (current == null) return DownloadManagementResult(record.resourceId, action, DownloadManagementOutcome.Skipped)
+            if (action == DownloadManagementAction.Open) {
+                val valid = withContext(transferDispatcher) { current.isReadable && hasVerifiedLocalArtifact(current) }
+                return DownloadManagementResult(record.resourceId, action,
+                    if (valid) DownloadManagementOutcome.Completed else DownloadManagementOutcome.Failed,
+                    if (valid) null else "DOWNLOAD_LOCAL_FILE_INVALID")
+            }
             activeTransfers[record.resourceId]?.let { job ->
                 job.cancel()
                 job.cancelAndJoin()
@@ -448,6 +463,11 @@ class DownloadActionsViewModel(
                 // preserve its task identity contract.
                 sharedCatalog.deleteTask(context.namespace, record.taskId)
             }
+            DownloadManagementResult(record.resourceId, action, DownloadManagementOutcome.Completed)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            DownloadManagementResult(record.resourceId, action, DownloadManagementOutcome.Failed, failureCode(error))
         }
     }
 

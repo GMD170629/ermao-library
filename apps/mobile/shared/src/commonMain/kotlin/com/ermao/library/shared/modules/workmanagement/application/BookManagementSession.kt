@@ -28,7 +28,19 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-enum class ManagementPhase { Closed, Loading, Menu, Editing, Recognizing, Kindle, DeleteConfirmation, CoverUpload, LoadFailed, Executing, Result }
+enum class ManagementPresentation { None, Menu, Sheet, DeleteConfirmation }
+
+enum class ManagementPhase {
+    Closed, Loading, Menu, Editing, Recognizing, Kindle, DeleteConfirmation, CoverUpload, LoadFailed, Executing, Result;
+
+    val presentation: ManagementPresentation
+        get() = when (this) {
+            Closed -> ManagementPresentation.None
+            Editing, Recognizing, Kindle, CoverUpload, Result -> ManagementPresentation.Sheet
+            DeleteConfirmation -> ManagementPresentation.DeleteConfirmation
+            else -> ManagementPresentation.Menu
+        }
+}
 enum class ManagementOperation { Loading, Saving, Searching, Applying, Executing }
 
 data class ManagementSessionState(
@@ -55,6 +67,8 @@ data class ManagementSessionState(
     val change: ManagementChange? = null,
     val revision: Long = 0,
 ) {
+    val presentation: ManagementPresentation get() = phase.presentation
+
     val feedbackKind: OperationFeedbackKind
         get() = when (notice) {
             "refreshFailed", "metadataPartial" -> OperationFeedbackKind.PartialSuccess
@@ -80,12 +94,13 @@ class BookManagementSession(
 
     private val bookMenuCache = BookMenuStateCache(repository, context)
     val bookMenuStates = bookMenuCache.state
-    suspend fun prepareBookMenu(bookId: String): Boolean? = bookMenuCache.prepare(bookId)
-    fun bookCompleted(bookId: String): Boolean? = bookMenuStates.value[bookId]
+    suspend fun prepareBookMenu(bookId: String): Boolean? = bookMenuCache.prepare(bookId)?.completed
+    fun bookCompleted(bookId: String): Boolean? = bookMenuStates.value[bookId]?.completed
+    fun bookKindleAvailable(bookId: String): Boolean = bookMenuStates.value[bookId]?.kindleSendAvailable == true
     fun dispose() { close(); bookMenuCache.clear() }
 
     val menuItems get() = current.target?.let { target -> managementActions(target.kind, canManage,
-        current.menuContext.kindleSendAvailable, current.menuContext.hasRepresentativeResource)
+        current.menuContext.kindleSendAvailable || (target.kind == ManagementObject.Book && bookKindleAvailable(target.bookId)), current.menuContext.hasRepresentativeResource)
         .map { if (it.action == ManagementAction.ReadingStatus) it.copy(enabled =
             (current.menuContext.completed ?: bookCompleted(target.bookId)) != null) else it }
     }.orEmpty()
@@ -99,12 +114,13 @@ class BookManagementSession(
         generation++
         deleteKey = null
         mutableState.value = ManagementSessionState(phase = ManagementPhase.Menu,
-            target = target, menuContext = menuContext.copy(completed = menuContext.completed ?: bookCompleted(target.bookId)),
+            target = target, menuContext = menuContext.copy(completed = menuContext.completed ?: bookCompleted(target.bookId),
+                kindleSendAvailable = menuContext.kindleSendAvailable || (target.kind == ManagementObject.Book && bookKindleAvailable(target.bookId))),
             revision = current.revision, change = current.change)
     }
 
     suspend fun retryPreparation() {
-        if (current.phase != ManagementPhase.LoadFailed && !(current.phase == ManagementPhase.DeleteConfirmation && current.snapshot == null && current.error != null)) return
+        if (current.phase != ManagementPhase.LoadFailed) return
         current.pendingAction?.let { select(it) }
     }
 
@@ -132,10 +148,10 @@ class BookManagementSession(
             mutableState.value = current.copy(providerId = value, candidates = emptyList(), selectedCandidate = null, selectedFields = emptyList())
     }
     fun setAsset(value: String) {
-        if (kindleOptions().any { resource -> resource.assets.any { it.id == value && it.role == "PRIMARY" } })
-            mutableState.value = current.copy(selectedAssetId = value)
+        if (current.operation == null && kindleOptions().any { resource -> resource.assets.any { it.id == value && it.role == "PRIMARY" } })
+            mutableState.value = current.copy(selectedAssetId = value, error = null)
     }
-    fun kindleOptions() = current.snapshot?.resources.orEmpty().filter { it.kindleSendAvailable && it.format in listOf("EPUB", "PDF") }
+    fun kindleOptions() = current.snapshot?.resources.orEmpty().filter { it.kindleSendAvailable && it.format in listOf("EPUB", "PDF") && it.assets.any { asset -> asset.role == "PRIMARY" } }
     fun setRecognizedField(field: RecognizedField, selected: Boolean) {
         if (field !in recognitionFields || current.operation != null) return
         mutableState.value = current.copy(selectedFields = if (selected) (current.selectedFields + field).distinct() else current.selectedFields - field)
@@ -158,15 +174,14 @@ class BookManagementSession(
 
     suspend fun select(action: ManagementAction) {
         val before = current
-        val retryingDelete = action == ManagementAction.Delete && before.phase == ManagementPhase.DeleteConfirmation && before.snapshot == null && before.error != null
-        if ((!retryingDelete && before.phase !in listOf(ManagementPhase.Menu, ManagementPhase.LoadFailed)) ||
+        if ((before.phase !in listOf(ManagementPhase.Menu, ManagementPhase.LoadFailed)) ||
             before.operation != null || menuItems.none { it.action == action && it.enabled }) return
         val requestedTarget = before.target ?: return
         val token = generation
         // Capture the user's displayed reading-state intention before a server refresh.
         val intendedCompleted = before.menuContext.completed ?: bookCompleted(requestedTarget.bookId)
-        val preparingPhase = if (action == ManagementAction.Delete) ManagementPhase.DeleteConfirmation else ManagementPhase.Loading
-        val failedPhase = if (action == ManagementAction.Delete) ManagementPhase.DeleteConfirmation else ManagementPhase.LoadFailed
+        val preparingPhase = ManagementPhase.Loading
+        val failedPhase = ManagementPhase.LoadFailed
         mutableState.value = before.copy(phase = preparingPhase, operation = ManagementOperation.Loading,
             pendingAction = action, error = null, notice = null, saveStage = null,
             menuContext = before.menuContext.copy(completed = intendedCompleted))
@@ -179,7 +194,10 @@ class BookManagementSession(
         }
         if (token != generation) return
         val allowed = managementActions(requestedTarget.kind, canManage,
-            snapshot.resources.find { it.id == requestedTarget.id }?.kindleSendAvailable == true,
+            snapshot.resources.any { resource ->
+                (requestedTarget.kind == ManagementObject.Book || resource.id == requestedTarget.id) &&
+                    resource.kindleSendAvailable && resource.format in listOf("EPUB", "PDF") && resource.assets.any { it.role == "PRIMARY" }
+            },
             snapshot.directory?.representativeResourceId != null)
         if (allowed.none { it.action == action && it.enabled }) {
             mutableState.value = current.copy(phase = failedPhase, operation = null,
@@ -192,7 +210,7 @@ class BookManagementSession(
             ManagementObject.Resource -> snapshot.resources.find { it.id == requestedTarget.id }?.title
         } ?: requestedTarget.title
         val target = requestedTarget.copy(title = title)
-        bookMenuCache.put(target.bookId, snapshot.book.completed)
+        bookMenuCache.put(target.bookId, snapshot.book.completed, snapshot.resources.any { it.kindleSendAvailable && it.assets.any { asset -> asset.role == "PRIMARY" } })
         mutableState.value = current.copy(target = target, snapshot = snapshot, operation = null)
         when (action) {
             ManagementAction.Edit -> mutableState.value = current.copy(phase = ManagementPhase.Editing, draft = initialDraft(snapshot, target))
@@ -222,6 +240,7 @@ class BookManagementSession(
         }
     }
     suspend fun loadKindle() = runOperation(ManagementOperation.Loading) { token ->
+        mutableState.value = current.copy(kindleSettings = null)
         when (val result = repository.loadKindleSettings(context)) {
             is WorkManagementResult.Failure -> fail(token, result)
             is WorkManagementResult.Content -> if (token == generation) mutableState.value = current.copy(kindleSettings = result.value)

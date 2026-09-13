@@ -13,7 +13,7 @@ final class DownloadCenterStore: ObservableObject {
     @Published private(set) var storageErrorCode: String?
     @Published private(set) var readerFailures: [String: String] = [:]
     @Published private(set) var activeManagementResourceIDs: Set<String> = []
-    @Published var completedSearch = ""
+    @Published var search = ""
     #if DEBUG
     @Published var uiTestResourceFilterID: String?
     #endif
@@ -31,9 +31,7 @@ final class DownloadCenterStore: ObservableObject {
         self.transfer = transfer
     }
 
-    var activeRecords: [ManagedDownloadRecord] { records.filter { [.queued, .downloading, .paused].contains($0.state) } }
-    var failedRecords: [ManagedDownloadRecord] { records.filter { [.failedRetryable, .failedTerminal].contains($0.state) } }
-    var completedGroups: [ManagedDownloadBookGroup] {
+    var bookGroups: [ManagedDownloadBookGroup] {
         #if DEBUG
         let projectedRecords = uiTestResourceFilterID.map { resourceID in
             records.filter { $0.resourceID == resourceID }
@@ -41,7 +39,7 @@ final class DownloadCenterStore: ObservableObject {
         #else
         let projectedRecords = records
         #endif
-        return ManagedDownloadGrouping.completed(records: projectedRecords, query: completedSearch)
+        return ManagedDownloadGrouping.books(records: projectedRecords, query: search)
     }
     var usedBytes: Int64 { records.filter(\.isVerifiedOfflineCopy).reduce(0) { $0 + $1.receivedBytes } }
 
@@ -91,6 +89,14 @@ final class DownloadCenterStore: ObservableObject {
             resource: resource,
             record: record(for: resource.id),
             active: activeManagementResourceIDs.contains(resource.id)
+        )
+    }
+
+    func managementResource(for record: ManagedDownloadRecord) -> DownloadManagementResource {
+        DownloadManagementAdapter.project(
+            resource: DownloadManagementAdapter.catalogResource(record, available: true),
+            record: record,
+            active: !record.isVerifiedOfflineCopy && activeManagementResourceIDs.contains(record.resourceID)
         )
     }
 
@@ -348,8 +354,8 @@ final class DownloadCenterStore: ObservableObject {
     func resume(_ record: ManagedDownloadRecord) { start(resourceID: record.resourceID) }
     func retry(_ record: ManagedDownloadRecord) { start(resourceID: record.resourceID) }
 
-    func verifiedReaderHandoff(resourceID: String, expectedNamespace: String? = nil) async -> ReaderHandoff? {
-        guard let record = record(for: resourceID),
+    func verifiedReaderHandoff(resourceID: String, assetID: String? = nil, expectedNamespace: String? = nil) async -> ReaderHandoff? {
+        guard let record = record(for: resourceID, assetID: assetID),
               expectedNamespace == nil || record.namespace == expectedNamespace,
               record.isVerifiedOfflineCopy,
               await repository.fileURL(for: record) != nil
@@ -554,23 +560,33 @@ final class DownloadCenterStore: ObservableObject {
     }
 
     func remove(_ record: ManagedDownloadRecord) {
-        guard context?.namespaceKey == record.namespace else { return }
-        Task {
-            do {
-                let result = try await removeManagementDownload(
-                    resourceID: record.resourceID,
-                    expectedNamespace: record.namespace,
-                    recordID: record.id
-                )
-                if result.outcome == .failed,
-                   self.context?.namespaceKey == record.namespace {
-                    storageErrorCode = result.failureCode
-                }
-            } catch let error as ManagedDownloadTransferError {
-                if self.context?.namespaceKey == record.namespace { storageErrorCode = error.stableCode }
-            } catch {
-                if self.context?.namespaceKey == record.namespace { storageErrorCode = "DOWNLOAD_REMOVE_FAILED" }
+        Task { _ = await removeAndAwait(record) }
+    }
+
+    /// The catalog deletes the selected asset, while batch management deletes the resource.
+    func removeAndAwait(_ record: ManagedDownloadRecord) async -> DownloadManagementResult {
+        guard context?.namespaceKey == record.namespace else {
+            return managementResult(resourceID: record.resourceID, action: .remove, outcome: .skipped)
+        }
+        do {
+            let result = try await removeManagementDownload(
+                resourceID: record.resourceID,
+                expectedNamespace: record.namespace,
+                recordID: record.id
+            )
+            if result.outcome == .failed,
+               self.context?.namespaceKey == record.namespace {
+                storageErrorCode = result.failureCode
             }
+            return managementResult(resourceID: record.resourceID, action: .remove, outcome: result.outcome, failureCode: result.failureCode)
+        } catch is CancellationError {
+            return managementResult(resourceID: record.resourceID, action: .remove, outcome: .skipped)
+        } catch let error as ManagedDownloadTransferError {
+            if self.context?.namespaceKey == record.namespace { storageErrorCode = error.stableCode }
+            return managementResult(resourceID: record.resourceID, action: .remove, outcome: .failed, failureCode: error.stableCode)
+        } catch {
+            if self.context?.namespaceKey == record.namespace { storageErrorCode = "DOWNLOAD_REMOVE_FAILED" }
+            return managementResult(resourceID: record.resourceID, action: .remove, outcome: .failed, failureCode: "DOWNLOAD_REMOVE_FAILED")
         }
     }
 

@@ -479,20 +479,13 @@
     <string name="reader_pdf_page_description">第 %1$d 页，共 %2$d 页</string>
     <string name="me_section_offline_storage">下载与存储</string>
     <string name="me_downloads_title">下载中心</string>
-    <string name="downloads_title">下载</string>
+    <string name="downloads_title">下载中心</string>
     <string name="downloads_loading">正在加载受管下载…</string>
     <string name="downloads_error">无法从设备私有存储读取已下载内容。</string>
-    <string name="downloads_storage">存储空间</string>
-    <string name="downloads_used_space">已下载图书占用 %1$s</string>
-    <string name="downloads_active">进行中</string>
-    <string name="downloads_completed">已下载图书</string>
-    <string name="downloads_failed">失败</string>
-    <string name="downloads_search">搜索已下载的图书</string>
-    <string name="downloads_empty">此设备上没有完整的已下载图书。</string>
-    <string name="downloads_search_empty">没有符合搜索条件的已下载图书。</string>
-    <plurals name="downloads_book_summary">
-        <item quantity="other">%1$d 个资源 · %2$s</item>
-    </plurals>
+    <string name="downloads_used_space">已占用 %1$s</string>
+    <string name="downloads_search">搜索书名、作者或资源</string>
+    <string name="downloads_empty">此设备上还没有下载记录。</string>
+    <string name="downloads_search_empty">没有符合搜索条件的图书。</string>
     <string name="downloads_failed_generic">下载未完成。</string>
     <string name="downloads_failed_interrupted">应用在下载完成前已关闭，请重试以重新开始。</string>
     <string name="downloads_failed_storage">设备私有存储空间不足，无法完成下载。</string>
@@ -500,10 +493,6 @@
     <string name="downloads_remove_title">移除下载？</string>
     <string name="downloads_remove_message">要从此设备移除《%1$s》的受管下载吗？</string>
     <string name="downloads_remove_action">移除</string>
-    <plurals name="downloads_resource_summary">
-        <item quantity="other">%1$d 个资源 · %2$s</item>
-    </plurals>
-    <string name="downloads_task_context">%1$s · %2$s</string>
     <string name="downloads_unavailable_title">下载不可用</string>
     <string name="downloads_unavailable_message">此下载已缺失、未完成，或当前账户不再有权使用。</string>
     <string name="reader_not_implemented_title">阅读器不可用</string>
@@ -658,4 +647,16 @@
     <string name="book_metadata_partial_import">部分文件导入失败，已保留可用内容</string>
     <string name="download_selection_hint">请选择卷册</string>
     <string name="management_delete_resource_pending_warning">将永久删除“%1$s”关联的源文件，此操作无法恢复。</string>
+    <plurals name="downloads_resource_count">
+        <item quantity="other">%d 个资源</item>
+    </plurals>
+    <string name="management_kindle_hint">一次发送一个 EPUB 或 PDF，多卷册请逐册发送。</string>
+    <string name="management_kindle_recipient">收件邮箱</string>
+    <string name="management_kindle_unconfigured">尚未配置</string>
+    <string name="management_kindle_choose">选择附件</string>
+    <string name="management_kindle_empty">这本图书没有可发送的 EPUB 或 PDF 文件。</string>
+    <string name="management_kindle_too_large">附件超过已配置的大小上限，请选择其他文件或检查邮件设置。</string>
+    <string name="management_kindle_settings_short">邮件设置</string>
+    <string name="management_kindle_book_context">选择《%1$s》的一个附件</string>
+    <string name="downloads_view_resources">查看资源</string>
 </resources>

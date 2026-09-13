@@ -1,5 +1,7 @@
 package com.ermao.library.shared.modules.workmanagement.infrastructure
 
+import com.ermao.library.shared.modules.workmanagement.domain.ManagementMenuContext
+
 import com.ermao.library.shared.core.network.ApiClient
 import com.ermao.library.shared.modules.auth.domain.PrivateDataNamespace
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
@@ -75,9 +77,18 @@ class KtorWorkManagementRepositoryTest {
 
     @Test fun menuStatePreparationReadsOnlyTheBookEndpoint() = runBlocking {
         val harness = Harness("""{"ok":true,"data":{"book":{"id":"book-1","completed":true}}}""")
-        val result = assertIs<WorkManagementResult.Content<Boolean>>(harness.repository.loadBookCompleted(context, "book-1"))
-        assertTrue(result.value)
+        val result = assertIs<WorkManagementResult.Content<ManagementMenuContext>>(harness.repository.loadBookMenuContext(context, "book-1"))
+        assertEquals(true, result.value.completed)
         assertEquals(listOf("/base/api/books/book-1"), harness.requests.map { it.path })
+    }
+
+    @Test fun bookMenuOnlyOffersKindleForSupportedPrimaryAssets() = runBlocking {
+        for ((format, role, expected) in listOf(Triple("EPUB", "PRIMARY", true), Triple("PDF", "PRIMARY", true),
+            Triple("CBZ", "PRIMARY", false), Triple("MP3", "PRIMARY", false), Triple("EPUB", "COVER", false))) {
+            val harness = Harness("""{"ok":true,"data":{"book":{"id":"book-1","completed":false,"resources":[{"format":"$format","kindleSendAvailable":true,"assets":[{"role":"$role"}]}]}}}""")
+            val result = assertIs<WorkManagementResult.Content<ManagementMenuContext>>(harness.repository.loadBookMenuContext(context, "book-1"))
+            assertEquals(expected, result.value.kindleSendAvailable)
+        }
     }
 
     @Test

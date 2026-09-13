@@ -164,3 +164,6 @@ typealias ReadingStatusResetPort = com.ermao.library.shared.modules.workmanageme
 
 fun withReadingStatusReset(repository: WorkManagementRepository, resetPort: ReadingStatusResetPort): WorkManagementRepository =
     com.ermao.library.shared.modules.workmanagement.application.ReadingStatusResettingRepository(repository, resetPort)
+
+typealias ManagementPresentation =
+    com.ermao.library.shared.modules.workmanagement.application.ManagementPresentation

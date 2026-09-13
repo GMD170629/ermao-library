@@ -1,5 +1,7 @@
 package com.ermao.library.features.administrativesettings
 
+import androidx.compose.material3.MaterialTheme
+
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -176,7 +178,7 @@ fun EmailKindleSettingsScreen(
     } == true
     val smtpChanged = snapshot?.smtp?.let { smtpForm.hasChangesFrom(it) } ?: false
     val smtpValid = smtpForm.host.isNotBlank() && smtpForm.senderEmail.isNotBlank() &&
-        (smtpForm.port.toIntOrNull() ?: 0) in 1..65535
+        (smtpForm.port.toIntOrNull() ?: 0) in 1..65535 && smtpForm.validAttachment
     val canSave = !state.mutationInFlight && snapshot != null && when (activeTab) {
         EmailKindleTab.Kindle -> kindleRecipient.isNotBlank() && kindleChanged
         EmailKindleTab.Smtp -> smtpValid && smtpChanged
@@ -255,6 +257,10 @@ private data class SmtpFormState(
     val senderName: String,
     val maximumAttachment: String,
 ) {
+    val validAttachment: Boolean get() = maximumAttachment.isBlank() || maximumAttachment.toDoubleOrNull()?.let {
+        com.ermao.library.shared.modules.administrativesettings.isValidAdministrativeAttachmentMegabytes(it)
+    } == true
+
     fun toDraft(): SmtpSettingsDraft = SmtpSettingsDraft(
         host = host.trim(),
         port = port.toIntOrNull() ?: 0,
@@ -263,7 +269,7 @@ private data class SmtpFormState(
         username = username.trim(),
         newPassword = password.ifBlank { null },
         senderName = senderName.trim(),
-        maximumAttachmentMegabytes = maximumAttachment.toDoubleOrNull(),
+        maximumAttachmentMegabytes = maximumAttachment.takeIf { it.isNotBlank() }?.toDoubleOrNull() ?: 50.0,
     )
 
     fun hasChangesFrom(initial: SmtpSettings): Boolean =
@@ -274,7 +280,7 @@ private data class SmtpFormState(
             username.trim() != initial.username.trim() ||
             password.isNotBlank() ||
             senderName.trim() != initial.senderName.trim() ||
-            maximumAttachment.toDoubleOrNull() != initial.maximumAttachmentMegabytes
+            (maximumAttachment.toDoubleOrNull() ?: 50.0) != initial.maximumAttachmentMegabytes
 
     companion object {
         fun from(initial: SmtpSettings?): SmtpFormState = SmtpFormState(
@@ -285,7 +291,7 @@ private data class SmtpFormState(
             username = initial?.username.orEmpty(),
             password = "",
             senderName = initial?.senderName.orEmpty(),
-            maximumAttachment = initial?.maximumAttachmentMegabytes?.toString().orEmpty(),
+            maximumAttachment = (initial?.maximumAttachmentMegabytes ?: 50.0).toString(),
         )
     }
 }
@@ -355,13 +361,15 @@ private fun ColumnScope.SmtpSettingsForm(
         AdministrativeCopy.MaximumAttachment,
         locale,
     )
+    Text(AdministrativeCopy.AttachmentHint.text(locale), style = MaterialTheme.typography.bodySmall)
+    if (!form.validAttachment) Text(AdministrativeCopy.AttachmentInvalid.text(locale), color = MaterialTheme.colorScheme.error)
     initial.lastTest?.let {
         AdministrativeValueRow(
             label = if (it.successful) AdministrativeCopy.SmtpTestSucceeded.text(locale) else AdministrativeCopy.OperationFailed.text(locale),
             value = it.latencyMilliseconds?.let { latency -> "$latency ms" } ?: it.code.orEmpty(),
         )
     }
-    val valid = form.host.isNotBlank() && form.senderEmail.isNotBlank() && (form.port.toIntOrNull() ?: 0) in 1..65535
+    val valid = form.host.isNotBlank() && form.senderEmail.isNotBlank() && (form.port.toIntOrNull() ?: 0) in 1..65535 && form.validAttachment
     OutlinedButton(onClick = { onCommand(AdministrativeCommand.TestSmtp(form.toDraft())) }, enabled = !saving && valid, modifier = Modifier.fillMaxWidth()) {
         Icon(Icons.AutoMirrored.Outlined.Send, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
         Spacer(Modifier.size(ButtonDefaults.IconSpacing))

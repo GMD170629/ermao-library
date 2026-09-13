@@ -8,7 +8,7 @@ internal object AdministrativeSettingsValidation {
     const val MINIMUM_SMTP_PORT = 1
     const val MAXIMUM_SMTP_PORT = 65_535
     const val MINIMUM_ATTACHMENT_MEGABYTES = 1.0
-    const val MAXIMUM_ATTACHMENT_MEGABYTES = 1_000.0
+    const val MAXIMUM_ATTACHMENT_MEGABYTES = 50.0
     const val MINIMUM_LOG_MEGABYTES = 1
     const val MAXIMUM_LOG_MEGABYTES = 100
     private const val BYTES_PER_MEGABYTE = 1024L * 1024L

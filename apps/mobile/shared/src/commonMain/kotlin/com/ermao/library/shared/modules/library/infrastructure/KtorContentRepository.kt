@@ -594,3 +594,7 @@ private data class ResourceReadingUnitsPayloadWire(
         progress = progress,
     )
 }
+
+/** Unversioned book covers are revalidated by the existing cover cache. */
+internal fun bookCoverRequestPath(bookId: String?): String? =
+    bookId?.takeIf { it.isNotBlank() }?.let { "/api/books/${it.encodeURLPathPart()}/cover" }

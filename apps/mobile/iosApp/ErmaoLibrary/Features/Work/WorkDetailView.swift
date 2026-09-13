@@ -554,6 +554,7 @@ struct WorkDetailView: View {
         if store.isBookRoot {
             var target = NativeManagementTarget.book(detail.book.id, currentDetail?.book.title ?? detail.book.title)
             target.completed = currentDetail?.readingStatus == .finished
+            target.kindleEligible = detail.resources.contains { $0.kindleSendAvailable }
             return target
         }
         let resource = detail.resources.first { $0.id == store.selectedResourceID }

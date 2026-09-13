@@ -672,42 +672,13 @@ struct MultiDownloadSheet: View {
                 .accessibilityIdentifier("work.downloadManagement.checkbox.\(resource.id)")
             }
 
-            VStack(alignment: .leading, spacing: .spaceHalf) {
-                Text("Ag")
-                        .appTextStyle(.body)
-                        .hidden()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .overlay(alignment: .leading) {
-                            Text(DownloadManagementPolicy.shared.displayTitle(bookTitle: detail.book.title, resourceTitle: resource.title))
-                                .appTextStyle(.body)
-                                .lineLimit(1)
-                                .fixedSize(horizontal: true, vertical: false)
-                                .accessibilityLabel(Text(resource.title))
-                        }
-                        .clipped()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .firstTextBaseline, spacing: .spaceHalf) {
-                        resourceMetadata(resource).fixedSize()
-                        Text("·").appTextStyle(.caption).foregroundStyle(theme.textSecondary)
-                        resourceStatus(resource, projected: projected).fixedSize()
-                    }
-                    VStack(alignment: .leading, spacing: .spaceHalf) {
-                        resourceMetadata(resource)
-                        resourceStatus(resource, projected: projected)
-                    }
-                }
-                if (projected.status == .downloading || projected.status == .paused),
-                   let progress = downloads.record(for: resource.id)?.progress {
-                    ProgressView(value: progress).tint(theme.textSecondary)
-                }
-                if [.failedretryable, .failedterminal, .invalidlocal].contains(projected.status),
-                   let code = downloads.record(for: resource.id)?.stableErrorCode {
-                    Text(downloadFailureMessage(code)).appTextStyle(.caption).foregroundStyle(.red)
-                }
-            }
-            .frame(maxWidth: .infinity, minHeight: CGFloat.iosMinimumTouchTarget + .spaceHalf, alignment: .leading)
+            DownloadResourceContent(
+                title: DownloadManagementPolicy.shared.displayTitle(bookTitle: detail.book.title, resourceTitle: resource.title),
+                metadata: [resource.format, resource.sizeLabel].compactMap { $0 }.joined(separator: " · "),
+                status: projected.status, progress: downloads.record(for: resource.id)?.progress,
+                errorCode: downloads.record(for: resource.id)?.stableErrorCode,
+                statusIdentifier: "work.downloadManagement.status.\(resource.id)", accessibilityTitle: resource.title
+            )
             .contentShape(Rectangle())
             .onTapGesture {
                 if mode == .selection {
@@ -755,22 +726,6 @@ struct MultiDownloadSheet: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("work.multiDownload.resource.\(resource.id)")
         .accessibilityValue(Text(statusText(resource, projected: projected)))
-    }
-
-    private func resourceMetadata(_ resource: BookResource) -> some View {
-        Text([resource.format, resource.sizeLabel].compactMap { $0 }.joined(separator: " · "))
-            .appTextStyle(.caption)
-            .foregroundStyle(theme.textSecondary)
-    }
-
-    private func resourceStatus(_ resource: BookResource, projected: DownloadManagementResource) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: .spaceHalf) {
-            if projected.status == .completed { Image(systemName: "checkmark") }
-            Text(statusText(resource, projected: projected))
-                .accessibilityIdentifier("work.downloadManagement.status.\(resource.id)")
-        }
-        .appTextStyle(.caption)
-        .foregroundStyle(statusColor(projected.status))
     }
 
     private var availableBatchActions: [DownloadManagementAction] {
@@ -848,15 +803,7 @@ struct MultiDownloadSheet: View {
     }
 
     private func actionImage(_ action: DownloadManagementAction) -> String {
-        switch action {
-        case .download: "arrow.down.to.line"
-        case .pause: "pause.circle"
-        case .resume: "play.circle"
-        case .retry: "arrow.clockwise"
-        case .open: "arrow.up.right.square"
-        case .remove: "trash"
-        default: "ellipsis"
-        }
+        downloadActionImage(action)
     }
     private var selectionControlTitle: LocalizedStringKey {
         let mark = selectionMark(for: scopedResourceIDs)
@@ -1037,30 +984,7 @@ struct MultiDownloadSheet: View {
     }
 
     private func statusText(_ resource: BookResource, projected: DownloadManagementResource) -> String {
-        let status: String
-        switch projected.status {
-        case .notdownloaded: status = String(localized: "work.downloadManagement.status.notDownloaded")
-        case .queued: status = String(localized: "work.downloadManagement.status.queued")
-        case .downloading: status = String(localized: "work.downloadManagement.status.downloading")
-        case .paused: status = String(localized: "work.downloadManagement.status.paused")
-        case .completed: status = String(localized: "work.downloadManagement.status.completed")
-        case .invalidlocal: status = String(localized: "work.downloadManagement.status.invalidLocal")
-        case .failedretryable: status = String(localized: "work.downloadManagement.status.failedRetryable")
-        case .failedterminal: status = String(localized: "work.downloadManagement.status.failedTerminal")
-        case .unavailable: status = String(localized: "work.downloadManagement.status.unavailable")
-        default: status = String(localized: "work.downloadManagement.status.unavailable")
-        }
-        guard (projected.status == .downloading || projected.status == .paused),
-              let progress = downloads.record(for: resource.id)?.progress else { return status }
-        return "\(status) · \(progress.formatted(.percent.precision(.fractionLength(0)).locale(locale)))"
-    }
-
-    private func statusColor(_ status: DownloadManagementStatus) -> Color {
-        switch status {
-        case .completed: theme.textSecondary
-        case .failedretryable, .failedterminal, .invalidlocal: .red
-        default: theme.textSecondary
-        }
+        downloadStatusText(status: projected.status, progress: downloads.record(for: resource.id)?.progress, locale: locale)
     }
 
     private func actionLabel(_ action: DownloadManagementAction, count: Int? = nil) -> String {

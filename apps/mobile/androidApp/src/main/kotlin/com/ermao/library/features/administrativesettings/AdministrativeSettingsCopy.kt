@@ -78,6 +78,8 @@ enum class AdministrativeCopy(
     SmtpDeliveryLimits("投递限制", "Delivery limits"),
     EnableKindle("启用发送到 Kindle", "Enable Send to Kindle"),
     FileFormat("文件格式", "File format"),
+    AttachmentHint("默认 50 MB，最高 50 MB，可根据邮件服务商限制调低。邮件编码会增加传输体积，实际可发送大小仍受发件服务商限制。", "Default and maximum: 50 MB. Lower this limit if required by your email provider. Email encoding increases the transmitted size."),
+    AttachmentInvalid("附件大小上限必须在 1 MB 到 50 MB 之间", "Attachment size must be between 1 MB and 50 MB"),
     MaximumAttachment("最大附件大小（MB）", "Maximum attachment size (MB)"),
     SubjectTemplate("主题模板", "Subject template"),
     SaveKindle("保存 Kindle 设置", "Save Kindle settings"),

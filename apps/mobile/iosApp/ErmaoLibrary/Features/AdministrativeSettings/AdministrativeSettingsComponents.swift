@@ -31,6 +31,7 @@ extension View {
 }
 
 struct AdministrativeSettingsDestination: View {
+    var cover: (String?, String) -> AnyView = { _, _ in AnyView(Image(systemName: "book.closed").foregroundStyle(.secondary)) }
     let route: AdministrativeSettingsRoute
     @ObservedObject var store: AdministrativeSettingsStore
 
@@ -38,7 +39,7 @@ struct AdministrativeSettingsDestination: View {
         Group {
             switch route {
             case .emailAndKindle: EmailKindleSettingsView(store: store)
-            case .kindleQueue: KindleQueueView(store: store)
+            case .kindleQueue: KindleQueueView(cover: cover, store: store)
             case .users: UsersSettingsView(store: store)
             case let .userEditor(userID): UserEditorView(store: store, userID: userID)
             case .opds: OPDSSettingsView(store: store)

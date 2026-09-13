@@ -66,7 +66,7 @@ class SharedAdministrativeSettingsAdapter(
         is AdministrativeSettingsRoute.EmailKindle -> loadEmailKindle(context, route)
         AdministrativeSettingsRoute.KindleQueue -> sharedRepository.listKindleTasks(sharedContext, SharedKindleTaskFilter()).map { page ->
             KindleQueueSnapshot(page.tasks.map { task ->
-                KindleTask(task.id, task.bookTitle, maskEmail(task.recipientEmail), task.status.toLocal(), null, task.errorMessage, task.createdAt)
+                KindleTask(task.id, task.bookTitle, maskEmail(task.recipientEmail), task.status.toLocal(), null, task.errorMessage, task.createdAt, task.bookId)
             })
         }
         AdministrativeSettingsRoute.Users -> sharedRepository.listUsers(sharedContext).map { users ->

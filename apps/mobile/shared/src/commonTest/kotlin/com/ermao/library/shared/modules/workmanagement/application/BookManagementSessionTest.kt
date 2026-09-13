@@ -53,6 +53,53 @@ class BookManagementSessionTest {
     private val failure = WorkManagementResult.Failure(WorkManagementError(WorkManagementErrorKind.Offline, "NETWORK_ERROR"))
     private fun session(repository: WorkManagementRepository, admin: Boolean = true) = BookManagementSession(repository, context, admin) { "operation-key" }
 
+    @Test fun transientPresentationNeverDependsOnActionName() {
+        for (action in ManagementAction.entries) {
+            for (phase in listOf(ManagementPhase.Menu, ManagementPhase.Loading, ManagementPhase.LoadFailed, ManagementPhase.Executing)) {
+                assertEquals(ManagementPresentation.Menu, ManagementSessionState(phase = phase, pendingAction = action).presentation)
+            }
+        }
+        for (phase in ManagementPhase.entries) {
+            val expected = when (phase) {
+                ManagementPhase.Closed -> ManagementPresentation.None
+                ManagementPhase.Editing, ManagementPhase.Recognizing, ManagementPhase.Kindle, ManagementPhase.CoverUpload, ManagementPhase.Result -> ManagementPresentation.Sheet
+                ManagementPhase.DeleteConfirmation -> ManagementPresentation.DeleteConfirmation
+                else -> ManagementPresentation.Menu
+            }
+            assertEquals(expected, ManagementSessionState(phase = phase).presentation)
+        }
+    }
+
+    @Test fun eachTargetPreparesAndRetriesInMenuBeforeOpeningEditor() = runBlocking {
+        for (kind in ManagementObject.entries) {
+            var gate = CompletableDeferred<Unit>()
+            var fail = true
+            val repo = object : UnusedManagementRepository() {
+                override suspend fun loadManagementSnapshot(context: BookManagementContext, target: ManagementTarget): WorkManagementResult<ManagementSnapshot> {
+                    gate.await()
+                    return if (fail) failure else WorkManagementResult.Content(snapshot)
+                }
+            }
+            val session = session(repo)
+            session.open(ManagementTarget(kind, "book", when (kind) {
+                ManagementObject.Book -> "book"
+                ManagementObject.Resource -> "pressed"
+                ManagementObject.Directory -> "directory"
+            }, "Target"))
+            val first = launch(start = CoroutineStart.UNDISPATCHED) { session.select(ManagementAction.Edit) }
+            assertEquals(ManagementPresentation.Menu, session.current.presentation)
+            gate.complete(Unit); first.join()
+            assertEquals(ManagementPhase.LoadFailed, session.current.phase)
+            assertEquals(ManagementPresentation.Menu, session.current.presentation)
+            fail = false; gate = CompletableDeferred()
+            val retry = launch(start = CoroutineStart.UNDISPATCHED) { session.retryPreparation() }
+            assertEquals(ManagementPresentation.Menu, session.current.presentation)
+            gate.complete(Unit); retry.join()
+            assertEquals(ManagementPhase.Editing, session.current.phase)
+            assertEquals(ManagementPresentation.Sheet, session.current.presentation)
+        }
+    }
+
     @Test fun feedbackConsumptionCannotClearANewerOutcome() {
         val session = session(object : UnusedManagementRepository() {})
         session.reportRefreshFailure()
@@ -113,8 +160,8 @@ class BookManagementSessionTest {
         val pending = CompletableDeferred<Unit>()
         var calls = 0
         val session = session(object : UnusedManagementRepository() {
-            override suspend fun loadBookCompleted(context: BookManagementContext, bookId: String): WorkManagementResult<Boolean> {
-                calls++; pending.await(); return WorkManagementResult.Content(true)
+            override suspend fun loadBookMenuContext(context: BookManagementContext, bookId: String): WorkManagementResult<ManagementMenuContext> {
+                calls++; pending.await(); return WorkManagementResult.Content(ManagementMenuContext(completed = true, kindleSendAvailable = true))
             }
         })
         val first = launch(start = CoroutineStart.UNDISPATCHED) { session.prepareBookMenu("book") }
@@ -133,8 +180,8 @@ class BookManagementSessionTest {
     @Test fun pagePreparationResponseCannotRepopulateADisposedSession() = runBlocking {
         val pending = CompletableDeferred<Unit>()
         val session = session(object : UnusedManagementRepository() {
-            override suspend fun loadBookCompleted(context: BookManagementContext, bookId: String): WorkManagementResult<Boolean> {
-                pending.await(); return WorkManagementResult.Content(true)
+            override suspend fun loadBookMenuContext(context: BookManagementContext, bookId: String): WorkManagementResult<ManagementMenuContext> {
+                pending.await(); return WorkManagementResult.Content(ManagementMenuContext(completed = true, kindleSendAvailable = true))
             }
         })
         val job = launch(start = CoroutineStart.UNDISPATCHED) { session.prepareBookMenu("book") }
@@ -166,6 +213,7 @@ class BookManagementSessionTest {
     }
 
     @Test fun menuMatrixIncludesOnlyAuthorizedActions() {
+        assertEquals(listOf(ManagementAction.ReadingStatus, ManagementAction.Kindle), managementActions(ManagementObject.Book, false, true, false).map { it.action })
         assertEquals(listOf(ManagementAction.ReadingStatus), managementActions(ManagementObject.Book, false, false, false).map { it.action })
         assertTrue(managementActions(ManagementObject.Directory, false, true, true).isEmpty())
         assertEquals(listOf(ManagementAction.Kindle), managementActions(ManagementObject.Resource, false, true, false).map { it.action })
@@ -231,7 +279,7 @@ class BookManagementSessionTest {
         assertEquals(false, session.current.change?.coverChanged)
     }
 
-    @Test fun deleteConfirmationIsImmediateAndCancellationRejectsLatePreparation() = runBlocking {
+    @Test fun deletePreparationStaysInMenuAndCancellationRejectsLatePreparation() = runBlocking {
         for (kind in listOf(ManagementObject.Book, ManagementObject.Resource)) {
             val gate = CompletableDeferred<Unit>()
             val repo = object : UnusedManagementRepository() {
@@ -243,7 +291,7 @@ class BookManagementSessionTest {
             val session = session(repo)
             session.open(if (kind == ManagementObject.Book) target else ManagementTarget(kind, "book", "pressed", "pressed"))
             val job = launch(start = CoroutineStart.UNDISPATCHED) { session.select(ManagementAction.Delete) }
-            assertEquals(ManagementPhase.DeleteConfirmation, session.current.phase)
+            assertEquals(ManagementPhase.Loading, session.current.phase)
             assertEquals(ManagementOperation.Loading, session.current.operation)
             session.confirmDelete() // No mutation while preparation is incomplete.
             session.close()
@@ -253,7 +301,7 @@ class BookManagementSessionTest {
         }
     }
 
-    @Test fun deletePreparationFailureRetriesWithinConfirmation() = runBlocking {
+    @Test fun deletePreparationFailureRetriesWithinMenu() = runBlocking {
         var loads = 0
         val repo = object : UnusedManagementRepository() {
             override suspend fun loadManagementSnapshot(context: BookManagementContext, target: ManagementTarget) =
@@ -261,7 +309,7 @@ class BookManagementSessionTest {
         }
         val session = session(repo)
         session.open(target); session.select(ManagementAction.Delete)
-        assertEquals(ManagementPhase.DeleteConfirmation, session.current.phase)
+        assertEquals(ManagementPhase.LoadFailed, session.current.phase)
         assertEquals(null, session.current.snapshot)
         session.confirmDelete()
         session.retryPreparation()
@@ -362,6 +410,29 @@ class BookManagementSessionTest {
         assertEquals(listOf("asset-pressed"), calls)
         pending.complete(Unit); job.join()
         assertEquals("alreadyQueued", session.current.notice)
+    }
+
+    @Test fun bookKindleEntryDefaultsToFirstVolumeAndRetainsSelectionAfterFailure() = runBlocking {
+        val calls = mutableListOf<String>()
+        val session = session(object : UnusedManagementRepository() {
+            override suspend fun loadManagementSnapshot(context: BookManagementContext, target: ManagementTarget) = WorkManagementResult.Content(snapshot)
+            override suspend fun loadKindleSettings(context: BookManagementContext) = WorkManagementResult.Content(KindleSettings("reader@kindle.com", true, "sender@example.com"))
+            override suspend fun sendToKindle(context: BookManagementContext, bookId: String, assetId: String): WorkManagementResult<KindleSendOutcome> {
+                calls += assetId
+                return WorkManagementResult.Failure(WorkManagementError(WorkManagementErrorKind.Validation, "KINDLE_ATTACHMENT_TOO_LARGE"))
+            }
+        }, false)
+        session.open(target, ManagementMenuContext(kindleSendAvailable = true))
+        session.select(ManagementAction.Kindle)
+        assertEquals(ManagementPhase.Kindle, session.current.phase)
+        assertEquals("asset-first", session.current.selectedAssetId)
+        session.setAsset("asset-pressed")
+        session.sendKindle()
+        assertEquals(listOf("asset-pressed"), calls)
+        assertEquals("asset-pressed", session.current.selectedAssetId)
+        assertEquals("KINDLE_ATTACHMENT_TOO_LARGE", session.current.error?.code)
+        session.setAsset("asset-first")
+        assertEquals(null, session.current.error)
     }
     @Test fun directoryKeepsItsIdentityEvenWhenItsCoverComesFromARepresentativeResource() = runBlocking {
         val calls = mutableListOf<String>()
@@ -514,7 +585,7 @@ class BookManagementSessionTest {
 }
 
 private open class UnusedManagementRepository : WorkManagementRepository {
-    override suspend fun loadBookCompleted(context: BookManagementContext, bookId: String): WorkManagementResult<Boolean> = error("Unexpected call: loadBookCompleted")
+    override suspend fun loadBookMenuContext(context: BookManagementContext, bookId: String): WorkManagementResult<ManagementMenuContext> = error("Unexpected call: loadBookMenuContext")
     override suspend fun saveBookFields(context: BookManagementContext, bookId: String, draft: BookMetadataDraft): WorkManagementResult<Unit> = error("Unexpected call: saveBookFields")
     override suspend fun replaceBookTags(context: BookManagementContext, bookId: String, current: List<String>, next: List<String>): WorkManagementResult<Unit> = error("Unexpected call: replaceBookTags")
     override suspend fun loadManagementSnapshot(context: BookManagementContext, target: ManagementTarget): WorkManagementResult<ManagementSnapshot> = error("Unexpected call: loadManagementSnapshot")

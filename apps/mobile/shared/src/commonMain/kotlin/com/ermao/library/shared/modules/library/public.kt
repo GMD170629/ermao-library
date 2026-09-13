@@ -116,3 +116,6 @@ fun resolveBookDetailIdentitySource(isBookRoot: Boolean, hasSelectedResource: Bo
 
 fun hasVersionedCover(apiPath: String): Boolean =
     com.ermao.library.shared.modules.library.domain.hasVersionedCover(apiPath)
+
+fun bookCoverRequestPath(bookId: String?): String? =
+    com.ermao.library.shared.modules.library.infrastructure.bookCoverRequestPath(bookId)

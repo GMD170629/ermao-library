@@ -20,13 +20,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.List
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -87,6 +85,7 @@ import com.ermao.library.shared.modules.workmanagement.ManagementChange
 import com.ermao.library.shared.modules.workmanagement.ManagementField
 import com.ermao.library.shared.modules.workmanagement.ManagementMenuContext
 import com.ermao.library.shared.modules.workmanagement.ManagementObject
+import com.ermao.library.shared.modules.workmanagement.ManagementPresentation
 import com.ermao.library.shared.modules.workmanagement.ManagementPhase
 import com.ermao.library.shared.modules.workmanagement.ManagementSessionState
 import com.ermao.library.shared.modules.workmanagement.ManagementTarget
@@ -154,12 +153,13 @@ fun ManagementAnchor(
     val label = stringResource(R.string.management_open_actions, target.title)
     val state = controller?.session?.state?.collectAsState()?.value
     val cachedStates = controller?.session?.bookMenuStates?.collectAsState()?.value
-    val resolvedContext = menuContext.copy(completed = menuContext.completed ?: cachedStates?.get(target.bookId))
+    val resolvedContext = menuContext.copy(completed = menuContext.completed ?: cachedStates?.get(target.bookId)?.completed,
+        kindleSendAvailable = menuContext.kindleSendAvailable || (target.kind == ManagementObject.Book && cachedStates?.get(target.bookId)?.kindleSendAvailable == true))
     val latestContext by rememberUpdatedState(resolvedContext)
     val hasActions = com.ermao.library.shared.modules.workmanagement.managementMenuItems(target.kind, controller?.session?.canManageActions == true, menuContext.kindleSendAvailable, menuContext.hasRepresentativeResource).isNotEmpty() || menuExtras != null
     val revision = LocalRevision.current
     LaunchedEffect(controller, target.bookId, menuContext.completed, revision) {
-        if (target.kind == ManagementObject.Book && menuContext.completed == null) controller?.session?.prepareBookMenu(target.bookId)
+        if (target.kind == ManagementObject.Book) controller?.session?.prepareBookMenu(target.bookId)
     }
     val open = { pressPosition = null; controller?.open(anchor, target, resolvedContext); Unit }
     val input = if (controller == null || !hasActions) Modifier else Modifier
@@ -187,18 +187,18 @@ fun ManagementAnchor(
     val menu: @Composable () -> Unit = {
         if (controller != null && controller.anchor === anchor && state != null) {
             WarmPagePopup(
-                expanded = (state.phase == ManagementPhase.Menu || state.isInlineAction) && (controller.session.menuItems.isNotEmpty() || menuExtras != null),
-                onDismiss = { if (controller.session.current.operation == null) controller.session.close() },
+                expanded = (state.presentation == ManagementPresentation.Menu) && (controller.session.menuItems.isNotEmpty() || menuExtras != null),
+                onDismiss = { if (controller.session.current.operation == null || controller.session.current.phase == ManagementPhase.Loading) controller.session.close() },
                 modifier = Modifier.width(menuWidth).testTag("management-menu"),
                 title = target.title,
             ) {
-                if (!state.isInlineAction) menuExtras?.invoke(controller.session::close)
-                if (state.isInlineAction && state.error != null) {
+                if (state.phase == ManagementPhase.Menu) menuExtras?.invoke(controller.session::close)
+                if ((state.presentation == ManagementPresentation.Menu && state.phase != ManagementPhase.Menu) && state.error != null) {
                     Text(stringResource(stageError(state)), color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(WarmPageThemeValues.spacing.two))
                 }
                 controller.session.menuItems.forEach { item ->
-                    val active = state.isInlineAction && item.action == state.pendingAction
+                    val active = (state.presentation == ManagementPresentation.Menu && state.phase != ManagementPhase.Menu) && item.action == state.pendingAction
                     val retry = active && state.error != null && state.operation == null
                     val label = actionLabel(item.action, state.copy(menuContext = resolvedContext))
                     WarmPageMenuItem(
@@ -333,8 +333,8 @@ private fun ManagementPresentation(controller: BookManagementController, state: 
             }
         }
     }
-    val close = { if (state.operation == null || state.phase == ManagementPhase.Loading || (state.phase == ManagementPhase.DeleteConfirmation && state.snapshot == null)) { if (session.isDirty) discard = true else session.close() } }
-    if (state.phase == ManagementPhase.DeleteConfirmation) {
+    val close = { if (state.operation == null || state.phase == ManagementPhase.Loading) { if (session.isDirty) discard = true else session.close() } }
+    if (state.presentation == ManagementPresentation.DeleteConfirmation) {
         val target = state.target ?: return
         val resource = state.snapshot?.resources?.find { it.id == target.id }
         AlertDialog(modifier = Modifier.testTag("management-delete-confirmation"), onDismissRequest = { close() }, title = { Text(actionLabel(ManagementAction.Delete, state)) }, text = {
@@ -344,26 +344,25 @@ private fun ManagementPresentation(controller: BookManagementController, state: 
                     else androidx.compose.ui.res.pluralStringResource(R.plurals.management_delete_resource_warning,
                         resource.assets.size, target.title, resource.assets.size))
                 if (state.operation != null) CircularProgressIndicator()
-                if (state.snapshot == null && state.error != null) {
-                    TextButton(onClick = { controller.perform { retryPreparation() } }, enabled = state.operation == null) {
-                        Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                        Text(stringResource(R.string.retry_action))
-                    }
-                }
                 if (state.error != null) Text(stringResource(R.string.management_operation_failed), color = MaterialTheme.colorScheme.error)
             }
         }, confirmButton = { OutlinedButton(modifier = Modifier.testTag("management-delete-submit"), onClick = { controller.perform { confirmDelete() } }, enabled = state.snapshot != null && state.operation == null) {
             Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
             Spacer(Modifier.size(ButtonDefaults.IconSpacing))
             Text(stringResource(R.string.management_delete), color = MaterialTheme.colorScheme.error)
-        } }, dismissButton = { OutlinedButton(onClick = { close() }, enabled = state.operation == null || state.snapshot == null) {
+        } }, dismissButton = { OutlinedButton(onClick = { close() }, enabled = state.operation == null) {
             Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
             Spacer(Modifier.size(ButtonDefaults.IconSpacing))
             Text(stringResource(R.string.cancel_action)) } })
     }
-    if (!state.isInlineAction && state.phase in listOf(ManagementPhase.Loading, ManagementPhase.LoadFailed, ManagementPhase.Executing, ManagementPhase.Result, ManagementPhase.Editing, ManagementPhase.Recognizing, ManagementPhase.Kindle, ManagementPhase.CoverUpload)) {
-        ModalBottomSheet(onDismissRequest = { close() }) {
+    if (state.presentation == ManagementPresentation.Sheet) {
+        ModalBottomSheet(onDismissRequest = { close() }, modifier = Modifier.testTag("management-modal"),
+            sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = state.phase == ManagementPhase.Kindle),
+            containerColor = if (state.phase == ManagementPhase.Kindle) WarmPageThemeValues.colors.canvas else MaterialTheme.colorScheme.surfaceContainerLow) {
+            if (state.phase == ManagementPhase.Kindle) {
+                KindleSendSheetContent(controller, state, onClose = { close() }, onSettings = onSettings, onQueue = onQueue,
+                    errorText = state.error?.let { stringResource(stageError(state)) })
+            } else {
             Column(Modifier.fillMaxWidth()) {
                 if (state.phase == ManagementPhase.Editing) {
                     CenterAlignedTopAppBar(
@@ -394,10 +393,6 @@ private fun ManagementPresentation(controller: BookManagementController, state: 
                 if (state.operation != null) CircularProgressIndicator()
                 if (state.error != null) Text(stringResource(stageError(state)), color = MaterialTheme.colorScheme.error)
                 when (state.phase) {
-                    ManagementPhase.LoadFailed -> OutlinedButton(onClick = { controller.perform { retryPreparation() } }) {
-                        Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                        Text(stringResource(R.string.retry_action)) }
                     ManagementPhase.Result -> {
                         state.metadataOutcome?.let { outcome ->
                             Text(stringResource(R.string.management_applied_fields))
@@ -414,13 +409,6 @@ private fun ManagementPresentation(controller: BookManagementController, state: 
                                 else -> R.string.management_result_cover_not_selected
                             }))
                         }
-                    }
-                    ManagementPhase.Executing -> {
-                        state.pendingAction?.let { Text(actionLabel(it, state)) }
-                        if (state.error != null) OutlinedButton(onClick = { controller.perform { retryAction() } }) {
-                            Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                            Text(stringResource(R.string.retry_action)) }
                     }
                     ManagementPhase.Editing -> {
                         state.draft.forEach { field -> OutlinedTextField(field.value, { session.setField(field.field, it) },
@@ -457,29 +445,6 @@ private fun ManagementPresentation(controller: BookManagementController, state: 
                             Button(onClick = { controller.perform { applyRecognition() } }, enabled = state.operation == null && (state.target?.kind == ManagementObject.Directory || state.selectedFields.isNotEmpty())) { Text(stringResource(R.string.management_apply)) }
                         }
                     }
-                    ManagementPhase.Kindle -> {
-                        Text(state.kindleSettings?.recipientEmail.orEmpty())
-                        if (state.kindleSettings?.ready != true) {
-                            Text(stringResource(R.string.management_kindle_not_ready))
-                            OutlinedButton(onClick = { controller.perform { loadKindle() } }) {
-                                Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                                Text(stringResource(R.string.retry_action)) }
-                        }
-                        session.kindleOptions().forEach { resource -> resource.assets.filter { it.role == "PRIMARY" }.forEach { asset ->
-                            Row { Checkbox(state.selectedAssetId == asset.id, { session.setAsset(asset.id) }, enabled = state.operation == null)
-                                Text("${resource.title} · ${resource.format} · ${asset.size}") }
-                        } }
-                        OutlinedButton(onClick = { session.close(); onSettings() }) {
-                            Icon(Icons.Outlined.Settings, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                            Text(stringResource(R.string.management_kindle_settings)) }
-                        OutlinedButton(onClick = { session.close(); onQueue() }) {
-                            Icon(Icons.AutoMirrored.Outlined.List, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                            Text(stringResource(R.string.management_kindle_queue)) }
-                        Button(onClick = { controller.perform { sendKindle() } }, enabled = state.operation == null && state.kindleSettings?.ready == true && state.selectedAssetId.isNotBlank()) { Text(stringResource(R.string.management_send_kindle)) }
-                    }
                     else -> Unit
                 }
                 if (selectionFailed) Text(stringResource(R.string.management_cover_read_failed), color = MaterialTheme.colorScheme.error)
@@ -489,6 +454,7 @@ private fun ManagementPresentation(controller: BookManagementController, state: 
                     Text(stringResource(R.string.cancel_action)) }
             }
         }
+    }
     }
     }
     if (discard) AlertDialog(onDismissRequest = { discard = false }, title = { Text(stringResource(R.string.management_discard_title)) },
@@ -502,11 +468,6 @@ private fun ManagementPresentation(controller: BookManagementController, state: 
             Text(stringResource(R.string.cancel_action)) } })
 
 }
-
-private val ManagementSessionState.isInlineAction: Boolean
-    get() = pendingAction in listOf(ManagementAction.Regenerate, ManagementAction.ReadingStatus, ManagementAction.Rescan) && phase in listOf(
-        ManagementPhase.Loading, ManagementPhase.LoadFailed, ManagementPhase.Executing,
-    )
 
 @Composable
 private fun actionLabel(action: ManagementAction, state: ManagementSessionState): String = stringResource(when (action) {
@@ -543,7 +504,7 @@ private fun fieldLabel(field: ManagementField): String = stringResource(when (fi
     ManagementField.Cover -> R.string.management_cover
 })
 
-private fun stageError(state: ManagementSessionState): Int = when (state.saveStage?.name) {
+private fun stageError(state: ManagementSessionState): Int = if (state.error?.code == "KINDLE_ATTACHMENT_TOO_LARGE") R.string.management_kindle_too_large else when (state.saveStage?.name) {
     "Tags" -> R.string.management_tags_failed
     "Refresh" -> R.string.management_refresh_failed
     else -> R.string.management_operation_failed

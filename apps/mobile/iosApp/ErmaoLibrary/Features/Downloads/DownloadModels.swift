@@ -72,6 +72,12 @@ struct ManagedDownloadRecord: Identifiable, Codable, Equatable, Sendable {
     var lastOpenedAt: Date?
     var sharedTaskJSON: String? = nil
 
+    var coverPath: String? {
+        guard let sharedTaskJSON, let task = try? DownloadCatalogCodec.shared.decode(serialized: sharedTaskJSON),
+              task.descriptor.identity.bookId == bookID else { return nil }
+        return task.descriptor.coverApiPath
+    }
+
     var progress: Double? {
         guard let expectedBytes, expectedBytes > 0 else { return nil }
         return min(1, max(0, Double(receivedBytes) / Double(expectedBytes)))
@@ -134,15 +140,15 @@ struct ManagedDownloadBookGroup: Identifiable, Equatable, Sendable {
 }
 
 enum ManagedDownloadGrouping {
-    static func completed(records: [ManagedDownloadRecord], query: String) -> [ManagedDownloadBookGroup] {
+    /// Catalog visibility is independent of local reader admission.
+    static func books(records: [ManagedDownloadRecord], query: String) -> [ManagedDownloadBookGroup] {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let completed = records.filter { record in
-            guard record.isVerifiedOfflineCopy else { return false }
+        let matching = records.filter { record in
             guard !normalizedQuery.isEmpty else { return true }
             return [record.bookTitle, record.bookAuthor ?? "", record.resourceTitle, record.format]
                 .contains { $0.localizedCaseInsensitiveContains(normalizedQuery) }
         }
-        return Dictionary(grouping: completed, by: \.bookID).compactMap { bookID, bookRecords in
+        return Dictionary(grouping: matching, by: \.bookID).compactMap { bookID, bookRecords in
             guard let first = bookRecords.first else { return nil }
             let resources = Dictionary(grouping: bookRecords, by: \.resourceID).map { resourceID, resourceRecords in
                 ManagedDownloadResourceGroup(
@@ -315,9 +321,9 @@ enum DownloadManagementAdapter {
     }
 
     /// Creates a display-only resource for a manifest entry absent from the
-    /// current server page. It deliberately remains unavailable so the shared
-    /// policy can expose only actions justified by local facts (Open/Remove).
-    static func catalogResource(_ record: ManagedDownloadRecord) -> BookResource {
+    /// current server page. Unknown server entries default to unavailable;
+    /// the download center may retry catalog records through the authorized transfer owner.
+    static func catalogResource(_ record: ManagedDownloadRecord, available: Bool = false) -> BookResource {
         let byteCount = record.expectedBytes ?? record.receivedBytes
         return BookResource(
             id: record.resourceID,
@@ -331,7 +337,7 @@ enum DownloadManagementAdapter {
                 : nil,
             sizeBytes: record.expectedBytes,
             progress: record.progress,
-            isReadable: false,
+            isReadable: available,
             isSelected: false,
             sortOrder: Int.max
         )

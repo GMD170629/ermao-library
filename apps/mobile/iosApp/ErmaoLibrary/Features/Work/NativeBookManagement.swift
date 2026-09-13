@@ -26,7 +26,7 @@ struct NativeManagementChange: Equatable {
 
 enum NativeManagementPresentation: Equatable {
     case none
-    case sheet(actionName: String)
+    case sheet
     case deleteConfirmation
 
     var presentsSheet: Bool {
@@ -89,7 +89,10 @@ final class NativeBookManagementStore: ObservableObject {
     let canManage: Bool
     @Published private(set) var state: ErmaoShared.ManagementSessionState
     @Published private(set) var running = false
-    @Published private(set) var presentation = NativeManagementPresentation.none
+    @Published private var presentationDeferred = false
+    var presentation: NativeManagementPresentation {
+        presentationDeferred ? .none : nativeManagementPresentation(for: state.presentation)
+    }
     @Published private(set) var menuExecution: NativeManagementMenuExecution?
     @Published private(set) var change: NativeManagementChange?
     @Published var transportFailed = false
@@ -123,12 +126,12 @@ final class NativeBookManagementStore: ObservableObject {
     func completed(_ target: NativeManagementTarget) -> Bool? {
         target.completed ?? session.bookCompleted(bookId: target.bookID)?.boolValue
     }
+    func kindleAvailable(_ target: NativeManagementTarget) -> Bool {
+        target.kindleEligible || (target.kind == .book && session.bookKindleAvailable(bookId: target.bookID))
+    }
     func menuContext(_ target: NativeManagementTarget) -> ErmaoShared.ManagementMenuContext {
         ErmaoShared.ManagementMenuContext(completed: completed(target).map { KotlinBoolean(bool: $0) },
-            kindleSendAvailable: target.kindleEligible, hasRepresentativeResource: target.hasRepresentative)
-    }
-    var isPreparingPresentedSheet: Bool {
-        presentation.presentsSheet && ["Menu", "Loading"].contains(state.phase.name)
+            kindleSendAvailable: kindleAvailable(target), hasRepresentativeResource: target.hasRepresentative)
     }
     func menuItemStatus(_ target: NativeManagementTarget, _ action: ErmaoShared.ManagementAction) -> NativeManagementMenuItemStatus {
         nativeManagementMenuItemStatus(execution: menuExecution, target: target, action: action)
@@ -137,7 +140,7 @@ final class NativeBookManagementStore: ObservableObject {
         try await contentClient.fetchTagSuggestions(context: context, query: query, limit: 20)
     }
     func prepareMenu(_ target: NativeManagementTarget) async {
-        guard target.kind == .book, target.completed == nil else { return }
+        guard target.kind == .book else { return }
         guard !preparedMenuBookIDs.contains(target.bookID) else { return }
         guard preparingMenuBookIDs.insert(target.bookID).inserted else { return }
         defer { preparingMenuBookIDs.remove(target.bookID) }
@@ -152,50 +155,65 @@ final class NativeBookManagementStore: ObservableObject {
     func invoke(
         _ target: NativeManagementTarget,
         _ action: ErmaoShared.ManagementAction,
+        deferPresentation: Bool = false,
         completion: ((NativeManagementInvocationOutcome) -> Void)? = nil
     ) {
         guard !running else { return }
-        let requestedPresentation = nativeManagementPresentation(for: action)
+        presentationDeferred = deferPresentation
         let actionKey = NativeManagementActionKey(target: target, action: action)
-        presentation = requestedPresentation
-        menuExecution = requestedPresentation != .none
-            ? nil
-            : NativeManagementMenuExecution(key: actionKey, status: .running)
+        menuExecution = NativeManagementMenuExecution(key: actionKey, status: .running)
         session.open(target: target.shared, menuContext: menuContext(target))
         run({ [session] in try await session.select(action: action) }) { [weak self] outcome in
             guard let self else { return }
-            if requestedPresentation == .none, menuExecution?.key == actionKey {
-                menuExecution = outcome == .succeeded
+            if menuExecution?.key == actionKey {
+                menuExecution = outcome == .succeeded || state.presentation != .menu
                     ? nil
                     : NativeManagementMenuExecution(key: actionKey, status: .failed)
             }
             completion?(outcome)
         }
     }
-    func retry() {
-        run { [session] in try await session.retryPreparation() }
-    }
-    func retryImmediateAction(completion: ((NativeManagementInvocationOutcome) -> Void)? = nil) {
+    func retryMenuAction(completion: ((NativeManagementInvocationOutcome) -> Void)? = nil) {
         guard !running, let failedExecution = menuExecution, failedExecution.status == .failed else { return }
         menuExecution = NativeManagementMenuExecution(key: failedExecution.key, status: .running)
-        run({ [session] in try await session.retryAction() }) { [weak self] outcome in
+        run({ [session] in
+            if session.current.phase == .loadFailed { try await session.retryPreparation() }
+            else { try await session.retryAction() }
+        }) { [weak self] outcome in
             guard let self else { return }
             if menuExecution?.key == failedExecution.key {
-                menuExecution = outcome == .succeeded
+                menuExecution = outcome == .succeeded || state.presentation != .menu
                     ? nil
                     : NativeManagementMenuExecution(key: failedExecution.key, status: .failed)
             }
             completion?(outcome)
         }
     }
+    func invokeFromPopover(_ target: NativeManagementTarget, _ action: ErmaoShared.ManagementAction, dismiss: @escaping () -> Void) {
+        let completion: (NativeManagementInvocationOutcome) -> Void = { [weak self] outcome in
+            guard let self else { return }
+            if outcome == .succeeded || state.presentation != .menu { dismiss() }
+        }
+        if menuItemStatus(target, action) == .failed {
+            presentationDeferred = true
+            retryMenuAction(completion: completion)
+        } else {
+            invoke(target, action, deferPresentation: true, completion: completion)
+        }
+    }
     func edit(_ operation: () -> Void) { operation(); state = session.current }
+    // Only coordinates native popover dismissal; shared state owns the destination.
+    func finishMenuPresentation() {
+        if running { close() }
+        else { presentationDeferred = false }
+    }
     func close() {
         task?.cancel()
         task = nil
         session.close()
         state = session.current
         running = false
-        presentation = .none
+        presentationDeferred = false
         menuExecution = nil
     }
     func run(
@@ -210,7 +228,6 @@ final class NativeBookManagementStore: ObservableObject {
             defer {
                 if !Task.isCancelled {
                     state = session.current
-                    if state.phase.name == "Closed" { presentation = .none }
                     running = false
                     completion?(transportFailed || state.error != nil ? .failed : .succeeded)
                 }
@@ -258,72 +275,43 @@ final class NativeBookManagementStore: ObservableObject {
 }
 private enum NativeManagementFileError: Error { case invalid }
 
-struct NativeManagementMenu: View {
-    @Environment(\.nativeManagement) private var store
-    let target: NativeManagementTarget
-    var body: some View {
-        if let store {
-            NativeManagementMenuItems(store: store, target: target, surface: .system) { action in
-                if store.menuItemStatus(target, action) == .failed {
-                    store.retryImmediateAction()
-                } else {
-                    store.invoke(target, action)
-                }
-            }
-        }
-    }
-}
-
-private enum NativeManagementMenuSurface {
-    case system
-    case popover
-}
-
 private struct NativeManagementMenuItems: View {
     @ObservedObject var store: NativeBookManagementStore
     let target: NativeManagementTarget
-    let surface: NativeManagementMenuSurface
     let onSelect: (ErmaoShared.ManagementAction) -> Void
 
     var body: some View {
         let completed = store.completed(target)
         ForEach(ErmaoShared.PublicKt.managementMenuItems(kind: target.kind, canManage: store.canManage,
-            kindleSendAvailable: target.kindleEligible, hasRepresentativeResource: target.hasRepresentative), id: \.action.name) { item in
+            kindleSendAvailable: store.kindleAvailable(target), hasRepresentativeResource: target.hasRepresentative), id: \.action.name) { item in
             let status = store.menuItemStatus(target, item.action)
             Button(role: item.action.name == "Delete" ? .destructive : nil) { onSelect(item.action) } label: {
-                NativeManagementMenuRowLabel(surface: surface) {
+                NativeManagementMenuRowLabel() {
                     HStack(spacing: .space2) {
                         if item.action.name == "ReadingStatus" && completed == nil {
                             Text("nativeManagement.readingStatus")
                         } else {
                             managementText(managementActionKey(item.action.name, kind: target.kind, completed: completed == true))
                         }
-                        if surface == .popover {
-                            Spacer(minLength: .space2)
-                            NativeManagementMenuStatusView(status: status)
-                        }
+                        Spacer(minLength: .space2)
+                        NativeManagementMenuStatusView(status: status)
                     }
                 }
             }
             .disabled(!item.enabled || store.running || (item.action.name == "ReadingStatus" && completed == nil))
-            .modifier(NativeManagementMenuButtonStyle(surface: surface))
+            .buttonStyle(.plain)
         }
     }
 }
 
 private struct NativeManagementMenuRowLabel<Content: View>: View {
-    let surface: NativeManagementMenuSurface
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        if surface == .popover {
-            content()
-                .padding(.horizontal, .space3)
-                .frame(maxWidth: .infinity, minHeight: .iosMinimumTouchTarget, alignment: .leading)
-                .contentShape(Rectangle())
-        } else {
-            content()
-        }
+        content()
+            .padding(.horizontal, .space3)
+            .frame(maxWidth: .infinity, minHeight: .iosMinimumTouchTarget, alignment: .leading)
+            .contentShape(Rectangle())
     }
 }
 
@@ -350,18 +338,6 @@ private struct NativeManagementMenuStatusView: View {
     }
 }
 
-private struct NativeManagementMenuButtonStyle: ViewModifier {
-    let surface: NativeManagementMenuSurface
-
-    @ViewBuilder func body(content: Content) -> some View {
-        if surface == .popover {
-            content.buttonStyle(.plain)
-        } else {
-            content
-        }
-    }
-}
-
 struct NativeManagementSupplementalAction: Identifiable {
     let id: String
     let title: LocalizedStringKey
@@ -373,9 +349,25 @@ struct NativeManagementSupplementalAction: Identifiable {
 private struct ManagementCoverMenu: ViewModifier {
     @Environment(\.nativeManagement) private var store
     @Environment(\.managementRevision) private var revision
+    @State private var isPresented = false
     let target: NativeManagementTarget
     func body(content: Content) -> some View {
-        content.contextMenu { NativeManagementMenu(target: target) }
+        content
+            .onLongPressGesture { isPresented = true }
+            .accessibilityAction(named: Text("common.more")) { isPresented = true }
+            .popover(isPresented: $isPresented) {
+                if let store {
+                    VStack(spacing: 0) {
+                        NativeManagementMenuItems(store: store, target: target) { action in
+                            store.invokeFromPopover(target, action) { isPresented = false }
+                        }
+                    }
+                    .padding(.vertical, .space1)
+                    .frame(width: 240)
+                    .presentationCompactAdaptation(.popover)
+                    .onDisappear { store.finishMenuPresentation() }
+                }
+            }
             .task(id: "\(target.bookID)|\(revision)") { await store?.prepareMenu(target) }
     }
 }
@@ -389,7 +381,6 @@ extension View {
 struct NativeManagementMore<Label: View>: View {
     @Environment(\.nativeManagement) private var store
     @State private var isPresented = false
-    @State private var pendingSheetAction: ErmaoShared.ManagementAction?
     @State private var pendingSupplementalActionID: String?
     let target: NativeManagementTarget
     let supplementalActions: [NativeManagementSupplementalAction]
@@ -413,7 +404,7 @@ struct NativeManagementMore<Label: View>: View {
             .popover(isPresented: $isPresented, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
                 VStack(spacing: 0) {
                     if let store {
-                        NativeManagementMenuItems(store: store, target: target, surface: .popover) { action in
+                        NativeManagementMenuItems(store: store, target: target) { action in
                             select(action, store: store)
                         }
                     }
@@ -445,27 +436,11 @@ struct NativeManagementMore<Label: View>: View {
     }
 
     private func select(_ action: ErmaoShared.ManagementAction, store: NativeBookManagementStore) {
-        if nativeManagementPresentation(for: action) != .none {
-            pendingSheetAction = action
-            isPresented = false
-            return
-        }
-        let completion: (NativeManagementInvocationOutcome) -> Void = { outcome in
-            if outcome == .succeeded { isPresented = false }
-        }
-        if store.menuItemStatus(target, action) == .failed {
-            store.retryImmediateAction(completion: completion)
-        } else {
-            store.invoke(target, action, completion: completion)
-        }
+        store.invokeFromPopover(target, action) { isPresented = false }
     }
 
     private func dispatchPendingAction(store: NativeBookManagementStore?) {
-        if let action = pendingSheetAction, let store {
-            pendingSheetAction = nil
-            store.invoke(target, action)
-            return
-        }
+        store?.finishMenuPresentation()
         guard let actionID = pendingSupplementalActionID else { return }
         pendingSupplementalActionID = nil
         supplementalActions.first(where: { $0.id == actionID })?.perform()
@@ -506,30 +481,13 @@ struct NativeBookManagementHost<Content: View>: View {
         content.environment(\.nativeManagement, store)
             .environment(\.managementRevision, store.change?.revision ?? 0)
             .environment(\.managementChange, store.change)
-            .overlay(alignment: .bottom) {
-                if store.state.phase.name == "Executing", store.state.error != nil {
-                    HStack {
-                        managementText("nativeManagement.failure.General").foregroundStyle(.red)
-                        Button("common.retry") { store.retryImmediateAction() }
-                        Button("common.close") { store.close() }
-                    }
-                    .padding(.space2)
-                    .padding(.bottom, bottomObstruction)
-                    .background(.regularMaterial)
-                    .accessibilityElement(children: .contain)
-                }
-            }
             .alert("nativeManagement.action.Delete", isPresented: $deleteAlertPresented) {
-                if store.state.snapshot == nil && (store.state.error != nil || store.transportFailed) {
-                    Button("common.retry") { store.retry() }.disabled(store.running)
-                } else {
-                    Button("nativeManagement.action.Delete", role: .destructive) {
-                        store.run { try await store.session.confirmDelete() }
-                    }
-                    .disabled(store.running || store.state.snapshot == nil)
+                Button("nativeManagement.action.Delete", role: .destructive) {
+                    store.run { try await store.session.confirmDelete() }
                 }
+                .disabled(store.running)
                 Button("common.cancel", role: .cancel) { store.close() }
-                    .disabled(store.running && store.state.snapshot != nil)
+                    .disabled(store.running)
             } message: {
                 Text(store.state.target?.title ?? "")
                 Text(LocalizedStringKey(store.state.target?.kind == .book ? "nativeManagement.deleteBookWarning" : "nativeManagement.deleteResourceWarning"))
@@ -930,7 +888,7 @@ private struct NativeManagementSheet: View {
             Form {
                 if store.running { ProgressView() }
                 if store.transportFailed || state.error != nil {
-                    managementText("nativeManagement.failure.\(state.saveStage?.name ?? "General")").foregroundStyle(.red)
+                    managementText(state.error?.code == "KINDLE_ATTACHMENT_TOO_LARGE" ? "management.kindle_too_large" : "nativeManagement.failure.\(state.saveStage?.name ?? "General")").foregroundStyle(.red)
                 }
                 switch state.phase.name {
                 case "Result":
@@ -943,17 +901,13 @@ private struct NativeManagementSheet: View {
                         }
                         managementText("nativeManagement.coverResult.\(outcome.coverStatus)")
                     }
-                case "Executing":
-                    Button("common.retry") { store.run { try await session.retryAction() } }.disabled(store.running)
                 case "Editing": editor
                 case "Recognizing": recognition
                 case "Kindle": kindle
                 case "CoverUpload":
                     Text("management.coverUploadHint")
                     Button("management.chooseCoverFile") { pickerInteraction = session.interactionId; importing = true }.disabled(store.running)
-                case "Loading", "Menu": EmptyView()
-                default:
-                    Button("common.retry") { store.retry() }.disabled(store.running)
+                default: EmptyView()
                 }
             }
             .navigationTitle(state.target?.title ?? "")
@@ -963,7 +917,7 @@ private struct NativeManagementSheet: View {
                     Button("common.cancel") {
                         if session.isDirty { discard = true } else { store.close() }
                     }
-                    .disabled(store.running && !store.isPreparingPresentedSheet)
+                    .disabled(store.running)
                 }
                 if state.phase.name == "Editing" {
                     ToolbarItem(placement: .confirmationAction) {
@@ -972,7 +926,7 @@ private struct NativeManagementSheet: View {
                     }
                 }
             }
-            .interactiveDismissDisabled((store.running && !store.isPreparingPresentedSheet) || session.isDirty)
+            .interactiveDismissDisabled((store.running) || session.isDirty)
             .fileImporter(isPresented: $importing, allowedContentTypes: [.jpeg, .png, .webP]) { result in
                 guard pickerInteraction == session.interactionId, session.current.phase.name == "CoverUpload" else { return }
                 switch result { case .success(let url): store.importCover(url, expectedInteractionId: pickerInteraction); case .failure: store.transportFailed = true }
@@ -1050,17 +1004,27 @@ private struct NativeManagementSheet: View {
 
     private var kindle: some View {
         Group {
-            Text(state.kindleSettings?.recipientEmail ?? "")
-            if state.kindleSettings?.ready != true {
+            Text("management.kindle_hint").foregroundStyle(.secondary)
+            Section("management.kindle_recipient") {
+                if let email = state.kindleSettings?.recipientEmail, !email.isEmpty { Text(email) }
+                else { Text("management.kindle_unconfigured") }
+            }
+            if !store.running && state.kindleSettings?.ready != true {
                 Text("management.kindleNotReady")
                 Button("common.retry") { store.run { try await session.loadKindle() } }.disabled(store.running)
             }
+            Section("management.kindle_choose") {
+            if session.kindleOptions().isEmpty { Text("management.kindle_empty") }
             ForEach(session.kindleOptions(), id: \.id) { resource in
                 ForEach(resource.assets.filter { $0.role == "PRIMARY" }, id: \.id) { asset in
                     Button { store.edit { session.setAsset(value: asset.id) } } label: {
-                        HStack { Text("\(resource.title) · \(resource.format) · \(asset.size)"); if asset.id == state.selectedAssetId { Image(systemName: "checkmark") } }
+                        HStack { VStack(alignment: .leading) { Text(resource.title)
+                            Text("\(resource.format) · \(asset.size)").font(.caption).foregroundStyle(.secondary) }
+                            Spacer()
+                            Image(systemName: asset.id == state.selectedAssetId ? "largecircle.fill.circle" : "circle").foregroundStyle(Color.accentColor) }
                     }.disabled(store.running)
                 }
+            }
             }
             Button("nativeManagement.kindleSettings") { store.close(); onSettings() }.disabled(store.running)
             Button("nativeManagement.kindleQueue") { store.close(); onQueue() }.disabled(store.running)
@@ -1070,11 +1034,12 @@ private struct NativeManagementSheet: View {
     }
 }
 
-func nativeManagementPresentation(for action: ErmaoShared.ManagementAction) -> NativeManagementPresentation {
-    if action == .delete { return .deleteConfirmation }
-    return ["Regenerate", "ReadingStatus", "Rescan"].contains(action.name)
-        ? .none
-        : .sheet(actionName: action.name)
+func nativeManagementPresentation(for presentation: ErmaoShared.ManagementPresentation) -> NativeManagementPresentation {
+    switch presentation {
+    case .sheet: return .sheet
+    case .deleteConfirmation: return .deleteConfirmation
+    default: return .none
+    }
 }
 
 func nativeManagementMenuItemStatus(

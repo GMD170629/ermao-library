@@ -250,6 +250,7 @@ data class KindleTask(
     val progress: Float? = null,
     val statusCode: String? = null,
     val createdAtLabel: String,
+    val bookId: String? = null,
 )
 
 enum class QueueStatus { Queued, Running, Completed, Failed, Cancelled, Unknown }
