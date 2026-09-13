@@ -69,6 +69,17 @@ The mutable `android-beta` prerelease is never Latest and does not update stable
 
 发布说明遵循现有脚本的双语文档与索引契约；GitHub Release 填写简短且有实际用户价值的修复/改进摘要，禁止空说明或只留自动生成列表。创建 tag 前完成版本来源同步与校验，发布前完成最终门禁；不得发布仍有版本冲突或实际验收阻塞的 RC。
 
+### 正式发布的主分支同步 / Stable-release main synchronization
+
+正式发布必须将本次已验收的发布提交同步到远端 `main`，不能仅更新 `develop`、标签、GitHub Release 或 `release-feed`。发布说明维护工作流 `sync-release-notes.yml` 从 `main` 读取权威文档，主分支滞后会使后续同步使用旧说明。
+
+1. 获取远端最新状态，确认待发布提交、版本、双语说明和验收结论一致；不要将发布冻结后无关的开发提交一并带入。
+2. 检查 `main` 与发布提交的历史关系。可快进时直接快进；存在分叉时保留两边改动，通过正常合并解决冲突并验证受影响范围，禁止强推覆盖主分支。
+3. 推送 `main` 后，核验远端 `main` 包含本次发布提交，且应用版本和本版本发布说明与正式标签一致。新建正式标签前完成此核验；补做已发布版本的同步时保留原标签和产物身份，不移动已发布标签。
+4. 收尾核对远端 `main`、正式标签、GitHub Release、Wiki 与 `release-feed` 的版本和说明，并报告同步结果。未同步主分支不得宣称正式发布流程已完整结束。
+
+Every stable release must synchronize its accepted release commit to remote `main`, because the release-note maintenance workflow reads that branch. Fetch current refs, fast-forward when possible, or merge divergent history without discarding either side. Verify that remote `main` contains the release commit and matches the tagged application version and release notes before creating a new stable tag. When repairing a previously published release, preserve its existing tag and artifacts. Verify `main`, the tag, Release, Wiki, and release feed before reporting completion; do not include unrelated post-freeze development changes.
+
 
 ### 图书／卷册单次删除确认兼容顺序
 
