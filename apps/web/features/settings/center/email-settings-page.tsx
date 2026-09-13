@@ -38,7 +38,7 @@ type KindleSettingsPayload = {
 };
 
 const emptySettings: EmailSettings = {
-  smtp: { host: '', port: 587, security: 'starttls', username: '', fromEmail: '', fromName: '二毛图书', maxAttachmentMb: null, passwordConfigured: false },
+  smtp: { host: '', port: 587, security: 'starttls', username: '', fromEmail: '', fromName: '二毛图书', maxAttachmentMb: 50, passwordConfigured: false },
   kindle: { email: '' }
 };
 
@@ -128,6 +128,10 @@ export function EmailSettingsPage() {
   }, [active, canManageSystem, loadKindleSettings, loadSmtpSettings, sessionReady]);
 
   async function saveSmtp() {
+    if (smtp.maxAttachmentMb !== null && (!Number.isFinite(smtp.maxAttachmentMb) || smtp.maxAttachmentMb < 1 || smtp.maxAttachmentMb > 50)) {
+      toast.error('附件大小上限必须在 1 MB 到 50 MB 之间');
+      return;
+    }
     setBusy('save-smtp');
     try {
       const body: Record<string, unknown> = {
@@ -218,7 +222,7 @@ export function EmailSettingsPage() {
                   triggerClassName="h-11"
                 />
               </div>
-              <label className="text-sm font-medium text-[#5E5953]"><I18nText>附件大小上限（MB，可选）</I18nText><input disabled={loading} type="number" min={1} max={1000} value={smtp.maxAttachmentMb ?? ''} onChange={(event) => setSmtp({ ...smtp, maxAttachmentMb: event.target.value ? Number(event.target.value) : null })} placeholder={i18nAttribute("留空则由邮件服务商限制")} className={inputClassName()} /></label>
+              <label className="text-sm font-medium text-[#5E5953]"><I18nText>附件大小上限（MB）</I18nText><input disabled={loading} type="number" min={1} max={50} step={0.01} value={smtp.maxAttachmentMb ?? 50} onChange={(event) => setSmtp({ ...smtp, maxAttachmentMb: event.target.value ? Number(event.target.value) : null })} placeholder="50" className={inputClassName()} /><span className="mt-2 block text-xs leading-5 text-stone-600"><I18nText>默认 50 MB，最高 50 MB，可根据邮件服务商限制调低。</I18nText> <I18nText>邮件编码会增加传输体积，实际可发送大小仍受发件服务商限制。</I18nText></span></label>
               <label className="text-sm font-medium text-[#5E5953]"><I18nText>SMTP 用户名</I18nText><input disabled={loading} value={smtp.username} onChange={(event) => setSmtp({ ...smtp, username: event.target.value })} autoComplete="username" placeholder={i18nAttribute("无需认证时留空")} className={inputClassName()} /></label>
               <label className="text-sm font-medium text-[#5E5953]"><I18nText>SMTP 密码</I18nText><input disabled={loading || clearPassword} value={smtp.password} onChange={(event) => { setSmtp({ ...smtp, password: event.target.value }); setClearPassword(false); }} type="password" autoComplete="new-password" placeholder={settings.smtp.passwordConfigured ? i18nAttribute("已配置，留空表示不修改") : i18nAttribute("无需认证时留空")} className={inputClassName()} /></label>
               <label className="text-sm font-medium text-[#5E5953]"><I18nText>发件邮箱</I18nText><input disabled={loading} value={smtp.fromEmail} onChange={(event) => setSmtp({ ...smtp, fromEmail: event.target.value })} type="email" placeholder="reader@example.com" className={inputClassName()} /></label>

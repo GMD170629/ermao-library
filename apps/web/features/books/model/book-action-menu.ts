@@ -8,12 +8,16 @@ export type BookActionId =
   | 'reading-status'
   | 'recognize'
   | 'rescan'
+  | 'kindle'
   | 'delete';
 
-export function bookActionIds(canManage: boolean): BookActionId[] {
-  return canManage
-    ? ['edit', 'regenerate-image', 'reading-status', 'recognize', 'rescan', 'delete']
-    : ['reading-status'];
+export function bookActionIds(canManage: boolean, kindleSendAvailable = false): BookActionId[] {
+  return [
+    ...(canManage ? ['edit', 'regenerate-image'] as const : []),
+    'reading-status',
+    ...(kindleSendAvailable ? ['kindle'] as const : []),
+    ...(canManage ? ['recognize', 'rescan', 'delete'] as const : [])
+  ];
 }
 
 export function nextBookReadingStatus(status: BookReadingStatus): 'UNREAD' | 'FINISHED' {

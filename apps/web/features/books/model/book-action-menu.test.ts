@@ -31,6 +31,8 @@ function book(resources: ReadableResourceView[], continueResourceId: string | nu
 test('offers the complete manager menu and only personal reading status to members', () => {
   assert.deepEqual(bookActionIds(true), ['edit', 'regenerate-image', 'reading-status', 'recognize', 'rescan', 'delete']);
   assert.deepEqual(bookActionIds(false), ['reading-status']);
+  assert.deepEqual(bookActionIds(false, true), ['reading-status', 'kindle']);
+  assert.ok(bookActionIds(true, true).includes('kindle'));
 });
 
 test('reading status action always targets the opposite terminal state', () => {

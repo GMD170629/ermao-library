@@ -19,30 +19,12 @@ type KindleSettingsPayload = {
   error?: { message: string };
 };
 
-type SendOption = {
-  assetId: string;
-  resourceId: string;
-  resourceTitle: string;
-  format: string;
-  size: string;
-};
-
-function supported(format: string) {
-  return format === 'EPUB' || format === 'PDF';
-}
+import { kindleSendOptions } from './model/kindle-send';
 
 export function KindleSendModal({ book, open, preferredResourceId, onClose }: { book: BookView; open: boolean; preferredResourceId: string | null; onClose: () => void }) {
   const { t: i18nAttribute } = useAttributeI18n();
   const toast = useToast();
-  const options = useMemo<SendOption[]>(() => book.resources.flatMap((resource) => resource.assets
-    .filter((asset) => resource.kindleSendAvailable && supported(resource.format) && asset.role === 'PRIMARY')
-    .map((asset) => ({
-      assetId: asset.id,
-      resourceId: resource.id,
-      resourceTitle: resource.title,
-      format: resource.format,
-      size: asset.size
-    }))), [book.resources]);
+  const options = useMemo(() => kindleSendOptions(book), [book]);
   const defaultOption = options.find((option) => option.resourceId === preferredResourceId)
     ?? options[0];
   const [selectedAssetId, setSelectedAssetId] = useState(defaultOption?.assetId ?? '');
@@ -55,27 +37,33 @@ export function KindleSendModal({ book, open, preferredResourceId, onClose }: { 
   useEffect(() => {
     if (!open) return;
     setSelectedAssetId(defaultOption?.assetId ?? '');
+    let active = true;
+    const controller = new AbortController();
     setSettingsLoading(true);
+    setSettingsReady(false);
     setSettingsError('');
-    fetch('/api/kindle-settings', { cache: 'no-store' })
+    fetch('/api/kindle-settings', { cache: 'no-store', signal: controller.signal })
       .then((response) => response.json())
       .then((payload: KindleSettingsPayload) => {
+        if (!active) return;
         if (!payload.ok || !payload.data) throw new Error(payload.error?.message ?? '读取邮件设置失败');
         const smtp = payload.data.smtp;
         setRecipient(payload.data.kindle.email);
         setSettingsReady(Boolean(smtp.configured && smtp.fromEmail && payload.data.kindle.email));
       })
       .catch((reason) => {
+        if (!active) return;
         setSettingsReady(false);
         setSettingsError(reason instanceof Error ? reason.message : '读取邮件设置失败');
       })
-      .finally(() => setSettingsLoading(false));
+      .finally(() => { if (active) setSettingsLoading(false); });
+    return () => { active = false; controller.abort(); };
   }, [defaultOption?.assetId, open]);
 
   if (!open) return null;
 
   async function enqueue() {
-    if (!selectedAssetId) return;
+    if (!selectedAssetId || sending || !settingsReady) return;
     setSending(true);
     try {
       const response = await fetch('/api/kindle-send-tasks', {

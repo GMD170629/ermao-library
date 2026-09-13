@@ -1,7 +1,7 @@
 'use client';
 
-import { BookCheck, BookX, Edit3, RefreshCw, ScanSearch, Sparkles, Trash2, type LucideIcon } from 'lucide-react';
-import { useState } from 'react';
+import { BookCheck, BookX, Edit3, RefreshCw, ScanSearch, Send, Sparkles, Trash2, type LucideIcon } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import {
   ContextActionMenu,
   type ContextActionMenuHorizontalAlign,
@@ -28,6 +28,8 @@ import {
 } from '../model/book-action-menu';
 import { MetadataLookupModal } from '../metadata-lookup-modal';
 import { BookMetadataEditor } from './book-metadata-editor';
+import { KindleSendModal } from '../kindle-send-modal';
+import { kindleSendOptions } from '../model/kindle-send';
 
 export type BookActionTarget = Readonly<{
   id: string;
@@ -53,6 +55,7 @@ const actionDetails: Record<Exclude<BookActionId, 'reading-status'>, { label: st
   'regenerate-image': { label: '重新生成图片', icon: RefreshCw },
   recognize: { label: '识别', icon: Sparkles },
   rescan: { label: '重新扫描文件', icon: ScanSearch },
+  kindle: { label: '发送到 Kindle', icon: Send },
   delete: { label: '删除', icon: Trash2, destructive: true }
 };
 
@@ -74,16 +77,30 @@ export function BookActionController({
   const [busy, setBusy] = useState<BookActionId | null>(null);
   const [editorBook, setEditorBook] = useState<BookView | null>(null);
   const [recognitionBook, setRecognitionBook] = useState<BookView | null>(null);
+  const [kindleBook, setKindleBook] = useState<BookView | null>(null);
+  const [menuBook, setMenuBook] = useState<BookView | null>(null);
+  const resolvedMenuBook = request?.book ?? (menuBook?.id === request?.target.id ? menuBook : null);
+
+  useEffect(() => {
+    if (!request || request.book) return;
+    const controller = new AbortController();
+    fetchBook(request.target.id, controller.signal).then((book) => {
+      if (!controller.signal.aborted) setMenuBook(book);
+    }).catch(() => {
+      if (!controller.signal.aborted) setMenuBook(null);
+    });
+    return () => controller.abort();
+  }, [request]);
 
   async function resolveBook(currentRequest: BookActionMenuRequest): Promise<BookView> {
     return currentRequest.book?.id === currentRequest.target.id
       ? currentRequest.book
-      : fetchBook(currentRequest.target.id);
+      : menuBook?.id === currentRequest.target.id ? menuBook : fetchBook(currentRequest.target.id);
   }
 
   async function invoke(action: BookActionId) {
     const currentRequest = request;
-    if (!currentRequest || (action !== 'reading-status' && !canManage)) return;
+    if (!currentRequest || busy || (!['reading-status', 'kindle'].includes(action) && !canManage)) return;
     onRequestClose();
 
     if (action === 'delete') {
@@ -98,6 +115,10 @@ export function BookActionController({
 
     setBusy(action);
     try {
+      if (action === 'kindle') {
+        setKindleBook(await resolveBook(currentRequest));
+        return;
+      }
       if (action === 'edit') {
         setEditorBook(await resolveBook(currentRequest));
         return;
@@ -158,7 +179,7 @@ export function BookActionController({
   }
 
   const readingTarget = request ? nextBookReadingStatus(request.target.status) : 'FINISHED';
-  const menuItems = request ? bookActionIds(canManage).map((action) => {
+  const menuItems = request ? bookActionIds(canManage, !!resolvedMenuBook && kindleSendOptions(resolvedMenuBook).length > 0).map((action) => {
     if (action === 'reading-status') {
       return {
         action,
@@ -179,6 +200,7 @@ export function BookActionController({
   }) : [];
 
   return <>
+    {kindleBook ? <KindleSendModal book={kindleBook} open preferredResourceId={null} onClose={() => setKindleBook(null)} /> : null}
     {request ? <ContextActionMenu<BookActionId>
       position={request.position}
       ariaLabel={t('管理图书')}
