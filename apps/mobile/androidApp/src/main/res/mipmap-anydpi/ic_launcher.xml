@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+<!-- Intentionally retain the shared full-color brand artwork when themed icons
+     are enabled; a monochrome layer would replace it with a different icon. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:ignore="MonochromeLauncherIcon">
     <background android:drawable="@color/launcher_background" />
     <foreground>
         <!-- Adaptive layers are 108dp; the visible viewport is 72dp. Keep the
