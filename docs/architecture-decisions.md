@@ -108,7 +108,7 @@
 
 ## 发布与版本
 
-- 根 package.json 为版本源，正式 tag 为 v<version>。发布前运行 pnpm release:validate（必要时 --tag），核对脚本覆盖的 Web/核心/契约/POC、Python、service worker、锁文件、Android/iOS 版本，不因宿主分工排除其他端；同步双语说明与索引，摘要有实际用户价值，不用空说明或纯自动列表。
+- 根 package.json 为版本源，正式 tag 为 v<version>。发布前运行 pnpm release:validate（必要时 --tag），核对脚本覆盖的 Web/核心/契约/POC、Python、service worker、锁文件、Android/iOS 版本，不因宿主分工排除其他端；同步双语说明与索引，摘要有实际用户价值，不用空说明或纯自动列表。发布说明只写用户可感知的功能、修复与必要升级影响，不罗列构建 workflow、产物清单、源码版本同步或内部交付过程。
 - 正式发布统一 fnos-package workflow，复用移动检查、构建原生章节库再测后端、构建版本镜像与 FPK；shared signer 的 stable/beta 渠道独立密钥与包名。正式 com.ermao.library，最低 API 26，更新保持签名并递增 versionCode。私钥在仓库外生成一次并独立备份，Secrets/DPAPI 不作唯一可恢复备份，不使用 Debug/Beta 代签；RELEASE_/BETA_ 两组 KEYSTORE_BASE64、KEYSTORE_PASSWORD、KEY_ALIAS、KEY_PASSWORD 缺失即失败，密码不入命令字面或日志，PR 不拿密钥，仅发布任务可写 Release。
 - 最终 APK 经 zipalign 16KiB 对齐、签名、apksigner verify 与对齐复查后生成 SHA-256，命名 ermao-library-v<version>-android.apk。APK、FPK 及摘要一起上传草稿，核对远端摘要后才能提升 prod/latest、公开 Release 和 feed；失败不公开部分版本。main 手动构建候选，最终签名 APK 完成物理设备验收再建正式 tag；签名冲突卸载需用户明确授权。未完成门禁只留草稿，不切 Latest 或建公开正式 tag。
 - v1.0.3 按维护者明确要求仅发布 Web／后端 Docker 与 fnOS FPK：跳过移动 workflow、APK 签名与上传，仍校验 FPK 本地和远端摘要，并在通过后发布镜像、Release 与 feed。移动源版本仍同步，但不交付 APK／IPA；此例外不适用于其他版本。
