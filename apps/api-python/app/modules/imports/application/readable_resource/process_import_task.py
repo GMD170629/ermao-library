@@ -34,6 +34,7 @@ from app.modules.library.public import (
     AssetRole,
     ResourceAssetMetadataInput,
 )
+from app.modules.media.public import FirstPageCoverPort
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +59,7 @@ class ProcessReadableResourceImportTask:
         sidecar: SidecarWritebackPort,
         metadata_priority: LocalMetadataPriorityPort | None = None,
         covers: LocalCoverPublicationPort | None = None,
+        first_page_covers: FirstPageCoverPort | None = None,
     ) -> None:
         self._libraries = libraries
         self._filesystem = filesystem
@@ -71,6 +73,7 @@ class ProcessReadableResourceImportTask:
         self._sidecar = sidecar
         self._metadata_priority = metadata_priority
         self._covers = covers
+        self._first_page_covers = first_page_covers
 
     def reset_inspection_cache(self) -> None:
         self._adapters.reset_inspection_cache()
@@ -172,14 +175,42 @@ class ProcessReadableResourceImportTask:
             None,
         )
 
+        publications = list(prepared_covers.values())
+        if (
+            parsed.ok
+            and parsed.asset is not None
+            and prepared_cover is None
+            and self._covers is not None
+            and self._first_page_covers is not None
+            and resource.format in {"PDF", "IMAGE_DIR"}
+        ):
+            should_extract = self._books_resources.should_extract_first_page_cover(
+                resource_id=resource_id, source_node_id=source_node_id
+            )
+            self._uow.release_before_io()
+            if should_extract:
+                content = self._first_page_covers.extract(
+                    path=absolute, source_format=resource.format
+                )
+                if content is not None:
+                    try:
+                        prepared_cover = self._covers.prepare(
+                            resource_id=f"{resource_id}-{source_node_id}-first-page",
+                            content=content,
+                        )
+                    except ValueError:
+                        prepared_cover = None
+                    if prepared_cover is not None:
+                        publications.append(prepared_cover)
+
         # Publish new immutable versions before exposing their database references.
         # Failure or cancellation can discard them without touching existing covers.
         if self._covers is not None:
             try:
-                for prepared in prepared_covers.values():
+                for prepared in publications:
                     self._covers.publish(prepared)
             except OSError:
-                for prepared in prepared_covers.values():
+                for prepared in publications:
                     self._covers.discard(prepared)
                 with self._uow.transaction():
                     if self._queue.get_task(task_id) is None:
@@ -211,12 +242,12 @@ class ProcessReadableResourceImportTask:
                     )
         except Exception:
             if self._covers is not None:
-                for prepared in prepared_covers.values():
+                for prepared in publications:
                     self._covers.discard(prepared)
             raise
         if task_was_cancelled:
             if self._covers is not None:
-                for prepared in prepared_covers.values():
+                for prepared in publications:
                     self._covers.discard(prepared)
             self._log.emit(
                 "readable_resource.task.cancelled",
@@ -229,7 +260,7 @@ class ProcessReadableResourceImportTask:
             return ProcessTaskResult(task_id=task_id, outcome="cancelled")
 
         if not import_succeeded and self._covers is not None:
-            for prepared in prepared_covers.values():
+            for prepared in publications:
                 self._covers.discard(prepared)
             prepared_covers.clear()
             prepared_cover = None

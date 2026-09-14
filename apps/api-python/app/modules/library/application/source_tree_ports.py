@@ -257,6 +257,11 @@ class BookResourceRepositoryPort(Protocol):
         self, resource_id: str, page_count: int | None
     ) -> None: ...
 
+    def should_extract_first_page_cover(
+        self, *, resource_id: str, source_node_id: str
+    ) -> bool:
+        """Whether this source is the first registered page and cover is unprotected."""
+
     def apply_local_metadata(
         self,
         *,

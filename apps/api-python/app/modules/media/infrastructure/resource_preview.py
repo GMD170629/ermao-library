@@ -3,24 +3,15 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import os
 import tempfile
-import threading
-from collections.abc import Iterator
-from contextlib import contextmanager
-from dataclasses import dataclass
-from importlib import import_module
 from pathlib import Path
-from typing import Protocol, cast
 
-from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import false, select, true
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.core.natural_sort import natural_sort_key
-from app.infrastructure.comic_archives import ComicArchiveError, open_comic_archive
 from app.models import (
     Library,
     LibraryReadableResource,
@@ -32,58 +23,16 @@ from app.modules.media.application.resource_preview import (
     ResourcePreviewAccessScope,
     ResourcePreviewData,
     ResourcePreviewNotFoundError,
-    ResourcePreviewUnavailableError,
+)
+from app.modules.media.infrastructure.page_image import (
+    PREVIEW_MAX_EDGE,
+    PREVIEW_WEBP_QUALITY,
+    PageImageRenderer,
+    PageImageSource,
+    ResourcePreviewRenderCoordinator,
 )
 
-PREVIEW_MAX_EDGE = 480
-PREVIEW_WEBP_QUALITY = 75
 PREVIEW_CACHE_VERSION = 1
-
-
-@dataclass(frozen=True, slots=True)
-class _PreviewSource:
-    resource_format: str
-    path: Path
-    page_entry: str | None
-
-
-class _PdfBitmap(Protocol):
-    def to_pil(self) -> Image.Image: ...
-
-
-class _PdfPage(Protocol):
-    def render(self, *, scale: int) -> _PdfBitmap: ...
-
-    def close(self) -> None: ...
-
-
-class _PdfDocument(Protocol):
-    def __len__(self) -> int: ...
-
-    def __getitem__(self, index: int) -> _PdfPage: ...
-
-    def close(self) -> None: ...
-
-
-class _PdfiumModule(Protocol):
-    def PdfDocument(self, path: str) -> _PdfDocument: ...
-
-
-class ResourcePreviewRenderCoordinator:
-    """Bound expensive PDFium work so concurrent thumbnail requests stay reliable."""
-
-    def __init__(self, *, max_concurrent_pdf_renders: int = 1) -> None:
-        if max_concurrent_pdf_renders < 1:
-            raise ValueError("max_concurrent_pdf_renders must be positive")
-        self._pdf_slots = threading.BoundedSemaphore(max_concurrent_pdf_renders)
-
-    @contextmanager
-    def pdf_render_slot(self) -> Iterator[None]:
-        self._pdf_slots.acquire()
-        try:
-            yield
-        finally:
-            self._pdf_slots.release()
 
 
 class FilesystemResourcePreview:
@@ -95,7 +44,7 @@ class FilesystemResourcePreview:
     ) -> None:
         self._db = db
         self._settings = settings
-        self._render_coordinator = render_coordinator
+        self._renderer = PageImageRenderer(render_coordinator)
 
     def load(
         self,
@@ -122,7 +71,7 @@ class FilesystemResourcePreview:
         )
         content = cache_path.read_bytes() if cache_path.is_file() else None
         if content is None:
-            content = self._render(source, page_index)
+            content = self._renderer.render(source, page_index)
             self._publish(cache_path, content)
         return ResourcePreviewData(
             content=content,
@@ -135,7 +84,7 @@ class FilesystemResourcePreview:
         scope: ResourcePreviewAccessScope,
         resource_id: str,
         page_index: int,
-    ) -> _PreviewSource:
+    ) -> PageImageSource:
         resource = self._db.scalar(
             select(LibraryReadableResource).where(
                 LibraryReadableResource.id == resource_id,
@@ -157,7 +106,7 @@ class FilesystemResourcePreview:
             asset = self._asset_source(resource_id, roles={"PRIMARY"})
             if asset is None:
                 raise ResourcePreviewNotFoundError
-            return _PreviewSource(resource_format, asset[0], None)
+            return PageImageSource(resource_format, asset[0], None)
         if resource_format in {"CBZ", "ZIP", "CBR", "RAR"}:
             unit = self._db.scalar(
                 select(ReadableResourceNavigationUnit).where(
@@ -171,12 +120,12 @@ class FilesystemResourcePreview:
             asset = self._asset_source(resource_id, roles={"PRIMARY"})
             if asset is None:
                 raise ResourcePreviewNotFoundError
-            return _PreviewSource(resource_format, asset[0], unit.href)
+            return PageImageSource(resource_format, asset[0], unit.href)
         if resource_format == "IMAGE_DIR":
             assets = self._asset_sources(resource_id, roles={"PAGE"})
             if page_index >= len(assets):
                 raise ResourcePreviewNotFoundError
-            return _PreviewSource(resource_format, assets[page_index][0], None)
+            return PageImageSource(resource_format, assets[page_index][0], None)
         raise ResourcePreviewNotFoundError
 
     def _asset_source(
@@ -234,60 +183,6 @@ class FilesystemResourcePreview:
         if resolved != candidate or not resolved.is_file():
             return None
         return resolved
-
-    def _render(self, source: _PreviewSource, page_index: int) -> bytes:
-        try:
-            if source.resource_format == "PDF":
-                with self._render_coordinator.pdf_render_slot():
-                    pdfium = cast(_PdfiumModule, import_module("pypdfium2"))
-                    document = pdfium.PdfDocument(str(source.path))
-                    try:
-                        if page_index >= len(document):
-                            raise ResourcePreviewNotFoundError
-                        page = document[page_index]
-                        try:
-                            image = page.render(scale=1).to_pil()
-                        finally:
-                            page.close()
-                    finally:
-                        document.close()
-            elif source.page_entry is not None:
-                with open_comic_archive(source.path) as archive:
-                    content = archive.read(source.page_entry)
-                image = Image.open(io.BytesIO(content))
-            else:
-                image = Image.open(source.path)
-            with image:
-                prepared = ImageOps.exif_transpose(image)
-                if getattr(prepared, "is_animated", False):
-                    prepared.seek(0)
-                prepared.thumbnail(
-                    (PREVIEW_MAX_EDGE, PREVIEW_MAX_EDGE),
-                    Image.Resampling.LANCZOS,
-                )
-                if prepared.mode not in {"RGB", "RGBA"}:
-                    prepared = prepared.convert(
-                        "RGBA" if "transparency" in prepared.info else "RGB"
-                    )
-                output = io.BytesIO()
-                prepared.save(
-                    output,
-                    format="WEBP",
-                    quality=PREVIEW_WEBP_QUALITY,
-                    method=4,
-                )
-                return output.getvalue()
-        except ResourcePreviewNotFoundError:
-            raise
-        except (
-            ComicArchiveError,
-            KeyError,
-            OSError,
-            RuntimeError,
-            ValueError,
-            UnidentifiedImageError,
-        ) as exc:
-            raise ResourcePreviewUnavailableError from exc
 
     @staticmethod
     def _publish(path: Path, content: bytes) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
+from app.bootstrap.media import first_page_covers
 from app.bootstrap.reader import reader_v5_library_queries
 from app.core.config import Settings
 from app.modules.imports.infrastructure.readable_resource.adapter_registry import (
@@ -46,7 +47,8 @@ def regenerate_local_metadata_covers(
         access=SqlAlchemyResourceMetadata(db),
         sources=SqlAlchemyLocalCoverSources(db),
         parser=FilesystemLocalMetadataCoverParser(
-            metadata_adapter.local_metadata_inspector
+            metadata_adapter.local_metadata_inspector,
+            first_page_covers=first_page_covers(),
         ),
         resource_covers=FilesystemResourceCoverPublication(
             settings.resolved_storage_root

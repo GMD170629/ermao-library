@@ -6,6 +6,7 @@ from app.modules.media.application.cover_proxy import (
     configured_cover_origins,
     validate_cover_url,
 )
+from app.modules.media.application.first_page_cover import FirstPageCoverPort
 from app.modules.media.application.page_index import (
     ReadOnlyResourcePageIndex,
     ResolvedResourcePageIndex,
@@ -17,6 +18,7 @@ from app.modules.media.application.page_index import (
 
 __all__ = [
     "CoverUrlResolver",
+    "FirstPageCoverPort",
     "ReadOnlyResourcePageIndex",
     "ResolvedResourcePageIndex",
     "ResourcePageIndexProjection",
