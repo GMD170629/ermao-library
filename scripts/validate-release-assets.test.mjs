@@ -29,3 +29,22 @@ test('publication requires both intact packages locally and remotely', t => {
   rmSync(apk);
   assert.throws(() => validateReleaseAssets(root, 'v1.0.1'), /Incomplete/);
 });
+
+test('only v1.0.3 permits a server-only bundle and still verifies remote digests', t => {
+  const root = mkdtempSync(join(tmpdir(), 'server-release-assets-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, 'fnos'));
+  const name = 'ermao-books-1.0.3-all.fpk';
+  const digest = createHash('sha256').update('fixture').digest('hex');
+  const assets = [];
+  for (const [file, data] of [[name, 'fixture'], [`${name}.sha256`, `${digest}  ${name}\n`]]) {
+    writeFileSync(join(root, 'fnos', file), data);
+    assets.push({ name: file, state: 'uploaded', size: Buffer.byteLength(data), digest: `sha256:${createHash('sha256').update(data).digest('hex')}` });
+  }
+  validateReleaseAssets(root, 'v1.0.3', { assets });
+  assert.throws(() => validateReleaseAssets(root, 'v1.0.4'), /android/);
+  assert.throws(() => validateReleaseAssets(root, 'v1.0.3', { assets: assets.slice(0, 1) }), /Remote/);
+  assert.throws(() => validateReleaseAssets(root, 'v1.0.3', { assets: [...assets, { name: 'old.apk' }] }), /must not contain mobile/);
+  writeFileSync(join(root, 'fnos', name), 'corrupt');
+  assert.throws(() => validateReleaseAssets(root, 'v1.0.3'), /SHA-256/);
+});

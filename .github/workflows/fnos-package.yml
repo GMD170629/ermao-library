@@ -62,6 +62,8 @@ jobs:
   validate:
     name: Validate fnOS package templates
     runs-on: ubuntu-latest
+    outputs:
+      app_version: ${{ steps.version.outputs.app_version }}
 
     steps:
       - name: Check out repository
@@ -74,6 +76,7 @@ jobs:
         run: node --test scripts/validate-release-notes.test.mjs scripts/validate-release-assets.test.mjs scripts/release-workflow-policy.test.mjs
 
       - name: Validate application version and bilingual release notes
+        id: version
         env:
           BASE_REF: ${{ github.base_ref }}
         shell: bash
@@ -225,7 +228,8 @@ jobs:
           cache-to: type=gha,mode=max,scope=develop-image
 
   mobile-release:
-    if: github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/prod' && github.ref != 'refs/heads/develop')
+    # v1.0.3 is an explicitly requested server-only release; other tags retain mobile gates.
+    if: needs.validate.outputs.app_version != '1.0.3' && (github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/prod' && github.ref != 'refs/heads/develop'))
     needs: validate
     permissions:
       contents: write
@@ -238,7 +242,7 @@ jobs:
 
   package:
     name: Build fnOS FPK
-    if: github.event_name != 'pull_request' && github.ref != 'refs/heads/prod' && github.ref != 'refs/heads/develop'
+    if: always() && needs.validate.result == 'success' && (needs.mobile-release.result == 'success' || (needs.validate.outputs.app_version == '1.0.3' && needs.mobile-release.result == 'skipped')) && github.event_name != 'pull_request' && github.ref != 'refs/heads/prod' && github.ref != 'refs/heads/develop'
     needs: [validate, mobile-release]
     runs-on: ubuntu-latest
     permissions:
@@ -312,24 +316,29 @@ jobs:
           uv run --extra dev --locked pytest -q
 
       - name: Download checked stable Android APK
+        if: needs.validate.outputs.app_version != '1.0.3'
         uses: actions/download-artifact@v4
         with:
           name: android-stable-unsigned
           path: unsigned-android
 
       - name: Set up JDK for stable signing
+        if: needs.validate.outputs.app_version != '1.0.3'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Set up Android SDK for stable signing
+        if: needs.validate.outputs.app_version != '1.0.3'
         uses: android-actions/setup-android@v3
 
       - name: Install signing tools
+        if: needs.validate.outputs.app_version != '1.0.3'
         run: sdkmanager 'build-tools;36.0.0'
 
       - name: Sign and verify stable Android APK
+        if: needs.validate.outputs.app_version != '1.0.3'
         env:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
@@ -411,7 +420,11 @@ jobs:
           RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
         run: |
           node scripts/validate-release-assets.mjs dist "$RELEASE_TAG"
-          gh release upload "$RELEASE_TAG" dist/fnos/*.fpk dist/fnos/*.sha256 dist/android/*.apk dist/android/*.sha256 --clobber
+          if [[ "$RELEASE_TAG" == 'v1.0.3' ]]; then
+            gh release upload "$RELEASE_TAG" dist/fnos/*.fpk dist/fnos/*.sha256 --clobber
+          else
+            gh release upload "$RELEASE_TAG" dist/fnos/*.fpk dist/fnos/*.sha256 dist/android/*.apk dist/android/*.sha256 --clobber
+          fi
           gh release view "$RELEASE_TAG" --json assets > "$RUNNER_TEMP/release-assets.json"
           node scripts/validate-release-assets.mjs dist "$RELEASE_TAG" "$RUNNER_TEMP/release-assets.json"
 
