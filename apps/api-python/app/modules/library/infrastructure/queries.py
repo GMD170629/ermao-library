@@ -40,6 +40,8 @@ class SqlAlchemyLibraryQueries:
         user_id: str | None,
     ) -> list[str]:
         user = self._db.get(User, user_id) if user_id else None
+        if user_id and user is None:
+            return []
         context = authorization_context(self._db, user) if user else None
         if context is None:
             from app.core.authorization import AuthorizationContext
@@ -60,7 +62,9 @@ class SqlAlchemyLibraryQueries:
             term = f"%{criteria.search.casefold()}%"
             predicates.append(
                 exists(
-                    select(LibraryBookMetadata.book_id).where(
+                    select(LibraryBookMetadata.book_id)
+                    .correlate(LibraryBook)
+                    .where(
                         LibraryBookMetadata.book_id == LibraryBook.id,
                         or_(
                             func.lower(LibraryBookMetadata.title).like(term),
@@ -109,7 +113,9 @@ class SqlAlchemyLibraryQueries:
         if criteria.authors:
             predicates.append(
                 exists(
-                    select(LibraryBookMetadata.book_id).where(
+                    select(LibraryBookMetadata.book_id)
+                    .correlate(LibraryBook)
+                    .where(
                         LibraryBookMetadata.book_id == LibraryBook.id,
                         or_(
                             *(
@@ -138,6 +144,9 @@ class SqlAlchemyLibraryQueries:
         matched_ids = list(
             self._db.scalars(
                 select(LibraryBook.id)
+                .join(
+                    LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id
+                )
                 .where(and_(*predicates))
                 .order_by(LibraryBook.updated_at.desc(), LibraryBook.id.desc())
             )

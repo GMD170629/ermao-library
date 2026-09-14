@@ -10,6 +10,7 @@ export type SmartShelfRules = {
   tags?: string[];
   authors?: string[];
   publishers?: string[];
+  includedBookIds?: string[];
   combinator?: 'ALL' | 'ANY';
   conditions?: SmartShelfCondition[];
 };
@@ -42,27 +43,30 @@ const valueLabels: Record<string, string> = {
   PENDING: '待整理', FAILED: '失败'
 };
 
-function displayValue(value: string | string[] | undefined) {
+function displayValue(value: string | string[] | undefined, translate: (text: string) => string) {
   if (value === undefined) return '';
   const values = Array.isArray(value) ? value : [value];
-  return values.map((item) => valueLabels[item] ?? item).join(' 至 ');
+  return values.map((item) => valueLabels[item] ? translate(valueLabels[item]) : item).join(` ${translate('至')} `);
 }
 
-export function summarizeSmartShelfRules(rules?: SmartShelfRules): SmartShelfRuleSummary[] {
+export function summarizeSmartShelfRules(
+  rules?: SmartShelfRules,
+  translate: (text: string) => string = (text) => text
+): SmartShelfRuleSummary[] {
   if (!rules) return [];
   const summaries: SmartShelfRuleSummary[] = [];
-  if (rules.search?.trim()) summaries.push({ label: '搜索', value: `包含“${rules.search.trim()}”` });
-  if (rules.statuses?.length) summaries.push({ label: '阅读状态', value: rules.statuses.map((item) => valueLabels[item] ?? item).join('、') });
+  if (rules.search?.trim()) summaries.push({ label: '搜索', value: `${translate('包含')}“${rules.search.trim()}”` });
+  if (rules.statuses?.length) summaries.push({ label: '阅读状态', value: rules.statuses.map((item) => valueLabels[item] ? translate(valueLabels[item]) : item).join('、') });
   if (rules.tags?.length) summaries.push({ label: '标签', value: rules.tags.join('、') });
   if (rules.authors?.length) summaries.push({ label: '作者', value: rules.authors.join('、') });
   if (rules.publishers?.length) summaries.push({ label: '出版社', value: rules.publishers.join('、') });
   for (const condition of rules.conditions ?? []) {
-    const operator = operatorLabels[condition.operator] ?? condition.operator;
-    const value = displayValue(condition.value);
+    const operator = translate(operatorLabels[condition.operator] ?? condition.operator);
+    const value = displayValue(condition.value, translate);
     summaries.push({
       label: fieldLabels[condition.field] ?? condition.field,
       value: value ? `${operator} ${value}` : operator
     });
   }
-  return summaries;
+  return summaries.map((summary) => ({ ...summary, label: translate(summary.label) }));
 }

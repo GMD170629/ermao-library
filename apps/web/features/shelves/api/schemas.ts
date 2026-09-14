@@ -89,6 +89,7 @@ function parseRules(value: unknown): SmartShelfRules | undefined {
     tags: stringList(value.tags),
     authors: stringList(value.authors),
     publishers: stringList(value.publishers),
+    includedBookIds: stringList(value.includedBookIds),
     combinator,
     conditions: conditions?.map(parseCondition)
   };

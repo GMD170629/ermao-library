@@ -22,3 +22,13 @@ test('summarizes base and combined smart shelf rules for display', () => {
 test('returns an empty list when a smart shelf includes all visible books', () => {
   assert.deepEqual(summarizeSmartShelfRules({ combinator: 'ALL', conditions: [] }), []);
 });
+
+
+test('translates rule labels and states without translating user content', () => {
+  const translations: Record<string, string> = { '搜索': 'Search', '包含': 'Contains', '阅读状态': 'Reading status', '进行中': 'In progress', '作者': 'Author' };
+  assert.deepEqual(summarizeSmartShelfRules({ search: '岛田庄司', statuses: ['READING'], authors: ['岛田庄司'] }, (text) => translations[text] ?? text), [
+    { label: 'Search', value: 'Contains“岛田庄司”' },
+    { label: 'Reading status', value: 'In progress' },
+    { label: 'Author', value: '岛田庄司' }
+  ]);
+});

@@ -1562,3 +1562,59 @@ test('all-books displays books without covers in bookshelf and management views'
   await expect(table.getByAltText('暂无封面的图书的缺省封面')).toBeVisible();
   await expect(page.getByText('LIBRARY_BOOK_SUMMARY_INVALID_coverUrl')).toHaveCount(0);
 });
+
+
+test('existing smart shelf loads editable rules, guards unsaved changes and preserves base filters', async ({ page }) => {
+  const originalRules = {
+    search: '作品', authors: ['岛田庄司'], tags: ['推理'], statuses: ['UNREAD'],
+    includedBookIds: ['included-book'],
+    combinator: 'ALL',
+    conditions: [{ field: 'sourcePath', operator: 'contains', value: '岛田庄司' }]
+  };
+  let shelf = {
+    id: 'smart-path', name: '岛田庄司作品集', description: null, kind: 'SMART',
+    pinned: false, rules: originalRules, rulesStatus: 'VALID', unsupportedRuleFields: [],
+    bookCount: 1, total: 1, page: 1, totalPages: 1, collectionIds: [],
+    books: [{ id: 'book-a', title: '螺丝人', author: '岛田庄司', progress: 0 }]
+  };
+  let savedBody: Record<string, unknown> | undefined;
+  await mockWebAppApi(page, async (route, url) => {
+    if (url.pathname === '/api/library/filter-schema') {
+      await route.fulfill({ json: { ok: true, data: {
+        fields: [{ key: 'sourcePath', label: '原始文件路径', group: '来源与归档', type: 'text', operators: ['contains', 'equals'], options: [] }], maxConditions: 30
+      } } });
+      return true;
+    }
+    if (url.pathname === '/api/shelves') {
+      await route.fulfill({ json: { ok: true, data: { shelves: [shelf] } } });
+      return true;
+    }
+    if (url.pathname === '/api/shelves/smart-path') {
+      if (route.request().method() === 'PATCH') {
+        savedBody = route.request().postDataJSON();
+        shelf = { ...shelf, rules: { ...originalRules, conditions: [{ field: 'sourcePath', operator: 'contains', value: '御手洗' }] } };
+      }
+      await route.fulfill({ json: { ok: true, data: { shelf } } });
+      return true;
+    }
+    return false;
+  });
+  await page.goto('/shelves?shelf=smart-path&edit=1');
+  const pathValue = page.getByRole('textbox', { name: '原始文件路径筛选值' });
+  await expect(pathValue).toHaveValue('岛田庄司');
+  await expect(page.getByRole('button', { name: '添加条件', exact: true })).toBeEnabled();
+  await pathValue.fill('御手洗');
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+  const confirmation = page.getByRole('dialog');
+  await expect(confirmation).toContainText('放弃未保存的更改');
+  await confirmation.getByRole('button', { name: '取消', exact: true }).click();
+  await expect(pathValue).toHaveValue('御手洗');
+  await page.getByRole('button', { name: '保存更改', exact: true }).click();
+  await expect.poll(() => savedBody).toBeDefined();
+  expect(savedBody?.rules).toEqual({
+    ...originalRules, conditions: [{ field: 'sourcePath', operator: 'contains', value: '御手洗' }]
+  });
+  expect(savedBody).not.toHaveProperty('pinned');
+  await expect(page).toHaveURL(/shelves\?shelf=smart-path$/);
+  await expect(page.getByText('螺丝人', { exact: true })).toBeVisible();
+});

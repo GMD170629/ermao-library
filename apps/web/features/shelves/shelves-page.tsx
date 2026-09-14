@@ -50,6 +50,21 @@ type BooksPayload = {
 const emptyForm = { name: '', description: '' };
 const emptySmartFilterRules: LibrarySmartFilterRules = { combinator: 'ALL', conditions: [] };
 
+function editableShelfRules(rules: ShelfView['rules']): LibrarySmartFilterRules {
+  return {
+    combinator: rules?.combinator === 'ANY' ? 'ANY' : 'ALL',
+    conditions: [
+      ...(rules?.conditions ?? []).map((condition, index) => ({
+        ...condition, id: `shelf-rule-${index}`
+      })),
+      ...(rules?.publishers ?? []).map((publisher, index) => ({
+        id: `shelf-legacy-publisher-${index}`,
+        field: 'publisher', operator: 'equals', value: publisher
+      }))
+    ]
+  };
+}
+
 async function readPayload<T extends { ok: boolean; error?: { message: string } }>(response: Response, fallback: string): Promise<T> {
   const payload = (await response.json().catch(() => null)) as T | null;
   if (!response.ok || !payload?.ok) throw new Error(payload?.error?.message ?? fallback);
@@ -101,7 +116,10 @@ export function ShelvesPage() {
   const activeKind = activeIsNew ? draftKind : activeShelf?.kind ?? 'STATIC';
   const activeIsSmart = activeKind === 'SMART';
   const activeIsCollection = activeKind === 'COLLECTION';
-  const smartRuleSummaries = useMemo(() => summarizeSmartShelfRules(activeShelf?.rules), [activeShelf?.rules]);
+  const smartRuleSummaries = useMemo(() => summarizeSmartShelfRules(
+    activeShelf?.rules ? { ...activeShelf.rules, conditions: [], publishers: [] } : undefined,
+    i18nAttribute
+  ), [activeShelf?.rules, i18nAttribute]);
   const applicableRules = useMemo(
     () => applicableSmartFilterRules(smartFilterRules),
     [smartFilterRules]
@@ -177,7 +195,7 @@ export function ShelvesPage() {
   }, [activeId, activeIsCollection, activeIsSmart, editing, search]);
 
   useEffect(() => {
-    if (!activeIsNew || !activeIsSmart || filterSchemaLoaded) return;
+    if (!editing || !activeIsSmart || filterSchemaLoaded) return;
     const controller = new AbortController();
     setFilterSchemaLoading(true);
     setFilterSchemaError('');
@@ -194,7 +212,7 @@ export function ShelvesPage() {
         if (!controller.signal.aborted) setFilterSchemaLoading(false);
       });
     return () => controller.abort();
-  }, [activeIsNew, activeIsSmart, filterSchemaLoaded, i18nAttribute]);
+  }, [editing, activeIsSmart, filterSchemaLoaded, i18nAttribute]);
 
   useEffect(() => {
     if (!activeIsNew || !activeIsSmart) {
@@ -280,10 +298,12 @@ export function ShelvesPage() {
         || selectedBookIds.length
         || selectedMemberShelfIds.length
         || selectedCollectionIds.length
+        || smartFilterRules.conditions.length
       )
     : activeShelf ? (
       form.name.trim() !== activeShelf.name
       || form.description.trim() !== (activeShelf.description ?? '')
+      || (activeIsSmart && JSON.stringify(serializableSmartFilterRules(smartFilterRules)) !== JSON.stringify(serializableSmartFilterRules(editableShelfRules(activeShelf.rules))))
       || (activeIsCollection
         ? selectedMemberShelfIds.join('\u0000') !== initialMemberShelfIds.join('\u0000')
         : selectedCollectionIds.join('\u0000') !== initialCollectionIds.join('\u0000')
@@ -354,23 +374,7 @@ export function ShelvesPage() {
       if (!append) {
         setForm({ name: shelf.name, description: shelf.description ?? '' });
         setDraftKind(shelf.kind ?? 'STATIC');
-        setSmartFilterRules({
-          combinator: shelf.rules?.combinator === 'ANY' ? 'ANY' : 'ALL',
-          conditions: [
-            ...(shelf.rules?.conditions ?? []).map((condition, index) => ({
-              id: `shelf-rule-${index}`,
-              field: condition.field,
-              operator: condition.operator,
-              value: condition.value
-            })),
-            ...(shelf.rules?.publishers ?? []).map((publisher, index) => ({
-              id: `shelf-legacy-publisher-${index}`,
-              field: 'publisher',
-              operator: 'equals',
-              value: publisher
-            }))
-          ]
-        });
+        setSmartFilterRules(editableShelfRules(shelf.rules));
         setSelectedBookIds(shelf.bookIds ?? (shelf.books ?? []).map((book) => book.id));
         setSelectedMemberShelfIds(shelf.memberShelfIds ?? (shelf.shelves ?? []).map((member) => member.id));
         setSelectedCollectionIds(shelf.collectionIds ?? []);
@@ -412,7 +416,7 @@ export function ShelvesPage() {
         description: activeIsCollection
           ? '合集名称、描述和成员调整都不会保留。'
           : activeIsSmart
-            ? '书架名称、描述和合集归属的更改不会保留。'
+            ? '书架名称、描述、筛选条件和合集归属的更改不会保留。'
             : '书架名称、描述、图书和合集归属调整都不会保留。',
         confirmLabel: '放弃更改',
         tone: 'danger'
@@ -448,7 +452,17 @@ export function ShelvesPage() {
           : {
               collectionIds: selectedCollectionIds,
               ...(activeIsSmart
-                ? { rules: serializableSmartFilterRules(applicableRules), pinned: true }
+                ? {
+                    rules: {
+                      search: activeShelf?.rules?.search,
+                      statuses: activeShelf?.rules?.statuses,
+                      tags: activeShelf?.rules?.tags,
+                      authors: activeShelf?.rules?.authors,
+                      includedBookIds: activeShelf?.rules?.includedBookIds,
+                      ...serializableSmartFilterRules(applicableRules)
+                    },
+                    ...(activeIsNew ? { pinned: true } : {})
+                  }
                 : !activeIsSmart
                   ? { bookIds: selectedBookIds }
                   : {})
@@ -575,7 +589,7 @@ export function ShelvesPage() {
                   : activeIsCollection
                     ? i18nAttribute("选择要包含的书架，合集本身不能包含图书。")
                   : activeIsSmart
-                    ? i18nAttribute("可以修改基本信息并查看自动收录条件；图书由规则自动管理。")
+                    ? i18nAttribute("可以修改基本信息和自动收录条件；图书由规则自动管理。")
                     : i18nAttribute("勾选或移除图书后，点击“{value0}”统一生效。", { value0: activeIsNew ? '创建书架' : '保存更改' })}
               </div>
             </div>
@@ -729,33 +743,24 @@ export function ShelvesPage() {
                       onChange={setSmartFilterRules}
                     />
                   )}
+                  {smartRuleSummaries.length > 0 ? (
+                    <div className="mt-3 text-sm text-[#746E68]">
+                      <I18nText>基础条件需全部满足</I18nText>
+                      <dl className="mt-2 space-y-1">
+                        {smartRuleSummaries.map((rule, index) => (
+                          <div key={`${rule.label}-${index}`}>
+                            <dt className="inline">{rule.label}{' · '}</dt>
+                            <dd className="inline" data-i18n-skip>{rule.value}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    </div>
+                  ) : null}
                   {incompleteSmartFilterCount > 0 ? (
                     <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800" role="status">
                       {i18nAttribute("还有 {value0} 条条件没有填写完整，请补全后再创建。", { value0: incompleteSmartFilterCount })}
                     </div>
                   ) : null}
-                </div>
-              ) : activeIsSmart ? (
-                <div>
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                    <div>
-                      <div className="text-sm font-semibold text-[#2A2825]"><I18nText>自动加入条件</I18nText></div>
-                      <div className="mt-1 text-xs leading-5 text-[#8A837D]"><I18nText>基础条件需全部满足</I18nText>{activeShelf?.rules?.conditions?.length ? i18nAttribute("，组合条件{value0}", { value0: activeShelf.rules.combinator === 'ANY' ? '满足任一条即可' : '需全部满足' }) : ''}<I18nText>。图书不能手动加入或移出。</I18nText></div>
-                    </div>
-                    <Badge tone="amber"><I18nText>智能书架</I18nText></Badge>
-                  </div>
-                  {smartRuleSummaries.length > 0 ? (
-                    <dl className="mt-3 grid gap-2 sm:grid-cols-2">
-                      {smartRuleSummaries.map((rule, index) => (
-                        <div key={`${rule.label}-${index}`} className="rounded-2xl border border-[#E8E0D9] bg-[#FAF8F6] px-4 py-3">
-                          <dt className="text-xs font-medium text-[#8D857E]">{rule.label}</dt>
-                          <dd className="mt-1 text-sm font-medium text-[#403C38]">{rule.value}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  ) : (
-                    <div className="mt-3 rounded-2xl border border-dashed border-[#DCD5CE] bg-[#FAF8F6] px-4 py-5 text-sm text-[#746E68]"><I18nText>没有额外筛选条件，将自动收录全部可见图书。</I18nText></div>
-                  )}
                 </div>
               ) : <div>
                 <div className="mb-3 flex items-center justify-between">

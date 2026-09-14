@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.bootstrap.media import build_cover_url_resolver
 from app.bootstrap.reader import reader_v5_library_queries
 from app.core.config import Settings
-from app.models import LibraryBook, MetadataLookupTask
+from app.models import MetadataLookupTask
 from app.models.auth import User
 from app.modules.library.application.asset_commands import DeleteResourceAsset
 from app.modules.library.application.book_commands import UpdateBook
@@ -40,6 +40,7 @@ from app.modules.library.application.management_commands import (
     UndoLibraryOperation,
 )
 from app.modules.library.application.queries import (
+    GetSmartShelfBookIds,
     SmartShelfCriteria,
 )
 from app.modules.library.application.recognized_metadata import (
@@ -107,6 +108,7 @@ from app.modules.library.infrastructure.legacy_views import (
 from app.modules.library.infrastructure.operation_management import (
     SqlAlchemyLibraryOperationManagement,
 )
+from app.modules.library.infrastructure.queries import SqlAlchemyLibraryQueries
 from app.modules.library.infrastructure.recognized_metadata import (
     FilesystemRecognizedCoverPublication,
     SafeRemoteCoverDownloader,
@@ -201,28 +203,9 @@ def smart_shelf_book_ids(
     *,
     user_id: str | None = None,
 ) -> list[str]:
-    criteria = SmartShelfCriteria.from_external(rules)
-    statement = select(LibraryBook.id)
-    if criteria.search:
-        from app.models import LibraryBookMetadata
-
-        term = f"%{criteria.search}%"
-        statement = statement.join(
-            LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id
-        ).where(
-            LibraryBookMetadata.title.ilike(term)
-            | LibraryBookMetadata.author.ilike(term)
-        )
-    if user_id:
-        from app.models import UserLibraryAccess
-
-        library_ids = select(UserLibraryAccess.library_id).where(
-            UserLibraryAccess.user_id == user_id
-        )
-        statement = statement.where(LibraryBook.library_id.in_(library_ids))
-    return [
-        str(book_id) for book_id in db.scalars(statement.order_by(LibraryBook.id)).all()
-    ]
+    return GetSmartShelfBookIds(
+        SqlAlchemyLibraryQueries(db, reader_queries=reader_v5_library_queries(db))
+    ).execute(SmartShelfCriteria.from_external(rules), user_id=user_id)
 
 
 def library_filter_schema(db: Session) -> GetLibraryFilterSchema:

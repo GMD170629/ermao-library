@@ -6,6 +6,7 @@ import hashlib
 import json
 from datetime import UTC, datetime
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -52,11 +53,12 @@ def _book(
     title: str,
     author: str | None,
     visibility_state: str = "VISIBLE",
+    library_id: str = "test-library",
 ) -> LibraryBook:
     path = f"{book_id}/"
     node = LibrarySourceNode(
         id=f"{book_id}-node",
-        library_id="test-library",
+        library_id=library_id,
         relative_path=path,
         path_key="v1:" + hashlib.sha256(path.encode()).hexdigest(),
         name=book_id,
@@ -67,7 +69,7 @@ def _book(
     )
     book = LibraryBook(
         id=book_id,
-        library_id="test-library",
+        library_id=library_id,
         source_node_id=node.id,
         visibility_state=visibility_state,
     )
@@ -413,6 +415,11 @@ def test_book_list_filters_by_the_three_supported_reading_states(
         assert [book["id"] for book in response.json()["data"]["books"]] == [
             expected_book_id
         ]
+        from app.bootstrap.library import smart_shelf_book_ids
+
+        assert smart_shelf_book_ids(
+            db_session, {"statuses": [status]}, user_id=user.id
+        ) == [expected_book_id]
 
 
 def test_catalog_facet_filter_uses_book_ids_and_stable_title_order(
@@ -453,6 +460,15 @@ def test_catalog_facet_filter_uses_book_ids_and_stable_title_order(
 
     assert result.total == 2
     assert [item.id for item in result.books] == ["book-a", "book-b"]
+    from app.bootstrap.library import smart_shelf_book_ids
+
+    assert set(
+        smart_shelf_book_ids(db_session, {"tags": ["Fiction"]}, user_id=user.id)
+    ) == {"book-a", "book-b"}
+    assert (
+        smart_shelf_book_ids(db_session, {"tags": ["Nonfiction"]}, user_id=user.id)
+        == []
+    )
 
 
 def test_catalog_filter_contract_rejects_only_one_facet_dimension(
@@ -486,3 +502,132 @@ def test_removed_identity_routes_are_not_filtering_aliases(client: TestClient) -
     assert client.get("/api/works").status_code == 404
     assert client.get("/api/versions").status_code == 404
     assert client.get("/api/volumes").status_code == 404
+
+
+@pytest.mark.parametrize(
+    "combinator,field,value,expected",
+    [
+        ("ALL", "sourcePath", "岛田庄司", {"岛田庄司-a", "岛田庄司-b"}),
+        ("ALL", "title", "螺丝人", {"岛田庄司-a"}),
+        ("ANY", "title", "螺丝人", {"岛田庄司-a", "other"}),
+    ],
+)
+def test_smart_shelf_matches_library_filters_and_pagination(
+    client: TestClient,
+    db_session: Session,
+    combinator: str,
+    field: str,
+    value: str,
+    expected: set[str],
+) -> None:
+    _login(client, db_session)
+    for book_id, title in (
+        ("岛田庄司-a", "螺丝人"),
+        ("岛田庄司-b", "斜屋犯罪"),
+        ("other", "其他作品"),
+        ("hidden", "螺丝人"),
+    ):
+        _book(
+            db_session,
+            book_id=book_id,
+            title=title,
+            author="Author",
+            visibility_state="HIDDEN" if book_id == "hidden" else "VISIBLE",
+        )
+        _ready_resource(db_session, book_id=book_id, resource_id=f"{book_id}-pdf")
+    db_session.commit()
+    conditions = [{"field": field, "operator": "contains", "value": value}]
+    if combinator == "ANY":
+        conditions.append({"field": "title", "operator": "equals", "value": "其他作品"})
+    rules = {"combinator": combinator, "conditions": conditions}
+    preview = client.get(
+        "/api/books", params={"filters": json.dumps(rules), "view": "search"}
+    )
+    assert preview.status_code == 200, preview.text
+    assert {book["id"] for book in preview.json()["data"]["books"]} == expected
+    created = client.post(
+        "/api/shelves", json={"name": "岛田庄司作品集", "kind": "SMART", "rules": rules}
+    )
+    assert created.status_code in (200, 201), created.text
+    shelf = created.json()["data"]["shelf"]
+    assert shelf["bookCount"] == len(expected)
+    assert set(shelf["bookIds"]) == expected
+    summaries = client.get("/api/shelves").json()["data"]["shelves"]
+    summary = next(item for item in summaries if item["id"] == shelf["id"])
+    assert summary["bookCount"] == len(expected)
+    seen = []
+    for page in range(1, len(expected) + 1):
+        detail = client.get(
+            f"/api/shelves/{shelf['id']}",
+            params={"page": page, "pageSize": 1, "includeBookIds": False},
+        )
+        assert detail.status_code == 200, detail.text
+        payload = detail.json()["data"]["shelf"]
+        assert payload["bookCount"] == payload["total"] == len(expected)
+        assert payload["totalPages"] == len(expected)
+        assert len(payload["books"]) == 1
+        seen.extend(book["id"] for book in payload["books"])
+    assert len(seen) == len(set(seen)) and set(seen) == expected
+
+
+def test_smart_shelf_admin_scope_and_member_authorization(db_session: Session) -> None:
+    from app.bootstrap.library import smart_shelf_book_ids
+    from app.models.auth import UserLibraryAccess
+    from app.models.library import Library
+
+    admin = User(
+        id="scope-admin",
+        email="scope-admin@example.com",
+        name="Admin",
+        password_hash="unused",
+        role="admin",
+    )
+    member = User(
+        id="scope-member",
+        email="scope-member@example.com",
+        name="Member",
+        password_hash="unused",
+        role="member",
+    )
+    db_session.add_all([admin, member])
+    db_session.add(
+        Library(
+            id="other-library",
+            name="Other library",
+            root_path="/other-library",
+            organization_mode="FLAT",
+        )
+    )
+    db_session.flush()
+    _book(
+        db_session,
+        book_id="other-visible",
+        title="Other",
+        author="Other",
+        library_id="other-library",
+    )
+    _book(db_session, book_id="visible", title="Visible", author="Author")
+    _book(
+        db_session,
+        book_id="hidden",
+        title="Hidden",
+        author="Author",
+        visibility_state="HIDDEN",
+    )
+    db_session.commit()
+    assert set(smart_shelf_book_ids(db_session, {}, user_id=admin.id)) == {
+        "visible",
+        "other-visible",
+    }
+    assert smart_shelf_book_ids(db_session, {}, user_id=member.id) == []
+    assert smart_shelf_book_ids(db_session, {}, user_id="nonexistent") == []
+    db_session.add(UserLibraryAccess(user_id=member.id, library_id="test-library"))
+    db_session.commit()
+    assert smart_shelf_book_ids(db_session, {}, user_id=member.id) == ["visible"]
+    assert (
+        smart_shelf_book_ids(db_session, {"authors": ["No match"]}, user_id=member.id)
+        == []
+    )
+    assert smart_shelf_book_ids(
+        db_session, {"search": "Visible", "authors": ["Author"]}, user_id=member.id
+    ) == ["visible"]
