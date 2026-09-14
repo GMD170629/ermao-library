@@ -1,12 +1,17 @@
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export function validateReleaseAssets(root, tag, remote) {
   if (!/^v\d+\.\d+\.\d+$/.test(tag)) throw Error('Invalid stable tag');
+  // Explicit owner-approved exception; all other stable versions still require APKs.
+  const serverOnly = tag === 'v1.0.3';
+  if (serverOnly && (existsSync(join(root, 'android')) || remote?.assets.some(asset => /\.(?:apk|ipa)(?:\.sha256)?$/.test(asset.name)))) {
+    throw Error('v1.0.3 must not contain mobile release assets');
+  }
   const expected = [
-    ['android', `ermao-library-${tag}-android.apk`],
+    ...(!serverOnly ? [['android', `ermao-library-${tag}-android.apk`]] : []),
     ['fnos', `ermao-books-${tag.slice(1)}-all.fpk`],
   ];
   for (const [directory, name] of expected) {
@@ -34,5 +39,5 @@ export function validateReleaseAssets(root, tag, remote) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   validateReleaseAssets(process.argv[2], process.argv[3], process.argv[4] ? JSON.parse(readFileSync(process.argv[4], 'utf8')) : undefined);
-  console.log('Complete APK and FPK release bundle verified.');
+  console.log('Complete release bundle verified.');
 }

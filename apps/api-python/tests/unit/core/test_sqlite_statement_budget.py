@@ -28,12 +28,23 @@ def _budget_table(engine: sa.Engine) -> sa.Table:
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("value", sa.Integer(), nullable=False),
     )
-    metadata.create_all(engine)
-    with engine.begin() as connection:
-        connection.execute(
-            sa.insert(table),
-            [{"id": index, "value": index} for index in range(200)],
-        )
+    # The tiny budgets exercise statements below, not filesystem latency while
+    # creating the fixture. CI disk stalls must not fail before the tested query.
+    assert engine.url.database is not None
+    setup_engine = create_sqlite_engine(
+        Path(engine.url.database),
+        statement_time_budget_seconds=None,
+        slow_write_threshold_seconds=None,
+    )
+    try:
+        metadata.create_all(setup_engine)
+        with setup_engine.begin() as connection:
+            connection.execute(
+                sa.insert(table),
+                [{"id": index, "value": index} for index in range(200)],
+            )
+    finally:
+        setup_engine.dispose()
     return table
 
 

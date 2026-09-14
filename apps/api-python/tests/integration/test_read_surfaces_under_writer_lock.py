@@ -173,14 +173,22 @@ def test_get_surfaces_remain_read_only_while_writer_slot_is_held(
                 .values(value="writer owns SQLite slot")
             )
 
+            paths = (
+                "/api/auth/me",
+                "/api/libraries",
+                "/api/books",
+                "/api/reader/v5/resources/writer-lock-resource/bootstrap",
+            )
             with StatementRecorder(reader_engine) as recorder:
+                # Warm route/serializer caches under the same held writer lock.
+                # Cold requests must also succeed without DML; only the latency
+                # measurement excludes unrelated one-time initialization.
+                for path in paths:
+                    response = client.get(path)
+                    assert response.status_code == 200, (path, response.text)
+                assert recorder.dml_count == 0
                 recorder.reset_after_warmup()
-                for path in (
-                    "/api/auth/me",
-                    "/api/libraries",
-                    "/api/books",
-                    "/api/reader/v5/resources/writer-lock-resource/bootstrap",
-                ):
+                for path in paths:
                     started_at = monotonic()
                     response = client.get(path)
                     elapsed = monotonic() - started_at
