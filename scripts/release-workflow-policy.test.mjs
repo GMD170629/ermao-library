@@ -33,15 +33,16 @@ test('Draft Release publication and release-feed updates have a strict order', (
 });
 
 test('stable releases wait for mobile checks and publish both packages before image promotion', () => {
-  const packageJob = releaseWorkflow.split('\n  package:')[1];
+  const packageJob = releaseWorkflow.split('\n  package:')[1].split('\n  publish:')[0];
+  const publishJob = releaseWorkflow.split('\n  publish:')[1];
   assert.match(packageJob, /needs: \[validate, mobile-release\]/);
   assert.match(releaseWorkflow, /uses: \.\/\.github\/workflows\/mobile.yml/);
   assert.match(releaseWorkflow, /run_full_android_regression: false/);
   assert.match(packageJob, /sign-android-apk.sh unsigned-android dist\/android stable/);
-  assert.match(packageJob, /gh release upload[^\n]*dist\/fnos\/\*\.fpk[^\n]*dist\/android\/\*\.apk/);
-  const verify = packageJob.indexOf('"$RUNNER_TEMP/release-assets.json"\n');
-  const promote = packageJob.indexOf('Promote verified release Docker image');
-  const publish = packageJob.indexOf('Verify and publish strict bilingual Release');
+  assert.match(publishJob, /gh release upload[^\n]*dist\/fnos\/\*\.fpk[^\n]*dist\/android\/\*\.apk/);
+  const verify = publishJob.indexOf('"$RUNNER_TEMP/release-assets.json"\n');
+  const promote = publishJob.indexOf('Promote verified release Docker image');
+  const publish = publishJob.indexOf('Verify and publish strict bilingual Release');
   assert.ok(verify > 0 && verify < promote && promote < publish);
 });
 
@@ -81,18 +82,40 @@ test('develop pushes publish only the isolated develop image channel', () => {
   assert.doesNotMatch(developJob, /shuku-starship-web:(?:prod|latest)/u);
   assert.match(
     releaseWorkflow,
-    /name: Build fnOS FPK\s+if: [^\n]*github\.ref != 'refs\/heads\/develop'/u
+    /name: Build fnOS FPK\s+if: [^\n]*github\.ref_type == 'tag'/u
   );
 });
 
 test('v1.0.3 skips mobile builds and signing without bypassing server validation', () => {
   const mobileJob = releaseWorkflow.split('\n  mobile-release:')[1].split('\n  package:')[0];
-  const packageJob = releaseWorkflow.split('\n  package:')[1];
-  assert.match(mobileJob, /if: needs.validate.outputs.app_version != '1\.0\.3'/);
+  const packageJob = releaseWorkflow.split('\n  package:')[1].split('\n  publish:')[0];
+  const publishJob = releaseWorkflow.split('\n  publish:')[1];
+  assert.match(mobileJob, /if: github.ref_type == 'tag' && needs.validate.outputs.app_version != '1\.0\.3'/);
   assert.match(packageJob, /if: always\(\) && needs.validate.result == 'success'/);
   assert.match(packageJob, /needs.mobile-release.result == 'success' \|\| \(needs.validate.outputs.app_version == '1\.0\.3' && needs.mobile-release.result == 'skipped'\)/);
   for (const name of ['Download checked stable Android APK', 'Set up JDK for stable signing', 'Set up Android SDK for stable signing', 'Install signing tools', 'Sign and verify stable Android APK']) {
     assert.ok(packageJob.includes(`- name: ${name}\n        if: needs.validate.outputs.app_version != '1.0.3'`));
   }
-  assert.match(packageJob, /if \[\[ "\$RELEASE_TAG" == 'v1\.0\.3' \]\]; then\n\s+gh release upload "\$RELEASE_TAG" dist\/fnos\/\*\.fpk dist\/fnos\/\*\.sha256 --clobber/);
+  assert.match(publishJob, /if \[\[ "\$RELEASE_TAG" == 'v1\.0\.3' \]\]; then\n\s+gh release upload "\$RELEASE_TAG" dist\/fnos\/\*\.fpk dist\/fnos\/\*\.sha256 --clobber/);
+});
+
+
+test('approval publishes the exact build artifact and image digest without rebuilding', () => {
+  const packageJob = releaseWorkflow.split('\n  package:')[1].split('\n  publish:')[0];
+  const publishJob = releaseWorkflow.split('\n  publish:')[1];
+  assert.match(packageJob, /bundle_id: \$\{\{ steps.bundle.outputs.artifact-id \}\}/);
+  assert.match(packageJob, /image_digest: \$\{\{ steps.release_image.outputs.digest \}\}/);
+  assert.match(packageJob, /value=release-\$\{\{ github.sha \}\}-\$\{\{ github.run_id \}\}-\$\{\{ github.run_attempt \}\}/);
+  assert.doesNotMatch(packageJob, /gh release (create|upload|edit)|imagetools create/);
+  assert.match(publishJob, /needs: \[validate, package\]/);
+  assert.match(publishJob, /!cancelled\(\) && needs.validate.result == 'success' && needs.package.result == 'success'/);
+  assert.match(publishJob, /environment:[\s\S]*'stable-release'/);
+  assert.match(publishJob, /artifact-ids: \$\{\{ needs.package.outputs.bundle_id \}\}/);
+  assert.match(publishJob, /merge-multiple: true/);
+  assert.match(publishJob, /IMAGE_DIGEST: \$\{\{ needs.package.outputs.image_digest \}\}/);
+  assert.match(publishJob, /shuku-starship-web@\$IMAGE_DIGEST/);
+  assert.doesNotMatch(publishJob, /build-push-action|sign-android-apk|sdkmanager|pytest|pnpm|build-fnos-package/);
+  assert.ok(publishJob.indexOf('Verify downloaded release bundle') < publishJob.indexOf('gh release upload'));
+  assert.match(releaseWorkflow, /node scripts\/validate-release-source.mjs/);
+  assert.match(releaseWorkflow, /cancel-in-progress: false/);
 });

@@ -35,6 +35,8 @@ on:
       - 'scripts/build-fnos-package.sh'
       - 'scripts/sign-android-apk.sh'
       - 'scripts/validate-release-assets*'
+      - 'scripts/validate-release-source*'
+      - 'scripts/release-workflow-policy.test.mjs'
       - 'scripts/test_fnos_installation.py'
       - 'scripts/publish-docker-hub.sh'
       - 'scripts/start-unified-app.sh'
@@ -50,6 +52,11 @@ on:
     tags:
       - 'v*.*.*'
   workflow_dispatch:
+
+# A release waiting for device acceptance must not be replaced by another release.
+concurrency:
+  group: fnos-${{ github.ref_type == 'tag' && 'stable-release' || github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -72,8 +79,13 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
+      - name: Validate release entry point and synchronized source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/validate-release-source.mjs
+
       - name: Test strict bilingual release-note validation
-        run: node --test scripts/validate-release-notes.test.mjs scripts/validate-release-assets.test.mjs scripts/release-workflow-policy.test.mjs
+        run: node --test scripts/validate-release-notes.test.mjs scripts/validate-release-assets.test.mjs scripts/release-workflow-policy.test.mjs scripts/validate-release-source.test.mjs
 
       - name: Validate application version and bilingual release notes
         id: version
@@ -229,7 +241,7 @@ jobs:
 
   mobile-release:
     # v1.0.3 is an explicitly requested server-only release; other tags retain mobile gates.
-    if: needs.validate.outputs.app_version != '1.0.3' && (github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/prod' && github.ref != 'refs/heads/develop'))
+    if: github.ref_type == 'tag' && needs.validate.outputs.app_version != '1.0.3'
     needs: validate
     permissions:
       contents: write
@@ -242,8 +254,11 @@ jobs:
 
   package:
     name: Build fnOS FPK
-    if: always() && needs.validate.result == 'success' && (needs.mobile-release.result == 'success' || (needs.validate.outputs.app_version == '1.0.3' && needs.mobile-release.result == 'skipped')) && github.event_name != 'pull_request' && github.ref != 'refs/heads/prod' && github.ref != 'refs/heads/develop'
+    if: always() && needs.validate.result == 'success' && (needs.mobile-release.result == 'success' || (needs.validate.outputs.app_version == '1.0.3' && needs.mobile-release.result == 'skipped')) && github.ref_type == 'tag'
     needs: [validate, mobile-release]
+    outputs:
+      image_digest: ${{ steps.release_image.outputs.digest }}
+      bundle_id: ${{ steps.bundle.outputs.artifact-id }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -263,39 +278,6 @@ jobs:
           else
             node scripts/validate-release-notes.mjs
           fi
-
-      - name: Prepare strict bilingual Draft Release
-        if: github.ref_type == 'tag'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
-          RELEASE_NOTES_PATH: ${{ steps.version.outputs.release_notes_path }}
-        shell: bash
-        run: |
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            is_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)"
-            if [[ "$is_draft" == 'true' ]]; then
-              gh release edit "$RELEASE_TAG" --title "$RELEASE_TAG" --notes-file "$RELEASE_NOTES_PATH"
-            fi
-          else
-            gh release create "$RELEASE_TAG" \
-              --draft \
-              --target "$GITHUB_SHA" \
-              --title "$RELEASE_TAG" \
-              --notes-file "$RELEASE_NOTES_PATH"
-          fi
-          remote_body="$RUNNER_TEMP/prepared-release-body.md"
-          gh release view "$RELEASE_TAG" --json body --jq .body > "$remote_body"
-          node - "$RELEASE_NOTES_PATH" "$remote_body" <<'NODE'
-          const fs = require('node:fs');
-                const normalize = (value) => value.replace(/\r\n/g, '\n').replace(/\n*$/, '\n');
-          const expected = normalize(fs.readFileSync(process.argv[2], 'utf8'));
-          const actual = normalize(fs.readFileSync(process.argv[3], 'utf8'));
-          if (expected !== actual) {
-            console.error('Published GitHub Release body differs from the authoritative bilingual release note.');
-            process.exit(1);
-          }
-          NODE
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -365,9 +347,10 @@ jobs:
           images: gamersgu/shuku-starship-web
           flavor: latest=false
           tags: |
-            type=raw,value=${{ steps.version.outputs.app_version }}
+            type=raw,value=release-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Build and push release Docker image
+        id: release_image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -405,13 +388,85 @@ jobs:
         run: node scripts/validate-release-assets.mjs dist '${{ steps.version.outputs.release_tag }}'
 
       - name: Upload complete release bundle artifact
+        id: bundle
         uses: actions/upload-artifact@v4
         with:
-          name: ermao-library-${{ steps.version.outputs.app_version }}-bundle
+          name: ermao-library-${{ steps.version.outputs.app_version }}-${{ github.run_id }}-${{ github.run_attempt }}-bundle
           path: |
             dist/fnos/*
             dist/android/*
           if-no-files-found: error
+
+  publish:
+    name: Publish verified release artifacts
+    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.package.result == 'success' && github.ref_type == 'tag' }}
+    needs: [validate, package]
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.validate.outputs.app_version == '1.0.3' && 'stable-release-server' || 'stable-release' }}
+      url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out the exact release source
+        uses: actions/checkout@v6
+
+      - name: Read and verify release version
+        id: version
+        run: node scripts/validate-release-notes.mjs --tag "${GITHUB_REF_NAME}"
+
+      - name: Download the verified bundle from this build
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.package.outputs.bundle_id }}
+          merge-multiple: true
+          path: dist
+
+      - name: Verify downloaded release bundle
+        run: node scripts/validate-release-assets.mjs dist '${{ steps.version.outputs.release_tag }}'
+
+      - name: Set up Docker Buildx for digest promotion
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Prepare strict bilingual Draft Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+          RELEASE_NOTES_PATH: ${{ steps.version.outputs.release_notes_path }}
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            is_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)"
+            if [[ "$is_draft" == 'true' ]]; then
+              gh release edit "$RELEASE_TAG" --title "$RELEASE_TAG" --notes-file "$RELEASE_NOTES_PATH"
+            fi
+          else
+            gh release create "$RELEASE_TAG" \
+              --draft \
+              --target "$GITHUB_SHA" \
+              --title "$RELEASE_TAG" \
+              --notes-file "$RELEASE_NOTES_PATH"
+          fi
+          remote_body="$RUNNER_TEMP/prepared-release-body.md"
+          gh release view "$RELEASE_TAG" --json body --jq .body > "$remote_body"
+          node - "$RELEASE_NOTES_PATH" "$remote_body" <<'NODE'
+          const fs = require('node:fs');
+                const normalize = (value) => value.replace(/\r\n/g, '\n').replace(/\n*$/, '\n');
+          const expected = normalize(fs.readFileSync(process.argv[2], 'utf8'));
+          const actual = normalize(fs.readFileSync(process.argv[3], 'utf8'));
+          if (expected !== actual) {
+            console.error('Published GitHub Release body differs from the authoritative bilingual release note.');
+            process.exit(1);
+          }
+          NODE
 
       - name: Upload complete APK and fnOS bundle to Draft Release
         if: github.ref_type == 'tag'
@@ -432,11 +487,14 @@ jobs:
         if: github.ref_type == 'tag'
         env:
           APP_VERSION: ${{ steps.version.outputs.app_version }}
+          IMAGE_DIGEST: ${{ needs.package.outputs.image_digest }}
         run: |
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Missing or invalid build digest' >&2; exit 1; }
           docker buildx imagetools create \
+            --tag "gamersgu/shuku-starship-web:$APP_VERSION" \
             --tag gamersgu/shuku-starship-web:prod \
             --tag gamersgu/shuku-starship-web:latest \
-            "gamersgu/shuku-starship-web:$APP_VERSION"
+            "gamersgu/shuku-starship-web@$IMAGE_DIGEST"
 
       - name: Verify and publish strict bilingual Release
         if: github.ref_type == 'tag'
