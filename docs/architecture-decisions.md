@@ -59,11 +59,12 @@
 对应 ADR 0009、0012、0014、0016、0025。
 
 - 第一方 EPUB/FB2/TXT/MOBI/AZW/AZW3/PRC 使用 DOWNLOAD_ORIGINAL：授权 asset 完整下载、验证身份／版本／长度并原子发布后，由本地 parser 打开。原件是唯一持久正文，不生成、缓存或下载派生 EPUB/ZIP、生成章节集或解包目录；TXT/FB2/MOBI 只提供内存 Publication。
-- Native `DownloadResourceRuntime` 唯一拥有完整下载、去重、续传、校验与登记；平台提供私有 staging、原子发布和清理，按授权／资源／asset／版本／长度隔离。Reader 观察或打开同一工件，不复制下载管线。Web 使用账号隔离的 Reader Cache Storage，不创建原生下载中心状态机。漫画／image_dir 用有界 manifest/page，音频走播放器、不隐式创建可重排下载。
+- Native `DownloadResourceRuntime` 唯一拥有完整下载、去重、续传、校验与登记；平台提供私有 staging、原子发布和清理，按授权／资源／asset／版本／长度隔离。Reader 观察或打开同一工件，不复制下载管线。Web 使用账号隔离的 Reader IndexedDB 原文件库，HTTP／HTTPS 共用；原件以至多 1 MiB 分块写入，校验完成后事务发布，取消／失败不发布。事务校验账号与授权代次，退出和权限变化使旧写入失效；不创建原生下载中心状态机。漫画／image_dir 用有界 manifest/page，音频走播放器、不隐式创建可重排下载。
 - 实际格式 parser/engine 决定可读性；服务器指纹、诊断版本、页数和百分比不成为第二道解析门槛。安全／引擎失败不触发旧解析器、修复或在线回退。进度、书签、设置尽力恢复，缺进度可从头；SDK 无法恢复 Locator 明确报 LOCATION_RESTORE_FAILED，不改写；进度持久化失败不阻止打开／关闭。
 - libmobi 公共入口是 `apps/mobile/native/mobi-core` 的 `ermao_mobi_*` ABI v1：不透明对象、串行访问、struct_size、定宽整数、UTF-8 调用方缓冲复制；稳定资源索引／名称／类型／长度及受 ERMAO_MOBI_MAX_READ_BYTES 限制的读取；目录身份用资源索引不用标题，返回稳定状态／警告。JNI、iOS wrapper、后端 adapter 可调用，UI／领域不可；后端使用前检查 ABI 版本。ABI 有界读取不等于上游流式解析，PDB/RAWML 仍受 parser 内存预算限制；分发须核对许可和实际平台证据。
 - 服务端 `NormalizedPublication.toc` 仅用于详情章节投影。EnsurePublicationNavigation 解析当前已授权验证 asset，原子写导航行和按 assetId 的成功标记（含零章节）；变化／删除使缓存失效，其他 asset 不复用。失败与空目录区分，不新增队列／轮询／锁／发布协议。Reader reading order、TOC、positions 来自本地原件，不依赖服务端投影；漫画／音频索引保持格式语义，章节共用[章节核心](mobile-reader-architecture.md#统一章节核心)。
-- 验证慢传输未完成不打开、完整缓存不重传、截断／取消不发布、缓存删除可重建、可重排不请求远程正文章节。
+- Web 原文件存储由 Cache Storage 替换为独立 IndexedDB（2026-09-14）；旧原文件不迁移，在 API 可用时精确清理旧 Reader 缓存，首次阅读重新下载。章节与 MOBI WASM 共用不依赖 WebCrypto 的 SHA-256 校验，HTTP 不跳过校验。
+- 验证慢传输未完成不打开、完整缓存不重传、截断／取消不发布、缓存删除可重建、可重排不请求远程正文章节；HTTP 使用真实非安全上下文，localhost 不作为该验证的替代。
 
 ## Reader 安全
 

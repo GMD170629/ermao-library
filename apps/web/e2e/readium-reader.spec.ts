@@ -1,12 +1,13 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
-import { TextReader, Uint8ArrayWriter, ZipWriter } from '@zip.js/zip.js';
+import { TextReader, Uint8ArrayReader, Uint8ArrayWriter, ZipWriter } from '@zip.js/zip.js';
 import type { Locator } from '@readium/shared';
 import { mkdirSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { resolve } from 'node:path';
 import { revealReaderControls, visibleReaderFrame as visibleReadiumFrame } from './reader-controls';
 
-test.beforeEach(async ({ context }) => {
-  await context.addCookies([{ name: 'shuku_session', value: 'readium-e2e-session', domain: '127.0.0.1', path: '/' }]);
+test.beforeEach(async ({ context, baseURL }) => {
+  await context.addCookies([{ name: 'shuku_session', value: 'readium-e2e-session', domain: new URL(baseURL ?? 'http://127.0.0.1:3100').hostname, path: '/' }]);
 });
 
 const chapterOne = `<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>第一章</title></head><body>
@@ -22,7 +23,7 @@ type EpubFixtureItem = Readonly<{ href: string; title: string; body: string }>;
 async function createEpub(items: readonly EpubFixtureItem[] = [
   { href: 'chapter1.xhtml', title: '第一章', body: chapterOne },
   { href: 'chapter2.xhtml', title: '第二章', body: chapterTwo }
-], language: string | null = 'zh-CN', includeToc = true): Promise<Uint8Array> {
+], language: string | null = 'zh-CN', includeToc = true, paddingBytes = 0): Promise<Uint8Array> {
   const writer = new ZipWriter(new Uint8ArrayWriter());
   await writer.add('mimetype', new TextReader('application/epub+zip'), { level: 0 });
   await writer.add('META-INF/container.xml', new TextReader('<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'));
@@ -31,6 +32,7 @@ async function createEpub(items: readonly EpubFixtureItem[] = [
   await writer.add('content.opf', new TextReader(`<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Readium E2E</dc:title>${language ? `<dc:language>${language}</dc:language>` : ''}</metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>${manifest}</manifest><spine>${spine}</spine></package>`));
   await writer.add('nav.xhtml', new TextReader(`<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>目录</title></head><body><nav epub:type="toc"><ol>${includeToc ? items.map((item) => `<li><a href="${item.href}">${item.title}</a></li>`).join('') : ''}</ol></nav></body></html>`));
   for (const item of items) await writer.add(item.href, new TextReader(item.body));
+  if (paddingBytes > 0) await writer.add('padding.bin', new Uint8ArrayReader(new Uint8Array(paddingBytes)), { level: 0 });
   return writer.close();
 }
 
@@ -230,10 +232,14 @@ test('captures the 411x914 Web mobile Reader parity states with a populated EPUB
   await capturePanel('阅读设置', '04-settings.png');
 });
 
-test('Readium opens a cached original EPUB without manifest, positions or chapter requests', async ({ page }) => {
+test('Readium opens a cached original EPUB without manifest, positions or chapter requests', async ({ page }, testInfo) => {
   const requests: string[] = [];
   page.on('request', (request) => requests.push(new URL(request.url()).pathname));
   const writes = await installReaderRoutes(page); await page.goto('/reader/epub-resource');
+  if (testInfo.project.name === 'http-chrome') {
+    expect(await page.evaluate(() => ({ secure: isSecureContext, caches: typeof caches, subtle: typeof crypto.subtle })))
+      .toEqual({ secure: false, caches: 'undefined', subtle: 'undefined' });
+  }
   const frame = await visibleReadiumFrame(page); await expect(frame.contentFrame().getByText('第一章 Readium 验收')).toBeVisible();
   await expect.poll(() => writes.length, { timeout: 10_000 }).toBeGreaterThan(0);
   expect((await emittedReadiumLocator(writes)).href).toBe('chapter1.xhtml');
@@ -712,4 +718,104 @@ test('Reader deletes a failed original transfer and retries it from zero', async
   await page.reload();
   await expect(page.getByText('原文件下载响应无效')).toBeVisible();
   expect(originalRequests).toHaveLength(2);
+});
+
+test('HTTP original download commits bounded chunks before EOF and a closed page restarts from zero', async ({ page, context, baseURL }) => {
+  const epub = await createEpub(undefined, 'zh-CN', true, 4 * 1024 * 1024);
+  const firstBytes = 2 * 1024 * 1024;
+  let transfers = 0;
+  const server = createServer((request, response) => {
+    response.setHeader('Access-Control-Allow-Origin', new URL(baseURL ?? 'http://127.0.0.1:3100').origin);
+    response.setHeader('Access-Control-Allow-Credentials', 'true');
+    response.setHeader('Access-Control-Allow-Headers', 'X-Asset-Version');
+    if (request.method === 'OPTIONS') { response.writeHead(204); response.end(); return; }
+    transfers += 1;
+    response.writeHead(200, {
+      'Content-Type': 'application/epub+zip', 'Content-Length': String(epub.byteLength),
+      'X-Asset-Version': `${epub.byteLength}:1234`
+    });
+    response.write(epub.subarray(0, firstBytes));
+    // Intentionally leave EOF pending until the page closes; this is a real streaming response.
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('STREAM_SERVER_ADDRESS_INVALID');
+  try {
+    await page.route('**/api/**', async (route) => {
+      if (new URL(route.request().url()).pathname === '/api/assets/epub-asset') {
+        return route.continue({ url: `http://127.0.0.1:${address.port}/original` });
+      }
+      return fulfillApi(route, null, 0, [], epub);
+    });
+    await page.goto('/reader/epub-resource');
+    // Wait for the application to create its schema; opening a missing DB would mutate the fixture.
+    await expect.poll(() => transfers).toBe(1);
+    await expect.poll(() => page.evaluate(async () => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const operation = indexedDB.open('shuku-reader-originals-v1');
+        operation.onsuccess = () => resolve(operation.result);
+        operation.onerror = () => reject(operation.error);
+      });
+      try {
+        return await new Promise<number>((resolve, reject) => {
+          if (!db.objectStoreNames.contains('chunks')) { resolve(0); return; }
+          const operation = db.transaction('chunks').objectStore('chunks').getAll();
+          operation.onerror = () => reject(operation.error);
+          operation.onsuccess = () => {
+            let total = 0;
+            for (const value of operation.result) {
+              if (!(value.blob instanceof Blob) || value.blob.size > 1024 * 1024) {
+                reject(new Error('CHUNK_NOT_BOUNDED')); return;
+              }
+              total += value.blob.size;
+            }
+            resolve(total);
+          };
+        });
+      } finally { db.close(); }
+    })).toBe(firstBytes);
+    await expect(page.locator('[data-reader-shell="v3"] iframe')).toHaveCount(0);
+    expect(transfers).toBe(1);
+    await page.close();
+    const reopened = await context.newPage();
+    let restarted = 0;
+    await reopened.route('**/api/**', async (route) => {
+      if (new URL(route.request().url()).pathname === '/api/assets/epub-asset') {
+        restarted += 1;
+        expect(route.request().headers().range).toBeUndefined();
+      }
+      return fulfillApi(route, null, 0, [], epub);
+    });
+    await reopened.goto('/reader/epub-resource');
+    let frame = await visibleReadiumFrame(reopened);
+    await expect(frame.contentFrame().getByText('第一章 Readium 验收')).toBeVisible();
+    expect(restarted).toBe(1);
+    await reopened.reload();
+    frame = await visibleReadiumFrame(reopened);
+    await expect(frame.contentFrame().getByText('第一章 Readium 验收')).toBeVisible();
+    expect(restarted).toBe(1);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test('HTTP original storage initialization recovers with the reader retry button', async ({ page }) => {
+  await page.addInitScript(() => {
+    Reflect.set(globalThis, 'failOriginalDatabase', true);
+    const open = indexedDB.open.bind(indexedDB);
+    Object.defineProperty(indexedDB, 'open', { value: (name: string, version?: number) => {
+      if (name === 'shuku-reader-originals-v1' && Reflect.get(globalThis, 'failOriginalDatabase')) {
+        throw new DOMException('Temporarily unavailable', 'InvalidStateError');
+      }
+      return version === undefined ? open(name) : open(name, version);
+    } });
+  });
+  await installReaderRoutes(page);
+  await page.goto('/reader/epub-resource');
+  await expect(page.locator('[data-reader-error-code]')).toHaveAttribute('data-reader-error-code', 'ORIGINAL_CACHE_IO');
+  await page.evaluate(() => Reflect.set(globalThis, 'failOriginalDatabase', false));
+  await page.getByRole('button', { name: '重试', exact: true }).click();
+  const frame = await visibleReadiumFrame(page);
+  await expect(frame.contentFrame().getByText('第一章 Readium 验收')).toBeVisible();
 });

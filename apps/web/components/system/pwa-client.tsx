@@ -15,6 +15,7 @@ import {
   resolveApplicationOnline
 } from '../../lib/pwa/network-availability';
 import { prepareForPwaUpdate } from '../../lib/pwa/update-coordination';
+import { clearOriginalPublicationData } from '../../features/reader/public';
 import { privateCacheNamespace } from '../../lib/pwa/private-cache-namespace';
 import { activateReaderUser, clearPrivateReaderData, deactivateReaderUser, getReaderRuntime, startReaderRuntime, stopReaderRuntime } from '../../lib/reader';
 import { withBasePath } from '../../lib/base-path';
@@ -72,7 +73,7 @@ export async function clearPrivatePwaStorage() {
   deactivateReaderUser();
   clearCurrentUserNamespace();
   const runtime = getReaderRuntime();
-  await Promise.all([clearPrivatePwaData(), clearPrivateReaderData(runtime.storage)]);
+  await Promise.all([clearPrivatePwaData(), clearPrivateReaderData(runtime.storage), clearOriginalPublicationData()]);
 }
 
 export function PwaClient() {

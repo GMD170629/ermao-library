@@ -258,10 +258,18 @@ metadata and content safety; they never validate progress Locator fields and are
 body-delivery fallback. Corruption, authentication and parser-limit errors remain
 distinct.
 
-Web stores complete originals in a dedicated Reader Cache Storage adapter keyed by
+Web stores complete originals in a dedicated Reader IndexedDB adapter, shared by HTTP
+and HTTPS, keyed by
 authorization namespace, resource, asset and `size:mtime` version. It has no persistent
 download task, pause or resume state. Cancellation aborts and deletes the incomplete
-entry; a later attempt starts at zero. Cold opening still requires fresh authorization
+artifact; a later attempt starts at zero. Each transfer persists at most 1 MiB per chunk
+and publishes its completion metadata in a transaction after full validation. Writes
+and publication check the database session epoch, so logout or authorization changes
+invalidate old transfers across tabs. Incomplete artifacts are never opened; session
+clearing removes them. Legacy Reader Cache Storage entries are removed where available
+without migration; the next open downloads again. Chapter and MOBI WASM SHA-256 checks
+share an HTTP-compatible implementation and remain mandatory.
+Cold opening still requires fresh authorization
 and Reader metadata. See ADR 0025.
 
 FB2 adapters retain mixed content, nested navigation, inline formatting,

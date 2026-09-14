@@ -24,7 +24,7 @@ const nextConfig = {
   distDir: process.env.NEXT_DIST_DIR || '.next',
   output: 'standalone',
   outputFileTracingRoot: path.join(__dirname, '../..'),
-  allowedDevOrigins: ['127.0.0.1', 'localhost', ...localIpv4Addresses],
+  allowedDevOrigins: ['127.0.0.1', 'localhost', 'reader-http.test', ...localIpv4Addresses],
   devIndicators: false,
   basePath,
   httpAgentOptions: {

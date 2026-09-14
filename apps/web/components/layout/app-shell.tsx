@@ -1,5 +1,8 @@
 'use client';
 
+import { activateOriginalPublicationUser } from '../../features/reader/public';
+import { emitReaderDebug } from '../../lib/reader/debug';
+
 import { authorDisplayLabel } from '@/types/book';
 
 import { AccountAvatar } from '../../features/account-avatar/public';
@@ -324,9 +327,14 @@ export function AppShell({ children }: { children: ReactNode }) {
             const previousNamespace = window.sessionStorage.getItem('shuku:session:authz-namespace');
             const nextNamespace = `${nextUser.id}:${nextVersion}`;
             if (previousNamespace && previousNamespace !== nextNamespace) {
-              void clearPrivatePwaStorage().catch(() => undefined);
+              await clearPrivatePwaStorage();
+              if (!active) return;
             }
             setCurrentUserNamespace(nextUser.id, nextVersion);
+            await activateOriginalPublicationUser(privateCacheNamespace(nextUser.id, nextVersion)).catch(() => {
+              emitReaderDebug('error', 'READER_ORIGINAL_STORAGE_ACTIVATION_FAILED');
+            });
+            if (!active) return;
             if (nextUser.locale === 'zh-CN' || nextUser.locale === 'en-US') {
               window.localStorage.setItem(userDevicePreferenceKey('shuku.locale', nextUser.id), nextUser.locale);
               setLocale(nextUser.locale);
