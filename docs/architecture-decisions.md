@@ -31,6 +31,7 @@
 - `RequestLibraryScan` 是唯一触发入口。监听只写内存缓冲，Worker 主循环入队；新建／移入按 5 秒静默窗合并，修改仅延后已有待处理新建，独立修改不触发。启用书库共用持久周期设置，启动、书库变化和监听重建做对账；监听故障不阻断 Worker，周期扫描补偿丢失事件。
 - 每库最多一个 QUEUED 和一个 RUNNING 扫描；运行时可排一个后续任务。自动触发用 PRESERVE，手动用 PRUNE_MISSING，合并只能升级为清理。只有相应目录完整正常遍历后才清理缺失节点。扫描不按触发类型批量重排失败任务，遇到兼容 Asset 时复用同一补建／重置规则；指定失败任务走 task-scoped ContinueImport。
 - 导入只读取文件属性、元数据、目录、指定封面、必要页码和有限编码样本。通用结构累计 8 MiB／文件，元数据文档 2 MiB，指定封面 20 MiB，编码样本 4 MiB + 3 字节；预算耗尽保留已知值，不作为出版物拒绝规则。禁止全文解码／正则、全页预检、全媒体包／块计数和失败后的全文件修复；分块、后台、限时均不构成例外。上传保存与实际阅读／播放不属于导入探测。
+- 图片目录与 PDF 无有效元数据封面时，允许仅将阅读页序第一张图片／PDF 物理第 1 页读取或渲染为封面；导入与显式封面重生成共用该回退，不跳到后续页、不进行全页扫描。渲染失败不使资源导入失败，不在封面 GET 时生成，不回填存量。
 - PDF 不做文本分类、损坏索引恢复或虚构页数；TXT 不查全文和尾部 NUL；FB2 到 description 结束；MOBI 按记录表取元数据／封面。ZIP/CBZ 只用中央目录登记页，不逐成员读本地头、预计算重叠或读普通页；RAR 不提取成员。音频导入不运行 ffprobe，无受限标签入口仍登记资产、未知信息为 null。实际请求成员时由 SDK 与 Reader 做结构／完整性检查，坏页保留位置。
 - READY 只表示可尝试打开，不是正文验证通过；缺失、访问错误和已确认安全违规仍失败。重导清除失效技术值与导航，不改人工描述性元数据，不要求批量重导历史资源。验证真实读取区间、累计字节、禁止正文访问，以及首次／重导／重试／取消／回滚，不以命名或编译代替证据。
 - 文件任务只写 Asset/Resource，所属文件任务和扫描终结后识别 Book；失败为终态不阻止本地识别，取消不触发收尾。本地必跑，联网按自动整理设置；文件状态与元数据状态独立，联网失败保留本地结果。
@@ -58,11 +59,12 @@
 对应 ADR 0009、0012、0014、0016、0025。
 
 - 第一方 EPUB/FB2/TXT/MOBI/AZW/AZW3/PRC 使用 DOWNLOAD_ORIGINAL：授权 asset 完整下载、验证身份／版本／长度并原子发布后，由本地 parser 打开。原件是唯一持久正文，不生成、缓存或下载派生 EPUB/ZIP、生成章节集或解包目录；TXT/FB2/MOBI 只提供内存 Publication。
-- Native `DownloadResourceRuntime` 唯一拥有完整下载、去重、续传、校验与登记；平台提供私有 staging、原子发布和清理，按授权／资源／asset／版本／长度隔离。Reader 观察或打开同一工件，不复制下载管线。Web 使用账号隔离的 Reader Cache Storage，不创建原生下载中心状态机。漫画／image_dir 用有界 manifest/page，音频走播放器、不隐式创建可重排下载。
+- Native `DownloadResourceRuntime` 唯一拥有完整下载、去重、续传、校验与登记；平台提供私有 staging、原子发布和清理，按授权／资源／asset／版本／长度隔离。Reader 观察或打开同一工件，不复制下载管线。Web 使用账号隔离的 Reader IndexedDB 原文件库，HTTP／HTTPS 共用；原件以至多 1 MiB 分块写入，校验完成后事务发布，取消／失败不发布。事务校验账号与授权代次，退出和权限变化使旧写入失效；不创建原生下载中心状态机。漫画／image_dir 用有界 manifest/page，音频走播放器、不隐式创建可重排下载。
 - 实际格式 parser/engine 决定可读性；服务器指纹、诊断版本、页数和百分比不成为第二道解析门槛。安全／引擎失败不触发旧解析器、修复或在线回退。进度、书签、设置尽力恢复，缺进度可从头；SDK 无法恢复 Locator 明确报 LOCATION_RESTORE_FAILED，不改写；进度持久化失败不阻止打开／关闭。
 - libmobi 公共入口是 `apps/mobile/native/mobi-core` 的 `ermao_mobi_*` ABI v1：不透明对象、串行访问、struct_size、定宽整数、UTF-8 调用方缓冲复制；稳定资源索引／名称／类型／长度及受 ERMAO_MOBI_MAX_READ_BYTES 限制的读取；目录身份用资源索引不用标题，返回稳定状态／警告。JNI、iOS wrapper、后端 adapter 可调用，UI／领域不可；后端使用前检查 ABI 版本。ABI 有界读取不等于上游流式解析，PDB/RAWML 仍受 parser 内存预算限制；分发须核对许可和实际平台证据。
 - 服务端 `NormalizedPublication.toc` 仅用于详情章节投影。EnsurePublicationNavigation 解析当前已授权验证 asset，原子写导航行和按 assetId 的成功标记（含零章节）；变化／删除使缓存失效，其他 asset 不复用。失败与空目录区分，不新增队列／轮询／锁／发布协议。Reader reading order、TOC、positions 来自本地原件，不依赖服务端投影；漫画／音频索引保持格式语义，章节共用[章节核心](mobile-reader-architecture.md#统一章节核心)。
-- 验证慢传输未完成不打开、完整缓存不重传、截断／取消不发布、缓存删除可重建、可重排不请求远程正文章节。
+- Web 原文件存储由 Cache Storage 替换为独立 IndexedDB（2026-09-14）；旧原文件不迁移，在 API 可用时精确清理旧 Reader 缓存，首次阅读重新下载。章节与 MOBI WASM 共用不依赖 WebCrypto 的 SHA-256 校验，HTTP 不跳过校验。
+- 验证慢传输未完成不打开、完整缓存不重传、截断／取消不发布、缓存删除可重建、可重排不请求远程正文章节；HTTP 使用真实非安全上下文，localhost 不作为该验证的替代。
 
 ## Reader 安全
 

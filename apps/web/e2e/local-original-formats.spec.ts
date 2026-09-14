@@ -18,11 +18,11 @@ const fixtures: readonly ReflowableFixture[] = [
   { format: 'prc', mimeType: 'application/x-mobipocket-ebook', path: 'test-data/library/mobi/12-basic.prc' }
 ];
 
-test.beforeEach(async ({ context }) => {
+test.beforeEach(async ({ context, baseURL }) => {
   await context.addCookies([{
     name: 'shuku_session',
     value: 'local-original-e2e',
-    domain: '127.0.0.1',
+    domain: new URL(baseURL ?? 'http://127.0.0.1:3100').hostname,
     path: '/'
   }]);
 });
@@ -192,11 +192,15 @@ async function visibleReaderFrame(page: Page) {
 }
 
 for (const fixture of fixtures) {
-  test(`${fixture.format.toUpperCase()} opens its original locally with TOC, positions and jumps`, async ({ page }) => {
+  test(`${fixture.format.toUpperCase()} opens its original locally with TOC, positions and jumps`, async ({ page }, testInfo) => {
     const bytes = await readFile(resolve(process.cwd(), '../..', fixture.path));
     const requests: string[] = [];
     await installFixtureRoutes(page, fixture, bytes, requests);
     await page.goto(`/reader/${fixture.format}-local-resource`);
+    if (testInfo.project.name === 'http-chrome') {
+      expect(await page.evaluate(() => ({ secure: isSecureContext, caches: typeof caches, subtle: typeof crypto.subtle })))
+        .toEqual({ secure: false, caches: 'undefined', subtle: 'undefined' });
+    }
     let frame = await visibleReaderFrame(page);
     await expect.poll(async () => frame.contentFrame().locator('body').innerText().then((text) => text.trim().length), {
       timeout: 30_000
@@ -220,6 +224,9 @@ for (const fixture of fixtures) {
     await progress.fill('67');
     await expect.poll(async () => Number(await progress.inputValue()), { timeout: 10_000 }).toBeGreaterThan(0);
 
+    await page.reload();
+    frame = await visibleReaderFrame(page);
+    await expect.poll(async () => frame.contentFrame().locator('body').innerText().then((text) => text.trim().length)).toBeGreaterThan(5);
     expect(requests.filter((path) => path === `/api/assets/${fixture.format}-local-asset`)).toHaveLength(1);
     expect(requests.filter((path) => /\/publication\/(?:manifest|positions|chapter)/.test(path))).toEqual([]);
   });
@@ -247,5 +254,25 @@ for (const invalid of [
     await expect(shell.locator('iframe')).toHaveCount(0);
     expect(requests.filter((path) => path === '/api/assets/mobi-local-asset')).toHaveLength(1);
     expect(requests.filter((path) => /\/publication\/(?:manifest|positions|chapter)/.test(path))).toEqual([]);
+  });
+}
+
+for (const format of ['txt', 'mobi'] as const) {
+  test(`${format.toUpperCase()} WASM digest mismatch fails closed in HTTP and secure contexts`, async ({ page }) => {
+    const fixture = fixtures.find((item) => item.format === format);
+    if (!fixture) throw new Error('FIXTURE_MISSING');
+    const bytes = await readFile(resolve(process.cwd(), '../..', fixture.path));
+    await installFixtureRoutes(page, fixture, bytes, []);
+    const core = format === 'txt' ? 'chapter-core' : 'mobi-core';
+    await page.route(`**/vendor/${core}/artifact-manifest.json`, async (route) => {
+      const manifest: unknown = JSON.parse(await readFile(resolve(process.cwd(), 'public/vendor', core, 'artifact-manifest.json'), 'utf8'));
+      if (!manifest || typeof manifest !== 'object') throw new Error('MANIFEST_INVALID');
+      await route.fulfill({ json: { ...manifest, wasmSha256: '0'.repeat(64) } });
+    });
+    await page.goto(`/reader/${format}-local-resource`);
+    const error = page.locator('[data-reader-error-code]');
+    await expect(error).toBeVisible();
+    await expect(error).toHaveAttribute('data-reader-error-code', /WASM/);
+    await expect(page.locator('[data-reader-shell="v3"] iframe')).toHaveCount(0);
   });
 }

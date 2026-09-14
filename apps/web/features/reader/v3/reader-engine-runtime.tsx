@@ -27,6 +27,7 @@ import {
   browserPublicationNamespace,
   type OriginalDownloadProgress
 } from './original-publication/browser-publication-store';
+import { originalPublicationStorage } from './original-publication/publication-storage-runtime';
 import { requestOriginalDownload } from './original-publication/api/client';
 
 type ReaderEngineRuntimeProps = {
@@ -194,6 +195,8 @@ export function ReaderEngineRuntime({
     let active = true;
     let created: ReaderAdapter | null = null;
     const controller = new AbortController();
+    const cancelPrivateLoad = () => { active = false; controller.abort(); };
+    window.addEventListener('shuku:private-data-clearing', cancelPrivateLoad);
     setAdapter(null);
     setAdapterLoadErrorCode('');
     container.replaceChildren();
@@ -222,7 +225,7 @@ export function ReaderEngineRuntime({
       if (bootstrap.readerType === 'reflowable') {
         const source = bootstrap.source;
         if (source.kind !== 'reflowable') throw new Error('READIUM_SOURCE_INVALID');
-        const store = new BrowserPublicationStore(window.caches, requestOriginalDownload);
+        const store = new BrowserPublicationStore(originalPublicationStorage, requestOriginalDownload);
         const original = await store.ensure({
           ...source.originalResource,
           namespace: browserPublicationNamespace(
@@ -290,6 +293,7 @@ export function ReaderEngineRuntime({
 
     return () => {
       active = false;
+      window.removeEventListener('shuku:private-data-clearing', cancelPrivateLoad);
       controller.abort();
       if (created) void created.dispose();
       container.replaceChildren();

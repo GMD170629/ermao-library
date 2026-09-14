@@ -642,6 +642,40 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         metadata.page_count = max(0, page_count) if page_count is not None else None
         self._session.flush()
 
+    def should_extract_first_page_cover(
+        self, *, resource_id: str, source_node_id: str
+    ) -> bool:
+        resource = self._session.get(LibraryReadableResource, resource_id)
+        metadata = self._session.get(LibraryReadableResourceMetadata, resource_id)
+        if resource is None or (
+            metadata is not None
+            and "cover_path" in protected_fields(metadata.protected_fields)
+        ):
+            return False
+        if resource.format == "PDF":
+            return True
+        if resource.format != "IMAGE_DIR":
+            return False
+        current = self._session.get(LibrarySourceNode, source_node_id)
+        if current is None:
+            return False
+        paths = self._session.scalars(
+            select(LibrarySourceNode.relative_path)
+            .join(
+                LibraryResourceAsset,
+                LibraryResourceAsset.source_node_id == LibrarySourceNode.id,
+            )
+            .where(
+                LibraryResourceAsset.resource_id == resource_id,
+                LibraryResourceAsset.role == "PAGE",
+                LibraryResourceAsset.import_state == "READY",
+            )
+        ).all()
+        return natural_sort_key(current.relative_path) <= min(
+            (natural_sort_key(path) for path in paths),
+            default=natural_sort_key(current.relative_path),
+        )
+
     def apply_local_metadata(
         self,
         *,
@@ -679,6 +713,10 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
                     LibraryResourceAsset.id,
                 )
             ).all()
+            if resource.format == "IMAGE_DIR":
+                assets.sort(
+                    key=lambda item: (natural_sort_key(item.sort_key or ""), item.id)
+                )
             grouped = merge_observations(
                 tuple(
                     candidate

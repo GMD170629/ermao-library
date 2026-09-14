@@ -1,3 +1,4 @@
+import { sha256Hex } from './sha256';
 /// <reference lib="webworker" />
 
 import { READER_SAFETY_BUDGETS, READER_SAFETY_RULE_IDS } from '@shuku/reader-core';
@@ -115,10 +116,6 @@ function copyString(functionName: string, prefix: readonly number[]): string | n
   }
 }
 
-async function sha256(bytes: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('');
-}
 
 async function loadRuntime(): Promise<RuntimeRecord> {
   if (runtimePromise) return runtimePromise;
@@ -132,7 +129,7 @@ async function loadRuntime(): Promise<RuntimeRecord> {
     const expectedWasmHash = typeof manifest.wasmSha256 === 'string' ? manifest.wasmSha256 : '';
     const wasmResponse = await fetch('/vendor/mobi-core/ermao-mobi.wasm', { cache: 'no-store', credentials: 'same-origin' });
     const wasmBinary = await wasmResponse.arrayBuffer();
-    if (!wasmResponse.ok || !/^[a-f0-9]{64}$/.test(expectedWasmHash) || await sha256(wasmBinary) !== expectedWasmHash) {
+    if (!wasmResponse.ok || !/^[a-f0-9]{64}$/.test(expectedWasmHash) || sha256Hex(wasmBinary) !== expectedWasmHash) {
       throw new Error('MOBI_WASM_INTEGRITY_INVALID');
     }
     const namespaceValue: unknown = await import(/* webpackIgnore: true */ RUNTIME_URL);

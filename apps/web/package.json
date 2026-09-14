@@ -31,6 +31,7 @@
     "i18n:migrate-expressions": "node scripts/migrate-i18n-jsx-expressions.mjs"
   },
   "dependencies": {
+    "@noble/hashes": "2.0.1",
     "@readium/navigator": "2.8.2",
     "@readium/shared": "2.4.0",
     "@shuku/reader-core": "workspace:*",
@@ -52,6 +53,7 @@
     "autoprefixer": "^10.4.20",
     "eslint": "9.39.5",
     "eslint-config-next": "16.2.12",
+    "fake-indexeddb": "6.2.4",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.13",
     "tsx": "^4.19.1",

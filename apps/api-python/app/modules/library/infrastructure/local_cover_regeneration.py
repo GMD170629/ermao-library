@@ -9,6 +9,7 @@ from typing import TypedDict
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, aliased
 
+from app.core.natural_sort import natural_sort_key
 from app.infrastructure.local_metadata_policy import SqlAlchemyLocalMetadataPriority
 from app.models import (
     Library,
@@ -37,6 +38,7 @@ from app.modules.library.application.resource_commands import OperationSummary
 from app.modules.library.infrastructure import operations as operation_store
 from app.modules.library.infrastructure.book_covers import first_readable_resource_id
 from app.modules.library.infrastructure.local_cover_validation import valid_local_cover
+from app.modules.media.public import FirstPageCoverPort
 from app.modules.metadata.public import FilesystemLocalMetadataInspector
 
 
@@ -50,8 +52,13 @@ class _OwnedSourceFields(TypedDict):
 class FilesystemLocalMetadataCoverParser:
     """Read only the cover field through the canonical metadata inspector."""
 
-    def __init__(self, inspector: FilesystemLocalMetadataInspector) -> None:
+    def __init__(
+        self,
+        inspector: FilesystemLocalMetadataInspector,
+        first_page_covers: FirstPageCoverPort | None = None,
+    ) -> None:
         self._inspector = inspector
+        self._first_page_covers = first_page_covers
 
     def extract_owned_cover(self, scope: LocalCoverScope) -> bytes | None:
         if scope.root_path is None:
@@ -78,7 +85,13 @@ class FilesystemLocalMetadataCoverParser:
         saw_readable_source = False
         saw_parse_failure = False
         source_format = self._metadata_source_format(source)
-        for relative_path in source.asset_relative_paths:
+        page_fallback = source_format in {"PDF", "IMAGE_DIR"}
+        asset_paths = source.asset_relative_paths
+        if source_format == "IMAGE_DIR":
+            asset_paths = tuple(sorted(asset_paths, key=natural_sort_key))
+        if page_fallback:
+            asset_paths = asset_paths[:1]
+        for relative_path in asset_paths:
             try:
                 asset_path = (root / relative_path).resolve(strict=True)
                 asset_path.relative_to(root)
@@ -96,8 +109,24 @@ class FilesystemLocalMetadataCoverParser:
             except (RuntimeError, ValueError):
                 saw_parse_failure = True
                 continue
-            if resolved.cover is not None:
-                return resolved.cover
+            if not page_fallback:
+                if resolved.cover is not None:
+                    return resolved.cover
+                continue
+            candidates = {
+                candidate.source: candidate for candidate in resolved.candidates
+            }
+            for candidate_source in source.local_metadata_priority:
+                candidate = candidates.get(candidate_source)
+                content = valid_local_cover(candidate.cover if candidate else None)
+                if content is not None:
+                    return content
+            if self._first_page_covers is not None:
+                content = self._first_page_covers.extract(
+                    path=asset_path, source_format=source_format
+                )
+                if content is not None:
+                    return content
 
         failure: LocalCoverFailureCode
         if not saw_readable_source:

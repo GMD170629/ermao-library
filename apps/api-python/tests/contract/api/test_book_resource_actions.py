@@ -449,3 +449,49 @@ def test_resource_actions_use_canonical_routes_and_do_not_restore_legacy_paths(
         client.post("/api/books/route-book/resources/route-resource/rescan").status_code
         == 404
     )
+
+
+def test_pdf_first_page_cover_regeneration_delivers_versioned_small_cover(
+    client, db_session, test_settings
+) -> None:
+    from io import BytesIO
+    from pathlib import Path
+
+    from PIL import Image
+
+    from app.bootstrap.media import build_cover_url_resolver
+
+    _login(client, db_session)
+    _add_graph(db_session, "first-page-book", "first-page-resource")
+    library = db_session.get(Library, "test-library")
+    library.root_path = str(test_settings.resolved_storage_root / "source-library")
+    source = Path(library.root_path) / "first-page-book" / "first-page-resource.pdf"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    with (
+        Image.new("RGB", (120, 180), "red") as first,
+        Image.new("RGB", (120, 180), "blue") as second,
+    ):
+        first.save(source, format="PDF", save_all=True, append_images=[second])
+    db_session.commit()
+    before_tasks = tuple(db_session.scalars(select(LibraryImportTask.id)))
+    response = client.post(
+        "/api/books/first-page-book/resources/first-page-resource/cover/regenerate"
+    )
+    assert response.status_code == 200, response.text
+    db_session.expire_all()
+    metadata = db_session.get(LibraryReadableResourceMetadata, "first-page-resource")
+    url = build_cover_url_resolver(test_settings)(
+        "/api/resources/first-page-resource/cover", metadata.cover_path, size="small"
+    )
+    assert "v=" in url and "size=small" in url
+    cover = client.get(url)
+    assert cover.status_code == 200
+    assert cover.headers["content-type"] == "image/webp"
+    assert "x-shuku-cover-fallback" not in cover.headers
+    assert len(cover.content) <= 50 * 1024
+    with Image.open(BytesIO(cover.content)) as image:
+        red, green, blue = image.convert("RGB").getpixel((20, 20))
+        assert red > 200 and green < 35 and blue < 35
+    again = client.get(url, headers={"If-None-Match": cover.headers["etag"]})
+    assert again.status_code == 304
+    assert tuple(db_session.scalars(select(LibraryImportTask.id))) == before_tasks

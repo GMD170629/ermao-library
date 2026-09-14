@@ -1,3 +1,4 @@
+import { sha256Hex } from './sha256';
 import type { LocalPublicationTocEntry } from './local-publication';
 import { requestReaderArtifact } from './api/client';
 import { withBasePath } from '../../../../lib/base-path';
@@ -72,11 +73,6 @@ function invoke(owner: RuntimeRecord, name: string, args: readonly unknown[]): u
   return Reflect.apply(operation, owner, args);
 }
 
-function sha256(bytes: ArrayBuffer): Promise<string> {
-  return crypto.subtle.digest('SHA-256', bytes).then((digest) => (
-    [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('')
-  ));
-}
 
 async function loadRuntime(): Promise<ChapterRuntime> {
   if (runtimePromise) return runtimePromise;
@@ -97,7 +93,7 @@ async function loadRuntime(): Promise<ChapterRuntime> {
     if (
       !wasmResponse.ok
       || !/^[a-f0-9]{64}$/u.test(expectedWasmHash)
-      || await sha256(wasmBinary) !== expectedWasmHash
+      || sha256Hex(wasmBinary) !== expectedWasmHash
     ) {
       throw new Error('CHAPTER_WASM_INTEGRITY_INVALID');
     }

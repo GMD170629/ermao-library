@@ -6,9 +6,6 @@ final class SessionStore: ObservableObject {
     @Published private(set) var snapshot: RuntimeSessionSnapshot
     @Published private(set) var serverProfiles: [RuntimeServerProfile]
     @Published private(set) var isSelectingServer = false
-    @Published private(set) var isReauthenticating = false
-    @Published private(set) var reauthenticationUserDisplayName: String?
-    @Published private(set) var reauthenticationUserEmail: String?
     @Published private(set) var operationFailure: RuntimeOperationFailure?
     @Published private(set) var isPerformingOperation = false
     @Published private(set) var navigationGeneration = 0
@@ -94,8 +91,6 @@ final class SessionStore: ObservableObject {
     }
 
     func requireReauthentication() {
-        captureReauthenticationIdentity(from: snapshot)
-        isReauthenticating = true
         refreshForForeground()
     }
 
@@ -198,14 +193,6 @@ final class SessionStore: ObservableObject {
 
     func acceptInsecureTLS() {
         perform { [runtime] in try await runtime.acceptInsecureTLS() }
-    }
-
-    func login() {
-        let request = LoginRequest(
-            email: email.trimmingCharacters(in: .whitespacesAndNewlines),
-            password: password
-        )
-        perform { [runtime] in try await runtime.login(request) }
     }
 
     func loginToCurrentServer(acceptingInsecureTLS: Bool = false) {
@@ -394,9 +381,6 @@ final class SessionStore: ObservableObject {
                 }
             }
         }
-        if newSnapshot.phase == .sessionExpired {
-            captureReauthenticationIdentity(from: newSnapshot)
-        }
         snapshot = newSnapshot
         refreshProfiles()
         if let profile = newSnapshot.profile, !isSelectingServer {
@@ -416,19 +400,6 @@ final class SessionStore: ObservableObject {
             isSelectingServer = false
             password = ""
         }
-        switch newSnapshot.phase {
-        case .sessionExpired:
-            isReauthenticating = true
-        case .authenticated, .signedOut, .accountDisabled:
-            isReauthenticating = false
-        default:
-            break
-        }
-    }
-
-    private func captureReauthenticationIdentity(from source: RuntimeSessionSnapshot) {
-        reauthenticationUserDisplayName = source.userDisplayName ?? reauthenticationUserDisplayName
-        reauthenticationUserEmail = source.userEmail ?? reauthenticationUserEmail
     }
 
     private func refreshProfiles() {

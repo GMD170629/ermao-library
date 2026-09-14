@@ -23,11 +23,11 @@ final class LocalizationTests: XCTestCase {
             let native = nativeManagementPresentation(for: phase.presentation)
             XCTAssertEqual(native.presentsSheet, phase.presentation == .sheet)
         }
-        for phase in [ManagementPhase.menu, .loading, .loadFailed, .executing, .closed] {
+        for phase in [ManagementPhase.menu, .loading, .loadfailed, .executing, .closed] {
             XCTAssertEqual(nativeManagementPresentation(for: phase.presentation), .none)
         }
         XCTAssertEqual(nativeManagementPresentation(for: ManagementPhase.editing.presentation), .sheet)
-        XCTAssertEqual(nativeManagementPresentation(for: ManagementPhase.deleteConfirmation.presentation), .deleteConfirmation)
+        XCTAssertEqual(nativeManagementPresentation(for: ManagementPhase.deleteconfirmation.presentation), .deleteConfirmation)
     }
 
     func testNativeManagementMenuStatusBelongsOnlyToTheInvokedTargetAndAction() {
@@ -146,7 +146,7 @@ final class LocalizationTests: XCTestCase {
             "auth.credentials.storageFailed.title",
             "auth.credentials.storageFailed.message",
             "auth.invalidCredentials",
-            "auth.reauthenticate.title",
+            "auth.sessionExpired.message",
             "common.operationFailed.title",
             "common.operationFailed",
             "common.requestFailed",

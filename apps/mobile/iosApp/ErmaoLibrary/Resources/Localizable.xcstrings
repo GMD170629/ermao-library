@@ -7088,23 +7088,7 @@
         }
       }
     },
-    "auth.reauthenticate.action": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sign in again"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "重新登录"
-          }
-        }
-      }
-    },
-    "auth.reauthenticate.message": {
+    "auth.sessionExpired.message": {
       "localizations": {
         "en": {
           "stringUnit": {
@@ -7116,38 +7100,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "此服务器的会话已失效。重新登录后可返回 App。"
-          }
-        }
-      }
-    },
-    "auth.reauthenticate.navigationTitle": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Reauthenticate"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "重新认证"
-          }
-        }
-      }
-    },
-    "auth.reauthenticate.title": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sign in required"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "需要重新登录"
           }
         }
       }

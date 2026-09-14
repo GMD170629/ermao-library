@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.bootstrap.media import build_cover_url_resolver
+from app.bootstrap.media import build_cover_url_resolver, first_page_covers
 from app.core.config import Settings, get_settings
 from app.infrastructure.local_metadata_policy import SqlAlchemyLocalMetadataPriority
 from app.models import LibraryBook
@@ -176,6 +176,7 @@ def build_readable_resource_pipeline(
         sidecar=sidecar,
         metadata_priority=SqlAlchemyLocalMetadataPriority(session),
         covers=FilesystemLocalCoverPublication(runtime_settings.resolved_storage_root),
+        first_page_covers=first_page_covers(),
     )
     request_scan = RequestLibraryScan(
         libraries=libraries,

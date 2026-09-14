@@ -1,5 +1,6 @@
 import Combine
 import XCTest
+import SwiftUI
 @testable import ErmaoLibrary
 
 @MainActor
@@ -30,6 +31,97 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.email, "reader@example.com")
         XCTAssertEqual(store.password, "remembered-password")
         XCTAssertEqual(store.selectedLoginProfile?.id, profile.id)
+    }
+
+    func testExpiredSessionCanCorrectAccountAndRetryThroughUnifiedLogin() async throws {
+        let profile = makeProfile(id: "saved", baseURL: "https://books.example.com/base", active: true)
+        let credentials = InMemoryCredentialStore()
+        let runtime = PreviewMobileRuntime(
+            snapshot: RuntimeSessionSnapshot(
+                phase: .sessionExpired,
+                profile: profile,
+                userDisplayName: "Reader",
+                userEmail: "old@example.com",
+                reasonCode: "UNAUTHORIZED"
+            )
+        )
+        let store = SessionStore(runtime: runtime, credentialStore: credentials)
+        XCTAssertEqual(store.email, "old@example.com")
+        store.email = "corrected@example.com"
+        store.password = "corrected-password"
+
+        runtime.transition(to: RuntimeSessionSnapshot(
+            phase: .loginFailed,
+            profile: profile,
+            userDisplayName: nil,
+            userEmail: nil,
+            reasonCode: "INVALID_CREDENTIALS"
+        ))
+        XCTAssertEqual(store.email, "corrected@example.com")
+        XCTAssertEqual(store.password, "corrected-password")
+        XCTAssertEqual(store.snapshot.reasonCode, "INVALID_CREDENTIALS")
+
+        store.loginToCurrentServer()
+        await waitUntilIdle(store)
+
+        XCTAssertEqual(store.snapshot.phase, .authenticated)
+        XCTAssertEqual(store.snapshot.userEmail, "corrected@example.com")
+        XCTAssertEqual(store.snapshot.profile?.id, profile.id)
+        XCTAssertEqual(try credentials.load(profileID: profile.id), SavedServerCredentials(
+            email: "corrected@example.com", password: "corrected-password"
+        ))
+        XCTAssertTrue(store.password.isEmpty)
+    }
+
+    func testExpiredSessionAndLoginFailureKeepTheExistingLoginForm() async throws {
+        let profile = makeProfile(id: "saved", baseURL: "https://books.example.com/base", active: true)
+        let runtime = PreviewMobileRuntime(snapshot: RuntimeSessionSnapshot(
+            phase: .sessionExpired, profile: profile, userDisplayName: "Reader",
+            userEmail: "reader@example.com", reasonCode: "UNAUTHORIZED"
+        ))
+        let store = SessionStore(runtime: runtime, credentialStore: InMemoryCredentialStore())
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let originalWindow = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = UIHostingController(rootView: AppRootView(store: store))
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            originalWindow?.makeKey()
+            store.close()
+        }
+        func fields(in view: UIView) -> [UITextField] {
+            (view as? UITextField).map { [$0] } ?? view.subviews.flatMap { fields(in: $0) }
+        }
+        for _ in 0..<50 where fields(in: window).count != 3 {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let originalFields = fields(in: window)
+        XCTAssertEqual(originalFields.count, 3, "Expiry must show server, email, and password fields")
+        XCTAssertTrue(originalFields.contains { $0.text == profile.baseURL })
+        XCTAssertTrue(originalFields.contains { $0.text == "reader@example.com" })
+        XCTAssertEqual(originalFields.filter(\.isSecureTextEntry).count, 1)
+
+        for phase in [SessionPhase.sessionExpired, .checkingServer, .authenticating, .loginFailed] {
+            runtime.transition(to: RuntimeSessionSnapshot(
+                phase: phase, profile: profile, userDisplayName: nil,
+                userEmail: "reader@example.com",
+                reasonCode: phase == .loginFailed ? "INVALID_CREDENTIALS" : "UNAUTHORIZED"
+            ))
+            try await Task.sleep(for: .milliseconds(100))
+            window.layoutIfNeeded()
+            XCTAssertEqual(fields(in: window), originalFields, "Login states must preserve the same editable form")
+            if phase == .sessionExpired || phase == .loginFailed {
+                let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+                    window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+                }
+                let attachment = XCTAttachment(image: image)
+                attachment.name = "unified-login-\(phase)"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+            }
+        }
     }
 
     func testSelectingAnotherServerOnlyFillsTheLoginForm() throws {
@@ -215,7 +307,7 @@ final class SessionStoreTests: XCTestCase {
             .filter { $0.phase == .authenticated }
             .first()
             .sink { _ in authenticated.fulfill() }
-        store.login()
+        store.loginToCurrentServer()
         await fulfillment(of: [authenticated], timeout: 1)
 
         XCTAssertEqual(store.snapshot.phase, .authenticated)

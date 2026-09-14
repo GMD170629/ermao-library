@@ -60,7 +60,7 @@ test('private API and cover caches are partitioned by user and authorization ver
   assert.match(source, /event\.data\?\.type === 'CLEAR_PRIVATE_CACHES'/);
 });
 
-test('reader originals share the service-worker namespace and only obsolete accounts are deleted', () => {
+test('legacy reader Cache Storage entries retain the service-worker namespace cleanup rules', () => {
   const namespace = privateCacheNamespace('user.1', 7);
   const currentReader = privateCacheName(namespace, 'reader-original-v1');
   const currentApi = privateCacheName(namespace, 'api');

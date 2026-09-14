@@ -16,6 +16,8 @@ from app.modules.media.application.resource_preview import GetResourcePreview
 from app.modules.media.application.resource_query import MediaResourceQuery
 from app.modules.media.infrastructure import http_streaming as media_streaming
 from app.modules.media.infrastructure.cover_identity import versioned_cover_url
+from app.modules.media.infrastructure.first_page_cover import FilesystemFirstPageCover
+from app.modules.media.infrastructure.page_image import PageImageRenderer
 from app.modules.media.infrastructure.page_index import (
     get_page_unit,
     get_resource_asset,
@@ -29,7 +31,7 @@ from app.modules.media.infrastructure.resource_preview import (
 from app.modules.media.infrastructure.resource_repository import (
     SqlAlchemyMediaResourceRepository,
 )
-from app.modules.media.public import CoverUrlResolver
+from app.modules.media.public import CoverUrlResolver, FirstPageCoverPort
 
 
 def load_read_only_resource_page_index(
@@ -86,3 +88,9 @@ __all__ = [
 
 def build_cover_url_resolver(settings: Settings) -> CoverUrlResolver:
     return partial(versioned_cover_url, settings=settings)
+
+
+def first_page_covers() -> FirstPageCoverPort:
+    return FilesystemFirstPageCover(
+        PageImageRenderer(resource_preview_render_coordinator)
+    )

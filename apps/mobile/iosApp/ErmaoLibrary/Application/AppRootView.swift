@@ -131,20 +131,11 @@ struct AppRootView: View {
             LoginView(store: store, canCancel: true)
         } else {
             switch store.snapshot.phase {
-            case .noServer, .checkingServer, .serverConnectionFailed, .tlsRisk, .incompatibleServer:
+            case .noServer, .checkingServer, .serverConnectionFailed, .tlsRisk, .incompatibleServer,
+                 .signedOut, .authenticating, .loginFailed, .sessionExpired:
                 LoginView(store: store)
             case .setupRequired, .settingUp, .setupFailed:
                 SetupRequiredView(store: store)
-            case .signedOut:
-                LoginView(store: store)
-            case .authenticating, .loginFailed:
-                if store.isReauthenticating {
-                    ReauthenticateView(store: store)
-                } else {
-                    LoginView(store: store)
-                }
-            case .sessionExpired:
-                ReauthenticateView(store: store)
             case .accountDisabled:
                 AccountDisabledView(store: store)
             case .authenticated:

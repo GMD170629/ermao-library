@@ -22,6 +22,16 @@ export default defineConfig({
   },
   projects: [
     { name: 'chrome', use: { ...devices['Desktop Chrome'], channel: 'chrome' } },
+    {
+      name: 'http-chrome',
+      testMatch: ['**/readium-reader.spec.ts', '**/local-original-formats.spec.ts'],
+      grep: /cached original EPUB|failed original transfer|original locally|original fails closed|WASM digest|HTTP original/,
+      use: {
+        ...devices['Desktop Chrome'], channel: 'chrome',
+        baseURL: 'http://reader-http.test:3100',
+        launchOptions: { args: ['--host-resolver-rules=MAP reader-http.test 127.0.0.1', '--no-proxy-server'] }
+      }
+    },
     { name: 'mobile-chrome', use: { ...devices['Pixel 7'], channel: 'chrome' } }
   ]
 });
