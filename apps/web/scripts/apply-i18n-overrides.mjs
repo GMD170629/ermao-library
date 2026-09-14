@@ -9,6 +9,19 @@ const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
 const sourceCatalog = JSON.parse(readFileSync(sourceCatalogPath, 'utf8'));
 
 const exactOverrides = {
+  '扫描': 'Scan',
+  '已加入扫描队列': 'Scan queued',
+  '扫描入队失败': 'Could not queue the scan',
+  '允许扫描清空书库': 'Allow scans to empty this library',
+  '默认保留意外变空书库的数据。开启后，成功读取为空目录时可清理全部记录；权限或访问错误始终保留数据。': 'By default, data is kept if the library unexpectedly becomes empty. Enable this to remove all records after successfully reading an empty directory. Permission and access errors always preserve data.',
+  '实时监听文件变化': 'Monitor file changes',
+  '新增、修改、删除和移动会在变化稳定后扫描受影响目录，同步书库数据。': 'After changes settle, additions, modifications, deletions, and moves trigger scans of the affected directories to reconcile library data.',
+  '所有启用书库共用一个周期扫描，用于同步停机或监听不可用期间遗漏的文件变化。': 'All enabled libraries share a periodic scan to reconcile file changes missed during downtime or watcher outages.',
+  '实时监听关闭后，周期扫描仍会继续运行。仅成功读取的目录会更新，访问失败时保留该目录的数据。': 'Periodic scans continue when real-time monitoring is off. Only successfully read directories are updated; data in inaccessible directories is preserved.',
+  '书库或扫描路径不可访问，已保留原数据': 'The library or scan path is inaccessible. Existing data was preserved.',
+  '部分目录扫描失败，失败目录的数据已保留': 'Some directories could not be scanned. Their data was preserved.',
+  '书库意外为空，已保留原数据；可在书库设置中允许清空': 'The library is unexpectedly empty. Data was preserved; you can allow cleanup in library settings.',
+  '扫描已取消': 'Scan cancelled',
   '文字排版': 'Text Layout',
   '阅读方向': 'Reading Direction',
   '排版方向': 'Writing Direction',

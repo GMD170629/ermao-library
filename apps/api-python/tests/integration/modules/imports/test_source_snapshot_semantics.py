@@ -10,6 +10,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -32,6 +33,7 @@ from app.modules.imports.application.readable_resource.ports import (
     FileParseResult,
     ParsedAssetPayload,
     ResourceAdapterExecutorPort,
+    UnreadableDirectoryEntry,
 )
 from app.modules.imports.application.readable_resource.process_import_task import (
     ProcessReadableResourceImportTask,
@@ -49,7 +51,7 @@ from app.modules.imports.domain.directory_probe import (
     ProbeTerminationReason,
 )
 from app.modules.imports.domain.resource_adapters import ResourceAdapterSpec
-from app.modules.imports.domain.scan_policy import MissingEntryPolicy
+from app.modules.imports.domain.scan_policy import MissingEntryPolicy, ScanScope
 from app.modules.imports.infrastructure.readable_resource.support import (
     InMemorySidecarWriteback,
     StructuredPipelineLog,
@@ -167,6 +169,275 @@ def _automatic_scan_and_drain(pipeline: ReadableResourcePipeline) -> list[str]:
         RequestLibraryScanCommand(library_id="lib-1", trigger="WATCHER")
     )
     return _drain(pipeline)
+
+
+def test_local_scan_reconciles_changes_without_visiting_sibling_trees(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            for name in ["changed", *[f"sibling-{i}" for i in range(40)]]:
+                (root / name).mkdir()
+                (root / name / "book.epub").write_bytes(b"v1")
+            pipeline = _pipeline(db)
+            _continue_and_drain(pipeline)
+            (root / "changed/book.epub").unlink()
+            (root / "changed/new.epub").write_bytes(b"new")
+            visited: list[Path] = []
+            original = pipeline.filesystem.iter_directory_entries
+
+            def observe(path: Path):
+                visited.append(path)
+                yield from original(path)
+
+            monkeypatch.setattr(pipeline.filesystem, "iter_directory_entries", observe)
+            request = pipeline.request_library_scan.execute(
+                RequestLibraryScanCommand("lib-1", "WATCHER", (ScanScope("changed"),))
+            )
+            _drain(pipeline)
+            db.expire_all()
+            task = db.get(LibraryImportTask, request.task_id)
+            assert task is not None and task.state == "SUCCEEDED"
+            paths = set(db.scalars(select(LibrarySourceNode.relative_path)).all())
+            assert "changed/new.epub" in paths
+            assert "changed/book.epub" not in paths
+            assert "sibling-39/book.epub" in paths
+            assert all("sibling-" not in str(path) for path in visited)
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("allow_cleanup", [False, True])
+@pytest.mark.parametrize("local", [False, True])
+def test_empty_root_policy_is_shared_by_full_and_local_scans(
+    tmp_path: Path,
+    allow_cleanup: bool,
+    local: bool,
+) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            (root / "book.epub").write_bytes(b"v1")
+            pipeline = _pipeline(db)
+            _continue_and_drain(pipeline)
+            library = db.get(Library, "lib-1")
+            assert library is not None
+            library.allow_empty_library_cleanup = allow_cleanup
+            db.commit()
+            (root / "book.epub").unlink()
+            result = pipeline.request_library_scan.execute(
+                RequestLibraryScanCommand(
+                    "lib-1", "WATCHER", (ScanScope(""),) if local else None
+                )
+            )
+            _drain(pipeline)
+            db.expire_all()
+            task = db.get(LibraryImportTask, result.task_id)
+            assert task is not None
+            assert task.state == ("SUCCEEDED" if allow_cleanup else "FAILED")
+            assert task.error_summary == (
+                None if allow_cleanup else "EMPTY_LIBRARY_PROTECTED"
+            )
+            assert db.scalar(select(func.count()).select_from(LibrarySourceNode)) == (
+                0 if allow_cleanup else 1
+            )
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("failure_mode", ["iteration", "stat", "probe"])
+def test_failed_directory_preserves_data_while_other_scope_updates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_mode: str,
+) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            for name in ("good", "bad"):
+                (root / name).mkdir()
+                (root / name / "book.epub").write_bytes(b"v1")
+            pipeline = _pipeline(db)
+            _continue_and_drain(pipeline)
+            (root / "good/book.epub").rename(root / "good/new.epub")
+            (root / "bad/book.epub").rename(root / "bad/new.epub")
+            original = pipeline.filesystem.iter_directory_entries
+
+            def failing(path: Path):
+                if path.name == "bad" and failure_mode == "stat":
+                    yield UnreadableDirectoryEntry("new.epub")
+                    return
+                yield from original(path)
+                if path.name == "bad" and failure_mode == "iteration":
+                    raise OSError("interrupted directory enumeration")
+
+            monkeypatch.setattr(pipeline.filesystem, "iter_directory_entries", failing)
+            original_probe = pipeline.filesystem.probe_directory
+
+            def failing_probe(**kwargs):
+                decision = original_probe(**kwargs)
+                if (
+                    kwargs["directory_relative_path"] == "bad"
+                    and failure_mode == "probe"
+                ):
+                    return replace(
+                        decision,
+                        evidence=replace(
+                            decision.evidence,
+                            termination_reason=ProbeTerminationReason.LOCAL_IO_ERROR,
+                        ),
+                    )
+                return decision
+
+            monkeypatch.setattr(pipeline.filesystem, "probe_directory", failing_probe)
+            result = pipeline.request_library_scan.execute(
+                RequestLibraryScanCommand(
+                    "lib-1", "WATCHER", (ScanScope("bad"), ScanScope("good"))
+                )
+            )
+            _drain(pipeline)
+            db.expire_all()
+            task = db.get(LibraryImportTask, result.task_id)
+            assert task is not None and task.state == "FAILED"
+            assert task.error_summary == "SOURCE_SCAN_INCOMPLETE"
+            paths = set(db.scalars(select(LibrarySourceNode.relative_path)).all())
+            assert "bad/book.epub" in paths and "bad/new.epub" not in paths
+            assert "good/new.epub" in paths and "good/book.epub" not in paths
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "scopes",
+    [
+        (ScanScope("gone/nested"),),
+        (ScanScope(""), ScanScope("gone"), ScanScope("gone/nested")),
+    ],
+)
+def test_queued_scope_deleted_before_execution_reconciles_parent(
+    tmp_path: Path,
+    scopes: tuple[ScanScope, ...],
+) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            (root / "keep.epub").write_bytes(b"keep")
+            (root / "gone/nested").mkdir(parents=True)
+            (root / "gone/nested/book.epub").write_bytes(b"book")
+            pipeline = _pipeline(db)
+            _continue_and_drain(pipeline)
+            result = pipeline.request_library_scan.execute(
+                RequestLibraryScanCommand("lib-1", "WATCHER", scopes)
+            )
+            (root / "gone/nested/book.epub").unlink()
+            (root / "gone/nested").rmdir()
+            (root / "gone").rmdir()
+            _drain(pipeline)
+            db.expire_all()
+            task = db.get(LibraryImportTask, result.task_id)
+            assert task is not None and task.state == "SUCCEEDED"
+            assert set(db.scalars(select(LibrarySourceNode.relative_path))) == {
+                "keep.epub"
+            }
+    finally:
+        engine.dispose()
+
+
+def test_nested_image_change_scans_owning_resource_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            (root / "comic/chapter").mkdir(parents=True)
+            (root / "comic/chapter/1.png").write_bytes(b"image")
+            (root / "other").mkdir()
+            (root / "other/book.epub").write_bytes(b"book")
+            pipeline = _pipeline(db)
+            _continue_and_drain(pipeline)
+            owner = SqlAlchemyBookResourceRepository(
+                db
+            ).find_outermost_directory_resource("lib-1", "comic/chapter/1.png")
+            assert owner is not None
+            owner_id = owner.id
+            (root / "comic/chapter/2.png").write_bytes(b"new image")
+            visited: list[Path] = []
+            original = pipeline.filesystem.iter_directory_entries
+
+            def observe(path: Path):
+                visited.append(path)
+                yield from original(path)
+
+            monkeypatch.setattr(pipeline.filesystem, "iter_directory_entries", observe)
+            result = pipeline.request_library_scan.execute(
+                RequestLibraryScanCommand(
+                    "lib-1", "WATCHER", (ScanScope("comic/chapter"),)
+                )
+            )
+            _drain(pipeline)
+            db.expire_all()
+            task = db.get(LibraryImportTask, result.task_id)
+            assert task is not None and task.state == "SUCCEEDED"
+            assert root / "comic" in visited and root / "other" not in visited
+            node = db.scalar(
+                select(LibrarySourceNode).where(
+                    LibrarySourceNode.relative_path == "comic/chapter/2.png"
+                )
+            )
+            assert node is not None
+            asset = db.scalar(
+                select(LibraryResourceAsset).where(
+                    LibraryResourceAsset.source_node_id == node.id
+                )
+            )
+            assert asset is not None and asset.resource_id == owner_id
+    finally:
+        engine.dispose()
+
+
+def test_scope_discovers_new_nested_directory(tmp_path: Path) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            (root / "new/nested").mkdir(parents=True)
+            (root / "new/nested/book.epub").write_bytes(b"book")
+            pipeline = _pipeline(db)
+            result = pipeline.request_library_scan.execute(
+                RequestLibraryScanCommand("lib-1", "WATCHER", (ScanScope("new", True),))
+            )
+            _drain(pipeline)
+            task = db.get(LibraryImportTask, result.task_id)
+            assert task is not None and task.state == "SUCCEEDED"
+            assert (
+                db.scalar(
+                    select(LibrarySourceNode).where(
+                        LibrarySourceNode.relative_path == "new/nested/book.epub"
+                    )
+                )
+                is not None
+            )
+    finally:
+        engine.dispose()
 
 
 def test_observed_snapshot_refreshes_on_content_change(tmp_path: Path) -> None:
@@ -340,7 +611,7 @@ def test_automatic_scan_preserves_missing_disk_file(tmp_path: Path) -> None:
         engine.dispose()
 
 
-def test_automatic_scan_creates_renamed_node_without_removing_old(
+def test_automatic_scan_reconciles_renamed_node_and_removes_old(
     tmp_path: Path,
 ) -> None:
     engine = _bootstrap(tmp_path)
@@ -368,9 +639,9 @@ def test_automatic_scan_creates_renamed_node_without_removing_old(
             _automatic_scan_and_drain(pipeline)
             db.commit()
 
-            assert db.get(LibrarySourceNode, old_ids[0]) is not None
-            assert db.get(LibraryReadableResource, old_ids[1]) is not None
-            assert db.get(LibraryResourceAsset, old_ids[2]) is not None
+            assert db.get(LibrarySourceNode, old_ids[0]) is None
+            assert db.get(LibraryReadableResource, old_ids[1]) is None
+            assert db.get(LibraryResourceAsset, old_ids[2]) is None
             new_node = db.scalar(
                 select(LibrarySourceNode).where(
                     LibrarySourceNode.relative_path == "new.epub"
@@ -393,8 +664,8 @@ def test_automatic_scan_creates_renamed_node_without_removing_old(
             )
             assert new_asset is not None
             assert new_asset.id != old_ids[2]
-            assert db.scalar(select(func.count()).select_from(LibrarySourceNode)) == 2
-            assert db.scalar(select(func.count()).select_from(LibraryBook)) == 2
+            assert db.scalar(select(func.count()).select_from(LibrarySourceNode)) == 1
+            assert db.scalar(select(func.count()).select_from(LibraryBook)) == 1
     finally:
         engine.dispose()
 
@@ -417,6 +688,10 @@ def test_manual_library_scan_prunes_missing_source_topology(tmp_path: Path) -> N
             assert node is not None and resource is not None and asset is not None
             node_id, resource_id, asset_id = node.id, resource.id, asset.id
 
+            library = db.get(Library, "lib-1")
+            assert library is not None
+            library.allow_empty_library_cleanup = True
+            db.commit()
             source.unlink()
             outcomes = _continue_and_drain(pipeline)
             db.commit()

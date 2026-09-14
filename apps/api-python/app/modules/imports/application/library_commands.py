@@ -113,6 +113,7 @@ def prepare_library_update_values(
         "enabled": "enabled",
         "ignorePatterns": "ignore_patterns",
         "ignoreHidden": "ignore_hidden",
+        "allowEmptyLibraryCleanup": "allow_empty_library_cleanup",
         "minFileSizeBytes": "min_file_size_bytes",
         "description": "description",
         "updatedAt": "updated_at",

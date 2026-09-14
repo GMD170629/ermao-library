@@ -21,6 +21,12 @@ from app.modules.imports.application.readable_resource.ports import (
     MissingEntryPolicy,
     PreparedBookIdentification,
 )
+from app.modules.imports.domain.scan_policy import (
+    ScanScope,
+    decode_scan_scopes,
+    encode_scan_scopes,
+    merge_scan_scopes,
+)
 from app.modules.imports.infrastructure.readable_resource.book_completion import (
     BookImportCompletion,
 )
@@ -93,6 +99,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         library_id: str,
         *,
         missing_entry_policy: MissingEntryPolicy,
+        scan_scopes: tuple[ScanScope, ...] | None = None,
     ) -> tuple[LibraryImportTaskRecord, bool]:
         """Merge an equivalent active scan and retain at most one follow-up."""
 
@@ -104,23 +111,12 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             )
         )
         if queued is not None:
-            self._promote_missing_entry_policy(queued, missing_entry_policy)
-            return self._to_record(queued), False
-
-        running = self._session.scalar(
-            select(LibraryImportTask).where(
-                LibraryImportTask.library_id == library_id,
-                LibraryImportTask.kind == "SCAN_LIBRARY",
-                LibraryImportTask.state == "RUNNING",
+            queued.scan_scopes = encode_scan_scopes(
+                merge_scan_scopes(decode_scan_scopes(queued.scan_scopes), scan_scopes)
             )
-        )
-        needs_follow_up = (
-            running is not None
-            and missing_entry_policy is MissingEntryPolicy.PRUNE_MISSING
-            and running.missing_entry_policy != MissingEntryPolicy.PRUNE_MISSING.value
-        )
-        if running is not None and not needs_follow_up:
-            return self._to_record(running), False
+            self._promote_missing_entry_policy(queued, missing_entry_policy)
+            self._session.flush()
+            return self._to_record(queued), False
 
         task_id = cuid()
         statement = (
@@ -131,6 +127,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
                 library_id=library_id,
                 state="QUEUED",
                 missing_entry_policy=missing_entry_policy.value,
+                scan_scopes=encode_scan_scopes(scan_scopes),
             )
             .on_conflict_do_nothing(
                 index_elements=[LibraryImportTask.library_id],
@@ -153,6 +150,11 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         if row is None:
             raise RuntimeError("queued library scan disappeared after request")
         self._promote_missing_entry_policy(row, missing_entry_policy)
+        if not inserted:
+            row.scan_scopes = encode_scan_scopes(
+                merge_scan_scopes(decode_scan_scopes(row.scan_scopes), scan_scopes)
+            )
+            self._session.flush()
         if inserted:
             self._completion.dirty(row)
         return self._to_record(row), inserted
@@ -406,6 +408,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             role=role,
             error_summary=row.error_summary,
             missing_entry_policy=MissingEntryPolicy(row.missing_entry_policy),
+            scan_scopes=decode_scan_scopes(row.scan_scopes),
         )
 
 

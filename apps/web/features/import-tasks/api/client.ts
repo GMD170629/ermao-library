@@ -205,6 +205,10 @@ export function continueSourceImport(sourceNodeId: string, signal?: AbortSignal)
   return continueImport(`/api/source-nodes/${encodeURIComponent(sourceNodeId)}/continue`, signal);
 }
 
+export function scanLibrary(libraryId: string, signal?: AbortSignal): Promise<ContinueImportResult> {
+  return continueImport(`/api/libraries/${encodeURIComponent(libraryId)}/scan`, signal);
+}
+
 export function continueImportTask(taskId: string, signal?: AbortSignal): Promise<ContinueImportResult> {
   return continueImport(`/api/library-import-tasks/${encodeURIComponent(taskId)}/continue`, signal);
 }

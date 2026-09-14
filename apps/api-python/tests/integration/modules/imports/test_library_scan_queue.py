@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.db.base import Base
 from app.db.sqlite import create_sqlite_engine
 from app.models import Library
-from app.modules.imports.domain.scan_policy import MissingEntryPolicy
+from app.modules.imports.domain.scan_policy import MissingEntryPolicy, ScanScope
 from app.modules.imports.infrastructure.readable_resource.task_queue import (
     SqlAlchemyLibraryImportTaskQueue,
 )
@@ -20,7 +20,61 @@ from app.modules.library.infrastructure.readable_resource_schema import (
 from app.modules.library.public import SourceNodeRelativePath
 
 
-def test_running_scan_merges_same_policy_without_follow_up(tmp_path: Path) -> None:
+def test_scope_queue_persists_merges_and_preserves_running_scope(
+    tmp_path: Path,
+) -> None:
+    engine = create_sqlite_engine(tmp_path / "scope.sqlite3")
+    Base.metadata.create_all(engine)
+    try:
+        with Session(engine) as session:
+            session.add(
+                Library(
+                    id="library",
+                    name="Library",
+                    root_path=str(tmp_path),
+                    organization_mode="FLAT",
+                )
+            )
+            session.commit()
+            queue = SqlAlchemyLibraryImportTaskQueue(session)
+            first, _ = queue.request_library_scan(
+                "library",
+                missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
+                scan_scopes=(ScanScope("a", True),),
+            )
+            session.commit()
+            session.expire_all()
+            restored = queue.get_task(first.id)
+            assert restored is not None and restored.scan_scopes == (
+                ScanScope("a", True),
+            )
+            merged, added = queue.request_library_scan(
+                "library",
+                missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
+                scan_scopes=(ScanScope("a/b"), ScanScope("c")),
+            )
+            assert not added and merged.scan_scopes == (
+                ScanScope("a", True),
+                ScanScope("c"),
+            )
+            queue.mark_running(first.id, started_at=datetime.now(UTC))
+            following, added = queue.request_library_scan(
+                "library",
+                missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
+                scan_scopes=(ScanScope("d"),),
+            )
+            assert added and following.id != first.id
+            full, added = queue.request_library_scan(
+                "library", missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING
+            )
+            assert not added and full.id == following.id and full.scan_scopes is None
+            running = queue.get_task(first.id)
+            assert running is not None and running.scan_scopes == merged.scan_scopes
+    finally:
+        engine.dispose()
+
+
+def test_running_scan_keeps_one_follow_up(tmp_path: Path) -> None:
     engine = create_sqlite_engine(tmp_path / "scan.sqlite3")
     Base.metadata.create_all(engine)
     try:
@@ -49,8 +103,8 @@ def test_running_scan_merges_same_policy_without_follow_up(tmp_path: Path) -> No
             merged, inserted = queue.request_library_scan(
                 "library", missing_entry_policy=MissingEntryPolicy.PRESERVE
             )
-            assert inserted is False
-            assert merged.id == first.id
+            assert inserted is True
+            assert merged.id != first.id
             session.commit()
 
             counts = dict(
@@ -64,7 +118,7 @@ def test_running_scan_merges_same_policy_without_follow_up(tmp_path: Path) -> No
                     .group_by(LibraryImportTask.state)
                 ).all()
             )
-            assert counts == {"RUNNING": 1}
+            assert counts == {"RUNNING": 1, "QUEUED": 1}
     finally:
         engine.dispose()
 

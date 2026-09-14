@@ -18,7 +18,7 @@ from app.modules.imports.domain.resource_adapters import (
     ResourceAdapterSpec,
     source_format_for_filename,
 )
-from app.modules.imports.domain.scan_policy import MissingEntryPolicy
+from app.modules.imports.domain.scan_policy import MissingEntryPolicy, ScanScope
 from app.modules.library.public import (
     AdapterIdentity,
     AssetRole,
@@ -108,6 +108,7 @@ class LibraryImportTaskRecord:
     role: AssetRole | None
     error_summary: str | None
     missing_entry_policy: MissingEntryPolicy = MissingEntryPolicy.PRESERVE
+    scan_scopes: tuple[ScanScope, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,6 +229,7 @@ class LibraryImportTaskQueuePort(Protocol):
         library_id: str,
         *,
         missing_entry_policy: MissingEntryPolicy,
+        scan_scopes: tuple[ScanScope, ...] | None = None,
     ) -> tuple[LibraryImportTaskRecord, bool]:
         """Return the one queued scan, creating it when absent."""
 

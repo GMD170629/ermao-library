@@ -16,7 +16,7 @@ from app.modules.imports.application.readable_resource.request_library_scan impo
     RequestLibraryScan,
     RequestLibraryScanCommand,
 )
-from app.modules.imports.domain.scan_policy import MissingEntryPolicy
+from app.modules.imports.domain.scan_policy import MissingEntryPolicy, ScanScope
 
 
 class _Libraries:
@@ -35,6 +35,7 @@ class _Queue:
         library_id: str,
         *,
         missing_entry_policy: MissingEntryPolicy,
+        scan_scopes: tuple[ScanScope, ...] | None = None,
     ) -> tuple[LibraryImportTaskRecord, bool]:
         self.requested_policies.append(missing_entry_policy)
         return (
@@ -79,7 +80,7 @@ def test_automatic_scan_triggers_do_not_retry_historical_failures(
         log=cast(PipelineLogPort, _Log()),
     )
     use_case.execute(RequestLibraryScanCommand(library_id="library", trigger=trigger))
-    assert queue.requested_policies == [MissingEntryPolicy.PRESERVE]
+    assert queue.requested_policies == [MissingEntryPolicy.PRUNE_MISSING]
 
 
 def test_manual_scan_only_changes_the_missing_entry_policy() -> None:

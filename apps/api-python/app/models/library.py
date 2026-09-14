@@ -41,6 +41,13 @@ class Library(Base):
     enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="1"
     )
+    allow_empty_library_cleanup: Mapped[bool] = mapped_column(
+        "allowEmptyLibraryCleanup",
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="0",
+    )
     ignore_patterns: Mapped[str | None] = mapped_column(
         "ignorePatterns", Text, nullable=True
     )

@@ -39,6 +39,7 @@ def _library_view(row: Library) -> dict[str, object]:
         "enabled": bool(row.enabled),
         "ignorePatterns": row.ignore_patterns,
         "ignoreHidden": bool(row.ignore_hidden),
+        "allowEmptyLibraryCleanup": bool(row.allow_empty_library_cleanup),
         "minFileSizeBytes": row.min_file_size_bytes,
         "description": row.description,
         "createdAt": row.created_at,

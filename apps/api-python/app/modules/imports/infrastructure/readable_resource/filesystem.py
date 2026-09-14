@@ -107,7 +107,9 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
             try:
                 for observed in entries:
                     if isinstance(observed, UnreadableDirectoryEntry):
-                        continue
+                        termination = ProbeTerminationReason.LOCAL_IO_ERROR
+                        stop = True
+                        break
                     name, kind, _size, _mtime = observed
                     if (time.monotonic() - started) * 1000 >= time_budget_ms:
                         termination = ProbeTerminationReason.TIME_BUDGET

@@ -18,6 +18,7 @@ from app.modules.imports.application.readable_resource.ports import (
 )
 from app.modules.imports.application.readable_resource.scan_source_tree import (
     ScanLibrarySourceTree,
+    SourceScanIncompleteError,
 )
 from app.modules.imports.domain.directory_probe import (
     DirectoryProbeDecision,
@@ -336,6 +337,7 @@ class DemandDrivenDirectoryFilesystem:
         self._uow = uow
         self._source_nodes = source_nodes
         self._conceptual_size = conceptual_size
+        self._initial_inserts = source_nodes.inserts
         self._process_limit = process_limit
         self._fail_after_yields = fail_after_yields
         self.yielded = 0
@@ -357,11 +359,7 @@ class DemandDrivenDirectoryFilesystem:
         for index in range(self._conceptual_size):
             outstanding = self.yielded - self._source_nodes.inserts
             self.max_outstanding = max(self.max_outstanding, outstanding)
-            if index > 0 and self._source_nodes.inserts < index:
-                raise AssertionError(
-                    "directory entry yielded before previous entry was inserted; "
-                    "scanner likely materialized the iterator with list() or a batch"
-                )
+            assert self._source_nodes.inserts == self._initial_inserts
             if self.yielded >= self._process_limit:
                 return
             if (
@@ -540,7 +538,7 @@ def test_scan_releases_before_directory_probe(tmp_path: Path) -> None:
     assert filesystem.io_while_in_txn == []
 
 
-def test_full_source_scan_consumes_directory_iterator_incrementally(
+def test_full_source_scan_reads_directory_before_applying_entries(
     tmp_path: Path,
 ) -> None:
     """Fail if scan materializes the directory iterator before processing."""
@@ -569,13 +567,13 @@ def test_full_source_scan_consumes_directory_iterator_incrementally(
     assert result.nodes_inserted == process_limit
     assert source_nodes.inserts == process_limit
     assert filesystem.yielded == process_limit
-    assert filesystem.max_outstanding <= 1
+    assert filesystem.max_outstanding == process_limit
     assert filesystem.io_while_in_txn == []
     assert "release" in uow.events
     assert uow.txn_count >= process_limit
 
 
-def test_full_source_scan_tolerates_oserror_mid_directory_iteration(
+def test_full_source_scan_preserves_data_on_oserror_mid_directory_iteration(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "books"
@@ -600,11 +598,11 @@ def test_full_source_scan_tolerates_oserror_mid_directory_iteration(
         clock=FakeClock(),
         log=log,
     )
-    result = scan.execute_library("lib-1")
-    assert result.nodes_inserted == 3
-    assert source_nodes.inserts == 3
+    with pytest.raises(SourceScanIncompleteError):
+        scan.execute_library("lib-1")
+    assert source_nodes.inserts == 0
     assert "source_tree.scan.directory_unreadable" in log.events
-    assert "source_tree.scan.completed" in log.events
+    assert "source_tree.scan.completed" not in log.events
     assert filesystem.io_while_in_txn == []
 
 
@@ -642,7 +640,7 @@ def test_prune_does_not_delete_when_directory_iteration_stops_with_oserror(
         process_limit=8,
         fail_after_yields=2,
     )
-    ScanLibrarySourceTree(
+    scan = ScanLibrarySourceTree(
         libraries=FakeLibraries(_config(root)),
         filesystem=interrupted,
         source_nodes=source_nodes,
@@ -652,8 +650,11 @@ def test_prune_does_not_delete_when_directory_iteration_stops_with_oserror(
         clock=FakeClock(),
         log=FakeLog(),
         source_node_deletion=deletion,
-    ).execute_library("lib-1", missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING)
-
+    )
+    with pytest.raises(SourceScanIncompleteError):
+        scan.execute_library(
+            "lib-1", missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING
+        )
     assert deletion.deleted == []
 
 
@@ -766,7 +767,7 @@ def test_unreadable_visible_entry_is_protected_from_prune(tmp_path: Path) -> Non
     unreadable = RecordingFilesystem(uow, {})
     unreadable._entries[str(root)] = [UnreadableDirectoryEntry(name="keep.png")]
     unreadable._entries[str(root.resolve())] = unreadable._entries[str(root)]
-    ScanLibrarySourceTree(
+    scan = ScanLibrarySourceTree(
         libraries=FakeLibraries(_config(root)),
         filesystem=unreadable,
         source_nodes=source_nodes,
@@ -776,5 +777,9 @@ def test_unreadable_visible_entry_is_protected_from_prune(tmp_path: Path) -> Non
         clock=FakeClock(),
         log=FakeLog(),
         source_node_deletion=deletion,
-    ).execute_library("lib-1", missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING)
+    )
+    with pytest.raises(SourceScanIncompleteError):
+        scan.execute_library(
+            "lib-1", missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING
+        )
     assert deletion.deleted == []

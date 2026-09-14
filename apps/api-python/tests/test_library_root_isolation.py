@@ -49,6 +49,50 @@ def _path_key(value: str) -> str:
     return "v1:" + hashlib.sha256(value.encode()).hexdigest()
 
 
+def test_library_empty_cleanup_setting_and_scan_enqueue(
+    client: TestClient,
+    db_session: Session,
+    tmp_path: Path,
+) -> None:
+    _login_admin(client, db_session)
+    root = tmp_path / "scan-books"
+    root.mkdir()
+    response = client.post(
+        "/api/libraries",
+        json={
+            "name": "Scan library",
+            "rootPath": str(root),
+            "organizationMode": "FLAT",
+            "allowEmptyLibraryCleanup": False,
+        },
+    )
+    assert response.status_code in {200, 201}
+    library = response.json()["data"]["library"]
+    assert library["allowEmptyLibraryCleanup"] is False
+    library_id = library["id"]
+    response = client.patch(
+        f"/api/libraries/{library_id}", json={"allowEmptyLibraryCleanup": True}
+    )
+    assert response.status_code == 200
+    libraries = client.get("/api/libraries").json()["data"]["libraries"]
+    assert (
+        next(item for item in libraries if item["id"] == library_id)[
+            "allowEmptyLibraryCleanup"
+        ]
+        is True
+    )
+    first = client.post(f"/api/libraries/{library_id}/scan")
+    second = client.post(f"/api/libraries/{library_id}/scan")
+    assert first.status_code == second.status_code == 202
+    assert first.json()["data"]["taskId"] == second.json()["data"]["taskId"]
+    db_session.expire_all()
+    task = db_session.get(LibraryImportTask, first.json()["data"]["taskId"])
+    assert task is not None and task.state == "QUEUED" and task.scan_scopes is None
+    assert task.missing_entry_policy == "PRUNE_MISSING"
+    client.patch(f"/api/libraries/{library_id}", json={"enabled": False})
+    assert client.post(f"/api/libraries/{library_id}/scan").status_code == 404
+
+
 def _book_graph(
     *,
     book_id: str,

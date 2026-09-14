@@ -11,7 +11,7 @@ from app.modules.imports.application.readable_resource.ports import (
     PipelineLogPort,
     UnitOfWorkPort,
 )
-from app.modules.imports.domain.scan_policy import MissingEntryPolicy
+from app.modules.imports.domain.scan_policy import MissingEntryPolicy, ScanScope
 
 LibraryScanTrigger = Literal[
     "STARTUP",
@@ -27,6 +27,7 @@ LibraryScanTrigger = Literal[
 class RequestLibraryScanCommand:
     library_id: str
     trigger: LibraryScanTrigger
+    scan_scopes: tuple[ScanScope, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,11 +59,8 @@ class RequestLibraryScan:
             self._libraries.get_library(command.library_id)
             task, enqueued = self._queue.request_library_scan(
                 command.library_id,
-                missing_entry_policy=(
-                    MissingEntryPolicy.PRUNE_MISSING
-                    if command.trigger == "MANUAL"
-                    else MissingEntryPolicy.PRESERVE
-                ),
+                missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
+                scan_scopes=command.scan_scopes,
             )
 
         self._log.emit(

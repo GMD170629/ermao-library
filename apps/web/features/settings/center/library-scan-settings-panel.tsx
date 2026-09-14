@@ -72,8 +72,8 @@ export function LibraryScanSettingsPanel() {
           <div className="flex gap-3">
             <FolderSync className="mt-0.5 text-[#D94724]" size={20} aria-hidden="true" />
             <div>
-              <h3 id="watch-title" className="text-lg font-semibold text-[#2A2825]"><I18nText>实时监听新增文件</I18nText></h3>
-              <p className="mt-1 text-sm leading-6 text-[#77716A]"><I18nText>新增文件、目录或移入书库的内容会在复制稳定后自动入库。</I18nText></p>
+              <h3 id="watch-title" className="text-lg font-semibold text-[#2A2825]"><I18nText>实时监听文件变化</I18nText></h3>
+              <p className="mt-1 text-sm leading-6 text-[#77716A]"><I18nText>新增、修改、删除和移动会在变化稳定后扫描受影响目录，同步书库数据。</I18nText></p>
             </div>
           </div>
           <button
@@ -96,7 +96,7 @@ export function LibraryScanSettingsPanel() {
             <Clock3 className="mt-0.5 text-[#D94724]" size={20} aria-hidden="true" />
             <div>
               <h3 id="interval-title" className="text-lg font-semibold text-[#2A2825]"><I18nText>周期扫描间隔</I18nText></h3>
-              <p className="mt-1 text-sm leading-6 text-[#77716A]"><I18nText>所有启用书库共用一个周期扫描，用于补回停机或监听不可用期间遗漏的新增内容。</I18nText></p>
+              <p className="mt-1 text-sm leading-6 text-[#77716A]"><I18nText>所有启用书库共用一个周期扫描，用于同步停机或监听不可用期间遗漏的文件变化。</I18nText></p>
             </div>
           </div>
           <label className="block w-full text-sm font-medium text-[#4F4B47] md:w-48 md:shrink-0">
@@ -111,7 +111,7 @@ export function LibraryScanSettingsPanel() {
             />
           </label>
         </div>
-        <p className="mt-4 rounded-xl bg-[#F7F4F1] px-4 py-3 text-sm leading-6 text-[#6F6963]"><I18nText>实时监听关闭后，周期扫描仍会继续运行。普通文件修改、移出和删除暂不会触发同步。</I18nText></p>
+        <p className="mt-4 rounded-xl bg-[#F7F4F1] px-4 py-3 text-sm leading-6 text-[#6F6963]"><I18nText>实时监听关闭后，周期扫描仍会继续运行。仅成功读取的目录会更新，访问失败时保留该目录的数据。</I18nText></p>
       </section>
 
       <div className="flex justify-end border-t border-[#E5E0DA] pt-6">

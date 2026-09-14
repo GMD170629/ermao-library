@@ -76,6 +76,7 @@ class LibrarySourceTreeConfig:
     probe_max_entries: int
     probe_max_depth: int
     probe_time_budget_ms: int
+    allow_empty_library_cleanup: bool = False
 
 
 @dataclass(frozen=True, slots=True)

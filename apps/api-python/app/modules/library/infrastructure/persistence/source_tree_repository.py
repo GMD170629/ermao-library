@@ -104,6 +104,7 @@ class SqlAlchemyLibraryConfigAdapter(LibraryConfigPort):
             root_path=Path(library.root_path),
             organization_mode=mode,
             ignore_hidden=bool(library.ignore_hidden),
+            allow_empty_library_cleanup=bool(library.allow_empty_library_cleanup),
             ignore_patterns=library.ignore_patterns,
             global_ignore_patterns=(
                 self._global_ignore_patterns_loader()
@@ -961,8 +962,11 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
                 unit.id,
             ),
         )
+        # Removed tracks can leave gaps, so the remaining count is not a safe
+        # offset. Move every unit beyond the current maximum before compacting.
+        temporary_start = max((unit.sort_order for unit in units), default=-1) + 1
         for index, unit in enumerate(ordered_units):
-            unit.sort_order = len(ordered_units) + index
+            unit.sort_order = temporary_start + index
         self._session.flush()
         for index, unit in enumerate(ordered_units):
             unit.sort_order = index

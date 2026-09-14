@@ -1,4 +1,4 @@
-"""Watchdog adapter that buffers create and move-in events without database I/O."""
+"""Watchdog adapter that buffers changed directory scopes without database I/O."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from watchdog.events import (
     FileSystemEvent,
@@ -16,6 +17,10 @@ from watchdog.events import (
 from watchdog.observers import Observer
 from watchdog.observers.api import BaseObserver
 
+from app.modules.imports.domain.scan_policy import ScanScope, merge_scan_scopes
+
+LibraryEventType = Literal["created", "modified", "deleted", "moved"]
+
 
 @dataclass(frozen=True, slots=True)
 class WatchedLibrary:
@@ -23,41 +28,58 @@ class WatchedLibrary:
     root_path: Path
 
 
+@dataclass(frozen=True, slots=True)
+class PendingLibraryEvents:
+    library_id: str
+    version: int
+    scopes: tuple[ScanScope, ...]
+    observed_at: float
+    event_types: frozenset[LibraryEventType]
+
+
 class LibraryEventBuffer:
     def __init__(self, *, quiet_seconds: float = 5.0) -> None:
         self._quiet_seconds = quiet_seconds
-        self._pending: dict[str, float] = {}
+        self._pending: dict[str, PendingLibraryEvents] = {}
+        self._version = 0
         self._lock = threading.Lock()
 
-    def mark_created(
-        self, library_id: str, *, observed_at: float | None = None
+    def mark_changed(
+        self,
+        library_id: str,
+        scopes: tuple[ScanScope, ...],
+        *,
+        observed_at: float | None = None,
+        event_type: LibraryEventType = "modified",
     ) -> None:
         with self._lock:
-            self._pending[library_id] = (
-                time.monotonic() if observed_at is None else observed_at
+            previous = self._pending.get(library_id)
+            merged = merge_scan_scopes(previous.scopes if previous else (), scopes)
+            self._version += 1
+            self._pending[library_id] = PendingLibraryEvents(
+                library_id,
+                self._version,
+                merged or (),
+                time.monotonic() if observed_at is None else observed_at,
+                (previous.event_types if previous else frozenset()) | {event_type},
             )
 
-    def extend_if_pending(
-        self, library_id: str, *, observed_at: float | None = None
-    ) -> None:
-        with self._lock:
-            if library_id in self._pending:
-                self._pending[library_id] = (
-                    time.monotonic() if observed_at is None else observed_at
-                )
-
-    def ready(self, *, observed_at: float | None = None) -> tuple[str, ...]:
+    def ready(
+        self, *, observed_at: float | None = None
+    ) -> tuple[PendingLibraryEvents, ...]:
         now = time.monotonic() if observed_at is None else observed_at
         with self._lock:
             return tuple(
-                library_id
-                for library_id, last_event_at in self._pending.items()
-                if now - last_event_at >= self._quiet_seconds
+                pending
+                for pending in self._pending.values()
+                if now - pending.observed_at >= self._quiet_seconds
             )
 
-    def acknowledge(self, library_id: str) -> None:
+    def acknowledge(self, library_id: str, version: int) -> None:
         with self._lock:
-            self._pending.pop(library_id, None)
+            pending = self._pending.get(library_id)
+            if pending is not None and pending.version == version:
+                self._pending.pop(library_id, None)
 
     def retain(self, library_ids: set[str]) -> None:
         with self._lock:
@@ -72,40 +94,46 @@ class _LibraryEventHandler(FileSystemEventHandler):
     def __init__(self, library: WatchedLibrary, buffer: LibraryEventBuffer) -> None:
         self._library = library
         self._buffer = buffer
-        self._known_paths = {library.root_path.resolve(strict=False)} | {
-            path.resolve(strict=False) for path in library.root_path.rglob("*")
-        }
 
     def on_created(self, event: FileSystemEvent) -> None:
-        path = Path(os.fsdecode(event.src_path)).resolve(strict=False)
-        if path in self._known_paths:
-            return
-        self._known_paths.add(path)
-        self._buffer.mark_created(self._library.library_id)
+        self._mark(event.src_path, recursive=event.is_directory, event_type="created")
 
     def on_moved(self, event: FileSystemMovedEvent) -> None:
-        source = Path(os.fsdecode(event.src_path)).resolve(strict=False)
-        destination = Path(os.fsdecode(event.dest_path)).resolve(strict=False)
-        self._known_paths.discard(source)
-        if self._is_inside_root(destination):
-            self._known_paths.add(destination)
-        if not self._is_inside_root(source) and self._is_inside_root(destination):
-            self._buffer.mark_created(self._library.library_id)
+        self._mark(event.src_path, event_type="moved")
+        self._mark(event.dest_path, recursive=event.is_directory, event_type="moved")
 
     def on_deleted(self, event: FileSystemEvent) -> None:
-        self._known_paths.discard(
-            Path(os.fsdecode(event.src_path)).resolve(strict=False)
-        )
+        self._mark(event.src_path, event_type="deleted")
 
     def on_modified(self, event: FileSystemEvent) -> None:
-        self._buffer.extend_if_pending(self._library.library_id)
+        # Directory metadata notifications duplicate the concrete child event.
+        if not event.is_directory:
+            self._mark(event.src_path)
 
-    def _is_inside_root(self, path: Path) -> bool:
+    def _mark(
+        self,
+        raw_path: bytes | str,
+        *,
+        recursive: bool = False,
+        event_type: LibraryEventType = "modified",
+    ) -> None:
+        # Keep lexical paths here; containment and symlinks are checked at execution.
+        path = Path(os.path.abspath(os.fsdecode(raw_path)))
         try:
-            path.resolve(strict=False).relative_to(self._library.root_path)
-            return True
+            relative = path.relative_to(self._library.root_path)
         except ValueError:
-            return False
+            return
+        parent = relative.parent.as_posix()
+        scopes = [ScanScope("" if parent == "." else parent)]
+        if recursive:
+            scopes.append(
+                ScanScope(
+                    "" if relative.as_posix() == "." else relative.as_posix(), True
+                )
+            )
+        self._buffer.mark_changed(
+            self._library.library_id, tuple(scopes), event_type=event_type
+        )
 
 
 class LibraryScanWatcher:

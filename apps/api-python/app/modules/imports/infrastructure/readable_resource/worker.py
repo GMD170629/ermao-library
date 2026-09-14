@@ -21,6 +21,7 @@ from app.modules.imports.application.readable_resource.scan_source_tree import (
     ScanLibrarySourceTree,
     SourceScanStartUnavailableError,
 )
+from app.modules.imports.domain.scan_policy import MissingEntryPolicy
 from app.modules.library.public import IdentifyImportedBook
 
 logger = logging.getLogger("ermao.readable_resource_pipeline")
@@ -95,15 +96,26 @@ class ReadableResourceWorkerProcessor:
             )
         except Exception as error:
             self._uow.rollback()
-            logger.exception(
-                "readable_resource.worker.containment_failure",
-                extra={
-                    "stage": "worker",
-                    "outcome": "error",
-                    "task_id": task.id,
-                    "library_id": task.library_id,
-                },
-            )
+            if isinstance(error, SourceScanStartUnavailableError):
+                logger.warning(
+                    "readable_resource.worker.scan_failed",
+                    extra={
+                        "stage": "scan",
+                        "outcome": error.code,
+                        "task_id": task.id,
+                        "library_id": task.library_id,
+                    },
+                )
+            else:
+                logger.exception(
+                    "readable_resource.worker.containment_failure",
+                    extra={
+                        "stage": "worker",
+                        "outcome": "error",
+                        "task_id": task.id,
+                        "library_id": task.library_id,
+                    },
+                )
             pending = _PendingCompletion(
                 task.id,
                 task.library_id,
@@ -123,7 +135,8 @@ class ReadableResourceWorkerProcessor:
             self._scan.execute_library(
                 task.library_id,
                 task_id=task.id,
-                missing_entry_policy=task.missing_entry_policy,
+                missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
+                scan_scopes=task.scan_scopes,
             )
             return "scan"
         if task.kind == "CONTINUE_SOURCE":
@@ -132,7 +145,7 @@ class ReadableResourceWorkerProcessor:
             self._scan.execute_source(
                 task.source_node_id,
                 task_id=task.id,
-                missing_entry_policy=task.missing_entry_policy,
+                missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
             )
             return "continue_source"
         if task.kind == "IDENTIFY_BOOK":

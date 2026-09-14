@@ -328,7 +328,7 @@ test('new library form labels and compact save fit in English on a narrow screen
   await expect(form.getByText('Filter options', { exact: true })).toBeVisible();
   await expect(form.getByRole('button', { name: 'Close Add Form' })).toHaveText('Collapse');
   await expect(form.getByRole('button', { name: 'Save', exact: true })).toHaveCSS('width', '120px');
-  await expect(form.getByRole('checkbox').locator('..')).toHaveCSS('height', '44px');
+  await expect(form.getByRole('checkbox', { name: 'Ignore hidden files', exact: true }).locator('..')).toHaveCSS('height', '44px');
 });
 
 for (const locale of ['zh-CN', 'en-US'] as const) {
@@ -356,7 +356,10 @@ for (const locale of ['zh-CN', 'en-US'] as const) {
     await expect(edit.getByRole('combobox')).toHaveValue('/library');
     await expect(edit.getByRole('spinbutton')).toHaveValue('20');
     await expect(edit.locator('textarea')).toHaveValue('*.tmp');
-    await expect(edit.getByRole('checkbox')).toBeChecked();
+    await expect(edit.getByRole('checkbox', { name: chinese ? '忽略隐藏文件' : 'Ignore hidden files', exact: true })).toBeChecked();
+    const cleanup = edit.getByRole('checkbox', { name: chinese ? '允许扫描清空书库' : 'Allow scans to empty this library', exact: false });
+    await expect(cleanup).not.toBeChecked();
+    await cleanup.check();
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 1100 });
       for (const selector of ['input[type="number"]', 'textarea']) {
@@ -369,7 +372,38 @@ for (const locale of ['zh-CN', 'en-US'] as const) {
     await edit.getByRole('button', { name: chinese ? '保存' : 'Save', exact: true }).click();
     await expect.poll(() => submitted.length).toBe(1);
     expect(submitted[0]).toEqual({ name: 'Renamed library', rootPath: '/library', organizationMode: 'FLAT',
-      ignorePatterns: '*.tmp', ignoreHidden: true, minFileSizeBytes: 20480 });
+      ignorePatterns: '*.tmp', ignoreHidden: true, allowEmptyLibraryCleanup: true, minFileSizeBytes: 20480 });
+  });
+}
+
+for (const locale of ['zh-CN', 'en-US'] as const) {
+  test(`library scan queues once and reports acceptance ${locale}`, async ({ page }) => {
+    await mockSettingsApi(page, locale);
+    const chinese = locale === 'zh-CN';
+    await page.route('**/api/libraries', (route) => route.fulfill({ json: { ok: true, data: { libraries: [
+      { id: 'library-1', name: 'Scan target', rootPath: '/library', enabled: true, organizationMode: 'FLAT', ignoreHidden: true, allowEmptyLibraryCleanup: false },
+      { id: 'disabled', name: 'Disabled library', rootPath: '/disabled', enabled: false, organizationMode: 'FLAT', ignoreHidden: true }
+    ] } } }));
+    const requests: Route[] = [];
+    await page.route('**/api/libraries/library-1/scan', (route) => { requests.push(route); });
+    await page.goto('/settings/library');
+    await page.getByRole('tab', { name: chinese ? '书库' : 'Library', exact: true }).click();
+    const buttons = page.getByRole('button', { name: chinese ? '扫描' : 'Scan', exact: true });
+    await expect(buttons).toHaveCount(2);
+    await expect(buttons.nth(1)).toBeDisabled();
+    await buttons.first().click();
+    await expect.poll(() => requests.length).toBe(1);
+    await expect(buttons.first()).toBeDisabled();
+    expect(requests[0].request().method()).toBe('POST');
+    await requests[0].fulfill({ status: 202, json: { ok: true, data: { taskId: 'scan-1', libraryId: 'library-1', sourceNodeId: null, requeuedFailed: 0, enqueued: true } } });
+    await expect(page.getByText(chinese ? '已加入扫描队列' : 'Scan queued', { exact: true })).toBeVisible();
+    await expect(buttons.first()).toBeEnabled();
+    await page.screenshot({ path: test.info().outputPath('library-scan.png'), fullPage: true });
+    await buttons.first().click();
+    await expect.poll(() => requests.length).toBe(2);
+    await requests[1].fulfill({ status: 503, json: { ok: false, error: { message: 'Unavailable' } } });
+    await expect(page.getByText(chinese ? '扫描入队失败' : 'Could not queue the scan', { exact: true })).toBeVisible();
+    await expect(buttons.first()).toBeEnabled();
   });
 }
 

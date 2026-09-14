@@ -13,6 +13,9 @@ from app.modules.library.public import LibraryOrganizationMode
 
 
 class Library(HttpContractModel):
+    allow_empty_library_cleanup: bool = Field(
+        default=False, alias="allowEmptyLibraryCleanup"
+    )
     id: str
     name: str
     root_path: str = Field(alias="rootPath")
@@ -27,6 +30,9 @@ class Library(HttpContractModel):
 
 
 class CreateLibraryRequest(HttpContractModel):
+    allow_empty_library_cleanup: bool = Field(
+        default=False, alias="allowEmptyLibraryCleanup"
+    )
     root_path: str = Field(alias="rootPath", min_length=1)
     name: str | None = None
     organization_mode: LibraryOrganizationMode = Field(alias="organizationMode")
@@ -38,6 +44,9 @@ class CreateLibraryRequest(HttpContractModel):
 
 
 class UpdateLibraryRequest(HttpContractModel):
+    allow_empty_library_cleanup: bool | None = Field(
+        default=None, alias="allowEmptyLibraryCleanup"
+    )
     root_path: str | None = Field(default=None, alias="rootPath")
     name: str | None = None
     organization_mode: LibraryOrganizationMode | None = Field(

@@ -26,6 +26,7 @@ from app.modules.imports.domain.library_scan_schedule import (
     LibraryScanSettings,
     next_periodic_scan_at,
 )
+from app.modules.imports.domain.scan_policy import ScanScope
 from app.modules.imports.infrastructure.library_scan_settings import (
     SqlAlchemyLibraryScanSettingsRepository,
 )
@@ -73,9 +74,9 @@ class LibraryScanCoordinator:
             if self._request(library_id, "STARTUP"):
                 self._startup_pending.discard(library_id)
 
-        for library_id in self._buffer.ready(observed_at=monotonic_now):
-            if self._request(library_id, "WATCHER"):
-                self._buffer.acknowledge(library_id)
+        for pending in self._buffer.ready(observed_at=monotonic_now):
+            if self._request(pending.library_id, "WATCHER", pending.scopes):
+                self._buffer.acknowledge(pending.library_id, pending.version)
 
         if self._next_periodic_at is not None and now >= self._next_periodic_at:
             completed = True
@@ -153,10 +154,17 @@ class LibraryScanCoordinator:
             legacy_interval_ms=self._settings.library_scan_interval_ms,
         ).load()
 
-    def _request(self, library_id: str, trigger: LibraryScanTrigger) -> bool:
+    def _request(
+        self,
+        library_id: str,
+        trigger: LibraryScanTrigger,
+        scan_scopes: tuple[ScanScope, ...] | None = None,
+    ) -> bool:
         try:
             self._request_scan.execute(
-                RequestLibraryScanCommand(library_id=library_id, trigger=trigger)
+                RequestLibraryScanCommand(
+                    library_id=library_id, trigger=trigger, scan_scopes=scan_scopes
+                )
             )
         except (OSError, RuntimeError, SQLAlchemyError):
             self._uow.recover_after_failure()

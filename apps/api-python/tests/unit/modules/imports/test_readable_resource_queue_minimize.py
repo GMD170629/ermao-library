@@ -352,6 +352,7 @@ class UnusedScan:
         *,
         task_id: str | None = None,
         missing_entry_policy: MissingEntryPolicy = MissingEntryPolicy.PRESERVE,
+        scan_scopes: object = None,
     ) -> None:
         del task_id, missing_entry_policy
         raise AssertionError(library_id)
@@ -378,6 +379,7 @@ class CancelDuringScan:
         *,
         task_id: str | None = None,
         missing_entry_policy: MissingEntryPolicy = MissingEntryPolicy.PRESERVE,
+        scan_scopes: object = None,
     ) -> None:
         assert library_id == "lib-1"
         assert task_id == "task-1"

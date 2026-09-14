@@ -143,6 +143,7 @@ class LibraryImportTask(Base):
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
     kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    scan_scopes: Mapped[str | None] = mapped_column("scanScopes", Text, nullable=True)
     book_metadata_revision: Mapped[int | None] = mapped_column(
         "bookMetadataRevision", Integer, nullable=True
     )

@@ -1,7 +1,7 @@
 'use client';
 
 import { ChevronDown, ChevronRight, Database, Download, FolderOpen, RotateCcw, Save, Settings2, SlidersHorizontal, Trash2 } from 'lucide-react';
-import { FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react';
+import { FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
 import { useConfirm, useToast } from '../../components/ui/feedback';
@@ -18,9 +18,11 @@ import {
   type OrganizationMode
 } from './model/organization-mode';
 import { deleteLibrary } from './api/libraries-client';
+import { scanLibrary } from '../import-tasks/public';
 import { DirectoryPathPicker as SharedDirectoryPathPicker } from './ui/directory-path-picker';
 
 type Library = {
+  allowEmptyLibraryCleanup: boolean;
   id: string;
   name: string;
   rootPath: string;
@@ -72,6 +74,13 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
   const [rootPath, setRootPath] = useState('');
   const [ignorePatterns, setIgnorePatterns] = useState('');
   const [ignoreHidden, setIgnoreHidden] = useState(true);
+  const [allowEmptyLibraryCleanup, setAllowEmptyLibraryCleanup] = useState(false);
+  const [scanningIds, setScanningIds] = useState<Set<string>>(new Set());
+  const scanRequests = useRef(new Map<string, AbortController>());
+  useEffect(() => {
+    const requests = scanRequests.current;
+    return () => { for (const controller of requests.values()) controller.abort(); requests.clear(); };
+  }, []);
   const [minFileSizeKb, setMinFileSizeKb] = useState('10');
   const [organizationMode, setOrganizationMode] = useState<OrganizationMode>('FLAT');
   const [message, setMessage] = useState('');
@@ -128,7 +137,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     const response = await fetch('/api/libraries', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, rootPath, organizationMode, enabled: true, ignorePatterns, ignoreHidden, minFileSizeBytes: Math.max(0, Math.round(Number(minFileSizeKb || 0) * 1024)) })
+      body: JSON.stringify({ name, rootPath, organizationMode, enabled: true, ignorePatterns, ignoreHidden, allowEmptyLibraryCleanup, minFileSizeBytes: Math.max(0, Math.round(Number(minFileSizeKb || 0) * 1024)) })
     });
     const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
     if (!payload.ok) {
@@ -150,6 +159,22 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     const nextVisible = !showCreateFolder;
     setShowCreateFolder(nextVisible);
     if (nextVisible) setShowCreateRules(true);
+  }
+
+  async function requestScan(path: Library) {
+    if (scanRequests.current.has(path.id)) return;
+    const controller = new AbortController();
+    scanRequests.current.set(path.id, controller);
+    setScanningIds((current) => new Set(current).add(path.id));
+    try {
+      await scanLibrary(path.id, controller.signal);
+      if (!controller.signal.aborted) toast.success(i18nAttribute('已加入扫描队列'));
+    } catch {
+      if (!controller.signal.aborted) toast.error(i18nAttribute('扫描入队失败'));
+    } finally {
+      scanRequests.current.delete(path.id);
+      if (!controller.signal.aborted) setScanningIds((current) => { const next = new Set(current); next.delete(path.id); return next; });
+    }
   }
 
   async function togglePath(path: Library) {
@@ -188,7 +213,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     }
   }
 
-  async function saveFolderSettings(path: Library, updates: Pick<Library, 'name' | 'rootPath' | 'ignorePatterns' | 'ignoreHidden' | 'minFileSizeBytes' | 'organizationMode'>) {
+  async function saveFolderSettings(path: Library, updates: Pick<Library, 'name' | 'rootPath' | 'ignorePatterns' | 'ignoreHidden' | 'allowEmptyLibraryCleanup' | 'minFileSizeBytes' | 'organizationMode'>) {
     setError('');
     setMessage('');
     setRuleBusy(path.id);
@@ -334,6 +359,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                   organizationMode={organizationMode} setOrganizationMode={setOrganizationMode}
                   ignorePatterns={ignorePatterns} setIgnorePatterns={setIgnorePatterns}
                   ignoreHidden={ignoreHidden} setIgnoreHidden={setIgnoreHidden}
+                  allowEmptyLibraryCleanup={allowEmptyLibraryCleanup} setAllowEmptyLibraryCleanup={setAllowEmptyLibraryCleanup}
                   minFileSizeKb={minFileSizeKb} setMinFileSizeKb={setMinFileSizeKb}
                   showRules={showCreateRules} onToggleRules={() => setShowCreateRules((current) => !current)}
                   rulesSummary={<I18nText>默认忽略隐藏文件，小于 10 KB 跳过</I18nText>}
@@ -367,6 +393,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                         aria-expanded={Boolean(expandedRules[path.id])}
                       >
                         <I18nText>设置</I18nText></Button>
+                      <Button variant="secondary" icon={RotateCcw} disabled={!path.enabled || scanningIds.has(path.id)} loading={scanningIds.has(path.id)} onClick={() => void requestScan(path)}><I18nText>扫描</I18nText></Button>
                       <Button variant="danger" icon={Trash2} loading={pathBusy === `delete:${path.id}`} loadingText={i18nAttribute("删除中")} onClick={() => deletePath(path)}><I18nText>删除</I18nText></Button>
                     </div>
                     {expandedRules[path.id] ? (
@@ -435,7 +462,7 @@ function LibraryEditor({
 }: {
   path: Library;
   saving: boolean;
-  onSave: (path: Library, updates: Pick<Library, 'name' | 'rootPath' | 'ignorePatterns' | 'ignoreHidden' | 'minFileSizeBytes' | 'organizationMode'>) => Promise<void>;
+  onSave: (path: Library, updates: Pick<Library, 'name' | 'rootPath' | 'ignorePatterns' | 'ignoreHidden' | 'allowEmptyLibraryCleanup' | 'minFileSizeBytes' | 'organizationMode'>) => Promise<void>;
   onClose: () => void;
 }) {
   const { t: i18nAttribute } = useAttributeI18n();
@@ -443,6 +470,7 @@ function LibraryEditor({
   const [folderPath, setFolderPath] = useState(path.rootPath);
   const [patterns, setPatterns] = useState(path.ignorePatterns ?? '');
   const [hidden, setHidden] = useState(path.ignoreHidden);
+  const [allowEmptyLibraryCleanup, setAllowEmptyLibraryCleanup] = useState(path.allowEmptyLibraryCleanup ?? false);
   const [minSizeKb, setMinSizeKb] = useState(String(Math.round((path.minFileSizeBytes ?? 0) / 1024)));
   const [mode, setMode] = useState<OrganizationMode>(path.organizationMode);
   const [showRules, setShowRules] = useState(true);
@@ -451,6 +479,7 @@ function LibraryEditor({
     setFolderPath(path.rootPath);
     setPatterns(path.ignorePatterns ?? '');
     setHidden(path.ignoreHidden);
+    setAllowEmptyLibraryCleanup(path.allowEmptyLibraryCleanup ?? false);
     setMinSizeKb(String(Math.round((path.minFileSizeBytes ?? 0) / 1024)));
     setMode(path.organizationMode);
   }, [path]);
@@ -461,7 +490,7 @@ function LibraryEditor({
       if (saving || !folderName.trim() || !folderPath.trim()) return;
       void onSave(path, {
         name: folderName.trim(), rootPath: folderPath, ignorePatterns: patterns,
-        ignoreHidden: hidden, organizationMode: mode,
+        ignoreHidden: hidden, organizationMode: mode, allowEmptyLibraryCleanup,
         minFileSizeBytes: Math.max(0, Math.round(Number(minSizeKb || 0) * 1024))
       });
     }}>
@@ -476,6 +505,7 @@ function LibraryEditor({
         organizationMode={mode} setOrganizationMode={setMode}
         ignorePatterns={patterns} setIgnorePatterns={setPatterns}
         ignoreHidden={hidden} setIgnoreHidden={setHidden}
+        allowEmptyLibraryCleanup={allowEmptyLibraryCleanup} setAllowEmptyLibraryCleanup={setAllowEmptyLibraryCleanup}
         minFileSizeKb={minSizeKb} setMinFileSizeKb={setMinSizeKb}
         showRules={showRules} onToggleRules={() => setShowRules((current) => !current)}
       />
@@ -494,6 +524,7 @@ const libraryFormClassName = "grid w-full grid-cols-1 gap-5 rounded-[20px] borde
 function LibraryFormFields({
   name, setName, rootPath, setRootPath, organizationMode, setOrganizationMode,
   ignorePatterns, setIgnorePatterns, ignoreHidden, setIgnoreHidden,
+  allowEmptyLibraryCleanup, setAllowEmptyLibraryCleanup,
   minFileSizeKb, setMinFileSizeKb, showRules, onToggleRules, rulesSummary
 }: {
   name: string; setName: (value: string) => void;
@@ -501,6 +532,7 @@ function LibraryFormFields({
   organizationMode: OrganizationMode; setOrganizationMode: (value: OrganizationMode) => void;
   ignorePatterns: string; setIgnorePatterns: (value: string) => void;
   ignoreHidden: boolean; setIgnoreHidden: (value: boolean) => void;
+  allowEmptyLibraryCleanup: boolean; setAllowEmptyLibraryCleanup: (value: boolean) => void;
   minFileSizeKb: string; setMinFileSizeKb: (value: string) => void;
   showRules: boolean; onToggleRules: () => void;
   rulesSummary?: ReactNode;
@@ -522,6 +554,13 @@ function LibraryFormFields({
         <SharedDirectoryPathPicker value={rootPath} onChange={setRootPath} compact controlClassName="!h-11" />
         <p className="mt-1.5 text-xs leading-5 text-slate-500"><I18nText>图书会进入书库；每位用户可按来源文件夹创建自己的智能书架。</I18nText></p>
       </div>
+      <label className="md:col-span-2 text-sm text-slate-700">
+        <span className="flex items-center gap-2">
+          <input type="checkbox" checked={allowEmptyLibraryCleanup} onChange={(event) => setAllowEmptyLibraryCleanup(event.target.checked)} />
+          <I18nText>允许扫描清空书库</I18nText>
+        </span>
+        <span className="mt-2 block text-xs text-slate-500"><I18nText>默认保留意外变空书库的数据。开启后，成功读取为空目录时可清理全部记录；权限或访问错误始终保留数据。</I18nText></span>
+      </label>
       <button
         type="button"
         aria-expanded={showRules}

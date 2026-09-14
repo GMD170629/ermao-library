@@ -23,7 +23,10 @@ from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
 from app.models.library import Library, ReadableResourceNavigationUnit
-from app.modules.imports.application.audio_types import AudioFileMetadata
+from app.modules.imports.application.audio_types import (
+    AudioChapterMetadata,
+    AudioFileMetadata,
+)
 from app.modules.imports.application.readable_resource.continue_import import (
     ContinueLibraryImport,
     ContinueSourceImport,
@@ -894,6 +897,76 @@ def test_volumes_audiobook_creates_one_book_and_eight_bounded_resources(
         engine.dispose()
 
 
+def test_audiobook_reimport_compacts_gapped_chapter_order(tmp_path: Path) -> None:
+    class AudioInspector:
+        def inspect(self, path: Path) -> AudioFileMetadata:
+            return AudioFileMetadata(
+                path=path,
+                title=path.stem,
+                album=None,
+                author=None,
+                narrator=None,
+                duration_ms=60_000,
+                codec="mp3",
+                bitrate=None,
+                sample_rate=None,
+                channels=None,
+                disc_number=None,
+                track_number=int(path.stem),
+                chapters=(AudioChapterMetadata(path.stem, 0, 60_000),),
+            )
+
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            album = root / "album"
+            album.mkdir()
+            for index in range(1, 4):
+                (album / f"{index}.mp3").write_bytes(b"audio")
+            db.commit()
+            pipeline, _ = _pipeline(
+                db,
+                adapters=RegistryResourceAdapterExecutor(
+                    audio_metadata=AudioInspector()
+                ),
+            )
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            _drain(pipeline)
+            units = db.scalars(
+                select(ReadableResourceNavigationUnit).order_by(
+                    ReadableResourceNavigationUnit.sort_order
+                )
+            ).all()
+            assert len(units) == 3
+            # Make UPDATE order deterministic: after removing chapter zero,
+            # moving chapter one to the remaining count (two) must collide.
+            for unit in units:
+                unit.id = f"chapter-{unit.sort_order}"
+            db.commit()
+            source = album / "1.mp3"
+            changed = source.stat().st_mtime_ns + 1_000_000_000
+            os.utime(source, ns=(changed, changed))
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            outcomes = _drain(pipeline)
+            assert "error" not in outcomes
+            db.expire_all()
+            assert set(db.scalars(select(LibraryImportTask.state))) == {"SUCCEEDED"}
+            assert list(
+                db.scalars(
+                    select(ReadableResourceNavigationUnit.sort_order).order_by(
+                        ReadableResourceNavigationUnit.sort_order
+                    )
+                )
+            ) == [0, 1, 2]
+            metadata = db.scalar(select(LibraryReadableResourceMetadata))
+            assert metadata is not None
+            assert metadata.track_count == 3 and metadata.duration_ms == 180_000
+    finally:
+        engine.dispose()
+
+
 def test_audiobook_volume_titles_survive_import_and_reprocessing(
     tmp_path: Path,
 ) -> None:
@@ -1586,16 +1659,21 @@ def test_comic_import_creates_metadata_before_page_navigation(
             db.commit()
             real_adapters = build_readable_resource_pipeline(db).adapters
             pipeline, _ = _pipeline(
-                db, adapters=StubFailOnceAdapter({"comic.zip"}) if retry_failed else real_adapters
+                db,
+                adapters=StubFailOnceAdapter({"comic.zip"})
+                if retry_failed
+                else real_adapters,
             )
             pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
             outcomes = _drain(pipeline)
             if retry_failed:
                 assert "failed" in outcomes
-                failed = db.scalar(select(LibraryImportTask).where(
-                    LibraryImportTask.kind == "IMPORT_ASSET",
-                    LibraryImportTask.state == "FAILED",
-                ))
+                failed = db.scalar(
+                    select(LibraryImportTask).where(
+                        LibraryImportTask.kind == "IMPORT_ASSET",
+                        LibraryImportTask.state == "FAILED",
+                    )
+                )
                 assert failed is not None
                 assert db.scalar(select(LibraryReadableResourceMetadata)) is None
                 pipeline.queue.requeue_failed_task(failed.id)
@@ -1609,9 +1687,11 @@ def test_comic_import_creates_metadata_before_page_navigation(
             assert resource is not None and resource.import_state == "READY"
             metadata = db.get(LibraryReadableResourceMetadata, resource.id)
             assert metadata is not None and metadata.page_count == 2
-            units = db.scalars(select(ReadableResourceNavigationUnit).where(
-                ReadableResourceNavigationUnit.resource_id == resource.id
-            )).all()
+            units = db.scalars(
+                select(ReadableResourceNavigationUnit).where(
+                    ReadableResourceNavigationUnit.resource_id == resource.id
+                )
+            ).all()
             assert len(units) == 2
             assert all(unit.unit_type == "page" for unit in units)
 
@@ -1624,8 +1704,13 @@ def test_comic_import_creates_metadata_before_page_navigation(
             assert "failed" not in outcomes
             db.expire_all()
             assert metadata.page_count == 1
-            assert db.scalar(select(func.count()).select_from(
-                ReadableResourceNavigationUnit
-            ).where(ReadableResourceNavigationUnit.resource_id == resource.id)) == 1
+            assert (
+                db.scalar(
+                    select(func.count())
+                    .select_from(ReadableResourceNavigationUnit)
+                    .where(ReadableResourceNavigationUnit.resource_id == resource.id)
+                )
+                == 1
+            )
     finally:
         engine.dispose()

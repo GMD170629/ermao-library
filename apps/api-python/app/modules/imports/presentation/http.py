@@ -230,7 +230,8 @@ def library_tree(
                 code="LIBRARY_NOT_FOUND",
             )
     node, error, status_code = library_directory_tree_node(
-        path, mount_root_for_path=mount_root_for_path,
+        path,
+        mount_root_for_path=mount_root_for_path,
         browse_roots=mount_root_for_path.browse_roots,
     )
     if error:
@@ -278,6 +279,7 @@ def create_library(
         "enabled": payload.enabled,
         "ignorePatterns": payload.ignore_patterns,
         "ignoreHidden": payload.ignore_hidden,
+        "allowEmptyLibraryCleanup": payload.allow_empty_library_cleanup,
         "minFileSizeBytes": payload.min_file_size_bytes,
         "description": payload.description,
         "createdAt": checkpoint_at,
