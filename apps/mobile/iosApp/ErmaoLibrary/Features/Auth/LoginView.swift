@@ -33,9 +33,10 @@ struct LoginView: View {
     }
 
     private var hasInvalidCredentials: Bool {
-        store.snapshot.reasonCode == "UNAUTHORIZED" ||
+        (store.snapshot.phase == .loginFailed && store.snapshot.reasonCode == "UNAUTHORIZED") ||
             store.snapshot.reasonCode == "INVALID_CREDENTIALS" ||
-            store.operationErrorCode == "UNAUTHORIZED"
+            store.operationErrorCode == "UNAUTHORIZED" ||
+            store.operationErrorCode == "INVALID_CREDENTIALS"
     }
 
     var body: some View {
@@ -108,6 +109,8 @@ struct LoginView: View {
                             Divider()
                             if hasInvalidCredentials {
                                 fieldError("auth.invalidCredentials")
+                            } else if store.snapshot.phase == .sessionExpired {
+                                fieldError("auth.sessionExpired.message")
                             } else if store.snapshot.phase == .loginFailed {
                                 fieldError("common.requestFailed")
                             }
@@ -372,97 +375,5 @@ struct AccountDisabledView: View {
             .navigationBarTitleDisplayMode(.inline)
             .appCanvas()
         }
-    }
-}
-
-struct ReauthenticateView: View {
-    @ObservedObject var store: SessionStore
-
-    @Environment(\.appTheme) private var theme
-    @FocusState private var passwordFocused: Bool
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: .space3) {
-                    Image(systemName: "lock.rotation")
-                        .font(.largeTitle)
-                        .foregroundStyle(theme.brandAccent)
-                        .accessibilityHidden(true)
-                    Text("auth.reauthenticate.title")
-                        .appTextStyle(.title)
-                        .multilineTextAlignment(.center)
-                    if let profile = store.snapshot.profile {
-                        ServerIdentityView(profile: profile)
-                    }
-                    VStack(spacing: .spaceHalf) {
-                        Text(
-                            store.snapshot.userDisplayName ??
-                                store.reauthenticationUserDisplayName ??
-                                store.snapshot.userEmail ??
-                                store.reauthenticationUserEmail ??
-                                ""
-                        )
-                            .appTextStyle(.headline)
-                        if let email = store.snapshot.userEmail ?? store.reauthenticationUserEmail {
-                            Text(email)
-                                .appTextStyle(.label)
-                                .foregroundStyle(theme.textSecondary)
-                                .textSelection(.enabled)
-                        }
-                    }
-                    Text("auth.reauthenticate.message")
-                        .foregroundStyle(theme.textSecondary)
-                        .multilineTextAlignment(.center)
-
-                    VStack(alignment: .leading, spacing: .space1) {
-                        Text("auth.password.label")
-                            .appTextStyle(.label)
-                            .foregroundStyle(theme.textSecondary)
-                        SecureField("auth.password.placeholder", text: $store.password)
-                            .textContentType(.password)
-                            .focused($passwordFocused)
-                            .submitLabel(.go)
-                            .onSubmit(loginIfValid)
-                            .padding(.vertical, .space1)
-                        Divider()
-                        if store.snapshot.reasonCode == "INVALID_CREDENTIALS" ||
-                            store.operationErrorCode == "UNAUTHORIZED" {
-                            Label("auth.invalidCredentials", systemImage: "exclamationmark.circle.fill")
-                                .appTextStyle(.caption)
-                                .foregroundStyle(.red)
-                        }
-                    }
-
-                    PrimaryActionButton(
-                        "auth.reauthenticate.action",
-                        isWorking: store.snapshot.phase == .authenticating,
-                        isDisabled: store.password.isEmpty,
-                        action: loginIfValid
-                    )
-
-                    Button("server.switch.action") {
-                        store.chooseAnotherServer()
-                    }
-                    .frame(minHeight: .iosMinimumTouchTarget)
-                }
-                .frame(maxWidth: 520)
-                .padding(.horizontal, .space3)
-                .padding(.vertical, .space3)
-                .frame(maxWidth: .infinity)
-            }
-            .navigationTitle("auth.reauthenticate.navigationTitle")
-            .navigationBarTitleDisplayMode(.inline)
-            .appCanvas()
-        }
-        .onAppear {
-            store.email = store.snapshot.userEmail ?? store.reauthenticationUserEmail ?? store.email
-        }
-    }
-
-    private func loginIfValid() {
-        guard !store.email.isEmpty, !store.password.isEmpty else { return }
-        passwordFocused = false
-        store.login()
     }
 }
