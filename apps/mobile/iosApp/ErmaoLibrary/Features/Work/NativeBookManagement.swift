@@ -177,7 +177,7 @@ final class NativeBookManagementStore: ObservableObject {
         guard !running, let failedExecution = menuExecution, failedExecution.status == .failed else { return }
         menuExecution = NativeManagementMenuExecution(key: failedExecution.key, status: .running)
         run({ [session] in
-            if session.current.phase == .loadFailed { try await session.retryPreparation() }
+            if session.current.phase == .loadfailed { try await session.retryPreparation() }
             else { try await session.retryAction() }
         }) { [weak self] outcome in
             guard let self else { return }
@@ -1037,7 +1037,7 @@ private struct NativeManagementSheet: View {
 func nativeManagementPresentation(for presentation: ErmaoShared.ManagementPresentation) -> NativeManagementPresentation {
     switch presentation {
     case .sheet: return .sheet
-    case .deleteConfirmation: return .deleteConfirmation
+    case .deleteconfirmation: return .deleteConfirmation
     default: return .none
     }
 }
