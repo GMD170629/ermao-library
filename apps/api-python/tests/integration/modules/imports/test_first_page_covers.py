@@ -1883,3 +1883,260 @@ def test_image_first_batch_interruption_rolls_back_results(library, monkeypatch)
         assert len(assets) == 3
         assert all(asset.processed_source_version for asset in assets)
         assert resumed.get(LibraryImportTask, task_id).state == "SUCCEEDED"
+
+
+@pytest.mark.parametrize("media", ["image", "audio"])
+@pytest.mark.parametrize("entry", ["library", "directory"])
+@pytest.mark.parametrize(
+    "scenario", ["temporary", "permanent", "interrupted", "incomplete_scan"]
+)
+def test_unchanged_directory_continue_recovers_failed_resource(
+    library, monkeypatch, media, entry, scenario
+):
+    import json
+    from collections import Counter
+
+    from sqlalchemy import event
+
+    from app.models import (
+        LibraryResourceAsset,
+        ReadableResourceNavigationUnit,
+        ReaderResourceProgress,
+        User,
+    )
+    from app.modules.imports.application.audio_types import (
+        AudioChapterMetadata,
+        AudioFileMetadata,
+    )
+    from app.modules.imports.application.readable_resource.continue_import import (
+        ContinueSourceImport,
+    )
+    from app.modules.imports.infrastructure.audio_metadata_inspector import (
+        BoundedAudioMetadataInspector,
+    )
+    from app.modules.imports.infrastructure.readable_resource.adapter_registry import (
+        RegistryResourceAdapterExecutor,
+    )
+
+    db, settings, root, pipeline = library
+    folder = root / "Book"
+    if media == "image":
+        write_pages(root, "IMAGE_DIR")
+    else:
+        folder.mkdir()
+        for name in ("1.mp3", "2.mp3", "10.mp3"):
+            (folder / name).write_bytes(b"fixed audio input")
+
+        def inspect(self, path):
+            return AudioFileMetadata(
+                path=path,
+                title=path.stem,
+                album="Book",
+                author=None,
+                narrator=None,
+                duration_ms=1000,
+                codec="mp3",
+                bitrate=None,
+                sample_rate=None,
+                channels=None,
+                disc_number=1,
+                track_number=int(path.stem),
+                chapters=(AudioChapterMetadata(path.stem, 0, 1000),),
+            )
+
+        monkeypatch.setattr(BoundedAudioMetadataInspector, "inspect", inspect)
+    inputs = {
+        p.name: (p.read_bytes(), p.stat().st_size, p.stat().st_mtime_ns)
+        for p in folder.iterdir()
+    }
+    parsed = Counter()
+    broken = scenario != "interrupted"
+    parse = RegistryResourceAdapterExecutor.parse_file
+
+    def parse_file(self, **kwargs):
+        name = kwargs["absolute_path"].name
+        parsed[name] += 1
+        if broken and kwargs["absolute_path"].stem == "10":
+            raise OSError("temporary read failure")
+        return parse(self, **kwargs)
+
+    monkeypatch.setattr(RegistryResourceAdapterExecutor, "parse_file", parse_file)
+    task_id = scan(db, pipeline)["Book"]
+    worker = build_readable_resource_worker(pipeline)
+    if scenario == "interrupted":
+        save = pipeline.process_import_task._save_directory_batch
+
+        def interrupt(*args):
+            save(*args)
+            raise KeyboardInterrupt("after committed assets, before finalization")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                pipeline.process_import_task, "_save_directory_batch", interrupt
+            )
+            with pytest.raises(KeyboardInterrupt):
+                worker.process_once()
+        db.close()
+        pipeline = build_readable_resource_pipeline(db, settings)
+        worker = build_readable_resource_worker(pipeline)
+        assert worker.startup() == 1
+    else:
+        assert worker.process_once() == "failed"
+    task = db.get(LibraryImportTask, task_id)
+    assert task.state == "FAILED"
+    resource_id, anchor_id = task.resource_id, task.source_node_id
+    assets = db.scalars(select(LibraryResourceAsset)).all()
+    assert len(assets) == 3
+    assert sum(a.import_state == "READY" for a in assets) == (
+        3 if scenario == "interrupted" else 2
+    )
+    asset_ids = {a.id for a in assets}
+    chapter_ids = {c.id for c in db.scalars(select(ReadableResourceNavigationUnit))}
+    ready_asset = next(a for a in assets if a.import_state == "READY")
+    db.add(
+        User(
+            id="retry-reader",
+            email="retry@example.test",
+            name="Reader",
+            password_hash="fixture",
+        )
+    )
+    db.commit()
+    locator = json.dumps(
+        {"assetId": ready_asset.id, "chapterId": next(iter(chapter_ids), None)}
+    )
+    db.add(
+        ReaderResourceProgress(
+            id="retry-progress",
+            user_id="retry-reader",
+            resource_id=resource_id,
+            reader_type="comic" if media == "image" else "audio",
+            position="0",
+            extra=locator,
+        )
+    )
+    db.commit()
+    stable = {
+        a.id: (a.processed_source_version, a.updated_at)
+        for a in assets
+        if a.import_state == "READY"
+    }
+    broken = scenario == "permanent"
+    parsed.clear()
+    target = (
+        ContinueLibraryImport("lib")
+        if entry == "library"
+        else ContinueSourceImport(anchor_id)
+    )
+    if scenario == "incomplete_scan":
+        from app.modules.imports.infrastructure.readable_resource.filesystem import (
+            OsSourceTreeFilesystem,
+        )
+
+        listing = OsSourceTreeFilesystem.iter_directory_entries
+
+        def unavailable(self, path):
+            for item in listing(self, path):
+                yield item
+                if path == folder:
+                    raise PermissionError("directory enumeration interrupted")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(OsSourceTreeFilesystem, "iter_directory_entries", unavailable)
+            scan_request = pipeline.continue_import.execute(target)
+            assert worker.process_once() == "error"
+            assert db.get(LibraryImportTask, scan_request.task_id).state == "FAILED"
+            assert worker.process_once() == "idle"
+            assert db.get(LibraryImportTask, task_id).state == "FAILED"
+            assert not parsed
+            assert {a.id for a in db.scalars(select(LibraryResourceAsset))} == asset_ids
+    pipeline.continue_import.execute(target)
+    assert worker.process_once() == (
+        "scan" if entry == "library" else "continue_source"
+    )
+    db.expire_all()
+    assert db.get(LibraryImportTask, task_id).state == "QUEUED"
+    assert worker.process_once() == ("failed" if scenario == "permanent" else "ok")
+    assert parsed == (
+        {}
+        if scenario == "interrupted"
+        else {"10.png" if media == "image" else "10.mp3": 1}
+    )
+    assert db.get(LibraryImportTask, task_id).state == (
+        "FAILED" if scenario == "permanent" else "SUCCEEDED"
+    )
+    if scenario == "permanent":
+        failed = db.scalar(
+            select(LibraryResourceAsset).where(
+                LibraryResourceAsset.import_state == "FAILED"
+            )
+        )
+        assert failed.failure_reason == (
+            "IMAGE_FILE_UNREADABLE" if media == "image" else "AUDIO_FILE_UNREADABLE"
+        )
+        assert failed.processed_source_version is None
+        assert db.get(LibraryImportTask, task_id).error_summary
+    for _ in range(5):
+        outcome = worker.process_once()
+        if outcome == "idle":
+            break
+        assert outcome == "identified"
+    else:
+        pytest.fail("resource retry did not terminate")
+    assert db.scalars(
+        select(LibraryImportTask.id).where(LibraryImportTask.kind == "IMPORT_RESOURCE")
+    ).all() == [task_id]
+    assert db.get(LibraryReadableResource, resource_id).import_state == "READY"
+    assert {a.id for a in db.scalars(select(LibraryResourceAsset))} == asset_ids
+    assert chapter_ids <= {
+        c.id for c in db.scalars(select(ReadableResourceNavigationUnit))
+    }
+    assert db.get(ReaderResourceProgress, "retry-progress").extra == locator
+    for asset_id, (version, timestamp) in stable.items():
+        assert (
+            db.get(LibraryResourceAsset, asset_id).processed_source_version == version
+        )
+        if scenario != "interrupted":
+            assert db.get(LibraryResourceAsset, asset_id).updated_at == timestamp
+    assert inputs == {
+        p.name: (p.read_bytes(), p.stat().st_size, p.stat().st_mtime_ns)
+        for p in folder.iterdir()
+    }
+
+    if scenario == "permanent":
+        return
+    parsed.clear()
+    writes = []
+    engine = db.get_bind()
+    cover_files = {
+        str(p): (p.stat().st_mtime_ns, p.read_bytes())
+        for p in (settings.resolved_storage_root / "covers").rglob("*")
+        if p.is_file()
+    }
+    finished = db.get(LibraryImportTask, task_id).finished_at
+
+    def record_write(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith(
+            ("UPDATE", "INSERT", "DELETE")
+        ) and any(
+            name in statement
+            for name in ("LibraryResourceAsset", "ReadableResourceNavigationUnit")
+        ):
+            writes.append(statement)
+
+    event.listen(engine, "after_cursor_execute", record_write)
+    try:
+        pipeline.continue_import.execute(target)
+        assert worker.process_once() == (
+            "scan" if entry == "library" else "continue_source"
+        )
+        assert worker.process_once() == "idle"
+    finally:
+        event.remove(engine, "after_cursor_execute", record_write)
+    assert not parsed and not writes
+    assert db.get(LibraryImportTask, task_id).finished_at == finished
+    assert cover_files == {
+        str(p): (p.stat().st_mtime_ns, p.read_bytes())
+        for p in (settings.resolved_storage_root / "covers").rglob("*")
+        if p.is_file()
+    }

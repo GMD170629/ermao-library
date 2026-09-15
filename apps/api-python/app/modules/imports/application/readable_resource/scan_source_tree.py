@@ -500,19 +500,21 @@ class ScanLibrarySourceTree:
                     and not self._covers.exists(cover.path)
                 )
                 with self._uow.transaction():
-                    if (
+                    changed = (
                         self._books_resources.refresh_scan_context(
                             owner.id, context_version
                         )
                         or missing_cover
-                    ):
-                        self._queue.request_import_resource(
-                            library_id=config.library_id,
-                            resource_id=owner.id,
-                            source_node_id=owner.source_node_id,
-                            changed=True,
-                        )
-                        tasks_enqueued += 1
+                    )
+                    # Unchanged inputs can still have failed or interrupted work.
+                    # The queue reuses that task and skips unchanged successes.
+                    task = self._queue.request_import_resource(
+                        library_id=config.library_id,
+                        resource_id=owner.id,
+                        source_node_id=owner.source_node_id,
+                        changed=changed,
+                    )
+                    tasks_enqueued += int(task is not None)
             seen_path_keys: set[str] = set()
             entries = []
             for name, kind, size, mtime in observations:

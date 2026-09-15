@@ -210,3 +210,70 @@ OPF-only 在各样例新增 10 图之后执行；表中规模为初始图片数�
 - 大体积真实媒体吞吐、全部格式的外部解码器部署组合：**未验证**；此处小媒体与替代音频解析不支持这类结论。
 - 普通封面文件名如何参与目录识别仍沿用原规则；没有顺手修复或固化新的识别规则。
 - 未发现阻塞本轮验收的剩余项；上述平台/真实 NAS 缺口不被包装为通过，不自动开始下一任务。
+
+## 返修：输入未变化的目录失败任务恢复
+
+基线：`develop / 02c4988ddd848e64601ff02b6b3133d2ee1fb8e8`；执行前工作区干净。本节补齐原验收遗漏：此前通过 `ContinueImportTask` 恢复的证据，不能证明书库和目录扫描入口也会恢复未变化输入的失败任务。上文任务 6 数据保留为当时记录，本节说明此次修复后的证据。
+
+### 修改前失败与最小修复
+
+真实调用链：`ContinueLibraryImport → RequestLibraryScan` 或 `ContinueSourceImport → request_source_scan`，然后 `worker → ScanLibrarySourceTree`。目录锚点原来仅在上下文或封面变化时调用 `request_import_resource`，所以 FAILED 任务没有得到恢复机会。
+
+先只增加回归、保持生产代码不变，执行：
+
+```sh
+uv run --project apps/api-python --extra dev --locked pytest -q \
+  apps/api-python/tests/integration/modules/imports/test_first_page_covers.py \
+  -k unchanged_directory_continue --tb=short
+```
+
+修改前 **4 failed, 43 deselected（1.08 秒）**：`library-image`、`library-audio`、`directory-image`、`directory-audio` 都在扫描后的同一个断言失败：`assert task.state == "QUEUED"`，实际为 `FAILED`。每例已有两个 READY 资产、一个失败资产，故障注入移除后没有写媒体、OPF、封面或配置。未调用 `request_import_resource` 或 `ContinueImportTask` 绕过入口。
+
+生产修复只修改 `scan_source_tree.py` 的目录资源锚点：完整枚举后统一申请资源待办，`changed` 仍取真实上下文变化或封面缺失。现有队列负责缺失创建、FAILED 复用重排、QUEUED 合并、未变 SUCCEEDED 跳过。未使用 force、未清除成功版本、未改变事务边界、未增加逐文件任务检查或自动重试循环。扫描失败屏障保持原实现。
+
+同一命令修复后 **4 passed（0.96 秒）**；随后扩展临时错误、永久错误、中断、枚举失败四种场景，**16 passed, 43 deselected（4.02 秒）**。
+
+### 验收矩阵
+
+所有场景复用现有 `library` 测试夹具、真实 SQLite、Continue 应用入口和 worker。图片为真实 PNG；音频仅替换昂贵音频元数据提取，返回固定音轨及章节，队列、保存、事务和收尾均真实执行。
+
+| 资源 / 恢复入口 | A 临时错误 | B 提交后中断 | C 成功后无变化 | D 永久错误 | E 身份与复用 | F 枚举失败 |
+| --- | --- | --- | --- | --- | --- | --- |
+| IMAGE_DIR / ContinueLibraryImport | 通过 | 通过 | 通过 | 通过 | 通过 | 通过 |
+| IMAGE_DIR / ContinueSourceImport（锚点） | 通过 | 通过 | 通过 | 通过 | 通过 | 通过 |
+| AUDIOBOOK_DIR / ContinueLibraryImport | 通过 | 通过 | 通过 | 通过 | 通过 | 通过 |
+| AUDIOBOOK_DIR / ContinueSourceImport（锚点） | 通过 | 通过 | 通过 | 通过 | 通过 | 通过 |
+
+- A：每例 3 个资产；原失败任务由 FAILED → QUEUED → SUCCEEDED，资源任务 ID 不变且总数为 1；只解析失败的 `10.png`/`10.mp3` 一次，其余成功资产版本和更新时间不变。文件内容、大小、mtime 的前后完整快照相等。
+- B：真实资产批次提交后、收尾前抛 KeyboardInterrupt，关闭 Session，重新装配 worker，`startup()` 将 1 个中断任务标为 FAILED；两个扫描入口都可恢复，新增解析次数为 0。资源收尾可完成必要排序，未声称首次音频收尾不会更新排序字段。
+- C：成功后再次通过同一入口扫描，下一 worker 返回 idle；解析次数 0，资产/资产元数据/章节 INSERT、UPDATE、DELETE 为 0；任务完成时间不变，封面目录全部产物内容和 mtime 不变。
+- D：保留故障注入后，仅重试失败文件一次；仍有明确 `IMAGE_FILE_UNREADABLE` / `AUDIO_FILE_UNREADABLE` 和任务错误摘要，失败资产成功版本为空；worker 在有界步数内到 idle，无同轮重新排队循环，其他资产可读。
+- E：资源 ID、全部资产 ID、未变化章节 ID、真实持久化阅读进度中的资产/章节引用有效；原有 100/1000/2000 图片与 10/20/100 音轨批量计数测试同时运行。
+- F：目录枚举返回首项后抛 PermissionError，扫描进入 FAILED，资源任务仍 FAILED，worker idle、不解析、不删资产；移除目录故障后由同一继续入口完成恢复。既有扫描已提交批次/不完整清单屏障回归同时通过。
+
+### 本次相关回归与性能边界
+
+```sh
+uv run --project apps/api-python --extra dev --locked pytest -q \
+  apps/api-python/tests/integration/modules/imports \
+  apps/api-python/tests/unit/modules/imports/test_scan_short_transactions.py \
+  apps/api-python/tests/unit/modules/imports/test_filesystem_streaming.py \
+  apps/api-python/tests/unit/modules/imports/test_readable_resource_queue_minimize.py \
+  apps/api-python/tests/contract/api/test_import_continue_contract.py --tb=short
+uv run --project apps/api-python --extra dev --locked ruff check \
+  apps/api-python/app/modules/imports/application/readable_resource/scan_source_tree.py \
+  apps/api-python/tests/integration/modules/imports/test_first_page_covers.py
+uv run --project apps/api-python --extra dev --locked mypy --follow-imports=skip \
+  apps/api-python/app/modules/imports/application/readable_resource/scan_source_tree.py
+git diff --check
+```
+
+回归结果：**202 passed，50.45 秒**，无失败或跳过；保留既有 Starlette/httpx 弃用警告。Ruff、局部 mypy 与 diff 检查通过。
+
+本次新增的是每个已完整枚举的资源锚点一次队列申请，不按图片/音轨数量判断失败任务。200/2000 张图片无变化扫描实际驱动调用分别为 43/70（原 41/68），SELECT 40/67（原 38/65），均只增加固定 2 次查询；写行数仍为 3、写事务提交仍为 3，全部属于扫描任务生命周期。资源执行、媒体解析、资产/章节重写与封面发布仍为 0。
+
+图片 100/1000/2000 初次资产提交仍为 1/5/10，资产保存 SELECT 为 5/25/50；每个音频资源的全局整理仍为一次。没有恢复逐文件事务或逐文件全集合汇总。
+
+本次未验证真实 NAS 断连与权限恢复，也未执行移动端、浏览器或全仓回归；本地权限异常注入不替代 NAS 实机证据，音频替代解析不代表真实解码性能。没有生产数据库操作或 schema 变更。本次仅提交返修文件，不推送。
+
+本次相对返修基线仅 3 个文件：生产 `scan_source_tree.py` **+11/-9**；测试 `test_first_page_covers.py` **+257/-0**；本验收文档追加记录。没有独立测试辅助代码或新测试平台；测试内固定样例与计数器计入测试行数。提交 SHA 见本次交付消息和 git log。
