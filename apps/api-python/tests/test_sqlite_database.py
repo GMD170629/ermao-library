@@ -383,10 +383,11 @@ def test_alembic_script_directory_has_one_linear_head() -> None:
     config = alembic_config_for_engine(create_engine("sqlite+pysqlite:///:memory:"))
     script = ScriptDirectory.from_config(config)
     revisions = list(script.walk_revisions())
-    assert len(revisions) == 13
-    assert script.get_heads() == ["0013_image_resource_tasks"]
-    assert head_revision() == "0013_image_resource_tasks"
+    assert len(revisions) == 14
+    assert script.get_heads() == ["0014_audio_resource_tasks"]
+    assert head_revision() == "0014_audio_resource_tasks"
     assert [revision.revision for revision in revisions] == [
+        "0014_audio_resource_tasks",
         "0013_image_resource_tasks",
         "0012_resource_import_tasks",
         "0011_incremental_library_scan",
@@ -412,7 +413,7 @@ def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
     engine = create_sqlite_engine(settings.database_path)
     try:
         runner_module.apply_schema(engine, settings)
-        assert _current_revision(engine) == "0013_image_resource_tasks"
+        assert _current_revision(engine) == "0014_audio_resource_tasks"
         operation_columns = {
             column["name"]: column
             for column in inspect(engine).get_columns("MetadataWritebackOperation")
@@ -453,7 +454,7 @@ def test_source_node_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None
         }
 
         runner_module.apply_schema(engine)
-        assert _current_revision(engine) == "0013_image_resource_tasks"
+        assert _current_revision(engine) == "0014_audio_resource_tasks"
         source_node_indexes = {
             index["name"]: tuple(index["column_names"])
             for index in inspect(engine).get_indexes("LibrarySourceNode")
@@ -504,7 +505,7 @@ def test_foreign_key_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None
             }
 
         runner_module.apply_schema(engine)
-        assert _current_revision(engine) == "0013_image_resource_tasks"
+        assert _current_revision(engine) == "0014_audio_resource_tasks"
         for table_name, index_name in expected_indexes.items():
             assert index_name in {
                 index["name"] for index in inspect(engine).get_indexes(table_name)
@@ -1293,7 +1294,10 @@ def test_resource_tasks_upgrade_preserves_assets_and_pending_work(
         engine.dispose()
 
 
-def test_image_legacy_tasks_upgrade_keeps_asset_ids_and_progress(tmp_path):
+@pytest.mark.parametrize("media", ["image", "audio"])
+def test_directory_legacy_tasks_upgrade_keeps_asset_ids_and_progress(
+    tmp_path, monkeypatch, media
+):
     from alembic import command
 
     from app.bootstrap.readable_resource_pipeline import (
@@ -1314,7 +1318,12 @@ def test_image_legacy_tasks_upgrade_keeps_asset_ids_and_progress(tmp_path):
     try:
         with engine.connect() as connection:
             config.attributes["connection"] = connection
-            command.upgrade(config, "0012_resource_import_tasks")
+            command.upgrade(
+                config,
+                "0012_resource_import_tasks"
+                if media == "image"
+                else "0013_image_resource_tasks",
+            )
         with Session(engine) as db:
             db.add(
                 Library(
@@ -1359,9 +1368,11 @@ def test_image_legacy_tasks_upgrade_keeps_asset_ids_and_progress(tmp_path):
                     library_id="lib",
                     book_id="book",
                     source_node_id="anchor",
-                    adapter_id="image-directory",
+                    adapter_id="image-directory"
+                    if media == "image"
+                    else "audiobook-directory",
                     adapter_version="1",
-                    format="IMAGE_DIR",
+                    format="IMAGE_DIR" if media == "image" else "AUDIOBOOK_DIR",
                 )
             )
             db.commit()
@@ -1370,13 +1381,13 @@ def test_image_legacy_tasks_upgrade_keeps_asset_ids_and_progress(tmp_path):
                     id="progress",
                     user_id="user",
                     resource_id="resource",
-                    reader_type="comic",
+                    reader_type="comic" if media == "image" else "audio",
                     position="2",
                     extra='{"assetId":"asset-2"}',
                 )
             )
             for index, state in enumerate(("QUEUED", "FAILED", "RUNNING"), start=1):
-                name = f"{index}.png"
+                name = f"{index}.png" if media == "image" else f"{index}.mp3"
                 (folder / name).write_bytes(
                     b"readable image file; optional artwork unavailable"
                 )
@@ -1404,7 +1415,7 @@ def test_image_legacy_tasks_upgrade_keeps_asset_ids_and_progress(tmp_path):
                         library_id="lib",
                         resource_id="resource",
                         source_node_id=f"node-{index}",
-                        role="PAGE",
+                        role="PAGE" if media == "image" else "TRACK",
                         import_state="READY",
                     )
                 )
@@ -1415,7 +1426,7 @@ def test_image_legacy_tasks_upgrade_keeps_asset_ids_and_progress(tmp_path):
                         library_id="lib",
                         resource_id="resource",
                         source_node_id=f"node-{index}",
-                        role="PAGE",
+                        role="PAGE" if media == "image" else "TRACK",
                         state=state,
                     )
                 )
@@ -1431,6 +1442,33 @@ def test_image_legacy_tasks_upgrade_keeps_asset_ids_and_progress(tmp_path):
                 a.processed_source_version is None
                 for a in db.scalars(select(LibraryResourceAsset))
             )
+            if media == "audio":
+                from app.modules.imports.application.audio_types import (
+                    AudioFileMetadata,
+                )
+                from app.modules.imports.infrastructure.audio_metadata_inspector import (
+                    BoundedAudioMetadataInspector,
+                )
+
+                def inspect_audio(self, path):
+                    return AudioFileMetadata(
+                        path,
+                        path.stem,
+                        None,
+                        None,
+                        None,
+                        3000,
+                        "mp3",
+                        None,
+                        None,
+                        None,
+                        1,
+                        int(path.stem),
+                    )
+
+                monkeypatch.setattr(
+                    BoundedAudioMetadataInspector, "inspect", inspect_audio
+                )
             pipeline = build_readable_resource_pipeline(db, settings)
             assert build_readable_resource_worker(pipeline).process_once() == "ok"
             assert {a.id for a in db.scalars(select(LibraryResourceAsset))} == {

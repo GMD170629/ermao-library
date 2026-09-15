@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 from io import BytesIO
 from pathlib import Path
@@ -44,6 +45,37 @@ class FilesystemLocalCoverPublication:
             final_path=final_path,
             stored_path=final_path.relative_to(self._storage_root).as_posix(),
         )
+
+    def retain_audio_candidate(self, *, resource_id: str, content: bytes) -> str:
+        # This is a durable parser candidate, not the user-visible cover. Identical
+        # album artwork shares one file; batches retain paths rather than bytes.
+        if not resource_id or Path(resource_id).name != resource_id:
+            raise ValueError("invalid resource identifier")
+        if not 0 < len(content) <= _MAX_COVER_BYTES:
+            raise ValueError("local cover exceeds the supported size")
+        digest = hashlib.sha256(content).hexdigest()
+        target = (
+            self._storage_root
+            / "covers"
+            / "resources"
+            / f"{resource_id}-candidate-{digest}"
+        )
+        if target.is_file():
+            return target.relative_to(self._storage_root).as_posix()
+        prepared = self.prepare(resource_id=resource_id, content=content)
+        os.replace(prepared.temporary_path, target)
+        return target.relative_to(self._storage_root).as_posix()
+
+    def read_candidate(self, stored_path: str) -> bytes | None:
+        target = (self._storage_root / stored_path).resolve()
+        if not target.is_relative_to(self._storage_root):
+            return None
+        try:
+            if target.stat().st_size > _MAX_COVER_BYTES:
+                return None
+            return target.read_bytes()
+        except OSError:
+            return None
 
     def matches(self, stored_path: str | None, content: bytes) -> bool:
         if stored_path is None:

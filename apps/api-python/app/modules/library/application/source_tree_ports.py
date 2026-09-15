@@ -126,19 +126,22 @@ class ReadableResourceRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class ImageImportMember:
+class DirectoryImportMember:
     node: SourceNodeRecord
     processed_version: str | None
     ready: bool
 
 
 @dataclass(frozen=True, slots=True)
-class ImageAssetResult:
+class DirectoryAssetResult:
     node: SourceNodeRecord
     processed_version: str | None
     title: str | None
     mime_type: str | None
     error: str | None
+    metadata: ResourceAssetMetadataInput | None = None
+    units: tuple[ResourceNavigationUnitInput, ...] = ()
+    observations: tuple[LocalMetadataObservation, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,17 +223,23 @@ class SourceNodeRepositoryPort(Protocol):
 
 
 class BookResourceRepositoryPort(Protocol):
-    def load_image_members(self, resource_id: str) -> tuple[ImageImportMember, ...]: ...
+    def load_directory_members(
+        self, resource_id: str
+    ) -> tuple[DirectoryImportMember, ...]: ...
 
-    def save_image_assets(
+    def save_directory_assets(
         self,
         *,
         library_id: str,
         resource_id: str,
-        results: tuple[ImageAssetResult, ...],
+        results: tuple[DirectoryAssetResult, ...],
     ) -> None: ...
 
     def resource_cover_state(self, resource_id: str) -> ResourceCoverState: ...
+
+    def resource_local_observations(
+        self, resource_id: str
+    ) -> tuple[LocalMetadataObservation, ...]: ...
 
     def ensure_book(
         self,

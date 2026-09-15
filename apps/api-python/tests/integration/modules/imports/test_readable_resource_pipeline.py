@@ -92,6 +92,9 @@ from app.modules.library.public import (
 
 
 class StubAlwaysOkAdapter(ResourceAdapterExecutorPort):
+    def inspect_resource_metadata(self, **kwargs):
+        return RegistryResourceAdapterExecutor().inspect_resource_metadata(**kwargs)
+
     def parse_file(
         self,
         *,
@@ -649,7 +652,7 @@ def test_changed_directory_member_preserves_other_ready_assets(tmp_path: Path) -
                 .where(LibraryResourceAsset.resource_id == resource.id)
             ).all()
             states = {node.name: asset.import_state for asset, node in assets}
-            assert states == {"01.mp3": "PENDING", "02.mp3": "READY"}
+            assert states == {"01.mp3": "READY", "02.mp3": "READY"}
             assert db.get(LibraryReadableResource, resource.id).import_state == "READY"
 
             assert _drain(pipeline) == ["ok", "identified"]
@@ -799,7 +802,7 @@ def test_shared_scan_converges_existing_audio_file_resources_to_one_directory(
                 directory_node.id,
                 missing_entry_policy=missing_entry_policy,
             )
-            assert _drain(pipeline, limit=500) == ["ok"] * 204 + ["identified"]
+            assert _drain(pipeline, limit=500) == ["ok", "identified"]
 
             resources = db.scalars(select(LibraryReadableResource)).all()
             assert len(resources) == 1
@@ -1051,7 +1054,7 @@ def test_audiobook_volume_titles_survive_import_and_reprocessing(
             assert book is not None
             assert (book.title, book.author) == ("鬼吹灯全集", "天下霸唱")
 
-            # Simulate existing bad titles, then re-run the existing asset jobs.
+            # Simulate existing bad titles, then re-run the resource job.
             for index, (resource, node, metadata) in enumerate(rows):
                 metadata.title = "旧错误标题"
                 if index == 0:
@@ -1069,11 +1072,11 @@ def test_audiobook_volume_titles_survive_import_and_reprocessing(
                     )
                 )
                 assert asset is not None
-                pipeline.queue.requeue_import_asset_task(
+                pipeline.queue.request_import_resource(
                     library_id="lib-1",
                     resource_id=resource.id,
-                    source_node_id=asset.source_node_id,
-                    role=AssetRole.TRACK,
+                    source_node_id=resource.source_node_id,
+                    changed=True,
                 )
             db.commit()
             _drain(pipeline)
@@ -1094,13 +1097,10 @@ def test_audiobook_volume_titles_survive_import_and_reprocessing(
                     )
                 )
                 assert asset is not None
-                path = next(
-                    item
+                assert all(
+                    item.source == "EMBEDDED"
                     for item in decode_observations(asset.local_metadata_candidates)
-                    if item.source == "PATH"
                 )
-                assert path.metadata.volume_title == node.name
-                assert path.metadata.authors == ()
             assert (book.title, book.author) == ("鬼吹灯全集", "天下霸唱")
     finally:
         engine.dispose()

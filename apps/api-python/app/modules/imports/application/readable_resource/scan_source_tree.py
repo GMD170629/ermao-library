@@ -526,16 +526,19 @@ class ScanLibrarySourceTree:
                         tasks_enqueued += enqueued
 
             with self._uow.transaction():
-                image_owner = (
+                directory_owner = (
                     self._books_resources.get_resource_by_source_node(parent_id)
                     if parent_id is not None
                     else None
                 )
-                if image_owner is not None and image_owner.format == "IMAGE_DIR":
+                if directory_owner is not None and directory_owner.format in {
+                    "IMAGE_DIR",
+                    "AUDIOBOOK_DIR",
+                }:
                     self._queue.request_import_resource(
                         library_id=config.library_id,
-                        resource_id=image_owner.id,
-                        source_node_id=image_owner.source_node_id,
+                        resource_id=directory_owner.id,
+                        source_node_id=directory_owner.source_node_id,
                         changed=True,
                     )
                     tasks_enqueued += 1
@@ -779,7 +782,7 @@ class ScanLibrarySourceTree:
         existing = self._books_resources.get_resource_by_source_node(node_id)
         if owner is not None:
             self._mark_node_covered_by_directory_resource(node_id)
-            if owner.format == "IMAGE_DIR":
+            if owner.format in {"IMAGE_DIR", "AUDIOBOOK_DIR"}:
                 # The completed directory scan requests one resource task below.
                 return (0, 0)
             adapter = self._adapter_for_resource(owner, relative_path.name)
@@ -909,7 +912,7 @@ class ScanLibrarySourceTree:
         source_node_id: str,
         adapter: ResourceAdapterSpec,
     ) -> None:
-        if adapter.format_label == "IMAGE_DIR":
+        if adapter.format_label in {"IMAGE_DIR", "AUDIOBOOK_DIR"}:
             return
         self._books_resources.invalidate_asset_for_reimport(
             resource_id=resource_id,
@@ -1006,7 +1009,7 @@ class ScanLibrarySourceTree:
                 source_node_id=resource.source_node_id,
             )
             return 0 if task is None else 1
-        if resource.format == "IMAGE_DIR":
+        if resource.format in {"IMAGE_DIR", "AUDIOBOOK_DIR"}:
             return 0
         role = adapter.asset_role
         task = self._queue.ensure_import_asset_task(

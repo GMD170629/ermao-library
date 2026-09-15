@@ -84,7 +84,7 @@ def resource_import_summaries(
                 LibraryReadableResource.book_id.in_(normalized_ids),
                 LibraryReadableResource.enablement_state == "ENABLED",
                 LibraryImportTask.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE")),
-                LibraryReadableResource.format != "IMAGE_DIR",
+                LibraryReadableResource.format.not_in(("IMAGE_DIR", "AUDIOBOOK_DIR")),
                 LibraryImportTask.state == "FAILED",
             )
             .group_by(LibraryReadableResource.book_id)
@@ -99,7 +99,7 @@ def resource_import_summaries(
         .where(
             LibraryReadableResource.book_id.in_(normalized_ids),
             LibraryReadableResource.enablement_state == "ENABLED",
-            LibraryReadableResource.format == "IMAGE_DIR",
+            LibraryReadableResource.format.in_(("IMAGE_DIR", "AUDIOBOOK_DIR")),
             LibraryResourceAsset.import_state == "FAILED",
         )
         .group_by(LibraryReadableResource.book_id)

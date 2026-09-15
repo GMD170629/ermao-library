@@ -618,7 +618,7 @@ def test_thousand_images_batch_import_and_incremental_reuse(
     monkeypatch.setattr(
         SqlAlchemyBookResourceRepository, "apply_local_metadata", apply_count
     )
-    original_batch = pipeline.process_import_task._save_image_batch
+    original_batch = pipeline.process_import_task._save_directory_batch
     sizes = []
 
     def save_batch(*args):
@@ -633,7 +633,9 @@ def test_thousand_images_batch_import_and_incremental_reuse(
             raise KeyboardInterrupt()
         return result
 
-    monkeypatch.setattr(pipeline.process_import_task, "_save_image_batch", save_batch)
+    monkeypatch.setattr(
+        pipeline.process_import_task, "_save_directory_batch", save_batch
+    )
     try:
         tasks = scan(db, pipeline)
         assert list(tasks) == ["Book"]
@@ -656,9 +658,9 @@ def test_thousand_images_batch_import_and_incremental_reuse(
             db.close()
             with Session(engine) as resumed:
                 restored = build_readable_resource_pipeline(resumed, settings)
-                original_batch = restored.process_import_task._save_image_batch
+                original_batch = restored.process_import_task._save_directory_batch
                 monkeypatch.setattr(
-                    restored.process_import_task, "_save_image_batch", save_batch
+                    restored.process_import_task, "_save_directory_batch", save_batch
                 )
                 restarted = build_readable_resource_worker(restored)
                 assert restarted.startup() == 1
@@ -906,7 +908,7 @@ def test_image_batch_keeps_topology_and_file_type_validation(library, invalid):
     from datetime import UTC, datetime
 
     from app.models import LibraryResourceAsset
-    from app.modules.library.public import ImageAssetResult, SourceNodeRelativePath
+    from app.modules.library.public import DirectoryAssetResult, SourceNodeRelativePath
 
     db, _settings, root, pipeline = library
     write_pages(root, "IMAGE_DIR")
@@ -917,7 +919,7 @@ def test_image_batch_keeps_topology_and_file_type_validation(library, invalid):
     )
 
     repository = SqlAlchemyBookResourceRepository(db)
-    member = repository.load_image_members(resource_id)[0]
+    member = repository.load_directory_members(resource_id)[0]
     node_id = member.node.id
     if invalid == "directory":
         node_id = db.get(LibraryImportTask, task_id).source_node_id
@@ -938,11 +940,11 @@ def test_image_batch_keeps_topology_and_file_type_validation(library, invalid):
         )
         db.commit()
         node_id = "invalid-node"
-    result = ImageAssetResult(
+    result = DirectoryAssetResult(
         replace(member.node, id=node_id), "test-version", "page", "image/png", None
     )
     with pytest.raises(ValueError), pipeline.uow.transaction():
-        repository.save_image_assets(
+        repository.save_directory_assets(
             library_id="other-library" if invalid == "library" else "lib",
             resource_id=resource_id,
             results=(result,),
@@ -982,3 +984,331 @@ def test_image_failed_file_summary_counts_assets_not_tasks(library, monkeypatch)
         )
         == 1
     )
+
+
+@pytest.mark.parametrize("tracks", [10, 20, 100])
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_audio_resource_batches_reuse_tracks_and_finalize_once(
+    library, monkeypatch, tracks, interrupted
+):
+    from collections import Counter
+
+    from sqlalchemy import event
+
+    from app.models import LibraryResourceAsset, ReadableResourceNavigationUnit
+    from app.modules.imports.application.audio_types import (
+        AudioChapterMetadata,
+        AudioFileMetadata,
+    )
+    from app.modules.imports.application.readable_resource.continue_import import (
+        ContinueImportTask,
+    )
+    from app.modules.imports.infrastructure.audio_metadata_inspector import (
+        BoundedAudioMetadataInspector,
+    )
+    from app.modules.imports.infrastructure.local_cover_publication import (
+        FilesystemLocalCoverPublication,
+    )
+    from app.modules.library.infrastructure.persistence.source_tree_repository import (
+        SqlAlchemyBookResourceRepository,
+    )
+
+    db, settings, root, pipeline = library
+    folder = root / "Album"
+    folder.mkdir()
+    for index in range(1, tracks + 1):
+        (folder / f"{index}.mp3").write_bytes(b"audio")
+    cover = BytesIO()
+    Image.new("RGB", (32, 32), "red").save(cover, format="PNG")
+    parsed = Counter()
+    counts = Counter()
+    phase = "scan"
+    sql = {name: Counter() for name in ("scan", "asset", "finish", "aggregate")}
+    engine = db.get_bind()
+
+    def executed(conn, cursor, statement, parameters, context, executemany):
+        sql[phase]["driver_calls"] += 1
+        sql[phase]["executemany_calls"] += int(executemany)
+        if cursor.rowcount >= 0:
+            sql[phase]["affected_rows"] += cursor.rowcount
+        if statement.startswith('UPDATE "ReadableResourceNavigationUnit"'):
+            counts["chapter_order_update_calls"] += 1
+            assert phase == "aggregate"
+
+    def committed(conn):
+        sql[phase]["commit_calls"] += 1
+        sql[phase]["actual_commits"] += int(
+            conn.connection.driver_connection.in_transaction
+        )
+
+    event.listen(engine, "after_cursor_execute", executed)
+    event.listen(engine, "commit", committed)
+    batch_save = pipeline.process_import_task._save_directory_batch
+
+    def measured_batch(*args):
+        nonlocal phase
+        phase = "asset"
+        try:
+            return batch_save(*args)
+        finally:
+            phase = "finish"
+
+    monkeypatch.setattr(
+        pipeline.process_import_task, "_save_directory_batch", measured_batch
+    )
+    broken = set()
+    changed = set()
+    unknown = set()
+
+    def inspect(self, path):
+        assert not db.in_transaction()
+        index = int(path.stem)
+        parsed[index] += 1
+        if index in broken:
+            raise ValueError("damaged track fixture")
+        return AudioFileMetadata(
+            path=path,
+            title=f"Track {index}",
+            album="Album",
+            author="Author",
+            narrator=None,
+            duration_ms=None if index in unknown else 3000,
+            codec="mp3",
+            bitrate=128000,
+            sample_rate=44100,
+            channels=2,
+            disc_number=1 if index in changed else 2,
+            track_number=index,
+            chapters=tuple(
+                AudioChapterMetadata(f"{index}.{c}", (c - 1) * 1000, c * 1000)
+                for c in range(1, 4)
+            ),
+            cover_data=cover.getvalue(),
+            cover_extension=".png",
+        )
+
+    aggregate = SqlAlchemyBookResourceRepository.refresh_audio_resource_aggregates
+    publish = FilesystemLocalCoverPublication.publish
+    from app.modules.imports.infrastructure.readable_resource.adapter_registry import (
+        RegistryResourceAdapterExecutor,
+    )
+
+    resource_inspect = RegistryResourceAdapterExecutor.inspect_resource_metadata
+    resource_merge = SqlAlchemyBookResourceRepository.apply_local_metadata
+
+    def inspect_resource(self, **kwargs):
+        counts["directory_metadata_inspections"] += 1
+        return resource_inspect(self, **kwargs)
+
+    def merge_resource(self, **kwargs):
+        counts["resource_metadata_merges"] += 1
+        return resource_merge(self, **kwargs)
+
+    monkeypatch.setattr(
+        RegistryResourceAdapterExecutor, "inspect_resource_metadata", inspect_resource
+    )
+    monkeypatch.setattr(
+        SqlAlchemyBookResourceRepository, "apply_local_metadata", merge_resource
+    )
+
+    def aggregate_count(self, resource_id):
+        nonlocal phase
+        counts["global_audio_ordering"] += 1
+        phase = "aggregate"
+        try:
+            return aggregate(self, resource_id)
+        finally:
+            phase = "finish"
+
+    def publish_count(self, prepared):
+        counts["cover_publications"] += 1
+        return publish(self, prepared)
+
+    monkeypatch.setattr(BoundedAudioMetadataInspector, "inspect", inspect)
+    monkeypatch.setattr(
+        SqlAlchemyBookResourceRepository,
+        "refresh_audio_resource_aggregates",
+        aggregate_count,
+    )
+    monkeypatch.setattr(FilesystemLocalCoverPublication, "publish", publish_count)
+    task_id = scan(db, pipeline)["Album"]
+    assert not db.scalars(
+        select(LibraryImportTask).where(LibraryImportTask.kind == "IMPORT_ASSET")
+    ).all()
+    phase = "finish"
+    worker = build_readable_resource_worker(pipeline)
+    if interrupted:
+        save = pipeline.process_import_task._save_directory_batch
+
+        def crash(*args):
+            save(*args)
+            raise KeyboardInterrupt()
+
+        monkeypatch.setattr(
+            pipeline.process_import_task, "_save_directory_batch", crash
+        )
+        with pytest.raises(KeyboardInterrupt):
+            worker.process_once()
+        assert len(db.scalars(select(LibraryResourceAsset)).all()) == tracks
+        assert (
+            len(db.scalars(select(ReadableResourceNavigationUnit)).all()) == tracks * 3
+        )
+        assert counts == {}
+        engine = db.get_bind()
+        db.close()
+        with Session(engine) as resumed:
+            restored = build_readable_resource_pipeline(resumed, settings)
+            restarted = build_readable_resource_worker(restored)
+            assert restarted.startup() == 1
+            restored.continue_import.execute(ContinueImportTask(task_id))
+            assert restarted.process_once() == "ok"
+    else:
+        assert worker.process_once() == "ok"
+    assert parsed == {i: 1 for i in range(1, tracks + 1)}
+    assert counts == {
+        "global_audio_ordering": 1,
+        "cover_publications": 1,
+        "chapter_order_update_calls": 2,
+        "directory_metadata_inspections": 1,
+        "resource_metadata_merges": 1,
+    }
+    assert sql["asset"]["actual_commits"] == 1
+    print(
+        {
+            "mode": "interrupted" if interrupted else "normal",
+            "tracks": tracks,
+            "chapters": tracks * 3,
+            "resource_tasks": 1,
+            "parses": sum(parsed.values()),
+            "work": dict(counts),
+            "sql": {key: dict(value) for key, value in sql.items()},
+        }
+    )
+    event.remove(engine, "after_cursor_execute", executed)
+    event.remove(engine, "commit", committed)
+    resource = db.scalar(select(LibraryReadableResource))
+    assets = db.scalars(
+        select(LibraryResourceAsset).order_by(LibraryResourceAsset.sequence_index)
+    ).all()
+    assert len(assets) == tracks and all(a.role == "TRACK" for a in assets)
+    chapters = db.scalars(
+        select(ReadableResourceNavigationUnit).order_by(
+            ReadableResourceNavigationUnit.sort_order
+        )
+    ).all()
+    assert [c.title for c in chapters] == [
+        f"{i}.{c}" for i in range(1, tracks + 1) for c in range(1, 4)
+    ]
+    metadata = db.get(LibraryReadableResourceMetadata, resource.id)
+    assert (metadata.track_count, metadata.chapter_count, metadata.duration_ms) == (
+        tracks,
+        tracks * 3,
+        tracks * 3000,
+    )
+    assert (
+        len(
+            list(
+                (settings.resolved_storage_root / "covers/resources").glob(
+                    "*-candidate-*"
+                )
+            )
+        )
+        == 1
+    )
+    if interrupted:
+        return
+    import json
+
+    from app.models import ReaderResourceProgress, User
+
+    db.add(
+        User(
+            id="audio-reader",
+            email="audio@example.test",
+            name="Listener",
+            password_hash="fixture",
+        )
+    )
+    db.commit()
+    locator = json.dumps(
+        {"chapterId": chapters[0].id, "assetId": chapters[0].asset_id, "offsetMs": 250}
+    )
+    db.add(
+        ReaderResourceProgress(
+            id="audio-progress",
+            user_id="audio-reader",
+            resource_id=resource.id,
+            reader_type="audio",
+            position="250",
+            extra=locator,
+        )
+    )
+    db.commit()
+    stable = {a.id: a.processed_source_version for a in assets}
+    stable_chapters = {c.id for c in chapters if c.asset_id != assets[-1].id}
+    changed.add(tracks)
+    (folder / f"{tracks}.mp3").write_bytes(b"changed audio version")
+    parsed.clear()
+    scan(db, pipeline)
+    assert worker.process_once() == "ok"
+    assert parsed == {tracks: 1}
+    assert counts["global_audio_ordering"] == 2 and counts["cover_publications"] == 1
+    assert all(
+        db.get(ReadableResourceNavigationUnit, chapter_id) is not None
+        for chapter_id in stable_chapters
+    )
+    assert all(
+        db.get(LibraryResourceAsset, key).processed_source_version == value
+        for key, value in stable.items()
+        if key != assets[-1].id
+    )
+    ordered = db.scalars(
+        select(ReadableResourceNavigationUnit).order_by(
+            ReadableResourceNavigationUnit.sort_order
+        )
+    ).all()
+    assert ordered[0].title == f"{tracks}.1"
+    assert [c.sort_order for c in ordered] == list(range(tracks * 3))
+    parsed.clear()
+    (folder / "metadata.opf").write_text(
+        "<package><metadata><title>OPF title</title></metadata></package>"
+    )
+    scan(db, pipeline)
+    assert worker.process_once() == "ok"
+    assert not parsed
+    assert db.get(LibraryReadableResourceMetadata, resource.id).title == "OPF title"
+    Image.new("RGB", (40, 40), "blue").save(folder / "metadata.cover.png")
+    (folder / "metadata.opf").write_text(
+        '<package><metadata><title>OPF title</title><meta name="cover" content="cover"/></metadata><manifest><item id="cover" href="metadata.cover.png" media-type="image/png"/></manifest></package>'
+    )
+    scan(db, pipeline)
+    assert worker.process_once() == "ok"
+    assert not parsed
+    assert counts["cover_publications"] == 2
+    # A damaged changed track loses its own chapters, never the other tracks'.
+    broken.add(tracks)
+    (folder / f"{tracks}.mp3").write_bytes(b"damaged audio")
+    scan(db, pipeline)
+    assert worker.process_once() == "failed"
+    assert parsed == {tracks: 1}
+    metadata = db.get(LibraryReadableResourceMetadata, resource.id)
+    assert (metadata.track_count, metadata.chapter_count, metadata.duration_ms) == (
+        tracks - 1,
+        (tracks - 1) * 3,
+        (tracks - 1) * 3000,
+    )
+    assert all(
+        db.get(ReadableResourceNavigationUnit, chapter_id) is not None
+        for chapter_id in stable_chapters
+    )
+    broken.clear()
+    unknown.add(tracks)
+    parsed.clear()
+    pipeline.continue_import.execute(ContinueImportTask(task_id))
+    assert worker.process_once() == "ok"
+    assert parsed == {tracks: 1}
+    metadata = db.get(LibraryReadableResourceMetadata, resource.id)
+    assert metadata.track_count == tracks and metadata.chapter_count == tracks * 3
+    assert metadata.duration_ms is None
+    assert db.get(ReaderResourceProgress, "audio-progress").extra == locator
+    assert db.get(ReadableResourceNavigationUnit, chapters[0].id) is not None

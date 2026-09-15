@@ -1,4 +1,4 @@
-"""Process resource tasks and legacy directory assets through shared file operations."""
+"""Process resource tasks and legacy single-file work through shared file operations."""
 
 from __future__ import annotations
 
@@ -10,7 +10,10 @@ from app.contracts.local_metadata import (
     DEFAULT_LOCAL_METADATA_PRIORITY,
     LocalMetadataSource,
 )
-from app.contracts.local_metadata_snapshot import LocalMetadataObservation
+from app.contracts.local_metadata_snapshot import (
+    LocalMetadataObservation,
+    merge_observations,
+)
 from app.core.natural_sort import natural_sort_key
 from app.modules.imports.application.readable_resource.ports import (
     BookResourceRepositoryPort,
@@ -38,12 +41,16 @@ from app.modules.imports.domain.resource_adapters import (
 from app.modules.library.public import (
     AssetImportState,
     AssetRole,
-    ImageAssetResult,
+    DirectoryAssetResult,
     ResourceAssetMetadataInput,
     SourceNodePhysicalKind,
 )
 from app.modules.media.public import FirstPageCoverPort
-from app.modules.metadata.public import ResolvedLocalMetadata, resolve_local_metadata
+from app.modules.metadata.public import (
+    LocalMetadataCandidate,
+    ResolvedLocalMetadata,
+    resolve_local_metadata,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,8 +145,11 @@ class ProcessReadableResourceImportTask:
                     finished_at=self._clock.now(),
                 )
                 return ProcessTaskResult(task_id=task_id, outcome="unknown_adapter")
-            resource_is_image = context.resource.format == "IMAGE_DIR"
-            if resource_is_image and task.kind != "IMPORT_RESOURCE":
+            resource_is_directory = context.resource.format in {
+                "IMAGE_DIR",
+                "AUDIOBOOK_DIR",
+            }
+            if resource_is_directory and task.kind != "IMPORT_RESOURCE":
                 self._queue.mark_failed(
                     task_id,
                     error_summary="RESOURCE_TASK_REQUIRED",
@@ -148,12 +158,12 @@ class ProcessReadableResourceImportTask:
                 return ProcessTaskResult(task_id, "invalid_task")
             if task.kind == "IMPORT_RESOURCE":
                 if (
-                    (adapter.is_directory_adapter and not resource_is_image)
+                    (adapter.is_directory_adapter and not resource_is_directory)
                     or context.node.id != context.resource.source_node_id
                     or context.node.physical_kind
                     is not (
                         SourceNodePhysicalKind.DIRECTORY
-                        if resource_is_image
+                        if resource_is_directory
                         else SourceNodePhysicalKind.REGULAR_FILE
                     )
                     or context.resource.library_id != task.library_id
@@ -178,8 +188,8 @@ class ProcessReadableResourceImportTask:
             source_node_id = task.source_node_id
             local_metadata_priority = context.local_metadata_priority
 
-        if resource_is_image:
-            return self._execute_images(task_id, context)
+        if resource_is_directory:
+            return self._execute_directory(task_id, context)
         self._uow.release_before_io()
         absolute = self._filesystem.resolve_under_root(root_path, relative_path)
         resource_absolute = self._filesystem.resolve_under_root(
@@ -376,7 +386,7 @@ class ProcessReadableResourceImportTask:
         )
         return ProcessTaskResult(task_id=task_id, outcome=outcome)
 
-    def _execute_images(
+    def _execute_directory(
         self, task_id: str, context: ResourceImportContext
     ) -> ProcessTaskResult:
         adapter = context.adapter
@@ -386,7 +396,7 @@ class ProcessReadableResourceImportTask:
         members = sorted(
             (
                 m
-                for m in self._books_resources.load_image_members(resource_id)
+                for m in self._books_resources.load_directory_members(resource_id)
                 if Path(m.node.name).suffix.lower() in adapter.file_extensions
             ),
             key=lambda m: natural_sort_key(m.node.relative_path),
@@ -398,7 +408,7 @@ class ProcessReadableResourceImportTask:
         ready = {m.node.id for m in members if m.ready}
         errors = False
         changed = False
-        batch: list[ImageAssetResult] = []
+        batch: list[DirectoryAssetResult] = []
         for member in members:
             path = self._filesystem.resolve_under_root(
                 context.root_path, member.node.relative_path
@@ -413,20 +423,66 @@ class ProcessReadableResourceImportTask:
                 continue
             error = None
             title = mime_type = None
+            asset_metadata = None
+            units = ()
+            observations = ()
+            candidate_path = None
             try:
                 parsed = self._adapters.parse_file(
                     absolute_path=path,
                     resource_absolute_path=absolute,
                     adapter=adapter,
-                    role=AssetRole.PAGE,
+                    role=adapter.asset_role,
                     local_metadata_priority=context.local_metadata_priority,
                 )
                 if parsed.ok and parsed.asset is not None:
                     title, mime_type = parsed.asset.title, parsed.asset.mime_type
+                    asset = parsed.asset
+                    asset_metadata = ResourceAssetMetadataInput(
+                        title=title,
+                        mime_type=mime_type,
+                        duration_ms=asset.duration_ms,
+                        codec=asset.technical.codec,
+                        bitrate=asset.technical.bitrate,
+                        sample_rate=asset.technical.sample_rate,
+                        channels=asset.technical.channels,
+                        disc_number=asset.technical.disc_number,
+                        track_number=asset.technical.track_number,
+                    )
+                    units = asset.navigation_units
+                    retained = []
+                    if (
+                        adapter.asset_role is AssetRole.TRACK
+                        and parsed.local_metadata is not None
+                    ):
+                        for candidate in parsed.local_metadata.candidates:
+                            candidate_path = None
+                            if candidate.cover is not None and self._covers is not None:
+                                try:
+                                    candidate_path = (
+                                        self._covers.retain_audio_candidate(
+                                            resource_id=resource_id,
+                                            content=candidate.cover,
+                                        )
+                                    )
+                                except ValueError:
+                                    candidate_path = None
+                            retained.append(
+                                LocalMetadataObservation(
+                                    candidate.source, candidate.metadata, candidate_path
+                                )
+                            )
+                        observations = tuple(retained)
+                    # No artwork payload is retained across iterations or batches.
+                    del parsed
                 else:
                     error = parsed.error_summary or parsed.error_code or "PARSE_FAILED"
             except OSError:
-                error = "IMAGE_FILE_UNREADABLE"
+                error = (
+                    "IMAGE_FILE_UNREADABLE"
+                    if adapter.asset_role is AssetRole.PAGE
+                    else "AUDIO_FILE_UNREADABLE"
+                )
             after = self._filesystem.observe_readable_file(path)
             if before != after:
                 changed = True
@@ -437,22 +493,25 @@ class ProcessReadableResourceImportTask:
             else:
                 ready.discard(member.node.id)
             batch.append(
-                ImageAssetResult(
+                DirectoryAssetResult(
                     member.node,
                     version if error is None else None,
                     title,
                     mime_type,
                     error,
+                    metadata=asset_metadata,
+                    units=units,
+                    observations=observations,
                 )
             )
             if len(batch) == 200:
-                if not self._save_image_batch(task_id, context, tuple(batch)):
+                if not self._save_directory_batch(task_id, context, tuple(batch)):
                     return ProcessTaskResult(task_id, "cancelled")
                 batch.clear()
-        if batch and not self._save_image_batch(task_id, context, tuple(batch)):
+        if batch and not self._save_directory_batch(task_id, context, tuple(batch)):
             return ProcessTaskResult(task_id, "cancelled")
 
-        # Only directory-owned candidates are resolved; pages own no directory snapshot.
+        # Directory candidates are inspected once; file observations remain file-owned.
         with self._uow.transaction():
             if self._queue.get_task(task_id) is None:
                 return ProcessTaskResult(task_id, "cancelled")
@@ -464,7 +523,32 @@ class ProcessReadableResourceImportTask:
             local_metadata_priority=context.local_metadata_priority,
         )
         if metadata is None:
-            raise ValueError("IMAGE_DIRECTORY_METADATA_UNAVAILABLE")
+            raise ValueError("DIRECTORY_METADATA_UNAVAILABLE")
+        if adapter.asset_role is AssetRole.TRACK:
+            observations = self._books_resources.resource_local_observations(
+                resource_id
+            )
+            self._uow.release_before_io()
+            grouped = merge_observations(observations)
+            embedded_candidates = []
+            for source, values in grouped.items():
+                cover = None
+                if self._covers is not None and not cover_state.protected:
+                    for observation in observations:
+                        if (
+                            observation.source == source
+                            and observation.cover_path is not None
+                        ):
+                            cover = self._covers.read_candidate(observation.cover_path)
+                            if cover is not None:
+                                break
+                embedded_candidates.append(
+                    LocalMetadataCandidate(source, values, cover)
+                )
+            metadata = resolve_local_metadata(
+                metadata.candidates + tuple(embedded_candidates),
+                context.local_metadata_priority,
+            )
         prepared = None
         cover_path = cover_state.path
         if not cover_state.protected and self._covers is not None:
@@ -485,7 +569,10 @@ class ProcessReadableResourceImportTask:
                 except ValueError:
                     continue
             else:
-                if self._first_page_covers is not None:
+                if (
+                    self._first_page_covers is not None
+                    and adapter.asset_role is AssetRole.PAGE
+                ):
                     for member in members:
                         if member.node.id not in ready:
                             continue
@@ -524,7 +611,10 @@ class ProcessReadableResourceImportTask:
                     metadata=metadata.metadata,
                     cover_path=cover_path,
                 )
-                self._books_resources.set_resource_page_count(resource_id, count)
+                if adapter.asset_role is AssetRole.TRACK:
+                    self._books_resources.refresh_audio_resource_aggregates(resource_id)
+                else:
+                    self._books_resources.set_resource_page_count(resource_id, count)
                 if changed:
                     self._queue.request_import_resource(
                         library_id=library_id,
@@ -535,7 +625,9 @@ class ProcessReadableResourceImportTask:
                 if errors:
                     self._queue.mark_failed(
                         task_id,
-                        error_summary="IMAGE_ASSETS_FAILED",
+                        error_summary="IMAGE_ASSETS_FAILED"
+                        if adapter.asset_role is AssetRole.PAGE
+                        else "AUDIO_ASSETS_FAILED",
                         finished_at=self._clock.now(),
                     )
                 else:
@@ -548,16 +640,16 @@ class ProcessReadableResourceImportTask:
             task_id, "failed" if errors else "changed" if changed else "ok"
         )
 
-    def _save_image_batch(
+    def _save_directory_batch(
         self,
         task_id: str,
         context: ResourceImportContext,
-        results: tuple[ImageAssetResult, ...],
+        results: tuple[DirectoryAssetResult, ...],
     ) -> bool:
         with self._uow.transaction():
             if self._queue.get_task(task_id) is None:
                 return False
-            self._books_resources.save_image_assets(
+            self._books_resources.save_directory_assets(
                 library_id=context.resource.library_id,
                 resource_id=context.resource.id,
                 results=results,
@@ -781,8 +873,8 @@ class ProcessReadableResourceImportTask:
     ) -> None:
         """Apply resource effects after cover publication, in the caller's transaction.
 
-        IMPORT_ASSET still calls this once per file. Scheduling and queue completion
-        remain owned by execute; this method does not commit or finish tasks.
+        The single-file entry calls this once. Directory entries finalize after
+        their asset batches; this method does not commit or finish tasks.
         """
         ready_assets = self._books_resources.count_ready_assets(resource_id)
         if parsed.ok and parsed.asset is not None:

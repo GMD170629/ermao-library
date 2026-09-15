@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
@@ -17,7 +18,10 @@ from app.contracts.local_metadata_snapshot import (
     merge_observations,
 )
 from app.contracts.publication_metadata import PublicationMetadata
-from app.contracts.reader_safety_policy_generated import READER_SAFETY_COMIC_PROFILE
+from app.contracts.reader_safety_policy_generated import (
+    READER_SAFETY_AUDIO_PROFILE,
+    READER_SAFETY_COMIC_PROFILE,
+)
 from app.core.natural_sort import natural_sort_key
 from app.infrastructure.local_metadata_policy import SqlAlchemyLocalMetadataPriority
 from app.models.common import cuid
@@ -29,8 +33,8 @@ from app.modules.library.application.metadata_ownership import protected_fields
 from app.modules.library.application.source_tree_ports import (
     AdapterIdentity,
     BookResourceRepositoryPort,
-    ImageAssetResult,
-    ImageImportMember,
+    DirectoryAssetResult,
+    DirectoryImportMember,
     InterpretationRecord,
     LibraryConfigPort,
     LibrarySourceTreeConfig,
@@ -898,9 +902,11 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             self._session.flush()
         return row.id
 
-    def load_image_members(self, resource_id: str) -> tuple[ImageImportMember, ...]:
+    def load_directory_members(
+        self, resource_id: str
+    ) -> tuple[DirectoryImportMember, ...]:
         resource = self._session.get(LibraryReadableResource, resource_id)
-        if resource is None or resource.format != "IMAGE_DIR":
+        if resource is None or resource.format not in {"IMAGE_DIR", "AUDIOBOOK_DIR"}:
             raise LookupError(resource_id)
         anchor = self._session.get(LibrarySourceNode, resource.source_node_id)
         if anchor is None:
@@ -925,7 +931,7 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             )
         ).all()
         return tuple(
-            ImageImportMember(
+            DirectoryImportMember(
                 node=SourceNodeRecord(
                     id=n.id,
                     library_id=n.library_id,
@@ -958,22 +964,22 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             row.cover_path, "cover_path" in protected_fields(row.protected_fields)
         )
 
-    def save_image_assets(
+    def save_directory_assets(
         self,
         *,
         library_id: str,
         resource_id: str,
-        results: tuple[ImageAssetResult, ...],
+        results: tuple[DirectoryAssetResult, ...],
     ) -> None:
         if not results or len(results) > 200:
-            raise ValueError("INVALID_IMAGE_BATCH_SIZE")
+            raise ValueError("INVALID_DIRECTORY_BATCH_SIZE")
         resource = self._session.get(LibraryReadableResource, resource_id)
         if (
             resource is None
             or resource.library_id != library_id
-            or resource.format != "IMAGE_DIR"
+            or resource.format not in {"IMAGE_DIR", "AUDIOBOOK_DIR"}
         ):
-            raise ValueError("INVALID_IMAGE_RESOURCE")
+            raise ValueError("INVALID_DIRECTORY_RESOURCE")
         anchor = self._session.get(LibrarySourceNode, resource.source_node_id)
         if anchor is None:
             raise ValueError("MISSING_RESOURCE_ANCHOR")
@@ -993,7 +999,11 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
                 or node.library_id != library_id
                 or node.physical_kind != "REGULAR_FILE"
                 or Path(node.name).suffix.lower()
-                not in READER_SAFETY_COMIC_PROFILE.page_mime_types_by_extension
+                not in (
+                    READER_SAFETY_COMIC_PROFILE.page_mime_types_by_extension
+                    if resource.format == "IMAGE_DIR"
+                    else READER_SAFETY_AUDIO_PROFILE.container_mime_types
+                )
                 or not is_asset_path_within_resource_scope(
                     resource_anchor=SourceNodeRelativePath(anchor.relative_path),
                     resource_anchor_kind=SourceNodePhysicalKind(anchor.physical_kind),
@@ -1001,12 +1011,12 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
                     adapter_id=resource.adapter_id,
                 )
             ):
-                raise ValueError("INVALID_IMAGE_ASSET_TARGET")
+                raise ValueError("INVALID_DIRECTORY_ASSET_TARGET")
             if (
                 node.observed_size_bytes != result.node.observed_size_bytes
                 or node.observed_mtime_ns != result.node.observed_mtime_ns
             ):
-                raise ValueError("IMAGE_INPUT_CHANGED")
+                raise ValueError("DIRECTORY_INPUT_CHANGED")
             assets.append(
                 {
                     "id": cuid(),
@@ -1014,7 +1024,7 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
                     "resource_id": resource_id,
                     "source_node_id": node.id,
                     "source_node_physical_kind": "REGULAR_FILE",
-                    "role": "PAGE",
+                    "role": "PAGE" if resource.format == "IMAGE_DIR" else "TRACK",
                     "import_state": "READY" if result.error is None else "FAILED",
                     "sort_key": resource_relative_asset_sort_key(
                         resource_anchor=SourceNodeRelativePath(anchor.relative_path),
@@ -1022,7 +1032,9 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
                     ),
                     "failure_reason": result.error,
                     "processed_source_version": result.processed_version,
-                    "local_metadata_candidates": "[]",
+                    "local_metadata_candidates": encode_observations(
+                        result.observations
+                    ),
                     "local_cover_path": None,
                 }
             )
@@ -1066,13 +1078,26 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             ).all()
         )
         metadata = [
-            {"asset_id": ids[r.node.id], "title": r.title, "mime_type": r.mime_type}
+            {
+                "asset_id": ids[r.node.id],
+                **(
+                    asdict(
+                        r.metadata
+                        or ResourceAssetMetadataInput(
+                            title=r.title, mime_type=r.mime_type
+                        )
+                    )
+                    if resource.format == "AUDIOBOOK_DIR"
+                    else {"title": r.title, "mime_type": r.mime_type}
+                ),
+            }
             for r in results
             if r.error is None
         ]
-        for offset in range(0, len(metadata), 100):
+        metadata_batch_size = 40 if resource.format == "AUDIOBOOK_DIR" else 100
+        for offset in range(0, len(metadata), metadata_batch_size):
             statement = sqlite_insert(LibraryResourceAssetMetadata).values(
-                metadata[offset : offset + 100]
+                metadata[offset : offset + metadata_batch_size]
             )
             self._session.execute(
                 statement.on_conflict_do_update(
@@ -1081,9 +1106,100 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
                         "title": statement.excluded.title,
                         "mimeType": statement.excluded.mimeType,
                         "updatedAt": statement.excluded.updatedAt,
+                        **(
+                            {
+                                key: getattr(statement.excluded, key)
+                                for key in (
+                                    "durationMs",
+                                    "codec",
+                                    "bitrate",
+                                    "sampleRate",
+                                    "channels",
+                                    "discNumber",
+                                    "trackNumber",
+                                )
+                            }
+                            if resource.format == "AUDIOBOOK_DIR"
+                            else {}
+                        ),
                     },
                 )
             )
+
+        if resource.format == "AUDIOBOOK_DIR":
+            # Replace only files in this batch; existing chapter IDs on other
+            # tracks survive. Allocate disjoint temporary slots before final ordering.
+            self._session.execute(
+                delete(ReadableResourceNavigationUnit).where(
+                    ReadableResourceNavigationUnit.resource_id == resource_id,
+                    ReadableResourceNavigationUnit.asset_id.in_(list(ids.values())),
+                )
+            )
+            maximum = self._session.scalar(
+                select(func.max(ReadableResourceNavigationUnit.sort_order)).where(
+                    ReadableResourceNavigationUnit.resource_id == resource_id
+                )
+            )
+            next_order = 0 if maximum is None else maximum + 1
+            chapters = []
+            for result in results:
+                if result.error is not None:
+                    continue
+                for unit in result.units:
+                    chapters.append(
+                        {
+                            "id": cuid(),
+                            "resource_id": resource_id,
+                            "asset_id": ids[result.node.id],
+                            "unit_type": unit.unit_type,
+                            "title": unit.title,
+                            "href": unit.href,
+                            "media_type": unit.media_type,
+                            "sort_order": next_order,
+                            "start_ms": unit.start_ms,
+                            "end_ms": unit.end_ms,
+                            "duration_ms": unit.duration_ms,
+                            "metadata_json": "{}",
+                        }
+                    )
+                    next_order += 1
+            for offset in range(0, len(chapters), 50):
+                self._session.execute(
+                    sqlite_insert(ReadableResourceNavigationUnit).values(
+                        chapters[offset : offset + 50]
+                    )
+                )
+
+    def resource_local_observations(
+        self, resource_id: str
+    ) -> tuple[LocalMetadataObservation, ...]:
+        rows = self._session.execute(
+            select(LibraryResourceAsset, LibraryResourceAssetMetadata)
+            .outerjoin(
+                LibraryResourceAssetMetadata,
+                LibraryResourceAssetMetadata.asset_id == LibraryResourceAsset.id,
+            )
+            .where(
+                LibraryResourceAsset.resource_id == resource_id,
+                LibraryResourceAsset.import_state == "READY",
+            )
+        ).all()
+        ordered = sorted(
+            rows,
+            key=lambda row: (
+                row[1].disc_number if row[1] and row[1].disc_number else 1,
+                row[1].track_number
+                if row[1] and row[1].track_number is not None
+                else 10**9,
+                natural_sort_key(row[0].sort_key or ""),
+                row[0].id,
+            ),
+        )
+        return tuple(
+            candidate
+            for asset, _ in ordered
+            for candidate in decode_observations(asset.local_metadata_candidates)
+        )
 
     def asset_has_processed_version(
         self,
