@@ -4,7 +4,7 @@ import { isFormalRelease, validateReleaseSource } from './validate-release-sourc
 
 const sha = 'a'.repeat(40);
 const source = {
-  sha, mainSha: sha, developSha: sha, tag: 'v1.0.4', version: '1.0.4', release: null,
+  sha, mainSha: sha, developSha: sha, tag: 'v1.0.5', version: '1.0.5', release: null,
   environment: { protection_rules: [{ type: 'required_reviewers', reviewers: [{ type: 'User', reviewer: { id: 1 } }] }] },
 };
 
@@ -24,7 +24,7 @@ test('a release must start from the same commit on both branches and match the v
   for (const field of ['mainSha', 'developSha', 'sha']) {
     assert.throws(() => validateReleaseSource({ ...source, [field]: 'b'.repeat(40) }), /same release commit/);
   }
-  assert.throws(() => validateReleaseSource({ ...source, tag: 'v1.0.5' }), /version/);
+  assert.throws(() => validateReleaseSource({ ...source, tag: 'v1.0.6' }), /version/);
 });
 
 test('an already published version cannot rebuild, while a draft can recover', () => {
@@ -35,6 +35,8 @@ test('an already published version cannot rebuild, while a draft can recover', (
 test('mobile releases fail closed if the real approval gate is missing', () => {
   for (const environment of [null, {}, { protection_rules: [] }, { protection_rules: [{ type: 'required_reviewers', reviewers: [] }] }]) {
     assert.throws(() => validateReleaseSource({ ...source, environment }), /required reviewers/);
-    validateReleaseSource({ ...source, tag: 'v1.0.3', version: '1.0.3', environment });
+    for (const version of ['1.0.3', '1.0.4']) {
+      validateReleaseSource({ ...source, tag: `v${version}`, version, environment });
+    }
   }
 });

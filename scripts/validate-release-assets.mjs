@@ -6,9 +6,9 @@ import { pathToFileURL } from 'node:url';
 export function validateReleaseAssets(root, tag, remote) {
   if (!/^v\d+\.\d+\.\d+$/.test(tag)) throw Error('Invalid stable tag');
   // Explicit owner-approved exception; all other stable versions still require APKs.
-  const serverOnly = tag === 'v1.0.3';
+  const serverOnly = ['v1.0.3', 'v1.0.4'].includes(tag);
   if (serverOnly && (existsSync(join(root, 'android')) || remote?.assets.some(asset => /\.(?:apk|ipa)(?:\.sha256)?$/.test(asset.name)))) {
-    throw Error('v1.0.3 must not contain mobile release assets');
+    throw Error(`${tag} must not contain mobile release assets`);
   }
   const expected = [
     ...(!serverOnly ? [['android', `ermao-library-${tag}-android.apk`]] : []),

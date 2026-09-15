@@ -31,7 +31,7 @@ download that bundle, complete physical-device acceptance, and approve the
 `stable-release` environment in the same run. Configure its required reviewer in
 repository Settings → Environments before releasing; preflight rejects a missing
 gate. Approval releases the original artifact and promotes the original Docker
-digest without rebuilding. The v1.0.3 server-only exception remains unchanged.
+digest without rebuilding. The owner-approved v1.0.3 and v1.0.4 releases are server-only exceptions.
 
 If publication fails after a successful build, rerun only the failed publication
 job. Do not rerun all jobs or move a published tag. Synchronize post-release note
