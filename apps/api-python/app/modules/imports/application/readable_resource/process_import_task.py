@@ -1,7 +1,8 @@
-"""Process one IMPORT_ASSET task: parse outside txn, upsert stable Asset."""
+"""Process resource tasks and legacy directory assets through shared file operations."""
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from app.modules.imports.application.readable_resource.ports import (
     PipelineLogPort,
     PreparedLocalCover,
     ReadableResourceRecord,
+    RegularFileObservation,
     ResourceAdapterExecutorPort,
     SidecarWritebackPort,
     SourceNodeRecord,
@@ -36,6 +38,7 @@ from app.modules.library.public import (
     AssetImportState,
     AssetRole,
     ResourceAssetMetadataInput,
+    SourceNodePhysicalKind,
 )
 from app.modules.media.public import FirstPageCoverPort
 from app.modules.metadata.public import ResolvedLocalMetadata, resolve_local_metadata
@@ -102,12 +105,12 @@ class ProcessReadableResourceImportTask:
     def execute(self, task_id: str) -> ProcessTaskResult:
         with self._uow.transaction():
             task = self._queue.get_task(task_id)
-            if task is None or task.kind != "IMPORT_ASSET":
+            if task is None or task.kind not in {"IMPORT_ASSET", "IMPORT_RESOURCE"}:
                 return ProcessTaskResult(task_id=task_id, outcome="missing_task")
             if (
                 task.resource_id is None
                 or task.source_node_id is None
-                or task.role is None
+                or (task.kind == "IMPORT_ASSET" and task.role is None)
             ):
                 self._queue.mark_failed(
                     task_id,
@@ -133,12 +136,29 @@ class ProcessReadableResourceImportTask:
                     finished_at=self._clock.now(),
                 )
                 return ProcessTaskResult(task_id=task_id, outcome="unknown_adapter")
+            if task.kind == "IMPORT_RESOURCE":
+                if (
+                    adapter.is_directory_adapter
+                    or context.node.id != context.resource.source_node_id
+                    or context.node.physical_kind
+                    is not SourceNodePhysicalKind.REGULAR_FILE
+                    or context.resource.library_id != task.library_id
+                ):
+                    self._queue.mark_failed(
+                        task_id,
+                        error_summary="INVALID_RESOURCE_TASK_TARGET",
+                        finished_at=self._clock.now(),
+                    )
+                    return ProcessTaskResult(task_id=task_id, outcome="invalid_task")
+                if task.state != "RUNNING":
+                    self._queue.mark_running(task_id, started_at=self._clock.now())
             resource = context.resource
             node = context.node
             relative_path = node.relative_path
             resource_relative_path = context.resource_node.relative_path
             root_path = context.root_path
-            role = task.role
+            role = adapter.asset_role if task.kind == "IMPORT_RESOURCE" else task.role
+            assert role is not None
             resource_id = resource.id
             library_id = resource.library_id
             source_node_id = task.source_node_id
@@ -149,6 +169,25 @@ class ProcessReadableResourceImportTask:
         resource_absolute = self._filesystem.resolve_under_root(
             root_path, resource_relative_path
         )
+        observation = (
+            self._filesystem.observe_readable_file(absolute)
+            if task.kind == "IMPORT_RESOURCE"
+            else None
+        )
+        processed_version = self._processed_version(context, observation)
+        if processed_version is not None:
+            already_processed = self._books_resources.asset_has_processed_version(
+                resource_id=resource_id,
+                source_node_id=source_node_id,
+                version=processed_version,
+            )
+            self._uow.release_before_io()
+            if already_processed:
+                with self._uow.transaction():
+                    if self._queue.get_task(task_id) is None:
+                        return ProcessTaskResult(task_id=task_id, outcome="cancelled")
+                    self._queue.mark_succeeded(task_id, finished_at=self._clock.now())
+                return ProcessTaskResult(task_id=task_id, outcome="ok")
         parsed = self._adapters.parse_file(
             absolute_path=absolute,
             resource_absolute_path=resource_absolute,
@@ -204,13 +243,44 @@ class ProcessReadableResourceImportTask:
                     )
                 return ProcessTaskResult(task_id=task_id, outcome="failed")
 
+        current_observation = (
+            self._filesystem.observe_readable_file(absolute)
+            if task.kind == "IMPORT_RESOURCE"
+            else None
+        )
         import_succeeded = False
         outcome = "cancelled"
         try:
             with self._uow.transaction():
                 current_task = self._queue.get_task(task_id)
                 task_was_cancelled = current_task is None
-                if not task_was_cancelled:
+                input_changed = False
+                if not task_was_cancelled and task.kind == "IMPORT_RESOURCE":
+                    current_context = self.load_resource_context(
+                        resource_id=resource_id, source_node_id=source_node_id
+                    )
+                    task_was_cancelled = current_context is None
+                    input_changed = current_context is not None and (
+                        current_observation != observation
+                        or current_context.node.observed_size_bytes
+                        != context.node.observed_size_bytes
+                        or current_context.node.observed_mtime_ns
+                        != context.node.observed_mtime_ns
+                        or current_context.resource.adapter_version
+                        != context.resource.adapter_version
+                    )
+                    if input_changed:
+                        self._queue.request_import_resource(
+                            library_id=library_id,
+                            resource_id=resource_id,
+                            source_node_id=source_node_id,
+                            changed=True,
+                        )
+                        self._queue.mark_succeeded(
+                            task_id, finished_at=self._clock.now()
+                        )
+                        outcome = "changed"
+                if not task_was_cancelled and not input_changed:
                     self.save_asset_result(
                         parsed=parsed,
                         library_id=library_id,
@@ -218,6 +288,7 @@ class ProcessReadableResourceImportTask:
                         source_node_id=source_node_id,
                         role=role,
                         sort_key=node.relative_path,
+                        processed_source_version=processed_version,
                         observations=tuple(
                             LocalMetadataObservation(
                                 candidate.source,
@@ -288,6 +359,26 @@ class ProcessReadableResourceImportTask:
             outcome=outcome,
         )
         return ProcessTaskResult(task_id=task_id, outcome=outcome)
+
+    @staticmethod
+    def _processed_version(
+        context: ResourceImportContext,
+        observation: RegularFileObservation | None,
+    ) -> str | None:
+        if observation is None:
+            return None
+        return json.dumps(
+            [
+                observation.observed_size_bytes,
+                observation.observed_mtime_ns,
+                context.resource.adapter_id,
+                context.adapter.adapter_version
+                if context.adapter is not None
+                else context.resource.adapter_version,
+                context.resource.format,
+            ],
+            separators=(",", ":"),
+        )
 
     def load_resource_context(
         self, *, resource_id: str, source_node_id: str
@@ -406,6 +497,7 @@ class ProcessReadableResourceImportTask:
         sort_key: str,
         observations: tuple[LocalMetadataObservation, ...] | None = None,
         cover_path: str | None = None,
+        processed_source_version: str | None = None,
     ) -> str:
         """Save only this file and its navigation in the caller's transaction.
 
@@ -424,6 +516,7 @@ class ProcessReadableResourceImportTask:
                 sequence_index=parsed.asset.sequence_index,
                 sort_key=sort_key,
                 failure_reason=None,
+                processed_source_version=processed_source_version,
                 metadata=ResourceAssetMetadataInput(
                     title=parsed.asset.title,
                     mime_type=parsed.asset.mime_type,

@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     ForeignKey,
     ForeignKeyConstraint,
@@ -34,7 +35,13 @@ class LibraryImportTask(Base):
     __table_args__ = (
         CheckConstraint(
             column("kind").in_(
-                ("SCAN_LIBRARY", "CONTINUE_SOURCE", "IMPORT_ASSET", "IDENTIFY_BOOK")
+                (
+                    "SCAN_LIBRARY",
+                    "CONTINUE_SOURCE",
+                    "IMPORT_ASSET",
+                    "IMPORT_RESOURCE",
+                    "IDENTIFY_BOOK",
+                )
             ),
             name="LibraryImportTask_kind_check",
         ),
@@ -70,6 +77,12 @@ class LibraryImportTask(Base):
                     column("role").is_(None),
                 ),
                 and_(
+                    column("kind") == "IMPORT_RESOURCE",
+                    column("sourceNodeId").is_not(None),
+                    column("resourceId").is_not(None),
+                    column("role").is_(None),
+                ),
+                and_(
                     column("kind") == "IMPORT_ASSET",
                     column("sourceNodeId").is_not(None),
                     column("resourceId").is_not(None),
@@ -77,6 +90,38 @@ class LibraryImportTask(Base):
                 ),
             ),
             name="LibraryImportTask_kind_shape_check",
+        ),
+        CheckConstraint(
+            or_(
+                and_(
+                    column("kind") == "IMPORT_RESOURCE",
+                    column("resourceAnchorNodeId").is_not(None),
+                    column("resourceAnchorNodeId") == column("sourceNodeId"),
+                ),
+                and_(
+                    column("kind") != "IMPORT_RESOURCE",
+                    column("resourceAnchorNodeId").is_(None),
+                ),
+            ),
+            name="LibraryImportTask_resource_anchor_check",
+        ),
+        ForeignKeyConstraint(
+            ["resourceId", "resourceAnchorNodeId"],
+            ["LibraryReadableResource.id", "LibraryReadableResource.sourceNodeId"],
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+            name="fk_LibraryImportTask_resource_anchor",
+        ),
+        Index(
+            "LibraryImportTask_resource_anchor_idx",
+            "resourceId",
+            "resourceAnchorNodeId",
+        ),
+        Index(
+            "LibraryImportTask_import_resource_key",
+            "resourceId",
+            unique=True,
+            sqlite_where=column("kind") == "IMPORT_RESOURCE",
         ),
         ForeignKeyConstraint(
             ["resourceId", "libraryId"],
@@ -143,6 +188,12 @@ class LibraryImportTask(Base):
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
     kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    resource_anchor_node_id: Mapped[str | None] = mapped_column(
+        "resourceAnchorNodeId", String(191), nullable=True
+    )
+    rerun_requested: Mapped[bool] = mapped_column(
+        "rerunRequested", Boolean, nullable=False, default=False, server_default="0"
+    )
     scan_scopes: Mapped[str | None] = mapped_column("scanScopes", Text, nullable=True)
     book_metadata_revision: Mapped[int | None] = mapped_column(
         "bookMetadataRevision", Integer, nullable=True

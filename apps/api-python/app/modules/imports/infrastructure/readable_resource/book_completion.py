@@ -55,7 +55,7 @@ def active_imports_for_book() -> ColumnElement[bool]:
             task.state.in_(("QUEUED", "RUNNING")),
             or_(
                 task.kind == "SCAN_LIBRARY",
-                and_(task.kind == "IMPORT_ASSET", under_root),
+                and_(task.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE")), under_root),
                 and_(task.kind == "CONTINUE_SOURCE", or_(under_root, ancestor_scan)),
             ),
         )

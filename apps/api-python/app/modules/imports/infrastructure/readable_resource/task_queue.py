@@ -10,7 +10,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
-from app.models import LibraryBook, LibraryBookMetadata
+from app.models import LibraryBook, LibraryBookMetadata, LibraryReadableResource
 from app.models.common import cuid
 from app.modules.imports.application.readable_resource.ports import (
     WORKER_INTERRUPTED,
@@ -86,6 +86,9 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             resource_id=resource_id,
             source_node_id=source_node_id,
             role=None if role is None else role.value,
+            resource_anchor_node_id=source_node_id
+            if kind == "IMPORT_RESOURCE"
+            else None,
             state="QUEUED",
             missing_entry_policy=missing_entry_policy.value,
         )
@@ -214,6 +217,51 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             task.missing_entry_policy = MissingEntryPolicy.PRUNE_MISSING.value
             self._session.flush()
 
+    def request_import_resource(
+        self,
+        *,
+        library_id: str,
+        resource_id: str,
+        source_node_id: str,
+        changed: bool = False,
+    ) -> LibraryImportTaskRecord | None:
+        resource = self._session.get(LibraryReadableResource, resource_id)
+        if (
+            resource is None
+            or resource.library_id != library_id
+            or resource.source_node_id != source_node_id
+        ):
+            raise ValueError("INVALID_RESOURCE_TASK_TARGET")
+        row = self._session.scalar(
+            select(LibraryImportTask)
+            .where(
+                LibraryImportTask.kind == "IMPORT_RESOURCE",
+                LibraryImportTask.resource_id == resource_id,
+            )
+            .execution_options(populate_existing=True)
+        )
+        if row is None:
+            return self.enqueue(
+                kind="IMPORT_RESOURCE",
+                library_id=library_id,
+                resource_id=resource_id,
+                source_node_id=source_node_id,
+            )
+        if row.state == "RUNNING":
+            if changed and not row.rerun_requested:
+                row.rerun_requested = True
+                self._completion.dirty(row)
+        elif row.state == "FAILED" or (row.state == "SUCCEEDED" and changed):
+            row.state = "QUEUED"
+            row.error_summary = None
+            row.started_at = None
+            row.finished_at = None
+            self._completion.dirty(row)
+        elif row.state == "SUCCEEDED":
+            return None
+        self._session.flush()
+        return self._to_record(row)
+
     def ensure_import_asset_task(
         self,
         *,
@@ -310,6 +358,8 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         if row is None:
             raise LookupError(task_id)
         row.state = "RUNNING"
+        if row.kind == "IMPORT_RESOURCE":
+            row.rerun_requested = False
         if row.kind == "IDENTIFY_BOOK":
             row.book_metadata_revision = self._session.scalar(
                 select(LibraryBookMetadata.import_revision)
@@ -324,6 +374,14 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         row = self._session.get(LibraryImportTask, task_id)
         if row is None:
             raise LookupError(task_id)
+        if row.kind == "IMPORT_RESOURCE" and row.rerun_requested:
+            row.state = "QUEUED"
+            row.rerun_requested = False
+            row.started_at = None
+            row.finished_at = None
+            row.error_summary = None
+            self._session.flush()
+            return
         row.state = "SUCCEEDED"
         row.finished_at = finished_at
         row.error_summary = None
@@ -339,6 +397,14 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         row = self._session.get(LibraryImportTask, task_id)
         if row is None:
             raise LookupError(task_id)
+        if row.kind == "IMPORT_RESOURCE" and row.rerun_requested:
+            row.state = "QUEUED"
+            row.rerun_requested = False
+            row.started_at = None
+            row.finished_at = None
+            row.error_summary = None
+            self._session.flush()
+            return
         row.state = "FAILED"
         row.finished_at = finished_at
         row.error_summary = error_summary

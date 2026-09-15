@@ -44,6 +44,7 @@ function kindLabel(kind: LibraryImportTask['kind']): string {
     SCAN_LIBRARY: '扫描书库',
     CONTINUE_SOURCE: '扫描来源',
     IMPORT_ASSET: '导入资源资产',
+    IMPORT_RESOURCE: '导入阅读资源',
     IDENTIFY_BOOK: '图书信息识别中'
   }[kind];
 }

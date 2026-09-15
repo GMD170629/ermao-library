@@ -82,7 +82,7 @@ def resource_import_summaries(
             .where(
                 LibraryReadableResource.book_id.in_(normalized_ids),
                 LibraryReadableResource.enablement_state == "ENABLED",
-                LibraryImportTask.kind == "IMPORT_ASSET",
+                LibraryImportTask.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE")),
                 LibraryImportTask.state == "FAILED",
             )
             .group_by(LibraryReadableResource.book_id)

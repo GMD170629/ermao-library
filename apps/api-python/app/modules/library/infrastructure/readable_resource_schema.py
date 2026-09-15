@@ -467,6 +467,12 @@ class LibraryBookMetadata(Base):
 class LibraryReadableResource(Base):
     __tablename__ = "LibraryReadableResource"
     __table_args__ = (
+        Index(
+            "LibraryReadableResource_id_sourceNodeId_key",
+            "id",
+            "sourceNodeId",
+            unique=True,
+        ),
         CheckConstraint(
             column("enablementState").in_(("ENABLED", "DISABLED")),
             name="LibraryReadableResource_enablementState_check",
@@ -746,6 +752,9 @@ class LibraryResourceAsset(Base):
         nullable=False,
         default="[]",
         server_default="[]",
+    )
+    processed_source_version: Mapped[str | None] = mapped_column(
+        "processedSourceVersion", Text, nullable=True
     )
     local_cover_path: Mapped[str | None] = mapped_column(
         "localCoverPath", Text, nullable=True

@@ -110,3 +110,10 @@ test('requests all libraries or one library with combined filters and cancellati
     globalThis.fetch = originalFetch;
   }
 });
+
+test('parses resource import tasks anchored at a resource with no file role', () => {
+  const parsed = parseLibraryImportTask({ ...task, kind: 'IMPORT_RESOURCE', role: null });
+  assert.equal(parsed.kind, 'IMPORT_RESOURCE');
+  assert.equal(parsed.role, null);
+  assert.equal(parsed.resourceId, 'resource-1');
+});

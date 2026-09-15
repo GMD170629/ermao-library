@@ -109,7 +109,9 @@ def test_scan_import_comic_archive_is_readable_end_to_end(
     assert asset is not None
     assert asset.import_state == "READY"
     task = db_session.scalar(
-        select(LibraryImportTask).where(LibraryImportTask.kind == "IMPORT_ASSET")
+        select(LibraryImportTask).where(
+            LibraryImportTask.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE"))
+        )
     )
     assert task is not None
     assert task.state == "SUCCEEDED"

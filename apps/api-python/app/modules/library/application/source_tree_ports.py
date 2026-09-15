@@ -299,7 +299,16 @@ class BookResourceRepositoryPort(Protocol):
         sort_key: str | None,
         failure_reason: str | None,
         metadata: ResourceAssetMetadataInput | None = None,
+        processed_source_version: str | None = None,
     ) -> str: ...
+
+    def asset_has_processed_version(
+        self,
+        *,
+        resource_id: str,
+        source_node_id: str,
+        version: str,
+    ) -> bool: ...
 
     def count_ready_assets(self, resource_id: str) -> int: ...
 

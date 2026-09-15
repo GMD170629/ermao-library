@@ -246,6 +246,9 @@ def test_source_node_path_key_unique_and_ready_assets(tmp_path: Path) -> None:
                 "errorSummary",
                 "missingEntryPolicy",
                 "bookMetadataRevision",
+                "scanScopes",
+                "rerunRequested",
+                "resourceAnchorNodeId",
                 "createdAt",
                 "startedAt",
                 "finishedAt",
@@ -316,6 +319,54 @@ def test_import_task_kind_shape_and_asset_unique(tmp_path: Path) -> None:
                 )
             )
             db.commit()
+
+            db.add(
+                _source_node(
+                    node_id="n2", relative_path="b.epub", physical_kind="REGULAR_FILE"
+                )
+            )
+            db.commit()
+            # Reject per-file roles, missing/mismatched anchors and foreign libraries
+            # at the database boundary, even when callers bypass the queue port.
+            for invalid in (
+                {"role": "PRIMARY"},
+                {"resource_anchor_node_id": None},
+                {"source_node_id": "n2"},
+                {"source_node_id": "n2", "resource_anchor_node_id": "n2"},
+                {"library_id": "missing-library"},
+            ):
+                values = {
+                    "id": "bad-resource",
+                    "kind": "IMPORT_RESOURCE",
+                    "library_id": "lib-1",
+                    "resource_id": "res-1",
+                    "source_node_id": "n1",
+                    "resource_anchor_node_id": "n1",
+                    "state": "QUEUED",
+                }
+                values.update(invalid)
+                db.add(LibraryImportTask(**values))
+                with pytest.raises(IntegrityError):
+                    db.commit()
+                db.rollback()
+            for task_id in ("resource-1", "resource-duplicate"):
+                db.add(
+                    LibraryImportTask(
+                        id=task_id,
+                        kind="IMPORT_RESOURCE",
+                        library_id="lib-1",
+                        resource_id="res-1",
+                        source_node_id="n1",
+                        resource_anchor_node_id="n1",
+                        state="QUEUED",
+                    )
+                )
+                if task_id == "resource-1":
+                    db.commit()
+                else:
+                    with pytest.raises(IntegrityError):
+                        db.commit()
+                    db.rollback()
 
             db.add(
                 LibraryImportTask(

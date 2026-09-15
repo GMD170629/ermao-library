@@ -472,7 +472,7 @@ def test_observed_snapshot_refreshes_on_content_change(tmp_path: Path) -> None:
             asset = db.scalar(select(LibraryResourceAsset))
             task = db.scalar(
                 select(LibraryImportTask).where(
-                    LibraryImportTask.kind == "IMPORT_ASSET",
+                    LibraryImportTask.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE")),
                     LibraryImportTask.state == "SUCCEEDED",
                 )
             )
@@ -530,7 +530,7 @@ def test_direct_file_rescan_refreshes_observation_and_reimports_asset(
             asset = db.scalar(select(LibraryResourceAsset))
             asset_task = db.scalar(
                 select(LibraryImportTask).where(
-                    LibraryImportTask.kind == "IMPORT_ASSET"
+                    LibraryImportTask.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE"))
                 )
             )
             assert node is not None and asset is not None and asset_task is not None
@@ -584,7 +584,7 @@ def test_automatic_scan_preserves_missing_disk_file(tmp_path: Path) -> None:
             asset = db.scalar(select(LibraryResourceAsset))
             task = db.scalar(
                 select(LibraryImportTask).where(
-                    LibraryImportTask.kind == "IMPORT_ASSET"
+                    LibraryImportTask.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE"))
                 )
             )
             assert node and resource and asset and task
@@ -870,7 +870,9 @@ def test_symlink_is_recorded_but_not_followed_or_imported(tmp_path: Path) -> Non
                 db.scalar(
                     select(func.count())
                     .select_from(LibraryImportTask)
-                    .where(LibraryImportTask.kind == "IMPORT_ASSET")
+                    .where(
+                        LibraryImportTask.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE"))
+                    )
                 )
                 == 0
             )
@@ -908,7 +910,9 @@ def test_other_special_file_is_not_imported(tmp_path: Path) -> None:
                 db.scalar(
                     select(func.count())
                     .select_from(LibraryImportTask)
-                    .where(LibraryImportTask.kind == "IMPORT_ASSET")
+                    .where(
+                        LibraryImportTask.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE"))
+                    )
                 )
                 == 0
             )

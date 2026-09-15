@@ -7,7 +7,13 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-ImportTaskKind = Literal["SCAN_LIBRARY", "CONTINUE_SOURCE", "IMPORT_ASSET"]
+ImportTaskKind = Literal[
+    "SCAN_LIBRARY",
+    "CONTINUE_SOURCE",
+    "IMPORT_ASSET",
+    "IMPORT_RESOURCE",
+    "IDENTIFY_BOOK",
+]
 ImportTaskState = Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED"]
 ImportTaskRole = Literal["PRIMARY", "TRACK", "PAGE", "SIDECAR", "SUPPLEMENT"]
 

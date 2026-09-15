@@ -52,7 +52,7 @@ def process_fixture_tasks(prefix: str) -> dict[str, int]:
                 )
                 .where(
                     LibraryImportTask.library_id == args.library_id,
-                    LibraryImportTask.kind == "IMPORT_ASSET",
+                    LibraryImportTask.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE")),
                     LibraryImportTask.state.in_(("QUEUED", "FAILED")),
                     LibrarySourceNode.relative_path.startswith(prefix),
                 )

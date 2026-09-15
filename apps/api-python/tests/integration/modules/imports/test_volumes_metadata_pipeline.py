@@ -125,7 +125,7 @@ def test_real_volumes_import_keeps_book_stable_and_resource_covers_distinct(
                     LibrarySourceNode,
                     LibrarySourceNode.id == LibraryImportTask.source_node_id,
                 )
-                .where(LibraryImportTask.kind == "IMPORT_ASSET")
+                .where(LibraryImportTask.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE")))
             ).all()
             tasks_by_name = {name: task for task, name in tasks}
             assert set(tasks_by_name) == {"01.epub", "02.epub"}
@@ -269,7 +269,9 @@ def test_completed_book_uses_configured_priority_and_counts_failed_volumes(
                 assert (
                     db.scalar(
                         select(LibraryImportTask.id).where(
-                            LibraryImportTask.kind == "IMPORT_ASSET",
+                            LibraryImportTask.kind.in_(
+                                ("IMPORT_ASSET", "IMPORT_RESOURCE")
+                            ),
                             LibraryImportTask.state == "FAILED",
                         )
                     )

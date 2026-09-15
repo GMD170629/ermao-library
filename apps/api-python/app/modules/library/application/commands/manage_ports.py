@@ -115,7 +115,7 @@ class ManageLibraryImportTasksPort(Protocol):
         ...
 
     def delete_tasks_for_source_nodes(self, source_node_ids: Sequence[str]) -> None:
-        """Delete CONTINUE_SOURCE / IMPORT_ASSET tasks keyed by source nodes."""
+        """Delete source-node tasks, including asset and resource imports."""
         ...
 
 

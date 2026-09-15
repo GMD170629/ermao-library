@@ -86,8 +86,9 @@ def import_history(db_session: Session) -> None:
         db_session.add(
             LibraryImportTask(
                 id=f"task-{index}",
-                kind="IMPORT_ASSET",
-                role="PRIMARY",
+                kind="IMPORT_RESOURCE" if index == 1 else "IMPORT_ASSET",
+                resource_anchor_node_id=f"node-{index}" if index == 1 else None,
+                role=None if index == 1 else "PRIMARY",
                 library_id=library_id,
                 source_node_id=f"node-{index}",
                 resource_id=f"resource-{index}",

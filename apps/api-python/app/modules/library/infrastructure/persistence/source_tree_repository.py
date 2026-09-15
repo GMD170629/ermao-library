@@ -823,6 +823,7 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         sort_key: str | None,
         failure_reason: str | None,
         metadata: ResourceAssetMetadataInput | None = None,
+        processed_source_version: str | None = None,
     ) -> str:
         # Keep the existing port field for compatibility, but persist the canonical
         # SourceNode path computed below instead of adapter-provided ordering hints.
@@ -890,6 +891,11 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             resource_anchor=SourceNodeRelativePath(resource_anchor.relative_path),
             asset_path=SourceNodeRelativePath(asset_node.relative_path),
         )
+        if (
+            import_state is AssetImportState.READY
+            and processed_source_version is not None
+        ):
+            row.processed_source_version = processed_source_version
         row.failure_reason = failure_reason
         self._session.flush()
         if metadata is not None:
@@ -908,6 +914,25 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             metadata_row.track_number = metadata.track_number
             self._session.flush()
         return row.id
+
+    def asset_has_processed_version(
+        self,
+        *,
+        resource_id: str,
+        source_node_id: str,
+        version: str,
+    ) -> bool:
+        return (
+            self._session.scalar(
+                select(LibraryResourceAsset.id).where(
+                    LibraryResourceAsset.resource_id == resource_id,
+                    LibraryResourceAsset.source_node_id == source_node_id,
+                    LibraryResourceAsset.import_state == "READY",
+                    LibraryResourceAsset.processed_source_version == version,
+                )
+            )
+            is not None
+        )
 
     def count_ready_assets(self, resource_id: str) -> int:
         return int(

@@ -75,7 +75,11 @@ __all__ = [
 ]
 
 ImportTaskKind = Literal[
-    "SCAN_LIBRARY", "CONTINUE_SOURCE", "IMPORT_ASSET", "IDENTIFY_BOOK"
+    "SCAN_LIBRARY",
+    "CONTINUE_SOURCE",
+    "IMPORT_ASSET",
+    "IMPORT_RESOURCE",
+    "IDENTIFY_BOOK",
 ]
 ImportTaskState = Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED"]
 
@@ -241,6 +245,16 @@ class LibraryImportTaskQueuePort(Protocol):
         missing_entry_policy: MissingEntryPolicy,
     ) -> tuple[LibraryImportTaskRecord, bool]:
         """Return one active source scan, preserving stronger queued intent."""
+
+    def request_import_resource(
+        self,
+        *,
+        library_id: str,
+        resource_id: str,
+        source_node_id: str,
+        changed: bool = False,
+    ) -> LibraryImportTaskRecord | None:
+        """Coalesce resource work; changes during execution survive completion."""
 
     def ensure_import_asset_task(
         self,

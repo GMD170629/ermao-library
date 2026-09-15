@@ -91,7 +91,7 @@ def scan(db: Session, pipeline: ReadableResourcePipeline) -> dict[str, str]:
                 LibraryImportTask,
                 LibraryImportTask.source_node_id == LibrarySourceNode.id,
             )
-            .where(LibraryImportTask.kind == "IMPORT_ASSET")
+            .where(LibraryImportTask.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE")))
         ).all()
     )
 
@@ -289,6 +289,10 @@ def test_fallback_publication_preserves_previous_cover_on_cancel_failure_or_prot
     previous_files = set(
         (settings.resolved_storage_root / "covers" / "resources").iterdir()
     )
+    # Reprocess a genuinely changed input; unchanged successful resource tasks
+    # now reuse their committed results without entering cover publication.
+    pdf = root / "Book" / "book.pdf"
+    pdf.write_bytes(pdf.read_bytes() + b"\n% changed source\n")
     if outcome == "protected":
         metadata.protected_fields = protect_fields(
             metadata.protected_fields, ("cover_path",)
@@ -323,8 +327,9 @@ def test_fallback_publication_preserves_previous_cover_on_cancel_failure_or_prot
 
 
 @pytest.mark.parametrize("retry_after_rollback", [False, True])
+@pytest.mark.parametrize("kind", ["IMAGE_DIR", "PDF"])
 def test_import_phase_counts_and_finalization_rollback(
-    library, monkeypatch, retry_after_rollback
+    library, monkeypatch, retry_after_rollback, kind
 ) -> None:
     """Count real work by phase; a failed transaction may repeat finalization."""
     from collections import Counter
@@ -343,7 +348,9 @@ def test_import_phase_counts_and_finalization_rollback(
     )
 
     db, settings, root, pipeline = library
-    write_pages(root, "IMAGE_DIR")
+    write_pages(root, kind)
+    filenames = ("book.pdf",) if kind == "PDF" else ("1.png", "2.png", "10.png")
+    file_count = len(filenames)
     process = pipeline.process_import_task
     phase = "scan"
     sql = {name: Counter() for name in ("scan", "save", "finalize", "queue_context")}
@@ -425,9 +432,9 @@ def test_import_phase_counts_and_finalization_rollback(
     event.listen(engine, "commit", committed)
     try:
         tasks = scan(db, pipeline)
-        assert len(tasks) == 3
+        assert len(tasks) == file_count
         phase = "queue_context"
-        task_id = tasks["1.png"]
+        task_id = tasks[filenames[0]]
         if retry_after_rollback:
             worker = build_readable_resource_worker(pipeline)
             # Select the first page deterministically through the real queue.
@@ -447,23 +454,24 @@ def test_import_phase_counts_and_finalization_rollback(
             )
             pipeline.queue.requeue_failed_task(task_id)
             db.commit()
-        for name in ("1.png", "2.png", "10.png"):
+        for name in filenames:
             import_task(db, pipeline, tasks[name])
         assert set(
             db.scalars(
                 select(LibraryImportTask.state).where(
-                    LibraryImportTask.kind == "IMPORT_ASSET"
+                    LibraryImportTask.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE"))
                 )
             )
         ) == {"SUCCEEDED"}
         metadata = db.scalar(select(LibraryReadableResourceMetadata))
         assert_red((settings.resolved_storage_root / metadata.cover_path).read_bytes())
         assert counts == {
-            "media_parses": 4 if retry_after_rollback else 3,
+            "media_parses": file_count + int(retry_after_rollback),
             "cover_publications": 2 if retry_after_rollback else 1,
-            "resource_finalizations": 4 if retry_after_rollback else 3,
-            "aggregate_assets": 7 if retry_after_rollback else 6,
-            "metadata_merges": 4 if retry_after_rollback else 3,
+            "resource_finalizations": file_count + int(retry_after_rollback),
+            "aggregate_assets": file_count * (file_count + 1) // 2
+            + int(retry_after_rollback),
+            "metadata_merges": file_count + int(retry_after_rollback),
         }
         # One transaction owns save + finalize + failed outcome; neither helper
         # silently commits. These counts include attempted rows before rollback.
@@ -475,7 +483,9 @@ def test_import_phase_counts_and_finalization_rollback(
         print(
             {
                 "mode": "rollback_retry" if retry_after_rollback else "normal",
-                "import_asset_tasks": len(tasks),
+                "import_asset_tasks": len(tasks) if kind == "IMAGE_DIR" else 0,
+                "import_resource_tasks": len(tasks) if kind == "PDF" else 0,
+                "format": kind,
                 "aggregate_chapters": 0,
                 "audio_aggregations": 0,
                 "work": dict(counts),
@@ -485,3 +495,38 @@ def test_import_phase_counts_and_finalization_rollback(
     finally:
         event.remove(engine, "after_cursor_execute", executed)
         event.remove(engine, "commit", committed)
+
+
+def test_unchanged_resource_reuses_committed_result_without_cover_publication(
+    library, monkeypatch
+) -> None:
+    from app.models import LibraryResourceAsset
+    from app.modules.imports.infrastructure.local_cover_publication import (
+        FilesystemLocalCoverPublication,
+    )
+    from app.modules.imports.infrastructure.readable_resource.adapter_registry import (
+        RegistryResourceAdapterExecutor,
+    )
+
+    db, settings, root, pipeline = library
+    write_pages(root, "PDF")
+    tasks = scan(db, pipeline)
+    task_id = tasks["book.pdf"]
+    import_task(db, pipeline, task_id)
+    asset = db.scalar(select(LibraryResourceAsset))
+    assert asset.processed_source_version is not None
+    asset_id = asset.id
+    old_cover = db.scalar(select(LibraryReadableResourceMetadata)).cover_path
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("unchanged asset must not parse or publish covers")
+
+    monkeypatch.setattr(RegistryResourceAdapterExecutor, "parse_file", forbidden)
+    monkeypatch.setattr(FilesystemLocalCoverPublication, "publish", forbidden)
+    monkeypatch.setattr(FilesystemLocalCoverPublication, "prepare", forbidden)
+    assert scan(db, pipeline) == tasks
+    assert db.get(LibraryImportTask, task_id).state == "SUCCEEDED"
+    import_task(db, pipeline, task_id)
+    assert db.scalar(select(LibraryResourceAsset.id)) == asset_id
+    assert db.scalar(select(LibraryReadableResourceMetadata)).cover_path == old_cover
+    assert (settings.resolved_storage_root / old_cover).is_file()

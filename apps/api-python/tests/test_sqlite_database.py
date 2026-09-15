@@ -299,6 +299,8 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
         assert import_task_columns == {
             "scanScopes",
             "bookMetadataRevision",
+            "rerunRequested",
+            "resourceAnchorNodeId",
             "id",
             "kind",
             "libraryId",
@@ -381,10 +383,11 @@ def test_alembic_script_directory_has_one_linear_head() -> None:
     config = alembic_config_for_engine(create_engine("sqlite+pysqlite:///:memory:"))
     script = ScriptDirectory.from_config(config)
     revisions = list(script.walk_revisions())
-    assert len(revisions) == 11
-    assert script.get_heads() == ["0011_incremental_library_scan"]
-    assert head_revision() == "0011_incremental_library_scan"
+    assert len(revisions) == 12
+    assert script.get_heads() == ["0012_resource_import_tasks"]
+    assert head_revision() == "0012_resource_import_tasks"
     assert [revision.revision for revision in revisions] == [
+        "0012_resource_import_tasks",
         "0011_incremental_library_scan",
         "0010_book_metadata_completion",
         "0009_reader_v5_opaque_progress",
@@ -408,7 +411,7 @@ def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
     engine = create_sqlite_engine(settings.database_path)
     try:
         runner_module.apply_schema(engine, settings)
-        assert _current_revision(engine) == "0011_incremental_library_scan"
+        assert _current_revision(engine) == "0012_resource_import_tasks"
         operation_columns = {
             column["name"]: column
             for column in inspect(engine).get_columns("MetadataWritebackOperation")
@@ -449,7 +452,7 @@ def test_source_node_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None
         }
 
         runner_module.apply_schema(engine)
-        assert _current_revision(engine) == "0011_incremental_library_scan"
+        assert _current_revision(engine) == "0012_resource_import_tasks"
         source_node_indexes = {
             index["name"]: tuple(index["column_names"])
             for index in inspect(engine).get_indexes("LibrarySourceNode")
@@ -500,7 +503,7 @@ def test_foreign_key_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None
             }
 
         runner_module.apply_schema(engine)
-        assert _current_revision(engine) == "0011_incremental_library_scan"
+        assert _current_revision(engine) == "0012_resource_import_tasks"
         for table_name, index_name in expected_indexes.items():
             assert index_name in {
                 index["name"] for index in inspect(engine).get_indexes(table_name)
@@ -1074,5 +1077,216 @@ def test_final_identity_foreign_keys_point_to_target_entities(tmp_path) -> None:
                 ("assetId",),
                 "LibraryResourceAsset",
             ) in targets(table_name), table_name
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("interrupted_upgrade", [False, True])
+def test_resource_tasks_upgrade_preserves_assets_and_pending_work(
+    tmp_path, interrupted_upgrade
+) -> None:
+    from alembic import command
+    from sqlalchemy import event
+
+    from app.bootstrap.readable_resource_pipeline import (
+        build_readable_resource_pipeline,
+        build_readable_resource_worker,
+    )
+    from app.db.runner import alembic_config_for_engine
+    from app.modules.imports.application.readable_resource.continue_import import (
+        ContinueImportTask,
+    )
+    from app.modules.library.infrastructure.readable_resource_schema import (
+        LibraryReadableResourceMetadata,
+        LibraryResourceAsset,
+    )
+    from app.modules.library.public import SourceNodeRelativePath
+
+    engine = create_sqlite_engine(tmp_path / "resource-upgrade.sqlite3")
+    config = alembic_config_for_engine(engine)
+    root = tmp_path / "books"
+    root.mkdir()
+    try:
+        with engine.connect() as connection:
+            config.attributes["connection"] = connection
+            command.upgrade(config, "0011_incremental_library_scan")
+        metadata = MetaData()
+        names = (
+            "Library",
+            "LibrarySourceNode",
+            "LibraryBook",
+            "LibraryBookMetadata",
+            "LibraryReadableResource",
+            "LibraryReadableResourceMetadata",
+            "LibraryResourceAsset",
+            "LibraryImportTask",
+        )
+        tables = {name: Table(name, metadata, autoload_with=engine) for name in names}
+        with engine.begin() as connection:
+            connection.execute(
+                tables["Library"]
+                .insert()
+                .values(
+                    id="lib",
+                    name="Library",
+                    rootPath=str(root),
+                    organizationMode="FLAT",
+                    updatedAt=1,
+                )
+            )
+            for index, state in enumerate(("QUEUED", "RUNNING", "FAILED", "SUCCEEDED")):
+                node_id, resource_id, book_id, asset_id = (
+                    f"{prefix}-{index}"
+                    for prefix in ("node", "resource", "book", "asset")
+                )
+                filename = f"{index}.txt"
+                (root / filename).write_text("fixture publication")
+                stat = (root / filename).stat()
+                connection.execute(
+                    tables["LibrarySourceNode"]
+                    .insert()
+                    .values(
+                        id=node_id,
+                        libraryId="lib",
+                        relativePath=filename,
+                        pathKey=SourceNodeRelativePath(filename).path_key,
+                        name=filename,
+                        physicalKind="REGULAR_FILE",
+                        observedSizeBytes=stat.st_size,
+                        observedMtimeNs=stat.st_mtime_ns,
+                        observedAt=1,
+                        updatedAt=1,
+                    )
+                )
+                connection.execute(
+                    tables["LibraryBook"]
+                    .insert()
+                    .values(
+                        id=book_id, libraryId="lib", sourceNodeId=node_id, updatedAt=1
+                    )
+                )
+                connection.execute(
+                    tables["LibraryBookMetadata"]
+                    .insert()
+                    .values(
+                        bookId=book_id,
+                        title="Protected",
+                        normalizedTitle="protected",
+                        updatedAt=1,
+                    )
+                )
+                connection.execute(
+                    tables["LibraryReadableResource"]
+                    .insert()
+                    .values(
+                        id=resource_id,
+                        libraryId="lib",
+                        bookId=book_id,
+                        sourceNodeId=node_id,
+                        adapterId="txt",
+                        adapterVersion="1",
+                        format="TXT",
+                        importState="READY",
+                        updatedAt=1,
+                    )
+                )
+                connection.execute(
+                    tables["LibraryReadableResourceMetadata"]
+                    .insert()
+                    .values(
+                        resourceId=resource_id,
+                        title="Curated title",
+                        protectedFields='["title"]',
+                        updatedAt=1,
+                    )
+                )
+                connection.execute(
+                    tables["LibraryResourceAsset"]
+                    .insert()
+                    .values(
+                        id=asset_id,
+                        libraryId="lib",
+                        resourceId=resource_id,
+                        sourceNodeId=node_id,
+                        role="PRIMARY",
+                        importState="READY",
+                        updatedAt=1,
+                    )
+                )
+                connection.execute(
+                    tables["LibraryImportTask"]
+                    .insert()
+                    .values(
+                        id=f"task-{index}",
+                        kind="IMPORT_ASSET",
+                        libraryId="lib",
+                        resourceId=resource_id,
+                        sourceNodeId=node_id,
+                        role="PRIMARY",
+                        state=state,
+                    )
+                )
+        if interrupted_upgrade:
+
+            def interrupt(conn, cursor, statement, parameters, context, executemany):
+                if 'ADD COLUMN "processedSourceVersion"' in statement:
+                    raise RuntimeError("interrupted upgrade")
+
+            event.listen(engine, "after_cursor_execute", interrupt)
+            try:
+                with pytest.raises(RuntimeError, match="interrupted upgrade"):
+                    runner_module.apply_schema(engine)
+            finally:
+                event.remove(engine, "after_cursor_execute", interrupt)
+        runner_module.apply_schema(engine)
+        runner_module.apply_schema(engine)
+        with Session(engine) as db:
+            tasks = db.scalars(
+                select(LibraryImportTask).order_by(LibraryImportTask.id)
+            ).all()
+            assert [task.kind for task in tasks] == ["IMPORT_RESOURCE"] * 3 + [
+                "IMPORT_ASSET"
+            ]
+            assert [task.state for task in tasks] == [
+                "QUEUED",
+                "RUNNING",
+                "FAILED",
+                "SUCCEEDED",
+            ]
+            assert all(
+                asset.processed_source_version is None
+                for asset in db.scalars(select(LibraryResourceAsset))
+            )
+            assert all(
+                item.title == "Curated title"
+                for item in db.scalars(select(LibraryReadableResourceMetadata))
+            )
+            pipeline = build_readable_resource_pipeline(db)
+            worker = build_readable_resource_worker(pipeline)
+            assert worker.startup() == 1
+            for task_id in ("task-1", "task-2"):
+                pipeline.continue_import.execute(ContinueImportTask(task_id))
+            for _ in range(20):
+                if worker.process_once() == "idle":
+                    break
+            db.expire_all()
+            assert all(
+                db.get(LibraryImportTask, f"task-{index}").state == "SUCCEEDED"
+                for index in range(4)
+            )
+            assert set(db.scalars(select(LibraryResourceAsset.id))) == {
+                f"asset-{index}" for index in range(4)
+            }
+            assert (
+                db.get(LibraryResourceAsset, "asset-0").processed_source_version
+                is not None
+            )
+            assert (
+                db.get(LibraryResourceAsset, "asset-3").processed_source_version is None
+            )
+            assert all(
+                item.title == "Curated title"
+                for item in db.scalars(select(LibraryReadableResourceMetadata))
+            )
     finally:
         engine.dispose()

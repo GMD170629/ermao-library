@@ -896,6 +896,14 @@ class ScanLibrarySourceTree:
             resource_id=resource_id,
             source_node_id=source_node_id,
         )
+        if not adapter.is_directory_adapter:
+            self._queue.request_import_resource(
+                library_id=config.library_id,
+                resource_id=resource_id,
+                source_node_id=source_node_id,
+                changed=True,
+            )
+            return
         self._queue.requeue_import_asset_task(
             library_id=config.library_id,
             resource_id=resource_id,
@@ -972,6 +980,13 @@ class ScanLibrarySourceTree:
         )
         if adapter is None or file_extension(filename) not in adapter.file_extensions:
             return 0
+        if not adapter.is_directory_adapter:
+            task = self._queue.request_import_resource(
+                library_id=config.library_id,
+                resource_id=resource_id,
+                source_node_id=resource.source_node_id,
+            )
+            return 0 if task is None else 1
         role = adapter.asset_role
         task = self._queue.ensure_import_asset_task(
             library_id=config.library_id,
