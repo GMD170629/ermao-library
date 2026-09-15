@@ -10,16 +10,19 @@ NEXT_SERVER="${NEXT_SERVER:-$ROOT_DIR/apps/web/server.js}"
 GATEWAY_SERVER="${GATEWAY_SERVER:-$ROOT_DIR/scripts/unified-http-gateway.mjs}"
 
 shutdown() {
-  trap - INT TERM EXIT
-  for pid in ${API_PID:-} ${WORKER_PID:-} ${WEB_PID:-} ${GATEWAY_PID:-}; do
+  trap '' INT TERM
+  trap - EXIT
+  for pid in ${GATEWAY_PID:-} ${PRESTART_PID:-} ${API_PID:-} ${WORKER_PID:-} ${WEB_PID:-}; do
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
       kill "$pid" 2>/dev/null || true
     fi
   done
-  wait ${API_PID:-} ${WORKER_PID:-} ${WEB_PID:-} ${GATEWAY_PID:-} 2>/dev/null || true
+  wait ${PRESTART_PID:-} ${API_PID:-} ${WORKER_PID:-} ${WEB_PID:-} ${GATEWAY_PID:-} 2>/dev/null || true
 }
 
-trap shutdown INT TERM EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap shutdown EXIT
 
 export STORAGE_ROOT="${STORAGE_ROOT:-$ROOT_DIR/storage}"
 mkdir -p "$STORAGE_ROOT/database" "$STORAGE_ROOT/covers" "$STORAGE_ROOT/indexes" "$STORAGE_ROOT/logs" "$STORAGE_ROOT/secrets"
@@ -40,12 +43,15 @@ fi
 
 (
   cd "$PYTHON_API_DIR"
-  python -m app.bootstrap.prestart
-)
+  exec python -m app.bootstrap.prestart
+) &
+PRESTART_PID="$!"
+wait "$PRESTART_PID"
+PRESTART_PID=""
 
 (
   cd "$PYTHON_API_DIR"
-  uvicorn app.main:app --host 127.0.0.1 --port "$PYTHON_API_PORT"
+  exec uvicorn app.main:app --host 127.0.0.1 --port "$PYTHON_API_PORT"
 ) &
 API_PID="$!"
 
@@ -62,7 +68,7 @@ done
 
 (
   cd "$PYTHON_API_DIR"
-  python -m app.worker.main
+  exec python -m app.worker.main
 ) &
 WORKER_PID="$!"
 

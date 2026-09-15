@@ -84,8 +84,11 @@ class RuntimeInstallTests(unittest.TestCase):
         for relative in ("apps/web/Dockerfile.prod", "apps/api-python/Dockerfile"):
             with self.subTest(dockerfile=relative):
                 dockerfile = (ROOT / relative).read_text()
+                project_root = (
+                    "/opt/shuku-image" if relative == "apps/web/Dockerfile.prod" else "/app"
+                )
                 self.assertIn(
-                    "install-python-runtime.sh /app/apps/api-python /opt/shuku-python",
+                    f"install-python-runtime.sh {project_root}/apps/api-python /opt/shuku-python",
                     dockerfile,
                 )
                 self.assertIn("apps/api-python/uv.lock", dockerfile)
