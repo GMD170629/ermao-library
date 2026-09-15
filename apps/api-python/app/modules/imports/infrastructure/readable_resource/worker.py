@@ -152,7 +152,7 @@ class ReadableResourceWorkerProcessor:
             if self._identify_book is None or task.source_node_id is None:
                 raise RuntimeError("Book metadata processor is not configured")
             return self._identify_book.execute(task.source_node_id)
-        if task.kind in {"IMPORT_ASSET", "IMPORT_RESOURCE"}:
+        if task.kind == "IMPORT_RESOURCE":
             return self._process_import.execute(task.id).outcome
         return "unknown_kind"
 

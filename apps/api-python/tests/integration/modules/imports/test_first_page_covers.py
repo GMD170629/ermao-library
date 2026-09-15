@@ -536,11 +536,15 @@ def test_unchanged_resource_reuses_committed_result_without_cover_publication(
     assert (settings.resolved_storage_root / old_cover).is_file()
 
 
-@pytest.mark.parametrize("interrupt_after_three", [False, True])
+@pytest.mark.parametrize(
+    "image_count,interrupt_after_three",
+    [(100, False), (1000, False), (2000, False), (1000, True)],
+)
 def test_thousand_images_batch_import_and_incremental_reuse(
-    library, monkeypatch, interrupt_after_three
+    library, monkeypatch, image_count, interrupt_after_three
 ):
     from collections import Counter
+    from time import perf_counter
 
     from sqlalchemy import event
 
@@ -563,7 +567,7 @@ def test_thousand_images_batch_import_and_incremental_reuse(
     folder.mkdir()
     output = BytesIO()
     Image.new("RGB", (32, 32), "red").save(output, format="PNG")
-    for index in range(1, 1001):
+    for index in range(1, image_count + 1):
         (folder / f"{index}.png").write_bytes(output.getvalue())
     (folder / "metadata.opf").write_text(
         "<package><metadata><title>Original</title><meta name='cover' content='cover'/></metadata><manifest><item id='cover' href='1.png' media-type='image/png'/></manifest></package>"
@@ -637,7 +641,10 @@ def test_thousand_images_batch_import_and_incremental_reuse(
         pipeline.process_import_task, "_save_directory_batch", save_batch
     )
     try:
+        scan_started = perf_counter()
         tasks = scan(db, pipeline)
+        scan_seconds = perf_counter() - scan_started
+        import_started = perf_counter()
         assert list(tasks) == ["Book"]
         task_id = tasks["Book"]
         assert (
@@ -669,16 +676,20 @@ def test_thousand_images_batch_import_and_incremental_reuse(
             db.expire_all()
         else:
             assert worker.process_once() == "ok"
-            assert sizes == [200] * 5
-            assert sql["asset"]["actual_commits"] == 5
-            assert sql["asset"]["selects"] <= 7 * 5
+            assert sizes == (
+                [200] * (image_count // 200)
+                + ([image_count % 200] if image_count % 200 else [])
+            )
+            assert sql["asset"]["actual_commits"] == (image_count + 199) // 200
+            assert sql["asset"]["selects"] <= 7 * ((image_count + 199) // 200)
             assert counts == {
                 "directory_metadata": 1,
                 "resource_merges": 1,
                 "cover_publications": 1,
             }
+        import_seconds = perf_counter() - import_started
         assets = db.scalars(select(LibraryResourceAsset)).all()
-        assert len(assets) == 1000
+        assert len(assets) == image_count
         assert all(
             a.role == "PAGE"
             and a.import_state == "READY"
@@ -686,22 +697,31 @@ def test_thousand_images_batch_import_and_incremental_reuse(
             for a in assets
         )
         assert all(a.local_metadata_candidates == "[]" for a in assets)
-        assert sum(parsed_names.values()) == 1000
+        assert sum(parsed_names.values()) == image_count
         ids = {a.source_node_id: a.id for a in assets}
         saved_timestamps = {a.id: a.updated_at for a in assets}
         resource = db.scalar(select(LibraryReadableResource))
-        assert db.get(LibraryReadableResourceMetadata, resource.id).page_count == 1000
+        assert (
+            db.get(LibraryReadableResourceMetadata, resource.id).page_count
+            == image_count
+        )
         from app.modules.reader.infrastructure.resource_catalog_repository import (
             SqlAlchemyReaderResourceCatalogRepository,
         )
 
         ordered = SqlAlchemyReaderResourceCatalogRepository(db).list_assets(resource.id)
-        assert [a.title for a in ordered] == [str(i) for i in range(1, 1001)]
-        assert sizes == [200] * 5
-        assert sql["asset"]["actual_commits"] == 5
+        assert [a.title for a in ordered] == [str(i) for i in range(1, image_count + 1)]
+        assert sizes == (
+            [200] * (image_count // 200)
+            + ([image_count % 200] if image_count % 200 else [])
+        )
+        assert sql["asset"]["actual_commits"] == (image_count + 199) // 200
         print(
             {
                 "mode": "interrupted_after_600" if interrupt_after_three else "normal",
+                "image_count": image_count,
+                "scan_seconds": scan_seconds,
+                "import_seconds": import_seconds,
                 "resource_tasks": 1,
                 "batches": sizes,
                 "work": dict(counts),
@@ -711,15 +731,37 @@ def test_thousand_images_batch_import_and_incremental_reuse(
         )
         if interrupt_after_three:
             return
-        for index in range(1001, 1011):
+        for index in range(image_count + 1, image_count + 11):
             (folder / f"{index}.png").write_bytes(output.getvalue())
         parsed_names.clear()
+        previous_sql = {key: value.copy() for key, value in sql.items()}
+        previous_work = counts.copy()
         phase = "scan"
+        started = perf_counter()
         scan(db, pipeline)
+        incremental_scan_seconds = perf_counter() - started
         phase = "finish"
+        started = perf_counter()
         assert worker.process_once() == "ok"
+        incremental_import_seconds = perf_counter() - started
+        print(
+            {
+                "image_count": image_count,
+                "mode": "add_10",
+                "scan_seconds": incremental_scan_seconds,
+                "import_seconds": incremental_import_seconds,
+                "parses": sum(parsed_names.values()),
+                "work": dict(counts - previous_work),
+                "sql": {
+                    key: dict(value - previous_sql[key]) for key, value in sql.items()
+                },
+            }
+        )
         assert len(parsed_names) == 10
-        assert sizes == [200] * 5 + [10]
+        assert sizes == (
+            [200] * (image_count // 200)
+            + ([image_count % 200] if image_count % 200 else [])
+        ) + [10]
         assert counts["cover_publications"] == 1
         assert all(
             db.get(LibraryResourceAsset, asset_id).updated_at == timestamp
@@ -733,8 +775,29 @@ def test_thousand_images_batch_import_and_incremental_reuse(
         (folder / "metadata.opf").write_text(
             "<package><metadata><title>Changed</title><meta name='cover' content='cover'/></metadata><manifest><item id='cover' href='1.png' media-type='image/png'/></manifest></package>"
         )
+        previous_sql = {key: value.copy() for key, value in sql.items()}
+        previous_work = counts.copy()
+        phase = "scan"
+        started = perf_counter()
         scan(db, pipeline)
+        metadata_scan_seconds = perf_counter() - started
+        phase = "finish"
+        started = perf_counter()
         assert worker.process_once() == "ok"
+        metadata_import_seconds = perf_counter() - started
+        print(
+            {
+                "image_count": image_count,
+                "mode": "opf_only",
+                "scan_seconds": metadata_scan_seconds,
+                "import_seconds": metadata_import_seconds,
+                "parses": sum(parsed_names.values()),
+                "work": dict(counts - previous_work),
+                "sql": {
+                    key: dict(value - previous_sql[key]) for key, value in sql.items()
+                },
+            }
+        )
         assert not parsed_names
         assert db.get(LibraryReadableResourceMetadata, resource.id).title == "Changed"
         assert counts["cover_publications"] == 1
@@ -760,18 +823,18 @@ def test_thousand_images_batch_import_and_incremental_reuse(
         )
         assert counts["cover_publications"] == 2
         assert not parsed_names
-        (folder / "1011.png").write_bytes(output.getvalue())
+        (folder / f"{image_count + 11}.png").write_bytes(output.getvalue())
 
         def failed_parse(self, **kwargs):
-            if kwargs["absolute_path"].name == "1011.png":
-                parsed_names["1011.png"] += 1
+            if kwargs["absolute_path"].name == f"{image_count + 11}.png":
+                parsed_names[f"{image_count + 11}.png"] += 1
                 raise OSError("injected unreadable image")
             return parse_count(self, **kwargs)
 
         monkeypatch.setattr(RegistryResourceAdapterExecutor, "parse_file", failed_parse)
         scan(db, pipeline)
         assert worker.process_once() == "failed"
-        assert parsed_names == {"1011.png": 1}
+        assert parsed_names == {f"{image_count + 11}.png": 1}
         assert db.scalar(select(LibraryReadableResource)).import_state == "READY"
         failed = db.scalar(
             select(LibraryResourceAsset).where(
@@ -784,7 +847,7 @@ def test_thousand_images_batch_import_and_incremental_reuse(
         parsed_names.clear()
         pipeline.continue_import.execute(ContinueImportTask(task_id))
         assert worker.process_once() == "ok"
-        assert parsed_names == {"1011.png": 1}
+        assert parsed_names == {f"{image_count + 11}.png": 1}
         # A changed existing image keeps its identity and updates the selected cover.
         metadata_row = db.get(LibraryReadableResourceMetadata, resource.id)
         metadata_row.protected_fields = '["title"]'
@@ -895,7 +958,7 @@ def test_image_cancellation_prevents_batch_writeback(
 
     monkeypatch.setattr(RegistryResourceAdapterExecutor, "parse_file", cancel)
     db.commit()
-    assert pipeline.process_import_task.execute(task_id).outcome == "cancelled"
+    assert build_readable_resource_worker(pipeline).process_once() == "cancelled"
     assert db.scalars(select(LibraryResourceAsset)).all() == []
     assert db.get(LibraryImportTask, task_id) is None
     if delete_resource:
@@ -992,6 +1055,7 @@ def test_audio_resource_batches_reuse_tracks_and_finalize_once(
     library, monkeypatch, tracks, interrupted
 ):
     from collections import Counter
+    from time import perf_counter
 
     from sqlalchemy import event
 
@@ -1029,6 +1093,7 @@ def test_audio_resource_batches_reuse_tracks_and_finalize_once(
     def executed(conn, cursor, statement, parameters, context, executemany):
         sql[phase]["driver_calls"] += 1
         sql[phase]["executemany_calls"] += int(executemany)
+        sql[phase]["selects"] += int(statement.lstrip().upper().startswith("SELECT"))
         if cursor.rowcount >= 0:
             sql[phase]["affected_rows"] += cursor.rowcount
         if statement.startswith('UPDATE "ReadableResourceNavigationUnit"'):
@@ -1041,6 +1106,17 @@ def test_audio_resource_batches_reuse_tracks_and_finalize_once(
             conn.connection.driver_connection.in_transaction
         )
 
+    global_read_rows = Counter()
+
+    def selected(state):
+        if phase != "aggregate" or not state.is_select:
+            return None
+        frozen = state.invoke_statement().freeze()
+        global_read_rows["rows"] += len(frozen.data)
+        global_read_rows["calls"] += 1
+        return frozen()
+
+    event.listen(db, "do_orm_execute", selected, retval=True)
     event.listen(engine, "after_cursor_execute", executed)
     event.listen(engine, "commit", committed)
     batch_save = pipeline.process_import_task._save_directory_batch
@@ -1131,7 +1207,10 @@ def test_audio_resource_batches_reuse_tracks_and_finalize_once(
         aggregate_count,
     )
     monkeypatch.setattr(FilesystemLocalCoverPublication, "publish", publish_count)
+    scan_started = perf_counter()
     task_id = scan(db, pipeline)["Album"]
+    scan_seconds = perf_counter() - scan_started
+    import_started = perf_counter()
     assert not db.scalars(
         select(LibraryImportTask).where(LibraryImportTask.kind == "IMPORT_ASSET")
     ).all()
@@ -1164,6 +1243,7 @@ def test_audio_resource_batches_reuse_tracks_and_finalize_once(
             assert restarted.process_once() == "ok"
     else:
         assert worker.process_once() == "ok"
+    import_seconds = perf_counter() - import_started
     assert parsed == {i: 1 for i in range(1, tracks + 1)}
     assert counts == {
         "global_audio_ordering": 1,
@@ -1173,17 +1253,25 @@ def test_audio_resource_batches_reuse_tracks_and_finalize_once(
         "resource_metadata_merges": 1,
     }
     assert sql["asset"]["actual_commits"] == 1
+    if not interrupted:
+        assert global_read_rows["rows"] <= 4 * tracks + 2
+        assert global_read_rows["calls"] <= 4
     print(
         {
             "mode": "interrupted" if interrupted else "normal",
+            "scan_seconds": scan_seconds,
+            "import_seconds": import_seconds,
+            "parser": "stub: scheduling and database only",
             "tracks": tracks,
             "chapters": tracks * 3,
             "resource_tasks": 1,
             "parses": sum(parsed.values()),
+            "global_selects": dict(global_read_rows),
             "work": dict(counts),
             "sql": {key: dict(value) for key, value in sql.items()},
         }
     )
+    event.remove(db, "do_orm_execute", selected)
     event.remove(engine, "after_cursor_execute", executed)
     event.remove(engine, "commit", committed)
     resource = db.scalar(select(LibraryReadableResource))
@@ -1334,6 +1422,7 @@ def test_audio_resource_batches_reuse_tracks_and_finalize_once(
 def test_scan_node_batches_and_unchanged_scan(library, monkeypatch, file_count):
     import os
     from collections import Counter
+    from time import perf_counter
 
     from sqlalchemy import event
 
@@ -1420,8 +1509,12 @@ def test_scan_node_batches_and_unchanged_scan(library, monkeypatch, file_count):
 
         monkeypatch.setattr(RegistryResourceAdapterExecutor, "parse_file", forbidden)
         stats.clear()
+        started = perf_counter()
         scan(db, pipeline)
+        unchanged_scan_seconds = perf_counter() - started
+        started = perf_counter()
         assert worker.process_once() == "idle"
+        unchanged_import_seconds = perf_counter() - started
         unchanged = dict(stats)
         db.expire_all()
         assert old_nodes == {
@@ -1462,6 +1555,8 @@ def test_scan_node_batches_and_unchanged_scan(library, monkeypatch, file_count):
                 "files": file_count,
                 "initial_scan": initial,
                 "unchanged_scan": unchanged,
+                "unchanged_scan_seconds": unchanged_scan_seconds,
+                "unchanged_idle_seconds": unchanged_import_seconds,
                 "changed_scan": changed,
             }
         )
@@ -1748,3 +1843,43 @@ def test_external_sidecar_cover_changes_without_media_parse(library, monkeypatch
     assert worker.process_once() == "ok"
     db.expire_all()
     assert db.scalar(select(LibraryReadableResourceMetadata)).title == "Book"
+
+
+def test_image_first_batch_interruption_rolls_back_results(library, monkeypatch):
+    from app.models import LibraryResourceAsset
+    from app.modules.imports.application.readable_resource.continue_import import (
+        ContinueImportTask,
+    )
+    from app.modules.library.infrastructure.persistence.source_tree_repository import (
+        SqlAlchemyBookResourceRepository,
+    )
+
+    db, settings, root, pipeline = library
+    write_pages(root, "IMAGE_DIR")
+    task_id = scan(db, pipeline)["Book"]
+    save = SqlAlchemyBookResourceRepository.save_directory_assets
+
+    def interrupt(self, *args, **kwargs):
+        save(self, *args, **kwargs)
+        raise KeyboardInterrupt("before asset transaction commit")
+
+    monkeypatch.setattr(
+        SqlAlchemyBookResourceRepository, "save_directory_assets", interrupt
+    )
+    with pytest.raises(KeyboardInterrupt):
+        build_readable_resource_worker(pipeline).process_once()
+    db.close()
+    with Session(db.get_bind()) as resumed:
+        assert resumed.scalars(select(LibraryResourceAsset)).all() == []
+        restored = build_readable_resource_pipeline(resumed, settings)
+        worker = build_readable_resource_worker(restored)
+        assert worker.startup() == 1
+        restored.continue_import.execute(ContinueImportTask(task_id))
+        monkeypatch.setattr(
+            SqlAlchemyBookResourceRepository, "save_directory_assets", save
+        )
+        assert worker.process_once() == "ok"
+        assets = resumed.scalars(select(LibraryResourceAsset)).all()
+        assert len(assets) == 3
+        assert all(asset.processed_source_version for asset in assets)
+        assert resumed.get(LibraryImportTask, task_id).state == "SUCCEEDED"

@@ -889,21 +889,7 @@ class ScanLibrarySourceTree:
                     )
                     return (0, 1)
                 return (0, 0)
-            adapter = self._adapter_for_resource(owner, relative_path.name)
-            if observation_changed and adapter is not None:
-                self._requeue_asset_import(
-                    config=config,
-                    resource_id=owner.id,
-                    source_node_id=node_id,
-                    adapter=adapter,
-                )
-                return (0, 1)
-            return (
-                0,
-                self._ensure_asset_for_resource(
-                    config, owner.id, node_id, relative_path.name
-                ),
-            )
+            return (0, 0)
 
         matches = match_file_adapters(relative_path.name)
         adapter = unique_adapter_or_none(matches)
@@ -964,7 +950,7 @@ class ScanLibrarySourceTree:
                 )
                 return (0, 1)
             if adapter_changed or observation_changed:
-                self._requeue_asset_import(
+                self._requeue_resource_import(
                     config=config,
                     resource_id=existing.id,
                     source_node_id=node_id,
@@ -973,9 +959,7 @@ class ScanLibrarySourceTree:
                 return (int(adapter_changed), 1)
             return (
                 0,
-                self._ensure_asset_for_resource(
-                    config, existing.id, node_id, relative_path.name
-                ),
+                self._ensure_resource_import(config, existing.id, relative_path.name),
             )
 
         book_id = self._resolve_book_id(
@@ -996,9 +980,7 @@ class ScanLibrarySourceTree:
             adapter=adapter,
             reason_code="UNIQUE_ADAPTER",
         )
-        enqueued = self._ensure_asset_for_resource(
-            config, resource.id, node_id, relative_path.name
-        )
+        enqueued = self._ensure_resource_import(config, resource.id, relative_path.name)
         return (1, enqueued)
 
     def _upsert_file_resource_interpretation(
@@ -1024,7 +1006,7 @@ class ScanLibrarySourceTree:
             recognized_at=self._clock.now(),
         )
 
-    def _requeue_asset_import(
+    def _requeue_resource_import(
         self,
         *,
         config: LibrarySourceTreeConfig,
@@ -1038,35 +1020,11 @@ class ScanLibrarySourceTree:
             resource_id=resource_id,
             source_node_id=source_node_id,
         )
-        if not adapter.is_directory_adapter:
-            self._queue.request_import_resource(
-                library_id=config.library_id,
-                resource_id=resource_id,
-                source_node_id=source_node_id,
-                changed=True,
-            )
-            return
-        self._queue.requeue_import_asset_task(
+        self._queue.request_import_resource(
             library_id=config.library_id,
             resource_id=resource_id,
             source_node_id=source_node_id,
-            role=adapter.asset_role,
-        )
-
-    @staticmethod
-    def _adapter_for_resource(
-        resource: ReadableResourceRecord,
-        source_name: str,
-    ) -> ResourceAdapterSpec | None:
-        extension = file_extension(source_name)
-        return next(
-            (
-                spec
-                for spec in ADAPTER_SPECS
-                if spec.adapter_id.value == resource.adapter_id
-                and extension in spec.file_extensions
-            ),
-            None,
+            changed=True,
         )
 
     def _resolve_book_id(
@@ -1102,11 +1060,10 @@ class ScanLibrarySourceTree:
             title=root_path.name,
         )
 
-    def _ensure_asset_for_resource(
+    def _ensure_resource_import(
         self,
         config: LibrarySourceTreeConfig,
         resource_id: str,
-        source_node_id: str,
         filename: str,
     ) -> int:
         resource = self._books_resources.get_resource(resource_id)
@@ -1122,21 +1079,10 @@ class ScanLibrarySourceTree:
         )
         if adapter is None or file_extension(filename) not in adapter.file_extensions:
             return 0
-        if not adapter.is_directory_adapter:
-            task = self._queue.request_import_resource(
-                library_id=config.library_id,
-                resource_id=resource_id,
-                source_node_id=resource.source_node_id,
-            )
-            return 0 if task is None else 1
-        if resource.format in {"IMAGE_DIR", "AUDIOBOOK_DIR"}:
-            return 0
-        role = adapter.asset_role
-        task = self._queue.ensure_import_asset_task(
+        task = self._queue.request_import_resource(
             library_id=config.library_id,
             resource_id=resource_id,
-            source_node_id=source_node_id,
-            role=role,
+            source_node_id=resource.source_node_id,
         )
         return 0 if task is None else 1
 

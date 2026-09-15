@@ -130,9 +130,6 @@ class FakeQueue:
         self._state = "FAILED"
         self._error_summary = error_summary
 
-    def ensure_import_asset_task(self, **kwargs: object) -> None:
-        return None
-
     def fail_interrupted_tasks_on_startup(self, *, finished_at: datetime) -> int:
         del finished_at
         return 0
@@ -236,6 +233,9 @@ class FakeLibraries:
 
 
 class FakeFilesystem:
+    def observe_readable_file(self, path: Path) -> None:
+        return None
+
     def resolve_under_root(self, root: Path, relative_path: str) -> Path:
         return root / relative_path
 
@@ -291,6 +291,7 @@ class FakeResource:
         self.library_id = "lib-1"
         self.source_node_id = "node-1"
         self.adapter_id = "epub"
+        self.adapter_version = "1"
         self.format = "EPUB"
 
 
@@ -401,7 +402,7 @@ class CancelDuringScan:
 def _import_task() -> LibraryImportTaskRecord:
     return LibraryImportTaskRecord(
         id="task-1",
-        kind="IMPORT_ASSET",
+        kind="IMPORT_RESOURCE",
         library_id="lib-1",
         state="QUEUED",
         resource_id="res-1",

@@ -283,9 +283,6 @@ class FakeBooks:
 
 
 class FakeQueue:
-    def ensure_import_asset_task(self, **kwargs: object) -> None:
-        return None
-
     def next_queued(self) -> None:
         return None
 

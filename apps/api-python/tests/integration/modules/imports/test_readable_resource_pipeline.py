@@ -788,11 +788,10 @@ def test_shared_scan_converges_existing_audio_file_resources_to_one_directory(
                     termination_reason=None,
                     recognized_at=observed_at,
                 )
-                queue.ensure_import_asset_task(
+                queue.request_import_resource(
                     library_id="lib-1",
                     resource_id=resource.id,
                     source_node_id=file_node.id,
-                    role=audio_adapter.asset_role,
                 )
             (album / "metadata.json").write_text("{}", encoding="utf-8")
             db.commit()

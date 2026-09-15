@@ -1322,10 +1322,9 @@ def test_directory_legacy_tasks_upgrade_keeps_asset_ids_and_progress(
             config.attributes["connection"] = connection
             command.upgrade(
                 config,
-                "0012_resource_import_tasks"
-                if media == "image"
-                else "0013_image_resource_tasks",
+                "0011_incremental_library_scan",
             )
+        old_tasks = Table("LibraryImportTask", MetaData(), autoload_with=engine)
         with Session(engine) as db:
             db.add(
                 Library(
@@ -1378,6 +1377,17 @@ def test_directory_legacy_tasks_upgrade_keeps_asset_ids_and_progress(
                 )
             )
             db.commit()
+            protected_cover = settings.resolved_storage_root / "covers/protected.png"
+            protected_cover.parent.mkdir(parents=True, exist_ok=True)
+            protected_cover.write_bytes(b"user-owned-cover")
+            db.add(
+                LibraryReadableResourceMetadata(
+                    resource_id="resource",
+                    title="User title",
+                    cover_path="covers/protected.png",
+                    protected_fields='["title","cover_path"]',
+                )
+            )
             db.add(
                 ReaderResourceProgress(
                     id="progress",
@@ -1388,7 +1398,9 @@ def test_directory_legacy_tasks_upgrade_keeps_asset_ids_and_progress(
                     extra='{"assetId":"asset-2"}',
                 )
             )
-            for index, state in enumerate(("QUEUED", "FAILED", "RUNNING"), start=1):
+            for index, state in enumerate(
+                ("QUEUED", "FAILED", "RUNNING", "SUCCEEDED"), start=1
+            ):
                 name = f"{index}.png" if media == "image" else f"{index}.mp3"
                 (folder / name).write_bytes(
                     b"readable image file; optional artwork unavailable"
@@ -1410,9 +1422,11 @@ def test_directory_legacy_tasks_upgrade_keeps_asset_ids_and_progress(
                     )
                 )
             db.commit()
-            for index, state in enumerate(("QUEUED", "FAILED", "RUNNING"), start=1):
-                db.add(
-                    LibraryResourceAsset(
+            for index, state in enumerate(
+                ("QUEUED", "FAILED", "RUNNING", "SUCCEEDED"), start=1
+            ):
+                db.execute(
+                    insert(LibraryResourceAsset).values(
                         id=f"asset-{index}",
                         library_id="lib",
                         resource_id="resource",
@@ -1421,13 +1435,13 @@ def test_directory_legacy_tasks_upgrade_keeps_asset_ids_and_progress(
                         import_state="READY",
                     )
                 )
-                db.add(
-                    LibraryImportTask(
+                db.execute(
+                    old_tasks.insert().values(
                         id=f"task-{index}",
                         kind="IMPORT_ASSET",
-                        library_id="lib",
-                        resource_id="resource",
-                        source_node_id=f"node-{index}",
+                        libraryId="lib",
+                        resourceId="resource",
+                        sourceNodeId=f"node-{index}",
                         role="PAGE" if media == "image" else "TRACK",
                         state=state,
                     )
@@ -1436,7 +1450,9 @@ def test_directory_legacy_tasks_upgrade_keeps_asset_ids_and_progress(
         runner_module.apply_schema(engine)
         runner_module.apply_schema(engine)
         with Session(engine) as db:
-            tasks = db.scalars(select(LibraryImportTask)).all()
+            tasks = db.scalars(
+                select(LibraryImportTask).where(LibraryImportTask.state != "SUCCEEDED")
+            ).all()
             assert len(tasks) == 1
             assert tasks[0].kind == "IMPORT_RESOURCE"
             assert tasks[0].source_node_id == "anchor" and tasks[0].role is None
@@ -1477,7 +1493,15 @@ def test_directory_legacy_tasks_upgrade_keeps_asset_ids_and_progress(
                 "asset-1",
                 "asset-2",
                 "asset-3",
+                "asset-4",
             }
+            protected = db.get(LibraryReadableResourceMetadata, "resource")
+            assert (protected.title, protected.cover_path) == (
+                "User title",
+                "covers/protected.png",
+            )
+            assert protected_cover.read_bytes() == b"user-owned-cover"
+            assert db.get(LibraryImportTask, "task-4").state == "SUCCEEDED"
             assert (
                 db.get(ReaderResourceProgress, "progress").extra
                 == '{"assetId":"asset-2"}'

@@ -236,3 +236,75 @@ def test_scan_import_image_directory_reuses_comic_manifest_without_download(
     assert page_response.status_code == 200, page_response.text
     assert page_response.headers["content-type"].startswith("image/")
     assert page_response.content
+
+
+def test_mixed_book_resources_scan_worker_and_reader_bootstrap(
+    client: TestClient, db_session: Session, test_settings: Settings, tmp_path: Path
+) -> None:
+    import wave
+
+    from PIL import Image
+
+    from app.models import LibraryBookMetadata
+
+    library = db_session.get(Library, "test-library")
+    root = tmp_path / "mixed-library"
+    work = root / "Work"
+    audio = work / "Audio"
+    audio.mkdir(parents=True)
+    for name in ("1.wav", "2.wav"):
+        with wave.open(str(audio / name), "wb") as output:
+            output.setnchannels(1)
+            output.setsampwidth(2)
+            output.setframerate(8000)
+            output.writeframes(b"\x00\x00" * 800)
+    _write_image_directory(work / "Pages")
+    with Image.new("RGB", (32, 32), "red") as page:
+        page.save(work / "single.pdf", format="PDF")
+    (work / "story.txt").write_text("第一章\n\n这是一个真实的文本阅读样例。\n" * 20)
+    library.root_path = str(root)
+    library.organization_mode = "VOLUMES"
+    db_session.commit()
+    pipeline = build_readable_resource_pipeline(db_session, test_settings)
+    pipeline.continue_import.execute(ContinueLibraryImport(library.id))
+    worker = build_readable_resource_worker(pipeline)
+    assert worker.process_once() == "scan"
+    book = db_session.scalar(select(LibraryBook))
+    resources = db_session.scalars(select(LibraryReadableResource)).all()
+    assert len(resources) == 4 and {r.book_id for r in resources} == {book.id}
+    assert not db_session.scalars(
+        select(LibraryImportTask).where(LibraryImportTask.kind == "IDENTIFY_BOOK")
+    ).all()
+    for _ in resources:
+        assert worker.process_once() == "ok"
+    assert worker.process_once() == "identified"
+    assert worker.process_once() == "idle"
+    db_session.expire_all()
+    assert db_session.get(LibraryBookMetadata, book.id).metadata_state == "COMPLETED"
+    assert all(r.import_state == "READY" for r in resources)
+    assert len(db_session.scalars(select(LibraryResourceAsset)).all()) == 6
+    _login(client, db_session)
+    response = client.get(f"/api/books/{book.id}")
+    assert response.status_code == 200, response.text
+    assert len(response.json()["data"]["book"]["resources"]) == 4
+    expected = {
+        "IMAGE_DIR": "comic",
+        "AUDIOBOOK_DIR": "audio",
+        "PDF": "pdf",
+        "TXT": "reflowable",
+    }
+    for resource in resources:
+        response = client.get(f"/api/reader/v5/resources/{resource.id}/bootstrap")
+        assert response.status_code == 200, response.text
+        data = response.json()["data"]
+        assert data["readerType"] == expected[resource.format]
+        assert data["assets"]
+        assert len(data["availableResources"]) == 4
+        for asset in data["assets"]:
+            content = client.get(asset["url"])
+            assert content.status_code == 200, content.text
+            assert content.content
+        if resource.format == "IMAGE_DIR":
+            manifest = client.get(data["publication"]["manifestUrl"])
+            assert manifest.status_code == 200, manifest.text
+            assert len(manifest.json()["data"]["readingOrder"]) == 2

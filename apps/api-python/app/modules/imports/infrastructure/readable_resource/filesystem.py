@@ -153,16 +153,12 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
                     if relative_dir == directory_relative_path
                     else (listings.get(relative_dir) if listings is not None else None)
                 )
-                if cached is None:
-                    complete: list[DirectoryEntry] = []
-                    for item in self.iter_directory_entries(absolute):
-                        if isinstance(item, UnreadableDirectoryEntry):
-                            raise OSError("directory entry unavailable")
-                        complete.append(item)
-                    cached = tuple(complete)
-                    if listings is not None:
-                        listings[relative_dir] = cached
-                entries = iter(cached)
+                complete: list[DirectoryEntry] = []
+                entries = (
+                    iter(cached)
+                    if cached is not None
+                    else self.iter_directory_entries(absolute)
+                )
             except OSError:
                 termination = ProbeTerminationReason.LOCAL_IO_ERROR
                 break
@@ -172,6 +168,8 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
                         termination = ProbeTerminationReason.LOCAL_IO_ERROR
                         stop = True
                         break
+                    if cached is None and listings is not None:
+                        complete.append(observed)
                     name, kind, _size, _mtime = observed
                     if (time.monotonic() - started) * 1000 >= time_budget_ms:
                         termination = ProbeTerminationReason.TIME_BUDGET
@@ -205,9 +203,16 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
                             break
                     elif kind is SourceNodePhysicalKind.DIRECTORY:
                         stack.append((child_rel, depth + 1))
+                else:
+                    if cached is None and listings is not None:
+                        listings[relative_dir] = tuple(complete)
             except OSError:
                 termination = ProbeTerminationReason.LOCAL_IO_ERROR
                 break
+            finally:
+                close = getattr(entries, "close", None)
+                if close is not None:
+                    close()
 
         return decide_directory_probe(
             directory_relative_path=directory_relative_path,

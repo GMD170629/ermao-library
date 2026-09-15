@@ -1,4 +1,4 @@
-"""Process resource tasks and legacy single-file work through shared file operations."""
+"""Process resource tasks through shared file operations."""
 
 from __future__ import annotations
 
@@ -114,13 +114,9 @@ class ProcessReadableResourceImportTask:
     def execute(self, task_id: str) -> ProcessTaskResult:
         with self._uow.transaction():
             task = self._queue.get_task(task_id)
-            if task is None or task.kind not in {"IMPORT_ASSET", "IMPORT_RESOURCE"}:
+            if task is None or task.kind != "IMPORT_RESOURCE":
                 return ProcessTaskResult(task_id=task_id, outcome="missing_task")
-            if (
-                task.resource_id is None
-                or task.source_node_id is None
-                or (task.kind == "IMPORT_ASSET" and task.role is None)
-            ):
+            if task.resource_id is None or task.source_node_id is None:
                 self._queue.mark_failed(
                     task_id,
                     error_summary="INVALID_TASK_SHAPE",
@@ -149,39 +145,31 @@ class ProcessReadableResourceImportTask:
                 "IMAGE_DIR",
                 "AUDIOBOOK_DIR",
             }
-            if resource_is_directory and task.kind != "IMPORT_RESOURCE":
+            if (
+                (adapter.is_directory_adapter and not resource_is_directory)
+                or context.node.id != context.resource.source_node_id
+                or context.node.physical_kind
+                is not (
+                    SourceNodePhysicalKind.DIRECTORY
+                    if resource_is_directory
+                    else SourceNodePhysicalKind.REGULAR_FILE
+                )
+                or context.resource.library_id != task.library_id
+            ):
                 self._queue.mark_failed(
                     task_id,
-                    error_summary="RESOURCE_TASK_REQUIRED",
+                    error_summary="INVALID_RESOURCE_TASK_TARGET",
                     finished_at=self._clock.now(),
                 )
-                return ProcessTaskResult(task_id, "invalid_task")
-            if task.kind == "IMPORT_RESOURCE":
-                if (
-                    (adapter.is_directory_adapter and not resource_is_directory)
-                    or context.node.id != context.resource.source_node_id
-                    or context.node.physical_kind
-                    is not (
-                        SourceNodePhysicalKind.DIRECTORY
-                        if resource_is_directory
-                        else SourceNodePhysicalKind.REGULAR_FILE
-                    )
-                    or context.resource.library_id != task.library_id
-                ):
-                    self._queue.mark_failed(
-                        task_id,
-                        error_summary="INVALID_RESOURCE_TASK_TARGET",
-                        finished_at=self._clock.now(),
-                    )
-                    return ProcessTaskResult(task_id=task_id, outcome="invalid_task")
-                if task.state != "RUNNING":
-                    self._queue.mark_running(task_id, started_at=self._clock.now())
+                return ProcessTaskResult(task_id=task_id, outcome="invalid_task")
+            if task.state != "RUNNING":
+                self._queue.mark_running(task_id, started_at=self._clock.now())
             resource = context.resource
             node = context.node
             relative_path = node.relative_path
             resource_relative_path = context.resource_node.relative_path
             root_path = context.root_path
-            role = adapter.asset_role if task.kind == "IMPORT_RESOURCE" else task.role
+            role = adapter.asset_role
             assert role is not None
             resource_id = resource.id
             library_id = resource.library_id
@@ -195,11 +183,7 @@ class ProcessReadableResourceImportTask:
         resource_absolute = self._filesystem.resolve_under_root(
             root_path, resource_relative_path
         )
-        observation = (
-            self._filesystem.observe_readable_file(absolute)
-            if task.kind == "IMPORT_RESOURCE"
-            else None
-        )
+        observation = self._filesystem.observe_readable_file(absolute)
         processed_version = self._processed_version(context, observation)
         if processed_version is not None:
             already_processed = self._books_resources.asset_has_processed_version(
@@ -267,11 +251,7 @@ class ProcessReadableResourceImportTask:
                     )
                 return ProcessTaskResult(task_id=task_id, outcome="failed")
 
-        current_observation = (
-            self._filesystem.observe_readable_file(absolute)
-            if task.kind == "IMPORT_RESOURCE"
-            else None
-        )
+        current_observation = self._filesystem.observe_readable_file(absolute)
         import_succeeded = False
         outcome = "cancelled"
         try:
@@ -279,7 +259,7 @@ class ProcessReadableResourceImportTask:
                 current_task = self._queue.get_task(task_id)
                 task_was_cancelled = current_task is None
                 input_changed = False
-                if not task_was_cancelled and task.kind == "IMPORT_RESOURCE":
+                if not task_was_cancelled:
                     current_context = self.load_resource_context(
                         resource_id=resource_id, source_node_id=source_node_id
                     )

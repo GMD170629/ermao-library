@@ -263,26 +263,6 @@ class LibraryImportTaskQueuePort(Protocol):
     ) -> LibraryImportTaskRecord | None:
         """Coalesce resource work; changes during execution survive completion."""
 
-    def ensure_import_asset_task(
-        self,
-        *,
-        library_id: str,
-        resource_id: str,
-        source_node_id: str,
-        role: AssetRole,
-    ) -> LibraryImportTaskRecord | None:
-        """Create or requeue FAILED task; return None when already SUCCEEDED."""
-
-    def requeue_import_asset_task(
-        self,
-        *,
-        library_id: str,
-        resource_id: str,
-        source_node_id: str,
-        role: AssetRole,
-    ) -> LibraryImportTaskRecord:
-        """Requeue an asset after its source version or adapter contract changes."""
-
     def next_queued(self) -> LibraryImportTaskRecord | None: ...
 
     def prepare_book_identifications(self) -> tuple[PreparedBookIdentification, ...]:

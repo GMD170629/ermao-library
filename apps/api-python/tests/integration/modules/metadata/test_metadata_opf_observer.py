@@ -38,6 +38,7 @@ from app.modules.library.domain.readable_resource_states import (
 from app.modules.library.public import (
     LibrarySourceTreeConfig,
     ReadableResourceRecord,
+    SourceNodePhysicalKind,
     SourceNodeRecord,
 )
 
@@ -184,9 +185,6 @@ class _Queue(LibraryImportTaskQueuePort):
     def mark_failed(self, task_id, *, error_summary, finished_at):
         self.failed = error_summary
 
-    def ensure_import_asset_task(self, **kwargs):
-        raise AssertionError("not used by asset import")
-
     def next_queued(self):
         return self.task
 
@@ -255,7 +253,7 @@ def _pipeline(source: Path, sidecar: SidecarWritebackPort, uow: _Uow):
         relative_path="books/sidecar.txt",
         path_key="v1:" + "b" * 64,
         name="sidecar.txt",
-        physical_kind="REGULAR_FILE",
+        physical_kind=SourceNodePhysicalKind.REGULAR_FILE,
         observed_size_bytes=source.stat().st_size,
         observed_mtime_ns=source.stat().st_mtime_ns,
         observed_at=datetime.now(UTC),
@@ -273,7 +271,7 @@ def _pipeline(source: Path, sidecar: SidecarWritebackPort, uow: _Uow):
     )
     task = LibraryImportTaskRecord(
         id="sidecar-task",
-        kind="IMPORT_ASSET",
+        kind="IMPORT_RESOURCE",
         library_id="test-library",
         state="QUEUED",
         resource_id=resource.id,

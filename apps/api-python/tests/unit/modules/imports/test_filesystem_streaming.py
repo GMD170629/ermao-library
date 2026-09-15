@@ -46,7 +46,10 @@ class BudgetedFilesystem(OsSourceTreeFilesystem):
             self.exhausted = True
 
 
-def test_probe_does_not_materialize_full_directory_listing(tmp_path: Path) -> None:
+@pytest.mark.parametrize("reuse_listings", [False, True])
+def test_probe_does_not_materialize_full_directory_listing(
+    tmp_path: Path, reuse_listings: bool
+) -> None:
     root = tmp_path / "lib"
     root.mkdir()
     target = root / "book"
@@ -58,6 +61,7 @@ def test_probe_does_not_materialize_full_directory_listing(tmp_path: Path) -> No
         raise AssertionError("generator fully exhausted unexpectedly")
 
     fs = BudgetedFilesystem(budget=150, names=names())
+    listings = {} if reuse_listings else None
     decision = fs.probe_directory(
         root=root,
         directory_relative_path="book",
@@ -66,6 +70,7 @@ def test_probe_does_not_materialize_full_directory_listing(tmp_path: Path) -> No
         global_ignore_patterns="",
         sample_limit=100,
         max_entries=10_000,
+        listings=listings,
         max_depth=4,
         time_budget_ms=60_000,
     )
@@ -73,6 +78,7 @@ def test_probe_does_not_materialize_full_directory_listing(tmp_path: Path) -> No
     assert decision.evidence.sample_count == 100
     assert fs.yielded == 100
     assert fs.exhausted is False
+    assert not listings  # An incomplete probe is never a complete scan listing.
 
 
 def test_million_entry_generator_stops_at_sample_limit(tmp_path: Path) -> None:
