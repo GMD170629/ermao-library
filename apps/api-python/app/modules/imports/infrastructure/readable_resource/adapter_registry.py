@@ -264,7 +264,9 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
         effective_resource_path = resource_absolute_path or (
             absolute_path.parent if adapter.is_directory_adapter else absolute_path
         )
-        if adapter.is_directory_adapter:
+        if adapter.format_label == "IMAGE_DIR":
+            resolved = resolve_local_metadata((), local_metadata_priority)
+        elif adapter.is_directory_adapter:
             # Only the current audio file owns embedded tags/artwork. Directory
             # naming and sidecars are inspected by inspect_resource_metadata.
             file_metadata = FilesystemLocalMetadataInspector().inspect(

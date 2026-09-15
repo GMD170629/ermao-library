@@ -125,6 +125,28 @@ class ReadableResourceRecord:
     import_state: ResourceImportState
 
 
+@dataclass(frozen=True, slots=True)
+class ImageImportMember:
+    node: SourceNodeRecord
+    processed_version: str | None
+    ready: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ImageAssetResult:
+    node: SourceNodeRecord
+    processed_version: str | None
+    title: str | None
+    mime_type: str | None
+    error: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceCoverState:
+    path: str | None
+    protected: bool
+
+
 class LibraryConfigPort(Protocol):
     def get_library(self, library_id: str) -> LibrarySourceTreeConfig: ...
 
@@ -198,6 +220,18 @@ class SourceNodeRepositoryPort(Protocol):
 
 
 class BookResourceRepositoryPort(Protocol):
+    def load_image_members(self, resource_id: str) -> tuple[ImageImportMember, ...]: ...
+
+    def save_image_assets(
+        self,
+        *,
+        library_id: str,
+        resource_id: str,
+        results: tuple[ImageAssetResult, ...],
+    ) -> None: ...
+
+    def resource_cover_state(self, resource_id: str) -> ResourceCoverState: ...
+
     def ensure_book(
         self,
         *,

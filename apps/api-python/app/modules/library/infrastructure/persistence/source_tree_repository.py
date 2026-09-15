@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from app.contracts.local_metadata_snapshot import (
@@ -16,6 +17,7 @@ from app.contracts.local_metadata_snapshot import (
     merge_observations,
 )
 from app.contracts.publication_metadata import PublicationMetadata
+from app.contracts.reader_safety_policy_generated import READER_SAFETY_COMIC_PROFILE
 from app.core.natural_sort import natural_sort_key
 from app.infrastructure.local_metadata_policy import SqlAlchemyLocalMetadataPriority
 from app.models.common import cuid
@@ -27,12 +29,15 @@ from app.modules.library.application.metadata_ownership import protected_fields
 from app.modules.library.application.source_tree_ports import (
     AdapterIdentity,
     BookResourceRepositoryPort,
+    ImageAssetResult,
+    ImageImportMember,
     InterpretationRecord,
     LibraryConfigPort,
     LibrarySourceTreeConfig,
     ObservedSourceEntry,
     ReadableResourceRecord,
     ResourceAssetMetadataInput,
+    ResourceCoverState,
     ResourceNavigationUnitInput,
     SourceNodeRecord,
     SourceNodeRepositoryPort,
@@ -653,29 +658,7 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             and "cover_path" in protected_fields(metadata.protected_fields)
         ):
             return False
-        if resource.format == "PDF":
-            return True
-        if resource.format != "IMAGE_DIR":
-            return False
-        current = self._session.get(LibrarySourceNode, source_node_id)
-        if current is None:
-            return False
-        paths = self._session.scalars(
-            select(LibrarySourceNode.relative_path)
-            .join(
-                LibraryResourceAsset,
-                LibraryResourceAsset.source_node_id == LibrarySourceNode.id,
-            )
-            .where(
-                LibraryResourceAsset.resource_id == resource_id,
-                LibraryResourceAsset.role == "PAGE",
-                LibraryResourceAsset.import_state == "READY",
-            )
-        ).all()
-        return natural_sort_key(current.relative_path) <= min(
-            (natural_sort_key(path) for path in paths),
-            default=natural_sort_key(current.relative_path),
-        )
+        return resource.format == "PDF"
 
     def save_asset_local_metadata(
         self,
@@ -914,6 +897,193 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             metadata_row.track_number = metadata.track_number
             self._session.flush()
         return row.id
+
+    def load_image_members(self, resource_id: str) -> tuple[ImageImportMember, ...]:
+        resource = self._session.get(LibraryReadableResource, resource_id)
+        if resource is None or resource.format != "IMAGE_DIR":
+            raise LookupError(resource_id)
+        anchor = self._session.get(LibrarySourceNode, resource.source_node_id)
+        if anchor is None:
+            raise LookupError(resource.source_node_id)
+        rows = self._session.execute(
+            select(
+                LibrarySourceNode,
+                LibraryResourceAsset.processed_source_version,
+                LibraryResourceAsset.import_state,
+            )
+            .outerjoin(
+                LibraryResourceAsset,
+                (LibraryResourceAsset.source_node_id == LibrarySourceNode.id)
+                & (LibraryResourceAsset.resource_id == resource_id),
+            )
+            .where(
+                LibrarySourceNode.library_id == resource.library_id,
+                LibrarySourceNode.physical_kind == "REGULAR_FILE",
+                LibrarySourceNode.relative_path.startswith(
+                    anchor.relative_path + "/", autoescape=True
+                ),
+            )
+        ).all()
+        return tuple(
+            ImageImportMember(
+                node=SourceNodeRecord(
+                    id=n.id,
+                    library_id=n.library_id,
+                    parent_id=n.parent_id,
+                    relative_path=n.relative_path,
+                    path_key=n.path_key,
+                    name=n.name,
+                    physical_kind=SourceNodePhysicalKind(n.physical_kind),
+                    observed_size_bytes=n.observed_size_bytes,
+                    observed_mtime_ns=n.observed_mtime_ns,
+                    observed_at=n.observed_at,
+                ),
+                processed_version=version,
+                ready=state == "READY",
+            )
+            for n, version, state in rows
+            if is_asset_path_within_resource_scope(
+                resource_anchor=SourceNodeRelativePath(anchor.relative_path),
+                resource_anchor_kind=SourceNodePhysicalKind(anchor.physical_kind),
+                asset_path=SourceNodeRelativePath(n.relative_path),
+                adapter_id=resource.adapter_id,
+            )
+        )
+
+    def resource_cover_state(self, resource_id: str) -> ResourceCoverState:
+        row = self._session.get(LibraryReadableResourceMetadata, resource_id)
+        if row is None:
+            return ResourceCoverState(None, False)
+        return ResourceCoverState(
+            row.cover_path, "cover_path" in protected_fields(row.protected_fields)
+        )
+
+    def save_image_assets(
+        self,
+        *,
+        library_id: str,
+        resource_id: str,
+        results: tuple[ImageAssetResult, ...],
+    ) -> None:
+        if not results or len(results) > 200:
+            raise ValueError("INVALID_IMAGE_BATCH_SIZE")
+        resource = self._session.get(LibraryReadableResource, resource_id)
+        if (
+            resource is None
+            or resource.library_id != library_id
+            or resource.format != "IMAGE_DIR"
+        ):
+            raise ValueError("INVALID_IMAGE_RESOURCE")
+        anchor = self._session.get(LibrarySourceNode, resource.source_node_id)
+        if anchor is None:
+            raise ValueError("MISSING_RESOURCE_ANCHOR")
+        nodes = {
+            n.id: n
+            for n in self._session.scalars(
+                select(LibrarySourceNode)
+                .where(LibrarySourceNode.id.in_([r.node.id for r in results]))
+                .execution_options(populate_existing=True)
+            )
+        }
+        assets = []
+        for result in results:
+            node = nodes.get(result.node.id)
+            if (
+                node is None
+                or node.library_id != library_id
+                or node.physical_kind != "REGULAR_FILE"
+                or Path(node.name).suffix.lower()
+                not in READER_SAFETY_COMIC_PROFILE.page_mime_types_by_extension
+                or not is_asset_path_within_resource_scope(
+                    resource_anchor=SourceNodeRelativePath(anchor.relative_path),
+                    resource_anchor_kind=SourceNodePhysicalKind(anchor.physical_kind),
+                    asset_path=SourceNodeRelativePath(node.relative_path),
+                    adapter_id=resource.adapter_id,
+                )
+            ):
+                raise ValueError("INVALID_IMAGE_ASSET_TARGET")
+            if (
+                node.observed_size_bytes != result.node.observed_size_bytes
+                or node.observed_mtime_ns != result.node.observed_mtime_ns
+            ):
+                raise ValueError("IMAGE_INPUT_CHANGED")
+            assets.append(
+                {
+                    "id": cuid(),
+                    "library_id": library_id,
+                    "resource_id": resource_id,
+                    "source_node_id": node.id,
+                    "source_node_physical_kind": "REGULAR_FILE",
+                    "role": "PAGE",
+                    "import_state": "READY" if result.error is None else "FAILED",
+                    "sort_key": resource_relative_asset_sort_key(
+                        resource_anchor=SourceNodeRelativePath(anchor.relative_path),
+                        asset_path=SourceNodeRelativePath(node.relative_path),
+                    ),
+                    "failure_reason": result.error,
+                    "processed_source_version": result.processed_version,
+                    "local_metadata_candidates": "[]",
+                    "local_cover_path": None,
+                }
+            )
+        table = LibraryResourceAsset.__table__
+        # Bound statement parameters independently of the 200-file business commit.
+        for offset in range(0, len(assets), 50):
+            statement = sqlite_insert(LibraryResourceAsset).values(
+                assets[offset : offset + 50]
+            )
+            self._session.execute(
+                statement.on_conflict_do_update(
+                    index_elements=[table.c.resourceId, table.c.sourceNodeId],
+                    set_={
+                        name: getattr(statement.excluded, name)
+                        for name in (
+                            "role",
+                            "importState",
+                            "sortKey",
+                            "failureReason",
+                            "localMetadataCandidates",
+                            "localCoverPath",
+                            "updatedAt",
+                        )
+                    }
+                    | {
+                        "processedSourceVersion": func.coalesce(
+                            statement.excluded.processedSourceVersion,
+                            table.c.processedSourceVersion,
+                        )
+                    },
+                )
+            )
+        ids = dict(
+            self._session.execute(
+                select(
+                    LibraryResourceAsset.source_node_id, LibraryResourceAsset.id
+                ).where(
+                    LibraryResourceAsset.resource_id == resource_id,
+                    LibraryResourceAsset.source_node_id.in_(list(nodes)),
+                )
+            ).all()
+        )
+        metadata = [
+            {"asset_id": ids[r.node.id], "title": r.title, "mime_type": r.mime_type}
+            for r in results
+            if r.error is None
+        ]
+        for offset in range(0, len(metadata), 100):
+            statement = sqlite_insert(LibraryResourceAssetMetadata).values(
+                metadata[offset : offset + 100]
+            )
+            self._session.execute(
+                statement.on_conflict_do_update(
+                    index_elements=[LibraryResourceAssetMetadata.asset_id],
+                    set_={
+                        "title": statement.excluded.title,
+                        "mimeType": statement.excluded.mimeType,
+                        "updatedAt": statement.excluded.updatedAt,
+                    },
+                )
+            )
 
     def asset_has_processed_version(
         self,

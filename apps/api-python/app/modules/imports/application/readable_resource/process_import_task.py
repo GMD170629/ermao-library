@@ -11,6 +11,7 @@ from app.contracts.local_metadata import (
     LocalMetadataSource,
 )
 from app.contracts.local_metadata_snapshot import LocalMetadataObservation
+from app.core.natural_sort import natural_sort_key
 from app.modules.imports.application.readable_resource.ports import (
     BookResourceRepositoryPort,
     ClockPort,
@@ -37,6 +38,7 @@ from app.modules.imports.domain.resource_adapters import (
 from app.modules.library.public import (
     AssetImportState,
     AssetRole,
+    ImageAssetResult,
     ResourceAssetMetadataInput,
     SourceNodePhysicalKind,
 )
@@ -136,12 +138,24 @@ class ProcessReadableResourceImportTask:
                     finished_at=self._clock.now(),
                 )
                 return ProcessTaskResult(task_id=task_id, outcome="unknown_adapter")
+            resource_is_image = context.resource.format == "IMAGE_DIR"
+            if resource_is_image and task.kind != "IMPORT_RESOURCE":
+                self._queue.mark_failed(
+                    task_id,
+                    error_summary="RESOURCE_TASK_REQUIRED",
+                    finished_at=self._clock.now(),
+                )
+                return ProcessTaskResult(task_id, "invalid_task")
             if task.kind == "IMPORT_RESOURCE":
                 if (
-                    adapter.is_directory_adapter
+                    (adapter.is_directory_adapter and not resource_is_image)
                     or context.node.id != context.resource.source_node_id
                     or context.node.physical_kind
-                    is not SourceNodePhysicalKind.REGULAR_FILE
+                    is not (
+                        SourceNodePhysicalKind.DIRECTORY
+                        if resource_is_image
+                        else SourceNodePhysicalKind.REGULAR_FILE
+                    )
                     or context.resource.library_id != task.library_id
                 ):
                     self._queue.mark_failed(
@@ -164,6 +178,8 @@ class ProcessReadableResourceImportTask:
             source_node_id = task.source_node_id
             local_metadata_priority = context.local_metadata_priority
 
+        if resource_is_image:
+            return self._execute_images(task_id, context)
         self._uow.release_before_io()
         absolute = self._filesystem.resolve_under_root(root_path, relative_path)
         resource_absolute = self._filesystem.resolve_under_root(
@@ -360,6 +376,195 @@ class ProcessReadableResourceImportTask:
         )
         return ProcessTaskResult(task_id=task_id, outcome=outcome)
 
+    def _execute_images(
+        self, task_id: str, context: ResourceImportContext
+    ) -> ProcessTaskResult:
+        adapter = context.adapter
+        assert adapter is not None
+        resource_id = context.resource.id
+        library_id = context.resource.library_id
+        members = sorted(
+            (
+                m
+                for m in self._books_resources.load_image_members(resource_id)
+                if Path(m.node.name).suffix.lower() in adapter.file_extensions
+            ),
+            key=lambda m: natural_sort_key(m.node.relative_path),
+        )
+        self._uow.release_before_io()
+        absolute = self._filesystem.resolve_under_root(
+            context.root_path, context.node.relative_path
+        )
+        ready = {m.node.id for m in members if m.ready}
+        errors = False
+        changed = False
+        batch: list[ImageAssetResult] = []
+        for member in members:
+            path = self._filesystem.resolve_under_root(
+                context.root_path, member.node.relative_path
+            )
+            before = self._filesystem.observe_readable_file(path)
+            version = self._processed_version(context, before)
+            if (
+                member.ready
+                and version is not None
+                and member.processed_version == version
+            ):
+                continue
+            error = None
+            title = mime_type = None
+            try:
+                parsed = self._adapters.parse_file(
+                    absolute_path=path,
+                    resource_absolute_path=absolute,
+                    adapter=adapter,
+                    role=AssetRole.PAGE,
+                    local_metadata_priority=context.local_metadata_priority,
+                )
+                if parsed.ok and parsed.asset is not None:
+                    title, mime_type = parsed.asset.title, parsed.asset.mime_type
+                else:
+                    error = parsed.error_summary or parsed.error_code or "PARSE_FAILED"
+            except OSError:
+                error = "IMAGE_FILE_UNREADABLE"
+            after = self._filesystem.observe_readable_file(path)
+            if before != after:
+                changed = True
+                continue
+            errors |= error is not None
+            if error is None:
+                ready.add(member.node.id)
+            else:
+                ready.discard(member.node.id)
+            batch.append(
+                ImageAssetResult(
+                    member.node,
+                    version if error is None else None,
+                    title,
+                    mime_type,
+                    error,
+                )
+            )
+            if len(batch) == 200:
+                if not self._save_image_batch(task_id, context, tuple(batch)):
+                    return ProcessTaskResult(task_id, "cancelled")
+                batch.clear()
+        if batch and not self._save_image_batch(task_id, context, tuple(batch)):
+            return ProcessTaskResult(task_id, "cancelled")
+
+        # Only directory-owned candidates are resolved; pages own no directory snapshot.
+        with self._uow.transaction():
+            if self._queue.get_task(task_id) is None:
+                return ProcessTaskResult(task_id, "cancelled")
+            cover_state = self._books_resources.resource_cover_state(resource_id)
+        self._uow.release_before_io()
+        metadata = self._adapters.inspect_resource_metadata(
+            resource_absolute_path=absolute,
+            adapter=adapter,
+            local_metadata_priority=context.local_metadata_priority,
+        )
+        if metadata is None:
+            raise ValueError("IMAGE_DIRECTORY_METADATA_UNAVAILABLE")
+        prepared = None
+        cover_path = cover_state.path
+        if not cover_state.protected and self._covers is not None:
+            contents = (
+                c.cover
+                for source in context.local_metadata_priority
+                for c in metadata.candidates
+                if c.source == source and c.cover is not None
+            )
+            for content in contents:
+                if self._covers.matches(cover_path, content):
+                    break
+                try:
+                    prepared = self._covers.prepare(
+                        resource_id=resource_id, content=content
+                    )
+                    break
+                except ValueError:
+                    continue
+            else:
+                if self._first_page_covers is not None:
+                    for member in members:
+                        if member.node.id not in ready:
+                            continue
+                        content = self._first_page_covers.extract(
+                            path=self._filesystem.resolve_under_root(
+                                context.root_path, member.node.relative_path
+                            ),
+                            source_format="IMAGE_DIR",
+                        )
+                        if content is None:
+                            continue
+                        if self._covers.matches(cover_path, content):
+                            break
+                        try:
+                            prepared = self._covers.prepare(
+                                resource_id=resource_id, content=content
+                            )
+                            break
+                        except ValueError:
+                            continue
+        committed = False
+        try:
+            if prepared is not None and self._covers is not None:
+                self._covers.publish(prepared)
+                cover_path = prepared.stored_path
+            with self._uow.transaction():
+                if self._queue.get_task(task_id) is None:
+                    return ProcessTaskResult(task_id, "cancelled")
+                count = self._books_resources.count_ready_assets(resource_id)
+                if count:
+                    self._books_resources.mark_resource_ready(resource_id=resource_id)
+                else:
+                    self._books_resources.mark_resource_failed(resource_id)
+                self._books_resources.apply_local_metadata(
+                    resource_id=resource_id,
+                    metadata=metadata.metadata,
+                    cover_path=cover_path,
+                )
+                self._books_resources.set_resource_page_count(resource_id, count)
+                if changed:
+                    self._queue.request_import_resource(
+                        library_id=library_id,
+                        resource_id=resource_id,
+                        source_node_id=context.node.id,
+                        changed=True,
+                    )
+                if errors:
+                    self._queue.mark_failed(
+                        task_id,
+                        error_summary="IMAGE_ASSETS_FAILED",
+                        finished_at=self._clock.now(),
+                    )
+                else:
+                    self._queue.mark_succeeded(task_id, finished_at=self._clock.now())
+            committed = True
+        finally:
+            if prepared is not None and not committed and self._covers is not None:
+                self._covers.discard(prepared)
+        return ProcessTaskResult(
+            task_id, "failed" if errors else "changed" if changed else "ok"
+        )
+
+    def _save_image_batch(
+        self,
+        task_id: str,
+        context: ResourceImportContext,
+        results: tuple[ImageAssetResult, ...],
+    ) -> bool:
+        with self._uow.transaction():
+            if self._queue.get_task(task_id) is None:
+                return False
+            self._books_resources.save_image_assets(
+                library_id=context.resource.library_id,
+                resource_id=context.resource.id,
+                results=results,
+            )
+        self._uow.release_before_io()
+        return True
+
     @staticmethod
     def _processed_version(
         context: ResourceImportContext,
@@ -459,7 +664,7 @@ class ProcessReadableResourceImportTask:
             and prepared_cover is None
             and self._covers is not None
             and self._first_page_covers is not None
-            and resource.format in {"PDF", "IMAGE_DIR"}
+            and resource.format == "PDF"
         ):
             should_extract = self._books_resources.should_extract_first_page_cover(
                 resource_id=resource_id, source_node_id=source_node_id

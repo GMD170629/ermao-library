@@ -45,6 +45,19 @@ class FilesystemLocalCoverPublication:
             stored_path=final_path.relative_to(self._storage_root).as_posix(),
         )
 
+    def matches(self, stored_path: str | None, content: bytes) -> bool:
+        if stored_path is None:
+            return False
+        target = (self._storage_root / stored_path).resolve()
+        if not target.is_relative_to(self._storage_root):
+            return False
+        try:
+            return (
+                target.stat().st_size == len(content) and target.read_bytes() == content
+            )
+        except OSError:
+            return False
+
     def publish(self, prepared: PreparedLocalCover) -> None:
         os.replace(prepared.temporary_path, prepared.final_path)
 

@@ -1779,6 +1779,12 @@ def test_save_asset_result_has_no_resource_or_queue_side_effects(
                 task.resource_id,
                 task.source_node_id,
             )
+            node_id = db.scalar(
+                select(LibrarySourceNode.id).where(
+                    LibrarySourceNode.library_id == "lib-1",
+                    LibrarySourceNode.relative_path == filename,
+                )
+            )
             process = pipeline.process_import_task
             context = process.load_resource_context(
                 resource_id=resource_id, source_node_id=node_id

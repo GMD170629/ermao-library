@@ -291,6 +291,7 @@ class FakeResource:
         self.library_id = "lib-1"
         self.source_node_id = "node-1"
         self.adapter_id = "epub"
+        self.format = "EPUB"
 
 
 class FakeBooks:

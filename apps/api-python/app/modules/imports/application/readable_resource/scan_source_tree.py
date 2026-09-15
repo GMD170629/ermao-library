@@ -525,6 +525,20 @@ class ScanLibrarySourceTree:
                         resources_created += created_r
                         tasks_enqueued += enqueued
 
+            with self._uow.transaction():
+                image_owner = (
+                    self._books_resources.get_resource_by_source_node(parent_id)
+                    if parent_id is not None
+                    else None
+                )
+                if image_owner is not None and image_owner.format == "IMAGE_DIR":
+                    self._queue.request_import_resource(
+                        library_id=config.library_id,
+                        resource_id=image_owner.id,
+                        source_node_id=image_owner.source_node_id,
+                        changed=True,
+                    )
+                    tasks_enqueued += 1
             if self._task_was_cancelled(task_id):
                 raise SourceScanCancelledError()
             if missing_entry_policy is MissingEntryPolicy.PRUNE_MISSING:
@@ -765,6 +779,9 @@ class ScanLibrarySourceTree:
         existing = self._books_resources.get_resource_by_source_node(node_id)
         if owner is not None:
             self._mark_node_covered_by_directory_resource(node_id)
+            if owner.format == "IMAGE_DIR":
+                # The completed directory scan requests one resource task below.
+                return (0, 0)
             adapter = self._adapter_for_resource(owner, relative_path.name)
             if observation_changed and adapter is not None:
                 self._requeue_asset_import(
@@ -892,6 +909,8 @@ class ScanLibrarySourceTree:
         source_node_id: str,
         adapter: ResourceAdapterSpec,
     ) -> None:
+        if adapter.format_label == "IMAGE_DIR":
+            return
         self._books_resources.invalidate_asset_for_reimport(
             resource_id=resource_id,
             source_node_id=source_node_id,
@@ -987,6 +1006,8 @@ class ScanLibrarySourceTree:
                 source_node_id=resource.source_node_id,
             )
             return 0 if task is None else 1
+        if resource.format == "IMAGE_DIR":
+            return 0
         role = adapter.asset_role
         task = self._queue.ensure_import_asset_task(
             library_id=config.library_id,

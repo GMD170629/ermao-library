@@ -383,10 +383,11 @@ def test_alembic_script_directory_has_one_linear_head() -> None:
     config = alembic_config_for_engine(create_engine("sqlite+pysqlite:///:memory:"))
     script = ScriptDirectory.from_config(config)
     revisions = list(script.walk_revisions())
-    assert len(revisions) == 12
-    assert script.get_heads() == ["0012_resource_import_tasks"]
-    assert head_revision() == "0012_resource_import_tasks"
+    assert len(revisions) == 13
+    assert script.get_heads() == ["0013_image_resource_tasks"]
+    assert head_revision() == "0013_image_resource_tasks"
     assert [revision.revision for revision in revisions] == [
+        "0013_image_resource_tasks",
         "0012_resource_import_tasks",
         "0011_incremental_library_scan",
         "0010_book_metadata_completion",
@@ -411,7 +412,7 @@ def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
     engine = create_sqlite_engine(settings.database_path)
     try:
         runner_module.apply_schema(engine, settings)
-        assert _current_revision(engine) == "0012_resource_import_tasks"
+        assert _current_revision(engine) == "0013_image_resource_tasks"
         operation_columns = {
             column["name"]: column
             for column in inspect(engine).get_columns("MetadataWritebackOperation")
@@ -452,7 +453,7 @@ def test_source_node_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None
         }
 
         runner_module.apply_schema(engine)
-        assert _current_revision(engine) == "0012_resource_import_tasks"
+        assert _current_revision(engine) == "0013_image_resource_tasks"
         source_node_indexes = {
             index["name"]: tuple(index["column_names"])
             for index in inspect(engine).get_indexes("LibrarySourceNode")
@@ -503,7 +504,7 @@ def test_foreign_key_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None
             }
 
         runner_module.apply_schema(engine)
-        assert _current_revision(engine) == "0012_resource_import_tasks"
+        assert _current_revision(engine) == "0013_image_resource_tasks"
         for table_name, index_name in expected_indexes.items():
             assert index_name in {
                 index["name"] for index in inspect(engine).get_indexes(table_name)
@@ -1288,5 +1289,159 @@ def test_resource_tasks_upgrade_preserves_assets_and_pending_work(
                 item.title == "Curated title"
                 for item in db.scalars(select(LibraryReadableResourceMetadata))
             )
+    finally:
+        engine.dispose()
+
+
+def test_image_legacy_tasks_upgrade_keeps_asset_ids_and_progress(tmp_path):
+    from alembic import command
+
+    from app.bootstrap.readable_resource_pipeline import (
+        build_readable_resource_pipeline,
+        build_readable_resource_worker,
+    )
+    from app.db.runner import alembic_config_for_engine
+    from app.models import LibraryImportTask, ReaderResourceProgress, User
+    from app.modules.library.public import SourceNodeRelativePath
+
+    engine = create_sqlite_engine(tmp_path / "images.sqlite3")
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    root = tmp_path / "books"
+    root.mkdir()
+    folder = root / "Images"
+    folder.mkdir()
+    config = alembic_config_for_engine(engine)
+    try:
+        with engine.connect() as connection:
+            config.attributes["connection"] = connection
+            command.upgrade(config, "0012_resource_import_tasks")
+        with Session(engine) as db:
+            db.add(
+                Library(
+                    id="lib",
+                    name="Images",
+                    root_path=str(root),
+                    organization_mode="FLAT",
+                )
+            )
+            db.add(
+                User(
+                    id="user",
+                    email="reader@example.test",
+                    name="Reader",
+                    password_hash="test-only",
+                )
+            )
+            db.commit()
+            db.add(
+                LibrarySourceNode(
+                    id="anchor",
+                    library_id="lib",
+                    relative_path="Images",
+                    path_key=SourceNodeRelativePath("Images").path_key,
+                    name="Images",
+                    physical_kind="DIRECTORY",
+                    observed_mtime_ns=0,
+                    observed_at=datetime.now(UTC),
+                )
+            )
+            db.commit()
+            db.add(LibraryBook(id="book", library_id="lib", source_node_id="anchor"))
+            db.commit()
+            db.add(
+                LibraryBookMetadata(
+                    book_id="book", title="Images", normalized_title="images"
+                )
+            )
+            db.add(
+                LibraryReadableResource(
+                    id="resource",
+                    library_id="lib",
+                    book_id="book",
+                    source_node_id="anchor",
+                    adapter_id="image-directory",
+                    adapter_version="1",
+                    format="IMAGE_DIR",
+                )
+            )
+            db.commit()
+            db.add(
+                ReaderResourceProgress(
+                    id="progress",
+                    user_id="user",
+                    resource_id="resource",
+                    reader_type="comic",
+                    position="2",
+                    extra='{"assetId":"asset-2"}',
+                )
+            )
+            for index, state in enumerate(("QUEUED", "FAILED", "RUNNING"), start=1):
+                name = f"{index}.png"
+                (folder / name).write_bytes(
+                    b"readable image file; optional artwork unavailable"
+                )
+                stat = (folder / name).stat()
+                db.add(
+                    LibrarySourceNode(
+                        id=f"node-{index}",
+                        library_id="lib",
+                        parent_id="anchor",
+                        parent_physical_kind="DIRECTORY",
+                        relative_path=f"Images/{name}",
+                        path_key=SourceNodeRelativePath(f"Images/{name}").path_key,
+                        name=name,
+                        physical_kind="REGULAR_FILE",
+                        observed_size_bytes=stat.st_size,
+                        observed_mtime_ns=stat.st_mtime_ns,
+                        observed_at=datetime.now(UTC),
+                    )
+                )
+            db.commit()
+            for index, state in enumerate(("QUEUED", "FAILED", "RUNNING"), start=1):
+                db.add(
+                    LibraryResourceAsset(
+                        id=f"asset-{index}",
+                        library_id="lib",
+                        resource_id="resource",
+                        source_node_id=f"node-{index}",
+                        role="PAGE",
+                        import_state="READY",
+                    )
+                )
+                db.add(
+                    LibraryImportTask(
+                        id=f"task-{index}",
+                        kind="IMPORT_ASSET",
+                        library_id="lib",
+                        resource_id="resource",
+                        source_node_id=f"node-{index}",
+                        role="PAGE",
+                        state=state,
+                    )
+                )
+            db.commit()
+        runner_module.apply_schema(engine)
+        runner_module.apply_schema(engine)
+        with Session(engine) as db:
+            tasks = db.scalars(select(LibraryImportTask)).all()
+            assert len(tasks) == 1
+            assert tasks[0].kind == "IMPORT_RESOURCE"
+            assert tasks[0].source_node_id == "anchor" and tasks[0].role is None
+            assert all(
+                a.processed_source_version is None
+                for a in db.scalars(select(LibraryResourceAsset))
+            )
+            pipeline = build_readable_resource_pipeline(db, settings)
+            assert build_readable_resource_worker(pipeline).process_once() == "ok"
+            assert {a.id for a in db.scalars(select(LibraryResourceAsset))} == {
+                "asset-1",
+                "asset-2",
+                "asset-3",
+            }
+            assert (
+                db.get(ReaderResourceProgress, "progress").extra
+                == '{"assetId":"asset-2"}'
+            )
+            assert db.get(ReaderResourceProgress, "progress").resource_id == "resource"
     finally:
         engine.dispose()

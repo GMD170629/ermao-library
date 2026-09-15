@@ -17,6 +17,7 @@ from app.models import (
     LibraryFacet,
     LibraryImportTask,
     LibraryReadableResource,
+    LibraryResourceAsset,
 )
 from app.modules.library.application.metadata_ownership import protect_fields
 from app.modules.library.domain.facets import normalize_facet_name
@@ -83,11 +84,27 @@ def resource_import_summaries(
                 LibraryReadableResource.book_id.in_(normalized_ids),
                 LibraryReadableResource.enablement_state == "ENABLED",
                 LibraryImportTask.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE")),
+                LibraryReadableResource.format != "IMAGE_DIR",
                 LibraryImportTask.state == "FAILED",
             )
             .group_by(LibraryReadableResource.book_id)
         ).all()
     )
+    for book_id, count in db.execute(
+        select(LibraryReadableResource.book_id, func.count(LibraryResourceAsset.id))
+        .join(
+            LibraryResourceAsset,
+            LibraryResourceAsset.resource_id == LibraryReadableResource.id,
+        )
+        .where(
+            LibraryReadableResource.book_id.in_(normalized_ids),
+            LibraryReadableResource.enablement_state == "ENABLED",
+            LibraryReadableResource.format == "IMAGE_DIR",
+            LibraryResourceAsset.import_state == "FAILED",
+        )
+        .group_by(LibraryReadableResource.book_id)
+    ):
+        failed_files[book_id] = failed_files.get(book_id, 0) + count
     return {
         book_id: ResourceImportSummary(
             ready=state_counts["READY"],
