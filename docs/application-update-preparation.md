@@ -1,6 +1,6 @@
 # 应用更新包与下载准备（第 2 批）
 
-本批提供检查、下载、校验与解压。`ready` 仅表示包准备完成，不代表已安装。没有停止业务、覆盖 runtime、迁移或重启入口，也没有安装页面。固定入口与程序目录继续遵循[容器运行说明](container-runtime.md)。
+本批提供检查、下载、校验与解压。`ready` 仅表示包准备完成，不代表已安装。第 3 批已新增消费准备结果的[固定入口停机安装](container-runtime.md#已准备应用包的停机安装第-3-批)，安装页面仍未接入。固定入口与程序目录继续遵循[容器运行说明](container-runtime.md)。
 
 ## 程序包与构建环境
 
@@ -13,7 +13,7 @@ Dockerfile 在依赖安装和原生库构建完成后调用 `scripts/build-runti
 - `/opt/shuku-launcher/environment.json`：固定环境描述与构建清单，不参与日常覆盖。
 - `/opt/shuku-image/application.json`：应用版本与该产物要求的环境标识。
 
-兼容标识为规范化构建清单的 SHA-256，包含平台／架构、Python 版本与 ABI、解释器和 Node 二进制摘要、已安装 Python 依赖版本及 RECORD 摘要、系统包版本、两个固定原生库摘要和 Web basePath。应用自身版本不参与环境指纹。真实运行依赖或原生库发生变化时会改变标识；不会在线安装依赖以尝试补齐。
+兼容标识为规范化构建清单的 SHA-256，包含固定入口协议、平台／架构、Python 版本与 ABI、解释器和 Node 二进制摘要、已安装 Python 依赖版本及 RECORD 摘要、系统包版本、两个固定原生库摘要和 Web basePath。应用自身版本不参与环境指纹。真实运行依赖或原生库发生变化时会改变标识；不会在线安装依赖以尝试补齐。
 
 后端只读取固定目录的环境信息，且要求 Linux、实际代码位于 runtime、初始化标记存在、固定入口正在持有 launcher.lock。旧部署缺少固定环境信息或没有固定入口时返回不支持，不根据待安装包自报的信息推导本机环境。
 
@@ -75,4 +75,4 @@ apps/api-python/.venv/bin/python -m pytest apps/api-python/tests/integration/mod
 
 该入口将真实 Web 构建与实际 Python 程序组合为同布局种子，生成实际宿主环境信息并调用生产打包器，经隔离 HTTP 连接注入运行同一官方下载、校验与解压代码；与普通测试复用逐文件摘要、合法链接、持久化及数据保护断言。缺少 standalone 构建时明确失败并提示构建命令，不使用 skip。Linux 还需要实际构建的 `libermao_mobi_core.so` 和 `libermao_chapters.so`，默认位于 `/usr/local/lib`，可通过 `ERMAO_MOBI_CORE_LIBRARY`、`ERMAO_CHAPTER_CORE_LIBRARY` 指定已有产物；缺失时明确失败。此要求只属于显式真实产物验收，不加入普通后端测试或发布工作流前置步骤。
 
-当前实测宿主为 macOS、Python 3.11.15、Node 22.15.0；生成的是 Darwin 测试包，不能作为 Linux 安装包发布。没有运行 Docker daemon、拉取镜像或公开测试 Release。生产 Linux 镜像环境生成、Linux 包与官方已发布资产下载仍待有对应产物后验证；保留第 1 批容器验收缺口。
+当前实测宿主为 macOS、Python 3.11.15、Node 22.15.0；生成的是 Darwin 测试包，不能作为 Linux 安装包发布。没有运行 Docker daemon、拉取镜像或公开测试 Release。第 3 批已完成 Linux 镜像环境、真实 Linux 包及停机安装验收，见[容器运行说明](container-runtime.md)。官方已发布应用资产下载与 fnOS 安装运行仍待验证。

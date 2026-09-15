@@ -268,6 +268,16 @@ class ContainerEntryTests(unittest.TestCase):
             entry.initialize_runtime(self.seed, self.runtime)
         self.assertFalse((self.runtime / ".initialized").exists())
 
+    def test_unfinished_installation_blocks_startup(self) -> None:
+        state = self.storage / "update-tmp"
+        state.mkdir()
+        (state / "installation-incomplete").write_text("{}")
+        process = self.launch()
+        _output, error = process.communicate(timeout=5)
+        self.assertNotEqual(process.returncode, 0)
+        self.assertIn("installation unfinished", error)
+        self.assertEqual(self.events(), [])
+
     def test_runtime_link_cannot_redirect_initialization(self) -> None:
         self.runtime.symlink_to(self.seed, target_is_directory=True)
         with self.assertRaisesRegex(entry.StartupError, "link"):

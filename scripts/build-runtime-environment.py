@@ -48,6 +48,7 @@ def snapshot(native_libraries: list[Path], base_path: str = "") -> dict[str, obj
         sysconfig.get_config_var("LIBDIR")
     ) / sysconfig.get_config_var("LDLIBRARY")
     inventory = {
+        "launcher_protocol": 1,
         "web_base_path": base_path,
         "python": platform.python_version(),
         "abi": sysconfig.get_config_var("SOABI"),

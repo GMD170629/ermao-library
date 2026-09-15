@@ -381,9 +381,12 @@ class KindleSendQueueWorker:
             recover_interrupted_tasks(db)
         self._thread.start()
 
-    def stop(self) -> None:
+    def request_stop(self) -> None:
         self._stop_event.set()
-        self._thread.join(timeout=10)
+
+    def stop(self) -> None:
+        self.request_stop()
+        self._thread.join()
 
     def process_once(self) -> bool:
         if not self._process_lock.acquire(blocking=False):

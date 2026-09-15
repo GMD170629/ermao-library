@@ -60,10 +60,13 @@ class LibraryScanCoordinator:
         self._settings_token: tuple[tuple[str, str, datetime], ...] = ()
         self._next_refresh_at = 0.0
         self._next_periodic_at: datetime | None = None
+        self._stopping = False
         self._started = False
         self._startup_pending: set[str] = set()
 
     def tick(self) -> None:
+        if self._stopping:
+            return
         monotonic_now = time.monotonic()
         now = datetime.now(UTC)
         if monotonic_now >= self._next_refresh_at:
@@ -87,6 +90,10 @@ class LibraryScanCoordinator:
                 self._next_periodic_at = next_periodic_scan_at(
                     now, scan_settings.interval_minutes
                 )
+
+    def request_stop(self) -> None:
+        self._stopping = True
+        self._watcher.request_stop()
 
     def shutdown(self) -> None:
         self._watcher.shutdown()
@@ -160,6 +167,8 @@ class LibraryScanCoordinator:
         trigger: LibraryScanTrigger,
         scan_scopes: tuple[ScanScope, ...] | None = None,
     ) -> bool:
+        if self._stopping:
+            return False
         try:
             self._request_scan.execute(
                 RequestLibraryScanCommand(

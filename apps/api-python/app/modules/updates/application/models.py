@@ -60,7 +60,19 @@ class ApplicationIdentity(UpdateModel):
 
 class PreparationState(UpdateModel):
     phase: Literal[
-        "idle", "downloading", "verifying", "extracting", "ready", "failed"
+        "idle",
+        "downloading",
+        "verifying",
+        "extracting",
+        "ready",
+        "failed",
+        "requested",
+        "checking",
+        "stopping",
+        "backup",
+        "copying",
+        "starting",
+        "success",
     ] = "idle"
     target: Package | None = None
     downloaded: int = 0

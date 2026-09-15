@@ -19,6 +19,7 @@ def fixed_environment(storage: Path) -> Environment | None:
         sys.platform != "linux"
         or not fixed.is_file()
         or fixed.is_symlink()
+        or not (fixed.parent / "container_install.py").is_file()
         or runtime.is_symlink()
         or Path(__file__).resolve().parents[4] != runtime.resolve() / "apps/api-python"
         or not (runtime / ".initialized").is_file()

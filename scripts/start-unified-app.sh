@@ -20,6 +20,14 @@ shutdown() {
   wait ${PRESTART_PID:-} ${API_PID:-} ${WORKER_PID:-} ${WEB_PID:-} ${GATEWAY_PID:-} 2>/dev/null || true
 }
 
+drain_for_update() {
+  # Stop public ingress, notify API background consumers before request draining.
+  if [ -n "${GATEWAY_PID:-}" ]; then kill "$GATEWAY_PID" 2>/dev/null || true; fi
+  if [ -n "${API_PID:-}" ]; then kill -USR1 "$API_PID" 2>/dev/null || true; fi
+  exit 0
+}
+
+trap drain_for_update USR1
 trap 'exit 130' INT
 trap 'exit 143' TERM
 trap shutdown EXIT
@@ -41,6 +49,7 @@ if [ -z "${SESSION_SECRET:-}" ]; then
   export SESSION_SECRET
 fi
 
+if [ -n "${SHUKU_STARTUP_STATUS_FILE:-}" ]; then printf migration > "$SHUKU_STARTUP_STATUS_FILE"; fi
 (
   cd "$PYTHON_API_DIR"
   exec python -m app.bootstrap.prestart
@@ -48,6 +57,7 @@ fi
 PRESTART_PID="$!"
 wait "$PRESTART_PID"
 PRESTART_PID=""
+if [ -n "${SHUKU_STARTUP_STATUS_FILE:-}" ]; then printf services > "$SHUKU_STARTUP_STATUS_FILE"; fi
 
 (
   cd "$PYTHON_API_DIR"
@@ -66,6 +76,7 @@ while :; do
   sleep 1
 done
 
+if [ -n "${IMPORT_WORKER_READY_FILE:-}" ]; then rm -f "$IMPORT_WORKER_READY_FILE"; fi
 (
   cd "$PYTHON_API_DIR"
   exec python -m app.worker.main

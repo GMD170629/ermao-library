@@ -75,6 +75,9 @@ def main() -> None:
         logger.info("readable_resource.worker.stopping", extra={"signal": signum})
         ready_file.unlink(missing_ok=True)
         stop_event.set()
+        scan_coordinator.request_stop()
+        metadata_worker.request_stop()
+        organizer_scheduler.request_stop()
 
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
@@ -88,6 +91,8 @@ def main() -> None:
         while not stop_event.is_set():
             try:
                 scan_coordinator.tick()
+                if stop_event.is_set():
+                    break
                 outcome = readable_worker.process_once()
             except Exception:
                 # This is the process-level containment boundary.  Task-level

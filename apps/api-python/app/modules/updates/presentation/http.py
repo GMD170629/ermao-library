@@ -1,4 +1,4 @@
-"""Administrator-only update inspection and preparation; no installation endpoint."""
+"""Administrator-only update inspection, preparation and installation requests."""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ def use_cases(request: Request) -> UpdatePreparation:
 
 def update_error(error: UpdateError) -> Response:
     return fail(
-        "无法准备应用更新，请查看错误码。 / Unable to prepare the application update; see the error code.",
+        "应用更新请求失败，请查看错误码。 / Application update request failed; see the error code.",
         status_code=409 if error.code == "UPDATE_BUSY" else 400,
         code=error.code,
     )
@@ -101,6 +101,48 @@ def prepare_update(
     try:
         return ok(
             updates.prepare(
+                actor is not None and can_manage_system(actor), payload.version
+            ),
+            status_code=202,
+        )
+    except UpdateError as rejected:
+        return update_error(rejected)
+
+
+@router.post(
+    "/updates/install",
+    status_code=202,
+    response_model=SuccessEnvelope[PreparationState],
+)
+def install_update(
+    payload: PrepareRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    updates: UpdatePreparation = Depends(use_cases),
+) -> Annotated[
+    SuccessEnvelope[PreparationState] | Response,
+    ErrorResponses(
+        BasicBadRequestError,
+        BasicUnauthorizedError,
+        BasicForbiddenError,
+        BasicConflictError,
+    ),
+]:
+    actor, error = require_system_manager(db, request, settings)
+    if error is not None:
+        return error
+    # Existing sessions retain SameSite=Lax; this JSON-only mutation also rejects
+    # cross-site browser fetches. No GET endpoint can start a preparation.
+    if request.headers.get("sec-fetch-site") == "cross-site":
+        return fail(
+            "禁止跨站请求 / Cross-site request forbidden",
+            status_code=403,
+            code="CROSS_SITE_REQUEST",
+        )
+    try:
+        return ok(
+            updates.install(
                 actor is not None and can_manage_system(actor), payload.version
             ),
             status_code=202,

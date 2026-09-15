@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import ctypes
 import fcntl
+import json
 import os
 import shutil
 import signal
@@ -12,7 +13,11 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from container_install import Installation, InstallError
 
 
 class StartupError(RuntimeError):
@@ -61,10 +66,9 @@ def run_application(runtime: Path, storage: Path) -> int:
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    # Adopt and reap orphaned grandchildren even when this entry is not PID 1.
     if sys.platform == "linux":
         libc = ctypes.CDLL(None, use_errno=True)
-        if libc.prctl(36, 1, 0, 0, 0) != 0:  # PR_SET_CHILD_SUBREAPER
+        if libc.prctl(36, 1, 0, 0, 0) != 0:
             raise StartupError("cannot enable child reaping / 无法启用子进程回收")
 
     environment = {
@@ -75,37 +79,200 @@ def run_application(runtime: Path, storage: Path) -> int:
         "NEXT_SERVER": str(runtime / "apps/web/server.js"),
         "GATEWAY_SERVER": str(runtime / "scripts/unified-http-gateway.mjs"),
     }
-    child = subprocess.Popen(
-        ["sh", str(runtime / "scripts/start-unified-app.sh")],
-        cwd=runtime,
-        env=environment,
-        start_new_session=True,
-    )
+    installer = Installation(storage)
+    child = None
     forwarded = False
-    # waitpid is the sole reaper, including for the Popen child. Popen.poll(),
-    # wait() and send_signal() would compete for its status (send_signal polls).
-    while child.returncode is None:
-        if stop_signal and not forwarded:
-            # The existing script owns graceful shutdown of API and Worker.
-            os.kill(child.pid, stop_signal)
-            forwarded = True
-        pid, status = os.waitpid(-1, os.WNOHANG)
-        if pid == child.pid:
-            child.returncode = os.waitstatus_to_exitcode(status)
-        elif pid == 0:
-            time.sleep(0.2)
-    # The shell has waited for its services. Terminate any orphaned tools left
-    # by those services, then reap them. Never restart on ordinary termination.
-    try:
-        os.killpg(child.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
+    preflight = None
+    installing = False
+    stopped = False
+    deadline = 0.0
+    stage_file = storage / "update-tmp/startup-stage"
+    ready_file = storage / "update-tmp/worker-ready"
+
+    def launch() -> subprocess.Popen:
+        stage_file.unlink(missing_ok=True)
+        ready_file.unlink(missing_ok=True)
+        return subprocess.Popen(
+            ["sh", str(runtime / "scripts/start-unified-app.sh")],
+            cwd=runtime,
+            env={
+                **environment,
+                "IMPORT_WORKER_READY_FILE": str(ready_file),
+                "SHUKU_STARTUP_STATUS_FILE": str(stage_file),
+            },
+            start_new_session=True,
+        )
+
+    def fail(code: str) -> None:
+        nonlocal installing
+        installer.fail(code)
+        installing = False
+
+    child = launch()
     while True:
-        try:
-            os.waitpid(-1, 0)
-        except ChildProcessError:
-            break
-    return 128 + stop_signal if stop_signal else (child.returncode or 0)
+        if stop_signal and not forwarded:
+            if installing:
+                fail("CONTAINER_STOPPED")
+            if child.returncode is None:
+                os.kill(child.pid, stop_signal)
+            if preflight is not None and preflight.returncode is None:
+                os.kill(preflight.pid, stop_signal)
+            forwarded = True
+        # Sole owner of all child statuses, including the main Popen child.
+        empty = False
+        while True:
+            try:
+                pid, status = os.waitpid(-1, os.WNOHANG)
+            except ChildProcessError:
+                empty = True
+                break
+            if pid == child.pid:
+                child.returncode = os.waitstatus_to_exitcode(status)
+            if preflight is not None and pid == preflight.pid:
+                preflight.returncode = os.waitstatus_to_exitcode(status)
+            if pid == 0:
+                break
+        if installing and installer.state["phase"] == "checking":
+            if child.returncode is not None or time.monotonic() >= deadline:
+                if preflight is not None and preflight.returncode is None:
+                    os.kill(preflight.pid, signal.SIGTERM)
+                fail("PREFLIGHT_INTERRUPTED")
+            elif preflight.returncode is not None:
+                if preflight.returncode != 0:
+                    fail("PREFLIGHT_FAILED")
+                else:
+                    installer.phase("stopping")
+                    os.kill(child.pid, signal.SIGUSR1)
+                    deadline = time.monotonic() + 120
+        elif installing and installer.state["phase"] == "stopping":
+            # ECHILD also proves adopted tools (including separate sessions) exited.
+            if child.returncode is not None and empty:
+                stopped = True
+                try:
+                    if child.returncode != 0:
+                        raise InstallError("STOP_FAILED")
+                    installer.backup()
+                    if stop_signal:
+                        raise InstallError("CONTAINER_STOPPED")
+                    installer.synchronize()
+                    if stop_signal:
+                        raise InstallError("CONTAINER_STOPPED")
+                    installer.phase("starting")
+                    child = launch()
+                    deadline = time.monotonic() + 180
+                except Exception as error:  # noqa: BLE001 - owned installation boundary
+                    fail(
+                        str(error)
+                        if isinstance(error, InstallError)
+                        else "INSTALLATION_FAILED"
+                    )
+                    return 1
+            elif time.monotonic() >= deadline:
+                fail("STOP_TIMEOUT")
+                # No kill or restart: retain the old process group until it exits
+                # or the administrator stops the container.
+        elif installing and installer.state["phase"] == "starting":
+            if child.returncode is not None:
+                phase = stage_file.read_text().strip() if stage_file.exists() else ""
+                fail("MIGRATION_FAILED" if phase == "migration" else "STARTUP_FAILED")
+            elif time.monotonic() >= deadline:
+                fail("STARTUP_TIMEOUT")
+                os.kill(child.pid, signal.SIGTERM)
+            elif application_ready(
+                child.pid, installer.state["target"]["version"], ready_file
+            ):
+                try:
+                    installer.success()
+                except OSError:
+                    fail("RESULT_WRITE_FAILED")
+                    os.kill(child.pid, signal.SIGTERM)
+                else:
+                    installer = Installation(storage)
+                    installing = False
+                    stopped = False
+        elif (  # noqa: SIM102
+            not stop_signal
+            and child.returncode is None
+            and installer.lock is None
+            and not stopped
+        ):
+            # A failed reservation is never retried during this run.
+            if installer.state is None:
+                try:
+                    if installer.claim():
+                        installing = True
+                        installer.check_paths()
+                        preflight = subprocess.Popen(
+                            [sys.executable, "-m", "app.bootstrap.update_install"],
+                            cwd=runtime / "apps/api-python",
+                            env=environment,
+                            start_new_session=True,
+                        )
+                        deadline = time.monotonic() + 300
+                except Exception as error:
+                    if installer.state is not None:
+                        fail(
+                            str(error)
+                            if isinstance(error, InstallError)
+                            else "PREFLIGHT_FAILED"
+                        )
+                    else:
+                        installer.close()
+                        raise StartupError(
+                            "invalid install request / 安装请求无效"
+                        ) from error
+        if child.returncode is not None and not installing:
+            if empty:
+                break
+            # Ordinary termination retains the established orphan cleanup. An
+            # installation failure must not kill remaining tools and then copy.
+            if installer.state is None or stop_signal:
+                try:
+                    os.killpg(child.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+        time.sleep(0.2)
+    return (
+        128 + stop_signal
+        if stop_signal
+        else (child.returncode or (1 if stopped else 0))
+    )
+
+
+def application_ready(group: int, version: str, ready_file: Path) -> bool:
+    try:
+        worker_pid = int(ready_file.read_text())
+        if os.getpgid(worker_pid) != group:
+            return False
+        with urllib.request.urlopen(
+            "http://127.0.0.1:8000/openapi.json", timeout=1
+        ) as response:
+            if json.load(response)["info"]["version"] != version:
+                return False
+        with urllib.request.urlopen(
+            "http://127.0.0.1:8000/api/health", timeout=1
+        ) as response:
+            if response.status != 200:
+                return False
+        port = int(os.environ.get("NEXT_INTERNAL_PORT", "3001"))
+        base_path = (
+            os.environ.get("NEXT_PUBLIC_BASE_PATH")
+            or os.environ.get("SHUKU_BASE_PATH")
+            or os.environ.get("COOKIE_PATH", "").rstrip("/")
+            or ""
+        )
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}{base_path}/", timeout=1
+        ) as response:
+            if response.status != 200:
+                return False
+        gateway_port = int(os.environ.get("PORT", "3000"))
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{gateway_port}{base_path}/api/health", timeout=1
+        ) as response:
+            return response.status == 200
+    except (OSError, ValueError, KeyError):
+        return False
 
 
 def main() -> int:
@@ -142,6 +309,16 @@ def main() -> int:
                 raise StartupError(
                     "application is already running / 应用已在运行"
                 ) from None
+            if any(
+                path.exists() or path.is_symlink()
+                for path in (
+                    state / "installation-incomplete",
+                    state / "install-request.json",
+                )
+            ):
+                raise StartupError(
+                    "installation unfinished; inspect update-tmp/installation.log and repair manually / 安装未完成，请检查更新日志并人工修复，禁止自动重试"
+                )
             initialize_runtime(seed, runtime)
             print("runtime ready / 持久化程序目录就绪", flush=True)
             return run_application(runtime, storage)

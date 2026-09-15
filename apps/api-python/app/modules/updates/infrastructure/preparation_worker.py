@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO
 
-from ..application.models import Package, PreparationState, UpdateError
+from ..application.models import Environment, Package, PreparationState, UpdateError
 from .archive import check_space, extract_package
 from .official_source import ByteSource, package_url
 
@@ -122,6 +122,10 @@ class PreparationWorker:
                     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError:
                     raise UpdateError("UPDATE_BUSY") from None
+                if (self.root / "install-request.json").exists() or (
+                    self.root / "installation-incomplete"
+                ).exists():
+                    raise UpdateError("UPDATE_BUSY")
                 previous = self._read()
                 if previous.phase == "ready" and previous.target == package:
                     lock.close()
@@ -144,6 +148,43 @@ class PreparationWorker:
             except Exception:
                 lock.close()
                 raise
+
+    def install(
+        self, version: str, environment: Environment, current: str
+    ) -> PreparationState:
+        import fcntl
+        import json
+
+        with self.guard, self._lock() as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise UpdateError("UPDATE_BUSY") from None
+            request = self.root / "install-request.json"
+            if (
+                request.exists()
+                or request.is_symlink()
+                or (self.root / "installation-incomplete").exists()
+            ):
+                raise UpdateError("UPDATE_BUSY")
+            state = self._read()
+            if (
+                state.phase != "ready"
+                or state.target is None
+                or state.target.version != version
+            ):
+                raise UpdateError("PACKAGE_NOT_READY")
+            if state.target.environment != environment:
+                raise UpdateError("INCOMPATIBLE_ENVIRONMENT")
+            # Durable reservation under prepare.lock. The fixed entry claims this
+            # same lock; preparation checks the reservation before deleting files.
+            with request.open("x") as stream:
+                json.dump(
+                    {"target": state.target.model_dump(), "current": current}, stream
+                )
+                stream.flush()
+                os.fsync(stream.fileno())
+            return self._write(state.model_copy(update={"phase": "requested"}))
 
     def _run(self, package: Package, state: PreparationState, lock: IO[str]) -> None:
         work = self.root / "prepared"

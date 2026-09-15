@@ -587,6 +587,7 @@ def test_fixed_environment_comes_from_fixed_metadata_not_package(
     (runtime / ".initialized").touch()
     (runtime / "application.json").write_text("{}")
     fixed = tmp_path / "fixed-environment.json"
+    (tmp_path / "container_install.py").touch()
     fixed.write_text(
         json.dumps({"environment": source[0].package.environment.model_dump()})
     )
@@ -635,3 +636,117 @@ def test_download_deadline_is_enforced(source):
     fixture, transport = source
     with pytest.raises(UpdateError, match="DOWNLOAD_TIMEOUT"):
         list(transport.chunks(package_url(fixture.package), fixture.package.size, 0))
+
+
+@pytest.mark.parametrize("role", [None, "member"])
+def test_install_requires_system_manager(client, db_session, role):
+    from tests.contract.api.test_system_management_authorization import (
+        _create_user,
+        _login,
+    )
+
+    if role:
+        user = _create_user(db_session, email="install-member@example.com", role=role)
+        _login(client, user.email)
+    assert client.post(
+        "/api/updates/install", json={"version": "1.0.4"}
+    ).status_code == (403 if role else 401)
+
+
+def test_install_reserves_prepared_source(client, db_session, preparation, source):
+    from tests.contract.api.test_system_management_authorization import (
+        _create_user,
+        _login,
+    )
+
+    updates, worker, storage = preparation
+    package = source[0].package
+    user = _create_user(db_session, email="installer@example.com", role="admin")
+    _login(client, user.email)
+    client.app.dependency_overrides[use_cases] = lambda: updates
+    assert (
+        client.post(
+            "/api/updates/install", json={"version": package.version}
+        ).status_code
+        == 400
+    )
+    updates.prepare(True, package.version)
+    assert finished(worker).phase == "ready"
+    archive = storage / "update-tmp/prepared/application.tar.gz"
+    before = archive.read_bytes()
+    assert (
+        client.post(
+            "/api/updates/install",
+            json={"version": package.version},
+            headers={"sec-fetch-site": "cross-site"},
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            "/api/updates/install", json={"version": package.version, "path": "/tmp"}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/api/updates/install", json={"version": package.version}
+        ).status_code
+        == 202
+    )
+    assert (
+        client.post(
+            "/api/updates/install", json={"version": package.version}
+        ).status_code
+        == 409
+    )
+    with pytest.raises(UpdateError, match="UPDATE_BUSY"):
+        worker.submit(package)
+    assert archive.read_bytes() == before
+    assert worker.status().phase == "requested"
+    assert (
+        json.loads((storage / "update-tmp/install-request.json").read_bytes())["target"]
+        == package.model_dump()
+    )
+
+
+@pytest.mark.parametrize("kind", ["download", "kindle", "logs", "metadata", "organize"])
+def test_background_shutdown_waits_for_current_task(kind):
+    from app.services.download_queue import DownloadQueueWorker
+    from app.services.kindle_queue import KindleSendQueueWorker
+    from app.services.log_maintenance import SystemEventMaintenanceWorker
+    from app.services.metadata_lookup_queue import MetadataLookupWorker
+    from app.services.organize_scheduler import OrganizerScheduler
+
+    cls, event_name, stop_name = {
+        "download": (DownloadQueueWorker, "_stop_event", "stop"),
+        "kindle": (KindleSendQueueWorker, "_stop_event", "stop"),
+        "logs": (SystemEventMaintenanceWorker, "_stop", "stop"),
+        "metadata": (MetadataLookupWorker, "_stop", "shutdown"),
+        "organize": (OrganizerScheduler, "_stop", "shutdown"),
+    }[kind]
+    worker = cls.__new__(cls)
+    stop = threading.Event()
+    release = threading.Event()
+    entered = threading.Event()
+    setattr(worker, event_name, stop)
+
+    def current_task():
+        entered.set()
+        release.wait(5)
+
+    worker._thread = threading.Thread(target=current_task)
+    worker._thread.start()
+    assert entered.wait(1)
+    worker.request_stop()
+    assert stop.is_set()
+    joining = threading.Thread(target=getattr(worker, stop_name))
+    joining.start()
+    try:
+        joining.join(0.05)
+        assert joining.is_alive(), "shutdown must not abandon current business work"
+    finally:
+        release.set()
+        joining.join(2)
+        worker._thread.join(2)
+    assert not joining.is_alive()

@@ -28,9 +28,12 @@ class SystemEventMaintenanceWorker:
     def start(self) -> None:
         self._thread.start()
 
-    def stop(self) -> None:
+    def request_stop(self) -> None:
         self._stop.set()
-        self._thread.join(timeout=5)
+
+    def stop(self) -> None:
+        self.request_stop()
+        self._thread.join()
 
     def run_once(self) -> dict[str, int]:
         with self._db_factory() as db:

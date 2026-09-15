@@ -177,13 +177,17 @@ class LibraryScanWatcher:
             self._observer = observer
         return changed
 
+    def request_stop(self) -> None:
+        if self._observer is not None:
+            self._observer.stop()
+
     def shutdown(self) -> None:
         observer = self._observer
         self._observer = None
         if observer is None:
             return
         observer.stop()
-        observer.join(timeout=5)
+        observer.join()
 
 
 __all__ = ["LibraryEventBuffer", "LibraryScanWatcher", "WatchedLibrary"]

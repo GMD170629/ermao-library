@@ -22,6 +22,9 @@ class ReleaseSource(Protocol):
 class PreparationPort(Protocol):
     def submit(self, package: Package) -> PreparationState: ...
     def status(self) -> PreparationState: ...
+    def install(
+        self, version: str, environment: Environment, current: str
+    ) -> PreparationState: ...
 
 
 class UpdatePreparation:
@@ -78,6 +81,14 @@ class UpdatePreparation:
                 package = next(p for p in packages if p.environment == self.environment)
                 return self.worker.submit(package)
         raise UpdateError("PACKAGE_UNAVAILABLE")
+
+    def install(self, can_manage_system: bool, version: str) -> PreparationState:
+        self.authorize(can_manage_system)
+        if self.environment is None:
+            raise UpdateError("UNSUPPORTED_DEPLOYMENT")
+        if version_parts(version) <= version_parts(self.current):
+            raise UpdateError("NOT_NEWER")
+        return self.worker.install(version, self.environment, self.current)
 
     def status(self, can_manage_system: bool) -> PreparationState:
         self.authorize(can_manage_system)

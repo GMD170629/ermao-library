@@ -1,4 +1,7 @@
+import asyncio
 import logging
+import signal
+import threading
 from collections.abc import Callable, Generator
 from contextlib import asynccontextmanager
 from typing import cast
@@ -169,9 +172,29 @@ def create_app(
         app.state.download_queue_worker = download_queue_worker
         app.state.kindle_send_queue_worker = kindle_send_queue_worker
         app.state.update_runtime = UpdateRuntime(settings)
+
+        def stop_background() -> None:
+            for worker in (
+                download_queue_worker,
+                kindle_send_queue_worker,
+                log_maintenance_worker,
+            ):
+                if worker is not None:
+                    worker.request_stop()
+
+        loop = asyncio.get_running_loop()
+        signal_installed = (
+            hasattr(signal, "SIGUSR1")
+            and threading.current_thread() is threading.main_thread()
+        )
+        if signal_installed:
+            loop.add_signal_handler(signal.SIGUSR1, stop_background)
         try:
             yield
         finally:
+            stop_background()
+            if signal_installed:
+                loop.remove_signal_handler(signal.SIGUSR1)
             await run_in_threadpool(app.state.update_runtime.close)
             if download_queue_worker is not None:
                 download_queue_worker.stop()

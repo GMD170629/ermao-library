@@ -964,10 +964,13 @@ class MetadataLookupWorker:
                 )
         self._thread.start()
 
-    def shutdown(self) -> None:
+    def request_stop(self) -> None:
         self._stop.set()
+
+    def shutdown(self) -> None:
+        self.request_stop()
         if self._thread.is_alive():
-            self._thread.join(timeout=max(2.0, self._poll_seconds + 1.0))
+            self._thread.join()
 
     def _process_iteration(self) -> bool | None:
         prefer_writeback = self._prefer_writeback

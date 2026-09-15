@@ -1,0 +1,174 @@
+"""Fixed, offline installation operations. Standard library; no runtime imports."""
+
+from __future__ import annotations
+
+import fcntl
+import json
+import os
+import shutil
+import sqlite3
+import time
+from contextlib import closing
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+class InstallError(RuntimeError):
+    pass
+
+
+def read_json(path: Path) -> dict:
+    if path.is_symlink() or path.stat().st_size > 16384:
+        raise InstallError("INVALID_STATE")
+    return json.loads(path.read_bytes())
+
+
+def write_json(path: Path, value: dict) -> None:
+    fd = os.open(
+        path.with_suffix(".tmp"),
+        os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW,
+        0o600,
+    )
+    with os.fdopen(fd, "w") as stream:
+        json.dump(value, stream)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(path.with_suffix(".tmp"), path)
+
+
+class Installation:
+    def __init__(self, storage: Path):
+        self.storage = storage
+        self.root = storage / "update-tmp"
+        self.runtime = storage / "runtime"
+        self.lock = None
+        self.state = None
+
+    def claim(self) -> bool:
+        request = self.root / "install-request.json"
+        if not request.exists():
+            return False
+        lock = os.fdopen(
+            os.open(
+                self.root / "prepare.lock",
+                os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
+                0o600,
+            ),
+            "w",
+        )
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            lock.close()
+            return False
+        self.lock = lock
+        self.state = read_json(self.root / "preparation.json")
+        if (
+            self.state["phase"] != "requested"
+            or self.state["target"] != read_json(request)["target"]
+        ):
+            raise InstallError("INVALID_INSTALL_REQUEST")
+        log_fd = os.open(
+            self.root / "installation.log",
+            os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW,
+            0o600,
+        )
+        os.close(log_fd)
+        self.phase("checking")
+        return True
+
+    def phase(self, phase: str, error: str | None = None) -> None:
+        assert self.state is not None
+        if error:
+            self.state["failed_phase"] = self.state["phase"]
+        self.state.update(
+            phase=phase, error=error, updated_at=datetime.now(timezone.utc).isoformat()
+        )
+        write_json(self.root / "preparation.json", self.state)
+        message = f"application_update phase={phase} reason={error or 'none'}"
+        print(message, flush=True)
+        log_fd = os.open(
+            self.root / "installation.log",
+            os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW,
+            0o600,
+        )
+        with os.fdopen(log_fd, "a") as stream:
+            stream.write(self.state["updated_at"] + " " + message + "\n")
+
+    def check_paths(self) -> None:
+        if (
+            self.runtime.is_symlink()
+            or self.runtime.resolve() != self.storage / "runtime"
+        ):
+            raise InstallError("UNSAFE_RUNTIME")
+        if (
+            not (self.runtime / ".initialized").is_file()
+            or (self.runtime / ".initialized").is_symlink()
+        ):
+            raise InstallError("UNINITIALIZED_RUNTIME")
+        if self.root.is_symlink() or (self.root / "prepared").is_symlink():
+            raise InstallError("UNSAFE_STORAGE")
+        if not os.access(self.runtime, os.W_OK | os.X_OK):
+            raise InstallError("RUNTIME_NOT_WRITABLE")
+
+    def backup(self) -> None:
+        self.phase("backup")
+        database = self.storage / "database/shuku.sqlite3"
+        backup = self.root / "database-before-update.sqlite3"
+        if database.is_symlink() or database.parent.is_symlink() or backup.is_symlink():
+            raise InstallError("UNSAFE_DATABASE")
+        # SQLite's native backup API takes a consistent snapshot including WAL.
+        # No schema queries, migrations, logical exports or application imports.
+        deadline = time.monotonic() + 60
+
+        def progress(_status, _remaining, _total):
+            if time.monotonic() > deadline:
+                raise InstallError("BACKUP_TIMEOUT")
+
+        with closing(
+            sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)
+        ) as source:
+            backup.unlink(missing_ok=True)
+            os.close(
+                os.open(
+                    backup, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600
+                )
+            )
+            with closing(sqlite3.connect(backup)) as target:
+                source.backup(target, pages=256, progress=progress)
+
+    def synchronize(self) -> None:
+        self.check_paths()
+        source = self.root / "prepared/app"
+        if source.is_symlink() or not source.is_dir():
+            raise InstallError("UNSAFE_SOURCE")
+        # Old processes are gone. Remove entries without following target links,
+        # then copy the already validated tree; .initialized is launcher-owned.
+        write_json(
+            self.root / "installation-incomplete", {"target": self.state["target"]}
+        )
+        self.phase("copying")
+        for path in self.runtime.iterdir():
+            if path.name == ".initialized":
+                continue
+            if path.is_symlink() or not path.is_dir():
+                path.unlink()
+            else:
+                shutil.rmtree(path)
+        shutil.copytree(source, self.runtime, symlinks=True, dirs_exist_ok=True)
+
+    def success(self) -> None:
+        self.phase("success")
+        (self.root / "installation-incomplete").unlink()
+        (self.root / "install-request.json").unlink()
+        self.close()
+
+    def fail(self, code: str) -> None:
+        self.phase("failed", code)
+        # Keep reservation on any failure: never silently retry on startup.
+        self.close()
+
+    def close(self) -> None:
+        if self.lock:
+            self.lock.close()
+            self.lock = None
