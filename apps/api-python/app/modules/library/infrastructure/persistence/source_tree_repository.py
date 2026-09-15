@@ -677,14 +677,69 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             default=natural_sort_key(current.relative_path),
         )
 
+    def save_asset_local_metadata(
+        self,
+        *,
+        resource_id: str,
+        asset_id: str,
+        observations: tuple[LocalMetadataObservation, ...],
+        cover_path: str | None,
+    ) -> None:
+        """Save observations for this asset without resolving the resource."""
+        asset = self._session.get(LibraryResourceAsset, asset_id)
+        if asset is None or asset.resource_id != resource_id:
+            raise LookupError(asset_id)
+        asset.local_metadata_candidates = encode_observations(observations)
+        asset.local_cover_path = cover_path
+        self._session.flush()
+
+    def refresh_resource_local_metadata(self, resource_id: str) -> None:
+        """Resolve persisted ready-asset observations in canonical resource order."""
+        resource = self._session.get(LibraryReadableResource, resource_id)
+        if resource is None:
+            raise LookupError(resource_id)
+        assets = self._session.scalars(
+            select(LibraryResourceAsset)
+            .where(
+                LibraryResourceAsset.resource_id == resource_id,
+                LibraryResourceAsset.import_state == "READY",
+            )
+            .order_by(
+                LibraryResourceAsset.sequence_index.asc().nulls_last(),
+                func.lower(LibraryResourceAsset.sort_key),
+                LibraryResourceAsset.id,
+            )
+        ).all()
+        if resource.format == "IMAGE_DIR":
+            assets.sort(
+                key=lambda item: (natural_sort_key(item.sort_key or ""), item.id)
+            )
+        grouped = merge_observations(
+            tuple(
+                candidate
+                for item in assets
+                for candidate in decode_observations(item.local_metadata_candidates)
+            )
+        )
+        metadata = resolve_local_metadata(
+            tuple(
+                LocalMetadataCandidate(source=source, metadata=grouped[source])
+                for source in SqlAlchemyLocalMetadataPriority(self._session).load()
+                if source in grouped
+            ),
+            SqlAlchemyLocalMetadataPriority(self._session).load(),
+        ).metadata
+        cover_path = assets[0].local_cover_path if assets else None
+        self.apply_local_metadata(
+            resource_id=resource_id, metadata=metadata, cover_path=cover_path
+        )
+
     def apply_local_metadata(
         self,
         *,
         resource_id: str,
         metadata: PublicationMetadata,
         cover_path: str | None = None,
-        asset_id: str | None = None,
-        observations: tuple[LocalMetadataObservation, ...] = (),
     ) -> None:
         resource = self._session.get(LibraryReadableResource, resource_id)
         if resource is None:
@@ -695,45 +750,6 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         book_metadata = self._session.get(LibraryBookMetadata, resource.book_id)
         if book_metadata is None:
             raise LookupError(resource.book_id)
-        if asset_id is not None:
-            asset = self._session.get(LibraryResourceAsset, asset_id)
-            if asset is None or asset.resource_id != resource_id:
-                raise LookupError(asset_id)
-            asset.local_metadata_candidates = encode_observations(observations)
-            asset.local_cover_path = cover_path
-            self._session.flush()
-            assets = self._session.scalars(
-                select(LibraryResourceAsset)
-                .where(
-                    LibraryResourceAsset.resource_id == resource_id,
-                    LibraryResourceAsset.import_state == "READY",
-                )
-                .order_by(
-                    LibraryResourceAsset.sequence_index.asc().nulls_last(),
-                    func.lower(LibraryResourceAsset.sort_key),
-                    LibraryResourceAsset.id,
-                )
-            ).all()
-            if resource.format == "IMAGE_DIR":
-                assets.sort(
-                    key=lambda item: (natural_sort_key(item.sort_key or ""), item.id)
-                )
-            grouped = merge_observations(
-                tuple(
-                    candidate
-                    for item in assets
-                    for candidate in decode_observations(item.local_metadata_candidates)
-                )
-            )
-            metadata = resolve_local_metadata(
-                tuple(
-                    LocalMetadataCandidate(source=source, metadata=grouped[source])
-                    for source in SqlAlchemyLocalMetadataPriority(self._session).load()
-                    if source in grouped
-                ),
-                SqlAlchemyLocalMetadataPriority(self._session).load(),
-            ).metadata
-            cover_path = assets[0].local_cover_path if assets else None
 
         resource_metadata = self._session.get(
             LibraryReadableResourceMetadata, resource_id
@@ -1032,14 +1048,6 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
                 for unit in units
             ]
         )
-        metadata = self._session.get(
-            LibraryReadableResourceMetadata,
-            resource_id,
-        )
-        if metadata is None:
-            raise LookupError(resource_id)
-        if units and all(unit.unit_type == "page" for unit in units):
-            metadata.page_count = len(units)
         self._session.flush()
 
     def find_outermost_directory_resource(

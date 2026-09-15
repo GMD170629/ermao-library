@@ -963,6 +963,18 @@ def test_audiobook_reimport_compacts_gapped_chapter_order(tmp_path: Path) -> Non
             metadata = db.scalar(select(LibraryReadableResourceMetadata))
             assert metadata is not None
             assert metadata.track_count == 3 and metadata.duration_ms == 180_000
+            from app.modules.reader.infrastructure.resource_repository import (
+                SqlAlchemyReaderResourceRepository,
+            )
+
+            reader = SqlAlchemyReaderResourceRepository(db)
+            assert reader.get_context(metadata.resource_id) is not None
+            reader_assets = reader.list_assets(metadata.resource_id)
+            assert [
+                db.get(LibrarySourceNode, asset.source_node_id).name
+                for asset in reader_assets
+            ] == ["1.mp3", "2.mp3", "3.mp3"]
+            assert all(asset.mime_type == "audio/mpeg" for asset in reader_assets)
     finally:
         engine.dispose()
 
@@ -1644,7 +1656,7 @@ def test_failed_asset_finishes_book_and_retry_identifies_new_revision(
 
 
 @pytest.mark.parametrize("retry_failed", [False, True])
-def test_comic_import_creates_metadata_before_page_navigation(
+def test_comic_import_finalizes_page_count_after_navigation(
     tmp_path: Path, retry_failed: bool
 ) -> None:
     engine = _bootstrap(tmp_path)
@@ -1711,6 +1723,285 @@ def test_comic_import_creates_metadata_before_page_navigation(
                     .where(ReadableResourceNavigationUnit.resource_id == resource.id)
                 )
                 == 1
+            )
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "filename,role,unit_type",
+    [
+        ("book.epub", AssetRole.PRIMARY, "chapter"),
+        ("book.zip", AssetRole.PRIMARY, "page"),
+        ("album/02.mp3", AssetRole.TRACK, "audio_chapter"),
+        ("images/02.png", AssetRole.PAGE, None),
+    ],
+)
+@pytest.mark.parametrize("failed", [False, True])
+def test_save_asset_result_has_no_resource_or_queue_side_effects(
+    tmp_path: Path,
+    monkeypatch,
+    filename: str,
+    role: AssetRole,
+    unit_type: str | None,
+    failed: bool,
+) -> None:
+    from app.contracts.publication_metadata import PublicationMetadata
+    from app.modules.imports.infrastructure.local_cover_publication import (
+        FilesystemLocalCoverPublication,
+    )
+    from app.modules.library.public import ResourceNavigationUnitInput
+    from app.modules.metadata.public import (
+        LocalMetadataCandidate,
+        resolve_local_metadata,
+    )
+
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            source = root / filename
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_bytes(b"inspection supplied by fixture")
+            db.commit()
+            pipeline = build_readable_resource_pipeline(db)
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            assert build_readable_resource_worker(pipeline).process_once() == "scan"
+            task = db.scalar(
+                select(LibraryImportTask).where(
+                    LibraryImportTask.kind == "IMPORT_ASSET"
+                )
+            )
+            assert task is not None
+            task_id, resource_id, node_id = (
+                task.id,
+                task.resource_id,
+                task.source_node_id,
+            )
+            process = pipeline.process_import_task
+            context = process.load_resource_context(
+                resource_id=resource_id, source_node_id=node_id
+            )
+            assert context is not None and context.adapter is not None
+            pipeline.uow.release_before_io()
+            parsed = StubAlwaysOkAdapter().parse_file(
+                absolute_path=source,
+                adapter=context.adapter,
+                role=role,
+            )
+            assert parsed.asset is not None
+            local = resolve_local_metadata(
+                (
+                    LocalMetadataCandidate(
+                        "EMBEDDED",
+                        PublicationMetadata(title="Fixture title", language="en"),
+                    ),
+                )
+            )
+            parsed = replace(
+                parsed,
+                ok=not failed,
+                local_metadata=local,
+                error_code="FIXTURE_PARSE_FAILED" if failed else None,
+                asset=None
+                if failed
+                else replace(
+                    parsed.asset,
+                    duration_ms=1200 if role is AssetRole.TRACK else None,
+                    technical=AssetTechnicalMetadata(
+                        track_number=2 if role is AssetRole.TRACK else None
+                    ),
+                    navigation_units=(
+                        ResourceNavigationUnitInput(
+                            unit_type=unit_type,
+                            title="Chapter",
+                            href="#1",
+                            media_type=None,
+                            sort_order=0,
+                            start_ms=0 if role is AssetRole.TRACK else None,
+                            end_ms=1200 if role is AssetRole.TRACK else None,
+                        ),
+                    )
+                    if unit_type
+                    else (),
+                ),
+            )
+
+            def forbidden(*args, **kwargs):
+                raise AssertionError("asset save invoked a resource/queue side effect")
+
+            with monkeypatch.context() as patch:
+                for method in (
+                    "apply_local_metadata",
+                    "refresh_resource_local_metadata",
+                    "refresh_audio_resource_aggregates",
+                    "mark_resource_ready",
+                    "mark_resource_failed",
+                    "set_resource_page_count",
+                ):
+                    patch.setattr(SqlAlchemyBookResourceRepository, method, forbidden)
+                patch.setattr(FilesystemLocalCoverPublication, "publish", forbidden)
+                patch.setattr(FilesystemLocalCoverPublication, "prepare", forbidden)
+                patch.setattr(
+                    SqlAlchemyLibraryImportTaskQueue, "mark_succeeded", forbidden
+                )
+                patch.setattr(
+                    SqlAlchemyLibraryImportTaskQueue, "mark_failed", forbidden
+                )
+                with pipeline.uow.transaction():
+                    asset_id = process.save_asset_result(
+                        parsed=parsed,
+                        library_id="lib-1",
+                        resource_id=resource_id,
+                        source_node_id=node_id,
+                        role=role,
+                        sort_key=filename,
+                    )
+            db.expire_all()
+            asset = db.get(LibraryResourceAsset, asset_id)
+            assert asset is not None and asset.import_state == (
+                "FAILED" if failed else "READY"
+            )
+            assert asset.failure_reason == ("FIXTURE_PARSE_FAILED" if failed else None)
+            assert db.get(LibraryImportTask, task_id).state == "QUEUED"
+            assert (
+                db.get(LibraryReadableResource, resource_id).import_state == "PENDING"
+            )
+            assert db.get(LibraryReadableResourceMetadata, resource_id) is None
+            units = db.scalars(
+                select(ReadableResourceNavigationUnit).where(
+                    ReadableResourceNavigationUnit.asset_id == asset_id,
+                )
+            ).all()
+            assert len(units) == (1 if unit_type and not failed else 0)
+            if not failed:
+                assert (
+                    decode_observations(asset.local_metadata_candidates)[
+                        0
+                    ].metadata.title
+                    == "Fixture title"
+                )
+                assert (
+                    db.get(LibraryResourceAssetMetadata, asset_id).title == source.stem
+                )
+            pipeline.uow.release_before_io()
+            with pipeline.uow.transaction():
+                process.finalize_resource(
+                    parsed=parsed,
+                    local_metadata=local,
+                    resource_id=resource_id,
+                    role=role,
+                )
+            db.expire_all()
+            assert db.get(LibraryImportTask, task_id).state == "QUEUED"
+            assert db.get(LibraryReadableResource, resource_id).import_state == (
+                "FAILED" if failed else "READY"
+            )
+            if not failed:
+                metadata = db.get(LibraryReadableResourceMetadata, resource_id)
+                assert metadata.title == "Fixture title" and metadata.language == "en"
+                if unit_type == "page":
+                    assert metadata.page_count == 1
+                if role is AssetRole.TRACK:
+                    assert (
+                        metadata.track_count,
+                        metadata.chapter_count,
+                        metadata.duration_ms,
+                    ) == (1, 1, 1200)
+                    assert db.get(LibraryResourceAsset, asset_id).sequence_index == 0
+            pipeline.uow.release_before_io()
+            with pipeline.uow.transaction():
+                assert (
+                    process.save_asset_result(
+                        parsed=parsed,
+                        library_id="lib-1",
+                        resource_id=resource_id,
+                        source_node_id=node_id,
+                        role=role,
+                        sort_key=filename,
+                    )
+                    == asset_id
+                )
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "invalid_target,expected_code",
+    [
+        ("cross_library", "CROSS_LIBRARY"),
+        ("outside", "ASSET_OUT_OF_RESOURCE_SCOPE"),
+        ("directory", "ASSET_SOURCE_NOT_REGULAR_FILE"),
+        ("missing", "SOURCE_NODE_NOT_FOUND"),
+    ],
+)
+def test_save_asset_result_preserves_topology_validation(
+    tmp_path: Path,
+    invalid_target: str,
+    expected_code: str,
+) -> None:
+    from app.modules.library.public import ReadableResourceTopologyError
+
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            (root / "images").mkdir()
+            (root / "images/1.png").write_bytes(b"image")
+            (root / "outside.epub").write_bytes(b"book")
+            db.commit()
+            pipeline = build_readable_resource_pipeline(db)
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            assert build_readable_resource_worker(pipeline).process_once() == "scan"
+            resource = db.scalar(
+                select(LibraryReadableResource).where(
+                    LibraryReadableResource.format == "IMAGE_DIR"
+                )
+            )
+            nodes = {
+                node.relative_path: node.id
+                for node in db.scalars(select(LibrarySourceNode))
+            }
+            context = pipeline.process_import_task.load_resource_context(
+                resource_id=resource.id,
+                source_node_id=nodes["images/1.png"],
+            )
+            assert context is not None and context.adapter is not None
+            resource_id = resource.id
+            pipeline.uow.release_before_io()
+            parsed = StubAlwaysOkAdapter().parse_file(
+                absolute_path=root / "images/1.png",
+                adapter=context.adapter,
+                role=AssetRole.PAGE,
+            )
+            source_id = {
+                "cross_library": nodes["images/1.png"],
+                "outside": nodes["outside.epub"],
+                "directory": nodes["images"],
+                "missing": "missing",
+            }[invalid_target]
+            with (
+                pytest.raises(ReadableResourceTopologyError) as error,
+                pipeline.uow.transaction(),
+            ):
+                pipeline.process_import_task.save_asset_result(
+                    parsed=parsed,
+                    library_id="other-library"
+                    if invalid_target == "cross_library"
+                    else "lib-1",
+                    resource_id=resource_id,
+                    source_node_id=source_id,
+                    role=AssetRole.PAGE,
+                    sort_key="ignored",
+                )
+            assert error.value.code.value == expected_code
+            assert (
+                db.scalar(select(func.count()).select_from(LibraryResourceAsset)) == 0
+            )
+            assert (
+                db.get(LibraryReadableResource, resource_id).import_state == "PENDING"
             )
     finally:
         engine.dispose()

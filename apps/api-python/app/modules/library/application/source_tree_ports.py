@@ -263,14 +263,24 @@ class BookResourceRepositoryPort(Protocol):
     ) -> bool:
         """Whether this source is the first registered page and cover is unprotected."""
 
+    def save_asset_local_metadata(
+        self,
+        *,
+        resource_id: str,
+        asset_id: str,
+        observations: tuple[LocalMetadataObservation, ...],
+        cover_path: str | None,
+    ) -> None:
+        """Persist one asset's observations; do not merge resource metadata."""
+
+    def refresh_resource_local_metadata(self, resource_id: str) -> None: ...
+
     def apply_local_metadata(
         self,
         *,
         resource_id: str,
         metadata: PublicationMetadata,
         cover_path: str | None = None,
-        asset_id: str | None = None,
-        observations: tuple[LocalMetadataObservation, ...] = (),
     ) -> None: ...
 
     def clear_local_cover(self, *, resource_id: str, expected_path: str) -> None: ...

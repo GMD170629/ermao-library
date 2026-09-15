@@ -320,3 +320,168 @@ def test_fallback_publication_preserves_previous_cover_on_cancel_failure_or_prot
         set((settings.resolved_storage_root / "covers" / "resources").iterdir())
         == previous_files
     )
+
+
+@pytest.mark.parametrize("retry_after_rollback", [False, True])
+def test_import_phase_counts_and_finalization_rollback(
+    library, monkeypatch, retry_after_rollback
+) -> None:
+    """Count real work by phase; a failed transaction may repeat finalization."""
+    from collections import Counter
+
+    from sqlalchemy import event
+
+    from app.models import LibraryResourceAsset
+    from app.modules.imports.infrastructure.local_cover_publication import (
+        FilesystemLocalCoverPublication,
+    )
+    from app.modules.imports.infrastructure.readable_resource.adapter_registry import (
+        RegistryResourceAdapterExecutor,
+    )
+    from app.modules.library.infrastructure.persistence.source_tree_repository import (
+        SqlAlchemyBookResourceRepository,
+    )
+
+    db, settings, root, pipeline = library
+    write_pages(root, "IMAGE_DIR")
+    process = pipeline.process_import_task
+    phase = "scan"
+    sql = {name: Counter() for name in ("scan", "save", "finalize", "queue_context")}
+    counts = Counter()
+
+    def executed(conn, cursor, statement, parameters, context, executemany):
+        sql[phase]["driver_calls"] += 1
+        sql[phase]["executemany_calls"] += int(executemany)
+        # DBAPI rowcount is affected DML rows, not a SQL statement count. SELECT
+        # rows are measured separately at the resource aggregation boundary.
+        if cursor.rowcount >= 0:
+            sql[phase]["affected_rows"] += cursor.rowcount
+
+    def committed(connection):
+        sql[phase]["connection_commit_calls"] += 1
+        # SQLite SELECT-only scopes and empty Session.commit() calls need not
+        # open a native transaction. Count native transactions independently.
+        if connection.connection.driver_connection.in_transaction:
+            sql[phase]["transaction_commits"] += 1
+
+    original_parse = RegistryResourceAdapterExecutor.parse_file
+    original_publish = FilesystemLocalCoverPublication.publish
+    original_count = SqlAlchemyBookResourceRepository.count_ready_assets
+    original_merge = SqlAlchemyBookResourceRepository.refresh_resource_local_metadata
+    original_save = process.save_asset_result
+    original_finalize = process.finalize_resource
+
+    def parse(self, **kwargs):
+        assert not db.in_transaction()
+        counts["media_parses"] += 1
+        return original_parse(self, **kwargs)
+
+    def publish(self, prepared):
+        assert not db.in_transaction()
+        counts["cover_publications"] += 1
+        original_publish(self, prepared)
+
+    def ready_count(self, resource_id):
+        result = original_count(self, resource_id)
+        if phase == "finalize":
+            counts["aggregate_assets"] += result
+        return result
+
+    def merge(self, resource_id):
+        counts["metadata_merges"] += 1
+        return original_merge(self, resource_id)
+
+    def save(**kwargs):
+        nonlocal phase
+        phase = "save"
+        try:
+            return original_save(**kwargs)
+        finally:
+            phase = "queue_context"
+
+    def finalize(**kwargs):
+        nonlocal phase
+        phase = "finalize"
+        counts["resource_finalizations"] += 1
+        try:
+            original_finalize(**kwargs)
+            if retry_after_rollback and counts["resource_finalizations"] == 1:
+                raise RuntimeError("injected after resource finalization")
+        finally:
+            phase = "queue_context"
+
+    monkeypatch.setattr(RegistryResourceAdapterExecutor, "parse_file", parse)
+    monkeypatch.setattr(FilesystemLocalCoverPublication, "publish", publish)
+    monkeypatch.setattr(
+        SqlAlchemyBookResourceRepository, "count_ready_assets", ready_count
+    )
+    monkeypatch.setattr(
+        SqlAlchemyBookResourceRepository, "refresh_resource_local_metadata", merge
+    )
+    monkeypatch.setattr(process, "save_asset_result", save)
+    monkeypatch.setattr(process, "finalize_resource", finalize)
+    engine = db.get_bind()
+    event.listen(engine, "after_cursor_execute", executed)
+    event.listen(engine, "commit", committed)
+    try:
+        tasks = scan(db, pipeline)
+        assert len(tasks) == 3
+        phase = "queue_context"
+        task_id = tasks["1.png"]
+        if retry_after_rollback:
+            worker = build_readable_resource_worker(pipeline)
+            # Select the first page deterministically through the real queue.
+            from datetime import UTC, datetime
+
+            db.get(LibraryImportTask, task_id).created_at = datetime(
+                2000, 1, 1, tzinfo=UTC
+            )
+            db.commit()
+            assert worker.process_once() == "error"
+            db.expire_all()
+            assert db.get(LibraryImportTask, task_id).state == "FAILED"
+            assert db.scalar(select(LibraryResourceAsset.id)) is None
+            assert db.scalar(select(LibraryReadableResourceMetadata)) is None
+            assert not list(
+                (settings.resolved_storage_root / "covers" / "resources").iterdir()
+            )
+            pipeline.queue.requeue_failed_task(task_id)
+            db.commit()
+        for name in ("1.png", "2.png", "10.png"):
+            import_task(db, pipeline, tasks[name])
+        assert set(
+            db.scalars(
+                select(LibraryImportTask.state).where(
+                    LibraryImportTask.kind == "IMPORT_ASSET"
+                )
+            )
+        ) == {"SUCCEEDED"}
+        metadata = db.scalar(select(LibraryReadableResourceMetadata))
+        assert_red((settings.resolved_storage_root / metadata.cover_path).read_bytes())
+        assert counts == {
+            "media_parses": 4 if retry_after_rollback else 3,
+            "cover_publications": 2 if retry_after_rollback else 1,
+            "resource_finalizations": 4 if retry_after_rollback else 3,
+            "aggregate_assets": 7 if retry_after_rollback else 6,
+            "metadata_merges": 4 if retry_after_rollback else 3,
+        }
+        # One transaction owns save + finalize + failed outcome; neither helper
+        # silently commits. These counts include attempted rows before rollback.
+        assert (
+            sql["save"]["connection_commit_calls"]
+            == sql["finalize"]["connection_commit_calls"]
+            == 0
+        )
+        print(
+            {
+                "mode": "rollback_retry" if retry_after_rollback else "normal",
+                "import_asset_tasks": len(tasks),
+                "aggregate_chapters": 0,
+                "audio_aggregations": 0,
+                "work": dict(counts),
+                "sql_by_phase": {key: dict(value) for key, value in sql.items()},
+            }
+        )
+    finally:
+        event.remove(engine, "after_cursor_execute", executed)
+        event.remove(engine, "commit", committed)

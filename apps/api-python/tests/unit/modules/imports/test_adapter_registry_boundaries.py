@@ -220,11 +220,18 @@ def test_registry_image_page_uses_stem(tmp_path: Path) -> None:
     assert result.asset.role is AssetRole.PAGE
     assert result.asset.sort_key == path.name
     assert result.asset.title == "第 02 页 & image"
-    assert result.resource_title == resource_path.name
+    assert result.resource_title is None
     assert result.local_metadata is not None
-    assert result.local_metadata.metadata.title == "图片目录 Images"
-    assert result.local_metadata.metadata.volume_title == resource_path.name
-    assert result.local_metadata.metadata.authors == ()
+    assert result.local_metadata.candidates == ()
+    context = RegistryResourceAdapterExecutor().inspect_resource_metadata(
+        resource_absolute_path=resource_path,
+        adapter=adapter,
+        local_metadata_priority=("SIDECAR_OPF", "EMBEDDED", "PATH"),
+    )
+    assert context is not None
+    assert context.metadata.title == "图片目录 Images"
+    assert context.metadata.volume_title == resource_path.name
+    assert context.metadata.authors == ()
 
 
 def test_registry_epub_merges_sidecar_embedded_path_and_cover(tmp_path: Path) -> None:

@@ -57,7 +57,9 @@ from app.modules.metadata.public import (
     FilesystemLocalMetadataInspector,
     LocalAudioMetadata,
     LocalMetadataCandidate,
+    ResolvedLocalMetadata,
     parse_opf_metadata,
+    resolve_local_metadata,
 )
 
 _MAX_COVER_BYTES = 20 * 1024 * 1024
@@ -76,7 +78,7 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
 
             audio_metadata = BoundedAudioMetadataInspector()
         self._audio_metadata = audio_metadata
-        self._directory_metadata = None
+        self._directory_metadata: ResolvedLocalMetadata | None = None
         self._directory_metadata_key: tuple[object, ...] | None = None
         self._local_metadata_inspector = FilesystemLocalMetadataInspector(
             embedded_reader=self.inspect_embedded_local_metadata,
@@ -148,6 +150,56 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
             return self._inspect_reflowable(source, normalized_format)
         return None
 
+    def inspect_resource_metadata(
+        self,
+        *,
+        resource_absolute_path: Path,
+        adapter: ResourceAdapterSpec,
+        local_metadata_priority: tuple[LocalMetadataSource, ...],
+    ) -> ResolvedLocalMetadata | None:
+        """Read directory-owned path/sidecar candidates separately from file results."""
+        if not adapter.is_directory_adapter:
+            return None
+        # Cache only the current image resource within a scan round. A single
+        # slot bounds memory; source revisions invalidate it even within a round.
+        directory_key: tuple[object, ...] | None = None
+        if adapter.adapter_id is ResourceAdapterId.IMAGE_DIRECTORY:
+            candidates = (
+                resource_absolute_path,
+                resource_absolute_path / "metadata.opf",
+                resource_absolute_path / f"{resource_absolute_path.name}.opf",
+                resource_absolute_path.with_suffix(".opf"),
+            )
+            directory_key = (
+                resource_absolute_path,
+                local_metadata_priority,
+                tuple(
+                    (item.stat().st_mtime_ns, item.stat().st_size)
+                    if item.exists()
+                    else None
+                    for item in candidates
+                ),
+            )
+        if (
+            directory_key is not None
+            and directory_key == self._directory_metadata_key
+            and self._directory_metadata is not None
+        ):
+            resolved = self._directory_metadata
+        else:
+            resolved = FilesystemLocalMetadataInspector(
+                sidecar_reader=self.inspect_sidecar_local_metadata,
+            ).inspect(
+                resource_absolute_path,
+                source_format=adapter.format_label,
+                resource_path=resource_absolute_path,
+                source_order=local_metadata_priority,
+            )
+            if directory_key is not None:
+                self._directory_metadata_key = directory_key
+                self._directory_metadata = resolved
+        return resolved
+
     def parse_file(
         self,
         *,
@@ -212,48 +264,32 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
         effective_resource_path = resource_absolute_path or (
             absolute_path.parent if adapter.is_directory_adapter else absolute_path
         )
-        # Cache only the current image resource within a scan round. A single
-        # slot bounds memory; source revisions invalidate it even within a round.
-        directory_key: tuple[object, ...] | None = None
-        if adapter.adapter_id is ResourceAdapterId.IMAGE_DIRECTORY:
-            candidates = (
-                effective_resource_path,
-                effective_resource_path / "metadata.opf",
-                effective_resource_path / f"{effective_resource_path.name}.opf",
-                effective_resource_path.with_suffix(".opf"),
-            )
-            directory_key = (
-                effective_resource_path,
-                local_metadata_priority,
-                tuple(
-                    (item.stat().st_mtime_ns, item.stat().st_size)
-                    if item.exists()
-                    else None
-                    for item in candidates
-                ),
-            )
-        if (
-            directory_key is not None
-            and directory_key == self._directory_metadata_key
-            and self._directory_metadata is not None
-        ):
-            resolved = self._directory_metadata
-        else:
-            resolved = self._local_metadata_inspector.inspect(
+        if adapter.is_directory_adapter:
+            # Only the current audio file owns embedded tags/artwork. Directory
+            # naming and sidecars are inspected by inspect_resource_metadata.
+            file_metadata = FilesystemLocalMetadataInspector().inspect(
                 absolute_path,
-                source_format=(
-                    "AUDIOBOOK_DIRECTORY"
-                    if adapter.adapter_id is ResourceAdapterId.AUDIOBOOK_DIRECTORY
-                    else source_format_for_filename(adapter, absolute_path.name)
-                ),
+                source_format="AUDIOBOOK_DIRECTORY"
+                if local_audio_metadata
+                else "IMAGE_DIR",
                 resource_path=effective_resource_path,
                 embedded=embedded,
                 audio=local_audio_metadata,
                 source_order=local_metadata_priority,
             )
-            if directory_key is not None:
-                self._directory_metadata_key = directory_key
-                self._directory_metadata = resolved
+            resolved = resolve_local_metadata(
+                tuple(c for c in file_metadata.candidates if c.source == "EMBEDDED"),
+                local_metadata_priority,
+            )
+        else:
+            resolved = self._local_metadata_inspector.inspect(
+                absolute_path,
+                source_format=source_format_for_filename(adapter, absolute_path.name),
+                resource_path=effective_resource_path,
+                embedded=embedded,
+                audio=local_audio_metadata,
+                source_order=local_metadata_priority,
+            )
         title = (
             resolved.metadata.volume_title
             or resolved.metadata.title
@@ -378,7 +414,7 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
         return FileParseResult(
             ok=True,
             adapter=adapter,
-            resource_title=title,
+            resource_title=None if adapter.is_directory_adapter else title,
             asset=asset,
             error_code=None,
             error_summary=None,

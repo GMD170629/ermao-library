@@ -297,6 +297,15 @@ class ResourceAdapterExecutorPort(Protocol):
     def reset_inspection_cache(self) -> None:
         """Start a new scan round; implementations without caches do nothing."""
 
+    def inspect_resource_metadata(
+        self,
+        *,
+        resource_absolute_path: Path,
+        adapter: ResourceAdapterSpec,
+        local_metadata_priority: tuple[LocalMetadataSource, ...],
+    ) -> ResolvedLocalMetadata | None:
+        """Read directory-owned metadata outside file extraction and transactions."""
+
     def parse_file(
         self,
         *,
