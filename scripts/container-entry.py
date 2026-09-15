@@ -11,6 +11,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -81,15 +82,18 @@ def run_application(runtime: Path, storage: Path) -> int:
         start_new_session=True,
     )
     forwarded = False
-    while child.poll() is None:
+    # waitpid is the sole reaper, including for the Popen child. Popen.poll(),
+    # wait() and send_signal() would compete for its status (send_signal polls).
+    while child.returncode is None:
         if stop_signal and not forwarded:
             # The existing script owns graceful shutdown of API and Worker.
-            child.send_signal(stop_signal)
+            os.kill(child.pid, stop_signal)
             forwarded = True
-        try:
-            child.wait(timeout=0.2)
-        except subprocess.TimeoutExpired:
-            pass
+        pid, status = os.waitpid(-1, os.WNOHANG)
+        if pid == child.pid:
+            child.returncode = os.waitstatus_to_exitcode(status)
+        elif pid == 0:
+            time.sleep(0.2)
     # The shell has waited for its services. Terminate any orphaned tools left
     # by those services, then reap them. Never restart on ordinary termination.
     try:

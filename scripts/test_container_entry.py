@@ -63,7 +63,21 @@ class ContainerEntryTests(unittest.TestCase):
             "    sys.exit(0)\n"
             "signal.signal(signal.SIGTERM, stop)\n"
             'record("start")\n'
+            'if "prestart" in role and os.environ.get("FAIL_PRESTART"): sys.exit(37)\n'
             'if "prestart" in role and not os.environ.get("HOLD_PRESTART"): sys.exit(0)\n'
+            'if "app.worker.main" in role and os.environ.get("ORPHAN_TOOL"):\n'
+            '    storage = Path(os.environ["STORAGE_ROOT"])\n'
+            "    intermediate = os.fork()\n"
+            "    if intermediate == 0:\n"
+            "        if os.fork() == 0:\n"
+            '            (storage / "tool-pid.tmp").write_text(str(os.getpid()))\n'
+            '            (storage / "tool-pid.tmp").rename(storage / "tool-pid")\n'
+            '            while not (storage / "release-tool").exists(): time.sleep(.02)\n'
+            '            (storage / "tool-exited").touch()\n'
+            "            os._exit(0)\n"
+            "        os._exit(0)\n"
+            "    assert os.waitpid(intermediate, 0) == (intermediate, 0)\n"
+            '    (storage / "intermediate-reaped").touch()\n'
             "while True: time.sleep(.02)\n"
         )
         executable.chmod(0o755)
@@ -149,6 +163,44 @@ class ContainerEntryTests(unittest.TestCase):
         process.terminate()
         self.assertEqual(process.wait(timeout=10), 143)
         self.assertEqual([event[0] for event in self.events()], ["start", "stop"])
+
+    @unittest.skipUnless(
+        sys.platform == "linux", "requires Linux child subreaper and /proc"
+    )
+    def test_orphan_tool_is_reaped_while_business_keeps_running(self) -> None:
+        process = self.launch(ORPHAN_TOOL="1")
+        self.await_starts(process, 5)
+        starts = self.events()
+        pid_file = self.storage / "tool-pid"
+        deadline = time.monotonic() + 5
+        while not (
+            pid_file.exists() and (self.storage / "intermediate-reaped").exists()
+        ):
+            self.assertLess(time.monotonic(), deadline, "tool fixture did not start")
+            time.sleep(0.02)
+        tool_pid = int(pid_file.read_text())
+        status_file = Path(f"/proc/{tool_pid}/status")
+        while f"PPid:\t{process.pid}\n" not in status_file.read_text():
+            self.assertLess(time.monotonic(), deadline, "tool was not adopted by entry")
+            time.sleep(0.02)
+        self.assertNotIn("State:\tZ", status_file.read_text())
+        (self.storage / "release-tool").touch()
+        deadline = time.monotonic() + 5
+        while status_file.exists():
+            self.assertLess(time.monotonic(), deadline, "exited orphan was not reaped")
+            time.sleep(0.02)
+        self.assertTrue((self.storage / "tool-exited").exists())
+        self.assertIsNone(process.poll())
+        self.assertEqual(self.events(), starts)
+        for _, role, pid, *_ in starts:
+            if "prestart" not in role:
+                os.kill(pid, 0)
+
+    def test_main_script_failure_status_is_preserved(self) -> None:
+        process = self.launch(FAIL_PRESTART="1")
+        self.assertEqual(process.wait(timeout=10), 37)
+        self.assertEqual(len(self.events()), 1)
+        self.assertIn("prestart", self.events()[0][1])
 
     def test_reuse_without_seed_preserves_runtime_and_user_data(self) -> None:
         for name in (
