@@ -18,6 +18,7 @@ from sqlalchemy import (
     Table,
     create_engine,
     func,
+    insert,
     inspect,
     select,
 )
@@ -383,10 +384,11 @@ def test_alembic_script_directory_has_one_linear_head() -> None:
     config = alembic_config_for_engine(create_engine("sqlite+pysqlite:///:memory:"))
     script = ScriptDirectory.from_config(config)
     revisions = list(script.walk_revisions())
-    assert len(revisions) == 14
-    assert script.get_heads() == ["0014_audio_resource_tasks"]
-    assert head_revision() == "0014_audio_resource_tasks"
+    assert len(revisions) == 15
+    assert script.get_heads() == ["0015_scan_context_version"]
+    assert head_revision() == "0015_scan_context_version"
     assert [revision.revision for revision in revisions] == [
+        "0015_scan_context_version",
         "0014_audio_resource_tasks",
         "0013_image_resource_tasks",
         "0012_resource_import_tasks",
@@ -413,7 +415,7 @@ def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
     engine = create_sqlite_engine(settings.database_path)
     try:
         runner_module.apply_schema(engine, settings)
-        assert _current_revision(engine) == "0014_audio_resource_tasks"
+        assert _current_revision(engine) == "0015_scan_context_version"
         operation_columns = {
             column["name"]: column
             for column in inspect(engine).get_columns("MetadataWritebackOperation")
@@ -454,7 +456,7 @@ def test_source_node_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None
         }
 
         runner_module.apply_schema(engine)
-        assert _current_revision(engine) == "0014_audio_resource_tasks"
+        assert _current_revision(engine) == "0015_scan_context_version"
         source_node_indexes = {
             index["name"]: tuple(index["column_names"])
             for index in inspect(engine).get_indexes("LibrarySourceNode")
@@ -505,7 +507,7 @@ def test_foreign_key_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None
             }
 
         runner_module.apply_schema(engine)
-        assert _current_revision(engine) == "0014_audio_resource_tasks"
+        assert _current_revision(engine) == "0015_scan_context_version"
         for table_name, index_name in expected_indexes.items():
             assert index_name in {
                 index["name"] for index in inspect(engine).get_indexes(table_name)
@@ -1362,8 +1364,8 @@ def test_directory_legacy_tasks_upgrade_keeps_asset_ids_and_progress(
                     book_id="book", title="Images", normalized_title="images"
                 )
             )
-            db.add(
-                LibraryReadableResource(
+            db.execute(
+                insert(LibraryReadableResource).values(
                     id="resource",
                     library_id="lib",
                     book_id="book",

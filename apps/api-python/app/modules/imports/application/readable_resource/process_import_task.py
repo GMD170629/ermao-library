@@ -209,11 +209,9 @@ class ProcessReadableResourceImportTask:
             )
             self._uow.release_before_io()
             if already_processed:
-                with self._uow.transaction():
-                    if self._queue.get_task(task_id) is None:
-                        return ProcessTaskResult(task_id=task_id, outcome="cancelled")
-                    self._queue.mark_succeeded(task_id, finished_at=self._clock.now())
-                return ProcessTaskResult(task_id=task_id, outcome="ok")
+                return self._refresh_single_file_metadata(
+                    task_id, context, resource_absolute
+                )
         parsed = self._adapters.parse_file(
             absolute_path=absolute,
             resource_absolute_path=resource_absolute,
@@ -385,6 +383,93 @@ class ProcessReadableResourceImportTask:
             outcome=outcome,
         )
         return ProcessTaskResult(task_id=task_id, outcome=outcome)
+
+    def _refresh_single_file_metadata(
+        self, task_id: str, context: ResourceImportContext, absolute: Path
+    ) -> ProcessTaskResult:
+        resource_id = context.resource.id
+        observations = self._books_resources.resource_local_observations(resource_id)
+        cover_state = self._books_resources.resource_cover_state(resource_id)
+        fallback_cover = self._books_resources.single_file_fallback_cover(resource_id)
+        self._uow.release_before_io()
+        assert context.adapter is not None
+        metadata = self._adapters.inspect_resource_metadata(
+            resource_absolute_path=absolute,
+            adapter=context.adapter,
+            local_metadata_priority=context.local_metadata_priority,
+        )
+        assert metadata is not None
+        embedded = tuple(
+            LocalMetadataCandidate(
+                o.source,
+                o.metadata,
+                self._covers.read_candidate(o.cover_path)
+                if self._covers is not None
+                and o.cover_path
+                and not cover_state.protected
+                else None,
+            )
+            for o in observations
+            if o.source == "EMBEDDED"
+        )
+        resolved = resolve_local_metadata(
+            metadata.candidates + embedded, context.local_metadata_priority
+        )
+        prepared = None
+        cover_path = cover_state.path
+        if self._covers is not None and not cover_state.protected:
+            for source in context.local_metadata_priority:
+                candidate = next(
+                    (c for c in resolved.candidates if c.source == source and c.cover),
+                    None,
+                )
+                if candidate is not None:
+                    if not self._covers.matches(cover_path, candidate.cover):
+                        prepared = self._covers.prepare(
+                            resource_id=resource_id, content=candidate.cover
+                        )
+                    break
+            else:
+                previous_cover = cover_path
+                cover_path = None
+                if fallback_cover is not None and self._covers.exists(fallback_cover):
+                    cover_path = fallback_cover
+                elif (
+                    context.resource.format == "PDF"
+                    and self._first_page_covers is not None
+                ):
+                    content = self._first_page_covers.extract(
+                        path=absolute, source_format="PDF"
+                    )
+                    if content is not None:
+                        if self._covers.matches(previous_cover, content):
+                            cover_path = previous_cover
+                        else:
+                            prepared = self._covers.prepare(
+                                resource_id=resource_id, content=content
+                            )
+        committed = False
+        try:
+            if prepared is not None and self._covers is not None:
+                self._covers.publish(prepared)
+                cover_path = prepared.stored_path
+            with self._uow.transaction():
+                if (
+                    self._queue.get_task(task_id) is None
+                    or self._books_resources.get_resource(resource_id) is None
+                ):
+                    return ProcessTaskResult(task_id, "cancelled")
+                self._books_resources.apply_local_metadata(
+                    resource_id=resource_id,
+                    metadata=resolved.metadata,
+                    cover_path=cover_path,
+                )
+                self._queue.mark_succeeded(task_id, finished_at=self._clock.now())
+            committed = True
+        finally:
+            if prepared is not None and not committed and self._covers is not None:
+                self._covers.discard(prepared)
+        return ProcessTaskResult(task_id, "ok")
 
     def _execute_directory(
         self, task_id: str, context: ResourceImportContext
@@ -569,6 +654,8 @@ class ProcessReadableResourceImportTask:
                 except ValueError:
                     continue
             else:
+                previous_cover = cover_path
+                cover_path = None
                 if (
                     self._first_page_covers is not None
                     and adapter.asset_role is AssetRole.PAGE
@@ -584,7 +671,8 @@ class ProcessReadableResourceImportTask:
                         )
                         if content is None:
                             continue
-                        if self._covers.matches(cover_path, content):
+                        if self._covers.matches(previous_cover, content):
+                            cover_path = previous_cover
                             break
                         try:
                             prepared = self._covers.prepare(

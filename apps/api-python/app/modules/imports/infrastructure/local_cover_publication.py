@@ -20,6 +20,10 @@ class FilesystemLocalCoverPublication:
     def __init__(self, storage_root: Path) -> None:
         self._storage_root = storage_root.resolve()
 
+    def exists(self, stored_path: str) -> bool:
+        target = (self._storage_root / stored_path).resolve()
+        return target.is_relative_to(self._storage_root) and target.is_file()
+
     def prepare(self, *, resource_id: str, content: bytes) -> PreparedLocalCover:
         if not resource_id or Path(resource_id).name != resource_id:
             raise ValueError("invalid resource identifier")

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,6 +14,7 @@ from app.modules.imports.application.readable_resource.ports import (
     LibraryConfigPort,
     LibraryImportTaskQueuePort,
     LibrarySourceTreeConfig,
+    LocalCoverPublicationPort,
     ObservedSourceEntry,
     PipelineLogPort,
     ReadableResourceRecord,
@@ -28,7 +31,10 @@ from app.modules.imports.domain.directory_probe import (
     ProbeInterpretationResult,
     ProbeTerminationReason,
 )
-from app.modules.imports.domain.ignore_rules import should_ignore_source_entry
+from app.modules.imports.domain.ignore_rules import (
+    is_builtin_ignored_file,
+    should_ignore_source_entry,
+)
 from app.modules.imports.domain.resource_adapters import (
     ADAPTER_SPECS,
     ResourceAdapterSpec,
@@ -46,8 +52,8 @@ from app.modules.library.public import (
     SourceNodePhysicalKind,
     SourceNodeRelativePath,
     SourceNodeViolationCode,
+    audiobook_resource_owns_path,
     decide_book_anchor_for_resource,
-    evaluate_path_key_occupancy,
     parse_source_node_relative_path,
     resource_root_folder_creates_empty_book_on_discovery,
 )
@@ -96,7 +102,9 @@ class ScanLibrarySourceTree:
         clock: ClockPort,
         log: PipelineLogPort,
         source_node_deletion: SourceNodeDeletionPort | None = None,
+        covers: LocalCoverPublicationPort | None = None,
     ) -> None:
+        self._covers = covers
         self._libraries = libraries
         self._filesystem = filesystem
         self._source_nodes = source_nodes
@@ -377,15 +385,26 @@ class ScanLibrarySourceTree:
         tasks_enqueued = 0
         collisions = 0
         failed = False
-        stack: list[tuple[str | None, str | None]] = [
-            (start_parent_id, start_parent_rel)
-        ]
-
+        with self._uow.transaction():
+            initial_owner = self._books_resources.find_outermost_directory_resource(
+                config.library_id, start_parent_rel or "__root__"
+            )
+            initial_anchor = (
+                self._source_nodes.get(initial_owner.source_node_id)
+                if initial_owner
+                else None
+            )
+        owner_anchors = (
+            {initial_owner.id: initial_anchor.relative_path}
+            if initial_owner and initial_anchor
+            else {}
+        )
+        stack = [(start_parent_id, start_parent_rel, initial_owner)]
+        listings: dict[str, tuple[DirectoryEntry, ...]] = {}
         while stack:
             if self._task_was_cancelled(task_id):
                 raise SourceScanCancelledError()
-
-            parent_id, parent_rel = stack.pop()
+            parent_id, parent_rel, owner = stack.pop()
             absolute = (
                 config.root_path
                 if parent_rel is None
@@ -393,11 +412,14 @@ class ScanLibrarySourceTree:
             )
             self._uow.release_before_io()
             try:
-                observations: list[DirectoryEntry] = []
-                for item in self._filesystem.iter_directory_entries(absolute):
-                    if isinstance(item, UnreadableDirectoryEntry):
-                        raise OSError("directory entry unavailable")
-                    observations.append(item)
+                observations = listings.pop(parent_rel or "", None)
+                if observations is None:
+                    collected = []
+                    for item in self._filesystem.iter_directory_entries(absolute):
+                        if isinstance(item, UnreadableDirectoryEntry):
+                            raise OSError("directory entry unavailable")
+                        collected.append(item)
+                    observations = tuple(collected)
             except OSError:
                 self._log.emit(
                     "source_tree.scan.directory_unreadable",
@@ -407,11 +429,6 @@ class ScanLibrarySourceTree:
                 )
                 failed = True
                 continue
-
-            if self._task_was_cancelled(task_id):
-                raise SourceScanCancelledError()
-
-            seen_path_keys: set[str] = set()
             if (
                 parent_rel is None
                 and not observations
@@ -420,56 +437,132 @@ class ScanLibrarySourceTree:
                 with self._uow.transaction():
                     if self._libraries.source_node_count(config.library_id):
                         raise EmptyLibraryProtectedError()
+            ownership_changed = False
             if parent_id is not None and parent_rel is not None:
-                with self._uow.transaction():
-                    covered = self._books_resources.find_outermost_directory_resource(
-                        config.library_id, parent_rel
-                    )
                 try:
-                    if covered is None:
+                    if owner is None:
                         created_r, enqueued = self._probe_and_persist_directory(
                             config,
                             parent_id,
                             SourceNodeRelativePath(parent_rel),
                             task_id=task_id,
+                            observations=observations,
+                            listings=listings,
                         )
                         resources_created += created_r
+                        ownership_changed = bool(created_r)
                         tasks_enqueued += enqueued
+                        with self._uow.transaction():
+                            owner = self._books_resources.get_resource_by_source_node(
+                                parent_id
+                            )
                     else:
                         with self._uow.transaction():
                             self._mark_node_covered_by_directory_resource(parent_id)
                 except SourceScanIncompleteError:
                     failed = True
                     continue
-            for name, kind, size, mtime_ns in observations:
+            if owner is not None:
+                owner_anchors.setdefault(owner.id, parent_rel)
+            # Includes non-asset sidecars without making them SourceNodes or resources.
+            context_version = hashlib.sha256(
+                json.dumps(
+                    [
+                        config.metadata_priority,
+                        config.ignore_hidden,
+                        config.ignore_patterns,
+                        config.global_ignore_patterns,
+                        self._filesystem.metadata_input_observations(
+                            absolute, directory=True
+                        )
+                        if owner is not None and owner.source_node_id == parent_id
+                        else (),
+                        sorted(
+                            (name, size, mtime)
+                            for name, kind, size, mtime in observations
+                            if kind is SourceNodePhysicalKind.REGULAR_FILE
+                            and is_builtin_ignored_file(name)
+                        ),
+                    ],
+                    sort_keys=True,
+                ).encode()
+            ).hexdigest()
+            # Only the anchor owns directory metadata; child listings still contribute
+            # member changes through the same durable resource task.
+            if owner is not None and owner.source_node_id == parent_id:
+                with self._uow.transaction():
+                    cover = self._books_resources.resource_cover_state(owner.id)
+                self._uow.release_before_io()
+                missing_cover = bool(
+                    self._covers is not None
+                    and cover.path
+                    and not cover.protected
+                    and not self._covers.exists(cover.path)
+                )
+                with self._uow.transaction():
+                    if (
+                        self._books_resources.refresh_scan_context(
+                            owner.id, context_version
+                        )
+                        or missing_cover
+                    ):
+                        self._queue.request_import_resource(
+                            library_id=config.library_id,
+                            resource_id=owner.id,
+                            source_node_id=owner.source_node_id,
+                            changed=True,
+                        )
+                        tasks_enqueued += 1
+            seen_path_keys: set[str] = set()
+            entries = []
+            for name, kind, size, mtime in observations:
                 if self._should_ignore(config, parent_rel, name, kind):
                     continue
-                relative_str = name if parent_rel is None else f"{parent_rel}/{name}"
-                parsed = parse_source_node_relative_path(relative_str)
-                if not isinstance(parsed, SourceNodeRelativePath):
-                    continue
-                seen_path_keys.add(parsed.path_key)
-
-                entry = ObservedSourceEntry(
-                    relative_path=parsed,
-                    physical_kind=kind,
-                    observed_size_bytes=size,
-                    observed_mtime_ns=mtime_ns,
-                    observed_at=self._clock.now(),
+                relative = parse_source_node_relative_path(
+                    name if parent_rel is None else f"{parent_rel}/{name}"
                 )
-
+                if not isinstance(relative, SourceNodeRelativePath):
+                    continue
+                seen_path_keys.add(relative.path_key)
+                entries.append(
+                    ObservedSourceEntry(relative, kind, size, mtime, self._clock.now())
+                )
+            for offset in range(0, len(entries), 200):
+                batch = tuple(entries[offset : offset + 200])
+                self._uow.release_before_io()
+                file_contexts = (
+                    {}
+                    if owner is not None
+                    else {
+                        entry.relative_path.value: hashlib.sha256(
+                            json.dumps(
+                                [
+                                    config.metadata_priority,
+                                    self._filesystem.metadata_input_observations(
+                                        self._filesystem.resolve_under_root(
+                                            config.root_path, entry.relative_path.value
+                                        ),
+                                        directory=False,
+                                    ),
+                                ]
+                            ).encode()
+                        ).hexdigest()
+                        for entry in batch
+                        if entry.physical_kind is SourceNodePhysicalKind.REGULAR_FILE
+                    }
+                )
                 with self._uow.transaction():
-                    existing = self._source_nodes.get_by_path_key(
-                        config.library_id, parsed.path_key
+                    if self._task_was_cancelled_in_transaction(task_id):
+                        raise SourceScanCancelledError()
+                    results = self._source_nodes.reconcile_batch(
+                        library_id=config.library_id, parent_id=parent_id, entries=batch
                     )
-                    if existing is not None:
-                        collision = evaluate_path_key_occupancy(
-                            occupied_relative_path=SourceNodeRelativePath(
-                                existing.relative_path
-                            ),
-                            candidate_relative_path=parsed,
-                        )
-                        if collision is not None:
+                    affected = False
+                    covered_ids = []
+                    for entry, (node, created, changed) in zip(
+                        batch, results, strict=True
+                    ):
+                        if node.relative_path != entry.relative_path.value:
                             collisions += 1
                             self._log.emit(
                                 "source_tree.scan.path_key_collision",
@@ -478,70 +571,73 @@ class ScanLibrarySourceTree:
                                 outcome=SourceNodeViolationCode.PATH_KEY_COLLISION.value,
                             )
                             continue
-                        node, observation_changed = (
-                            self._source_nodes.refresh_observation(
-                                source_node_id=existing.id,
-                                entry=entry,
-                            )
+                        inserted += int(created)
+                        if entry.physical_kind is SourceNodePhysicalKind.DIRECTORY:
+                            if (
+                                resource_root_folder_creates_empty_book_on_discovery(
+                                    config.organization_mode,
+                                    is_root_child_directory=entry.relative_path.is_root_child,
+                                )
+                                and self._books_resources.get_book_id_for_source_node(
+                                    node.id
+                                )
+                                is None
+                            ):
+                                self._books_resources.ensure_book(
+                                    library_id=config.library_id,
+                                    source_node_id=node.id,
+                                    title=node.name,
+                                )
+                            if recursive:
+                                stack.append(
+                                    (
+                                        node.id,
+                                        node.relative_path,
+                                        owner
+                                        if owner is not None
+                                        and (
+                                            owner.format != "AUDIOBOOK_DIR"
+                                            or audiobook_resource_owns_path(
+                                                resource_anchor=SourceNodeRelativePath(
+                                                    owner_anchors[owner.id]
+                                                ),
+                                                candidate_path=entry.relative_path,
+                                                candidate_kind=entry.physical_kind,
+                                            )
+                                        )
+                                        else None,
+                                    )
+                                )
+                        elif entry.physical_kind is SourceNodePhysicalKind.REGULAR_FILE:
+                            if owner is not None:
+                                if changed or ownership_changed:
+                                    covered_ids.append(node.id)
+                                affected |= changed
+                            else:
+                                created_r, enqueued = self._process_regular_file(
+                                    config,
+                                    node.id,
+                                    entry.relative_path,
+                                    observation_changed=changed,
+                                    owner_known=True,
+                                    context_version=file_contexts[
+                                        entry.relative_path.value
+                                    ],
+                                )
+                                resources_created += created_r
+                                tasks_enqueued += enqueued
+                    if covered_ids:
+                        self._source_nodes.mark_covered_batch(
+                            tuple(covered_ids), recognized_at=self._clock.now()
                         )
-                    else:
-                        node, created = self._source_nodes.insert_if_absent(
+                    if affected and owner is not None:
+                        self._queue.request_import_resource(
                             library_id=config.library_id,
-                            parent_id=parent_id,
-                            entry=entry,
+                            resource_id=owner.id,
+                            source_node_id=owner.source_node_id,
+                            changed=True,
                         )
-                        if created:
-                            inserted += 1
-                        observation_changed = False
-
-                    if (
-                        kind is SourceNodePhysicalKind.DIRECTORY
-                        and resource_root_folder_creates_empty_book_on_discovery(
-                            config.organization_mode,
-                            is_root_child_directory=parsed.is_root_child,
-                        )
-                        and self._books_resources.get_book_id_for_source_node(node.id)
-                        is None
-                    ):
-                        self._books_resources.ensure_book(
-                            library_id=config.library_id,
-                            source_node_id=node.id,
-                            title=parsed.name,
-                        )
-
-                if kind is SourceNodePhysicalKind.DIRECTORY:
-                    if recursive:
-                        stack.append((node.id, parsed.value))
-                    continue
-
-                if kind is SourceNodePhysicalKind.REGULAR_FILE:
-                    with self._uow.transaction():
-                        created_r, enqueued = self._process_regular_file(
-                            config,
-                            node.id,
-                            parsed,
-                            observation_changed=observation_changed,
-                        )
-                        resources_created += created_r
-                        tasks_enqueued += enqueued
-
-            with self._uow.transaction():
-                directory_owner = (
-                    self._books_resources.get_resource_by_source_node(parent_id)
-                    if parent_id is not None
-                    else None
-                )
-                if directory_owner is not None and directory_owner.format in {
-                    "IMAGE_DIR",
-                    "AUDIOBOOK_DIR",
-                }:
-                    self._queue.request_import_resource(
-                        library_id=config.library_id,
-                        resource_id=directory_owner.id,
-                        source_node_id=directory_owner.source_node_id,
-                        changed=True,
-                    )
-                    tasks_enqueued += 1
+                        tasks_enqueued += 1
             if self._task_was_cancelled(task_id):
                 raise SourceScanCancelledError()
             if missing_entry_policy is MissingEntryPolicy.PRUNE_MISSING:
@@ -549,6 +645,7 @@ class ScanLibrarySourceTree:
                     library_id=config.library_id,
                     parent_id=parent_id,
                     seen_path_keys=seen_path_keys,
+                    owner=owner,
                 )
 
         if failed:
@@ -568,6 +665,8 @@ class ScanLibrarySourceTree:
         relative: SourceNodeRelativePath,
         *,
         task_id: str | None,
+        observations: tuple[DirectoryEntry, ...],
+        listings: dict[str, tuple[DirectoryEntry, ...]],
     ) -> tuple[int, int]:
         self._uow.release_before_io()
         decision = self._filesystem.probe_directory(
@@ -580,6 +679,8 @@ class ScanLibrarySourceTree:
             max_entries=config.probe_max_entries,
             max_depth=config.probe_max_depth,
             time_budget_ms=config.probe_time_budget_ms,
+            observations=observations,
+            listings=listings,
         )
         if (
             decision.evidence.termination_reason
@@ -595,11 +696,16 @@ class ScanLibrarySourceTree:
                 relative_path=relative,
                 decision=decision,
             )
-            if decision.result is ProbeInterpretationResult.RESOURCE:
-                return (
-                    int(changed),
-                    self._enqueue_directory_samples(config, node_id, decision),
-                )
+            if decision.result is ProbeInterpretationResult.RESOURCE and changed:
+                resource = self._books_resources.get_resource_by_source_node(node_id)
+                if resource is not None:
+                    self._queue.request_import_resource(
+                        library_id=config.library_id,
+                        resource_id=resource.id,
+                        source_node_id=resource.source_node_id,
+                        changed=True,
+                    )
+                    return (1, 1)
         return (0, 0)
 
     def _mark_node_covered_by_directory_resource(self, node_id: str) -> None:
@@ -668,6 +774,7 @@ class ScanLibrarySourceTree:
         library_id: str,
         parent_id: str | None,
         seen_path_keys: set[str],
+        owner: ReadableResourceRecord | None = None,
     ) -> None:
         if self._source_node_deletion is None:
             raise RuntimeError("source node deletion is not configured")
@@ -680,6 +787,14 @@ class ScanLibrarySourceTree:
                 )
                 if child.path_key not in seen_path_keys
             )
+            if stale_ids and owner is not None:
+                # Commit intent before the existing bounded deletion use case starts.
+                self._queue.request_import_resource(
+                    library_id=library_id,
+                    resource_id=owner.id,
+                    source_node_id=owner.source_node_id,
+                    changed=True,
+                )
         for source_node_id in stale_ids:
             self._source_node_deletion.delete_source_node(source_node_id)
 
@@ -744,30 +859,6 @@ class ScanLibrarySourceTree:
         )
         return True
 
-    def _enqueue_directory_samples(
-        self,
-        config: LibrarySourceTreeConfig,
-        node_id: str,
-        decision: DirectoryProbeDecision,
-    ) -> int:
-        resource = self._books_resources.get_resource_by_source_node(node_id)
-        adapter = decision.adapter
-        if resource is None or adapter is None:
-            return 0
-        count = 0
-        for sample in decision.evidence.sample_relative_paths:
-            sample_path = SourceNodeRelativePath(sample)
-            sample_node = self._source_nodes.get_by_path_key(
-                config.library_id, sample_path.path_key
-            )
-            if sample_node is None:
-                continue
-            if file_extension(sample_path.name) in adapter.file_extensions:
-                count += self._ensure_asset_for_resource(
-                    config, resource.id, sample_node.id, sample_path.name
-                )
-        return count
-
     def _process_regular_file(
         self,
         config: LibrarySourceTreeConfig,
@@ -775,15 +866,28 @@ class ScanLibrarySourceTree:
         relative_path: SourceNodeRelativePath,
         *,
         observation_changed: bool,
+        owner_known: bool = False,
+        context_version: str | None = None,
     ) -> tuple[int, int]:
-        owner = self._books_resources.find_outermost_directory_resource(
-            config.library_id, relative_path.value
+        owner = (
+            None
+            if owner_known
+            else self._books_resources.find_outermost_directory_resource(
+                config.library_id, relative_path.value
+            )
         )
         existing = self._books_resources.get_resource_by_source_node(node_id)
         if owner is not None:
             self._mark_node_covered_by_directory_resource(node_id)
             if owner.format in {"IMAGE_DIR", "AUDIOBOOK_DIR"}:
-                # The completed directory scan requests one resource task below.
+                if observation_changed:
+                    self._queue.request_import_resource(
+                        library_id=config.library_id,
+                        resource_id=owner.id,
+                        source_node_id=owner.source_node_id,
+                        changed=True,
+                    )
+                    return (0, 1)
                 return (0, 0)
             adapter = self._adapter_for_resource(owner, relative_path.name)
             if observation_changed and adapter is not None:
@@ -845,6 +949,20 @@ class ScanLibrarySourceTree:
                     "ADAPTER_CONTRACT_UPGRADED" if adapter_changed else "UNIQUE_ADAPTER"
                 ),
             )
+            context_changed = (
+                context_version is not None
+                and self._books_resources.refresh_scan_context(
+                    existing.id, context_version
+                )
+            )
+            if context_changed and not (adapter_changed or observation_changed):
+                self._queue.request_import_resource(
+                    library_id=config.library_id,
+                    resource_id=existing.id,
+                    source_node_id=existing.source_node_id,
+                    changed=True,
+                )
+                return (0, 1)
             if adapter_changed or observation_changed:
                 self._requeue_asset_import(
                     config=config,
@@ -871,6 +989,8 @@ class ScanLibrarySourceTree:
             source_node_id=node_id,
             adapter=identity,
         )
+        if context_version is not None:
+            self._books_resources.refresh_scan_context(resource.id, context_version)
         self._upsert_file_resource_interpretation(
             node_id=node_id,
             adapter=adapter,

@@ -8,9 +8,15 @@ from typing import cast
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
-from app.models import LibraryBook, LibraryBookMetadata, LibraryReadableResource
+from app.models import (
+    LibraryBook,
+    LibraryBookMetadata,
+    LibraryReadableResource,
+    LibraryResourceAsset,
+    LibrarySourceNode,
+)
 from app.models.common import cuid
 from app.modules.imports.application.readable_resource.ports import (
     WORKER_INTERRUPTED,
@@ -113,6 +119,63 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
                 LibraryImportTask.state == "QUEUED",
             )
         )
+        failed = self._session.scalars(
+            select(LibraryImportTask)
+            .where(
+                LibraryImportTask.library_id == library_id,
+                LibraryImportTask.kind.in_(("SCAN_LIBRARY", "CONTINUE_SOURCE")),
+                LibraryImportTask.state == "FAILED",
+            )
+            .order_by(LibraryImportTask.created_at)
+        ).all()
+        if failed:
+            # A fresh scan request explicitly resumes unfinished scopes. Coalesce
+            # their intent before removing superseded failed queue rows.
+            for previous in failed:
+                if previous.kind == "SCAN_LIBRARY":
+                    scopes = decode_scan_scopes(previous.scan_scopes)
+                else:
+                    node = self._session.get(LibrarySourceNode, previous.source_node_id)
+                    scopes = (
+                        (
+                            ScanScope(
+                                node.relative_path
+                                if node.physical_kind == "DIRECTORY"
+                                else node.relative_path.rpartition("/")[0],
+                                True,
+                            ),
+                        )
+                        if node
+                        else None
+                    )
+                scan_scopes = merge_scan_scopes(scan_scopes, scopes)
+            survivor = queued if queued is not None else failed[0]
+            for offset in range(0, len(failed), 200):
+                self._session.execute(
+                    delete(LibraryImportTask).where(
+                        LibraryImportTask.id.in_(
+                            [
+                                row.id
+                                for row in failed[offset : offset + 200]
+                                if row.id != survivor.id
+                            ]
+                        )
+                    )
+                )
+            if queued is not None:
+                scan_scopes = merge_scan_scopes(
+                    decode_scan_scopes(queued.scan_scopes), scan_scopes
+                )
+            survivor.kind = "SCAN_LIBRARY"
+            survivor.source_node_id = None
+            survivor.scan_scopes = encode_scan_scopes(scan_scopes)
+            survivor.state = "QUEUED"
+            survivor.finished_at = None
+            survivor.started_at = None
+            survivor.error_summary = None
+            self._promote_missing_entry_policy(survivor, missing_entry_policy)
+            self._session.flush()
+            return self._to_record(survivor), queued is None
         if queued is not None:
             queued.scan_scopes = encode_scan_scopes(
                 merge_scan_scopes(decode_scan_scopes(queued.scan_scopes), scan_scopes)
@@ -181,6 +244,21 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             self._promote_missing_entry_policy(queued, missing_entry_policy)
             return self._to_record(queued), False
 
+        failed_source = self._session.scalar(
+            select(LibraryImportTask)
+            .where(
+                LibraryImportTask.kind == "CONTINUE_SOURCE",
+                LibraryImportTask.library_id == library_id,
+                LibraryImportTask.source_node_id == source_node_id,
+                LibraryImportTask.state == "FAILED",
+            )
+            .order_by(LibraryImportTask.created_at)
+            .limit(1)
+        )
+        if failed_source is not None:
+            self._promote_missing_entry_policy(failed_source, missing_entry_policy)
+            return self.requeue_failed_task(failed_source.id)
+
         running = self._session.scalar(
             select(LibraryImportTask).where(
                 LibraryImportTask.kind == "CONTINUE_SOURCE",
@@ -224,6 +302,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         resource_id: str,
         source_node_id: str,
         changed: bool = False,
+        force: bool = False,
     ) -> LibraryImportTaskRecord | None:
         resource = self._session.get(LibraryReadableResource, resource_id)
         if (
@@ -232,6 +311,18 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             or resource.source_node_id != source_node_id
         ):
             raise ValueError("INVALID_RESOURCE_TASK_TARGET")
+        if force:
+            # Keep IDs, READY results and navigation readable until replacement.
+            # Clearing only the successful version forces extraction on the next run.
+            self._session.execute(
+                update(LibraryResourceAsset)
+                .where(
+                    LibraryResourceAsset.resource_id == resource_id,
+                    LibraryResourceAsset.library_id == library_id,
+                )
+                .values(processed_source_version=None)
+            )
+            changed = True
         row = self._session.scalar(
             select(LibraryImportTask)
             .where(
@@ -330,9 +421,23 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         return self._to_record(row)
 
     def next_queued(self) -> LibraryImportTaskRecord | None:
+        scan = aliased(LibraryImportTask)
+        incomplete_scan = (
+            select(scan.id)
+            .where(
+                scan.library_id == LibraryImportTask.library_id,
+                scan.kind.in_(("SCAN_LIBRARY", "CONTINUE_SOURCE")),
+                scan.state.in_(("QUEUED", "RUNNING", "FAILED")),
+            )
+            .exists()
+        )
         row = self._session.scalar(
             select(LibraryImportTask)
-            .where(LibraryImportTask.state == "QUEUED")
+            .where(
+                LibraryImportTask.state == "QUEUED",
+                LibraryImportTask.kind.in_(("SCAN_LIBRARY", "CONTINUE_SOURCE"))
+                | ~incomplete_scan,
+            )
             .order_by(
                 LibraryImportTask.created_at.asc(),
                 LibraryImportTask.id.asc(),

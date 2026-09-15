@@ -600,7 +600,7 @@ def test_changed_file_observation_invalidates_and_requeues_only_once(
 
             assert _drain(pipeline) == ["ok", "identified"]
             pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
-            assert _drain(pipeline) == ["scan", "identified"]
+            assert _drain(pipeline) == ["scan"]
             db.expire_all()
             assert db.get(LibraryImportTask, original_task_id).state == "SUCCEEDED"
     finally:

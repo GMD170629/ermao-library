@@ -31,6 +31,7 @@ class ContinueSourceImport:
 @dataclass(frozen=True, slots=True)
 class ContinueImportTask:
     task_id: str
+    force: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,7 +68,7 @@ class ContinueImport:
         if isinstance(target, ContinueLibraryImport):
             return self._continue_library(target.library_id)
         if isinstance(target, ContinueImportTask):
-            return self._continue_task(target.task_id)
+            return self._continue_task(target.task_id, force=target.force)
         return self._continue_source(target)
 
     def _continue_library(self, library_id: str) -> ContinueImportResult:
@@ -111,12 +112,26 @@ class ContinueImport:
             task_id=task.id,
         )
 
-    def _continue_task(self, task_id: str) -> ContinueImportResult:
+    def _continue_task(
+        self, task_id: str, *, force: bool = False
+    ) -> ContinueImportResult:
         with self._uow.transaction():
             existing = self._queue.get_task(task_id)
             if existing is None or existing.source_node_id is None:
                 raise LookupError(task_id)
-            task, requeued = self._queue.requeue_failed_task(task_id)
+            if force:
+                if existing.kind != "IMPORT_RESOURCE" or existing.resource_id is None:
+                    raise ValueError("FORCE_REQUIRES_RESOURCE_TASK")
+                requested = self._queue.request_import_resource(
+                    library_id=existing.library_id,
+                    resource_id=existing.resource_id,
+                    source_node_id=existing.source_node_id,
+                    force=True,
+                )
+                assert requested is not None
+                task, requeued = requested, True
+            else:
+                task, requeued = self._queue.requeue_failed_task(task_id)
         self._log.emit(
             "continue_import.task",
             library_id=task.library_id,

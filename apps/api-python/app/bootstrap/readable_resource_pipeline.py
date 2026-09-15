@@ -162,6 +162,7 @@ def build_readable_resource_pipeline(
         clock=clock,
         log=log,
         source_node_deletion=LibrarySourceNodeDeletionAdapter(delete_source_node),
+        covers=FilesystemLocalCoverPublication(runtime_settings.resolved_storage_root),
     )
     process_import = ProcessReadableResourceImportTask(
         libraries=libraries,

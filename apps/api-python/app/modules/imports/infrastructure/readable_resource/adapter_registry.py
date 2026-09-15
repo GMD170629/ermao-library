@@ -159,7 +159,13 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
     ) -> ResolvedLocalMetadata | None:
         """Read directory-owned path/sidecar candidates separately from file results."""
         if not adapter.is_directory_adapter:
-            return None
+            return FilesystemLocalMetadataInspector(
+                sidecar_reader=self.inspect_sidecar_local_metadata
+            ).inspect(
+                resource_absolute_path,
+                source_format=adapter.format_label,
+                source_order=local_metadata_priority,
+            )
         # Cache only the current image resource within a scan round. A single
         # slot bounds memory; source revisions invalidate it even within a round.
         directory_key: tuple[object, ...] | None = None

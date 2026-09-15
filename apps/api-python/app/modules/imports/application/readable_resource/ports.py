@@ -197,6 +197,10 @@ class UnitOfWorkPort(Protocol):
 
 
 class SourceTreeFilesystemPort(Protocol):
+    def metadata_input_observations(
+        self, source: Path, *, directory: bool
+    ) -> tuple[tuple[str, int | None, int | None], ...]: ...
+
     def resolve_under_root(self, root: Path, relative_path: str) -> Path: ...
 
     def iter_directory_entries(
@@ -216,6 +220,8 @@ class SourceTreeFilesystemPort(Protocol):
         max_entries: int,
         max_depth: int,
         time_budget_ms: int,
+        observations: tuple[DirectoryEntry, ...] | None = None,
+        listings: dict[str, tuple[DirectoryEntry, ...]] | None = None,
     ) -> DirectoryProbeDecision: ...
 
     def path_is_readable_directory(self, path: Path) -> bool: ...
@@ -253,6 +259,7 @@ class LibraryImportTaskQueuePort(Protocol):
         resource_id: str,
         source_node_id: str,
         changed: bool = False,
+        force: bool = False,
     ) -> LibraryImportTaskRecord | None:
         """Coalesce resource work; changes during execution survive completion."""
 
@@ -340,6 +347,8 @@ class LocalMetadataPriorityPort(Protocol):
 
 
 class LocalCoverPublicationPort(Protocol):
+    def exists(self, stored_path: str) -> bool: ...
+
     def retain_audio_candidate(self, *, resource_id: str, content: bytes) -> str: ...
 
     def read_candidate(self, stored_path: str) -> bytes | None: ...

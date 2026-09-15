@@ -524,6 +524,9 @@ class LibraryReadableResource(Base):
         "sourceNodeId", String(191), nullable=False
     )
     adapter_id: Mapped[str] = mapped_column("adapterId", String(191), nullable=False)
+    scan_context_version: Mapped[str | None] = mapped_column(
+        "scanContextVersion", Text, nullable=True
+    )
     adapter_version: Mapped[str] = mapped_column(
         "adapterVersion", String(64), nullable=False
     )

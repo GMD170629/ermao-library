@@ -1312,3 +1312,439 @@ def test_audio_resource_batches_reuse_tracks_and_finalize_once(
     assert metadata.duration_ms is None
     assert db.get(ReaderResourceProgress, "audio-progress").extra == locator
     assert db.get(ReadableResourceNavigationUnit, chapters[0].id) is not None
+    parsed.clear()
+    (folder / f"{tracks}.mp3").unlink()
+    (folder / "metadata.cover.png").unlink()
+    scan(db, pipeline)
+    assert worker.process_once() == "ok"
+    assert not parsed
+    db.expire_all()
+    metadata = db.get(LibraryReadableResourceMetadata, resource.id)
+    assert (metadata.track_count, metadata.chapter_count, metadata.duration_ms) == (
+        tracks - 1,
+        (tracks - 1) * 3,
+        (tracks - 1) * 3000,
+    )
+    assert db.get(ReaderResourceProgress, "audio-progress").extra == locator
+    assert db.get(ReadableResourceNavigationUnit, chapters[0].id) is not None
+    assert counts["cover_publications"] == 3
+
+
+@pytest.mark.parametrize("file_count", [200, 2000])
+def test_scan_node_batches_and_unchanged_scan(library, monkeypatch, file_count):
+    import os
+    from collections import Counter
+
+    from sqlalchemy import event
+
+    from app.models import LibraryResourceAsset
+    from app.modules.imports.infrastructure.readable_resource.adapter_registry import (
+        RegistryResourceAdapterExecutor,
+    )
+    from app.modules.imports.infrastructure.readable_resource.filesystem import (
+        OsSourceTreeFilesystem,
+    )
+    from app.modules.library.infrastructure.persistence.source_tree_repository import (
+        SqlAlchemySourceNodeRepository,
+    )
+
+    db, _settings, root, pipeline = library
+    folder = root / "Book"
+    folder.mkdir()
+    out = BytesIO()
+    Image.new("RGB", (8, 8), "red").save(out, format="PNG")
+    for index in range(file_count):
+        (folder / f"{index}.png").write_bytes(out.getvalue())
+    stats = Counter()
+    enumeration = Counter()
+    batch_sizes = []
+    original = SqlAlchemySourceNodeRepository.reconcile_batch
+
+    def batch(self, **kwargs):
+        batch_sizes.append(len(kwargs["entries"]))
+        return original(self, **kwargs)
+
+    original_iter = OsSourceTreeFilesystem.iter_directory_entries
+
+    def listing(self, path):
+        enumeration[path.name] += 1
+        yield from original_iter(self, path)
+
+    monkeypatch.setattr(SqlAlchemySourceNodeRepository, "reconcile_batch", batch)
+    monkeypatch.setattr(OsSourceTreeFilesystem, "iter_directory_entries", listing)
+
+    def executed(conn, cursor, statement, parameters, context, executemany):
+        if statement.startswith('UPDATE "LibrarySourceNode"'):
+            stats["node_update_calls"] += 1
+            stats["node_update_rows"] += max(0, cursor.rowcount)
+            assert executemany
+        stats["driver_calls"] += 1
+        stats["executemany_calls"] += int(executemany)
+        stats["selects"] += int(statement.lstrip().startswith("SELECT"))
+        stats["affected_rows"] += max(0, cursor.rowcount)
+
+    def commit(conn):
+        stats["commits"] += int(conn.connection.driver_connection.in_transaction)
+
+    engine = db.get_bind()
+    event.listen(engine, "after_cursor_execute", executed)
+    event.listen(engine, "commit", commit)
+    try:
+        scan(db, pipeline)
+        initial = dict(stats)
+        assert batch_sizes == [1] + [200] * (file_count // 200)
+        assert enumeration["Book"] == 1
+        # Calls grow per business batch, not per member. Multirow DML rows
+        # and actual commits are counted independently from driver invocations.
+        assert stats["driver_calls"] < 80 + 16 * (file_count // 200)
+        worker = build_readable_resource_worker(pipeline)
+        assert worker.process_once() == "ok"
+        while worker.process_once() != "idle":
+            pass
+        db.expire_all()
+        old_nodes = {n.id: n.observed_at for n in db.scalars(select(LibrarySourceNode))}
+        old_assets = {
+            a.id: a.updated_at for a in db.scalars(select(LibraryResourceAsset))
+        }
+        old_tasks = {
+            t.id: t.finished_at
+            for t in db.scalars(
+                select(LibraryImportTask).where(
+                    LibraryImportTask.kind == "IMPORT_RESOURCE"
+                )
+            )
+        }
+
+        def forbidden(*args, **kwargs):
+            raise AssertionError("unchanged scan parsed media")
+
+        monkeypatch.setattr(RegistryResourceAdapterExecutor, "parse_file", forbidden)
+        stats.clear()
+        scan(db, pipeline)
+        assert worker.process_once() == "idle"
+        unchanged = dict(stats)
+        db.expire_all()
+        assert old_nodes == {
+            n.id: n.observed_at for n in db.scalars(select(LibrarySourceNode))
+        }
+        assert old_assets == {
+            a.id: a.updated_at for a in db.scalars(select(LibraryResourceAsset))
+        }
+        assert old_tasks == {
+            t.id: t.finished_at
+            for t in db.scalars(
+                select(LibraryImportTask).where(
+                    LibraryImportTask.kind == "IMPORT_RESOURCE"
+                )
+            )
+        }
+        for page in folder.glob("*.png"):
+            stamp = page.stat()
+            os.utime(page, ns=(stamp.st_atime_ns, stamp.st_mtime_ns + 1000))
+        stats.clear()
+        scan(db, pipeline)
+        changed = dict(stats)
+        assert stats["node_update_calls"] == file_count // 200
+        assert stats["node_update_rows"] == file_count
+        assert (
+            len(
+                db.scalars(
+                    select(LibraryImportTask).where(
+                        LibraryImportTask.kind == "IMPORT_RESOURCE",
+                        LibraryImportTask.state == "QUEUED",
+                    )
+                ).all()
+            )
+            == 1
+        )
+        print(
+            {
+                "files": file_count,
+                "initial_scan": initial,
+                "unchanged_scan": unchanged,
+                "changed_scan": changed,
+            }
+        )
+    finally:
+        event.remove(engine, "after_cursor_execute", executed)
+        event.remove(engine, "commit", commit)
+
+
+def test_scan_committed_batch_keeps_intent_and_blocks_incomplete_resource(
+    library, monkeypatch
+):
+    from collections import Counter
+
+    from sqlalchemy import event
+
+    from app.models import LibraryResourceAsset
+    from app.modules.library.infrastructure.persistence.source_tree_repository import (
+        SqlAlchemySourceNodeRepository,
+    )
+
+    db, _settings, root, pipeline = library
+    folder = write_pages(root, "IMAGE_DIR")
+    scan(db, pipeline)
+    worker = build_readable_resource_worker(pipeline)
+    assert worker.process_once() == "ok"
+    while worker.process_once() != "idle":
+        pass
+    resource_id = db.scalar(select(LibraryReadableResource.id))
+    previous = db.scalar(
+        select(LibraryImportTask).where(LibraryImportTask.kind == "IMPORT_RESOURCE")
+    )
+    phase = "interrupted_scan"
+    sql = {"interrupted_scan": Counter(), "recovery": Counter()}
+    engine = db.get_bind()
+
+    def executed(conn, cursor, statement, parameters, context, executemany):
+        sql[phase]["driver_calls"] += 1
+        sql[phase]["executemany_calls"] += int(executemany)
+        sql[phase]["affected_rows"] += max(0, cursor.rowcount)
+
+    def committed(conn):
+        sql[phase]["commits"] += int(conn.connection.driver_connection.in_transaction)
+
+    event.listen(engine, "after_cursor_execute", executed)
+    event.listen(engine, "commit", committed)
+    try:
+        original = SqlAlchemySourceNodeRepository.reconcile_batch
+        count = 0
+
+        def fail_after_batch(self, **kwargs):
+            nonlocal count
+            count += 1
+            if count == 3:
+                raise KeyboardInterrupt("after committed first member batch")
+            return original(self, **kwargs)
+
+        content = (folder / "1.png").read_bytes()
+        for index in range(11, 411):
+            (folder / f"{index}.png").write_bytes(content)
+        monkeypatch.setattr(
+            SqlAlchemySourceNodeRepository, "reconcile_batch", fail_after_batch
+        )
+        pipeline.continue_import.execute(ContinueLibraryImport("lib"))
+        with pytest.raises(KeyboardInterrupt):
+            worker.process_once()
+        db.expire_all()
+        assert db.get(LibraryImportTask, previous.id).state == "QUEUED"
+        assert (
+            len(
+                db.scalars(
+                    select(LibrarySourceNode).where(
+                        LibrarySourceNode.physical_kind == "REGULAR_FILE"
+                    )
+                ).all()
+            )
+            >= 200
+        )
+        assert len(db.scalars(select(LibraryResourceAsset)).all()) == 3
+        phase = "recovery"
+        worker = build_readable_resource_worker(pipeline)
+        assert worker.startup() == 1
+        assert worker.process_once() == "idle"
+        monkeypatch.setattr(SqlAlchemySourceNodeRepository, "reconcile_batch", original)
+        pipeline.queue.enqueue(kind="SCAN_LIBRARY", library_id="lib")
+        db.commit()
+        scan(db, pipeline)
+        assert worker.process_once() == "ok"
+        assert db.scalar(select(LibraryReadableResource.id)) == resource_id
+        assert len(db.scalars(select(LibraryResourceAsset)).all()) == 403
+        print(
+            {
+                "scan_crash_after_member_batch": dict(sql["interrupted_scan"]),
+                "recovery_scan_and_import": dict(sql["recovery"]),
+                "final_assets": 403,
+            }
+        )
+    finally:
+        event.remove(engine, "after_cursor_execute", executed)
+        event.remove(engine, "commit", committed)
+
+
+def test_scan_sidecar_config_deletion_and_equal_count_member_change(
+    library, monkeypatch
+):
+    import json
+
+    from app.models import LibraryResourceAsset
+    from app.models.organize import OrganizePolicy
+    from app.modules.imports.infrastructure.readable_resource.adapter_registry import (
+        RegistryResourceAdapterExecutor,
+    )
+
+    db, _settings, root, pipeline = library
+    folder = write_pages(root, "IMAGE_DIR")
+    opf = folder / "metadata.opf"
+    opf.write_text(
+        "<package><metadata><title>Sidecar title</title><description>Sidecar description</description></metadata></package>"
+    )
+    scan(db, pipeline)
+    worker = build_readable_resource_worker(pipeline)
+    assert worker.process_once() == "ok"
+    while worker.process_once() != "idle":
+        pass
+    resource = db.scalar(select(LibraryReadableResource))
+    original_ids = {
+        a.source_node_id: a.id for a in db.scalars(select(LibraryResourceAsset))
+    }
+    original_parse = RegistryResourceAdapterExecutor.parse_file
+    parsed = []
+
+    def parse(self, **kwargs):
+        parsed.append(kwargs["absolute_path"].name)
+        return original_parse(self, **kwargs)
+
+    monkeypatch.setattr(RegistryResourceAdapterExecutor, "parse_file", parse)
+    policy = db.scalar(select(OrganizePolicy))
+    if policy is None:
+        policy = OrganizePolicy(id="default")
+        db.add(policy)
+    policy.local_metadata_priority_json = json.dumps(
+        ["PATH", "SIDECAR_OPF", "EMBEDDED"]
+    )
+    db.commit()
+    scan(db, pipeline)
+    assert worker.process_once() == "ok"
+    assert parsed == []
+    db.expire_all()
+    assert db.get(LibraryReadableResourceMetadata, resource.id).title == "Book"
+    opf.unlink()
+    scan(db, pipeline)
+    assert worker.process_once() == "ok"
+    assert parsed == []
+    db.expire_all()
+    assert db.get(LibraryReadableResourceMetadata, resource.id).description is None
+    old_cover = db.get(LibraryReadableResourceMetadata, resource.id).cover_path
+    # Same count, different membership; old page zero is no longer a cover candidate.
+    (folder / "1.png").unlink()
+    (folder / "20.png").write_bytes((folder / "2.png").read_bytes())
+    scan(db, pipeline)
+    assert worker.process_once() == "ok"
+    assert parsed == ["20.png"]
+    db.expire_all()
+    metadata = db.get(LibraryReadableResourceMetadata, resource.id)
+    assert metadata.page_count == 3
+    assert metadata.cover_path != old_cover
+    for asset in db.scalars(select(LibraryResourceAsset)):
+        if asset.source_node_id in original_ids:
+            assert asset.id == original_ids[asset.source_node_id]
+    for file in folder.glob("*.png"):
+        file.unlink()
+    scan(db, pipeline)
+    # Current recognition rules turn an empty folder into NODE_ONLY.
+    assert db.get(LibraryReadableResource, resource.id) is None
+    assert not db.scalars(select(LibraryResourceAsset)).all()
+
+
+def test_single_file_sidecar_refresh_does_not_parse_media(library, monkeypatch):
+    from app.modules.imports.infrastructure.readable_resource.adapter_registry import (
+        RegistryResourceAdapterExecutor,
+    )
+
+    db, _settings, root, pipeline = library
+    source = write_pages(root, "PDF")
+    scan(db, pipeline)
+    worker = build_readable_resource_worker(pipeline)
+    assert worker.process_once() == "ok"
+    while worker.process_once() != "idle":
+        pass
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("sidecar-only change parsed PDF")
+
+    monkeypatch.setattr(RegistryResourceAdapterExecutor, "parse_file", forbidden)
+    source.with_suffix(".opf").write_text(
+        "<package><metadata><title>New PDF title</title></metadata></package>"
+    )
+    scan(db, pipeline)
+    assert worker.process_once() == "ok"
+    db.expire_all()
+    assert db.scalar(select(LibraryReadableResourceMetadata)).title == "New PDF title"
+    fallback = db.scalar(select(LibraryReadableResourceMetadata)).cover_path
+    cover = source.parent / "metadata.cover.png"
+    Image.new("RGB", (20, 20), "green").save(cover)
+    source.with_suffix(".opf").write_text(
+        "<package><metadata><title>New PDF title</title><meta name='cover' content='c'/></metadata><manifest><item id='c' href='metadata.cover.png' media-type='image/png'/></manifest></package>"
+    )
+    scan(db, pipeline)
+    assert worker.process_once() == "ok"
+    db.expire_all()
+    assert db.scalar(select(LibraryReadableResourceMetadata)).cover_path != fallback
+    cover.unlink()
+    scan(db, pipeline)
+    assert worker.process_once() == "ok"
+    db.expire_all()
+    assert db.scalar(select(LibraryReadableResourceMetadata)).cover_path == fallback
+
+
+def test_explicit_resource_force_preserves_ids_and_reprocesses(library, monkeypatch):
+    from app.models import LibraryResourceAsset
+    from app.modules.imports.application.readable_resource.continue_import import (
+        ContinueImportTask,
+    )
+    from app.modules.imports.infrastructure.readable_resource.adapter_registry import (
+        RegistryResourceAdapterExecutor,
+    )
+
+    db, _settings, root, pipeline = library
+    write_pages(root, "IMAGE_DIR")
+    scan(db, pipeline)
+    worker = build_readable_resource_worker(pipeline)
+    assert worker.process_once() == "ok"
+    while worker.process_once() != "idle":
+        pass
+    original_ids = set(db.scalars(select(LibraryResourceAsset.id)))
+    task = db.scalar(
+        select(LibraryImportTask).where(LibraryImportTask.kind == "IMPORT_RESOURCE")
+    )
+    parsed = []
+    original_parse = RegistryResourceAdapterExecutor.parse_file
+
+    def parse(self, **kwargs):
+        parsed.append(kwargs["absolute_path"].name)
+        return original_parse(self, **kwargs)
+
+    monkeypatch.setattr(RegistryResourceAdapterExecutor, "parse_file", parse)
+    pipeline.continue_import.execute(ContinueImportTask(task.id, force=True))
+    assert worker.process_once() == "ok"
+    assert sorted(parsed) == ["1.png", "10.png", "2.png"]
+    assert set(db.scalars(select(LibraryResourceAsset.id))) == original_ids
+
+
+def test_external_sidecar_cover_changes_without_media_parse(library, monkeypatch):
+    from app.modules.imports.infrastructure.readable_resource.adapter_registry import (
+        RegistryResourceAdapterExecutor,
+    )
+
+    db, _settings, root, pipeline = library
+    folder = write_pages(root, "IMAGE_DIR")
+    # Existing discovery supports a sibling Book.opf and a cover under its directory.
+    opf = root / "Book.opf"
+    opf.write_text(
+        "<package><metadata><title>External</title><meta name='cover' content='c'/></metadata><manifest><item id='c' href='Book/metadata.cover.png' media-type='image/png'/></manifest></package>"
+    )
+    cover = folder / "metadata.cover.png"
+    cover.write_bytes((folder / "1.png").read_bytes())
+    scan(db, pipeline)
+    worker = build_readable_resource_worker(pipeline)
+    assert worker.process_once() == "ok"
+    while worker.process_once() != "idle":
+        pass
+    old_cover = db.scalar(select(LibraryReadableResourceMetadata)).cover_path
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("cover-only change parsed media")
+
+    monkeypatch.setattr(RegistryResourceAdapterExecutor, "parse_file", forbidden)
+    cover.write_bytes((folder / "2.png").read_bytes())
+    scan(db, pipeline)
+    assert worker.process_once() == "ok"
+    db.expire_all()
+    assert db.scalar(select(LibraryReadableResourceMetadata)).cover_path != old_cover
+    opf.unlink()
+    scan(db, pipeline)
+    assert worker.process_once() == "ok"
+    db.expire_all()
+    assert db.scalar(select(LibraryReadableResourceMetadata)).title == "Book"

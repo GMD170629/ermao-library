@@ -314,6 +314,18 @@ def test_failed_directory_preserves_data_while_other_scope_updates(
             paths = set(db.scalars(select(LibrarySourceNode.relative_path)).all())
             assert "bad/book.epub" in paths and "bad/new.epub" not in paths
             assert "good/new.epub" in paths and "good/book.epub" not in paths
+            pending = db.scalars(
+                select(LibraryImportTask)
+                .join(
+                    LibrarySourceNode,
+                    LibraryImportTask.source_node_id == LibrarySourceNode.id,
+                )
+                .where(
+                    LibraryImportTask.kind == "IMPORT_RESOURCE",
+                    LibrarySourceNode.relative_path == "good/new.epub",
+                )
+            ).all()
+            assert len(pending) == 1 and pending[0].state == "QUEUED"
     finally:
         engine.dispose()
 
@@ -731,7 +743,7 @@ def test_direct_rescan_of_missing_file_fails_without_deleting_data(
                 )
             )
             assert result.enqueued_scan is True
-            assert _drain(pipeline) == ["error", "identified"]
+            assert _drain(pipeline) == ["error"]
             db.commit()
 
             assert db.get(LibrarySourceNode, node.id) is not None
@@ -781,7 +793,7 @@ def test_direct_rescan_of_missing_directory_fails_without_deleting_subtree(
                 )
             )
             assert result.enqueued_scan is True
-            assert _drain(pipeline) == ["error", "identified"]
+            assert _drain(pipeline) == ["error"]
             db.commit()
 
             assert db.get(LibrarySourceNode, directory_node.id) is not None
@@ -815,7 +827,7 @@ def test_manual_scan_of_missing_library_root_fails_without_deleting_data(
 
             result = pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
             assert result.enqueued_scan is True
-            assert _drain(pipeline) == ["error", "identified"]
+            assert _drain(pipeline) == ["error"]
             db.commit()
 
             assert db.get(LibrarySourceNode, node.id) is not None
@@ -922,6 +934,9 @@ def test_other_special_file_is_not_imported(tmp_path: Path) -> None:
 
 class _LiteralNameFilesystem:
     """Yields exact directory entry names without OS Unicode normalization."""
+
+    def metadata_input_observations(self, source, *, directory):
+        return ()
 
     def __init__(self, entries: dict[str, list[DirectoryEntry]]) -> None:
         self._entries = entries

@@ -90,6 +90,9 @@ class RecordingFilesystem:
                 return
         yield from ()
 
+    def metadata_input_observations(self, source, *, directory):
+        return ()
+
     def probe_directory(
         self,
         *,
@@ -102,6 +105,8 @@ class RecordingFilesystem:
         max_entries: int,
         max_depth: int,
         time_budget_ms: int,
+        observations=None,
+        listings=None,
     ) -> DirectoryProbeDecision:
         if self._uow.in_transaction:
             self.io_while_in_txn.append(f"probe:{directory_relative_path}")
@@ -150,6 +155,20 @@ class FakeLibraries:
 
 
 class FakeSourceNodes:
+    def reconcile_batch(self, *, library_id, parent_id, entries):
+        return tuple(
+            (node, created, created)
+            for node, created in (
+                self.insert_if_absent(
+                    library_id=library_id, parent_id=parent_id, entry=entry
+                )
+                for entry in entries
+            )
+        )
+
+    def mark_covered_batch(self, node_ids, *, recognized_at):
+        pass
+
     def __init__(self) -> None:
         self._by_id: dict[str, SourceNodeRecord] = {}
         self._by_key: dict[tuple[str, str], SourceNodeRecord] = {}
@@ -377,6 +396,9 @@ class DemandDrivenDirectoryFilesystem:
                 index,
             )
 
+    def metadata_input_observations(self, source, *, directory):
+        return ()
+
     def probe_directory(
         self,
         *,
@@ -389,6 +411,8 @@ class DemandDrivenDirectoryFilesystem:
         max_entries: int,
         max_depth: int,
         time_budget_ms: int,
+        observations=None,
+        listings=None,
     ) -> DirectoryProbeDecision:
         del (
             root,
@@ -469,7 +493,7 @@ def test_scan_performs_io_only_outside_transactions(tmp_path: Path) -> None:
     assert result.nodes_inserted == 40
     assert filesystem.io_while_in_txn == []
     assert "release" in uow.events
-    assert uow.txn_count >= 40
+    assert uow.txn_count == 3
     assert uow.events.count("commit") == uow.txn_count
 
 
@@ -570,7 +594,7 @@ def test_full_source_scan_reads_directory_before_applying_entries(
     assert filesystem.max_outstanding == process_limit
     assert filesystem.io_while_in_txn == []
     assert "release" in uow.events
-    assert uow.txn_count >= process_limit
+    assert uow.txn_count == 3
 
 
 def test_full_source_scan_preserves_data_on_oserror_mid_directory_iteration(

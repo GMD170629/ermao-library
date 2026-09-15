@@ -111,7 +111,7 @@ class BookImportCompletion:
         return query.where(under)
 
     def dirty(self, task: LibraryImportTask) -> None:
-        if task.kind == "IDENTIFY_BOOK":
+        if task.kind in {"IDENTIFY_BOOK", "SCAN_LIBRARY", "CONTINUE_SOURCE"}:
             return
         self._db.execute(
             update(LibraryBookMetadata)

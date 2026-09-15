@@ -286,7 +286,8 @@ def test_identification_failure_preserves_scans_and_retries_after_worker_restart
         db_session.add(
             LibraryImportTask(
                 id="interrupted-scan",
-                library_id="test-library",
+                # Failed scans block resource/identification work only in their library.
+                library_id="second-library",
                 kind="SCAN_LIBRARY",
                 state="RUNNING",
             )

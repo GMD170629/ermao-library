@@ -23,10 +23,56 @@ from app.modules.imports.domain.ignore_rules import should_ignore_source_entry
 from app.modules.imports.domain.resource_adapters import (
     is_supported_source_tree_filename,
 )
+from app.modules.imports.infrastructure.limited_read import read_optional_file
+from app.modules.imports.infrastructure.sidecar_opf import (
+    safe_sidecar_cover_path,
+    sidecar_opf_paths,
+)
 from app.modules.library.public import SourceNodePhysicalKind
+from app.modules.metadata.public import (
+    MAX_OPF_BYTES,
+    OpfMetadataError,
+    parse_opf_metadata,
+)
 
 
 class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
+    def metadata_input_observations(
+        self, source: Path, *, directory: bool
+    ) -> tuple[tuple[str, int | None, int | None], ...]:
+        observations = []
+        for path in sidecar_opf_paths(source, directory=directory):
+            observed = (
+                self.observe_readable_file(path) if not path.is_symlink() else None
+            )
+            observations.append(
+                (
+                    str(path),
+                    observed.observed_size_bytes if observed else None,
+                    observed.observed_mtime_ns if observed else None,
+                )
+            )
+            if observed is None or observed.observed_size_bytes > MAX_OPF_BYTES:
+                continue
+            try:
+                content = read_optional_file(path, MAX_OPF_BYTES)
+                if content is None:
+                    continue
+                metadata = parse_opf_metadata(content)
+            except (OSError, OpfMetadataError):
+                continue
+            cover = safe_sidecar_cover_path(path, metadata.cover_href)
+            if cover is not None:
+                version = self.observe_readable_file(cover)
+                observations.append(
+                    (
+                        str(cover),
+                        version.observed_size_bytes if version else None,
+                        version.observed_mtime_ns if version else None,
+                    )
+                )
+        return tuple(observations)
+
     def resolve_under_root(self, root: Path, relative_path: str) -> Path:
         root_resolved = root.resolve()
         candidate = (root_resolved / relative_path).resolve()
@@ -77,6 +123,8 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
         max_entries: int,
         max_depth: int,
         time_budget_ms: int,
+        observations: tuple[DirectoryEntry, ...] | None = None,
+        listings: dict[str, tuple[DirectoryEntry, ...]] | None = None,
     ) -> DirectoryProbeDecision:
         started = time.monotonic()
         samples: list[str] = []
@@ -100,7 +148,21 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
             max_depth_reached = max(max_depth_reached, depth)
             absolute = self.resolve_under_root(root, relative_dir)
             try:
-                entries = self.iter_directory_entries(absolute)
+                cached = (
+                    observations
+                    if relative_dir == directory_relative_path
+                    else (listings.get(relative_dir) if listings is not None else None)
+                )
+                if cached is None:
+                    complete: list[DirectoryEntry] = []
+                    for item in self.iter_directory_entries(absolute):
+                        if isinstance(item, UnreadableDirectoryEntry):
+                            raise OSError("directory entry unavailable")
+                        complete.append(item)
+                    cached = tuple(complete)
+                    if listings is not None:
+                        listings[relative_dir] = cached
+                entries = iter(cached)
             except OSError:
                 termination = ProbeTerminationReason.LOCAL_IO_ERROR
                 break

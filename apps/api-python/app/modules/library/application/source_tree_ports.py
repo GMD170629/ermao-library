@@ -77,6 +77,7 @@ class LibrarySourceTreeConfig:
     probe_max_depth: int
     probe_time_budget_ms: int
     allow_empty_library_cleanup: bool = False
+    metadata_priority: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +170,18 @@ class LibraryConfigPort(Protocol):
 
 
 class SourceNodeRepositoryPort(Protocol):
+    def reconcile_batch(
+        self,
+        *,
+        library_id: str,
+        parent_id: str | None,
+        entries: tuple[ObservedSourceEntry, ...],
+    ) -> tuple[tuple[SourceNodeRecord, bool, bool], ...]: ...
+
+    def mark_covered_batch(
+        self, node_ids: tuple[str, ...], *, recognized_at: datetime
+    ) -> None: ...
+
     def get_by_path_key(
         self, library_id: str, path_key: str
     ) -> SourceNodeRecord | None: ...
@@ -223,6 +236,8 @@ class SourceNodeRepositoryPort(Protocol):
 
 
 class BookResourceRepositoryPort(Protocol):
+    def refresh_scan_context(self, resource_id: str, version: str) -> bool: ...
+
     def load_directory_members(
         self, resource_id: str
     ) -> tuple[DirectoryImportMember, ...]: ...
@@ -236,6 +251,8 @@ class BookResourceRepositoryPort(Protocol):
     ) -> None: ...
 
     def resource_cover_state(self, resource_id: str) -> ResourceCoverState: ...
+
+    def single_file_fallback_cover(self, resource_id: str) -> str | None: ...
 
     def resource_local_observations(
         self, resource_id: str

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
@@ -120,6 +120,7 @@ class SqlAlchemyLibraryConfigAdapter(LibraryConfigPort):
                 if self._global_ignore_patterns_loader is not None
                 else ""
             ),
+            metadata_priority=SqlAlchemyLocalMetadataPriority(self._session).load(),
             probe_sample_limit=100,
             probe_max_entries=5000,
             probe_max_depth=32,
@@ -204,6 +205,164 @@ class SqlAlchemySourceNodeRepository(SourceNodeRepositoryPort):
             )
         ).all()
         return tuple(self._to_record(row) for row in rows)
+
+    def reconcile_batch(
+        self,
+        *,
+        library_id: str,
+        parent_id: str | None,
+        entries: tuple[ObservedSourceEntry, ...],
+    ) -> tuple[tuple[SourceNodeRecord, bool, bool], ...]:
+        if not entries or len(entries) > 200:
+            raise ValueError("INVALID_NODE_BATCH_SIZE")
+        parent = self.get(parent_id) if parent_id is not None else None
+        parent_tree = (
+            None
+            if parent is None
+            else SourceNodeTreeNode(
+                library_id=parent.library_id,
+                relative_path=SourceNodeRelativePath(parent.relative_path),
+                physical_kind=parent.physical_kind,
+            )
+        )
+        if parent_id is not None and parent is None:
+            raise LookupError(parent_id)
+        existing = {
+            row.path_key: row
+            for row in self._session.scalars(
+                select(LibrarySourceNode).where(
+                    LibrarySourceNode.library_id == library_id,
+                    LibrarySourceNode.path_key.in_(
+                        [e.relative_path.path_key for e in entries]
+                    ),
+                )
+            )
+        }
+        additions = []
+        changes = []
+        result = []
+        for entry in entries:
+            violations = validate_source_node_direct_parent(
+                node=SourceNodeTreeNode(
+                    library_id=library_id,
+                    relative_path=entry.relative_path,
+                    physical_kind=entry.physical_kind,
+                ),
+                parent=parent_tree,
+            )
+            if violations:
+                raise SourceNodeTopologyError(
+                    violations[0].code, relative_path=violations[0].relative_path
+                )
+            row = existing.get(entry.relative_path.path_key)
+            if row is not None and row.relative_path != entry.relative_path.value:
+                result.append((self._to_record(row), False, False))
+                continue
+            if row is not None and row.physical_kind != entry.physical_kind.value:
+                raise SourceNodeTopologyError(
+                    SourceNodeViolationCode.PHYSICAL_KIND_CHANGED,
+                    relative_path=entry.relative_path.value,
+                )
+            created = row is None
+            changed = (
+                row is None
+                or row.observed_size_bytes != entry.observed_size_bytes
+                or row.observed_mtime_ns != entry.observed_mtime_ns
+            )
+            if row is None:
+                row = LibrarySourceNode(
+                    id=cuid(),
+                    library_id=library_id,
+                    parent_id=parent_id,
+                    parent_physical_kind="DIRECTORY" if parent_id else None,
+                    relative_path=entry.relative_path.value,
+                    path_key=entry.relative_path.path_key,
+                    name=entry.relative_path.name,
+                    physical_kind=entry.physical_kind.value,
+                    observed_size_bytes=entry.observed_size_bytes,
+                    observed_mtime_ns=entry.observed_mtime_ns,
+                    observed_at=entry.observed_at,
+                )
+                additions.append(
+                    {
+                        key: getattr(row, key)
+                        for key in (
+                            "id",
+                            "library_id",
+                            "parent_id",
+                            "parent_physical_kind",
+                            "relative_path",
+                            "path_key",
+                            "name",
+                            "physical_kind",
+                            "observed_size_bytes",
+                            "observed_mtime_ns",
+                            "observed_at",
+                        )
+                    }
+                )
+                existing[row.path_key] = row
+            elif changed:
+                changes.append(
+                    {
+                        "id": row.id,
+                        "observed_size_bytes": entry.observed_size_bytes,
+                        "observed_mtime_ns": entry.observed_mtime_ns,
+                        "observed_at": entry.observed_at,
+                    }
+                )
+            record = self._to_record(row)
+            if changed and not created:
+                record = replace(
+                    record,
+                    observed_size_bytes=entry.observed_size_bytes,
+                    observed_mtime_ns=entry.observed_mtime_ns,
+                    observed_at=entry.observed_at,
+                )
+            result.append((record, created, changed))
+        for offset in range(0, len(additions), 50):
+            self._session.execute(
+                sqlite_insert(LibrarySourceNode).values(additions[offset : offset + 50])
+            )
+        if changes:
+            self._session.execute(update(LibrarySourceNode), changes)
+        return tuple(result)
+
+    def mark_covered_batch(
+        self, node_ids: tuple[str, ...], *, recognized_at: datetime
+    ) -> None:
+        if not node_ids:
+            return
+        self._session.execute(
+            delete(LibraryReadableResource).where(
+                LibraryReadableResource.source_node_id.in_(node_ids)
+            )
+        )
+        for offset in range(0, len(node_ids), 100):
+            statement = sqlite_insert(LibrarySourceNodeInterpretation).values(
+                [
+                    {
+                        "source_node_id": node_id,
+                        "result": "NODE_ONLY",
+                        "source": "AUTO",
+                        "reason_code": "COVERED_BY_OUTER_DIRECTORY_RESOURCE",
+                        "recognized_at": recognized_at,
+                    }
+                    for node_id in node_ids[offset : offset + 100]
+                ]
+            )
+            self._session.execute(
+                statement.on_conflict_do_update(
+                    index_elements=[LibrarySourceNodeInterpretation.source_node_id],
+                    set_={
+                        "result": "NODE_ONLY",
+                        "adapterId": None,
+                        "adapterVersion": None,
+                        "reasonCode": "COVERED_BY_OUTER_DIRECTORY_RESOURCE",
+                    },
+                    where=LibrarySourceNodeInterpretation.result != "NODE_ONLY",
+                )
+            )
 
     def insert_if_absent(
         self,
@@ -294,7 +453,8 @@ class SqlAlchemySourceNodeRepository(SourceNodeRepositoryPort):
         )
         row.observed_size_bytes = entry.observed_size_bytes
         row.observed_mtime_ns = entry.observed_mtime_ns
-        row.observed_at = entry.observed_at
+        if version_changed:
+            row.observed_at = entry.observed_at
         self._session.flush()
         return self._to_record(row), version_changed
 
@@ -360,6 +520,32 @@ class SqlAlchemySourceNodeRepository(SourceNodeRepositoryPort):
         recognized_at: datetime | None,
     ) -> None:
         row = self._session.get(LibrarySourceNodeInterpretation, source_node_id)
+        if row is not None and (
+            row.result,
+            row.source,
+            row.adapter_id,
+            row.adapter_version,
+            row.reason_code,
+            row.sample_relative_paths,
+            row.sample_count,
+            row.max_entries_visited,
+            row.max_depth,
+            row.time_budget_ms,
+            row.termination_reason,
+        ) == (
+            result,
+            source,
+            adapter_id,
+            adapter_version,
+            reason_code,
+            sample_relative_paths,
+            sample_count,
+            max_entries_visited,
+            max_depth,
+            time_budget_ms,
+            termination_reason,
+        ):
+            return
         if row is None:
             row = LibrarySourceNodeInterpretation(source_node_id=source_node_id)
             self._session.add(row)
@@ -751,25 +937,27 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         protected = protected_fields(resource_metadata.protected_fields)
         if "title" not in protected:
             resource_metadata.title = resource_title
-        if "description" not in protected and metadata.description:
+        if "description" not in protected:
             resource_metadata.description = metadata.description
-        if "language" not in protected and metadata.language:
+        if "language" not in protected:
             resource_metadata.language = metadata.language
-        if "publisher" not in protected and metadata.publisher:
+        if "publisher" not in protected:
             resource_metadata.publisher = metadata.publisher
-        if "published_at" not in protected and metadata.published_at:
-            published_at = _parse_publication_datetime(metadata.published_at)
-            if published_at is not None:
-                resource_metadata.published_at = published_at
-        if "identifier" not in protected and metadata.identifier:
+        if "published_at" not in protected:
+            resource_metadata.published_at = (
+                _parse_publication_datetime(metadata.published_at)
+                if metadata.published_at
+                else None
+            )
+        if "identifier" not in protected:
             resource_metadata.identifier = metadata.identifier
-        if "isbn" not in protected and metadata.isbn:
+        if "isbn" not in protected:
             resource_metadata.isbn = metadata.isbn
-        if "narrator" not in protected and metadata.narrators:
-            resource_metadata.narrator = " / ".join(metadata.narrators)
-        if "abridged" not in protected and metadata.abridged is not None:
+        if "narrator" not in protected:
+            resource_metadata.narrator = " / ".join(metadata.narrators) or None
+        if "abridged" not in protected:
             resource_metadata.abridged = metadata.abridged
-        if "resource_index" not in protected and metadata.volume_index is not None:
+        if "resource_index" not in protected:
             resource_metadata.resource_index = metadata.volume_index
         if "cover_path" not in protected:
             resource_metadata.cover_path = cover_path
@@ -902,6 +1090,16 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             self._session.flush()
         return row.id
 
+    def refresh_scan_context(self, resource_id: str, version: str) -> bool:
+        row = self._session.get(LibraryReadableResource, resource_id)
+        if row is None:
+            raise LookupError(resource_id)
+        if row.scan_context_version == version:
+            return False
+        row.scan_context_version = version
+        self._session.flush()
+        return True
+
     def load_directory_members(
         self, resource_id: str
     ) -> tuple[DirectoryImportMember, ...]:
@@ -954,6 +1152,26 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
                 asset_path=SourceNodeRelativePath(n.relative_path),
                 adapter_id=resource.adapter_id,
             )
+        )
+
+    def single_file_fallback_cover(self, resource_id: str) -> str | None:
+        asset = self._session.scalar(
+            select(LibraryResourceAsset)
+            .where(
+                LibraryResourceAsset.resource_id == resource_id,
+                LibraryResourceAsset.import_state == "READY",
+            )
+            .limit(1)
+        )
+        if asset is None or asset.local_cover_path is None:
+            return None
+        candidate_paths = {
+            o.cover_path for o in decode_observations(asset.local_metadata_candidates)
+        }
+        return (
+            asset.local_cover_path
+            if asset.local_cover_path not in candidate_paths
+            else None
         )
 
     def resource_cover_state(self, resource_id: str) -> ResourceCoverState:
