@@ -15,6 +15,7 @@ from app.modules.organize.presentation.http import router as organize_router
 from app.modules.reader.presentation.router import router as reader_router
 from app.modules.shelf.presentation.http import router as shelf_router
 from app.modules.system.presentation.router import router as system_router
+from app.modules.updates.presentation.http import router as updates_router
 
 api_router = APIRouter(route_class=TypedContractRoute)
 api_router.include_router(auth_router)
@@ -31,3 +32,5 @@ api_router.include_router(download_router)
 api_router.include_router(shelf_router)
 api_router.include_router(organize_router)
 api_router.include_router(kindle_router, tags=["kindle"])
+
+api_router.include_router(updates_router)

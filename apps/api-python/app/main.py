@@ -21,6 +21,7 @@ from app.bootstrap.prestart import verify_current_schema
 from app.bootstrap.publication_navigation import (
     build_publication_navigation_runtime,
 )
+from app.bootstrap.updates import UpdateRuntime
 from app.contracts.http_errors import HttpContractError
 from app.core.auth import get_current_user
 from app.core.authorization import can_manage_system
@@ -167,9 +168,11 @@ def create_app(
         log_maintenance_worker.start()
         app.state.download_queue_worker = download_queue_worker
         app.state.kindle_send_queue_worker = kindle_send_queue_worker
+        app.state.update_runtime = UpdateRuntime(settings)
         try:
             yield
         finally:
+            await run_in_threadpool(app.state.update_runtime.close)
             if download_queue_worker is not None:
                 download_queue_worker.stop()
             if kindle_send_queue_worker is not None:
