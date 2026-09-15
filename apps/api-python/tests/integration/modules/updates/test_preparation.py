@@ -7,7 +7,6 @@ import io
 import json
 import shutil
 import subprocess
-import sys
 import tarfile
 import threading
 import time
@@ -40,62 +39,49 @@ def load_script(name):
 
 
 @pytest.fixture(scope="module")
-def real_package(tmp_path_factory):
-    directory = tmp_path_factory.mktemp("actual-update-package")
+def program_package(tmp_path_factory):
+    """Protocol fixture only: no Web build, host inventory or native installation."""
+    directory = tmp_path_factory.mktemp("protocol-update-package")
     root = directory / "image"
-    standalone = ROOT / "apps/web/.next/standalone"
-    assert (standalone / "apps/web/server.js").is_file(), (
-        "Run pnpm --filter @shuku/web build first"
-    )
-    shutil.copytree(standalone, root, symlinks=True)
-    for source, destination in (
-        ("apps/web/.next/static", "apps/web/.next/static"),
-        ("apps/web/public", "apps/web/public"),
-        ("apps/api-python/app", "apps/api-python/app"),
-    ):
-        shutil.copytree(ROOT / source, root / destination, dirs_exist_ok=True)
-    (root / "scripts").mkdir(exist_ok=True)
-    for name in (
-        "scripts/start-unified-app.sh",
-        "scripts/unified-http-gateway.mjs",
-        "apps/api-python/pyproject.toml",
-        "apps/api-python/uv.lock",
-    ):
-        shutil.copy2(ROOT / name, root / name)
-    # Actual build-time environment capture, using this isolated host's runtime.
-    command = [
-        sys.executable,
-        str(ROOT / "scripts/build-runtime-environment.py"),
-        "--output",
-        str(directory / "environment.json"),
-        "--program-root",
-        str(root),
-    ]
-    if sys.platform == "linux":
-        import os
-
-        command.extend(
-            [
-                "--native",
-                os.environ.get(
-                    "ERMAO_MOBI_CORE_LIBRARY", "/usr/local/lib/libermao_mobi_core.so"
-                ),
-                "--native",
-                os.environ.get(
-                    "ERMAO_CHAPTER_CORE_LIBRARY", "/usr/local/lib/libermao_chapters.so"
-                ),
-            ]
-        )
-    subprocess.run(command, check=True)
-    # Sentinels prove these never enter an application package.
-    for name in (
-        "storage/database/book.db",
-        "apps/api-python/app/.env",
-        "apps/web/.next/cache/private",
-    ):
+    files = {
+        "scripts/start-unified-app.sh": "#!/bin/sh\nexit 0\n",
+        "scripts/unified-http-gateway.mjs": "export {};\n",
+        "apps/web/server.js": "console.log('protocol fixture');\n",
+        "apps/web/package.json": '{"version":"1.0.4"}',
+        "apps/web/.next/BUILD_ID": "protocol-fixture",
+        "apps/web/.next/server/page.js": "export {};\n",
+        "apps/web/.next/static/chunk.js": "export {};\n",
+        "apps/web/public/icon.svg": "<svg/>",
+        "apps/api-python/app/main.py": "# protocol fixture\n",
+        "apps/api-python/app/worker/main.py": "# protocol fixture\n",
+        "apps/api-python/app/bootstrap/prestart.py": "# protocol fixture\n",
+        "apps/api-python/app/db/alembic.ini": "[alembic]\n",
+        "apps/api-python/app/db/alembic/versions/initial.py": "# migration fixture\n",
+        "apps/api-python/app/core/config.py": 'app_version: str = "1.0.4"\n',
+        "apps/api-python/pyproject.toml": '[project]\nversion = "1.0.4"\n',
+        "apps/api-python/uv.lock": "version = 1\n",
+        "node_modules/dependency/index.js": "module.exports = {};\n",
+        "storage/database/book.db": "must not ship",
+        "apps/api-python/app/.env": "must not ship",
+        "apps/web/.next/cache/private": "must not ship",
+        "application.json": json.dumps(
+            {
+                "version": "1.0.4",
+                "environment": {
+                    "format": 1,
+                    "platform": "linux-x86_64",
+                    "compatibility": "a" * 64,
+                },
+            }
+        ),
+    }
+    for name, content in files.items():
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("must not ship")
+        path.write_text(content)
+    (root / "apps/web/node_modules").symlink_to(
+        "../../node_modules", target_is_directory=True
+    )
     package = load_script("build-application-package").build_package(
         root, directory / "output"
     )
@@ -131,8 +117,8 @@ class DownloadFixture:
 
 
 @pytest.fixture()
-def source(real_package):
-    _, package, body = real_package
+def source(program_package):
+    _, package, body = program_package
     fixture = DownloadFixture(package, body)
 
     class Handler(BaseHTTPRequestHandler):
@@ -234,10 +220,8 @@ def finished(worker):
     pytest.fail("preparation did not finish")
 
 
-def test_real_build_download_verification_extraction_and_persistence(
-    real_package, preparation, source
-):
-    root, package, _ = real_package
+def assert_package_prepared(program_package, preparation, source):
+    root, package, _ = program_package
     updates, worker, storage = preparation
     assert updates.check(True).releases[0].installable
     assert updates.prepare(True, package.version).phase == "downloading"
@@ -262,6 +246,31 @@ def test_real_build_download_verification_extraction_and_persistence(
     assert PreparationWorker(storage, source[1]).status() == state
     assert updates.prepare(True, package.version).phase == "ready"
     assert source[0].downloads == 1
+
+
+def test_package_download_verification_extraction_and_persistence(
+    program_package, preparation, source
+):
+    assert_package_prepared(program_package, preparation, source)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "apps/web/package.json",
+        "apps/api-python/pyproject.toml",
+        "apps/api-python/app/core/config.py",
+    ],
+)
+def test_packager_rejects_version_mismatch(program_package, tmp_path, name):
+    root = tmp_path / "image"
+    shutil.copytree(program_package[0], root, symlinks=True)
+    path = root / name
+    path.write_text(path.read_text().replace("1.0.4", "1.0.5"))
+    with pytest.raises(ValueError, match="application versions disagree"):
+        load_script("build-application-package").build_package(
+            root, tmp_path / "output"
+        )
 
 
 def test_duplicate_operation_and_browser_disconnect(
@@ -498,7 +507,34 @@ def test_program_version_change_does_not_change_fixed_environment(
     library.write_bytes(b"original")
     from types import SimpleNamespace
 
-    distributions = list(builder.importlib.metadata.distributions())
+    # Deterministic inventory: exercise hashing without inspecting this host.
+    binary = tmp_path / "fixed-runtime-binary"
+    binary.write_bytes(b"fixed interpreter")
+    distributions = [
+        SimpleNamespace(
+            metadata={"Name": "dependency"},
+            version="1.0",
+            read_text=lambda _: "dependency-record",
+        )
+    ]
+    monkeypatch.setattr(builder.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(builder.platform, "python_version", lambda: "3.11.0")
+    monkeypatch.setattr(
+        builder, "sys", SimpleNamespace(platform="linux", executable=str(binary))
+    )
+    monkeypatch.setattr(
+        builder.sysconfig,
+        "get_config_var",
+        lambda key: {
+            "LIBDIR": str(tmp_path),
+            "LDLIBRARY": binary.name,
+            "SOABI": "test-abi",
+        }[key],
+    )
+    monkeypatch.setattr(
+        builder.subprocess, "check_output", lambda *a, **k: "test-system=1\n"
+    )
+    monkeypatch.setattr(shutil, "which", lambda _: str(binary))
     application = SimpleNamespace(
         metadata={"Name": "ermao-books-api-python"},
         version="1.0.4",

@@ -57,14 +57,22 @@ API 生命周期拥有一个准备线程。接受请求后，浏览器断开不�
 
 ## 定向验收与缺口
 
+普通后端测试使用小型完整协议夹具和确定性的测试环境描述，不依赖 Web 构建、生产安装路径原生库或宿主指纹扫描。仍执行生产打包器、官方清单解析、下载、摘要与解压逻辑；版本一致性、合法链接、权限、并发、失败保护和数据保护断言保留。原有后端 chapters 等前置要求不变。
+
 ```sh
-pnpm --filter @shuku/web build
 apps/api-python/.venv/bin/python -m pytest apps/api-python/tests/integration/modules/updates/test_preparation.py -q
 apps/api-python/.venv/bin/python -m pytest apps/api-python/tests/test_capability_architecture.py apps/api-python/tests/test_openapi_quality.py -q
 apps/api-python/.venv/bin/python -m mypy --follow-imports=silent apps/api-python/app/modules/updates apps/api-python/app/bootstrap/updates.py
 pnpm --dir apps/web exec tsx --conditions=import --test features/updates/model/release-notes.test.ts
 ```
 
-真实产物测试将本次 Web 构建与 Python 程序组合为同布局种子，生成实际宿主环境信息并调用正式打包器，经隔离 HTTP 连接注入运行同一官方下载读取、校验与解压代码；逐文件比较内容及链接。其他测试覆盖授权、重复请求、浏览器会话丢弃、版本／环境拒绝、下载与资源限制失败、状态持久化以及程序／数据保护。
+真实产物验收单独显式执行；`acceptance_real_package.py` 不匹配默认 pytest 测试文件名，因此 `cd apps/api-python && uv run --extra dev --locked pytest -q` 不收集它，也不跳过普通更新测试：
+
+```sh
+pnpm --filter @shuku/web build
+apps/api-python/.venv/bin/python -m pytest apps/api-python/tests/integration/modules/updates/acceptance_real_package.py -q
+```
+
+该入口将真实 Web 构建与实际 Python 程序组合为同布局种子，生成实际宿主环境信息并调用生产打包器，经隔离 HTTP 连接注入运行同一官方下载、校验与解压代码；与普通测试复用逐文件摘要、合法链接、持久化及数据保护断言。缺少 standalone 构建时明确失败并提示构建命令，不使用 skip。Linux 还需要实际构建的 `libermao_mobi_core.so` 和 `libermao_chapters.so`，默认位于 `/usr/local/lib`，可通过 `ERMAO_MOBI_CORE_LIBRARY`、`ERMAO_CHAPTER_CORE_LIBRARY` 指定已有产物；缺失时明确失败。此要求只属于显式真实产物验收，不加入普通后端测试或发布工作流前置步骤。
 
 当前实测宿主为 macOS、Python 3.11.15、Node 22.15.0；生成的是 Darwin 测试包，不能作为 Linux 安装包发布。没有运行 Docker daemon、拉取镜像或公开测试 Release。生产 Linux 镜像环境生成、Linux 包与官方已发布资产下载仍待有对应产物后验证；保留第 1 批容器验收缺口。
