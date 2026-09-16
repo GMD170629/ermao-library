@@ -1,161 +1,265 @@
 #!/usr/bin/env python3
-"""Host smoke of the real built application. Run with the API virtualenv Python.
-
-Requires `pnpm --filter @shuku/web build` and free ports 8000, 3001, 18300.
-This does not replace Linux container, PID 1 or network-isolation acceptance.
-"""
+"""Explicit real-image D1 acceptance, isolated Docker volume; no default test collection."""
 
 from __future__ import annotations
 
-import hashlib
+import argparse
 import json
-import os
-import shutil
-import socket
-import sqlite3
 import subprocess
-import sys
-import tempfile
 import time
-import urllib.request
-from pathlib import Path
+import uuid
 
-ROOT = Path(__file__).resolve().parents[1]
+
+def docker(*args: str) -> str:
+    return subprocess.check_output(["docker", *args], text=True).strip()
 
 
 def main() -> None:
-    for port in (8000, 3001, 18300):
-        with socket.socket() as probe:
-            probe.bind(("127.0.0.1", port))
-    standalone = ROOT / "apps/web/.next/standalone"
-    if not (standalone / "apps/web/server.js").is_file():
-        raise RuntimeError("Build the Web production artifact first")
-    with tempfile.TemporaryDirectory(prefix="shuku-runtime-smoke-") as temporary:
-        scratch = Path(temporary).resolve()
-        seed, storage = scratch / "image", scratch / "storage"
-        shutil.copytree(standalone, seed, symlinks=True)
-        for source, target in (
-            (ROOT / "apps/web/.next/static", seed / "apps/web/.next/static"),
-            (ROOT / "apps/web/public", seed / "apps/web/public"),
-            (ROOT / "apps/api-python/app", seed / "apps/api-python/app"),
-        ):
-            shutil.copytree(source, target, dirs_exist_ok=True)
-        (seed / "scripts").mkdir(exist_ok=True)
-        for name in ("start-unified-app.sh", "unified-http-gateway.mjs"):
-            shutil.copy2(ROOT / "scripts" / name, seed / "scripts" / name)
-        storage.mkdir()
-        protected = (
-            storage / "covers/fixture",
-            scratch / "books/fixture",
-            storage / "configuration",
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--image", required=True)
+    args = parser.parse_args()
+    name = "shuku-d1-" + uuid.uuid4().hex[:10]
+    volume = name + "-data"
+    books = name + "-books"
+    docker("volume", "create", volume)
+    docker("volume", "create", books)
+    running = False
+
+    def execute(code: str, python: str = "/usr/local/bin/python3.11") -> str:
+        return docker("exec", name, python, "-c", code)
+
+    def start(*, without_seed: bool = False) -> None:
+        nonlocal running
+        docker(
+            "run",
+            "-d",
+            "--name",
+            name,
+            "--network",
+            "none",
+            "--user",
+            "12345:12345",
+            "-v",
+            volume + ":/app/storage",
+            "-v",
+            books + ":/books:ro",
+            *(
+                [
+                    "-e",
+                    "SHUKU_IMAGE_ROOT=/absent",
+                    "-e",
+                    "SHUKU_DEPENDENCY_SEED=/absent",
+                ]
+                if without_seed
+                else []
+            ),
+            args.image,
         )
-        for file in protected:
-            file.parent.mkdir(parents=True, exist_ok=True)
-            file.write_bytes(b"preserve me")
-        runtime = storage / "runtime"
-        ready = storage / "update-tmp/worker-ready"
-        environment = {
-            **os.environ,
-            "PATH": f"{Path(sys.executable).parent}:{os.environ['PATH']}",
-            "STORAGE_ROOT": str(storage),
-            "SHUKU_IMAGE_ROOT": str(seed),
-            "HOSTNAME": "127.0.0.1",
-            "PORT": "18300",
-            "NEXT_INTERNAL_PORT": "3001",
-            "PYTHONDONTWRITEBYTECODE": "1",
-        }
-        environment.pop("SESSION_SECRET", None)
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        secret_digest = None
-        database_inode = None
-        for attempt in range(2):
-            log = scratch / f"run-{attempt}.log"
-            with log.open("w") as output:
-                process = subprocess.Popen(
-                    [sys.executable, str(ROOT / "scripts/container-entry.py")],
-                    env=environment,
-                    stdout=output,
-                    stderr=subprocess.STDOUT,
-                )
-                try:
-                    deadline = time.monotonic() + 60
-                    while True:
-                        if process.poll() is not None:
-                            raise RuntimeError(log.read_text())
-                        try:
-                            with opener.open(
-                                "http://127.0.0.1:18300/api/health", timeout=1
-                            ) as response:
-                                health = json.load(response)
-                            with opener.open(
-                                "http://127.0.0.1:18300/login", timeout=2
-                            ) as response:
-                                assert response.status == 200
-                                assert b"<html" in response.read()
-                            if ready.is_file():
-                                break
-                        except OSError:
-                            pass
-                        if time.monotonic() >= deadline:
-                            raise RuntimeError(log.read_text())
-                        time.sleep(0.2)
-                    worker_pid = int(ready.read_text())
-                    command = subprocess.check_output(
-                        ["ps", "-p", str(worker_pid), "-o", "command="], text=True
-                    )
-                    assert "app.worker.main" in command
-                    # lsof resolves the live Worker's cwd, not a configured string.
-                    cwd = subprocess.check_output(
-                        ["lsof", "-a", "-p", str(worker_pid), "-d", "cwd", "-Fn"],
-                        text=True,
-                    )
-                    assert str(runtime / "apps/api-python") in cwd
-                    database = storage / "database/shuku.sqlite3"
-                    with sqlite3.connect(database) as connection:
-                        assert connection.execute(
-                            "SELECT version_num FROM alembic_version"
-                        ).fetchone()
-                        if attempt == 0:
-                            connection.execute("PRAGMA user_version=321")
-                        else:
-                            assert connection.execute(
-                                "PRAGMA user_version"
-                            ).fetchone() == (321,)
-                    digest = hashlib.sha256(
-                        (storage / "secrets/session-secret").read_bytes()
-                    ).hexdigest()
-                    if attempt == 0:
-                        secret_digest, database_inode = digest, database.stat().st_ino
-                    else:
-                        assert (digest, database.stat().st_ino) == (
-                            secret_digest,
-                            database_inode,
-                        )
-                        assert (
-                            runtime / "retained-marker"
-                        ).read_text() == "keep newer runtime"
-                    assert all(
-                        file.read_bytes() == b"preserve me" for file in protected
-                    )
-                    print(
-                        f"run {attempt + 1}: API={health}, Web=200, Worker cwd=runtime",
-                        flush=True,
-                    )
-                finally:
-                    process.terminate()
-                    process.wait(timeout=30)
-                assert process.returncode == 143
-                assert not ready.exists()
-                contents = log.read_text()
-                assert contents.index("prestart outcome=success") < contents.index(
-                    "Application startup complete"
-                )
-            if attempt == 0:
-                (runtime / "retained-marker").write_text("keep newer runtime")
-                shutil.rmtree(seed)
+        running = True
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            probe = subprocess.run(
+                [
+                    "docker",
+                    "exec",
+                    name,
+                    "/usr/local/bin/python3.11",
+                    "-c",
+                    "import urllib.request; from pathlib import Path; assert Path('/app/storage/update-tmp/worker-ready').exists(); assert Path('/books/sentinel').read_text()=='original-book'; assert urllib.request.urlopen('http://127.0.0.1:3000/login').status == 200; assert urllib.request.urlopen('http://127.0.0.1:3000/api/health').status == 200",
+                ],
+                capture_output=True,
+                check=False,
+            )
+            if probe.returncode == 0:
+                return
+            if docker("inspect", "-f", "{{.State.Running}}", name) != "true":
+                raise RuntimeError(docker("logs", name))
+            time.sleep(1)
+        raise RuntimeError(docker("logs", name))
+
+    def stop() -> None:
+        nonlocal running
+        docker("stop", "-t", "30", name)
+        assert docker("inspect", "-f", "{{.State.ExitCode}}", name) == "143"
+        docker("rm", name)
+        running = False
+
+    def offline_command(code: str) -> str:
+        return docker(
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--user",
+            "12345:12345",
+            "-v",
+            volume + ":/app/storage",
+            "--entrypoint",
+            "/usr/local/bin/python3.11",
+            args.image,
+            "-c",
+            code,
+        )
+
+    try:
+        docker(
+            "run",
+            "--rm",
+            "-v",
+            volume + ":/app/storage",
+            "-v",
+            books + ":/books",
+            "--entrypoint",
+            "sh",
+            args.image,
+            "-c",
+            "chown 12345:12345 /app/storage && touch /app/storage/.acceptance-volume && printf original-book > /books/sentinel",
+        )
+        start()
+        assert execute(
+            "import importlib.util; assert importlib.util.find_spec('fastapi') is None; print('fixed environment has no business dependencies')"
+        )
+        business = "/app/storage/dependencies/python/bin/python"
         print(
-            "PASS: real services restarted without image seed; database, secret and file sentinels retained"
+            execute(
+                "import sys,site,fastapi; assert sys.prefix=='/app/storage/dependencies/python'; assert not site.ENABLE_USER_SITE; assert all('/usr/local/lib/python3.11/site-packages' != p for p in sys.path); print('business environment isolated')",
+                business,
+            )
         )
+        processes = json.loads(
+            execute(
+                "import json; from pathlib import Path; print(json.dumps([p.read_bytes().replace(b'\\0',b' ').decode() for p in Path('/proc').glob('[0-9]*/cmdline') if p.is_file()]))"
+            )
+        )
+        for role in ("-m uvicorn app.main:app", "-m app.worker.main"):
+            assert any(
+                command.startswith(business + " ") and role in command
+                for command in processes
+            )
+        assert "prestart outcome=success" in docker("logs", name)
+        assert execute(
+            "from pathlib import Path; import json; s=Path('/app/storage'); (s/'covers/sentinel').write_text('keep'); (s/'configuration').write_text('keep'); print(json.loads((s/'dependencies/installed.json').read_text())['identity'])"
+        )
+        execute(
+            "import sqlite3; c=sqlite3.connect('/app/storage/database/shuku.sqlite3'); c.execute('PRAGMA user_version=321'); c.close()"
+        )
+        snapshot = execute(
+            "from pathlib import Path; import hashlib,json; s=Path('/app/storage'); print(json.dumps({str(p.relative_to(s)):[p.stat().st_ino,p.stat().st_mtime_ns,hashlib.sha256(p.read_bytes()).hexdigest()] for p in [s/'dependencies/installed.json',s/'dependencies/python/pyvenv.cfg',s/'secrets/session-secret',s/'covers/sentinel',s/'configuration']}))"
+        )
+        # A competing conversion must fail while the launcher lock is held.
+        blocked = subprocess.run(
+            [
+                "docker",
+                "exec",
+                name,
+                "/usr/local/bin/python3.11",
+                "/opt/shuku-launcher/container-entry.py",
+                "--convert-legacy",
+            ],
+            capture_output=True,
+            check=False,
+        )
+        assert blocked.returncode != 0 and b"already running" in blocked.stderr
+        stop()
+        start(without_seed=True)
+        assert snapshot == execute(
+            "from pathlib import Path; import hashlib,json; s=Path('/app/storage'); print(json.dumps({str(p.relative_to(s)):[p.stat().st_ino,p.stat().st_mtime_ns,hashlib.sha256(p.read_bytes()).hexdigest()] for p in [s/'dependencies/installed.json',s/'dependencies/python/pyvenv.cfg',s/'secrets/session-secret',s/'covers/sentinel',s/'configuration']}))"
+        )
+        assert execute(
+            "import sqlite3; c=sqlite3.connect('/app/storage/database/shuku.sqlite3'); assert c.execute('PRAGMA user_version').fetchone()==(321,); c.close(); print('database retained')"
+        )
+        stop()
+        # Convert only this isolated deployment to a known v1-shaped fixture.
+        offline_command(
+            "from pathlib import Path; import json,shutil; s=Path('/app/storage'); p=s/'runtime/application.json'; v=json.loads(p.read_text()); v.pop('protocol'); p.write_text(json.dumps(v)); shutil.rmtree(s/'dependencies')"
+        )
+        refused = subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "--user",
+                "12345:12345",
+                "-v",
+                volume + ":/app/storage",
+                args.image,
+            ],
+            capture_output=True,
+            check=False,
+        )
+        assert refused.returncode != 0 and b"--convert-legacy" in refused.stderr
+        print(
+            docker(
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "--user",
+                "12345:12345",
+                "-v",
+                volume + ":/app/storage",
+                "--entrypoint",
+                "/usr/local/bin/python3.11",
+                args.image,
+                "/opt/shuku-launcher/container-entry.py",
+                "--convert-legacy",
+            )
+        )
+        start()
+        assert execute(
+            "from pathlib import Path; s=Path('/app/storage'); assert (s/'update-tmp/database-before-dependency-conversion.sqlite3').is_file(); assert (s/'covers/sentinel').read_text()=='keep'; print('conversion preserved data')"
+        )
+        preserved = json.loads(
+            execute(
+                "from pathlib import Path; import hashlib,json; s=Path('/app/storage'); print(json.dumps({str(p.relative_to(s)):[p.stat().st_ino,p.stat().st_mtime_ns,hashlib.sha256(p.read_bytes()).hexdigest()] for p in [s/'secrets/session-secret',s/'covers/sentinel',s/'configuration']}))"
+            )
+        )
+        assert all(
+            json.loads(snapshot)[key] == value for key, value in preserved.items()
+        )
+        assert execute(
+            "import sqlite3; c=sqlite3.connect('/app/storage/database/shuku.sqlite3'); assert c.execute('PRAGMA user_version').fetchone()==(321,); c.close(); print('converted database retained')"
+        )
+        stop()
+        # A newer/unknown database must not be made acceptable by conversion.
+        offline_command(
+            "from pathlib import Path; import json,shutil,sqlite3; s=Path('/app/storage'); p=s/'runtime/application.json'; v=json.loads(p.read_text()); v.pop('protocol'); p.write_text(json.dumps(v)); shutil.rmtree(s/'dependencies'); c=sqlite3.connect(s/'database/shuku.sqlite3'); c.execute(\"UPDATE alembic_version SET version_num='future_schema'\"); c.commit(); c.close()"
+        )
+        rejected = subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "--user",
+                "12345:12345",
+                "-v",
+                volume + ":/app/storage",
+                "--entrypoint",
+                "/usr/local/bin/python3.11",
+                args.image,
+                "/opt/shuku-launcher/container-entry.py",
+                "--convert-legacy",
+            ],
+            capture_output=True,
+            check=False,
+        )
+        assert rejected.returncode != 0
+        assert offline_command(
+            "from pathlib import Path; import json,sqlite3; s=Path('/app/storage'); assert 'protocol' not in json.loads((s/'runtime/application.json').read_text()); c=sqlite3.connect(s/'database/shuku.sqlite3'); assert c.execute('SELECT version_num FROM alembic_version').fetchone()==('future_schema',); c.close(); print('unknown schema rejected without downgrade')"
+        )
+        print(
+            "PASS: API, Worker, schema, Web; non-root; offline initialization/restart; v1 refusal, locked conversion, unknown-schema refusal"
+        )
+    finally:
+        if running:
+            subprocess.run(
+                ["docker", "rm", "-f", name], check=False, capture_output=True
+            )
+        docker("volume", "rm", volume, books)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import shutil
 import subprocess
@@ -44,6 +45,12 @@ class ContainerEntryTests(unittest.TestCase):
             ROOT / "scripts/start-unified-app.sh",
             self.seed / "scripts/start-unified-app.sh",
         )
+        (self.seed / "application.json").write_text(
+            json.dumps({"version": "1.0.5", "protocol": 2})
+        )
+        dependencies = self.storage / "dependencies"
+        (dependencies / "python/bin").mkdir(parents=True)
+        (dependencies / "installed.json").write_text('{"protocol":2}')
         self.bin = self.root / "bin"
         self.bin.mkdir()
         # Exercise the real shell's roles, cwd, prestart barrier and signal traps.
@@ -83,6 +90,8 @@ class ContainerEntryTests(unittest.TestCase):
         executable.chmod(0o755)
         for name in ("python", "uvicorn", "node"):
             (self.bin / name).symlink_to(executable.name)
+
+        (dependencies / "python/bin/python").symlink_to(self.bin / "fixture")
 
     def launch(self, **extra: str) -> subprocess.Popen[str]:
         process = subprocess.Popen(

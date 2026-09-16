@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import ctypes
 import fcntl
 import json
@@ -17,7 +18,12 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from container_install import Installation, InstallError
+from container_install import Installation, InstallError, backup_database, write_json
+from dependency_environment import (
+    DependencyError,
+    business_environment,
+    initialize_dependencies,
+)
 
 
 class StartupError(RuntimeError):
@@ -72,7 +78,7 @@ def run_application(runtime: Path, storage: Path) -> int:
             raise StartupError("cannot enable child reaping / 无法启用子进程回收")
 
     environment = {
-        **os.environ,
+        **business_environment(storage),
         "STORAGE_ROOT": str(storage),
         "ROOT_DIR": str(runtime),
         "PYTHON_API_DIR": str(runtime / "apps/api-python"),
@@ -203,7 +209,11 @@ def run_application(runtime: Path, storage: Path) -> int:
                         installing = True
                         installer.check_paths()
                         preflight = subprocess.Popen(
-                            [sys.executable, "-m", "app.bootstrap.update_install"],
+                            [
+                                environment["SHUKU_BUSINESS_PYTHON"],
+                                "-m",
+                                "app.bootstrap.update_install",
+                            ],
                             cwd=runtime / "apps/api-python",
                             env=environment,
                             start_new_session=True,
@@ -275,7 +285,102 @@ def application_ready(group: int, version: str, ready_file: Path) -> bool:
         return False
 
 
+def convert_legacy(
+    seed: Path, runtime: Path, storage: Path, dependency_seed: Path
+) -> None:
+    """Known v1 layout only, same release/lock; caller holds the stopped launcher lock."""
+    from dependency_packages import node_packages
+
+    if runtime.is_symlink() or not (runtime / ".initialized").is_file():
+        raise StartupError("unknown legacy layout / 未知旧布局")
+    for relative in (
+        "application.json",
+        "scripts/start-unified-app.sh",
+        "apps/api-python/uv.lock",
+    ):
+        path = runtime / relative
+        if path.is_symlink() or not path.resolve().is_relative_to(runtime.resolve()):
+            raise StartupError("unsafe legacy layout / 旧布局路径不安全")
+    current = json.loads((runtime / "application.json").read_text())
+    target = json.loads((seed / "application.json").read_text())
+    if current.get("protocol", 1) != 1 or target.get("protocol") != 2:
+        raise StartupError("unsupported conversion / 不支持此转换")
+    # Conversion is not an application update: require the exact release and lock.
+    if (
+        current["environment"]["platform"] != target["environment"]["platform"]
+        or current["version"] != target["version"]
+        or (runtime / "apps/api-python/uv.lock").read_bytes()
+        != (seed / "apps/api-python/uv.lock").read_bytes()
+    ):
+        raise StartupError(
+            "conversion requires the same release and lock / 转换要求程序版本和锁文件相同"
+        )
+    if (storage / "dependencies").exists():
+        raise StartupError(
+            "conversion dependencies already exist; inspect manually / 转换依赖已存在，请人工检查"
+        )
+    initialize_runtime(seed, runtime)
+    with tempfile.TemporaryDirectory(dir=storage / "update-tmp") as temporary:
+        from dataclasses import asdict
+
+        actual, links, scopes = node_packages(runtime, Path(temporary))
+        manifest = json.loads((dependency_seed / "manifest.json").read_text())
+        if (
+            [asdict(item) for item in actual]
+            != [
+                dict(item, files=tuple(item["files"]))
+                for item in manifest["packages"]
+                if item["ecosystem"] == "node"
+            ]
+            or links != manifest["node_links"]
+            or scopes != manifest["node_scopes"]
+        ):
+            raise StartupError(
+                "legacy Node layout differs from seed / 旧 Node 布局与种子不一致"
+            )
+    backup_database(
+        storage, storage / "update-tmp/database-before-dependency-conversion.sqlite3"
+    )
+    initialize_dependencies(storage, dependency_seed)
+    # Use the existing schema barrier. Unknown/newer schemas are never stamped or downgraded.
+    subprocess.run(
+        [
+            str(storage / "dependencies/python/bin/python"),
+            "-c",
+            "from app.bootstrap.prestart import verify_current_schema; from app.db.session import engine; verify_current_schema(engine)",
+        ],
+        cwd=runtime / "apps/api-python",
+        env=business_environment(storage),
+        check=True,
+        capture_output=True,
+    )
+    # No application replacement and no v2 package installation. Only the known launch script changes.
+    script = runtime / "scripts/start-unified-app.sh"
+    staged = script.with_suffix(".conversion")
+    descriptor = os.open(
+        staged, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o755
+    )
+    with os.fdopen(descriptor, "wb") as output:
+        output.write((seed / "scripts/start-unified-app.sh").read_bytes())
+        output.flush()
+        os.fsync(output.fileno())
+    os.replace(staged, script)
+    write_json(
+        runtime / "application.json",
+        {**current, "environment": target["environment"], "protocol": 2},
+    )
+    print("dependency conversion complete / 依赖转换完成", flush=True)
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--convert-legacy",
+        action="store_true",
+        help="convert a stopped same-release v1 deployment / 转换已停机的同版本旧部署",
+    )
+    args = parser.parse_args()
+
     def stop_initialization(signum: int, _frame: object) -> None:
         print("startup cancelled / 启动已取消", flush=True)
         raise SystemExit(128 + signum)
@@ -319,12 +424,58 @@ def main() -> int:
                 raise StartupError(
                     "installation unfinished; inspect update-tmp/installation.log and repair manually / 安装未完成，请检查更新日志并人工修复，禁止自动重试"
                 )
+            dependency_seed = Path(
+                os.environ.get("SHUKU_DEPENDENCY_SEED", "/opt/shuku-dependency-seed")
+            )
+            if args.convert_legacy:
+                # Also exclude an in-progress preparation, using its existing lock.
+                with os.fdopen(
+                    os.open(
+                        state / "prepare.lock",
+                        os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
+                        0o600,
+                    ),
+                    "w",
+                ) as preparation_lock:
+                    fcntl.flock(preparation_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    convert_legacy(seed, runtime, storage, dependency_seed)
+                return 0
+            if runtime.exists():
+                identity = json.loads((runtime / "application.json").read_text())
+                if identity.get("protocol") != 2:
+                    raise StartupError(
+                        "legacy runtime requires --convert-legacy while stopped / 旧程序须停机后显式转换"
+                    )
+                if not (storage / "dependencies/installed.json").is_file():
+                    raise StartupError(
+                        "missing business environment / 缺少业务依赖环境"
+                    )
             initialize_runtime(seed, runtime)
+            fixed_environment = Path(__file__).with_name("environment.json")
+            if fixed_environment.is_file():
+                fixed = json.loads(fixed_environment.read_text())["environment"]
+                identity = json.loads((runtime / "application.json").read_text())
+                if identity.get("protocol") != 2 or identity["environment"] != fixed:
+                    raise StartupError("incompatible base environment / 基础环境不兼容")
+            initialize_dependencies(storage, dependency_seed)
             print("runtime ready / 持久化程序目录就绪", flush=True)
             return run_application(runtime, storage)
-    except (OSError, shutil.Error, StartupError) as error:
+    except (
+        OSError,
+        ValueError,
+        subprocess.CalledProcessError,
+        shutil.Error,
+        StartupError,
+        DependencyError,
+        InstallError,
+        KeyError,
+    ) as error:
         # Do not expose private paths or dump a traceback into container logs.
-        detail = str(error) if isinstance(error, StartupError) else type(error).__name__
+        detail = (
+            str(error)
+            if isinstance(error, (StartupError, DependencyError))
+            else type(error).__name__
+        )
         print(
             f"container startup failed ({detail}); check storage permissions and runtime integrity; "
             "no application started / 容器启动失败，请检查存储权限和程序目录完整性，未启动应用",

@@ -31,3 +31,10 @@ books
 .fnos-build
 npm-debug.log*
 pnpm-debug.log*
+
+# Host-only mobile build outputs are not container inputs.
+apps/mobile/iosApp/build
+apps/mobile/.gradle
+apps/mobile/shared/build
+apps/mobile/androidApp/build
+.tmp

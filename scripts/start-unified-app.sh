@@ -6,6 +6,7 @@ PYTHON_API_PORT="8000"
 WEB_PORT="${PORT:-3000}"
 NEXT_INTERNAL_PORT="${NEXT_INTERNAL_PORT:-3001}"
 PYTHON_API_DIR="${PYTHON_API_DIR:-$ROOT_DIR/apps/api-python}"
+BUSINESS_PYTHON="${SHUKU_BUSINESS_PYTHON:?fixed launcher must select business Python / 固定入口必须指定业务 Python}"
 NEXT_SERVER="${NEXT_SERVER:-$ROOT_DIR/apps/web/server.js}"
 GATEWAY_SERVER="${GATEWAY_SERVER:-$ROOT_DIR/scripts/unified-http-gateway.mjs}"
 
@@ -52,7 +53,7 @@ fi
 if [ -n "${SHUKU_STARTUP_STATUS_FILE:-}" ]; then printf migration > "$SHUKU_STARTUP_STATUS_FILE"; fi
 (
   cd "$PYTHON_API_DIR"
-  exec python -m app.bootstrap.prestart
+  exec "$BUSINESS_PYTHON" -m app.bootstrap.prestart
 ) &
 PRESTART_PID="$!"
 wait "$PRESTART_PID"
@@ -61,7 +62,7 @@ if [ -n "${SHUKU_STARTUP_STATUS_FILE:-}" ]; then printf services > "$SHUKU_START
 
 (
   cd "$PYTHON_API_DIR"
-  exec uvicorn app.main:app --host 127.0.0.1 --port "$PYTHON_API_PORT"
+  exec "$BUSINESS_PYTHON" -m uvicorn app.main:app --host 127.0.0.1 --port "$PYTHON_API_PORT"
 ) &
 API_PID="$!"
 
@@ -70,7 +71,7 @@ while :; do
     wait "$API_PID" || exit $?
     exit 1
   fi
-  if python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${PYTHON_API_PORT}/api/health', timeout=1).read()" >/dev/null 2>&1; then
+  if "$BUSINESS_PYTHON" -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${PYTHON_API_PORT}/api/health', timeout=1).read()" >/dev/null 2>&1; then
     break
   fi
   sleep 1
@@ -79,7 +80,7 @@ done
 if [ -n "${IMPORT_WORKER_READY_FILE:-}" ]; then rm -f "$IMPORT_WORKER_READY_FILE"; fi
 (
   cd "$PYTHON_API_DIR"
-  exec python -m app.worker.main
+  exec "$BUSINESS_PYTHON" -m app.worker.main
 ) &
 WORKER_PID="$!"
 

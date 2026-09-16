@@ -68,6 +68,7 @@ class Installation:
             or self.state["target"] != read_json(request)["target"]
         ):
             raise InstallError("INVALID_INSTALL_REQUEST")
+        self.reject_package_protocol()
         log_fd = os.open(
             self.root / "installation.log",
             os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW,
@@ -95,7 +96,16 @@ class Installation:
         with os.fdopen(log_fd, "a") as stream:
             stream.write(self.state["updated_at"] + " " + message + "\n")
 
+    def reject_package_protocol(self) -> None:
+        target = self.state["target"] if self.state else {}
+        identity = self.runtime / "application.json"
+        if target.get("format", 1) != 1 or (
+            identity.is_file() and read_json(identity).get("protocol", 1) != 1
+        ):
+            raise InstallError("UNSUPPORTED_UPDATE_PROTOCOL")
+
     def check_paths(self) -> None:
+        self.reject_package_protocol()
         if (
             self.runtime.is_symlink()
             or self.runtime.resolve() != self.storage / "runtime"
@@ -113,35 +123,16 @@ class Installation:
 
     def backup(self) -> None:
         self.phase("backup")
-        database = self.storage / "database/shuku.sqlite3"
-        backup = self.root / "database-before-update.sqlite3"
-        if database.is_symlink() or database.parent.is_symlink() or backup.is_symlink():
-            raise InstallError("UNSAFE_DATABASE")
-        # SQLite's native backup API takes a consistent snapshot including WAL.
-        # No schema queries, migrations, logical exports or application imports.
-        deadline = time.monotonic() + 60
-
-        def progress(_status, _remaining, _total):
-            if time.monotonic() > deadline:
-                raise InstallError("BACKUP_TIMEOUT")
-
-        with closing(
-            sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)
-        ) as source:
-            backup.unlink(missing_ok=True)
-            os.close(
-                os.open(
-                    backup, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600
-                )
-            )
-            with closing(sqlite3.connect(backup)) as target:
-                source.backup(target, pages=256, progress=progress)
+        backup_database(self.storage, self.root / "database-before-update.sqlite3")
 
     def synchronize(self) -> None:
         self.check_paths()
         source = self.root / "prepared/app"
         if source.is_symlink() or not source.is_dir():
             raise InstallError("UNSAFE_SOURCE")
+        identity = source / "application.json"
+        if identity.is_file() and read_json(identity).get("protocol", 1) != 1:
+            raise InstallError("UNSUPPORTED_UPDATE_PROTOCOL")
         # Old processes are gone. Remove entries without following target links,
         # then copy the already validated tree; .initialized is launcher-owned.
         write_json(
@@ -172,3 +163,25 @@ class Installation:
         if self.lock:
             self.lock.close()
             self.lock = None
+
+
+def backup_database(storage: Path, destination: Path) -> None:
+    database = storage / "database/shuku.sqlite3"
+    backup = destination
+    if database.is_symlink() or database.parent.is_symlink() or backup.is_symlink():
+        raise InstallError("UNSAFE_DATABASE")
+    # SQLite's native backup API takes a consistent snapshot including WAL.
+    # No schema queries, migrations, logical exports or application imports.
+    deadline = time.monotonic() + 60
+
+    def progress(_status, _remaining, _total):
+        if time.monotonic() > deadline:
+            raise InstallError("BACKUP_TIMEOUT")
+
+    with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as source:
+        backup.unlink(missing_ok=True)
+        os.close(
+            os.open(backup, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        )
+        with closing(sqlite3.connect(backup)) as target:
+            source.backup(target, pages=256, progress=progress)

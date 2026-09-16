@@ -1,5 +1,7 @@
 # 容器内持久化程序目录与停机安装
 
+当前 D1 协议 2 的依赖目录、初始化及显式转换以 [包级依赖更新](dependency-package-updates.md) 为准。下文第 1–4 批安装说明为协议 1；D1 暂不开放协议 2 下载／安装。
+
 第 1 批提供固定启动入口和唯一持久化程序目录。[第 2 批](application-update-preparation.md) 增加应用包与后台下载准备，第 3 批增加下述固定入口停机安装，第 4 批接入独立下载/安装确认与正式应用产物；开发脚本、单独 API 镜像仍沿用原有启动方式，不支持应用内安装。
 
 ## 目录与启动
@@ -12,7 +14,7 @@
 | `STORAGE_ROOT/update-tmp/launcher.lock` | 固定入口持有的进程互斥锁，进程退出自动释放，不通过删除文件解锁 |
 | `STORAGE_ROOT/database`、`covers`、`indexes`、`logs`、`secrets` | 继续保存原有业务数据；书库继续通过原挂载路径访问 |
 
-Python 依赖继续安装在镜像的 `/opt/shuku-python`，Node/Python 解释器及原生库留在镜像固定位置，不复制进 runtime。Web 的运行依赖和资源随 standalone 程序复制。程序目录的工作路径由入口强制指定，API 与 Worker 的 cwd 为 runtime 下的 `apps/api-python`。
+Python 业务依赖离线初始化在 `STORAGE_ROOT/dependencies/python`，Node/Python 解释器及原生库留在镜像固定位置，不复制进 runtime。Web 的运行依赖和资源随 standalone 程序复制。程序目录的工作路径由入口强制指定，API 与 Worker 的 cwd 为 runtime 下的 `apps/api-python`。
 
 启动顺序复用 `start-unified-app.sh`：prestart 初始化／迁移并校验数据库 → API 就绪 → Worker、Web、网关。数据仍通过原 `STORAGE_ROOT` 查找，已有会话密钥继续使用，Compose 环境变量保持生效。
 
@@ -23,7 +25,7 @@ Python 依赖继续安装在镜像的 `/opt/shuku-python`，Node/Python 解释�
 生产 Dockerfile CMD、根目录两份 Compose 的 web 服务和 fnOS 模板均调用：
 
 ```text
-python /opt/shuku-launcher/container-entry.py
+/usr/local/bin/python3.11 /opt/shuku-launcher/container-entry.py
 ```
 
 首次采用本批代码需部署包含该入口的新镜像，并同步 Compose command。现有存储挂载和图书挂载不变。默认 `STORAGE_ROOT=/app/storage`。目录须允许配置的 PUID/PGID（fnOS 为 TRIM_UID/TRIM_GID）创建程序副本和状态目录；复制文件归运行用户所有，入口不递归改权限或属主，也不修改书库权限。
@@ -34,14 +36,14 @@ python /opt/shuku-launcher/container-entry.py
 
 ```sh
 apps/api-python/.venv/bin/python -m unittest scripts.test_container_entry scripts.test_install_python_runtime -v
-pnpm --filter @shuku/web build
-apps/api-python/.venv/bin/python scripts/smoke-container-runtime.py
+docker build -f apps/web/Dockerfile.prod -t shuku-d1:local .
+python3 scripts/smoke-container-runtime.py --image shuku-d1:local
 sh -n scripts/start-unified-app.sh
 docker compose -f docker-compose.prod.yml config --quiet
 docker compose -f docker-compose.yml config --quiet
 ```
 
-冒烟脚本只使用隔离临时目录，要求 8000、3001、18300 空闲以及已安装的 API 依赖、Node、lsof。它使用真实构建产物，检查四个服务、迁移先行、Worker 实际 cwd、数据库与密钥保留，并移除测试镜像种子后再次启动，验证 runtime 不被覆盖。它不模拟更新，也不修改正式版本或用户书库。
+冒烟脚本使用隔离 Docker 卷、非 root UID/GID 和断网容器，启动真实 API、Worker、Web、网关并验证迁移、依赖隔离、二次启动和显式旧布局转换；不修改用户部署。
 
 第 1 批最初仅完成宿主验证。第 3 批已启动 Docker Desktop，并完成 Linux ARM64 的真实应用更新、PID 1/孤儿回收、普通停止及断网重启；fnOS 安装运行仍未执行。镜像使用 Python 3.11.15、Node 22.23.1。完整生产镜像首次构建成功；后续 Docker Hub 元数据请求 EOF，因此最终验收复用该镜像的真实 Web/依赖产物，复制本批最新程序和固定入口并重新生成环境信息后执行，未重新安装运行依赖。
 

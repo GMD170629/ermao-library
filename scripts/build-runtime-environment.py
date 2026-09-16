@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib.metadata
 import json
 import platform
 import subprocess
@@ -23,15 +22,6 @@ def snapshot(native_libraries: list[Path], base_path: str = "") -> dict[str, obj
     machine = {"arm64": "aarch64", "AMD64": "x86_64"}.get(
         platform.machine(), platform.machine()
     )
-    packages = sorted(
-        (
-            d.metadata["Name"],
-            d.version,
-            hashlib.sha256((d.read_text("RECORD") or "").encode()).hexdigest(),
-        )
-        for d in importlib.metadata.distributions()
-        if d.metadata["Name"] != "ermao-books-api-python"
-    )
     system = (
         subprocess.check_output(
             ["dpkg-query", "-W", "-f=${binary:Package}=${Version}\\n"], text=True
@@ -48,7 +38,7 @@ def snapshot(native_libraries: list[Path], base_path: str = "") -> dict[str, obj
         sysconfig.get_config_var("LIBDIR")
     ) / sysconfig.get_config_var("LDLIBRARY")
     inventory = {
-        "launcher_protocol": 1,
+        "launcher_protocol": 2,
         "web_base_path": base_path,
         "python": platform.python_version(),
         "abi": sysconfig.get_config_var("SOABI"),
@@ -56,7 +46,6 @@ def snapshot(native_libraries: list[Path], base_path: str = "") -> dict[str, obj
         "python_library": digest(python_library) if python_library.is_file() else None,
         "node_binary": digest(Path(node)),
         "system": sorted(system.splitlines()),
-        "python_packages": packages,
         "native": {path.name: digest(path) for path in native_libraries},
     }
     fingerprint = hashlib.sha256(
@@ -94,7 +83,10 @@ def main() -> None:
         (args.program_root / "apps/api-python/pyproject.toml").read_text()
     )["project"]["version"]
     (args.program_root / "application.json").write_text(
-        json.dumps({"version": version, "environment": result["environment"]}) + "\n"
+        json.dumps(
+            {"version": version, "environment": result["environment"], "protocol": 2}
+        )
+        + "\n"
     )
 
 

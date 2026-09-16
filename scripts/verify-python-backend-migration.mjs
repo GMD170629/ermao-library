@@ -147,8 +147,9 @@ expectIncludes('docker-compose.yml', '${LIBRARY_HOST_PATH:-./library}:/libraries
 expectIncludes('docker-compose.prod.yml', '${LIBRARY_HOST_PATH:-./library}:/libraries/books');
 expectIncludes('docker-compose.yml', '/path/to/another-library:/libraries/another');
 expectIncludes('docker-compose.prod.yml', '/path/to/another-library:/libraries/another');
-expectIncludes('docker-compose.prod.yml', 'scripts/start-unified-app.sh');
-expectIncludes('scripts/start-unified-app.sh', 'python -m app.bootstrap.prestart');
+expectIncludes('docker-compose.prod.yml', '/usr/local/bin/python3.11');
+expectIncludes('docker-compose.prod.yml', '/opt/shuku-launcher/container-entry.py');
+expectIncludes('scripts/start-unified-app.sh', '"$BUSINESS_PYTHON" -m app.bootstrap.prestart');
 expectNotIncludes('docker-compose.yml', 'ADMIN_EMAIL');
 expectNotIncludes('docker-compose.yml', 'ADMIN_PASSWORD');
 expectNotIncludes('docker-compose.prod.yml', 'ADMIN_EMAIL');

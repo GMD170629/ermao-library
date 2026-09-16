@@ -541,14 +541,16 @@ def test_program_version_change_does_not_change_fixed_environment(
         read_text=lambda _: "app-record",
     )
     monkeypatch.setattr(
-        builder.importlib.metadata,
+        __import__("importlib.metadata", fromlist=["metadata"]),
         "distributions",
         lambda: [*distributions, application],
     )
     before = builder.snapshot([library])
     application.version = "99.0.0"
     assert builder.snapshot([library])["environment"] == before["environment"]
-    library.write_bytes(b"changed dependency")
+    distributions[0].version = "2.0"
+    assert builder.snapshot([library])["environment"] == before["environment"]
+    library.write_bytes(b"changed fixed native dependency")
     assert builder.snapshot([library])["environment"] != before["environment"]
 
 
@@ -607,6 +609,15 @@ def test_fixed_environment_comes_from_fixed_metadata_not_package(
     with (state / "launcher.lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         assert detection.fixed_environment(storage) == source[0].package.environment
+        fixed.write_text(
+            json.dumps(
+                {
+                    "environment": source[0].package.environment.model_dump(),
+                    "inventory": {"launcher_protocol": 2},
+                }
+            )
+        )
+        assert detection.fixed_environment(storage) is None
         fixed.unlink()
         assert detection.fixed_environment(storage) is None
     assert detection.fixed_environment(storage) is None
@@ -785,3 +796,22 @@ def test_runtime_information_uses_actual_backend_and_requires_login(
         "supported": True,
     }
     assert client.get("/api/updates/status").status_code == 403
+
+
+def test_protocol_two_cannot_be_parsed_as_legacy_package(source):
+    from pydantic import ValidationError
+
+    from app.modules.updates.application.models import ApplicationIdentity, Package
+
+    package = source[0].package.model_dump()
+    package["format"] = 2
+    with pytest.raises(ValidationError):
+        Package.model_validate(package)
+    with pytest.raises(ValidationError):
+        ApplicationIdentity.model_validate(
+            {
+                "version": source[0].package.version,
+                "environment": source[0].package.environment.model_dump(),
+                "protocol": 2,
+            }
+        )
