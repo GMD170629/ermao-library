@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -13,6 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from dependency_packages import canonical_digest, digest
+
 from shuku_dependencies.installed import (
     bounded_json,
     collect_target,
@@ -288,6 +290,20 @@ class DependencyInstallation:
                         str(self.work / package["artifact"]["filename"]),
                     ],
                 )
+        # Only ancestors of removed leaves may become obsolete layout.
+        directories: set[Path] = set()
+
+        def remove_leaf(name: str) -> None:
+            path = safe_destination(self.runtime, name)
+            path.unlink()
+            for parent in path.parents:
+                if (
+                    parent == self.runtime
+                    or "node_modules" not in parent.relative_to(self.runtime).parts
+                ):
+                    break
+                directories.add(parent)
+
         # Remove owned leaves only. Never rmtree a package containing kept children.
         for k in removed:
             package = self.old[k]
@@ -295,13 +311,27 @@ class DependencyInstallation:
                 self.log_node("remove", package)
                 for name in package["files"]:
                     self.check_cancelled()
-                    safe_destination(self.runtime, name).unlink()
+                    remove_leaf(name)
         old_links = {x["path"]: x["target"] for x in self.local["node_links"]}
         new_links = {x["path"]: x["target"] for x in self.target["node_links"]}
         for name, target in old_links.items():
             path = safe_destination(self.runtime, name)
             if new_links.get(name) != target and path.is_symlink():
-                path.unlink()
+                remove_leaf(name)
+        # Vacate old directories before file/link type transitions. Nonempty parents
+        # retain their kept nested instances; unrelated empty directories are untouched.
+        for path in sorted(directories, key=lambda p: len(p.parts), reverse=True):
+            relative = path.relative_to(self.runtime).as_posix()
+            if relative in self.target["node_scopes"]:
+                continue
+            safe_destination(self.runtime, relative)
+            if path.is_symlink():
+                raise DependencyInstallError("UNSAFE_STORAGE")
+            try:
+                path.rmdir()
+            except OSError as error:
+                if error.errno not in (errno.ENOTEMPTY, errno.EEXIST):
+                    raise
         for k in self.delta["install"]:
             package = self.new[k]
             if package["ecosystem"] != "node":
@@ -330,20 +360,6 @@ class DependencyInstallation:
                 continue
             path.parent.mkdir(parents=True, exist_ok=True)
             path.symlink_to(target)
-        # Empty obsolete directories are layout, not package contents.
-        for directory, dirs, files in os.walk(
-            self.runtime, topdown=False, followlinks=False
-        ):
-            path = Path(directory)
-            relative = path.relative_to(self.runtime).as_posix()
-            if (
-                "node_modules" in path.relative_to(self.runtime).parts
-                and relative not in self.target["node_scopes"]
-            ):
-                try:
-                    path.rmdir()
-                except OSError:
-                    pass  # Nonempty directories (including kept nested packages) remain.
         for scope in self.target["node_scopes"]:
             safe_destination(self.runtime, scope).mkdir(parents=True, exist_ok=True)
         self.result = collect_target(self.storage, self.target)

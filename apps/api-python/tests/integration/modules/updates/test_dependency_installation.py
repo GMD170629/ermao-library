@@ -264,16 +264,25 @@ def test_node_parent_removal_preserves_nested_instance_and_links(
     )
     for name in ("package.json", "index.js"):
         (p.image / "node_modules/b" / name).unlink()
-    nested = p.storage / "runtime/node_modules/b/node_modules/@scope/same/index.js"
-    before = (nested.read_bytes(), nested.stat().st_ino, nested.stat().st_mtime_ns)
+    nested_files = [
+        file
+        for parent in ("b", "d")
+        for file in (p.storage / f"runtime/node_modules/{parent}/node_modules").rglob(
+            "*"
+        )
+        if file.is_file()
+    ]
+    before = {
+        file: (file.read_bytes(), file.stat().st_ino, file.stat().st_mtime_ns)
+        for file in nested_files
+    }
     installer = prepare_install(p, downloads, monkeypatch)
     installer.synchronize_code()
     installer.apply()
-    assert before == (
-        nested.read_bytes(),
-        nested.stat().st_ino,
-        nested.stat().st_mtime_ns,
-    )
+    assert before == {
+        file: (file.read_bytes(), file.stat().st_ino, file.stat().st_mtime_ns)
+        for file in nested_files
+    }
     assert (
         p.storage / "runtime/node_modules/alias/index.js"
     ).read_text() == 'module.exports="1"'
@@ -357,3 +366,137 @@ def test_wheel_installation_paths_cannot_overwrite_keep(
         )
     assert prepare.snapshot(p.storage) == before
     assert not (p.storage / "update-tmp/install-request.json").exists()
+
+
+@pytest.mark.parametrize("transition", ["link", "file"])
+def test_node_directory_type_transition(installed, downloads, monkeypatch, transition):
+    p = installed
+    runtime = p.storage / "runtime"
+    if transition == "file":
+        for root in (p.image, runtime):
+            data = root / "node_modules/b/data"
+            data.mkdir()
+            (data / "old.txt").write_text("obsolete")
+    local = generate(runtime, p.seed)
+    record = p.storage / "dependencies/installed.json"
+    record.write_text(
+        json.dumps(
+            {
+                **local,
+                "python_records": installed_records(p.storage / "dependencies/python"),
+            }
+        )
+    )
+    previous_record = record.read_bytes()
+    before = keep_snapshot(p.storage)
+    protected = {
+        name: (p.storage / name).read_bytes()
+        for name in (
+            "database/shuku.sqlite3",
+            "secrets/session-secret",
+            "covers/book",
+            "books/book",
+            "configuration",
+        )
+    }
+    (runtime / ".initialized").write_text("1\n")
+    # No removed leaf belongs to this directory: the installer must leave it alone.
+    unrelated = runtime / "node_modules/a/empty"
+    unrelated.mkdir()
+    unrelated_stat = unrelated.stat()
+    if transition == "link":
+        shutil.rmtree(p.image / "node_modules/b")
+        prepare.node(p.image, "b", "2", "node_modules/.pnpm/b@2/node_modules/b")
+        (p.image / "node_modules/b").symlink_to(".pnpm/b@2/node_modules/b")
+    else:
+        shutil.rmtree(p.image / "node_modules/b/data")
+        (p.image / "node_modules/b/data").write_text("new regular file")
+    installer = prepare_install(p, downloads, monkeypatch)
+    installer.synchronize_code()
+    installer.apply()
+    if transition == "link":
+        link = runtime / "node_modules/b"
+        assert link.is_symlink()
+        assert os.readlink(link) == ".pnpm/b@2/node_modules/b"
+        assert (link / "index.js").read_text() == 'module.exports="2"'
+        assert json.loads((link / "package.json").read_text())["version"] == "2"
+    else:
+        data = runtime / "node_modules/b/data"
+        assert data.is_file() and not data.is_symlink()
+        assert data.read_text() == "new regular file"
+    assert installer.result["identity"] == installer.target["identity"]
+    assert before == keep_snapshot(p.storage)
+    assert record.read_bytes() == previous_record  # Only later health checks commit it.
+    assert (runtime / ".initialized").read_text() == "1\n"
+    assert protected == {name: (p.storage / name).read_bytes() for name in protected}
+    assert (unrelated.stat().st_ino, unrelated.stat().st_mtime_ns) == (
+        unrelated_stat.st_ino,
+        unrelated_stat.st_mtime_ns,
+    )
+    print(
+        f"Node directory -> {transition}: uid={os.getuid()}, target verified; keep bytes/inode/mtime unchanged"
+    )
+
+
+@pytest.mark.parametrize("transition", ["file", "link"])
+def test_node_type_conflict_with_kept_nested_instance_rejected(
+    installed, downloads, transition
+):
+    p = installed
+    for root in (p.image, p.storage / "runtime"):
+        prepare.node(root, "nested", "1", "node_modules/b/data/node_modules/nested")
+    local = generate(p.storage / "runtime", p.seed)
+    (p.storage / "dependencies/installed.json").write_text(
+        json.dumps(
+            {
+                **local,
+                "python_records": installed_records(p.storage / "dependencies/python"),
+            }
+        )
+    )
+    p.build()
+    # A conflicting manifest cannot be represented by a real filesystem. Inject
+    # it at the HTTP asset boundary, retaining the nested instance as a keep target.
+    manifest_path = p.output / p.reference.filename
+    manifest = json.loads(manifest_path.read_text())
+    dependencies = manifest["dependencies"]
+    if transition == "file":
+        package = next(
+            x for x in dependencies["packages"] if x["location"] == "node_modules/b"
+        )
+        package["files"].append("node_modules/b/data")
+    else:
+        dependencies["node_links"].append(
+            {"path": "node_modules/b/data", "target": "../a"}
+        )
+    dependencies["identity"] = prepare.canonical_digest(
+        {k: v for k, v in dependencies.items() if k != "identity"}
+    )
+    manifest_path.write_text(json.dumps(manifest))
+    p.reference = p.reference.model_copy(
+        update={
+            "size": manifest_path.stat().st_size,
+            "sha256": prepare.digest(manifest_path),
+        }
+    )
+    before = prepare.snapshot(p.storage)
+    keep = keep_snapshot(p.storage)
+    nested = p.storage / "runtime/node_modules/b/data/node_modules/nested/index.js"
+    nested_before = (
+        nested.read_bytes(),
+        nested.stat().st_ino,
+        nested.stat().st_mtime_ns,
+    )
+    downloads.updates.prepare(True, "1.0.4")
+    state = prepare.finish(downloads)
+    assert state.phase == "failed"
+    assert state.error == "INVALID_MANIFEST"
+    assert prepare.snapshot(p.storage) == before
+    assert keep_snapshot(p.storage) == keep
+    assert (
+        nested.read_bytes(),
+        nested.stat().st_ino,
+        nested.stat().st_mtime_ns,
+    ) == nested_before
+    assert not (p.storage / "update-tmp/install-request.json").exists()
+    assert not (p.storage / "update-tmp/installation-incomplete").exists()

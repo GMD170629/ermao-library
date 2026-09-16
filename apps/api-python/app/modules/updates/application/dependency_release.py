@@ -165,10 +165,12 @@ class DependencySet(UpdateModel):
         links = {link.path: link.target for link in self.node_links}
         if len(links) != len(self.node_links):
             raise ValueError("duplicate link")
-        for file in owners:
-            parts = file.split("/")
-            if any("/".join(parts[:i]) in links for i in range(1, len(parts))):
-                raise ValueError("file under link")
+        leaves = owners | links.keys()
+        for path in leaves | scopes:
+            parts = path.split("/")
+            ancestors = {"/".join(parts[:i]) for i in range(1, len(parts))}
+            if ancestors & leaves:
+                raise ValueError("file or scope under file/link")
         for path, target in links.items():
             if (
                 not safe_path(path)
