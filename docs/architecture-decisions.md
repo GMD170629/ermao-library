@@ -119,6 +119,7 @@
 - v1.0.3、v1.0.4、v1.1.0 按维护者明确要求仅发布 Web／后端 Docker 与 fnOS FPK：跳过移动 workflow、APK 签名与上传，仍校验 FPK 本地和远端摘要，并在通过后发布镜像、Release 与 feed。移动源版本仍同步，但不交付 APK／IPA；此例外不适用于其他版本。
 - v1.1.0 尚未正式公开，维护者于 2026-09-16 明确授权删除草稿及附件，将其标签重建到 GHCR 适配后的发布提交，并重新构建服务端镜像与 FPK；此决定取代此前保留原标签及镜像的恢复约定，仅适用于本次未发布版本。
 - 自 v1.1.0 起更新清单、应用代码与依赖发布到公开 GHCR `ghcr.io/gmd170629/ermao-library-updates`，每架构一个 OCI 制品、每文件独立 blob。feed 使用 `ghcrDependencyReleases` 固定 OCI manifest 摘要，运行时匿名下载并验证文件与安装身份；失败不回退同名 Release 文件。Release 仅保留面向用户的安装包及摘要。公开 Release、提升稳定镜像之前必须匿名校验 GHCR 制品与所有 blob；已有同版本不同内容不得覆盖。旧部署须通过 Docker 或 FPK 手动迁移一次。
+- v1.1.0 运行 `35079716004` 已完成构建、GHCR 匿名校验、镜像推广及 Release 发布，最后 feed 同步因历史 v0.5.0 仅存说明但无 Release 而失败。仅修复发布工具对已存在历史纯说明条目的处理，再同步 feed/Wiki；不重建或移动已公开的 v1.1.0 标签及产物。最新版本或曾有安装元数据的 Release 缺失仍必须失败。
 - 正式提交须同步远端 main 与 develop：fetch 后优先快进；确有分叉时只合并一次，再将另一分支快进到同一提交，不来回制造合并提交、不强推、不夹带冻结后无关改动。新 tag 前两分支必须指向同一发布提交，workflow 预检强制核对 SHA 与版本。发布后的说明修订也按同样方式同步，不能只比较文件内容。已发布 tag 不移动，程序修复用补丁版本，禁止重建或覆盖已发布版本；发布步骤失败时仅重跑失败的 publish job，沿用已有 artifact ID 和镜像摘要，禁止重新运行全部成功构建。最终核对 main/develop/tag/Release/Wiki/release-feed 和日期。
 - develop 相关推送／手动才发布 Android Beta，其他分支／PR 不发布。全部移动检查成功后签名并更新 android-beta；旧运行不覆盖新运行、失败不替换上一版。包名 com.ermao.library.beta，非调试配置，版本追加 -beta.<run_number>、versionCode=100000+run_number，重跑保持安装版本，附件以 SHA/attempt 区分，迁移不能重置计数。标签可变但不作 Latest，不进正式说明／更新源；先上传新验证附件，再更新标签／说明，最后清旧附件，后续成功运行可清中断遗留。
 - 局部修复、集成与冻结 RC 按测试策略分别验证；最终 RC 满足该次完整门禁及设备证据，冻结后变化按影响重验。CI 冒烟不代替真机。

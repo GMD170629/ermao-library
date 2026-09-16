@@ -44,6 +44,13 @@ export function publishedDependencies(release, version, readManifest) {
 export function assembleFeed(index, getRelease, readManifest, ghcr = new Map()) {
   return { ...index, releases: index.releases.map(release => {
     const published = getRelease(release.tag);
+    if (published === null) {
+      if (release === index.releases[0] || ghcr.has(release.version) ||
+          ['appPackages', 'dependencyReleases', 'ghcrDependencyReleases'].some(key => release[key]?.length)) {
+        throw Error('Installable or latest Release is missing');
+      }
+      return release; // Historic notes without install metadata need no binary Release.
+    }
     const read = name => readManifest(release.tag, name);
     const packages = publishedPackages(published, release.version, read);
     const dependencies = publishedDependencies(published, release.version, read);
@@ -58,6 +65,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   try {
     const source = JSON.parse(readFileSync(file, 'utf8'));
     const existing = JSON.parse(Buffer.from(JSON.parse(gh(['api', 'repos/GMD170629/ermao-library/contents/index.json?ref=release-feed'])).content, 'base64').toString('utf8'));
+    const availableTags = new Set(gh(['api', '--paginate', 'repos/GMD170629/ermao-library/releases?per_page=100', '--jq', '.[].tag_name']).trim().split('\n'));
     const ghcr = new Map();
     for (const release of source.releases) {
       if (release.version.split('.').map(Number)[0] > 1 ||
@@ -68,7 +76,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       }
     }
     const index = assembleFeed(source,
-      tag => JSON.parse(gh(['release', 'view', tag, '--repo', 'GMD170629/ermao-library', '--json', 'tagName,isDraft,isPrerelease,assets'])),
+      tag => {
+        if (!availableTags.has(tag)) {
+          const previous = existing.releases.find(item => item.tag === tag);
+          if (!previous || ['appPackages', 'dependencyReleases', 'ghcrDependencyReleases'].some(key => previous[key]?.length)) throw Error(`Published Release disappeared: ${tag}`);
+          return null;
+        }
+        return JSON.parse(gh(['release', 'view', tag, '--repo', 'GMD170629/ermao-library', '--json', 'tagName,isDraft,isPrerelease,assets']));
+      },
       (tag, name) => {
         gh(['release', 'download', tag, '--repo', 'GMD170629/ermao-library', '--pattern', name, '--dir', directory, '--clobber']);
         return readFileSync(join(directory, name));

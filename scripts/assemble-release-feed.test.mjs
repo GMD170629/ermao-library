@@ -91,3 +91,15 @@ test('self-consistent wrong protocol, ABI or base environment is rejected', () =
     assert.throws(f.build,/Invalid dependency release manifest/);
   }
 });
+
+test('archived note-only versions survive missing Releases, but current or installable versions fail', () => {
+  const f = fixture();
+  const historic = { version: '0.5.0', tag: 'v0.5.0', notesPath: 'v0.5.0.md' };
+  f.index.releases.push(historic);
+  const build = () => assembleFeed(f.index, tag => tag === historic.tag ? null : f.release, (_, name) => f.manifests.get(name));
+  assert.deepEqual(build().releases[1], historic);
+  historic.appPackages = [{}];
+  assert.throws(build, /missing/);
+  assert.throws(() => assembleFeed(f.index, () => null, () => {}), /missing/);
+  assert.throws(() => assembleFeed(f.index, () => { throw Error('network'); }, () => {}), /network/);
+});

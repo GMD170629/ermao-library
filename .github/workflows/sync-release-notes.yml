@@ -28,9 +28,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          gh api --paginate 'repos/GMD170629/ermao-library/releases?per_page=100' --jq '.[].tag_name' > "$RUNNER_TEMP/published-tags.txt"
           node -e "
             const index = require('./release-notes/index.json');
+            const tags = new Set(require('node:fs').readFileSync(process.env.RUNNER_TEMP + '/published-tags.txt', 'utf8').trim().split('\\n'));
+            if (!tags.has(index.releases[0].tag)) throw new Error('Latest Release is missing');
             for (const release of index.releases) {
+              if (!tags.has(release.tag)) continue;
               process.stdout.write([release.tag, 'release-notes/' + release.notesPath].join('\t') + '\n');
             }
           " > "$RUNNER_TEMP/releases.tsv"
