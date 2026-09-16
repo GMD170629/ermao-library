@@ -19,8 +19,6 @@ from pydantic import Field
 from shuku_dependencies import (
     Package,
     canonical_digest,
-    installed_records,
-    node_packages,
     normalized,
 )
 
@@ -77,32 +75,9 @@ def verify_local(storage: Path) -> tuple[DependencySet, str]:
         raw = read_bounded(storage / "dependencies/installed.json", MAX_INSTALLED)
         local = InstalledSet.model_validate_json(raw)
         target = local.target()
-        config = read_bounded(storage / "dependencies/python/pyvenv.cfg", 8192).decode()
-        if "include-system-site-packages = false" not in config:
-            raise UpdateError("LOCAL_DEPENDENCIES_INVALID")
-        actual_records = installed_records(storage / "dependencies/python")
-        if actual_records != [record.model_dump() for record in local.python_records]:
-            raise UpdateError("LOCAL_RECORDS_DRIFT")
-        expected = {
-            p.name: p.version for p in target.packages if p.ecosystem == "python"
-        }
-        if {
-            record["name"]: record["version"] for record in actual_records
-        } != expected or len(actual_records) != len(expected):
-            raise UpdateError("LOCAL_DEPENDENCIES_INVALID")
-        actual, links, scopes = node_packages(storage / "runtime", None)
-        if (
-            actual != [p for p in target.packages if p.ecosystem == "node"]
-            or links != [link.model_dump() for link in target.node_links]
-            or scopes != target.node_scopes
-        ):
-            raise UpdateError("LOCAL_DEPENDENCIES_INVALID")
-        return target, canonical_digest(
-            {
-                "record_sha256": hashlib.sha256(raw).hexdigest(),
-                "identity": target.identity,
-            }
-        )
+        from shuku_dependencies.installed import verify_current
+
+        return target, verify_current(storage, local.model_dump())
     except UpdateError:
         raise
     except (ValueError, OSError, KeyError, TypeError) as error:

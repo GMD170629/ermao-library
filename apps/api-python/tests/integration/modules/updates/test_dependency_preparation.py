@@ -307,9 +307,9 @@ def test_selective_http_downloads_and_unchanged_business(packages, downloads, cu
     }
     assert before == snapshot(packages.storage)
     assert not (packages.storage / "update-tmp/install-request.json").exists()
-    with pytest.raises(UpdateError, match="INSTALLATION_NOT_SUPPORTED"):
+    with pytest.raises(UpdateError, match="PLAN_CHANGED"):
         downloads.updates.install(True, "1.0.4", packages.reference.sha256)
-    with pytest.raises(UpdateError, match="INSTALLATION_NOT_SUPPORTED"):
+    with pytest.raises(UpdateError, match="PLAN_CHANGED"):
         downloads.worker.install(
             "1.0.4", packages.reference.sha256, packages.reference.environment, "1.0.0"
         )

@@ -7,6 +7,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -187,6 +188,19 @@ class PackageTests(unittest.TestCase):
             "-I",
             str(Path(__file__).with_name("dependency_records.py")),
         ]
+        # -I removes the script directory; the fixed-layout wrapper must restore it.
+        fixed = self.root / "fixed-launcher"
+        fixed.mkdir()
+        shutil.copyfile(
+            Path(__file__).with_name("dependency_records.py"),
+            fixed / "dependency_records.py",
+        )
+        shutil.copytree(
+            Path(__file__).resolve().parents[1] / "apps/api-python/shuku_dependencies",
+            fixed / "shuku_dependencies",
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
+        command[-1] = str(fixed / "dependency_records.py")
         result = subprocess.run(command, capture_output=True, text=True, check=True)
         self.assertEqual(json.loads(result.stdout)[0]["name"], "demo")
         (site / "demo.py").write_bytes(b"modified")
@@ -203,8 +217,11 @@ class ProtocolTests(unittest.TestCase):
     setUp = test_container_install.InstallationTests.setUp
 
     # Reuse installation fixture; test only the new refusal boundaries here.
-    def test_new_protocol_cannot_claim_or_copy(self):
+    def test_new_protocol_needs_verified_plan_and_unknown_protocol_is_rejected(self):
         self.installer.state["target"]["format"] = 2
+        with self.assertRaisesRegex(InstallError, "PLAN_NOT_VERIFIED"):
+            self.installer.synchronize()
+        self.installer.state["target"]["format"] = 3
         with self.assertRaisesRegex(InstallError, "UNSUPPORTED_UPDATE_PROTOCOL"):
             self.installer.synchronize()
         self.installer.state["target"]["format"] = 1

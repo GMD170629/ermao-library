@@ -9,6 +9,7 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from shuku_dependencies import Artifact, Package, canonical_digest, normalized
+from shuku_dependencies.packages import dependency_difference
 
 from .models import (
     MAX_EXPANDED,
@@ -272,12 +273,8 @@ class Difference(UpdateModel):
 
 
 def difference(local: DependencySet, target: DependencySet) -> Difference:
-    old = {package_key(p): p for p in local.packages}
-    new = {package_key(p): p for p in target.packages}
-    return Difference(
-        keep=sorted(key for key, value in new.items() if old.get(key) == value),
-        install=sorted(key for key, value in new.items() if old.get(key) != value),
-        remove=sorted(old.keys() - new.keys()),
+    return Difference.model_validate(
+        dependency_difference(local.model_dump(), target.model_dump())
     )
 
 

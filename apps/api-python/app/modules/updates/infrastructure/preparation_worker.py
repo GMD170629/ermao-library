@@ -16,6 +16,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO
 
+from shuku_dependencies import canonical_digest
+
 from ..application.dependency_release import (
     CodePackage,
     ReleaseManifest,
@@ -181,7 +183,12 @@ class PreparationWorker:
                 raise
 
     def install(
-        self, version: str, sha256: str, environment: Environment, current: str
+        self,
+        version: str,
+        sha256: str,
+        environment: Environment,
+        current: str,
+        plan_sha256: str | None = None,
     ) -> PreparationState:
         import fcntl
         import json
@@ -207,14 +214,28 @@ class PreparationWorker:
             ):
                 raise UpdateError("PACKAGE_NOT_READY")
             if isinstance(state.target, ReleaseReference):
-                raise UpdateError("INSTALLATION_NOT_SUPPORTED")
+                from .install_plan import validate_prepared
+
+                if plan_sha256 is None:
+                    raise UpdateError("PLAN_CHANGED")
+                try:
+                    validate_prepared(self.storage, state, environment, plan_sha256)
+                except UpdateError:
+                    raise
+                except (OSError, ValueError, KeyError, TypeError) as error:
+                    raise UpdateError("INVALID_PREPARED_PLAN") from error
             if state.target.environment != environment:
                 raise UpdateError("INCOMPATIBLE_ENVIRONMENT")
             # Durable reservation under prepare.lock. The fixed entry claims this
             # same lock; preparation checks the reservation before deleting files.
             with request.open("x") as stream:
                 json.dump(
-                    {"target": state.target.model_dump(), "current": current}, stream
+                    {
+                        "target": state.target.model_dump(),
+                        "current": current,
+                        "plan_sha256": plan_sha256,
+                    },
+                    stream,
                 )
                 stream.flush()
                 os.fsync(stream.fileno())
@@ -431,7 +452,12 @@ class PreparationWorker:
                 update={
                     "phase": "ready",
                     "summary": summary.model_copy(
-                        update={"verified_artifacts": len(verified)}
+                        update={
+                            "verified_artifacts": len(verified),
+                            "plan_sha256": canonical_digest(
+                                json.loads((work / "plan.json").read_bytes())
+                            ),
+                        }
                     ),
                 }
             )

@@ -24,6 +24,7 @@ from dependency_environment import (
     business_environment,
     initialize_dependencies,
 )
+from dependency_install import DependencyInstallError
 
 
 class StartupError(RuntimeError):
@@ -86,6 +87,7 @@ def run_application(runtime: Path, storage: Path) -> int:
         "GATEWAY_SERVER": str(runtime / "scripts/unified-http-gateway.mjs"),
     }
     installer = Installation(storage)
+    installer.cancelled = lambda: bool(stop_signal)
     child = None
     forwarded = False
     preflight = None
@@ -147,6 +149,15 @@ def run_application(runtime: Path, storage: Path) -> int:
                 if preflight.returncode != 0:
                     fail("PREFLIGHT_FAILED")
                 else:
+                    try:
+                        installer.verify_dependencies()
+                    except Exception as error:  # noqa: BLE001 - owned preflight boundary
+                        fail(
+                            str(error)
+                            if isinstance(error, (InstallError, DependencyInstallError))
+                            else "PREFLIGHT_FAILED"
+                        )
+                        continue
                     installer.phase("stopping")
                     os.kill(child.pid, signal.SIGUSR1)
                     deadline = time.monotonic() + 120
@@ -169,10 +180,10 @@ def run_application(runtime: Path, storage: Path) -> int:
                 except Exception as error:  # noqa: BLE001 - owned installation boundary
                     fail(
                         str(error)
-                        if isinstance(error, InstallError)
+                        if isinstance(error, (InstallError, DependencyInstallError))
                         else "INSTALLATION_FAILED"
                     )
-                    return 1
+                    return 128 + stop_signal if stop_signal else 1
             elif time.monotonic() >= deadline:
                 fail("STOP_TIMEOUT")
                 # No kill or restart: retain the old process group until it exits
@@ -189,11 +200,12 @@ def run_application(runtime: Path, storage: Path) -> int:
             ):
                 try:
                     installer.success()
-                except OSError:
+                except (OSError, ValueError, DependencyInstallError, InstallError):
                     fail("RESULT_WRITE_FAILED")
                     os.kill(child.pid, signal.SIGTERM)
                 else:
                     installer = Installation(storage)
+                    installer.cancelled = lambda: bool(stop_signal)
                     installing = False
                     stopped = False
         elif (  # noqa: SIM102
@@ -223,7 +235,7 @@ def run_application(runtime: Path, storage: Path) -> int:
                     if installer.state is not None:
                         fail(
                             str(error)
-                            if isinstance(error, InstallError)
+                            if isinstance(error, (InstallError, DependencyInstallError))
                             else "PREFLIGHT_FAILED"
                         )
                     else:

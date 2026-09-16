@@ -13,6 +13,7 @@ from app.modules.updates.application.models import (
     Environment,
     Package,
     PreparationState,
+    ReleaseReference,
     UpdateError,
     version_parts,
 )
@@ -27,7 +28,9 @@ def validate() -> None:
     state = PreparationState.model_validate_json(
         (state_root / "preparation.json").read_bytes()
     )
-    package = Package.model_validate(request["target"])
+    package = (
+        ReleaseReference if request["target"].get("format") == 2 else Package
+    ).model_validate(request["target"])
     environment = Environment.model_validate(
         json.loads(Path("/opt/shuku-launcher/environment.json").read_bytes())[
             "environment"
@@ -41,6 +44,13 @@ def validate() -> None:
         package.version
     ) <= version_parts(settings.app_version):
         raise UpdateError("NOT_NEWER")
+    if isinstance(package, ReleaseReference):
+        from app.modules.updates.infrastructure.install_plan import validate_prepared
+
+        validate_prepared(
+            storage, state, environment, request["plan_sha256"], extract=True
+        )
+        return
     work = state_root / "prepared"
     archive = work / "application.tar.gz"
     if work.is_symlink() or archive.is_symlink():

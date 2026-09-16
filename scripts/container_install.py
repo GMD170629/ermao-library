@@ -12,6 +12,8 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
+from dependency_install import DependencyInstallation
+
 
 class InstallError(RuntimeError):
     pass
@@ -43,6 +45,8 @@ class Installation:
         self.runtime = storage / "runtime"
         self.lock = None
         self.state = None
+        self.dependencies = None
+        self.cancelled = lambda: False
 
     def claim(self) -> bool:
         request = self.root / "install-request.json"
@@ -99,8 +103,9 @@ class Installation:
     def reject_package_protocol(self) -> None:
         target = self.state["target"] if self.state else {}
         identity = self.runtime / "application.json"
-        if target.get("format", 1) != 1 or (
-            identity.is_file() and read_json(identity).get("protocol", 1) != 1
+        protocol = target.get("format", 1)
+        if protocol not in (1, 2) or (
+            identity.is_file() and read_json(identity).get("protocol", 1) != protocol
         ):
             raise InstallError("UNSUPPORTED_UPDATE_PROTOCOL")
 
@@ -121,24 +126,48 @@ class Installation:
         if not os.access(self.runtime, os.W_OK | os.X_OK):
             raise InstallError("RUNTIME_NOT_WRITABLE")
 
+    def verify_dependencies(self) -> None:
+        if self.state["target"].get("format", 1) == 2:
+            self.dependencies = DependencyInstallation(
+                self.storage,
+                read_json(self.root / "install-request.json"),
+                self.state,
+                Path(__file__).with_name("environment.json"),
+                cancelled=self.cancelled,
+            )
+            self.dependencies.verify_code()
+
     def backup(self) -> None:
+        self.verify_dependencies()
         self.phase("backup")
         backup_database(self.storage, self.root / "database-before-update.sqlite3")
 
     def synchronize(self) -> None:
         self.check_paths()
+        if self.state["target"].get("format", 1) == 2 and self.dependencies is None:
+            raise InstallError("PLAN_NOT_VERIFIED")
         source = self.root / "prepared/app"
         if source.is_symlink() or not source.is_dir():
             raise InstallError("UNSAFE_SOURCE")
         identity = source / "application.json"
-        if identity.is_file() and read_json(identity).get("protocol", 1) != 1:
+        if identity.is_file() and read_json(identity).get("protocol", 1) != self.state[
+            "target"
+        ].get("format", 1):
             raise InstallError("UNSUPPORTED_UPDATE_PROTOCOL")
+        if self.dependencies is not None:
+            self.dependencies.recheck()
+            self.dependencies.verify_code()
         # Old processes are gone. Remove entries without following target links,
         # then copy the already validated tree; .initialized is launcher-owned.
         write_json(
             self.root / "installation-incomplete", {"target": self.state["target"]}
         )
         self.phase("copying")
+        if self.dependencies is not None:
+            self.dependencies.check_cancelled()
+            self.dependencies.synchronize_code()
+            self.dependencies.apply()
+            return
         for path in self.runtime.iterdir():
             if path.name == ".initialized":
                 continue
@@ -149,6 +178,15 @@ class Installation:
         shutil.copytree(source, self.runtime, symlinks=True, dirs_exist_ok=True)
 
     def success(self) -> None:
+        if self.dependencies is not None:
+            if self.dependencies.result is None:
+                raise InstallError("DEPENDENCIES_NOT_VERIFIED")
+            from shuku_dependencies.installed import collect_target
+
+            actual = collect_target(self.storage, self.dependencies.target)
+            if actual != self.dependencies.result:
+                raise InstallError("DEPENDENCIES_CHANGED_DURING_STARTUP")
+            write_json(self.storage / "dependencies/installed.json", actual)
         self.phase("success")
         (self.root / "installation-incomplete").unlink()
         (self.root / "install-request.json").unlink()

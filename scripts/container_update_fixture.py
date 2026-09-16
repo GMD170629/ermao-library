@@ -24,6 +24,7 @@ from app.models import Library, ReaderResourceProgress, SystemSetting, User
 from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryBook,
     LibraryReadableResource,
+    LibraryResourceAsset,
     LibrarySourceNode,
 )
 from app.modules.updates.application.models import Environment
@@ -89,6 +90,18 @@ def main():
         )
         db.flush()
         db.add(
+            LibraryResourceAsset(
+                id="acceptance-asset",
+                library_id="acceptance",
+                resource_id="acceptance-resource",
+                source_node_id="acceptance-node",
+                source_node_physical_kind="REGULAR_FILE",
+                role="PRIMARY",
+                import_state="READY",
+            )
+        )
+        db.flush()
+        db.add(
             ReaderResourceProgress(
                 id="acceptance-progress",
                 user_id=user.id,
@@ -124,7 +137,7 @@ def main():
     ):
         path = root / name
         path.write_text(path.read_text().replace(current, version))
-    if "--build-only" in sys.argv:
+    if "--build-only" in sys.argv and "--dependencies" not in sys.argv:
         # Real B Next build, including the matching service worker and static assets.
         web = Path("/acceptance-web")
         assert (
@@ -159,7 +172,42 @@ def main():
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    package = module.build_package(root, root.parent / "output")
+    if "--dependencies" in sys.argv:
+        from app.modules.updates.application.models import ReleaseReference
+        from dependency_update_fixture import target_dependencies
+
+        seed = root.parent / "dependency-seed"
+        shutil.copytree("/opt/shuku-dependency-seed", seed)
+        target_dependencies(root, seed)
+        health.write_text(
+            health.read_text().replace(
+                '    response.headers["X-Acceptance-Code"]',
+                '    from d3_namespace.b import VALUE\n    response.headers["X-Acceptance-Dependency"] = str(VALUE)\n    response.headers["X-Acceptance-Code"]',
+            )
+        )
+        health.write_text(
+            health.read_text().replace(
+                '    response.headers["X-Acceptance-Code"]',
+                '    from d3_namespace.b import VALUE\n    response.headers["X-Acceptance-Dependency"] = str(VALUE)\n    response.headers["X-Acceptance-Code"]',
+            )
+        )
+        migration = root / "apps/api-python/app/db/alembic/versions/acceptance_only.py"
+        migration.write_text(
+            migration.read_text().replace(
+                "def upgrade():",
+                "def upgrade():\n    from d3_namespace.b import VALUE\n    from d3_namespace.e import VALUE as ADDED\n    assert VALUE == 2 and ADDED == 1",
+            )
+        )
+        package = ReleaseReference.model_validate(
+            module.build_release(
+                root,
+                root.parent / "output",
+                seed,
+                Path("/opt/shuku-launcher/environment.json"),
+            )
+        )
+    else:
+        package = module.build_package(root, root.parent / "output")
     body = (root.parent / "output" / package.filename).read_bytes()
     feed = {
         "schemaVersion": 1,
@@ -171,7 +219,11 @@ def main():
                 "notesPath": f"v{version}.md",
                 "publishedAt": "2026-09-15T00:00:00Z",
                 "releaseUrl": f"https://github.com/GMD170629/ermao-library/releases/tag/v{version}",
-                "appPackages": [package.model_dump()],
+                (
+                    "dependencyReleases"
+                    if "--dependencies" in sys.argv
+                    else "appPackages"
+                ): [package.model_dump()],
             }
         ],
     }

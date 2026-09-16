@@ -58,6 +58,24 @@ def normalized(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
+def dependency_key(package: dict) -> str:
+    return (
+        "python:" + normalized(package["name"])
+        if package["ecosystem"] == "python"
+        else "node:" + package["location"]
+    )
+
+
+def dependency_difference(local: dict, target: dict) -> dict[str, list[str]]:
+    old = {dependency_key(p): p for p in local["packages"]}
+    new = {dependency_key(p): p for p in target["packages"]}
+    return {
+        "keep": sorted(k for k in new if old.get(k) == new[k]),
+        "install": sorted(k for k in new if old.get(k) != new[k]),
+        "remove": sorted(old.keys() - new.keys()),
+    }
+
+
 def python_packages(wheels: Path) -> list[Package]:
     packages = []
     names = set()

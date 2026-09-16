@@ -16,6 +16,7 @@ export type Environment = {
 
 export type InstallRequest = {
   version: string;
+  plan_sha256?: string | null;
   sha256: string;
 };
 
@@ -42,6 +43,7 @@ export type PreparationState = {
 };
 
 export type PreparationSummary = {
+  plan_sha256?: string | null;
   dependency_identity: string;
   baseline: string;
   code_sha256: string;

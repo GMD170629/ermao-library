@@ -61,6 +61,21 @@ if Path('/acceptance-only').exists() and Path.cwd().name == 'api-python':
     assembly.OfficialHTTP = lambda: OfficialHTTP(urllib.request.build_opener(urllib.request.ProxyHandler({{}}), OfficialRedirects(), LocalHTTPS()))
 """)
 
+    def inject_module(self, path: Path):
+        # Only copied into an isolated acceptance image, never production source.
+        with path.open("a") as output:
+            output.write(f"""
+
+def _acceptance_transport():
+    import http.client, urllib.request
+    from app.modules.updates.infrastructure.official_source import OfficialHTTP, OfficialRedirects
+    class LocalHTTPS(urllib.request.HTTPSHandler):
+        def https_open(self, request):
+            return self.do_open(lambda host, **kw: http.client.HTTPConnection('host.docker.internal', {self.server.server_port}, **kw), request)
+    return OfficialHTTP(urllib.request.build_opener(urllib.request.ProxyHandler({{}}), OfficialRedirects(), LocalHTTPS()))
+OfficialHTTP = _acceptance_transport
+""")
+
     def close(self):
         self.release_download.set()
         self.server.shutdown()

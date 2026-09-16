@@ -24,7 +24,12 @@ class PreparationPort(Protocol):
     def submit(self, package: Package | ReleaseReference) -> PreparationState: ...
     def status(self) -> PreparationState: ...
     def install(
-        self, version: str, sha256: str, environment: Environment, current: str
+        self,
+        version: str,
+        sha256: str,
+        environment: Environment,
+        current: str,
+        plan_sha256: str | None = None,
     ) -> PreparationState: ...
 
 
@@ -95,16 +100,20 @@ class UpdatePreparation:
         raise UpdateError("PACKAGE_UNAVAILABLE")
 
     def install(
-        self, can_manage_system: bool, version: str, sha256: str
+        self,
+        can_manage_system: bool,
+        version: str,
+        sha256: str,
+        plan_sha256: str | None = None,
     ) -> PreparationState:
         self.authorize(can_manage_system)
         if self.environment is None:
             raise UpdateError("UNSUPPORTED_DEPLOYMENT")
-        if self.protocol == 2:
-            raise UpdateError("INSTALLATION_NOT_SUPPORTED")
         if version_parts(version) <= version_parts(self.current):
             raise UpdateError("NOT_NEWER")
-        return self.worker.install(version, sha256, self.environment, self.current)
+        return self.worker.install(
+            version, sha256, self.environment, self.current, plan_sha256
+        )
 
     def status(self, can_manage_system: bool) -> PreparationState:
         self.authorize(can_manage_system)

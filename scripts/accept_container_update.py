@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import http.cookiejar
+import io
 import json
 import shutil
 import sqlite3
@@ -13,7 +14,9 @@ import subprocess
 import tempfile
 import time
 import urllib.request
+import urllib.response
 import uuid
+from email.message import Message
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,10 +42,18 @@ def main():
         "--web-image",
         help="Prebuilt Dockerfile builder stage for isolated version B (required with --browser)",
     )
+    parser.add_argument(
+        "--dependencies",
+        action="store_true",
+        help="Explicit D3 real dependency update via administrator API",
+    )
     args = parser.parse_args()
     if args.browser and not args.web_image:
         parser.error("--browser requires a real B Web builder image via --web-image")
-    docker("image", "inspect", args.image)
+    image_id = docker("images", "--quiet", args.image)
+    if not image_id:
+        raise RuntimeError("prebuilt local image required")
+    docker("image", "inspect", image_id)
     name = "shuku-update-" + uuid.uuid4().hex[:10]
     # Use Docker's native Linux volume for SQLite and flock, not a macOS file share.
     volume = name + "-storage"
@@ -97,6 +108,47 @@ def main():
                 "-v",
                 f"{web}:/acceptance-web:ro",
             ]
+        if args.dependencies:
+            from container_update_source import AcceptanceSource
+
+            output = root / "packages"
+            output.mkdir()
+            source = AcceptanceSource(output)
+            context = root / "image-context"
+            context.mkdir()
+            shutil.copytree(
+                ROOT / "apps/api-python/app",
+                context / "app",
+                ignore=shutil.ignore_patterns("__pycache__"),
+            )
+            shutil.copytree(
+                ROOT / "apps/api-python/shuku_dependencies",
+                context / "shuku_dependencies",
+                ignore=shutil.ignore_patterns("__pycache__"),
+            )
+            source.inject_module(context / "app/bootstrap/updates.py")
+            for filename in (
+                "container-entry.py",
+                "container_install.py",
+                "dependency_install.py",
+                "dependency_environment.py",
+                "dependency_packages.py",
+                "dependency_records.py",
+                "dependency_update_fixture.py",
+            ):
+                shutil.copyfile(ROOT / "scripts" / filename, context / filename)
+            (context / "Dockerfile").write_text(f"""FROM {args.image}
+USER root
+COPY app /opt/shuku-image/apps/api-python/app
+COPY shuku_dependencies /opt/shuku-image/apps/api-python/shuku_dependencies
+COPY shuku_dependencies /opt/shuku-launcher/shuku_dependencies
+COPY container-entry.py container_install.py dependency_install.py dependency_environment.py dependency_packages.py dependency_records.py /opt/shuku-launcher/
+COPY dependency_update_fixture.py /opt/dependency_update_fixture.py
+RUN /usr/local/bin/python3.11 /opt/dependency_update_fixture.py
+""")
+            derived = name + "-image"
+            docker("build", "--network=none", "-t", derived, str(context))
+            args.image = derived
         # Only the disposable Linux test volume is chowned, never the user library.
         docker(
             "run",
@@ -140,7 +192,21 @@ def main():
                 urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
             )
 
+            offline_api = False
+
             def request(path, payload=None):
+                if offline_api:
+                    code = f"import urllib.request,json; r=urllib.request.Request('http://127.0.0.1:3000'+{path!r},data=(json.dumps({payload!r}).encode() if {payload is not None!r} else None),headers={{'Content-Type':'application/json','Cookie':{cookies!r}}}); s=urllib.request.urlopen(r,timeout=30); print(json.dumps({{'body':s.read().hex(),'status':s.status,'headers':dict(s.headers)}}))"
+                    result = json.loads(docker("exec", name, "python", "-c", code))
+                    headers = Message()
+                    for key, value in result["headers"].items():
+                        headers[key] = value
+                    return urllib.response.addinfourl(
+                        io.BytesIO(bytes.fromhex(result["body"])),
+                        headers,
+                        base + path,
+                        result["status"],
+                    )
                 data = json.dumps(payload).encode() if payload is not None else None
                 return client.open(
                     urllib.request.Request(
@@ -204,13 +270,14 @@ def main():
                 "-w",
                 "/app/storage/runtime/apps/api-python",
                 name,
-                "python",
+                "/app/storage/dependencies/python/bin/python",
                 "/tooling/scripts/container_update_fixture.py",
-                *(["--build-only"] if args.browser else []),
+                *(["--build-only"] if args.browser or args.dependencies else []),
+                *(["--dependencies"] if args.dependencies else []),
             )
             identity = json.loads(fixture.splitlines()[-1])
             target = identity["target"]
-            if source is not None:
+            if args.browser:
                 docker("cp", name + ":/tmp/update-fixture/output/.", str(output))
                 (output / f"v{target}.md").write_text(
                     "<!-- shuku:locale=zh-CN:start -->\n隔离验收更新\n<!-- shuku:locale=zh-CN:end -->\n<!-- shuku:locale=en-US:start -->\nIsolated acceptance update\n<!-- shuku:locale=en-US:end -->"
@@ -270,6 +337,62 @@ def main():
                     f"from pathlib import Path;assert all(Path(f'/proc/{{p}}').exists() for p in {old_pids!r})",
                 )
                 browser("install")
+            elif args.dependencies:
+                docker("cp", name + ":/tmp/update-fixture/output/.", str(output))
+                source.release_download.set()
+                with request("/api/updates/prepare", {"version": target}) as response:
+                    assert response.status == 202
+
+                def dependency_ready():
+                    with request("/api/updates/status") as response:
+                        state = json.load(response)["data"]
+                    assert state["phase"] != "failed", state
+                    return state["phase"] == "ready"
+
+                wait_for(dependency_ready, 300)
+                with request("/api/updates/status") as response:
+                    ready = json.load(response)["data"]
+                keep_code = """from pathlib import Path
+import hashlib
+import json
+s=Path('/app/storage'); record=json.loads((s/'dependencies/installed.json').read_text()); result={}
+for p in record['packages']:
+    if p['ecosystem']=='node' and p['name']!='client-only':
+        for name in p['files']:
+            f=s/'runtime'/name
+            if not f.is_symlink(): result[str(f)]=[hashlib.sha256(f.read_bytes()).hexdigest(),f.stat().st_ino,f.stat().st_mtime_ns]
+for record in record['python_records']:
+    if record['name'] not in ['d3-b','d3-c']:
+        for f in record['files']:
+            p=s/'dependencies/python'/f['path']; result[str(p)]=[hashlib.sha256(p.read_bytes()).hexdigest(),p.stat().st_ino,p.stat().st_mtime_ns]
+Path("/tmp/d3-kept.json").write_text(json.dumps(result,sort_keys=True)); print(len(result))
+"""
+                docker("exec", name, "python", "-c", keep_code)
+                # Remove all original wheels/cache; no implicit full installation is possible.
+                docker(
+                    "exec",
+                    "--user",
+                    "0:0",
+                    name,
+                    "sh",
+                    "-c",
+                    "rm -rf /opt/shuku-dependency-seed/wheels /tmp/update-fixture/dependency-seed /tmp/update-fixture/output /root/.cache/uv",
+                )
+                cookies = "; ".join(
+                    f"{c.name}={c.value}"
+                    for handler in client.handlers
+                    if isinstance(handler, urllib.request.HTTPCookieProcessor)
+                    for c in handler.cookiejar
+                )
+                docker("network", "disconnect", "bridge", name)
+                offline_api = True
+                payload = {
+                    "version": target,
+                    "sha256": identity["sha256"],
+                    "plan_sha256": ready["summary"]["plan_sha256"],
+                }
+                code = f"import urllib.request,json; r=urllib.request.Request('http://127.0.0.1:3000/api/updates/install',data=json.dumps({payload!r}).encode(),headers={{'Content-Type':'application/json','Cookie':{cookies!r}}}); print(urllib.request.urlopen(r,timeout=60).status)"
+                assert docker("exec", name, "python", "-c", code) == "202"
             else:
                 with request(
                     "/api/updates/install",
@@ -288,11 +411,40 @@ def main():
                 return state["phase"] == "success"
 
             wait_for(installed, 300)
-            if source is not None:
+            if args.dependencies:
+                # Compare exactly the pre-update keep files (the final set also contains E).
+                check = "import json,hashlib; from pathlib import Path; old=json.loads(Path('/tmp/d3-kept.json').read_text()); assert all([hashlib.sha256(Path(p).read_bytes()).hexdigest(),Path(p).stat().st_ino,Path(p).stat().st_mtime_ns]==v for p,v in old.items()); print(len(old))"
+                kept_count = docker("exec", name, "python", "-c", check)
+                print("D3 kept files with identical digest/inode/mtime:", kept_count)
+                print(
+                    docker(
+                        "exec", name, "cat", "/app/storage/update-tmp/installation.log"
+                    )
+                )
+                docker("network", "connect", "bridge", name)
+            if args.browser:
                 browser("verify")
             docker("cp", name + ":/app/storage/.", str(storage))
             with request("/api/health") as response:
                 assert response.headers["X-Acceptance-Code"] == "B"
+                if args.dependencies:
+                    assert response.headers["X-Acceptance-Dependency"] == "2"
+                if args.dependencies:
+                    assert response.headers["X-Acceptance-Dependency"] == "2"
+            if args.dependencies:
+                with request("/api/auth/me") as response:
+                    assert (
+                        json.load(response)["data"]["user"]["email"]
+                        == "acceptance@example.com"
+                    )
+                with request(
+                    "/api/reader/v5/resources/acceptance-resource/bootstrap"
+                ) as response:
+                    assert response.status == 200
+                with request(
+                    "/api/reader/v5/resources/acceptance-resource/publication"
+                ) as response:
+                    assert response.read() == b"book"
             assert docker("inspect", "-f", "{{.Id}}", name) == container
             assert docker("inspect", "-f", "{{.Image}}", name) == image
             assert not (storage / "runtime/obsolete-acceptance-file").exists()
@@ -381,6 +533,8 @@ print('actual B API, migrated DB, progress, configuration, Worker and PID 1 veri
             Path("/tmp/shuku-container-update-acceptance.log").write_text(logs)
             docker("rm", "-f", name)
             docker("volume", "rm", volume)
+            if args.dependencies:
+                docker("image", "rm", args.image)
 
 
 if __name__ == "__main__":

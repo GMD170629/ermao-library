@@ -42,6 +42,7 @@ class PrepareRequest(HttpContractModel):
 
 
 class InstallRequest(PrepareRequest):
+    plan_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
@@ -155,6 +156,7 @@ def install_update(
                 actor is not None and can_manage_system(actor),
                 payload.version,
                 payload.sha256,
+                payload.plan_sha256,
             ),
             status_code=202,
         )

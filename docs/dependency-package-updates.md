@@ -1,4 +1,4 @@
-# 包级依赖更新（D1 / D2）
+# 包级依赖更新（D1 / D2 / D3）
 
 D1 建立协议 2 的目录、可信种子、身份清单与启动基础，不实现协议 2 更新安装器。首次启用必须换用包含新固定入口的基础镜像。管理员下载、安装两次确认、单容器、停机安装和失败保护继续作为后续实现约束。
 
@@ -87,7 +87,7 @@ Python 以规范化分发名为键；Node 以实际部署位置为键，同名�
 
 另有限制：至多 10,000 个包、100,000 个依赖文件，依赖下载总和与声明展开量各至多 4 GiB；单个制品继续使用既有 512 MiB 边界。准备失败保留受限暂存与错误，重试沿用既有清理范围。关闭浏览器不取消已接受任务，重复点击受同一锁保护。
 
-协议 2 只到 ready：业务用例和准备工作器两处拒绝安装请求，固定旧安装器拒绝新格式；前端显示暂不支持安装且不提供安装按钮。准备不停止服务、不迁移数据库、不卸载或改写依赖、不产生 install-request.json。管理员第二次安装确认保留为 D3 的边界，不自动触发。
+D2 阶段协议 2 只到 ready：业务用例和准备工作器两处拒绝安装请求，固定旧安装器拒绝新格式；前端显示暂不支持安装且不提供安装按钮。准备不停止服务、不迁移数据库、不卸载或改写依赖、不产生 install-request.json。管理员第二次安装确认保留为 D3 的边界，不自动触发。
 
 ### D2 验证结果与复现
 
@@ -116,3 +116,49 @@ docker run --rm --network none -v "$PWD:/source:ro" \
 本次使用真实 D1 Linux ARM64 镜像、39 个 Python 包、20 个 Node 实例、34 条链接。业务 venv 在隔离最终路径从可信种子离线初始化，业务解释器运行生产准备逻辑。目标使用实际 standalone Web 产物与当前 Python 代码；仅在隔离目标对 client-only 包追加一行，制造同版本制品变化。完整清单 289,176 字节、完整代码 69,451,676 字节、选中 Node tar 10,240 字节，共 69,751,092 字节，三个真实 HTTP 请求各一次；58 keep、1 install、0 remove，所有 keep 制品请求为零。代码包无 node_modules，全部依赖制品和归属在生成时验证，最终 ready，程序/依赖/记录及数据快照完全一致，没有安装请求。
 
 真实验收复用 D1 已构建的 Web 产物，不表示本轮重建了完整镜像或再次启动全部服务；普通 UI 用 Chrome 开发服务器验证。未验证 Linux AMD64、fnOS 实机、Safari/PWA；没有正式协议 2 远程资产，未执行真实网络发布下载、D3 安装、D4 发布、全量回归或 CI。
+
+## D3：管理员确认后的离线差异安装
+
+首次启用 D3 要使用包含新 `dependency_install.py` 及共享校验包的固定入口镜像；应用更新仍不覆盖固定入口。D3 接通安装 API，页面完整操作留到 D4。未携带计划摘要的旧 D2 ready 结果需重新准备，不隐式选择新目标。
+
+`GET /api/updates/status` 的 `summary.plan_sha256` 是服务端对已准备 `plan.json` 的规范 JSON 摘要。第二次管理员确认调用既有 `POST /api/updates/install`，提交 `version`、`sha256`（完整发布清单摘要）和 `plan_sha256`。授权、原有跨站限制保留。用例和工作器在 prepare.lock 内校验三者，复核清单、全部选中制品和实际本机依赖，重新计算差异；计划中的操作列表不直接授权删除。预约落盘后，新准备和重复安装请求均拒绝，不等待 launcher.lock，不依赖浏览器继续在线。
+
+实际顺序：固定入口领取预约 → 当前业务解释器离线预检并重新展开代码到准备目录 → 固定标准库校验基线、制品、代码树、权限及累计空间 → 原有 SIGUSR1 排空并等待整组业务/收养子进程退出 → 再次核验 → SQLite 原生备份 → 写未完成标记 → 保留 `.initialized`、Node 子树和必要父目录，清理并全量复制其他代码 → Python/Node 包级操作 → 完整目标校验、uv check、必要导入检查 → 新业务解释器执行迁移并启动服务 → API 目标版本、Web、Worker、网关就绪 → 再核对实际记录并原子提交 installed.json → 成功状态、清除阻止标记。
+
+固定安装模块仅依赖标准库和固定目录 `shuku_dependencies`。差异规则与安装记录核验提取至共享包，准备阶段继续委托同一实现。开始覆盖后不导入 runtime 的旧 Pydantic/FastAPI；必要导入与迁移是显式的新业务解释器子进程。大清单/计划上限 32 MiB、安装记录上限 64 MiB，状态仍使用原小型边界。
+
+镜像 uv 固定 0.11.29，已用实际命令帮助和执行验证以下调用。所有命令包含 `--offline --no-cache --no-config --no-python-downloads`，并显式 `--python STORAGE_ROOT/dependencies/python/bin/python`：
+
+- `pip uninstall <remove 和 replace 的旧分发名>`；文件删除由 uv 的 RECORD 归属执行。
+- 对每个 install/replace：`pip install --no-index --no-deps --no-build <已验证本地 wheel>`。同版本制品变化也先卸载，绝不使用 sync、全局 reinstall 或重建 venv。
+- `pip check` 仅作依赖关系检查，不替代完整目标核验；随后新业务 Python 导入 FastAPI、Uvicorn、SQLAlchemy、Alembic、API 与 Worker 模块。
+
+Node 逐实例删除旧归属叶文件，再部署选中 tar 的完整文件；从不 rmtree 父包导致嵌套 keep 丢失。链接在普通文件完成后按目标布局创建，未变化链接不重写，仅清理空的旧目录。路径写入不穿越链接。keep 实例不复制、不解压、不重装，也不通过整套备份恢复来保留。
+
+安装后以完整新目标集合采集真实分发包与 Node 实例，验证 RECORD、未知文件、版本、Node 内容/制品身份与布局；变化 wheel 的内容逐项对应实际安装文件（RECORD/生成脚本采用安装语义），Python keep 的安装记录必须仍与旧记录相同。迁移和启动完成前不提交新 installed.json。依赖失败立即停止，不迁移、不开放业务，保留原记录、失败阶段、日志、预约和未完成标记；普通启动拒绝继续，不自动修复、续装或回滚。原停止超时保持失败，不强杀任务后继续复制；容器 SIGTERM/SIGINT 不触发更新后重启。
+
+### D3 验证
+
+普通测试使用真实 uv 0.11.29、小型 wheel/Node 夹具，移除所有源制品后只给安装器选中制品；uv 禁止网络和缓存。A1/B1/C1/D1 → A1/B2/D1/E1 实际执行卸载 B/C、安装 B2/E1，旧 B 遗留文件消失，A/D 内容、inode、mtime 不变。另覆盖仅代码、仅删除、同版本替换、共享 namespace、同名多位置/嵌套 Node 与链接、预约互斥、计划/摘要变化、确认后再次漂移、缺包、依赖失败与旧协议拒绝。wheel 的 `.data` 最终位置和生成命令入口也在预约前核对，与 keep 文件冲突立即拒绝；固定布局 `python -I` 入口另有回归测试。
+
+```sh
+# SHUKU_TEST_UV 指向匹配项目版本的 uv；不在测试内下载工具或依赖。
+SHUKU_TEST_UV=/path/to/uv-0.11.29 PYTHONPATH=apps/api-python \
+  apps/api-python/.venv/bin/pytest -q \
+  apps/api-python/tests/integration/modules/updates/test_dependency_installation.py \
+  apps/api-python/tests/integration/modules/updates/test_dependency_preparation.py \
+  apps/api-python/tests/integration/modules/updates/test_preparation.py
+PYTHONPATH=apps/api-python python3 -m unittest discover -s scripts -p 'test_dependency_packages.py'
+PYTHONPATH=apps/api-python python3 -m unittest discover -s scripts -p 'test_container*.py'
+# 显式真实容器验收：复用真实 Web/原生库，仅构建隔离入口及代码测试层。
+PYTHONPATH=apps/api-python apps/api-python/.venv/bin/python \
+  scripts/accept_container_update.py --image shuku-d1:local --dependencies
+```
+
+结果：更新准备 64 项、安装 15 项通过；架构/OpenAPI 54 项通过；D1 依赖夹具 9 项通过；容器入口 21 项通过、1 项 Linux 子进程专属检查在 macOS 跳过。Ruff、Mypy 和生成契约的 TypeScript 检查通过。
+
+真实 Linux ARM64、UID/GID 1000:1000 容器，通过真实准备和管理员安装 API 更新隔离程序 1.0.4 → 1.0.5。安装预约前断开容器网络并删除镜像原始 wheels/临时全量 seed，无 keep wheel 可供重装。实际日志：Python 卸载 `d3-b==1`、`d3-c==1`，安装 `d3-b==2`、`d3-e==1`；Node 原路径 `node_modules/.pnpm/client-only@0.0.1/node_modules/client-only` 完整替换，同版本内容发生变化。最终 43 个 Python 包、20 个 Node 实例与完整目标匹配；3,125 个 keep 文件的内容摘要、inode、mtime 一致。
+
+隔离迁移实际导入新 B/E 依赖后建测试表，新 API 响应也证明加载 B2；真实 Worker、Web、网关就绪。Reader bootstrap 与原文件读取成功，管理员会话、数据库阅读记录、配置、密钥和书库内容保留，数据库备份含更新前记录。普通及离线重启仍为目标版本和依赖，容器 ID/镜像 ID 全程不变。测试依赖、目标版本及迁移仅存在于隔离产物，正式版本号和迁移链未改。
+
+未验证 Linux AMD64、fnOS 实机、浏览器渲染阅读及协议 2 页面安装操作；本轮未全量重建 Web、未执行 CI 或全量回归。正式资产上传、feed 接入和页面完善仍留在 D4。

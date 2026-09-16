@@ -70,6 +70,7 @@ class ReleaseReference(UpdateModel):
 
 
 class PreparationSummary(UpdateModel):
+    plan_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     dependency_identity: str
     baseline: str
     code_sha256: str
