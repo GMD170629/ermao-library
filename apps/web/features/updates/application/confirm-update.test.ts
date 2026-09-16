@@ -71,7 +71,7 @@ test('protocol 2 captures plan before dialog and verifies exact success identity
 test('POST carries the full protocol 2 plan exactly once', async t => {
   const identity = { version: target.version, sha256: target.sha256, plan_sha256: 'e'.repeat(64) };
   const calls: unknown[] = [];
-  t.mock.method(globalThis, 'fetch', async (_input, init) => {
+  t.mock.method(globalThis, 'fetch', async (_input: RequestInfo | URL, init?: RequestInit) => {
     calls.push(JSON.parse(String(init?.body)));
     return new Response(JSON.stringify({ ok: true, data: { phase: 'requested', target, downloaded: 10 } }));
   });
