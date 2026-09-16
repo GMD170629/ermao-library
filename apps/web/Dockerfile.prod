@@ -64,6 +64,8 @@ COPY --from=builder /app/apps/api-python/uv.lock ./apps/api-python/uv.lock
 COPY scripts/install-python-runtime.sh ./scripts/install-python-runtime.sh
 COPY scripts/container-entry.py /opt/shuku-launcher/container-entry.py
 COPY scripts/container_install.py /opt/shuku-launcher/container_install.py
+COPY apps/api-python/shuku_dependencies /opt/shuku-launcher/shuku_dependencies
+COPY apps/api-python/shuku_dependencies ./apps/api-python/shuku_dependencies
 COPY scripts/dependency_packages.py scripts/dependency_environment.py scripts/dependency_records.py /opt/shuku-launcher/
 COPY scripts/build-runtime-environment.py /opt/shuku-launcher/build-runtime-environment.py
 COPY --from=mobi-core-builder /build/mobi-core/libermao_mobi_core.so /usr/local/lib/libermao_mobi_core.so

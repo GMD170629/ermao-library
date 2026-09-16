@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 import ast
+import gzip
 import hashlib
 import json
+import shutil
 import sys
 import tarfile
 from pathlib import Path
@@ -16,20 +18,26 @@ import tomllib
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "apps/api-python"))
 from app.modules.updates.public import (
     ApplicationIdentity,
+    CodePackage,
+    DependencySet,
     Package,
+    ProgramIdentity,
+    ReleaseManifest,
+    ReleaseReference,
     program_path,
     validate_layout,
+    verify_dependency_artifact,
 )
 
 
-def build_package(root: Path, output: Path) -> Package:
+def build_package(root: Path, output: Path, protocol: int = 1) -> Package | CodePackage:
     if (root / ".initialized").exists() or output.is_relative_to(root):
         raise ValueError(
             "Use the image seed and an output directory outside the program"
         )
-    identity = ApplicationIdentity.model_validate_json(
-        (root / "application.json").read_bytes()
-    )
+    identity = (
+        ApplicationIdentity if protocol == 1 else ProgramIdentity
+    ).model_validate_json((root / "application.json").read_bytes())
     api_version = tomllib.loads((root / "apps/api-python/pyproject.toml").read_text())[
         "project"
     ]["version"]
@@ -47,14 +55,18 @@ def build_package(root: Path, output: Path) -> Package:
         raise ValueError("application versions disagree")
     validate_layout(root, identity)
     output.mkdir(parents=True, exist_ok=True)
-    name = f"shuku-{identity.version}-{identity.environment.platform}.tar.gz"
+    name = f"shuku-{identity.version}-{identity.environment.platform}{'-code' if protocol == 2 else ''}.tar.gz"
     archive = output / name
     expanded = count = 0
     try:
-        with tarfile.open(archive, "w:gz", dereference=False) as bundle:
+        with (
+            archive.open("wb") as raw,
+            gzip.GzipFile(filename="", fileobj=raw, mode="wb", mtime=0) as compressed,
+            tarfile.open(fileobj=compressed, mode="w", dereference=False) as bundle,
+        ):
             for path in sorted(root.rglob("*")):
                 relative = path.relative_to(root).as_posix()
-                if not program_path(relative):
+                if not program_path(relative, protocol):
                     continue
                 if path.is_symlink() and (
                     not path.resolve().is_relative_to(root) or not path.exists()
@@ -68,7 +80,7 @@ def build_package(root: Path, output: Path) -> Package:
                     or member.islnk()
                 ):
                     raise ValueError("unsupported program file")
-                member.uid = member.gid = 0
+                member.uid = member.gid = member.mtime = 0
                 member.uname = member.gname = ""
                 expanded += member.size
                 count += 1
@@ -79,7 +91,7 @@ def build_package(root: Path, output: Path) -> Package:
                     bundle.addfile(member)
         with archive.open("rb") as stream:
             sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
-        package = Package(
+        package = (Package if protocol == 1 else CodePackage)(
             version=identity.version,
             environment=identity.environment,
             filename=name,
@@ -95,11 +107,87 @@ def build_package(root: Path, output: Path) -> Package:
         raise
 
 
+def build_release(
+    root: Path, output: Path, seed: Path, fixed: Path
+) -> dict[str, object]:
+    from threading import Event
+
+    from shuku_dependencies import digest, node_packages
+
+    dependencies = DependencySet.model_validate_json(
+        (seed / "manifest.json").read_bytes()
+    )
+    actual, links, scopes = node_packages(root, None)
+    if (
+        actual != [p for p in dependencies.packages if p.ecosystem == "node"]
+        or links != [link.model_dump() for link in dependencies.node_links]
+        or scopes != dependencies.node_scopes
+    ):
+        raise ValueError("seed does not describe standalone")
+    environment = json.loads(fixed.read_text())
+    code = build_package(root, output, protocol=2)
+    if code.environment.model_dump() != environment["environment"]:
+        raise ValueError("base environment mismatch")
+    expanded = 0
+    for package in dependencies.packages:
+        source = (
+            seed
+            / ("wheels" if package.ecosystem == "python" else "node")
+            / package.artifact.filename
+        )
+        if (
+            source.is_symlink()
+            or source.stat().st_size != package.artifact.size
+            or digest(source) != package.artifact.sha256
+        ):
+            raise ValueError("missing or invalid dependency artifact")
+        expanded += verify_dependency_artifact(source, package, dependencies, Event())
+        shutil.copyfile(source, output / package.artifact.filename)
+    manifest = ReleaseManifest(
+        version=code.version,
+        environment=code.environment,
+        python_abi=environment["inventory"]["abi"],
+        code=code.model_dump(exclude={"format", "version", "environment"}),
+        dependencies=dependencies,
+        dependency_expanded_size=expanded,
+    )
+    filename = f"shuku-{code.version}-{code.environment.platform}-v2.json"
+    path = output / filename
+    path.write_text(manifest.model_dump_json() + "\n")
+    reference = ReleaseReference(
+        version=code.version,
+        environment=code.environment,
+        filename=filename,
+        size=path.stat().st_size,
+        sha256=digest(path),
+    )
+    (output / (filename + ".reference.json")).write_text(
+        reference.model_dump_json() + "\n"
+    )
+    return reference.model_dump()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--program-root", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--dependency-seed", type=Path)
+    parser.add_argument("--fixed-environment", type=Path)
     args = parser.parse_args()
+    if args.dependency_seed is not None:
+        if args.fixed_environment is None:
+            parser.error("--fixed-environment required for protocol 2")
+        print(
+            json.dumps(
+                build_release(
+                    args.program_root.resolve(),
+                    args.output_dir.resolve(),
+                    args.dependency_seed.resolve(),
+                    args.fixed_environment.resolve(),
+                )
+            )
+        )
+        return
     print(
         json.dumps(
             build_package(

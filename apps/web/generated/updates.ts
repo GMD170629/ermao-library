@@ -32,7 +32,8 @@ export type Package = {
 
 export type PreparationState = {
   phase?: "idle" | "downloading" | "verifying" | "extracting" | "ready" | "failed" | "requested" | "checking" | "stopping" | "backup" | "copying" | "starting" | "success";
-  target?: Package | null;
+  target?: Package | ReleaseReference | null;
+  summary?: PreparationSummary | null;
   downloaded?: number;
   started_at?: string | null;
   updated_at?: string | null;
@@ -40,8 +41,29 @@ export type PreparationState = {
   error?: string | null;
 };
 
+export type PreparationSummary = {
+  dependency_identity: string;
+  baseline: string;
+  code_sha256: string;
+  keep: number;
+  install: number;
+  remove: number;
+  total_bytes: number;
+  dependency_bytes: number;
+  verified_artifacts?: number;
+};
+
 export type PrepareRequest = {
   version: string;
+};
+
+export type ReleaseReference = {
+  version: string;
+  format?: 2;
+  environment: Environment;
+  filename: string;
+  size: number;
+  sha256: string;
 };
 
 export type RuntimeInfo = {

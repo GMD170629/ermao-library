@@ -14,7 +14,13 @@ from typing import IO, Protocol
 
 from pydantic import ValidationError
 
-from ..application.models import REPOSITORY, Package, UpdateError, version_parts
+from ..application.models import (
+    REPOSITORY,
+    Package,
+    ReleaseReference,
+    UpdateError,
+    version_parts,
+)
 
 FEED_URL = f"https://raw.githubusercontent.com/{REPOSITORY}/release-feed/index.json"
 ASSET_ROOT = f"https://github.com/{REPOSITORY}/releases/download/"
@@ -87,10 +93,11 @@ class OfficialHTTP:
 
 
 class OfficialReleases:
-    def __init__(self, transport: ByteSource) -> None:
+    def __init__(self, transport: ByteSource, protocol: int = 1) -> None:
         self.transport = transport
+        self.protocol = protocol
 
-    def releases(self) -> list[tuple[str, list[Package]]]:
+    def releases(self) -> list[tuple[str, list[Package | ReleaseReference]]]:
         try:
             feed = json.loads(
                 b"".join(self.transport.chunks(FEED_URL, 1024 * 1024, 30))
@@ -117,7 +124,13 @@ class OfficialReleases:
                 ):
                     raise ValueError("release identity")
                 packages = [
-                    Package.model_validate(p) for p in release.get("appPackages", [])
+                    (
+                        Package if self.protocol == 1 else ReleaseReference
+                    ).model_validate(p)
+                    for p in release.get(
+                        "appPackages" if self.protocol == 1 else "dependencyReleases",
+                        [],
+                    )
                 ]
                 if any(p.version != version for p in packages) or len(
                     {p.environment.platform for p in packages}
@@ -129,5 +142,14 @@ class OfficialReleases:
             raise UpdateError("INVALID_MANIFEST") from error
 
 
-def package_url(package: Package) -> str:
+def package_url(package: Package | ReleaseReference) -> str:
     return f"{ASSET_ROOT}v{package.version}/{package.filename}"
+
+
+def artifact_url(version: str, filename: str) -> str:
+    version_parts(version)
+    import re
+
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,240}", filename):
+        raise UpdateError("UNTRUSTED_SOURCE")
+    return f"{ASSET_ROOT}v{version}/{filename}"

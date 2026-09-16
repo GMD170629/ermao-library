@@ -38,7 +38,7 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["app*"]
+include = ["app*", "shuku_dependencies*"]
 
 [tool.setuptools.package-data]
 "app.modules.auth.infrastructure" = ["assets/*.webp"]

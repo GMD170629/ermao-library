@@ -33,6 +33,7 @@ RUN apt-get update \
 
 COPY apps/api-python/pyproject.toml apps/api-python/uv.lock ./
 COPY apps/api-python/app ./app
+COPY apps/api-python/shuku_dependencies ./shuku_dependencies
 COPY scripts/install-python-runtime.sh /app/scripts/install-python-runtime.sh
 COPY --from=mobi-core-builder /build/mobi-core/libermao_mobi_core.so /usr/local/lib/libermao_mobi_core.so
 COPY --from=mobi-core-builder /build/chapters/libermao_chapters.so /usr/local/lib/libermao_chapters.so

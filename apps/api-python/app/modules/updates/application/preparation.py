@@ -9,6 +9,7 @@ from .models import (
     Environment,
     Package,
     PreparationState,
+    ReleaseReference,
     UpdateCheck,
     UpdateError,
     version_parts,
@@ -16,11 +17,11 @@ from .models import (
 
 
 class ReleaseSource(Protocol):
-    def releases(self) -> list[tuple[str, list[Package]]]: ...
+    def releases(self) -> list[tuple[str, list[Package | ReleaseReference]]]: ...
 
 
 class PreparationPort(Protocol):
-    def submit(self, package: Package) -> PreparationState: ...
+    def submit(self, package: Package | ReleaseReference) -> PreparationState: ...
     def status(self) -> PreparationState: ...
     def install(
         self, version: str, sha256: str, environment: Environment, current: str
@@ -34,7 +35,9 @@ class UpdatePreparation:
         environment: Environment | None,
         source: ReleaseSource,
         worker: PreparationPort,
+        protocol: int = 1,
     ) -> None:
+        self.protocol = protocol
         self.current = current
         self.environment = environment
         self.source = source
@@ -45,14 +48,19 @@ class UpdatePreparation:
         if not can_manage_system:
             raise UpdateError("SYSTEM_MANAGER_REQUIRED")
 
-    def reason(self, version: str, packages: list[Package]) -> str | None:
+    def reason(
+        self, version: str, packages: list[Package | ReleaseReference]
+    ) -> str | None:
         if self.environment is None:
             return "UNSUPPORTED_DEPLOYMENT"
         if version_parts(version) <= version_parts(self.current):
             return "NOT_NEWER"
         if not packages:
             return "PACKAGE_UNAVAILABLE"
-        if not any(p.environment == self.environment for p in packages):
+        if not any(
+            p.environment == self.environment and p.format == self.protocol
+            for p in packages
+        ):
             return "INCOMPATIBLE_ENVIRONMENT"
         return None
 
@@ -78,7 +86,11 @@ class UpdatePreparation:
                 reason = self.reason(candidate, packages)
                 if reason:
                     raise UpdateError(reason)
-                package = next(p for p in packages if p.environment == self.environment)
+                package = next(
+                    p
+                    for p in packages
+                    if p.environment == self.environment and p.format == self.protocol
+                )
                 return self.worker.submit(package)
         raise UpdateError("PACKAGE_UNAVAILABLE")
 
@@ -88,6 +100,8 @@ class UpdatePreparation:
         self.authorize(can_manage_system)
         if self.environment is None:
             raise UpdateError("UNSUPPORTED_DEPLOYMENT")
+        if self.protocol == 2:
+            raise UpdateError("INSTALLATION_NOT_SUPPORTED")
         if version_parts(version) <= version_parts(self.current):
             raise UpdateError("NOT_NEWER")
         return self.worker.install(version, sha256, self.environment, self.current)

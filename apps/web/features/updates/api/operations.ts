@@ -1,4 +1,4 @@
-import type { InstallRequest, Package, PreparationState, RuntimeInfo, UpdateCheck } from '@/generated/updates';
+import type { InstallRequest, Package, ReleaseReference, PreparationSummary, PreparationState, RuntimeInfo, UpdateCheck } from '@/generated/updates';
 import { withBasePath } from '@/lib/base-path';
 
 function object(value: unknown): Record<string, unknown> {
@@ -22,20 +22,30 @@ export function parseRuntime(value: unknown): RuntimeInfo {
   const data = object(value);
   return { current_version: string(data.current_version), supported: boolean(data.supported) };
 }
-function parsePackage(value: unknown): Package {
+function parsePackage(value: unknown): Package | ReleaseReference {
   const data = object(value), environment = object(data.environment);
-  if (data.format !== 1 || environment.format !== 1 || !/^[a-f0-9]{64}$/.test(string(data.sha256))) throw new Error('更新响应无效');
-  return {
-    version: string(data.version), sha256: string(data.sha256), format: 1,
-    filename: string(data.filename), size: number(data.size), expanded_size: number(data.expanded_size), file_count: number(data.file_count),
-    environment: { format: 1, platform: string(environment.platform), compatibility: string(environment.compatibility) }
+  if (![1, 2].includes(number(data.format)) || environment.format !== 1 || !/^[a-f0-9]{64}$/.test(string(data.sha256))) throw new Error('更新响应无效');
+  const common = {
+    version: string(data.version), sha256: string(data.sha256),
+    filename: string(data.filename), size: number(data.size),
+    environment: { format: 1 as const, platform: string(environment.platform), compatibility: string(environment.compatibility) }
   };
+  return data.format === 2 ? { ...common, format: 2 } : {
+    ...common, format: 1, expanded_size: number(data.expanded_size), file_count: number(data.file_count)
+  };
+}
+function parseSummary(value: unknown): PreparationSummary | null {
+  if (value == null) return null;
+  const data = object(value);
+  return { dependency_identity: string(data.dependency_identity), baseline: string(data.baseline), code_sha256: string(data.code_sha256),
+    keep: number(data.keep), install: number(data.install), remove: number(data.remove), total_bytes: number(data.total_bytes),
+    dependency_bytes: number(data.dependency_bytes), verified_artifacts: number(data.verified_artifacts) };
 }
 export function parsePreparation(value: unknown): PreparationState {
   const data = object(value);
   const phase = string(data.phase);
   if (!['idle', 'downloading', 'verifying', 'extracting', 'ready', 'failed', 'requested', 'checking', 'stopping', 'backup', 'copying', 'starting', 'success'].includes(phase)) throw new Error('更新响应无效');
-  return { phase: phase as PreparationState['phase'], target: data.target == null ? null : parsePackage(data.target), downloaded: number(data.downloaded), started_at: optional(data.started_at), updated_at: optional(data.updated_at), failed_phase: optional(data.failed_phase), error: optional(data.error) };
+  return { phase: phase as PreparationState['phase'], target: data.target == null ? null : parsePackage(data.target), summary: parseSummary(data.summary), downloaded: number(data.downloaded), started_at: optional(data.started_at), updated_at: optional(data.updated_at), failed_phase: optional(data.failed_phase), error: optional(data.error) };
 }
 export function parseCheck(value: unknown): UpdateCheck {
   const data = object(value);

@@ -1,4 +1,4 @@
-# 包级依赖更新（D1）
+# 包级依赖更新（D1 / D2）
 
 D1 建立协议 2 的目录、可信种子、身份清单与启动基础，不实现协议 2 更新安装器。首次启用必须换用包含新固定入口的基础镜像。管理员下载、安装两次确认、单容器、停机安装和失败保护继续作为后续实现约束。
 
@@ -19,11 +19,11 @@ D1 建立协议 2 的目录、可信种子、身份清单与启动基础，不�
 
 ## 身份、归属与清理边界
 
-`dependency_packages.py` 从实际 wheel 和 standalone 生成协议 2 完整清单，包含间接依赖。Python 身份为规范化分发名、版本、wheel 标签、下载大小和 SHA-256。wheel 的 RECORD 是制品内归属；实际安装位置、大小、SHA-256 与原 RECORD 校验由业务解释器执行 `dependency_records.py`，二者不可互换。
+`shuku_dependencies/packages.py`（`scripts/dependency_packages.py` 保留薄 CLI 入口）从实际 wheel 和 standalone 生成协议 2 完整清单，包含间接依赖。Python 身份为规范化分发名、版本、wheel 标签、下载大小和 SHA-256。wheel 的 RECORD 是制品内归属；实际安装位置、大小、SHA-256 与原 RECORD 校验由业务解释器执行 `dependency_records.py`，二者不可互换。
 
 Node 身份包含部署位置、名称、版本、内容摘要及每实例 tar 的大小和 SHA-256；位置不同即为不同实例。登记所有实际 `node_modules` 子树和相对链接。文件归最近的实际包根，父包不包含嵌套包文件，包内 vendored 文件归该包。bundle 内编译内容仍归应用。拒绝外部／悬空链接和无归属普通文件，不将整个 node_modules 当作包。
 
-后续清理必须先排除登记的 Node 子树及固定入口的 `.initialized`，再全量替换应用代码；Python 目录与 installed.json 不在 runtime 清理范围内。新增／变化依赖整包替换、删除依赖同步卸载、未变化依赖不下载不卸载不重装。D1 不执行这些新协议覆盖动作；旧清空复制入口拒绝协议 2 runtime、目标或准备产物，旧打包器也拒绝协议 2 application.json。准备和安装阶段核验完整性，不添加日常扫描。
+后续清理必须先排除登记的 Node 子树及固定入口的 `.initialized`，再全量替换应用代码；Python 目录与 installed.json 不在 runtime 清理范围内。新增／变化依赖整包替换、删除依赖同步卸载、未变化依赖不下载不卸载不重装。D1 / D2 不执行这些新协议覆盖动作；旧清空复制入口拒绝协议 2 runtime、目标或准备产物，打包器默认的旧格式路径仍拒绝协议 2 application.json。准备和安装阶段核验完整性，不添加日常扫描。
 
 基础指纹只保留解释器与 ABI、架构、系统包、固定原生库、Web 基础路径及启动协议。应用版本或业务依赖变化不改变它。D1 不更新解释器、系统库、启动器环境或固定原生阅读库。不实现文件差分、包内补丁、自动安装、多版本、自动回滚、外部服务或通用包管理平台。
 
@@ -48,3 +48,71 @@ Node 身份包含部署位置、名称、版本、内容摘要及每实例 tar �
 | 固定入口与协议隔离 | `scripts/container-entry.py`、`scripts/container_install.py`、`scripts/start-unified-app.sh`、`apps/api-python/app/modules/updates/infrastructure/environment.py` |
 | 验证 | `scripts/test_dependency_packages.py`、`scripts/test_container_entry.py`、`scripts/test_install_python_runtime.py`、`scripts/smoke-container-runtime.py`、`scripts/verify-python-backend-migration.mjs`、`apps/api-python/tests/integration/modules/updates/test_preparation.py` |
 | 文档 | 本文、`docs/container-runtime.md`、`docs/application-update-preparation.md` |
+
+## D2：独立制品与准备链路
+
+身份和安装记录的唯一实现迁入 `apps/api-python/shuku_dependencies`，由固定入口、构建脚本和业务更新模块共同复用；两个原脚本仅作入口，不维护第二套规则。基础镜像复制该标准库包到固定入口目录，也复制到应用种子。业务模块使用业务解释器的同一包。
+
+在匹配目标平台的 D1 构建环境运行：
+
+```sh
+python scripts/build-application-package.py --program-root /path/to/program \
+  --dependency-seed /opt/shuku-dependency-seed \
+  --fixed-environment /opt/shuku-launcher/environment.json \
+  --output-dir /path/to/output
+```
+
+本地产物平铺在输出目录：
+
+- `shuku-{version}-{platform}-code.tar.gz`：完整代码，排除所有 node_modules、Python venv、缓存及业务数据；bundle 内容仍保留。附带本地代码描述 JSON。
+- `shuku-{version}-{platform}-v2.json`：完整目标清单，含基础指纹、Python ABI、代码制品、完整 Python/Node 身份、文件归属、链接布局及展开空间预算。
+- `*.whl`、D1 原名 `node-{位置摘要}-{内容摘要}.tar`：完整独立依赖制品，不重新命名 Node 制品。构建逐一验证种子、实际 standalone、大小、SHA-256、归属与内容后复制。
+- `*-v2.json.reference.json`：清单自身的版本、大小和 SHA-256 描述，供后续发布使用。未来 feed 使用独立 `dependencyReleases` 字段，不能塞入旧 `appPackages`；D2 不修改正式 feed 或上传资产。
+
+Node tar 沿用 D1 对时间、UID/GID、所有者名字的规范化；验证时流式重现同一个 tar 摘要，不创建副本。代码 gzip 同样固定时间戳并去掉源文件名。保留文件内容、模式与链接语义。wheel 原样交付，wheel 摘要不能替代安装 RECORD 验证。
+
+管理员第一次确认沿用现有准备线程、prepare.lock 和状态文件。官方 feed 指向经摘要验证的完整目标清单，生产仍仅允许官方 HTTPS 发布资产；测试只在传输适配器注入隔离 HTTP 服务，没有任意 URL 配置。校验基础环境、ABI及所有 wheel 平台后，读取本机 installed.json 并核对业务 venv RECORD、未知文件和完整 Node 归属/链接/摘要；损坏、缺失、未知依赖或记录漂移直接失败，不修复现场。
+
+Python 以规范化分发名为键；Node 以实际部署位置为键，同名多实例独立比较。完整包身份相同为 keep；缺失或版本/制品/归属等身份变化为 install（整包替换）；只在本机存在为 remove。同版本摘要变化也必须下载。比较只依赖经核验的本机状态，不依赖上一个发布版本。`python_records` 是安装记录，明确排除在目标身份摘要之外；准备基线另含安装记录文件摘要。
+
+仅下载目标清单、完整代码与 install 集合。keep 和 remove 均不请求依赖制品。代码只展开到 `update-tmp/prepared/app`；依赖只流式校验归属、链接、内容和展开量，不落入业务环境。累计空间检查包含全部下载、代码暂存及完整依赖展开预算。完成前再次核对本机基线，发现变化拒绝 ready。
+
+| 准备位置 | 内容与上限 |
+| --- | --- |
+| `update-tmp/preparation.json` | 原小型状态（16 KiB），目标清单摘要、代码摘要、基线、差异数量、累计下载字节、错误及摘要进度；轮询不返回文件清单 |
+| `update-tmp/prepared/release.json` | 完整目标清单，独立上限 32 MiB |
+| `update-tmp/prepared/plan.json` | 完整差异键、目标身份、本机基线、逐制品大小/摘要及已验证结果；仅供后续安装实现审查 |
+| `update-tmp/prepared/` | 完整代码压缩包、选中依赖制品与代码暂存；不覆盖业务目录 |
+| `dependencies/installed.json` | 准备阶段只读，独立上限 64 MiB |
+
+另有限制：至多 10,000 个包、100,000 个依赖文件，依赖下载总和与声明展开量各至多 4 GiB；单个制品继续使用既有 512 MiB 边界。准备失败保留受限暂存与错误，重试沿用既有清理范围。关闭浏览器不取消已接受任务，重复点击受同一锁保护。
+
+协议 2 只到 ready：业务用例和准备工作器两处拒绝安装请求，固定旧安装器拒绝新格式；前端显示暂不支持安装且不提供安装按钮。准备不停止服务、不迁移数据库、不卸载或改写依赖、不产生 install-request.json。管理员第二次安装确认保留为 D3 的边界，不自动触发。
+
+### D2 验证结果与复现
+
+普通测试使用小型 wheel/Node 夹具和真实 loopback HTTP 计数，运行：
+
+```sh
+PYTHONPATH=apps/api-python apps/api-python/.venv/bin/pytest -q -s \
+  apps/api-python/tests/integration/modules/updates/test_dependency_preparation.py \
+  apps/api-python/tests/integration/modules/updates/test_preparation.py
+PYTHONPATH=apps/api-python apps/api-python/.venv/bin/python -m unittest discover -s scripts -p 'test_dependency_packages.py'
+# apps/web 内，使用项目固定 Node：
+pnpm exec tsx --conditions=import --test features/updates/application/confirm-update.test.ts features/updates/model/release-notes.test.ts
+pnpm exec playwright test e2e/application-updates.spec.ts --project=chrome
+```
+
+固定 A1/B1/C1/D1 → A1/B2/D1/E1 样例：清单 2,765 字节、完整代码 957 字节、B2/E1 各 10,240 字节，各请求一次，总计 24,202 字节；A/D/C 依赖请求为零（另外一个 Python 夹具包同样 keep 且零请求）。同一目标分别从 1.0.0、1.0.1、1.0.3 的本机状态计算。覆盖代码独变、仅删除、同版本 Node/wheel 制品变化、多实例、记录漂移、缺包/坏包、ABI、空间、路径逃逸、准备中损坏、重复请求和不轮询仍完成。所有业务文件和链接均比较内容、mtime、模式，包含未变化依赖及 installed.json，不只比较哨兵。
+
+显式真实产物验证（不进入普通后端测试）：
+
+```sh
+docker run --rm --network none -v "$PWD:/source:ro" \
+  --entrypoint /usr/local/bin/python3.11 shuku-d1:local \
+  /source/scripts/accept_dependency_preparation.py
+```
+
+本次使用真实 D1 Linux ARM64 镜像、39 个 Python 包、20 个 Node 实例、34 条链接。业务 venv 在隔离最终路径从可信种子离线初始化，业务解释器运行生产准备逻辑。目标使用实际 standalone Web 产物与当前 Python 代码；仅在隔离目标对 client-only 包追加一行，制造同版本制品变化。完整清单 289,176 字节、完整代码 69,451,676 字节、选中 Node tar 10,240 字节，共 69,751,092 字节，三个真实 HTTP 请求各一次；58 keep、1 install、0 remove，所有 keep 制品请求为零。代码包无 node_modules，全部依赖制品和归属在生成时验证，最终 ready，程序/依赖/记录及数据快照完全一致，没有安装请求。
+
+真实验收复用 D1 已构建的 Web 产物，不表示本轮重建了完整镜像或再次启动全部服务；普通 UI 用 Chrome 开发服务器验证。未验证 Linux AMD64、fnOS 实机、Safari/PWA；没有正式协议 2 远程资产，未执行真实网络发布下载、D3 安装、D4 发布、全量回归或 CI。

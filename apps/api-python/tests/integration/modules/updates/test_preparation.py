@@ -617,7 +617,8 @@ def test_fixed_environment_comes_from_fixed_metadata_not_package(
                 }
             )
         )
-        assert detection.fixed_environment(storage) is None
+        assert detection.fixed_environment(storage) == source[0].package.environment
+        assert detection.fixed_protocol() == 2
         fixed.unlink()
         assert detection.fixed_environment(storage) is None
     assert detection.fixed_environment(storage) is None

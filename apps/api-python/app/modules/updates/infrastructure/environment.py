@@ -28,12 +28,6 @@ def fixed_environment(storage: Path) -> Environment | None:
     import fcntl
 
     try:
-        # Protocol 2 has no update installer in D1. Do not expose the v1 workflow.
-        if (
-            json.loads(fixed.read_bytes()).get("inventory", {}).get("launcher_protocol")
-            == 2
-        ):
-            return None
         with (storage / "update-tmp/launcher.lock").open("r") as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -44,3 +38,13 @@ def fixed_environment(storage: Path) -> Environment | None:
     except (OSError, ValueError, KeyError):
         return None
     return None
+
+
+def fixed_protocol() -> int:
+    try:
+        value = json.loads(FIXED_ENVIRONMENT.read_bytes())["inventory"][
+            "launcher_protocol"
+        ]
+        return 2 if value == 2 else 1
+    except (OSError, ValueError, KeyError):
+        return 1

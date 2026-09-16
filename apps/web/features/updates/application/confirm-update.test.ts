@@ -41,3 +41,13 @@ test('HTTP adapter sends only selected operation and exact package identity', as
   await installUpdate({ version: target.version, sha256: target.sha256 });
   assert.deepEqual(calls[1], { path: '/api/updates/install', body: { version: target.version, sha256: target.sha256 } });
 });
+
+test('protocol 2 state carries a manifest reference and bounded preparation summary', () => {
+  const reference = { format: 2, version: target.version, environment: target.environment, filename: 'shuku-1.0.5-linux-x86_64-v2.json', size: 1000, sha256: target.sha256 };
+  const summary = { dependency_identity: 'b'.repeat(64), baseline: 'c'.repeat(64), code_sha256: 'd'.repeat(64), keep: 58, install: 1, remove: 0, total_bytes: 12000, dependency_bytes: 10240, verified_artifacts: 2 };
+  const state = parsePreparation({ phase: 'ready', target: reference, summary, downloaded: 12000 });
+  assert.deepEqual(state.target, reference);
+  assert.deepEqual(state.summary, summary);
+  assert.equal(confirmedSuccess(state, target.version), false);
+  assert.throws(() => parsePreparation({ ...state, summary: { ...summary, total_bytes: -1 } }));
+});

@@ -15,6 +15,10 @@ const phaseLabels: Record<string, string> = {
   backup: '正在备份数据库', copying: '正在更新程序文件', starting: '正在迁移数据库并启动服务', failed: '更新操作失败', success: '正在核对实际运行版本'
 };
 const reasonLabels: Record<string, string> = {
+  LOCAL_DEPENDENCIES_INVALID: '本机受管理依赖损坏、缺失或存在未知文件，已停止准备。',
+  LOCAL_RECORDS_DRIFT: '本机依赖安装记录已变化，已停止准备。',
+  INSTALLATION_NOT_SUPPORTED: '更新已准备，当前版本尚不支持安装此协议。',
+  INVALID_DEPENDENCY_ARTIFACT: '依赖制品或文件归属无效，未修改运行环境。',
   DOWNLOAD_FAILED: '下载失败，请检查网络后手动重试。', DOWNLOAD_TIMEOUT: '下载超时，请检查网络后手动重试。',
   DIGEST_MISMATCH: '更新包摘要不匹配，未修改当前程序。', INSUFFICIENT_SPACE: '存储空间不足，请释放空间后重试。',
   RUNTIME_NOT_WRITABLE: '程序目录不可写，请检查部署用户和目录权限。',
@@ -55,8 +59,9 @@ export function UpdateOperations() {
   const busy = operations.installRequested || operations.submitting || operations.observing || confirming || installing || preparationPhases.has(phase);
   const latest = check?.releases[0];
   const ready = phase === 'ready' && state?.target;
+  const preparationOnly = state?.target?.format === 2;
   async function act(install: boolean) {
-    if (confirmingRef.current || busy) return;
+    if (confirmingRef.current || busy || (install && preparationOnly)) return;
     const target = install ? state?.target : latest && { version: latest.version, sha256: '' };
     if (!target) return;
     confirmingRef.current = true;
@@ -72,17 +77,17 @@ export function UpdateOperations() {
     } finally { confirmingRef.current = false; setConfirming(false); }
   }
   return <div className="mt-4 space-y-3 rounded-2xl border border-[#DEDAD4] bg-[#F7F5F2] p-5 text-sm" aria-live="polite">
-    <p>{t(success ? '更新成功，实际运行版本 v{version}。' : phaseLabels[phase], { version: runtime.current_version })}</p>
+    <p>{t(success ? '更新成功，实际运行版本 v{version}。' : (ready && preparationOnly ? '更新已准备，当前版本尚不支持安装此协议。' : phaseLabels[phase]), { version: runtime.current_version })}</p>
     {state?.target ? <p>{t('本次更新包：v{version}', { version: state.target.version })}</p> : null}
     {latest ? <p>{t('远程最新版本：v{version}', { version: latest.version })}</p> : null}
-    {phase === 'downloading' && state?.target && (state.downloaded ?? 0) > 0 ? <p>{Math.min(100, Math.floor((state.downloaded ?? 0) / state.target.size * 100))}%</p> : null}
+    {phase === 'downloading' && state?.target && (state.downloaded ?? 0) > 0 ? <p>{Math.min(100, Math.floor((state.downloaded ?? 0) / (state.summary?.total_bytes ?? state.target.size) * 100))}%</p> : null}
     {operations.observing && !preparationPhases.has(phase) ? <p>{t('正在确认更新状态，安装期间服务可能暂时不可用。')}</p> : null}
     {operations.error ? <p role="alert">{t(reasonLabels[operations.error] ?? operations.error)}</p> : null}
     {state?.error ? <p role="alert">{t('操作失败：{reason}', { reason: t(reasonLabels[state.error] ?? '请根据错误码检查日志：{code}', { code: state.error }) })}</p> : null}
     {installing || state?.phase === 'failed' ? <p>{t('请查看容器日志和 STORAGE_ROOT/update-tmp/installation.log。安装失败请联系管理员检查，勿删除失败标记或清空数据库。')}</p> : null}
     {!ready && latest && !latest.installable ? <p>{t(reasonLabels[latest.reason ?? ''] ?? '此版本未提供应用更新包。')}</p> : null}
-    {ready ? <button type="button" disabled={busy} onClick={() => void act(true)} className="min-h-10 rounded-xl bg-[#ED4D2D] px-4 text-white disabled:opacity-50">{t('安装并重启')}</button>
-      : latest?.installable && !installing ? <button type="button" disabled={busy} onClick={() => void act(false)} className="min-h-10 rounded-xl bg-[#ED4D2D] px-4 text-white disabled:opacity-50">{t('下载更新')}</button> : null}
+    {ready && !preparationOnly ? <button type="button" disabled={busy} onClick={() => void act(true)} className="min-h-10 rounded-xl bg-[#ED4D2D] px-4 text-white disabled:opacity-50">{t('安装并重启')}</button>
+      : !ready && latest?.installable && !installing ? <button type="button" disabled={busy} onClick={() => void act(false)} className="min-h-10 rounded-xl bg-[#ED4D2D] px-4 text-white disabled:opacity-50">{t('下载更新')}</button> : null}
     {!operations.observing && !operations.submitting ? <button type="button" onClick={operations.refresh} className="ml-3 min-h-10 underline">{t('刷新更新状态')}</button> : null}
   </div>;
 }

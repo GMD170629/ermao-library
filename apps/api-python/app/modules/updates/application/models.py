@@ -53,6 +53,34 @@ class Package(UpdateModel):
         return self
 
 
+class ReleaseReference(UpdateModel):
+    version: str = Field(max_length=32)
+    format: Literal[2] = 2
+    environment: Environment
+    filename: str
+    size: int = Field(gt=0, le=32 * 1024 * 1024)
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @model_validator(mode="after")
+    def validate_identity(self) -> ReleaseReference:
+        version_parts(self.version)
+        if self.filename != f"shuku-{self.version}-{self.environment.platform}-v2.json":
+            raise ValueError("invalid manifest asset name")
+        return self
+
+
+class PreparationSummary(UpdateModel):
+    dependency_identity: str
+    baseline: str
+    code_sha256: str
+    keep: int
+    install: int
+    remove: int
+    total_bytes: int
+    dependency_bytes: int
+    verified_artifacts: int = 0
+
+
 class ApplicationIdentity(UpdateModel):
     version: str
     environment: Environment
@@ -74,7 +102,8 @@ class PreparationState(UpdateModel):
         "starting",
         "success",
     ] = "idle"
-    target: Package | None = None
+    target: Package | ReleaseReference | None = None
+    summary: PreparationSummary | None = None
     downloaded: int = 0
     started_at: str | None = None
     updated_at: str | None = None

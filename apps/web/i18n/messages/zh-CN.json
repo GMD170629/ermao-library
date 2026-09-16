@@ -2155,5 +2155,9 @@
   "TXT 解码器无法解码此文件。": "TXT 解码器无法解码此文件。",
   "TXT 解析器未找到可读文本。": "TXT 解析器未找到可读文本。",
   "URL 加 ?debug=0 可关闭持久开关": "URL 加 ?debug=0 可关闭持久开关",
-  "useAudioPlayback 必须在 AudioPlaybackProvider 内使用": "useAudioPlayback 必须在 AudioPlaybackProvider 内使用"
+  "useAudioPlayback 必须在 AudioPlaybackProvider 内使用": "useAudioPlayback 必须在 AudioPlaybackProvider 内使用",
+  "本机受管理依赖损坏、缺失或存在未知文件，已停止准备。": "本机受管理依赖损坏、缺失或存在未知文件，已停止准备。",
+  "本机依赖安装记录已变化，已停止准备。": "本机依赖安装记录已变化，已停止准备。",
+  "更新已准备，当前版本尚不支持安装此协议。": "更新已准备，当前版本尚不支持安装此协议。",
+  "依赖制品或文件归属无效，未修改运行环境。": "依赖制品或文件归属无效，未修改运行环境。"
 }

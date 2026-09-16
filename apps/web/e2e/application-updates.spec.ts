@@ -100,3 +100,14 @@ test('ambiguous installation times out without offering a blind second submissio
   await expect(page.getByRole('button', { name: '安装并重启', exact: true })).toBeDisabled();
   expect(f.install).toBe(1);
 });
+
+test('protocol 2 ready survives refresh and never offers installation', async ({ page }) => {
+  const f = await fixture(page);
+  f.state = { phase: 'ready', downloaded: 100, target: { format: 2, version: target.version, environment: target.environment, filename: 'shuku-1.0.5-linux-x86_64-v2.json', size: 100, sha256: target.sha256 } };
+  await page.goto('/settings/about');
+  await expect(page.getByText('更新已准备，当前版本尚不支持安装此协议。', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '安装并重启', exact: true })).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByText('更新已准备，当前版本尚不支持安装此协议。', { exact: true })).toBeVisible();
+  expect([f.prepare, f.install]).toEqual([0, 0]);
+});

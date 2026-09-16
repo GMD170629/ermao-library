@@ -11,6 +11,7 @@ import time
 from pathlib import Path, PurePosixPath
 from threading import Event
 
+from ..application.dependency_release import CodePackage, ProgramIdentity
 from ..application.models import (
     MAX_EXPANDED,
     MAX_FILES,
@@ -39,8 +40,10 @@ REQUIRED = (
 )
 
 
-def program_path(name: str) -> bool:
+def program_path(name: str, protocol: int = 1) -> bool:
     parts = PurePosixPath(name).parts
+    if protocol == 2 and "node_modules" in parts:
+        return False
     if (
         not parts
         or name.startswith("/")
@@ -69,10 +72,18 @@ def program_path(name: str) -> bool:
             "node_modules",
             "package.json",
         }
-        or name.startswith(("apps/web/", "apps/api-python/app/", "node_modules/"))
+        or name.startswith(
+            (
+                "apps/web/",
+                "apps/api-python/app/",
+                "apps/api-python/shuku_dependencies/",
+                "node_modules/",
+            )
+        )
         or name
         in {
             "apps/api-python/app",
+            "apps/api-python/shuku_dependencies",
             "apps/api-python/pyproject.toml",
             "apps/api-python/uv.lock",
             "scripts/start-unified-app.sh",
@@ -81,11 +92,18 @@ def program_path(name: str) -> bool:
     )
 
 
-def validate_layout(root: Path, identity: ApplicationIdentity) -> None:
-    if any(not (root / name).exists() for name in REQUIRED):
+def validate_layout(
+    root: Path, identity: ApplicationIdentity | ProgramIdentity
+) -> None:
+    required = (
+        REQUIRED
+        if isinstance(identity, ApplicationIdentity)
+        else tuple(name for name in REQUIRED if name != "node_modules")
+    )
+    if any(not (root / name).exists() for name in required):
         raise UpdateError("INVALID_LAYOUT")
     try:
-        actual = ApplicationIdentity.model_validate_json(
+        actual = type(identity).model_validate_json(
             (root / "application.json").read_bytes()
         )
         if actual != identity:
@@ -119,7 +137,7 @@ class ExpandedReader(io.RawIOBase):
 
 
 def extract_package(
-    archive: Path, destination: Path, package: Package, cancelled: Event
+    archive: Path, destination: Path, package: Package | CodePackage, cancelled: Event
 ) -> None:
     destination.mkdir()  # Caller provides a fresh, dedicated directory.
     seen: set[str] = set()
@@ -134,7 +152,7 @@ def extract_package(
         with tarfile.open(fileobj=bounded, mode="r|") as bundle:
             for member in bundle:
                 name = member.name.rstrip("/")
-                if not program_path(name) or name in seen:
+                if not program_path(name, package.format) or name in seen:
                     raise UpdateError("UNSAFE_ARCHIVE")
                 seen.add(name)
                 if len(seen) > min(MAX_FILES, package.file_count):
@@ -189,5 +207,7 @@ def extract_package(
             raise UpdateError("UNSAFE_ARCHIVE")
     validate_layout(
         destination,
-        ApplicationIdentity(version=package.version, environment=package.environment),
+        (ApplicationIdentity if package.format == 1 else ProgramIdentity)(
+            version=package.version, environment=package.environment
+        ),
     )
