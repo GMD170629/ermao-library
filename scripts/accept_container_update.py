@@ -111,9 +111,10 @@ def main():
         if args.dependencies:
             from container_update_source import AcceptanceSource
 
-            output = root / "packages"
-            output.mkdir()
-            source = AcceptanceSource(output)
+            if source is None:
+                output = root / "packages"
+                output.mkdir()
+                source = AcceptanceSource(output)
             context = root / "image-context"
             context.mkdir()
             shutil.copytree(
@@ -137,9 +138,13 @@ def main():
                 "dependency_update_fixture.py",
             ):
                 shutil.copyfile(ROOT / "scripts" / filename, context / filename)
+            web_copy = ""
+            if args.browser:
+                shutil.copytree(web, context / "web", symlinks=True)
+                web_copy = "RUN rm -rf /opt/shuku-image/apps/web /opt/shuku-image/node_modules\nCOPY web/standalone /opt/shuku-image/\nCOPY web/static /opt/shuku-image/apps/web/.next/static\nCOPY web/public /opt/shuku-image/apps/web/public\n"
             (context / "Dockerfile").write_text(f"""FROM {args.image}
 USER root
-COPY app /opt/shuku-image/apps/api-python/app
+{web_copy}COPY app /opt/shuku-image/apps/api-python/app
 COPY shuku_dependencies /opt/shuku-image/apps/api-python/shuku_dependencies
 COPY shuku_dependencies /opt/shuku-launcher/shuku_dependencies
 COPY container-entry.py container_install.py dependency_install.py dependency_environment.py dependency_packages.py dependency_records.py /opt/shuku-launcher/
@@ -236,6 +241,21 @@ RUN /usr/local/bin/python3.11 /opt/dependency_update_fixture.py
                 with request("/api/health") as response:
                     return response.status == 200
 
+            def restore_network():
+                nonlocal base, offline_api
+                docker("network", "connect", "bridge", name)
+                # Docker Desktop drops published ports on network detach. A normal
+                # restart restores them without changing the container or image.
+                docker("stop", "-t", "120", name)
+                assert docker("inspect", "-f", "{{.State.ExitCode}}", name) == "143"
+                docker("start", name)
+                base = (
+                    "http://127.0.0.1:"
+                    + docker("port", name, "3000/tcp").rsplit(":", 1)[1]
+                )
+                offline_api = False
+                wait_for(healthy)
+
             wait_for(healthy)
             with request(
                 "/api/auth/setup",
@@ -254,6 +274,7 @@ RUN /usr/local/bin/python3.11 /opt/dependency_update_fixture.py
                 "-c",
                 'import json;print(json.load(open("/opt/shuku-image/application.json"))["version"])',
             )
+            initial_version = seed_version
             secret = docker("exec", name, "cat", "/app/storage/secrets/session-secret")
             # Actual program paths and old process identities, excluding exec helpers.
             old_pids = json.loads(
@@ -274,11 +295,39 @@ RUN /usr/local/bin/python3.11 /opt/dependency_update_fixture.py
                 "/tooling/scripts/container_update_fixture.py",
                 *(["--build-only"] if args.browser or args.dependencies else []),
                 *(["--dependencies"] if args.dependencies else []),
+                *(["--two-updates"] if args.browser and args.dependencies else []),
             )
             identity = json.loads(fixture.splitlines()[-1])
             target = identity["target"]
+            keep_code = """from pathlib import Path
+import hashlib,json
+s=Path('/app/storage'); record=json.loads((s/'dependencies/installed.json').read_text()); result={}
+plan=json.loads((s/'update-tmp/prepared/plan.json').read_text()); keep=set(plan['difference']['keep'])
+for p in record['packages']:
+    if p['ecosystem']=='node' and 'node:'+p['location'] in keep:
+        for name in p['files']:
+            f=s/'runtime'/name
+            if not f.is_symlink(): result[str(f)]=[hashlib.sha256(f.read_bytes()).hexdigest(),f.stat().st_ino,f.stat().st_mtime_ns]
+for record in record['python_records']:
+    if 'python:'+record['name'] in keep:
+        for f in record['files']:
+            p=s/'dependencies/python'/f['path']; result[str(p)]=[hashlib.sha256(p.read_bytes()).hexdigest(),p.stat().st_ino,p.stat().st_mtime_ns]
+Path('/tmp/d3-kept.json').write_text(json.dumps(result,sort_keys=True)); print(len(result))
+"""
+            cookies = "; ".join(
+                f"{c.name}={c.value}"
+                for handler in client.handlers
+                if isinstance(handler, urllib.request.HTTPCookieProcessor)
+                for c in handler.cookiejar
+            )
             if args.browser:
                 docker("cp", name + ":/tmp/update-fixture/output/.", str(output))
+                if args.dependencies:
+                    next_output = root / "packages-c"
+                    next_output.mkdir()
+                    docker(
+                        "cp", name + ":/tmp/update-fixture/output-c/.", str(next_output)
+                    )
                 (output / f"v{target}.md").write_text(
                     "<!-- shuku:locale=zh-CN:start -->\n隔离验收更新\n<!-- shuku:locale=zh-CN:end -->\n<!-- shuku:locale=en-US:start -->\nIsolated acceptance update\n<!-- shuku:locale=en-US:end -->"
                 )
@@ -303,7 +352,27 @@ RUN /usr/local/bin/python3.11 /opt/dependency_update_fixture.py
                         timeout=120,
                     )
 
+                def dependency_snapshot():
+                    return docker(
+                        "exec",
+                        name,
+                        "python",
+                        "-c",
+                        """from pathlib import Path
+import json,hashlib,os
+s=Path('/app/storage'); r=s/'dependencies/installed.json'; record=json.loads(r.read_text()); result=[r.read_text()]
+paths=[s/'runtime'/f for p in record['packages'] if p['ecosystem']=='node' for f in p['files']]
+paths += [s/'dependencies/python'/f['path'] for p in record['python_records'] for f in p['files']]
+for p in sorted(set(paths)):
+    result.append([str(p),os.readlink(p) if p.is_symlink() else hashlib.sha256(p.read_bytes()).hexdigest(),p.lstat().st_ino,p.lstat().st_mtime_ns])
+print(hashlib.sha256(json.dumps(result).encode()).hexdigest())
+""",
+                    )
+
                 browser("read")
+                before_preparation = (
+                    dependency_snapshot() if args.dependencies else None
+                )
                 browser("download")
                 with request("/api/updates/status") as response:
                     assert json.load(response)["data"]["phase"] == "downloading"
@@ -317,6 +386,13 @@ RUN /usr/local/bin/python3.11 /opt/dependency_update_fixture.py
 
                 wait_for(prepared)
                 browser("cancel")
+                if args.dependencies:
+                    assert dependency_snapshot() == before_preparation
+                    print(
+                        "Preparation/cancellation retained all dependency files and installed records:",
+                        before_preparation,
+                        flush=True,
+                    )
                 with request("/api/updates/runtime") as response:
                     assert (
                         json.load(response)["data"]["current_version"] == seed_version
@@ -336,7 +412,25 @@ RUN /usr/local/bin/python3.11 /opt/dependency_update_fixture.py
                     "-c",
                     f"from pathlib import Path;assert all(Path(f'/proc/{{p}}').exists() for p in {old_pids!r})",
                 )
+                if args.dependencies:
+                    docker("exec", name, "python", "-c", keep_code)
+                    docker(
+                        "exec",
+                        "--user",
+                        "0:0",
+                        name,
+                        "sh",
+                        "-c",
+                        "rm -rf /opt/shuku-dependency-seed/wheels /tmp/update-fixture/dependency-seed /tmp/update-fixture/output /tmp/update-fixture/output-c /root/.cache/uv",
+                    )
+                    # Pause only PID 1 while the live API accepts the confirmation.
+                    # Resume it after browser exit and network removal: all installation is offline.
+                    docker("kill", "--signal=STOP", name)
                 browser("install")
+                if args.dependencies:
+                    docker("network", "disconnect", "bridge", name)
+                    offline_api = True
+                    docker("kill", "--signal=CONT", name)
             elif args.dependencies:
                 docker("cp", name + ":/tmp/update-fixture/output/.", str(output))
                 source.release_download.set()
@@ -352,21 +446,6 @@ RUN /usr/local/bin/python3.11 /opt/dependency_update_fixture.py
                 wait_for(dependency_ready, 300)
                 with request("/api/updates/status") as response:
                     ready = json.load(response)["data"]
-                keep_code = """from pathlib import Path
-import hashlib
-import json
-s=Path('/app/storage'); record=json.loads((s/'dependencies/installed.json').read_text()); result={}
-for p in record['packages']:
-    if p['ecosystem']=='node' and p['name']!='client-only':
-        for name in p['files']:
-            f=s/'runtime'/name
-            if not f.is_symlink(): result[str(f)]=[hashlib.sha256(f.read_bytes()).hexdigest(),f.stat().st_ino,f.stat().st_mtime_ns]
-for record in record['python_records']:
-    if record['name'] not in ['d3-b','d3-c']:
-        for f in record['files']:
-            p=s/'dependencies/python'/f['path']; result[str(p)]=[hashlib.sha256(p.read_bytes()).hexdigest(),p.stat().st_ino,p.stat().st_mtime_ns]
-Path("/tmp/d3-kept.json").write_text(json.dumps(result,sort_keys=True)); print(len(result))
-"""
                 docker("exec", name, "python", "-c", keep_code)
                 # Remove all original wheels/cache; no implicit full installation is possible.
                 docker(
@@ -421,7 +500,12 @@ Path("/tmp/d3-kept.json").write_text(json.dumps(result,sort_keys=True)); print(l
                         "exec", name, "cat", "/app/storage/update-tmp/installation.log"
                     )
                 )
-                docker("network", "connect", "bridge", name)
+                restore_network()
+                print(
+                    "HTTP evidence first update:",
+                    json.dumps(dict(source.requests)),
+                    json.dumps(dict(source.bytes)),
+                )
             if args.browser:
                 browser("verify")
             docker("cp", name + ":/app/storage/.", str(storage))
@@ -493,6 +577,89 @@ print('actual B API, migrated DB, progress, configuration, Worker and PID 1 veri
                     ).fetchone()[0]
                     != "acceptance_b"
                 )
+            if args.browser and args.dependencies:
+                first_target = target
+                seed_version = first_target
+                source.root = next_output
+                source.requests.clear()
+                source.bytes.clear()
+                target = json.loads((next_output / "index.json").read_text())[
+                    "releases"
+                ][0]["version"]
+                (next_output / f"v{target}.md").write_text(
+                    (output / f"v{first_target}.md").read_text()
+                )
+                # No keep artifacts exist in the second download source either.
+                for artifact in next_output.iterdir():
+                    if artifact.suffix in (".whl", ".tar"):
+                        artifact.unlink()
+                source.release_download.clear()
+                before_preparation = dependency_snapshot()
+                browser("download")
+                source.release_download.set()
+                wait_for(prepared)
+                with request("/api/updates/status") as response:
+                    second = json.load(response)["data"]
+                assert second["summary"]["dependency_bytes"] == 0
+                assert second["summary"]["install"] == second["summary"]["remove"] == 0
+                docker("exec", name, "python", "-c", keep_code)
+                browser("cancel")
+                assert dependency_snapshot() == before_preparation
+                docker("kill", "--signal=STOP", name)
+                browser("install")
+                docker("network", "disconnect", "bridge", name)
+                offline_api = True
+                docker("kill", "--signal=CONT", name)
+                wait_for(installed, 300)
+                kept_count = docker("exec", name, "python", "-c", check)
+                second_log = docker(
+                    "exec", name, "cat", "/app/storage/update-tmp/installation.log"
+                )
+                assert "dependency_operation=check packages=[]" in second_log
+                assert "application_update phase=success" in second_log
+                assert not any(
+                    operation in second_log
+                    for operation in (
+                        "dependency_operation=install",
+                        "dependency_operation=uninstall",
+                        "dependency_operation=node_",
+                    )
+                )
+                assert not any(
+                    name.endswith((".whl", ".tar")) for name in source.requests
+                )
+                assert (
+                    sum(
+                        count
+                        for name, count in source.requests.items()
+                        if name.endswith("-code.tar.gz")
+                    )
+                    == 1
+                )
+                print(
+                    "HTTP evidence second update:",
+                    json.dumps(dict(source.requests)),
+                    json.dumps(dict(source.bytes)),
+                )
+                print(
+                    "Second update kept digest/inode/mtime:",
+                    kept_count,
+                    "dependency bytes: Python=0 Node=0; operations:",
+                    second_log,
+                )
+                restore_network()
+                browser("verify")
+                with request("/api/health") as response:
+                    assert response.headers["X-Acceptance-Code"] == "C"
+                    assert response.headers["X-Acceptance-Dependency"] == "2"
+                verify = verify.replace(repr(first_target), repr(target))
+                assert (
+                    docker(
+                        "exec", name, "cat", "/app/storage/secrets/session-secret"
+                    ).strip()
+                    == secret
+                )
+                docker("exec", name, "python", "-c", verify)
             for offline in (False, True):
                 if offline:
                     docker("network", "disconnect", "bridge", name)
@@ -517,8 +684,9 @@ print('actual B API, migrated DB, progress, configuration, Worker and PID 1 veri
                         "image": image,
                         "uid_gid": docker("exec", name, "id"),
                         "browser": args.browser,
-                        "A": seed_version,
-                        "B": target,
+                        "versions": [initial_version, seed_version, target]
+                        if args.browser and args.dependencies
+                        else [initial_version, target],
                         "backup_sha256": hashlib.sha256(
                             backup.read_bytes()
                         ).hexdigest(),

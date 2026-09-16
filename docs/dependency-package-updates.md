@@ -1,4 +1,4 @@
-# 包级依赖更新（D1 / D2 / D3）
+# 包级依赖更新（D1 / D2 / D3 / D4）
 
 D1 建立协议 2 的目录、可信种子、身份清单与启动基础，不实现协议 2 更新安装器。首次启用必须换用包含新固定入口的基础镜像。管理员下载、安装两次确认、单容器、停机安装和失败保护继续作为后续实现约束。
 
@@ -133,7 +133,7 @@ docker run --rm --network none -v "$PWD:/source:ro" \
 - 对每个 install/replace：`pip install --no-index --no-deps --no-build <已验证本地 wheel>`。同版本制品变化也先卸载，绝不使用 sync、全局 reinstall 或重建 venv。
 - `pip check` 仅作依赖关系检查，不替代完整目标核验；随后新业务 Python 导入 FastAPI、Uvicorn、SQLAlchemy、Alembic、API 与 Worker 模块。
 
-Node 逐实例删除旧归属叶文件，再部署选中 tar 的完整文件；从不 rmtree 父包导致嵌套 keep 丢失。链接在普通文件完成后按目标布局创建，未变化链接不重写，仅清理空的旧目录。路径写入不穿越链接。keep 实例不复制、不解压、不重装，也不通过整套备份恢复来保留。
+Node 逐实例删除旧归属叶文件，再部署选中 tar 的完整文件；从不 rmtree 父包导致嵌套 keep 丢失。先对本次删除叶文件的祖先目录自底向上清理实际空目录，再写目标普通文件和链接，支持目录变文件／链接；保留非空嵌套目录，未变化链接不重写。路径写入不穿越链接。keep 实例不复制、不解压、不重装，也不通过整套备份恢复来保留。
 
 安装后以完整新目标集合采集真实分发包与 Node 实例，验证 RECORD、未知文件、版本、Node 内容/制品身份与布局；变化 wheel 的内容逐项对应实际安装文件（RECORD/生成脚本采用安装语义），Python keep 的安装记录必须仍与旧记录相同。迁移和启动完成前不提交新 installed.json。依赖失败立即停止，不迁移、不开放业务，保留原记录、失败阶段、日志、预约和未完成标记；普通启动拒绝继续，不自动修复、续装或回滚。原停止超时保持失败，不强杀任务后继续复制；容器 SIGTERM/SIGINT 不触发更新后重启。
 
@@ -162,3 +162,81 @@ PYTHONPATH=apps/api-python apps/api-python/.venv/bin/python \
 隔离迁移实际导入新 B/E 依赖后建测试表，新 API 响应也证明加载 B2；真实 Worker、Web、网关就绪。Reader bootstrap 与原文件读取成功，管理员会话、数据库阅读记录、配置、密钥和书库内容保留，数据库备份含更新前记录。普通及离线重启仍为目标版本和依赖，容器 ID/镜像 ID 全程不变。测试依赖、目标版本及迁移仅存在于隔离产物，正式版本号和迁移链未改。
 
 未验证 Linux AMD64、fnOS 实机、浏览器渲染阅读及协议 2 页面安装操作；本轮未全量重建 Web、未执行 CI 或全量回归。正式资产上传、feed 接入和页面完善仍留在 D4。
+
+## D4：页面与正式发布接线
+
+更新中心沿用两次确认。第一次仅准备完整代码和本机差异依赖；ready、刷新、重新登录均不产生安装请求。第二次对话框打开前捕获 `version`、完整清单 `sha256`、`summary.plan_sha256`，确认后原样提交；服务端仍在既有锁内复核，不能把展示期间变化的计划替换成另一个目标。取消保留准备结果。POST 响应中断只有限轮询观察，不自动重发。接受后关闭浏览器不取消固定入口工作。
+
+`/api/updates/runtime` 新增小型 `install_protocol` 能力字段。基础指纹的 launcher_protocol=2 不代表已包含 D3：固定目录缺少 `dependency_install.py` 或共享安装校验模块时不开放协议 2 安装；服务端也拒绝。页面只有 ready、协议匹配、有效计划摘要齐全才提供安装。旧 ready 缺计划摘要可重新准备。展示实际运行版本、目标版本、累计／总下载字节、依赖字节及安装／替换、删除、保留数量，按当前 locale 格式化。
+
+成功必须来自持久化 success 状态，且目标版本与实际 API 运行版本一致；当前页面确认过的更新还必须匹配目标清单和计划摘要。成功后可以检查下一次更新。沿用原 PWA 资源刷新，只更新前端资源，不清空阅读缓存或会话，不新增维护服务。
+
+### 发布资产与 feed
+
+原正式 workflow 继续调用 `build-release-app-packages.sh`，输入必须是不可变镜像摘要。分别在 Linux AMD64、ARM64 目标镜像内、断网条件下创建临时 `/tmp/package-tools`，从目标镜像可信 wheel 种子离线安装构建所需包，再明确使用该解释器运行 D2 打包器及 `--verify` 生产代码解压校验。这是临时构建工具环境，不是业务 venv，也不把业务依赖装回固定启动器。
+
+每个平台上传完整 `*-code.tar.gz`、`*-v2.json`、`*-v2.json.reference.json` 及清单引用的全部 wheel／Node 实例 tar；本地辅助代码描述 JSON 不上传。打包复用 D2 对真实 standalone、wheel 平台、文件归属、链接、基础环境、制品大小和摘要的核验，代码中无独立管理的外部依赖。
+
+两架构先独立输出；合并前逐个比较同名资产的大小和 SHA-256，相同才共用，不同立即失败，不靠覆盖掩盖冲突。发布完整性检查改为清单引用集合，继续核验本地和 GitHub 远端每个必需资产的状态、大小、摘要；多余资产也拒绝。发布侧提供完整依赖集合，客户端下载仍按本机差异，不跨 Release 复用资产。
+
+原流程仍先上传草稿、核对完整资产、公开正式 Release，最后更新 feed；失败不公开可安装引用。`assemble-release-feed.mjs` 在正式发布和说明同步中共同重建 `dependencyReleases` 小型引用，并保留旧 `appPackages` 历史。新格式不放入旧字段，feed 不展开依赖文件清单；草稿、缺包、坏摘要、错误协议／平台／基础环境均拒绝。
+
+### 首次接入与日常更新
+
+- 首次必须部署包含 D3 固定安装入口及共享模块的基础镜像，仅升级 runtime 不会补齐固定能力。挂载可写的空 STORAGE_ROOT、配置既有 UID/GID 后正常启动：入口在最终持久化路径创建业务 venv 并从可信种子离线初始化，随后启动业务。非空旧布局不会静默混用新环境。
+- 已有协议 1 布局先停止旧业务容器，使用同挂载与 UID/GID 的新基础镜像运行本文前述 `--convert-legacy`。必须相同平台、完全相同应用版本、uv.lock 和种子 Node 布局；不支持借转换升级、降级或跨任意历史版本迁移。转换持锁并在修改前备份数据库，已有数据库必须通过现有 schema 校验。
+- 转换成功后正常启动。日常协议 2 更新在同一容器内进行，不拉镜像、不重建容器、不更新解释器、系统库或固定原生库。失败交由管理员检查日志和备份；不得删除 runtime、清空数据库、手写 `.initialized` 或删除失败标记绕过拒绝。
+
+### D4 验证入口与范围
+
+```sh
+# 后端普通夹具，包含 D3 路径类型转换及嵌套 keep 回归
+cd apps/api-python
+SHUKU_TEST_UV=/path/to/uv-0.11.29 .venv/bin/python -m pytest -q \
+  tests/integration/modules/updates/test_dependency_installation.py \
+  tests/integration/modules/updates/test_dependency_preparation.py \
+  tests/integration/modules/updates/test_preparation.py
+# 仓库根：发布/说明同步与门禁的本地夹具
+node --test scripts/assemble-release-feed.test.mjs \
+  scripts/validate-release-assets.test.mjs scripts/release-workflow-policy.test.mjs
+# apps/web：普通 UI 测试不要求生产构建
+pnpm exec tsx --conditions=import --test features/updates/application/confirm-update.test.ts features/updates/model/release-notes.test.ts
+pnpm exec playwright test e2e/application-updates.spec.ts --project=chrome
+pnpm i18n:check
+# 显式真实验收：预先构建当前 Web builder，再复用真实基础镜像
+# docker build --target builder -f apps/web/Dockerfile.prod -t shuku-d4-web:local .
+PYTHONPATH=apps/api-python apps/api-python/.venv/bin/python scripts/accept_container_update.py \
+  --image shuku-d1:local --browser --web-image shuku-d4-web:local --dependencies
+```
+
+普通验证：后端更新 84 项、架构/OpenAPI 54 项、页面逻辑 13 项、Chrome 交互 9 项、发布/同步/门禁 27 项通过。另针对最后的安装入口调整复验 4 项。Ruff、Mypy、TypeScript、ESLint、双语目录校验通过。实际使用 uv 0.11.29、Python 3.11.15、Node 22.23.1；后端测试保留既有 Starlette/httpx 弃用警告。
+
+真实架构构建验证：当前 Web ARM64 builder 成功；在真实 D1 Linux ARM64 基础镜像内，独立工具 venv 离线执行协议 2 生成及生产解压校验成功，完整集合 39 Python／20 Node。未构建 AMD64 镜像，不将合并夹具等同于双架构构建通过。
+
+真实运行验收使用隔离 UID/GID 1000:1000、临时 Linux 数据卷和浏览器 profile，连续 1.0.4 → 1.0.5 → 1.0.6。测试版本、依赖、迁移和 service worker 版本只写隔离产物。两次均真实点击下载后关闭浏览器、重新打开并取消一次安装、再确认安装后关闭浏览器。为确保整个安装阶段断网，测试仅暂停固定 PID 1，让仍运行的 API 接受请求；关闭浏览器并断开网络后再恢复固定入口。Docker Desktop 网络重连会丢失端口映射，验收通过普通 stop/start 恢复映射，容器／镜像身份不变；生产更新不需要该测试步骤。
+
+两次页面成功结果、登录、书库浏览、EPUB 继续阅读、实际新 Python 导入、迁移、Worker、普通与离线重启均通过。准备／取消前后对全部受管理依赖和 installed.json 比较摘要、inode、mtime；安装后对 keep 文件逐个比较相同信息。数据库阅读记录、配置、密钥、会话、书库原始内容及迁移前备份保留。第二次源中不提供任何 wheel／Node tar，仍只下载代码和清单，uv 仅执行 check。
+
+最终一次真实运行的 HTTP 证据（下表为更新制品，不含页面轮询 feed／说明的传输）：
+
+| 更新 | 完整代码 | 完整清单 | Python 差异 | Node 差异 | 总字节 | keep 文件 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1.0.4 → 1.0.5 | 69,457,071 | 290,636 | 1,736 | 10,240 | 69,759,683 | 3,125 |
+| 1.0.5 → 1.0.6 | 69,457,067 | 290,636 | 0 | 0 | 69,747,703 | 3,143 |
+
+首轮代码、清单、B2 wheel、E1 wheel、client-only Node tar 各请求一次，其他依赖制品请求为零；次轮仅代码和清单各一次。首轮日志实际卸载 d3-b/d3-c、安装 d3-b2/d3-e1、替换 client-only 实例；次轮完整独立安装日志只有 `dependency_operation=check packages=[]`，无 install/uninstall/node 操作。两轮 keep 摘要、inode、mtime 全部一致。
+
+最终容器 `dc86f2b5de497c078113d5aee58d7903f7b798508ee9c4397a81f819524eade5`，镜像 `sha256:e7b0d67717e8f2cb8adc137f6fa1d82a1b94f897a0baab6d628a5609bfd2bb2c`，全程 UID/GID 1000:1000。迁移前数据库备份 SHA-256 为 `a03c4eb7aafd8790a6d50f969581456a7f6c5342a88b26e3486e3798ca4fb19f`。临时容器和卷已清理；本机日志 `/tmp/shuku-d4-real-final.log`，页面截图 `/tmp/shuku-update-1.0.5.png`、`/tmp/shuku-update-1.0.6.png`。
+
+D4 修改文件（均相对仓库根）：
+
+| 范围 | 文件 |
+| --- | --- |
+| 固定能力/API 接线 | `apps/api-python/app/bootstrap/updates.py`、`apps/api-python/app/modules/updates/application/preparation.py`、`infrastructure/environment.py`、`presentation/http.py`（后两者同 updates 根） |
+| 页面与契约 | `apps/web/features/updates/api/operations.ts`、`application/confirm-update.ts`、`application/use-update-operations.ts`、`model/installation.ts`、`ui/update-operations.tsx`（后四者同 features/updates 根）、`apps/web/generated/updates.ts`、`apps/web/i18n/messages/{zh-CN,en-US}.json` |
+| 发布接入 | `scripts/build-application-package.py`、`scripts/build-release-app-packages.sh`、`scripts/validate-app-packages.mjs`、`scripts/assemble-release-feed.mjs` |
+| 普通测试 | `apps/api-python/tests/integration/modules/updates/{test_dependency_installation,test_preparation}.py`、`apps/web/features/updates/application/confirm-update.test.ts`、`apps/web/e2e/application-updates.spec.ts`、`scripts/{assemble-release-feed,validate-release-assets,release-workflow-policy}.test.mjs` |
+| 显式验收 | `scripts/accept_container_update.py`、`scripts/container_update_browser.mjs`、`scripts/container_update_fixture.py`、`scripts/container_update_source.py` |
+| 文档 | 本文 |
+
+本轮未执行正式 GitHub Release、上传、feed 推送或 CI；正式发布流程通过本地夹具与 ARM64 打包命令验证，未声称远端已发布。未验证 AMD64 实际构建／运行、fnOS 实机、Safari/iOS PWA，也未运行全仓回归。

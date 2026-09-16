@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import threading
+from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
 class AcceptanceSource:
     def __init__(self, root: Path):
+        self.requests = Counter()
+        self.bytes = Counter()
         self.root = root
         self.release_download = threading.Event()
         owner = self
@@ -23,6 +26,7 @@ class AcceptanceSource:
                 if name.endswith(".tar.gz") and not owner.release_download.wait(120):
                     self.send_error(504)
                     return
+                owner.requests[name] += 1
                 self.send_response(200)
                 self.send_header("Content-Length", str(file.stat().st_size))
                 self.end_headers()
@@ -30,6 +34,7 @@ class AcceptanceSource:
                     with file.open("rb") as stream:
                         while chunk := stream.read(64 * 1024):
                             self.wfile.write(chunk)
+                            owner.bytes[name] += len(chunk)
                 except (BrokenPipeError, ConnectionResetError):
                     pass
 

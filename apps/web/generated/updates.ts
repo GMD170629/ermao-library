@@ -71,6 +71,7 @@ export type ReleaseReference = {
 export type RuntimeInfo = {
   current_version: string;
   supported: boolean;
+  install_protocol?: number;
 };
 
 export type UpdateCheck = {

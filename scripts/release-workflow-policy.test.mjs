@@ -122,3 +122,16 @@ test('approval publishes the exact build artifact and image digest without rebui
   assert.match(releaseWorkflow, /node scripts\/validate-release-source.mjs/);
   assert.match(releaseWorkflow, /cancel-in-progress: false/);
 });
+
+
+test('protocol 2 assets build offline per architecture before collision-checked merge', () => {
+  const packaging = readFileSync(new URL('./build-release-app-packages.sh', import.meta.url), 'utf8');
+  assert.match(packaging, /--network none --platform/);
+  assert.match(packaging, /--python \/tmp\/package-tools\/bin\/python --no-index --no-deps --no-build/);
+  assert.match(packaging, /\/tmp\/package-tools\/bin\/python \/opt\/shuku-image\/scripts\/build-application-package.py/);
+  assert.match(packaging, /--dependency-seed/);
+  assert.match(packaging, /--fixed-environment.*--verify/);
+  assert.match(packaging, /--merge/);
+  assert.ok(releaseWorkflow.indexOf('Verify and publish strict bilingual Release') < releaseWorkflow.indexOf('Publish verified release feed'));
+  assert.match(maintenanceWorkflow, /assemble-release-feed.mjs/);
+});

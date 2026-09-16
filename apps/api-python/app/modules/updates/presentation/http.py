@@ -33,6 +33,7 @@ router = APIRouter(tags=["updates"], route_class=TypedContractRoute)
 class RuntimeInfo(HttpContractModel):
     current_version: str
     supported: bool
+    install_protocol: int = 0
 
 
 class PrepareRequest(HttpContractModel):
@@ -203,6 +204,10 @@ def runtime_info(
         return error
     return ok(
         RuntimeInfo(
-            current_version=updates.current, supported=updates.environment is not None
+            current_version=updates.current,
+            supported=updates.environment is not None,
+            install_protocol=updates.install_protocol
+            if updates.environment is not None
+            else 0,
         )
     )

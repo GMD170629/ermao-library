@@ -6,6 +6,7 @@ from app.core.config import Settings
 from app.modules.updates.application.preparation import UpdatePreparation
 from app.modules.updates.infrastructure.environment import (
     fixed_environment,
+    fixed_install_protocol,
     fixed_protocol,
 )
 from app.modules.updates.infrastructure.official_source import (
@@ -29,6 +30,7 @@ class UpdateRuntime:
             OfficialReleases(transport, protocol),
             self.worker,
             protocol,
+            install_protocol=fixed_install_protocol(),
         )
 
     def close(self) -> None:

@@ -20,7 +20,7 @@ function boolean(value: unknown): boolean {
 const optional = (value: unknown) => value == null ? null : string(value);
 export function parseRuntime(value: unknown): RuntimeInfo {
   const data = object(value);
-  return { current_version: string(data.current_version), supported: boolean(data.supported) };
+  return { current_version: string(data.current_version), supported: boolean(data.supported), install_protocol: data.install_protocol == null ? 0 : number(data.install_protocol) };
 }
 function parsePackage(value: unknown): Package | ReleaseReference {
   const data = object(value), environment = object(data.environment);
@@ -37,7 +37,8 @@ function parsePackage(value: unknown): Package | ReleaseReference {
 function parseSummary(value: unknown): PreparationSummary | null {
   if (value == null) return null;
   const data = object(value);
-  return { dependency_identity: string(data.dependency_identity), baseline: string(data.baseline), code_sha256: string(data.code_sha256),
+  if (data.plan_sha256 != null && !/^[a-f0-9]{64}$/.test(string(data.plan_sha256))) throw new Error('更新响应无效');
+  return { ...(data.plan_sha256 == null ? {} : { plan_sha256: string(data.plan_sha256) }), dependency_identity: string(data.dependency_identity), baseline: string(data.baseline), code_sha256: string(data.code_sha256),
     keep: number(data.keep), install: number(data.install), remove: number(data.remove), total_bytes: number(data.total_bytes),
     dependency_bytes: number(data.dependency_bytes), verified_artifacts: number(data.verified_artifacts) };
 }

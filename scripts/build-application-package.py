@@ -11,9 +11,8 @@ import json
 import shutil
 import sys
 import tarfile
-from pathlib import Path
-
 import tomllib
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "apps/api-python"))
 from app.modules.updates.public import (
@@ -171,22 +170,40 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--program-root", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--verify", action="store_true")
     parser.add_argument("--dependency-seed", type=Path)
     parser.add_argument("--fixed-environment", type=Path)
     args = parser.parse_args()
     if args.dependency_seed is not None:
         if args.fixed_environment is None:
             parser.error("--fixed-environment required for protocol 2")
-        print(
-            json.dumps(
-                build_release(
-                    args.program_root.resolve(),
-                    args.output_dir.resolve(),
-                    args.dependency_seed.resolve(),
-                    args.fixed_environment.resolve(),
-                )
-            )
+        reference = build_release(
+            args.program_root.resolve(),
+            args.output_dir.resolve(),
+            args.dependency_seed.resolve(),
+            args.fixed_environment.resolve(),
         )
+        if args.verify:
+            import tempfile
+            from threading import Event
+
+            from app.modules.updates.infrastructure.archive import extract_package
+
+            manifest = ReleaseManifest.model_validate_json(
+                (args.output_dir / str(reference["filename"])).read_bytes()
+            )
+            with tempfile.TemporaryDirectory() as directory:
+                extract_package(
+                    args.output_dir / manifest.code.filename,
+                    Path(directory) / "app",
+                    CodePackage(
+                        version=manifest.version,
+                        environment=manifest.environment,
+                        **manifest.code.model_dump(),
+                    ),
+                    Event(),
+                )
+        print(json.dumps(reference))
         return
     print(
         json.dumps(

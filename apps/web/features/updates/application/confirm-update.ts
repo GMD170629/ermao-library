@@ -6,6 +6,6 @@ export async function confirmUpdate(
   confirm: () => Promise<boolean>,
   submit: (operation: 'prepare' | 'install', identity: InstallRequest) => Promise<void>
 ) {
-  const identity = { version: target.version, sha256: target.sha256 };
+  const identity = { version: target.version, sha256: target.sha256, ...(target.plan_sha256 ? { plan_sha256: target.plan_sha256 } : {}) };
   if (await confirm()) await submit(operation, identity);
 }

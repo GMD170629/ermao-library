@@ -65,7 +65,7 @@ export function useUpdateOperations(enabled: boolean) {
     sending.current = true;
     setSubmitting(true);
     setError(null);
-    if (operation === 'install') expected.current = target;
+    expected.current = operation === 'install' ? target : null;
     deadline.current = Date.now() + observationTimeoutMs;
     try {
       const next = await (operation === 'prepare' ? prepareUpdate(target.version) : installUpdate(target));
@@ -86,7 +86,7 @@ export function useUpdateOperations(enabled: boolean) {
     }
   }, []);
   return { check, state, error, observing, submitting, submit, runtime,
-    installRequested: expected.current !== null,
+    installRequested: expected.current !== null && !(state && runtime && confirmedSuccess(state, runtime.current_version, expected.current)),
     success: !!state && !!runtime && confirmedSuccess(state, runtime.current_version, expected.current),
     refresh: () => { deadline.current = 0; setError(null); setAttempt(value => value + 1); }
   };

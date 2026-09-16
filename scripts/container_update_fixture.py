@@ -131,6 +131,7 @@ def main():
     version = f"{major}.{minor}.{patch + 1}"
     for name in (
         "apps/web/package.json",
+        "apps/web/public/sw.js",
         "apps/api-python/pyproject.toml",
         "apps/api-python/app/core/config.py",
         "application.json",
@@ -173,18 +174,13 @@ def main():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     if "--dependencies" in sys.argv:
-        from app.modules.updates.application.models import ReleaseReference
         from dependency_update_fixture import target_dependencies
+
+        from app.modules.updates.application.models import ReleaseReference
 
         seed = root.parent / "dependency-seed"
         shutil.copytree("/opt/shuku-dependency-seed", seed)
         target_dependencies(root, seed)
-        health.write_text(
-            health.read_text().replace(
-                '    response.headers["X-Acceptance-Code"]',
-                '    from d3_namespace.b import VALUE\n    response.headers["X-Acceptance-Dependency"] = str(VALUE)\n    response.headers["X-Acceptance-Code"]',
-            )
-        )
         health.write_text(
             health.read_text().replace(
                 '    response.headers["X-Acceptance-Code"]',
@@ -208,6 +204,24 @@ def main():
         )
     else:
         package = module.build_package(root, root.parent / "output")
+    if "--two-updates" in sys.argv:
+        next_version = f"{major}.{minor}.{patch + 2}"
+        for name in (
+            "apps/web/package.json",
+            "apps/web/public/sw.js",
+            "apps/api-python/pyproject.toml",
+            "apps/api-python/app/core/config.py",
+            "application.json",
+        ):
+            path = root / name
+            path.write_text(path.read_text().replace(version, next_version))
+        health.write_text(health.read_text().replace('Code"] = "B"', 'Code"] = "C"'))
+        next_package = module.build_release(
+            root,
+            root.parent / "output-c",
+            seed,
+            Path("/opt/shuku-launcher/environment.json"),
+        )
     body = (root.parent / "output" / package.filename).read_bytes()
     feed = {
         "schemaVersion": 1,
@@ -229,6 +243,17 @@ def main():
     }
 
     (root.parent / "output/index.json").write_text(json.dumps(feed))
+    if "--two-updates" in sys.argv:
+        next_feed = json.loads(json.dumps(feed))
+        item = next_feed["releases"][0]
+        item.update(
+            version=next_version,
+            tag=f"v{next_version}",
+            notesPath=f"v{next_version}.md",
+            releaseUrl=f"https://github.com/GMD170629/ermao-library/releases/tag/v{next_version}",
+            dependencyReleases=[next_package],
+        )
+        (root.parent / "output-c/index.json").write_text(json.dumps(next_feed))
     if "--build-only" in sys.argv:
         print(
             json.dumps(

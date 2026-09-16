@@ -89,6 +89,8 @@ try {
       assert.equal(mutations.length, 1);
       assert.equal(mutations[0].postDataJSON().version, target);
       assert.match(mutations[0].postDataJSON().sha256, /^[a-f0-9]{64}$/);
+      const status = await (await context.request.get(`${base}/api/updates/status`)).json();
+      if (status.data.target.format === 2) assert.equal(mutations[0].postDataJSON().plan_sha256, status.data.summary.plan_sha256);
       await page.close();
     }
   } else {
@@ -99,7 +101,8 @@ try {
     assert.equal(mutations.length, 0);
     await expect(page.getByRole('alertdialog')).toHaveCount(0, { timeout: 30000 });
     await expect(page.getByText(`更新成功，实际运行版本 v${target}。`, { exact: true })).toBeVisible();
-    await page.screenshot({ path: '/tmp/shuku-update-success.png' });
+    await page.getByText(`更新成功，实际运行版本 v${target}。`, { exact: true }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `/tmp/shuku-update-${target}.png`, fullPage: true });
     // Login and catalog regression use the same authenticated browser and real API.
     await readerRegression(false);
     await page.goto(`${base}/library`);

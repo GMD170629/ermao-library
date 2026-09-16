@@ -500,3 +500,18 @@ def test_node_type_conflict_with_kept_nested_instance_rejected(
     ) == nested_before
     assert not (p.storage / "update-tmp/install-request.json").exists()
     assert not (p.storage / "update-tmp/installation-incomplete").exists()
+
+
+def test_missing_fixed_install_capability_refuses_request(installed, downloads):
+    p = installed
+    p.build()
+    downloads.updates.prepare(True, "1.0.4")
+    state = prepare.finish(downloads)
+    downloads.updates.install_protocol = 0
+    before = prepare.snapshot(p.storage)
+    with pytest.raises(UpdateError, match="INSTALLATION_NOT_SUPPORTED"):
+        downloads.updates.install(
+            True, "1.0.4", p.reference.sha256, state.summary.plan_sha256
+        )
+    assert prepare.snapshot(p.storage) == before
+    assert not (p.storage / "update-tmp/install-request.json").exists()

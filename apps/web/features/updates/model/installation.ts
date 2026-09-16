@@ -7,8 +7,15 @@ export const observationTimeoutMs = 20 * 60_000;
 export const pollIntervalMs = 3_000;
 export function confirmedSuccess(state: PreparationState, current: string, expected?: InstallRequest | null) {
   return state.phase === 'success' && !!state.target && state.target.version === current
-    && (!expected || (state.target.version === expected.version && state.target.sha256 === expected.sha256));
+    && (state.target.format !== 2 || /^[a-f0-9]{64}$/.test(state.summary?.plan_sha256 ?? ''))
+    && (!expected || (state.target.version === expected.version && state.target.sha256 === expected.sha256
+      && (state.target.format !== 2 || state.summary?.plan_sha256 === expected.plan_sha256)));
 }
 export function installationFailed(state: PreparationState) {
   return state.phase === 'failed' && !preparationPhases.has(state.failed_phase ?? '');
+}
+
+export function canInstall(state: PreparationState | null, protocol: number | undefined) {
+  return state?.phase === 'ready' && !!state.target && state.target.format === protocol
+    && (state.target.format !== 2 || /^[a-f0-9]{64}$/.test(state.summary?.plan_sha256 ?? ''));
 }

@@ -619,6 +619,11 @@ def test_fixed_environment_comes_from_fixed_metadata_not_package(
         )
         assert detection.fixed_environment(storage) == source[0].package.environment
         assert detection.fixed_protocol() == 2
+        assert detection.fixed_install_protocol() == 0
+        (tmp_path / "dependency_install.py").touch()
+        (tmp_path / "shuku_dependencies").mkdir()
+        (tmp_path / "shuku_dependencies/installed.py").touch()
+        assert detection.fixed_install_protocol() == 2
         fixed.unlink()
         assert detection.fixed_environment(storage) is None
     assert detection.fixed_environment(storage) is None
@@ -795,6 +800,7 @@ def test_runtime_information_uses_actual_backend_and_requires_login(
     assert result.json()["data"] == {
         "current_version": updates.current,
         "supported": True,
+        "install_protocol": 1,
     }
     assert client.get("/api/updates/status").status_code == 403
 

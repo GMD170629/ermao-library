@@ -41,7 +41,11 @@ class UpdatePreparation:
         source: ReleaseSource,
         worker: PreparationPort,
         protocol: int = 1,
+        install_protocol: int | None = None,
     ) -> None:
+        self.install_protocol = (
+            protocol if install_protocol is None else install_protocol
+        )
         self.protocol = protocol
         self.current = current
         self.environment = environment
@@ -111,6 +115,11 @@ class UpdatePreparation:
             raise UpdateError("UNSUPPORTED_DEPLOYMENT")
         if version_parts(version) <= version_parts(self.current):
             raise UpdateError("NOT_NEWER")
+        if self.install_protocol != self.protocol:
+            raise UpdateError("INSTALLATION_NOT_SUPPORTED")
+        target = self.worker.status().target
+        if target is not None and target.format != self.install_protocol:
+            raise UpdateError("INSTALLATION_NOT_SUPPORTED")
         return self.worker.install(
             version, sha256, self.environment, self.current, plan_sha256
         )

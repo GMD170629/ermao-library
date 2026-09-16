@@ -48,3 +48,18 @@ def fixed_protocol() -> int:
         return 2 if value == 2 else 1
     except (OSError, ValueError, KeyError):
         return 1
+
+
+def fixed_install_protocol() -> int:
+    """D1/D2 protocol metadata alone does not advertise the D3 executor."""
+    if fixed_protocol() != 2:
+        return 1
+    return (
+        2
+        if all(
+            (FIXED_ENVIRONMENT.parent / name).is_file()
+            and not (FIXED_ENVIRONMENT.parent / name).is_symlink()
+            for name in ("dependency_install.py", "shuku_dependencies/installed.py")
+        )
+        else 0
+    )

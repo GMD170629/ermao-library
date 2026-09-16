@@ -78,3 +78,34 @@ test('application assets are mandatory and digest checked', t => {
   rmSync(join(directory, 'shuku-1.0.5-linux-x86_64.tar.gz.json'));
   assert.throws(() => validateAppPackages(directory, '1.0.5'));
 });
+
+import { dependencyFixture } from './assemble-release-feed.test.mjs';
+import { mergeApplicationAssets } from './validate-app-packages.mjs';
+test('complete dependency assets validate; missing/corrupt assets and merge conflicts fail', t => {
+  const root=mkdtempSync(join(tmpdir(), 'dependency-assets-'));
+  t.after(() => rmSync(root,{recursive:true,force:true}));
+  const f=dependencyFixture();
+  for (const [name, bytes] of f.manifests) writeFileSync(join(root,name),bytes);
+  assert.equal(validateAppPackages(root,'1.0.5',f.release).length,2);
+  writeFileSync(join(root,'demo-1-py3-none-any.whl'),'corrupt');
+  assert.throws(() => validateAppPackages(root,'1.0.5'),/SHA-256/);
+  rmSync(join(root,'demo-1-py3-none-any.whl'));
+  assert.throws(() => validateAppPackages(root,'1.0.5'));
+  const a=join(root,'a'), b=join(root,'b'), output=join(root,'merged'); mkdirSync(a); mkdirSync(b);
+  writeFileSync(join(a,'shared.whl'),'a'); writeFileSync(join(b,'shared.whl'),'b');
+  assert.throws(() => mergeApplicationAssets(output,[a,b]),/Conflicting architecture asset/);
+});
+
+test('architecture merge shares identical assets and retains complete references', t => {
+  const root=mkdtempSync(join(tmpdir(),'dependency-merge-'));
+  t.after(()=>rmSync(root,{recursive:true,force:true}));
+  const inputs=['linux-x86_64','linux-aarch64'].map(platform=>join(root,platform));
+  inputs.forEach(path=>mkdirSync(path));
+  const f=dependencyFixture();
+  for (const [name,bytes] of f.manifests) for (const path of inputs) {
+    if (name.endsWith('.whl') || name.includes(path.split('/').at(-1))) writeFileSync(join(path,name),bytes);
+  }
+  const output=join(root,'out');
+  mergeApplicationAssets(output,inputs);
+  assert.equal(validateAppPackages(output,'1.0.5').length,2);
+});
