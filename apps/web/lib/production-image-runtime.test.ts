@@ -3,9 +3,10 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 test('standalone production image supports optimization under the configured runtime user', async () => {
-  const [packageSource, dockerfile] = await Promise.all([
+  const [packageSource, dockerfile, launcher] = await Promise.all([
     readFile('package.json', 'utf8'),
-    readFile('Dockerfile.prod', 'utf8')
+    readFile('Dockerfile.prod', 'utf8'),
+    readFile('../../scripts/container-entry.py', 'utf8')
   ]);
   const packageManifest = JSON.parse(packageSource) as {
     dependencies?: Record<string, string>;
@@ -17,10 +18,10 @@ test('standalone production image supports optimization under the configured run
   );
   assert.match(
     dockerfile,
-    /mkdir -p [^\n]*\/app\/apps\/web\/\.next\/cache/
+    /mkdir -p [^\n]*\/opt\/shuku-image\/apps\/web\/\.next\/cache/
   );
-  assert.match(
-    dockerfile,
-    /chmod 1777 \/app\/apps\/web\/\.next\/cache/
-  );
+  assert.match(launcher, /shutil\.copytree\(seed, runtime, symlinks=True\)/);
+  assert.match(launcher, /runtime \/ "apps\/web\/\.next\/cache"/);
+  assert.match(launcher, /with tempfile\.TemporaryFile\(dir=directory\):/);
+  assert.doesNotMatch(launcher, /os\.(?:chmod|chown)\(/);
 });
