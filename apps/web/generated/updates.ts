@@ -14,6 +14,16 @@ export type Environment = {
   compatibility: string;
 };
 
+export type GHCRReleaseReference = {
+  version: string;
+  format?: 2;
+  environment: Environment;
+  filename: string;
+  size: number;
+  sha256: string;
+  oci_digest: string;
+};
+
 export type InstallRequest = {
   version: string;
   plan_sha256?: string | null;
@@ -33,7 +43,7 @@ export type Package = {
 
 export type PreparationState = {
   phase?: "idle" | "downloading" | "verifying" | "extracting" | "ready" | "failed" | "requested" | "checking" | "stopping" | "backup" | "copying" | "starting" | "success";
-  target?: Package | ReleaseReference | null;
+  target?: Package | GHCRReleaseReference | ReleaseReference | null;
   summary?: PreparationSummary | null;
   downloaded?: number;
   started_at?: string | null;

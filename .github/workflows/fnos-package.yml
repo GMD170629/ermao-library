@@ -36,6 +36,7 @@ on:
       - 'scripts/sign-android-apk.sh'
       - 'scripts/validate-release-assets*'
       - 'scripts/*app-packages*'
+      - 'scripts/ghcr-updates*'
       - 'scripts/assemble-release-feed*'
       - 'scripts/build-application-package.py'
       - 'scripts/validate-release-source*'
@@ -88,7 +89,7 @@ jobs:
         run: node scripts/validate-release-source.mjs
 
       - name: Test strict bilingual release-note validation
-        run: node --test scripts/validate-release-notes.test.mjs scripts/validate-release-assets.test.mjs scripts/release-workflow-policy.test.mjs scripts/validate-release-source.test.mjs scripts/assemble-release-feed.test.mjs scripts/build-release-app-packages.test.mjs
+        run: node --test scripts/ghcr-updates.test.mjs scripts/validate-release-notes.test.mjs scripts/validate-release-assets.test.mjs scripts/release-workflow-policy.test.mjs scripts/validate-release-source.test.mjs scripts/assemble-release-feed.test.mjs scripts/build-release-app-packages.test.mjs
 
       - name: Validate application version and bilingual release notes
         id: version
@@ -265,6 +266,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: write
 
     steps:
       - name: Check out repository
@@ -420,6 +422,7 @@ jobs:
       url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
     permissions:
       contents: write
+      packages: write
 
     steps:
       - name: Check out the exact release source
@@ -447,6 +450,22 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up ORAS
+        uses: oras-project/setup-oras@22ce207df3b08e061f537244349aac6ae1d214f6 # v1
+        with:
+          version: 1.3.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Publish and anonymously verify OCI update artifacts
+        if: github.ref_type == 'tag'
+        run: node scripts/ghcr-updates.mjs dist/application '${{ steps.version.outputs.app_version }}'
 
       - name: Prepare strict bilingual Draft Release
         if: github.ref_type == 'tag'
@@ -493,7 +512,6 @@ jobs:
           else
             gh release upload "$RELEASE_TAG" dist/fnos/*.fpk dist/fnos/*.sha256 dist/android/*.apk dist/android/*.sha256 --clobber
           fi
-          gh release upload "$RELEASE_TAG" dist/application/* --clobber
           gh release view "$RELEASE_TAG" --json assets > "$RUNNER_TEMP/release-assets.json"
           node scripts/validate-release-assets.mjs dist "$RELEASE_TAG" "$RUNNER_TEMP/release-assets.json"
 

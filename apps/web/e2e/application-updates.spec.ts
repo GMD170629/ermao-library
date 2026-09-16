@@ -130,10 +130,10 @@ test('protocol 2 ready survives refresh and never offers installation', async ({
 });
 
 
-test('protocol 2 sends captured plan and shows real dependency totals', async ({ page }) => {
+test('GHCR protocol 2 sends captured plan and shows real dependency totals', async ({ page }) => {
   const f = await fixture(page, { protocol: 2 });
   const summary = { plan_sha256: 'e'.repeat(64), dependency_identity: 'b'.repeat(64), baseline: 'c'.repeat(64), code_sha256: 'd'.repeat(64), keep: 58, install: 1, remove: 2, total_bytes: 12000, dependency_bytes: 10240, verified_artifacts: 2 };
-  f.state = { phase: 'ready', downloaded: 12000, target: { format: 2, version: target.version, environment: target.environment, filename: 'shuku-1.0.5-linux-x86_64-v2.json', size: 100, sha256: target.sha256 }, summary };
+  f.state = { phase: 'ready', downloaded: 12000, target: { format: 2, version: target.version, environment: target.environment, filename: 'shuku-1.0.5-linux-x86_64-v2.json', size: 100, sha256: target.sha256, oci_digest: `sha256:${'9'.repeat(64)}` }, summary };
   await page.goto('/settings/about');
   await page.getByText('更新详情', { exact: true }).click();
   await expect(page.getByText('依赖：安装／替换 1，删除 2，保留 58。', { exact: false })).toBeVisible();

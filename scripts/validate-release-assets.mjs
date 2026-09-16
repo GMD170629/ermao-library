@@ -36,7 +36,9 @@ export function validateReleaseAssets(root, tag, remote) {
       }
     }
   }
-  validateAppPackages(join(root, 'application'), tag.slice(1), remote);
+  const ghcr = Number(tag.slice(1).split('.')[0]) > 1 || (Number(tag.slice(1).split('.')[0]) === 1 && Number(tag.slice(1).split('.')[1]) >= 1);
+  if (ghcr && remote && remote.assets.length !== expected.length * 2) throw Error('Unexpected Release attachments; update dependencies belong in GHCR');
+  validateAppPackages(join(root, 'application'), tag.slice(1), ghcr ? undefined : remote);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

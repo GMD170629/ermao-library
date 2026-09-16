@@ -45,6 +45,10 @@ test(`${version} permits a server-only bundle and still verifies remote digests`
     assets.push({ name: file, state: 'uploaded', size: Buffer.byteLength(data), digest: `sha256:${createHash('sha256').update(data).digest('hex')}` });
   }
   addApplications(root, version, assets);
+  if (version === '1.1.0') {
+    assert.throws(() => validateReleaseAssets(root, `v${version}`, { assets }), /belong in GHCR/);
+    assets.splice(2);
+  }
   validateReleaseAssets(root, `v${version}`, { assets });
   assert.throws(() => validateReleaseAssets(root, 'v1.0.5'), /android/);
   assert.throws(() => validateReleaseAssets(root, `v${version}`, { assets: assets.slice(0, 1) }), /Remote/);

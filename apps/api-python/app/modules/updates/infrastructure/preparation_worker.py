@@ -26,6 +26,7 @@ from ..application.dependency_release import (
 )
 from ..application.models import (
     Environment,
+    GHCRReleaseReference,
     Package,
     PreparationState,
     PreparationSummary,
@@ -39,7 +40,8 @@ from .dependency_preparation import (
     verify_dependency_artifact,
     verify_local,
 )
-from .official_source import ByteSource, package_url
+from .ghcr_source import blob_url, validate_registry_files, validate_registry_manifest
+from .official_source import ByteSource, artifact_url, package_url
 
 LOGGER = logging.getLogger(__name__)
 
@@ -332,13 +334,21 @@ class PreparationWorker:
             raise UpdateError("DIGEST_MISMATCH")
         return state
 
+    @staticmethod
+    def _artifact_url(reference: ReleaseReference, filename: str, digest: str) -> str:
+        if isinstance(reference, GHCRReleaseReference):
+            return blob_url(digest)
+        return artifact_url(reference.version, filename)
+
     def _prepare_v2(
         self, reference: ReleaseReference, state: PreparationState, work: Path
     ) -> None:
-        from .official_source import artifact_url
-
         if self.environment is None or reference.environment != self.environment:
             raise UpdateError("INCOMPATIBLE_ENVIRONMENT")
+        if isinstance(reference, GHCRReleaseReference):
+            registry_files = validate_registry_manifest(self.transport, reference)
+        else:
+            registry_files = None
         check_space(work, reference.size)
         manifest_path = work / "release.json"
         state = self._download(
@@ -360,6 +370,8 @@ class PreparationWorker:
             or manifest.python_abi != sysconfig.get_config_var("SOABI")
         ):
             raise UpdateError("INCOMPATIBLE_ENVIRONMENT")
+        if registry_files is not None:
+            validate_registry_files(registry_files, reference, manifest)
         for package in manifest.dependencies.packages:
             if package.ecosystem == "python":
                 check_wheel_platform(package)
@@ -388,7 +400,7 @@ class PreparationWorker:
         state = self._write(state.model_copy(update={"summary": summary}))
         code = manifest.code
         state = self._download(
-            artifact_url(reference.version, code.filename),
+            self._artifact_url(reference, code.filename, code.sha256),
             work / code.filename,
             code.size,
             code.sha256,
@@ -411,7 +423,7 @@ class PreparationWorker:
             item = package.artifact
             state = self._write(state.model_copy(update={"phase": "downloading"}))
             state = self._download(
-                artifact_url(reference.version, item.filename),
+                self._artifact_url(reference, item.filename, item.sha256),
                 work / item.filename,
                 item.size,
                 item.sha256,

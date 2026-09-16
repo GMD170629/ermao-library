@@ -69,6 +69,10 @@ class ReleaseReference(UpdateModel):
         return self
 
 
+class GHCRReleaseReference(ReleaseReference):
+    oci_digest: str = Field(pattern=r"^sha256:[a-f0-9]{64}$")
+
+
 class PreparationSummary(UpdateModel):
     plan_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     dependency_identity: str
@@ -103,7 +107,7 @@ class PreparationState(UpdateModel):
         "starting",
         "success",
     ] = "idle"
-    target: Package | ReleaseReference | None = None
+    target: Package | GHCRReleaseReference | ReleaseReference | None = None
     summary: PreparationSummary | None = None
     downloaded: int = 0
     started_at: str | None = None

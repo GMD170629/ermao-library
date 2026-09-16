@@ -1,5 +1,6 @@
 // Rebuild optional install metadata from published, digest-verified official assets.
 // Also used by notes synchronization: it cannot erase published appPackages accidentally.
+import { readPublishedDependencies } from './ghcr-updates.mjs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
@@ -40,14 +41,14 @@ export function publishedDependencies(release, version, readManifest) {
     return reference;
   });
 }
-export function assembleFeed(index, getRelease, readManifest) {
+export function assembleFeed(index, getRelease, readManifest, ghcr = new Map()) {
   return { ...index, releases: index.releases.map(release => {
     const published = getRelease(release.tag);
     const read = name => readManifest(release.tag, name);
     const packages = publishedPackages(published, release.version, read);
     const dependencies = publishedDependencies(published, release.version, read);
-    const { appPackages: _old, dependencyReleases: _dependencies, ...notes } = release;
-    return { ...notes, ...(packages.length ? { appPackages: packages } : {}), ...(dependencies.length ? { dependencyReleases: dependencies } : {}) };
+    const { appPackages: _old, dependencyReleases: _dependencies, ghcrDependencyReleases: _ghcr, ...notes } = release;
+    return { ...notes, ...(ghcr.has(release.version) ? { ghcrDependencyReleases: ghcr.get(release.version) } : {}), ...(packages.length ? { appPackages: packages } : {}), ...(dependencies.length ? { dependencyReleases: dependencies } : {}) };
   }) };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
@@ -55,12 +56,23 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   const directory = mkdtempSync(join(tmpdir(), 'release-manifests-'));
   const gh = args => execFileSync('gh', args, { encoding: 'utf8' });
   try {
-    const index = assembleFeed(JSON.parse(readFileSync(file, 'utf8')),
+    const source = JSON.parse(readFileSync(file, 'utf8'));
+    const existing = JSON.parse(Buffer.from(JSON.parse(gh(['api', 'repos/GMD170629/ermao-library/contents/index.json?ref=release-feed'])).content, 'base64').toString('utf8'));
+    const ghcr = new Map();
+    for (const release of source.releases) {
+      if (release.version.split('.').map(Number)[0] > 1 ||
+          (Number(release.version.split('.')[0]) === 1 && Number(release.version.split('.')[1]) >= 1)) {
+        ghcr.set(release.version, await readPublishedDependencies(release.version, {
+          expectedDigests: existing.releases.find(item => item.version === release.version)?.ghcrDependencyReleases?.map(reference => reference.oci_digest),
+        }));
+      }
+    }
+    const index = assembleFeed(source,
       tag => JSON.parse(gh(['release', 'view', tag, '--repo', 'GMD170629/ermao-library', '--json', 'tagName,isDraft,isPrerelease,assets'])),
       (tag, name) => {
         gh(['release', 'download', tag, '--repo', 'GMD170629/ermao-library', '--pattern', name, '--dir', directory, '--clobber']);
         return readFileSync(join(directory, name));
-      });
+      }, ghcr);
     writeFileSync(file, JSON.stringify(index, null, 2) + '\n');
   } finally { rmSync(directory, { recursive: true, force: true }); }
 }

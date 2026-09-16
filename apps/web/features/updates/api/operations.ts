@@ -1,4 +1,4 @@
-import type { InstallRequest, Package, ReleaseReference, PreparationSummary, PreparationState, RuntimeInfo, UpdateCheck } from '@/generated/updates';
+import type { InstallRequest, Package, ReleaseReference, GHCRReleaseReference, PreparationSummary, PreparationState, RuntimeInfo, UpdateCheck } from '@/generated/updates';
 import { withBasePath } from '@/lib/base-path';
 
 function object(value: unknown): Record<string, unknown> {
@@ -22,7 +22,7 @@ export function parseRuntime(value: unknown): RuntimeInfo {
   const data = object(value);
   return { current_version: string(data.current_version), supported: boolean(data.supported), install_protocol: data.install_protocol == null ? 0 : number(data.install_protocol) };
 }
-function parsePackage(value: unknown): Package | ReleaseReference {
+function parsePackage(value: unknown): Package | ReleaseReference | GHCRReleaseReference {
   const data = object(value), environment = object(data.environment);
   if (![1, 2].includes(number(data.format)) || environment.format !== 1 || !/^[a-f0-9]{64}$/.test(string(data.sha256))) throw new Error('更新响应无效');
   const common = {
@@ -30,6 +30,11 @@ function parsePackage(value: unknown): Package | ReleaseReference {
     filename: string(data.filename), size: number(data.size),
     environment: { format: 1 as const, platform: string(environment.platform), compatibility: string(environment.compatibility) }
   };
+  if (data.format === 2 && data.oci_digest != null) {
+    const oci_digest = string(data.oci_digest);
+    if (!/^sha256:[a-f0-9]{64}$/.test(oci_digest)) throw new Error('更新响应无效');
+    return { ...common, format: 2, oci_digest };
+  }
   return data.format === 2 ? { ...common, format: 2 } : {
     ...common, format: 1, expanded_size: number(data.expanded_size), file_count: number(data.file_count)
   };

@@ -145,3 +145,11 @@ test('backend installation tests use the production uv version and report its ex
   assert.ok(packageJob.indexOf('uses: astral-sh/setup-uv') < packageJob.indexOf('command -v uv'));
   assert.ok(packageJob.indexOf('ctest --test-dir') < packageJob.indexOf('uv run --extra dev --locked pytest -q'));
 });
+
+test('GHCR artifacts are anonymously verified before stable publication and stay out of Releases', () => {
+  const publish = releaseWorkflow.split('\n  publish:')[1];
+  assert.match(publish, /packages: write/);
+  assert.match(publish, /version: 1\.3\.0/);
+  assert.ok(publish.indexOf('node scripts/ghcr-updates.mjs') < publish.indexOf('Promote verified release Docker image'));
+  assert.doesNotMatch(publish, /gh release upload[^\n]*dist\/application/);
+});

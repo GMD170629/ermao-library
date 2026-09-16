@@ -536,3 +536,82 @@ def test_target_python_ownership_cannot_overlap(packages):
     )
     with pytest.raises(ValueError, match="overlapping Python ownership"):
         DependencySet.model_validate(payload)
+
+
+def test_ghcr_selective_preparation_and_restart(packages):
+    from app.modules.updates.application.models import GHCRReleaseReference
+    from app.modules.updates.infrastructure.ghcr_source import (
+        ARTIFACT_TYPE,
+        OCI_TYPE,
+        REGISTRY,
+    )
+
+    change_target(packages)
+    reference = packages.reference
+    manifest = json.loads((packages.output / reference.filename).read_text())
+    artifacts = [
+        reference.model_dump(),
+        manifest["code"],
+        *[p["artifact"] for p in manifest["dependencies"]["packages"]],
+    ]
+    files = {a["filename"]: a for a in artifacts}
+    oci = json.dumps(
+        {
+            "schemaVersion": 2,
+            "mediaType": OCI_TYPE,
+            "artifactType": ARTIFACT_TYPE,
+            "annotations": {
+                "org.opencontainers.image.version": reference.version,
+                "io.ermao.platform": reference.environment.platform,
+            },
+            "layers": [
+                {
+                    "digest": "sha256:" + a["sha256"],
+                    "size": a["size"],
+                    "annotations": {"org.opencontainers.image.title": name},
+                }
+                for name, a in files.items()
+            ],
+        }
+    ).encode()
+    target = GHCRReleaseReference(
+        **reference.model_dump(), oci_digest="sha256:" + hashlib.sha256(oci).hexdigest()
+    )
+    responses = {
+        f"{REGISTRY}/blobs/sha256:{a['sha256']}": (packages.output / name).read_bytes()
+        for name, a in files.items()
+    }
+    responses[f"{REGISTRY}/manifests/{target.oci_digest}"] = oci
+    requested = []
+
+    class Registry:
+        def chunks(self, url, limit, seconds):
+            requested.append(url)
+            content = responses[url]
+            assert len(content) <= limit
+            for offset in range(0, len(content), 1024):
+                yield content[offset : offset + 1024]
+
+    worker = PreparationWorker(packages.storage, Registry(), reference.environment)
+    try:
+        worker.submit(target)
+        state = finish(SimpleNamespace(worker=worker))
+        assert state.phase == "ready", state
+        assert state.target.oci_digest == target.oci_digest
+        kept = [
+            p["artifact"]["sha256"]
+            for p in manifest["dependencies"]["packages"]
+            if p["name"] in {"a", "d", "demo"}
+        ]
+        assert all(f"{REGISTRY}/blobs/sha256:{sha}" not in requested for sha in kept)
+        assert (
+            len(requested) == 5
+        )  # OCI manifest, release manifest, code, two changed dependencies
+    finally:
+        worker.close()
+    restarted = PreparationWorker(packages.storage, Registry(), reference.environment)
+    try:
+        assert restarted.status().phase == "ready"
+        assert restarted.status().target.oci_digest == target.oci_digest
+    finally:
+        restarted.close()

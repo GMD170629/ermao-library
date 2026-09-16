@@ -16,11 +16,13 @@ from pydantic import ValidationError
 
 from ..application.models import (
     REPOSITORY,
+    GHCRReleaseReference,
     Package,
     ReleaseReference,
     UpdateError,
     version_parts,
 )
+from .ghcr_source import blob_url, registry_chunks
 
 FEED_URL = f"https://raw.githubusercontent.com/{REPOSITORY}/release-feed/index.json"
 ASSET_ROOT = f"https://github.com/{REPOSITORY}/releases/download/"
@@ -68,6 +70,9 @@ class OfficialHTTP:
         self.opener = opener or urllib.request.build_opener(OfficialRedirects())
 
     def chunks(self, url: str, limit: int, seconds: int) -> Iterator[bytes]:
+        if url.startswith("https://ghcr.io/v2/gmd170629/ermao-library-updates/"):
+            yield from registry_chunks(url, limit, seconds)
+            return
         if url != FEED_URL and not url.startswith(ASSET_ROOT):
             raise UpdateError("UNTRUSTED_SOURCE")
         deadline = time.monotonic() + seconds
@@ -132,6 +137,11 @@ class OfficialReleases:
                         [],
                     )
                 ]
+                if self.protocol != 1 and "ghcrDependencyReleases" in release:
+                    packages = [
+                        GHCRReleaseReference.model_validate(p)
+                        for p in release["ghcrDependencyReleases"]
+                    ]
                 if any(p.version != version for p in packages) or len(
                     {p.environment.platform for p in packages}
                 ) != len(packages):
@@ -143,6 +153,8 @@ class OfficialReleases:
 
 
 def package_url(package: Package | ReleaseReference) -> str:
+    if isinstance(package, GHCRReleaseReference):
+        return blob_url(package.sha256)
     return f"{ASSET_ROOT}v{package.version}/{package.filename}"
 
 
