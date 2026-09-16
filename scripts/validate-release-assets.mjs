@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 export function validateReleaseAssets(root, tag, remote) {
   if (!/^v\d+\.\d+\.\d+$/.test(tag)) throw Error('Invalid stable tag');
   // Explicit owner-approved exception; all other stable versions still require APKs.
-  const serverOnly = ['v1.0.3', 'v1.0.4'].includes(tag);
+  const serverOnly = ['v1.0.3', 'v1.0.4', 'v1.1.0'].includes(tag);
   if (serverOnly && (existsSync(join(root, 'android')) || remote?.assets.some(asset => /\.(?:apk|ipa)(?:\.sha256)?$/.test(asset.name)))) {
     throw Error(`${tag} must not contain mobile release assets`);
   }

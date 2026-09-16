@@ -90,7 +90,7 @@ test('owner-approved server-only releases retain server validation', () => {
   const mobileJob = releaseWorkflow.split('\n  mobile-release:')[1].split('\n  package:')[0];
   const packageJob = releaseWorkflow.split('\n  package:')[1].split('\n  publish:')[0];
   const publishJob = releaseWorkflow.split('\n  publish:')[1];
-  const serverOnly = `contains(fromJSON('["1.0.3","1.0.4"]'), needs.validate.outputs.app_version)`;
+  const serverOnly = `contains(fromJSON('["1.0.3","1.0.4","1.1.0"]'), needs.validate.outputs.app_version)`;
   assert.ok(mobileJob.includes(`if: github.ref_type == 'tag' && !${serverOnly}`));
   assert.match(packageJob, /if: always\(\) && needs.validate.result == 'success'/);
   assert.ok(packageJob.includes(`needs.mobile-release.result == 'success' || (${serverOnly} && needs.mobile-release.result == 'skipped')`));
@@ -98,7 +98,7 @@ test('owner-approved server-only releases retain server validation', () => {
     assert.ok(packageJob.includes(`- name: ${name}\n        if: ` + '${{ !' + serverOnly + ' }}'));
   }
   assert.ok(publishJob.includes('name: ${{ ' + serverOnly + " && 'stable-release-server' || 'stable-release' }}"));
-  assert.ok(publishJob.includes(`if [[ "$RELEASE_TAG" == 'v1.0.3' || "$RELEASE_TAG" == 'v1.0.4' ]]; then`));
+  assert.ok(publishJob.includes(`if [[ "$RELEASE_TAG" == 'v1.0.3' || "$RELEASE_TAG" == 'v1.0.4' || "$RELEASE_TAG" == 'v1.1.0' ]]; then`));
   assert.ok(publishJob.includes('gh release upload "$RELEASE_TAG" dist/fnos/*.fpk dist/fnos/*.sha256 --clobber'));
 });
 

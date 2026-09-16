@@ -1,67 +1,14 @@
 'use client';
 
-import { AlertCircle, CheckCircle2, ChevronDown, FlaskConical, RefreshCw, Sparkles } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useI18n } from '@/i18n/provider';
 import { fetchReleaseNote } from '../api/client';
 import { useReleaseFeed } from '../application/release-feed-context';
-import { extractLocalizedReleaseNote, updateStatus } from '../model/release-notes';
+import { extractLocalizedReleaseNote } from '../model/release-notes';
 import type { ReleaseSummary } from '../model/types';
 import { UpdateOperations } from './update-operations';
 import { ReleaseMarkdown } from './release-markdown';
-
-function StatusCard() {
-  const { state, retry, runtime } = useReleaseFeed();
-  const { formatDateTime, t } = useI18n();
-  if (state.status === 'loading' || !runtime) {
-    return <div className="rounded-2xl border border-[#DEDAD4] bg-[#F7F5F2] p-5 text-sm text-[#716B64]">{t('正在检查更新…')}</div>;
-  }
-  if (state.status === 'error') {
-    return (
-      <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-[#E8C8C1] bg-[#FFF4F1] p-5 text-sm text-[#8D3828]">
-        <AlertCircle size={19} aria-hidden="true" />
-        <span className="min-w-0 flex-1">{t(state.message)}</span>
-        <button type="button" onClick={retry} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[#DFAE9F] px-3 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]">
-          <RefreshCw size={16} aria-hidden="true" />
-          {t('重试')}
-        </button>
-      </div>
-    );
-  }
-  const status = updateStatus(runtime.current_version, state.feed);
-  if (status.kind === 'update-available') {
-    return (
-      <div className="rounded-2xl border border-[#F1B8A8] bg-[#FFF2ED] p-5">
-        <div className="flex items-start gap-3">
-          <Sparkles size={20} className="mt-0.5 text-[#ED4D2D]" aria-hidden="true" />
-          <div>
-            <h3 className="font-semibold text-[#8F2F1D]">{t('发现新版本 v{version}', { version: status.latest.version })}</h3>
-            <p className="mt-1 text-sm leading-6 text-[#7B5148]">
-              {t('当前版本 v{current}，最新版本发布于 {date}。', {
-                current: runtime.current_version,
-                date: formatDateTime(status.latest.publishedAt)
-              })}
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-  if (status.kind === 'development') {
-    return (
-      <div className="flex items-center gap-3 rounded-2xl border border-[#D7D3E7] bg-[#F5F3FA] p-5 text-sm text-[#5F577C]">
-        <FlaskConical size={19} aria-hidden="true" />
-        <span>{t('当前运行的是高于最新正式版的开发版本。')}</span>
-      </div>
-    );
-  }
-  return (
-    <div className="flex items-center gap-3 rounded-2xl border border-[#CFE0CF] bg-[#F2F8F1] p-5 text-sm text-[#426443]">
-      <CheckCircle2 size={19} aria-hidden="true" />
-      <span>{t('当前已是最新正式版本。')}</span>
-    </div>
-  );
-}
 
 function ReleaseEntry({ release, initiallyOpen }: { release: ReleaseSummary; initiallyOpen: boolean }) {
   const { locale, formatDate, t } = useI18n();
@@ -116,7 +63,6 @@ export function ReleaseHistory() {
     <section className="mt-8 border-t border-[#DEDAD4] pt-7" aria-labelledby="release-history-title">
       <h3 id="release-history-title" className="text-lg font-semibold text-[#2A2825]">{t('更新与版本历史')}</h3>
       <p className="mt-2 text-sm leading-6 text-[#716B64]">{t('更新说明与 GitHub Release 保持一致。')}</p>
-      <div className="mt-4"><StatusCard /></div>
       <UpdateOperations />
       {state.status === 'ready' ? (
         <div className="mt-5 space-y-3">

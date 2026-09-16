@@ -35,7 +35,7 @@ test('an already published version cannot rebuild, while a draft can recover', (
 test('mobile releases fail closed if the real approval gate is missing', () => {
   for (const environment of [null, {}, { protection_rules: [] }, { protection_rules: [{ type: 'required_reviewers', reviewers: [] }] }]) {
     assert.throws(() => validateReleaseSource({ ...source, environment }), /required reviewers/);
-    for (const version of ['1.0.3', '1.0.4']) {
+    for (const version of ['1.0.3', '1.0.4', '1.1.0']) {
       validateReleaseSource({ ...source, tag: `v${version}`, version, environment });
     }
   }

@@ -40,6 +40,7 @@ export function useUpdateOperations(enabled: boolean) {
         const info = await refreshRuntime(controller.signal);
         if (controller.signal.aborted) return;
         setState(next);
+        if (confirmedSuccess(next, info.current_version, expected.current)) setError(null);
         const pending = installationPhases.has(next.phase ?? '') || preparationPhases.has(next.phase ?? '') ||
           (next.phase === 'success' && !confirmedSuccess(next, info.current_version, expected.current)) ||
           (expected.current !== null && !confirmedSuccess(next, info.current_version, expected.current) && next.phase !== 'failed');

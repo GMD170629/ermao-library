@@ -32,7 +32,7 @@ test('publication requires both intact packages locally and remotely', t => {
   assert.throws(() => validateReleaseAssets(root, 'v1.0.1'), /Incomplete/);
 });
 
-for (const version of ['1.0.3', '1.0.4']) {
+for (const version of ['1.0.3', '1.0.4', '1.1.0']) {
 test(`${version} permits a server-only bundle and still verifies remote digests`, t => {
   const root = mkdtempSync(join(tmpdir(), 'server-release-assets-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
