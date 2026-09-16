@@ -135,3 +135,13 @@ test('protocol 2 assets build offline per architecture before collision-checked 
   assert.ok(releaseWorkflow.indexOf('Verify and publish strict bilingual Release') < releaseWorkflow.indexOf('Publish verified release feed'));
   assert.match(maintenanceWorkflow, /assemble-release-feed.mjs/);
 });
+
+
+test('backend installation tests use the production uv version and report its executable', () => {
+  const packageJob = releaseWorkflow.split('\n  package:')[1].split('\n  publish:')[0];
+  assert.match(packageJob, /uses: astral-sh\/setup-uv@v6\n        with:\n          version: "0\.11\.29"/);
+  assert.match(packageJob, /command -v uv\n          uv --version/);
+  assert.match(packageJob, /uv run --extra dev --locked pytest -q/);
+  assert.ok(packageJob.indexOf('uses: astral-sh/setup-uv') < packageJob.indexOf('command -v uv'));
+  assert.ok(packageJob.indexOf('ctest --test-dir') < packageJob.indexOf('uv run --extra dev --locked pytest -q'));
+});

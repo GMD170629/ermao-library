@@ -289,12 +289,16 @@ jobs:
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.29"
 
       - name: Test Python backend with production runtime version
         # The production image builds this same native library; host tests need it too.
         # Keep this prerequisite before pytest instead of replacing chapter adapters.
         working-directory: apps/api-python
         run: |
+          command -v uv
+          uv --version
           cmake -S ../../packages/reader-core/native/chapters -B ../../packages/reader-core/native/chapters/build -DCMAKE_BUILD_TYPE=Release
           cmake --build ../../packages/reader-core/native/chapters/build --config Release
           ctest --test-dir ../../packages/reader-core/native/chapters/build -C Release --output-on-failure
