@@ -1,19 +1,19 @@
 'use client';
 
 import { AlertCircle, CheckCircle2, ChevronDown, FlaskConical, RefreshCw, Sparkles } from 'lucide-react';
-import rootPackage from '../../../../../package.json';
 import { useEffect, useState } from 'react';
 import { useI18n } from '@/i18n/provider';
 import { fetchReleaseNote } from '../api/client';
 import { useReleaseFeed } from '../application/release-feed-context';
 import { extractLocalizedReleaseNote, updateStatus } from '../model/release-notes';
 import type { ReleaseSummary } from '../model/types';
+import { UpdateOperations } from './update-operations';
 import { ReleaseMarkdown } from './release-markdown';
 
 function StatusCard() {
-  const { state, retry } = useReleaseFeed();
+  const { state, retry, runtime } = useReleaseFeed();
   const { formatDateTime, t } = useI18n();
-  if (state.status === 'loading') {
+  if (state.status === 'loading' || !runtime) {
     return <div className="rounded-2xl border border-[#DEDAD4] bg-[#F7F5F2] p-5 text-sm text-[#716B64]">{t('正在检查更新…')}</div>;
   }
   if (state.status === 'error') {
@@ -28,7 +28,7 @@ function StatusCard() {
       </div>
     );
   }
-  const status = updateStatus(rootPackage.version, state.feed);
+  const status = updateStatus(runtime.current_version, state.feed);
   if (status.kind === 'update-available') {
     return (
       <div className="rounded-2xl border border-[#F1B8A8] bg-[#FFF2ED] p-5">
@@ -38,7 +38,7 @@ function StatusCard() {
             <h3 className="font-semibold text-[#8F2F1D]">{t('发现新版本 v{version}', { version: status.latest.version })}</h3>
             <p className="mt-1 text-sm leading-6 text-[#7B5148]">
               {t('当前版本 v{current}，最新版本发布于 {date}。', {
-                current: rootPackage.version,
+                current: runtime.current_version,
                 date: formatDateTime(status.latest.publishedAt)
               })}
             </p>
@@ -65,6 +65,7 @@ function StatusCard() {
 
 function ReleaseEntry({ release, initiallyOpen }: { release: ReleaseSummary; initiallyOpen: boolean }) {
   const { locale, formatDate, t } = useI18n();
+  const { runtime } = useReleaseFeed();
   const [open, setOpen] = useState(initiallyOpen);
   const [note, setNote] = useState<{ locale: string; markdown: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -90,7 +91,7 @@ function ReleaseEntry({ release, initiallyOpen }: { release: ReleaseSummary; ini
         className="flex min-h-16 w-full items-center gap-3 px-5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#F6B7A5]"
       >
         <span className="font-mono text-base font-semibold text-[#2A2825]">v{release.version}</span>
-        {release.version === rootPackage.version ? <span className="rounded-full bg-[#F9DED4] px-2 py-0.5 text-xs font-medium text-[#D94327]">{t('当前版本')}</span> : null}
+        {release.version === runtime?.current_version ? <span className="rounded-full bg-[#F9DED4] px-2 py-0.5 text-xs font-medium text-[#D94327]">{t('当前版本')}</span> : null}
         <time className="ml-auto text-xs text-[#827B73]" dateTime={release.publishedAt}>{formatDate(release.publishedAt)}</time>
         <ChevronDown size={17} className={`text-[#827B73] transition ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
       </button>
@@ -116,6 +117,7 @@ export function ReleaseHistory() {
       <h3 id="release-history-title" className="text-lg font-semibold text-[#2A2825]">{t('更新与版本历史')}</h3>
       <p className="mt-2 text-sm leading-6 text-[#716B64]">{t('更新说明与 GitHub Release 保持一致。')}</p>
       <div className="mt-4"><StatusCard /></div>
+      <UpdateOperations />
       {state.status === 'ready' ? (
         <div className="mt-5 space-y-3">
           {state.feed.releases.map((release, index) => (
@@ -125,4 +127,9 @@ export function ReleaseHistory() {
       ) : null}
     </section>
   );
+}
+
+export function RuntimeVersion() {
+  const { runtime } = useReleaseFeed();
+  return <>{runtime ? `v${runtime.current_version}` : '—'}</>;
 }

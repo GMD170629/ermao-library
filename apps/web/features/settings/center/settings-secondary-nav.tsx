@@ -8,7 +8,6 @@ import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { cn } from '../../../components/ui/cn';
 import { useAppSession } from '../../../components/layout/app-session-context';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
-import rootPackage from '../../../../../package.json';
 import { updateStatus, useReleaseFeed } from '../../updates/public';
 
 export type SettingsAccess = 'account' | 'system' | 'admin';
@@ -64,7 +63,7 @@ export function isSettingsItemActive(pathname: string, href: string) {
 
 export function SettingsSecondaryNav() {
   const { t: i18nAttribute } = useAttributeI18n();
-  const { state: releaseFeedState } = useReleaseFeed();
+  const { state: releaseFeedState, runtime } = useReleaseFeed();
   const pathname = usePathname();
   const router = useRouter();
   const session = useAppSession();
@@ -103,7 +102,8 @@ export function SettingsSecondaryNav() {
                 const selected = pendingHref ? pendingHref === href : active;
                 const hasUpdate = href === '/settings/about'
                   && releaseFeedState.status === 'ready'
-                  && updateStatus(rootPackage.version, releaseFeedState.feed).kind === 'update-available';
+                  && runtime !== null
+                  && updateStatus(runtime.current_version, releaseFeedState.feed).kind === 'update-available';
                 return (
                   <Link
                     key={href}

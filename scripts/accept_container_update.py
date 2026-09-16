@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import http.cookiejar
 import json
+import shutil
 import sqlite3
 import subprocess
 import tempfile
@@ -29,7 +30,18 @@ def main():
         required=True,
         help="Locally built production image; never pulled by this script",
     )
+    parser.add_argument(
+        "--browser",
+        action="store_true",
+        help="Exercise separate download/install confirmations through real Web UI",
+    )
+    parser.add_argument(
+        "--web-image",
+        help="Prebuilt Dockerfile builder stage for isolated version B (required with --browser)",
+    )
     args = parser.parse_args()
+    if args.browser and not args.web_image:
+        parser.error("--browser requires a real B Web builder image via --web-image")
     docker("image", "inspect", args.image)
     name = "shuku-update-" + uuid.uuid4().hex[:10]
     # Use Docker's native Linux volume for SQLite and flock, not a macOS file share.
@@ -41,8 +53,65 @@ def main():
         storage.mkdir()
         books.mkdir()
         (books / "book.txt").write_text("book")
+        reader_book = books / "reader/reader-v2.epub"
+        reader_book.parent.mkdir()
+        shutil.copyfile(ROOT / "test-data/library/epub/reader-v2.epub", reader_book)
+        reader_hash = hashlib.sha256(reader_book.read_bytes()).hexdigest()
         sentinel = root / "acceptance-only"
         sentinel.touch()
+        source = None
+        extra = []
+        if args.browser:
+            web = root / "web-b"
+            web.mkdir()
+            build_container = docker("create", "--pull=never", args.web_image)
+            try:
+                docker(
+                    "cp",
+                    build_container + ":/app/apps/web/.next/standalone",
+                    str(web / "standalone"),
+                )
+                docker(
+                    "cp",
+                    build_container + ":/app/apps/web/.next/static",
+                    str(web / "static"),
+                )
+                docker(
+                    "cp", build_container + ":/app/apps/web/public", str(web / "public")
+                )
+            finally:
+                docker("rm", build_container)
+            from container_update_source import AcceptanceSource
+
+            output = root / "packages"
+            output.mkdir()
+            injection = root / "injection"
+            injection.mkdir()
+            source = AcceptanceSource(output)
+            source.injection(injection)
+            extra = [
+                "-v",
+                f"{injection}:/acceptance-python:ro",
+                "-e",
+                "PYTHONPATH=/acceptance-python",
+                "-v",
+                f"{web}:/acceptance-web:ro",
+            ]
+        # Only the disposable Linux test volume is chowned, never the user library.
+        docker(
+            "run",
+            "--rm",
+            "--pull=never",
+            "--user",
+            "0:0",
+            "--entrypoint",
+            "sh",
+            "-v",
+            f"{volume}:/app/storage",
+            args.image,
+            "-c",
+            "touch /app/storage/.acceptance-volume && chown 1000:1000 /app/storage /app/storage/.acceptance-volume",
+        )
         container = docker(
             "run",
             "--pull=never",
@@ -59,6 +128,9 @@ def main():
             f"{ROOT}:/tooling:ro",
             "-v",
             f"{sentinel}:/acceptance-only:ro",
+            "--user",
+            "1000:1000",
+            *extra,
             args.image,
         )
         try:
@@ -91,6 +163,10 @@ def main():
                 raise AssertionError("acceptance timed out")
 
             def healthy():
+                if docker("inspect", "-f", "{{.State.Running}}", name) != "true":
+                    raise RuntimeError(
+                        "acceptance container exited before becoming healthy"
+                    )
                 with request("/api/health") as response:
                     return response.status == 200
 
@@ -130,10 +206,76 @@ def main():
                 name,
                 "python",
                 "/tooling/scripts/container_update_fixture.py",
+                *(["--build-only"] if args.browser else []),
             )
-            target = json.loads(fixture.splitlines()[-1])["target"]
-            with request("/api/updates/install", {"version": target}) as response:
-                assert response.status == 202
+            identity = json.loads(fixture.splitlines()[-1])
+            target = identity["target"]
+            if source is not None:
+                docker("cp", name + ":/tmp/update-fixture/output/.", str(output))
+                (output / f"v{target}.md").write_text(
+                    "<!-- shuku:locale=zh-CN:start -->\n隔离验收更新\n<!-- shuku:locale=zh-CN:end -->\n<!-- shuku:locale=en-US:start -->\nIsolated acceptance update\n<!-- shuku:locale=en-US:end -->"
+                )
+
+                def browser(action):
+                    subprocess.run(
+                        [
+                            "pnpm",
+                            "--filter",
+                            "@shuku/web",
+                            "exec",
+                            "tsx",
+                            str(ROOT / "scripts/container_update_browser.mjs"),
+                            base,
+                            source.url,
+                            action,
+                            seed_version,
+                            target,
+                            str(root / "browser-profile"),
+                        ],
+                        check=True,
+                        timeout=120,
+                    )
+
+                browser("read")
+                browser("download")
+                with request("/api/updates/status") as response:
+                    assert json.load(response)["data"]["phase"] == "downloading"
+                source.release_download.set()
+
+                def prepared():
+                    with request("/api/updates/status") as response:
+                        state = json.load(response)["data"]
+                        assert state["phase"] != "failed", state
+                        return state["phase"] == "ready"
+
+                wait_for(prepared)
+                browser("cancel")
+                with request("/api/updates/runtime") as response:
+                    assert (
+                        json.load(response)["data"]["current_version"] == seed_version
+                    )
+                docker(
+                    "exec",
+                    name,
+                    "python",
+                    "-c",
+                    "from pathlib import Path;assert not Path('/app/storage/update-tmp/install-request.json').exists()",
+                )
+                # Same running business PIDs prove preparation/cancellation did not restart.
+                docker(
+                    "exec",
+                    name,
+                    "python",
+                    "-c",
+                    f"from pathlib import Path;assert all(Path(f'/proc/{{p}}').exists() for p in {old_pids!r})",
+                )
+                browser("install")
+            else:
+                with request(
+                    "/api/updates/install",
+                    {"version": target, "sha256": identity["sha256"]},
+                ) as response:
+                    assert response.status == 202
 
             def installed():
                 state = json.loads(
@@ -146,6 +288,8 @@ def main():
                 return state["phase"] == "success"
 
             wait_for(installed, 300)
+            if source is not None:
+                browser("verify")
             docker("cp", name + ":/app/storage/.", str(storage))
             with request("/api/health") as response:
                 assert response.headers["X-Acceptance-Code"] == "B"
@@ -155,6 +299,7 @@ def main():
             assert (storage / "runtime/.initialized").read_text() == "1\n"
             assert (storage / "secrets/session-secret").read_text().strip() == secret
             assert (books / "book.txt").read_text() == "book"
+            assert hashlib.sha256(reader_book.read_bytes()).hexdigest() == reader_hash
             assert not (storage / "update-tmp/installation-incomplete").exists()
             verify = """import json,urllib.request,sqlite3,os
 from pathlib import Path
@@ -218,6 +363,8 @@ print('actual B API, migrated DB, progress, configuration, Worker and PID 1 veri
                     {
                         "container": container,
                         "image": image,
+                        "uid_gid": docker("exec", name, "id"),
+                        "browser": args.browser,
                         "A": seed_version,
                         "B": target,
                         "backup_sha256": hashlib.sha256(
@@ -228,6 +375,8 @@ print('actual B API, migrated DB, progress, configuration, Worker and PID 1 veri
                 )
             )
         finally:
+            if source is not None:
+                source.close()
             logs = docker("logs", name)
             Path("/tmp/shuku-container-update-acceptance.log").write_text(logs)
             docker("rm", "-f", name)

@@ -1,6 +1,6 @@
 # 容器内持久化程序目录与停机安装
 
-第 1 批提供固定启动入口和唯一持久化程序目录。[第 2 批](application-update-preparation.md) 增加应用包与后台下载准备，第 3 批增加下述固定入口停机安装；开发脚本、单独 API 镜像仍沿用原有启动方式，不支持应用内安装。
+第 1 批提供固定启动入口和唯一持久化程序目录。[第 2 批](application-update-preparation.md) 增加应用包与后台下载准备，第 3 批增加下述固定入口停机安装，第 4 批接入独立下载/安装确认与正式应用产物；开发脚本、单独 API 镜像仍沿用原有启动方式，不支持应用内安装。
 
 ## 目录与启动
 
@@ -47,7 +47,7 @@ docker compose -f docker-compose.yml config --quiet
 
 ## 已准备应用包的停机安装（第 3 批）
 
-管理员可向 `POST /api/updates/install` 提交 `{"version":"目标版本"}`，仅接受第 2 批已准备完成的包；页面的一次确认接线仍在第 4 批。返回 202 后请求独立落盘，关闭浏览器不取消安装。没有固定安装入口的部署不支持此操作。
+管理员可向 `POST /api/updates/install` 提交 `{"version":"目标版本","sha256":"已确认包的 SHA-256"}`，仅接受已准备完成且身份完全一致的包。返回 202 后请求独立落盘，关闭浏览器不取消安装。没有固定安装入口的部署不支持此操作。
 
 固定入口使用 `prepare.lock` 消费 `update-tmp/install-request.json`，不等待其自身常驻的 `launcher.lock`。请求存在期间新的准备被拒绝，安装源不会被并行准备替换。安装前离线重验清单、摘要、固定环境标识、版本、空间和路径，复用原解压器重新生成已验证的临时程序目录；不安装依赖或联网下载。
 
@@ -80,3 +80,52 @@ python3 scripts/accept_container_update.py --image shuku-update-acceptance:local
 ```
 
 真实验收脚本复用镜像中的真实 Web/Python 产物和固定环境信息，仅在容器临时产物中创建 B 版本、可观察的 API 行为与测试迁移。通过受控本地 HTTP 连接注入运行生产准备链路，再经真实管理员 HTTP 安装入口执行。验证容器/镜像 ID、迁移、旧文件删除、数据库阅读记录与配置、图书与密钥、PID 1、普通停止及离线重启。不会修改正式版本或迁移链，不发布测试版本。日志写入宿主 `/tmp/shuku-container-update-acceptance.log`。
+
+
+## 后台下载与安装（第 4 批）
+
+首次部署需使用包含固定入口的生产镜像和对应 Compose command，并让原存储目录可由部署用户写入。官方 Compose 默认 UID/GID 为 `1000:1000`；不需要 docker.sock。以后应用内更新不拉镜像、不重建容器。fnOS 管理器记录的包版本不会被更新器改写，以后台显示的实际 API 运行版本为准。
+
+在「设置 → 关于 → 更新与版本历史」中：
+
+1. 管理员点击「下载更新」，确认目标版本和“只准备、不停机”。后台下载、验证并解压；关闭浏览器也继续执行。
+2. 状态停在「更新包已准备好，等待安装」，可稍后再安装。刷新、登录、轮询、普通启动均不会自动安装。
+3. 点击「安装并重启」，再次确认当前版本、已准备版本及停机提示。取消会保留准备包。确认绑定版本和 SHA-256；准备包发生变化时拒绝请求，必须重新查看后确认。
+4. 安装期间可以断线或关闭浏览器。页面每 3 秒检查一次，单次请求最长 15 秒，总观察时限 20 分钟，不自动重发安装请求。恢复后必须同时核对持久化成功结果与实际运行版本，才显示成功并调用现有 Web/PWA 资源刷新流程；不删除阅读缓存或退出登录。
+
+远程最新版本与已准备版本分别展示。历史版本缺少应用包、部署不支持固定入口或固定环境不兼容时，不提供无效下载/安装操作。更新仅替换兼容的 Web/Python 应用产物；Node/Python、固定 Python 依赖、系统库及原生库不能通过此流程升级。不兼容版本需另行部署对应环境，本功能不会自动升级环境。
+
+下载失败不影响旧服务，可手动重试。安装失败按上文日志、失败标记、数据库备份和程序一致性检查处理；页面不提供清除标记或强行重试入口。
+
+### 发布与验收入口
+
+正式 tag 流程从同一个不可变镜像摘要分别运行 Linux AMD64/ARM64 目标环境，生成完整包和清单，并使用生产解压器验证。资产通过本地及 GitHub 摘要校验、发布审批且 Release 正式发布后，才重建 feed 的 `appPackages`。更新说明同步也从已发布且校验通过的资产重建该字段；旧 feed 字段保持不变。日常安装不执行这些构建命令。
+
+```sh
+# 普通行为测试，不需要 Docker 或 Web standalone
+cd apps/web
+pnpm exec tsx --test features/updates/application/confirm-update.test.ts features/updates/model/release-notes.test.ts
+pnpm exec playwright test e2e/application-updates.spec.ts --project=chrome
+cd ../..
+node --test scripts/validate-release-assets.test.mjs scripts/assemble-release-feed.test.mjs scripts/release-workflow-policy.test.mjs
+# 显式真实页面 + 同容器 A → B；需本机已构建的真实生产镜像及 Chrome
+python3 scripts/accept_container_update.py --image shuku-update-batch4:local --web-image shuku-update-batch4-web-b:local --browser
+```
+
+真实验收使用隔离 Linux 卷、UID/GID `1000:1000` 和受控下载源。连接注入只存在于测试容器挂载的 Python `sitecustomize`，正式配置不开放任意 URL。生产打包、下载、摘要、环境、解压、安装、迁移和服务检查不被替换。脚本在下载/安装接受后关闭浏览器，重开后取消一次安装再确认；同时检查版本、进程、数据、容器/镜像 ID 和离线重启。
+
+
+`--web-image` 必须是隔离 B 版本源码副本用同一个 `apps/web/Dockerfile.prod --target builder` 构建的镜像，包含真实 Next standalone、静态资源及 public。在隔离副本同步根 package.json、Web package.json 和 public/sw.js 的测试版本，再构建；不能修改正式工作区版本，不能只替换已编译页面文字或 SW 版本来代替构建。脚本把该产物与测试 B Python 代码、测试迁移一起交给生产打包器。
+
+验收使用一个隔离的持久浏览器配置目录，关闭浏览器后保留 A 的 Service Worker、前端缓存及登录会话。安装 B 后复用同一配置，验证资源刷新完成、会话仍有效和真实第二章阅读进度恢复；不是用全新浏览器绕开缓存验收。
+
+
+### 本批实际验证（2026-09-16）
+
+- Linux ARM64，官方默认 UID/GID `1000:1000`，真实 API/Web/Worker/网关，隔离版本 `1.0.4 → 1.0.5`。正式工作区版本未改。
+- 容器 `84c4468daad5525935c8bcd2efb4e75af94525b65b6bf371a09bad2a8f3fe723` 和镜像 `sha256:09dabf560213594b2050af68d9d98fedc314e6e9620f0cb35455c8190d89deb7` 在安装及两次重启前后不变。
+- 浏览器下载确认后关闭，完成 ready；重开取消安装，确认无 install-request、旧进程仍在、实际版本仍为 A；第二次确认后关闭，固定入口独立完成迁移和 B 启动。
+- 完整 B Web 构建、真实 API 行为差异、测试迁移生效；旧程序文件移除，`.initialized`、会话、密钥、配置、图书和阅读记录保留。真实队列导入 EPUB，更新前翻到第二章，更新后持久浏览器继续从第二章阅读。
+- 普通停止退出码 143；普通重启与断网重启仍运行 B。宿主旧冒烟两轮也通过，不再因 worker-ready 路径误报。
+- 准备/权限/身份测试 39 项、OpenAPI/架构 54 项、Web 模型/接口 9 项、普通浏览器 7 项、发布资产/工作流 16 项通过；类型、局部 lint、mypy 和双语目录检查通过。
+- 未执行真实 GitHub 发布/审批/资产上传（本批禁止发布）、Linux AMD64 完整容器链路和 fnOS 管理器安装。发布流程的双架构接线已实现，不能用 ARM64 运行证据代替另一架构或真实发布结果。

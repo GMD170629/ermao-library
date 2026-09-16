@@ -55,3 +55,8 @@ test('localized release notes require the requested locale section', () => {
   assert.equal(extractLocalizedReleaseNote(markdown, 'zh-CN'), '中文内容');
   assert.equal(extractLocalizedReleaseNote(markdown, 'en-US'), 'English content');
 });
+
+
+test('old release-feed consumers ignore optional application packages', () => {
+  assert.deepEqual(parseReleaseFeed({ ...feedPayload, releases: feedPayload.releases.map(release => ({ ...release, appPackages: [{ format: 1, version: release.version }] })) }), parseReleaseFeed(feedPayload));
+});

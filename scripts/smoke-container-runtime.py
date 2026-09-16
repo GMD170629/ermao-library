@@ -53,7 +53,7 @@ def main() -> None:
             file.parent.mkdir(parents=True, exist_ok=True)
             file.write_bytes(b"preserve me")
         runtime = storage / "runtime"
-        ready = scratch / "worker-ready"
+        ready = storage / "update-tmp/worker-ready"
         environment = {
             **os.environ,
             "PATH": f"{Path(sys.executable).parent}:{os.environ['PATH']}",
@@ -62,7 +62,6 @@ def main() -> None:
             "HOSTNAME": "127.0.0.1",
             "PORT": "18300",
             "NEXT_INTERNAL_PORT": "3001",
-            "IMPORT_WORKER_READY_FILE": str(ready),
             "PYTHONDONTWRITEBYTECODE": "1",
         }
         environment.pop("SESSION_SECRET", None)

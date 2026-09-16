@@ -1,3 +1,4 @@
+import { validateAppPackages } from './validate-app-packages.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
@@ -35,6 +36,7 @@ export function validateReleaseAssets(root, tag, remote) {
       }
     }
   }
+  validateAppPackages(join(root, 'application'), tag.slice(1), remote);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

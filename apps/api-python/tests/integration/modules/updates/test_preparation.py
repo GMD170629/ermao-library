@@ -649,7 +649,7 @@ def test_install_requires_system_manager(client, db_session, role):
         user = _create_user(db_session, email="install-member@example.com", role=role)
         _login(client, user.email)
     assert client.post(
-        "/api/updates/install", json={"version": "1.0.4"}
+        "/api/updates/install", json={"version": "1.0.4", "sha256": "a" * 64}
     ).status_code == (403 if role else 401)
 
 
@@ -666,37 +666,50 @@ def test_install_reserves_prepared_source(client, db_session, preparation, sourc
     client.app.dependency_overrides[use_cases] = lambda: updates
     assert (
         client.post(
-            "/api/updates/install", json={"version": package.version}
+            "/api/updates/install",
+            json={"version": package.version, "sha256": package.sha256},
         ).status_code
         == 400
     )
     updates.prepare(True, package.version)
     assert finished(worker).phase == "ready"
+    assert (
+        client.post(
+            "/api/updates/install",
+            json={"version": package.version, "sha256": "0" * 64},
+        ).status_code
+        == 400
+    )
+    assert not (storage / "update-tmp/install-request.json").exists()
+    assert worker.status().phase == "ready"
     archive = storage / "update-tmp/prepared/application.tar.gz"
     before = archive.read_bytes()
     assert (
         client.post(
             "/api/updates/install",
-            json={"version": package.version},
+            json={"version": package.version, "sha256": package.sha256},
             headers={"sec-fetch-site": "cross-site"},
         ).status_code
         == 403
     )
     assert (
         client.post(
-            "/api/updates/install", json={"version": package.version, "path": "/tmp"}
+            "/api/updates/install",
+            json={"version": package.version, "sha256": package.sha256, "path": "/tmp"},
         ).status_code
         == 422
     )
     assert (
         client.post(
-            "/api/updates/install", json={"version": package.version}
+            "/api/updates/install",
+            json={"version": package.version, "sha256": package.sha256},
         ).status_code
         == 202
     )
     assert (
         client.post(
-            "/api/updates/install", json={"version": package.version}
+            "/api/updates/install",
+            json={"version": package.version, "sha256": package.sha256},
         ).status_code
         == 409
     )
@@ -750,3 +763,25 @@ def test_background_shutdown_waits_for_current_task(kind):
         joining.join(2)
         worker._thread.join(2)
     assert not joining.is_alive()
+
+
+def test_runtime_information_uses_actual_backend_and_requires_login(
+    client, db_session, preparation
+):
+    from tests.contract.api.test_system_management_authorization import (
+        _create_user,
+        _login,
+    )
+
+    updates, _, _ = preparation
+    client.app.dependency_overrides[use_cases] = lambda: updates
+    assert client.get("/api/updates/runtime").status_code == 401
+    user = _create_user(db_session, email="runtime-member@example.com", role="member")
+    _login(client, user.email)
+    result = client.get("/api/updates/runtime")
+    assert result.status_code == 200
+    assert result.json()["data"] == {
+        "current_version": updates.current,
+        "supported": True,
+    }
+    assert client.get("/api/updates/status").status_code == 403

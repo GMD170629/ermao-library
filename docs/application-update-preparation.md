@@ -31,17 +31,18 @@ python scripts/build-application-package.py \
 
 ## 官方来源及接口
 
-继续读取固定官方 release-feed 的 `index.json`。现有 `schemaVersion: 1` 和版本字段不变；版本条目可选新增 `appPackages` 数组，数组元素为打包器生成的清单。没有该数组的历史版本返回 `PACKAGE_UNAVAILABLE`，不会猜测下载包存在。正式发布流程写入数组仍属于第 4 批，本批没有修改远程 feed 或发布资产。
+继续读取固定官方 release-feed 的 `index.json`。现有 `schemaVersion: 1` 和版本字段不变；版本条目可选新增 `appPackages` 数组，数组元素为打包器生成的清单。没有该数组的历史版本返回 `PACKAGE_UNAVAILABLE`，不会猜测下载包存在。第 4 批已将此字段接入正式发布与更新说明同步流程；本地实现不会直接修改远程 feed 或发布资产。
 
 资产定位固定为官方仓库的 `releases/download/v<version>/<filename>`。仅 HTTPS，重定向仅接受 GitHub 的 release-assets/objects 下载域名；下载地址、路径、命令不作为接口参数。测试只通过 Python 构造参数注入本地连接，不提供正式 URL 配置项。
 
 | 接口 | 内容 |
 | --- | --- |
+| `GET /api/updates/runtime` | 登录用户可读取实际运行版本及部署支持情况，不暴露更新日志 |
 | `GET /api/updates/check` | 当前版本、部署支持状态、各正式版本是否可准备及原因码 |
 | `POST /api/updates/prepare` | JSON `{"version":"1.0.4"}`；返回 202 和持久化初始状态，重复进行中的操作返回 409 |
 | `GET /api/updates/status` | 最近一次准备的阶段、目标清单、已下载字节、时间和失败码 |
 
-接口均复用系统管理权限；应用用例也检查授权。保留现有 SameSite=Lax 会话，准备接口拒绝额外 JSON 字段和 cross-site 浏览器请求。未登录及普通成员不能读取状态或触发准备。当前及更旧版本被拒绝，权限委派遵循现有 `can_manage_system` 规则。
+除只读 runtime 接口外，接口均复用系统管理权限；应用用例也检查授权。保留现有 SameSite=Lax 会话，准备接口拒绝额外 JSON 字段和 cross-site 浏览器请求。未登录及普通成员不能读取状态或触发准备。当前及更旧版本被拒绝，权限委派遵循现有 `can_manage_system` 规则。
 
 ## 状态与运行边界
 

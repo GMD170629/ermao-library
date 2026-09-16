@@ -67,6 +67,7 @@ jobs:
         run: |
           feed_root="$(mktemp -d)"
           cp -R release-notes/. "$feed_root/"
+          node scripts/assemble-release-feed.mjs "$feed_root/index.json"
           touch "$feed_root/.nojekyll"
           git -C "$feed_root" init
           git -C "$feed_root" checkout -b release-feed

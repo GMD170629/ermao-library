@@ -35,6 +35,9 @@ on:
       - 'scripts/build-fnos-package.sh'
       - 'scripts/sign-android-apk.sh'
       - 'scripts/validate-release-assets*'
+      - 'scripts/*app-packages*'
+      - 'scripts/assemble-release-feed*'
+      - 'scripts/build-application-package.py'
       - 'scripts/validate-release-source*'
       - 'scripts/release-workflow-policy.test.mjs'
       - 'scripts/test_fnos_installation.py'
@@ -85,7 +88,7 @@ jobs:
         run: node scripts/validate-release-source.mjs
 
       - name: Test strict bilingual release-note validation
-        run: node --test scripts/validate-release-notes.test.mjs scripts/validate-release-assets.test.mjs scripts/release-workflow-policy.test.mjs scripts/validate-release-source.test.mjs
+        run: node --test scripts/validate-release-notes.test.mjs scripts/validate-release-assets.test.mjs scripts/release-workflow-policy.test.mjs scripts/validate-release-source.test.mjs scripts/assemble-release-feed.test.mjs
 
       - name: Validate application version and bilingual release notes
         id: version
@@ -363,6 +366,11 @@ jobs:
           cache-from: type=gha,scope=fnos-versioned-image
           cache-to: type=gha,mode=max,scope=fnos-versioned-image
 
+      - name: Build and validate applications from the exact target environments
+        env:
+          IMAGE_DIGEST: ${{ steps.release_image.outputs.digest }}
+        run: bash scripts/build-release-app-packages.sh "gamersgu/shuku-starship-web@$IMAGE_DIGEST" dist/application
+
       - name: Install official fnpack
         shell: bash
         run: |
@@ -395,6 +403,7 @@ jobs:
           path: |
             dist/fnos/*
             dist/android/*
+            dist/application/*
           if-no-files-found: error
 
   publish:
@@ -480,6 +489,7 @@ jobs:
           else
             gh release upload "$RELEASE_TAG" dist/fnos/*.fpk dist/fnos/*.sha256 dist/android/*.apk dist/android/*.sha256 --clobber
           fi
+          gh release upload "$RELEASE_TAG" dist/application/* --clobber
           gh release view "$RELEASE_TAG" --json assets > "$RUNNER_TEMP/release-assets.json"
           node scripts/validate-release-assets.mjs dist "$RELEASE_TAG" "$RUNNER_TEMP/release-assets.json"
 
@@ -535,6 +545,7 @@ jobs:
           fi
           feed_root="$(mktemp -d)"
           cp -R release-notes/. "$feed_root/"
+          node scripts/assemble-release-feed.mjs "$feed_root/index.json"
           touch "$feed_root/.nojekyll"
           git -C "$feed_root" init
           git -C "$feed_root" checkout -b release-feed

@@ -1,0 +1,43 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { confirmUpdate } from './confirm-update';
+import { confirmedSuccess, installationFailed } from '../model/installation';
+import { installUpdate, parsePreparation, prepareUpdate } from '../api/operations';
+import type { Package, PreparationState } from '@/generated/updates';
+
+const target: Package = { version: '1.0.5', format: 1, sha256: 'a'.repeat(64), filename: 'shuku-1.0.5-linux-x86_64.tar.gz', size: 10, expanded_size: 20, file_count: 2, environment: { format: 1, platform: 'linux-x86_64', compatibility: 'b'.repeat(64) } };
+const ready: PreparationState = { phase: 'ready', target, downloaded: 10, error: null };
+test('first confirmation only prepares; ready is not successful installation', async () => {
+  const calls: string[] = [];
+  await confirmUpdate('prepare', target, async () => true, async operation => { calls.push(operation); });
+  assert.deepEqual(calls, ['prepare']);
+  assert.equal(confirmedSuccess(ready, target.version), false);
+});
+test('cancelling installation submits nothing; confirmed identity cannot drift', async () => {
+  const calls: unknown[] = [];
+  const displayed = { ...target };
+  await confirmUpdate('install', displayed, async () => false, async (...args) => { calls.push(args); });
+  assert.equal(calls.length, 0);
+  await confirmUpdate('install', displayed, async () => { displayed.sha256 = 'c'.repeat(64); return true; }, async (...args) => { calls.push(args); });
+  assert.deepEqual(calls, [['install', { version: target.version, sha256: target.sha256 }]]);
+});
+test('success requires actual running version and persisted package identity', () => {
+  const success = { ...ready, phase: 'success' as const };
+  assert.equal(confirmedSuccess(success, '1.0.4', target), false);
+  assert.equal(confirmedSuccess(success, target.version, { ...target, sha256: 'c'.repeat(64) }), false);
+  assert.equal(confirmedSuccess(success, target.version, target), true);
+  assert.equal(installationFailed({ phase: 'failed', failed_phase: 'verifying' }), false);
+  assert.equal(installationFailed({ phase: 'failed', failed_phase: 'starting' }), true);
+  assert.throws(() => parsePreparation({ phase: 'unknown' }));
+});
+test('HTTP adapter sends only selected operation and exact package identity', async t => {
+  const calls: { path: string; body: unknown }[] = [];
+  t.mock.method(globalThis, 'fetch', async (path: string, init: RequestInit) => {
+    calls.push({ path, body: JSON.parse(String(init.body)) });
+    return new Response(JSON.stringify({ ok: true, data: ready }), { status: 202 });
+  });
+  assert.equal((await prepareUpdate(target.version)).phase, 'ready');
+  assert.deepEqual(calls, [{ path: '/api/updates/prepare', body: { version: target.version } }]);
+  await installUpdate({ version: target.version, sha256: target.sha256 });
+  assert.deepEqual(calls[1], { path: '/api/updates/install', body: { version: target.version, sha256: target.sha256 } });
+});

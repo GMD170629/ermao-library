@@ -100,6 +100,16 @@ def main():
             )
         )
         db.add(SystemSetting(key="acceptance-preserved", value="configuration"))
+        if "--build-only" in sys.argv:
+            db.add(
+                Library(
+                    id="acceptance-reader",
+                    name="Reader acceptance",
+                    root_path="/books/reader",
+                    organization_mode="FLAT",
+                    enabled=True,
+                )
+            )
         db.commit()
     root = Path("/tmp/update-fixture/image")
     shutil.copytree("/opt/shuku-image", root, symlinks=True)
@@ -114,6 +124,22 @@ def main():
     ):
         path = root / name
         path.write_text(path.read_text().replace(current, version))
+    if "--build-only" in sys.argv:
+        # Real B Next build, including the matching service worker and static assets.
+        web = Path("/acceptance-web")
+        assert (
+            json.loads((web / "standalone/apps/web/package.json").read_text())[
+                "version"
+            ]
+            == version
+        )
+        for directory in (root / "apps/web", root / "node_modules"):
+            shutil.rmtree(directory)
+        shutil.copytree(web / "standalone", root, dirs_exist_ok=True, symlinks=True)
+        shutil.copytree(
+            web / "static", root / "apps/web/.next/static", dirs_exist_ok=True
+        )
+        shutil.copytree(web / "public", root / "apps/web/public", dirs_exist_ok=True)
     # Isolated B code behavior and migration, never the formal source/version chain.
     health = root / "apps/api-python/app/modules/system/presentation/health.py"
     health.write_text(
@@ -149,6 +175,15 @@ def main():
             }
         ],
     }
+
+    (root.parent / "output/index.json").write_text(json.dumps(feed))
+    if "--build-only" in sys.argv:
+        print(
+            json.dumps(
+                {"target": version, "sha256": package.sha256, "size": package.size}
+            )
+        )
+        return
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):

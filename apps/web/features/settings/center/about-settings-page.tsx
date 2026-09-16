@@ -1,11 +1,10 @@
 import { BookOpen, ExternalLink, Github, Info, Layers3, Scale } from 'lucide-react';
 import Image from 'next/image';
-import rootPackage from '../../../../../package.json';
 import { withBasePath } from '../../../lib/base-path';
 import { PRODUCT_DESCRIPTION, PRODUCT_NAME } from '../../../lib/brand';
 import { SettingsCenterShell } from './settings-center-shell';
 import { I18nText } from '@/i18n/provider';
-import { ReleaseHistory } from '../../updates/public';
+import { ReleaseHistory, RuntimeVersion } from '../../updates/public';
 
 const PROJECT_URL = 'https://github.com/GMD170629/ermao-library';
 
@@ -37,7 +36,7 @@ export function AboutSettingsPage() {
           <div className="flex items-center justify-between gap-4 border-t border-[#DEDAD4] bg-[#F7F5F2] px-6 py-5 md:block md:border-l md:border-t-0 md:px-7 md:py-7">
             <span className="text-xs font-medium uppercase tracking-[0.12em] text-[#827B73]"><I18nText>当前版本</I18nText></span>
             <strong className="font-mono text-2xl font-semibold tabular-nums tracking-[-0.03em] text-[#ED4D2D] md:mt-3 md:block md:text-[30px]">
-              v{rootPackage.version}
+              <RuntimeVersion />
             </strong>
           </div>
         </div>

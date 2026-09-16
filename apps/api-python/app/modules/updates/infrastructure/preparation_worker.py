@@ -150,7 +150,7 @@ class PreparationWorker:
                 raise
 
     def install(
-        self, version: str, environment: Environment, current: str
+        self, version: str, sha256: str, environment: Environment, current: str
     ) -> PreparationState:
         import fcntl
         import json
@@ -172,6 +172,7 @@ class PreparationWorker:
                 state.phase != "ready"
                 or state.target is None
                 or state.target.version != version
+                or state.target.sha256 != sha256
             ):
                 raise UpdateError("PACKAGE_NOT_READY")
             if state.target.environment != environment:

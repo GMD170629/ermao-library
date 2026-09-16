@@ -9,7 +9,7 @@ from fastapi.responses import Response
 from pydantic import Field
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_system_manager
+from app.api.deps import require_system_manager, require_user
 from app.api.typed_route import TypedContractRoute
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.http_errors import (
@@ -30,10 +30,19 @@ from ..application.preparation import UpdatePreparation
 router = APIRouter(tags=["updates"], route_class=TypedContractRoute)
 
 
+class RuntimeInfo(HttpContractModel):
+    current_version: str
+    supported: bool
+
+
 class PrepareRequest(HttpContractModel):
     version: str = Field(
         pattern=r"^(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})$"
     )
+
+
+class InstallRequest(PrepareRequest):
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 def use_cases(request: Request) -> UpdatePreparation:
@@ -115,7 +124,7 @@ def prepare_update(
     response_model=SuccessEnvelope[PreparationState],
 )
 def install_update(
-    payload: PrepareRequest,
+    payload: InstallRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -143,7 +152,9 @@ def install_update(
     try:
         return ok(
             updates.install(
-                actor is not None and can_manage_system(actor), payload.version
+                actor is not None and can_manage_system(actor),
+                payload.version,
+                payload.sha256,
             ),
             status_code=202,
         )
@@ -173,3 +184,23 @@ def update_status(
         return ok(updates.status(actor is not None and can_manage_system(actor)))
     except UpdateError as rejected:
         return update_error(rejected)
+
+
+@router.get("/updates/runtime", response_model=SuccessEnvelope[RuntimeInfo])
+def runtime_info(
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    updates: UpdatePreparation = Depends(use_cases),
+) -> Annotated[
+    SuccessEnvelope[RuntimeInfo] | Response,
+    ErrorResponses(BasicUnauthorizedError),
+]:
+    _, error = require_user(db, request, settings)
+    if error is not None:
+        return error
+    return ok(
+        RuntimeInfo(
+            current_version=updates.current, supported=updates.environment is not None
+        )
+    )

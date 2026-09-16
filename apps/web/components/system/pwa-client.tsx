@@ -143,6 +143,16 @@ export function PwaClient() {
   }, [performForcedUpdate]);
 
   useEffect(() => {
+    const installed = async () => {
+      if (registrationRef.current) await checkForForcedUpdate(registrationRef.current);
+      if (!forcedUpdateRef.current) window.location.reload();
+    };
+    const listener = () => { void installed(); };
+    window.addEventListener('shuku:application-installed', listener);
+    return () => window.removeEventListener('shuku:application-installed', listener);
+  }, [checkForForcedUpdate]);
+
+  useEffect(() => {
     const userId = session?.user?.id;
     if (!userId) return;
     const authzVersion = Number(session.authorization?.authzVersion ?? 1);
