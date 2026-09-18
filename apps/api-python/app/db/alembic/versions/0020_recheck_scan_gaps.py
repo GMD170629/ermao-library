@@ -1,14 +1,15 @@
-"""Backfill durable scan gaps from pre-existing FAILED scan tasks.
+"""Re-run the robust scan-gap backfill once for already-migrated instances.
 
-Revision ID: 0019_backfill_scan_gaps
-Revises: 0018_library_import_scan_gaps
+Revision ID: 0020_recheck_scan_gaps
+Revises: 0019_backfill_scan_gaps
 
-Runs exactly once. Before the durable gap table existed, a failed scan gated
-dependent work through its task row. Converting those rows here preserves the
-protection after the task-based gate was removed, without rebuilding recovered
-gaps on every startup. Recovery is decided by execution time and covered range,
-not by creation order: a task row keeps its ``createdAt`` across retries, so
-``finishedAt`` is the only proof a successful scan actually ran after a failure.
+0019 originally ordered recovery by ``createdAt``/task id, but retries reuse a
+task row and keep ``createdAt``. An instance that already executed 0019 could
+therefore have missed a gap a later retry needed. This one-time pass repeats
+the execution-time backfill and only merges: it never removes ranges, so a range
+a runtime scan already recovered is left in place while any missing protection
+is restored. Databases upgrading directly from 0018 run the corrected 0019 and
+then this idempotent pass.
 """
 
 from __future__ import annotations
@@ -18,8 +19,8 @@ import json
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0019_backfill_scan_gaps"
-down_revision = "0018_library_import_scan_gaps"
+revision = "0020_recheck_scan_gaps"
+down_revision = "0019_backfill_scan_gaps"
 branch_labels = None
 depends_on = None
 
@@ -168,6 +169,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # The converted ranges belong to a table owned by 0018; dropping it there
-    # removes them. Leaving them on a partial downgrade keeps inputs gated.
+    # Merged ranges stay; a downgrade to 0018 drops the whole table instead.
     pass

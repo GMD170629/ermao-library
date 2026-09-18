@@ -504,6 +504,7 @@ def test_readable_resource_migrations_are_linear_and_baseline_is_self_contained(
         "0017_reset_default_cover_paths.py",
         "0018_library_import_scan_gaps.py",
         "0019_backfill_scan_gaps.py",
+        "0020_recheck_scan_gaps.py",
     ]
     path = versions_dir / "0001_library_topology_baseline.py"
     source = path.read_text(encoding="utf-8")

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from alembic import command
@@ -29,6 +29,9 @@ from app.modules.imports.application.readable_resource.request_library_scan impo
     RequestLibraryScanCommand,
 )
 from app.modules.imports.domain.scan_policy import ScanScope, decode_scan_scopes
+from app.modules.imports.infrastructure.readable_resource.task_queue import (
+    SqlAlchemyLibraryImportTaskQueue,
+)
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
 )
@@ -119,13 +122,15 @@ def test_legacy_failed_scan_variants_backfill_scopes(tmp_path: Path) -> None:
                         kind="SCAN_LIBRARY",
                         state="FAILED",
                         created_at=datetime(2026, 9, 1, tzinfo=UTC),
+                        finished_at=datetime(2026, 9, 1, tzinfo=UTC),
                     ),
                     LibraryImportTask(
                         id="recovered-success",
                         library_id="recovered",
                         kind="SCAN_LIBRARY",
                         state="SUCCEEDED",
-                        created_at=datetime(2026, 9, 2, tzinfo=UTC),
+                        created_at=datetime(2026, 9, 1, tzinfo=UTC),
+                        finished_at=datetime(2026, 9, 2, tzinfo=UTC),
                     ),
                 ]
             )
@@ -295,6 +300,268 @@ def test_legacy_failed_scan_backfilled_and_recovered_without_revival(
                     )
                 )
                 is None
+            )
+    finally:
+        engine.dispose()
+
+
+def _add_library(db: Session, library_id: str, root: Path) -> None:
+    library_root = root / library_id
+    library_root.mkdir(parents=True, exist_ok=True)
+    db.add(
+        Library(
+            id=library_id,
+            name=library_id,
+            root_path=str(library_root),
+            organization_mode="FLAT",
+            min_file_size_bytes=0,
+        )
+    )
+    db.flush()
+
+
+def test_upgrade_from_0018_handles_existing_gap_rows(tmp_path: Path) -> None:
+    import json
+
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    engine = create_sqlite_engine(settings.database_path)
+    root = tmp_path / "library"
+    root.mkdir(parents=True)
+    try:
+        _upgrade_to(engine, "0018_library_import_scan_gaps")
+        with Session(engine) as db:
+            for library_id in ("v-none", "v-null", "v-other"):
+                _add_library(db, library_id, root)
+            db.add(
+                LibraryImportScanGap(library_id="v-null", scopes=None)
+            )
+            db.add(
+                LibraryImportScanGap(
+                    library_id="v-other",
+                    scopes=json.dumps(
+                        [{"relativePath": "keep", "recursive": True}]
+                    ),
+                )
+            )
+            db.add_all(
+                [
+                    LibraryImportTask(
+                        id="v-none-scan",
+                        library_id="v-none",
+                        kind="SCAN_LIBRARY",
+                        state="FAILED",
+                        finished_at=datetime(2026, 9, 1, tzinfo=UTC),
+                    ),
+                    LibraryImportTask(
+                        id="v-null-scan",
+                        library_id="v-null",
+                        kind="SCAN_LIBRARY",
+                        state="FAILED",
+                        finished_at=datetime(2026, 9, 1, tzinfo=UTC),
+                    ),
+                    LibraryImportTask(
+                        id="v-other-scan",
+                        library_id="v-other",
+                        kind="SCAN_LIBRARY",
+                        state="FAILED",
+                        scan_scopes=json.dumps(
+                            [{"relativePath": "part", "recursive": False}]
+                        ),
+                        finished_at=datetime(2026, 9, 1, tzinfo=UTC),
+                    ),
+                ]
+            )
+            db.commit()
+
+        apply_schema(engine, settings)
+
+        with Session(engine) as db:
+            assert decode_scan_scopes(db.get(LibraryImportScanGap, "v-none").scopes) == (  # type: ignore[union-attr]
+                ScanScope("", True),
+            )
+            null_gap = db.get(LibraryImportScanGap, "v-null")
+            assert null_gap is not None
+            assert decode_scan_scopes(null_gap.scopes) == (ScanScope("", True),)
+            assert (
+                len(
+                    db.scalars(
+                        select(LibraryImportScanGap.library_id).where(
+                            LibraryImportScanGap.library_id == "v-null"
+                        )
+                    ).all()
+                )
+                == 1
+            )
+            other = decode_scan_scopes(db.get(LibraryImportScanGap, "v-other").scopes)  # type: ignore[union-attr]
+            assert other is not None
+            assert {scope.relative_path for scope in other} == {"keep", "part"}
+    finally:
+        engine.dispose()
+
+
+def test_backfill_uses_execution_time_not_creation_order(tmp_path: Path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    engine = create_sqlite_engine(settings.database_path)
+    root = tmp_path / "library"
+    root.mkdir(parents=True)
+    base = datetime(2026, 9, 1, tzinfo=UTC)
+    try:
+        _upgrade_to(engine, "0018_library_import_scan_gaps")
+        with Session(engine) as db:
+            for library_id in ("r1", "r2", "r3", "r4"):
+                _add_library(db, library_id, root)
+            db.commit()
+            queue = SqlAlchemyLibraryImportTaskQueue(db)
+
+            # r1: early-created A is retried and fails last; the later-created
+            # B succeeded earlier, so it cannot release A's range.
+            a = queue.enqueue(kind="SCAN_LIBRARY", library_id="r1")
+            a_row = db.get(LibraryImportTask, a.id)
+            assert a_row is not None
+            a_row.created_at = base
+            db.flush()
+            queue.mark_running(a.id, started_at=base)
+            queue.mark_failed(
+                a.id,
+                error_summary="SOURCE_SCAN_INCOMPLETE",
+                finished_at=base + timedelta(seconds=100),
+            )
+            queue.requeue_failed_task(a.id)
+            queue.mark_running(a.id, started_at=base + timedelta(seconds=150))
+            queue.mark_failed(
+                a.id,
+                error_summary="SOURCE_SCAN_INCOMPLETE",
+                finished_at=base + timedelta(seconds=200),
+            )
+            b = queue.enqueue(kind="SCAN_LIBRARY", library_id="r1")
+            b_row = db.get(LibraryImportTask, b.id)
+            assert b_row is not None
+            b_row.created_at = base + timedelta(seconds=1)
+            db.flush()
+            queue.mark_running(b.id, started_at=base)
+            queue.mark_succeeded(b.id, finished_at=base + timedelta(seconds=100))
+
+            # r2: early-created A is retried and succeeds last; the later-created
+            # B failed earlier, so A's success releases B's range.
+            a2 = queue.enqueue(kind="SCAN_LIBRARY", library_id="r2")
+            a2_row = db.get(LibraryImportTask, a2.id)
+            assert a2_row is not None
+            a2_row.created_at = base
+            db.flush()
+            queue.mark_running(a2.id, started_at=base)
+            queue.mark_failed(
+                a2.id,
+                error_summary="SOURCE_SCAN_INCOMPLETE",
+                finished_at=base + timedelta(seconds=100),
+            )
+            queue.requeue_failed_task(a2.id)
+            queue.mark_running(a2.id, started_at=base + timedelta(seconds=150))
+            queue.mark_succeeded(a2.id, finished_at=base + timedelta(seconds=200))
+            b2 = queue.enqueue(kind="SCAN_LIBRARY", library_id="r2")
+            b2_row = db.get(LibraryImportTask, b2.id)
+            assert b2_row is not None
+            b2_row.created_at = base + timedelta(seconds=1)
+            db.flush()
+            queue.mark_running(b2.id, started_at=base)
+            queue.mark_failed(
+                b2.id,
+                error_summary="SOURCE_SCAN_INCOMPLETE",
+                finished_at=base + timedelta(seconds=150),
+            )
+
+            # r3: failure finish time missing; a later success cannot prove order.
+            f3 = queue.enqueue(kind="SCAN_LIBRARY", library_id="r3")
+            db.flush()
+            queue.mark_running(f3.id, started_at=base)
+            queue.mark_failed(
+                f3.id,
+                error_summary="SOURCE_SCAN_INCOMPLETE",
+                finished_at=base + timedelta(seconds=100),
+            )
+            s3 = queue.enqueue(kind="SCAN_LIBRARY", library_id="r3")
+            db.flush()
+            queue.mark_running(s3.id, started_at=base)
+            queue.mark_succeeded(s3.id, finished_at=base + timedelta(seconds=200))
+            f3_row = db.get(LibraryImportTask, f3.id)
+            assert f3_row is not None
+            f3_row.finished_at = None
+
+            # r4: success finish time missing; it cannot prove recovery.
+            f4 = queue.enqueue(kind="SCAN_LIBRARY", library_id="r4")
+            db.flush()
+            queue.mark_running(f4.id, started_at=base)
+            queue.mark_failed(
+                f4.id,
+                error_summary="SOURCE_SCAN_INCOMPLETE",
+                finished_at=base + timedelta(seconds=100),
+            )
+            s4 = queue.enqueue(kind="SCAN_LIBRARY", library_id="r4")
+            db.flush()
+            queue.mark_running(s4.id, started_at=base)
+            queue.mark_succeeded(s4.id, finished_at=base + timedelta(seconds=200))
+            s4_row = db.get(LibraryImportTask, s4.id)
+            assert s4_row is not None
+            s4_row.finished_at = None
+            db.commit()
+
+        apply_schema(engine, settings)
+
+        with Session(engine) as db:
+            r1 = db.get(LibraryImportScanGap, "r1")
+            assert r1 is not None and r1.scopes
+            assert {scope.relative_path for scope in decode_scan_scopes(r1.scopes) or ()} == {
+                ""
+            }
+            # r2 recovered by the retried success, so no gap is rebuilt.
+            r2 = db.get(LibraryImportScanGap, "r2")
+            assert r2 is None or not r2.scopes
+            # Unprovable ordering stays gated.
+            assert db.get(LibraryImportScanGap, "r3") is not None
+            assert db.get(LibraryImportScanGap, "r4") is not None
+    finally:
+        engine.dispose()
+
+
+def test_0020_compensates_an_instance_already_at_0019(tmp_path: Path) -> None:
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    engine = create_sqlite_engine(settings.database_path)
+    root = tmp_path / "library"
+    root.mkdir(parents=True)
+    try:
+        _upgrade_to(engine, "0019_backfill_scan_gaps")
+        with Session(engine) as db:
+            _add_library(db, "late", root)
+            # The already-run 0019 left an empty row and missed the failure.
+            db.add(LibraryImportScanGap(library_id="late", scopes=None))
+            db.add(
+                LibraryImportTask(
+                    id="late-scan",
+                    library_id="late",
+                    kind="SCAN_LIBRARY",
+                    state="FAILED",
+                    finished_at=datetime(2026, 9, 1, tzinfo=UTC),
+                )
+            )
+            db.commit()
+
+        apply_schema(engine, settings)
+
+        with Session(engine) as db:
+            gap = db.get(LibraryImportScanGap, "late")
+            assert gap is not None
+            assert decode_scan_scopes(gap.scopes) == (ScanScope("", True),)
+            assert (
+                len(
+                    db.scalars(
+                        select(LibraryImportScanGap.library_id).where(
+                            LibraryImportScanGap.library_id == "late"
+                        )
+                    ).all()
+                )
+                == 1
             )
     finally:
         engine.dispose()
