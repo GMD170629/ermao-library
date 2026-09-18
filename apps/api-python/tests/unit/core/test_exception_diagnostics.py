@@ -4,6 +4,7 @@ import asyncio
 import io
 import json
 import logging
+from contextlib import contextmanager
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -19,6 +20,7 @@ from app.core.exception_diagnostics import (
 )
 from app.core.logging_config import (
     ContextFormatter,
+    SanitizingFilter,
     configure_logging,
     install_uvicorn_sanitizer,
 )
@@ -632,6 +634,101 @@ def test_uvicorn_sanitizer_preserves_access_formatter_args() -> None:
     assert '"GET /ok?token=[redacted] HTTP/1.1"' in output
     assert "200" in output
     assert "unit-query-secret" not in output
+
+
+@contextmanager
+def _filtered_logger(name: str, *, preserve_args: bool = False):
+    logger = logging.getLogger(name)
+    original_handlers = logger.handlers[:]
+    original_filters = logger.filters[:]
+    original_propagate = logger.propagate
+    original_level = logger.level
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.handlers = [handler]
+    logger.filters = [SanitizingFilter(preserve_args=preserve_args)]
+    logger.propagate = False
+    logger.setLevel(logging.DEBUG)
+    try:
+        yield logger, stream
+    finally:
+        logger.handlers = original_handlers
+        logger.filters = original_filters
+        logger.propagate = original_propagate
+        logger.setLevel(original_level)
+
+
+def _assert_no_logging_error(
+    capsys: pytest.CaptureFixture[str], *secrets: str
+) -> None:
+    captured = capsys.readouterr()
+    assert "Logging error" not in captured.err
+    assert "cannot unpack" not in captured.err
+    for secret in secrets:
+        assert secret not in captured.err
+
+
+def test_sanitizer_renders_template_before_redacting(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with _filtered_logger("tests.diagnostics.param.template") as (logger, stream):
+        logger.error("password=%s", "param-secret")
+
+    output = stream.getvalue()
+    assert "password=[redacted]" in output
+    assert "param-secret" not in output
+    _assert_no_logging_error(capsys, "param-secret")
+
+
+def test_sanitizer_redacts_split_field_and_value(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with _filtered_logger("tests.diagnostics.param.split") as (logger, stream):
+        logger.error("%s=%s", "password", "split-secret")
+
+    output = stream.getvalue()
+    assert "password=[redacted]" in output
+    assert "split-secret" not in output
+    _assert_no_logging_error(capsys, "split-secret")
+
+
+def test_sanitizer_redacts_dictionary_placeholder(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with _filtered_logger("tests.diagnostics.param.dict") as (logger, stream):
+        logger.error(
+            "%(field)s=%(value)s",
+            {"field": "password", "value": "dict-secret"},
+        )
+
+    output = stream.getvalue()
+    assert "password=[redacted]" in output
+    assert "dict-secret" not in output
+    _assert_no_logging_error(capsys, "dict-secret")
+
+
+def test_sanitizer_keeps_non_sensitive_parameterized_message(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with _filtered_logger("tests.diagnostics.param.plain") as (logger, stream):
+        logger.info("loaded %d books for %s", 3, "library-a")
+
+    assert stream.getvalue().strip() == "loaded 3 books for library-a"
+    _assert_no_logging_error(capsys, "library-a")
+
+
+def test_sanitizer_falls_back_safely_on_format_mismatch(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with _filtered_logger("tests.diagnostics.param.mismatch") as (logger, stream):
+        logger.error(  # noqa: PLE1205 - intentionally mismatched for fallback
+            "too few %s", "first", "password=fallback-secret"
+        )
+
+    output = stream.getvalue()
+    assert "fallback-secret" not in output
+    _assert_no_logging_error(capsys, "fallback-secret")
 
 
 def test_json_metadata_payload_contains_no_secrets() -> None:

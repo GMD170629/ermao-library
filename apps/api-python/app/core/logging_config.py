@@ -41,27 +41,51 @@ def _sanitize_arg(value: object) -> object:
 
 
 class SanitizingFilter(logging.Filter):
-    """Redact credentials from a record before its handlers format it."""
+    """Redact credentials from a record before its handlers format it.
+
+    ``preserve_args`` keeps ``record.msg``/``record.args`` intact so formatters
+    such as uvicorn's ``AccessFormatter`` can unpack their positional contract;
+    only string argument values are sanitized.  Otherwise the full message is
+    rendered first so combined fields (for example ``"%s=%s"``) can be
+    detected, then sanitized, and the arguments are dropped so they cannot be
+    formatted a second time.
+    """
+
+    def __init__(self, *, preserve_args: bool = False) -> None:
+        super().__init__()
+        self.preserve_args = preserve_args
 
     def filter(self, record: logging.LogRecord) -> bool:
+        self._sanitize_exception(record)
+        if self.preserve_args:
+            self._sanitize_args_in_place(record)
+        else:
+            self._collapse_message(record)
+        return True
+
+    def _sanitize_exception(self, record: logging.LogRecord) -> None:
         if record.exc_info and not record.exc_text:
             try:
                 text = "".join(traceback.format_exception(*record.exc_info))
             except Exception:  # noqa: BLE001 - never break logging on diagnostics
                 text = ""
             record.exc_text = sanitize_diagnostic_text(text)
-        if isinstance(record.msg, str):
-            record.msg = sanitize_diagnostic_text(record.msg)
-        # Preserve the argument contract: formatters such as uvicorn's
-        # AccessFormatter unpack ``record.args`` positionally, so sanitize the
-        # values in place instead of collapsing them into the message.
+
+    def _sanitize_args_in_place(self, record: logging.LogRecord) -> None:
         if isinstance(record.args, tuple):
             record.args = tuple(_sanitize_arg(value) for value in record.args)
         elif isinstance(record.args, dict):
             record.args = {
                 key: _sanitize_arg(value) for key, value in record.args.items()
             }
-        return True
+
+    def _collapse_message(self, record: logging.LogRecord) -> None:
+        try:
+            message = record.getMessage()
+        except Exception:  # noqa: BLE001 - fall back without reprinting args
+            message = str(record.msg)
+        record.msg = sanitize_diagnostic_text(message)
+        record.args = None
 
 
 class ContextFormatter(logging.Formatter):
@@ -82,11 +106,14 @@ def install_uvicorn_sanitizer() -> None:
     """Attach the sanitizing filter to uvicorn loggers without replacing them."""
 
     for name in UVICORN_SANITIZED_LOGGERS:
+        preserve_args = name == "uvicorn.access"
         logger = logging.getLogger(name)
         if not any(
-            isinstance(existing, SanitizingFilter) for existing in logger.filters
+            isinstance(existing, SanitizingFilter)
+            and existing.preserve_args == preserve_args
+            for existing in logger.filters
         ):
-            logger.addFilter(SanitizingFilter())
+            logger.addFilter(SanitizingFilter(preserve_args=preserve_args))
 
 
 def configure_logging(level: int = logging.INFO, *, force: bool = False) -> None:
