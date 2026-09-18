@@ -1,4 +1,4 @@
-"""Re-run the robust scan-gap backfill once for already-migrated instances.
+"""Re-run the scan-gap backfill once for already-migrated instances.
 
 Revision ID: 0020_recheck_scan_gaps
 Revises: 0019_backfill_scan_gaps
@@ -8,8 +8,8 @@ task row and keep ``createdAt``. An instance that already executed 0019 could
 therefore have missed a gap a later retry needed. This one-time pass repeats
 the execution-time backfill and only merges: it never removes ranges, so a range
 a runtime scan already recovered is left in place while any missing protection
-is restored. Databases upgrading directly from 0018 run the corrected 0019 and
-then this idempotent pass.
+is restored. Like 0019, it only reads SCAN_LIBRARY and CONTINUE_SOURCE tasks;
+ordinary import and identification rows are neither coverage nor evidence.
 """
 
 from __future__ import annotations
@@ -94,21 +94,26 @@ def backfill_scan_gaps(bind) -> None:
             tasks.c.sourceNodeId,
             tasks.c.scanScopes,
             tasks.c.finishedAt,
-        )
+        ).where(tasks.c.kind.in_(("SCAN_LIBRARY", "CONTINUE_SOURCE")))
     ).all()
 
     def pending_scopes(row) -> list[tuple[str, bool]]:
         if row.kind == "SCAN_LIBRARY":
             scopes = _decode_scopes(row.scanScopes)
             return scopes if scopes else [("", True)]
-        path = node_paths.get(row.sourceNodeId)
-        return [(path, True)] if path is not None else []
+        if row.kind == "CONTINUE_SOURCE":
+            path = node_paths.get(row.sourceNodeId)
+            return [(path, True)] if path is not None else []
+        # Ordinary import and identification tasks never describe scan coverage.
+        return []
 
     def completed_scopes(row) -> list[tuple[str, bool]] | None:
         if row.kind == "SCAN_LIBRARY":
             return _decode_scopes(row.scanScopes)
-        path = node_paths.get(row.sourceNodeId)
-        return [(path, True)] if path is not None else []
+        if row.kind == "CONTINUE_SOURCE":
+            path = node_paths.get(row.sourceNodeId)
+            return [(path, True)] if path is not None else []
+        return []
 
     per_library: dict[str, list[tuple[str, bool]]] = {}
     for row in scan_rows:

@@ -565,3 +565,194 @@ def test_0020_compensates_an_instance_already_at_0019(tmp_path: Path) -> None:
             )
     finally:
         engine.dispose()
+
+
+def _add_import_graph(db: Session, library_id: str) -> None:
+    node_id = f"{library_id}-node"
+    book_id = f"{library_id}-book"
+    resource_id = f"{library_id}-resource"
+    db.add(
+        LibrarySourceNode(
+            id=node_id,
+            library_id=library_id,
+            relative_path="book",
+            path_key=SourceNodeRelativePath("book").path_key,
+            name="book",
+            physical_kind="DIRECTORY",
+            observed_size_bytes=None,
+            observed_mtime_ns=0,
+            observed_at=datetime(2026, 9, 1, tzinfo=UTC),
+        )
+    )
+    db.flush()
+    db.add(
+        LibraryBook(id=book_id, library_id=library_id, source_node_id=node_id)
+    )
+    db.flush()
+    db.add(
+        LibraryReadableResource(
+            id=resource_id,
+            library_id=library_id,
+            book_id=book_id,
+            source_node_id=node_id,
+            adapter_id="image_dir",
+            adapter_version="1",
+            format="IMAGE_DIR",
+        )
+    )
+    db.flush()
+
+
+def test_backfill_ignores_and_is_not_cleared_by_ordinary_tasks(tmp_path: Path) -> None:
+    import json
+
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    engine = create_sqlite_engine(settings.database_path)
+    root = tmp_path / "library"
+    root.mkdir(parents=True)
+    base = datetime(2026, 9, 1, tzinfo=UTC)
+    later = base + timedelta(seconds=10)
+    local_scope = json.dumps([{"relativePath": "part", "recursive": False}])
+    try:
+        _upgrade_to(engine, "0018_library_import_scan_gaps")
+        with Session(engine) as db:
+            for library_id in (
+                "import-only",
+                "ident-only",
+                "asset-only",
+                "scan-import",
+                "scan-ident",
+                "source-import",
+                "covered",
+            ):
+                _add_library(db, library_id, root)
+                _add_import_graph(db, library_id)
+            db.add_all(
+                [
+                    # Ordinary failures never create a scan gap.
+                    LibraryImportTask(
+                        id="t-import",
+                        library_id="import-only",
+                        kind="IMPORT_RESOURCE",
+                        state="FAILED",
+                        resource_id="import-only-resource",
+                        source_node_id="import-only-node",
+                        resource_anchor_node_id="import-only-node",
+                        finished_at=base,
+                    ),
+                    LibraryImportTask(
+                        id="t-ident",
+                        library_id="ident-only",
+                        kind="IDENTIFY_BOOK",
+                        state="FAILED",
+                        source_node_id="ident-only-node",
+                        finished_at=base,
+                    ),
+                    LibraryImportTask(
+                        id="t-asset",
+                        library_id="asset-only",
+                        kind="IMPORT_ASSET",
+                        state="FAILED",
+                        resource_id="asset-only-resource",
+                        source_node_id="asset-only-node",
+                        role="PRIMARY",
+                        finished_at=base,
+                    ),
+                    # A failed local scan stays gated even if ordinary work
+                    # later succeeds; imports are not scan-coverage evidence.
+                    LibraryImportTask(
+                        id="t-scan-import",
+                        library_id="scan-import",
+                        kind="SCAN_LIBRARY",
+                        state="FAILED",
+                        scan_scopes=local_scope,
+                        finished_at=base,
+                    ),
+                    LibraryImportTask(
+                        id="t-import-ok",
+                        library_id="scan-import",
+                        kind="IMPORT_RESOURCE",
+                        state="SUCCEEDED",
+                        resource_id="scan-import-resource",
+                        source_node_id="scan-import-node",
+                        resource_anchor_node_id="scan-import-node",
+                        finished_at=later,
+                    ),
+                    LibraryImportTask(
+                        id="t-scan-ident",
+                        library_id="scan-ident",
+                        kind="SCAN_LIBRARY",
+                        state="FAILED",
+                        scan_scopes=local_scope,
+                        finished_at=base,
+                    ),
+                    LibraryImportTask(
+                        id="t-ident-ok",
+                        library_id="scan-ident",
+                        kind="IDENTIFY_BOOK",
+                        state="SUCCEEDED",
+                        source_node_id="scan-ident-node",
+                        finished_at=later,
+                    ),
+                    LibraryImportTask(
+                        id="t-source",
+                        library_id="source-import",
+                        kind="CONTINUE_SOURCE",
+                        state="FAILED",
+                        source_node_id="source-import-node",
+                        finished_at=base,
+                    ),
+                    LibraryImportTask(
+                        id="t-source-import-ok",
+                        library_id="source-import",
+                        kind="IMPORT_RESOURCE",
+                        state="SUCCEEDED",
+                        resource_id="source-import-resource",
+                        source_node_id="source-import-node",
+                        resource_anchor_node_id="source-import-node",
+                        finished_at=later,
+                    ),
+                    # A real covering scan success does resolve the gap.
+                    LibraryImportTask(
+                        id="t-scan-covered",
+                        library_id="covered",
+                        kind="SCAN_LIBRARY",
+                        state="FAILED",
+                        scan_scopes=local_scope,
+                        finished_at=base,
+                    ),
+                    LibraryImportTask(
+                        id="t-scan-ok",
+                        library_id="covered",
+                        kind="SCAN_LIBRARY",
+                        state="SUCCEEDED",
+                        finished_at=later,
+                    ),
+                ]
+            )
+            db.commit()
+
+        apply_schema(engine, settings)
+
+        with Session(engine) as db:
+            assert db.get(LibraryImportScanGap, "import-only") is None
+            assert db.get(LibraryImportScanGap, "ident-only") is None
+            assert db.get(LibraryImportScanGap, "asset-only") is None
+            for library_id in ("scan-import", "scan-ident"):
+                gap = db.get(LibraryImportScanGap, library_id)
+                assert gap is not None and gap.scopes
+                assert {
+                    scope.relative_path
+                    for scope in decode_scan_scopes(gap.scopes) or ()
+                } == {"part"}
+            source = db.get(LibraryImportScanGap, "source-import")
+            assert source is not None
+            assert {
+                scope.relative_path
+                for scope in decode_scan_scopes(source.scopes) or ()
+            } == {"book"}
+            covered = db.get(LibraryImportScanGap, "covered")
+            assert covered is None or not covered.scopes
+    finally:
+        engine.dispose()

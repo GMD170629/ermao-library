@@ -93,21 +93,26 @@ def backfill_scan_gaps(bind) -> None:
             tasks.c.sourceNodeId,
             tasks.c.scanScopes,
             tasks.c.finishedAt,
-        )
+        ).where(tasks.c.kind.in_(("SCAN_LIBRARY", "CONTINUE_SOURCE")))
     ).all()
 
     def pending_scopes(row) -> list[tuple[str, bool]]:
         if row.kind == "SCAN_LIBRARY":
             scopes = _decode_scopes(row.scanScopes)
             return scopes if scopes else [("", True)]
-        path = node_paths.get(row.sourceNodeId)
-        return [(path, True)] if path is not None else []
+        if row.kind == "CONTINUE_SOURCE":
+            path = node_paths.get(row.sourceNodeId)
+            return [(path, True)] if path is not None else []
+        # Ordinary import and identification tasks never describe scan coverage.
+        return []
 
     def completed_scopes(row) -> list[tuple[str, bool]] | None:
         if row.kind == "SCAN_LIBRARY":
             return _decode_scopes(row.scanScopes)
-        path = node_paths.get(row.sourceNodeId)
-        return [(path, True)] if path is not None else []
+        if row.kind == "CONTINUE_SOURCE":
+            path = node_paths.get(row.sourceNodeId)
+            return [(path, True)] if path is not None else []
+        return []
 
     per_library: dict[str, list[tuple[str, bool]]] = {}
     for row in scan_rows:
