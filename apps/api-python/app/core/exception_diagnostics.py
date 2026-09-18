@@ -21,6 +21,8 @@ from sqlalchemy.orm import Session
 
 from app.core.safe_errors import mask_email
 
+SessionFactory = Callable[[], Session]
+
 MAX_TRACEBACK_CHARS = 16_000
 MAX_CHAIN_ITEMS = 8
 MAX_DIAGNOSTIC_MESSAGE_CHARS = 2_000
@@ -70,11 +72,11 @@ _QUERY_SECRET = re.compile(
 )
 _EMAIL = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
 
-_session_factory: Callable[[], Session] | None = None
+_session_factory: SessionFactory | None = None
 _hooks_installed = False
 
 
-def configure_exception_storage(factory: Callable[[], Session] | None) -> None:
+def configure_exception_storage(factory: SessionFactory | None) -> None:
     """Set the process-wide session factory used by best-effort persistence."""
 
     global _session_factory
@@ -224,7 +226,7 @@ def record_exception(
     actor_id: str | None = None,
     target_type: str | None = None,
     target_id: str | None = None,
-    session_factory: Callable[[], Session] | None = None,
+    session_factory: SessionFactory | None = None,
 ) -> str:
     """Record one exception to running logs and best-effort SystemEvent storage.
 
@@ -235,12 +237,11 @@ def record_exception(
     diagnostic_id = f"diag_{uuid4().hex}"
     log_level = logging.WARNING if level == "warning" else logging.ERROR
     # ``exc_info=error`` formats the original exception traceback instead of
-    # the current call stack.
+    # the current call stack; ``diagnostic_id`` travels in ``extra`` so the
+    # context formatter can render it without changing the stable event name.
     logger.log(
         log_level,
-        "%s diagnostic_id=%s",
         event,
-        diagnostic_id,
         exc_info=error,
         extra=_log_extra(context, diagnostic_id),
     )
@@ -280,7 +281,7 @@ def _persist_best_effort(
     actor_id: str | None,
     target_type: str | None,
     target_id: str | None,
-    factory: Callable[[], Session],
+    factory: SessionFactory,
 ) -> bool:
     # Imported lazily so this cross-cutting core module does not pull the
     # system capability into every importer and cannot create an import cycle.

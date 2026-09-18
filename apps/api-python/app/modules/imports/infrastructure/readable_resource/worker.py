@@ -98,10 +98,16 @@ class ReadableResourceWorkerProcessor:
         except Exception as error:  # noqa: BLE001 - task containment boundary
             self._uow.rollback()
             scan_failure = isinstance(error, SourceScanStartUnavailableError)
+            event = (
+                "readable_resource.worker.scan_failed"
+                if scan_failure
+                else "readable_resource.worker.containment_failure"
+            )
             record_exception(
                 logger,
-                "readable_resource.worker.task_failed",
+                event,
                 error,
+                level="warning" if scan_failure else "error",
                 context={
                     "stage": "scan" if scan_failure else "worker",
                     "outcome": error.code if scan_failure else "error",
