@@ -80,7 +80,7 @@ class RuntimeInstallTests(unittest.TestCase):
         self.assertNotEqual(self.run_helper().returncode, 0)
         self.assertFalse(self.calls.exists())
 
-    def test_both_images_use_helper_lock_and_audio_probe(self) -> None:
+    def test_both_images_use_helper_lock_without_ffmpeg(self) -> None:
         for relative in ("apps/web/Dockerfile.prod", "apps/api-python/Dockerfile"):
             with self.subTest(dockerfile=relative):
                 dockerfile = (ROOT / relative).read_text()
@@ -100,8 +100,7 @@ class RuntimeInstallTests(unittest.TestCase):
                 )
                 self.assertIn("apps/api-python/uv.lock", dockerfile)
                 self.assertIn("ghcr.io/astral-sh/uv:0.11.29", dockerfile)
-                self.assertIn("ffprobe -version", dockerfile)
-                self.assertRegex(dockerfile, r"apt-get install[^\n]*\bffmpeg\b")
+                self.assertNotRegex(dockerfile, r"\b(?:ffmpeg|ffprobe|ffplay)\b")
                 self.assertNotIn("pip install", dockerfile)
 
 

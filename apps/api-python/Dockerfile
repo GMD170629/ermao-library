@@ -27,9 +27,8 @@ WORKDIR /app/apps/api-python
 COPY --from=ghcr.io/astral-sh/uv:0.11.29 /uv /usr/local/bin/uv
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ffmpeg unar ca-certificates \
-  && rm -rf /var/lib/apt/lists/* \
-  && ffprobe -version
+  && apt-get install -y --no-install-recommends unar ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
 COPY apps/api-python/pyproject.toml apps/api-python/uv.lock ./
 COPY apps/api-python/app ./app
