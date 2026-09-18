@@ -6,6 +6,8 @@ English | [简体中文](README.md)
 
 Novels, comics, PDFs, audiobooks—give your collection a place to be enjoyed. Run Ermao Books on a NAS or home server to organize your personal or family library, read on your computer, continue on your phone, or settle in with an audiobook.
 
+The official site <https://embook.xyz/> offers feature demos, deployment guides, and downloads for every platform.
+
 ## Make time for your books
 
 - **Find your next read.** Search by title, author, or tag. Organize collections with custom shelves, smart shelves, and reading statuses; fill in covers and book details.
@@ -49,4 +51,4 @@ For existing books, replace `./library` with their directory. The container uses
 
 ## Guides and community
 
-[Wiki](https://github.com/GMD170629/ermao-library/wiki) · [Docs](docs/README.md) · [Report an issue](https://github.com/GMD170629/ermao-library/issues) · QQ group: `154560969` · [MIT license](LICENSE)
+[Official site](https://embook.xyz/) · [Wiki](https://github.com/GMD170629/ermao-library/wiki) · [Docs](docs/README.md) · [Report an issue](https://github.com/GMD170629/ermao-library/issues) · QQ group: `154560969` · [MIT license](LICENSE)

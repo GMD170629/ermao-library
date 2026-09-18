@@ -6,6 +6,8 @@
 
 小说、漫画、PDF、有声书，收藏得多了，也需要一个方便找书、翻阅的地方。二毛图书部署在 NAS 或家庭服务器上，帮你整理个人与家庭藏书，在电脑上读书，在手机上继续，也能戴上耳机听一会儿。
 
+官网 <https://embook.xyz/> 提供功能演示、部署说明和各平台下载入口。
+
 ## 让藏书读起来
 
 - **找到下一本想读的书**：按书名、作者或标签查找，用自定义书架、智能书架和阅读状态整理收藏，补全封面与图书信息。
@@ -49,4 +51,4 @@ services:
 
 ## 文档与交流
 
-[使用 Wiki](https://github.com/GMD170629/ermao-library/wiki) · [项目文档](docs/README.md) · [问题反馈](https://github.com/GMD170629/ermao-library/issues) · QQ 群：`154560969` · [MIT 许可证](LICENSE)
+[官网](https://embook.xyz/) · [使用 Wiki](https://github.com/GMD170629/ermao-library/wiki) · [项目文档](docs/README.md) · [问题反馈](https://github.com/GMD170629/ermao-library/issues) · QQ 群：`154560969` · [MIT 许可证](LICENSE)
