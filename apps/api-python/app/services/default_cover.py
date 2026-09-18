@@ -1,49 +1,26 @@
+"""Identity of the bundled book fallback cover served when a Book has none."""
+
 from __future__ import annotations
 
 from pathlib import Path
 
-from app.core.config import Settings
-from app.infrastructure.atomic_files import write_atomic_bytes
-
-DEFAULT_COVER_RELATIVE_PATH = Path("covers/default-book-cover-v1.png")
 DEFAULT_COVER_ASSET_PATH = (
-    Path(__file__).resolve().parent.parent / "assets/default-book-cover-v1.png"
+    Path(__file__).resolve().parent.parent / "assets/default-book-cover-v2.webp"
 )
-DEFAULT_COVER_STATUS = "DEFAULT"
+# Legacy versions persisted this file name into metadata; keep recognizing it so
+# stale rows never resolve to a real cover or get re-published.
+_DEFAULT_COVER_FILE_NAMES = frozenset(
+    {
+        "default-book-cover-v1.png",
+        "default-book-cover-v2.webp",
+    }
+)
 
 
-def default_cover_path(settings: Settings) -> Path:
-    return settings.resolved_storage_root / DEFAULT_COVER_RELATIVE_PATH
-
-
-def ensure_default_cover(settings: Settings) -> str:
-    """Copy the bundled fallback cover into durable storage and return its path."""
-    target = default_cover_path(settings)
-    asset_size = DEFAULT_COVER_ASSET_PATH.stat().st_size
-    if target.is_file() and target.stat().st_size == asset_size:
-        return str(DEFAULT_COVER_RELATIVE_PATH)
-
-    asset = DEFAULT_COVER_ASSET_PATH.read_bytes()
-    if len(asset) != asset_size:
-        raise OSError("default cover asset changed while being read")
-    try:
-        write_atomic_bytes(target, asset)
-    except PermissionError:
-        # Concurrent first requests can publish the same bundled cover before
-        # this writer replaces it. Windows may keep that completed file open.
-        if not target.is_file() or target.read_bytes() != asset:
-            raise
-    return str(DEFAULT_COVER_RELATIVE_PATH)
-
-
-def is_default_cover_path(value: object, settings: Settings | None = None) -> bool:
+def is_default_cover_path(value: object) -> bool:
     if not value:
         return False
-    candidate = Path(str(value))
-    if candidate.as_posix() == DEFAULT_COVER_RELATIVE_PATH.as_posix():
-        return True
-    return settings is not None and candidate == default_cover_path(settings)
+    return Path(str(value)).name in _DEFAULT_COVER_FILE_NAMES
 
 
-def cover_status(value: object, settings: Settings) -> str:
-    return DEFAULT_COVER_STATUS if is_default_cover_path(value, settings) else "READY"
+__all__ = ["DEFAULT_COVER_ASSET_PATH", "is_default_cover_path"]

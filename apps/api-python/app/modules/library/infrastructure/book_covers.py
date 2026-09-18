@@ -24,7 +24,7 @@ def _ready_cover(
         column_path.is_not(None),
         func.trim(func.coalesce(column_path, "")) != "",
         column_status == "READY",
-        ~column_path.endswith("default-book-cover-v1.png"),
+        ~func.lower(column_path).like("%default-book-cover-%"),
     )
 
 

@@ -165,6 +165,23 @@ def test_cover_is_written_beside_opf_and_referenced_with_real_media_type(
     assert metadata.cover_href == "book.cover.png"
 
 
+def test_missing_cover_publishes_no_sidecar_or_manifest_item(tmp_path: Path) -> None:
+    source = tmp_path / "book.epub"
+    source.write_bytes(b"immutable epub without cover")
+
+    prepared = prepare_writeback(str(source), _payload(source), tmp_path)
+    output, _size, _mtime = publish_prepared(str(source), str(prepared.prepared_path))
+
+    assert not list(tmp_path.glob("book.cover.*"))
+    package = etree.fromstring(output.read_bytes())
+    assert not [
+        node
+        for node in package.iter()
+        if etree.QName(node).localname == "item" and node.get("id") == "cover-image"
+    ]
+    assert parse_opf_metadata(output.read_bytes()).cover_href is None
+
+
 def test_directory_book_writes_metadata_opf_without_changing_contents(
     tmp_path: Path,
 ) -> None:

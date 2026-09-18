@@ -15,6 +15,7 @@ def test_cover_identity_rejects_default_and_escaped_files(
         None,
         "",
         "covers/default-book-cover-v1.png",
+        "covers/default-book-cover-v2.webp",
         str(outside),
         "../outside.png",
         "escape.png",

@@ -50,6 +50,7 @@ from app.db.session import (
     get_short_write_db,
 )
 from app.schemas.responses import fail
+from app.services.default_cover_cleanup import cleanup_default_cover_residue
 from app.services.download_queue import start_download_queue_worker
 from app.services.health_runs import fail_abandoned_health_runs
 from app.services.kindle_queue import start_kindle_send_queue_worker
@@ -169,6 +170,19 @@ def create_app(
                 raise
             LOGGER.warning(
                 "startup_health_recovery outcome=deferred reason=%s",
+                "database_busy"
+                if is_database_busy_error(error)
+                else "time_budget_exceeded",
+            )
+        try:
+            cleanup_default_cover_residue(startup_db, settings)
+        except OperationalError as error:
+            if not (
+                is_database_busy_error(error) or is_database_operation_timeout(error)
+            ):
+                raise
+            LOGGER.warning(
+                "startup_default_cover_cleanup outcome=deferred reason=%s",
                 "database_busy"
                 if is_database_busy_error(error)
                 else "time_budget_exceeded",

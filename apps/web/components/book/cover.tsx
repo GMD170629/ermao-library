@@ -51,7 +51,7 @@ export function Cover({
     if (book.coverUrl) return withBasePath(coverUrlWithSize(book.coverUrl, requestedSize));
     return '';
   }, [book.coverUrl, requestedSize]);
-  const fallbackCoverUrl = withBasePath('/images/fallback-book-cover-v1.png');
+  const fallbackCoverUrl = withBasePath('/images/fallback-book-cover-v2.webp');
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
 
   useEffect(() => {

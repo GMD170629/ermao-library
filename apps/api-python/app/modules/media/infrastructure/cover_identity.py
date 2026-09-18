@@ -17,7 +17,7 @@ def versioned_cover_url(
     *,
     size: str | None = None,
 ) -> str:
-    if not cover_path or is_default_cover_path(cover_path, settings):
+    if not cover_path or is_default_cover_path(cover_path):
         return ""
     path = stored_path(cover_path, settings)
     if path is None:
