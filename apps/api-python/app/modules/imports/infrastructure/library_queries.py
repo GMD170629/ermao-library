@@ -278,6 +278,11 @@ def _attach_waiting_reasons(db: Session, views: list[dict[str, object]]) -> None
                 "recovery": "RETRY_SCAN",
             }
             continue
+        # Only identification waits on active work. A directory resource is
+        # executable in creation order, so announcing an active scan would
+        # contradict the scheduler's actual selection.
+        if view.get("kind") != "IDENTIFY_BOOK":
+            continue
         for kind, path, scopes in scans.get(library_id, ()):
             if kind == "SCAN_LIBRARY":
                 covered = scopes is None or scopes_cover_path(scopes, anchor)  # type: ignore[arg-type]

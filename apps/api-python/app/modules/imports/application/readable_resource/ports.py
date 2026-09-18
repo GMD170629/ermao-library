@@ -289,21 +289,23 @@ class LibraryImportTaskQueuePort(Protocol):
 
     def fail_interrupted_tasks_on_startup(self, *, finished_at: datetime) -> int: ...
 
-    def record_incomplete_scan(
+    def has_incomplete_ranges(self, library_id: str) -> bool:
+        """Whether this library still has durable incomplete scan ranges."""
+
+    def apply_scan_round(
         self,
         task_id: str | None,
         library_id: str,
-        scopes: tuple[ScanScope, ...],
+        *,
+        resolved: tuple[ScanScope, ...],
+        incomplete: tuple[ScanScope, ...],
     ) -> None:
-        """Persist unfinished scan ranges both on the task and durably."""
+        """Replace visited ranges with this round's remaining incomplete ranges.
 
-    def has_incomplete_ranges(self, library_id: str) -> bool:
-        """Whether any durable incomplete scan range still gates this library."""
-
-    def clear_complete_scan(
-        self, library_id: str, scopes: tuple[ScanScope, ...]
-    ) -> None:
-        """Remove durable ranges a fully completed scan actually enumerated."""
+        ``resolved`` removes old gaps this round actually enumerated;
+        ``incomplete`` adds the exact failed and unvisited ranges. Both happen
+        in one transaction so an incomplete input is never momentarily released.
+        """
 
     def requeue_failed_task(
         self, task_id: str

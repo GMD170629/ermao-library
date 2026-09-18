@@ -13,6 +13,7 @@ import {
   continueImportTask,
   fetchImportLibraries,
   fetchImportTasks,
+  scanLibrary,
   type ImportLibrary,
   type ImportTaskState,
   type LibraryImportTask
@@ -126,6 +127,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [continuingTaskId, setContinuingTaskId] = useState('');
+  const [recoveringLibraryId, setRecoveringLibraryId] = useState('');
   const [error, setError] = useState('');
   const requestIdRef = useRef(0);
 
@@ -231,6 +233,22 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
       toast.error(t('继续导入失败'), message);
     } finally {
       setContinuingTaskId('');
+    }
+  }
+
+  async function retryScan(task: LibraryImportTask) {
+    setRecoveringLibraryId(task.libraryId);
+    try {
+      const result = await scanLibrary(task.libraryId);
+      toast.success(result.enqueued ? t('已重新加入扫描队列') : t('没有新的扫描任务'));
+      setError('');
+      await loadTasks(page);
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : t('重试扫描失败');
+      setError(message);
+      toast.error(t('重试扫描失败'), message);
+    } finally {
+      setRecoveringLibraryId('');
     }
   }
 
@@ -370,6 +388,11 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
                 {task.state === 'FAILED' && task.sourceNodeId ? (
                   <Button className="min-h-9 px-3 py-1.5" variant="secondary" loading={continuingTaskId === task.id} loadingText={t('继续中')} onClick={() => void continueTask(task)}>
                     <I18nText>继续导入</I18nText>
+                  </Button>
+                ) : null}
+                {task.state === 'QUEUED' && task.waitingFor?.recovery === 'RETRY_SCAN' ? (
+                  <Button className="min-h-9 px-3 py-1.5" variant="secondary" loading={recoveringLibraryId === task.libraryId} loadingText={t('扫描中')} onClick={() => void retryScan(task)}>
+                    <I18nText>重试扫描</I18nText>
                   </Button>
                 ) : null}
               </div>

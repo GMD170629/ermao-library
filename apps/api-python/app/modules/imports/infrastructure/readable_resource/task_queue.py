@@ -32,6 +32,7 @@ from app.modules.imports.domain.scan_policy import (
     decode_scan_scopes,
     encode_scan_scopes,
     merge_scan_scopes,
+    remove_scan_scopes,
 )
 from app.modules.imports.infrastructure.readable_resource.book_completion import (
     BookImportCompletion,
@@ -508,31 +509,34 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         self._session.flush()
         return int(getattr(result, "rowcount", 0) or 0)
 
-    def record_incomplete_scan(
-        self,
-        task_id: str | None,
-        library_id: str,
-        scopes: tuple[ScanScope, ...],
-    ) -> None:
-        normalized = merge_scan_scopes((), scopes) or ()
-        if not normalized:
-            return
-        if task_id is not None:
-            row = self._session.get(LibraryImportTask, task_id)
-            if row is not None and row.kind == "SCAN_LIBRARY":
-                row.scan_scopes = encode_scan_scopes(normalized)
-        record_scan_gaps(self._session, library_id, normalized)
-
     def has_incomplete_ranges(self, library_id: str) -> bool:
         row = self._session.get(LibraryImportScanGap, library_id)
         return row is not None and bool(row.scopes)
 
-    def clear_complete_scan(
-        self, library_id: str, scopes: tuple[ScanScope, ...]
+    def apply_scan_round(
+        self,
+        task_id: str | None,
+        library_id: str,
+        *,
+        resolved: tuple[ScanScope, ...],
+        incomplete: tuple[ScanScope, ...],
     ) -> None:
-        if not scopes:
-            return
-        clear_scan_gaps(self._session, library_id, scopes)
+        resolved_scopes = merge_scan_scopes((), resolved) or ()
+        incomplete_scopes = merge_scan_scopes((), incomplete) or ()
+        if task_id is not None:
+            row = self._session.get(LibraryImportTask, task_id)
+            if row is not None and row.kind == "SCAN_LIBRARY":
+                remaining = remove_scan_scopes(
+                    decode_scan_scopes(row.scan_scopes) or (), resolved_scopes
+                )
+                combined = merge_scan_scopes(remaining, incomplete_scopes) or ()
+                row.scan_scopes = (
+                    encode_scan_scopes(combined) if combined else None
+                )
+        if resolved_scopes:
+            clear_scan_gaps(self._session, library_id, resolved_scopes)
+        if incomplete_scopes:
+            record_scan_gaps(self._session, library_id, incomplete_scopes)
 
     def _record_gaps_for_task(self, task: LibraryImportTask) -> None:
         if task.kind == "SCAN_LIBRARY":

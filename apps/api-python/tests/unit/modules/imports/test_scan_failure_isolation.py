@@ -17,8 +17,19 @@ from sqlalchemy.orm import Session
 
 from app.db.base import Base
 from app.db.sqlite import create_sqlite_engine
-from app.models import Library, LibraryBook, LibraryBookMetadata, LibrarySourceNode
-from app.modules.imports.domain.scan_policy import MissingEntryPolicy, ScanScope
+from app.models import (
+    Library,
+    LibraryBook,
+    LibraryBookMetadata,
+    LibraryImportScanGap,
+    LibrarySourceNode,
+)
+from app.modules.imports.domain.scan_policy import (
+    MissingEntryPolicy,
+    ScanScope,
+    completed_scope_resolves,
+    decode_scan_scopes,
+)
 from app.modules.imports.infrastructure.readable_resource.book_completion import (
     BookImportCompletion,
 )
@@ -148,8 +159,8 @@ def test_failed_scan_record_does_not_block_single_file_resource(db: Session) -> 
     )
     queue = SqlAlchemyLibraryImportTaskQueue(db)
     _failed_scan(db, queue, None)
-    queue.record_incomplete_scan(
-        None, "library", (ScanScope("", True),)
+    queue.apply_scan_round(
+        None, "library", resolved=(), incomplete=(ScanScope("", True),)
     )
     task = queue.enqueue(
         kind="IMPORT_RESOURCE",
@@ -180,7 +191,9 @@ def test_unrelated_incomplete_range_does_not_block_directory_resource(
             adapter_id="image_dir",
         )
     queue = SqlAlchemyLibraryImportTaskQueue(db)
-    queue.record_incomplete_scan(None, "library", (ScanScope("bad", True),))
+    queue.apply_scan_round(
+        None, "library", resolved=(), incomplete=(ScanScope("bad", True),)
+    )
     good = queue.enqueue(
         kind="IMPORT_RESOURCE",
         library_id="library",
@@ -216,7 +229,9 @@ def test_completed_scan_range_releases_dependent_directory_resource(
         adapter_id="image_dir",
     )
     queue = SqlAlchemyLibraryImportTaskQueue(db)
-    queue.record_incomplete_scan(None, "library", (ScanScope("bad", True),))
+    queue.apply_scan_round(
+        None, "library", resolved=(), incomplete=(ScanScope("bad", True),)
+    )
     task = queue.enqueue(
         kind="IMPORT_RESOURCE",
         library_id="library",
@@ -227,7 +242,9 @@ def test_completed_scan_range_releases_dependent_directory_resource(
     assert queue.next_queued() is None
 
     # A completed scan is the only operation that clears the range.
-    queue.clear_complete_scan("library", (ScanScope("bad", True),))
+    queue.apply_scan_round(
+        None, "library", resolved=(ScanScope("bad", True),), incomplete=()
+    )
     db.flush()
 
     selected = queue.next_queued()
@@ -247,7 +264,9 @@ def test_cleaning_failed_task_record_does_not_release_gap(db: Session) -> None:
     )
     queue = SqlAlchemyLibraryImportTaskQueue(db)
     failed_id = _failed_scan(db, queue, (ScanScope("bad", True),))
-    queue.record_incomplete_scan(failed_id, "library", (ScanScope("bad", True),))
+    queue.apply_scan_round(
+        failed_id, "library", resolved=(), incomplete=(ScanScope("bad", True),)
+    )
     task = queue.enqueue(
         kind="IMPORT_RESOURCE",
         library_id="library",
@@ -298,7 +317,9 @@ def test_unrelated_library_gap_does_not_block_other_library_task(
         library_id="other-library",
     )
     queue = SqlAlchemyLibraryImportTaskQueue(db)
-    queue.record_incomplete_scan(None, "library", (ScanScope("bad", True),))
+    queue.apply_scan_round(
+        None, "library", resolved=(), incomplete=(ScanScope("bad", True),)
+    )
     task = queue.enqueue(
         kind="IMPORT_RESOURCE",
         library_id="other-library",
@@ -357,3 +378,27 @@ def test_full_scan_still_waits_for_identification(db: Session) -> None:
     db.flush()
 
     assert BookImportCompletion(db).prepare_ready() == ()
+
+
+def test_root_non_recursive_completion_does_not_clear_recursive_gap(
+    db: Session,
+) -> None:
+    assert not completed_scope_resolves(ScanScope("", False), ScanScope("", True))
+    assert completed_scope_resolves(ScanScope("", False), ScanScope("", False))
+    assert completed_scope_resolves(ScanScope("", True), ScanScope("a/b", True))
+    assert not completed_scope_resolves(ScanScope("a", False), ScanScope("a/b", True))
+
+    queue = SqlAlchemyLibraryImportTaskQueue(db)
+    queue.apply_scan_round(
+        None, "library", resolved=(), incomplete=(ScanScope("", True),)
+    )
+    db.flush()
+    # A non-recursive root scan never enumerates nested directories.
+    queue.apply_scan_round(
+        None, "library", resolved=(ScanScope("", False),), incomplete=()
+    )
+    db.flush()
+
+    gap = db.get(LibraryImportScanGap, "library")
+    assert gap is not None
+    assert decode_scan_scopes(gap.scopes) == (ScanScope("", True),)

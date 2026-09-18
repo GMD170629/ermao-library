@@ -130,6 +130,7 @@ class ScanLibrarySourceTree:
             self._guard_empty_root(config)
             result = self._execute_scopes(config, scan_scopes, task_id=task_id)
         else:
+            full_scope = ScanScope("", True)
             incomplete_paths: set[str] = set()
             try:
                 result = self._walk(
@@ -141,15 +142,18 @@ class ScanLibrarySourceTree:
                     incomplete_paths=incomplete_paths,
                 )
             except Exception:
-                # Every non-successful exit leaves the affected ranges gated;
-                # only a later complete enumeration may release them.
-                self._record_incomplete_scan(
+                # A visited range is resolved and replaced by the exact failed
+                # sub-ranges of this round; only unvisited ranges stay unknown.
+                self._apply_scan_round(
                     task_id,
                     config.library_id,
-                    self._paths_to_scopes(incomplete_paths, None),
+                    resolved=(full_scope,),
+                    incomplete=self._paths_to_scopes(incomplete_paths, full_scope),
                 )
                 raise
-            self._clear_complete_scan(config.library_id, (ScanScope("", True),))
+            self._apply_scan_round(
+                task_id, config.library_id, resolved=(full_scope,), incomplete=()
+            )
         self._log.emit(
             "source_tree.scan.completed",
             library_id=config.library_id,
@@ -227,6 +231,7 @@ class ScanLibrarySourceTree:
                 path_key_collisions=0,
             )
         if node.physical_kind is SourceNodePhysicalKind.DIRECTORY:
+            anchor_scope = ScanScope(relative.value, True)
             incomplete_paths: set[str] = set()
             try:
                 result = self._walk(
@@ -238,16 +243,18 @@ class ScanLibrarySourceTree:
                     incomplete_paths=incomplete_paths,
                 )
             except Exception:
-                self._record_incomplete_scan(
+                self._apply_scan_round(
                     task_id,
                     config.library_id,
-                    self._paths_to_scopes(
-                        incomplete_paths, ScanScope(relative.value, True)
-                    ),
+                    resolved=(anchor_scope,),
+                    incomplete=self._paths_to_scopes(incomplete_paths, anchor_scope),
                 )
                 raise
-            self._clear_complete_scan(
-                config.library_id, (ScanScope(relative.value, True),)
+            self._apply_scan_round(
+                task_id,
+                config.library_id,
+                resolved=(anchor_scope,),
+                incomplete=(),
             )
             return result
         return ScanLibrarySourceTreeResult(
@@ -302,14 +309,14 @@ class ScanLibrarySourceTree:
         totals = [0, 0, 0, 0]
         failed = False
         failed_error: BaseException | None = None
-        completed_scopes: list[ScanScope] = []
-        incomplete_scopes: list[ScanScope] = []
         while pending:
             if self._task_was_cancelled(task_id):
                 # Cancellation stops the round; unprocessed ranges stay gated.
-                incomplete_scopes.extend(pending)
-                self._record_incomplete_scan(
-                    task_id, config.library_id, tuple(incomplete_scopes)
+                self._apply_scan_round(
+                    task_id,
+                    config.library_id,
+                    resolved=(),
+                    incomplete=tuple(pending),
                 )
                 raise SourceScanCancelledError()
             scope = pending.pop(0)
@@ -327,10 +334,12 @@ class ScanLibrarySourceTree:
                 if parent not in visited:
                     pending[0:0] = [ScanScope(parent), scope]
                     continue
-                # A successfully scanned parent did not discover this path.
-                # Remember its absence so descendant events cannot repeatedly
-                # schedule this already resolved parent after a directory move.
+                # A successfully scanned parent did not discover this path, so
+                # the scope is confirmed absent and any old gap is resolved.
                 visited.add(relative)
+                self._apply_scan_round(
+                    task_id, config.library_id, resolved=(scope,), incomplete=()
+                )
                 continue
             if (
                 node is not None
@@ -349,7 +358,12 @@ class ScanLibrarySourceTree:
                     except SourceScanIncompleteError as error:
                         failed = True
                         failed_error = failed_error or error
-                        incomplete_scopes.append(scope)
+                        self._apply_scan_round(
+                            task_id,
+                            config.library_id,
+                            resolved=(),
+                            incomplete=(scope,),
+                        )
                     continue
             visited.add(relative)
             failed_paths: set[str] = set()
@@ -375,29 +389,31 @@ class ScanLibrarySourceTree:
             except SourceScanIncompleteError as error:
                 failed = True
                 failed_error = failed_error or error
-                # The walk reports exact failed sub-ranges; never widen them
-                # back into the whole requested parent scope.
-                incomplete_scopes.extend(
-                    self._paths_to_scopes(failed_paths, scope)
+                # The visited scope is resolved and replaced by the exact
+                # failed sub-ranges; successful siblings are released.
+                self._apply_scan_round(
+                    task_id,
+                    config.library_id,
+                    resolved=(scope,),
+                    incomplete=self._paths_to_scopes(failed_paths, scope),
                 )
             except Exception:
-                # Preserve the current failure plus everything not yet visited.
-                incomplete_scopes.extend(
-                    self._paths_to_scopes(failed_paths, scope)
-                )
-                incomplete_scopes.extend(pending)
-                self._record_incomplete_scan(
-                    task_id, config.library_id, tuple(incomplete_scopes)
+                # Resolve what was visited, then gate the current failure and
+                # every range this round never reached.
+                self._apply_scan_round(
+                    task_id,
+                    config.library_id,
+                    resolved=(scope,),
+                    incomplete=(
+                        self._paths_to_scopes(failed_paths, scope) + tuple(pending)
+                    ),
                 )
                 raise
             else:
-                completed_scopes.append(scope)
-        if completed_scopes:
-            self._clear_complete_scan(config.library_id, tuple(completed_scopes))
+                self._apply_scan_round(
+                    task_id, config.library_id, resolved=(scope,), incomplete=()
+                )
         if failed:
-            self._record_incomplete_scan(
-                task_id, config.library_id, tuple(incomplete_scopes)
-            )
             raise SourceScanIncompleteError() from failed_error
         return ScanLibrarySourceTreeResult(config.library_id, *totals)
 
@@ -410,24 +426,25 @@ class ScanLibrarySourceTree:
             return scopes
         return (fallback,)
 
-    def _record_incomplete_scan(
+    def _apply_scan_round(
         self,
         task_id: str | None,
         library_id: str,
-        scopes: tuple[ScanScope, ...],
+        *,
+        resolved: tuple[ScanScope, ...],
+        incomplete: tuple[ScanScope, ...],
     ) -> None:
-        if not scopes:
+        if not incomplete and not (
+            resolved and self._queue.has_incomplete_ranges(library_id)
+        ):
             return
         with self._uow.transaction():
-            self._queue.record_incomplete_scan(task_id, library_id, scopes)
-
-    def _clear_complete_scan(
-        self, library_id: str, scopes: tuple[ScanScope, ...]
-    ) -> None:
-        if not scopes or not self._queue.has_incomplete_ranges(library_id):
-            return
-        with self._uow.transaction():
-            self._queue.clear_complete_scan(library_id, scopes)
+            self._queue.apply_scan_round(
+                task_id,
+                library_id,
+                resolved=resolved,
+                incomplete=incomplete,
+            )
 
     def _confirmed_missing_parent(
         self, config: LibrarySourceTreeConfig, relative: str

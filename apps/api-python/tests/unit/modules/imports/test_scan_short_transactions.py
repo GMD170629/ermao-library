@@ -306,19 +306,16 @@ class FakeQueue:
     def requeue_failed_task(self, task_id: str) -> tuple[LibraryImportTaskRecord, bool]:
         raise NotImplementedError(task_id)
 
-    def record_incomplete_scan(
-        self,
-        task_id: str | None,
-        library_id: str,
-        scopes: tuple[ScanScope, ...],
-    ) -> None:
-        return None
-
     def has_incomplete_ranges(self, library_id: str) -> bool:
         return False
 
-    def clear_complete_scan(
-        self, library_id: str, scopes: tuple[ScanScope, ...]
+    def apply_scan_round(
+        self,
+        task_id: str | None,
+        library_id: str,
+        *,
+        resolved: tuple[ScanScope, ...],
+        incomplete: tuple[ScanScope, ...],
     ) -> None:
         return None
 

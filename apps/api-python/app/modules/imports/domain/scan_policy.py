@@ -92,9 +92,9 @@ def completed_scope_resolves(
     children, so it resolves an equally non-recursive range at the same path.
     An ancestor is never resolved by a descendant completion.
     """
-    if completed.relative_path == "":
-        return completed.recursive or pending.relative_path == ""
     if completed.recursive:
+        if completed.relative_path == "":
+            return True
         return pending.relative_path == completed.relative_path or (
             pending.relative_path.startswith(completed.relative_path + "/")
         )
