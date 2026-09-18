@@ -2174,5 +2174,12 @@
   "异常类型：": "Exception type: ",
   "异常信息：": "Exception message: ",
   "预览《{value0}》的封面": "Preview the cover of \"{value0}\"",
-  "执行阶段：": "Stage: "
+  "执行阶段：": "Stage: ",
+  "等待扫描": "Waiting for scan",
+  "前置扫描失败": "Prerequisite scan failed",
+  "等待资源导入": "Waiting for resource import",
+  "等待扫描，范围 {value0}": "Waiting for a scan of {value0}",
+  "前置扫描失败，等待范围 {value0} 的完整扫描": "Prerequisite scan failed; waiting for a complete scan of {value0}",
+  "导入任务响应缺少等待原因": "Import task response is missing a waiting reason",
+  "导入任务响应包含无效等待原因": "Import task response contains an invalid waiting reason"
 }

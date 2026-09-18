@@ -17,6 +17,8 @@ export {
   type ImportTaskRole,
   type ImportTasksPage,
   type ImportTaskState,
+  type ImportTaskWaiting,
+  type ImportTaskWaitingReason,
   type LibraryImportTask
 } from './api/client';
 export { waitForImportTask } from './application/wait-for-import-task';

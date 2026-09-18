@@ -18,6 +18,16 @@ ImportTaskState = Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED"]
 ImportTaskRole = Literal["PRIMARY", "TRACK", "PAGE", "SIDECAR", "SUPPLEMENT"]
 
 
+class LibraryImportTaskWaiting(BaseModel):
+    """Read-only reason a queued task is blocked and how to recover."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    reason: Literal["SCAN_ACTIVE", "SCAN_INCOMPLETE", "IMPORT_ACTIVE"]
+    scope: str | None = None
+    recovery: Literal["RETRY_SCAN"] | None = None
+
+
 class LibraryImportTaskContract(BaseModel):
     """Wire projection; no importer lease or legacy book identity is exposed."""
 
@@ -36,6 +46,9 @@ class LibraryImportTaskContract(BaseModel):
     role: ImportTaskRole | None = None
     state: ImportTaskState
     error_summary: str | None = Field(default=None, alias="errorSummary")
+    waiting_for: LibraryImportTaskWaiting | None = Field(
+        default=None, alias="waitingFor"
+    )
     created_at: datetime | str = Field(alias="createdAt")
     started_at: datetime | str | None = Field(default=None, alias="startedAt")
     finished_at: datetime | str | None = Field(default=None, alias="finishedAt")
@@ -49,4 +62,5 @@ __all__ = [
     "ImportTaskRole",
     "ImportTaskState",
     "LibraryImportTaskContract",
+    "LibraryImportTaskWaiting",
 ]

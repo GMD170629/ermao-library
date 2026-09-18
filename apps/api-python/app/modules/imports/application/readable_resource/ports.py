@@ -289,10 +289,21 @@ class LibraryImportTaskQueuePort(Protocol):
 
     def fail_interrupted_tasks_on_startup(self, *, finished_at: datetime) -> int: ...
 
-    def record_incomplete_scan_scopes(
-        self, task_id: str, scopes: tuple[ScanScope, ...]
+    def record_incomplete_scan(
+        self,
+        task_id: str | None,
+        library_id: str,
+        scopes: tuple[ScanScope, ...],
     ) -> None:
-        """Persist only the scopes a failed SCAN_LIBRARY did not finish."""
+        """Persist unfinished scan ranges both on the task and durably."""
+
+    def has_incomplete_ranges(self, library_id: str) -> bool:
+        """Whether any durable incomplete scan range still gates this library."""
+
+    def clear_complete_scan(
+        self, library_id: str, scopes: tuple[ScanScope, ...]
+    ) -> None:
+        """Remove durable ranges a fully completed scan actually enumerated."""
 
     def requeue_failed_task(
         self, task_id: str

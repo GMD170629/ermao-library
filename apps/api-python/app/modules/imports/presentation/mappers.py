@@ -33,6 +33,7 @@ def import_task_view(task: Mapping[str, object]) -> dict[str, object]:
         "role": task.get("role"),
         "state": str(task.get("state") or ""),
         "errorSummary": task.get("errorSummary"),
+        "waitingFor": task.get("waitingFor"),
         "createdAt": _datetime_value(task.get("createdAt")),
         "startedAt": _datetime_value(task.get("startedAt")),
         "finishedAt": _datetime_value(task.get("finishedAt")),

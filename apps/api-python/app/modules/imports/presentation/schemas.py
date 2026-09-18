@@ -129,6 +129,14 @@ class ContinueImportPayload(HttpContractModel):
 ContinueImportResponse = SuccessEnvelope[ContinueImportPayload]
 
 
+class ImportTaskWaitingView(HttpContractModel):
+    """Read-only explanation of why a queued task is not yet executable."""
+
+    reason: Literal["SCAN_ACTIVE", "SCAN_INCOMPLETE", "IMPORT_ACTIVE"]
+    scope: str | None = None
+    recovery: Literal["RETRY_SCAN"] | None = None
+
+
 class LibraryImportTaskView(HttpContractModel):
     """The public, read-only projection of one canonical import task."""
 
@@ -151,6 +159,9 @@ class LibraryImportTaskView(HttpContractModel):
     role: Literal["PRIMARY", "TRACK", "PAGE", "SIDECAR", "SUPPLEMENT"] | None = None
     state: Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED"]
     error_summary: str | None = Field(default=None, alias="errorSummary")
+    waiting_for: ImportTaskWaitingView | None = Field(
+        default=None, alias="waitingFor"
+    )
     created_at: datetime = Field(alias="createdAt")
     started_at: datetime | None = Field(default=None, alias="startedAt")
     finished_at: datetime | None = Field(default=None, alias="finishedAt")

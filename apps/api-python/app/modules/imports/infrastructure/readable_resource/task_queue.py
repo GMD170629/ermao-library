@@ -38,9 +38,12 @@ from app.modules.imports.infrastructure.readable_resource.book_completion import
 )
 from app.modules.imports.infrastructure.readable_resource.scan_gating import (
     active_imports_for_anchor,
-    incomplete_scan_touches,
+    clear_scan_gaps,
+    gap_covers_anchor,
+    record_scan_gaps,
 )
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
+    LibraryImportScanGap,
     LibraryImportTask,
 )
 from app.modules.library.public import AssetRole
@@ -362,28 +365,16 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
 
         Dependencies are path and scope based, not library based. A queued
         IMPORT_RESOURCE for a single file is always executable because its node
-        and observation are already committed. A directory resource waits only
-        for an incomplete scan whose recorded range covers its anchor. An
-        IDENTIFY_BOOK waits for an incomplete scan on its own path or for active
-        import work below it; an unrelated scoped scan does not block it.
+        and observation are already committed. A directory resource waits while
+        a durable incomplete range covers its anchor, so deleting or replacing a
+        failed scan task never releases it. An IDENTIFY_BOOK waits for such a
+        range on its own path or for active import work below it; an unrelated
+        scoped scan does not block it.
         """
         anchor = aliased(LibrarySourceNode)
-        scan = aliased(LibraryImportTask)
-        scan_node = aliased(LibrarySourceNode)
-
-        blocked_by_scan = (
-            exists(
-                select(literal(1))
-                .select_from(scan)
-                .outerjoin(scan_node, scan_node.id == scan.source_node_id)
-                .where(
-                    scan.library_id == LibraryImportTask.library_id,
-                    incomplete_scan_touches(scan, scan_node, anchor),
-                )
-            )
-            .correlate(LibraryImportTask)
-            .correlate(anchor)
-        )
+        blocked_by_gap = gap_covers_anchor(
+            LibraryImportTask.library_id, anchor
+        ).correlate(LibraryImportTask).correlate(anchor)
         is_directory_resource = exists(
             select(literal(1))
             .select_from(LibraryReadableResource)
@@ -399,13 +390,13 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
                 library_id=LibraryImportTask.library_id,
                 anchor_id=LibraryImportTask.source_node_id,
             ),
-            blocked_by_scan,
+            blocked_by_gap,
         )
         executable = or_(
             LibraryImportTask.kind.in_(("SCAN_LIBRARY", "CONTINUE_SOURCE")),
             and_(
                 LibraryImportTask.kind == "IMPORT_RESOURCE",
-                or_(~is_directory_resource, ~blocked_by_scan),
+                or_(~is_directory_resource, ~blocked_by_gap),
             ),
             and_(LibraryImportTask.kind == "IDENTIFY_BOOK", ~identify_blocked),
         )
@@ -495,6 +486,16 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         self._completion.finished(row)
 
     def fail_interrupted_tasks_on_startup(self, *, finished_at: datetime) -> int:
+        # An interrupted process left partial enumeration behind. Preserve its
+        # unfinished ranges durably before the task rows become historical.
+        running = self._session.scalars(
+            select(LibraryImportTask).where(
+                LibraryImportTask.state == "RUNNING",
+                LibraryImportTask.kind.in_(("SCAN_LIBRARY", "CONTINUE_SOURCE")),
+            )
+        ).all()
+        for task in running:
+            self._record_gaps_for_task(task)
         result = self._session.execute(
             update(LibraryImportTask)
             .where(LibraryImportTask.state == "RUNNING")
@@ -507,17 +508,45 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         self._session.flush()
         return int(getattr(result, "rowcount", 0) or 0)
 
-    def record_incomplete_scan_scopes(
-        self, task_id: str, scopes: tuple[ScanScope, ...]
+    def record_incomplete_scan(
+        self,
+        task_id: str | None,
+        library_id: str,
+        scopes: tuple[ScanScope, ...],
     ) -> None:
-        row = self._session.get(LibraryImportTask, task_id)
-        if row is None or row.kind != "SCAN_LIBRARY":
-            return
         normalized = merge_scan_scopes((), scopes) or ()
         if not normalized:
             return
-        row.scan_scopes = encode_scan_scopes(normalized)
-        self._session.flush()
+        if task_id is not None:
+            row = self._session.get(LibraryImportTask, task_id)
+            if row is not None and row.kind == "SCAN_LIBRARY":
+                row.scan_scopes = encode_scan_scopes(normalized)
+        record_scan_gaps(self._session, library_id, normalized)
+
+    def has_incomplete_ranges(self, library_id: str) -> bool:
+        row = self._session.get(LibraryImportScanGap, library_id)
+        return row is not None and bool(row.scopes)
+
+    def clear_complete_scan(
+        self, library_id: str, scopes: tuple[ScanScope, ...]
+    ) -> None:
+        if not scopes:
+            return
+        clear_scan_gaps(self._session, library_id, scopes)
+
+    def _record_gaps_for_task(self, task: LibraryImportTask) -> None:
+        if task.kind == "SCAN_LIBRARY":
+            scopes = decode_scan_scopes(task.scan_scopes)
+            if scopes is None:
+                scopes = (ScanScope("", True),)
+        elif task.source_node_id is not None:
+            node = self._session.get(LibrarySourceNode, task.source_node_id)
+            scopes = (
+                (ScanScope(node.relative_path, True),) if node is not None else ()
+            )
+        else:
+            return
+        record_scan_gaps(self._session, task.library_id, scopes)
 
     def requeue_failed_task(self, task_id: str) -> tuple[LibraryImportTaskRecord, bool]:
         row = self._session.get(LibraryImportTask, task_id)

@@ -2174,5 +2174,12 @@
   "TXT 解码器无法解码此文件。": "TXT 解码器无法解码此文件。",
   "TXT 解析器未找到可读文本。": "TXT 解析器未找到可读文本。",
   "URL 加 ?debug=0 可关闭持久开关": "URL 加 ?debug=0 可关闭持久开关",
-  "useAudioPlayback 必须在 AudioPlaybackProvider 内使用": "useAudioPlayback 必须在 AudioPlaybackProvider 内使用"
+  "useAudioPlayback 必须在 AudioPlaybackProvider 内使用": "useAudioPlayback 必须在 AudioPlaybackProvider 内使用",
+  "等待扫描": "等待扫描",
+  "前置扫描失败": "前置扫描失败",
+  "等待资源导入": "等待资源导入",
+  "等待扫描，范围 {value0}": "等待扫描，范围 {value0}",
+  "前置扫描失败，等待范围 {value0} 的完整扫描": "前置扫描失败，等待范围 {value0} 的完整扫描",
+  "导入任务响应缺少等待原因": "导入任务响应缺少等待原因",
+  "导入任务响应包含无效等待原因": "导入任务响应包含无效等待原因"
 }

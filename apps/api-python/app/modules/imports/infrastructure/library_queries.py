@@ -22,12 +22,22 @@ from app.core.authorization import (
 from app.models import (
     Library,
     LibraryBookMetadata,
+    LibraryImportScanGap,
     LibraryImportTask,
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
     LibrarySourceNode,
     UserLibraryAccess,
 )
+from app.modules.imports.domain.scan_policy import (
+    decode_scan_scopes,
+    paths_intersect,
+    scope_covers_path,
+    scopes_cover_path,
+)
+
+_DIRECTORY_FORMATS = ("IMAGE_DIR", "AUDIOBOOK_DIR")
+_WAITING_KINDS = ("IMPORT_RESOURCE", "IDENTIFY_BOOK")
 
 
 def _library_view(row: Library) -> dict[str, object]:
@@ -159,10 +169,143 @@ def _task_view(
         "role": row.role,
         "state": row.state,
         "errorSummary": row.error_summary,
+        "waitingFor": None,
         "createdAt": row.created_at,
         "startedAt": row.started_at,
         "finishedAt": row.finished_at,
     }
+
+
+def _attach_waiting_reasons(db: Session, views: list[dict[str, object]]) -> None:
+    """Explain, read-only, why a queued task is not yet executable.
+
+    Reasons come from durable scan gaps and active work; no state is written
+    and waiting tasks stay ``QUEUED``.
+    """
+    queued = [
+        view
+        for view in views
+        if view.get("state") == "QUEUED" and view.get("kind") in _WAITING_KINDS
+    ]
+    if not queued:
+        return
+    library_ids = {str(view.get("libraryId")) for view in queued}
+    resource_ids = {
+        str(view.get("resourceId"))
+        for view in queued
+        if view.get("kind") == "IMPORT_RESOURCE" and view.get("resourceId")
+    }
+    directory_resource_ids: set[str] = set()
+    if resource_ids:
+        directory_resource_ids = {
+            str(value)
+            for value in db.scalars(
+                select(LibraryReadableResource.id).where(
+                    LibraryReadableResource.id.in_(resource_ids),
+                    LibraryReadableResource.format.in_(_DIRECTORY_FORMATS),
+                )
+            ).all()
+        }
+    gaps: dict[str, list[object]] = {}
+    for library_id, scopes_json in db.execute(
+        select(
+            LibraryImportScanGap.library_id, LibraryImportScanGap.scopes
+        ).where(LibraryImportScanGap.library_id.in_(library_ids))
+    ).all():
+        gaps[str(library_id)] = list(decode_scan_scopes(scopes_json) or ())
+    scans: dict[str, list[tuple[str, str, tuple[object, ...] | None]]] = {}
+    for library_id, kind, path, scopes_json in db.execute(
+        select(
+            LibraryImportTask.library_id,
+            LibraryImportTask.kind,
+            LibrarySourceNode.relative_path,
+            LibraryImportTask.scan_scopes,
+        )
+        .select_from(LibraryImportTask)
+        .outerjoin(
+            LibrarySourceNode,
+            LibrarySourceNode.id == LibraryImportTask.source_node_id,
+        )
+        .where(
+            LibraryImportTask.library_id.in_(library_ids),
+            LibraryImportTask.kind.in_(("SCAN_LIBRARY", "CONTINUE_SOURCE")),
+            LibraryImportTask.state.in_(("QUEUED", "RUNNING")),
+        )
+    ).all():
+        scans.setdefault(str(library_id), []).append(
+            (
+                str(kind),
+                str(path) if path is not None else "",
+                decode_scan_scopes(scopes_json),
+            )
+        )
+    active_imports: dict[str, list[str]] = {}
+    for library_id, path in db.execute(
+        select(LibraryImportTask.library_id, LibrarySourceNode.relative_path)
+        .select_from(LibraryImportTask)
+        .outerjoin(
+            LibrarySourceNode,
+            LibrarySourceNode.id == LibraryImportTask.source_node_id,
+        )
+        .where(
+            LibraryImportTask.library_id.in_(library_ids),
+            LibraryImportTask.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE")),
+            LibraryImportTask.state.in_(("QUEUED", "RUNNING")),
+        )
+    ).all():
+        active_imports.setdefault(str(library_id), []).append(
+            str(path) if path is not None else ""
+        )
+    for view in queued:
+        if view.get("kind") == "IMPORT_RESOURCE" and str(
+            view.get("resourceId") or ""
+        ) not in directory_resource_ids:
+            continue
+        library_id = str(view.get("libraryId"))
+        anchor = str(view.get("sourceRelativePath") or "")
+        gap_scope = next(
+            (
+                scope
+                for scope in gaps.get(library_id, ())
+                if scope_covers_path(scope, anchor)  # type: ignore[arg-type]
+            ),
+            None,
+        )
+        if gap_scope is not None:
+            view["waitingFor"] = {
+                "reason": "SCAN_INCOMPLETE",
+                "scope": getattr(gap_scope, "relative_path", ""),
+                "recovery": "RETRY_SCAN",
+            }
+            continue
+        for kind, path, scopes in scans.get(library_id, ()):
+            if kind == "SCAN_LIBRARY":
+                covered = scopes is None or scopes_cover_path(scopes, anchor)  # type: ignore[arg-type]
+            else:
+                covered = paths_intersect(path, anchor)
+            if covered:
+                view["waitingFor"] = {
+                    "reason": "SCAN_ACTIVE",
+                    "scope": path,
+                    "recovery": None,
+                }
+                break
+        if view["waitingFor"] is not None:
+            continue
+        if view.get("kind") == "IDENTIFY_BOOK" and any(
+            path_contains_anchor(path, anchor)
+            for path in active_imports.get(library_id, ())
+        ):
+            view["waitingFor"] = {
+                "reason": "IMPORT_ACTIVE",
+                "scope": None,
+                "recovery": None,
+            }
+
+
+def path_contains_anchor(candidate: str, anchor: str) -> bool:
+    """True when an active import path can change the anchor's inputs."""
+    return candidate == anchor or anchor == "" or candidate.startswith(anchor + "/")
 
 
 def _task_projection_statement():
@@ -239,7 +382,11 @@ def get_import_task(
             )
         )
     row = db.execute(_task_projection_statement().where(*filters)).one_or_none()
-    return None if row is None else _project_task_row(row)
+    if row is None:
+        return None
+    view = _project_task_row(row)
+    _attach_waiting_reasons(db, [view])
+    return view
 
 
 def list_import_tasks_page(
@@ -325,8 +472,10 @@ def list_import_tasks_page(
         .join(page_task_ids, page_task_ids.c.task_id == LibraryImportTask.id)
         .order_by(LibraryImportTask.created_at.desc(), LibraryImportTask.id.desc())
     ).all()
+    views = [_project_task_row(row) for row in rows]
+    _attach_waiting_reasons(db, views)
     return (
-        [_project_task_row(row) for row in rows],
+        views,
         total,
         summary,
     )

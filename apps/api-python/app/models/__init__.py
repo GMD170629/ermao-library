@@ -51,6 +51,7 @@ from app.models.settings import (
 )
 from app.models.shelf import Shelf, ShelfBook
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
+    LibraryImportScanGap,
     LibraryImportTask,
 )
 from app.modules.library.infrastructure.readable_resource_schema import (
@@ -83,6 +84,7 @@ __all__ = [
     "LibraryBookFacet",
     "LibraryBookMetadata",
     "LibraryFacet",
+    "LibraryImportScanGap",
     "LibraryImportTask",
     "LibraryOperation",
     "LibraryReadableResource",

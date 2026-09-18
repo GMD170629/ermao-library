@@ -60,6 +60,21 @@ test('parses ContinueImport result without queue-control fields', () => {
   assert.equal(result.enqueued, true);
 });
 
+test('parses a read-only waiting reason for a queued task', () => {
+  const parsed = parseLibraryImportTask({
+    ...task,
+    kind: 'IMPORT_RESOURCE',
+    role: null,
+    state: 'QUEUED',
+    waitingFor: { reason: 'SCAN_INCOMPLETE', scope: 'book', recovery: 'RETRY_SCAN' }
+  });
+  assert.deepEqual(parsed.waitingFor, {
+    reason: 'SCAN_INCOMPLETE',
+    scope: 'book',
+    recovery: 'RETRY_SCAN'
+  });
+});
+
 test('rejects retired import task states', () => {
   assert.throws(() => parseLibraryImportTask({ ...task, state: 'COMPLETED' }), /无效状态/);
 });

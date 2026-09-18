@@ -28,6 +28,25 @@ if TYPE_CHECKING:
     from app.models import LibraryReadableResource, LibrarySourceNode
 
 
+class LibraryImportScanGap(Base):
+    """Durable incomplete scan ranges that gate dependent import work.
+
+    Stored outside the task row so cleanup, replacement or deletion of a scan
+    task cannot silently release a directory resource whose member list was
+    never fully enumerated. A fully completed scan covering a range removes it.
+    """
+
+    __tablename__ = "LibraryImportScanGap"
+
+    library_id: Mapped[str] = mapped_column(
+        "libraryId",
+        String(191),
+        ForeignKey("Library.id", ondelete="CASCADE", onupdate="CASCADE"),
+        primary_key=True,
+    )
+    scopes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class LibraryImportTask(Base):
     """Single-consumer ContinueImport task."""
 
@@ -257,4 +276,4 @@ class LibraryImportTask(Base):
     )
 
 
-__all__ = ["LibraryImportTask"]
+__all__ = ["LibraryImportScanGap", "LibraryImportTask"]

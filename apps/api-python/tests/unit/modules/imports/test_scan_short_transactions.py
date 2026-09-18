@@ -26,7 +26,7 @@ from app.modules.imports.domain.directory_probe import (
     ProbeInterpretationResult,
     ProbeTerminationReason,
 )
-from app.modules.imports.domain.scan_policy import MissingEntryPolicy
+from app.modules.imports.domain.scan_policy import MissingEntryPolicy, ScanScope
 from app.modules.library.application.source_tree_ports import (
     InterpretationRecord,
     LibrarySourceTreeConfig,
@@ -305,6 +305,22 @@ class FakeQueue:
 
     def requeue_failed_task(self, task_id: str) -> tuple[LibraryImportTaskRecord, bool]:
         raise NotImplementedError(task_id)
+
+    def record_incomplete_scan(
+        self,
+        task_id: str | None,
+        library_id: str,
+        scopes: tuple[ScanScope, ...],
+    ) -> None:
+        return None
+
+    def has_incomplete_ranges(self, library_id: str) -> bool:
+        return False
+
+    def clear_complete_scan(
+        self, library_id: str, scopes: tuple[ScanScope, ...]
+    ) -> None:
+        return None
 
 
 class FakeClock:

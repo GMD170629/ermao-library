@@ -53,6 +53,70 @@ def merge_scan_scopes(
     return tuple(result)
 
 
+def path_contains(container: str, child: str) -> bool:
+    """True when ``child`` is the same path or lives below ``container``."""
+    return (
+        container == ""
+        or child == container
+        or child.startswith(container + "/")
+    )
+
+
+def paths_intersect(left: str, right: str) -> bool:
+    """True when scanning one path can change the other path's member set."""
+    return path_contains(left, right) or path_contains(right, left)
+
+
+def scope_covers_path(scope: ScanScope, path: str) -> bool:
+    """Python twin of the SQL scope-coverage rule for read-only projections."""
+    return path_contains(path, scope.relative_path) or (
+        scope.recursive and path_contains(scope.relative_path, path)
+    )
+
+
+def scopes_cover_path(
+    scopes: tuple[ScanScope, ...] | None, path: str
+) -> bool:
+    if scopes is None:
+        return True
+    return any(scope_covers_path(scope, path) for scope in scopes)
+
+
+def completed_scope_resolves(
+    completed: ScanScope, pending: ScanScope
+) -> bool:
+    """Whether a successfully completed scope covers an incomplete range.
+
+    A recursive completion enumerates the whole subtree, so it resolves any
+    range at or below its path. A non-recursive completion only lists direct
+    children, so it resolves an equally non-recursive range at the same path.
+    An ancestor is never resolved by a descendant completion.
+    """
+    if completed.relative_path == "":
+        return completed.recursive or pending.relative_path == ""
+    if completed.recursive:
+        return pending.relative_path == completed.relative_path or (
+            pending.relative_path.startswith(completed.relative_path + "/")
+        )
+    return (
+        pending.relative_path == completed.relative_path and not pending.recursive
+    )
+
+
+def remove_scan_scopes(
+    pending: tuple[ScanScope, ...] | None,
+    completed: tuple[ScanScope, ...] | None,
+) -> tuple[ScanScope, ...]:
+    """Drop pending ranges that a completed scope actually enumerated."""
+    if not pending or not completed:
+        return pending or ()
+    return tuple(
+        item
+        for item in pending
+        if not any(completed_scope_resolves(done, item) for done in completed)
+    )
+
+
 def encode_scan_scopes(scopes: tuple[ScanScope, ...] | None) -> str | None:
     return (
         None

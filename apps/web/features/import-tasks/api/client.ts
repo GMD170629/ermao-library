@@ -1,6 +1,13 @@
 export type ImportTaskKind = 'SCAN_LIBRARY' | 'CONTINUE_SOURCE' | 'IMPORT_ASSET' | 'IMPORT_RESOURCE' | 'IDENTIFY_BOOK';
 export type ImportTaskState = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
 export type ImportTaskRole = 'PRIMARY' | 'TRACK' | 'PAGE' | 'SIDECAR' | 'SUPPLEMENT';
+export type ImportTaskWaitingReason = 'SCAN_ACTIVE' | 'SCAN_INCOMPLETE' | 'IMPORT_ACTIVE';
+
+export type ImportTaskWaiting = Readonly<{
+  reason: ImportTaskWaitingReason;
+  scope: string | null;
+  recovery: 'RETRY_SCAN' | null;
+}>;
 
 export type LibraryImportTask = Readonly<{
   id: string;
@@ -16,6 +23,7 @@ export type LibraryImportTask = Readonly<{
   role: ImportTaskRole | null;
   state: ImportTaskState;
   errorSummary: string | null;
+  waitingFor: ImportTaskWaiting | null;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -90,6 +98,20 @@ function taskRole(value: unknown): ImportTaskRole | null {
   throw new Error('导入任务响应包含无效资产角色');
 }
 
+function taskWaiting(value: unknown): ImportTaskWaiting | null {
+  if (value === null || value === undefined) return null;
+  if (!isObject(value)) throw new Error('导入任务响应缺少等待原因');
+  const reason = value.reason;
+  if (reason !== 'SCAN_ACTIVE' && reason !== 'SCAN_INCOMPLETE' && reason !== 'IMPORT_ACTIVE') {
+    throw new Error('导入任务响应包含无效等待原因');
+  }
+  return {
+    reason,
+    scope: typeof value.scope === 'string' ? value.scope : null,
+    recovery: value.recovery === 'RETRY_SCAN' ? 'RETRY_SCAN' : null
+  };
+}
+
 export function parseLibraryImportTask(value: unknown): LibraryImportTask {
   if (!isObject(value)) throw new Error('导入任务响应无效');
   return {
@@ -106,6 +128,7 @@ export function parseLibraryImportTask(value: unknown): LibraryImportTask {
     role: taskRole(value.role),
     state: taskState(value.state),
     errorSummary: nullableString(value.errorSummary, 'errorSummary'),
+    waitingFor: taskWaiting(value.waitingFor),
     createdAt: requiredString(value.createdAt, 'createdAt'),
     startedAt: nullableString(value.startedAt, 'startedAt'),
     finishedAt: nullableString(value.finishedAt, 'finishedAt')

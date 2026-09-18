@@ -30,13 +30,24 @@ function statusTone(state: ImportTaskState): BadgeTone {
   return 'slate';
 }
 
-function statusLabel(state: ImportTaskState): string {
+function statusLabel(task: LibraryImportTask): string {
+  if (task.state === 'QUEUED' && task.waitingFor) {
+    if (task.waitingFor.reason === 'SCAN_INCOMPLETE') return '前置扫描失败';
+    if (task.waitingFor.reason === 'SCAN_ACTIVE') return '等待扫描';
+    return '等待资源导入';
+  }
   return {
     QUEUED: '等待中',
     RUNNING: '导入中',
     SUCCEEDED: '已完成',
     FAILED: '失败'
-  }[state];
+  }[task.state];
+}
+
+function waitingScope(task: LibraryImportTask): string {
+  const waiting = task.waitingFor;
+  if (!waiting) return '';
+  return waiting.scope || task.libraryName || task.libraryId;
 }
 
 function kindLabel(kind: LibraryImportTask['kind']): string {
@@ -329,11 +340,20 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span><I18nText>{kindLabel(task.kind)}</I18nText></span>
-                    <Badge tone={statusTone(task.state)}>{t(statusLabel(task.state))}</Badge>
+                    <Badge tone={statusTone(task.state)}>{t(statusLabel(task))}</Badge>
                     {task.role ? <Badge>{t(roleLabel(task.role))}</Badge> : null}
                   </div>
                   <div data-i18n-skip className="mt-2 break-all text-sm font-medium text-slate-700">{taskTitle(task)}</div>
                   {taskContext(task).length > 0 ? <div data-i18n-skip className="mt-1 break-all text-xs text-slate-500">{taskContext(task).join(' · ')}</div> : null}
+                  {task.state === 'QUEUED' && task.waitingFor ? (
+                    <div className="mt-2 rounded-2xl bg-amber-50 px-4 py-2 text-xs text-amber-800">
+                      {task.waitingFor.reason === 'SCAN_INCOMPLETE'
+                        ? t('前置扫描失败，等待范围 {value0} 的完整扫描', { value0: waitingScope(task) })
+                        : task.waitingFor.reason === 'SCAN_ACTIVE'
+                          ? t('等待扫描，范围 {value0}', { value0: waitingScope(task) })
+                          : t('等待资源导入')}
+                    </div>
+                  ) : null}
                   <details className="mt-2 text-xs text-slate-400">
                     <summary className="cursor-pointer select-none text-slate-500"><I18nText>技术信息</I18nText></summary>
                     <div data-i18n-skip className="mt-2 break-all font-mono leading-5">

@@ -101,6 +101,7 @@ def test_import_task_page_has_fixed_query_count(db_session: Session) -> None:
             "role",
             "state",
             "errorSummary",
+            "waitingFor",
             "createdAt",
             "startedAt",
             "finishedAt",
