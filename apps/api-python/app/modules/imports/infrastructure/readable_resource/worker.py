@@ -96,7 +96,8 @@ class ReadableResourceWorkerProcessor:
                 "UNKNOWN_KIND" if outcome == "unknown_kind" else None,
             )
         except Exception as error:  # noqa: BLE001 - task containment boundary
-            self._uow.rollback()
+            # Preserve the original failure before rollback or cleanup so a
+            # failing rollback cannot mask the root cause.
             scan_failure = isinstance(error, SourceScanStartUnavailableError)
             event = (
                 "readable_resource.worker.scan_failed"
@@ -122,6 +123,7 @@ class ReadableResourceWorkerProcessor:
                 target_type="importTask",
                 target_id=task.id,
             )
+            self._uow.rollback()
             pending = _PendingCompletion(
                 task.id,
                 task.library_id,
@@ -181,7 +183,6 @@ class ReadableResourceWorkerProcessor:
                             finished_at=pending.finished_at,
                         )
         except SQLAlchemyError as error:
-            self._uow.rollback()
             record_exception(
                 logger,
                 "readable_resource.worker.completion_deferred",
@@ -198,6 +199,7 @@ class ReadableResourceWorkerProcessor:
                 target_type="importTask",
                 target_id=pending.task_id,
             )
+            self._uow.rollback()
             return "deferred"
         self._pending_completion = None
         return "cancelled" if current is None else pending.outcome
@@ -214,7 +216,6 @@ class ReadableResourceWorkerProcessor:
                     self._queue.enqueue_book_identifications(prepared)
             return True
         except SQLAlchemyError as error:
-            self._uow.rollback()
             record_exception(
                 logger,
                 "readable_resource.worker.identification_deferred",
@@ -227,6 +228,7 @@ class ReadableResourceWorkerProcessor:
                 source="import",
                 action="readable_resource.identification_deferred",
             )
+            self._uow.rollback()
             return False
 
 
