@@ -63,6 +63,24 @@ export async function loadLibraryDirectory(
   return node;
 }
 
+export async function reorderLibraries(libraryIds: string[]): Promise<void> {
+  const response = await fetch('/api/libraries/order', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ libraryIds })
+  });
+  const payload: unknown = await response.json().catch(() => null);
+  const libraries = isRecord(payload) && isRecord(payload.data)
+    ? payload.data.libraries : null;
+  if (!response.ok || !isRecord(payload) || payload.ok !== true || !Array.isArray(libraries)) {
+    const message = isRecord(payload) && isRecord(payload.error)
+      && typeof payload.error.message === 'string'
+      ? payload.error.message : '保存书库顺序失败';
+    throw new LibraryApiError(message);
+  }
+}
+
 export async function deleteLibrary(libraryId: string): Promise<void> {
   const response = await fetch(`/api/libraries/${encodeURIComponent(libraryId)}`, {
     method: 'DELETE',

@@ -500,6 +500,8 @@ def test_readable_resource_migrations_are_linear_and_baseline_is_self_contained(
         "0013_image_resource_tasks.py",
         "0014_audio_resource_tasks.py",
         "0015_scan_context_version.py",
+        "0016_library_sort_order.py",
+        "0017_reset_default_cover_paths.py",
     ]
     path = versions_dir / "0001_library_topology_baseline.py"
     source = path.read_text(encoding="utf-8")

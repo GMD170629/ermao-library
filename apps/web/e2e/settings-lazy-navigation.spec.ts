@@ -407,6 +407,43 @@ for (const locale of ['zh-CN', 'en-US'] as const) {
   });
 }
 
+for (const locale of ['zh-CN', 'en-US'] as const) {
+  test(`library rows reorder through the manual order endpoint ${locale}`, async ({ page }) => {
+    await mockSettingsApi(page, locale);
+    const chinese = locale === 'zh-CN';
+    let libraries = [
+      { id: 'library-1', name: 'First', rootPath: '/first', enabled: true, organizationMode: 'FLAT', ignoreHidden: true },
+      { id: 'library-2', name: 'Second', rootPath: '/second', enabled: true, organizationMode: 'FLAT', ignoreHidden: true }
+    ];
+    const orderRequests: unknown[] = [];
+    await page.route('**/api/libraries/order', async (route) => {
+      const body = route.request().postDataJSON() as { libraryIds: string[] };
+      orderRequests.push(body);
+      libraries = [...libraries].sort((left, right) => body.libraryIds.indexOf(left.id) - body.libraryIds.indexOf(right.id));
+      await route.fulfill({ json: { ok: true, data: { libraries } } });
+    });
+    await page.route('**/api/libraries', (route) => route.fulfill({ json: { ok: true, data: { libraries } } }));
+
+    await page.goto('/settings/library');
+    await page.getByRole('tab', { name: chinese ? '书库' : 'Library', exact: true }).click();
+
+    const moveDownFirst = page.getByRole('button', { name: chinese ? '下移First' : 'Move down First', exact: true });
+    const moveUpSecond = page.getByRole('button', { name: chinese ? '上移Second' : 'Move Up Second', exact: true });
+    await expect(moveDownFirst).toBeVisible();
+    await expect(moveUpSecond).toBeEnabled();
+
+    await moveDownFirst.click();
+    await expect.poll(() => orderRequests.length).toBe(1);
+    expect(orderRequests[0]).toEqual({ libraryIds: ['library-2', 'library-1'] });
+
+    const firstRow = await moveDownFirst.boundingBox();
+    const secondRow = await moveUpSecond.boundingBox();
+    expect(firstRow).not.toBeNull();
+    expect(secondRow).not.toBeNull();
+    expect(firstRow!.y).toBeGreaterThan(secondRow!.y);
+  });
+}
+
 test('provider configuration matches recognition order width', async ({ page }) => {
   await page.route('**/api/metadata/providers', (route) => route.fulfill({ json: { ok: true, data: { providers: [{
     id: 'douban', sourceId: null, name: '豆瓣图书', version: 'builtin', description: '通过豆瓣读书网页获取图书信息。',

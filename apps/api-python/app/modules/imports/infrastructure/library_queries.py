@@ -47,10 +47,16 @@ def _library_view(row: Library) -> dict[str, object]:
     }
 
 
+def _library_display_order() -> tuple[ColumnElement[object], ...]:
+    return (
+        Library.sort_order.asc(),
+        Library.created_at.desc(),
+        Library.id.desc(),
+    )
+
+
 def list_libraries(db: Session) -> list[dict[str, object]]:
-    rows = db.scalars(
-        select(Library).order_by(Library.created_at.desc(), Library.id.desc())
-    ).all()
+    rows = db.scalars(select(Library).order_by(*_library_display_order())).all()
     return [_library_view(row) for row in rows]
 
 
@@ -58,7 +64,7 @@ def list_enabled_library_rows(db: Session) -> list[dict[str, object]]:
     rows = db.scalars(
         select(Library)
         .where(Library.enabled.is_(True))
-        .order_by(Library.created_at.desc(), Library.id.desc())
+        .order_by(*_library_display_order())
     ).all()
     return [_library_view(row) for row in rows]
 
@@ -67,7 +73,7 @@ def list_library_root_paths(db: Session) -> tuple[str, ...]:
     rows = db.scalars(
         select(Library.root_path)
         .where(Library.root_path.is_not(None))
-        .order_by(Library.created_at.desc(), Library.id.desc())
+        .order_by(*_library_display_order())
     ).all()
     return tuple(str(path) for path in rows if path)
 

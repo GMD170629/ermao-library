@@ -26,7 +26,9 @@ from app.modules.imports.application.library_commands import (
     DeleteLibrary,
     PreparedLibraryCreate,
     PreparedLibraryDelete,
+    PreparedLibraryOrder,
     PreparedLibraryUpdate,
+    ReorderLibraries,
     UpdateLibrary,
 )
 from app.modules.imports.application.library_paths import DirectoryMountSnapshot
@@ -97,6 +99,13 @@ def persist_import_library_update(
     UpdateLibrary(SqlAlchemyLibraryWriteStore(db), db).execute(prepared)
 
 
+def persist_import_library_order(
+    db: Session,
+    prepared: PreparedLibraryOrder,
+) -> None:
+    ReorderLibraries(SqlAlchemyLibraryWriteStore(db), db).execute(prepared)
+
+
 def persist_import_library_delete(
     db: Session,
     prepared: PreparedLibraryDelete,
@@ -159,6 +168,7 @@ __all__ = [
     "list_library_access_user_ids",
     "persist_import_library_create",
     "persist_import_library_delete",
+    "persist_import_library_order",
     "persist_import_library_update",
     "save_uploaded_files",
     "source_node_library_id",

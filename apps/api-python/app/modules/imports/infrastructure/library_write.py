@@ -11,6 +11,7 @@ from app.models.library import Library
 from app.modules.imports.application.library_commands import (
     PreparedLibraryCreate,
     PreparedLibraryDelete,
+    PreparedLibraryOrder,
     PreparedLibraryUpdate,
 )
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
@@ -33,6 +34,15 @@ class SqlAlchemyLibraryWriteStore:
             .where(Library.id == prepared.library_id)
             .values(**prepared.values)
         )
+        write_prepared_system_events(self._db, (prepared.event,))
+
+    def reorder(self, prepared: PreparedLibraryOrder) -> None:
+        for index, library_id in enumerate(prepared.library_ids, start=1):
+            self._db.execute(
+                update(Library)
+                .where(Library.id == library_id)
+                .values(sort_order=index, updated_at=prepared.updated_at)
+            )
         write_prepared_system_events(self._db, (prepared.event,))
 
     def cancel_import_tasks(self, library_id: str) -> int:

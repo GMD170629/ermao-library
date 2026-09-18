@@ -1,6 +1,6 @@
 'use client';
 
-import { ChevronDown, ChevronRight, Database, Download, FolderOpen, RotateCcw, Save, Settings2, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Database, Download, FolderOpen, RotateCcw, Save, Settings2, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
@@ -17,7 +17,7 @@ import {
   organizationModeLabel,
   type OrganizationMode
 } from './model/organization-mode';
-import { deleteLibrary } from './api/libraries-client';
+import { deleteLibrary, reorderLibraries } from './api/libraries-client';
 import { scanLibrary } from '../import-tasks/public';
 import { DirectoryPathPicker as SharedDirectoryPathPicker } from './ui/directory-path-picker';
 
@@ -213,6 +213,28 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     }
   }
 
+  async function moveLibrary(index: number, direction: -1 | 1) {
+    const target = index + direction;
+    if (target < 0 || target >= folders.length) return;
+    const previous = folders;
+    const next = [...folders];
+    [next[index], next[target]] = [next[target], next[index]];
+    setFolders(next);
+    setPathBusy(`order:${next[target].id}`);
+    try {
+      await reorderLibraries(next.map((item) => item.id));
+      await loadPaths();
+      toast.success('书库顺序已更新');
+    } catch (reason: unknown) {
+      setFolders(previous);
+      const message = reason instanceof Error ? reason.message : '保存书库顺序失败';
+      setError(message);
+      toast.error('保存书库顺序失败', message);
+    } finally {
+      setPathBusy('');
+    }
+  }
+
   async function saveFolderSettings(path: Library, updates: Pick<Library, 'name' | 'rootPath' | 'ignorePatterns' | 'ignoreHidden' | 'allowEmptyLibraryCleanup' | 'minFileSizeBytes' | 'organizationMode'>) {
     setError('');
     setMessage('');
@@ -371,7 +393,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                 </div>
               </form> : null}
               <div className="space-y-3">
-                {folders.map((path) => (
+                {folders.map((path, index) => (
                   <div key={path.id} className="rounded-[20px] border border-slate-200 bg-white p-4">
                     <div className="flex flex-col gap-4 md:flex-row md:items-center">
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#fff0ea] text-[#d94724]">
@@ -381,6 +403,26 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                         <div className="font-semibold">{path.name}</div>
                         <div className="break-words text-sm text-slate-500">{path.rootPath}</div>
                         <div className="mt-2 text-xs text-slate-500"><I18nText>引用原文件</I18nText> · {i18nAttribute(organizationModeLabel(path.organizationMode))} · {path.ignoreHidden ? i18nAttribute("忽略隐藏文件") : i18nAttribute("包含隐藏文件")} <I18nText>· 小于 </I18nText>{Math.round((path.minFileSizeBytes ?? 0) / 1024)} <I18nText>KB 跳过</I18nText></div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={index === 0 || pathBusy === `order:${path.id}`}
+                          onClick={() => void moveLibrary(index, -1)}
+                          aria-label={i18nAttribute('上移{value0}', { value0: path.name })}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-[#fff0ea] hover:text-[#d94724] disabled:opacity-25"
+                        >
+                          <ArrowUp size={15} />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={index === folders.length - 1 || pathBusy === `order:${path.id}`}
+                          onClick={() => void moveLibrary(index, 1)}
+                          aria-label={i18nAttribute('下移{value0}', { value0: path.name })}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-[#fff0ea] hover:text-[#d94724] disabled:opacity-25"
+                        >
+                          <ArrowDown size={15} />
+                        </button>
                       </div>
                       <button disabled={pathBusy === `toggle:${path.id}`} onClick={() => togglePath(path)} className={cn('h-7 w-12 rounded-full p-1 transition disabled:cursor-not-allowed disabled:opacity-60', path.enabled ? 'bg-[#ff4f26]' : 'bg-slate-300')} aria-label={i18nAttribute("启用书库")}>
                         <span className={cn('block h-5 w-5 rounded-full bg-white transition', path.enabled && 'translate-x-5')} />

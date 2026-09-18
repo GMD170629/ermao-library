@@ -31,10 +31,19 @@ class PreparedLibraryDelete:
     event: PreparedSystemEvent
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedLibraryOrder:
+    library_ids: tuple[str, ...]
+    updated_at: datetime
+    event: PreparedSystemEvent
+
+
 class LibraryWriteStorePort(Protocol):
     def create(self, prepared: PreparedLibraryCreate) -> None: ...
 
     def update(self, prepared: PreparedLibraryUpdate) -> None: ...
+
+    def reorder(self, prepared: PreparedLibraryOrder) -> None: ...
 
     def cancel_import_tasks(self, library_id: str) -> int: ...
 
@@ -77,6 +86,24 @@ class UpdateLibrary:
     def execute(self, prepared: PreparedLibraryUpdate) -> None:
         try:
             self._store.update(prepared)
+            self._unit_of_work.commit()
+        except Exception:
+            self._unit_of_work.rollback()
+            raise
+
+
+class ReorderLibraries:
+    def __init__(
+        self,
+        store: LibraryWriteStorePort,
+        unit_of_work: LibraryWriteUnitOfWork,
+    ) -> None:
+        self._store = store
+        self._unit_of_work = unit_of_work
+
+    def execute(self, prepared: PreparedLibraryOrder) -> None:
+        try:
+            self._store.reorder(prepared)
             self._unit_of_work.commit()
         except Exception:
             self._unit_of_work.rollback()

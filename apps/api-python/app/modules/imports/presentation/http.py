@@ -28,6 +28,7 @@ from app.bootstrap.imports import (
     list_library_access_user_ids,
     persist_import_library_create,
     persist_import_library_delete,
+    persist_import_library_order,
     persist_import_library_update,
 )
 from app.bootstrap.system import get_setting
@@ -43,6 +44,7 @@ from app.models.common import cuid
 from app.modules.imports.application.library_commands import (
     PreparedLibraryCreate,
     PreparedLibraryDelete,
+    PreparedLibraryOrder,
     PreparedLibraryUpdate,
     prepare_library_update_values,
 )
@@ -66,6 +68,7 @@ from app.modules.imports.presentation.schemas import (
     LibraryResponse,
     ParsedReleaseTitleResponse,
     ParseReleaseTitleRequest,
+    UpdateLibraryOrderRequest,
     UpdateLibraryRequest,
 )
 from app.modules.imports.presentation.writes import router as writes_router
@@ -113,17 +116,63 @@ def list_library_roots(
             if bool(folder.get("enabled"))
             and (context.is_admin or str(folder.get("id") or "") in allowed_library_ids)
         ]
-    return ok(
-        {
-            "libraries": folders,
-            "lastUploadTargetPath": _system_setting_value(
-                db, "library.lastUploadTargetPath"
-            ),
-            "lastDownloadTargetPath": _system_setting_value(
-                db, "library.lastDownloadTargetPath"
-            ),
-        }
+    return ok(_libraries_payload(db, folders))
+
+
+def _libraries_payload(db: Session, folders: list[dict[str, object]]) -> dict[str, object]:
+    return {
+        "libraries": folders,
+        "lastUploadTargetPath": _system_setting_value(db, "library.lastUploadTargetPath"),
+        "lastDownloadTargetPath": _system_setting_value(
+            db, "library.lastDownloadTargetPath"
+        ),
+    }
+
+
+@router.put("/libraries/order", response_model=LibrariesResponse)
+def reorder_libraries(
+    payload: UpdateLibraryOrderRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    LibrariesResponse | Response,
+    ErrorResponses(ImportBadRequestError, ImportForbiddenError),
+]:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    if user is None:
+        return fail("当前用户无权管理书库", status_code=403)
+    current_ids = [str(folder["id"]) for folder in list_libraries(db)]
+    requested_ids = list(payload.library_ids)
+    if (
+        not all(requested_ids)
+        or len(set(requested_ids)) != len(requested_ids)
+        or set(requested_ids) != set(current_ids)
+    ):
+        return fail(
+            "书库顺序必须包含全部书库且不能重复",
+            status_code=400,
+            code="LIBRARY_ORDER_INVALID",
+        )
+    checkpoint_at = _now()
+    prepared_event = prepare_system_event(
+        level="info",
+        source="library",
+        actor_type="admin",
+        actor_id=user.id,
+        action="library_order.updated",
+        target_type="libraryOrder",
+        target_id="global",
+        message="更新书库显示顺序",
+        metadata={"libraryIds": requested_ids},
     )
+    persist_import_library_order(
+        db,
+        PreparedLibraryOrder(tuple(requested_ids), checkpoint_at, prepared_event),
+    )
+    return ok(_libraries_payload(db, list_libraries(db)))
 
 
 @router.get("/library-import-tasks", response_model=LibraryImportTaskListResponse)
@@ -277,6 +326,7 @@ def create_library(
         "rootPath": root_path,
         "organizationMode": payload.organization_mode.value,
         "enabled": payload.enabled,
+        "sortOrder": 0,
         "ignorePatterns": payload.ignore_patterns,
         "ignoreHidden": payload.ignore_hidden,
         "allowEmptyLibraryCleanup": payload.allow_empty_library_cleanup,

@@ -61,6 +61,10 @@ class UpdateLibraryRequest(HttpContractModel):
     description: str | None = None
 
 
+class UpdateLibraryOrderRequest(HttpContractModel):
+    library_ids: list[str] = Field(alias="libraryIds", min_length=1)
+
+
 class ParseReleaseTitleRequest(HttpContractModel):
     title: str = ""
 

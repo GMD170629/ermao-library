@@ -41,6 +41,13 @@ class Library(Base):
     enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="1"
     )
+    sort_order: Mapped[int] = mapped_column(
+        "sortOrder",
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
     allow_empty_library_cleanup: Mapped[bool] = mapped_column(
         "allowEmptyLibraryCleanup",
         Boolean,
