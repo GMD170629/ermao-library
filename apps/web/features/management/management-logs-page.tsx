@@ -1,6 +1,6 @@
 'use client';
 
-import { ChevronDown, ChevronLeft, ChevronRight, Download, HardDrive, RefreshCw, Save, Search, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Copy, Download, HardDrive, RefreshCw, Save, Search, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { Badge, type BadgeTone } from '../../components/ui/badge';
@@ -12,6 +12,7 @@ import { ManagementNav } from './management-nav';
 import { ignoredImportEventSummary } from './system-event-presentation';
 import {
   clearManagementEvents,
+  fetchManagementEventDetail,
   fetchManagementEvents,
   updateSystemLogLimit,
   type EventStorage,
@@ -40,6 +41,66 @@ function targetHref(event: ManagementEvent) {
   if (event.targetType === 'importTask') return '/settings/library';
   if (event.targetType === 'library') return '/settings/library';
   return '';
+}
+
+type DiagnosticMetadata = {
+  exceptionType?: unknown;
+  location?: unknown;
+  stage?: unknown;
+  message?: unknown;
+  traceback?: unknown;
+  truncated?: unknown;
+};
+
+function readDiagnostics(metadata: Record<string, unknown> | undefined): DiagnosticMetadata | null {
+  const value = metadata?.diagnostics;
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as DiagnosticMetadata) : null;
+}
+
+function diagnosticText(value: unknown) {
+  return typeof value === 'string' ? value : '';
+}
+
+function DiagnosticDetails({ event, loading }: { event: ManagementEvent; loading: boolean }) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+  const diagnostics = readDiagnostics(event.metadata);
+  if (!diagnostics) return null;
+  const traceback = diagnosticText(diagnostics.traceback);
+  const labelClass = 'text-[#969089]';
+
+  async function copyTraceback() {
+    if (!traceback) return;
+    try {
+      await navigator.clipboard.writeText(traceback);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 rounded-xl border border-red-100 bg-red-50/60 p-3 text-xs leading-5 text-[#68625C]">
+      <div><span className={labelClass}>{t('异常类型：')}</span>{diagnosticText(diagnostics.exceptionType) || '—'}</div>
+      <div><span className={labelClass}>{t('执行阶段：')}</span>{diagnosticText(diagnostics.stage) || '—'}</div>
+      {diagnosticText(diagnostics.location) ? <div><span className={labelClass}>{t('抛出位置：')}</span>{diagnosticText(diagnostics.location)}</div> : null}
+      {diagnosticText(diagnostics.message) ? <div><span className={labelClass}>{t('异常信息：')}</span>{diagnosticText(diagnostics.message)}</div> : null}
+      {diagnostics.truncated ? <p className="mt-1 text-[#B45309]">{t('堆栈信息已截断')}</p> : null}
+      {loading && !traceback ? <p className="mt-2 text-[#918A83]">{t('加载堆栈中…')}</p> : null}
+      {traceback ? (
+        <>
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <span className={labelClass}>{t('堆栈信息')}</span>
+            <button type="button" onClick={() => void copyTraceback()} className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-[#E4D4CE] bg-white px-2 text-[11px] font-medium text-[#C83B23] hover:bg-[#FCE5DE]">
+              <Copy size={12} />
+              {copied ? t('已复制堆栈') : t('复制堆栈')}
+            </button>
+          </div>
+          <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-white p-2 text-[11px] text-[#4F4A45]">{traceback}</pre>
+        </>
+      ) : null}
+    </div>
+  );
 }
 
 function redactString(value: string) {
@@ -80,6 +141,8 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [expandedEventId, setExpandedEventId] = useState('');
+  const [eventDetails, setEventDetails] = useState<Record<string, ManagementEvent>>({});
+  const [detailLoading, setDetailLoading] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
@@ -150,6 +213,28 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
       toast.error('保存日志容量失败', reason instanceof Error ? reason.message : '请稍后重试');
     } finally {
       setSavingLimit(false);
+    }
+  }
+
+  async function toggleEvent(eventId: string) {
+    if (expandedEventId === eventId) {
+      setExpandedEventId('');
+      return;
+    }
+    setExpandedEventId(eventId);
+    if (eventDetails[eventId]) return;
+    setDetailLoading((current) => ({ ...current, [eventId]: true }));
+    try {
+      const detail = await fetchManagementEventDetail(eventId);
+      setEventDetails((current) => ({ ...current, [eventId]: detail }));
+    } catch {
+      // Keep the list summary; the stack simply stays unavailable.
+    } finally {
+      setDetailLoading((current) => {
+        const next = { ...current };
+        delete next[eventId];
+        return next;
+      });
     }
   }
 
@@ -306,11 +391,12 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
                   <div><span className="text-[#969089]"><I18nText>动作：</I18nText></span>{event.action || '—'}</div>
                   <div><span className="text-[#969089]"><I18nText>执行者：</I18nText></span>{event.actorType || 'system'}</div>
                   {event.targetType ? <div><span className="text-[#969089]"><I18nText>关联：</I18nText></span>{event.targetType}{event.targetId ? ` · ${event.targetId}` : ''}</div> : null}
+                  <DiagnosticDetails event={eventDetails[event.id] ?? event} loading={Boolean(detailLoading[event.id])} />
                   {Object.keys(event.metadata ?? {}).length > 0 ? <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-white p-2 text-[11px] text-[#716B64]">{JSON.stringify(safeMetadata, null, 2)}</pre> : null}
                   {href ? <Link href={href} className="mt-2 inline-flex font-medium text-[#ED4D2D] hover:text-[#C83B23]"><I18nText>打开关联对象</I18nText></Link> : null}
                 </div>
               ) : null}
-              <button type="button" onClick={() => setExpandedEventId(expanded ? '' : event.id)} aria-expanded={expanded} className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-[#DEDAD4] text-sm font-medium text-[#625D57] transition hover:bg-[#F6F3F0]">
+              <button type="button" onClick={() => void toggleEvent(event.id)} aria-expanded={expanded} className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-[#DEDAD4] text-sm font-medium text-[#625D57] transition hover:bg-[#F6F3F0]">
                 {expanded ? i18nAttribute("收起详情") : i18nAttribute("查看详情")}
                 <ChevronDown size={16} className={expanded ? 'rotate-180 transition' : 'transition'} />
               </button>
@@ -357,7 +443,7 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
                     ) : null}
                   </td>
                   <td className="px-3 py-3 text-right">
-                    <button type="button" onClick={() => setExpandedEventId(expanded ? '' : event.id)} aria-expanded={expanded} aria-label={expanded ? i18nAttribute("收起日志详情") : i18nAttribute("展开日志详情")} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[#77716A] transition hover:bg-[#F2EEEA] hover:text-[#ED4D2D]">
+                    <button type="button" onClick={() => void toggleEvent(event.id)} aria-expanded={expanded} aria-label={expanded ? i18nAttribute("收起日志详情") : i18nAttribute("展开日志详情")} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[#77716A] transition hover:bg-[#F2EEEA] hover:text-[#ED4D2D]">
                       <ChevronDown size={16} className={expanded ? 'rotate-180 transition' : 'transition'} />
                     </button>
                   </td>

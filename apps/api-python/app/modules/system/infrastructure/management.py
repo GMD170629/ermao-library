@@ -13,6 +13,9 @@ from app.models import (
     OrganizeJob,
     SystemEvent,
 )
+from app.modules.system.application.projections import (
+    summarize_diagnostic_metadata,
+)
 
 
 def management_card_counts(db: Session) -> dict[str, int]:
@@ -87,7 +90,7 @@ def recent_system_events(db: Session, *, limit: int = 8) -> list[dict[str, Any]]
             "targetType": row.target_type,
             "targetId": row.target_id,
             "message": row.message,
-            "metadata": row.metadata_json,
+            "metadata": summarize_diagnostic_metadata(row.metadata_json),
             "createdAt": row.created_at,
         }
         for row in rows

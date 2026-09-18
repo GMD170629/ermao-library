@@ -19,6 +19,12 @@ from app.bootstrap.readable_resource_pipeline import (
     build_readable_resource_worker,
 )
 from app.core.config import get_settings
+from app.core.exception_diagnostics import (
+    configure_exception_storage,
+    install_exception_hooks,
+    record_exception,
+)
+from app.core.logging_config import configure_logging
 from app.db.session import (
     BackgroundSessionLocal,
     HeartbeatSessionLocal,
@@ -44,6 +50,9 @@ def main() -> None:
 
     settings = get_settings()
     ready_file = worker_ready_file()
+    configure_logging()
+    configure_exception_storage(BackgroundSessionLocal)
+    install_exception_hooks()
     verify_current_schema(engine)
 
     import_session = BackgroundSessionLocal()
@@ -94,11 +103,18 @@ def main() -> None:
                 if stop_event.is_set():
                     break
                 outcome = readable_worker.process_once()
-            except Exception:
+            except Exception as error:  # noqa: BLE001 - process containment boundary
                 # This is the process-level containment boundary.  Task-level
                 # failures are contained and persisted by the target worker.
                 readable_worker.recover_after_loop_failure()
-                logger.exception("readable_resource.worker.loop_failure")
+                record_exception(
+                    logger,
+                    "readable_resource.worker.loop_failure",
+                    error,
+                    context={"stage": "worker_loop", "outcome": "error"},
+                    source="import",
+                    action="readable_resource.worker_loop_failure",
+                )
                 outcome = "error"
             if outcome in {"idle", "error", "deferred"}:
                 stop_event.wait(settings.import_queue_interval_seconds)

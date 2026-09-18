@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.bootstrap.download import continue_download_import_command
 from app.core.config import Settings
+from app.core.exception_diagnostics import record_exception
 from app.modules.download.infrastructure.tasks import (
     list_enabled_libraries,
     next_queued_download_task,
@@ -18,6 +20,8 @@ from app.modules.download.infrastructure.tasks import (
 from app.modules.imports.public import is_supported_import_filename
 from app.services.download_executor import execute_download_task
 from app.services.queue_runtime import QueueHeartbeatPump
+
+logger = logging.getLogger("ermao.download_queue")
 
 
 class DownloadQueueWorker:
@@ -59,7 +63,14 @@ class DownloadQueueWorker:
             with self.db_factory() as db:
                 return process_next_download_task(db, self.settings)
         except Exception as exc:  # noqa: BLE001 - worker iteration containment.
-            print(f"[download-queue] task processing failed: {exc}", flush=True)
+            record_exception(
+                logger,
+                "download_queue.task_failed",
+                exc,
+                context={"stage": "download_queue", "outcome": "error"},
+                source="download",
+                action="download.task_failed",
+            )
             return False
         finally:
             self._process_lock.release()
@@ -68,8 +79,19 @@ class DownloadQueueWorker:
         self._heartbeat.start()
         try:
             while not self._stop_event.is_set():
-                processed = self.process_once()
-                self._heartbeat.pulse(processed=processed, error=None)
+                try:
+                    processed = self.process_once()
+                    self._heartbeat.pulse(processed=processed, error=None)
+                except Exception as exc:  # noqa: BLE001 - thread must not die
+                    record_exception(
+                        logger,
+                        "download_queue.loop_failure",
+                        exc,
+                        context={"stage": "download_queue", "outcome": "error"},
+                        source="download",
+                        action="download.loop_failure",
+                    )
+                    processed = False
                 if processed:
                     continue
                 self._stop_event.wait(self.settings.download_queue_interval_seconds)
@@ -81,9 +103,14 @@ def next_queued_task(db: Session) -> dict[str, Any] | None:
     try:
         return next_queued_download_task(db)
     except SQLAlchemyError as exc:
-        print(
-            f"[download-queue] download task table unavailable, retrying later: {exc}",
-            flush=True,
+        record_exception(
+            logger,
+            "download_queue.table_unavailable",
+            exc,
+            level="warning",
+            context={"stage": "download_queue", "outcome": "deferred"},
+            source="download",
+            action="download.table_unavailable",
         )
         return None
 

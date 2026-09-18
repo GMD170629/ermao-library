@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import mimetypes
 import smtplib
 import threading
@@ -24,6 +25,7 @@ from app.bootstrap.kindle import (
 )
 from app.bootstrap.system import prepare_system_event
 from app.core.config import Settings
+from app.core.exception_diagnostics import record_exception
 from app.core.i18n import configured_locale
 from app.core.safe_errors import mask_email, safe_error_message
 from app.core.time import now_timestamp_ms
@@ -40,6 +42,8 @@ from app.services.email_settings import (
     smtp_connection_settings,
 )
 from app.services.queue_runtime import QueueHeartbeatPump
+
+LOGGER = logging.getLogger("ermao.kindle_queue")
 
 MAX_SEND_ATTEMPTS = 3
 RETRY_DELAYS_SECONDS = (30, 120)
@@ -79,7 +83,16 @@ def _task(db: Session, task_id: str) -> dict[str, Any] | None:
 def next_queued_task(db: Session) -> dict[str, Any] | None:
     try:
         return next_queued_kindle_task(db, now_timestamp_ms())
-    except SQLAlchemyError:
+    except SQLAlchemyError as exc:
+        record_exception(
+            LOGGER,
+            "kindle_queue.table_unavailable",
+            exc,
+            level="warning",
+            context={"stage": "kindle_queue", "outcome": "deferred"},
+            source="kindle",
+            action="kindle.table_unavailable",
+        )
         return None
 
 
@@ -265,6 +278,22 @@ def process_next_kindle_send_task(db: Session, settings: Settings) -> bool:
     # Task processing is a queue containment boundary: translate every
     # adapter failure into the durable retry/failure state for this task.
     except Exception as exc:  # noqa: BLE001
+        record_exception(
+            LOGGER,
+            "kindle_queue.task_failed",
+            exc,
+            level="warning",
+            context={
+                "stage": "kindle_send",
+                "outcome": "failed",
+                "task_id": str(task.get("id")) if task.get("id") else None,
+                "resource_id": str(task.get("assetId")) if task.get("assetId") else None,
+            },
+            source="kindle",
+            action="kindle.task_failed",
+            target_type="kindleSendTask",
+            target_id=str(task.get("id")) if task.get("id") else None,
+        )
         error = (
             exc
             if isinstance(exc, KindleSendError)
@@ -397,9 +426,13 @@ class KindleSendQueueWorker:
         # The worker boundary must keep the queue alive after an unexpected
         # database or adapter failure.
         except Exception as exc:  # noqa: BLE001
-            print(
-                f"[kindle-send-queue] task processing failed: {safe_error_message(exc)}",
-                flush=True,
+            record_exception(
+                LOGGER,
+                "kindle_queue.task_failed",
+                exc,
+                context={"stage": "kindle_queue", "outcome": "error"},
+                source="kindle",
+                action="kindle.task_failed",
             )
             return False
         finally:
@@ -409,8 +442,19 @@ class KindleSendQueueWorker:
         self._heartbeat.start()
         try:
             while not self._stop_event.is_set():
-                processed = self.process_once()
-                self._heartbeat.pulse(processed=processed, error=None)
+                try:
+                    processed = self.process_once()
+                    self._heartbeat.pulse(processed=processed, error=None)
+                except Exception as exc:  # noqa: BLE001 - thread must not die
+                    record_exception(
+                        LOGGER,
+                        "kindle_queue.loop_failure",
+                        exc,
+                        context={"stage": "kindle_queue", "outcome": "error"},
+                        source="kindle",
+                        action="kindle.loop_failure",
+                    )
+                    processed = False
                 if processed:
                     continue
                 self._stop_event.wait(self.settings.kindle_send_queue_interval_seconds)

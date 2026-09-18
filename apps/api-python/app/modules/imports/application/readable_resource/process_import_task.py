@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from app.contracts.local_metadata_snapshot import (
     LocalMetadataObservation,
     merge_observations,
 )
+from app.core.exception_diagnostics import record_exception
 from app.core.natural_sort import natural_sort_key
 from app.modules.imports.application.readable_resource.ports import (
     BookResourceRepositoryPort,
@@ -51,6 +53,8 @@ from app.modules.metadata.public import (
     ResolvedLocalMetadata,
     resolve_local_metadata,
 )
+
+LOGGER = logging.getLogger("ermao.readable_resource_pipeline")
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,7 +242,23 @@ class ProcessReadableResourceImportTask:
             try:
                 for prepared in publications:
                     self._covers.publish(prepared)
-            except OSError:
+            except OSError as error:
+                record_exception(
+                    LOGGER,
+                    "readable_resource.cover_publish_failed",
+                    error,
+                    context={
+                        "stage": "cover_publish",
+                        "outcome": "COVER_PUBLISH_FAILED",
+                        "task_id": task_id,
+                        "resource_id": resource_id,
+                        "source_node_id": source_node_id,
+                    },
+                    source="import",
+                    action="readable_resource.cover_publish_failed",
+                    target_type="importTask",
+                    target_id=task_id,
+                )
                 for prepared in publications:
                     self._covers.discard(prepared)
                 with self._uow.transaction():
@@ -542,7 +562,27 @@ class ProcessReadableResourceImportTask:
                     del parsed
                 else:
                     error = parsed.error_summary or parsed.error_code or "PARSE_FAILED"
-            except OSError:
+            except OSError as io_error:
+                record_exception(
+                    LOGGER,
+                    "readable_resource.asset_unreadable",
+                    io_error,
+                    level="warning",
+                    context={
+                        "stage": "asset_parse",
+                        "outcome": (
+                            "IMAGE_FILE_UNREADABLE"
+                            if adapter.asset_role is AssetRole.PAGE
+                            else "AUDIO_FILE_UNREADABLE"
+                        ),
+                        "task_id": task_id,
+                        "path": str(path),
+                    },
+                    source="import",
+                    action="readable_resource.asset_unreadable",
+                    target_type="importTask",
+                    target_id=task_id,
+                )
                 error = (
                     "IMAGE_FILE_UNREADABLE"
                     if adapter.asset_role is AssetRole.PAGE

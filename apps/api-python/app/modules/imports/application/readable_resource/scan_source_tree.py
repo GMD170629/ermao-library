@@ -272,6 +272,7 @@ class ScanLibrarySourceTree:
         visited: set[str] = set()
         totals = [0, 0, 0, 0]
         failed = False
+        failed_error: BaseException | None = None
         while pending:
             if self._task_was_cancelled(task_id):
                 raise SourceScanCancelledError()
@@ -309,8 +310,9 @@ class ScanLibrarySourceTree:
                     try:
                         parent = self._confirmed_missing_parent(config, relative)
                         pending.insert(0, ScanScope(parent))
-                    except SourceScanIncompleteError:
+                    except SourceScanIncompleteError as error:
                         failed = True
+                        failed_error = failed_error or error
                     continue
             visited.add(relative)
             try:
@@ -331,10 +333,11 @@ class ScanLibrarySourceTree:
                     )
                 ):
                     totals[index] += value
-            except SourceScanIncompleteError:
+            except SourceScanIncompleteError as error:
                 failed = True
+                failed_error = failed_error or error
         if failed:
-            raise SourceScanIncompleteError()
+            raise SourceScanIncompleteError() from failed_error
         return ScanLibrarySourceTreeResult(config.library_id, *totals)
 
     def _confirmed_missing_parent(
@@ -385,6 +388,7 @@ class ScanLibrarySourceTree:
         tasks_enqueued = 0
         collisions = 0
         failed = False
+        failed_error: BaseException | None = None
         with self._uow.transaction():
             initial_owner = self._books_resources.find_outermost_directory_resource(
                 config.library_id, start_parent_rel or "__root__"
@@ -420,7 +424,7 @@ class ScanLibrarySourceTree:
                             raise OSError("directory entry unavailable")
                         collected.append(item)
                     observations = tuple(collected)
-            except OSError:
+            except OSError as error:
                 self._log.emit(
                     "source_tree.scan.directory_unreadable",
                     library_id=config.library_id,
@@ -428,6 +432,7 @@ class ScanLibrarySourceTree:
                     outcome="io_error",
                 )
                 failed = True
+                failed_error = failed_error or error
                 continue
             if (
                 parent_rel is None
@@ -459,8 +464,9 @@ class ScanLibrarySourceTree:
                     else:
                         with self._uow.transaction():
                             self._mark_node_covered_by_directory_resource(parent_id)
-                except SourceScanIncompleteError:
+                except SourceScanIncompleteError as error:
                     failed = True
+                    failed_error = failed_error or error
                     continue
             if owner is not None:
                 owner_anchors.setdefault(owner.id, parent_rel)
@@ -651,7 +657,7 @@ class ScanLibrarySourceTree:
                 )
 
         if failed:
-            raise SourceScanIncompleteError()
+            raise SourceScanIncompleteError() from failed_error
         return ScanLibrarySourceTreeResult(
             library_id=config.library_id,
             nodes_inserted=inserted,

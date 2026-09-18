@@ -292,6 +292,25 @@ def record_system_event(
     return prepared.id
 
 
+def get_system_event(db: Session, event_id: str) -> dict[str, Any] | None:
+    row = db.get(SystemEvent, event_id)
+    if row is None:
+        return None
+    return {
+        "id": row.id,
+        "level": row.level,
+        "source": row.source,
+        "actorType": row.actor_type,
+        "actorId": row.actor_id,
+        "action": row.action,
+        "targetType": row.target_type,
+        "targetId": row.target_id,
+        "message": row.message,
+        "metadata": row.metadata_json,
+        "createdAt": row.created_at,
+    }
+
+
 def list_event_source_facets(db: Session) -> list[dict[str, Any]]:
     return [
         {"source": row._mapping["source"], "count": int(row._mapping["count"] or 0)}

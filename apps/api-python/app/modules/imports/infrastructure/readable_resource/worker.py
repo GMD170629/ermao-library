@@ -8,6 +8,7 @@ from datetime import datetime
 
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.core.exception_diagnostics import record_exception
 from app.modules.imports.application.readable_resource.ports import (
     ClockPort,
     LibraryImportTaskQueuePort,
@@ -94,28 +95,27 @@ class ReadableResourceWorkerProcessor:
                 outcome,
                 "UNKNOWN_KIND" if outcome == "unknown_kind" else None,
             )
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - task containment boundary
             self._uow.rollback()
-            if isinstance(error, SourceScanStartUnavailableError):
-                logger.warning(
-                    "readable_resource.worker.scan_failed",
-                    extra={
-                        "stage": "scan",
-                        "outcome": error.code,
-                        "task_id": task.id,
-                        "library_id": task.library_id,
-                    },
-                )
-            else:
-                logger.exception(
-                    "readable_resource.worker.containment_failure",
-                    extra={
-                        "stage": "worker",
-                        "outcome": "error",
-                        "task_id": task.id,
-                        "library_id": task.library_id,
-                    },
-                )
+            scan_failure = isinstance(error, SourceScanStartUnavailableError)
+            record_exception(
+                logger,
+                "readable_resource.worker.task_failed",
+                error,
+                context={
+                    "stage": "scan" if scan_failure else "worker",
+                    "outcome": error.code if scan_failure else "error",
+                    "task_id": task.id,
+                    "task_kind": task.kind,
+                    "library_id": task.library_id,
+                    "resource_id": task.resource_id,
+                    "source_node_id": task.source_node_id,
+                },
+                source="import",
+                action="readable_resource.task_failed",
+                target_type="importTask",
+                target_id=task.id,
+            )
             pending = _PendingCompletion(
                 task.id,
                 task.library_id,
@@ -176,12 +176,21 @@ class ReadableResourceWorkerProcessor:
                         )
         except SQLAlchemyError as error:
             self._uow.rollback()
-            logger.warning(
-                "readable_resource.worker.completion_deferred "
-                "task_id=%s library_id=%s error_type=%s",
-                pending.task_id,
-                pending.library_id,
-                type(error).__name__,
+            record_exception(
+                logger,
+                "readable_resource.worker.completion_deferred",
+                error,
+                level="warning",
+                context={
+                    "stage": "completion",
+                    "outcome": "deferred",
+                    "task_id": pending.task_id,
+                    "library_id": pending.library_id,
+                },
+                source="import",
+                action="readable_resource.completion_deferred",
+                target_type="importTask",
+                target_id=pending.task_id,
             )
             return "deferred"
         self._pending_completion = None
@@ -200,9 +209,17 @@ class ReadableResourceWorkerProcessor:
             return True
         except SQLAlchemyError as error:
             self._uow.rollback()
-            logger.warning(
-                "readable_resource.worker.identification_deferred error_type=%s",
-                type(error).__name__,
+            record_exception(
+                logger,
+                "readable_resource.worker.identification_deferred",
+                error,
+                level="warning",
+                context={
+                    "stage": "identification_enqueue",
+                    "outcome": "deferred",
+                },
+                source="import",
+                action="readable_resource.identification_deferred",
             )
             return False
 

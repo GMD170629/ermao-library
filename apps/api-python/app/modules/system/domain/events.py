@@ -61,7 +61,40 @@ def normalize_event_level(level: str) -> str:
 
 
 def truncate_event_message(message: object) -> str:
-    return str(message)[:MAX_EVENT_MESSAGE_CHARS]
+    text = str(message)
+    if len(text) <= MAX_EVENT_MESSAGE_CHARS:
+        return text
+    marker = " …[message truncated]… "
+    budget = MAX_EVENT_MESSAGE_CHARS - len(marker)
+    head = budget // 2
+    tail = budget - head
+    return text[:head] + marker + text[-tail:]
+
+
+def _lift_diagnostic_root(
+    payload: dict[str, Any],
+    truncated: dict[str, Any],
+) -> None:
+    diagnostics = payload.get("diagnostics")
+    if not isinstance(diagnostics, dict):
+        return
+    root: dict[str, Any] = {"truncated": True}
+    for key in ("id", "exceptionType", "location", "stage"):
+        value = diagnostics.get(key)
+        if value is not None:
+            root[key] = value
+    message = diagnostics.get("message")
+    if isinstance(message, str):
+        root["message"] = message[:1_000]
+    traceback_text = diagnostics.get("traceback")
+    if isinstance(traceback_text, str):
+        marker = "\n...[traceback truncated]...\n"
+        budget = 2_000 - len(marker)
+        head = budget // 2
+        root["traceback"] = (
+            traceback_text[:head] + marker + traceback_text[-budget + head :]
+        )
+    truncated["diagnostics"] = root
 
 
 def prepare_event_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
@@ -69,10 +102,20 @@ def prepare_event_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
     serialized = json.dumps(payload, ensure_ascii=False, default=str)
     if len(serialized) <= MAX_EVENT_METADATA_CHARS:
         return json.loads(serialized)
-    return {
+    # Preserve both the beginning (context) and the tail (root cause and
+    # diagnostic footer) instead of silently keeping only the head.
+    marker = "...[metadata truncated]..."
+    budget = MAX_EVENT_METADATA_CHARS
+    head = budget // 2
+    tail = budget - head - len(marker)
+    truncated: dict[str, Any] = {
         "truncated": True,
-        "preview": serialized[: MAX_EVENT_METADATA_CHARS - 80],
+        "originalChars": len(serialized),
+        "preview": serialized[:head],
+        "tail": serialized[-tail:],
     }
+    _lift_diagnostic_root(payload, truncated)
+    return truncated
 
 
 def validate_log_max_bytes(max_bytes: int) -> int:

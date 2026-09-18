@@ -33,6 +33,13 @@ from app.core.database_errors import (
     is_database_busy_error,
     is_database_operation_timeout,
 )
+from app.core.exception_diagnostics import (
+    configure_exception_storage,
+    install_exception_hooks,
+    install_loop_exception_handler,
+    record_exception,
+)
+from app.core.logging_config import configure_logging
 from app.db.maintenance import database_maintenance_is_active
 from app.db.session import (
     BackgroundSessionLocal,
@@ -137,6 +144,9 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        configure_logging()
+        configure_exception_storage(background_runtime_factory)
+        install_exception_hooks()
         if session_factory is None:
             verify_current_schema(engine)
         download_queue_worker = start_download_queue_worker(
@@ -183,6 +193,7 @@ def create_app(
                     worker.request_stop()
 
         loop = asyncio.get_running_loop()
+        install_loop_exception_handler(loop)
         signal_installed = (
             hasattr(signal, "SIGUSR1")
             and threading.current_thread() is threading.main_thread()
@@ -281,6 +292,38 @@ def create_app(
         finally:
             db.close()
         return _vary_api_response_by_cookie(await call_next(request))
+
+    @app.middleware("http")
+    async def capture_unexpected_errors(request, call_next):
+        # Outermost user middleware: records unhandled request failures with the
+        # original traceback and returns a correlation id without leaking
+        # internals.  Business handlers registered on the app still run first.
+        try:
+            response = await call_next(request)
+        except Exception as error:  # noqa: BLE001 - unified API failure boundary
+            diagnostic_id = record_exception(
+                LOGGER,
+                "api.request_failed",
+                error,
+                context={
+                    "stage": "api_request",
+                    "path": request.url.path,
+                    "method": request.method,
+                    "request_id": request.headers.get("X-Request-Id"),
+                },
+                source="system",
+                action="api.request_failed",
+                session_factory=background_runtime_factory,
+            )
+            failure = fail(
+                "服务器内部错误",
+                status_code=500,
+                details={"eventId": diagnostic_id},
+                code="INTERNAL_ERROR",
+            )
+            failure.headers["X-Error-Id"] = diagnostic_id
+            return _vary_api_response_by_cookie(failure)
+        return response
 
     app.include_router(api_router, prefix="/api")
     app.include_router(

@@ -106,6 +106,17 @@ export async function fetchManagementEvents(params: URLSearchParams): Promise<Ma
   };
 }
 
+export async function fetchManagementEventDetail(eventId: string): Promise<ManagementEvent> {
+  const data = await readData(
+    await fetch(`/api/management/events/${encodeURIComponent(eventId)}`, {
+      cache: 'no-store',
+      credentials: 'same-origin'
+    }),
+    '读取日志详情失败'
+  );
+  return parseEvent(data);
+}
+
 export async function clearManagementEvents(): Promise<number> {
   const data = await readData(
     await fetch('/api/management/events', {

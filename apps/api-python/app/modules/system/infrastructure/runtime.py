@@ -17,6 +17,7 @@ from app.modules.system.domain.queue import prepare_queue_heartbeat
 from app.modules.system.infrastructure.events import (
     clear_info_warning_events,
     configured_max_event_bytes,
+    get_system_event,
     list_event_level_facets,
     list_event_source_facets,
     list_system_events_page,
@@ -314,6 +315,7 @@ __all__ = [
     "fail_abandoned_health_runs",
     "get_setting",
     "get_setting_raw",
+    "get_system_event",
     "health_run_snapshot",
     "library_import_dashboard_snapshot",
     "list_event_level_facets",

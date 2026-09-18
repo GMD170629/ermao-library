@@ -135,6 +135,12 @@ def management_events_payload(
     }
 
 
+def management_event_payload(event: dict[str, Any]) -> dict[str, Any]:
+    """Detail projection that keeps the full diagnostic stack and chain."""
+
+    return serialize_system_event(event, include_diagnostics=True)
+
+
 def parse_event_date_bounds(
     date_from: str | None,
     date_to: str | None,

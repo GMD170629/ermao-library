@@ -14,6 +14,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 
+from app.core.exception_diagnostics import record_exception
 from app.core.time import now_timestamp_ms, to_timestamp_ms
 from app.models import QueueRuntimeState
 from app.modules.system.application.commands import SystemWriteTransaction
@@ -21,7 +22,6 @@ from app.modules.system.domain.queue import (
     PreparedQueueHeartbeat,
     enrich_queue_runtime_view,
     prepare_queue_heartbeat,
-    safe_runtime_error,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -157,10 +157,18 @@ class QueueHeartbeatPump:
             except Exception as exc:  # noqa: BLE001
                 now = monotonic()
                 if now - self._last_write_warning_at >= 30:
-                    LOGGER.warning(
-                        "queue heartbeat write deferred queue=%s error=%s",
-                        self._queue_name,
-                        safe_runtime_error(exc),
+                    record_exception(
+                        LOGGER,
+                        "queue.heartbeat_write_deferred",
+                        exc,
+                        level="warning",
+                        context={
+                            "stage": "heartbeat",
+                            "outcome": "deferred",
+                            "path": self._queue_name,
+                        },
+                        source="system",
+                        action="queue.heartbeat_deferred",
                     )
                     self._last_write_warning_at = now
 
@@ -180,15 +188,33 @@ class QueueHeartbeatPump:
             # Stopping must remain best-effort after the worker has been told to
             # exit; an unavailable database cannot block process shutdown.
             except Exception as exc:  # noqa: BLE001
-                LOGGER.warning(
-                    "queue stopped state write deferred queue=%s error=%s",
-                    self._queue_name,
-                    safe_runtime_error(exc),
+                record_exception(
+                    LOGGER,
+                    "queue.stopped_state_write_deferred",
+                    exc,
+                    level="warning",
+                    context={
+                        "stage": "heartbeat",
+                        "outcome": "deferred",
+                        "path": self._queue_name,
+                    },
+                    source="system",
+                    action="queue.stopped_state_deferred",
                 )
 
     def _run(self) -> None:
         while not self._stop_event.wait(self._heartbeat_interval):
-            self.pulse()
+            try:
+                self.pulse()
+            except Exception as exc:  # noqa: BLE001 - heartbeat thread must live
+                record_exception(
+                    LOGGER,
+                    "queue.heartbeat_loop_failure",
+                    exc,
+                    context={"stage": "heartbeat", "outcome": "error"},
+                    source="system",
+                    action="queue.heartbeat_loop_failure",
+                )
 
 
 def prepare_queue_stopped_write(

@@ -17,6 +17,7 @@ from app.bootstrap.imports import (
 from app.bootstrap.system import (
     clear_system_events_with_audit,
     configured_max_event_bytes,
+    get_system_event,
     library_import_dashboard_snapshot,
     list_settings,
     list_system_events_page,
@@ -27,6 +28,7 @@ from app.bootstrap.system import (
     system_event_storage_view,
 )
 from app.contracts.http_errors import ErrorResponses
+from app.contracts.system_events import SystemEvent
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.modules.imports.public import (
@@ -36,6 +38,7 @@ from app.modules.system.application.queries import (
     SettingsUpdateError,
     app_config_payload,
     dashboard_system_status_payload,
+    management_event_payload,
     management_events_payload,
     parse_event_date_bounds,
     prepare_system_settings_update,
@@ -51,6 +54,7 @@ from app.modules.system.presentation.schemas import (
     DashboardSystemStatusResponse,
     LibraryScanSystemSettingsPayload,
     LibraryScanSystemSettingsResponse,
+    ManagementEventResponse,
     ManagementEventsPayload,
     ManagementEventsResponse,
     ManagementOverviewPayload,
@@ -302,6 +306,30 @@ def list_system_events(
                 levels=snapshot.levels,
             )
         )
+    )
+
+
+@router.get(
+    "/management/events/{event_id}",
+    response_model=ManagementEventResponse,
+)
+def get_system_event_detail(
+    event_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    ManagementEventResponse | Response,
+    ErrorResponses(SystemManagerRequiredError),
+]:
+    _user, auth_error = _system_manager(db, request, settings)
+    if auth_error:
+        return auth_error
+    event = get_system_event(db, event_id)
+    if event is None:
+        return fail("日志不存在", status_code=404, code="EVENT_NOT_FOUND")
+    return ManagementEventResponse(
+        data=SystemEvent.model_validate(management_event_payload(event))
     )
 
 

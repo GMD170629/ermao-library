@@ -19,8 +19,34 @@ def _parse_json(value: Any, fallback: Any) -> Any:
         return fallback
 
 
-def serialize_system_event(event: dict[str, Any]) -> dict[str, Any]:
+_DIAGNOSTIC_LIST_OMITTED_KEYS = frozenset({"traceback", "chain"})
+
+
+def summarize_diagnostic_metadata(metadata: Any) -> Any:
+    """Keep the small diagnostic summary and omit bulk payload from lists."""
+
+    if not isinstance(metadata, dict):
+        return metadata
+    diagnostics = metadata.get("diagnostics")
+    if not isinstance(diagnostics, dict):
+        return metadata
+    summary = {key: value for key, value in metadata.items() if key != "diagnostics"}
+    summary["diagnostics"] = {
+        key: value
+        for key, value in diagnostics.items()
+        if key not in _DIAGNOSTIC_LIST_OMITTED_KEYS
+    }
+    return summary
+
+
+def serialize_system_event(
+    event: dict[str, Any],
+    *,
+    include_diagnostics: bool = False,
+) -> dict[str, Any]:
     metadata = _parse_json(event.get("metadata"), {})
+    if not include_diagnostics:
+        metadata = summarize_diagnostic_metadata(metadata)
     created = event.get("createdAt")
     return {
         "id": event.get("id"),
