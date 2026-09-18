@@ -130,13 +130,19 @@ class ScanLibrarySourceTree:
             self._guard_empty_root(config)
             result = self._execute_scopes(config, scan_scopes, task_id=task_id)
         else:
-            result = self._walk(
-                config=config,
-                start_parent_id=None,
-                start_parent_rel=None,
-                task_id=task_id,
-                missing_entry_policy=missing_entry_policy,
-            )
+            incomplete_scopes: list[ScanScope] = []
+            try:
+                result = self._walk(
+                    config=config,
+                    start_parent_id=None,
+                    start_parent_rel=None,
+                    task_id=task_id,
+                    missing_entry_policy=missing_entry_policy,
+                    incomplete_scopes=incomplete_scopes,
+                )
+            except SourceScanIncompleteError:
+                self._record_incomplete_scopes(task_id, incomplete_scopes)
+                raise
         self._log.emit(
             "source_tree.scan.completed",
             library_id=config.library_id,
@@ -273,6 +279,7 @@ class ScanLibrarySourceTree:
         totals = [0, 0, 0, 0]
         failed = False
         failed_error: BaseException | None = None
+        incomplete_scopes: list[ScanScope] = []
         while pending:
             if self._task_was_cancelled(task_id):
                 raise SourceScanCancelledError()
@@ -313,6 +320,7 @@ class ScanLibrarySourceTree:
                     except SourceScanIncompleteError as error:
                         failed = True
                         failed_error = failed_error or error
+                        incomplete_scopes.append(scope)
                     continue
             visited.add(relative)
             try:
@@ -323,6 +331,7 @@ class ScanLibrarySourceTree:
                     task_id=task_id,
                     missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
                     recursive=scope.recursive,
+                    incomplete_scopes=incomplete_scopes,
                 )
                 for index, value in enumerate(
                     (
@@ -336,9 +345,19 @@ class ScanLibrarySourceTree:
             except SourceScanIncompleteError as error:
                 failed = True
                 failed_error = failed_error or error
+                incomplete_scopes.append(scope)
         if failed:
+            self._record_incomplete_scopes(task_id, incomplete_scopes)
             raise SourceScanIncompleteError() from failed_error
         return ScanLibrarySourceTreeResult(config.library_id, *totals)
+
+    def _record_incomplete_scopes(
+        self, task_id: str | None, scopes: list[ScanScope]
+    ) -> None:
+        if task_id is None or not scopes:
+            return
+        with self._uow.transaction():
+            self._queue.record_incomplete_scan_scopes(task_id, tuple(scopes))
 
     def _confirmed_missing_parent(
         self, config: LibrarySourceTreeConfig, relative: str
@@ -382,6 +401,7 @@ class ScanLibrarySourceTree:
         task_id: str | None,
         missing_entry_policy: MissingEntryPolicy,
         recursive: bool = True,
+        incomplete_scopes: list[ScanScope] | None = None,
     ) -> ScanLibrarySourceTreeResult:
         inserted = 0
         resources_created = 0
@@ -433,6 +453,8 @@ class ScanLibrarySourceTree:
                 )
                 failed = True
                 failed_error = failed_error or error
+                if incomplete_scopes is not None:
+                    incomplete_scopes.append(ScanScope(parent_rel or "", True))
                 continue
             if (
                 parent_rel is None
@@ -467,6 +489,8 @@ class ScanLibrarySourceTree:
                 except SourceScanIncompleteError as error:
                     failed = True
                     failed_error = failed_error or error
+                    if incomplete_scopes is not None:
+                        incomplete_scopes.append(ScanScope(parent_rel or "", True))
                     continue
             if owner is not None:
                 owner_anchors.setdefault(owner.id, parent_rel)

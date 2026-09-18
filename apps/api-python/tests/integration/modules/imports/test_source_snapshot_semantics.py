@@ -51,7 +51,11 @@ from app.modules.imports.domain.directory_probe import (
     ProbeTerminationReason,
 )
 from app.modules.imports.domain.resource_adapters import ResourceAdapterSpec
-from app.modules.imports.domain.scan_policy import MissingEntryPolicy, ScanScope
+from app.modules.imports.domain.scan_policy import (
+    MissingEntryPolicy,
+    ScanScope,
+    decode_scan_scopes,
+)
 from app.modules.imports.infrastructure.readable_resource.support import (
     InMemorySidecarWriteback,
     StructuredPipelineLog,
@@ -311,6 +315,11 @@ def test_failed_directory_preserves_data_while_other_scope_updates(
             task = db.get(LibraryImportTask, result.task_id)
             assert task is not None and task.state == "FAILED"
             assert task.error_summary == "SOURCE_SCAN_INCOMPLETE"
+            # Only the unfinished scope stays recorded, so an independent
+            # completed scope is never gated by the failed scan.
+            recorded = decode_scan_scopes(task.scan_scopes)
+            assert recorded is not None
+            assert {scope.relative_path for scope in recorded} == {"bad"}
             paths = set(db.scalars(select(LibrarySourceNode.relative_path)).all())
             assert "bad/book.epub" in paths and "bad/new.epub" not in paths
             assert "good/new.epub" in paths and "good/book.epub" not in paths
@@ -325,7 +334,7 @@ def test_failed_directory_preserves_data_while_other_scope_updates(
                     LibrarySourceNode.relative_path == "good/new.epub",
                 )
             ).all()
-            assert len(pending) == 1 and pending[0].state == "QUEUED"
+            assert len(pending) == 1 and pending[0].state == "SUCCEEDED"
     finally:
         engine.dispose()
 

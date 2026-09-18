@@ -25,6 +25,9 @@ from app.models.common import cuid
 from app.modules.imports.application.readable_resource.ports import (
     PreparedBookIdentification,
 )
+from app.modules.imports.infrastructure.readable_resource.scan_gating import (
+    active_imports_for_anchor,
+)
 
 IDENTIFICATION_BATCH_SIZE = 50
 
@@ -32,35 +35,11 @@ IDENTIFICATION_BATCH_SIZE = 50
 def active_imports_for_book() -> ColumnElement[bool]:
     """Correlated to LibraryBook: scanners count until they stop producing tasks."""
     root = aliased(LibrarySourceNode)
-    node = aliased(LibrarySourceNode)
-    task = aliased(LibraryImportTask)
-    under_root = or_(
-        node.id == root.id,
-        and_(
-            root.physical_kind == "DIRECTORY",
-            func.instr(node.relative_path, root.relative_path + "/") == 1,
-        ),
-    )
-    ancestor_scan = or_(
-        node.relative_path == "",
-        func.instr(root.relative_path, node.relative_path + "/") == 1,
-    )
-    return exists(
-        select(task.id)
-        .select_from(task)
-        .join(root, root.id == LibraryBook.source_node_id)
-        .outerjoin(node, node.id == task.source_node_id)
-        .where(
-            task.library_id == LibraryBook.library_id,
-            task.state.in_(("QUEUED", "RUNNING")),
-            or_(
-                task.kind == "SCAN_LIBRARY",
-                and_(task.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE")), under_root),
-                and_(task.kind == "CONTINUE_SOURCE", or_(under_root, ancestor_scan)),
-            ),
-        )
-        .correlate(LibraryBook)
-    )
+    return active_imports_for_anchor(
+        root,
+        library_id=LibraryBook.library_id,
+        anchor_id=LibraryBook.source_node_id,
+    ).correlate(LibraryBook)
 
 
 def _ready_for_identification() -> ColumnElement[bool]:

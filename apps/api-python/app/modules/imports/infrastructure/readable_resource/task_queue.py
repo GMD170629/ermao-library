@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import cast
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import and_, delete, exists, literal, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, aliased
 
@@ -35,6 +35,10 @@ from app.modules.imports.domain.scan_policy import (
 )
 from app.modules.imports.infrastructure.readable_resource.book_completion import (
     BookImportCompletion,
+)
+from app.modules.imports.infrastructure.readable_resource.scan_gating import (
+    active_imports_for_anchor,
+    incomplete_scan_touches,
 )
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
@@ -354,22 +358,63 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         return self._to_record(row)
 
     def next_queued(self) -> LibraryImportTaskRecord | None:
+        """Select the oldest queued task whose necessary inputs are ready.
+
+        Dependencies are path and scope based, not library based. A queued
+        IMPORT_RESOURCE for a single file is always executable because its node
+        and observation are already committed. A directory resource waits only
+        for an incomplete scan whose recorded range covers its anchor. An
+        IDENTIFY_BOOK waits for an incomplete scan on its own path or for active
+        import work below it; an unrelated scoped scan does not block it.
+        """
+        anchor = aliased(LibrarySourceNode)
         scan = aliased(LibraryImportTask)
-        incomplete_scan = (
-            select(scan.id)
-            .where(
-                scan.library_id == LibraryImportTask.library_id,
-                scan.kind.in_(("SCAN_LIBRARY", "CONTINUE_SOURCE")),
-                scan.state.in_(("QUEUED", "RUNNING", "FAILED")),
+        scan_node = aliased(LibrarySourceNode)
+
+        blocked_by_scan = (
+            exists(
+                select(literal(1))
+                .select_from(scan)
+                .outerjoin(scan_node, scan_node.id == scan.source_node_id)
+                .where(
+                    scan.library_id == LibraryImportTask.library_id,
+                    incomplete_scan_touches(scan, scan_node, anchor),
+                )
             )
-            .exists()
+            .correlate(LibraryImportTask)
+            .correlate(anchor)
+        )
+        is_directory_resource = exists(
+            select(literal(1))
+            .select_from(LibraryReadableResource)
+            .where(
+                LibraryReadableResource.id == LibraryImportTask.resource_id,
+                LibraryReadableResource.format.in_(("IMAGE_DIR", "AUDIOBOOK_DIR")),
+            )
+        )
+        identify_anchor = aliased(LibrarySourceNode)
+        identify_blocked = or_(
+            active_imports_for_anchor(
+                identify_anchor,
+                library_id=LibraryImportTask.library_id,
+                anchor_id=LibraryImportTask.source_node_id,
+            ),
+            blocked_by_scan,
+        )
+        executable = or_(
+            LibraryImportTask.kind.in_(("SCAN_LIBRARY", "CONTINUE_SOURCE")),
+            and_(
+                LibraryImportTask.kind == "IMPORT_RESOURCE",
+                or_(~is_directory_resource, ~blocked_by_scan),
+            ),
+            and_(LibraryImportTask.kind == "IDENTIFY_BOOK", ~identify_blocked),
         )
         row = self._session.scalar(
             select(LibraryImportTask)
+            .outerjoin(anchor, anchor.id == LibraryImportTask.source_node_id)
             .where(
                 LibraryImportTask.state == "QUEUED",
-                LibraryImportTask.kind.in_(("SCAN_LIBRARY", "CONTINUE_SOURCE"))
-                | ~incomplete_scan,
+                executable,
             )
             .order_by(
                 LibraryImportTask.created_at.asc(),
@@ -461,6 +506,18 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         )
         self._session.flush()
         return int(getattr(result, "rowcount", 0) or 0)
+
+    def record_incomplete_scan_scopes(
+        self, task_id: str, scopes: tuple[ScanScope, ...]
+    ) -> None:
+        row = self._session.get(LibraryImportTask, task_id)
+        if row is None or row.kind != "SCAN_LIBRARY":
+            return
+        normalized = merge_scan_scopes((), scopes) or ()
+        if not normalized:
+            return
+        row.scan_scopes = encode_scan_scopes(normalized)
+        self._session.flush()
 
     def requeue_failed_task(self, task_id: str) -> tuple[LibraryImportTaskRecord, bool]:
         row = self._session.get(LibraryImportTask, task_id)

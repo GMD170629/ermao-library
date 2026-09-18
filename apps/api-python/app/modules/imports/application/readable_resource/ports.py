@@ -289,6 +289,11 @@ class LibraryImportTaskQueuePort(Protocol):
 
     def fail_interrupted_tasks_on_startup(self, *, finished_at: datetime) -> int: ...
 
+    def record_incomplete_scan_scopes(
+        self, task_id: str, scopes: tuple[ScanScope, ...]
+    ) -> None:
+        """Persist only the scopes a failed SCAN_LIBRARY did not finish."""
+
     def requeue_failed_task(
         self, task_id: str
     ) -> tuple[LibraryImportTaskRecord, bool]: ...
