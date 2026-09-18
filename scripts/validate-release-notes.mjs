@@ -126,18 +126,18 @@ function singleCapturedVersion(contents, expression) {
   return versions.length > 0 && new Set(versions).size === 1 ? versions[0] : null;
 }
 
-export async function readApplicationVersions(repositoryRoot) {
-  const rootPackage = JSON.parse(await readFile(path.join(repositoryRoot, 'package.json'), 'utf8'));
-  const webPackage = JSON.parse(await readFile(path.join(repositoryRoot, 'apps/web/package.json'), 'utf8'));
-  const readerCorePackage = JSON.parse(await readFile(path.join(repositoryRoot, 'packages/reader-core/package.json'), 'utf8'));
-  const readerContractsPackage = JSON.parse(await readFile(path.join(repositoryRoot, 'packages/reader-contracts/package.json'), 'utf8'));
-  const readiumWebPocPackage = JSON.parse(await readFile(path.join(repositoryRoot, 'apps/readium-web-poc/package.json'), 'utf8'));
-  const pyproject = await readFile(path.join(repositoryRoot, 'apps/api-python/pyproject.toml'), 'utf8');
-  const runtimeConfig = await readFile(path.join(repositoryRoot, 'apps/api-python/app/core/config.py'), 'utf8');
-  const serviceWorker = await readFile(path.join(repositoryRoot, 'apps/web/public/sw.js'), 'utf8');
-  const uvLock = await readFile(path.join(repositoryRoot, 'apps/api-python/uv.lock'), 'utf8');
-  const androidBuild = await readFile(path.join(repositoryRoot, 'apps/mobile/androidApp/build.gradle.kts'), 'utf8');
-  const iosProject = await readFile(path.join(repositoryRoot, 'apps/mobile/iosApp/ErmaoLibrary.xcodeproj/project.pbxproj'), 'utf8');
+export async function readApplicationVersions(repositoryRoot, read = readFile) {
+  const rootPackage = JSON.parse(await read(path.join(repositoryRoot, 'package.json'), 'utf8'));
+  const webPackage = JSON.parse(await read(path.join(repositoryRoot, 'apps/web/package.json'), 'utf8'));
+  const readerCorePackage = JSON.parse(await read(path.join(repositoryRoot, 'packages/reader-core/package.json'), 'utf8'));
+  const readerContractsPackage = JSON.parse(await read(path.join(repositoryRoot, 'packages/reader-contracts/package.json'), 'utf8'));
+  const readiumWebPocPackage = JSON.parse(await read(path.join(repositoryRoot, 'apps/readium-web-poc/package.json'), 'utf8'));
+  const pyproject = await read(path.join(repositoryRoot, 'apps/api-python/pyproject.toml'), 'utf8');
+  const runtimeConfig = await read(path.join(repositoryRoot, 'apps/api-python/app/core/config.py'), 'utf8');
+  const serviceWorker = await read(path.join(repositoryRoot, 'apps/web/public/sw.js'), 'utf8');
+  const uvLock = await read(path.join(repositoryRoot, 'apps/api-python/uv.lock'), 'utf8');
+  const androidBuild = await read(path.join(repositoryRoot, 'apps/mobile/androidApp/build.gradle.kts'), 'utf8');
+  const iosProject = await read(path.join(repositoryRoot, 'apps/mobile/iosApp/ErmaoLibrary.xcodeproj/project.pbxproj'), 'utf8');
   return {
     root: rootPackage.version,
     web: webPackage.version,
@@ -156,6 +156,10 @@ export async function readApplicationVersions(repositoryRoot) {
 export function validateApplicationVersions(versions, expectedTag = null) {
   if (!parseStableVersion(versions.root)) throw new Error(`Root package version ${versions.root} is not stable SemVer`);
   for (const [source, version] of Object.entries(versions)) {
+    if (['android', 'ios', 'readerCore', 'readerContracts', 'readiumWebPoc'].includes(source)) {
+      if (!parseStableVersion(version)) throw new Error(`Invalid ${source} component version: ${version}`);
+      continue;
+    }
     if (version !== versions.root) throw new Error(`Application version mismatch: root=${versions.root}, ${source}=${version}`);
   }
   if (expectedTag && expectedTag !== `v${versions.root}`) {
@@ -207,12 +211,7 @@ export async function validateReleaseNotesRepository({
         'apps/web/public/sw.js',
         'apps/api-python/pyproject.toml',
         'apps/api-python/app/core/config.py',
-        'apps/api-python/uv.lock',
-        'packages/reader-core/package.json',
-        'packages/reader-contracts/package.json',
-        'apps/readium-web-poc/package.json',
-        'apps/mobile/androidApp/build.gradle.kts',
-        'apps/mobile/iosApp/ErmaoLibrary.xcodeproj/project.pbxproj'
+        'apps/api-python/uv.lock'
       ];
       const missing = required.filter((file) => !changes.has(file));
       if (missing.length > 0) throw new Error(`Version bump must update: ${missing.join(', ')}`);
