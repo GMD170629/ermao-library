@@ -559,7 +559,7 @@ def test_logging_session_failures_never_replace_the_original_failure(
     assert "exception_diagnostics.persist_failed" in caplog.text
 
 
-def test_recording_does_not_wait_on_business_write_lock_and_persists_after_rollback(
+def test_recording_degrades_bounded_under_business_write_lock_then_persists(
     tmp_path,
 ) -> None:
     database_path = tmp_path / "diagnostics-lock.sqlite3"
@@ -603,8 +603,10 @@ def test_recording_does_not_wait_on_business_write_lock_and_persists_after_rollb
             elapsed = monotonic() - started
             transaction.rollback()
 
+        # The recorder degrades (fails fast) instead of waiting indefinitely on
+        # the business write lock; the bounded busy timeout keeps it short.
         assert persisted_while_locked is False
-        assert elapsed < 2.0, "recording must not block on the business write lock"
+        assert elapsed < 1.5, "recording waited too long on the business write lock"
 
         assert persist_exception_diagnostic(LOGGER, snapshot, factory) is True
         session = factory()

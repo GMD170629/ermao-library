@@ -19,7 +19,7 @@ def _parse_json(value: Any, fallback: Any) -> Any:
         return fallback
 
 
-_DIAGNOSTIC_LIST_OMITTED_KEYS = frozenset({"traceback", "chain"})
+_DIAGNOSTIC_LIST_OMITTED_KEYS = frozenset({"traceback", "chain", "members"})
 
 
 def summarize_diagnostic_metadata(metadata: Any) -> Any:

@@ -61,22 +61,21 @@ _LOG_EXTRA_KEYS = (
     "diagnostic_id",
 )
 
-_SQL_PARAMETERS = re.compile(r"\[parameters:.*?\](\s*\[.*?\])?", re.DOTALL)
+_SQL_PARAMETERS_MARKER = "[parameters:"
 _SQL_BACKGROUND = re.compile(r"\(Background on this error at: [^)]+\)")
-_HEADER_SECRET = re.compile(
-    r"(?im)^([ \t]*(?:authorization|proxy-authorization|x-api-key|x-auth-token|"
-    r"private-token|cookie|set-cookie)[ \t]*[:=][ \t]*)\S.*$"
+_SENSITIVE_KEYS = (
+    r"authorization|proxy-authorization|x-api-key|x-auth-token|private-token|"
+    r"cookie|set-cookie|password|passwd|pwd|secret|token|api[_-]?key|"
+    r"access[_-]?key|client[_-]?secret|refresh[_-]?token|credential|passphrase"
 )
-_CREDENTIAL_QUOTED = re.compile(
-    r"(?i)([\"']?(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|"
-    r"client[_-]?secret|refresh[_-]?token|credential|passphrase)[\"']?\s*[:=]\s*)"
-    r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*')"
+_SENSITIVE_VALUE = (
+    r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\r\n]+)"
 )
-_CREDENTIAL_BARE = re.compile(
-    r"(?i)([\"']?\b(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|"
-    r"client[_-]?secret|refresh[_-]?token|credential|passphrase)\b[\"']?\s*[:=]\s*)"
-    r"[^\r\n]+"
+_SENSITIVE_ASSIGNMENT = re.compile(
+    r"(?i)([\"']?\b(?:" + _SENSITIVE_KEYS + r")\b[\"']?[ \t]*[:=][ \t]*)"
+    + _SENSITIVE_VALUE
 )
+_BASIC = re.compile(r"(?i)\bbasic\s+[A-Za-z0-9+/=._~-]+")
 _BEARER = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+")
 _QUERY_SECRET = re.compile(
     r"(?i)([?&](?:token|key|secret|password|access_token|api_key)=)[^&\s]+"
@@ -116,17 +115,58 @@ def reset_exception_storage() -> None:
     configure_exception_storage(None)
 
 
+def _redact_sql_parameters(text: str) -> str:
+    """Redact every ``[parameters: ...]`` block with bracket/quote awareness.
+
+    Parameter values may contain ``]``, newlines, or nested lists/dicts, so a
+    non-greedy regex would stop early and leave later parameters exposed.
+    """
+
+    marker = _SQL_PARAMETERS_MARKER
+    result: list[str] = []
+    index = 0
+    length = len(text)
+    while True:
+        start = text.find(marker, index)
+        if start == -1:
+            result.append(text[index:])
+            break
+        result.append(text[index:start])
+        depth = 0
+        quote: str | None = None
+        cursor = start
+        while cursor < length:
+            char = text[cursor]
+            if quote is not None:
+                if char == quote:
+                    if cursor + 1 < length and text[cursor + 1] == quote:
+                        cursor += 2
+                        continue
+                    quote = None
+            elif char in ("'", '"'):
+                quote = char
+            elif char == "[":
+                depth += 1
+            elif char == "]":
+                depth -= 1
+                if depth == 0:
+                    cursor += 1
+                    break
+            cursor += 1
+        result.append("[parameters: [redacted]]")
+        index = cursor
+    return "".join(result)
+
+
 def sanitize_diagnostic_text(text: object) -> str:
     """Redact credentials and SQL parameters from diagnostic text."""
 
-    value = str(text)
-    value = _SQL_PARAMETERS.sub("[parameters: [redacted]]", value)
+    value = _redact_sql_parameters(str(text))
     value = _SQL_BACKGROUND.sub("", value)
-    value = _HEADER_SECRET.sub(lambda match: f"{match.group(1)}[redacted]", value)
-    value = _CREDENTIAL_QUOTED.sub(
+    value = _SENSITIVE_ASSIGNMENT.sub(
         lambda match: f"{match.group(1)}[redacted]", value
     )
-    value = _CREDENTIAL_BARE.sub(lambda match: f"{match.group(1)}[redacted]", value)
+    value = _BASIC.sub("Basic [redacted]", value)
     value = _BEARER.sub("Bearer [redacted]", value)
     value = _QUERY_SECRET.sub(r"\1[redacted]", value)
     value = _EMAIL.sub(lambda match: mask_email(match.group(0)), value)
@@ -276,18 +316,160 @@ def _format_log_text(
     return f"{header}\n{body}".rstrip()
 
 
-def _existing_snapshot(error: BaseException) -> DiagnosticSnapshot | None:
+def _attach_snapshot(error: BaseException, snapshot: DiagnosticSnapshot) -> None:
+    try:
+        setattr(error, _DIAGNOSTIC_ATTR, snapshot)
+    except Exception:  # noqa: BLE001, S110 - some exceptions forbid attributes
+        pass
+
+
+def _direct_snapshot(error: BaseException) -> DiagnosticSnapshot | None:
     snapshot = getattr(error, _DIAGNOSTIC_ATTR, None)
-    if isinstance(snapshot, DiagnosticSnapshot):
-        return snapshot
-    # Asyncio/anyio task boundaries may wrap the prepared failure in a group;
-    # reuse the leaf diagnostic instead of creating a second main event.
+    return snapshot if isinstance(snapshot, DiagnosticSnapshot) else None
+
+
+def _iter_leaves(error: BaseException):
+    # A node that already carries a diagnostic is treated as a recorded leaf so
+    # a nested group's aggregate is not expanded and re-recorded.
+    if _direct_snapshot(error) is not None:
+        yield error
+        return
     if isinstance(error, BaseExceptionGroup):
-        for inner in error.exceptions:
-            found = _existing_snapshot(inner)
-            if found is not None:
-                return found
-    return None
+        for child in error.exceptions:
+            yield from _iter_leaves(child)
+    else:
+        yield error
+
+
+def _build_snapshot(
+    logger: logging.Logger,
+    event: str,
+    error: BaseException,
+    diagnostics: dict[str, Any],
+    *,
+    diagnostic_id: str,
+    level: str,
+    context: dict[str, Any] | None,
+    source: str,
+    action: str | None,
+    actor_type: str,
+    actor_id: str | None,
+    target_type: str | None,
+    target_id: str | None,
+) -> DiagnosticSnapshot:
+    try:
+        log_text = _format_log_text(event, diagnostic_id, diagnostics, context)
+        logger.log(
+            logging.WARNING if level == "warning" else logging.ERROR,
+            log_text,
+            extra=_log_extra(context, diagnostic_id),
+        )
+    except Exception:  # noqa: BLE001 - diagnostics must never mask the failure
+        logger.log(
+            logging.WARNING if level == "warning" else logging.ERROR,
+            "%s diagnostic_id=%s exception_type=%s",
+            event,
+            diagnostic_id,
+            _qualified_type(error),
+            extra=_log_extra(context, diagnostic_id),
+        )
+    metadata = {
+        "diagnostics": {"id": diagnostic_id, **diagnostics},
+        **_context_metadata(context),
+    }
+    snapshot = DiagnosticSnapshot(
+        diagnostic_id=diagnostic_id,
+        event=event,
+        level=level,
+        message=str(diagnostics.get("message") or _qualified_type(error)),
+        metadata=metadata,
+        source=source,
+        action=action or event,
+        actor_type=actor_type,
+        actor_id=actor_id,
+        target_type=target_type,
+        target_id=target_id,
+    )
+    _attach_snapshot(error, snapshot)
+    return snapshot
+
+
+def _prepare_group_diagnostic(
+    logger: logging.Logger,
+    event: str,
+    group: BaseExceptionGroup,
+    *,
+    level: str,
+    context: dict[str, Any] | None,
+    source: str,
+    action: str | None,
+    actor_type: str,
+    actor_id: str | None,
+    target_type: str | None,
+    target_id: str | None,
+) -> DiagnosticSnapshot:
+    """Diagnose every independent leaf exactly once.
+
+    Already recorded leaves are referenced by id; unrecorded leaves are
+    aggregated into one group event so a single propagation still produces a
+    single main event.
+    """
+
+    leaves = list(_iter_leaves(group))
+    recorded = [
+        snapshot
+        for snapshot in (_direct_snapshot(leaf) for leaf in leaves)
+        if snapshot is not None
+    ]
+    unrecorded = [leaf for leaf in leaves if _direct_snapshot(leaf) is None]
+    if not unrecorded:
+        reused = recorded[0]
+        _attach_snapshot(group, reused)
+        return reused
+
+    diagnostic_id = f"diag_{uuid4().hex}"
+    member_diagnostics = [format_exception_diagnostics(leaf) for leaf in unrecorded]
+    combined_traceback, truncated = _bound_text(
+        "\n".join(str(item.get("traceback") or "") for item in member_diagnostics),
+        MAX_TRACEBACK_CHARS,
+    )
+    first = member_diagnostics[0]
+    diagnostics: dict[str, Any] = {
+        "exceptionType": _qualified_type(group),
+        "message": str(first.get("message") or f"{len(unrecorded)} failures"),
+        "traceback": combined_traceback,
+        "chain": [],
+        "location": first.get("location"),
+        "truncated": truncated or any(item.get("truncated") for item in member_diagnostics),
+        "members": [
+            {
+                "exceptionType": item.get("exceptionType"),
+                "message": item.get("message"),
+                "location": item.get("location"),
+            }
+            for item in member_diagnostics
+        ],
+        "memberCount": len(leaves),
+        "relatedIds": [snapshot.diagnostic_id for snapshot in recorded],
+    }
+    snapshot = _build_snapshot(
+        logger,
+        event,
+        group,
+        diagnostics,
+        diagnostic_id=diagnostic_id,
+        level=level,
+        context=context,
+        source=source,
+        action=action,
+        actor_type=actor_type,
+        actor_id=actor_id,
+        target_type=target_type,
+        target_id=target_id,
+    )
+    for leaf in unrecorded:
+        _attach_snapshot(leaf, snapshot)
+    return snapshot
 
 
 def prepare_exception_diagnostic(
@@ -306,23 +488,32 @@ def prepare_exception_diagnostic(
 ) -> DiagnosticSnapshot:
     """Emit a sanitized running log and return a reusable diagnostic snapshot.
 
-    Calling this again for the same exception instance reuses the snapshot so a
-    cross-layer propagation produces a single main event and diagnostic id.
+    Calling this again for the same exception instance (or a group containing a
+    recorded leaf) reuses the snapshot so a cross-layer propagation produces a
+    single main event and diagnostic id.
     """
 
-    existing = _existing_snapshot(error)
+    existing = _direct_snapshot(error)
     if existing is not None:
         return existing
+    if isinstance(error, BaseExceptionGroup):
+        return _prepare_group_diagnostic(
+            logger,
+            event,
+            error,
+            level=level,
+            context=context,
+            source=source,
+            action=action,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            target_type=target_type,
+            target_id=target_id,
+        )
 
     diagnostic_id = f"diag_{uuid4().hex}"
     try:
         diagnostics = format_exception_diagnostics(error)
-        log_text = _format_log_text(event, diagnostic_id, diagnostics, context)
-        logger.log(
-            logging.WARNING if level == "warning" else logging.ERROR,
-            log_text,
-            extra=_log_extra(context, diagnostic_id),
-        )
     except Exception:  # noqa: BLE001 - diagnostics must never mask the failure
         diagnostics = {
             "exceptionType": _qualified_type(error),
@@ -332,37 +523,21 @@ def prepare_exception_diagnostic(
             "location": None,
             "truncated": False,
         }
-        logger.log(
-            logging.WARNING if level == "warning" else logging.ERROR,
-            "%s diagnostic_id=%s exception_type=%s",
-            event,
-            diagnostic_id,
-            diagnostics["exceptionType"],
-            extra=_log_extra(context, diagnostic_id),
-        )
-
-    metadata = {
-        "diagnostics": {"id": diagnostic_id, **diagnostics},
-        **_context_metadata(context),
-    }
-    snapshot = DiagnosticSnapshot(
+    return _build_snapshot(
+        logger,
+        event,
+        error,
+        diagnostics,
         diagnostic_id=diagnostic_id,
-        event=event,
         level=level,
-        message=str(diagnostics.get("message") or _qualified_type(error)),
-        metadata=metadata,
+        context=context,
         source=source,
-        action=action or event,
+        action=action,
         actor_type=actor_type,
         actor_id=actor_id,
         target_type=target_type,
         target_id=target_id,
     )
-    try:
-        setattr(error, _DIAGNOSTIC_ATTR, snapshot)
-    except Exception:  # noqa: BLE001, S110 - some exceptions forbid attributes
-        pass
-    return snapshot
 
 
 def _safe_rollback(session: Session) -> None:

@@ -14,7 +14,11 @@ from app.core.exception_diagnostics import (
     prepare_exception_diagnostic,
     sanitize_diagnostic_text,
 )
-from app.core.logging_config import ContextFormatter, configure_logging
+from app.core.logging_config import (
+    ContextFormatter,
+    configure_logging,
+    install_uvicorn_sanitizer,
+)
 from app.modules.system.application.projections import (
     serialize_system_event,
     summarize_diagnostic_metadata,
@@ -45,6 +49,98 @@ def test_sanitize_redacts_credentials_and_sql_parameters() -> None:
     assert "sekret" not in cleaned
     assert "[parameters: [redacted]]" in cleaned
     assert "Background on this error" not in cleaned
+
+
+def test_sanitize_redacts_cookie_after_exception_prefix() -> None:
+    cleaned = sanitize_diagnostic_text(
+        "RuntimeError: Cookie: shuku_session=runtime-cookie-secret"
+    )
+
+    assert "runtime-cookie-secret" not in cleaned
+    assert "RuntimeError: Cookie:" in cleaned
+
+
+def test_sanitize_redacts_json_and_dict_cookie_and_authorization() -> None:
+    text = (
+        '{"Cookie": "shuku_session=json-cookie", '
+        '"Set-Cookie": "shuku_session=json-set-cookie", '
+        '"Authorization": "Basic json-basic-credential"}\n'
+        "{'cookie': 'shuku_session=dict-cookie', "
+        "'authorization': 'Bearer dict-bearer-credential'}"
+    )
+
+    cleaned = sanitize_diagnostic_text(text)
+
+    for secret in (
+        "json-cookie",
+        "json-set-cookie",
+        "json-basic-credential",
+        "dict-cookie",
+        "dict-bearer-credential",
+    ):
+        assert secret not in cleaned
+    assert '"Cookie"' in cleaned
+    assert "'authorization'" in cleaned
+
+
+def test_sanitize_redacts_basic_and_bearer_authorization() -> None:
+    text = (
+        "RuntimeError: Authorization: Basic dXNlcjpwYXNzd29yZA==\n"
+        "ValueError: Authorization: Bearer header.payload.signature"
+    )
+
+    cleaned = sanitize_diagnostic_text(text)
+
+    assert "dXNlcjpwYXNzd29yZA" not in cleaned
+    assert "header.payload.signature" not in cleaned
+    assert "RuntimeError:" in cleaned
+
+
+def test_sanitize_redacts_full_sql_parameters_with_brackets_and_newlines() -> None:
+    text = (
+        "[parameters: (('a]b', 'sql-secret'), [1, 2, 3])]\n"
+        "[parameters: (1,\n  'sql-multiline-secret')]\n"
+        "trailing-safe-value"
+    )
+
+    cleaned = sanitize_diagnostic_text(text)
+
+    assert "sql-secret" not in cleaned
+    assert "sql-multiline-secret" not in cleaned
+    assert cleaned.count("[parameters: [redacted]]") == 2
+    assert "trailing-safe-value" in cleaned
+
+
+def test_secrets_absent_from_message_traceback_chain_and_metadata(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def _inner() -> None:
+        raise ValueError("cause Cookie: shuku_session=cause-cookie-secret")
+
+    def _outer() -> None:
+        try:
+            _inner()
+        except ValueError as root:
+            raise RuntimeError(
+                "outer Authorization: Basic b3V0ZXI6b3V0ZXItc2VjcmV0"
+            ) from root
+
+    try:
+        _outer()
+    except RuntimeError as error:
+        with caplog.at_level(logging.ERROR):
+            snapshot = prepare_exception_diagnostic(LOGGER, "embedded.secrets", error)
+
+    diagnostics = snapshot.metadata["diagnostics"]
+    persisted_blob = json.dumps(snapshot.metadata, ensure_ascii=False)
+    for secret in ("cause-cookie-secret", "b3V0ZXI6b3V0ZXItc2VjcmV0"):
+        assert secret not in diagnostics["message"]
+        assert secret not in diagnostics["traceback"]
+        assert secret not in json.dumps(diagnostics["chain"], ensure_ascii=False)
+        assert secret not in persisted_blob
+        assert secret not in caplog.text
+    assert diagnostics["message"].startswith("outer Authorization:")
+    assert diagnostics["chain"]
 
 
 def _raise_marker() -> None:
@@ -290,16 +386,141 @@ def test_loop_handler_skips_normal_cancellation() -> None:
     assert len(loop.default_calls) == 1
 
 
-def test_exception_group_reuses_leaf_diagnostic_id() -> None:
+def _new_error(error_type, message: str) -> BaseException:
     try:
-        raise ValueError("leaf failure")
-    except ValueError as leaf:
-        inner = prepare_exception_diagnostic(LOGGER, "leaf.failure", leaf)
-        group = ExceptionGroup("group failure", [leaf])
-        outer = prepare_exception_diagnostic(LOGGER, "group.failure", group)
+        raise error_type(message)
+    except error_type as error:
+        return error
+
+
+def test_exception_group_reuses_leaf_diagnostic_id() -> None:
+    leaf = _new_error(ValueError, "leaf failure")
+    inner = prepare_exception_diagnostic(LOGGER, "leaf.failure", leaf)
+    group = ExceptionGroup("group failure", [leaf])
+    outer = prepare_exception_diagnostic(LOGGER, "group.failure", group)
 
     assert outer is inner
     assert outer.diagnostic_id == inner.diagnostic_id
+    # Repeated propagation of the same group must not create a second event.
+    assert (
+        prepare_exception_diagnostic(LOGGER, "group.failure.again", group) is inner
+    )
+
+
+def test_exception_group_records_unrecorded_member_with_recorded_sibling() -> None:
+    recorded_leaf = _new_error(ValueError, "A token=alpha-secret")
+    recorded_snapshot = prepare_exception_diagnostic(
+        LOGGER, "leaf.recorded", recorded_leaf
+    )
+    unrecorded_leaf = _new_error(RuntimeError, "B token=beta-secret")
+    group = ExceptionGroup("group", [recorded_leaf, unrecorded_leaf])
+
+    snapshot = prepare_exception_diagnostic(LOGGER, "group", group)
+
+    assert snapshot is not recorded_snapshot
+    diagnostics = snapshot.metadata["diagnostics"]
+    assert diagnostics["memberCount"] == 2
+    assert len(diagnostics["members"]) == 1
+    assert diagnostics["members"][0]["exceptionType"].endswith("RuntimeError")
+    assert diagnostics["relatedIds"] == [recorded_snapshot.diagnostic_id]
+    assert "beta-secret" not in json.dumps(snapshot.metadata, ensure_ascii=False)
+    # The previously unrecorded leaf now carries the aggregate diagnostic.
+    assert (
+        prepare_exception_diagnostic(LOGGER, "leaf.later", unrecorded_leaf)
+        is snapshot
+    )
+
+
+def test_nested_exception_groups_diagnose_every_leaf() -> None:
+    leaf_c = _new_error(ValueError, "C token=gamma-secret")
+    leaf_d = _new_error(RuntimeError, "D token=delta-secret")
+    nested = ExceptionGroup(
+        "outer",
+        [ExceptionGroup("inner", [leaf_c, leaf_d])],
+    )
+
+    snapshot = prepare_exception_diagnostic(LOGGER, "nested.group", nested)
+
+    diagnostics = snapshot.metadata["diagnostics"]
+    assert diagnostics["memberCount"] == 2
+    assert len(diagnostics["members"]) == 2
+    types = {member["exceptionType"] for member in diagnostics["members"]}
+    assert any(item.endswith("ValueError") for item in types)
+    assert any(item.endswith("RuntimeError") for item in types)
+    blob = json.dumps(snapshot.metadata, ensure_ascii=False)
+    assert "gamma-secret" not in blob
+    assert "delta-secret" not in blob
+    # Each leaf now resolves to the aggregate diagnostic.
+    assert prepare_exception_diagnostic(LOGGER, "leaf.c", leaf_c) is snapshot
+    assert prepare_exception_diagnostic(LOGGER, "leaf.d", leaf_d) is snapshot
+
+
+def test_nested_group_does_not_rerecord_recorded_inner_group() -> None:
+    leaf_c = _new_error(ValueError, "C token=gamma-secret")
+    leaf_d = _new_error(RuntimeError, "D token=delta-secret")
+    inner_group = ExceptionGroup("inner", [leaf_c, leaf_d])
+    inner_snapshot = prepare_exception_diagnostic(LOGGER, "inner.group", inner_group)
+
+    leaf_e = _new_error(KeyError, "E token=epsilon-secret")
+    outer_group = ExceptionGroup("outer", [inner_group, leaf_e])
+    snapshot = prepare_exception_diagnostic(LOGGER, "outer.group", outer_group)
+
+    assert snapshot is not inner_snapshot
+    diagnostics = snapshot.metadata["diagnostics"]
+    assert diagnostics["relatedIds"] == [inner_snapshot.diagnostic_id]
+    assert len(diagnostics["members"]) == 1
+    assert diagnostics["members"][0]["exceptionType"].endswith("KeyError")
+    assert prepare_exception_diagnostic(LOGGER, "leaf.e", leaf_e) is snapshot
+    # The already recorded inner group is not expanded into new events.
+    assert (
+        prepare_exception_diagnostic(LOGGER, "inner.again", inner_group)
+        is inner_snapshot
+    )
+
+
+def test_distinct_groups_are_not_merged() -> None:
+    first = prepare_exception_diagnostic(
+        LOGGER,
+        "group.one",
+        ExceptionGroup("one", [_new_error(ValueError, "first attempt")]),
+    )
+    second = prepare_exception_diagnostic(
+        LOGGER,
+        "group.two",
+        ExceptionGroup("two", [_new_error(ValueError, "first attempt")]),
+    )
+
+    assert first.diagnostic_id != second.diagnostic_id
+
+
+def test_uvicorn_sanitizer_redacts_exc_info_and_message() -> None:
+    logger = logging.getLogger("uvicorn.error")
+    original_handlers = logger.handlers[:]
+    original_filters = logger.filters[:]
+    original_propagate = logger.propagate
+    original_level = logger.level
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.handlers = [handler]
+    logger.propagate = False
+    logger.setLevel(logging.ERROR)
+    try:
+        install_uvicorn_sanitizer()
+        try:
+            raise RuntimeError("Cookie: shuku_session=uvicorn-unit-secret")
+        except RuntimeError:
+            logger.exception("Exception in ASGI application")
+    finally:
+        logger.handlers = original_handlers
+        logger.filters = original_filters
+        logger.propagate = original_propagate
+        logger.setLevel(original_level)
+
+    output = stream.getvalue()
+    assert "Exception in ASGI application" in output
+    assert "RuntimeError" in output
+    assert "uvicorn-unit-secret" not in output
 
 
 def test_json_metadata_payload_contains_no_secrets() -> None:
