@@ -1,11 +1,6 @@
 """Stable media application contracts."""
 
 from app.modules.media.application.cover_identity import CoverUrlResolver
-from app.modules.media.application.cover_proxy import (
-    UnsafeCoverUrl,
-    configured_cover_origins,
-    validate_cover_url,
-)
 from app.modules.media.application.first_page_cover import FirstPageCoverPort
 from app.modules.media.application.page_index import (
     ReadOnlyResourcePageIndex,
@@ -24,8 +19,5 @@ __all__ = [
     "ResourcePageIndexProjection",
     "ResourcePageSource",
     "ResourcePageUnit",
-    "UnsafeCoverUrl",
     "comic_manifest_policy_failure",
-    "configured_cover_origins",
-    "validate_cover_url",
 ]

@@ -36,8 +36,8 @@ const candidate: SourceNodeMetadataCandidate = {
 
 test('whole-book recognition exposes every supported book field', () => {
   assert.deepEqual(recognizedMetadataFields('book').map(({ field }) => field), [
-    'book.title', 'book.author', 'book.description', 'book.seriesName',
-    'book.seriesIndex', 'book.tags', 'book.cover'
+    'book.cover', 'book.title', 'book.author', 'book.description', 'book.seriesName',
+    'book.seriesIndex', 'book.tags'
   ]);
 });
 
@@ -47,9 +47,9 @@ test('resource recognition groups linked book fields and all resource metadata',
     'book.author', 'book.seriesName', 'book.seriesIndex', 'book.tags'
   ]);
   assert.deepEqual(definitions.filter(({ group }) => group === 'resource').map(({ field }) => field), [
-    'resource.title', 'resource.description', 'resource.publisher', 'resource.publishedAt',
+    'resource.cover', 'resource.title', 'resource.description', 'resource.publisher', 'resource.publishedAt',
     'resource.language', 'resource.isbn', 'resource.identifier', 'resource.narrator',
-    'resource.abridged', 'resource.resourceIndex', 'resource.cover'
+    'resource.abridged', 'resource.resourceIndex'
   ]);
 });
 

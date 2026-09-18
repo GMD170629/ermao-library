@@ -5,12 +5,11 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
-from http.client import HTTPMessage
 from pathlib import Path
-from typing import IO, Annotated, Any
+from typing import Annotated, Any
 from urllib.error import HTTPError
-from urllib.request import HTTPRedirectHandler, build_opener
 from urllib.request import Request as UrlRequest
+from urllib.request import build_opener
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
@@ -45,11 +44,6 @@ from app.core.authorization import (
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models import LibraryReadableResource
-from app.modules.media.application.cover_proxy import (
-    UnsafeCoverUrl,
-    configured_cover_origins,
-    validate_cover_url,
-)
 from app.modules.media.application.page_index import comic_manifest_policy_failure
 from app.modules.media.application.resource_preview import (
     ResourcePreviewAccessScope,
@@ -66,7 +60,6 @@ from app.modules.media.presentation.schemas import (
 )
 from app.schemas.responses import fail
 from app.services.default_cover import DEFAULT_COVER_ASSET_PATH, is_default_cover_path
-from app.services.metadata_provider_registry import get_metadata_provider
 
 router = APIRouter(tags=["media"], route_class=TypedContractRoute)
 logger = logging.getLogger(__name__)
@@ -75,24 +68,6 @@ ApplicationSettings = Annotated[Settings, Depends(get_settings)]
 PARTIAL_CONTENT_RESPONSE: dict[int | str, dict[str, Any]] = {
     206: {"description": "Partial content"}
 }
-
-
-class _SafeCoverRedirectHandler(HTTPRedirectHandler):
-    def __init__(self, allowed_origins: frozenset[tuple[str, str, int | None]]) -> None:
-        super().__init__()
-        self._allowed_origins = allowed_origins
-
-    def redirect_request(
-        self,
-        req: UrlRequest,
-        fp: IO[bytes],
-        code: int,
-        msg: str,
-        headers: HTTPMessage,
-        newurl: str,
-    ) -> UrlRequest | None:
-        validate_cover_url(newurl, configured_origins=self._allowed_origins)
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 def _now() -> datetime:
@@ -340,7 +315,7 @@ def get_cover(
     if (
         cover_path is None
         or not cover_path.is_file()
-        or is_default_cover_path(cover_path_value, settings)
+        or is_default_cover_path(cover_path_value)
     ):
         cover_path = DEFAULT_COVER_ASSET_PATH
         using_fallback = True
@@ -377,17 +352,6 @@ def metadata_cover_proxy(
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    provider_configs = [
-        (get_metadata_provider(db, provider_id) or {}).get("config", {})
-        for provider_id in ("douban", "bangumi")
-    ]
-    allowed_origins = configured_cover_origins(
-        config.get("baseUrl") for config in provider_configs if isinstance(config, dict)
-    )
-    try:
-        validate_cover_url(url, configured_origins=allowed_origins)
-    except UnsafeCoverUrl:
-        return fail("封面地址不支持", status_code=400)
     remote_request = UrlRequest(
         url,
         headers={
@@ -397,13 +361,13 @@ def metadata_cover_proxy(
         },
     )
     try:
-        opener = build_opener(_SafeCoverRedirectHandler(allowed_origins))
+        opener = build_opener()
         with opener.open(remote_request, timeout=20) as remote_response:
             content_type = remote_response.headers.get("content-type") or "image/jpeg"
             if not content_type.lower().startswith("image/"):
                 return fail("远程地址不是图片", status_code=400)
             data = remote_response.read(8 * 1024 * 1024)
-    except (HTTPError, OSError, UnsafeCoverUrl) as exc:
+    except (HTTPError, OSError) as exc:
         logger.warning("failed to proxy metadata cover url=%s error=%s", url, exc)
         return fail("封面预览加载失败", status_code=502)
     return Response(

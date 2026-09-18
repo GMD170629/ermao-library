@@ -225,7 +225,6 @@ export function BookActionController({
       onClose={() => setRecognitionBook(null)}
       onApplied={async () => {
         const nextBook = await fetchBook(recognitionBook.id);
-        setRecognitionBook(nextBook);
         await onChanged(nextBook);
       }}
     /> : null}

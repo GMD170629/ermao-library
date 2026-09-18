@@ -1755,6 +1755,7 @@
   "有新版本": "有新版本",
   "右至左": "右至左",
   "语言": "语言",
+  "预览《{value0}》的封面": "预览《{value0}》的封面",
   "预览不存在": "预览不存在",
   "预览暂不可用": "预览暂不可用",
   "预览暂时不可用": "预览暂时不可用",
@@ -2173,8 +2174,5 @@
   "TXT 解码器无法解码此文件。": "TXT 解码器无法解码此文件。",
   "TXT 解析器未找到可读文本。": "TXT 解析器未找到可读文本。",
   "URL 加 ?debug=0 可关闭持久开关": "URL 加 ?debug=0 可关闭持久开关",
-  "useAudioPlayback 必须在 AudioPlaybackProvider 内使用": "useAudioPlayback 必须在 AudioPlaybackProvider 内使用",
-  "封面地址不支持": "封面地址不支持",
-  "可更新封面": "可更新封面",
-  "已设置封面": "已设置封面"
+  "useAudioPlayback 必须在 AudioPlaybackProvider 内使用": "useAudioPlayback 必须在 AudioPlaybackProvider 内使用"
 }

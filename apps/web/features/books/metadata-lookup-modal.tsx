@@ -2,13 +2,15 @@
 
 import { authorDisplayLabel } from '@/types/book';
 
-import { CheckCircle2, Search, Sparkles, X } from 'lucide-react';
+import { CheckCircle2, ImageOff, Maximize2, Search, Sparkles, X } from 'lucide-react';
+import Image from 'next/image';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
 import { Select } from '../../components/ui/select';
 import { useToast } from '../../components/ui/feedback';
+import { withBasePath } from '../../lib/base-path';
 import type { ReadableResourceView, BookView } from '../../types/book';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
@@ -45,6 +47,45 @@ function initialSource(providers: ReadonlyArray<{ id: string; enabled: boolean }
   return providers.find((provider) => provider.enabled)?.id ?? '';
 }
 
+function previewCoverUrl(value: string) {
+  if (value.startsWith('/')) return withBasePath(value);
+  return withBasePath(`/api/metadata/cover-proxy?url=${encodeURIComponent(value)}`);
+}
+
+function CoverThumbnail({ url, previewLabel, className, onPreview }: {
+  url: string;
+  previewLabel: string;
+  className?: string;
+  onPreview?: () => void;
+}) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setFailed(false);
+  }, [url]);
+  const available = Boolean(url) && !failed;
+  const content = available
+    ? <Image src={previewCoverUrl(url)} alt="" width={48} height={72} unoptimized loading="lazy" decoding="async" onError={() => setFailed(true)} className="h-full w-full object-cover" />
+    : <span className="flex h-full w-full items-center justify-center text-slate-400"><ImageOff size={18} /></span>;
+  if (!onPreview || !available) {
+    return <div data-i18n-skip className={cn('overflow-hidden rounded-xl border border-slate-200 bg-slate-100', className)}>{content}</div>;
+  }
+  return (
+    <button
+      type="button"
+      data-i18n-skip
+      onClick={(event) => { event.stopPropagation(); onPreview(); }}
+      title={previewLabel}
+      aria-label={previewLabel}
+      className={cn('group relative overflow-hidden rounded-xl border border-slate-200 bg-slate-100 transition hover:border-blue-300', className)}
+    >
+      {content}
+      <span className="absolute inset-0 flex items-center justify-center bg-slate-950/45 text-white opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
+        <Maximize2 size={16} />
+      </span>
+    </button>
+  );
+}
+
 export function MetadataLookupModal({ book, currentResourceId, fixedScope = null, open, onClose, onApplied }: MetadataLookupModalProps) {
   const { formatDate, t: i18nAttribute } = useAttributeI18n();
   const feedback = useToast();
@@ -62,6 +103,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [coverPreview, setCoverPreview] = useState<{ url: string; title: string } | null>(null);
   const [providers, setProviders] = useState<Awaited<ReturnType<typeof fetchMetadataProviders>>['providers']>([]);
   const [enabledProviderIds, setEnabledProviderIds] = useState<string[]>([]);
   const searchControllerRef = useRef<AbortController | null>(null);
@@ -85,6 +127,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
     setSelectedFields([]);
     setMessage('');
     setError('');
+    setCoverPreview(null);
     const controller = new AbortController();
     void fetchMetadataProviders(controller.signal)
       .then(({ providers: nextProviders }) => {
@@ -109,6 +152,17 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
   useEffect(() => {
     setSelectedFields(defaultRecognizedMetadataFields(book, selectedTargetResource, selected, definitions));
   }, [book, definitions, selected, selectedTargetResource]);
+
+  useEffect(() => {
+    if (!coverPreview) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      setCoverPreview(null);
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [coverPreview]);
 
   async function searchCandidates() {
     searchControllerRef.current?.abort();
@@ -184,6 +238,22 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
     return String(value);
   }
 
+  function renderCoverValue(value: unknown, kind: 'current' | 'candidate', field: RecognizedMetadataField) {
+    const coverUrl = typeof value === 'string' ? value : '';
+    if (!hasMetadataValue(coverUrl)) {
+      return kind === 'candidate' ? i18nAttribute('候选未提供该字段') : i18nAttribute('未填写');
+    }
+    const title = field === 'resource.cover' ? targetResource?.title ?? book.title : book.title;
+    return (
+      <CoverThumbnail
+        url={coverUrl}
+        previewLabel={i18nAttribute('预览《{value0}》的封面', { value0: title })}
+        className="h-[72px] w-12"
+        onPreview={() => setCoverPreview({ url: coverUrl, title })}
+      />
+    );
+  }
+
   if (!open) return null;
 
   return (
@@ -222,23 +292,33 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
         <div className="grid min-h-0 flex-1 gap-4 overflow-auto p-5 lg:grid-cols-[320px_1fr]">
           <div className="space-y-2">
             {candidates.map((candidate) => (
-              <button
+              <div
                 key={candidate.id}
-                type="button"
-                onClick={() => setSelectedId(candidate.id)}
-                className={cn('w-full rounded-2xl border p-3 text-left transition', selected?.id === candidate.id ? 'border-blue-200 bg-blue-50' : 'border-slate-200 hover:bg-slate-50')}
+                className={cn('w-full rounded-2xl border p-3 transition', selected?.id === candidate.id ? 'border-blue-200 bg-blue-50' : 'border-slate-200 hover:bg-slate-50')}
               >
                 <div className="flex gap-3">
-                  <div data-i18n-skip className="min-w-0 flex-1">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="line-clamp-2 font-medium text-slate-900">{candidate.title || i18nAttribute("未命名候选")}</div>
-                      <Badge tone={candidate.confidence >= 0.8 ? 'green' : 'blue'}>{Math.round(candidate.confidence * 100)}%</Badge>
+                  <CoverThumbnail
+                    url={candidate.coverUrl ?? ''}
+                    previewLabel={i18nAttribute('预览《{value0}》的封面', { value0: candidate.title || book.title })}
+                    className="h-[72px] w-12 shrink-0"
+                    onPreview={() => setCoverPreview({ url: candidate.coverUrl ?? '', title: candidate.title || book.title })}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setSelectedId(candidate.id)}
+                    className="min-w-0 flex-1 text-left"
+                  >
+                    <div data-i18n-skip className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="line-clamp-2 font-medium text-slate-900">{candidate.title || i18nAttribute("未命名候选")}</div>
+                        <Badge tone={candidate.confidence >= 0.8 ? 'green' : 'blue'}>{Math.round(candidate.confidence * 100)}%</Badge>
+                      </div>
+                      <div className="mt-1 line-clamp-1 text-xs text-slate-500">{[authorDisplayLabel(candidate.author), candidate.source].filter(Boolean).join(' · ')}</div>
+                      {candidate.description ? <div className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500">{candidate.description}</div> : null}
                     </div>
-                    <div className="mt-1 line-clamp-1 text-xs text-slate-500">{[authorDisplayLabel(candidate.author), candidate.source].filter(Boolean).join(' · ')}</div>
-                    {candidate.description ? <div className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500">{candidate.description}</div> : null}
-                  </div>
+                  </button>
                 </div>
-              </button>
+              </div>
             ))}
             {candidates.length === 0 ? <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-sm text-slate-500"><I18nText>输入查询文本后开始搜索。</I18nText></div> : null}
           </div>
@@ -274,11 +354,11 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
                         <div className="font-medium">{i18nAttribute(label)}</div>
                         <div className="col-span-2 min-w-0 break-words pl-7 text-slate-500 md:col-auto md:pl-0">
                           <span className="mb-1 block text-xs text-slate-400 md:hidden"><I18nText>当前值</I18nText></span>
-                          {field.endsWith('.cover') && hasMetadataValue(currentValue) ? i18nAttribute('已设置封面') : renderFieldValue(currentValue, 'current', field)}
+                          {field.endsWith('.cover') ? renderCoverValue(currentValue, 'current', field) : renderFieldValue(currentValue, 'current', field)}
                         </div>
                         <div className="col-span-2 min-w-0 break-words pl-7 text-slate-900 md:col-auto md:pl-0">
                           <span className="mb-1 block text-xs text-slate-400 md:hidden"><I18nText>候选值</I18nText></span>
-                          {field.endsWith('.cover') && available ? i18nAttribute('可更新封面') : renderFieldValue(nextValue, 'candidate', field)}
+                          {field.endsWith('.cover') ? renderCoverValue(nextValue, 'candidate', field) : renderFieldValue(nextValue, 'candidate', field)}
                         </div>
                       </label>
                     );
@@ -294,6 +374,34 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
           <Button disabled={busy || !selected || selectedFields.length === 0 || (scope === 'resource' && !targetResource)} icon={CheckCircle2} onClick={() => void applySelected()}><I18nText>应用所选字段</I18nText></Button>
         </div>
       </div>
+
+      {coverPreview ? (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-label={coverPreview.title}
+          onClick={() => setCoverPreview(null)}
+        >
+          <Image
+            data-i18n-skip
+            src={previewCoverUrl(coverPreview.url)}
+            alt={coverPreview.title}
+            width={600}
+            height={900}
+            unoptimized
+            className="h-auto max-h-[90dvh] w-auto max-w-[90vw] rounded-2xl shadow-2xl"
+          />
+          <button
+            type="button"
+            onClick={() => setCoverPreview(null)}
+            aria-label={i18nAttribute("关闭")}
+            className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-2xl bg-white/90 text-slate-700 hover:bg-white"
+          >
+            <X size={18} />
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

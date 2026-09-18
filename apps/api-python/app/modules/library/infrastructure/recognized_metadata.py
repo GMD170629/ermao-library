@@ -5,12 +5,10 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime
-from http.client import HTTPMessage
 from pathlib import Path
-from typing import IO
 from urllib.error import HTTPError
-from urllib.request import HTTPRedirectHandler, build_opener
 from urllib.request import Request as UrlRequest
+from urllib.request import build_opener
 from uuid import uuid4
 
 from PIL import Image, UnidentifiedImageError
@@ -55,7 +53,6 @@ from app.modules.library.infrastructure.facet_sync import (
     execute_book_facet_write,
     prepare_book_facet_write,
 )
-from app.modules.media.public import validate_cover_url
 
 _MAX_COVER_BYTES = 10 * 1024 * 1024
 _IMAGE_SUFFIXES = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
@@ -318,23 +315,8 @@ class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetada
         metadata.updated_at = now
 
 
-class _SafeCoverRedirectHandler(HTTPRedirectHandler):
-    def redirect_request(
-        self,
-        req: UrlRequest,
-        fp: IO[bytes],
-        code: int,
-        msg: str,
-        headers: HTTPMessage,
-        newurl: str,
-    ) -> UrlRequest | None:
-        validate_cover_url(newurl)
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
-
-
 class SafeRemoteCoverDownloader(RemoteCoverDownloadPort):
     def download(self, cover_url: str) -> bytes:
-        validate_cover_url(cover_url)
         request = UrlRequest(
             cover_url,
             headers={
@@ -343,7 +325,7 @@ class SafeRemoteCoverDownloader(RemoteCoverDownloadPort):
                 "Referer": "https://book.douban.com/",
             },
         )
-        opener = build_opener(_SafeCoverRedirectHandler())
+        opener = build_opener()
         try:
             with opener.open(request, timeout=20) as response:
                 content_type = str(response.headers.get("content-type") or "")

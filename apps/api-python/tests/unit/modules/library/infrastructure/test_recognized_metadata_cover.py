@@ -13,20 +13,12 @@ from app.modules.library.infrastructure.recognized_metadata import (
     FilesystemRecognizedCoverPublication,
     SafeRemoteCoverDownloader,
 )
-from app.modules.media.public import UnsafeCoverUrl
 
 
 def _image_bytes(image_format: str = "PNG") -> bytes:
     buffer = BytesIO()
     Image.new("RGB", (4, 4), color=(20, 40, 60)).save(buffer, format=image_format)
     return buffer.getvalue()
-
-
-def test_remote_cover_rejects_non_public_targets_before_network_access() -> None:
-    downloader = SafeRemoteCoverDownloader()
-
-    with pytest.raises(UnsafeCoverUrl):
-        downloader.download("http://127.0.0.1/private-cover.png")
 
 
 class _Response:
@@ -66,7 +58,6 @@ def test_remote_cover_rejects_wrong_mime_and_oversized_responses(
     content_type: str,
     content: bytes,
 ) -> None:
-    monkeypatch.setattr(recognized_metadata, "validate_cover_url", lambda url: url)
     monkeypatch.setattr(
         recognized_metadata,
         "build_opener",

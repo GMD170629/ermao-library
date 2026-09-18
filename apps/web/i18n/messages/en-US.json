@@ -2173,8 +2173,6 @@
   "已复制堆栈": "Stack trace copied",
   "异常类型：": "Exception type: ",
   "异常信息：": "Exception message: ",
-  "执行阶段：": "Stage: ",
-  "封面地址不支持": "Cover URL is unsupported",
-  "可更新封面": "New cover available",
-  "已设置封面": "Cover set"
+  "预览《{value0}》的封面": "Preview the cover of \"{value0}\"",
+  "执行阶段：": "Stage: "
 }

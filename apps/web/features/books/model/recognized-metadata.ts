@@ -17,13 +17,13 @@ export type MetadataFieldDefinition = Readonly<{
 }>;
 
 const bookFields: readonly MetadataFieldDefinition[] = [
+  { field: 'book.cover', group: 'book', label: '封面' },
   { field: 'book.title', group: 'book', label: '标题' },
   { field: 'book.author', group: 'book', label: '作者' },
   { field: 'book.description', group: 'book', label: '简介' },
   { field: 'book.seriesName', group: 'book', label: '系列名' },
   { field: 'book.seriesIndex', group: 'book', label: '系列序号' },
-  { field: 'book.tags', group: 'book', label: '标签' },
-  { field: 'book.cover', group: 'book', label: '封面' }
+  { field: 'book.tags', group: 'book', label: '标签' }
 ];
 
 const resourceBookFields: readonly MetadataFieldDefinition[] = [
@@ -34,6 +34,7 @@ const resourceBookFields: readonly MetadataFieldDefinition[] = [
 ];
 
 const resourceFields: readonly MetadataFieldDefinition[] = [
+  { field: 'resource.cover', group: 'resource', label: '封面' },
   { field: 'resource.title', group: 'resource', label: '卷标题' },
   { field: 'resource.description', group: 'resource', label: '简介' },
   { field: 'resource.publisher', group: 'resource', label: '出版社' },
@@ -43,8 +44,7 @@ const resourceFields: readonly MetadataFieldDefinition[] = [
   { field: 'resource.identifier', group: 'resource', label: '标识符' },
   { field: 'resource.narrator', group: 'resource', label: '朗读者' },
   { field: 'resource.abridged', group: 'resource', label: '删节状态' },
-  { field: 'resource.resourceIndex', group: 'resource', label: '卷号' },
-  { field: 'resource.cover', group: 'resource', label: '封面' }
+  { field: 'resource.resourceIndex', group: 'resource', label: '卷号' }
 ];
 
 export function recognizedMetadataFields(scope: MetadataTargetScope): readonly MetadataFieldDefinition[] {
