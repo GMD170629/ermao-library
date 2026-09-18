@@ -138,6 +138,12 @@ def _redact_sql_parameters(text: str) -> str:
         while cursor < length:
             char = text[cursor]
             if quote is not None:
+                if char == "\\":
+                    # Backslash-escaped character inside a quoted value (for
+                    # example repr of ``a\'b``); never treat it as the closing
+                    # quote or as a bracket.
+                    cursor += 2
+                    continue
                 if char == quote:
                     if cursor + 1 < length and text[cursor + 1] == quote:
                         cursor += 2

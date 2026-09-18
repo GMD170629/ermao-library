@@ -6,6 +6,9 @@ import json
 import logging
 
 import pytest
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import IntegrityError
+from uvicorn.logging import AccessFormatter
 
 from app.api.diagnostics_middleware import DiagnosticBoundaryMiddleware
 from app.core.exception_diagnostics import (
@@ -109,6 +112,77 @@ def test_sanitize_redacts_full_sql_parameters_with_brackets_and_newlines() -> No
     assert "sql-multiline-secret" not in cleaned
     assert cleaned.count("[parameters: [redacted]]") == 2
     assert "trailing-safe-value" in cleaned
+
+
+def test_redact_sql_parameters_handles_escaped_quotes_and_multiple_segments() -> None:
+    text = (
+        "[parameters: (1, 'a\\']b\"c', 'must-not-leak-3f9a')]\n"
+        "[parameters: (\"x\\\"y]z\", 'other-secret')]\n"
+        "safe-tail"
+    )
+
+    cleaned = sanitize_diagnostic_text(text)
+
+    assert "must-not-leak-3f9a" not in cleaned
+    assert "other-secret" not in cleaned
+    assert "a']b" not in cleaned
+    assert cleaned.count("[parameters: [redacted]]") == 2
+    assert "safe-tail" in cleaned
+
+
+def test_redact_sql_parameters_conservative_when_unclosed() -> None:
+    cleaned = sanitize_diagnostic_text(
+        "[parameters: (1, 'unclosed-secret') trailing-sensitive"
+    )
+
+    assert "unclosed-secret" not in cleaned
+    assert "trailing-sensitive" not in cleaned
+    assert "[parameters: [redacted]]" in cleaned
+
+
+def test_real_sqlalchemy_exception_parameters_are_redacted(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    tricky = "a']b\"c"
+    sensitive = "must-not-leak-3f9a"
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT, b TEXT)"
+        )
+
+    with pytest.raises(IntegrityError) as excinfo, engine.begin() as connection:
+        statement = text(
+            "INSERT INTO t (id, a, b) VALUES (:id, :a, :b)"
+        )
+        connection.execute(
+            statement, {"id": 1, "a": "safe", "b": "safe"}
+        )
+        connection.execute(
+            statement, {"id": 1, "a": tricky, "b": sensitive}
+        )
+
+    error = excinfo.value
+    # The raw database exception genuinely contains the parameters.
+    assert sensitive in str(error)
+
+    diagnostics = format_exception_diagnostics(error)
+    blob = (
+        diagnostics["message"]
+        + diagnostics["traceback"]
+        + json.dumps(diagnostics["chain"], ensure_ascii=False)
+    )
+    assert sensitive not in blob
+    assert "a']b" not in blob
+    assert diagnostics["exceptionType"].endswith("IntegrityError")
+    assert "UNIQUE constraint failed" in diagnostics["message"]
+    assert diagnostics["traceback"]
+
+    with caplog.at_level(logging.ERROR):
+        snapshot = prepare_exception_diagnostic(LOGGER, "sql.integrity", error)
+    assert sensitive not in json.dumps(snapshot.metadata, ensure_ascii=False)
+    assert sensitive not in caplog.text
+    assert snapshot.message == diagnostics["message"]
 
 
 def test_secrets_absent_from_message_traceback_chain_and_metadata(
@@ -521,6 +595,43 @@ def test_uvicorn_sanitizer_redacts_exc_info_and_message() -> None:
     assert "Exception in ASGI application" in output
     assert "RuntimeError" in output
     assert "uvicorn-unit-secret" not in output
+
+
+def test_uvicorn_sanitizer_preserves_access_formatter_args() -> None:
+    logger = logging.getLogger("uvicorn.access")
+    original_handlers = logger.handlers[:]
+    original_filters = logger.filters[:]
+    original_propagate = logger.propagate
+    original_level = logger.level
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(
+        AccessFormatter('%(client_addr)s - "%(request_line)s" %(status_code)s')
+    )
+    logger.handlers = [handler]
+    logger.propagate = False
+    logger.setLevel(logging.INFO)
+    try:
+        install_uvicorn_sanitizer()
+        logger.info(
+            '%s - "%s %s HTTP/%s" %d',
+            "127.0.0.1:5000",
+            "GET",
+            "/ok?token=unit-query-secret",
+            "1.1",
+            200,
+        )
+    finally:
+        logger.handlers = original_handlers
+        logger.filters = original_filters
+        logger.propagate = original_propagate
+        logger.setLevel(original_level)
+
+    output = stream.getvalue()
+    assert "127.0.0.1:5000" in output
+    assert '"GET /ok?token=[redacted] HTTP/1.1"' in output
+    assert "200" in output
+    assert "unit-query-secret" not in output
 
 
 def test_json_metadata_payload_contains_no_secrets() -> None:

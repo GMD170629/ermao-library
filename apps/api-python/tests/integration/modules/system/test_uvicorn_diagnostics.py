@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 import httpx
+import pytest
 
 API_ROOT = Path(__file__).resolve().parents[4]
 
@@ -18,6 +19,10 @@ from app.core.logging_config import configure_logging
 
 async def _dispatch(scope, receive, send):
     path = scope["path"]
+    if path == "/ok":
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+        return
     if path == "/route":
         raise RuntimeError(
             "route failure Cookie: shuku_session=uvicorn-route-secret"
@@ -72,6 +77,13 @@ async def app(scope, receive, send):
     await _outer(scope, receive, send)
 '''
 
+SECRETS = (
+    "uvicorn-route-secret",
+    "uvicorn-stream-secret",
+    "uvicorn-query-secret",
+    "dXNlcjp1dmljb3JuLXNlY3JldA",
+)
+
 
 def _free_port() -> int:
     with socket.socket() as probe:
@@ -96,7 +108,25 @@ def _get(port: int, path: str) -> httpx.Response:
     )
 
 
-def test_real_uvicorn_logs_are_sanitized_across_boundaries(tmp_path: Path) -> None:
+def _read_stream(port: int) -> bytes:
+    with socket.create_connection(("127.0.0.1", port), timeout=5.0) as sock:
+        sock.sendall(
+            b"GET /stream HTTP/1.1\r\nHost: localhost\r\n"
+            b"Connection: close\r\n\r\n"
+        )
+        chunks: list[bytes] = []
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    return b"".join(chunks)
+
+
+@pytest.mark.parametrize("log_level", ["info", "error"])
+def test_real_uvicorn_logs_are_safe_and_access_formatted(
+    tmp_path: Path, log_level: str
+) -> None:
     (tmp_path / "diagnostic_uvicorn_app.py").write_text(APP_SOURCE, encoding="utf-8")
     port = _free_port()
     existing_pythonpath = os.environ.get("PYTHONPATH", "")
@@ -118,7 +148,7 @@ def test_real_uvicorn_logs_are_sanitized_across_boundaries(tmp_path: Path) -> No
             "--port",
             str(port),
             "--log-level",
-            "error",
+            log_level,
         ],
         cwd=str(API_ROOT),
         env=env,
@@ -129,6 +159,13 @@ def test_real_uvicorn_logs_are_sanitized_across_boundaries(tmp_path: Path) -> No
     try:
         assert _wait_for_port(port), "uvicorn server did not start"
 
+        ok = _get(port, "/ok?token=uvicorn-query-secret")
+        assert ok.status_code == 200
+        assert ok.text == "ok"
+
+        missing = _get(port, "/missing")
+        assert missing.status_code == 404
+
         route = _get(port, "/route")
         assert route.status_code == 500
         assert route.headers["X-Error-Id"].startswith("diag_")
@@ -137,35 +174,34 @@ def test_real_uvicorn_logs_are_sanitized_across_boundaries(tmp_path: Path) -> No
         boundary = _get(port, "/boundary")
         assert boundary.status_code == 500
 
-        with socket.create_connection(("127.0.0.1", port), timeout=5.0) as sock:
-            sock.sendall(
-                b"GET /stream HTTP/1.1\r\nHost: localhost\r\n"
-                b"Connection: close\r\n\r\n"
-            )
-            chunks: list[bytes] = []
-            while True:
-                chunk = sock.recv(4096)
-                if not chunk:
-                    break
-                chunks.append(chunk)
-        stream_bytes = b"".join(chunks)
+        stream_bytes = _read_stream(port)
     finally:
         process.terminate()
         try:
-            _stdout, stderr = process.communicate(timeout=10)
+            stdout, stderr = process.communicate(timeout=10)
         except subprocess.TimeoutExpired:
             process.kill()
-            _stdout, stderr = process.communicate()
+            stdout, stderr = process.communicate()
 
-    assert stderr, "uvicorn produced no server output"
-    for secret in (
-        "uvicorn-route-secret",
-        "uvicorn-stream-secret",
-        "dXNlcjp1dmljb3JuLXNlY3JldA",
-    ):
-        assert secret not in stderr, f"server log leaked {secret}"
+    combined = f"{stdout}\n{stderr}"
+    assert combined.strip(), "uvicorn produced no output"
+    for secret in SECRETS:
+        assert secret not in stdout, f"stdout leaked {secret}"
+        assert secret not in stderr, f"stderr leaked {secret}"
+    assert "Logging error" not in combined
+    assert "cannot unpack" not in combined
+    assert "TypeError" not in combined
+
+    # Error visibility and correlation must survive sanitization.
     assert "Exception in ASGI application" in stderr
     assert "diagnostic_id=diag_" in stderr
+
+    if log_level == "info":
+        assert '"GET /ok?token=[redacted] HTTP/1.1"' in stdout
+        assert "200" in stdout
+        assert '"GET /missing HTTP/1.1"' in stdout
+        assert "404" in stdout
+        assert "127.0.0.1" in stdout
 
     # The streaming failure must not trigger a second response.
     assert b"partial-" in stream_bytes

@@ -36,6 +36,10 @@ _CONTEXT_EXTRA_KEYS = (
 _configured = False
 
 
+def _sanitize_arg(value: object) -> object:
+    return sanitize_diagnostic_text(value) if isinstance(value, str) else value
+
+
 class SanitizingFilter(logging.Filter):
     """Redact credentials from a record before its handlers format it."""
 
@@ -46,15 +50,17 @@ class SanitizingFilter(logging.Filter):
             except Exception:  # noqa: BLE001 - never break logging on diagnostics
                 text = ""
             record.exc_text = sanitize_diagnostic_text(text)
-        if record.args:
-            try:
-                message = record.getMessage()
-            except Exception:  # noqa: BLE001 - fall back to the raw template
-                message = str(record.msg)
-            record.msg = sanitize_diagnostic_text(message)
-            record.args = None
-        elif isinstance(record.msg, str):
+        if isinstance(record.msg, str):
             record.msg = sanitize_diagnostic_text(record.msg)
+        # Preserve the argument contract: formatters such as uvicorn's
+        # AccessFormatter unpack ``record.args`` positionally, so sanitize the
+        # values in place instead of collapsing them into the message.
+        if isinstance(record.args, tuple):
+            record.args = tuple(_sanitize_arg(value) for value in record.args)
+        elif isinstance(record.args, dict):
+            record.args = {
+                key: _sanitize_arg(value) for key, value in record.args.items()
+            }
         return True
 
 
