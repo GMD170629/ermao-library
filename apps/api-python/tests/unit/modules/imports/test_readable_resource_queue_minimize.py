@@ -517,7 +517,9 @@ def test_worker_containment_logs_without_worker_id(
     records = [
         record
         for record in caplog.records
-        if record.getMessage() == "readable_resource.worker.containment_failure"
+        if record.getMessage().startswith(
+            "readable_resource.worker.containment_failure"
+        )
     ]
     assert len(records) == 1
     assert getattr(records[0], "task_id", None) == "task-1"

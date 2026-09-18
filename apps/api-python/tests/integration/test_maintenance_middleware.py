@@ -239,11 +239,11 @@ def test_maintenance_query_error_closes_session_and_does_not_allow_write(
                 await client.post("/api/maintenance-probe")
         assert harness.pool.checkedout() == 0
         assert harness.reached == []
-        assert [phase for phase, _, _ in harness.lifecycle] == [
-            "create",
-            "query",
-            "close",
-        ]
+        # The maintenance boundary session and the independent diagnostic
+        # session must both be created and closed.
+        phases = [phase for phase, _, _ in harness.lifecycle]
+        assert phases[0] == "create"
+        assert phases.count("create") == phases.count("close")
         async with harness.client(raise_app_exceptions=False) as client:
             response = await client.post("/api/maintenance-probe")
             assert response.status_code == 500
@@ -273,11 +273,11 @@ def test_pool_timeout_closes_session_and_recovers_after_release(
         asyncio.run(blocked_write())
         assert harness.pool.checkedout() == 1
         assert harness.reached == []
-        assert [phase for phase, _, _ in harness.lifecycle] == [
-            "create",
-            "query",
-            "close",
-        ]
+        # Every boundary/diagnostic session created while the pool was
+        # exhausted must still be closed without leaking a connection.
+        phases = [phase for phase, _, _ in harness.lifecycle]
+        assert phases[0] == "create"
+        assert phases.count("create") == phases.count("close")
     assert harness.pool.checkedout() == 0
 
     async def recovered_write() -> None:

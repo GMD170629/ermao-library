@@ -8,7 +8,10 @@ from datetime import datetime
 
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import (
+    persist_exception_diagnostic,
+    prepare_exception_diagnostic,
+)
 from app.modules.imports.application.readable_resource.ports import (
     ClockPort,
     LibraryImportTaskQueuePort,
@@ -104,7 +107,7 @@ class ReadableResourceWorkerProcessor:
                 if scan_failure
                 else "readable_resource.worker.containment_failure"
             )
-            record_exception(
+            snapshot = prepare_exception_diagnostic(
                 logger,
                 event,
                 error,
@@ -123,7 +126,11 @@ class ReadableResourceWorkerProcessor:
                 target_type="importTask",
                 target_id=task.id,
             )
-            self._uow.rollback()
+            try:
+                self._uow.rollback()
+            finally:
+                # Persist only after the business transaction released its lock.
+                persist_exception_diagnostic(logger, snapshot)
             pending = _PendingCompletion(
                 task.id,
                 task.library_id,
@@ -183,7 +190,7 @@ class ReadableResourceWorkerProcessor:
                             finished_at=pending.finished_at,
                         )
         except SQLAlchemyError as error:
-            record_exception(
+            snapshot = prepare_exception_diagnostic(
                 logger,
                 "readable_resource.worker.completion_deferred",
                 error,
@@ -199,7 +206,10 @@ class ReadableResourceWorkerProcessor:
                 target_type="importTask",
                 target_id=pending.task_id,
             )
-            self._uow.rollback()
+            try:
+                self._uow.rollback()
+            finally:
+                persist_exception_diagnostic(logger, snapshot)
             return "deferred"
         self._pending_completion = None
         return "cancelled" if current is None else pending.outcome
@@ -216,7 +226,7 @@ class ReadableResourceWorkerProcessor:
                     self._queue.enqueue_book_identifications(prepared)
             return True
         except SQLAlchemyError as error:
-            record_exception(
+            snapshot = prepare_exception_diagnostic(
                 logger,
                 "readable_resource.worker.identification_deferred",
                 error,
@@ -228,7 +238,10 @@ class ReadableResourceWorkerProcessor:
                 source="import",
                 action="readable_resource.identification_deferred",
             )
-            self._uow.rollback()
+            try:
+                self._uow.rollback()
+            finally:
+                persist_exception_diagnostic(logger, snapshot)
             return False
 
 

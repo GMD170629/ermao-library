@@ -2,14 +2,16 @@
 
 The app loggers rely on the standard library; this module only ensures a
 handler/formatter exists that actually renders whitelisted ``extra`` context
-fields alongside the exception traceback, even before any business database is
-available.
+fields.  Rendered output is sanitized as a second layer so that diagnostics
+never leak credentials even when an existing handler formats the record.
 """
 
 from __future__ import annotations
 
 import logging
 import sys
+
+from app.core.exception_diagnostics import sanitize_diagnostic_text
 
 LOGGER_NAME = "ermao.diagnostics"
 
@@ -31,7 +33,7 @@ _configured = False
 
 
 class ContextFormatter(logging.Formatter):
-    """Render ``extra`` diagnostics fields without dropping the traceback."""
+    """Render diagnostics context and sanitize the final output."""
 
     def format(self, record: logging.LogRecord) -> str:
         base = super().format(record)
@@ -40,17 +42,20 @@ class ContextFormatter(logging.Formatter):
             for key in _CONTEXT_EXTRA_KEYS
             if getattr(record, key, None) is not None
         )
-        return f"{base} {context}".rstrip() if context else base
+        rendered = f"{base} {context}".rstrip() if context else base
+        return sanitize_diagnostic_text(rendered)
 
 
-def configure_logging(level: int = logging.INFO) -> None:
+def configure_logging(level: int = logging.INFO, *, force: bool = False) -> None:
     """Attach one context formatter to the root logger (idempotent).
 
-    Skipped under pytest so test capture owns the root logging configuration.
+    Existing handlers are preserved; a context handler is only added when the
+    root logger has no stream handler yet.  Skipped under pytest so test
+    capture owns the root logging configuration, unless ``force`` is set.
     """
 
     global _configured
-    if _configured or "pytest" in sys.modules:
+    if (_configured and not force) or ("pytest" in sys.modules and not force):
         return
     _configured = True
 

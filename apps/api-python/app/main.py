@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
 from starlette.types import ExceptionHandler
 
+from app.api.diagnostics_middleware import DiagnosticBoundaryMiddleware
 from app.api.error_handlers import (
     request_validation_error_handler,
     typed_http_error_handler,
@@ -37,7 +38,6 @@ from app.core.exception_diagnostics import (
     configure_exception_storage,
     install_exception_hooks,
     install_loop_exception_handler,
-    record_exception,
 )
 from app.core.logging_config import configure_logging
 from app.db.maintenance import database_maintenance_is_active
@@ -269,38 +269,13 @@ def create_app(
         with runtime_factory() as maintenance_db:
             return database_maintenance_is_active(maintenance_db)
 
-    @app.middleware("http")
-    async def capture_unexpected_errors(request, call_next):
-        # Records unhandled route failures with the original traceback and
-        # returns a correlation id without leaking internals.  Registered
-        # before the manager boundary so that boundary's own database failures
-        # keep their established propagation behavior.
-        try:
-            response = await call_next(request)
-        except Exception as error:  # noqa: BLE001 - unified API failure boundary
-            diagnostic_id = record_exception(
-                LOGGER,
-                "api.request_failed",
-                error,
-                context={
-                    "stage": "api_request",
-                    "path": request.url.path,
-                    "method": request.method,
-                    "request_id": request.headers.get("X-Request-Id"),
-                },
-                source="system",
-                action="api.request_failed",
-                session_factory=background_runtime_factory,
-            )
-            failure = fail(
-                "服务器内部错误",
-                status_code=500,
-                details={"eventId": diagnostic_id},
-                code="INTERNAL_ERROR",
-            )
-            failure.headers["X-Error-Id"] = diagnostic_id
-            return _vary_api_response_by_cookie(failure)
-        return response
+    # Inner boundary: unexpected route errors become a 500 envelope that still
+    # carries a correlation id and never leaks internals.
+    app.add_middleware(
+        DiagnosticBoundaryMiddleware,
+        session_factory=background_runtime_factory,
+        respond_with_json=True,
+    )
 
     @app.middleware("http")
     async def enforce_system_manager_boundary(request, call_next):
@@ -339,6 +314,14 @@ def create_app(
         finally:
             db.close()
         return _vary_api_response_by_cookie(await call_next(request))
+
+    # Outer boundary: middleware-layer database/permission failures are recorded
+    # and then re-raised so the established propagation contract is preserved.
+    app.add_middleware(
+        DiagnosticBoundaryMiddleware,
+        session_factory=background_runtime_factory,
+        respond_with_json=False,
+    )
 
     app.include_router(api_router, prefix="/api")
     app.include_router(

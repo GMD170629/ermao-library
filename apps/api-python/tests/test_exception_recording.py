@@ -1,19 +1,25 @@
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
+from time import monotonic
 from typing import TYPE_CHECKING
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import create_engine, insert, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
+import app.main as app_main
 import app.modules.system.presentation.http as system_http
 from app.core.auth import hash_password
 from app.core.exception_diagnostics import (
     configure_exception_storage,
+    persist_exception_diagnostic,
+    prepare_exception_diagnostic,
     record_exception,
     reset_exception_storage,
 )
@@ -86,9 +92,14 @@ def test_unhandled_api_exception_records_correlation_and_hides_stack(
     assert diagnostic_id.startswith("diag_")
     assert body["error"]["details"]["eventId"] == diagnostic_id
 
-    records = [record for record in caplog.records if record.exc_info is not None]
+    records = [
+        record for record in caplog.records if "api.request_failed" in record.getMessage()
+    ]
     assert records, "unhandled exception must be logged with a traceback"
     assert "_boom" in caplog.text
+    # The raw exception must not be attached as exc_info; only the sanitized
+    # traceback text is emitted.
+    assert all(record.exc_info is None for record in records)
 
     event = _load_event(db_session, diagnostic_id)
     assert event is not None
@@ -351,6 +362,259 @@ def test_worker_containment_records_task_context_and_original_traceback(
     assert event.metadata_json["taskKind"] == "SCAN_LIBRARY"
     assert event.metadata_json["sourceNodeId"] == "node-9"
     assert "scan boom marker" in event.metadata_json["diagnostics"]["traceback"]
+
+
+def test_outer_boundary_records_maintenance_failure_and_still_propagates(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def _boom(_db):
+        raise OperationalError("maintenance probe", {}, Exception("db down"))
+
+    monkeypatch.setattr(app_main, "database_maintenance_is_active", _boom)
+
+    with caplog.at_level(logging.ERROR), pytest.raises(OperationalError):
+        client.post("/api/app-config")
+
+    assert "http_boundary" in caplog.text
+    events = [
+        event
+        for event in _all_events(db_session, source="system")
+        if event.action == "api.request_failed"
+    ]
+    assert len(events) == 1
+    assert events[0].metadata_json["stage"] == "http_boundary"
+    assert events[0].metadata_json["method"] == "POST"
+    assert "db down" in events[0].metadata_json["diagnostics"]["traceback"]
+
+
+def test_outer_boundary_records_permission_query_failure_and_still_propagates(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("auth lookup failed")
+
+    monkeypatch.setattr(app_main, "get_current_user", _boom)
+
+    with caplog.at_level(logging.ERROR), pytest.raises(RuntimeError):
+        client.get("/api/management/events")
+
+    assert "http_boundary" in caplog.text
+    events = [
+        event
+        for event in _all_events(db_session, source="system")
+        if event.action == "api.request_failed"
+    ]
+    assert len(events) == 1
+    assert events[0].metadata_json["stage"] == "http_boundary"
+
+
+def test_secrets_never_reach_running_log_or_persisted_event(
+    db_session: Session,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def factory() -> Session:
+        return _session_for(db_session)
+
+    configure_exception_storage(factory)
+    try:
+        try:
+            raise RuntimeError(
+                'password="db-secret" token=db-token '
+                '{"authorization": "Bearer db-bearer"}'
+            )
+        except RuntimeError as error:
+            with caplog.at_level(logging.ERROR):
+                diagnostic_id = record_exception(
+                    LOGGER,
+                    "secret.failure",
+                    error,
+                    context={"stage": "unit", "path": "/var/private/db.sqlite"},
+                )
+    finally:
+        reset_exception_storage()
+
+    event = _load_event(db_session, diagnostic_id)
+    assert event is not None
+    persisted_blob = f"{event.message}{json.dumps(event.metadata_json, ensure_ascii=False)}"
+    for secret in ("db-secret", "db-token", "db-bearer"):
+        assert secret not in persisted_blob
+        assert secret not in caplog.text
+    assert "secret.failure" in caplog.text
+    assert "diag_" in caplog.text
+
+
+def test_cross_layer_propagation_reuses_one_main_event(db_session: Session) -> None:
+    def factory() -> Session:
+        return _session_for(db_session)
+
+    try:
+        raise ValueError("cross-layer failure")
+    except ValueError as error:
+        inner = prepare_exception_diagnostic(
+            LOGGER, "layer.inner", error, context={"stage": "inner"}
+        )
+        outer = prepare_exception_diagnostic(
+            LOGGER, "layer.outer", error, context={"stage": "outer"}
+        )
+        assert inner is outer
+        assert inner.diagnostic_id == outer.diagnostic_id
+        assert persist_exception_diagnostic(LOGGER, inner, factory) is True
+        assert persist_exception_diagnostic(LOGGER, outer, factory) is True
+
+    events = _all_events(db_session, source="system")
+    assert len(events) == 1
+    assert events[0].id == inner.diagnostic_id
+
+
+def test_distinct_attempts_with_identical_text_are_recorded_separately(
+    db_session: Session,
+) -> None:
+    def factory() -> Session:
+        return _session_for(db_session)
+
+    configure_exception_storage(factory)
+    try:
+        diagnostic_ids = []
+        for _attempt in range(2):
+            try:
+                raise ValueError("identical failure text")
+            except ValueError as error:
+                diagnostic_ids.append(
+                    record_exception(LOGGER, "attempt.failed", error, source="import")
+                )
+    finally:
+        reset_exception_storage()
+
+    assert len(set(diagnostic_ids)) == 2
+    events = _all_events(db_session, source="import")
+    assert len(events) == 2
+    assert {event.id for event in events} == set(diagnostic_ids)
+
+
+class _ClosingSession:
+    def execute(self, *_args, **_kwargs):
+        return None
+
+    def commit(self) -> None:
+        return None
+
+    def rollback(self) -> None:
+        return None
+
+    def close(self) -> None:
+        raise RuntimeError("close failed")
+
+
+class _FailingWriteSession:
+    def execute(self, *_args, **_kwargs):
+        raise RuntimeError("write failed")
+
+    def commit(self) -> None:
+        raise RuntimeError("commit failed")
+
+    def rollback(self) -> None:
+        raise RuntimeError("rollback failed")
+
+    def close(self) -> None:
+        raise RuntimeError("close failed too")
+
+
+def test_logging_session_failures_never_replace_the_original_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    try:
+        raise ValueError("original business failure")
+    except ValueError as error:
+        close_only = prepare_exception_diagnostic(
+            LOGGER, "session.close_failed", error
+        )
+    with caplog.at_level(logging.WARNING):
+        assert (
+            persist_exception_diagnostic(LOGGER, close_only, lambda: _ClosingSession())
+            is True
+        )
+
+    try:
+        raise ValueError("second business failure")
+    except ValueError as error:
+        write_failed = prepare_exception_diagnostic(
+            LOGGER, "session.write_failed", error
+        )
+    with caplog.at_level(logging.WARNING):
+        assert (
+            persist_exception_diagnostic(
+                LOGGER, write_failed, lambda: _FailingWriteSession()
+            )
+            is False
+        )
+
+    assert "original business failure" in caplog.text
+    assert "second business failure" in caplog.text
+    assert "exception_diagnostics.persist_failed" in caplog.text
+
+
+def test_recording_does_not_wait_on_business_write_lock_and_persists_after_rollback(
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "diagnostics-lock.sqlite3"
+    locked_engine = create_engine(
+        f"sqlite+pysqlite:///{database_path.as_posix()}",
+        connect_args={"timeout": 0.25, "check_same_thread": False},
+    )
+    recorder_engine = create_engine(
+        f"sqlite+pysqlite:///{database_path.as_posix()}",
+        connect_args={"timeout": 0.25, "check_same_thread": False},
+    )
+    SystemEvent.__table__.create(recorder_engine)
+    factory = sessionmaker(
+        bind=recorder_engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+    try:
+        try:
+            raise RuntimeError("locked diagnostic failure")
+        except RuntimeError as error:
+            snapshot = prepare_exception_diagnostic(LOGGER, "lock.failure", error)
+
+        with locked_engine.connect() as business:
+            transaction = business.begin()
+            business.execute(
+                insert(SystemEvent).values(
+                    id="held-business-row",
+                    level="info",
+                    source="test",
+                    actor_type="system",
+                    action="held",
+                    message="uncommitted business write",
+                )
+            )
+            started = monotonic()
+            persisted_while_locked = persist_exception_diagnostic(
+                LOGGER, snapshot, factory
+            )
+            elapsed = monotonic() - started
+            transaction.rollback()
+
+        assert persisted_while_locked is False
+        assert elapsed < 2.0, "recording must not block on the business write lock"
+
+        assert persist_exception_diagnostic(LOGGER, snapshot, factory) is True
+        session = factory()
+        try:
+            assert session.get(SystemEvent, snapshot.diagnostic_id) is not None
+        finally:
+            session.close()
+    finally:
+        locked_engine.dispose()
+        recorder_engine.dispose()
 
 
 def test_cancelled_completion_is_not_recorded_as_crash(
