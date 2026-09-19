@@ -74,6 +74,45 @@ class RecordingHeartbeat:
         self.stopped = True
 
 
+@pytest.mark.parametrize("failed_component", ["lookup", "writeback"])
+def test_metadata_runtime_bug_pauses_only_failed_path(
+    monkeypatch, test_settings, failed_component
+):
+    factory = RecordingSessionFactory()
+    worker = metadata_queue.MetadataLookupWorker(factory, test_settings)
+    worker._heartbeat = RecordingHeartbeat()
+    calls = {"lookup": 0, "writeback": 0}
+    for name in (
+        "recover_stale_metadata_lookup_tasks",
+        "recover_interrupted_metadata_writebacks",
+    ):
+        monkeypatch.setattr(metadata_queue, name, lambda db: 0)
+    monkeypatch.setattr(
+        metadata_queue, "maintain_metadata_writebacks", lambda *a, **kw: None
+    )
+
+    def process(*args, **kwargs):
+        name = "lookup" if kwargs["lookup_ready"] else "writeback"
+        calls[name] += 1
+        if name == failed_component:
+            raise RuntimeError("uncertain task outcome")
+        if calls[name] == 3:
+            worker._stop.set()
+        return True
+
+    monkeypatch.setattr(metadata_queue, "process_next_metadata_lookup_task", process)
+    worker._run()
+    assert calls[failed_component] == 1
+    assert calls["writeback" if failed_component == "lookup" else "lookup"] == 3
+    state = (
+        worker._lookup_recovery
+        if failed_component == "lookup"
+        else worker._writeback_recovery
+    )
+    assert not state.ready and ":paused:" in state.error
+    assert all(db.closed for db in factory.sessions)
+
+
 def test_metadata_recovery_retries_with_fresh_sessions_and_gates_claims(
     monkeypatch, test_settings
 ):

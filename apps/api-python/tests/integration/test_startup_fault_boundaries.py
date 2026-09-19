@@ -4,10 +4,29 @@ from unittest.mock import Mock
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from app import main
-from app.services import kindle_queue, log_maintenance
+from app.services import download_queue, kindle_queue, log_maintenance
+
+
+@pytest.mark.parametrize(
+    "module,adapter",
+    [
+        (download_queue, "next_queued_download_task"),
+        (kindle_queue, "next_queued_kindle_task"),
+    ],
+)
+@pytest.mark.parametrize("reason", ["database is locked", "no such table: queue"])
+def test_queue_read_failure_is_not_an_empty_queue(
+    monkeypatch, db_session, module, adapter, reason
+):
+    error = OperationalError("SELECT queue", {}, RuntimeError(reason))
+    monkeypatch.setattr(module, adapter, Mock(side_effect=error))
+    with pytest.raises(OperationalError) as captured:
+        module.next_queued_task(db_session)
+    assert captured.value is error
 
 
 @pytest.mark.parametrize("component", ["download", "kindle", "maintenance"])

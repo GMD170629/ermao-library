@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.bootstrap.kindle import (
@@ -82,19 +81,7 @@ def _task(db: Session, task_id: str) -> dict[str, Any] | None:
 
 
 def next_queued_task(db: Session) -> dict[str, Any] | None:
-    try:
-        return next_queued_kindle_task(db, now_timestamp_ms())
-    except SQLAlchemyError as exc:
-        record_exception(
-            LOGGER,
-            "kindle_queue.table_unavailable",
-            exc,
-            level="warning",
-            context={"stage": "kindle_queue", "outcome": "deferred"},
-            source="kindle",
-            action="kindle.table_unavailable",
-        )
-        return None
+    return next_queued_kindle_task(db, now_timestamp_ms())
 
 
 def _claim_task(db: Session, task_id: str) -> dict[str, Any] | None:

@@ -545,7 +545,9 @@ with sqlite3.connect('/app/storage/database/shuku.sqlite3') as db:
     assert db.execute('select value from SystemSetting where key=?', ('acceptance-preserved',)).fetchone()[0] == 'configuration'
     assert db.execute('select version_num from alembic_version').fetchone()[0] == 'acceptance_b'
     db.execute('select * from AcceptanceMigration').fetchall()
-pid=int(Path('/app/storage/update-tmp/worker-ready').read_text())
+ready=json.loads(Path('/app/storage/update-tmp/worker-ready').read_text())
+pid=ready['pid']
+assert Path(f'/proc/{pid}/stat').read_text().rsplit(')',1)[1].split()[19] == ready['startTime']
 assert b'app.worker.main' in Path(f'/proc/{pid}/cmdline').read_bytes()
 assert Path('/proc/1/cmdline').read_bytes().find(b'container-entry.py') >= 0
 print('actual B API, migrated DB, progress, configuration, Worker and PID 1 verified')

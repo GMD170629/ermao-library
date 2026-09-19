@@ -8,15 +8,25 @@ import json
 import subprocess
 import time
 import uuid
+from pathlib import Path
 
 
 def docker(*args: str) -> str:
-    return subprocess.check_output(["docker", *args], text=True).strip()
+    return subprocess.check_output(
+        ["docker", *args],
+        text=True,
+        encoding="utf-8",
+        timeout=180,
+        stderr=subprocess.STDOUT if args[0] == "logs" else None,
+    ).strip()
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--image", required=True)
+    parser.add_argument("--fault-boundaries", action="store_true")
+    parser.add_argument("--update-boundaries", action="store_true")
+    parser.add_argument("--output-dir", default="artifacts/startup-acceptance")
     args = parser.parse_args()
     name = "shuku-d1-" + uuid.uuid4().hex[:10]
     volume = name + "-data"
@@ -24,11 +34,20 @@ def main() -> None:
     docker("volume", "create", volume)
     docker("volume", "create", books)
     running = False
+    output = Path(args.output_dir)
+    output.mkdir(parents=True, exist_ok=True)
+    log_index = 0
+    business = "/app/storage/dependencies/python/bin/python"
 
     def execute(code: str, python: str = "/usr/local/bin/python3.11") -> str:
         return docker("exec", name, python, "-c", code)
 
-    def start(*, without_seed: bool = False) -> None:
+    def start(
+        *,
+        without_seed: bool = False,
+        require_worker: bool = True,
+        writable_books: bool = False,
+    ) -> None:
         nonlocal running
         docker(
             "run",
@@ -42,7 +61,9 @@ def main() -> None:
             "-v",
             volume + ":/app/storage",
             "-v",
-            books + ":/books:ro",
+            books + (":/books" if writable_books else ":/books:ro"),
+            "-v",
+            str(Path(__file__).resolve().parents[1]) + ":/tooling:ro",
             *(
                 [
                     "-e",
@@ -65,7 +86,13 @@ def main() -> None:
                     name,
                     "/usr/local/bin/python3.11",
                     "-c",
-                    "import urllib.request; from pathlib import Path; assert Path('/app/storage/update-tmp/worker-ready').exists(); assert Path('/books/sentinel').read_text()=='original-book'; assert urllib.request.urlopen('http://127.0.0.1:3000/login').status == 200; assert urllib.request.urlopen('http://127.0.0.1:3000/api/health').status == 200",
+                    "import urllib.request; from pathlib import Path; "
+                    + (
+                        "assert Path('/app/storage/update-tmp/worker-ready').exists(); "
+                        if require_worker
+                        else ""
+                    )
+                    + "assert Path('/books/sentinel').read_text()=='original-book'; assert urllib.request.urlopen('http://127.0.0.1:3000/login').status == 200; assert urllib.request.urlopen('http://127.0.0.1:3000/api/health').status == 200",
                 ],
                 capture_output=True,
                 check=False,
@@ -78,13 +105,17 @@ def main() -> None:
         raise RuntimeError(docker("logs", name))
 
     def stop() -> None:
-        nonlocal running
+        nonlocal running, log_index
         docker("stop", "-t", "30", name)
+        log_index += 1
+        (output / f"{name}-{log_index}.log").write_text(
+            docker("logs", name), encoding="utf-8"
+        )
         assert docker("inspect", "-f", "{{.State.ExitCode}}", name) == "143"
         docker("rm", name)
         running = False
 
-    def offline_command(code: str) -> str:
+    def offline_command(code: str, python: str = "/usr/local/bin/python3.11") -> str:
         return docker(
             "run",
             "--rm",
@@ -95,11 +126,155 @@ def main() -> None:
             "-v",
             volume + ":/app/storage",
             "--entrypoint",
-            "/usr/local/bin/python3.11",
+            python,
             args.image,
             "-c",
-            code,
+            "from pathlib import Path; assert Path('/app/storage/.acceptance-volume').is_file(); "
+            + code,
         )
+
+    def wait_for(code: str, timeout: int = 60) -> str:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            result = execute(code)
+            if result == "ready":
+                return result
+            if docker("inspect", "-f", "{{.State.Running}}", name) != "true":
+                raise RuntimeError(docker("logs", name))
+            time.sleep(0.2)
+        raise AssertionError(f"acceptance condition timed out: {code}")
+
+    def inject(relative: str, addition: str, *, replace: bool = False) -> None:
+        offline_command(
+            f"p=Path('/app/storage/runtime/apps/api-python/{relative}'); p.with_suffix('.acceptance-original').write_bytes(p.read_bytes()); p.write_text({addition!r} if {replace!r} else p.read_text()+'\\n'+{addition!r})"
+        )
+
+    def restore(relative: str) -> None:
+        offline_command(
+            f"p=Path('/app/storage/runtime/apps/api-python/{relative}'); p.write_bytes(p.with_suffix('.acceptance-original').read_bytes()); p.with_suffix('.acceptance-original').unlink()"
+        )
+
+    def fault_boundaries() -> None:
+        fixture_root = Path(__file__).parent / "fixtures"
+        probe = (fixture_root / "startup-http-probe.py").read_text(encoding="utf-8")
+        print(execute("initialize=True\n" + probe, business))
+        stop()
+        queue_file = "app/services/metadata_lookup_queue.py"
+        inject(
+            queue_file,
+            (fixture_root / "metadata-startup-faults.py").read_text(encoding="utf-8"),
+        )
+        offline_command(
+            "import sys; sys.path.insert(0,'/app/storage/runtime/apps/api-python'); "
+            "from sqlalchemy import select; from app.db.session import SessionLocal; "
+            "from app.models import MetadataLookupTask, LibraryReadableResource; "
+            "db=SessionLocal(); r=db.scalar(select(LibraryReadableResource).where(LibraryReadableResource.format=='TXT')); "
+            "db.add(MetadataLookupTask(id='acceptance-lookup',book_id=r.book_id,resource_id=r.id,status='PENDING',provider_order='[]',attempts=0)); db.commit(); db.close()",
+            business,
+        )
+        start()
+        wait_for(
+            "from pathlib import Path; p=Path('/app/storage/update-tmp/claimed-tasks'); print('ready' if p.exists() and 'acceptance-lookup' in p.read_text() else 'waiting')"
+        )
+        assert execute(
+            "from pathlib import Path; p=Path('/app/storage/update-tmp'); assert (p/'recovery-attempts').read_text()=='3'; assert (p/'claimed-tasks').read_text().splitlines().count('acceptance-lookup')==1; assert (p/'maintenance-failed').exists(); print('recovery gated, retried, and processed once')"
+        )
+        print(execute(probe, business))
+        assert "metadata.maintenance_deferred" in docker("logs", name)
+        stop()
+        restore(queue_file)
+        # Crash before publication with a persisted PREPARED target, then allow
+        # the expired lease to recover. No production fault switch is added.
+        writeback_file = "app/services/metadata_file_writeback.py"
+        inject(
+            writeback_file,
+            (fixture_root / "writeback-crash.py").read_text(encoding="utf-8"),
+        )
+        offline_command(
+            (fixture_root / "seed-writeback-crash.py").read_text(encoding="utf-8"),
+            business,
+        )
+        start(writable_books=True, require_worker=False)
+        wait_for(
+            "from pathlib import Path; print('ready' if Path('/app/storage/update-tmp/writeback-crashed').exists() else 'waiting')"
+        )
+        # Advance only the test lease to simulate downtime without a minute sleep.
+        execute(
+            "import sys; sys.path.insert(0,'/app/storage/runtime/apps/api-python'); from datetime import datetime,UTC,timedelta; from app.db.session import SessionLocal; from app.models.organize import MetadataWritebackTarget; db=SessionLocal(); t=db.get(MetadataWritebackTarget,'acceptance-target'); assert t.status=='PREPARED'; assert __import__('pathlib').Path(t.prepared_path).is_file(); t.lease_expires_at=datetime.now(UTC)-timedelta(seconds=1); db.commit(); db.close()",
+            business,
+        )
+        wait_for(
+            "from pathlib import Path; print('ready' if Path('/app/storage/update-tmp/writeback-published').exists() else 'waiting')"
+        )
+        assert execute(
+            "from pathlib import Path; p=Path('/app/storage/update-tmp/writeback-published'); assert p.read_text()=='once'; assert b'Crash recovery' in Path('/books/sample.opf').read_bytes(); assert Path('/books/sample.txt').read_text()=='acceptance original text'; print('crash recovery published once; source retained')"
+        )
+        print(execute(probe, business))
+        stop()
+        restore(writeback_file)
+        inject(
+            "app/worker/main.py",
+            "raise RuntimeError('acceptance worker load failure')\n",
+            replace=True,
+        )
+        start(require_worker=False)
+        core_pids = execute(
+            "from pathlib import Path; import json,os; print(json.dumps(sorted(int(p.parent.name) for p in Path('/proc').glob('[0-9]*/cmdline') if int(p.parent.name)!=os.getpid() and any(x in p.read_bytes().replace(bytes([0]),b' ') for x in [b'uvicorn app.main:app',b'next-server',b'unified-http-gateway.mjs']))))"
+        )
+        assert len(json.loads(core_pids)) >= 3, core_pids
+        deadline = time.monotonic() + 65
+        while "worker.paused reason=restart_limit" not in docker("logs", name):
+            if time.monotonic() > deadline:
+                raise AssertionError("worker restart limit not reached")
+            time.sleep(0.5)
+        execute(f"import os; [os.kill(pid,0) for pid in {core_pids}]")
+        assert execute(
+            "from pathlib import Path; assert not Path('/app/storage/update-tmp/worker-ready').exists(); print('worker offline, core processes retained')"
+        )
+        print(execute(probe, business))
+        stop()
+        restore("app/worker/main.py")
+        start()
+        print(
+            "PASS startup fault boundaries A/B/C/D; process crash is not hardware power loss"
+        )
+
+    def update_boundaries() -> None:
+        fixture_root = Path(__file__).parent / "fixtures"
+        probe = (fixture_root / "startup-http-probe.py").read_text(encoding="utf-8")
+        print(execute("initialize=True\n" + probe, business), flush=True)
+        fixture = (fixture_root / "prepare-startup-update.py").read_text(
+            encoding="utf-8"
+        )
+        for fault in ("recovery", "worker"):
+            target = json.loads(execute(f"fault={fault!r}\n" + fixture, business))
+            print("prepared real update:", target, flush=True)
+            wait_for(
+                "import json; from pathlib import Path; s=json.loads(Path('/app/storage/update-tmp/preparation.json').read_text()); print('ready' if s['phase'] in ('success','failed') else 'waiting')",
+                timeout=240,
+            )
+            state = json.loads(
+                execute(
+                    "from pathlib import Path; print(Path('/app/storage/update-tmp/preparation.json').read_text())"
+                )
+            )
+            assert state["phase"] == ("success" if fault == "recovery" else "failed"), (
+                state
+            )
+            if fault == "worker":
+                assert state["error"] == "WORKER_STARTUP_FAILED", state
+            assert execute(
+                f"import urllib.request,json; assert json.load(urllib.request.urlopen('http://127.0.0.1:8000/openapi.json'))['info']['version']=={target['version']!r}; print('target version verified')"
+            )
+            print(execute(probe, business), flush=True)
+            print(
+                "PASS online update",
+                fault,
+                state["phase"],
+                state.get("error"),
+                flush=True,
+            )
+        stop()
 
     try:
         docker(
@@ -113,9 +288,14 @@ def main() -> None:
             "sh",
             args.image,
             "-c",
-            "chown 12345:12345 /app/storage && touch /app/storage/.acceptance-volume && printf original-book > /books/sentinel",
+            "chown 12345:12345 /app/storage /books && touch /app/storage/.acceptance-volume && printf original-book > /books/sentinel && printf 'acceptance original text' > /books/sample.txt",
         )
         start()
+        if args.update_boundaries:
+            update_boundaries()
+            return
+        if args.fault_boundaries:
+            fault_boundaries()
         assert execute(
             "import importlib.util; assert importlib.util.find_spec('fastapi') is None; print('fixed environment has no business dependencies')"
         )
@@ -225,6 +405,33 @@ def main() -> None:
         stop()
         # A newer/unknown database must not be made acceptable by conversion.
         offline_command(
+            "import sqlite3; c=sqlite3.connect('/app/storage/database/shuku.sqlite3'); c.execute(\"UPDATE alembic_version SET version_num='future_schema'\"); c.commit(); c.close()"
+        )
+        rejected_start = subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "--user",
+                "12345:12345",
+                "-v",
+                volume + ":/app/storage",
+                args.image,
+            ],
+            capture_output=True,
+            timeout=120,
+            check=False,
+        )
+        assert rejected_start.returncode != 0
+        (output / f"{name}-schema-refused.log").write_bytes(
+            rejected_start.stdout + rejected_start.stderr
+        )
+        assert offline_command(
+            "import sqlite3; c=sqlite3.connect('/app/storage/database/shuku.sqlite3'); assert c.execute('SELECT version_num FROM alembic_version').fetchone()==('future_schema',); assert c.execute('PRAGMA user_version').fetchone()==(321,); c.close(); print('normal entry rejected unknown schema and retained database')"
+        )
+        offline_command(
             "from pathlib import Path; import json,shutil,sqlite3; s=Path('/app/storage'); p=s/'runtime/application.json'; v=json.loads(p.read_text()); v.pop('protocol'); p.write_text(json.dumps(v)); shutil.rmtree(s/'dependencies'); c=sqlite3.connect(s/'database/shuku.sqlite3'); c.execute(\"UPDATE alembic_version SET version_num='future_schema'\"); c.commit(); c.close()"
         )
         rejected = subprocess.run(
@@ -256,6 +463,9 @@ def main() -> None:
         )
     finally:
         if running:
+            (output / f"{name}-final.log").write_text(
+                docker("logs", name), encoding="utf-8"
+            )
             subprocess.run(
                 ["docker", "rm", "-f", name], check=False, capture_output=True
             )

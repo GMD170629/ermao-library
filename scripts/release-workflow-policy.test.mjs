@@ -75,7 +75,7 @@ test('develop pushes publish only the isolated develop image channel', () => {
 
   assert.ok(developJob, 'the develop image publishing job must exist');
   assert.match(developJob, /if: github\.ref == 'refs\/heads\/develop'/u);
-  assert.match(developJob, /needs: validate/u);
+  assert.match(developJob, /needs: \[validate, startup-acceptance\]/u);
   assert.match(developJob, /platforms: linux\/amd64(?:\r?\n)/u);
   assert.doesNotMatch(developJob, /linux\/arm64/u);
   assert.match(developJob, /tags: gamersgu\/shuku-starship-web:develop/u);

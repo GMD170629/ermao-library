@@ -4,6 +4,7 @@ import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from sqlalchemy import select
 
 from app.models import (
@@ -27,6 +28,7 @@ from app.modules.metadata.infrastructure.writeback_queue import (
     load_metadata_writeback_projection,
     reconcile_queue_state,
 )
+from app.services import metadata_file_writeback
 from app.services.metadata_file_writeback import (
     metadata_writeback_view,
     process_next_metadata_writeback,
@@ -154,6 +156,44 @@ def test_writeback_uses_immutable_book_resource_snapshot_after_commit(
     assert source.read_bytes() == original_source
     assert source.stat().st_mtime_ns == original_mtime
     assert metadata_writeback_view(db_session, queued.operation_id) is None
+
+
+@pytest.mark.parametrize("stage", ["register", "publish", "complete"])
+def test_uncertain_writeback_preserves_file_and_durable_ownership(
+    db_session, test_settings, tmp_path, monkeypatch, stage
+):
+    source = tmp_path / "uncertain.txt"
+    source.write_text("original")
+    book, resource, _ = _seed_book_resource(db_session, source)
+    enqueue_writeback(
+        db_session, book_id=book.id, resource_id=resource.id, source="MANUAL"
+    )
+    db_session.commit()
+    assert process_next_metadata_writeback(db_session, test_settings)
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("injected publication boundary")
+
+    if stage == "register":
+        monkeypatch.setattr(metadata_file_writeback, "_mark_target_prepared_uow", fail)
+    elif stage == "publish":
+        monkeypatch.setattr(
+            metadata_file_writeback.file_writeback, "publish_prepared", fail
+        )
+    else:
+        monkeypatch.setattr(metadata_file_writeback, "_complete_target_uow", fail)
+    with pytest.raises(RuntimeError, match="WRITEBACK_OUTCOME_REQUIRES_REVIEW"):
+        process_next_metadata_writeback(
+            db_session, test_settings, owner_id="uncertain-owner"
+        )
+    target = db_session.scalar(select(MetadataWritebackTarget))
+    assert target.status in {"RUNNING", "PREPARED"}
+    assert target.lease_owner_id == "uncertain-owner"
+    assert source.read_text() == "original"
+    if stage == "complete":
+        assert source.with_suffix(".opf").exists()
+    else:
+        assert list(tmp_path.glob(".*.shuku-*.part"))
 
 
 def test_external_asset_change_is_recorded_without_retry_or_source_rollback(

@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.bootstrap.download import continue_download_import_command
@@ -112,19 +111,7 @@ class DownloadQueueWorker:
 
 
 def next_queued_task(db: Session) -> dict[str, Any] | None:
-    try:
-        return next_queued_download_task(db)
-    except SQLAlchemyError as exc:
-        record_exception(
-            logger,
-            "download_queue.table_unavailable",
-            exc,
-            level="warning",
-            context={"stage": "download_queue", "outcome": "deferred"},
-            source="download",
-            action="download.table_unavailable",
-        )
-        return None
+    return next_queued_download_task(db)
 
 
 def process_next_download_task(db: Session, settings: Settings) -> bool:

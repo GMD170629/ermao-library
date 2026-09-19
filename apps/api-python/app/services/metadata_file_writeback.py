@@ -368,9 +368,12 @@ def process_next_metadata_writeback(
             mtime_ms=mtime_ms,
             warning_code=warning_code,
         )
-    except Exception as exc:  # noqa: BLE001 - contains one recoverable worker target.
+    except Exception as exc:
         if prepared_path:
-            Path(prepared_path).unlink(missing_ok=True)
+            # Publication or its acknowledgement may already have happened.
+            # Preserve the prepared file, lease and durable state for inspection;
+            # do not translate uncertainty into a failed task or replay it.
+            raise RuntimeError("WRITEBACK_OUTCOME_REQUIRES_REVIEW") from exc
         LOGGER.warning(
             "metadata OPF sidecar save failed target=%s operation=%s: %s",
             target_id,

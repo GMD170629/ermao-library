@@ -16,8 +16,8 @@ on:
       - 'apps/web/public/sw.js'
       - 'apps/web/Dockerfile.prod'
       - 'apps/web/next.config.js'
-      - 'apps/api-python/app/core/**'
-      - 'apps/api-python/app/db/**'
+      - 'apps/api-python/app/**'
+      - 'apps/api-python/tests/**'
       - 'apps/api-python/tests/conformance/**'
       - 'apps/api-python/pyproject.toml'
       - 'apps/api-python/uv.lock'
@@ -44,6 +44,10 @@ on:
       - 'scripts/test_fnos_installation.py'
       - 'scripts/publish-docker-hub.sh'
       - 'scripts/start-unified-app.sh'
+      - 'scripts/container-entry.py'
+      - 'scripts/test_container*.py'
+      - 'scripts/smoke-container-runtime.py'
+      - 'scripts/fixtures/**'
       - 'docker-compose.yml'
       - 'docker-compose.prod.yml'
       - 'package.json'
@@ -163,7 +167,7 @@ jobs:
   publish-prod-image:
     name: Publish prod Docker image
     if: github.ref == 'refs/heads/prod'
-    needs: validate
+    needs: [validate, startup-acceptance]
     runs-on: ubuntu-latest
 
     steps:
@@ -204,10 +208,45 @@ jobs:
           cache-from: type=gha,scope=prod-image
           cache-to: type=gha,mode=max,scope=prod-image
 
+  startup-acceptance:
+    name: Verify real server startup fault boundaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - name: Test supervisor with real child processes
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_container_entry.py'
+          python3 -m unittest discover -s scripts -p 'test_container_install.py'
+      - uses: docker/setup-buildx-action@v3
+      - name: Build candidate server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile.prod
+          target: runner
+          platforms: linux/amd64
+          load: true
+          tags: shuku-startup:candidate
+          cache-from: type=gha,scope=startup-acceptance
+          cache-to: type=gha,mode=max,scope=startup-acceptance
+      - name: Verify actual image startup, recovery, crash isolation and core refusal
+        run: |
+          python3 scripts/smoke-container-runtime.py --image shuku-startup:candidate --fault-boundaries
+          python3 scripts/smoke-container-runtime.py --image shuku-startup:candidate --update-boundaries
+      - name: Preserve startup diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: startup-acceptance
+          path: artifacts/startup-acceptance
+
   publish-develop-image:
     name: Publish develop Docker image
     if: github.ref == 'refs/heads/develop'
-    needs: validate
+    needs: [validate, startup-acceptance]
     runs-on: ubuntu-latest
 
     steps:
@@ -376,6 +415,20 @@ jobs:
         env:
           IMAGE_DIGEST: ${{ steps.release_image.outputs.digest }}
         run: bash scripts/build-release-app-packages.sh "gamersgu/shuku-starship-web@$IMAGE_DIGEST" dist/application
+
+      - name: Accept the exact server release image before publication
+        env:
+          IMAGE_DIGEST: ${{ steps.release_image.outputs.digest }}
+        run: |
+          python3 scripts/smoke-container-runtime.py --image "gamersgu/shuku-starship-web@$IMAGE_DIGEST" --fault-boundaries
+          python3 scripts/smoke-container-runtime.py --image "gamersgu/shuku-starship-web@$IMAGE_DIGEST" --update-boundaries
+
+      - name: Preserve exact release startup diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-startup-acceptance
+          path: artifacts/startup-acceptance
 
       - name: Install official fnpack
         shell: bash

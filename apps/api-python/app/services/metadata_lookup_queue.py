@@ -1074,7 +1074,14 @@ class MetadataLookupWorker:
 
     def _record_iteration_error(self, error: BaseException) -> None:
         if not is_database_busy_error(error):
-            LOGGER.exception("metadata lookup worker iteration failed")
+            record_exception(
+                LOGGER,
+                "metadata.iteration_paused",
+                error,
+                context={"stage": "iteration", "outcome": "paused"},
+                source="metadata",
+                action="metadata.iteration_paused",
+            )
             return
         now = monotonic()
         if (
@@ -1103,30 +1110,37 @@ class MetadataLookupWorker:
                 if self._stop.is_set():
                     break
                 worked = False
-                error = None
-                try:
-                    iteration_result = (
-                        self._process_iteration(
-                            lookup_ready=self._lookup_recovery.ready,
-                            writeback_ready=self._writeback_recovery.ready,
-                        )
-                        if self._lookup_recovery.ready or self._writeback_recovery.ready
-                        else False
-                    )
-                    if iteration_result is None:
+                for name, state in (
+                    ("lookup", self._lookup_recovery),
+                    ("writeback", self._writeback_recovery),
+                ):
+                    if self._stop.is_set():
                         break
-                    worked = iteration_result
-                except Exception as exc:  # noqa: BLE001 - worker containment boundary.
-                    error = exc
-                    self._record_iteration_error(exc)
+                    if not state.ready or monotonic() < state.next_attempt:
+                        continue
+                    try:
+                        iteration_result = self._process_iteration(
+                            lookup_ready=name == "lookup",
+                            writeback_ready=name == "writeback",
+                        )
+                        worked = bool(iteration_result) or worked
+                        state.error = None
+                    except Exception as exc:  # noqa: BLE001 - only the failed path pauses.
+                        self._record_iteration_error(exc)
+                        retry = is_database_busy_error(exc)
+                        state.error = f"{name}:{'retrying' if retry else 'paused'}:{type(exc).__name__}"
+                        state.next_attempt = monotonic() + 60 if retry else float("inf")
+                        if not retry:
+                            state.ready = False
                 self._heartbeat.pulse(
                     status="running"
-                    if self._lookup_recovery.ready and self._writeback_recovery.ready
+                    if self._lookup_recovery.ready
+                    and self._writeback_recovery.ready
+                    and not self._lookup_recovery.error
+                    and not self._writeback_recovery.error
                     else "degraded",
                     processed=worked,
-                    error=self._lookup_recovery.error
-                    or self._writeback_recovery.error
-                    or error,
+                    error=self._lookup_recovery.error or self._writeback_recovery.error,
                 )
                 self._maintain()
                 if not worked:
