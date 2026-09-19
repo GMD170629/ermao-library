@@ -27,6 +27,7 @@ from app.bootstrap.library import (
 from app.bootstrap.media import versioned_cover_url
 from app.core.config import Settings
 from app.core.database_errors import is_database_busy_error
+from app.core.exception_diagnostics import record_exception
 from app.models.common import db_timestamp
 from app.modules.imports.public import (
     UNKNOWN_AUTHOR,
@@ -41,6 +42,7 @@ from app.modules.metadata.application.writeback import (
 from app.modules.metadata.infrastructure import lookup_queue as lookup_persist
 from app.modules.metadata.infrastructure import writeback_queue
 from app.services.metadata_file_writeback import (
+    maintain_metadata_writebacks,
     process_next_metadata_writeback,
     recover_interrupted_metadata_writebacks,
 )
@@ -901,24 +903,40 @@ def process_next_metadata_lookup_task(
     owner_id: str = "metadata-lookup-compat",
     prefer_writeback: bool = False,
     prefer_preparation: bool = True,
+    lookup_ready: bool = True,
+    writeback_ready: bool = True,
 ) -> bool:
-    if prefer_writeback and process_next_metadata_writeback(
-        db,
-        settings,
-        owner_id=owner_id,
-        prefer_preparation=prefer_preparation,
+    if (
+        writeback_ready
+        and prefer_writeback
+        and process_next_metadata_writeback(
+            db,
+            settings,
+            owner_id=owner_id,
+            prefer_preparation=prefer_preparation,
+        )
     ):
         return True
-    task = claim_next_metadata_lookup_task(db, owner_id=owner_id)
+    task = (
+        claim_next_metadata_lookup_task(db, owner_id=owner_id) if lookup_ready else None
+    )
     if task:
         process_metadata_lookup_task(db, settings, task, automatic_request_gate)
         return True
-    return process_next_metadata_writeback(
+    return writeback_ready and process_next_metadata_writeback(
         db,
         settings,
         owner_id=owner_id,
         prefer_preparation=prefer_preparation,
     )
+
+
+@dataclass
+class _MetadataRecovery:
+    ready: bool = False
+    attempts: int = 0
+    next_attempt: float = 0.0
+    error: str | None = None
 
 
 class MetadataLookupWorker:
@@ -942,6 +960,9 @@ class MetadataLookupWorker:
         self._instance_id = f"metadata-{uuid4().hex}"
         self._prefer_writeback = False
         self._prefer_preparation = True
+        self._lookup_recovery = _MetadataRecovery()
+        self._writeback_recovery = _MetadataRecovery()
+        self._next_maintenance = 0.0
         self._heartbeat = QueueHeartbeatPump(
             heartbeat_db_factory or db_factory,
             queue_name="metadata",
@@ -950,19 +971,59 @@ class MetadataLookupWorker:
         )
 
     def start(self) -> None:
-        with self._db_factory() as db:
-            recovered = recover_stale_metadata_lookup_tasks(db)
-            if recovered:
-                LOGGER.warning("recovered %s stale metadata lookup tasks", recovered)
-            recovered_writebacks = recover_interrupted_metadata_writebacks(
-                db, self._settings
-            )
-            if recovered_writebacks:
-                LOGGER.warning(
-                    "recovered %s interrupted metadata writeback targets",
-                    recovered_writebacks,
-                )
         self._thread.start()
+
+    def _recover(
+        self, state: _MetadataRecovery, operation: Callable[[Session], int], name: str
+    ) -> None:
+        if state.ready or self._stop.is_set() or monotonic() < state.next_attempt:
+            return
+        try:
+            with self._db_factory() as db:
+                operation(db)
+        except Exception as exc:  # noqa: BLE001 - this component remains gated.
+            state.attempts += 1
+            retry = is_database_busy_error(exc)
+            state.next_attempt = (
+                monotonic() + min(300.0, 5.0 * 2 ** min(state.attempts - 1, 6))
+                if retry
+                else float("inf")
+            )
+            state.error = (
+                f"{name}:{'retrying' if retry else 'paused'}:{type(exc).__name__}"
+            )
+            record_exception(
+                LOGGER,
+                "metadata.recovery_failed",
+                exc,
+                context={"stage": name, "outcome": "retrying" if retry else "paused"},
+                source="metadata",
+                action="metadata.recovery_failed",
+            )
+        else:
+            state.ready = True
+            state.error = None
+
+    def _maintain(self) -> None:
+        if (
+            not self._writeback_recovery.ready
+            or self._stop.is_set()
+            or monotonic() < self._next_maintenance
+        ):
+            return
+        self._next_maintenance = monotonic() + 300.0
+        try:
+            with self._db_factory() as db:
+                maintain_metadata_writebacks(db, self._settings)
+        except Exception as exc:  # noqa: BLE001 - maintenance cannot revoke readiness.
+            record_exception(
+                LOGGER,
+                "metadata.maintenance_deferred",
+                exc,
+                context={"stage": "maintenance", "outcome": "deferred"},
+                source="metadata",
+                action="metadata.maintenance_deferred",
+            )
 
     def request_stop(self) -> None:
         self._stop.set()
@@ -972,7 +1033,9 @@ class MetadataLookupWorker:
         if self._thread.is_alive():
             self._thread.join()
 
-    def _process_iteration(self) -> bool | None:
+    def _process_iteration(
+        self, *, lookup_ready: bool = True, writeback_ready: bool = True
+    ) -> bool | None:
         prefer_writeback = self._prefer_writeback
         prefer_preparation = self._prefer_preparation
         self._prefer_writeback = not self._prefer_writeback
@@ -992,6 +1055,8 @@ class MetadataLookupWorker:
                             owner_id=self._instance_id,
                             prefer_writeback=prefer_writeback,
                             prefer_preparation=prefer_preparation,
+                            lookup_ready=lookup_ready,
+                            writeback_ready=writeback_ready,
                         )
                     )
             except OperationalError as error:
@@ -1020,17 +1085,40 @@ class MetadataLookupWorker:
         self._heartbeat.start()
         try:
             while not self._stop.is_set():
+                self._recover(
+                    self._lookup_recovery, recover_stale_metadata_lookup_tasks, "lookup"
+                )
+                self._recover(
+                    self._writeback_recovery,
+                    recover_interrupted_metadata_writebacks,
+                    "writeback",
+                )
+                if self._stop.is_set():
+                    break
                 worked = False
                 error = None
                 try:
-                    iteration_result = self._process_iteration()
+                    iteration_result = (
+                        self._process_iteration(
+                            lookup_ready=self._lookup_recovery.ready,
+                            writeback_ready=self._writeback_recovery.ready,
+                        )
+                        if self._lookup_recovery.ready or self._writeback_recovery.ready
+                        else False
+                    )
                     if iteration_result is None:
                         break
                     worked = iteration_result
                 except Exception as exc:  # noqa: BLE001 - worker containment boundary.
                     error = exc
                     self._record_iteration_error(exc)
-                self._heartbeat.pulse(processed=worked, error=error)
+                self._heartbeat.pulse(
+                    processed=worked,
+                    error=self._lookup_recovery.error
+                    or self._writeback_recovery.error
+                    or error,
+                )
+                self._maintain()
                 if not worked:
                     self._stop.wait(self._poll_seconds)
         finally:

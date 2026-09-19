@@ -268,6 +268,12 @@ def _cleanup_terminal_history_uow(
     return cleaned, cleanup_projection
 
 
+def maintain_metadata_writebacks(db: Session, settings: Settings) -> None:
+    """Run bounded maintenance independently of recovery and task claims."""
+    _, projection = _cleanup_terminal_history_uow(db)
+    _cleanup_orphan_prepared_files(projection, settings)
+
+
 def process_next_metadata_writeback(
     db: Session,
     settings: Settings,
@@ -301,9 +307,7 @@ def process_next_metadata_writeback(
             )
             return True
     if target is None:
-        cleaned, cleanup_projection = _cleanup_terminal_history_uow(db)
-        _cleanup_orphan_prepared_files(cleanup_projection, settings)
-        return cleaned
+        return False
     target_id = str(target["id"])
     prepared_path = str(target.get("preparedPath") or "")
     try:
@@ -373,13 +377,10 @@ def recover_interrupted_metadata_writebacks(
     db: Session,
     settings: Settings | None = None,
 ) -> int:
-    cleanup_projection = writeback_queue.load_writeback_cleanup_projection(db)
-    prepared_cleanup = writeback_queue.prepare_terminal_history_cleanup(db)
+    # Retain the public signature; correctness recovery never scans files.
+    del settings
     now = db_timestamp()
     db.close()
     with MetadataWriteTransaction(db):
-        writeback_queue.write_prepared_terminal_history_cleanup(db, prepared_cleanup)
         recovered = writeback_queue.recover_interrupted_targets(db, now=now)
-    if settings is not None:
-        _cleanup_orphan_prepared_files(cleanup_projection, settings)
     return recovered

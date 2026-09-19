@@ -74,6 +74,162 @@ class RecordingHeartbeat:
         self.stopped = True
 
 
+def test_metadata_recovery_retries_with_fresh_sessions_and_gates_claims(
+    monkeypatch, test_settings
+):
+    factory = RecordingSessionFactory()
+    worker = metadata_queue.MetadataLookupWorker(factory, test_settings)
+    clock = [0.0]
+    monkeypatch.setattr(metadata_queue, "monotonic", lambda: clock[0])
+    attempts = []
+
+    def recover(db):
+        attempts.append(db)
+        if len(attempts) < 3:
+            raise _operational_error("database is locked")
+        return 1
+
+    state = worker._lookup_recovery
+    for expected_time in (0, 5, 15):
+        clock[0] = expected_time
+        worker._recover(state, recover, "lookup")
+        if expected_time < 15:
+            assert not state.ready
+            worker._recover(state, recover, "lookup")
+    assert len(attempts) == 3
+    assert len({id(db) for db in attempts}) == 3
+    assert all(db.closed for db in attempts)
+    assert state.ready and state.error is None
+    worker._recover(state, recover, "lookup")
+    assert len(attempts) == 3
+
+
+@pytest.mark.parametrize("failed_component", ["lookup", "writeback"])
+def test_metadata_start_contains_recovery_bug_and_runs_independent_path(
+    monkeypatch, test_settings, failed_component
+):
+    factory = RecordingSessionFactory()
+    worker = metadata_queue.MetadataLookupWorker(
+        factory, test_settings, poll_seconds=0.01
+    )
+    heartbeat = RecordingHeartbeat()
+    worker._heartbeat = heartbeat
+    processed = Event()
+    failures = []
+
+    def fail(db):
+        failures.append(db)
+        raise RuntimeError("broken recovery")
+
+    monkeypatch.setattr(
+        metadata_queue,
+        "recover_stale_metadata_lookup_tasks",
+        fail if failed_component == "lookup" else lambda db: 0,
+    )
+    monkeypatch.setattr(
+        metadata_queue,
+        "recover_interrupted_metadata_writebacks",
+        fail if failed_component == "writeback" else lambda db: 0,
+    )
+    monkeypatch.setattr(
+        metadata_queue, "maintain_metadata_writebacks", lambda *args: None
+    )
+
+    def process(*args, **kwargs):
+        assert kwargs["lookup_ready"] == (failed_component != "lookup")
+        assert kwargs["writeback_ready"] == (failed_component != "writeback")
+        processed.set()
+        return False
+
+    monkeypatch.setattr(metadata_queue, "process_next_metadata_lookup_task", process)
+    worker.start()
+    try:
+        assert processed.wait(2)
+        assert worker._thread.is_alive()
+        assert len(failures) == 1
+    finally:
+        worker.shutdown()
+    assert heartbeat.stopped
+    assert all(db.closed for db in factory.sessions)
+
+
+@pytest.mark.parametrize(
+    "failure", [RuntimeError("broken cleanup"), _operational_error("interrupted")]
+)
+def test_metadata_maintenance_failure_does_not_revoke_recovery_or_busy_loop(
+    monkeypatch, test_settings, failure, caplog
+):
+    worker = metadata_queue.MetadataLookupWorker(
+        RecordingSessionFactory(), test_settings
+    )
+    worker._writeback_recovery.ready = True
+    clock = [0.0]
+    monkeypatch.setattr(metadata_queue, "monotonic", lambda: clock[0])
+    calls = []
+
+    def fail(*args):
+        calls.append(True)
+        raise failure
+
+    monkeypatch.setattr(metadata_queue, "maintain_metadata_writebacks", fail)
+    worker._maintain()
+    worker._maintain()
+    assert len(calls) == 1
+    assert worker._writeback_recovery.ready
+    assert "metadata.maintenance_deferred" in caplog.text
+    clock[0] = 300
+    worker._maintain()
+    assert len(calls) == 2
+
+
+def test_metadata_gated_paths_do_not_claim(monkeypatch, test_settings):
+    calls = []
+    monkeypatch.setattr(
+        metadata_queue,
+        "claim_next_metadata_lookup_task",
+        lambda *a, **kw: calls.append("lookup"),
+    )
+    monkeypatch.setattr(
+        metadata_queue,
+        "process_next_metadata_writeback",
+        lambda *a, **kw: calls.append("writeback") or False,
+    )
+    metadata_queue.process_next_metadata_lookup_task(
+        None, test_settings, lookup_ready=False
+    )
+    assert calls == ["writeback"]
+    calls.clear()
+    metadata_queue.process_next_metadata_lookup_task(
+        None, test_settings, writeback_ready=False
+    )
+    assert calls == ["lookup"]
+
+
+def test_metadata_stop_during_recovery_backoff(monkeypatch, test_settings):
+    attempted = Event()
+    calls = []
+    worker = metadata_queue.MetadataLookupWorker(
+        RecordingSessionFactory(), test_settings, poll_seconds=60
+    )
+    worker._heartbeat = RecordingHeartbeat()
+
+    def busy(db):
+        calls.append(db)
+        attempted.set()
+        raise _operational_error("database is locked")
+
+    monkeypatch.setattr(metadata_queue, "recover_stale_metadata_lookup_tasks", busy)
+    monkeypatch.setattr(metadata_queue, "recover_interrupted_metadata_writebacks", busy)
+    worker.start()
+    assert attempted.wait(2)
+    worker.shutdown()
+    count = len(calls)
+    worker._recover(worker._lookup_recovery, busy, "lookup")
+    assert len(calls) == count
+    assert not worker._thread.is_alive()
+    assert worker._heartbeat.stopped
+
+
 def test_metadata_worker_retries_transient_database_locks(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -169,6 +325,15 @@ def test_metadata_worker_shutdown_interrupts_long_idle_poll(
         return False
 
     monkeypatch.setattr(metadata_queue, "process_next_metadata_lookup_task", operation)
+    monkeypatch.setattr(
+        metadata_queue, "recover_stale_metadata_lookup_tasks", lambda db: 0
+    )
+    monkeypatch.setattr(
+        metadata_queue, "recover_interrupted_metadata_writebacks", lambda db: 0
+    )
+    monkeypatch.setattr(
+        metadata_queue, "maintain_metadata_writebacks", lambda *args: None
+    )
     worker = metadata_queue.MetadataLookupWorker(
         RecordingSessionFactory(),
         Settings(storage_root=str(tmp_path)),

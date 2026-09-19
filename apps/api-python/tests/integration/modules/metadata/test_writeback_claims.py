@@ -27,6 +27,7 @@ from app.models.organize import (
 )
 from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.infrastructure import writeback_queue
+from app.services import metadata_file_writeback
 
 
 def _node(
@@ -245,5 +246,63 @@ def test_writeback_claim_respects_and_recovers_leases(
         assert recovered is not None
         assert recovered["id"] == first["id"]
         assert recovered["leaseOwnerId"] == "worker-b"
+    finally:
+        engine.dispose()
+
+
+def test_recovery_rolls_back_partial_failure_and_preserves_prepared_files(
+    tmp_path, monkeypatch
+):
+    settings = type("Settings", (), {"database_path": tmp_path / "db.sqlite"})()
+    engine = create_sqlite_engine(settings.database_path)
+    bootstrap_database(engine, settings)
+    source = tmp_path / "book.txt"
+    source.write_text("book")
+    prepared = tmp_path / "prepared.part"
+    prepared.write_text("prepared")
+    _seed_claim_rows(engine, source)
+    try:
+        with Session(engine) as db:
+            target = db.get(MetadataWritebackTarget, "claim-target")
+            target.status = "RUNNING"
+            target.lease_owner_id = "old"
+            target.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+            target.prepared_path = str(prepared)
+            db.commit()
+            original = writeback_queue.reconcile_queue_state
+
+            def fail(*args, **kwargs):
+                raise RuntimeError("reconcile failed after target update")
+
+            monkeypatch.setattr(writeback_queue, "reconcile_queue_state", fail)
+            with pytest.raises(RuntimeError):
+                metadata_file_writeback.recover_interrupted_metadata_writebacks(db)
+            assert db.get(MetadataWritebackTarget, "claim-target").status == "RUNNING"
+            monkeypatch.setattr(writeback_queue, "reconcile_queue_state", original)
+            # Maintenance queries are not a prerequisite of recovery.
+            monkeypatch.setattr(
+                writeback_queue, "load_writeback_cleanup_projection", fail
+            )
+            assert (
+                metadata_file_writeback.recover_interrupted_metadata_writebacks(db) == 1
+            )
+            assert (
+                metadata_file_writeback.recover_interrupted_metadata_writebacks(db) == 0
+            )
+            target = db.get(MetadataWritebackTarget, "claim-target")
+            assert target.status == "PENDING"
+            assert target.prepared_path == str(prepared)
+            assert prepared.read_text() == "prepared"
+            target.status = "RUNNING"
+            target.lease_owner_id = "active"
+            target.lease_expires_at = datetime.now(UTC) + timedelta(minutes=5)
+            db.commit()
+            assert (
+                metadata_file_writeback.recover_interrupted_metadata_writebacks(db) == 0
+            )
+            assert (
+                db.get(MetadataWritebackTarget, "claim-target").lease_owner_id
+                == "active"
+            )
     finally:
         engine.dispose()
