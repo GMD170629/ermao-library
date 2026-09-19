@@ -25,6 +25,7 @@ from app.bootstrap.kindle import (
 )
 from app.bootstrap.system import prepare_system_event
 from app.core.config import Settings
+from app.core.database_errors import is_database_busy_error
 from app.core.exception_diagnostics import record_exception
 from app.core.i18n import configured_locale
 from app.core.safe_errors import mask_email, safe_error_message
@@ -287,7 +288,9 @@ def process_next_kindle_send_task(db: Session, settings: Settings) -> bool:
                 "stage": "kindle_send",
                 "outcome": "failed",
                 "task_id": str(task.get("id")) if task.get("id") else None,
-                "resource_id": str(task.get("assetId")) if task.get("assetId") else None,
+                "resource_id": str(task.get("assetId"))
+                if task.get("assetId")
+                else None,
             },
             source="kindle",
             action="kindle.task_failed",
@@ -406,8 +409,6 @@ class KindleSendQueueWorker:
         )
 
     def start(self) -> None:
-        with self.db_factory() as db:
-            recover_interrupted_tasks(db)
         self._thread.start()
 
     def request_stop(self) -> None:
@@ -415,7 +416,8 @@ class KindleSendQueueWorker:
 
     def stop(self) -> None:
         self.request_stop()
-        self._thread.join()
+        if self._thread.is_alive():
+            self._thread.join()
 
     def process_once(self) -> bool:
         if not self._process_lock.acquire(blocking=False):
@@ -425,7 +427,7 @@ class KindleSendQueueWorker:
                 return process_next_kindle_send_task(db, self.settings)
         # The worker boundary must keep the queue alive after an unexpected
         # database or adapter failure.
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             record_exception(
                 LOGGER,
                 "kindle_queue.task_failed",
@@ -434,13 +436,40 @@ class KindleSendQueueWorker:
                 source="kindle",
                 action="kindle.task_failed",
             )
-            return False
+            raise
         finally:
             self._process_lock.release()
 
     def _run(self) -> None:
         self._heartbeat.start()
         try:
+            attempts = 0
+            while not self._stop_event.is_set():
+                try:
+                    with self.db_factory() as db:
+                        recover_interrupted_tasks(db)
+                    break
+                except Exception as exc:  # noqa: BLE001 - gate claims until recovery succeeds.
+                    retry = is_database_busy_error(exc)
+                    record_exception(
+                        LOGGER,
+                        "kindle_queue.recovery_failed",
+                        exc,
+                        context={
+                            "stage": "recovery",
+                            "outcome": "retrying" if retry else "paused",
+                        },
+                        source="kindle",
+                        action="kindle.recovery_failed",
+                    )
+                    self._heartbeat.pulse(
+                        error=f"recovery:{'retrying' if retry else 'paused'}:{type(exc).__name__}"
+                    )
+                    attempts += 1
+                    if self._stop_event.wait(
+                        min(300, 5 * 2 ** min(attempts - 1, 6)) if retry else None
+                    ):
+                        return
             while not self._stop_event.is_set():
                 try:
                     processed = self.process_once()
@@ -455,6 +484,13 @@ class KindleSendQueueWorker:
                         action="kindle.loop_failure",
                     )
                     processed = False
+                    self._heartbeat.pulse(
+                        error=f"iteration:paused:{type(exc).__name__}"
+                    )
+                    if self._stop_event.wait(
+                        60 if is_database_busy_error(exc) else None
+                    ):
+                        return
                 if processed:
                     continue
                 self._stop_event.wait(self.settings.kindle_send_queue_interval_seconds)
@@ -470,5 +506,9 @@ def start_kindle_send_queue_worker(
     if not settings.kindle_send_queue_enabled:
         return None
     worker = KindleSendQueueWorker(db_factory, settings, heartbeat_db_factory)
-    worker.start()
+    try:
+        worker.start()
+    except BaseException:
+        worker.stop()
+        raise
     return worker

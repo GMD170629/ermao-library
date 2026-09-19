@@ -8,7 +8,6 @@ from typing import cast
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
 from starlette.types import ExceptionHandler
@@ -30,14 +29,11 @@ from app.contracts.http_errors import HttpContractError
 from app.core.auth import get_current_user
 from app.core.authorization import can_manage_system
 from app.core.config import Settings, get_settings
-from app.core.database_errors import (
-    is_database_busy_error,
-    is_database_operation_timeout,
-)
 from app.core.exception_diagnostics import (
     configure_exception_storage,
     install_exception_hooks,
     install_loop_exception_handler,
+    record_exception,
 )
 from app.core.logging_config import configure_logging
 from app.db.maintenance import database_maintenance_is_active
@@ -50,9 +46,7 @@ from app.db.session import (
     get_short_write_db,
 )
 from app.schemas.responses import fail
-from app.services.default_cover_cleanup import cleanup_default_cover_residue
 from app.services.download_queue import start_download_queue_worker
-from app.services.health_runs import fail_abandoned_health_runs
 from app.services.kindle_queue import start_kindle_send_queue_worker
 from app.services.log_maintenance import SystemEventMaintenanceWorker
 
@@ -150,49 +144,60 @@ def create_app(
         install_exception_hooks()
         if session_factory is None:
             verify_current_schema(engine)
-        download_queue_worker = start_download_queue_worker(
-            background_runtime_factory,
-            settings,
-            heartbeat_runtime_factory,
-        )
-        kindle_send_queue_worker = start_kindle_send_queue_worker(
-            background_runtime_factory,
-            settings,
-            heartbeat_runtime_factory,
-        )
-        startup_db = background_runtime_factory()
+
+        def report(stage: str, error: Exception) -> None:
+            try:
+                record_exception(
+                    LOGGER,
+                    "api.background_unavailable",
+                    error,
+                    context={"stage": stage, "outcome": "paused"},
+                    source="system",
+                    action="api.background_unavailable",
+                )
+            except Exception as diagnostic_error:  # noqa: BLE001 - safe fallback.
+                LOGGER.error(
+                    "api.background_unavailable stage=%s type=%s diagnostic_type=%s",
+                    stage,
+                    type(error).__name__,
+                    type(diagnostic_error).__name__,
+                )
+
+        def release(stage: str, action: Callable[[], object]) -> None:
+            try:
+                action()
+            except Exception as error:  # noqa: BLE001 - continue releasing other owners.
+                report(stage, error)
+
+        download_queue_worker = None
+        kindle_send_queue_worker = None
+        log_maintenance_worker = None
         try:
-            fail_abandoned_health_runs(startup_db)
-        except OperationalError as error:
-            if not (
-                is_database_busy_error(error) or is_database_operation_timeout(error)
-            ):
-                raise
-            LOGGER.warning(
-                "startup_health_recovery outcome=deferred reason=%s",
-                "database_busy"
-                if is_database_busy_error(error)
-                else "time_budget_exceeded",
+            download_queue_worker = start_download_queue_worker(
+                background_runtime_factory,
+                settings,
+                heartbeat_runtime_factory,
             )
+        except Exception as error:  # noqa: BLE001 - optional component boundary.
+            report("download_start", error)
         try:
-            cleanup_default_cover_residue(startup_db, settings)
-        except OperationalError as error:
-            if not (
-                is_database_busy_error(error) or is_database_operation_timeout(error)
-            ):
-                raise
-            LOGGER.warning(
-                "startup_default_cover_cleanup outcome=deferred reason=%s",
-                "database_busy"
-                if is_database_busy_error(error)
-                else "time_budget_exceeded",
+            kindle_send_queue_worker = start_kindle_send_queue_worker(
+                background_runtime_factory,
+                settings,
+                heartbeat_runtime_factory,
             )
-        finally:
-            startup_db.close()
-        log_maintenance_worker = SystemEventMaintenanceWorker(
-            background_runtime_factory
-        )
-        log_maintenance_worker.start()
+        except Exception as error:  # noqa: BLE001 - optional component boundary.
+            report("kindle_start", error)
+        try:
+            log_maintenance_worker = SystemEventMaintenanceWorker(
+                background_runtime_factory,
+                settings=settings,
+            )
+            log_maintenance_worker.start()
+        except Exception as error:  # noqa: BLE001 - optional component boundary.
+            report("maintenance_start", error)
+            if log_maintenance_worker is not None:
+                release("maintenance_stop", log_maintenance_worker.stop)
         app.state.download_queue_worker = download_queue_worker
         app.state.kindle_send_queue_worker = kindle_send_queue_worker
         app.state.update_runtime = UpdateRuntime(settings)
@@ -204,7 +209,7 @@ def create_app(
                 log_maintenance_worker,
             ):
                 if worker is not None:
-                    worker.request_stop()
+                    release("request_stop", worker.request_stop)
 
         loop = asyncio.get_running_loop()
         install_loop_exception_handler(loop)
@@ -220,13 +225,22 @@ def create_app(
             stop_background()
             if signal_installed:
                 loop.remove_signal_handler(signal.SIGUSR1)
-            await run_in_threadpool(app.state.update_runtime.close)
+            await run_in_threadpool(
+                release, "update_stop", app.state.update_runtime.close
+            )
             if download_queue_worker is not None:
-                download_queue_worker.stop()
+                await run_in_threadpool(
+                    release, "download_stop", download_queue_worker.stop
+                )
             if kindle_send_queue_worker is not None:
-                kindle_send_queue_worker.stop()
-            log_maintenance_worker.stop()
-            publication_navigation_runtime.close()
+                await run_in_threadpool(
+                    release, "kindle_stop", kindle_send_queue_worker.stop
+                )
+            if log_maintenance_worker is not None:
+                await run_in_threadpool(
+                    release, "maintenance_stop", log_maintenance_worker.stop
+                )
+            release("navigation_stop", publication_navigation_runtime.close)
 
     app = FastAPI(
         title=settings.app_name, version=settings.app_version, lifespan=lifespan

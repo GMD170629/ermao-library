@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.bootstrap.download import continue_download_import_command
 from app.core.config import Settings
+from app.core.database_errors import is_database_busy_error
 from app.core.exception_diagnostics import record_exception
 from app.modules.download.infrastructure.tasks import (
     list_enabled_libraries,
@@ -54,7 +55,8 @@ class DownloadQueueWorker:
 
     def stop(self) -> None:
         self.request_stop()
-        self._thread.join()
+        if self._thread.is_alive():
+            self._thread.join()
 
     def process_once(self) -> bool:
         if not self._process_lock.acquire(blocking=False):
@@ -62,7 +64,7 @@ class DownloadQueueWorker:
         try:
             with self.db_factory() as db:
                 return process_next_download_task(db, self.settings)
-        except Exception as exc:  # noqa: BLE001 - worker iteration containment.
+        except Exception as exc:
             record_exception(
                 logger,
                 "download_queue.task_failed",
@@ -71,7 +73,7 @@ class DownloadQueueWorker:
                 source="download",
                 action="download.task_failed",
             )
-            return False
+            raise
         finally:
             self._process_lock.release()
 
@@ -92,6 +94,13 @@ class DownloadQueueWorker:
                         action="download.loop_failure",
                     )
                     processed = False
+                    self._heartbeat.pulse(
+                        error=f"iteration:paused:{type(exc).__name__}"
+                    )
+                    if self._stop_event.wait(
+                        60 if is_database_busy_error(exc) else None
+                    ):
+                        return
                 if processed:
                     continue
                 self._stop_event.wait(self.settings.download_queue_interval_seconds)
@@ -175,5 +184,9 @@ def start_download_queue_worker(
     if not settings.download_queue_enabled:
         return None
     worker = DownloadQueueWorker(db_factory, settings, heartbeat_db_factory)
-    worker.start()
+    try:
+        worker.start()
+    except BaseException:
+        worker.stop()
+        raise
     return worker
