@@ -230,6 +230,26 @@ def test_metadata_stop_during_recovery_backoff(monkeypatch, test_settings):
     assert worker._heartbeat.stopped
 
 
+def test_organizer_program_error_waits_for_stop(monkeypatch):
+    scheduler = organize_scheduler.OrganizerScheduler(RecordingSessionFactory())
+    attempted = Event()
+    calls = []
+
+    def fail(db):
+        calls.append(db)
+        attempted.set()
+        raise RuntimeError("deterministic bug")
+
+    monkeypatch.setattr(organize_scheduler, "process_organize_schedule_tick", fail)
+    scheduler.start()
+    try:
+        assert attempted.wait(2)
+    finally:
+        scheduler.shutdown()
+    assert len(calls) == 1
+    assert calls[0].closed
+
+
 def test_metadata_worker_retries_transient_database_locks(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

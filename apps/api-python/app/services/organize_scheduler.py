@@ -451,4 +451,9 @@ class OrganizerScheduler:
                     break
             except Exception as error:  # noqa: BLE001 - worker containment boundary.
                 self._record_iteration_error(error)
+                if not is_database_busy_error(error):
+                    # Preserve queued work; a deterministic failure requires a
+                    # fix/restart, not another execution every five seconds.
+                    self._stop.wait()
+                    break
             self._stop.wait(self._poll_seconds)
