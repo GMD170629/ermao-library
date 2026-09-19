@@ -6,7 +6,7 @@ from pathlib import Path
 from threading import Barrier
 
 import pytest
-from sqlalchemy import update
+from sqlalchemy import delete, update
 from sqlalchemy.orm import Session
 
 from app.db.bootstrap import bootstrap_database
@@ -187,6 +187,86 @@ def test_two_workers_atomically_claim_one_writeback_item(
         assert results.count(None) == 1
     finally:
         engine.dispose()
+
+
+def test_cleanup_protects_unbounded_active_targets_and_pending_preparations(tmp_path):
+    import os
+
+    settings = type(
+        "Settings",
+        (),
+        {"database_path": tmp_path / "db.sqlite", "resolved_storage_root": tmp_path},
+    )()
+    engine = create_sqlite_engine(settings.database_path)
+    bootstrap_database(engine, settings)
+    source = tmp_path / "book.txt"
+    source.write_text("book")
+    prepared = tmp_path / ".book.opf.shuku-old.part"
+    prepared.write_text("still owned")
+    os.utime(prepared, (1000, 1000))
+    _seed_claim_rows(engine, source)
+    try:
+        with Session(engine) as db:
+            for index in range(600):
+                db.add(
+                    MetadataWritebackTarget(
+                        id=f"other-{index}",
+                        operation_id="claim-operation",
+                        target_key=f"other-{index}",
+                        source_path=str(tmp_path / "other" / "book.txt"),
+                        format="TXT",
+                        payload_json="{}",
+                        status="PREPARED",
+                        prepared_path=str(tmp_path / "other" / f"part-{index}"),
+                        written_fields_json="[]",
+                    )
+                )
+            target = db.get(MetadataWritebackTarget, "claim-target")
+            target.status = "PENDING"
+            target.prepared_path = str(prepared)
+            db.commit()
+            metadata_file_writeback.maintain_metadata_writebacks(db, settings)
+            assert prepared.read_text() == "still owned"
+            # A RUNNING target protects the file before preparedPath registration.
+            target = db.get(MetadataWritebackTarget, "claim-target")
+            target.status = "RUNNING"
+            target.prepared_path = None
+            db.commit()
+            metadata_file_writeback.maintain_metadata_writebacks(db, settings)
+            assert prepared.exists()
+            db.execute(delete(MetadataWritebackTarget))
+            db.commit()
+            metadata_file_writeback.maintain_metadata_writebacks(db, settings)
+            assert db.get(MetadataWritebackOperation, "claim-operation") is not None
+            assert db.get(MetadataWritebackPreparation, "claim-preparation") is not None
+            assert not prepared.exists()
+    finally:
+        engine.dispose()
+
+
+def test_cleanup_projection_advances_by_stable_id_and_uses_library_root(
+    db_session, tmp_path
+):
+    library = db_session.get(Library, "test-library")
+    library.root_path = str(tmp_path)
+    for index in range(520):
+        db_session.add(_node(f"node-{index:04}", f"folder/book-{index}.txt"))
+    db_session.commit()
+    seen = []
+    cursor = None
+    while True:
+        projection = writeback_queue.load_writeback_cleanup_projection(
+            db_session, limit=128, after_id=cursor
+        )
+        seen.extend(projection.sources)
+        cursor = projection.next_cursor
+        if cursor is None:
+            break
+    assert len(seen) == len(set(seen)) == 520
+    assert all(
+        root == str(tmp_path) and not Path(relative).is_absolute()
+        for relative, root in seen
+    )
 
 
 @pytest.mark.parametrize("claim_kind", ["preparation", "target"])

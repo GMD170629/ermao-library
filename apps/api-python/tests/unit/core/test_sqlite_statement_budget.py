@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 import time
 from pathlib import Path
 
@@ -8,6 +9,8 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.exc import OperationalError
 
+from app.core.database_errors import is_database_operation_timeout
+from app.core.exception_diagnostics import format_exception_diagnostics
 from app.db.sqlite import (
     SHORT_WRITE_LOCK_TIMEOUT_SECONDS,
     SQLITE_STATEMENT_TIMEOUT_SECONDS,
@@ -18,6 +21,13 @@ from app.db.sqlite import (
 def test_statement_budget_and_lock_wait_are_independent() -> None:
     assert SHORT_WRITE_LOCK_TIMEOUT_SECONDS == 0.5
     assert SQLITE_STATEMENT_TIMEOUT_SECONDS == 2.0
+
+
+def test_external_sqlite_interruption_is_not_a_budget_timeout():
+    original = sqlite3.OperationalError("interrupted")
+    original.sqlite_errorcode = sqlite3.SQLITE_INTERRUPT
+    assert not is_database_operation_timeout(original)
+    assert not is_database_operation_timeout(OperationalError("query", {}, original))
 
 
 def _budget_table(engine: sa.Engine) -> sa.Table:
@@ -113,7 +123,7 @@ def test_slow_sql_interrupts_and_transaction_rolls_back_with_connection_reuse(
     try:
         with engine.connect() as connection:
             with (
-                pytest.raises(OperationalError, match="interrupted"),
+                pytest.raises(OperationalError, match="interrupted") as interrupted,
                 connection.begin(),
             ):
                 connection.execute(
@@ -127,6 +137,12 @@ def test_slow_sql_interrupts_and_transaction_rolls_back_with_connection_reuse(
                         .where(table.c.id == 1)
                         .values(value=expensive_count.scalar_subquery())
                     )
+            assert is_database_operation_timeout(interrupted.value)
+            assert (
+                format_exception_diagnostics(interrupted.value)["reason"]
+                == "time_budget_exceeded"
+            )
+            assert interrupted.value.orig.sqlite_errorcode == 9
             assert (
                 connection.scalar(sa.select(table.c.value).where(table.c.id == 0)) == 0
             )

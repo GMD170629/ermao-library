@@ -239,24 +239,35 @@ def _fail_target_uow(
 def _cleanup_orphan_prepared_files(
     projection: writeback_queue.WritebackCleanupProjection,
     settings: Settings,
+    db: Session,
 ) -> int:
     directories: list[Path] = [settings.resolved_storage_root]
-    for source_value in projection.source_paths:
-        source = Path(source_value).expanduser()
+    for relative, root_value in projection.sources:
+        root = Path(root_value).expanduser().resolve()
+        source = (root / relative).resolve()
+        if not source.is_relative_to(root):
+            continue
         directories.append(source if source.is_dir() else source.parent)
-    protected = frozenset(
-        Path(value).expanduser() for value in projection.protected_prepared_paths
-    )
+
+    def can_remove(candidate: Path) -> bool:
+        try:
+            return writeback_queue.prepared_file_is_unowned(db, candidate)
+        finally:
+            db.close()
+
     return file_writeback.cleanup_orphan_prepared_files(
         tuple(directories),
-        protected_paths=protected,
+        can_remove=can_remove,
     )
 
 
 def _cleanup_terminal_history_uow(
     db: Session,
+    after_id: str | None = None,
 ) -> tuple[bool, writeback_queue.WritebackCleanupProjection]:
-    cleanup_projection = writeback_queue.load_writeback_cleanup_projection(db)
+    cleanup_projection = writeback_queue.load_writeback_cleanup_projection(
+        db, after_id=after_id
+    )
     prepared_cleanup = writeback_queue.prepare_terminal_history_cleanup(db)
     db.close()
     with MetadataWriteTransaction(db):
@@ -268,10 +279,13 @@ def _cleanup_terminal_history_uow(
     return cleaned, cleanup_projection
 
 
-def maintain_metadata_writebacks(db: Session, settings: Settings) -> None:
+def maintain_metadata_writebacks(
+    db: Session, settings: Settings, *, after_id: str | None = None
+) -> str | None:
     """Run bounded maintenance independently of recovery and task claims."""
-    _, projection = _cleanup_terminal_history_uow(db)
-    _cleanup_orphan_prepared_files(projection, settings)
+    _, projection = _cleanup_terminal_history_uow(db, after_id)
+    _cleanup_orphan_prepared_files(projection, settings, db)
+    return projection.next_cursor
 
 
 def process_next_metadata_writeback(

@@ -6,6 +6,7 @@ import os
 import shutil
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -45,6 +46,7 @@ def cleanup_orphan_prepared_files(
     now_seconds: float | None = None,
     max_age_seconds: int = ORPHAN_PREPARED_MAX_AGE_SECONDS,
     scan_limit: int = ORPHAN_PREPARED_SCAN_LIMIT,
+    can_remove: Callable[[Path], bool] | None = None,
 ) -> int:
     """Remove bounded, stale OPF preparation files from known source directories."""
 
@@ -81,6 +83,8 @@ def cleanup_orphan_prepared_files(
                     or not candidate.is_file()
                     or stat.st_mtime > cutoff
                 ):
+                    continue
+                if can_remove is not None and not can_remove(resolved_candidate):
                     continue
                 try:
                     candidate.unlink()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -19,6 +20,7 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.models import (
+    Library,
     LibraryBook,
     LibraryBookMetadata,
     LibraryImportTask,
@@ -72,8 +74,8 @@ class PreparedTargetInsert:
 
 @dataclass(frozen=True, slots=True)
 class WritebackCleanupProjection:
-    source_paths: tuple[str, ...]
-    protected_prepared_paths: tuple[str, ...]
+    sources: tuple[tuple[str, str], ...]
+    next_cursor: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,57 +99,47 @@ def load_writeback_cleanup_projection(
     db: Session,
     *,
     limit: int = WRITEBACK_CLEANUP_PATH_LIMIT,
+    after_id: str | None = None,
 ) -> WritebackCleanupProjection:
-    """Load a bounded path projection for transaction-external orphan cleanup."""
-
+    """Walk source nodes by stable primary key, without an asset join/sort."""
     bounded = min(max(limit, 1), WRITEBACK_CLEANUP_PATH_LIMIT)
-    target_sources = tuple(
-        str(value)
-        for value in db.scalars(
-            select(MetadataWritebackTarget.source_path)
-            .where(
-                MetadataWritebackTarget.status.in_(("PENDING", "RUNNING", "PREPARED"))
-            )
-            .order_by(MetadataWritebackTarget.updated_at.desc())
-            .limit(bounded)
-        ).all()
-        if value
+    statement = (
+        select(LibrarySourceNode.id, LibrarySourceNode.relative_path, Library.root_path)
+        .join(Library, Library.id == LibrarySourceNode.library_id)
+        .order_by(LibrarySourceNode.id)
+        .limit(bounded)
     )
-    remaining = max(0, bounded - len(target_sources))
-    library_sources = (
-        tuple(
-            str(value)
-            for value in db.scalars(
-                select(LibrarySourceNode.relative_path)
-                .join(
-                    LibraryResourceAsset,
-                    LibraryResourceAsset.source_node_id == LibrarySourceNode.id,
-                )
-                .order_by(LibraryResourceAsset.updated_at.desc())
-                .limit(remaining)
-            ).all()
-            if value
-        )
-        if remaining
-        else ()
-    )
-    protected = tuple(
-        str(value)
-        for value in db.scalars(
-            select(MetadataWritebackTarget.prepared_path)
-            .where(
-                MetadataWritebackTarget.prepared_path.is_not(None),
-                MetadataWritebackTarget.status.in_(("RUNNING", "PREPARED")),
-            )
-            .order_by(MetadataWritebackTarget.updated_at.desc())
-            .limit(bounded)
-        ).all()
-        if value
-    )
+    if after_id is not None:
+        statement = statement.where(LibrarySourceNode.id > after_id)
+    rows = db.execute(statement).all()
     return WritebackCleanupProjection(
-        source_paths=target_sources + library_sources,
-        protected_prepared_paths=protected,
+        sources=tuple((str(relative), str(root)) for _, relative, root in rows),
+        next_cursor=str(rows[-1][0]) if len(rows) == bounded else None,
     )
+
+
+def prepared_file_is_unowned(db: Session, candidate: Path) -> bool:
+    """Confirm protection at deletion time, including the pre-registration window.
+
+    Any unfinished target in this directory conservatively protects its files.
+    Legacy relative task paths cannot prove ownership and defer deletion.
+    """
+    parent = str(candidate.parent)
+    source = MetadataWritebackTarget.source_path
+    active = (
+        select(MetadataWritebackTarget.id)
+        .where(
+            MetadataWritebackTarget.status.in_(("PENDING", "RUNNING", "PREPARED")),
+            or_(
+                MetadataWritebackTarget.prepared_path == str(candidate),
+                source == parent,
+                source.startswith(parent + os.sep, autoescape=True),
+                (~source.startswith("/")) & (func.substr(source, 2, 1) != ":"),
+            ),
+        )
+        .limit(1)
+    )
+    return db.scalar(active) is None
 
 
 def write_metadata_to_files_enabled(db: Session) -> bool:
@@ -1223,7 +1215,16 @@ def prepare_terminal_history_cleanup(
                 MetadataWritebackTarget,
                 MetadataWritebackTarget.operation_id == MetadataWritebackOperation.id,
             )
-            .where(MetadataWritebackTarget.id.is_(None))
+            .where(
+                MetadataWritebackTarget.id.is_(None),
+                MetadataWritebackOperation.status.in_(("COMPLETED", "WARNING")),
+                ~select(MetadataWritebackPreparation.id)
+                .where(
+                    MetadataWritebackPreparation.operation_id
+                    == MetadataWritebackOperation.id
+                )
+                .exists(),
+            )
             .limit(batch_size)
         ).all()
     )

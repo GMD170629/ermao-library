@@ -26,7 +26,10 @@ from app.bootstrap.library import (
 )
 from app.bootstrap.media import versioned_cover_url
 from app.core.config import Settings
-from app.core.database_errors import is_database_busy_error
+from app.core.database_errors import (
+    is_database_busy_error,
+    is_database_operation_timeout,
+)
 from app.core.exception_diagnostics import record_exception
 from app.models.common import db_timestamp
 from app.modules.imports.public import (
@@ -963,6 +966,7 @@ class MetadataLookupWorker:
         self._lookup_recovery = _MetadataRecovery()
         self._writeback_recovery = _MetadataRecovery()
         self._next_maintenance = 0.0
+        self._maintenance_cursor: str | None = None
         self._heartbeat = QueueHeartbeatPump(
             heartbeat_db_factory or db_factory,
             queue_name="metadata",
@@ -983,7 +987,7 @@ class MetadataLookupWorker:
                 operation(db)
         except Exception as exc:  # noqa: BLE001 - this component remains gated.
             state.attempts += 1
-            retry = is_database_busy_error(exc)
+            retry = is_database_busy_error(exc) or is_database_operation_timeout(exc)
             state.next_attempt = (
                 monotonic() + min(300.0, 5.0 * 2 ** min(state.attempts - 1, 6))
                 if retry
@@ -1014,7 +1018,9 @@ class MetadataLookupWorker:
         self._next_maintenance = monotonic() + 300.0
         try:
             with self._db_factory() as db:
-                maintain_metadata_writebacks(db, self._settings)
+                self._maintenance_cursor = maintain_metadata_writebacks(
+                    db, self._settings, after_id=self._maintenance_cursor
+                )
         except Exception as exc:  # noqa: BLE001 - maintenance cannot revoke readiness.
             record_exception(
                 LOGGER,

@@ -167,7 +167,7 @@ def test_metadata_maintenance_failure_does_not_revoke_recovery_or_busy_loop(
     monkeypatch.setattr(metadata_queue, "monotonic", lambda: clock[0])
     calls = []
 
-    def fail(*args):
+    def fail(*args, **kwargs):
         calls.append(True)
         raise failure
 

@@ -22,6 +22,7 @@ from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
+from app.core.database_errors import is_database_operation_timeout
 from app.core.safe_errors import mask_email
 
 SessionFactory = Callable[[], Session]
@@ -68,11 +69,11 @@ _SENSITIVE_KEYS = (
     r"cookie|set-cookie|password|passwd|pwd|secret|token|api[_-]?key|"
     r"access[_-]?key|client[_-]?secret|refresh[_-]?token|credential|passphrase"
 )
-_SENSITIVE_VALUE = (
-    r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\r\n]+)"
-)
+_SENSITIVE_VALUE = r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\r\n]+)"
 _SENSITIVE_ASSIGNMENT = re.compile(
-    r"(?i)([\"']?\b(?:" + _SENSITIVE_KEYS + r")\b[\"']?[ \t]*[:=][ \t]*)"
+    r"(?i)([\"']?\b(?:"
+    + _SENSITIVE_KEYS
+    + r")\b[\"']?[ \t]*[:=][ \t]*)"
     + _SENSITIVE_VALUE
 )
 _BASIC = re.compile(r"(?i)\bbasic\s+[A-Za-z0-9+/=._~-]+")
@@ -243,6 +244,11 @@ def format_exception_diagnostics(
         "chain": _chain_entries(error),
         "location": sanitize_diagnostic_text(location) if location else None,
         "truncated": truncated,
+        **(
+            {"reason": "time_budget_exceeded"}
+            if is_database_operation_timeout(error)
+            else {}
+        ),
     }
 
 
@@ -312,6 +318,8 @@ def _format_log_text(
     fields = _context_log_fields(context)
     context_line = " ".join(f"{key}={value}" for key, value in fields.items())
     header = f"{event} diagnostic_id={diagnostic_id}"
+    if diagnostics.get("reason") == "time_budget_exceeded":
+        header += " reason=time_budget_exceeded"
     if context_line:
         header = f"{header} {context_line}"
     traceback_text = str(diagnostics.get("traceback") or "")
@@ -446,7 +454,8 @@ def _prepare_group_diagnostic(
         "traceback": combined_traceback,
         "chain": [],
         "location": first.get("location"),
-        "truncated": truncated or any(item.get("truncated") for item in member_diagnostics),
+        "truncated": truncated
+        or any(item.get("truncated") for item in member_diagnostics),
         "members": [
             {
                 "exceptionType": item.get("exceptionType"),
@@ -712,9 +721,7 @@ def install_loop_exception_handler(loop: Any) -> None:
     if loop is None or not hasattr(loop, "set_exception_handler"):
         return
     previous = (
-        loop.get_exception_handler()
-        if hasattr(loop, "get_exception_handler")
-        else None
+        loop.get_exception_handler() if hasattr(loop, "get_exception_handler") else None
     )
 
     def _handler(active_loop: Any, context: dict[str, Any]) -> None:

@@ -37,8 +37,10 @@ class _StatementBudgetCursor(sqlite3.Cursor):
     _remaining_seconds: float | None = None
     _deadline: float | None = None
     _started_at: float = 0
+    _budget_exhausted: bool = False
 
     def _start_statement(self) -> None:
+        self._budget_exhausted = False
         self._remaining_seconds = cast(
             _StatementBudgetConnection, self.connection
         ).statement_time_budget_seconds
@@ -50,7 +52,9 @@ class _StatementBudgetCursor(sqlite3.Cursor):
         )
 
     def _expired(self) -> int:
-        return int(self._deadline is not None and monotonic() >= self._deadline)
+        expired = self._deadline is not None and monotonic() >= self._deadline
+        self._budget_exhausted = self._budget_exhausted or expired
+        return int(expired)
 
     def _check_budget(self) -> None:
         if self._expired():
@@ -59,6 +63,7 @@ class _StatementBudgetCursor(sqlite3.Cursor):
             error = sqlite3.OperationalError("interrupted")
             error.sqlite_errorcode = sqlite3.SQLITE_INTERRUPT
             error.sqlite_errorname = "SQLITE_INTERRUPT"
+            error.time_budget_exceeded = True
             raise error
 
     def _run(self, operation: Callable[[], _Result]) -> _Result:
@@ -72,6 +77,10 @@ class _StatementBudgetCursor(sqlite3.Cursor):
             result = operation()
             self._check_budget()
             return result
+        except sqlite3.OperationalError as error:
+            if self._budget_exhausted:
+                error.time_budget_exceeded = True
+            raise
         finally:
             self._remaining_seconds -= monotonic() - self._started_at
             self._deadline = None
