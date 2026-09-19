@@ -1,6 +1,6 @@
 # 容器内持久化程序目录与停机安装
 
-当前 D1 协议 2 的依赖目录、初始化及显式转换以 [包级依赖更新](dependency-package-updates.md) 为准。下文第 1–4 批安装说明为协议 1；D1 暂不开放协议 2 下载／安装。
+当前协议 2 的依赖目录及在线安装以 [包级依赖更新](dependency-package-updates.md) 为准；镜像切换遵循本文的自动同步规则。下文第 1–4 批安装说明保留协议 1 的历史流程。
 
 第 1 批提供固定启动入口和唯一持久化程序目录。[第 2 批](application-update-preparation.md) 增加应用包与后台下载准备，第 3 批增加下述固定入口停机安装，第 4 批接入独立下载/安装确认与正式应用产物；开发脚本、单独 API 镜像仍沿用原有启动方式，不支持应用内安装。
 
@@ -12,13 +12,20 @@
 | `/opt/shuku-image/` | 镜像携带的初始完整程序：Next standalone、静态资源、Python 应用与迁移、现有启动脚本及网关 |
 | `STORAGE_ROOT/runtime/` | 唯一运行程序目录；首次复制后创建 `.initialized` 标记 |
 | `STORAGE_ROOT/update-tmp/launcher.lock` | 固定入口持有的进程互斥锁，进程退出自动释放，不通过删除文件解锁 |
+| `STORAGE_ROOT/update-tmp/image.json` | 最近一次通过启动验收的镜像身份，与在线更新后的程序版本分开记录 |
 | `STORAGE_ROOT/database`、`covers`、`indexes`、`logs`、`secrets` | 继续保存原有业务数据；书库继续通过原挂载路径访问 |
 
 Python 业务依赖离线初始化在 `STORAGE_ROOT/dependencies/python`，Node/Python 解释器及原生库留在镜像固定位置，不复制进 runtime。Web 的运行依赖和资源随 standalone 程序复制。程序目录的工作路径由入口强制指定，API 与 Worker 的 cwd 为 runtime 下的 `apps/api-python`。
 
 启动顺序复用 `start-unified-app.sh`：prestart 初始化／迁移并校验数据库 → API 就绪 → Worker、Web、网关。数据仍通过原 `STORAGE_ROOT` 查找，已有会话密钥继续使用，Compose 环境变量保持生效。
 
-后续启动只运行 runtime；即使镜像初始程序变化或不可用，也不重新复制。启动失败不会清空 runtime 或数据库。复制失败留下无完成标记的目录，下一次启动拒绝继续，需检查容器日志、可用空间、文件完整性及部署 UID 的写入权限后人工修复；不要通过手写完成标记来绕过检查。
+普通重启复用 runtime，保留管理页面在线更新的版本。入口每次读取镜像内 `application.json`，比较版本、环境指纹及协议与 `update-tmp/image.json`；身份变化时，以当前镜像携带的程序为准同步。首次启用此机制、尚无镜像记录时，也同步一次。镜像身份文件必须可读，同一身份的普通重启不扫描或重装依赖。
+
+同步在业务启动前持有 `launcher.lock` 与 `prepare.lock`：先验证源、路径、权限、空间及离线依赖种子；数据库存在时用 SQLite 备份 API 保存 `update-tmp/database-before-image.sqlite3`（包含 WAL）；随后写入 `installation-incomplete`，完整替换 runtime 程序及 Node 依赖，重建 `dependencies/python` 和安装记录。所有依赖来自镜像，不联网下载。已识别且完整的协议 1 目录自动接管，无须用户执行转换命令；不完整或不安全的目录拒绝覆盖。
+
+复用原 prestart 迁移及服务启动，实际 API 版本、API/网关健康、Web 响应和本次 Worker 就绪全部通过后，才清理旧准备产物、写入镜像身份并移除未完成标记。已有安装未完成标记或请求始终阻止启动。复制、依赖安装、迁移或健康检查失败保留现场和备份，不自动回滚或重试；仅 Worker 未就绪时沿用现有故障隔离，保留健康的核心服务，但不标记同步成功。检查容器日志和部署 UID 权限后人工修复，不要手写完成标记或删除失败标记绕过检查。
+
+数据库、图书、封面、配置和会话密钥不属于替换范围。切回较低版本镜像也选择该镜像程序，但数据库不自动降级或恢复，遇到不支持的 schema 明确拒绝启动。本机制只对包含新固定入口的镜像生效，不能改变已经发布的旧镜像行为。
 
 ## 部署入口与权限
 
@@ -35,15 +42,17 @@ Python 业务依赖离线初始化在 `STORAGE_ROOT/dependencies/python`，Node/
 ## 定向验证
 
 ```sh
-apps/api-python/.venv/bin/python -m unittest scripts.test_container_entry scripts.test_install_python_runtime -v
+python3 -m unittest discover -s scripts -p 'test_container_*.py' -v
 docker build -f apps/web/Dockerfile.prod -t shuku-d1:local .
 python3 scripts/smoke-container-runtime.py --image shuku-d1:local
+# 两个镜像均包含本次固定入口，版本不同，且数据库兼容：
+python3 scripts/smoke-container-runtime.py --image shuku-new:local --upgrade-from shuku-old:local
 sh -n scripts/start-unified-app.sh
 docker compose -f docker-compose.prod.yml config --quiet
 docker compose -f docker-compose.yml config --quiet
 ```
 
-冒烟脚本使用隔离 Docker 卷、非 root UID/GID 和断网容器，启动真实 API、Worker、Web、网关并验证迁移、依赖隔离、二次启动和显式旧布局转换；不修改用户部署。
+冒烟脚本使用隔离 Docker 卷、非 root UID/GID 和断网容器，启动真实 API、Worker、Web、网关并验证迁移、依赖隔离、二次启动和旧布局自动接管。`--upgrade-from` 验证镜像切换、数据保留、真实在线更新后的普通重启，以及切回数据库兼容的较低版本镜像；不修改用户部署。
 
 第 1 批最初仅完成宿主验证。第 3 批已启动 Docker Desktop，并完成 Linux ARM64 的真实应用更新、PID 1/孤儿回收、普通停止及断网重启；fnOS 安装运行仍未执行。镜像使用 Python 3.11.15、Node 22.23.1。完整生产镜像首次构建成功；后续 Docker Hub 元数据请求 EOF，因此最终验收复用该镜像的真实 Web/依赖产物，复制本批最新程序和固定入口并重新生成环境信息后执行，未重新安装运行依赖。
 

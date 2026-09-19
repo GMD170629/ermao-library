@@ -10,15 +10,24 @@ import json
 import os
 import shutil
 import signal
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.request
+import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from container_install import Installation, InstallError, backup_database, write_json
+from container_image import ImageSynchronization
+from container_install import (
+    REQUIRED_RUNTIME_FILES,
+    Installation,
+    InstallError,
+    backup_database,
+    write_json,
+)
 from dependency_environment import (
     DependencyError,
     business_environment,
@@ -47,13 +56,7 @@ def initialize_runtime(seed: Path, runtime: Path) -> None:
         # Create the destination before copying. Failure leaves no success marker;
         # subsequent starts refuse it instead of overwriting possible user changes.
         shutil.copytree(seed, runtime, symlinks=True)
-    required = (
-        "scripts/start-unified-app.sh",
-        "scripts/unified-http-gateway.mjs",
-        "apps/web/server.js",
-        "apps/api-python/app/bootstrap/prestart.py",
-    )
-    if any(not (runtime / name).is_file() for name in required):
+    if any(not (runtime / name).is_file() for name in REQUIRED_RUNTIME_FILES):
         raise StartupError("runtime files are missing / 程序文件缺失")
     # Probe with actual writes under the configured UID, without chmod/chown.
     for directory in (runtime, runtime / "apps/web/.next/cache"):
@@ -64,7 +67,9 @@ def initialize_runtime(seed: Path, runtime: Path) -> None:
         marker.write_text("1\n", encoding="utf-8")
 
 
-def run_application(runtime: Path, storage: Path) -> int:
+def run_application(
+    runtime: Path, storage: Path, image_sync: ImageSynchronization | None = None
+) -> int:
     stop_signal = 0
 
     def stop(signum: int, _frame: object) -> None:
@@ -117,6 +122,9 @@ def run_application(runtime: Path, storage: Path) -> int:
         installing = False
 
     child = launch()
+    image_pending = image_sync is not None
+    image_failed = False
+    image_deadline = time.monotonic() + 180
     while True:
         if stop_signal and not forwarded:
             if installing:
@@ -140,7 +148,40 @@ def run_application(runtime: Path, storage: Path) -> int:
                 preflight.returncode = os.waitstatus_to_exitcode(status)
             if pid == 0:
                 break
-        if installing and installer.state["phase"] == "checking":
+        if image_pending:
+            if stop_signal or child.returncode is not None:
+                image_pending = False
+                image_failed = True
+                print(
+                    "image startup interrupted / 镜像程序启动中断，保留未完成标记",
+                    flush=True,
+                )
+            elif time.monotonic() >= image_deadline:
+                image_pending = False
+                image_failed = True
+                core_ready = core_application_ready(image_sync.target["version"])
+                print(
+                    "image worker verification timed out / 镜像 Worker 验证超时，保留未完成标记"
+                    if core_ready
+                    else "image startup verification timed out / 镜像程序启动验证超时，保留未完成标记",
+                    flush=True,
+                )
+                if not core_ready:
+                    os.kill(child.pid, signal.SIGTERM)
+            elif application_ready(child.pid, image_sync.target["version"], ready_file):
+                try:
+                    image_sync.success()
+                except (OSError, ValueError, InstallError):
+                    image_failed = True
+                    print(
+                        "image result write failed / 镜像同步结果写入失败，保留未完成标记",
+                        flush=True,
+                    )
+                    os.kill(child.pid, signal.SIGTERM)
+                else:
+                    image_sync = None
+                image_pending = False
+        elif installing and installer.state["phase"] == "checking":
             if child.returncode is not None or time.monotonic() >= deadline:
                 if preflight is not None and preflight.returncode is None:
                     os.kill(preflight.pid, signal.SIGTERM)
@@ -214,6 +255,7 @@ def run_application(runtime: Path, storage: Path) -> int:
                     stopped = False
         elif (  # noqa: SIM102
             not stop_signal
+            and image_sync is None
             and child.returncode is None
             and installer.lock is None
             and not stopped
@@ -261,7 +303,7 @@ def run_application(runtime: Path, storage: Path) -> int:
     return (
         128 + stop_signal
         if stop_signal
-        else (child.returncode or (1 if stopped else 0))
+        else (child.returncode or (1 if stopped or image_failed else 0))
     )
 
 
@@ -424,6 +466,7 @@ def main() -> int:
     seed = Path(os.environ.get("SHUKU_IMAGE_ROOT", "/opt/shuku-image")).resolve()
     runtime = storage / "runtime"
     state = storage / "update-tmp"
+    image_sync = None
     try:
         if state.is_symlink():
             raise StartupError("update-tmp must not be a link / 更新临时目录不能是链接")
@@ -454,7 +497,7 @@ def main() -> int:
                 )
             ):
                 raise StartupError(
-                    "installation unfinished; inspect update-tmp/installation.log and repair manually / 安装未完成，请检查更新日志并人工修复，禁止自动重试"
+                    "installation unfinished; inspect container logs and update-tmp backups and repair manually / 安装未完成，请检查容器日志与 update-tmp 备份并人工修复，禁止自动重试"
                 )
             dependency_seed = Path(
                 os.environ.get("SHUKU_DEPENDENCY_SEED", "/opt/shuku-dependency-seed")
@@ -472,6 +515,8 @@ def main() -> int:
                     fcntl.flock(preparation_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     convert_legacy(seed, runtime, storage, dependency_seed)
                 return 0
+            image_sync = ImageSynchronization(storage, seed, dependency_seed)
+            pending_image = image_sync.prepare()
             if runtime.exists():
                 identity = json.loads((runtime / "application.json").read_text())
                 if identity.get("protocol") != 2:
@@ -491,7 +536,9 @@ def main() -> int:
                     raise StartupError("incompatible base environment / 基础环境不兼容")
             initialize_dependencies(storage, dependency_seed)
             print("runtime ready / 持久化程序目录就绪", flush=True)
-            return run_application(runtime, storage)
+            return run_application(
+                runtime, storage, image_sync if pending_image else None
+            )
     except (
         OSError,
         ValueError,
@@ -501,11 +548,14 @@ def main() -> int:
         DependencyError,
         InstallError,
         KeyError,
+        TypeError,
+        sqlite3.Error,
+        zipfile.BadZipFile,
     ) as error:
         # Do not expose private paths or dump a traceback into container logs.
         detail = (
             str(error)
-            if isinstance(error, (StartupError, DependencyError))
+            if isinstance(error, (StartupError, DependencyError, InstallError))
             else type(error).__name__
         )
         print(
@@ -515,6 +565,9 @@ def main() -> int:
             flush=True,
         )
         return 1
+    finally:
+        if image_sync is not None:
+            image_sync.close()
 
 
 if __name__ == "__main__":

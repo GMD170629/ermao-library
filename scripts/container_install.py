@@ -19,6 +19,27 @@ class InstallError(RuntimeError):
     pass
 
 
+REQUIRED_RUNTIME_FILES = (
+    "scripts/start-unified-app.sh",
+    "scripts/unified-http-gateway.mjs",
+    "apps/web/server.js",
+    "apps/api-python/app/bootstrap/prestart.py",
+)
+
+
+def replace_runtime(source: Path, runtime: Path) -> None:
+    """Caller owns validation and the incomplete marker; never follow old links."""
+    runtime.mkdir(exist_ok=True)
+    for path in runtime.iterdir():
+        if path.name == ".initialized":
+            continue
+        if path.is_symlink() or not path.is_dir():
+            path.unlink()
+        else:
+            shutil.rmtree(path)
+    shutil.copytree(source, runtime, symlinks=True, dirs_exist_ok=True)
+
+
 def read_json(path: Path) -> dict:
     if path.is_symlink() or path.stat().st_size > 16384:
         raise InstallError("INVALID_STATE")
@@ -168,14 +189,7 @@ class Installation:
             self.dependencies.synchronize_code()
             self.dependencies.apply()
             return
-        for path in self.runtime.iterdir():
-            if path.name == ".initialized":
-                continue
-            if path.is_symlink() or not path.is_dir():
-                path.unlink()
-            else:
-                shutil.rmtree(path)
-        shutil.copytree(source, self.runtime, symlinks=True, dirs_exist_ok=True)
+        replace_runtime(source, self.runtime)
 
     def success(self) -> None:
         if self.dependencies is not None:

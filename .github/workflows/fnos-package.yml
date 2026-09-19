@@ -220,6 +220,7 @@ jobs:
         run: |
           python3 -m unittest discover -s scripts -p 'test_container_entry.py'
           python3 -m unittest discover -s scripts -p 'test_container_install.py'
+          python3 -m unittest discover -s scripts -p 'test_container_image.py'
       - uses: docker/setup-buildx-action@v3
       - name: Build candidate server image
         uses: docker/build-push-action@v6

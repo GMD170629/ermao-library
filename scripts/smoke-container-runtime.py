@@ -24,6 +24,9 @@ def docker(*args: str) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--image", required=True)
+    parser.add_argument(
+        "--upgrade-from", help="existing image to replace using the same test volume"
+    )
     parser.add_argument("--fault-boundaries", action="store_true")
     parser.add_argument("--update-boundaries", action="store_true")
     parser.add_argument("--output-dir", default="artifacts/startup-acceptance")
@@ -44,9 +47,10 @@ def main() -> None:
 
     def start(
         *,
-        without_seed: bool = False,
+        without_dependency_seed: bool = False,
         require_worker: bool = True,
         writable_books: bool = False,
+        image: str | None = None,
     ) -> None:
         nonlocal running
         docker(
@@ -67,14 +71,12 @@ def main() -> None:
             *(
                 [
                     "-e",
-                    "SHUKU_IMAGE_ROOT=/absent",
-                    "-e",
                     "SHUKU_DEPENDENCY_SEED=/absent",
                 ]
-                if without_seed
+                if without_dependency_seed
                 else []
             ),
-            args.image,
+            image or args.image,
         )
         running = True
         deadline = time.monotonic() + 120
@@ -92,7 +94,7 @@ def main() -> None:
                         if require_worker
                         else ""
                     )
-                    + "assert Path('/books/sentinel').read_text()=='original-book'; assert urllib.request.urlopen('http://127.0.0.1:3000/login').status == 200; assert urllib.request.urlopen('http://127.0.0.1:3000/api/health').status == 200",
+                    + "assert not Path('/app/storage/update-tmp/installation-incomplete').exists(); assert Path('/books/sentinel').read_text()=='original-book'; assert urllib.request.urlopen('http://127.0.0.1:3000/login').status == 200; assert urllib.request.urlopen('http://127.0.0.1:3000/api/health').status == 200",
                 ],
                 capture_output=True,
                 check=False,
@@ -276,6 +278,67 @@ def main() -> None:
             )
         stop()
 
+    def image_switches() -> None:
+        old_version = execute(
+            "import json; from pathlib import Path; print(json.loads(Path('/app/storage/runtime/application.json').read_text())['version'])"
+        )
+        execute(
+            "from pathlib import Path; s=Path('/app/storage'); (s/'runtime/obsolete-image-file').write_text('old'); (s/'dependencies/obsolete-image-file').write_text('old'); (s/'covers/sentinel').write_text('keep'); (s/'configuration').write_text('keep')"
+        )
+        # Existing real API fixture verifies accounts, library content and reading state.
+        probe = (Path(__file__).parent / "fixtures/startup-http-probe.py").read_text(
+            encoding="utf-8"
+        )
+        print(execute("initialize=True\n" + probe, business))
+        secret = execute(
+            "from pathlib import Path; import hashlib; print(hashlib.sha256(Path('/app/storage/secrets/session-secret').read_bytes()).hexdigest())"
+        )
+        stop()
+        start()
+        target = json.loads(
+            execute(
+                "from pathlib import Path; print(Path('/opt/shuku-image/application.json').read_text())"
+            )
+        )
+        assert target["version"] != old_version, (
+            "--upgrade-from must have a different version"
+        )
+        assert execute(
+            "import json,urllib.request; from pathlib import Path; s=Path('/app/storage'); target=json.loads(Path('/opt/shuku-image/application.json').read_text()); assert json.loads((s/'runtime/application.json').read_text())==target; assert json.loads((s/'update-tmp/image.json').read_text())==target; assert json.load(urllib.request.urlopen('http://127.0.0.1:8000/openapi.json'))['info']['version']==target['version']; assert not (s/'runtime/obsolete-image-file').exists(); assert not (s/'dependencies/obsolete-image-file').exists(); assert (s/'update-tmp/database-before-image.sqlite3').exists(); assert (s/'covers/sentinel').read_text()=='keep'; assert (s/'configuration').read_text()=='keep'; print('image and actual API aligned; obsolete code/dependencies removed')"
+        )
+        assert secret == execute(
+            "from pathlib import Path; import hashlib; print(hashlib.sha256(Path('/app/storage/secrets/session-secret').read_bytes()).hexdigest())"
+        )
+        print(execute(probe, business))
+        fixture = (
+            Path(__file__).parent / "fixtures/prepare-startup-update.py"
+        ).read_text(encoding="utf-8")
+        online = json.loads(execute("fault='none'\n" + fixture, business))
+        wait_for(
+            "import json; from pathlib import Path; s=json.loads(Path('/app/storage/update-tmp/preparation.json').read_text()); assert s['phase']!='failed',s; print('ready' if s['phase']=='success' else 'waiting')",
+            timeout=240,
+        )
+        snapshot_code = "from pathlib import Path; import hashlib,json; s=Path('/app/storage'); print(json.dumps({n:[(s/n).stat().st_ino,(s/n).stat().st_mtime_ns,hashlib.sha256((s/n).read_bytes()).hexdigest()] for n in ['runtime/application.json','dependencies/installed.json','dependencies/python/pyvenv.cfg','update-tmp/image.json']}))"
+        snapshot = execute(snapshot_code)
+        stop()
+        start(without_dependency_seed=True)
+        assert snapshot == execute(snapshot_code)
+        assert execute(
+            f"import json,urllib.request; assert json.load(urllib.request.urlopen('http://127.0.0.1:8000/openapi.json'))['info']['version']=={online['version']!r}; print('online version retained after same-image restart')"
+        )
+        print(execute(probe, business))
+        stop()
+        # An older image that includes this launcher must also take precedence.
+        start(image=args.upgrade_from)
+        assert execute(
+            f"import json,urllib.request; from pathlib import Path; assert json.load(urllib.request.urlopen('http://127.0.0.1:8000/openapi.json'))['info']['version']=={old_version!r}; assert json.loads(Path('/app/storage/update-tmp/image.json').read_text())['version']=={old_version!r}; print('older image selected without database downgrade')"
+        )
+        print(execute(probe, business))
+        stop()
+        print(
+            "PASS image switch, data retention, real online update/restart, and compatible older image"
+        )
+
     try:
         docker(
             "run",
@@ -290,7 +353,10 @@ def main() -> None:
             "-c",
             "chown 12345:12345 /app/storage /books && touch /app/storage/.acceptance-volume && printf original-book > /books/sentinel && printf 'acceptance original text' > /books/sample.txt",
         )
-        start()
+        start(image=args.upgrade_from)
+        if args.upgrade_from:
+            image_switches()
+            return
         if args.update_boundaries:
             update_boundaries()
             return
@@ -341,7 +407,7 @@ def main() -> None:
         )
         assert blocked.returncode != 0 and b"already running" in blocked.stderr
         stop()
-        start(without_seed=True)
+        start(without_dependency_seed=True)
         assert snapshot == execute(
             "from pathlib import Path; import hashlib,json; s=Path('/app/storage'); print(json.dumps({str(p.relative_to(s)):[p.stat().st_ino,p.stat().st_mtime_ns,hashlib.sha256(p.read_bytes()).hexdigest()] for p in [s/'dependencies/installed.json',s/'dependencies/python/pyvenv.cfg',s/'secrets/session-secret',s/'covers/sentinel',s/'configuration']}))"
         )
@@ -351,45 +417,11 @@ def main() -> None:
         stop()
         # Convert only this isolated deployment to a known v1-shaped fixture.
         offline_command(
-            "from pathlib import Path; import json,shutil; s=Path('/app/storage'); p=s/'runtime/application.json'; v=json.loads(p.read_text()); v.pop('protocol'); p.write_text(json.dumps(v)); shutil.rmtree(s/'dependencies')"
-        )
-        refused = subprocess.run(
-            [
-                "docker",
-                "run",
-                "--rm",
-                "--network",
-                "none",
-                "--user",
-                "12345:12345",
-                "-v",
-                volume + ":/app/storage",
-                args.image,
-            ],
-            capture_output=True,
-            check=False,
-        )
-        assert refused.returncode != 0 and b"--convert-legacy" in refused.stderr
-        print(
-            docker(
-                "run",
-                "--rm",
-                "--network",
-                "none",
-                "--user",
-                "12345:12345",
-                "-v",
-                volume + ":/app/storage",
-                "--entrypoint",
-                "/usr/local/bin/python3.11",
-                args.image,
-                "/opt/shuku-launcher/container-entry.py",
-                "--convert-legacy",
-            )
+            "from pathlib import Path; import json,shutil; s=Path('/app/storage'); p=s/'runtime/application.json'; v=json.loads(p.read_text()); v.pop('protocol'); p.write_text(json.dumps(v)); shutil.rmtree(s/'dependencies'); (s/'update-tmp/image.json').unlink()"
         )
         start()
         assert execute(
-            "from pathlib import Path; s=Path('/app/storage'); assert (s/'update-tmp/database-before-dependency-conversion.sqlite3').is_file(); assert (s/'covers/sentinel').read_text()=='keep'; print('conversion preserved data')"
+            "from pathlib import Path; s=Path('/app/storage'); assert (s/'update-tmp/database-before-image.sqlite3').is_file(); assert (s/'covers/sentinel').read_text()=='keep'; print('automatic legacy adoption preserved data')"
         )
         preserved = json.loads(
             execute(
@@ -459,7 +491,7 @@ def main() -> None:
             "from pathlib import Path; import json,sqlite3; s=Path('/app/storage'); assert 'protocol' not in json.loads((s/'runtime/application.json').read_text()); c=sqlite3.connect(s/'database/shuku.sqlite3'); assert c.execute('SELECT version_num FROM alembic_version').fetchone()==('future_schema',); c.close(); print('unknown schema rejected without downgrade')"
         )
         print(
-            "PASS: API, Worker, schema, Web; non-root; offline initialization/restart; v1 refusal, locked conversion, unknown-schema refusal"
+            "PASS: API, Worker, schema, Web; non-root; offline initialization/restart; automatic legacy adoption, locked conversion, unknown-schema refusal"
         )
     finally:
         if running:

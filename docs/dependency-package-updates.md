@@ -7,13 +7,13 @@ D1 建立协议 2 的目录、可信种子、身份清单与启动基础，不�
 | 位置 | 职责 |
 | --- | --- |
 | `/opt/shuku-launcher` | 固定解释器启动的标准库入口、基础环境指纹、初始化工具；不由应用更新覆盖 |
-| `/opt/shuku-dependency-seed` | 目标平台的 `requirements.txt`、完整 `wheels/`、逐实例 `node/` 制品及 `manifest.json`；仅初始化或显式转换使用 |
+| `/opt/shuku-dependency-seed` | 目标平台的 `requirements.txt`、完整 `wheels/`、逐实例 `node/` 制品及 `manifest.json`；初始化、镜像切换同步或显式转换使用 |
 | `STORAGE_ROOT/runtime` | 应用程序；保留真实 standalone 相对部署布局 |
 | `STORAGE_ROOT/dependencies/python` | 在最终路径创建、不继承全局 site-packages 的业务 venv |
 | `STORAGE_ROOT/dependencies/installed.json` | 完整目标身份及 Python 安装 RECORD 核对结果；不属于程序覆盖范围 |
 | `STORAGE_ROOT/update-tmp` | 既有锁、更新状态、失败标记和备份；转换备份为 `database-before-dependency-conversion.sqlite3` |
 
-`runtime/.initialized` 仍仅标记程序初始化。数据库、密钥、配置、封面与书库位置不变。API、Worker、迁移、业务预检使用固定入口设置的绝对 `SHUKU_BUSINESS_PYTHON`；不依赖 PATH，不设置 NODE_PATH 或 preserve-symlinks。普通启动不下载、不扫描、不清空、不同步依赖。初始化失败保留现场并拒绝隐式重试。
+`runtime/.initialized` 仍仅标记程序初始化。数据库、密钥、配置、封面与书库位置不变。API、Worker、迁移、业务预检使用固定入口设置的绝对 `SHUKU_BUSINESS_PYTHON`；不依赖 PATH，不设置 NODE_PATH 或 preserve-symlinks。同一镜像身份的普通重启不下载、不扫描、不清空、不同步依赖；镜像身份变化或首次建立身份记录时按[镜像同步规则](container-runtime.md#目录与启动)离线重建配套依赖。初始化失败保留现场并拒绝隐式重试。
 
 构建工具（uv、pip）使用镜像固定环境；`install-python-runtime.sh ... --wheel-seed` 复用 `uv.lock` 的完整生产导出，由目标平台 pip 下载并按锁定哈希验证二进制 wheel。用户设备只离线安装，不编译源码，不复制开发 venv。
 
@@ -28,6 +28,8 @@ Node 身份包含部署位置、名称、版本、内容摘要及每实例 tar �
 基础指纹只保留解释器与 ABI、架构、系统包、固定原生库、Web 基础路径及启动协议。应用版本或业务依赖变化不改变它。D1 不更新解释器、系统库、启动器环境或固定原生阅读库。不实现文件差分、包内补丁、自动安装、多版本、自动回滚、外部服务或通用包管理平台。
 
 ## 已有部署显式转换
+
+以下保留早期入口的显式转换操作。包含镜像同步机制的新入口会在首次建立镜像记录或镜像身份变化时自动接管完整的旧布局，常规换镜像不再要求此命令，详见[容器启动规则](container-runtime.md#目录与启动)。
 
 先停止旧容器，再用新基础镜像、相同挂载和 UID/GID，运行 `/usr/local/bin/python3.11 /opt/shuku-launcher/container-entry.py --convert-legacy`。入口取得既有 launcher 和 prepare 排他锁，运行中或未完成更新一律拒绝。只接受协议 1、同平台、完全相同程序版本与 uv.lock、匹配种子的 Node 布局；不是升级入口，不能降级。
 
@@ -184,8 +186,8 @@ PYTHONPATH=apps/api-python apps/api-python/.venv/bin/python \
 ### 首次接入与日常更新
 
 - 首次必须部署包含 D3 固定安装入口及共享模块的基础镜像，仅升级 runtime 不会补齐固定能力。挂载可写的空 STORAGE_ROOT、配置既有 UID/GID 后正常启动：入口在最终持久化路径创建业务 venv 并从可信种子离线初始化，随后启动业务。非空旧布局不会静默混用新环境。
-- 已有协议 1 布局先停止旧业务容器，使用同挂载与 UID/GID 的新基础镜像运行本文前述 `--convert-legacy`。必须相同平台、完全相同应用版本、uv.lock 和种子 Node 布局；不支持借转换升级、降级或跨任意历史版本迁移。转换持锁并在修改前备份数据库，已有数据库必须通过现有 schema 校验。
-- 转换成功后正常启动。日常协议 2 更新在同一容器内进行，不拉镜像、不重建容器、不更新解释器、系统库或固定原生库。失败交由管理员检查日志和备份；不得删除 runtime、清空数据库、手写 `.initialized` 或删除失败标记绕过拒绝。
+- 已有协议 1 布局停止旧业务容器后，使用同挂载与 UID/GID 启动包含镜像同步机制的新基础镜像。入口自动备份数据库、替换程序并离线初始化新依赖，数据库仍须通过既有 schema 迁移与校验；无须执行 `--convert-legacy`。较早固定入口的显式转换限制保留在前述历史说明中。
+- 日常协议 2 在线更新在同一容器内进行，不拉镜像、不重建容器、不更新解释器、系统库或固定原生库。同一镜像重启保留在线更新；换镜像时跟随镜像版本同步。失败交由管理员检查日志和备份；不得删除 runtime、清空数据库、手写 `.initialized` 或删除失败标记绕过拒绝。
 
 ### D4 验证入口与范围
 

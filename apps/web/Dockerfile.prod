@@ -63,6 +63,7 @@ COPY --from=builder /app/apps/api-python/uv.lock ./apps/api-python/uv.lock
 COPY scripts/install-python-runtime.sh ./scripts/install-python-runtime.sh
 COPY scripts/container-entry.py /opt/shuku-launcher/container-entry.py
 COPY scripts/container_install.py /opt/shuku-launcher/container_install.py
+COPY scripts/container_image.py /opt/shuku-launcher/container_image.py
 COPY scripts/dependency_install.py /opt/shuku-launcher/dependency_install.py
 COPY apps/api-python/shuku_dependencies /opt/shuku-launcher/shuku_dependencies
 COPY apps/api-python/shuku_dependencies ./apps/api-python/shuku_dependencies

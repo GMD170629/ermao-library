@@ -46,7 +46,17 @@ class ContainerEntryTests(unittest.TestCase):
             self.seed / "scripts/start-unified-app.sh",
         )
         (self.seed / "application.json").write_text(
-            json.dumps({"version": "1.0.5", "protocol": 2})
+            json.dumps(
+                {
+                    "version": "1.0.5",
+                    "protocol": 2,
+                    "environment": {
+                        "format": 1,
+                        "platform": "linux-amd64",
+                        "compatibility": "fixture",
+                    },
+                }
+            )
         )
         dependencies = self.storage / "dependencies"
         (dependencies / "python/bin").mkdir(parents=True)
@@ -95,6 +105,14 @@ class ContainerEntryTests(unittest.TestCase):
         (dependencies / "python/bin/python").symlink_to(self.bin / "fixture")
 
     def launch(self, **extra: str) -> subprocess.Popen[str]:
+        # These process fixtures exercise ordinary restart, after image acceptance.
+        if not self.runtime.exists():
+            entry.initialize_runtime(self.seed, self.runtime)
+        state = self.storage / "update-tmp"
+        state.mkdir(exist_ok=True)
+        (state / "image.json").write_bytes(
+            (self.seed / "application.json").read_bytes()
+        )
         process = subprocess.Popen(
             [sys.executable, str(ENTRY)],
             env={
@@ -300,7 +318,7 @@ class ContainerEntryTests(unittest.TestCase):
         self.assertEqual(len(self.events()), 1)
         self.assertIn("prestart", self.events()[0][1])
 
-    def test_reuse_without_seed_preserves_runtime_and_user_data(self) -> None:
+    def test_same_image_restart_preserves_runtime_and_user_data(self) -> None:
         for name in (
             "database/shuku.sqlite3",
             "secrets/session-secret",
@@ -314,7 +332,7 @@ class ContainerEntryTests(unittest.TestCase):
         marker = self.runtime / "keep"
         marker.write_text("newer-program")
         (self.runtime / "apps/web/server.js").write_text("newer-server")
-        shutil.rmtree(self.seed)
+        (self.seed / "apps/web/server.js").unlink()
         process = self.launch()
         self.await_starts(process, 5)
         process.terminate()
