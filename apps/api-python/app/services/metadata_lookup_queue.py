@@ -1084,6 +1084,7 @@ class MetadataLookupWorker:
     def _run(self) -> None:
         self._heartbeat.start()
         try:
+            self._heartbeat.pulse(status="recovering")
             while not self._stop.is_set():
                 self._recover(
                     self._lookup_recovery, recover_stale_metadata_lookup_tasks, "lookup"
@@ -1113,6 +1114,9 @@ class MetadataLookupWorker:
                     error = exc
                     self._record_iteration_error(exc)
                 self._heartbeat.pulse(
+                    status="running"
+                    if self._lookup_recovery.ready and self._writeback_recovery.ready
+                    else "degraded",
                     processed=worked,
                     error=self._lookup_recovery.error
                     or self._writeback_recovery.error

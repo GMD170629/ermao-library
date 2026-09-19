@@ -83,7 +83,9 @@ class DownloadQueueWorker:
             while not self._stop_event.is_set():
                 try:
                     processed = self.process_once()
-                    self._heartbeat.pulse(processed=processed, error=None)
+                    self._heartbeat.pulse(
+                        processed=processed, error=None, status="running"
+                    )
                 except Exception as exc:  # noqa: BLE001 - thread must not die
                     record_exception(
                         logger,
@@ -95,7 +97,8 @@ class DownloadQueueWorker:
                     )
                     processed = False
                     self._heartbeat.pulse(
-                        error=f"iteration:paused:{type(exc).__name__}"
+                        status="retrying" if is_database_busy_error(exc) else "paused",
+                        error=f"iteration:paused:{type(exc).__name__}",
                     )
                     if self._stop_event.wait(
                         60 if is_database_busy_error(exc) else None

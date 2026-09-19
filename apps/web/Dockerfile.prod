@@ -47,7 +47,7 @@ COPY --from=deps /usr/local/bin/node /usr/local/bin/node
 COPY --from=ghcr.io/astral-sh/uv:0.11.29 /uv /usr/local/bin/uv
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends openssl ca-certificates libstdc++6 unar \
+  && apt-get install -y --no-install-recommends openssl ca-certificates libstdc++6 unar util-linux \
   && rm -rf /var/lib/apt/lists/* \
   && node --version \
   && python --version

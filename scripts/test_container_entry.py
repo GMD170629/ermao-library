@@ -72,6 +72,7 @@ class ContainerEntryTests(unittest.TestCase):
             'record("start")\n'
             'if "prestart" in role and os.environ.get("FAIL_PRESTART"): sys.exit(37)\n'
             'if "prestart" in role and not os.environ.get("HOLD_PRESTART"): sys.exit(0)\n'
+            'if "app.worker.main" in role and os.environ.get("FAIL_WORKER"): sys.exit(42)\n'
             'if "app.worker.main" in role and os.environ.get("ORPHAN_TOOL"):\n'
             '    storage = Path(os.environ["STORAGE_ROOT"])\n'
             "    intermediate = os.fork()\n"
@@ -172,6 +173,94 @@ class ContainerEntryTests(unittest.TestCase):
         process.terminate()
         self.assertEqual(process.wait(timeout=10), 143)
         self.assertEqual([event[0] for event in self.events()], ["start", "stop"])
+
+    @unittest.skipUnless(sys.platform == "linux", "requires Linux process identity")
+    def test_ready_rejects_stale_pid_identity_and_dead_process(self) -> None:
+        worker = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            start_new_session=True,
+        )
+        self.addCleanup(lambda: worker.poll() is None and worker.kill())
+        ready = self.root / "ready"
+        start_time = (
+            Path(f"/proc/{worker.pid}/stat").read_text().rsplit(")", 1)[1].split()[19]
+        )
+        ready.write_text(json.dumps({"pid": worker.pid, "startTime": start_time}))
+        with patch.object(entry, "core_application_ready", return_value=True):
+            self.assertTrue(entry.application_ready(os.getpid(), "1", ready))
+            ready.write_text(json.dumps({"pid": worker.pid, "startTime": "stale"}))
+            self.assertFalse(entry.application_ready(os.getpid(), "1", ready))
+            ready.write_text(json.dumps({"pid": worker.pid, "startTime": start_time}))
+            worker.terminate()
+            worker.wait(timeout=5)
+            self.assertFalse(entry.application_ready(os.getpid(), "1", ready))
+
+    def test_worker_failure_keeps_core_processes_and_stop_cancels_restart(self) -> None:
+        process = self.launch(FAIL_WORKER="1")
+        self.await_starts(process, 5)
+        starts = self.events()
+        self.assertIsNone(process.poll())
+        for _, role, pid, *_ in starts:
+            if "prestart" not in role and "app.worker.main" not in role:
+                os.kill(pid, 0)
+        process.terminate()
+        self.assertEqual(process.wait(timeout=10), 143)
+        self.assertEqual(len([e for e in self.events() if e[0] == "start"]), 5)
+
+    def test_worker_crashes_exhaust_restart_budget_without_stopping_core(self) -> None:
+        # Advance the supervisor's clock without waiting through real backoff.
+        date = self.bin / "date"
+        date.write_text(
+            f"#!{sys.executable}\nfrom pathlib import Path\n"
+            f"p = Path({str(self.root / 'clock')!r})\n"
+            "n = int(p.read_text()) + 10 if p.exists() else 10\n"
+            "p.write_text(str(n))\nprint(n)\n"
+        )
+        date.chmod(0o755)
+        sleep = self.bin / "sleep"
+        sleep.write_text(f"#!{sys.executable}\nimport time\ntime.sleep(.02)\n")
+        sleep.chmod(0o755)
+        process = self.launch(FAIL_WORKER="1")
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            workers = [
+                e
+                for e in self.events()
+                if e[0] == "start" and "app.worker.main" in e[1]
+            ]
+            if len(workers) == 4:
+                break
+            self.assertIsNone(process.poll())
+            time.sleep(0.1)
+        self.assertEqual(len(workers), 4)
+        from threading import Event, Thread
+
+        exhausted = Event()
+
+        def read_diagnostics():
+            for line in process.stderr:
+                if "worker.paused reason=restart_limit" in line:
+                    exhausted.set()
+                    return
+
+        reader = Thread(target=read_diagnostics, daemon=True)
+        reader.start()
+        self.assertTrue(exhausted.wait(5), "missing restart-limit diagnostic")
+        reader.join(timeout=1)
+        self.assertIsNone(process.poll())
+        self.assertEqual(
+            len(
+                [
+                    e
+                    for e in self.events()
+                    if e[0] == "start" and "app.worker.main" in e[1]
+                ]
+            ),
+            4,
+        )
+        for _, role, pid, *_ in self.events():
+            if "prestart" not in role and "app.worker.main" not in role:
+                os.kill(pid, 0)
 
     @unittest.skipUnless(
         sys.platform == "linux", "requires Linux child subreaper and /proc"

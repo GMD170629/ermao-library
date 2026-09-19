@@ -123,8 +123,11 @@ class QueueHeartbeatPump:
         self._write_lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._last_write_warning_at = 0.0
+        self._status = "running"
+        self._owner_thread: threading.Thread | None = None
 
     def start(self) -> None:
+        self._owner_thread = threading.current_thread()
         self.pulse()
         self._thread = threading.Thread(
             target=self._run,
@@ -138,17 +141,21 @@ class QueueHeartbeatPump:
         *,
         processed: bool = False,
         error: BaseException | str | None = None,
+        status: str | None = None,
     ) -> None:
-        prepared = prepare_queue_heartbeat(
-            queue_name=self._queue_name,
-            instance_id=self._instance_id,
-            poll_interval_seconds=self._poll_interval_seconds,
-            recorded_at=now_timestamp_ms(),
-            processed=processed,
-            error=error,
-        )
-        prepared_write = prepare_queue_heartbeat_write(prepared)
         with self._write_lock:
+            if status is not None:
+                self._status = status
+            prepared = prepare_queue_heartbeat(
+                queue_name=self._queue_name,
+                instance_id=self._instance_id,
+                poll_interval_seconds=self._poll_interval_seconds,
+                recorded_at=now_timestamp_ms(),
+                processed=processed,
+                error=error,
+                status=self._status,
+            )
+            prepared_write = prepare_queue_heartbeat_write(prepared)
             try:
                 with self._session_factory() as db, SystemWriteTransaction(db):
                     write_prepared_queue_runtime(db, prepared_write)
@@ -205,6 +212,9 @@ class QueueHeartbeatPump:
     def _run(self) -> None:
         while not self._stop_event.wait(self._heartbeat_interval):
             try:
+                if self._owner_thread is not None and not self._owner_thread.is_alive():
+                    self.pulse(status="failed", error="consumer-thread-exited")
+                    return
                 self.pulse()
             except Exception as exc:  # noqa: BLE001 - heartbeat thread must live
                 record_exception(

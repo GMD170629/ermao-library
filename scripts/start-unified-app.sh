@@ -13,6 +13,9 @@ GATEWAY_SERVER="${GATEWAY_SERVER:-$ROOT_DIR/scripts/unified-http-gateway.mjs}"
 shutdown() {
   trap '' INT TERM
   trap - EXIT
+  for group in ${WORKER_PID:-} ${WORKER_RETIRED_GROUP:-}; do
+    kill -TERM "-$group" 2>/dev/null || true
+  done
   for pid in ${GATEWAY_PID:-} ${PRESTART_PID:-} ${API_PID:-} ${WORKER_PID:-} ${WEB_PID:-}; do
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
       kill "$pid" 2>/dev/null || true
@@ -77,12 +80,18 @@ while :; do
   sleep 1
 done
 
-if [ -n "${IMPORT_WORKER_READY_FILE:-}" ]; then rm -f "$IMPORT_WORKER_READY_FILE"; fi
-(
-  cd "$PYTHON_API_DIR"
-  exec "$BUSINESS_PYTHON" -m app.worker.main
-) &
-WORKER_PID="$!"
+start_worker() {
+  if [ -n "${IMPORT_WORKER_READY_FILE:-}" ]; then rm -f "$IMPORT_WORKER_READY_FILE"; fi
+  (
+    cd "$PYTHON_API_DIR"
+    exec setsid "$BUSINESS_PYTHON" -m app.worker.main
+  ) &
+  WORKER_PID="$!"
+}
+start_worker
+WORKER_RESTARTS=0
+WORKER_RESTART_AT=0
+WORKER_RETIRED_GROUP=""
 
 HOSTNAME=127.0.0.1 PORT="$NEXT_INTERNAL_PORT" node "$NEXT_SERVER" &
 WEB_PID="$!"
@@ -95,11 +104,37 @@ GATEWAY_HOST="${HOSTNAME:-0.0.0.0}" \
 GATEWAY_PID="$!"
 
 while :; do
-  for pid in "$API_PID" "$WORKER_PID" "$WEB_PID" "$GATEWAY_PID"; do
+  for pid in "$API_PID" "$WEB_PID" "$GATEWAY_PID"; do
     if ! kill -0 "$pid" 2>/dev/null; then
       wait "$pid" || exit $?
       exit 1
     fi
   done
+  if [ -n "$WORKER_PID" ] && ! kill -0 "$WORKER_PID" 2>/dev/null; then
+    worker_exit=0
+    wait "$WORKER_PID" || worker_exit=$?
+    WORKER_RETIRED_GROUP="$WORKER_PID"
+    WORKER_PID=""
+    if [ -n "${IMPORT_WORKER_READY_FILE:-}" ]; then rm -f "$IMPORT_WORKER_READY_FILE"; fi
+    echo "worker.offline exit=$worker_exit restart_count=$WORKER_RESTARTS" >&2
+    if [ "$WORKER_RESTARTS" -lt 3 ]; then
+      WORKER_RESTART_AT=$(( $(date +%s) + 5 * (1 << WORKER_RESTARTS) ))
+    else
+      WORKER_RESTART_AT=0
+      echo "worker.paused reason=restart_limit" >&2
+    fi
+  fi
+  if [ -z "$WORKER_PID" ] && [ "$WORKER_RESTART_AT" -gt 0 ] && [ "$(date +%s)" -ge "$WORKER_RESTART_AT" ]; then
+    # Do not create another consumer while tools from the old worker remain.
+    # The fixed launcher reaps adopted children. No files or tasks are reset.
+    if kill -0 "-$WORKER_RETIRED_GROUP" 2>/dev/null; then
+      WORKER_RESTART_AT=0
+      echo "worker.paused reason=previous_execution_still_alive" >&2
+    else
+      WORKER_RESTARTS=$((WORKER_RESTARTS + 1))
+      WORKER_RESTART_AT=0
+      start_worker
+    fi
+  fi
   sleep 2
 done

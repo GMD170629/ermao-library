@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import signal
@@ -34,6 +35,7 @@ from app.db.session import (
     MetadataMaintenanceSessionLocal,
     engine,
 )
+from app.services.queue_runtime import QueueHeartbeatPump
 
 logger = logging.getLogger("ermao.import_worker")
 
@@ -92,6 +94,12 @@ def main() -> None:
     metadata_worker = None
     organizer_scheduler = None
     stop_event = threading.Event()
+    import_heartbeat = QueueHeartbeatPump(
+        HeartbeatSessionLocal,
+        queue_name="import",
+        instance_id=f"import-{os.getpid()}",
+        poll_interval_seconds=settings.import_queue_interval_seconds,
+    )
     stopping = False
 
     def shutdown(signum: int, _frame: object) -> None:
@@ -110,6 +118,8 @@ def main() -> None:
     signal.signal(signal.SIGTERM, shutdown)
 
     try:
+        import_heartbeat.start()
+        import_heartbeat.pulse(status="recovering")
         try:
             metadata_worker = MetadataLookupWorker(
                 MetadataMaintenanceSessionLocal,
@@ -132,7 +142,18 @@ def main() -> None:
             if organizer_scheduler is not None:
                 _cleanup("organizer_stop", organizer_scheduler.shutdown)
         if not stop_event.is_set():
-            ready_file.write_text(str(os.getpid()), encoding="utf-8")
+            birth = Path(f"/proc/{os.getpid()}/stat")
+            ready_file.write_text(
+                json.dumps(
+                    {
+                        "pid": os.getpid(),
+                        "startTime": birth.read_text().rsplit(")", 1)[1].split()[19]
+                        if birth.exists()
+                        else None,
+                    }
+                ),
+                encoding="utf-8",
+            )
             logger.info("readable_resource.worker.ready")
         next_import_attempt = 0.0
         import_failures = 0
@@ -157,6 +178,10 @@ def main() -> None:
                     )
                     import_failures += 1
                     imports_paused = not closed or not is_database_busy_error(error)
+                    import_heartbeat.pulse(
+                        status="paused" if imports_paused else "retrying",
+                        error=f"recovery:{type(error).__name__}",
+                    )
                     next_import_attempt = monotonic() + min(
                         300, 5 * 2 ** min(import_failures - 1, 6)
                     )
@@ -175,6 +200,10 @@ def main() -> None:
                     imports_paused = not _cleanup(
                         "scan_rollback", readable_worker.recover_after_loop_failure
                     )
+                    import_heartbeat.pulse(
+                        status="paused" if imports_paused else "degraded",
+                        error="scan-start-failed",
+                    )
             if stop_event.is_set() or imports_paused:
                 continue
             if (
@@ -191,12 +220,20 @@ def main() -> None:
                     imports_paused = not _cleanup(
                         "scan_rollback", readable_worker.recover_after_loop_failure
                     )
+                    import_heartbeat.pulse(
+                        status="paused" if imports_paused else "degraded",
+                        error="scan-tick-failed",
+                    )
                     if scan_paused or imports_paused:
                         _cleanup("scan_request_stop", scan_coordinator.request_stop)
             if stop_event.is_set() or imports_paused:
                 continue
             try:
                 outcome = readable_worker.process_once()
+                import_heartbeat.pulse(
+                    status="degraded" if scan_paused else "running",
+                    processed=outcome not in {"idle", "deferred"},
+                )
             except Exception as error:  # noqa: BLE001 - process containment boundary
                 _report_failure("import_loop", error)
                 recovered = _cleanup(
@@ -205,6 +242,10 @@ def main() -> None:
                 # Keep the processor (including pending completion) and never
                 # repeat startup recovery or unknown filesystem side effects.
                 imports_paused = not recovered or not is_database_busy_error(error)
+                import_heartbeat.pulse(
+                    status="paused" if imports_paused else "retrying",
+                    error=f"iteration:{type(error).__name__}",
+                )
                 if not imports_paused:
                     import_failures += 1
                     next_import_attempt = monotonic() + min(
@@ -215,6 +256,7 @@ def main() -> None:
                 stop_event.wait(settings.import_queue_interval_seconds)
     finally:
         shutdown(0, None)
+        _cleanup("import_heartbeat_stop", import_heartbeat.stop)
         for component in (metadata_worker, organizer_scheduler, scan_coordinator):
             if component is not None:
                 _cleanup("component_shutdown", component.shutdown)

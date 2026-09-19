@@ -193,8 +193,12 @@ def run_application(runtime: Path, storage: Path) -> int:
                 phase = stage_file.read_text().strip() if stage_file.exists() else ""
                 fail("MIGRATION_FAILED" if phase == "migration" else "STARTUP_FAILED")
             elif time.monotonic() >= deadline:
-                fail("STARTUP_TIMEOUT")
-                os.kill(child.pid, signal.SIGTERM)
+                core_ready = core_application_ready(
+                    installer.state["target"]["version"]
+                )
+                fail("WORKER_STARTUP_FAILED" if core_ready else "STARTUP_TIMEOUT")
+                if not core_ready:
+                    os.kill(child.pid, signal.SIGTERM)
             elif application_ready(
                 child.pid, installer.state["target"]["version"], ready_file
             ):
@@ -263,9 +267,25 @@ def run_application(runtime: Path, storage: Path) -> int:
 
 def application_ready(group: int, version: str, ready_file: Path) -> bool:
     try:
-        worker_pid = int(ready_file.read_text())
-        if os.getpgid(worker_pid) != group:
+        identity = json.loads(ready_file.read_text())
+        worker_pid = int(identity["pid"])
+        fields = Path(f"/proc/{worker_pid}/stat").read_text().rsplit(")", 1)[1].split()
+        if (
+            fields[0] == "Z"
+            or int(fields[1]) != group
+            or fields[19] != identity["startTime"]
+        ):
             return False
+        if os.getpgid(worker_pid) != worker_pid:
+            return False
+    except (OSError, ValueError, KeyError, TypeError, IndexError):
+        return False
+    return core_application_ready(version)
+
+
+def core_application_ready(version: str) -> bool:
+    """Core acceptance does not depend on optional queue recovery/maintenance."""
+    try:
         with urllib.request.urlopen(
             "http://127.0.0.1:8000/openapi.json", timeout=1
         ) as response:

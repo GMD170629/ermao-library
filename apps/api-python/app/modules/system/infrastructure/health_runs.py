@@ -508,6 +508,9 @@ def _queue_result(
         )
         if details["failed"]:
             return "warning", "health.queue.failed", details
+        runtime = queue_runtime_view(db, queue)
+        if runtime is None or runtime.get("status") != "running" or runtime.get("stale"):
+            return "error", "health.queue.stale", details
         return "ok", "health.queue.ok", details
 
     runtime = queue_runtime_view(db, queue)

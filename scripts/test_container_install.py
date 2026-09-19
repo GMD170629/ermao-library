@@ -203,6 +203,11 @@ class InstallationTests(unittest.TestCase):
                     entry, "application_ready", return_value=outcome == "success"
                 )
             )
+            stack.enter_context(
+                patch.object(
+                    entry, "core_application_ready", return_value=outcome == "worker"
+                )
+            )
             if outcome == "copy":
                 stack.enter_context(
                     patch.object(shutil, "copytree", side_effect=OSError("copy failed"))
@@ -245,6 +250,12 @@ class InstallationTests(unittest.TestCase):
     def test_entry_readiness_failure_keeps_blocker(self):
         _, _, _, state = self.run_entry("health")
         self.assertEqual(state["error"], "STARTUP_TIMEOUT")
+        self.assertTrue((self.installer.root / "installation-incomplete").exists())
+
+    def test_worker_load_failure_is_not_success_and_does_not_stop_core(self):
+        _, _, events, state = self.run_entry("worker")
+        self.assertEqual(state["error"], "WORKER_STARTUP_FAILED")
+        self.assertNotIn(("signal", 101, __import__("signal").SIGTERM), events)
         self.assertTrue((self.installer.root / "installation-incomplete").exists())
 
     def test_stop_during_preflight_does_not_install_or_restart(self):

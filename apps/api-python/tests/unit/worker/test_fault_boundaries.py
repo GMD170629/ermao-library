@@ -81,6 +81,7 @@ def runtime(monkeypatch, tmp_path):
     monkeypatch.setattr(
         worker_main, "build_automatic_metadata_request_gate", lambda: None
     )
+    monkeypatch.setattr(worker_main, "QueueHeartbeatPump", lambda *a, **kw: Mock())
     diagnostics = Mock()
     monkeypatch.setattr(worker_main, "record_exception", diagnostics)
     return SimpleNamespace(

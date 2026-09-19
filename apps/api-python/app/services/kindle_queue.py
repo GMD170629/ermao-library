@@ -443,6 +443,7 @@ class KindleSendQueueWorker:
     def _run(self) -> None:
         self._heartbeat.start()
         try:
+            self._heartbeat.pulse(status="recovering")
             attempts = 0
             while not self._stop_event.is_set():
                 try:
@@ -463,7 +464,8 @@ class KindleSendQueueWorker:
                         action="kindle.recovery_failed",
                     )
                     self._heartbeat.pulse(
-                        error=f"recovery:{'retrying' if retry else 'paused'}:{type(exc).__name__}"
+                        status="retrying" if retry else "paused",
+                        error=f"recovery:{'retrying' if retry else 'paused'}:{type(exc).__name__}",
                     )
                     attempts += 1
                     if self._stop_event.wait(
@@ -473,7 +475,9 @@ class KindleSendQueueWorker:
             while not self._stop_event.is_set():
                 try:
                     processed = self.process_once()
-                    self._heartbeat.pulse(processed=processed, error=None)
+                    self._heartbeat.pulse(
+                        processed=processed, error=None, status="running"
+                    )
                 except Exception as exc:  # noqa: BLE001 - thread must not die
                     record_exception(
                         LOGGER,
@@ -485,7 +489,8 @@ class KindleSendQueueWorker:
                     )
                     processed = False
                     self._heartbeat.pulse(
-                        error=f"iteration:paused:{type(exc).__name__}"
+                        status="retrying" if is_database_busy_error(exc) else "paused",
+                        error=f"iteration:paused:{type(exc).__name__}",
                     )
                     if self._stop_event.wait(
                         60 if is_database_busy_error(exc) else None
