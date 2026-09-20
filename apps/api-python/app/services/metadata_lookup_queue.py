@@ -699,13 +699,16 @@ def process_metadata_lookup_task(
         return "FAILED"
     metadata_guard = lookup_persist.book_metadata_guard(db, str(book["id"]))
     if metadata_guard is not None and metadata_guard[-1]:
+        task_id = str(task["id"])
+        now = _now()
+        owner_id = str(task.get("leaseOwnerId") or "") or None
         db.close()
         with MetadataWriteTransaction(db):
             _update_task(
                 db,
-                str(task["id"]),
-                updated_at=_now(),
-                owner_id=str(task.get("leaseOwnerId") or "") or None,
+                task_id,
+                updated_at=now,
+                owner_id=owner_id,
                 status="PENDING",
                 startedAt=None,
                 leaseOwnerId=None,
