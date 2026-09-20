@@ -284,8 +284,8 @@ jobs:
           cache-to: type=gha,mode=max,scope=develop-image
 
   mobile-release:
-    # v1.0.3, v1.0.4 and v1.1.0 are owner-approved server-only releases; other tags retain mobile gates.
-    if: github.ref_type == 'tag' && !contains(fromJSON('["1.0.3","1.0.4","1.1.0"]'), needs.validate.outputs.app_version)
+    # v1.0.3, v1.0.4, v1.1.0 and v1.2.0 are owner-approved server-only releases; other tags retain mobile gates.
+    if: github.ref_type == 'tag' && !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version)
     needs: validate
     permissions:
       contents: write
@@ -298,7 +298,7 @@ jobs:
 
   package:
     name: Build fnOS FPK
-    if: always() && needs.validate.result == 'success' && (needs.mobile-release.result == 'success' || (contains(fromJSON('["1.0.3","1.0.4","1.1.0"]'), needs.validate.outputs.app_version) && needs.mobile-release.result == 'skipped')) && github.ref_type == 'tag'
+    if: always() && needs.validate.result == 'success' && (needs.mobile-release.result == 'success' || (contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) && needs.mobile-release.result == 'skipped')) && github.ref_type == 'tag'
     needs: [validate, mobile-release]
     outputs:
       image_digest: ${{ steps.release_image.outputs.digest }}
@@ -347,29 +347,29 @@ jobs:
           uv run --extra dev --locked pytest -q
 
       - name: Download checked stable Android APK
-        if: ${{ !contains(fromJSON('["1.0.3","1.0.4","1.1.0"]'), needs.validate.outputs.app_version) }}
+        if: ${{ !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) }}
         uses: actions/download-artifact@v4
         with:
           name: android-stable-unsigned
           path: unsigned-android
 
       - name: Set up JDK for stable signing
-        if: ${{ !contains(fromJSON('["1.0.3","1.0.4","1.1.0"]'), needs.validate.outputs.app_version) }}
+        if: ${{ !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) }}
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Set up Android SDK for stable signing
-        if: ${{ !contains(fromJSON('["1.0.3","1.0.4","1.1.0"]'), needs.validate.outputs.app_version) }}
+        if: ${{ !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) }}
         uses: android-actions/setup-android@v3
 
       - name: Install signing tools
-        if: ${{ !contains(fromJSON('["1.0.3","1.0.4","1.1.0"]'), needs.validate.outputs.app_version) }}
+        if: ${{ !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) }}
         run: sdkmanager 'build-tools;36.0.0'
 
       - name: Sign and verify stable Android APK
-        if: ${{ !contains(fromJSON('["1.0.3","1.0.4","1.1.0"]'), needs.validate.outputs.app_version) }}
+        if: ${{ !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) }}
         env:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
@@ -472,7 +472,7 @@ jobs:
     needs: [validate, package]
     runs-on: ubuntu-latest
     environment:
-      name: ${{ contains(fromJSON('["1.0.3","1.0.4","1.1.0"]'), needs.validate.outputs.app_version) && 'stable-release-server' || 'stable-release' }}
+      name: ${{ contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) && 'stable-release-server' || 'stable-release' }}
       url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
     permissions:
       contents: write
@@ -561,7 +561,7 @@ jobs:
           RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
         run: |
           node scripts/validate-release-assets.mjs dist "$RELEASE_TAG"
-          if [[ "$RELEASE_TAG" == 'v1.0.3' || "$RELEASE_TAG" == 'v1.0.4' || "$RELEASE_TAG" == 'v1.1.0' ]]; then
+          if [[ "$RELEASE_TAG" == 'v1.0.3' || "$RELEASE_TAG" == 'v1.0.4' || "$RELEASE_TAG" == 'v1.1.0' || "$RELEASE_TAG" == 'v1.2.0' ]]; then
             gh release upload "$RELEASE_TAG" dist/fnos/*.fpk dist/fnos/*.sha256 --clobber
           else
             gh release upload "$RELEASE_TAG" dist/fnos/*.fpk dist/fnos/*.sha256 dist/android/*.apk dist/android/*.sha256 --clobber

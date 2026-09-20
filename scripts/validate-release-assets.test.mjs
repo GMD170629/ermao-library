@@ -32,7 +32,7 @@ test('publication requires both intact packages locally and remotely', t => {
   assert.throws(() => validateReleaseAssets(root, 'v1.0.1'), /Incomplete/);
 });
 
-for (const version of ['1.0.3', '1.0.4', '1.1.0']) {
+for (const version of ['1.0.3', '1.0.4', '1.1.0', '1.2.0']) {
 test(`${version} permits a server-only bundle and still verifies remote digests`, t => {
   const root = mkdtempSync(join(tmpdir(), 'server-release-assets-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -45,7 +45,7 @@ test(`${version} permits a server-only bundle and still verifies remote digests`
     assets.push({ name: file, state: 'uploaded', size: Buffer.byteLength(data), digest: `sha256:${createHash('sha256').update(data).digest('hex')}` });
   }
   addApplications(root, version, assets);
-  if (version === '1.1.0') {
+  if (['1.1.0', '1.2.0'].includes(version)) {
     assert.throws(() => validateReleaseAssets(root, `v${version}`, { assets }), /belong in GHCR/);
     assets.splice(2);
   }
