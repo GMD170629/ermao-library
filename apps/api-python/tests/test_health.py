@@ -5,6 +5,7 @@ from pathlib import Path
 from app.models.auth import User
 from app.models.library import Library
 from app.models.settings import SystemHealthRun
+from app.services.log_maintenance import SystemEventMaintenanceWorker
 
 
 def _setup_admin(client) -> None:
@@ -25,7 +26,10 @@ def _disable_fixture_library(db_session) -> None:
     db_session.commit()
 
 
-def test_health_response_shape(client, db_session, test_settings):
+def test_health_response_shape(monkeypatch, request, db_session, test_settings):
+    # StaticPool shares one connection; background rollback must not race setup.
+    monkeypatch.setattr(SystemEventMaintenanceWorker, "start", lambda self: None)
+    client = request.getfixturevalue("client")
     _disable_fixture_library(db_session)
     _setup_admin(client)
 

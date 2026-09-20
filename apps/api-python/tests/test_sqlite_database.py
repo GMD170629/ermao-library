@@ -1330,13 +1330,16 @@ def test_directory_legacy_tasks_upgrade_keeps_asset_ids_and_progress(
                 "0011_incremental_library_scan",
             )
         old_tasks = Table("LibraryImportTask", MetaData(), autoload_with=engine)
+        old_library = Table("Library", MetaData(), autoload_with=engine)
         with Session(engine) as db:
-            db.add(
-                Library(
+            db.execute(
+                old_library.insert().values(
                     id="lib",
                     name="Images",
-                    root_path=str(root),
-                    organization_mode="FLAT",
+                    rootPath=str(root),
+                    organizationMode="FLAT",
+                    enabled=True,
+                    updatedAt=int(datetime.now(UTC).timestamp() * 1000),
                 )
             )
             db.add(

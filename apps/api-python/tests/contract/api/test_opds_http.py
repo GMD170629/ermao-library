@@ -31,6 +31,7 @@ from app.modules.reader.infrastructure.persistence.models import (
     ReaderResourceProgressV5,
 )
 from app.modules.system.infrastructure.settings import upsert_setting
+from app.services.log_maintenance import SystemEventMaintenanceWorker
 
 
 def _node(node_id: str, path: str, *, directory: bool = False) -> LibrarySourceNode:
@@ -132,7 +133,10 @@ def _client(test_settings: Settings, db_session: Session) -> TestClient:
 def test_opds_catalog_keeps_download_and_retires_progression_without_writes(
     test_settings: Settings,
     db_session: Session,
+    monkeypatch,
 ) -> None:
+    # Measure request writes, not unrelated asynchronous startup maintenance.
+    monkeypatch.setattr(SystemEventMaintenanceWorker, "start", lambda self: None)
     _seed_opds_book(db_session)
     _enable_opds(db_session)
     dml_statements: list[str] = []
@@ -233,7 +237,10 @@ def test_opds_catalog_keeps_download_and_retires_progression_without_writes(
 def test_opds_missing_resource_page_does_not_read_or_create_navigation_units(
     test_settings: Settings,
     db_session: Session,
+    monkeypatch,
 ) -> None:
+    # Measure request writes, not unrelated asynchronous startup maintenance.
+    monkeypatch.setattr(SystemEventMaintenanceWorker, "start", lambda self: None)
     _seed_opds_book(db_session)
     _enable_opds(db_session)
     dml_statements: list[str] = []

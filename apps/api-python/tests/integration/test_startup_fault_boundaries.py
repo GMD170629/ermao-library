@@ -8,6 +8,8 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from app import main
+from app.core.config import get_settings
+from app.db.session import get_db
 from app.services import download_queue, kindle_queue, log_maintenance
 
 
@@ -50,6 +52,12 @@ def test_optional_start_failure_preserves_api_and_other_consumers(
         main, "SystemEventMaintenanceWorker", lambda *a, **kw: start("maintenance")
     )
     app = main.create_app(test_settings, session_factory=lambda: db_session)
+    app.dependency_overrides[get_settings] = lambda: test_settings
+
+    def request_session():
+        yield db_session
+
+    app.dependency_overrides[get_db] = request_session
     with TestClient(app) as client:
         assert client.get("/api/health").status_code == 200
         assert client.get("/api/libraries").status_code == 401
