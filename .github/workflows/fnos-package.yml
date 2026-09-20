@@ -392,6 +392,8 @@ jobs:
       - name: Set up Android SDK for stable signing
         if: ${{ needs.validate.outputs.release_mode != 'code-only' && !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) }}
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Install signing tools
         if: ${{ needs.validate.outputs.release_mode != 'code-only' && !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) }}
