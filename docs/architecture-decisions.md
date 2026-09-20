@@ -135,18 +135,20 @@
 - 冻结提交后执行 `node scripts/release-mode.mjs --published-base`；main/develop/tag 对齐规则继续适用。正式 tag 触发同一 fnos-package 工作流。快速提交的镜像任务、移动任务以及 FPK 任务跳过；该版本 tag 之后的新开发提交恢复普通开发任务。
 - `scripts/build-release-app-packages.sh IMAGE@DIGEST OUTPUT code-only SEED_VERSION` 在既有 AMD64/ARM64 镜像临时容器内编译 Web、组装后端，不执行 docker build、不编译固定原生库。构建依赖按锁文件安装在临时目录；pnpm 工具版本及分发摘要固定。复用协议 2 打包器核验真实 standalone 的完整依赖身份/布局、原镜像依赖种子及 blob，不允许重写依赖冒充 keep。环境指纹来自镜像，Web basePath 也必须一致。
 - 交付完整应用代码与完整目标依赖清单；现有用户只下载代码及实际缺失/变化的依赖，无逐版本补丁链。独立编译若改变依赖身份即停止 code-only；不能用旧 node_modules 覆盖新产物规避检查。
-- 快速最终门禁：版本与说明、资格、Web 模块检查、原失败及直接受影响行为、双架构完整产物校验、真实在线升级与浏览器确认/刷新、远端完整性校验。基线镜像直接升级到候选；连续快速版本还下载已公开前版，验证基线 → 前版 → 候选。核对接口契约不变、实际 API/Web/Worker/网关、数据/会话及依赖 keep、镜像/容器身份、普通和断网重启。未变化移动端不构建，无关全仓回归不属于快速门禁。
+- 快速最终门禁：版本与说明、资格、Web 模块检查、原失败及直接受影响行为、双架构构建及完整产物/依赖身份校验、远端完整性校验。按维护者要求，正确构建并通过这些校验后直接发布；下载更新、安装、浏览器及重启运行验收不再是快速发布门禁，不在发布流水线执行。既有候选验收工具保留为按需诊断入口，不将构建成功表述为运行验收通过。未变化移动端不构建，无关全仓回归不属于快速门禁。
 - 用户明确授权后自动验证通过即发布，不设人工审批或 required reviewers 预检；发布只使用同一运行的不可变 artifact ID。先 GHCR 上传且匿名校验所有 blob，再公开 Release，最后更新 feed。快速 Release 无 APK/FPK 附件，feed 必须有两种架构的已校验 OCI 引用；发布失败复用原产物，仅恢复失败阶段，不自动重建。
 - 应用实际版本与基础镜像/fnOS 版本分别记录。在线更新不推广 Docker 版本/prod/latest，不产生新的 FPK/APK/IPA；新安装使用上次完整版本再显式在线更新。后续完整发布整合修复。不新增自动安装/回滚，保留现有两阶段操作：点击下载只准备，点击立即更新后再次确认才安装；不新增下载弹窗，保留停机备份及失败保护。
 
-精确候选验收入口（已有镜像，无新镜像构建）：
+按需诊断入口（非快速发布门禁，已有镜像，无新镜像构建）：
 
 ```sh
 python3 scripts/accept_container_update.py --image IMAGE@DIGEST \
   --candidate-packages dist/application --both-architectures --browser \
   --report artifacts/startup-acceptance/code-only.json
 # 连续快速版本另加 --prior-packages <已校验前版制品目录>。
-# 单架构本地已有镜像可省略 --both-architectures；不能作为双架构发布验收。
+# 单架构本地已有镜像可省略 --both-architectures；仅代表实际执行的架构。
 ```
 
 技能入口为 `.agents/skills/ermao-release/SKILL.md`。修改技能/流水线本身不升级产品版本、不创建 tag、不发布远端产物。
+
+维护者于 2026-09-20 明确取消快速发布的下载更新运行验收并要求重新发布 v1.2.1。该版本首次运行在 ARM64 浏览器验收超时，尚无公开 Release 或 GHCR 发布产物，且构建包未保存；允许将未发布的 v1.2.1 标签更新至移除该门禁的发布提交并重新构建应用包。已公开版本与产物仍不可覆盖。

@@ -165,9 +165,8 @@ test('explicit quick mode gates every image build, installer and promotion in th
   const publish = releaseWorkflow.split('\n  publish:')[1];
   assert.match(publish, /- name: Promote verified release Docker image\n        if: .*release_mode != 'code-only'/);
   assert.match(publish, /- name: Upload complete APK and fnOS bundle to Draft Release\n        if: .*release_mode != 'code-only'/);
-  assert.match(packageJob, /--candidate-packages dist\/application --both-architectures --browser/);
-  assert.match(packageJob, /--prior-packages prior-application/);
-  assert.match(packageJob, /ghcr-updates.mjs --download/);
+  assert.doesNotMatch(packageJob, /accept_container_update|candidate browser|prior-application/);
+  assert.match(packageJob, /Validate complete release bundle/);
 });
 
 test('system release checkout never initializes the unrelated Wiki submodule', () => {

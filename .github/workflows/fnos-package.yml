@@ -496,53 +496,6 @@ jobs:
           SEED_VERSION: ${{ needs.validate.outputs.seed_version }}
         run: bash scripts/build-release-app-packages.sh "$RUNTIME_IMAGE" dist/application code-only "$SEED_VERSION"
 
-      - name: Set up ORAS for previous quick release
-        if: needs.validate.outputs.release_mode == 'code-only' && needs.validate.outputs.base_version != needs.validate.outputs.seed_version
-        uses: oras-project/setup-oras@22ce207df3b08e061f537244349aac6ae1d214f6
-        with:
-          version: 1.3.0
-
-      - name: Download immutable previous quick release for upgrade acceptance
-        if: needs.validate.outputs.release_mode == 'code-only' && needs.validate.outputs.base_version != needs.validate.outputs.seed_version
-        env:
-          BASE_VERSION: ${{ needs.validate.outputs.base_version }}
-        run: node scripts/ghcr-updates.mjs --download "$BASE_VERSION" prior-application
-
-      - name: Set up pnpm for candidate browser acceptance
-        if: needs.validate.outputs.release_mode == 'code-only'
-        uses: pnpm/action-setup@v4.4.0
-        with:
-          version: 9.12.2
-
-      - name: Set up Node for candidate browser acceptance
-        if: needs.validate.outputs.release_mode == 'code-only'
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-
-      - name: Install candidate browser tools
-        if: needs.validate.outputs.release_mode == 'code-only'
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm --filter @shuku/web exec playwright install --with-deps chromium
-
-      - name: Accept exact code-only candidates on both architectures
-        if: needs.validate.outputs.release_mode == 'code-only'
-        env:
-          RUNTIME_IMAGE: ${{ needs.validate.outputs.runtime_image }}
-          ACCEPTANCE_CHROMIUM: bundled
-        run: |
-          args=()
-          if [[ -d prior-application ]]; then args+=(--prior-packages prior-application); fi
-          python3 scripts/accept_container_update.py --image "$RUNTIME_IMAGE" --candidate-packages dist/application --both-architectures --browser --report artifacts/startup-acceptance/code-only.json "${args[@]}"
-
-      - name: Preserve quick-update acceptance diagnostics
-        if: always() && needs.validate.outputs.release_mode == 'code-only'
-        uses: actions/upload-artifact@v4
-        with:
-          name: code-only-acceptance
-          path: artifacts/startup-acceptance
-
       - name: Validate complete release bundle
         run: node scripts/validate-release-assets.mjs dist '${{ steps.version.outputs.release_tag }}'
 
