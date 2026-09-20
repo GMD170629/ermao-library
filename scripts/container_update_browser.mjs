@@ -7,7 +7,7 @@ const { chromium, expect } = require('@playwright/test');
 const [base, source, action, current, target, profile] = process.argv.slice(2);
 if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(base) || !['read', 'download', 'cancel', 'install', 'verify'].includes(action)) throw Error('Disposable local acceptance only');
 if (!profile) throw Error('Isolated persistent browser profile required');
-const context = await chromium.launchPersistentContext(profile, { channel: 'chrome', headless: true, locale: 'zh-CN' });
+const context = await chromium.launchPersistentContext(profile, { ...(process.env.ACCEPTANCE_CHROMIUM === 'bundled' ? {} : { channel: 'chrome' }), headless: true, locale: 'zh-CN' });
 try {
   // Only release metadata is redirected to the real fixture server, never business APIs.
   await context.route('https://raw.githubusercontent.com/GMD170629/ermao-library/release-feed/**', async route => {
@@ -42,9 +42,13 @@ try {
       book = body.data.books.find(item => item.libraryId === 'acceptance-reader');
       return !!book;
     }, { timeout: 60000 }).toBe(true);
-    const detail = await (await context.request.get(`${base}/api/books/${book.id}`)).json();
-    const resource = detail.data.book.resources.find(item => item.format.toUpperCase() === 'EPUB');
-    assert.ok(resource);
+    // A book can be visible before its asynchronous resource import completes.
+    let detail, resource;
+    await expect.poll(async () => {
+      detail = await (await context.request.get(`${base}/api/books/${book.id}`)).json();
+      resource = detail.data.book.resources.find(item => item.format.toUpperCase() === 'EPUB');
+      return !!resource;
+    }, { timeout: 60000 }).toBe(true);
     await page.goto(`${base}/library`);
     await expect(page.getByRole('button', { name: new RegExp(detail.data.book.title) }).first()).toBeVisible();
     await page.goto(`${base}/reader/${resource.id}`);
@@ -64,10 +68,8 @@ try {
   if (action === 'read') {
     await readerRegression(true);
   } else if (action === 'download') {
-    await page.getByRole('button', { name: '下载更新', exact: true }).click();
-    await expect(page.getByText(/此操作只下载并准备更新包/)).toBeVisible();
     const accepted = page.waitForResponse(r => r.url().endsWith('/api/updates/prepare') && r.status() === 202);
-    await page.getByRole('button', { name: '确认下载', exact: true }).click();
+    await page.getByRole('button', { name: '下载更新', exact: true }).click();
     await accepted;
     assert.equal(mutations.length, 1);
     assert.match(mutations[0].url(), /\/prepare$/);
@@ -75,7 +77,7 @@ try {
   } else if (action === 'cancel' || action === 'install') {
     await expect(page.getByText('更新包已准备好，等待安装', { exact: true })).toBeVisible();
     await expect(page.getByText(`本次更新包：v${target}`, { exact: true })).toBeVisible();
-    await page.getByRole('button', { name: '安装并重启', exact: true }).click();
+    await page.getByRole('button', { name: /^(安装并重启|立即更新)$/ }).click();
     await expect(page.getByText(new RegExp(`当前版本 v${current}，待安装版本 v${target}`))).toBeVisible();
     if (action === 'cancel') {
       await page.getByRole('button', { name: '取消', exact: true }).click();
@@ -84,7 +86,7 @@ try {
       assert.equal(mutations.length, 0);
     } else {
       const accepted = page.waitForResponse(r => r.url().endsWith('/api/updates/install') && r.status() === 202);
-      await page.getByRole('button', { name: '确认安装', exact: true }).click();
+      await page.getByRole('button', { name: /^(确认安装|确认更新)$/ }).click();
       await accepted;
       assert.equal(mutations.length, 1);
       assert.equal(mutations[0].postDataJSON().version, target);

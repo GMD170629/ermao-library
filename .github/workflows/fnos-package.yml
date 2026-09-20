@@ -40,6 +40,13 @@ on:
       - 'scripts/assemble-release-feed*'
       - 'scripts/build-application-package.py'
       - 'scripts/validate-release-source*'
+      - 'scripts/release-mode*'
+      - 'scripts/release-request*'
+      - 'scripts/build-code-only-app.py'
+      - 'scripts/accept_candidate_update.py'
+      - 'scripts/test_accept_candidate_update.py'
+      - 'scripts/accept_container_update.py'
+      - 'scripts/container_update_*'
       - 'scripts/release-workflow-policy.test.mjs'
       - 'scripts/test_fnos_installation.py'
       - 'scripts/publish-docker-hub.sh'
@@ -79,13 +86,22 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       app_version: ${{ steps.version.outputs.app_version }}
+      release_mode: ${{ steps.mode.outputs.release_mode }}
+      runtime_image: ${{ steps.mode.outputs.runtime_image }}
+      seed_version: ${{ steps.mode.outputs.seed_version }}
+      base_version: ${{ steps.mode.outputs.base_version }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          submodules: recursive
+
+      - name: Resolve committed release mode and verify baseline
+        id: mode
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-mode.mjs --published-base
 
       - name: Validate release entry point and synchronized source
         env:
@@ -93,7 +109,10 @@ jobs:
         run: node scripts/validate-release-source.mjs
 
       - name: Test strict bilingual release-note validation
-        run: node --test scripts/ghcr-updates.test.mjs scripts/validate-release-notes.test.mjs scripts/validate-release-assets.test.mjs scripts/release-workflow-policy.test.mjs scripts/validate-release-source.test.mjs scripts/assemble-release-feed.test.mjs scripts/build-release-app-packages.test.mjs
+        run: node --test scripts/release-request.test.mjs scripts/release-mode.test.mjs scripts/ghcr-updates.test.mjs scripts/validate-release-notes.test.mjs scripts/validate-release-assets.test.mjs scripts/release-workflow-policy.test.mjs scripts/validate-release-source.test.mjs scripts/assemble-release-feed.test.mjs scripts/build-release-app-packages.test.mjs
+
+      - name: Test candidate platform selection
+        run: python3 -m unittest discover -s scripts -p 'test_accept_candidate_update.py'
 
       - name: Validate application version and bilingual release notes
         id: version
@@ -122,9 +141,11 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install browsers for production Reader safety conformance
+        if: steps.mode.outputs.release_mode != 'code-only'
         run: pnpm --filter @shuku/web exec playwright install --with-deps chromium webkit
 
       - name: Run Web quality gates
+        if: steps.mode.outputs.release_mode != 'code-only'
         run: |
           pnpm --filter @shuku/web lint
           pnpm --filter @shuku/web typecheck
@@ -132,15 +153,27 @@ jobs:
           pnpm --filter @shuku/web i18n:check
           pnpm --filter @shuku/web build
 
+      - name: Check quick-update Web module
+        if: steps.mode.outputs.release_mode == 'code-only'
+        run: |
+          pnpm --filter @shuku/web lint
+          pnpm --filter @shuku/web typecheck
+          pnpm --filter @shuku/web i18n:check
+          cd apps/web
+          pnpm exec tsx --test features/updates/application/confirm-update.test.ts features/updates/model/release-notes.test.ts
+
       - name: Set up Python for backend Reader conformance
+        if: steps.mode.outputs.release_mode != 'code-only'
         uses: actions/setup-python@v5
         with:
           python-version-file: apps/api-python/.python-version
 
       - name: Set up uv
+        if: steps.mode.outputs.release_mode != 'code-only'
         uses: astral-sh/setup-uv@v6
 
       - name: Compare executable Reader safety reports
+        if: steps.mode.outputs.release_mode != 'code-only'
         run: |
           pnpm --filter @shuku/web conformance:reader-safety
           uv run --project apps/api-python --locked python apps/api-python/tests/conformance/reader_safety_conformance.py \
@@ -152,7 +185,7 @@ jobs:
             artifacts/reader-safety-conformance/web.json
 
       - name: Upload Reader safety reports
-        if: always()
+        if: always() && steps.mode.outputs.release_mode != 'code-only'
         uses: actions/upload-artifact@v4
         with:
           name: reader-safety-web-backend-conformance
@@ -160,21 +193,20 @@ jobs:
           if-no-files-found: error
 
       - name: Validate fnOS package templates
+        if: steps.mode.outputs.release_mode != 'code-only'
         env:
           FNOS_VALIDATE_ONLY: 'true'
         run: bash scripts/build-fnos-package.sh
 
   publish-prod-image:
     name: Publish prod Docker image
-    if: github.ref == 'refs/heads/prod'
+    if: github.ref == 'refs/heads/prod' && needs.validate.outputs.release_mode != 'code-only'
     needs: [validate, startup-acceptance]
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
-        with:
-          submodules: recursive
 
       - name: Validate application version and bilingual release notes
         run: node scripts/validate-release-notes.mjs
@@ -210,12 +242,12 @@ jobs:
 
   startup-acceptance:
     name: Verify real server startup fault boundaries
+    needs: validate
+    if: needs.validate.outputs.release_mode != 'code-only'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
-        with:
-          submodules: recursive
       - name: Test supervisor with real child processes
         run: |
           python3 -m unittest discover -s scripts -p 'test_container_entry.py'
@@ -246,15 +278,13 @@ jobs:
 
   publish-develop-image:
     name: Publish develop Docker image
-    if: github.ref == 'refs/heads/develop'
+    if: github.ref == 'refs/heads/develop' && needs.validate.outputs.release_mode != 'code-only'
     needs: [validate, startup-acceptance]
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
-        with:
-          submodules: recursive
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -285,7 +315,7 @@ jobs:
 
   mobile-release:
     # v1.0.3, v1.0.4, v1.1.0 and v1.2.0 are owner-approved server-only releases; other tags retain mobile gates.
-    if: github.ref_type == 'tag' && !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version)
+    if: github.ref_type == 'tag' && needs.validate.outputs.release_mode != 'code-only' && !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version)
     needs: validate
     permissions:
       contents: write
@@ -297,8 +327,8 @@ jobs:
       run_full_android_regression: false
 
   package:
-    name: Build fnOS FPK
-    if: always() && needs.validate.result == 'success' && (needs.mobile-release.result == 'success' || (contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) && needs.mobile-release.result == 'skipped')) && github.ref_type == 'tag'
+    name: Build selected release artifacts
+    if: always() && needs.validate.result == 'success' && (needs.validate.outputs.release_mode == 'code-only' || needs.mobile-release.result == 'success' || (contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) && needs.mobile-release.result == 'skipped')) && github.ref_type == 'tag'
     needs: [validate, mobile-release]
     outputs:
       image_digest: ${{ steps.release_image.outputs.digest }}
@@ -311,8 +341,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
-        with:
-          submodules: recursive
 
       - name: Read and verify package version and bilingual release notes
         id: version
@@ -335,6 +363,7 @@ jobs:
           version: "0.11.29"
 
       - name: Test Python backend with production runtime version
+        if: needs.validate.outputs.release_mode != 'code-only'
         # The production image builds this same native library; host tests need it too.
         # Keep this prerequisite before pytest instead of replacing chapter adapters.
         working-directory: apps/api-python
@@ -347,29 +376,29 @@ jobs:
           uv run --extra dev --locked pytest -q
 
       - name: Download checked stable Android APK
-        if: ${{ !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) }}
+        if: ${{ needs.validate.outputs.release_mode != 'code-only' && !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) }}
         uses: actions/download-artifact@v4
         with:
           name: android-stable-unsigned
           path: unsigned-android
 
       - name: Set up JDK for stable signing
-        if: ${{ !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) }}
+        if: ${{ needs.validate.outputs.release_mode != 'code-only' && !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) }}
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Set up Android SDK for stable signing
-        if: ${{ !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) }}
+        if: ${{ needs.validate.outputs.release_mode != 'code-only' && !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) }}
         uses: android-actions/setup-android@v3
 
       - name: Install signing tools
-        if: ${{ !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) }}
+        if: ${{ needs.validate.outputs.release_mode != 'code-only' && !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) }}
         run: sdkmanager 'build-tools;36.0.0'
 
       - name: Sign and verify stable Android APK
-        if: ${{ !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) }}
+        if: ${{ needs.validate.outputs.release_mode != 'code-only' && !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) }}
         env:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
@@ -384,12 +413,14 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub
+        if: needs.validate.outputs.release_mode != 'code-only'
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Prepare Docker image tags
+        if: needs.validate.outputs.release_mode != 'code-only'
         id: docker_meta
         uses: docker/metadata-action@v5
         with:
@@ -399,6 +430,7 @@ jobs:
             type=raw,value=release-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Build and push release Docker image
+        if: needs.validate.outputs.release_mode != 'code-only'
         id: release_image
         uses: docker/build-push-action@v6
         with:
@@ -413,11 +445,13 @@ jobs:
           cache-to: type=gha,mode=max,scope=fnos-versioned-image
 
       - name: Build and validate applications from the exact target environments
+        if: needs.validate.outputs.release_mode != 'code-only'
         env:
           IMAGE_DIGEST: ${{ steps.release_image.outputs.digest }}
         run: bash scripts/build-release-app-packages.sh "gamersgu/shuku-starship-web@$IMAGE_DIGEST" dist/application
 
       - name: Accept the exact server release image before publication
+        if: needs.validate.outputs.release_mode != 'code-only'
         env:
           IMAGE_DIGEST: ${{ steps.release_image.outputs.digest }}
         run: |
@@ -432,6 +466,7 @@ jobs:
           path: artifacts/startup-acceptance
 
       - name: Install official fnpack
+        if: needs.validate.outputs.release_mode != 'code-only'
         shell: bash
         run: |
           curl --fail --location --retry 3 \
@@ -443,14 +478,70 @@ jobs:
           "$RUNNER_TEMP/fnpack" --help >/dev/null
 
       - name: Build fnOS package
+        if: needs.validate.outputs.release_mode != 'code-only'
         env:
           APP_VERSION: ${{ steps.version.outputs.app_version }}
         run: scripts/build-fnos-package.sh
 
       - name: Hash fnOS packages
+        if: needs.validate.outputs.release_mode != 'code-only'
         run: |
           cd dist/fnos
           for package in *.fpk; do sha256sum "$package" > "$package.sha256"; done
+
+      - name: Build code-only applications in existing runtimes
+        if: needs.validate.outputs.release_mode == 'code-only'
+        env:
+          RUNTIME_IMAGE: ${{ needs.validate.outputs.runtime_image }}
+          SEED_VERSION: ${{ needs.validate.outputs.seed_version }}
+        run: bash scripts/build-release-app-packages.sh "$RUNTIME_IMAGE" dist/application code-only "$SEED_VERSION"
+
+      - name: Set up ORAS for previous quick release
+        if: needs.validate.outputs.release_mode == 'code-only' && needs.validate.outputs.base_version != needs.validate.outputs.seed_version
+        uses: oras-project/setup-oras@22ce207df3b08e061f537244349aac6ae1d214f6
+        with:
+          version: 1.3.0
+
+      - name: Download immutable previous quick release for upgrade acceptance
+        if: needs.validate.outputs.release_mode == 'code-only' && needs.validate.outputs.base_version != needs.validate.outputs.seed_version
+        env:
+          BASE_VERSION: ${{ needs.validate.outputs.base_version }}
+        run: node scripts/ghcr-updates.mjs --download "$BASE_VERSION" prior-application
+
+      - name: Set up pnpm for candidate browser acceptance
+        if: needs.validate.outputs.release_mode == 'code-only'
+        uses: pnpm/action-setup@v4.4.0
+        with:
+          version: 9.12.2
+
+      - name: Set up Node for candidate browser acceptance
+        if: needs.validate.outputs.release_mode == 'code-only'
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install candidate browser tools
+        if: needs.validate.outputs.release_mode == 'code-only'
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @shuku/web exec playwright install --with-deps chromium
+
+      - name: Accept exact code-only candidates on both architectures
+        if: needs.validate.outputs.release_mode == 'code-only'
+        env:
+          RUNTIME_IMAGE: ${{ needs.validate.outputs.runtime_image }}
+          ACCEPTANCE_CHROMIUM: bundled
+        run: |
+          args=()
+          if [[ -d prior-application ]]; then args+=(--prior-packages prior-application); fi
+          python3 scripts/accept_container_update.py --image "$RUNTIME_IMAGE" --candidate-packages dist/application --both-architectures --browser --report artifacts/startup-acceptance/code-only.json "${args[@]}"
+
+      - name: Preserve quick-update acceptance diagnostics
+        if: always() && needs.validate.outputs.release_mode == 'code-only'
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-only-acceptance
+          path: artifacts/startup-acceptance
 
       - name: Validate complete release bundle
         run: node scripts/validate-release-assets.mjs dist '${{ steps.version.outputs.release_tag }}'
@@ -460,10 +551,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ermao-library-${{ steps.version.outputs.app_version }}-${{ github.run_id }}-${{ github.run_attempt }}-bundle
-          path: |
-            dist/fnos/*
-            dist/android/*
-            dist/application/*
+          path: dist
           if-no-files-found: error
 
   publish:
@@ -471,9 +559,6 @@ jobs:
     if: ${{ !cancelled() && needs.validate.result == 'success' && needs.package.result == 'success' && github.ref_type == 'tag' }}
     needs: [validate, package]
     runs-on: ubuntu-latest
-    environment:
-      name: ${{ contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) && 'stable-release-server' || 'stable-release' }}
-      url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
     permissions:
       contents: write
       packages: write
@@ -497,9 +582,11 @@ jobs:
         run: node scripts/validate-release-assets.mjs dist '${{ steps.version.outputs.release_tag }}'
 
       - name: Set up Docker Buildx for digest promotion
+        if: needs.validate.outputs.release_mode != 'code-only'
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub
+        if: needs.validate.outputs.release_mode != 'code-only'
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -555,7 +642,7 @@ jobs:
           NODE
 
       - name: Upload complete APK and fnOS bundle to Draft Release
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' && needs.validate.outputs.release_mode != 'code-only'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
@@ -569,8 +656,17 @@ jobs:
           gh release view "$RELEASE_TAG" --json assets > "$RUNNER_TEMP/release-assets.json"
           node scripts/validate-release-assets.mjs dist "$RELEASE_TAG" "$RUNNER_TEMP/release-assets.json"
 
+      - name: Verify quick Release has no installer attachments
+        if: needs.validate.outputs.release_mode == 'code-only'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+        run: |
+          gh release view "$RELEASE_TAG" --json assets > "$RUNNER_TEMP/release-assets.json"
+          node scripts/validate-release-assets.mjs dist "$RELEASE_TAG" "$RUNNER_TEMP/release-assets.json"
+
       - name: Promote verified release Docker image
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' && needs.validate.outputs.release_mode != 'code-only'
         env:
           APP_VERSION: ${{ steps.version.outputs.app_version }}
           IMAGE_DIGEST: ${{ needs.package.outputs.image_digest }}

@@ -47,7 +47,19 @@ def main():
         action="store_true",
         help="Explicit D3 real dependency update via administrator API",
     )
+    parser.add_argument("--candidate-packages", type=Path, help="Exact protocol 2 candidate directory; never builds or changes an image")
+    parser.add_argument("--prior-packages", type=Path, help="Published previous quick version, for sequential upgrade acceptance")
+    parser.add_argument("--both-architectures", action="store_true")
+    parser.add_argument("--report", type=Path)
     args = parser.parse_args()
+    if args.candidate_packages:
+        if args.web_image or args.dependencies:
+            parser.error("candidate mode cannot use fixture images or synthetic dependencies")
+        from accept_candidate_update import accept_candidates
+        accept_candidates(args)
+        return
+    if args.prior_packages or args.both_architectures or args.report:
+        parser.error("candidate options require --candidate-packages")
     if args.browser and not args.web_image:
         parser.error("--browser requires a real B Web builder image via --web-image")
     image_id = docker("images", "--quiet", args.image)

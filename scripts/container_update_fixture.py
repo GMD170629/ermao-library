@@ -124,6 +124,8 @@ def main():
                 )
             )
         db.commit()
+    if "--seed-only" in sys.argv:
+        return
     root = Path("/tmp/update-fixture/image")
     shutil.copytree("/opt/shuku-image", root, symlinks=True)
     current = get_settings().app_version

@@ -1,3 +1,4 @@
+import { serverUpdate } from './validate-release-notes.mjs';
 // Rebuild optional install metadata from published, digest-verified official assets.
 // Also used by notes synchronization: it cannot erase published appPackages accidentally.
 import { readPublishedDependencies } from './ghcr-updates.mjs';
@@ -43,6 +44,13 @@ export function publishedDependencies(release, version, readManifest) {
 }
 export function assembleFeed(index, getRelease, readManifest, ghcr = new Map()) {
   return { ...index, releases: index.releases.map(release => {
+    if (serverUpdate(release)) {
+      const references = ghcr.get(release.version);
+      if (!references || references.length !== 2 || new Set(references.map(item => item.environment.platform)).size !== 2 ||
+          !references.every(item => item.version === release.version && ['linux-x86_64', 'linux-aarch64'].includes(item.environment.platform) && /^sha256:[a-f0-9]{64}$/.test(item.oci_digest))) {
+        throw Error('code-only requires both digest-verified GHCR architectures');
+      }
+    }
     const published = getRelease(release.tag);
     if (published === null) {
       if (release === index.releases[0] || ghcr.has(release.version) ||
@@ -71,6 +79,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       if (release.version.split('.').map(Number)[0] > 1 ||
           (Number(release.version.split('.')[0]) === 1 && Number(release.version.split('.')[1]) >= 1)) {
         ghcr.set(release.version, await readPublishedDependencies(release.version, {
+          verifyBlobs: !existing.releases.find(item => item.version === release.version)?.ghcrDependencyReleases?.length,
           expectedDigests: existing.releases.find(item => item.version === release.version)?.ghcrDependencyReleases?.map(reference => reference.oci_digest),
         }));
       }

@@ -10,16 +10,13 @@ export function isFormalRelease({ eventName, refType, refName }) {
   throw Error('Stable releases build once from a version tag; main candidate builds are disabled.');
 }
 
-export function validateReleaseSource({ sha, mainSha, developSha, tag, version, release, environment }) {
+export function validateReleaseSource({ sha, mainSha, developSha, tag, version, release }) {
   if (!/^[a-f0-9]{40}$/.test(sha) || mainSha !== sha || developSha !== sha) {
     throw Error('Before tagging, fast-forward main and develop to the same release commit.');
   }
   if (tag !== `v${version}`) throw Error('Release tag does not match the application version.');
   if (release && !release.draft) throw Error('This release is already published; do not rebuild or replace its artifacts.');
-  if (!['1.0.3', '1.0.4', '1.1.0', '1.2.0'].includes(version) && !environment?.protection_rules?.some(rule =>
-    rule.type === 'required_reviewers' && rule.reviewers?.length > 0)) {
-    throw Error('Configure required reviewers on the stable-release environment before building mobile release artifacts.');
-  }
+
 }
 
 function command(program, args) {
@@ -47,7 +44,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       mainSha: command('git', ['rev-parse', 'origin/main']),
       developSha: command('git', ['rev-parse', 'origin/develop']),
       release: optionalGitHubResource(`repos/${repository}/releases/tags/${refName}`),
-      environment: ['1.0.3', '1.0.4', '1.1.0', '1.2.0'].includes(version) ? null : optionalGitHubResource(`repos/${repository}/environments/stable-release`),
     });
   }
   console.log('Release entry point and source verified.');

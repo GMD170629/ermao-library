@@ -10,7 +10,7 @@ const manifest = (architecture, digit) => ({
   platform: { os: 'linux', architecture }, digest: `sha256:${digit.repeat(64)}`
 });
 
-function run(t, manifests) {
+function run(t, manifests, mode = 'full') {
   const root = mkdtempSync(path.join(tmpdir(), 'ermao-package-platform-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(path.join(root, 'bin'));
@@ -28,7 +28,7 @@ if (args[0] === 'buildx') {
   fs.writeFileSync(output + '/fixture-code.tar.gz.json', '{}');
 } else process.exit(74);
 `, { mode: 0o755 });
-  const result = spawnSync('bash', ['scripts/build-release-app-packages.sh', image, path.join(root, 'output')], {
+  const result = spawnSync('bash', ['scripts/build-release-app-packages.sh', image, path.join(root, 'output'), mode, '1.2.0'], {
     encoding: 'utf8',
     env: { ...process.env, PATH: `${path.join(root, 'bin')}:${process.env.PATH}`,
       PACKAGE_TEST_CALLS: calls, PACKAGE_TEST_INDEX: JSON.stringify({ manifests }) }
@@ -60,5 +60,20 @@ test('missing, ambiguous or malformed architecture digests never start a contain
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /Expected one immutable linux\/amd64 image manifest/);
     assert.equal(calls.filter(args => args[0] === 'run').length, 0);
+  }
+});
+
+
+test('code-only runs existing per-platform images and never invokes image construction', t => {
+  const { result, calls } = run(t, [manifest('amd64', 'b'), manifest('arm64', 'c')], 'code-only');
+  assert.equal(result.status, 73, result.stderr);
+  assert.ok(calls.every(args => args[0] === 'run' || args.slice(0,3).join(' ') === 'buildx imagetools inspect'));
+  const containers = calls.filter(args => args[0] === 'run');
+  assert.equal(containers.length, 2);
+  for (const args of containers) {
+    assert.ok(args.includes('SHUKU_SEED_VERSION=1.2.0'));
+    assert.ok(args.includes('/build-code-only-app.py'));
+    assert.ok(args.some(arg => arg.endsWith(':/source:ro')));
+    assert.ok(!args.includes('build'));
   }
 });

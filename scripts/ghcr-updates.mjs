@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -120,6 +120,17 @@ async function publish(root, version) {
     console.log('GHCR manifests and all blobs verified anonymously.');
   } finally { rmSync(scratch, { recursive: true, force: true }); }
 }
+export async function downloadPublished(version, output) {
+  const references = await readPublishedDependencies(version, { verifyBlobs: true });
+  mkdirSync(output, { recursive: true });
+  for (const reference of references) {
+    execFileSync('oras', ['pull', `${repository}@${reference.oci_digest}`, '--output', output], { stdio: 'inherit' });
+    const { oci_digest: _digest, ...local } = reference;
+    writeFileSync(join(output, `${reference.filename}.reference.json`), JSON.stringify(local) + '\n');
+  }
+  validateDependencyPackages(output, version);
+}
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  await publish(resolve(process.argv[2]), process.argv[3]);
+  if (process.argv[2] === '--download') await downloadPublished(process.argv[3], resolve(process.argv[4]));
+  else await publish(resolve(process.argv[2]), process.argv[3]);
 }

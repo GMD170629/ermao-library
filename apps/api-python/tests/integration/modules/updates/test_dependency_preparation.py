@@ -615,3 +615,25 @@ def test_ghcr_selective_preparation_and_restart(packages):
         assert restarted.status().target.oci_digest == target.oci_digest
     finally:
         restarted.close()
+
+
+@pytest.mark.parametrize("change", ["content", "layout", "remove"])
+def test_code_only_packaging_rejects_drift_against_unchanged_seed(packages, change):
+    packages.build()
+    original_seed = snapshot(packages.seed)
+    output = packages.root / "quick-output"
+    output.mkdir()
+    packager = load_script("build-application-package")
+    # Application-only changes still use the original, immutable dependency seed.
+    (packages.image / "apps/web/server.js").write_text("// application fix")
+    packager.build_release(packages.image, output, packages.seed, packages.fixed)
+    package = packages.image / "node_modules/a"
+    if change == "content":
+        (package / "index.js").write_text("// changed bytes, same package version")
+    elif change == "layout":
+        package.rename(packages.image / "node_modules/relocated")
+    else:
+        shutil.rmtree(package)
+    with pytest.raises(ValueError, match="seed does not describe standalone"):
+        packager.build_release(packages.image, output, packages.seed, packages.fixed)
+    assert snapshot(packages.seed) == original_seed

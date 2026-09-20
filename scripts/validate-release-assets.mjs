@@ -1,11 +1,18 @@
-import { validateAppPackages } from './validate-app-packages.mjs';
+import { releaseMode } from './release-mode.mjs';
+import { validateAppPackages, validateDependencyPackages } from './validate-app-packages.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export function validateReleaseAssets(root, tag, remote) {
+export function validateReleaseAssets(root, tag, remote, mode = 'full') {
   if (!/^v\d+\.\d+\.\d+$/.test(tag)) throw Error('Invalid stable tag');
+  if (mode === 'code-only') {
+    if (['android', 'fnos'].some(name => existsSync(join(root, name))) || (remote && remote.assets.length)) throw Error('code-only must not contain installer assets');
+    validateDependencyPackages(join(root, 'application'), tag.slice(1));
+    return;
+  }
+  if (mode !== 'full') throw Error('Invalid release mode');
   // Explicit owner-approved exception; all other stable versions still require APKs.
   const serverOnly = ['v1.0.3', 'v1.0.4', 'v1.1.0', 'v1.2.0'].includes(tag);
   if (serverOnly && (existsSync(join(root, 'android')) || remote?.assets.some(asset => /\.(?:apk|ipa)(?:\.sha256)?$/.test(asset.name)))) {
@@ -42,6 +49,6 @@ export function validateReleaseAssets(root, tag, remote) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  validateReleaseAssets(process.argv[2], process.argv[3], process.argv[4] ? JSON.parse(readFileSync(process.argv[4], 'utf8')) : undefined);
+  validateReleaseAssets(process.argv[2], process.argv[3], process.argv[4] ? JSON.parse(readFileSync(process.argv[4], 'utf8')) : undefined, releaseMode({ version: process.argv[3].slice(1) }).mode);
   console.log('Complete release bundle verified.');
 }

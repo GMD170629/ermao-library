@@ -103,3 +103,16 @@ test('archived note-only versions survive missing Releases, but current or insta
   assert.throws(() => assembleFeed(f.index, () => null, () => {}), /missing/);
   assert.throws(() => assembleFeed(f.index, () => { throw Error('network'); }, () => {}), /network/);
 });
+
+test('quick Release without installer assets requires both verified OCI references', () => {
+  const f = dependencyFixture();
+  const entry = f.index.releases[0];
+  entry.serverUpdate = { mode: 'code-only', baseVersion: '1.0.4', runtimeImage: `gamersgu/shuku-starship-web@sha256:${'a'.repeat(64)}` };
+  f.release.assets = [];
+  const references = [...f.manifests].filter(([name]) => name.endsWith('.reference.json')).map(([,bytes]) => ({ ...JSON.parse(bytes), oci_digest: `sha256:${'b'.repeat(64)}` }));
+  const build = refs => assembleFeed(f.index, () => f.release, () => { throw Error('No Release download expected'); }, new Map([['1.0.5', refs]]));
+  assert.equal(build(references).releases[0].ghcrDependencyReleases.length, 2);
+  for (const refs of [[], references.slice(0,1), [references[0], references[0]], references.map(r => ({ ...r, oci_digest: 'bad' }))]) assert.throws(() => build(refs));
+  f.release.isDraft = true;
+  assert.throws(() => build(references), /published/);
+});

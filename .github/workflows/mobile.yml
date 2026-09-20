@@ -93,7 +93,21 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/develop' }}
 
 jobs:
+  release-mode:
+    name: Detect explicit code-only release
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.mode.outputs.release_mode }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: mode
+        run: node scripts/release-mode.mjs
+
   backend-contract:
+    needs: release-mode
+    if: needs.release-mode.outputs.mode != 'code-only'
     name: Backend mobile contract
     runs-on: ubuntu-latest
     defaults:
@@ -147,6 +161,8 @@ jobs:
           if-no-files-found: error
 
   android:
+    needs: release-mode
+    if: needs.release-mode.outputs.mode != 'code-only'
     name: Shared and Android
     runs-on: ubuntu-latest
     defaults:
@@ -323,6 +339,8 @@ jobs:
         run: node scripts/publish-android-beta.mjs dist/android-beta
 
   android-emulator:
+    needs: release-mode
+    if: needs.release-mode.outputs.mode != 'code-only'
     name: Android emulator smoke and safety conformance
     runs-on: ubuntu-latest
     defaults:

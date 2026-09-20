@@ -128,20 +128,36 @@ export function validateMode(request, { root = process.cwd() } = {}) {
   const base = `refs/tags/v${baseVersion}`;
   gitRead(root, ['merge-base', '--is-ancestor', base, request.sourceCommit]);
   if (mode === 'runtime') return;
-  const changed = gitRead(root, ['diff', '--name-only', base, request.sourceCommit]).split('\n');
-  const fixed = ['apps/web/Dockerfile.prod', 'scripts/container-entry.py', 'scripts/container_install.py', 'scripts/dependency_install.py', 'scripts/dependency_environment.py', 'scripts/dependency_packages.py', 'scripts/dependency_records.py', 'scripts/build-runtime-environment.py', '.nvmrc', 'apps/api-python/.python-version'];
+  const changed = gitRead(root, ['diff', '--name-only', base, request.sourceCommit]).split('\n').filter(file => file !== 'ermao-library.wiki');
+  const fixed = ['apps/web/Dockerfile.prod', 'scripts/container-entry.py', 'scripts/container_install.py', 'scripts/container_image.py', 'scripts/install-python-runtime.sh', 'scripts/dependency_install.py', 'scripts/dependency_environment.py', 'scripts/dependency_packages.py', 'scripts/dependency_records.py', 'scripts/build-runtime-environment.py', '.nvmrc', 'apps/api-python/.python-version'];
   requireValue(!changed.some(file => fixed.includes(file) || file.startsWith('apps/mobile/native/mobi-core/') || file.startsWith('packages/reader-core/native/') || file.startsWith('apps/api-python/shuku_dependencies/')), 'Fixed runtime changed; select runtime mode and docker');
   if (mode !== 'code-only') return;
-  requireValue(!changed.some(file => file.startsWith('apps/api-python/app/db/migrations/') || file.startsWith('apps/api-python/app/contracts/') || file.startsWith('packages/reader-contracts/')), 'code-only cannot change migrations or interface contracts');
-  // Compare dependency inputs while ignoring the application package's own version.
-  for (const file of ['apps/api-python/uv.lock', 'apps/api-python/pyproject.toml', 'pnpm-lock.yaml', 'apps/web/package.json', 'package.json']) {
-    const normalize = text => {
-      if (file.endsWith('.json')) { const value = JSON.parse(text); return canonical(Object.fromEntries(['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies', 'pnpm', 'engines', 'packageManager'].filter(key => value[key] !== undefined).map(key => [key, value[key]]))); }
-      if (file.endsWith('uv.lock')) return text.replace(/(\[\[package\]\]\nname = "ermao-books-api-python"\nversion = )"[^"]+"/g, '$1"APPLICATION"');
-      if (file.endsWith('pyproject.toml')) return text.replace(/^version = "[^"]+"$/m, 'version = "APPLICATION"');
-      return text;
-    };
-    requireValue(normalize(gitRead(root, ['show', `${base}:${file}`])) === normalize(gitRead(root, ['show', `${request.sourceCommit}:${file}`])), `code-only dependency/configuration change: ${file}`);
+  requireValue(!changed.some(file => file.startsWith('apps/api-python/app/db/migrations/') || file.startsWith('apps/api-python/app/contracts/') || (file.startsWith('packages/reader-contracts/') && !file.endsWith('/package.json'))), 'code-only cannot change migrations or interface contracts');
+  const read = (ref, file) => gitRead(root, ['show', `${ref}:${file}`]);
+  const normalize = (file, text) => {
+    if (file.endsWith('package.json')) {
+      const value = JSON.parse(text); delete value.version;
+      return canonical(value);
+    }
+    if (file.endsWith('uv.lock')) return text.replace(/(\[\[package\]\]\nname = "ermao-books-api-python"\nversion = )"[^"]+"/g, '$1"APPLICATION"');
+    if (file.endsWith('pyproject.toml')) return text.replace(/^version = "[^"]+"$/m, 'version = "APPLICATION"');
+    if (file === 'apps/mobile/androidApp/build.gradle.kts') return text.replace(/versionCode = \d+/g, 'versionCode = BUILD').replace(/versionName = "[^"]+"/g, 'versionName = "VERSION"');
+    if (file === 'apps/mobile/iosApp/ErmaoLibrary.xcodeproj/project.pbxproj') return text.replace(/CURRENT_PROJECT_VERSION = \d+;/g, 'CURRENT_PROJECT_VERSION = BUILD;').replace(/MARKETING_VERSION = [^;]+;/g, 'MARKETING_VERSION = VERSION;');
+    return text;
+  };
+  // Only known application roots are deliverable. New build/runtime inputs fail closed.
+  const application = file => /^(apps\/web\/(app|components|features|lib|generated|styles|public|i18n|hooks|contexts|types|tests|e2e)\/|apps\/api-python\/(app|tests)\/|packages\/reader-core\/(src|tests)\/)/.test(file);
+  const documentation = file => /^(docs\/|release-notes\/|\.agents\/skills\/)/.test(file) || /(^|\/)(AGENTS|README)\.md$/.test(file);
+  const releaseTool = file => file.startsWith('.github/workflows/') ||
+    /^scripts\/(?:release-[\w-]+|validate-release-[\w-]+|validate-app-packages|assemble-release-feed|ghcr-updates|build-release-app-packages|build-code-only-app|build-application-package|accept_candidate_update|accept_container_update|container_update_(?:fixture|browser|source)|test_accept_candidate_update)(?:\.test)?\.(?:mjs|py|sh)$/.test(file);
+  for (const file of changed.filter(Boolean)) {
+    if (file.endsWith('/package.json') || file === 'package.json' ||
+        ['pnpm-lock.yaml', 'apps/api-python/uv.lock', 'apps/api-python/pyproject.toml',
+         'apps/mobile/androidApp/build.gradle.kts', 'apps/mobile/iosApp/ErmaoLibrary.xcodeproj/project.pbxproj'].includes(file)) {
+      requireValue(normalize(file, read(base, file)) === normalize(file, read(request.sourceCommit, file)), `code-only dependency/configuration change: ${file}`);
+    } else {
+      requireValue(application(file) || documentation(file) || releaseTool(file), `code-only unsupported build/runtime/client input: ${file}`);
+    }
   }
 }
 

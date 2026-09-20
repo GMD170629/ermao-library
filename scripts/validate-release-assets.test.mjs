@@ -113,3 +113,18 @@ test('architecture merge shares identical assets and retains complete references
   mergeApplicationAssets(output,inputs);
   assert.equal(validateAppPackages(output,'1.0.5').length,2);
 });
+
+test('code-only validates two protocol-2 architectures without installer attachments', t => {
+  const root = mkdtempSync(join(tmpdir(), 'quick-assets-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const application = join(root, 'application'); mkdirSync(application);
+  const f = dependencyFixture();
+  for (const [name, bytes] of f.manifests) writeFileSync(join(application, name), bytes);
+  validateReleaseAssets(root, 'v1.0.5', { assets: [] }, 'code-only');
+  assert.throws(() => validateReleaseAssets(root, 'v1.0.5', { assets: [{ name: 'unexpected.apk' }] }, 'code-only'), /installer/);
+  mkdirSync(join(root, 'fnos'));
+  assert.throws(() => validateReleaseAssets(root, 'v1.0.5', undefined, 'code-only'), /installer/);
+  rmSync(join(root, 'fnos'), { recursive: true });
+  rmSync(join(application, 'shuku-1.0.5-linux-aarch64-v2.json.reference.json'));
+  assert.throws(() => validateReleaseAssets(root, 'v1.0.5', undefined, 'code-only'));
+});

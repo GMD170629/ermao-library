@@ -82,7 +82,7 @@ test('develop pushes publish only the isolated develop image channel', () => {
   assert.doesNotMatch(developJob, /shuku-starship-web:(?:prod|latest)/u);
   assert.match(
     releaseWorkflow,
-    /name: Build fnOS FPK\s+if: [^\n]*github\.ref_type == 'tag'/u
+    /name: Build selected release artifacts\s+if: [^\n]*github\.ref_type == 'tag'/u
   );
 });
 
@@ -91,19 +91,18 @@ test('owner-approved server-only releases retain server validation', () => {
   const packageJob = releaseWorkflow.split('\n  package:')[1].split('\n  publish:')[0];
   const publishJob = releaseWorkflow.split('\n  publish:')[1];
   const serverOnly = `contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version)`;
-  assert.ok(mobileJob.includes(`if: github.ref_type == 'tag' && !${serverOnly}`));
+  assert.ok(mobileJob.includes(`if: github.ref_type == 'tag' && needs.validate.outputs.release_mode != 'code-only' && !${serverOnly}`));
   assert.match(packageJob, /if: always\(\) && needs.validate.result == 'success'/);
   assert.ok(packageJob.includes(`needs.mobile-release.result == 'success' || (${serverOnly} && needs.mobile-release.result == 'skipped')`));
   for (const name of ['Download checked stable Android APK', 'Set up JDK for stable signing', 'Set up Android SDK for stable signing', 'Install signing tools', 'Sign and verify stable Android APK']) {
-    assert.ok(packageJob.includes(`- name: ${name}\n        if: ` + '${{ !' + serverOnly + ' }}'));
+    assert.ok(packageJob.includes(`- name: ${name}\n        if: ` + "${{ needs.validate.outputs.release_mode != 'code-only' && !" + serverOnly + ' }}'));
   }
-  assert.ok(publishJob.includes('name: ${{ ' + serverOnly + " && 'stable-release-server' || 'stable-release' }}"));
   assert.ok(publishJob.includes(`if [[ "$RELEASE_TAG" == 'v1.0.3' || "$RELEASE_TAG" == 'v1.0.4' || "$RELEASE_TAG" == 'v1.1.0' || "$RELEASE_TAG" == 'v1.2.0' ]]; then`));
   assert.ok(publishJob.includes('gh release upload "$RELEASE_TAG" dist/fnos/*.fpk dist/fnos/*.sha256 --clobber'));
 });
 
 
-test('approval publishes the exact build artifact and image digest without rebuilding', () => {
+test('authorized publication uses the exact build artifact and image digest without rebuilding', () => {
   const packageJob = releaseWorkflow.split('\n  package:')[1].split('\n  publish:')[0];
   const publishJob = releaseWorkflow.split('\n  publish:')[1];
   assert.match(packageJob, /bundle_id: \$\{\{ steps.bundle.outputs.artifact-id \}\}/);
@@ -112,7 +111,7 @@ test('approval publishes the exact build artifact and image digest without rebui
   assert.doesNotMatch(packageJob, /gh release (create|upload|edit)|imagetools create/);
   assert.match(publishJob, /needs: \[validate, package\]/);
   assert.match(publishJob, /!cancelled\(\) && needs.validate.result == 'success' && needs.package.result == 'success'/);
-  assert.match(publishJob, /environment:[\s\S]*'stable-release'/);
+  assert.doesNotMatch(publishJob, /environment:/);
   assert.match(publishJob, /artifact-ids: \$\{\{ needs.package.outputs.bundle_id \}\}/);
   assert.match(publishJob, /merge-multiple: true/);
   assert.match(publishJob, /IMAGE_DIGEST: \$\{\{ needs.package.outputs.image_digest \}\}/);
@@ -152,4 +151,28 @@ test('GHCR artifacts are anonymously verified before stable publication and stay
   assert.match(publish, /version: 1\.3\.0/);
   assert.ok(publish.indexOf('node scripts/ghcr-updates.mjs') < publish.indexOf('Promote verified release Docker image'));
   assert.doesNotMatch(publish, /gh release upload[^\n]*dist\/application/);
+});
+
+test('explicit quick mode gates every image build, installer and promotion in the shared workflow', () => {
+  const packageJob = releaseWorkflow.split('\n  package:')[1].split('\n  publish:')[0];
+  for (const name of ['Build and push release Docker image', 'Build fnOS package', 'Hash fnOS packages', 'Accept the exact server release image before publication']) {
+    assert.ok(packageJob.includes(`- name: ${name}\n        if: needs.validate.outputs.release_mode != 'code-only'`), name);
+  }
+  for (const job of ['startup-acceptance', 'publish-develop-image', 'publish-prod-image', 'mobile-release']) {
+    const text = releaseWorkflow.split(`\n  ${job}:`)[1].split(/\n  [a-z][\w-]*:/)[0];
+    assert.match(text, /if: .*needs.validate.outputs.release_mode != 'code-only'/);
+  }
+  const publish = releaseWorkflow.split('\n  publish:')[1];
+  assert.match(publish, /- name: Promote verified release Docker image\n        if: .*release_mode != 'code-only'/);
+  assert.match(publish, /- name: Upload complete APK and fnOS bundle to Draft Release\n        if: .*release_mode != 'code-only'/);
+  assert.match(packageJob, /--candidate-packages dist\/application --both-architectures --browser/);
+  assert.match(packageJob, /--prior-packages prior-application/);
+  assert.match(packageJob, /ghcr-updates.mjs --download/);
+});
+
+test('system release checkout never initializes the unrelated Wiki submodule', () => {
+  assert.doesNotMatch(releaseWorkflow, /submodules:|submodule update/);
+  const packaging = readFileSync(new URL('./build-release-app-packages.sh', import.meta.url), 'utf8');
+  assert.doesNotMatch(packaging, /--recurse-submodules/);
+  assert.match(packaging, /name == 'ermao-library\.wiki'/);
 });

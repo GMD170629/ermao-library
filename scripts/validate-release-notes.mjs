@@ -24,6 +24,19 @@ export function compareStableVersions(left, right) {
   return 0;
 }
 
+export function serverUpdate(entry) {
+  if (!Object.hasOwn(entry, 'serverUpdate')) return null;
+  const value = entry.serverUpdate;
+  if (!value || Array.isArray(value) || Object.keys(value).sort().join(',') !== 'baseVersion,mode,runtimeImage' ||
+      value.mode !== 'code-only' || !parseStableVersion(value.baseVersion) ||
+      compareStableVersions(value.baseVersion, entry.version) >= 0 ||
+      !/^(?:docker\.io\/)?gamersgu\/shuku-starship-web@sha256:[a-f0-9]{64}$/.test(value.runtimeImage ?? '')) {
+    throw Error('Invalid serverUpdate: code-only requires an earlier baseVersion and trusted immutable runtimeImage');
+  }
+  return value;
+}
+
+
 export function extractLocalizedReleaseNote(markdown, locale) {
   const start = `<!-- shuku:locale=${locale}:start -->`;
   const end = `<!-- shuku:locale=${locale}:end -->`;
@@ -94,6 +107,7 @@ export function validateReleaseIndex(index, currentVersion) {
   const seenVersions = new Set();
   for (const [position, release] of index.releases.entries()) {
     if (!release || typeof release !== 'object' || Array.isArray(release)) throw new Error(`Release at index ${position} must be an object`);
+    serverUpdate(release);
     if (!parseStableVersion(release.version)) throw new Error(`Release at index ${position} has an invalid stable version`);
     if (release.tag !== `v${release.version}`) throw new Error(`Release ${release.version} tag must be v${release.version}`);
     if (seenVersions.has(release.version)) throw new Error(`Duplicate release version ${release.version}`);
