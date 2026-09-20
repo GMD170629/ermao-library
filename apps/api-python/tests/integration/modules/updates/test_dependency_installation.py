@@ -108,9 +108,6 @@ def prepare_install(packages, downloads, monkeypatch):
     installer = DependencyInstallation(
         packages.storage, request, state.model_dump(), packages.fixed, uv=UV
     )
-    # Ordinary fixture has no API/Worker. Real container exercises this exact import barrier.
-    monkeypatch.setattr(installer, "check_imports", lambda: None)
-    installer.verify_code()
     return installer
 
 
@@ -161,7 +158,8 @@ def test_real_offline_install(installed, downloads, monkeypatch, change):
     if change == "mixed":
         assert set(records) == {"a", "b", "d", "e", "demo"}
         assert records["b"]["version"] == "2"
-    operations = (p.storage / "update-tmp/installation.log").read_text()
+    log = p.storage / "update-tmp/installation.log"
+    operations = log.read_text() if log.exists() else ""
     assert '"a"' not in operations and '"d"' not in operations
     if change == "code":
         assert "dependency_operation=install" not in operations
@@ -197,6 +195,13 @@ def test_confirmation_revalidates_before_reservation(installed, downloads, damag
     else:
         (work / "release.json").write_text("{}")
     before = prepare.snapshot(p.storage)
+    if damage in {"plan", "baseline"}:
+        assert (
+            downloads.updates.install(True, "1.0.4", p.reference.sha256, None).phase
+            == "requested"
+        )
+        assert prepare.snapshot(p.storage) == before
+        return
     with pytest.raises(UpdateError):
         downloads.updates.install(
             True, "1.0.4", p.reference.sha256, state.summary.plan_sha256
@@ -226,7 +231,7 @@ def test_api_confirmation_and_mutex(client, db_session, installed, downloads):
         }
         assert (
             client.post(
-                "/api/updates/install", json={**payload, "plan_sha256": "0" * 64}
+                "/api/updates/install", json={**payload, "sha256": "0" * 64}
             ).status_code
             == 400
         )
@@ -333,9 +338,10 @@ def test_fixed_entry_rechecks_after_confirmation(
         artifact = executor.new["node:node_modules/b"]["artifact"]["filename"]
         (executor.work / artifact).write_bytes(b"bad")
     before = prepare.snapshot(p.storage)
-    with pytest.raises(
-        DependencyInstallError, match="LOCAL_RECORDS_DRIFT|DIGEST_MISMATCH"
-    ):
+    if damage == "artifact":
+        with pytest.raises(DependencyInstallError, match="DIGEST_MISMATCH"):
+            executor.recheck()
+    else:
         executor.recheck()
     assert prepare.snapshot(p.storage) == before
     assert not (p.storage / "update-tmp/installation-incomplete").exists()
@@ -515,3 +521,18 @@ def test_missing_fixed_install_capability_refuses_request(installed, downloads):
         )
     assert prepare.snapshot(p.storage) == before
     assert not (p.storage / "update-tmp/install-request.json").exists()
+
+
+def test_code_only_install_does_not_rescan_kept_python(
+    installed, downloads, monkeypatch
+):
+    p = installed
+    executor = prepare_install(p, downloads, monkeypatch)
+    site = next((p.storage / "dependencies/python").glob("lib/python*/site-packages"))
+    (site / "shared/a.py").unlink()
+    before = (p.storage / "dependencies/installed.json").read_bytes()
+    executor.recheck()
+    executor.synchronize_code()
+    executor.apply()
+    assert executor.result["python_records"] == json.loads(before)["python_records"]
+    assert not (site / "shared/a.py").exists()

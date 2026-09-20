@@ -67,7 +67,8 @@ class UpdatePreparation:
         if not packages:
             return "PACKAGE_UNAVAILABLE"
         if not any(
-            p.environment == self.environment and p.format == self.protocol
+            p.environment.platform == self.environment.platform
+            and p.format == self.protocol
             for p in packages
         ):
             return "INCOMPATIBLE_ENVIRONMENT"
@@ -98,7 +99,8 @@ class UpdatePreparation:
                 package = next(
                     p
                     for p in packages
-                    if p.environment == self.environment and p.format == self.protocol
+                    if p.environment.platform == self.environment.platform
+                    and p.format == self.protocol
                 )
                 return self.worker.submit(package)
         raise UpdateError("PACKAGE_UNAVAILABLE")

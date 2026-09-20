@@ -1,4 +1,4 @@
-"""Read-only local verification and bounded verification of independent artifacts."""
+"""Read installed metadata; inspect artifact safety with strict publication validation."""
 
 from __future__ import annotations
 
@@ -14,8 +14,6 @@ from email.parser import Parser
 from pathlib import Path
 from threading import Event
 
-from pydantic import Field
-
 from shuku_dependencies import (
     Package,
     canonical_digest,
@@ -23,28 +21,7 @@ from shuku_dependencies import (
 )
 
 from ..application.dependency_release import MAX_INSTALLED, DependencySet, safe_path
-from ..application.models import MAX_EXPANDED, MAX_FILES, UpdateError, UpdateModel
-
-
-class InstalledFile(UpdateModel):
-    path: str
-    size: int = Field(ge=0)
-    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    record_hash: str | None
-
-
-class InstalledDistribution(UpdateModel):
-    name: str
-    version: str
-    files: list[InstalledFile] = Field(max_length=MAX_FILES)
-
-
-class InstalledSet(DependencySet):
-    python_records: list[InstalledDistribution] = Field(max_length=10000)
-
-    # DependencySet's identity deliberately excludes local installation records.
-    def target(self) -> DependencySet:
-        return DependencySet.model_validate(self.model_dump(exclude={"python_records"}))
+from ..application.models import MAX_EXPANDED, MAX_FILES, UpdateError
 
 
 def read_bounded(path: Path, limit: int) -> bytes:
@@ -59,7 +36,7 @@ def read_bounded(path: Path, limit: int) -> bytes:
         return data
 
 
-def verify_local(storage: Path) -> tuple[DependencySet, str]:
+def read_local(storage: Path) -> tuple[DependencySet, str]:
     try:
         for relative in (
             "runtime",
@@ -73,11 +50,8 @@ def verify_local(storage: Path) -> tuple[DependencySet, str]:
             ):
                 raise UpdateError("UNSAFE_STORAGE")
         raw = read_bounded(storage / "dependencies/installed.json", MAX_INSTALLED)
-        local = InstalledSet.model_validate_json(raw)
-        target = local.target()
-        from shuku_dependencies.installed import verify_current
-
-        return target, verify_current(storage, local.model_dump())
+        target = DependencySet.model_validate_json(raw, context={"runtime": True})
+        return target, canonical_digest(target.model_dump())
     except UpdateError:
         raise
     except (ValueError, OSError, KeyError, TypeError) as error:
@@ -131,7 +105,12 @@ def check_wheel_platform(package: Package) -> None:
 
 
 def verify_dependency_artifact(
-    path: Path, package: Package, target: DependencySet, cancelled: Event
+    path: Path,
+    package: Package,
+    target: DependencySet,
+    cancelled: Event,
+    *,
+    verify_identity: bool = True,
 ) -> int:
     expanded = 0
     seen: list[str] = []
@@ -165,7 +144,8 @@ def verify_dependency_artifact(
         return digest.hexdigest(), bytes(captured)
 
     if package.ecosystem == "python":
-        check_wheel_platform(package)
+        if verify_identity:
+            check_wheel_platform(package)
         with zipfile.ZipFile(path) as archive:
             if len(archive.infolist()) > MAX_FILES:
                 raise UpdateError("SIZE_LIMIT")
@@ -175,19 +155,21 @@ def verify_dependency_artifact(
                     raise UpdateError("UNSAFE_ARCHIVE")
                 if item.is_dir():
                     continue
-                if name in seen or name not in package.files:
+                if name in seen or (verify_identity and name not in package.files):
                     raise UpdateError("INVALID_DEPENDENCY_ARTIFACT")
                 seen.append(name)
                 with archive.open(item) as stream:
                     _, contents = consume(stream, item.file_size)
-                if name.endswith(".dist-info/METADATA"):
+                if verify_identity and name.endswith(".dist-info/METADATA"):
                     if metadata is not None:
                         raise UpdateError("INVALID_DEPENDENCY_ARTIFACT")
                     metadata = contents
-            if set(seen) != set(package.files) or metadata is None:
+            if verify_identity and (
+                set(seen) != set(package.files) or metadata is None
+            ):
                 raise UpdateError("INVALID_DEPENDENCY_ARTIFACT")
-            info = Parser().parsestr(metadata.decode())
-            if (
+            info = Parser().parsestr(metadata.decode()) if verify_identity else {}
+            if verify_identity and (
                 normalized(info["Name"]) != package.name
                 or info["Version"] != package.version
             ):
@@ -196,7 +178,7 @@ def verify_dependency_artifact(
         with tarfile.open(path, "r:") as bundle:
             for member in bundle:
                 if (
-                    member.name not in package.files
+                    (verify_identity and member.name not in package.files)
                     or member.name in seen
                     or not safe_path(member.name)
                 ):
@@ -230,13 +212,14 @@ def verify_dependency_artifact(
                         metadata = contents
                 else:
                     raise UpdateError("UNSAFE_ARCHIVE")
-        if (
+        if verify_identity and (
             tuple(seen) != package.files
             or canonical_digest(inventory) != package.content_sha256
             or metadata is None
         ):
             raise UpdateError("INVALID_DEPENDENCY_ARTIFACT")
-        info = json.loads(metadata)
-        if info["name"] != package.name or info["version"] != package.version:
-            raise UpdateError("INVALID_DEPENDENCY_ARTIFACT")
+        if verify_identity:
+            info = json.loads(metadata)
+            if info["name"] != package.name or info["version"] != package.version:
+                raise UpdateError("INVALID_DEPENDENCY_ARTIFACT")
     return expanded

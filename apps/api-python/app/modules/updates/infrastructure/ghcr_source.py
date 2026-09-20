@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import http.client
 import json
 import re
@@ -11,15 +10,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Iterator
-from typing import IO, TYPE_CHECKING
+from typing import IO
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
-
-from ..application.dependency_release import ReleaseManifest
-from ..application.models import GHCRReleaseReference, ReleaseReference, UpdateError
-
-if TYPE_CHECKING:
-    from .official_source import ByteSource
+from ..application.models import UpdateError
 
 REGISTRY = "https://ghcr.io/v2/gmd170629/ermao-library-updates"
 TOKEN_URL = "https://ghcr.io/token?service=ghcr.io&scope=repository%3Agmd170629%2Fermao-library-updates%3Apull"
@@ -100,80 +93,3 @@ def registry_chunks(url: str, limit: int, seconds: int) -> Iterator[bytes]:
         raise UpdateError("DOWNLOAD_FAILED") from error
     except (ValueError, KeyError, TypeError) as error:
         raise UpdateError("INVALID_MANIFEST") from error
-
-
-class Descriptor(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    digest: str = Field(pattern=r"^sha256:[a-f0-9]{64}$")
-    size: int = Field(gt=0, le=512 * 1024 * 1024)
-    annotations: dict[str, str]
-
-
-class OCIManifest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    schemaVersion: int
-    mediaType: str
-    artifactType: str
-    annotations: dict[str, str]
-    layers: list[Descriptor] = Field(max_length=10002)
-
-
-def validate_registry_manifest(
-    source: ByteSource, reference: GHCRReleaseReference
-) -> dict[str, Descriptor]:
-    raw = b"".join(
-        source.chunks(
-            f"{REGISTRY}/manifests/{reference.oci_digest}", 4 * 1024 * 1024, 30
-        )
-    )
-    if "sha256:" + hashlib.sha256(raw).hexdigest() != reference.oci_digest:
-        raise UpdateError("DIGEST_MISMATCH")
-    try:
-        manifest = OCIManifest.model_validate_json(raw)
-        if (
-            manifest.schemaVersion != 2
-            or manifest.mediaType != OCI_TYPE
-            or manifest.artifactType != ARTIFACT_TYPE
-            or manifest.annotations.get("org.opencontainers.image.version")
-            != reference.version
-            or manifest.annotations.get("io.ermao.platform")
-            != reference.environment.platform
-        ):
-            raise ValueError("OCI identity")
-        files: dict[str, Descriptor] = {}
-        for layer in manifest.layers:
-            name = layer.annotations["org.opencontainers.image.title"]
-            if name in files or not re.fullmatch(
-                r"[A-Za-z0-9][A-Za-z0-9._+-]{0,240}", name
-            ):
-                raise ValueError("OCI filename")
-            files[name] = layer
-        match_descriptor(files, reference.filename, reference.size, reference.sha256)
-        return files
-    except (ValueError, KeyError, ValidationError) as error:
-        raise UpdateError("INVALID_MANIFEST") from error
-
-
-def match_descriptor(
-    files: dict[str, Descriptor], name: str, size: int, digest: str
-) -> None:
-    item = files.get(name)
-    if item is None or item.size != size or item.digest != f"sha256:{digest}":
-        raise UpdateError("INVALID_MANIFEST")
-
-
-def validate_registry_files(
-    files: dict[str, Descriptor],
-    reference: ReleaseReference,
-    manifest: ReleaseManifest,
-) -> None:
-    expected = {reference.filename}
-    code = manifest.code
-    match_descriptor(files, code.filename, code.size, code.sha256)
-    expected.add(code.filename)
-    for package in manifest.dependencies.packages:
-        item = package.artifact
-        match_descriptor(files, item.filename, item.size, item.sha256)
-        expected.add(item.filename)
-    if set(files) != expected:
-        raise UpdateError("INVALID_MANIFEST")

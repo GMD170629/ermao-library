@@ -43,7 +43,7 @@ class PrepareRequest(HttpContractModel):
 
 
 class InstallRequest(PrepareRequest):
-    plan_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    plan_sha256: str | None = None
     sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 

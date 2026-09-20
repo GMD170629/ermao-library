@@ -112,11 +112,6 @@ def validate_layout(
         raise UpdateError("INVALID_LAYOUT") from error
 
 
-def check_space(root: Path, required: int) -> None:
-    if shutil.disk_usage(root).free < required + 64 * 1024 * 1024:
-        raise UpdateError("INSUFFICIENT_SPACE")
-
-
 class ExpandedReader(io.RawIOBase):
     def __init__(self, source: gzip.GzipFile, limit: int, cancelled: Event) -> None:
         self.source, self.remaining, self.cancelled = source, limit, cancelled
@@ -137,7 +132,12 @@ class ExpandedReader(io.RawIOBase):
 
 
 def extract_package(
-    archive: Path, destination: Path, package: Package | CodePackage, cancelled: Event
+    archive: Path,
+    destination: Path,
+    package: Package | CodePackage,
+    cancelled: Event,
+    *,
+    verify_identity: bool = True,
 ) -> None:
     destination.mkdir()  # Caller provides a fresh, dedicated directory.
     seen: set[str] = set()
@@ -146,7 +146,12 @@ def extract_package(
     with gzip.open(archive, "rb") as compressed:
         bounded = ExpandedReader(
             compressed,
-            min(MAX_EXPANDED, package.expanded_size) + MAX_FILES * 2048,
+            (
+                min(MAX_EXPANDED, package.expanded_size)
+                if verify_identity
+                else MAX_EXPANDED
+            )
+            + MAX_FILES * 2048,
             cancelled,
         )
         with tarfile.open(fileobj=bounded, mode="r|") as bundle:
@@ -155,7 +160,9 @@ def extract_package(
                 if not program_path(name, package.format) or name in seen:
                     raise UpdateError("UNSAFE_ARCHIVE")
                 seen.add(name)
-                if len(seen) > min(MAX_FILES, package.file_count):
+                if len(seen) > (
+                    min(MAX_FILES, package.file_count) if verify_identity else MAX_FILES
+                ):
                     raise UpdateError("SIZE_LIMIT")
                 target = destination / name
                 if member.issym() or member.islnk():
@@ -169,7 +176,8 @@ def extract_package(
                 else:
                     expanded += member.size
                     if member.size < 0 or expanded > min(
-                        MAX_EXPANDED, package.expanded_size
+                        MAX_EXPANDED,
+                        package.expanded_size if verify_identity else MAX_EXPANDED,
                     ):
                         raise UpdateError("SIZE_LIMIT")
                     stream = bundle.extractfile(member)
@@ -178,7 +186,9 @@ def extract_package(
                     with stream, target.open("xb") as output:
                         shutil.copyfileobj(stream, output, 64 * 1024)
                     target.chmod(0o755 if member.mode & 0o111 else 0o644)
-    if expanded != package.expanded_size or len(seen) != package.file_count:
+    if verify_identity and (
+        expanded != package.expanded_size or len(seen) != package.file_count
+    ):
         raise UpdateError("PACKAGE_IDENTITY_MISMATCH")
     # Create links only after all file writes. No extraction can traverse a link.
     for member in links:
@@ -205,9 +215,10 @@ def extract_package(
             raise UpdateError("UNSAFE_ARCHIVE") from error
         if not resolved.is_relative_to(destination):
             raise UpdateError("UNSAFE_ARCHIVE")
-    validate_layout(
-        destination,
-        (ApplicationIdentity if package.format == 1 else ProgramIdentity)(
-            version=package.version, environment=package.environment
-        ),
-    )
+    if verify_identity:
+        validate_layout(
+            destination,
+            (ApplicationIdentity if package.format == 1 else ProgramIdentity)(
+                version=package.version, environment=package.environment
+            ),
+        )

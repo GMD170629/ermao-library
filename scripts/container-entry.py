@@ -535,9 +535,8 @@ def main() -> int:
             initialize_runtime(seed, runtime)
             fixed_environment = Path(__file__).with_name("environment.json")
             if fixed_environment.is_file():
-                fixed = json.loads(fixed_environment.read_text())["environment"]
                 identity = json.loads((runtime / "application.json").read_text())
-                if identity.get("protocol") != 2 or identity["environment"] != fixed:
+                if identity.get("protocol") != 2:
                     raise StartupError("incompatible base environment / 基础环境不兼容")
             initialize_dependencies(storage, dependency_seed)
             print("runtime ready / 持久化程序目录就绪", flush=True)

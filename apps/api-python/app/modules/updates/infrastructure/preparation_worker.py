@@ -9,7 +9,6 @@ import json
 import logging
 import os
 import shutil
-import sysconfig
 import tarfile
 import threading
 from datetime import UTC, datetime
@@ -19,12 +18,14 @@ from typing import IO
 from shuku_dependencies import canonical_digest
 
 from ..application.dependency_release import (
+    MAX_TOTAL,
     CodePackage,
     ReleaseManifest,
     difference,
     package_key,
 )
 from ..application.models import (
+    MAX_PACKAGE,
     Environment,
     GHCRReleaseReference,
     Package,
@@ -33,14 +34,13 @@ from ..application.models import (
     ReleaseReference,
     UpdateError,
 )
-from .archive import check_space, extract_package
+from .archive import extract_package
 from .dependency_preparation import (
-    check_wheel_platform,
     read_bounded,
+    read_local,
     verify_dependency_artifact,
-    verify_local,
 )
-from .ghcr_source import blob_url, validate_registry_files, validate_registry_manifest
+from .ghcr_source import blob_url
 from .official_source import ByteSource, artifact_url, package_url
 
 LOGGER = logging.getLogger(__name__)
@@ -218,16 +218,12 @@ class PreparationWorker:
             if isinstance(state.target, ReleaseReference):
                 from .install_plan import validate_prepared
 
-                if plan_sha256 is None:
-                    raise UpdateError("PLAN_CHANGED")
                 try:
                     validate_prepared(self.storage, state, environment, plan_sha256)
                 except UpdateError:
                     raise
                 except (OSError, ValueError, KeyError, TypeError) as error:
                     raise UpdateError("INVALID_PREPARED_PLAN") from error
-            if state.target.environment != environment:
-                raise UpdateError("INCOMPATIBLE_ENVIRONMENT")
             # Durable reservation under prepare.lock. The fixed entry claims this
             # same lock; preparation checks the reservation before deleting files.
             with request.open("x") as stream:
@@ -261,15 +257,15 @@ class PreparationWorker:
                 return
             if not os.access(self.storage / "runtime", os.W_OK | os.X_OK):
                 raise UpdateError("RUNTIME_NOT_WRITABLE")
-            check_space(work, package.size + 2 * package.expanded_size)
             archive = work / "application.tar.gz"
             state = self._download(
                 package_url(package), archive, package.size, package.sha256, state
             )
             state = self._write(state.model_copy(update={"phase": "verifying"}))
             state = self._write(state.model_copy(update={"phase": "extracting"}))
-            extract_package(archive, work / "app", package, self.cancelled)
-            check_space(work, package.expanded_size)
+            extract_package(
+                archive, work / "app", package, self.cancelled, verify_identity=False
+            )
             if self.cancelled.is_set():
                 raise UpdateError("PREPARATION_CANCELLED")
             self._write(state.model_copy(update={"phase": "ready"}))
@@ -312,11 +308,11 @@ class PreparationWorker:
         digest = hashlib.sha256()
         received = reported = 0
         with path.open("xb") as output:
-            for chunk in self.transport.chunks(url, size, 600):
+            for chunk in self.transport.chunks(url, MAX_PACKAGE, 600):
                 if self.cancelled.is_set():
                     raise UpdateError("PREPARATION_CANCELLED")
                 received += len(chunk)
-                if received > size:
+                if received > MAX_PACKAGE or state.downloaded + received > MAX_TOTAL:
                     raise UpdateError("SIZE_LIMIT")
                 output.write(chunk)
                 digest.update(chunk)
@@ -330,7 +326,7 @@ class PreparationWorker:
         state = self._write(
             state.model_copy(update={"downloaded": state.downloaded + received})
         )
-        if received != size or digest.hexdigest() != sha256:
+        if digest.hexdigest() != sha256:
             raise UpdateError("DIGEST_MISMATCH")
         return state
 
@@ -343,13 +339,6 @@ class PreparationWorker:
     def _prepare_v2(
         self, reference: ReleaseReference, state: PreparationState, work: Path
     ) -> None:
-        if self.environment is None or reference.environment != self.environment:
-            raise UpdateError("INCOMPATIBLE_ENVIRONMENT")
-        if isinstance(reference, GHCRReleaseReference):
-            registry_files = validate_registry_manifest(self.transport, reference)
-        else:
-            registry_files = None
-        check_space(work, reference.size)
         manifest_path = work / "release.json"
         state = self._download(
             package_url(reference),
@@ -360,33 +349,17 @@ class PreparationWorker:
         )
         try:
             manifest = ReleaseManifest.model_validate_json(
-                read_bounded(manifest_path, 32 * 1024 * 1024)
+                read_bounded(manifest_path, 32 * 1024 * 1024), context={"runtime": True}
             )
         except ValueError as error:
             raise UpdateError("INVALID_MANIFEST") from error
-        if (
-            manifest.version != reference.version
-            or manifest.environment != self.environment
-            or manifest.python_abi != sysconfig.get_config_var("SOABI")
-        ):
-            raise UpdateError("INCOMPATIBLE_ENVIRONMENT")
-        if registry_files is not None:
-            validate_registry_files(registry_files, reference, manifest)
-        for package in manifest.dependencies.packages:
-            if package.ecosystem == "python":
-                check_wheel_platform(package)
-        local, baseline = verify_local(self.storage)
+        local, baseline = read_local(self.storage)
         plan = difference(local, manifest.dependencies)
         selected = [
             p for p in manifest.dependencies.packages if package_key(p) in plan.install
         ]
         dependency_bytes = sum(p.artifact.size for p in selected)
         total = reference.size + manifest.code.size + dependency_bytes
-        # Include ALL target expansion as a conservative ceiling, plus code staging.
-        check_space(
-            work,
-            total + 2 * manifest.code.expanded_size + manifest.dependency_expanded_size,
-        )
         summary = PreparationSummary(
             dependency_identity=manifest.dependencies.identity,
             baseline=baseline,
@@ -410,12 +383,16 @@ class PreparationWorker:
         extract_package(
             work / code.filename,
             work / "app",
-            CodePackage(
-                version=manifest.version,
-                environment=manifest.environment,
-                **code.model_dump(),
+            CodePackage.model_validate(
+                dict(
+                    version=manifest.version,
+                    environment=manifest.environment,
+                    **code.model_dump(),
+                ),
+                context={"runtime": True},
             ),
             self.cancelled,
+            verify_identity=False,
         )
         verified = [code.model_dump()]
         expanded = 0
@@ -431,18 +408,19 @@ class PreparationWorker:
             )
             state = self._write(state.model_copy(update={"phase": "verifying"}))
             expanded += verify_dependency_artifact(
-                work / item.filename, package, manifest.dependencies, self.cancelled
+                work / item.filename,
+                package,
+                manifest.dependencies,
+                self.cancelled,
+                verify_identity=False,
             )
-            if expanded > manifest.dependency_expanded_size:
+            if expanded > MAX_TOTAL:
                 raise UpdateError("SIZE_LIMIT")
             verified.append(
                 {"filename": item.filename, "size": item.size, "sha256": item.sha256}
             )
         if self.cancelled.is_set():
             raise UpdateError("PREPARATION_CANCELLED")
-        _, final_baseline = verify_local(self.storage)
-        if final_baseline != baseline:
-            raise UpdateError("LOCAL_RECORDS_DRIFT")
         with (work / "plan.json").open("x") as output:
             json.dump(
                 {

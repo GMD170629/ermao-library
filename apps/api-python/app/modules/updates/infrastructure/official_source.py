@@ -20,6 +20,7 @@ from ..application.models import (
     Package,
     ReleaseReference,
     UpdateError,
+    parse_target,
     version_parts,
 )
 from .ghcr_source import blob_url, registry_chunks
@@ -129,9 +130,7 @@ class OfficialReleases:
                 ):
                     raise ValueError("release identity")
                 packages = [
-                    (
-                        Package if self.protocol == 1 else ReleaseReference
-                    ).model_validate(p)
+                    parse_target(p)
                     for p in release.get(
                         "appPackages" if self.protocol == 1 else "dependencyReleases",
                         [],
@@ -139,8 +138,7 @@ class OfficialReleases:
                 ]
                 if self.protocol != 1 and "ghcrDependencyReleases" in release:
                     packages = [
-                        GHCRReleaseReference.model_validate(p)
-                        for p in release["ghcrDependencyReleases"]
+                        parse_target(p) for p in release["ghcrDependencyReleases"]
                     ]
                 if any(p.version != version for p in packages) or len(
                     {p.environment.platform for p in packages}

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 MAX_PACKAGE = 512 * 1024 * 1024
 MAX_EXPANDED = 2 * 1024 * 1024 * 1024
@@ -25,14 +25,21 @@ def version_parts(value: str) -> tuple[int, ...]:
     return tuple(int(part) for part in value.split("."))
 
 
+def validate_filename(value: str) -> None:
+    if value in (".", "..") or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._+-]{0,240}", value
+    ):
+        raise ValueError("unsafe artifact filename")
+
+
 class UpdateModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="ignore", frozen=True)
 
 
 class Environment(UpdateModel):
     format: Literal[1] = 1
     platform: str = Field(pattern=r"^(linux|darwin)-(x86_64|aarch64)$")
-    compatibility: str = Field(pattern=r"^[a-f0-9]{64}$")
+    compatibility: str = ""
 
 
 class Package(UpdateModel):
@@ -40,16 +47,15 @@ class Package(UpdateModel):
     format: Literal[1] = 1
     environment: Environment
     filename: str
-    size: int = Field(gt=0, le=MAX_PACKAGE)
+    size: int = 0
     sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    expanded_size: int = Field(gt=0, le=MAX_EXPANDED)
-    file_count: int = Field(gt=0, le=MAX_FILES)
+    expanded_size: int = 0
+    file_count: int = 0
 
     @model_validator(mode="after")
     def validate_identity(self) -> Package:
         version_parts(self.version)
-        if self.filename != f"shuku-{self.version}-{self.environment.platform}.tar.gz":
-            raise ValueError("invalid asset name")
+        validate_filename(self.filename)
         return self
 
 
@@ -58,14 +64,13 @@ class ReleaseReference(UpdateModel):
     format: Literal[2] = 2
     environment: Environment
     filename: str
-    size: int = Field(gt=0, le=32 * 1024 * 1024)
+    size: int = 0
     sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
 
     @model_validator(mode="after")
     def validate_identity(self) -> ReleaseReference:
         version_parts(self.version)
-        if self.filename != f"shuku-{self.version}-{self.environment.platform}-v2.json":
-            raise ValueError("invalid manifest asset name")
+        validate_filename(self.filename)
         return self
 
 
@@ -73,8 +78,23 @@ class GHCRReleaseReference(ReleaseReference):
     oci_digest: str = Field(pattern=r"^sha256:[a-f0-9]{64}$")
 
 
+def parse_target(value: object) -> Package | GHCRReleaseReference | ReleaseReference:
+    if isinstance(value, (Package, ReleaseReference)):
+        return value
+    if not isinstance(value, dict):
+        raise ValueError("invalid update target")  # noqa: TRY004 - Pydantic validation boundary
+    model = (
+        GHCRReleaseReference
+        if "oci_digest" in value
+        else ReleaseReference
+        if value.get("format") == 2
+        else Package
+    )
+    return model.model_validate(value)
+
+
 class PreparationSummary(UpdateModel):
-    plan_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    plan_sha256: str | None = None
     dependency_identity: str
     baseline: str
     code_sha256: str
@@ -87,6 +107,7 @@ class PreparationSummary(UpdateModel):
 
 
 class ApplicationIdentity(UpdateModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
     version: str
     environment: Environment
 
@@ -114,6 +135,11 @@ class PreparationState(UpdateModel):
     updated_at: str | None = None
     failed_phase: str | None = None
     error: str | None = None
+
+    @field_validator("target", mode="before")
+    @classmethod
+    def read_target(cls, value: object):
+        return None if value is None else parse_target(value)
 
 
 class AvailableRelease(UpdateModel):

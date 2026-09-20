@@ -18,7 +18,6 @@ import pytest
 
 from app.modules.updates.application.models import UpdateError
 from app.modules.updates.application.preparation import UpdatePreparation
-from app.modules.updates.infrastructure import archive as archive_module
 from app.modules.updates.infrastructure.archive import program_path
 from app.modules.updates.infrastructure.official_source import (
     OfficialHTTP,
@@ -336,7 +335,7 @@ def test_preparation_failures_leave_program_and_data_untouched(
     fixture, _ = source
     if failure == "incompatible":
         updates.environment = fixture.package.environment.model_copy(
-            update={"compatibility": "0" * 64}
+            update={"platform": "linux-aarch64"}
         )
     elif failure in {"old", "same"}:
         updates.current = "1.0.5" if failure == "old" else fixture.package.version
@@ -346,9 +345,9 @@ def test_preparation_failures_leave_program_and_data_untouched(
         fixture.packages = [fixture.package.model_copy(update={"sha256": "0" * 64})]
     elif failure == "space":
         monkeypatch.setattr(
-            archive_module.shutil,
-            "disk_usage",
-            lambda _: shutil._ntuple_diskusage(1, 1, 0),
+            worker,
+            "_download",
+            lambda *args: (_ for _ in ()).throw(OSError(28, "disk full")),
         )
     else:
         fixture.fail = True
@@ -479,14 +478,14 @@ def test_abandoned_preparation_is_failed_without_resuming(preparation, source):
 @pytest.mark.parametrize(
     "field,value", [("size", 1), ("expanded_size", 1), ("file_count", 1)]
 )
-def test_declared_resource_limits_are_enforced(preparation, source, field, value):
+def test_declared_sizes_do_not_override_valid_digest(preparation, source, field, value):
     updates, worker, _ = preparation
     fixture, _ = source
     fixture.packages = [fixture.package.model_copy(update={field: value})]
     updates.prepare(True, fixture.package.version)
     state = finished(worker)
-    assert state.phase == "failed"
-    assert state.error == "SIZE_LIMIT"
+    assert state.phase == "ready"
+    assert state.downloaded == len(fixture.body)
 
 
 def test_unsupported_deployment_cannot_prepare(preparation, source):
@@ -822,3 +821,22 @@ def test_protocol_two_cannot_be_parsed_as_legacy_package(source):
                 "protocol": 2,
             }
         )
+
+
+@pytest.mark.parametrize("limit", ["bytes", "files", "total"])
+def test_fixed_resource_caps_still_protect_runtime(
+    preparation, source, monkeypatch, limit
+):
+    updates, worker, _ = preparation
+    fixture, _ = source
+    if limit in {"bytes", "total"}:
+        name = "MAX_PACKAGE" if limit == "bytes" else "MAX_TOTAL"
+        monkeypatch.setattr(
+            f"app.modules.updates.infrastructure.preparation_worker.{name}", 1
+        )
+    else:
+        monkeypatch.setattr("app.modules.updates.infrastructure.archive.MAX_FILES", 1)
+    updates.prepare(True, fixture.package.version)
+    state = finished(worker)
+    assert state.phase == "failed"
+    assert state.error == "SIZE_LIMIT"

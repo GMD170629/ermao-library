@@ -28,7 +28,10 @@ program_package = legacy_tests.program_package
 from app.modules.updates.application.dependency_release import DependencySet
 from app.modules.updates.application.models import ReleaseReference, UpdateError
 from app.modules.updates.application.preparation import UpdatePreparation
-from app.modules.updates.infrastructure.dependency_preparation import verify_local
+from app.modules.updates.infrastructure.dependency_preparation import (
+    read_local,
+    verify_dependency_artifact,
+)
 from app.modules.updates.infrastructure.official_source import (
     OfficialHTTP,
     OfficialRedirects,
@@ -307,12 +310,8 @@ def test_selective_http_downloads_and_unchanged_business(packages, downloads, cu
     }
     assert before == snapshot(packages.storage)
     assert not (packages.storage / "update-tmp/install-request.json").exists()
-    with pytest.raises(UpdateError, match="PLAN_CHANGED"):
-        downloads.updates.install(True, "1.0.4", packages.reference.sha256)
-    with pytest.raises(UpdateError, match="PLAN_CHANGED"):
-        downloads.worker.install(
-            "1.0.4", packages.reference.sha256, packages.reference.environment, "1.0.0"
-        )
+    result = downloads.updates.install(True, "1.0.4", packages.reference.sha256)
+    assert result.phase == "requested"
     assert len(state.model_dump_json()) < 16384
     print("HTTP evidence:", dict(downloads.requests), "bytes:", dict(downloads.sizes))
 
@@ -348,7 +347,7 @@ def test_other_differences(packages, downloads, change):
 @pytest.mark.parametrize(
     "damage", ["node", "record", "unknown-python", "unknown-node", "missing-python"]
 )
-def test_local_damage_cannot_be_keep(packages, downloads, damage):
+def test_local_content_drift_does_not_gate_keep(packages, downloads, damage):
     packages.build()
     if damage == "node":
         (packages.storage / "runtime/node_modules/a/index.js").write_text("damaged")
@@ -373,9 +372,9 @@ def test_local_damage_cannot_be_keep(packages, downloads, damage):
     before = snapshot(packages.storage)
     downloads.updates.prepare(True, "1.0.4")
     state = finish(downloads)
-    assert state.phase == "failed"
-    assert state.error in ("LOCAL_DEPENDENCIES_INVALID", "LOCAL_RECORDS_DRIFT")
-    assert len(downloads.requests) == 1
+    assert state.phase == "ready"
+    assert state.summary.install == 0
+    assert len(downloads.requests) == 2
     assert snapshot(packages.storage) == before
 
 
@@ -396,8 +395,9 @@ def test_bad_target_never_writes_business(packages, downloads, monkeypatch, fail
         path.write_bytes(data)
     elif failure == "space":
         monkeypatch.setattr(
-            "app.modules.updates.infrastructure.preparation_worker.check_space",
-            lambda *a: (_ for _ in ()).throw(UpdateError("INSUFFICIENT_SPACE")),
+            downloads.worker,
+            "_download",
+            lambda *a: (_ for _ in ()).throw(OSError(28, "disk full")),
         )
     else:
         if failure == "platform":
@@ -418,6 +418,10 @@ def test_bad_target_never_writes_business(packages, downloads, monkeypatch, fail
     before = snapshot(packages.storage)
     downloads.updates.prepare(True, "1.0.4")
     state = finish(downloads)
+    if failure == "platform":
+        assert state.phase == "ready"
+        assert snapshot(packages.storage) == before
+        return
     assert state.phase == "failed"
     assert state.error in (
         "DOWNLOAD_FAILED",
@@ -485,20 +489,20 @@ def test_legacy_feed_ignores_protocol_two_field(packages, downloads):
 
 
 def test_local_records_are_not_part_of_target_identity(packages):
-    local, baseline = verify_local(packages.storage)
+    local, baseline = read_local(packages.storage)
     assert local.identity == packages.initial["identity"]
     assert baseline != local.identity
     assert local == DependencySet.model_validate(packages.initial)
 
 
-def test_corruption_during_download_cannot_be_ready(packages, downloads):
+def test_local_drift_during_download_does_not_block_preparation(packages, downloads):
     change_target(packages)
     downloads.hold.clear()
     downloads.updates.prepare(True, "1.0.4")
     assert downloads.entered.wait(5)
     (packages.storage / "runtime/node_modules/d/index.js").write_text("changed")
     downloads.hold.set()
-    assert finish(downloads).error == "LOCAL_DEPENDENCIES_INVALID"
+    assert finish(downloads).phase == "ready"
 
 
 def test_valid_digest_does_not_authorize_archive_escape(packages, downloads):
@@ -538,7 +542,7 @@ def test_target_python_ownership_cannot_overlap(packages):
         DependencySet.model_validate(payload)
 
 
-def test_ghcr_selective_preparation_and_restart(packages):
+def test_ghcr_selective_preparation_and_restart(packages, monkeypatch):
     from app.modules.updates.application.models import GHCRReleaseReference
     from app.modules.updates.infrastructure.ghcr_source import (
         ARTIFACT_TYPE,
@@ -605,14 +609,43 @@ def test_ghcr_selective_preparation_and_restart(packages):
         ]
         assert all(f"{REGISTRY}/blobs/sha256:{sha}" not in requested for sha in kept)
         assert (
-            len(requested) == 5
-        )  # OCI manifest, release manifest, code, two changed dependencies
+            len(requested) == 4
+        )  # Release manifest, code, two changed dependencies; no OCI identity gate
     finally:
         worker.close()
     restarted = PreparationWorker(packages.storage, Registry(), reference.environment)
     try:
         assert restarted.status().phase == "ready"
         assert restarted.status().target.oci_digest == target.oci_digest
+        from app.bootstrap import update_install
+
+        requested_state = restarted.install(
+            target.version, target.sha256, target.environment, "1.0.0"
+        )
+        restarted._write(requested_state.model_copy(update={"phase": "checking"}))
+        monkeypatch.setattr(
+            update_install,
+            "get_settings",
+            lambda: SimpleNamespace(
+                resolved_storage_root=packages.storage, app_version="1.0.0"
+            ),
+        )
+        original_read = Path.read_bytes
+        monkeypatch.setattr(
+            Path,
+            "read_bytes",
+            lambda path: (
+                json.dumps({"environment": target.environment.model_dump()}).encode()
+                if str(path) == "/opt/shuku-launcher/environment.json"
+                else original_read(path)
+            ),
+        )
+        before = snapshot(packages.storage)
+        update_install.validate()
+        assert snapshot(packages.storage) == before
+        assert (
+            packages.storage / "update-tmp/prepared/app/apps/web/server.js"
+        ).is_file()
     finally:
         restarted.close()
 
@@ -637,3 +670,47 @@ def test_code_only_packaging_rejects_drift_against_unchanged_seed(packages, chan
     with pytest.raises(ValueError, match="seed does not describe standalone"):
         packager.build_release(packages.image, output, packages.seed, packages.fixed)
     assert snapshot(packages.seed) == original_seed
+
+
+def test_runtime_ignores_descriptive_identity_and_size_metadata(packages, downloads):
+    packages.build()
+    path = packages.output / packages.reference.filename
+    value = json.loads(path.read_text())
+    value.update(python_abi="future-abi", dependency_expanded_size=1, future_field=True)
+    value["environment"]["compatibility"] = "different-environment"
+    value["dependencies"]["identity"] = "different-dependency-identity"
+    value["dependencies"]["future_field"] = {"enabled": True}
+    value["code"].update(size=1, expanded_size=1, file_count=1, future_field=True)
+    path.write_text(json.dumps(value))
+    packages.reference = packages.reference.model_copy(
+        update={"size": 1, "sha256": digest(path)}
+    )
+    downloads.updates.prepare(True, packages.reference.version)
+    state = finish(downloads)
+    assert state.phase == "ready", state
+    assert state.downloaded > state.summary.total_bytes
+    assert (
+        downloads.updates.install(
+            True,
+            packages.reference.version,
+            packages.reference.sha256,
+            "ignored-old-plan",
+        ).phase
+        == "requested"
+    )
+
+
+def test_wheel_metadata_identity_is_only_a_publication_check(packages):
+    target = DependencySet.model_validate(packages.initial)
+    package = next(p for p in target.packages if p.ecosystem == "python")
+    path = next((packages.seed / "wheels").glob("*.whl"))
+    with zipfile.ZipFile(path, "a") as archive:
+        archive.writestr("extra.dist-info/METADATA", b"Name: extra\nVersion: 1\n")
+    assert (
+        verify_dependency_artifact(
+            path, package, target, threading.Event(), verify_identity=False
+        )
+        > 0
+    )
+    with pytest.raises(UpdateError):
+        verify_dependency_artifact(path, package, target, threading.Event())

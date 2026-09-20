@@ -88,9 +88,10 @@ class Installation:
             return False
         self.lock = lock
         self.state = read_json(self.root / "preparation.json")
-        if (
-            self.state["phase"] != "requested"
-            or self.state["target"] != read_json(request)["target"]
+        requested_target = read_json(request)["target"]
+        if self.state["phase"] != "requested" or any(
+            self.state["target"].get(key) != requested_target.get(key)
+            for key in ("version", "sha256", "format")
         ):
             raise InstallError("INVALID_INSTALL_REQUEST")
         self.reject_package_protocol()
@@ -156,7 +157,6 @@ class Installation:
                 Path(__file__).with_name("environment.json"),
                 cancelled=self.cancelled,
             )
-            self.dependencies.verify_code()
 
     def backup(self) -> None:
         self.verify_dependencies()
@@ -177,7 +177,6 @@ class Installation:
             raise InstallError("UNSUPPORTED_UPDATE_PROTOCOL")
         if self.dependencies is not None:
             self.dependencies.recheck()
-            self.dependencies.verify_code()
         # Old processes are gone. Remove entries without following target links,
         # then copy the already validated tree; .initialized is launcher-owned.
         write_json(

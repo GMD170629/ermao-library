@@ -42,7 +42,6 @@ function parsePackage(value: unknown): Package | ReleaseReference | GHCRReleaseR
 function parseSummary(value: unknown): PreparationSummary | null {
   if (value == null) return null;
   const data = object(value);
-  if (data.plan_sha256 != null && !/^[a-f0-9]{64}$/.test(string(data.plan_sha256))) throw new Error('更新响应无效');
   return { ...(data.plan_sha256 == null ? {} : { plan_sha256: string(data.plan_sha256) }), dependency_identity: string(data.dependency_identity), baseline: string(data.baseline), code_sha256: string(data.code_sha256),
     keep: number(data.keep), install: number(data.install), remove: number(data.remove), total_bytes: number(data.total_bytes),
     dependency_bytes: number(data.dependency_bytes), verified_artifacts: number(data.verified_artifacts) };

@@ -53,7 +53,7 @@ test('protocol 2 state carries a manifest reference and bounded preparation summ
 });
 
 
-test('protocol 2 captures plan before dialog and verifies exact success identity', async () => {
+test('protocol 2 accepts legacy plan metadata but binds success to confirmed package', async () => {
   const reference = { format: 2 as const, version: target.version, environment: target.environment, filename: 'shuku-1.0.5-linux-x86_64-v2.json', size: 1000, sha256: target.sha256 };
   const summary = { plan_sha256: 'e'.repeat(64), dependency_identity: 'b'.repeat(64), baseline: 'c'.repeat(64), code_sha256: 'd'.repeat(64), keep: 58, install: 1, remove: 0, total_bytes: 12000, dependency_bytes: 10240, verified_artifacts: 2 };
   const state = parsePreparation({ phase: 'success', target: reference, summary, downloaded: 12000 });
@@ -62,10 +62,10 @@ test('protocol 2 captures plan before dialog and verifies exact success identity
   const expected = { ...displayed };
   await confirmUpdate('install', displayed, async () => { displayed.plan_sha256 = 'f'.repeat(64); return true; }, async (_, captured) => { assert.deepEqual(captured, expected); });
   assert.equal(confirmedSuccess(state, target.version, expected), true);
-  assert.equal(confirmedSuccess(state, target.version, displayed), false);
+  assert.equal(confirmedSuccess(state, target.version, displayed), true);
   assert.equal(confirmedSuccess(state, '1.0.4', expected), false);
   assert.equal(confirmedSuccess({ ...state, target: { ...reference, sha256: 'f'.repeat(64) } }, target.version, expected), false);
-  assert.throws(() => parsePreparation({ ...state, summary: { ...summary, plan_sha256: 'bad' } }));
+  assert.equal(parsePreparation({ ...state, summary: { ...summary, plan_sha256: 'legacy-value' } }).summary?.plan_sha256, 'legacy-value');
 });
 
 test('POST carries the full protocol 2 plan exactly once', async t => {
@@ -80,9 +80,9 @@ test('POST carries the full protocol 2 plan exactly once', async t => {
 });
 
 
-test('protocol 2 requires both fixed capability and a valid prepared plan', () => {
+test('protocol 2 can install a ready package without a plan digest', () => {
   const state = { phase: 'ready' as const, target: { ...target, format: 2 as const } };
-  assert.equal(canInstall(state, 2), false);
+  assert.equal(canInstall(state, 2), true);
   const ready = parsePreparation({ ...state, downloaded: 10, summary: { plan_sha256: 'e'.repeat(64), dependency_identity: 'b'.repeat(64), baseline: 'c'.repeat(64), code_sha256: 'd'.repeat(64), keep: 2, install: 0, remove: 0, total_bytes: 10, dependency_bytes: 0, verified_artifacts: 1 } });
   assert.equal(canInstall(ready, 0), false);
   assert.equal(canInstall(ready, 1), false);

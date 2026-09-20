@@ -6,7 +6,7 @@ import posixpath
 import re
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, ValidationInfo, model_validator
 
 from shuku_dependencies import Artifact, Package, canonical_digest, normalized
 from shuku_dependencies.packages import dependency_difference
@@ -58,8 +58,8 @@ class DependencySet(UpdateModel):
     identity: str
 
     @model_validator(mode="after")
-    def validate_set(self) -> DependencySet:
-        if (
+    def validate_set(self, info: ValidationInfo) -> DependencySet:
+        if not (info.context or {}).get("runtime") and (
             canonical_digest(
                 self.model_dump(
                     include={"protocol", "packages", "node_links", "node_scopes"}
@@ -74,7 +74,14 @@ class DependencySet(UpdateModel):
         locations: set[str] = set()
         names: dict[str, Artifact] = {}
         for package in self.packages:
-            validate_artifact(package.artifact)
+            if not (info.context or {}).get("runtime"):
+                validate_artifact(package.artifact)
+            else:
+                from .models import validate_filename
+
+                validate_filename(package.artifact.filename)
+                if not re.fullmatch(r"[a-f0-9]{64}", package.artifact.sha256):
+                    raise ValueError("invalid artifact digest")
             key = package_key(package)
             if key in keys or not package.version or len(package.files) > MAX_FILES:
                 raise ValueError("duplicate dependency or invalid version")
@@ -92,21 +99,26 @@ class DependencySet(UpdateModel):
                     or not package.artifact.filename.endswith(".whl")
                 ):
                     raise ValueError("invalid Python identity")
-                if (
+                if not (info.context or {}).get("runtime") and (
                     "-".join(package.artifact.filename[:-4].split("-")[-3:])
                     != package.platform
                 ):
                     raise ValueError("wheel platform mismatch")
             elif package.ecosystem == "node":
-                if (
-                    not safe_path(package.location)
-                    or "node_modules" not in package.location.split("/")
-                    or package.platform != "standalone"
+                if not safe_path(
+                    package.location
+                ) or "node_modules" not in package.location.split("/"):
+                    raise ValueError("invalid Node identity")
+                if not (info.context or {}).get("runtime") and (
+                    package.platform != "standalone"
                     or not re.fullmatch(r"[a-f0-9]{64}", package.content_sha256 or "")
                 ):
                     raise ValueError("invalid Node identity")
                 expected_name = f"node-{canonical_digest(package.location)[:16]}-{package.content_sha256}.tar"
-                if package.artifact.filename != expected_name:
+                if (
+                    not (info.context or {}).get("runtime")
+                    and package.artifact.filename != expected_name
+                ):
                     raise ValueError("invalid Node artifact name")
                 locations.add(package.location)
             else:
@@ -188,9 +200,9 @@ class DependencySet(UpdateModel):
                 or any(file.startswith(resolved + "/") for file in owners)
             ):
                 raise ValueError("dangling or escaping Node link")
-        if (
-            len(owners) > MAX_FILES
-            or sum(p.artifact.size for p in self.packages) > MAX_TOTAL
+        if len(owners) > MAX_FILES or (
+            not (info.context or {}).get("runtime")
+            and sum(p.artifact.size for p in self.packages) > MAX_TOTAL
         ):
             raise ValueError("dependency set too large")
         return self
@@ -225,14 +237,24 @@ def resolve_link(path: str, links: dict[str, str]) -> str:
 
 class CodeArtifact(UpdateModel):
     filename: str
-    size: int = Field(gt=0, le=MAX_PACKAGE)
+    size: int = 0
     sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    expanded_size: int = Field(gt=0, le=MAX_EXPANDED)
-    file_count: int = Field(gt=0, le=MAX_FILES)
+    expanded_size: int = 0
+    file_count: int = 0
 
     @model_validator(mode="after")
-    def validate_code(self) -> CodeArtifact:
-        validate_artifact(Artifact(self.filename, self.size, self.sha256))
+    def validate_code(self, info: ValidationInfo) -> CodeArtifact:
+        if not (info.context or {}).get("runtime"):
+            validate_artifact(Artifact(self.filename, self.size, self.sha256))
+            if (
+                not 0 < self.expanded_size <= MAX_EXPANDED
+                or not 0 < self.file_count <= MAX_FILES
+            ):
+                raise ValueError("invalid code dimensions")
+        else:
+            from .models import validate_filename
+
+            validate_filename(self.filename)
         return self
 
 
@@ -240,15 +262,20 @@ class ReleaseManifest(UpdateModel):
     protocol: Literal[2] = 2
     version: str
     environment: Environment
-    python_abi: str = Field(min_length=1, max_length=100)
+    python_abi: str = ""
     code: CodeArtifact
     dependencies: DependencySet
-    dependency_expanded_size: int = Field(ge=0, le=MAX_TOTAL)
+    dependency_expanded_size: int = 0
 
     @model_validator(mode="after")
-    def validate_release(self) -> ReleaseManifest:
+    def validate_release(self, info: ValidationInfo) -> ReleaseManifest:
         version_parts(self.version)
-        if (
+        if not (info.context or {}).get("runtime") and (
+            not 0 < len(self.python_abi) <= 100
+            or not 0 <= self.dependency_expanded_size <= MAX_TOTAL
+        ):
+            raise ValueError("invalid release dimensions")
+        if not (info.context or {}).get("runtime") and (
             self.code.filename
             != f"shuku-{self.version}-{self.environment.platform}-code.tar.gz"
         ):

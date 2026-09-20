@@ -11,7 +11,7 @@ export type AvailableRelease = {
 export type Environment = {
   format?: 1;
   platform: string;
-  compatibility: string;
+  compatibility?: string;
 };
 
 export type GHCRReleaseReference = {
@@ -19,7 +19,7 @@ export type GHCRReleaseReference = {
   format?: 2;
   environment: Environment;
   filename: string;
-  size: number;
+  size?: number;
   sha256: string;
   oci_digest: string;
 };
@@ -35,10 +35,10 @@ export type Package = {
   format?: 1;
   environment: Environment;
   filename: string;
-  size: number;
+  size?: number;
   sha256: string;
-  expanded_size: number;
-  file_count: number;
+  expanded_size?: number;
+  file_count?: number;
 };
 
 export type PreparationState = {
@@ -74,7 +74,7 @@ export type ReleaseReference = {
   format?: 2;
   environment: Environment;
   filename: string;
-  size: number;
+  size?: number;
   sha256: string;
 };
 

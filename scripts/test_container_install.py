@@ -40,6 +40,32 @@ class InstallationTests(unittest.TestCase):
             db.execute("insert into records values ('reading-progress')")
         (self.storage / "secret").write_text("keep")
 
+    def test_claim_ignores_extension_metadata_but_binds_digest(self):
+        target = {"version": "1.0.5", "sha256": "a" * 64}
+        (self.installer.root / "preparation.json").write_text(
+            json.dumps({"phase": "requested", "target": target})
+        )
+        request = self.installer.root / "install-request.json"
+        request.write_text(
+            json.dumps({"target": {**target, "future_field": True, "size": 1}})
+        )
+        self.assertTrue(self.installer.claim())
+
+    def test_claim_rejects_changed_digest(self):
+        (self.installer.root / "preparation.json").write_text(
+            json.dumps(
+                {
+                    "phase": "requested",
+                    "target": {"version": "1.0.5", "sha256": "a" * 64},
+                }
+            )
+        )
+        (self.installer.root / "install-request.json").write_text(
+            json.dumps({"target": {"version": "1.0.5", "sha256": "b" * 64}})
+        )
+        with self.assertRaisesRegex(InstallError, "INVALID_INSTALL_REQUEST"):
+            self.installer.claim()
+
     def test_claim_mutex_and_snapshot_sync(self):
         import fcntl
 

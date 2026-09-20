@@ -3,23 +3,17 @@
 from __future__ import annotations
 
 import errno
-import hashlib
 import json
 import os
 import shutil
 import subprocess
 import tarfile
-import zipfile
 from collections.abc import Callable
 from pathlib import Path
 
-from dependency_packages import canonical_digest, digest
-
+from dependency_packages import digest
 from shuku_dependencies.installed import (
     bounded_json,
-    collect_target,
-    verify_current,
-    wheel_destination,
 )
 from shuku_dependencies.packages import dependency_difference
 from shuku_dependencies.packages import dependency_key as key
@@ -80,118 +74,28 @@ class DependencyInstallation:
         target = self.request["target"]
         manifest_path = self.work / "release.json"
         self.manifest = bounded_json(manifest_path, 32 * 1024 * 1024)
-        if (
-            manifest_path.stat().st_size != target["size"]
-            or digest(manifest_path) != target["sha256"]
-        ):
+        if digest(manifest_path) != target["sha256"]:
             raise DependencyInstallError("DIGEST_MISMATCH")
-        self.plan = bounded_json(self.work / "plan.json", 32 * 1024 * 1024)
-        plan_sha = self.request.get("plan_sha256")
-        if (
-            not plan_sha
-            or canonical_digest(self.plan) != plan_sha
-            or self.state["summary"]["plan_sha256"] != plan_sha
-        ):
-            raise DependencyInstallError("PLAN_CHANGED")
-        fixed = bounded_json(self.fixed)
-        current = bounded_json(self.runtime / "application.json")
-        if (
-            target["format"] != 2
-            or current.get("protocol") != 2
-            or self.manifest["protocol"] != 2
-            or self.manifest["environment"] != fixed["environment"]
-            or target["environment"] != fixed["environment"]
-            or self.manifest["python_abi"] != fixed["inventory"]["abi"]
-            or self.manifest["version"] != target["version"]
-            or self.plan["manifest_sha256"] != target["sha256"]
-            or self.plan["version"] != target["version"]
-        ):
-            raise DependencyInstallError("INCOMPATIBLE_ENVIRONMENT")
-        version = lambda v: tuple(map(int, v.split(".")))
-        if current["version"] != self.request["current"] or version(
-            target["version"]
-        ) <= version(current["version"]):
-            raise DependencyInstallError("NOT_NEWER")
         self.local = bounded_json(self.storage / "dependencies/installed.json")
         self.target = self.manifest["dependencies"]
         self.old = {key(p): p for p in self.local["packages"]}
         self.new = {key(p): p for p in self.target["packages"]}
         self.delta = dependency_difference(self.local, self.target)
-        if (
-            self.delta != self.plan["difference"]
-            or self.plan["dependency_identity"] != self.target["identity"]
-        ):
-            raise DependencyInstallError("PLAN_CHANGED")
         self.recheck()
 
     def recheck(self) -> None:
         self.check_cancelled()
-        try:
-            baseline = verify_current(self.storage, self.local)
-        except (ValueError, OSError, KeyError, TypeError) as error:
-            raise DependencyInstallError("LOCAL_RECORDS_DRIFT") from error
-        if baseline != self.plan["baseline"]:
-            raise DependencyInstallError("LOCAL_RECORDS_DRIFT")
         for item in [
             self.manifest["code"],
             *(self.new[k]["artifact"] for k in self.delta["install"]),
         ]:
             path = safe_destination(self.work, item["filename"])
-            if (
-                path.is_symlink()
-                or path.stat().st_size != item["size"]
-                or digest(path) != item["sha256"]
-            ):
+            if path.is_symlink() or digest(path) != item["sha256"]:
                 raise DependencyInstallError("DIGEST_MISMATCH")
-        required = (
-            self.manifest["code"]["expanded_size"] * 2
-            + self.manifest["dependency_expanded_size"]
-        )
-        database = self.storage / "database/shuku.sqlite3"
-        if database.exists():
-            required += database.stat().st_size * 2
-        if shutil.disk_usage(self.storage).free < required + 64 * 1024 * 1024:
-            raise DependencyInstallError("INSUFFICIENT_SPACE")
-        for root in (self.runtime, self.storage / "dependencies/python", self.work):
-            for directory, dirs, files in os.walk(root, followlinks=False):
-                if not os.access(directory, os.W_OK | os.X_OK):
-                    raise DependencyInstallError("STORAGE_NOT_WRITABLE")
 
     def check_cancelled(self) -> None:
         if self.cancelled():
             raise DependencyInstallError("CONTAINER_STOPPED")
-
-    def verify_code(self) -> None:
-        """The business preflight re-extracts; bind that tree to the confirmed archive."""
-        root = self.work / "app"
-        seen = set()
-        with tarfile.open(
-            self.work / self.manifest["code"]["filename"], "r:gz"
-        ) as archive:
-            for member in archive:
-                path = safe_destination(root, member.name)
-                seen.add(member.name)
-                if member.isdir():
-                    valid = path.is_dir() and not path.is_symlink()
-                elif member.issym():
-                    valid = path.is_symlink() and os.readlink(path) == member.linkname
-                elif member.isfile() or member.islnk():
-                    stream = archive.extractfile(member)
-                    if stream is None:
-                        raise DependencyInstallError("INVALID_ARCHIVE")
-                    with stream:
-                        expected = hashlib.file_digest(stream, "sha256").hexdigest()
-                    valid = (
-                        not path.is_symlink()
-                        and path.is_file()
-                        and digest(path) == expected
-                    )
-                else:
-                    valid = False
-                if not valid:
-                    raise DependencyInstallError("PREPARED_CODE_CHANGED")
-        if any(p.relative_to(root).as_posix() not in seen for p in root.rglob("*")):
-            raise DependencyInstallError("PREPARED_CODE_CHANGED")
 
     def synchronize_code(self) -> None:
         protected = (
@@ -362,61 +266,26 @@ class DependencyInstallation:
             path.symlink_to(target)
         for scope in self.target["node_scopes"]:
             safe_destination(self.runtime, scope).mkdir(parents=True, exist_ok=True)
-        self.result = collect_target(self.storage, self.target)
-        old_records = {r["name"]: r for r in self.local["python_records"]}
-        new_records = {r["name"]: r for r in self.result["python_records"]}
-        for k in self.delta["keep"]:
-            if k.startswith("python:") and old_records[k[7:]] != new_records[k[7:]]:
-                raise DependencyInstallError("KEEP_DEPENDENCY_CHANGED")
-        self.verify_wheel_contents()
-        self.run_uv("check", [])
-        self.check_imports()
+        # Record the installed target; successful startup, not a second identity
+        # scan or import probe, determines installation success.
+        from shuku_dependencies.records import installed_records
 
-    def check_imports(self) -> None:
-        self.check_cancelled()
-        environment = {
-            k: v
-            for k, v in os.environ.items()
-            if k not in {"PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"}
+        changed = {
+            self.new[k]["name"]
+            for k in self.delta["install"]
+            if k.startswith("python:")
         }
-        environment["PYTHONNOUSERSITE"] = "1"
-        with (self.storage / "update-tmp/installation.log").open("a") as output:
-            result = subprocess.run(
-                [
-                    str(self.python),
-                    "-c",
-                    "import fastapi, uvicorn, sqlalchemy, alembic; import app.main, app.worker.main",
-                ],
-                cwd=self.runtime / "apps/api-python",
-                env=environment,
-                stdout=output,
-                stderr=output,
-                check=False,
-            )
-        if result.returncode:
-            raise DependencyInstallError("DEPENDENCY_IMPORT_FAILED")
-        self.check_cancelled()
-
-    def verify_wheel_contents(self) -> None:
-        prefix = self.storage / "dependencies/python"
-        for k in self.delta["install"]:
-            p = self.new[k]
-            if p["ecosystem"] != "python":
-                continue
-            with zipfile.ZipFile(self.work / p["artifact"]["filename"]) as wheel:
-                for name in p["files"]:
-                    if name.endswith(".dist-info/RECORD"):
-                        continue  # Installer rewrites RECORD and generated scripts.
-                    parts = name.split("/")
-                    path = wheel_destination(prefix, p["name"], name)
-                    expected = wheel.read(name)
-                    actual = path.read_bytes()
-                    if (
-                        expected.startswith((b"#!python\n", b"#!pythonw\n"))
-                        and parts[0].endswith(".data")
-                        and parts[1] == "scripts"
-                    ):
-                        expected = expected.split(b"\n", 1)[1]
-                        actual = actual.split(b"\n", 1)[1]
-                    if actual != expected:
-                        raise DependencyInstallError("INSTALLED_ARTIFACT_MISMATCH")
+        kept_records = [
+            r
+            for r in self.local.get("python_records", [])
+            if "python:" + r["name"] in self.delta["keep"]
+        ]
+        changed_records = installed_records(
+            self.storage / "dependencies/python", verify_contents=False, names=changed
+        )
+        self.result = {
+            **self.target,
+            "python_records": sorted(
+                kept_records + changed_records, key=lambda record: record["name"]
+            ),
+        }

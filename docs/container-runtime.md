@@ -60,7 +60,7 @@ docker compose -f docker-compose.yml config --quiet
 
 管理员可向 `POST /api/updates/install` 提交 `{"version":"目标版本","sha256":"已确认包的 SHA-256"}`，仅接受已准备完成且身份完全一致的包。返回 202 后请求独立落盘，关闭浏览器不取消安装。没有固定安装入口的部署不支持此操作。
 
-固定入口使用 `prepare.lock` 消费 `update-tmp/install-request.json`，不等待其自身常驻的 `launcher.lock`。请求存在期间新的准备被拒绝，安装源不会被并行准备替换。安装前离线重验清单、摘要、固定环境标识、版本、空间和路径，复用原解压器重新生成已验证的临时程序目录；不安装依赖或联网下载。
+固定入口使用 `prepare.lock` 消费 `update-tmp/install-request.json`，不等待其自身常驻的 `launcher.lock`。请求存在期间新的准备被拒绝，安装源不会被并行准备替换。安装前按清单重新计算已下载文件的 SHA-256，复用安全解压器重新生成临时程序目录；不再检查环境指纹、ABI、依赖内容漂移、声明尺寸或安装计划摘要。保留路径、权限、互斥及固定资源上限。预检不安装依赖或联网下载；具体规则见[在线更新校验](architecture-decisions.md#在线更新的-sha-256-校验与安装保护)。
 
 停止范围包括网关、Web、API、独立 Worker，以及下载、Kindle、日志维护、导入、元数据、扫描/监听和整理任务。先停止入口与后台领取，再等待现有请求/任务及收养的工具子进程退出。停止最多等待 120 秒；超时记录 `STOP_TIMEOUT`，不复制、不强杀任务后继续安装，也不重复启动旧服务。剩余进程可继续结束，但系统不声称旧服务已恢复，需要人工检查。
 
@@ -110,7 +110,7 @@ python3 scripts/accept_container_update.py --image shuku-update-acceptance:local
 
 ### 发布与验收入口
 
-普通正式 tag 流程从同一个不可变镜像摘要分别运行 Linux AMD64/ARM64 目标环境，生成完整包和清单，并使用生产解压器验证。资产通过本地及 GitHub 摘要校验、发布审批且 Release 正式发布后，才重建 feed 的 `appPackages`。更新说明同步也从已发布且校验通过的资产重建该字段；旧 feed 字段保持不变。日常安装不执行这些构建命令。
+普通正式 tag 流程从同一个不可变镜像摘要分别运行 Linux AMD64/ARM64 目标环境，生成完整包和清单，并使用生产解压器验证。资产通过本地及 GitHub 摘要校验且 Release 正式发布后，才重建 feed 的 `appPackages`。更新说明同步也从已发布且校验通过的资产重建该字段；旧 feed 字段保持不变。日常安装不执行这些构建命令。
 
 ```sh
 # 普通行为测试，不需要 Docker 或 Web standalone
@@ -123,7 +123,7 @@ node --test scripts/validate-release-assets.test.mjs scripts/assemble-release-fe
 python3 scripts/accept_container_update.py --image shuku-update-batch4:local --web-image shuku-update-batch4-web-b:local --browser
 ```
 
-真实验收使用隔离 Linux 卷、UID/GID `1000:1000` 和受控下载源。连接注入只存在于测试容器挂载的 Python `sitecustomize`，正式配置不开放任意 URL。生产打包、下载、摘要、环境、解压、安装、迁移和服务检查不被替换。脚本在下载/安装接受后关闭浏览器，重开后取消一次安装再确认；同时检查版本、进程、数据、容器/镜像 ID 和离线重启。
+真实验收使用隔离 Linux 卷、UID/GID `1000:1000` 和受控下载源。连接注入只存在于测试容器挂载的 Python `sitecustomize`，正式配置不开放任意 URL。生产打包、下载、摘要、安全解压、安装、迁移和服务检查不被替换。脚本在下载/安装接受后关闭浏览器，重开后取消一次安装再确认；同时检查版本、进程、数据、容器/镜像 ID 和离线重启。
 
 
 `--web-image` 必须是隔离 B 版本源码副本用同一个 `apps/web/Dockerfile.prod --target builder` 构建的镜像，包含真实 Next standalone、静态资源及 public。在隔离副本同步根 package.json、Web package.json 和 public/sw.js 的测试版本，再构建；不能修改正式工作区版本，不能只替换已编译页面文字或 SW 版本来代替构建。脚本把该产物与测试 B Python 代码、测试迁移一起交给生产打包器。
