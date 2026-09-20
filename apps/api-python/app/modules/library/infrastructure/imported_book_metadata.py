@@ -10,6 +10,7 @@ from typing import Protocol
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
+from app.contracts.library_layout import LibraryOrganizationMode
 from app.contracts.local_metadata_snapshot import (
     LocalMetadataObservation,
     decode_observations,
@@ -145,6 +146,7 @@ class SqlAlchemyImportedBookMetadata:
             metadata.cover_path,
             "cover_path" in protected_fields(metadata.protected_fields),
             metadata.updated_at,
+            LibraryOrganizationMode(library.organization_mode),
         )
 
     def inspect(self, snapshot: ImportedBookSnapshot) -> IdentifiedBookMetadata:
@@ -172,6 +174,15 @@ class SqlAlchemyImportedBookMetadata:
         grouped["PATH"] = metadata_from_source_name(
             Path(snapshot.relative_path).name, is_directory=snapshot.is_directory
         )
+        if snapshot.organization_mode is LibraryOrganizationMode.FLAT:
+            # Local parsers retain the full publication title as volume_title
+            # when they promote a series name or strip a volume suffix.
+            grouped = {
+                kind: replace(metadata, title=metadata.volume_title or metadata.title)
+                if kind != "PATH"
+                else metadata
+                for kind, metadata in grouped.items()
+            }
         candidates = tuple(
             LocalMetadataCandidate(
                 source=kind,

@@ -52,7 +52,15 @@ def _write_epub(
     title: str,
     author: str,
     cover: bytes,
+    series_name: str | None = None,
 ) -> None:
+    series_metadata = (
+        f'<meta property="belongs-to-collection" id="series">{series_name}</meta>'
+        '<meta property="collection-type" refines="#series">series</meta>'
+        '<meta property="group-position" refines="#series">1</meta>'
+        if series_name
+        else ""
+    )
     with ZipFile(path, "w") as archive:
         archive.writestr(
             "META-INF/container.xml",
@@ -63,11 +71,71 @@ def _write_epub(
             "OPS/book.opf",
             f"""<package xmlns:dc="http://purl.org/dc/elements/1.1/"><metadata>
             <dc:title>{title}</dc:title><dc:creator>{author}</dc:creator>
+            {series_metadata}
             <meta name="cover" content="cover-image"/></metadata>
             <manifest><item id="cover-image" href="cover.png"
             media-type="image/png"/></manifest></package>""",
         )
         archive.writestr("OPS/cover.png", cover)
+
+
+@pytest.mark.parametrize("mode", ["FLAT", "VOLUMES"])
+@pytest.mark.parametrize("title", ["第一章 樱花时节", "春之歌 Vol.1", "春之歌"])
+def test_epub_book_title_respects_organization_mode(
+    tmp_path: Path, mode: str, title: str
+) -> None:
+    from app.modules.library.infrastructure.imported_book_metadata import (
+        SqlAlchemyBookIdentificationRequests,
+    )
+
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    root = tmp_path / "library"
+    folder = root / "Unrelated folder"
+    folder.mkdir(parents=True)
+    _write_epub(
+        folder / "different-filename.epub",
+        title=title,
+        author="Author",
+        cover=_png((1, 2, 3)),
+        series_name="春之歌",
+    )
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            db.add(
+                Library(
+                    id="lib",
+                    name="Library",
+                    root_path=str(root),
+                    organization_mode=mode,
+                    min_file_size_bytes=0,
+                )
+            )
+            db.commit()
+            pipeline = build_readable_resource_pipeline(db, settings)
+            pipeline.continue_import.execute(ContinueLibraryImport("lib"))
+            worker = build_readable_resource_worker(pipeline)
+            for _ in range(10):
+                if worker.process_once() == "idle":
+                    break
+            metadata = db.scalar(select(LibraryBookMetadata))
+            assert metadata is not None
+            expected_title = title if mode == "FLAT" else "春之歌"
+            assert metadata.title == expected_title
+            assert metadata.series_name == "春之歌"
+            assert metadata.series_index == 1
+
+            # Re-identification uses persisted observations, without reimporting.
+            metadata.title = "Previous title"
+            SqlAlchemyBookIdentificationRequests(db).request((metadata.book_id,))
+            db.commit()
+            assert worker.process_once() == "identified"
+            db.refresh(metadata)
+            assert metadata.title == expected_title
+            assert metadata.series_name == "春之歌"
+    finally:
+        engine.dispose()
 
 
 @pytest.mark.parametrize(

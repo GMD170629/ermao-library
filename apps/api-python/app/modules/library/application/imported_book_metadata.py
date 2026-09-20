@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+from app.contracts.library_layout import LibraryOrganizationMode
 from app.contracts.local_metadata import LocalMetadataSource
 from app.contracts.local_metadata_snapshot import LocalMetadataObservation
 from app.contracts.publication_metadata import PublicationMetadata
@@ -28,6 +29,7 @@ class ImportedBookSnapshot:
     previous_cover_path: str | None
     cover_protected: bool
     metadata_updated_at: datetime | None = None
+    organization_mode: LibraryOrganizationMode = LibraryOrganizationMode.VOLUMES
 
 
 @dataclass(frozen=True, slots=True)
