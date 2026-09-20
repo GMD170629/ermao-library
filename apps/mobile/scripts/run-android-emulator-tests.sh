@@ -78,8 +78,18 @@ grep -E "versionCode=$expected_code([[:space:]]|$)" <<<"$package_dump" >/dev/nul
 grep -Fx "    versionName=$expected_version" <<<"$package_dump" >/dev/null
 
 app_ready=false
+launcher_recovered=false
 startup_stage=login-screen
 for attempt in $(seq 1 20); do
+  # The API 36 emulator can leave Quickstep's ANR dialog over the running app.
+  # Recover that exact system process once; never dismiss an application ANR.
+  if [[ "$launcher_recovered" == false ]] \
+    && adb shell dumpsys activity activities \
+      | grep -E 'mCurrentFocus=.*Application Not Responding: com\.android\.launcher3\}' >/dev/null; then
+    echo 'Recovering the emulator Quickstep ANR blocking the login screen.'
+    adb shell am force-stop com.android.launcher3
+    launcher_recovered=true
+  fi
   if adb shell uiautomator dump /sdcard/mobile-stage-1.xml >/dev/null \
     && ui_dump="$(adb shell cat /sdcard/mobile-stage-1.xml)" \
     && grep 'Log in to your library' <<<"$ui_dump" >/dev/null; then

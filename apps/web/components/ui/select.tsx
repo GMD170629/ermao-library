@@ -76,6 +76,7 @@ const groupTone = {
 };
 
 type MenuPosition = {
+  portalTarget: HTMLElement;
   left: number;
   top: number;
   width: number;
@@ -121,6 +122,7 @@ export function Select<TValue extends string>({
     }
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === 'Escape') {
+        event.preventDefault();
         setOpen(false);
         buttonRef.current?.focus();
       }
@@ -154,7 +156,9 @@ export function Select<TValue extends string>({
       const preferredLeft = align === 'right' ? rect.right - width : rect.left;
       const left = Math.max(viewportPadding, Math.min(preferredLeft, window.innerWidth - width - viewportPadding));
       const top = openUpwards ? Math.max(viewportPadding, rect.top - gap - renderedHeight) : rect.bottom + gap;
-      setMenuPosition({ left, top, width, maxHeight });
+      // Keep menus inside the modal top layer and its interactive subtree.
+      const portalTarget = trigger.closest<HTMLDialogElement>('dialog[open]');
+      setMenuPosition({ left, top, width, maxHeight, portalTarget: portalTarget ?? document.body });
     }
     positionMenu();
     window.addEventListener('resize', positionMenu);
@@ -271,7 +275,7 @@ export function Select<TValue extends string>({
             );
           })}
         </div>
-      , document.body) : null}
+      , menuPosition.portalTarget) : null}
     </div>
   );
 }

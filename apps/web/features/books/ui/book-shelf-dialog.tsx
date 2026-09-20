@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '../../../components/ui/button';
+import { Select } from '../../../components/ui/select';
 import { useToast } from '../../../components/ui/feedback';
 import { useI18n } from '@/i18n/provider';
 import { updateBulkBookShelfMembership } from '../../library/public';
@@ -78,13 +79,13 @@ export function BookShelfDialog({ book, returnFocusTo, onClose }: {
     {loading ? <p role="status" className="mt-5">{t('正在读取书架…')}</p> : loadFailed ? <div className="mt-5">
       <p role="alert">{t('读取书架失败')}</p>
       <Button variant="secondary" className="mt-3" onClick={() => { setLoadFailed(false); setLoading(true); setAttempt((value) => value + 1); }}>{t('重试')}</Button>
-    </div> : shelves.length === 0 ? <p role="status" className="mt-5">{t('暂无普通书架')}</p> : <label className="mt-5 block text-sm">
+    </div> : shelves.length === 0 ? <p role="status" className="mt-5">{t('暂无普通书架')}</p> : <div className="mt-5 text-sm">
       {t('目标书架')}
-      <select value={shelfId} onChange={(event) => setShelfId(event.target.value)} disabled={saving} className="mt-2 w-full rounded-xl border border-[var(--visual-color-app-divider)] bg-[var(--visual-color-app-surface)] p-3">
-        <option value="">{t('请选择普通书架')}</option>
-        {shelves.map((shelf) => <option key={shelf.id} value={shelf.id} data-i18n-skip>{shelf.name}</option>)}
-      </select>
-    </label>}
+      <Select value={shelfId} onChange={setShelfId} disabled={saving} className="mt-2 w-full"
+        ariaLabel="目标书架" placeholder="请选择普通书架"
+        options={shelves.map((shelf) => ({ value: shelf.id, label: shelf.name, translate: false }))}
+      />
+    </div>}
     {saveFailed ? <p role="alert" className="mt-3">{t('保存书架失败')} {t('请稍后重试')}</p> : null}
     <div className="mt-6 flex justify-end gap-2">
       <Button variant="secondary" disabled={saving} onClick={onClose}>{t('取消')}</Button>
