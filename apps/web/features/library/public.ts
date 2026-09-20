@@ -32,6 +32,7 @@ export type {
 } from './api/books';
 export { fetchLibraryNavigationSources } from './api/library-sources';
 export {
+  updateBulkBookShelfMembership,
   updateBulkBookCovers,
   type BulkBookCoverResult
 } from './api/bulk-operations';

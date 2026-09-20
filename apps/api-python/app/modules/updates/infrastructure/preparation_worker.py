@@ -153,9 +153,7 @@ class PreparationWorker:
                     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError:
                     raise UpdateError("UPDATE_BUSY") from None
-                if (self.root / "install-request.json").exists() or (
-                    self.root / "installation-incomplete"
-                ).exists():
+                if (self.root / "install-request.json").exists():
                     raise UpdateError("UPDATE_BUSY")
                 previous = self._read()
                 if (
@@ -201,11 +199,7 @@ class PreparationWorker:
             except BlockingIOError:
                 raise UpdateError("UPDATE_BUSY") from None
             request = self.root / "install-request.json"
-            if (
-                request.exists()
-                or request.is_symlink()
-                or (self.root / "installation-incomplete").exists()
-            ):
+            if request.exists() or request.is_symlink():
                 raise UpdateError("UPDATE_BUSY")
             state = self._read()
             if (

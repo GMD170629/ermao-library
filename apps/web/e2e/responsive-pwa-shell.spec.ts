@@ -329,9 +329,46 @@ test('book detail resource covers support selection, keyboard-accessible context
   const topBookActions = page.getByRole('button', { name: '管理图书 右键菜单测试图书', exact: true });
   await topBookActions.click();
   const topBookMenu = page.getByRole('menu', { name: '管理图书' });
-  await expect(topBookMenu.getByRole('menuitem')).toHaveCount(6);
-  await expect(topBookMenu.getByRole('menuitem')).toHaveText(['编辑', '重新生成图片', '设为已读', '识别', '重新扫描文件', '删除']);
+  await expect(topBookMenu.getByRole('menuitem')).toHaveCount(7);
+  await expect(topBookMenu.getByRole('menuitem')).toHaveText(['编辑', '重新生成图片', '设为已读', '加入书架', '识别', '重新扫描文件', '删除']);
   await expectMenuHorizontallyAlignedToAnchor(page, topBookActions, topBookMenu);
+  const membershipRequests: unknown[] = [];
+  let rejectMembership = true;
+  await page.route('**/api/shelves', async (route) => {
+    await route.fulfill({ json: { ok: true, data: { shelves: [
+      { id: 'chosen-shelf', name: '我的指定书架', kind: 'STATIC' },
+      { id: 'smart-shelf', name: '智能书架不可选', kind: 'SMART' },
+      { id: 'collection', name: '合集不可选', kind: 'COLLECTION' }
+    ] } } });
+  });
+  await page.route('**/api/library/operations/books/shelf-membership', async (route) => {
+    membershipRequests.push(route.request().postDataJSON());
+    await route.fulfill(rejectMembership
+      ? { status: 500, json: { ok: false } }
+      : { json: { ok: true, data: { updated: 1, changedValues: 1, operation: { id: 'shelf-operation' } } } });
+  });
+  await topBookMenu.getByRole('menuitem', { name: '加入书架', exact: true }).click();
+  const shelfDialog = page.getByRole('dialog', { name: '加入书架', exact: true });
+  await expect(shelfDialog.getByRole('button', { name: '加入书架', exact: true })).toBeDisabled();
+  await expect(shelfDialog.getByRole('option')).toHaveText(['请选择普通书架', '我的指定书架']);
+  await page.keyboard.press('Escape');
+  await expect(shelfDialog).toHaveCount(0);
+  await expect(topBookActions).toBeFocused();
+  expect(membershipRequests).toEqual([]);
+  await topBookActions.click();
+  await topBookMenu.getByRole('menuitem', { name: '加入书架', exact: true }).click();
+  await shelfDialog.getByRole('combobox', { name: '目标书架' }).selectOption('chosen-shelf');
+  await shelfDialog.getByRole('button', { name: '加入书架', exact: true }).click();
+  await expect(shelfDialog.getByRole('alert')).toContainText('保存书架失败');
+  rejectMembership = false;
+  await shelfDialog.getByRole('button', { name: '加入书架', exact: true }).click();
+  await expect(shelfDialog).toHaveCount(0);
+  expect(membershipRequests).toEqual([
+    { ids: ['context-book'], shelfId: 'chosen-shelf', membership: 'ADD' },
+    { ids: ['context-book'], shelfId: 'chosen-shelf', membership: 'ADD' }
+  ]);
+  await topBookActions.click();
+
   await topBookMenu.getByRole('menuitem', { name: '删除', exact: true }).click();
   const bookDeletion = page.getByRole('dialog', { name: '删除图书和源文件' });
   await expect(bookDeletion).toBeVisible();
@@ -1500,7 +1537,7 @@ test('desktop book list opens details from both the cover and title', async ({ p
   await expect(managedBookActions).toHaveCount(1);
   await managedBookActions.click();
   const managedBookMenu = page.getByRole('menu', { name: '管理图书' });
-  await expect(managedBookMenu.getByRole('menuitem')).toHaveText(['编辑', '重新生成图片', '设为已读', '识别', '重新扫描文件', '删除']);
+  await expect(managedBookMenu.getByRole('menuitem')).toHaveText(['编辑', '重新生成图片', '设为已读', '加入书架', '识别', '重新扫描文件', '删除']);
   await expectMenuHorizontallyAlignedToAnchor(page, managedBookActions, managedBookMenu);
   await page.keyboard.press('Escape');
   await expect(managedBookActions).toBeFocused();

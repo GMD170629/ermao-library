@@ -28,10 +28,10 @@ function book(resources: ReadableResourceView[], continueResourceId: string | nu
   };
 }
 
-test('offers the complete manager menu and only personal reading status to members', () => {
-  assert.deepEqual(bookActionIds(true), ['edit', 'regenerate-image', 'reading-status', 'recognize', 'rescan', 'delete']);
-  assert.deepEqual(bookActionIds(false), ['reading-status']);
-  assert.deepEqual(bookActionIds(false, true), ['reading-status', 'kindle']);
+test('offers the complete manager menu and personal reading and shelf actions to members', () => {
+  assert.deepEqual(bookActionIds(true), ['edit', 'regenerate-image', 'reading-status', 'add-to-shelf', 'recognize', 'rescan', 'delete']);
+  assert.deepEqual(bookActionIds(false), ['reading-status', 'add-to-shelf']);
+  assert.deepEqual(bookActionIds(false, true), ['reading-status', 'add-to-shelf', 'kindle']);
   assert.ok(bookActionIds(true, true).includes('kindle'));
 });
 

@@ -18,19 +18,20 @@ const phaseLabels: Record<string, string> = {
   backup: '正在备份数据库', copying: '正在更新程序文件', starting: '正在迁移数据库并启动服务', failed: '更新操作失败', success: '正在核对实际运行版本'
 };
 const reasonLabels: Record<string, string> = {
+  CONTAINER_RESTARTED: '容器已重启，上次安装请求已结束；未自动重试安装。',
   PLAN_CHANGED: '准备包已变化或失效，请重新查看并确认。',
-  DEPENDENCY_OPERATION_FAILED: '依赖安装失败，服务保持停止，请联系管理员检查日志。',
+  DEPENDENCY_OPERATION_FAILED: '依赖安装失败，请查看安装日志。',
   DEPENDENCY_OWNERSHIP_CONFLICT: '依赖文件归属冲突，已拒绝安装。',
-  LOCAL_DEPENDENCIES_INVALID: '本机受管理依赖损坏、缺失或存在未知文件，已停止准备。',
+  LOCAL_DEPENDENCIES_INVALID: '无法读取或解析本机依赖记录，请查看安装日志。',
   LOCAL_RECORDS_DRIFT: '本机依赖安装记录已变化，已停止准备。',
   INSTALLATION_NOT_SUPPORTED: '更新已准备，当前版本尚不支持安装此协议。',
-  INVALID_DEPENDENCY_ARTIFACT: '依赖制品或文件归属无效，未修改运行环境。',
+  INVALID_DEPENDENCY_ARTIFACT: '依赖包或文件归属信息无效，请查看安装日志。',
   DOWNLOAD_FAILED: '下载失败，请检查网络后手动重试。', DOWNLOAD_TIMEOUT: '下载超时，请检查网络后手动重试。',
-  DIGEST_MISMATCH: '更新包摘要不匹配，未修改当前程序。', INSUFFICIENT_SPACE: '存储空间不足，请释放空间后重试。',
-  RUNTIME_NOT_WRITABLE: '程序目录不可写，请检查部署用户和目录权限。',
-  UNSAFE_ARCHIVE: '更新包包含不安全的路径，已拒绝。',
+  DIGEST_MISMATCH: '更新包 SHA-256 与预期值不一致，操作已停止。', INSUFFICIENT_SPACE: '存储空间不足，请释放空间后重试。',
+  RUNTIME_NOT_WRITABLE: '更新操作被拒绝：文件或目录访问权限不足。',
+  UNSAFE_ARCHIVE: '更新包包含不支持或不安全的文件条目，已拒绝。',
   UNSUPPORTED_DEPLOYMENT: '当前部署不支持应用内更新。', PACKAGE_UNAVAILABLE: '此版本未提供应用更新包。',
-  INCOMPATIBLE_ENVIRONMENT: '此更新包与固定运行环境不兼容，需要部署兼容的运行环境。', NOT_NEWER: '没有更新的可安装版本。',
+  INCOMPATIBLE_ENVIRONMENT: '未找到匹配当前操作系统、CPU 架构和更新协议的安装包。', NOT_NEWER: '没有更新的可安装版本。',
   PACKAGE_NOT_READY: '准备包已变化或失效，请重新查看并确认。', UPDATE_BUSY: '已有更新操作正在进行，请查看当前状态。'
 };
 
@@ -140,7 +141,7 @@ export function UpdateOperations() {
         <p>{t('实际运行版本：v{version}', { version: runtime.current_version })}</p>
         {latest ? <p>{t('远程最新版本：v{version}', { version: latest.version })}</p> : null}
         {state?.summary ? <p>{t('已下载 {downloaded} 字节，总计 {total} 字节；依赖下载 {dependencies} 字节。', { downloaded: formatNumber(state.downloaded ?? 0), total: formatNumber(state.summary.total_bytes), dependencies: formatNumber(state.summary.dependency_bytes) })}<br />{t('依赖：安装／替换 {install}，删除 {remove}，保留 {keep}。', { install: formatNumber(state.summary.install), remove: formatNumber(state.summary.remove), keep: formatNumber(state.summary.keep) })}</p> : null}
-        {installing || phase === 'failed' ? <p>{t('请查看容器日志和 STORAGE_ROOT/update-tmp/installation.log。安装失败请联系管理员检查，勿删除失败标记或清空数据库。')}</p> : null}
+        {installing || phase === 'failed' ? <p>{t('请查看容器日志和 STORAGE_ROOT/update-tmp/installation.log 获取失败阶段和错误码。重启不会自动重试上次安装。')}</p> : null}
       </div>
     </details> : null}
   </div>;

@@ -6,6 +6,7 @@ export type BookActionId =
   | 'edit'
   | 'regenerate-image'
   | 'reading-status'
+  | 'add-to-shelf'
   | 'recognize'
   | 'rescan'
   | 'kindle'
@@ -15,6 +16,7 @@ export function bookActionIds(canManage: boolean, kindleSendAvailable = false): 
   return [
     ...(canManage ? ['edit', 'regenerate-image'] as const : []),
     'reading-status',
+    'add-to-shelf',
     ...(kindleSendAvailable ? ['kindle'] as const : []),
     ...(canManage ? ['recognize', 'rescan', 'delete'] as const : [])
   ];

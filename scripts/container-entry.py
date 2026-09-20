@@ -26,6 +26,7 @@ from container_install import (
     Installation,
     InstallError,
     backup_database,
+    retire_previous_installation,
     write_json,
 )
 from dependency_environment import (
@@ -49,8 +50,8 @@ def initialize_runtime(seed: Path, runtime: Path) -> None:
     if runtime.exists():
         if not runtime.is_dir() or not marker.is_file() or marker.is_symlink():
             raise StartupError(
-                "runtime initialization is incomplete; inspect and repair manually / "
-                "程序目录初始化未完成，请检查并人工修复"
+                "invalid runtime directory or initialization record / "
+                "程序目录或初始化记录无效"
             )
     else:
         # Create the destination before copying. Failure leaves no success marker;
@@ -494,16 +495,7 @@ def main() -> int:
                 raise StartupError(
                     "application is already running / 应用已在运行"
                 ) from None
-            if any(
-                path.exists() or path.is_symlink()
-                for path in (
-                    state / "installation-incomplete",
-                    state / "install-request.json",
-                )
-            ):
-                raise StartupError(
-                    "installation unfinished; inspect container logs and update-tmp backups and repair manually / 安装未完成，请检查容器日志与 update-tmp 备份并人工修复，禁止自动重试"
-                )
+            retire_previous_installation(storage)
             dependency_seed = Path(
                 os.environ.get("SHUKU_DEPENDENCY_SEED", "/opt/shuku-dependency-seed")
             )
@@ -526,7 +518,7 @@ def main() -> int:
                 identity = json.loads((runtime / "application.json").read_text())
                 if identity.get("protocol") != 2:
                     raise StartupError(
-                        "legacy runtime requires --convert-legacy while stopped / 旧程序须停机后显式转换"
+                        "runtime protocol is not 2 / 程序更新协议不是 2"
                     )
                 if not (storage / "dependencies/installed.json").is_file():
                     raise StartupError(
@@ -537,7 +529,7 @@ def main() -> int:
             if fixed_environment.is_file():
                 identity = json.loads((runtime / "application.json").read_text())
                 if identity.get("protocol") != 2:
-                    raise StartupError("incompatible base environment / 基础环境不兼容")
+                    raise StartupError("runtime protocol is not 2 / 程序更新协议不是 2")
             initialize_dependencies(storage, dependency_seed)
             print("runtime ready / 持久化程序目录就绪", flush=True)
             return run_application(
@@ -563,8 +555,7 @@ def main() -> int:
             else type(error).__name__
         )
         print(
-            f"container startup failed ({detail}); check storage permissions and runtime integrity; "
-            "no application started / 容器启动失败，请检查存储权限和程序目录完整性，未启动应用",
+            f"container startup failed / 容器启动失败：{detail}",
             file=sys.stderr,
             flush=True,
         )

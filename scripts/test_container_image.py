@@ -83,10 +83,15 @@ class ImageSynchronizationTests(unittest.TestCase):
             return self.installer.prepare()
 
     def test_image_switch_replaces_code_dependencies_and_preserves_data(self):
+        from container_install import retire_previous_installation
+
         marker_stat = (self.runtime / ".initialized").stat()
         write_json(self.state / "image.json", {**self.target, "version": "1.0.0"})
         write_json(self.state / "preparation.json", {"phase": "ready"})
         (self.state / "prepared").mkdir()
+        (self.state / "installation-incomplete").write_text("previous failure")
+        (self.state / "install-request.json").write_text("previous request")
+        retire_previous_installation(self.storage)
         self.assertTrue(self.prepare())
         self.assertFalse((self.runtime / "obsolete").exists())
         self.assertEqual((self.runtime / ".initialized").stat(), marker_stat)
@@ -106,6 +111,14 @@ class ImageSynchronizationTests(unittest.TestCase):
                 "reading progress",
             )
         self.installer.success()
+        self.assertEqual(
+            (self.state / "installation-incomplete.previous").read_text(),
+            "previous failure",
+        )
+        self.assertEqual(
+            (self.state / "install-request.json.previous").read_text(),
+            "previous request",
+        )
         self.assertFalse((self.state / "installation-incomplete").exists())
         self.assertFalse((self.state / "preparation.json").exists())
         self.assertFalse((self.state / "prepared").exists())

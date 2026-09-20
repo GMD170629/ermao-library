@@ -1,6 +1,6 @@
 'use client';
 
-import { BookCheck, BookX, Edit3, RefreshCw, ScanSearch, Send, Sparkles, Trash2, type LucideIcon } from 'lucide-react';
+import { BookCheck, BookPlus, BookX, Edit3, RefreshCw, ScanSearch, Send, Sparkles, Trash2, type LucideIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import {
   ContextActionMenu,
@@ -30,6 +30,7 @@ import { MetadataLookupModal } from '../metadata-lookup-modal';
 import { BookMetadataEditor } from './book-metadata-editor';
 import { KindleSendModal } from '../kindle-send-modal';
 import { kindleSendOptions } from '../model/kindle-send';
+import { BookShelfDialog } from './book-shelf-dialog';
 
 export type BookActionTarget = Readonly<{
   id: string;
@@ -56,6 +57,7 @@ const actionDetails: Record<Exclude<BookActionId, 'reading-status'>, { label: st
   recognize: { label: '识别', icon: Sparkles },
   rescan: { label: '重新扫描文件', icon: ScanSearch },
   kindle: { label: '发送到 Kindle', icon: Send },
+  'add-to-shelf': { label: '加入书架', icon: BookPlus },
   delete: { label: '删除', icon: Trash2, destructive: true }
 };
 
@@ -78,6 +80,7 @@ export function BookActionController({
   const [editorBook, setEditorBook] = useState<BookView | null>(null);
   const [recognitionBook, setRecognitionBook] = useState<BookView | null>(null);
   const [kindleBook, setKindleBook] = useState<BookView | null>(null);
+  const [shelfRequest, setShelfRequest] = useState<BookActionMenuRequest | null>(null);
   const [menuBook, setMenuBook] = useState<BookView | null>(null);
   const resolvedMenuBook = request?.book ?? (menuBook?.id === request?.target.id ? menuBook : null);
 
@@ -100,8 +103,12 @@ export function BookActionController({
 
   async function invoke(action: BookActionId) {
     const currentRequest = request;
-    if (!currentRequest || busy || (!['reading-status', 'kindle'].includes(action) && !canManage)) return;
+    if (!currentRequest || busy || (!['reading-status', 'kindle', 'add-to-shelf'].includes(action) && !canManage)) return;
     onRequestClose();
+    if (action === 'add-to-shelf') {
+      setShelfRequest(currentRequest);
+      return;
+    }
 
     if (action === 'delete') {
       const confirmed = await feedback.confirm({
@@ -200,6 +207,7 @@ export function BookActionController({
   }) : [];
 
   return <>
+    {shelfRequest ? <BookShelfDialog key={shelfRequest.target.id} book={shelfRequest.target} returnFocusTo={shelfRequest.anchor} onClose={() => setShelfRequest(null)} /> : null}
     {kindleBook ? <KindleSendModal book={kindleBook} open preferredResourceId={null} onClose={() => setKindleBook(null)} /> : null}
     {request ? <ContextActionMenu<BookActionId>
       position={request.position}

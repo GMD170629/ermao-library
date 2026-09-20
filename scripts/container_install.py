@@ -59,6 +59,45 @@ def write_json(path: Path, value: dict) -> None:
     os.replace(path.with_suffix(".tmp"), path)
 
 
+def retire_previous_installation(storage: Path) -> None:
+    """Keep restart diagnostics without replaying a previous install request."""
+    root = storage / "update-tmp"
+    with os.fdopen(
+        os.open(root / "prepare.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600),
+        "w",
+    ) as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        for name in ("install-request.json", "installation-incomplete"):
+            path = root / name
+            if path.exists() or path.is_symlink():
+                path.replace(root / (name + ".previous"))
+        path = root / "preparation.json"
+        try:
+            state = read_json(path)
+        except (OSError, ValueError, InstallError) as error:
+            if not isinstance(error, FileNotFoundError):
+                print(
+                    "previous update state could not be read / 无法读取上次更新状态",
+                    flush=True,
+                )
+            return
+        if isinstance(state, dict) and state.get("phase") in {
+            "requested",
+            "checking",
+            "stopping",
+            "backup",
+            "copying",
+            "starting",
+        }:
+            state.update(
+                failed_phase=state["phase"],
+                phase="failed",
+                error="CONTAINER_RESTARTED",
+                updated_at=datetime.now(timezone.utc).isoformat(),
+            )
+            write_json(path, state)
+
+
 class Installation:
     def __init__(self, storage: Path):
         self.storage = storage

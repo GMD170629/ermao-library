@@ -247,6 +247,17 @@ def assert_package_prepared(program_package, preparation, source):
     assert source[0].downloads == 1
 
 
+def test_historical_failure_marker_does_not_block_preparation(
+    program_package, preparation, source
+):
+    _, worker, _ = preparation
+    worker.root.mkdir(exist_ok=True)
+    marker = worker.root / "installation-incomplete"
+    marker.write_text("previous failure")
+    assert_package_prepared(program_package, preparation, source)
+    assert marker.read_text() == "previous failure"
+
+
 def test_package_download_verification_extraction_and_persistence(
     program_package, preparation, source
 ):

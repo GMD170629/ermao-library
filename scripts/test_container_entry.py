@@ -377,7 +377,7 @@ class ContainerEntryTests(unittest.TestCase):
         ):
             entry.initialize_runtime(self.seed, self.runtime)
         self.assertFalse((self.runtime / ".initialized").exists())
-        with self.assertRaisesRegex(entry.StartupError, "incomplete"):
+        with self.assertRaisesRegex(entry.StartupError, "initialization record"):
             entry.initialize_runtime(self.seed, self.runtime)
 
     def test_unwritable_runtime_and_invalid_storage_fail_before_business(self) -> None:
@@ -398,15 +398,46 @@ class ContainerEntryTests(unittest.TestCase):
             entry.initialize_runtime(self.seed, self.runtime)
         self.assertFalse((self.runtime / ".initialized").exists())
 
-    def test_unfinished_installation_blocks_startup(self) -> None:
+    def test_unfinished_installation_does_not_block_or_replay_on_restart(self) -> None:
         state = self.storage / "update-tmp"
         state.mkdir()
         (state / "installation-incomplete").write_text("{}")
+        (state / "install-request.json").write_text("invalid old request")
+        (state / "preparation.json").write_text(json.dumps({"phase": "checking"}))
+        (state / "installation.log").write_text("old failure")
         process = self.launch()
+        self.await_starts(process, 5)
+        time.sleep(0.5)
+        self.assertIsNone(process.poll())
+        self.assertFalse((state / "install-request.json").exists())
+        self.assertFalse((state / "installation-incomplete").exists())
+        self.assertEqual(
+            (state / "install-request.json.previous").read_text(), "invalid old request"
+        )
+        self.assertEqual((state / "installation.log").read_text(), "old failure")
+        self.assertEqual(
+            json.loads((state / "preparation.json").read_text())["error"],
+            "CONTAINER_RESTARTED",
+        )
+
+    def test_unreadable_previous_state_does_not_block_startup(self) -> None:
+        state = self.storage / "update-tmp"
+        state.mkdir()
+        (state / "preparation.json").write_text("invalid old state")
+        process = self.launch()
+        self.await_starts(process, 5)
+        self.assertIsNone(process.poll())
+
+    def test_startup_error_does_not_invent_permission_or_integrity_failure(
+        self,
+    ) -> None:
+        process = self.launch(STORAGE_ROOT=str(self.seed / "apps"))
         _output, error = process.communicate(timeout=5)
         self.assertNotEqual(process.returncode, 0)
-        self.assertIn("installation unfinished", error)
-        self.assertEqual(self.events(), [])
+        self.assertIn("image and storage must be separate", error)
+        self.assertNotIn("storage permissions", error)
+        self.assertNotIn("程序目录完整性", error)
+        self.assertNotIn("no application started", error)
 
     def test_runtime_link_cannot_redirect_initialization(self) -> None:
         self.runtime.symlink_to(self.seed, target_is_directory=True)

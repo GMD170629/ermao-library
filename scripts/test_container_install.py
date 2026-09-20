@@ -8,10 +8,43 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from container_install import Installation, InstallError
+from container_install import Installation, InstallError, retire_previous_installation
 
 
 class InstallationTests(unittest.TestCase):
+    def test_restart_retires_every_previous_installation_stage(self):
+        for phase in (
+            "requested",
+            "checking",
+            "stopping",
+            "backup",
+            "copying",
+            "starting",
+            "failed",
+        ):
+            with self.subTest(phase=phase):
+                root = self.installer.root
+                state = {
+                    "phase": phase,
+                    "error": "PREFLIGHT_FAILED" if phase == "failed" else None,
+                }
+                (root / "preparation.json").write_text(json.dumps(state))
+                (root / "install-request.json").write_text("old request")
+                (root / "installation-incomplete").write_text("old marker")
+                (root / "database-before-update.sqlite3").write_bytes(b"backup")
+                retire_previous_installation(self.storage)
+                result = json.loads((root / "preparation.json").read_text())
+                self.assertEqual(result["phase"], "failed")
+                self.assertEqual(
+                    result["error"],
+                    "PREFLIGHT_FAILED" if phase == "failed" else "CONTAINER_RESTARTED",
+                )
+                self.assertFalse((root / "install-request.json").exists())
+                self.assertFalse((root / "installation-incomplete").exists())
+                self.assertEqual(
+                    (root / "database-before-update.sqlite3").read_bytes(), b"backup"
+                )
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
