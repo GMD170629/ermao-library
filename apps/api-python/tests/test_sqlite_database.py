@@ -1517,3 +1517,20 @@ def test_directory_legacy_tasks_upgrade_keeps_asset_ids_and_progress(
             assert db.get(ReaderResourceProgress, "progress").resource_id == "resource"
     finally:
         engine.dispose()
+
+
+def test_fixture_sessions_do_not_share_transactions(db_session):
+    db_session.add(
+        Library(
+            id="isolated-library",
+            name="Isolated",
+            root_path="/isolated",
+            organization_mode="FLAT",
+        )
+    )
+    db_session.flush()
+    with Session(db_session.get_bind()) as background:
+        assert background.scalar(select(1)) == 1
+    db_session.commit()
+    db_session.expire_all()
+    assert db_session.get(Library, "isolated-library") is not None
