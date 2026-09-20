@@ -96,3 +96,9 @@ class IdentifyImportedBook:
                 published, previous_stored_path=snapshot.previous_cover_path
             )
         return "identified"
+
+
+class BookIdentificationRequests(Protocol):
+    def request(self, book_ids: tuple[str, ...]) -> None:
+        """Request local identification within the caller-owned transaction."""
+        ...

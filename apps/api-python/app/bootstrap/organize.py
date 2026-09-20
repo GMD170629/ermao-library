@@ -8,6 +8,10 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.modules.library.infrastructure.imported_book_metadata import (
+    SqlAlchemyBookIdentificationRequests,
+)
+from app.modules.library.public import BookIdentificationRequests
 from app.modules.organize.application.dto import (
     PreparedOrganizeJobEnqueue,
     PreparedOrganizePolicyUpdate,
@@ -71,8 +75,13 @@ def create_organize_run_command(
         timestamp=timestamp,
         job_plans=job_plans,
     )
+    identification: BookIdentificationRequests = SqlAlchemyBookIdentificationRequests(
+        db
+    )
     with OrganizeWriteTransaction(db):
         queued_count = organize_jobs.execute_organize_run_write(db, prepared_write)
+        if trigger == "MANUAL" and queued_count:
+            identification.request(organize_jobs.book_ids_for_run(db, run_id))
     return queued_count
 
 
@@ -105,6 +114,9 @@ def recognize_organize_job_command(
     run_id: str | None,
     timestamp: datetime,
 ) -> None:
+    identification: BookIdentificationRequests = SqlAlchemyBookIdentificationRequests(
+        db
+    )
     prepared_task_ids = list(task_ids)
     prepared_task = organize_jobs.prepare_lookup_task_row(
         task_id=task_id,
@@ -118,6 +130,7 @@ def recognize_organize_job_command(
         organize_jobs.clear_job_recognition_artifacts(
             db, job_id=job_id, task_ids=prepared_task_ids
         )
+        identification.request((book_id,))
         organize_jobs.insert_prepared_lookup_task(db, prepared_task)
         organize_jobs.reset_job_for_recognition(db, job_id=job_id, now=timestamp)
         organize_jobs.mark_book_curation_state(

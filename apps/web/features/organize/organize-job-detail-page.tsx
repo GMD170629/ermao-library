@@ -107,7 +107,7 @@ export function OrganizeJobDetailPage({ jobId, embedded = false }: { jobId: stri
             <div><dt className="text-slate-500"><I18nText>源资产</I18nText></dt><dd className="mt-1 break-all text-slate-800">{sourceAsset ? <a className="font-medium text-[#D94322] hover:underline" href={sourceAsset.downloadUrl}><I18nText>下载附件</I18nText></a> : i18nAttribute("未记录")}</dd></div>
             <div><dt className="text-slate-500"><I18nText>导入时间</I18nText></dt><dd className="mt-1 text-slate-800">{new Date(job.book.addedAt).toLocaleString(locale)}</dd></div>
             <div><dt className="text-slate-500"><I18nText>任务更新时间</I18nText></dt><dd className="mt-1 text-slate-800">{new Date(job.updatedAt).toLocaleString(locale)}</dd></div>
-            <div><dt className="text-slate-500"><I18nText>整理摘要</I18nText></dt><dd className="mt-1 text-slate-800">{job.summary ?? i18nAttribute("暂无整理摘要")}</dd></div>
+            <div><dt className="text-slate-500"><I18nText>整理摘要</I18nText></dt><dd className="mt-1 text-slate-800">{job.summary === "等待本地元数据识别" ? i18nAttribute("等待本地元数据识别") : job.summary ? i18nAttribute(job.summary) : i18nAttribute("暂无整理摘要")}</dd></div>
           </dl>
           <div className="mt-5 flex flex-wrap gap-2">
             <Button variant="secondary" icon={ExternalLink} onClick={() => router.push(`/books/${job.book.id}`)}><I18nText>打开读物详情</I18nText></Button>

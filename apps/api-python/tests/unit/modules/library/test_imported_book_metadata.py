@@ -106,3 +106,59 @@ def test_failed_or_stale_identification_keeps_original_book_and_cover(
     assert repository.title == "Original"
     assert old.final_path.read_bytes() == _png("red")
     assert tuple(old.final_path.parent.iterdir()) == (old.final_path,)
+
+
+@pytest.mark.parametrize(
+    "priority",
+    [
+        ("EMBEDDED", "SIDECAR_OPF", "PATH"),
+        ("PATH", "SIDECAR_OPF", "EMBEDDED"),
+    ],
+)
+@pytest.mark.parametrize("embedded_state", ["valid", "missing", "invalid"])
+def test_book_cover_uses_valid_persisted_candidates(tmp_path, priority, embedded_state):
+    from sqlalchemy.orm import Session
+
+    from app.contracts.local_metadata_snapshot import LocalMetadataObservation
+    from app.modules.library.infrastructure.imported_book_metadata import (
+        SqlAlchemyImportedBookMetadata,
+    )
+    from app.modules.metadata.public import LocalMetadataCandidate
+
+    embedded, sidecar = _png("red"), _png("blue")
+    path = tmp_path / "embedded.png"
+    if embedded_state != "missing":
+        path.write_bytes(embedded if embedded_state == "valid" else b"broken")
+    snapshot = ImportedBookSnapshot(
+        "book",
+        "node",
+        1,
+        "[]",
+        str(tmp_path),
+        "book.epub",
+        False,
+        priority,
+        (
+            LocalMetadataObservation(
+                "EMBEDDED", PublicationMetadata(title="Embedded"), "embedded.png"
+            ),
+        ),
+        None,
+        None,
+        False,
+    )
+    with Session() as db:
+        repository = SqlAlchemyImportedBookMetadata(
+            db,
+            lambda source, directory: LocalMetadataCandidate(
+                "SIDECAR_OPF", PublicationMetadata(), sidecar
+            ),
+            lambda book_id: True,
+            lambda stored: tmp_path / stored if stored else None,
+            lambda endpoint, stored: "/cover" if stored else "",
+        )
+        result = repository.inspect(snapshot)
+    expected = (
+        embedded if priority[0] == "EMBEDDED" and embedded_state == "valid" else sidecar
+    )
+    assert result.cover == expected

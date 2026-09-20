@@ -1,4 +1,6 @@
 {
+  "等待本地元数据识别": "Waiting for local metadata identification",
+  "本地元数据识别失败，请重试识别": "Local metadata identification failed. Retry recognition.",
   " {value0} 分钟": " {value0} min",
   "，当前{value0}": "Current {value0}",
   "，跳过 {value0} 本": "Skip {value0} Ben",

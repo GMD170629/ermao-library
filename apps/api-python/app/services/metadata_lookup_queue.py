@@ -699,8 +699,22 @@ def process_metadata_lookup_task(
         return "FAILED"
     metadata_guard = lookup_persist.book_metadata_guard(db, str(book["id"]))
     if metadata_guard is not None and metadata_guard[-1]:
-        _schedule_retry(db, task, "等待本地导入任务完成", [])
+        db.close()
+        with MetadataWriteTransaction(db):
+            _update_task(
+                db,
+                str(task["id"]),
+                updated_at=_now(),
+                owner_id=str(task.get("leaseOwnerId") or "") or None,
+                status="PENDING",
+                startedAt=None,
+                leaseOwnerId=None,
+                leaseExpiresAt=None,
+            )
         return "PENDING"
+    if lookup_persist.local_identification_failed(db, str(book["id"])):
+        _finish_without_match(db, task, "FAILED", [], "本地元数据识别失败，请重试识别")
+        return "FAILED"
     context = metadata_context_for_book(db, str(book["id"]))
     if not context:
         _finish_without_match(

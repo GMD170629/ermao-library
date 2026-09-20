@@ -75,7 +75,9 @@ def prepare_organize_run_write(
             "status": "LOOKUP_PENDING",
             "issue_codes": "[]",
             "reason_codes": json.dumps(plan.reasons, ensure_ascii=False),
-            "summary": "等待元数据插件识别",
+            "summary": "等待本地元数据识别"
+            if trigger == "MANUAL"
+            else "等待元数据插件识别",
             "error_summary": None,
             "started_at": None,
             "finished_at": None,
@@ -299,7 +301,7 @@ def reset_job_for_recognition(
         .where(OrganizeJob.id == job_id)
         .values(
             status="LOOKUP_PENDING",
-            summary="等待重新识别",
+            summary="等待本地元数据识别",
             error_summary=None,
             trigger="MANUAL",
             reason_codes='["MANUAL_RECOGNIZE"]',
@@ -404,3 +406,9 @@ def prepare_refresh_run_queue_count(*, run_id: str, now: datetime) -> Executable
 
 def execute_refresh_run_queue_count(db: Session, statement: Executable) -> None:
     db.execute(statement)
+
+
+def book_ids_for_run(db: Session, run_id: str) -> tuple[str, ...]:
+    return tuple(
+        db.scalars(select(OrganizeJob.book_id).where(OrganizeJob.run_id == run_id))
+    )

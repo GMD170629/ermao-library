@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import select
 
 from app.db.seed import seed_baseline_data
@@ -233,3 +234,60 @@ def test_interval_schedule_respects_next_run_boundary(db_session) -> None:
     )
     assert process_organize_schedule_tick(db_session) == 1
     assert db_session.scalar(select(OrganizeJob.id)) is not None
+
+
+def test_manual_wait_does_not_block_other_books_and_local_failure_stops_remote(
+    db_session, test_settings, monkeypatch
+):
+    from app.models import LibraryImportTask
+    from app.modules.imports.infrastructure.readable_resource.book_completion import (
+        BookImportCompletion,
+    )
+    from app.services import metadata_lookup_queue as lookup
+
+    waiting, _ = _seed_book(db_session, "waiting")
+    ready, _ = _seed_book(db_session, "ready")
+    create_organize_run(db_session, book_ids=[waiting.id])
+    create_organize_run(db_session, book_ids=[ready.id])
+    waiting_id, ready_id = waiting.id, ready.id
+    completion = BookImportCompletion(db_session)
+    completion.persist_ready(completion.prepare_ready())
+    db_session.commit()
+    completion.persist_ready(completion.prepare_ready())
+    db_session.commit()
+    assert (
+        len(
+            db_session.scalars(
+                select(LibraryImportTask).where(
+                    LibraryImportTask.kind == "IDENTIFY_BOOK"
+                )
+            ).all()
+        )
+        == 2
+    )
+    metadata = db_session.get(LibraryBookMetadata, ready_id)
+    metadata.metadata_pending = False
+    metadata.metadata_state = "FAILED"
+    db_session.commit()
+    claimed = lookup.claim_next_metadata_lookup_task(db_session, owner_id="test")
+    assert claimed["bookId"] == ready_id
+    monkeypatch.setattr(
+        lookup,
+        "metadata_context_for_book",
+        lambda *_: pytest.fail("must not query after local failure"),
+    )
+    assert (
+        lookup.process_metadata_lookup_task(db_session, test_settings, claimed)
+        == "FAILED"
+    )
+    waiting_task = db_session.scalar(
+        select(MetadataLookupTask).where(MetadataLookupTask.book_id == waiting_id)
+    )
+    assert waiting_task.attempts == 0
+    assert waiting_task.status == "PENDING"
+    job_id = db_session.scalar(
+        select(OrganizeJob.id).where(OrganizeJob.book_id == ready_id)
+    )
+    recognize_organize_job(db_session, job_id)
+    assert db_session.get(LibraryBookMetadata, ready_id).metadata_pending
+    assert lookup.claim_next_metadata_lookup_task(db_session, owner_id="test") is None

@@ -355,3 +355,116 @@ def test_multi_volume_comic_identifies_bracketed_directory_title_and_author(
             assert metadata.author == "地主"
     finally:
         engine.dispose()
+
+
+@pytest.mark.parametrize("entry", ("new", "recognize", "retry"))
+def test_manual_identification_reuses_candidates_before_remote_lookup(
+    tmp_path, entry, monkeypatch
+):
+    from app.models import MetadataLookupTask
+    from app.models.organize import OrganizeJob
+    from app.services import metadata_lookup_queue as lookup
+    from app.services.organize_scheduler import (
+        create_organize_run,
+        recognize_organize_job,
+        retry_organize_job,
+    )
+
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    root = tmp_path / "library"
+    root.mkdir()
+    book_path = root / "Path Title - Path Author.epub"
+    red, blue = _png((255, 0, 0)), _png((0, 0, 255))
+    _write_epub(book_path, title="Embedded Title", author="", cover=red)
+    (root / "cover.png").write_bytes(blue)
+
+    def write_opf(title=""):
+        book_path.with_suffix(".opf").write_text(
+            '<package xmlns:dc="http://purl.org/dc/elements/1.1/"><metadata>'
+            f"<dc:title>{title}</dc:title><dc:description>Sidecar description</dc:description>"
+            '<meta name="cover" content="cover"/></metadata><manifest>'
+            '<item id="cover" href="cover.png" media-type="image/png"/></manifest></package>'
+        )
+
+    write_opf()
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with Session(engine) as db:
+            db.add(
+                Library(
+                    id="lib",
+                    name="Library",
+                    root_path=str(root),
+                    organization_mode="FLAT",
+                    min_file_size_bytes=0,
+                )
+            )
+            policy = db.get(OrganizePolicy, "default")
+            if policy is None:
+                policy = OrganizePolicy(id="default")
+                db.add(policy)
+            policy.local_metadata_priority_json = json.dumps(
+                ["EMBEDDED", "SIDECAR_OPF", "PATH"]
+            )
+            db.commit()
+            pipeline = build_readable_resource_pipeline(db, settings)
+            pipeline.continue_import.execute(ContinueLibraryImport("lib"))
+            worker = build_readable_resource_worker(pipeline)
+            for _ in range(10):
+                if worker.process_once() == "idle":
+                    break
+            metadata = db.scalar(select(LibraryBookMetadata))
+            assert metadata.title == "Embedded Title"
+            assert metadata.author == "Path Author"
+            assert metadata.description == "Sidecar description"
+            assert (
+                settings.resolved_storage_root / metadata.cover_path
+            ).read_bytes() == red
+            book_id = metadata.book_id
+            create_organize_run(db, book_ids=[book_id])
+            if entry != "new":
+                job_id = db.scalar(select(OrganizeJob.id))
+                (
+                    recognize_organize_job
+                    if entry == "recognize"
+                    else retry_organize_job
+                )(db, job_id)
+            task_id = db.scalar(select(MetadataLookupTask.id))
+            assert lookup.claim_next_metadata_lookup_task(db, owner_id="test") is None
+            db.expire_all()
+            assert db.get(MetadataLookupTask, task_id).attempts == 0
+            policy = db.get(OrganizePolicy, "default")
+            policy.local_metadata_priority_json = json.dumps(
+                ["SIDECAR_OPF", "EMBEDDED", "PATH"]
+            )
+            write_opf("Updated OPF Title")
+            db.commit()
+            assert worker.process_once() == "identified"
+            db.expire_all()
+            metadata = db.get(LibraryBookMetadata, book_id)
+            assert metadata.title == "Updated OPF Title"
+            assert metadata.author == "Path Author"
+            assert (
+                settings.resolved_storage_root / metadata.cover_path
+            ).read_bytes() == blue
+            claimed = lookup.claim_next_metadata_lookup_task(db, owner_id="test")
+            assert claimed is not None
+            seen = []
+            original = lookup.metadata_context_for_book
+
+            def capture_context(session, identifier):
+                seen.append(session.get(LibraryBookMetadata, identifier).title)
+                return original(session, identifier)
+
+            monkeypatch.setattr(lookup, "metadata_context_for_book", capture_context)
+            claimed["providerOrder"] = "[]"
+            assert (
+                lookup.process_metadata_lookup_task(db, settings, claimed)
+                == "NO_PROVIDER"
+            )
+            assert seen == ["Updated OPF Title"]
+            db.expire_all()
+            assert db.get(LibraryBookMetadata, book_id).title == "Updated OPF Title"
+    finally:
+        engine.dispose()

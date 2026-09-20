@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import and_, func, insert, or_, select, update
+from sqlalchemy import and_, exists, func, insert, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
@@ -251,6 +251,12 @@ def claim_next_lookup_task(
     candidate_id = (
         select(MetadataLookupTask.id)
         .where(
+            ~exists(
+                select(LibraryBookMetadata.book_id).where(
+                    LibraryBookMetadata.book_id == MetadataLookupTask.book_id,
+                    LibraryBookMetadata.metadata_pending.is_(True),
+                )
+            ),
             or_(
                 (
                     (MetadataLookupTask.status == "PENDING")
@@ -571,3 +577,14 @@ def book_metadata_guard(
         )
     )
     return row[0], row[1].isoformat(), row[2], str(priority or ""), row[3]
+
+
+def local_identification_failed(db: Session, book_id: str) -> bool:
+    return (
+        db.scalar(
+            select(LibraryBookMetadata.metadata_state).where(
+                LibraryBookMetadata.book_id == book_id
+            )
+        )
+        == "FAILED"
+    )

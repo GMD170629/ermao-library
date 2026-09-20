@@ -1,4 +1,7 @@
-from app.modules.library.application.imported_book_metadata import IdentifyImportedBook
+from app.modules.library.application.imported_book_metadata import (
+    BookIdentificationRequests,
+    IdentifyImportedBook,
+)
 from app.modules.library.application.metadata_ownership import (
     protected_fields as protected_metadata_fields,
 )
@@ -152,6 +155,7 @@ __all__ = [
     "BookCoverSource",
     "BookFacetProjection",
     "BookFacetReferences",
+    "BookIdentificationRequests",
     "BookListProjection",
     "BookListQuery",
     "BookListResult",

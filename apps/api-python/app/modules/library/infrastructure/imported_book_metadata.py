@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.contracts.local_metadata_snapshot import (
@@ -53,6 +53,23 @@ class BookSidecarReader(Protocol):
     def __call__(
         self, source: Path, *, directory: bool
     ) -> LocalMetadataCandidate | None: ...
+
+
+class SqlAlchemyBookIdentificationRequests:
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def request(self, book_ids: tuple[str, ...]) -> None:
+        """Mark a new local pass in the caller's transaction."""
+        self._db.execute(
+            update(LibraryBookMetadata)
+            .where(LibraryBookMetadata.book_id.in_(book_ids))
+            .values(
+                import_revision=LibraryBookMetadata.import_revision + 1,
+                metadata_pending=True,
+                metadata_state="QUEUED",
+            )
+        )
 
 
 class SqlAlchemyImportedBookMetadata:
@@ -159,7 +176,7 @@ class SqlAlchemyImportedBookMetadata:
             LocalMetadataCandidate(
                 source=kind,
                 metadata=grouped[kind],
-                cover=sidecar.cover if sidecar and kind == "SIDECAR_OPF" else None,
+                cover=self._candidate_cover(snapshot, kind, sidecar),
             )
             for kind in snapshot.priority
             if kind in grouped
@@ -169,6 +186,25 @@ class SqlAlchemyImportedBookMetadata:
         if cover is None and not snapshot.cover_protected:
             cover = self._read_cover(snapshot.resource_cover_path)
         return IdentifiedBookMetadata(result.metadata, cover)
+
+    def _candidate_cover(
+        self,
+        snapshot: ImportedBookSnapshot,
+        kind: str,
+        sidecar: LocalMetadataCandidate | None,
+    ) -> bytes | None:
+        if snapshot.cover_protected:
+            return None
+        if kind == "SIDECAR_OPF" and sidecar is not None:
+            cover = valid_local_cover(sidecar.cover)
+            if cover is not None:
+                return cover
+        for observation in snapshot.observations:
+            if observation.source == kind and observation.cover_path:
+                cover = self._read_cover(observation.cover_path)
+                if cover is not None:
+                    return cover
+        return None
 
     def _read_cover(self, stored_path: str | None) -> bytes | None:
         if not self._cover_url_resolver("/cover", stored_path):
