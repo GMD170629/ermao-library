@@ -308,6 +308,11 @@ def run_application(
 
 
 def application_ready(group: int, version: str, ready_file: Path) -> bool:
+    # Probe the core throughout the startup window, even if the Worker fails.
+    # Otherwise its first (potentially cold) probe happens only at the deadline
+    # and can misclassify an isolated Worker failure as a core startup timeout.
+    if not core_application_ready(version):
+        return False
     try:
         identity = json.loads(ready_file.read_text())
         worker_pid = int(identity["pid"])
@@ -322,7 +327,7 @@ def application_ready(group: int, version: str, ready_file: Path) -> bool:
             return False
     except (OSError, ValueError, KeyError, TypeError, IndexError):
         return False
-    return core_application_ready(version)
+    return True
 
 
 def core_application_ready(version: str) -> bool:

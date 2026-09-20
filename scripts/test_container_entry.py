@@ -192,6 +192,18 @@ class ContainerEntryTests(unittest.TestCase):
         self.assertEqual(process.wait(timeout=10), 143)
         self.assertEqual([event[0] for event in self.events()], ["start", "stop"])
 
+    def test_core_readiness_is_polled_even_when_worker_is_missing(self) -> None:
+        ready = self.root / "missing-worker-ready"
+        with patch.object(
+            entry, "core_application_ready", side_effect=[False, True]
+        ) as core_ready:
+            # A cold core probe may time out. Keep probing during the startup
+            # window even when the Worker never publishes its ready marker.
+            self.assertFalse(entry.application_ready(os.getpid(), "1", ready))
+            self.assertFalse(entry.application_ready(os.getpid(), "1", ready))
+        self.assertEqual(core_ready.call_count, 2)
+        core_ready.assert_called_with("1")
+
     @unittest.skipUnless(sys.platform == "linux", "requires Linux process identity")
     def test_ready_rejects_stale_pid_identity_and_dead_process(self) -> None:
         worker = subprocess.Popen(
@@ -206,6 +218,8 @@ class ContainerEntryTests(unittest.TestCase):
         ready.write_text(json.dumps({"pid": worker.pid, "startTime": start_time}))
         with patch.object(entry, "core_application_ready", return_value=True):
             self.assertTrue(entry.application_ready(os.getpid(), "1", ready))
+            with patch.object(entry, "core_application_ready", return_value=False):
+                self.assertFalse(entry.application_ready(os.getpid(), "1", ready))
             ready.write_text(json.dumps({"pid": worker.pid, "startTime": "stale"}))
             self.assertFalse(entry.application_ready(os.getpid(), "1", ready))
             ready.write_text(json.dumps({"pid": worker.pid, "startTime": start_time}))
