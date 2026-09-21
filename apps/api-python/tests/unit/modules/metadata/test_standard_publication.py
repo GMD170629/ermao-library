@@ -165,3 +165,64 @@ def test_read_only_source_is_rejected_during_preview(tmp_path):
         assert sorted(item.name for item in tmp_path.iterdir()) == ["book.opf"]
     finally:
         source.chmod(0o644)
+
+
+def test_same_size_replacement_changes_millisecond_reader_identity(tmp_path):
+    request = target(tmp_path)
+    source = tmp_path / "book.opf"
+    # Canonicalize once, then change an equal-length title in a second operation.
+    prepared = files().prepare(request)
+    files().publish(request, prepared)
+    before = source.stat()
+    second = replace(
+        request,
+        original=file_identity(before),
+        values=PublicationMetadata(title="Old"),
+        prepared_name=".ermao-mcp-" + "b" * 32 + "-target",
+        backup_name=".ermao-mcp-" + "b" * 32 + "-source",
+    )
+    import asyncio
+
+    from fastapi import Request
+
+    from app.modules.media.infrastructure.http_streaming import send_file
+
+    def http_request(headers=()):
+        return Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": "/api/assets/fixture",
+                "headers": list(headers),
+                "query_string": b"",
+            }
+        )
+
+    original_content = source.read_bytes()
+    active = send_file(source, http_request(), "user", asset_id="fixture")
+    old_version = active.headers["x-asset-version"]
+    proof = files().prepare(second)
+    files().publish(second, proof)
+    after = source.stat()
+    assert after.st_size == before.st_size
+    assert after.st_mtime_ns // 1_000_000 > before.st_mtime_ns // 1_000_000
+    assert b">Old<" in source.read_bytes()
+    assert (tmp_path / second.backup_name).stat().st_mtime_ns == before.st_mtime_ns
+
+    async def consume(response):
+        chunks = [chunk async for chunk in response.body_iterator]
+        if response.background is not None:
+            await response.background()
+        return b"".join(chunks)
+
+    assert asyncio.run(consume(active)) == original_content
+    stale = send_file(
+        source,
+        http_request(((b"x-asset-version", old_version.encode()),)),
+        "user",
+        asset_id="fixture",
+    )
+    assert stale.status_code == 412
+    fresh = send_file(source, http_request(), "user", asset_id="fixture")
+    assert fresh.headers["x-asset-version"] != old_version
+    assert asyncio.run(consume(fresh)) == source.read_bytes()

@@ -28,6 +28,7 @@ from app.modules.metadata.application.execute_standard_writeback import (
 )
 from app.modules.metadata.application.standard_writeback_maintenance import (
     MaintainStandardBackups,
+    RecoverStandardWrites,
 )
 from app.modules.metadata.infrastructure.standard_publication import (
     StandardMetadataPublication,
@@ -77,8 +78,10 @@ def maintain_standard_writeback(db: Session) -> None:
 
 
 def recover_standard_writeback(db: Session) -> int:
-    recovered = SqlAlchemyStandardWritePlans(
-        db, queue_capacity=get_settings().metadata_opf_queue_max_pending
-    ).recover_verified_targets(now_timestamp_ms())
-    db.commit()
-    return recovered
+    return RecoverStandardWrites(
+        SqlAlchemyStandardWritePlans(
+            db, queue_capacity=get_settings().metadata_opf_queue_max_pending
+        ),
+        db,
+        now_timestamp_ms,
+    ).execute()

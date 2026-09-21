@@ -130,6 +130,9 @@ def test_same_disk_cross_library_move_keeps_book_resource_asset_and_shelf_ids(
         SqlAlchemyFileMoveIndex,
     )
     from app.modules.library.infrastructure.file_move_io import publish_same_device_move
+    from app.modules.reader.infrastructure.persistence.models import (
+        ReaderResourceProgressV5,
+    )
     from tests.integration.modules.automation.test_file_reads import add_file
 
     access, root = file_access(db_session, tmp_path)
@@ -165,6 +168,21 @@ def test_same_disk_cross_library_move_keeps_book_resource_asset_and_shelf_ids(
             source_node_physical_kind="REGULAR_FILE",
             role="PRIMARY",
             import_state="READY",
+        )
+    )
+    db_session.commit()
+    db_session.add(
+        ReaderResourceProgressV5(
+            id="move-progress",
+            user_id=access.user_id,
+            resource_id="move-resource",
+            client_id="reader-client",
+            mutation_id="original-position",
+            locator_json='{"href":"chapter-2.xhtml"}',
+            presentation_json="{}",
+            captured_at=datetime.now(UTC),
+            revision=7,
+            display_percent=42,
         )
     )
     db_session.commit()
@@ -208,6 +226,11 @@ def test_same_disk_cross_library_move_keeps_book_resource_asset_and_shelf_ids(
     )
     assert (destination_root / "renamed/book.epub").read_bytes() == b"book bytes"
     assert not (root / "allowed").exists()
+    progress = db_session.get(ReaderResourceProgressV5, "move-progress")
+    assert progress.resource_id == "move-resource"
+    assert progress.revision == 7
+    assert progress.display_percent == 42
+    assert progress.locator_json == '{"href":"chapter-2.xhtml"}'
 
 
 def test_cross_device_recovery_quota_is_reserved_before_queueing(db_session, tmp_path):
@@ -262,3 +285,28 @@ def test_cross_device_recovery_quota_is_reserved_before_queueing(db_session, tmp
     )
     db_session.rollback()
     assert (root / "allowed/book").read_bytes() == b"1234567890"
+
+
+def test_directory_with_unknown_recovery_slot_cannot_relocate_backup(
+    db_session, tmp_path
+):
+    access, root = file_access(db_session, tmp_path)
+    db_session.get(Library, "test-library").organization_mode = "VOLUMES"
+    db_session.commit()
+    backup = root / "allowed" / (".ermao-mcp-" + "a" * 32 + "-source")
+    backup.write_bytes(b"retained original")
+    planner = PrepareFileMovePlan(
+        SqlAlchemyMoveTopology(db_session),
+        AnchoredMoveInspection(),
+        lambda: 1000,
+        lambda: "plan",
+    )
+    actor = MoveActor(
+        access.user_id, access.grant_id, access.permissions.library_ids, False
+    )
+    with pytest.raises(FileMoveError, match="RECOVERY_BACKUP_PENDING"):
+        planner.execute(
+            actor, (MoveRequest("allowed-node", "test-library", "renamed"),)
+        )
+    assert backup.read_bytes() == b"retained original"
+    assert not (root / "renamed").exists()

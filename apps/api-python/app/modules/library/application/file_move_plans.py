@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
+from app.contracts.controlled_file_slots import is_controlled_file_slot
 from app.modules.library.domain.file_moves import (
     MAX_BYTES,
     MAX_FILES,
@@ -172,6 +173,12 @@ class PrepareFileMovePlan:
         files = size = 0
         for source, destination in zip(sources, destinations, strict=True):
             inventory = self.inspection.source(source.root, source.relative_path)
+            if any(
+                is_controlled_file_slot(part)
+                for entry in inventory.entries
+                for part in entry.relative_path.split("/")
+            ):
+                raise FileMoveError("RECOVERY_BACKUP_PENDING")
             target = self.inspection.destination(
                 destination.root,
                 destination.relative_path,

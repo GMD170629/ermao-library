@@ -275,3 +275,46 @@ def test_standard_write_and_scan_claims_exclude_each_other(db_session, tmp_path)
     queue.status = "REVIEW"
     db_session.commit()
     assert scans.next_queued() is None
+
+
+def test_completed_writeback_keeps_locator_until_verified_backup_cleanup(
+    db_session, tmp_path
+):
+    import pytest
+
+    from app.modules.library.infrastructure.move_topology import SqlAlchemyMoveTopology
+    from app.modules.library.public import FileMoveError
+
+    root, original, files, store, plan = prepared(db_session, tmp_path)
+    executor = ExecuteStandardWrite(
+        store,
+        files,
+        lambda *_: None,
+        SqlAlchemyStandardWriteIndex(db_session).record,
+        db_session,
+        lambda: 3000,
+    )
+    assert process_next_metadata_writeback(
+        db_session,
+        Settings(),
+        standard_handler=lambda db, target, owner: executor.execute(
+            "operation", 0, owner
+        ),
+    )
+    topology = SqlAlchemyMoveTopology(db_session)
+    with pytest.raises(FileMoveError, match="RECOVERY_BACKUP_PENDING"):
+        topology.source("allowed-node", frozenset({"test-library"}))
+    backup = root / "allowed" / plan.targets[0].file.backup_name
+    assert backup.read_bytes() == original
+    entries = store.expired_backups(3000 + 2 * 24 * 60 * 60_000)
+    operation, ordinal, target, proof = entries[0]
+    db_session.rollback()
+    files.clear_backup(target.targets[ordinal].file, proof)
+    store.backup_cleanup_result(
+        operation, ordinal, 3000 + 2 * 24 * 60 * 60_000, failed=False
+    )
+    db_session.commit()
+    assert (
+        topology.source("allowed-node", frozenset({"test-library"})).node_id
+        == "allowed-node"
+    )

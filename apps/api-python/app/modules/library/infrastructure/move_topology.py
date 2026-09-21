@@ -7,6 +7,7 @@ from pathlib import Path
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.infrastructure.file_operation_conflicts import recovery_holds_source_nodes
 from app.models.library import Library
 from app.modules.library.application.file_move_plans import MoveDestination, MoveSource
 from app.modules.library.domain.book_placement import decide_book_anchor_for_resource
@@ -63,6 +64,8 @@ class SqlAlchemyMoveTopology:
             raise FileMoveError("RESOURCE_NOT_FOUND")
         nodes = self._nodes(node)
         ids = tuple(item.id for item in nodes)
+        if recovery_holds_source_nodes(self._db, ids):
+            raise FileMoveError("RECOVERY_BACKUP_PENDING")
         resources = tuple(
             self._db.scalars(
                 select(LibraryReadableResource)

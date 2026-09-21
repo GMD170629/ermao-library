@@ -71,11 +71,19 @@ def test_audio_write_preserves_encoded_packets_and_chapters(tmp_path, format):
             input_file,
             output_file,
             format=format,
-            values=PublicationMetadata(title="新标题", authors=("新作者",)),
-            fields=frozenset({"title", "authors"}),
+            values=PublicationMetadata(
+                title="新标题", authors=("新作者", "Écrivain"), description="新简介 Ω"
+            ),
+            fields=frozenset({"title", "authors", "description"}),
         )
     assert source.read_bytes() == original
     assert probe(output) == before
+    from app.modules.metadata.infrastructure.standard_files import _audio_metadata
+
+    with output.open("rb") as stream:
+        observed = _audio_metadata(stream, source.suffix)
+    assert observed.authors == ("新作者", "Écrivain")
+    assert observed.description == "新简介 Ω"
 
 
 @pytest.mark.parametrize("format", ["MP3", "M4A", "M4B", "FLAC"])
@@ -141,7 +149,7 @@ def test_audio_publication_reads_back_selected_fields_and_preserves_original(
 
 
 def test_id3_v23_preserves_unrelated_frames(tmp_path):
-    from mutagen.id3 import APIC, ID3, TXXX
+    from mutagen.id3 import APIC, COMM, ID3, TXXX
 
     path = tmp_path / "book.mp3"
     subprocess.run(
@@ -168,6 +176,7 @@ def test_id3_v23_preserves_unrelated_frames(tmp_path):
     )
     tags = ID3(path, translate=False)
     tags.add(TXXX(encoding=1, desc="custom", text=["preserve 中文"]))
+    tags.add(COMM(encoding=1, lang="eng", desc="", text=["旧简介"]))
     tags.add(
         APIC(
             encoding=0,
@@ -185,11 +194,33 @@ def test_id3_v23_preserves_unrelated_frames(tmp_path):
             source,
             destination,
             format="MP3",
-            values=PublicationMetadata(title="新标题"),
-            fields=frozenset({"title"}),
+            values=PublicationMetadata(
+                title="新标题", authors=("作者甲", "Auteur B"), description="新的简介"
+            ),
+            fields=frozenset({"title", "authors", "description"}),
         )
     assert probe(output) == before
     result = ID3(output, translate=False)
     assert result.version[1] == 3
+    assert result["TPE1"].text == ["作者甲/Auteur B"]
+    assert result["COMM::eng"].text == ["新的简介"]
     assert result["TXXX:custom"] == tags["TXXX:custom"]
     assert result["APIC:"].data == b"opaque existing cover"
+
+
+def test_id3_header_without_mpeg_audio_is_not_writable():
+    from io import BytesIO
+
+    from app.modules.metadata.application.standard_files import StandardMetadataError
+
+    source = BytesIO(b"ID3\x04\0\0\0\0\0\0" + b"not audio" * 30)
+    output = BytesIO(b"untouched")
+    with pytest.raises(StandardMetadataError, match="INVALID_AUDIO_STRUCTURE"):
+        write_audio_metadata(
+            source,
+            output,
+            format="MP3",
+            values=PublicationMetadata(title="New"),
+            fields=frozenset({"title"}),
+        )
+    assert output.getvalue() == b"untouched"

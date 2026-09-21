@@ -43,6 +43,7 @@ from app.modules.metadata.infrastructure.audio_structure import (
     mp3_structure,
     mp4_structure,
 )
+from app.modules.metadata.infrastructure.audio_tags import audio_tag_metadata
 from app.modules.metadata.infrastructure.audio_writeback import AUDIO_WRITABLE_FIELDS
 from app.modules.metadata.infrastructure.pdf_writeback import (
     PDF_WRITABLE_FIELDS,
@@ -107,58 +108,14 @@ def read_comic_metadata(content: bytes) -> PublicationMetadata:
     )
 
 
-def _text(values: object) -> str | None:
-    if hasattr(values, "text"):
-        values = values.text
-    if isinstance(values, (tuple, list)):
-        return " / ".join(str(value) for value in values) or None
-    return str(values) if values is not None else None
-
-
 def _audio_metadata(stream: BinaryIO, extension: str) -> PublicationMetadata:
-    # Standard tags only. No frame decoding, external media probes or transcoding.
     if extension == ".mp3":
-        tags: dict[str, object] = dict(ID3(stream))
-        names = {
-            "title": "TIT2",
-            "author": "TPE1",
-            "description": "COMM::eng",
-            "subjects": "TCON",
-            "publisher": "TPUB",
-            "language": "TLAN",
-            "date": "TDRC",
-        }
-    elif extension == ".flac":
-        tags = dict(FLAC(stream))
-        names = {
-            "title": "title",
-            "author": "artist",
-            "description": "description",
-            "subjects": "genre",
-            "publisher": "publisher",
-            "language": "language",
-            "date": "date",
-        }
-    else:
-        tags = dict(MP4(stream).tags or {})
-        names = {
-            "title": "©nam",
-            "author": "©ART",
-            "description": "desc",
-            "subjects": "©gen",
-            "date": "©day",
-        }
-    values = {field: _text(tags.get(key)) for field, key in names.items()}
-    author = values.get("author")
-    subjects = values.get("subjects")
-    return PublicationMetadata(
-        title=values.get("title"),
-        authors=(author,) if author else (),
-        description=values.get("description"),
-        subjects=(subjects,) if subjects else (),
-        publisher=values.get("publisher"),
-        language=values.get("language"),
-        published_at=values.get("date"),
+        tags = ID3(stream, translate=False)
+        return audio_tag_metadata(dict(tags), "MP3", id3_version=tags.version[1])
+    if extension == ".flac":
+        return audio_tag_metadata(dict(FLAC(stream)), "FLAC")
+    return audio_tag_metadata(
+        dict(MP4(stream).tags or {}), "M4B" if extension == ".m4b" else "M4A"
     )
 
 

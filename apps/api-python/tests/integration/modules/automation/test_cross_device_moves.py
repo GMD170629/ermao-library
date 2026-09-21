@@ -191,6 +191,10 @@ def test_real_cross_device_operation_verifies_copy_and_retains_recovery_source(
     assert (
         CleanExpiredMoveBackups(store, files, db_session, lambda: 5000).execute() == 0
     )
+    from app.modules.library.domain.file_moves import FileMoveError
+
+    with pytest.raises(FileMoveError, match="RECOVERY_BACKUP_PENDING"):
+        SqlAlchemyMoveTopology(db_session).source("allowed-node", actor.library_ids)
     retained = root / plan.moves[0].backup_relative_path
     if interruption == "publish":
         (separate_volume / "renamed/publication.epub").write_bytes(b"new user content")
@@ -202,6 +206,12 @@ def test_real_cross_device_operation_verifies_copy_and_retains_recovery_source(
     assert cleaned == (1 if interruption is None else 0)
     if interruption is None:
         assert not retained.exists()
+        assert (
+            SqlAlchemyMoveTopology(db_session)
+            .source("allowed-node", actor.library_ids)
+            .relative_path
+            == "renamed"
+        )
         assert (separate_volume / "renamed/publication.epub").read_bytes() == original
     else:
         assert retained.exists()

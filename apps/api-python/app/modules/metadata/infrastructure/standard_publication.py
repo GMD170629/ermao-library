@@ -3,6 +3,7 @@
 import hashlib
 import os
 import stat
+import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import replace
@@ -304,6 +305,18 @@ class StandardMetadataPublication:
                         if file_identity(os.fstat(source_fd)) != target.original:
                             raise StandardMetadataError("SOURCE_CHANGED")
                         apply_copy_attributes(prepared_fd, attributes)
+                        # A content replacement must invalidate size/mtime based
+                        # readers even if the new tag occupies exactly the same bytes.
+                        current = os.fstat(prepared_fd)
+                        os.utime(
+                            prepared_fd,
+                            ns=(
+                                current.st_atime_ns,
+                                max(
+                                    time.time_ns(), target.original.mtime_ns + 1_000_000
+                                ),
+                            ),
+                        )
                 os.fsync(prepared_fd)
                 identity = file_identity(os.fstat(prepared_fd))
                 digest = _digest(prepared_fd, identity.size)

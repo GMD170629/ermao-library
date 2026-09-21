@@ -75,3 +75,7 @@ Expired or changed plans require a new reviewed preview. If an operation was alr
 封面可用 `get_metadata_schema` 中的 `cover_references` 选择，通过系统字段 `cover_ref` 更新。仅列出当前图书已保存的不可变本地封面，最多 50 项；不接受 URL、文件路径或其他图书的引用，不复制图片。`values.cover_ref` 表示当前值，不一定是可重新选择的候选。清空封面仍须显式选择并满足人工保护权限。
 
 For covers, select a `cover_references` entry returned by `get_metadata_schema` and update the system field `cover_ref`. Only up to 50 immutable local covers already saved for this book are eligible. URLs, filesystem paths and other books' references are rejected; no image is copied. The current `values.cover_ref` is not necessarily an eligible candidate. Clearing requires explicit selection and the applicable protected-field permission.
+
+已完成任务的恢复副本尚未验证清理时，相关文件及其父目录移动返回 `RECOVERY_BACKUP_PENDING`，避免改变恢复位置；其他图书不受影响。正常保留期为两天，目标被改动而无法验证时继续保留，需核查任务记录。标准元数据写回更新文件修改时间，使阅读缓存识别新版本；纯移动保留原修改时间。ID3v2.3 使用标准斜线分隔多个作者，作者名字自身包含斜线时拒绝写入，以免读回歧义。
+
+While a completed operation retains an unverified recovery backup, moves of the affected file or its parent return `RECOVERY_BACKUP_PENDING`; unrelated books remain movable. The normal retention is two days; changed targets retain backups for review. Metadata writeback advances the file modification time to invalidate reader caches; moves preserve it. ID3v2.3 uses slash-separated authors and rejects author names containing literal slashes to prevent ambiguous round trips.

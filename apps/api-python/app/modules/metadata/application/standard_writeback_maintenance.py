@@ -52,3 +52,23 @@ class MaintainStandardBackups:
                 operation_id, ordinal, self.clock_ms(), failed=failed
             )
             self.uow.commit()
+
+
+class StandardRecoveryStore(Protocol):
+    def recover_verified_targets(self, now_ms: int) -> int: ...
+
+
+@dataclass(frozen=True)
+class RecoverStandardWrites:
+    store: StandardRecoveryStore
+    uow: StandardBackupUnitOfWork
+    clock_ms: Callable[[], int]
+
+    def execute(self) -> int:
+        try:
+            recovered = self.store.recover_verified_targets(self.clock_ms())
+            self.uow.commit()
+            return recovered
+        except Exception:
+            self.uow.rollback()
+            raise

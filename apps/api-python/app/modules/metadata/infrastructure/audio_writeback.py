@@ -1,6 +1,6 @@
 """Selective audio tags, verified against untouched frames, blocks and tracks."""
 
-from typing import BinaryIO, Literal
+from typing import BinaryIO
 
 from mutagen.flac import FLAC
 from mutagen.id3 import COMM, ID3, TIT2, TPE1
@@ -13,13 +13,19 @@ from app.modules.metadata.infrastructure.audio_structure import (
     mp3_structure,
     mp4_structure,
 )
+from app.modules.metadata.infrastructure.audio_tags import (
+    FLAC_FIELDS,
+    ID3_FIELDS,
+    MP4_FIELDS,
+    AudioFormat,
+    audio_tag_metadata,
+)
 from app.modules.metadata.infrastructure.id3_writeback import write_selected_id3
 
-AudioFormat = Literal["MP3", "M4A", "M4B", "FLAC"]
 AUDIO_WRITABLE_FIELDS = frozenset({"title", "authors", "description"})
-_ID3 = {"title": "TIT2", "authors": "TPE1", "description": "COMM"}
-_MP4 = {"title": "©nam", "authors": "©ART", "description": "desc"}
-_FLAC = {"title": "title", "authors": "artist", "description": "description"}
+_ID3 = {name: ID3_FIELDS[name].split(":", 1)[0] for name in AUDIO_WRITABLE_FIELDS}
+_MP4 = {name: MP4_FIELDS[name] for name in AUDIO_WRITABLE_FIELDS}
+_FLAC = {name: FLAC_FIELDS[name] for name in AUDIO_WRITABLE_FIELDS}
 
 
 def _values(values: PublicationMetadata, field: str) -> list[str]:
@@ -42,25 +48,11 @@ def _tags(audio, format: AudioFormat) -> dict:
     return dict(audio if format == "MP3" else audio.tags or {})
 
 
-def _observation(tags: dict, format: AudioFormat) -> PublicationMetadata:
-    mapping = _ID3 if format == "MP3" else _FLAC if format == "FLAC" else _MP4
-
-    def values(name: str) -> tuple[str, ...]:
-        key = mapping[name]
-        value = tags.get("COMM::eng" if key == "COMM" else key)
-        value = getattr(value, "text", value)
-        if value is None:
-            return ()
-        return (
-            tuple(str(item) for item in value)
-            if isinstance(value, (list, tuple))
-            else (str(value),)
-        )
-
-    return PublicationMetadata(
-        title=" / ".join(values("title")) or None,
-        authors=values("authors"),
-        description=" / ".join(values("description")) or None,
+def _observation(audio, format: AudioFormat) -> PublicationMetadata:
+    return audio_tag_metadata(
+        _tags(audio, format),
+        format,
+        id3_version=audio.version[1] if format == "MP3" else 4,
     )
 
 
@@ -84,7 +76,15 @@ def inspect_audio_write(
     ):
         raise StandardMetadataError("METADATA_TOO_LARGE")
     _structure(stream, format, fields)
-    return _observation(_tags(_load(stream, format), format), format)
+    audio = _load(stream, format)
+    if (
+        format == "MP3"
+        and audio.version[1] == 3
+        and "authors" in fields
+        and any("/" in author for author in values.authors)
+    ):
+        raise StandardMetadataError("UNSUPPORTED_ID3_AUTHOR_SEPARATOR")
+    return _observation(audio, format)
 
 
 def write_audio_metadata(
@@ -149,7 +149,8 @@ def write_audio_metadata(
         audio.save(output)
     output.flush()
     after_structure = _structure(output, format, fields)
-    after_tags = _tags(_load(output, format), format)
+    after_audio = _load(output, format)
+    after_tags = _tags(after_audio, format)
     selected_keys = {
         (_ID3 if format == "MP3" else _FLAC if format == "FLAC" else _MP4)[field]
         for field in fields
@@ -165,7 +166,7 @@ def write_audio_metadata(
     }
     if before_structure != after_structure or preserved_before != preserved_after:
         raise StandardMetadataError("AUDIO_CONTENT_CHANGED")
-    observed = _observation(after_tags, format)
+    observed = _observation(after_audio, format)
     for field in fields:
         if _values(observed, field) != _values(values, field):
             raise StandardMetadataError("METADATA_VERIFICATION_FAILED")

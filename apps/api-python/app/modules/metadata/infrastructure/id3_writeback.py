@@ -5,6 +5,7 @@ from typing import BinaryIO
 
 from mutagen.id3 import ID3
 
+from app.modules.metadata.application.standard_files import StandardMetadataError
 from app.modules.metadata.infrastructure.audio_structure import read_at, syncsafe
 
 
@@ -32,9 +33,15 @@ def write_selected_id3(
         if name == "COMM" and selected:
             # Only the default English description, never language-specific comments.
             encoding = frame[10] if len(frame) > 10 else -1
-            selected = frame[11:14] == b"eng" and (
-                frame[14:15] == b"\0" if encoding in {0, 3} else frame[14:16] == b"\0\0"
-            )
+            selected = False
+            if frame[11:14] == b"eng":
+                try:
+                    codec = {0: "latin-1", 1: "utf-16", 2: "utf-16-be", 3: "utf-8"}[
+                        encoding
+                    ]
+                    selected = frame[14:].decode(codec).split("\0", 1)[0] == ""
+                except (KeyError, UnicodeError) as error:
+                    raise StandardMetadataError("INVALID_ID3_DESCRIPTION") from error
         if not selected:
             kept.append(frame)
         offset += len(frame)
