@@ -71,3 +71,18 @@ def test_source_entry_combines_builtin_library_and_global_rules() -> None:
         library_patterns=None,
         global_patterns="*.part",
     )
+
+
+def test_controlled_move_slots_are_ignored_even_when_hidden_files_are_enabled():
+    from app.modules.imports.domain.ignore_rules import should_ignore_source_entry
+
+    slot = ".ermao-mcp-" + "a" * 32 + "-source"
+    for path in (slot, slot.upper(), slot + "/book.epub"):
+        assert should_ignore_source_entry(
+            relative_path=path,
+            name=path.rsplit("/", 1)[-1],
+            is_regular_file=path.endswith(".epub"),
+            ignore_hidden=False,
+            library_patterns=None,
+            global_patterns="",
+        )

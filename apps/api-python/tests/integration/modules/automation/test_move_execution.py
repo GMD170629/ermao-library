@@ -99,9 +99,9 @@ def test_move_publication_and_restart_repair_keep_files_and_identity(
             assert not db_session.in_transaction()
             super().validate(move)
 
-        def publish(self, move):
+        def publish(self, move, copy=None):
             assert not db_session.in_transaction()
-            super().publish(move)
+            super().publish(move, copy)
             self.calls += 1
             if crash_after_publish:
                 raise OSError("simulated interruption after rename")
@@ -159,8 +159,8 @@ def test_real_grant_revocation_before_publish_prevents_file_and_index_changes(
     actor, root, store = prepare(db_session, tmp_path)
 
     class RevokeBeforePublish(SameDeviceMovePublication):
-        def is_published(self, move):
-            published = super().is_published(move)
+        def is_published(self, move, copy=None):
+            published = super().is_published(move, copy)
             build_grant_manager(db_session).revoke(
                 user_id=actor.user_id, grant_id=actor.grant_id
             )
@@ -175,3 +175,59 @@ def test_real_grant_revocation_before_publish_prevents_file_and_index_changes(
     assert (root / "allowed/metadata.opf").read_bytes() == b"original metadata"
     assert not (root / "renamed").exists()
     assert db_session.get(LibrarySourceNode, "allowed-node").relative_path == "allowed"
+
+
+def test_move_creates_and_indexes_planned_parent_directories(db_session, tmp_path):
+    from app.models import LibraryReadableResource
+
+    access, root = file_access(db_session, tmp_path)
+    (root / "allowed").rmdir()
+    (root / "allowed").write_bytes(b"publication")
+    db_session.get(Library, "test-library").organization_mode = "FLAT"
+    node = db_session.get(LibrarySourceNode, "allowed-node")
+    node.physical_kind = "REGULAR_FILE"
+    node.observed_size_bytes = 11
+    db_session.flush()
+    db_session.add(
+        LibraryReadableResource(
+            id="file-resource",
+            library_id="test-library",
+            book_id="allowed",
+            source_node_id="allowed-node",
+            adapter_id="epub",
+            adapter_version="1",
+            format="EPUB",
+            enablement_state="ENABLED",
+            import_state="READY",
+        )
+    )
+    db_session.commit()
+    actor = MoveActor(
+        access.user_id, access.grant_id, access.permissions.library_ids, False
+    )
+    plan = PrepareFileMovePlan(
+        SqlAlchemyMoveTopology(db_session),
+        AnchoredMoveInspection(),
+        lambda: 1000,
+        lambda: "plan",
+    ).execute(
+        actor, (MoveRequest("allowed-node", "test-library", "author/series/book.epub"),)
+    )
+    store = SqlAlchemyFileMoveOperations(db_session)
+    store.save_plan(plan)
+    store.enqueue(plan, "operation", "request", 2000)
+    db_session.commit()
+    assert store.claim_next(3000) == "operation"
+    db_session.commit()
+    executor(
+        db_session, store, SameDeviceMovePublication(), lambda actor: actor
+    ).execute("operation")
+    assert store.progress("operation", actor).status == "COMPLETED"
+    assert (root / "author/series/book.epub").read_bytes() == b"publication"
+    db_session.expire_all()
+    moved = db_session.get(LibrarySourceNode, "allowed-node")
+    assert moved.relative_path == "author/series/book.epub"
+    parent = db_session.get(LibrarySourceNode, moved.parent_id)
+    assert parent.relative_path == "author/series"
+    assert db_session.get(LibrarySourceNode, parent.parent_id).relative_path == "author"
+    assert len(store.execution("operation").created_directories[0]) == 2

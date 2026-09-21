@@ -13,7 +13,7 @@ from app.modules.library.domain.file_moves import (
     MoveInventory,
     MoveInventoryEntry,
     collision_key,
-    validate_move_path,
+    validate_portable_file_path,
 )
 from app.modules.library.infrastructure.source_file_access import open_library_directory
 
@@ -31,7 +31,7 @@ def file_identity(value: os.stat_result) -> FileIdentity:
 
 
 def inspect_move_source(root: Path, relative_path: str) -> MoveInventory:
-    validate_move_path(relative_path)
+    validate_portable_file_path(relative_path)
     parent, _, name = relative_path.rpartition("/")
     entries: list[MoveInventoryEntry] = []
     files = byte_count = 0
@@ -61,7 +61,7 @@ def inspect_move_source(root: Path, relative_path: str) -> MoveInventory:
                 seen: set[str] = set()
                 for child in sorted(names):
                     child_path = path + "/" + child
-                    validate_move_path(child_path)
+                    validate_portable_file_path(child_path)
                     key = collision_key(child)
                     if key in seen:
                         raise FileMoveError("PORTABLE_NAME_COLLISION")
@@ -93,7 +93,7 @@ def inspect_move_source(root: Path, relative_path: str) -> MoveInventory:
 
 
 def inspect_move_destination(root: Path, relative_path: str) -> DestinationInspection:
-    validate_move_path(relative_path)
+    validate_portable_file_path(relative_path)
     parts = relative_path.split("/")
     with open_library_directory(root) as root_fd:
         directory = root_fd
@@ -136,9 +136,20 @@ def inspect_move_destination(root: Path, relative_path: str) -> DestinationInspe
     raise FileMoveError("DESTINATION_EXISTS")
 
 
+def require_writable_move_directory(root: Path, relative_path: str) -> None:
+    with open_library_directory(root, relative_path) as descriptor:
+        if os.fstatvfs(descriptor).f_flag & os.ST_RDONLY:
+            raise FileMoveError("READ_ONLY_FILESYSTEM")
+        if not os.access(".", os.W_OK | os.X_OK, dir_fd=descriptor, effective_ids=True):
+            raise FileMoveError("DIRECTORY_NOT_WRITABLE")
+
+
 class AnchoredMoveInspection:
     def source(self, root: Path, relative_path: str) -> MoveInventory:
+        require_writable_move_directory(root, relative_path.rpartition("/")[0])
         return inspect_move_source(root, relative_path)
 
     def destination(self, root: Path, relative_path: str) -> DestinationInspection:
-        return inspect_move_destination(root, relative_path)
+        result = inspect_move_destination(root, relative_path)
+        require_writable_move_directory(root, result.parent_relative_path)
+        return result

@@ -1,18 +1,23 @@
 """Advance durable file moves through publication and index reconciliation."""
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
+from pathlib import Path
 from typing import Protocol
 
 from app.contracts.source_relocation import SourceRelocation
 from app.modules.library.application.file_move_operations import require_plan_access
 from app.modules.library.application.file_move_plans import (
+    CreatedMoveDirectory,
+    DestinationInspection,
     FileMovePlan,
     MoveActor,
     PlannedMove,
+    PreparedMoveCopy,
+    StagedMoveSource,
 )
-from app.modules.library.domain.file_moves import FileMoveError
+from app.modules.library.domain.file_moves import FileIdentity, FileMoveError
 
 
 @dataclass(frozen=True)
@@ -20,9 +25,17 @@ class MoveExecution:
     plan: FileMovePlan
     stages: tuple[str, ...]
     cancelled: bool
+    created_directories: tuple[tuple[CreatedMoveDirectory, ...], ...]
+    copies: tuple[PreparedMoveCopy | None, ...]
 
 
 class MoveExecutionStore(Protocol):
+    def record_copy(
+        self, operation_id: str, ordinal: int, copy: PreparedMoveCopy
+    ) -> None: ...
+    def record_source_backup(
+        self, operation_id: str, ordinal: int, backup: StagedMoveSource
+    ) -> None: ...
     def execution(self, operation_id: str) -> MoveExecution: ...
     def checkpoint(
         self,
@@ -33,16 +46,35 @@ class MoveExecutionStore(Protocol):
         error_code: str | None = None,
     ) -> None: ...
     def finish(self, operation_id: str, now_ms: int) -> None: ...
+    def record_directory(
+        self, operation_id: str, ordinal: int, directory: CreatedMoveDirectory
+    ) -> None: ...
 
 
 class MovePublicationPort(Protocol):
+    def create_directory(
+        self, root: Path, relative_path: str, parent: DestinationInspection
+    ) -> FileIdentity: ...
     def validate(self, move: PlannedMove) -> None: ...
-    def publish(self, move: PlannedMove) -> None: ...
-    def is_published(self, move: PlannedMove) -> bool: ...
+    def prepare_copy(self, move: PlannedMove) -> PreparedMoveCopy | None: ...
+    def publish(
+        self, move: PlannedMove, copy: PreparedMoveCopy | None = None
+    ) -> None: ...
+    def is_published(
+        self, move: PlannedMove, copy: PreparedMoveCopy | None = None
+    ) -> bool: ...
+    def finish_source(
+        self, move: PlannedMove, copy: PreparedMoveCopy | None = None
+    ) -> StagedMoveSource | None: ...
 
 
 class MoveIndexPort(Protocol):
-    def apply(self, move: PlannedMove, now: datetime) -> tuple[str, ...]: ...
+    def apply(
+        self,
+        move: PlannedMove,
+        now: datetime,
+        directories: tuple[CreatedMoveDirectory, ...] = (),
+    ) -> tuple[str, ...]: ...
 
 
 class MoveExecutionUnitOfWork(Protocol):
@@ -88,11 +120,23 @@ class ExecuteFileMoveOperation:
         for ordinal, move in enumerate(plan.moves):
             current = self.store.execution(operation_id)
             stage = current.stages[ordinal]
+            copy = current.copies[ordinal]
             self.uow.rollback()
             if stage in {"COMPLETED", "FAILED", "CANCELLED"}:
                 continue
             if stage == "RECOVERY_REQUIRED":
                 return
+            if stage == "FILES_PUBLISHED" and current.created_directories[ordinal]:
+                last_directory = current.created_directories[ordinal][-1]
+                move = replace(
+                    move,
+                    destination_inspection=DestinationInspection(
+                        (),
+                        last_directory.identity.device,
+                        last_directory.identity.inode,
+                        last_directory.relative_path,
+                    ),
+                )
             publication_uncertain = stage != "QUEUED"
             try:
                 if stage == "QUEUED":
@@ -111,10 +155,44 @@ class ExecuteFileMoveOperation:
                     self.uow.commit()
                     stage = "PREPARING"
                 if stage == "PREPARING":
+                    created = list(current.created_directories[ordinal])
+                    destination = move.destination_inspection
+                    for relative in move.destination_inspection.missing_directories:
+                        saved = next(
+                            (
+                                item
+                                for item in created
+                                if item.relative_path == relative
+                            ),
+                            None,
+                        )
+                        if saved is None:
+                            require_plan_access(plan, self.authorize(plan.actor))
+                            self.uow.rollback()
+                            identity = self.files.create_directory(
+                                move.destination.root, relative, destination
+                            )
+                            saved = CreatedMoveDirectory(relative, identity)
+                            self.store.record_directory(operation_id, ordinal, saved)
+                            self.uow.commit()
+                            created.append(saved)
+                        destination = DestinationInspection(
+                            (), saved.identity.device, saved.identity.inode, relative
+                        )
+                    if created:
+                        move = replace(move, destination_inspection=destination)
+                    if move.cross_device and copy is None:
+                        require_plan_access(plan, self.authorize(plan.actor))
+                        self.uow.rollback()
+                        copy = self.files.prepare_copy(move)
+                        if copy is None:
+                            raise FileMoveError("COPY_NOT_PREPARED")
+                        self.store.record_copy(operation_id, ordinal, copy)
+                        self.uow.commit()
                     # Reopening an uncertain rename observes only the frozen source
                     # and target. A published item receives minimal index repair,
                     # even if its token has since been revoked.
-                    published = self.files.is_published(move)
+                    published = self.files.is_published(move, copy)
                     publication_uncertain = published
                     if not published:
                         require_plan_access(plan, self.authorize(plan.actor))
@@ -127,16 +205,20 @@ class ExecuteFileMoveOperation:
                             self.uow.commit()
                             continue
                         publication_uncertain = True
-                        self.files.publish(move)
+                        self.files.publish(move, copy)
                     self.store.checkpoint(
                         operation_id, ordinal, "FILES_PUBLISHED", self.clock_ms()
                     )
                     self.uow.commit()
                     stage = "FILES_PUBLISHED"
                 if stage == "FILES_PUBLISHED":
-                    if not self.files.is_published(move):
+                    if not self.files.is_published(move, copy):
                         raise FileMoveError("PUBLISHED_FILE_MISSING")
-                    node_ids = self.index.apply(move, self.clock())
+                    node_ids = self.index.apply(
+                        move,
+                        self.clock(),
+                        self.store.execution(operation_id).created_directories[ordinal],
+                    )
                     change = SourceRelocation(
                         move.source.library_id,
                         move.source.relative_path,
@@ -151,6 +233,10 @@ class ExecuteFileMoveOperation:
                         operation_id, ordinal, "INDEX_UPDATED", self.clock_ms()
                     )
                     self.uow.commit()
+                self.uow.rollback()
+                backup = self.files.finish_source(move, copy)
+                if backup is not None:
+                    self.store.record_source_backup(operation_id, ordinal, backup)
                 self.store.checkpoint(
                     operation_id, ordinal, "COMPLETED", self.clock_ms()
                 )

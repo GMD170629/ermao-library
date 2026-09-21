@@ -24,18 +24,19 @@ def open_library_directory(root: Path, relative_path: str = "") -> Iterator[int]
         raise SourceAccessError("INVALID_RELATIVE_PATH")
     descriptors: list[int] = []
     try:
-        directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-        descriptors.append(directory)
-        for name in relative_path.split("/") if relative_path else ():
-            directory = os.open(
-                name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory
-            )
+        try:
+            directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
             descriptors.append(directory)
+            for name in relative_path.split("/") if relative_path else ():
+                directory = os.open(
+                    name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory
+                )
+                descriptors.append(directory)
+        except FileNotFoundError:
+            raise
+        except OSError as error:
+            raise SourceAccessError("SOURCE_UNAVAILABLE") from error
         yield directory
-    except FileNotFoundError:
-        raise
-    except OSError as error:
-        raise SourceAccessError("SOURCE_UNAVAILABLE") from error
     finally:
         for descriptor in reversed(descriptors):
             os.close(descriptor)
@@ -53,13 +54,13 @@ def open_library_file(root: Path, relative_path: str) -> Iterator[int]:
             descriptor = os.open(
                 name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
             )
-            try:
-                if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-                    raise SourceAccessError("REGULAR_FILE_REQUIRED")
-                yield descriptor
-            finally:
-                os.close(descriptor)
         except FileNotFoundError:
             raise
         except OSError as error:
             raise SourceAccessError("SOURCE_UNAVAILABLE") from error
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise SourceAccessError("REGULAR_FILE_REQUIRED")
+            yield descriptor
+        finally:
+            os.close(descriptor)

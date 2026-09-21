@@ -1,5 +1,6 @@
 """Freeze authorized moves without creating or moving any library file."""
 
+import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,6 +9,7 @@ from typing import Protocol
 from app.modules.library.domain.file_moves import (
     MAX_BYTES,
     MAX_FILES,
+    FileIdentity,
     FileMoveError,
     MoveInventory,
     MoveRequest,
@@ -49,11 +51,19 @@ class DestinationInspection:
 
 
 @dataclass(frozen=True)
+class CreatedMoveDirectory:
+    relative_path: str
+    identity: FileIdentity
+
+
+@dataclass(frozen=True)
 class PlannedMove:
     source: MoveSource
     destination: MoveDestination
     inventory: MoveInventory
     destination_inspection: DestinationInspection
+    staging_relative_path: str | None = None
+    backup_relative_path: str | None = None
 
     @property
     def cross_device(self) -> bool:
@@ -61,6 +71,25 @@ class PlannedMove:
             self.inventory.entries[0].identity.device
             != self.destination_inspection.device
         )
+
+
+@dataclass(frozen=True)
+class CopiedContent:
+    relative_path: str
+    size: int
+    sha256: str
+
+
+@dataclass(frozen=True)
+class PreparedMoveCopy:
+    inventory: MoveInventory
+    contents: tuple[CopiedContent, ...]
+
+
+@dataclass(frozen=True)
+class StagedMoveSource:
+    relative_path: str
+    identity: FileIdentity
 
 
 @dataclass(frozen=True)
@@ -124,6 +153,7 @@ class PrepareFileMovePlan:
             self.topology.destination(source, request, actor.library_ids)
             for source, request in zip(sources, requests, strict=True)
         )
+        plan_id = self.new_id()
         moves: list[PlannedMove] = []
         files = size = 0
         for source, destination in zip(sources, destinations, strict=True):
@@ -135,6 +165,16 @@ class PrepareFileMovePlan:
             size += inventory.byte_count
             if files > MAX_FILES or size > MAX_BYTES:
                 raise FileMoveError("INVENTORY_LIMIT")
-            moves.append(PlannedMove(source, destination, inventory, target))
+            slot = hashlib.sha256(f"{plan_id}:{len(moves)}".encode()).hexdigest()[:32]
+            moves.append(
+                PlannedMove(
+                    source,
+                    destination,
+                    inventory,
+                    target,
+                    f".ermao-mcp-{slot}-target",
+                    f".ermao-mcp-{slot}-source",
+                )
+            )
         now = self.clock_ms()
-        return FileMovePlan(self.new_id(), actor, now, now + 15 * 60_000, tuple(moves))
+        return FileMovePlan(plan_id, actor, now, now + 15 * 60_000, tuple(moves))

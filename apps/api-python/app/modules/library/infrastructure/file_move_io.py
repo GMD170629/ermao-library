@@ -6,12 +6,18 @@ import os
 import sys
 from pathlib import Path
 
-from app.modules.library.application.file_move_plans import PlannedMove
+from app.modules.library.application.file_move_plans import (
+    DestinationInspection,
+    PlannedMove,
+    PreparedMoveCopy,
+    StagedMoveSource,
+)
 from app.modules.library.domain.file_moves import FileIdentity, FileMoveError
 from app.modules.library.infrastructure.move_inventory import (
     file_identity,
     inspect_move_destination,
     inspect_move_source,
+    require_writable_move_directory,
 )
 from app.modules.library.infrastructure.source_file_access import open_library_directory
 
@@ -143,7 +149,29 @@ def published_same_device_identity(
 
 
 class SameDeviceMovePublication:
+    def create_directory(
+        self, root: Path, relative_path: str, parent: DestinationInspection
+    ) -> FileIdentity:
+        parent_path, _, name = relative_path.rpartition("/")
+        if parent_path != parent.parent_relative_path:
+            raise FileMoveError("DESTINATION_CHANGED")
+        with open_library_directory(root, parent_path) as descriptor:
+            info = os.fstat(descriptor)
+            if (info.st_dev, info.st_ino) != (parent.device, parent.parent_inode):
+                raise FileMoveError("DESTINATION_CHANGED")
+            os.mkdir(name, 0o755, dir_fd=descriptor)
+            os.fsync(descriptor)
+            return file_identity(
+                os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            )
+
     def validate(self, move: PlannedMove) -> None:
+        require_writable_move_directory(
+            move.source.root, move.source.relative_path.rpartition("/")[0]
+        )
+        require_writable_move_directory(
+            move.destination.root, move.destination_inspection.parent_relative_path
+        )
         if move.cross_device:
             raise FileMoveError("CROSS_DEVICE_COPY_REQUIRED")
         if (
@@ -156,13 +184,21 @@ class SameDeviceMovePublication:
         )
         if destination != move.destination_inspection:
             raise FileMoveError("DESTINATION_CHANGED")
-        if destination.missing_directories:
-            raise FileMoveError("DESTINATION_DIRECTORIES_NOT_PREPARED")
 
-    def publish(self, move: PlannedMove) -> None:
+    def prepare_copy(self, move: PlannedMove) -> PreparedMoveCopy | None:
+        return None
+
+    def finish_source(
+        self, move: PlannedMove, copy: PreparedMoveCopy | None = None
+    ) -> StagedMoveSource | None:
+        return None
+
+    def publish(self, move: PlannedMove, copy: PreparedMoveCopy | None = None) -> None:
         publish_same_device_move(move)
 
-    def is_published(self, move: PlannedMove) -> bool:
+    def is_published(
+        self, move: PlannedMove, copy: PreparedMoveCopy | None = None
+    ) -> bool:
         target = published_same_device_identity(
             move.destination.root,
             move.destination.relative_path,

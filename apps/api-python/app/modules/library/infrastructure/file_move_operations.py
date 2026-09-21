@@ -13,7 +13,13 @@ from app.modules.library.application.file_move_operations import (
     FileMoveProgress,
     require_plan_access,
 )
-from app.modules.library.application.file_move_plans import FileMovePlan, MoveActor
+from app.modules.library.application.file_move_plans import (
+    CreatedMoveDirectory,
+    FileMovePlan,
+    MoveActor,
+    PreparedMoveCopy,
+    StagedMoveSource,
+)
 from app.modules.library.domain.file_moves import FileMoveError
 from app.modules.library.infrastructure.file_move_schema import (
     LibraryFileMoveOperation,
@@ -26,6 +32,9 @@ from app.modules.library.infrastructure.operations import (
 )
 
 _PLAN = TypeAdapter(FileMovePlan)
+_DIRECTORIES = TypeAdapter(tuple[CreatedMoveDirectory, ...])
+_COPY = TypeAdapter(PreparedMoveCopy)
+_BACKUP = TypeAdapter(StagedMoveSource)
 _TERMINAL = frozenset(
     {"COMPLETED", "PARTIAL", "FAILED", "CANCELLED", "RECOVERY_REQUIRED"}
 )
@@ -262,7 +271,27 @@ class SqlAlchemyFileMoveOperations:
                 .order_by(LibraryFileMoveTarget.ordinal)
             )
         )
-        return MoveExecution(plan, stages, row.cancel_requested)
+        directories = tuple(
+            _DIRECTORIES.validate_python(target.recovery.get("directories", []))
+            for target in self._db.scalars(
+                select(LibraryFileMoveTarget)
+                .where(LibraryFileMoveTarget.operation_id == operation_id)
+                .order_by(LibraryFileMoveTarget.ordinal)
+                .execution_options(populate_existing=True)
+            )
+        )
+        copies = tuple(
+            _COPY.validate_python(target.recovery["copy"])
+            if "copy" in target.recovery
+            else None
+            for target in self._db.scalars(
+                select(LibraryFileMoveTarget)
+                .where(LibraryFileMoveTarget.operation_id == operation_id)
+                .order_by(LibraryFileMoveTarget.ordinal)
+                .execution_options(populate_existing=True)
+            )
+        )
+        return MoveExecution(plan, stages, row.cancel_requested, directories, copies)
 
     def checkpoint(
         self,
@@ -302,7 +331,7 @@ class SqlAlchemyFileMoveOperations:
             if target is None:
                 raise FileMoveError("RESOURCE_NOT_FOUND")
             if target.stage != "RECOVERY_REQUIRED":
-                target.recovery = {"resume_stage": target.stage}
+                target.recovery = {**target.recovery, "resume_stage": target.stage}
                 self._db.flush()
         self._db.execute(
             update(LibraryFileMoveTarget)
@@ -364,4 +393,49 @@ class SqlAlchemyFileMoveOperations:
             .where(LibraryFileMoveOperation.id == operation_id)
             .values(status="PREPARING", updated_at_ms=now_ms)
         )
+        self._db.flush()
+
+    def record_directory(
+        self, operation_id: str, ordinal: int, directory: CreatedMoveDirectory
+    ) -> None:
+        target = self._db.get(
+            LibraryFileMoveTarget, (operation_id, ordinal), populate_existing=True
+        )
+        if target is None:
+            raise FileMoveError("RESOURCE_NOT_FOUND")
+        existing = _DIRECTORIES.validate_python(target.recovery.get("directories", []))
+        target.recovery = {
+            **target.recovery,
+            "directories": _DIRECTORIES.dump_python(
+                (*existing, directory), mode="json"
+            ),
+        }
+        self._db.flush()
+
+    def record_copy(
+        self, operation_id: str, ordinal: int, copy: PreparedMoveCopy
+    ) -> None:
+        target = self._db.get(
+            LibraryFileMoveTarget, (operation_id, ordinal), populate_existing=True
+        )
+        if target is None:
+            raise FileMoveError("RESOURCE_NOT_FOUND")
+        target.recovery = {
+            **target.recovery,
+            "copy": _COPY.dump_python(copy, mode="json"),
+        }
+        self._db.flush()
+
+    def record_source_backup(
+        self, operation_id: str, ordinal: int, backup: StagedMoveSource
+    ) -> None:
+        target = self._db.get(
+            LibraryFileMoveTarget, (operation_id, ordinal), populate_existing=True
+        )
+        if target is None:
+            raise FileMoveError("RESOURCE_NOT_FOUND")
+        target.recovery = {
+            **target.recovery,
+            "source_backup": _BACKUP.dump_python(backup, mode="json"),
+        }
         self._db.flush()

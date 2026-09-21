@@ -4,6 +4,7 @@ import unicodedata
 from dataclasses import dataclass
 from string import Formatter
 
+from app.contracts.controlled_file_slots import is_controlled_file_slot
 from app.modules.library.domain.source_nodes import (
     SourceNodeRelativePath,
     parse_source_node_relative_path,
@@ -29,10 +30,19 @@ def collision_key(value: str) -> str:
 
 
 def validate_move_path(value: str) -> str:
+    validate_portable_file_path(value)
+    if any(is_controlled_file_slot(part) for part in value.split("/")):
+        raise FileMoveError("RESERVED_OPERATION_PATH")
+    return value
+
+
+def validate_portable_file_path(value: str) -> str:
     if not isinstance(parse_source_node_relative_path(value), SourceNodeRelativePath):
         raise FileMoveError("INVALID_RELATIVE_PATH")
     if len(value.encode("utf-8")) > 4096:
         raise FileMoveError("PATH_TOO_LONG")
+    if len(value.split("/")) > 128:
+        raise FileMoveError("PATH_TOO_DEEP")
     for name in value.split("/"):
         if (
             any(ord(char) < 32 or char in '\\:*?"<>|' for char in name)

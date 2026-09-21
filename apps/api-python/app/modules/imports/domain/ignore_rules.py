@@ -5,6 +5,8 @@ from __future__ import annotations
 import fnmatch
 from pathlib import Path, PurePosixPath
 
+from app.contracts.controlled_file_slots import is_controlled_file_slot
+
 IMPORT_IGNORE_PATTERNS_KEY = "import.ignorePatterns"
 
 _COVER_EXTENSIONS = frozenset({"jpg", "jpeg", "png", "webp"})
@@ -75,6 +77,8 @@ def should_ignore_source_entry(
     library_patterns: str | None,
     global_patterns: str,
 ) -> bool:
+    if any(is_controlled_file_slot(part) for part in relative_path.split("/")):
+        return True
     if ignore_hidden and name.startswith(".") and name not in {".", ".."}:
         return True
     if is_regular_file and is_builtin_ignored_file(name):
