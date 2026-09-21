@@ -90,8 +90,10 @@ test('stable Android selection replaces historical exceptions and guards the ent
   assert.match(mobileJob, /outputs.build_android == 'true'/);
   assert.match(mobileJob, /build_android: true/);
   assert.doesNotMatch(releaseWorkflow, /1\.0\.3|1\.0\.4|1\.1\.0|1\.2\.0/);
-  assert.match(packageJob, /outputs.build_android == 'false' && needs.mobile-release.result == 'skipped'/);
-  assert.match(packageJob, /outputs.build_android == 'true' && needs.mobile-release.result == 'success'/);
+  assert.match(packageJob, /outputs.build_android == 'false'/);
+  assert.match(packageJob, /needs.mobile-release.result == 'skipped' && needs.android-package.result == 'skipped'/);
+  assert.match(job('mobile-contracts'), /build_android: false/);
+  assert.match(packageJob, /outputs.build_android == 'true' && needs.mobile-contracts.result == 'skipped' && needs.mobile-release.result == 'success'/);
   for (const name of ['Download checked stable Android APK', 'Set up JDK for stable signing', 'Set up Android SDK for stable signing', 'Install signing tools', 'Sign and verify stable Android APK']) {
     assert.ok(job('android-package').includes(`- name: ${name}\n        if: needs.validate.outputs.build_android == 'true'`));
   }
@@ -184,8 +186,9 @@ test('server build and backend tests run independently, then require every selec
   // Evaluate the actual, bounded job condition with all Actions result states.
   const condition = job('package').match(/if: >-\s+\$\{\{([\s\S]*?)\}\}/)[1];
   const permitted = ({ android = false, mode = 'full', cancelled = false, results = {} } = {}) => {
-    const needs = Object.fromEntries(['validate', 'backend-tests', 'server-package', 'mobile-release', 'android-package'].map(name => [name, { result: 'success' }]));
+    const needs = Object.fromEntries(['validate', 'backend-tests', 'server-package', 'mobile-contracts', 'mobile-release', 'android-package'].map(name => [name, { result: 'success' }]));
     needs.validate.outputs = { build_android: String(android), release_mode: mode };
+    if (android || mode === 'code-only') needs['mobile-contracts'].result = 'skipped';
     if (!android) for (const name of ['mobile-release', 'android-package']) needs[name].result = 'skipped';
     if (mode === 'code-only') needs['backend-tests'].result = 'skipped';
     for (const [name, result] of Object.entries(results)) needs[name].result = result;
@@ -197,7 +200,7 @@ test('server build and backend tests run independently, then require every selec
   assert.equal(permitted({ mode: 'code-only' }), true);
   assert.equal(permitted({ cancelled: true }), false);
   for (const android of [false, true]) {
-    for (const name of ['validate', 'backend-tests', 'server-package', ...(android ? ['mobile-release', 'android-package'] : [])]) {
+    for (const name of ['validate', 'backend-tests', 'server-package', ...(android ? ['mobile-release', 'android-package'] : ['mobile-contracts'])]) {
       for (const result of ['failure', 'cancelled', 'skipped']) assert.equal(permitted({ android, results: { [name]: result } }), false, `${name}: ${result}`);
     }
   }

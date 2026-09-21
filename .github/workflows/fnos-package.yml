@@ -326,6 +326,17 @@ jobs:
           cache-from: type=gha,scope=develop-image
           cache-to: type=gha,mode=max,scope=develop-image
 
+  mobile-contracts:
+    name: Check mobile contracts without Android
+    needs: validate
+    if: github.ref_type == 'tag' && needs.validate.outputs.release_mode != 'code-only' && needs.validate.outputs.build_android == 'false'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/mobile.yml
+    with:
+      build_android: false
+      stable_release: true
+
   mobile-release:
     if: github.ref_type == 'tag' && needs.validate.outputs.release_mode != 'code-only' && needs.validate.outputs.build_android == 'true'
     needs: validate
@@ -384,6 +395,10 @@ jobs:
       artifact_id: ${{ steps.android_bundle.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v6
+      - name: Verify selected Android artifact identity
+        env:
+          ARTIFACT_ID: ${{ needs.mobile-release.outputs.stable_artifact_id }}
+        run: '[[ "$ARTIFACT_ID" =~ ^[0-9]+$ ]]'
       - name: Download checked stable Android APK
         if: needs.validate.outputs.build_android == 'true'
         uses: actions/download-artifact@v4
@@ -564,14 +579,16 @@ jobs:
 
   package:
     name: Assemble verified selected release artifacts
-    needs: [validate, backend-tests, server-package, mobile-release, android-package]
+    needs: [validate, backend-tests, server-package, mobile-contracts, mobile-release, android-package]
     if: >-
       ${{ !cancelled() && github.ref_type == 'tag' && needs.validate.result == 'success' &&
           needs.server-package.result == 'success' &&
           ((needs.validate.outputs.release_mode == 'code-only' && needs.backend-tests.result == 'skipped') ||
            (needs.validate.outputs.release_mode != 'code-only' && needs.backend-tests.result == 'success')) &&
-          ((needs.validate.outputs.build_android == 'false' && needs.mobile-release.result == 'skipped' && needs.android-package.result == 'skipped') ||
-           (needs.validate.outputs.build_android == 'true' && needs.mobile-release.result == 'success' && needs.android-package.result == 'success')) }}
+          ((needs.validate.outputs.build_android == 'false' &&
+            ((needs.validate.outputs.release_mode == 'code-only' && needs.mobile-contracts.result == 'skipped') ||
+             (needs.validate.outputs.release_mode != 'code-only' && needs.mobile-contracts.result == 'success')) && needs.mobile-release.result == 'skipped' && needs.android-package.result == 'skipped') ||
+           (needs.validate.outputs.build_android == 'true' && needs.mobile-contracts.result == 'skipped' && needs.mobile-release.result == 'success' && needs.android-package.result == 'success')) }}
     runs-on: ubuntu-latest
     env:
       BUILD_ANDROID: ${{ needs.validate.outputs.build_android }}
@@ -590,6 +607,20 @@ jobs:
             node scripts/validate-release-notes.mjs
           fi
 
+      - name: Verify candidate artifact identities
+        env:
+          SERVER_ARTIFACT_ID: ${{ needs.server-package.outputs.artifact_id }}
+          ANDROID_ARTIFACT_ID: ${{ needs.android-package.outputs.artifact_id }}
+          IMAGE_DIGEST: ${{ needs.server-package.outputs.image_digest }}
+          RELEASE_MODE: ${{ needs.validate.outputs.release_mode }}
+        run: |
+          [[ "$SERVER_ARTIFACT_ID" =~ ^[0-9]+$ ]]
+          if [[ "$BUILD_ANDROID" == 'true' ]]; then
+            [[ "$ANDROID_ARTIFACT_ID" =~ ^[0-9]+$ ]]
+          fi
+          if [[ "$RELEASE_MODE" != 'code-only' ]]; then
+            [[ "$IMAGE_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          fi
       - name: Download this run's accepted server candidate
         uses: actions/download-artifact@v4
         with:

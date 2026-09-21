@@ -209,6 +209,7 @@ export async function workflowAndroidSelection({ root = process.cwd(), env = pro
     request = validateRequest(JSON.parse(readFileSync(resolve(root, requestPath), 'utf8')), requestPath);
     validateSource(request, { root, requestPath, accepted: true });
     requireValue(request.channel === 'stable', 'Stable tag requires stable request');
+    requireValue(!request.android || request.versions.android === version, 'Legacy stable APK version must match the server tag');
     requireValue(!request.targets.includes('ios'), 'The legacy stable workflow does not deliver iOS');
     // Admission necessarily follows the frozen source commit. Only this request may differ.
     const changed = gitRead(root, ['diff', '--name-only', request.sourceCommit, 'HEAD']).split('\n').filter(Boolean);
@@ -220,25 +221,25 @@ export async function workflowAndroidSelection({ root = process.cwd(), env = pro
   const input = env.GITHUB_EVENT_NAME === 'workflow_dispatch' ? env.BUILD_ANDROID_INPUT : undefined;
   const buildAndroid = selectAndroidBuild({ request, input, eventName: env.GITHUB_EVENT_NAME, mode: env.RELEASE_MODE });
   requireValue(!buildAndroid || formal, 'Stable Android requires a version tag');
-  return { buildAndroid, reason: request ? `request:${request.id}` : buildAndroid ? 'explicit manual input' : 'not selected' };
+  return { version, buildAndroid, reason: request ? `request:${request.id}` : buildAndroid ? 'explicit manual input' : 'not selected' };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
     const [file, ...args] = process.argv.slice(2);
     if (file === '--workflow') {
-      const { buildAndroid, reason } = await workflowAndroidSelection();
+      const { version, buildAndroid, reason } = await workflowAndroidSelection();
       if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `build_android=${buildAndroid}\n`);
-      const summary = `Android: ${buildAndroid ? '构建 / build' : '不构建 / skip'} (${reason})\nSource: ${process.env.GITHUB_SHA}\nServer: ${process.env.RELEASE_MODE}\n`;
+      const summary = `- 版本 / Version: ${version}\n- 源码 / Source: ${process.env.GITHUB_SHA}\n- 服务端模式 / Server mode: ${process.env.RELEASE_MODE}\n- Docker / fnOS: ${process.env.RELEASE_MODE === 'code-only' ? '不构建 / skip' : '完整模式 / full'}\n- Android: ${buildAndroid ? '构建 / build' : '不构建 / skip'} (${reason})\n`;
       if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
       console.log(summary);
     } else {
-    requireValue(file && args.every(arg => arg === '--accepted' || arg.startsWith('--ref=')), 'Usage: node scripts/release-request.mjs FILE [--accepted] [--ref=REF] (read-only dry-run)');
-    const request = validateRequest(JSON.parse(readFileSync(file, 'utf8')), file);
-    validateSource(request, { requestPath: file, accepted: args.includes('--accepted'), authorizedRef: args.find(arg => arg.startsWith('--ref='))?.slice(6) ?? 'origin/main' });
-    validateMode(request);
-    await validateRequestVersions(request);
-    console.log(JSON.stringify({ dryRun: true, id: request.id, tasks: selectTasks(request) }, null, 2));
+      requireValue(file && args.every(arg => arg === '--accepted' || arg.startsWith('--ref=')), 'Usage: node scripts/release-request.mjs FILE [--accepted] [--ref=REF] (read-only dry-run)');
+      const request = validateRequest(JSON.parse(readFileSync(file, 'utf8')), file);
+      validateSource(request, { requestPath: file, accepted: args.includes('--accepted'), authorizedRef: args.find(arg => arg.startsWith('--ref='))?.slice(6) ?? 'origin/main' });
+      validateMode(request);
+      await validateRequestVersions(request);
+      console.log(JSON.stringify({ dryRun: true, id: request.id, tasks: selectTasks(request) }, null, 2));
     }
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

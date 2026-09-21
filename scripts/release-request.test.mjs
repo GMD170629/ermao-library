@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { requestDigest, selectTasks, validateRequest, validateSource, validateMode, selectAndroidBuild, workflowAndroidSelection } from './release-request.mjs';
+import { requestDigest, selectTasks, validateRequest, validateSource, validateMode, selectAndroidBuild, workflowAndroidSelection, validateRequestVersions } from './release-request.mjs';
 
 const image = `gamersgu/shuku-starship-web@sha256:${'a'.repeat(64)}`;
 export function sample(target = 'server-update') {
@@ -139,4 +139,35 @@ test('legacy tag and branch entries do not inherit an Android selection', async 
     assert.equal(result.buildAndroid, false);
   }
   await assert.rejects(workflowAndroidSelection({ root, env: { GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF_TYPE: 'branch', BUILD_ANDROID_INPUT: 'true' } }), /version tag/);
+});
+
+
+test('tag selection validates admitted request identity, source contents, version and native build number', async t => {
+  const { root, put, commit, git } = repository(t);
+  const files = ['package.json', 'apps/web/package.json', 'packages/reader-core/package.json',
+    'packages/reader-contracts/package.json', 'apps/readium-web-poc/package.json',
+    'apps/api-python/pyproject.toml', 'apps/api-python/uv.lock', 'apps/api-python/app/core/config.py',
+    'apps/web/public/sw.js', 'apps/mobile/androidApp/build.gradle.kts',
+    'apps/mobile/iosApp/ErmaoLibrary.xcodeproj/project.pbxproj'];
+  for (const file of files) put(file, readFileSync(file));
+  const request = sample('android');
+  const version = JSON.parse(readFileSync('package.json')).version;
+  request.versions.android = version;
+  request.android.buildNumber = Number(readFileSync('apps/mobile/androidApp/build.gradle.kts', 'utf8').match(/versionCode = (\d+)/)[1]);
+  request.id = `stable-${version.replaceAll('.', '-')}`;
+  request.sourceCommit = commit();
+  await assert.rejects(validateRequestVersions({ ...request, android: { ...request.android, buildNumber: request.android.buildNumber + 1 } }, { root }), /buildNumber differs/);
+  await assert.rejects(validateRequestVersions({ ...request, versions: { android: '9.9.9' } }, { root }), /version differs/);
+  const path = `release/requests/${request.id}.json`;
+  put(path, JSON.stringify(request)); commit();
+  git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+  const env = { GITHUB_EVENT_NAME: 'push', GITHUB_REF_TYPE: 'tag', RELEASE_MODE: 'full' };
+  assert.equal((await workflowAndroidSelection({ root, env })).buildAndroid, true);
+  await assert.rejects(workflowAndroidSelection({ root, env: { ...env, GITHUB_EVENT_NAME: 'workflow_dispatch', BUILD_ANDROID_INPUT: 'false' } }), /conflict/);
+  put('apps/api-python/app/core/config.py', 'changed after frozen source'); commit();
+  await assert.rejects(workflowAndroidSelection({ root, env }), /source differs/);
+  git('reset', '--hard', 'HEAD^');
+  request.android.buildNumber += 1;
+  put(path, JSON.stringify(request)); commit(); git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+  await assert.rejects(workflowAndroidSelection({ root, env }), /immutable/);
 });

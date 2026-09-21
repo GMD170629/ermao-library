@@ -11,12 +11,12 @@ export function validateReleaseAssets(root, tag, remote, mode = 'full', buildAnd
   if (typeof buildAndroid !== 'boolean') throw Error('buildAndroid must be boolean');
   if (mode === 'code-only') {
     if (buildAndroid) throw Error('code-only cannot select Android');
-    if (['android', 'fnos'].some(name => existsSync(join(root, name))) || (remote && remote.assets.length)) throw Error('code-only must not contain installer assets');
+    if (['android', 'fnos'].some(name => existsSync(join(root, name))) || readdirSync(root, { recursive: true }).some(name => /\.(?:apk|ipa)(?:\.sha256)?$/.test(name)) || (remote && remote.assets.length)) throw Error('code-only must not contain installer assets');
     validateDependencyPackages(join(root, 'application'), tag.slice(1));
     return;
   }
   if (mode !== 'full') throw Error('Invalid release mode');
-  if (!buildAndroid && (existsSync(join(root, 'android')) || remote?.assets.some(asset => /\.(?:apk|ipa)(?:\.sha256)?$/.test(asset.name)))) {
+  if (!buildAndroid && (existsSync(join(root, 'android')) || readdirSync(root, { recursive: true }).some(name => /\.(?:apk|ipa)(?:\.sha256)?$/.test(name)) || remote?.assets.some(asset => /\.(?:apk|ipa)(?:\.sha256)?$/.test(asset.name)))) {
     throw Error(`${tag} must not contain mobile release assets when Android is not selected`);
   }
   const expected = [

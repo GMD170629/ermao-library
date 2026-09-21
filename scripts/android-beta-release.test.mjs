@@ -91,3 +91,27 @@ test('CI gates signing/publication behind all existing mobile checks', () => {
   assert.match(signer, /Required signing input is missing/);
   assert.doesNotMatch(signer, /genkey|debug.keystore|set -x/);
 });
+
+
+test('automatic entries cannot run Android; explicit channels retain their checks without cross-building', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/mobile.yml', import.meta.url), 'utf8');
+  const job = name => workflow.split(`\n  ${name}:`)[1].split(/\n  [a-z][\w-]*:/)[0];
+  for (const name of ['android', 'android-emulator']) {
+    const condition = job(name).match(/    if: (.*)/)[1].replaceAll('needs.release-mode.outputs.mode', 'mode');
+    const evaluate = Function('inputs', 'github', 'mode', `return (${condition});`);
+    for (const event_name of ['push', 'pull_request', 'workflow_dispatch']) {
+      assert.equal(evaluate({}, { event_name }, 'full'), false);
+      assert.equal(evaluate({ build_android: false }, { event_name }, 'full'), false);
+    }
+    for (const event_name of ['pull_request', 'pull_request_target']) assert.equal(evaluate({ build_android: true }, { event_name }, 'full'), false);
+    assert.equal(evaluate({ build_android: true }, { event_name: 'workflow_dispatch' }, 'full'), true);
+    assert.equal(evaluate({ build_android: true }, { event_name: 'workflow_dispatch' }, 'code-only'), false);
+  }
+  for (const name of ['backend-contract', 'public-contracts']) assert.doesNotMatch(job(name).match(/    if: (.*)/)[1], /build_android/);
+  for (const [name, stable] of [['Assemble and lint unsigned beta', false], ['Assemble and lint stable Android APK', true]]) {
+    const condition = workflow.split(`- name: ${name}\n`)[1].match(/        if: (.*)/)[1];
+    const evaluate = Function('inputs', `return (${condition});`);
+    assert.equal(evaluate({ stable_release: true }), stable);
+    assert.equal(evaluate({ stable_release: false }), !stable);
+  }
+});

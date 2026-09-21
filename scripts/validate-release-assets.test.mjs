@@ -53,6 +53,9 @@ test(`${version} permits a server-only bundle and still verifies remote digests`
   assert.throws(() => validateReleaseAssets(root, `v${version}`, undefined, 'full', true), /android/);
   assert.throws(() => validateReleaseAssets(root, `v${version}`, { assets: assets.slice(0, 1) }), /Remote/);
   assert.throws(() => validateReleaseAssets(root, `v${version}`, { assets: [...assets, { name: 'old.apk' }] }), /must not contain mobile/);
+  writeFileSync(join(root, 'stale.apk'), 'old');
+  assert.throws(() => validateReleaseAssets(root, `v${version}`), /must not contain mobile/);
+  rmSync(join(root, 'stale.apk'));
   mkdirSync(join(root, 'android'));
   assert.throws(() => validateReleaseAssets(root, `v${version}`), /must not contain mobile/);
   rmSync(join(root, 'android'), { recursive: true });
@@ -124,6 +127,10 @@ test('code-only validates two protocol-2 architectures without installer attachm
   const f = dependencyFixture();
   for (const [name, bytes] of f.manifests) writeFileSync(join(application, name), bytes);
   validateReleaseAssets(root, 'v1.0.5', { assets: [] }, 'code-only');
+  assert.throws(() => validateReleaseAssets(root, 'v1.0.5', undefined, 'code-only', true), /cannot select Android/);
+  writeFileSync(join(root, 'unexpected.apk'), 'old');
+  assert.throws(() => validateReleaseAssets(root, 'v1.0.5', undefined, 'code-only'), /installer/);
+  rmSync(join(root, 'unexpected.apk'));
   assert.throws(() => validateReleaseAssets(root, 'v1.0.5', { assets: [{ name: 'unexpected.apk' }] }, 'code-only'), /installer/);
   mkdirSync(join(root, 'fnos'));
   assert.throws(() => validateReleaseAssets(root, 'v1.0.5', undefined, 'code-only'), /installer/);

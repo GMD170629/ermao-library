@@ -114,21 +114,31 @@
 ## 发布与版本
 
 - 根 package.json 为版本源，正式 tag 为 v<version>。发布前运行 pnpm release:validate（必要时 --tag），核对脚本覆盖的 Web/核心/契约/POC、Python、service worker、锁文件、Android/iOS 版本，不因宿主分工排除其他端；同步双语说明与索引，摘要有实际用户价值，不用空说明或纯自动列表。发布说明只写用户可感知的功能、修复与必要升级影响，不罗列构建 workflow、产物清单、源码版本同步或内部交付过程。
-- 普通正式发布统一 fnos-package workflow（快速分支见下文），复用移动检查、构建原生章节库再测后端、构建版本镜像与 FPK；shared signer 的 stable/beta 渠道独立密钥与包名。正式 com.ermao.library，最低 API 26，更新保持签名并递增 versionCode。私钥在仓库外生成一次并独立备份，Secrets/DPAPI 不作唯一可恢复备份，不使用 Debug/Beta 代签；RELEASE_/BETA_ 两组 KEYSTORE_BASE64、KEYSTORE_PASSWORD、KEY_ALIAS、KEY_PASSWORD 缺失即失败，密码不入命令字面或日志，PR 不拿密钥，仅发布任务可写 Release。
-- 最终 APK 经 zipalign 16KiB 对齐、签名、apksigner verify 与对齐复查后生成 SHA-256，命名 ermao-library-v<version>-android.apk。APK、FPK 及摘要一起上传草稿，核对远端摘要后才能提升 prod/latest、公开 Release 和 feed；失败不公开部分版本。正式 tag 是唯一稳定版构建入口，禁止先在 main 手动构建候选再打 tag 重建。标签运行一次检查、构建与签名，将最终安装包保存为该运行的不可变 artifact；用户明确授权发布后，在完成相应验收和自动校验时直接执行 publish job，不要求 GitHub environment 人工审批；签名冲突卸载需用户明确授权。发布时只按 artifact ID 下载并复核原包，按构建输出的 Docker digest 推广版本／prod／latest，不重新测试、编译或签名。未通过验收不公开 Release 或推广稳定镜像；待发布镜像仅使用提交／运行／尝试号专属标签。
-- v1.0.3、v1.0.4、v1.1.0、v1.2.0 按维护者明确要求仅发布 Web／后端 Docker 与 fnOS FPK：跳过移动 workflow、APK 签名与上传，仍校验 FPK 本地和远端摘要，并在通过后发布镜像、Release 与 feed。移动源版本仍同步，但不交付 APK／IPA；此例外不适用于其他版本。
+- 普通正式发布统一 fnos-package workflow（快速分支见下文），并行执行后端完整测试（含原生章节库构建与 ctest）、服务端候选镜像／应用包／FPK；仅明确选择 Android 时执行客户端检查与签名；shared signer 的 stable/beta 渠道独立密钥与包名。正式 com.ermao.library，最低 API 26，更新保持签名并递增 versionCode。私钥在仓库外生成一次并独立备份，Secrets/DPAPI 不作唯一可恢复备份，不使用 Debug/Beta 代签；RELEASE_/BETA_ 两组 KEYSTORE_BASE64、KEYSTORE_PASSWORD、KEY_ALIAS、KEY_PASSWORD 缺失即失败，密码不入命令字面或日志，PR 不拿密钥，仅发布任务可写 Release。
+- 已选择 Android 时，最终 APK 经 zipalign 16KiB 对齐、签名、apksigner verify 与对齐复查后生成 SHA-256，命名 ermao-library-v<version>-android.apk。本次选中的安装包及摘要一起上传草稿，核对远端摘要后才能提升 prod/latest、公开 Release 和 feed；失败不公开部分版本。正式 tag 是唯一稳定版构建入口，禁止先在 main 手动构建候选再打 tag 重建。标签运行一次检查、构建与签名，将最终安装包保存为该运行的不可变 artifact；用户明确授权发布后，在完成相应验收和自动校验时直接执行 publish job，不要求 GitHub environment 人工审批；签名冲突卸载需用户明确授权。发布时只按 artifact ID 下载并复核原包，按构建输出的 Docker digest 推广版本／prod／latest，不重新测试、编译或签名。未通过验收不公开 Release 或推广稳定镜像；待发布镜像仅使用提交／运行／尝试号专属标签。
+- Android 默认不构建。用户说“发布新版本”“发布正式版”“完整更新”、推 tag、修改移动代码／版本或上一次选择过 Android，均不构成本次授权；未选择时直接执行服务端范围，不重复询问。此规则取代历史版本白名单；历史 Release／APK 保持原样。未选择时跳过 SDK／NDK、Gradle、模拟器、签名、APK 下载／上传，产物校验拒绝混入 APK；已选择时任何构建、签名或必要检查失败、取消、异常跳过都阻止发布，不自动降级为仅服务端。Stable/Beta 只构建各自交付渠道，必要 Debug／测试 APK 限于已授权分支。
 - v1.1.0 尚未正式公开，维护者于 2026-09-16 明确授权删除草稿及附件，将其标签重建到 GHCR 适配后的发布提交，并重新构建服务端镜像与 FPK；此决定取代此前保留原标签及镜像的恢复约定，仅适用于本次未发布版本。
 - 自 v1.1.0 起更新清单、应用代码与依赖发布到公开 GHCR `ghcr.io/gmd170629/ermao-library-updates`，每架构一个 OCI 制品、每文件独立 blob。feed 使用 `ghcrDependencyReleases` 固定 OCI manifest 摘要，运行时匿名下载并按下述在线更新规则验证文件 SHA-256；失败不回退同名 Release 文件。Release 仅保留面向用户的安装包及摘要。公开 Release、提升稳定镜像之前必须匿名校验 GHCR 制品与所有 blob；已有同版本不同内容不得覆盖。旧部署须通过 Docker 或 FPK 手动迁移一次。
 - v1.1.0 运行 `35079716004` 已完成构建、GHCR 匿名校验、镜像推广及 Release 发布，最后 feed 同步因历史 v0.5.0 仅存说明但无 Release 而失败。仅修复发布工具对已存在历史纯说明条目的处理，再同步 feed/Wiki；不重建或移动已公开的 v1.1.0 标签及产物。最新版本或曾有安装元数据的 Release 缺失仍必须失败。
 - 正式提交须同步远端 main 与 develop：fetch 后优先快进；确有分叉时只合并一次，再将另一分支快进到同一提交，不来回制造合并提交、不强推、不夹带冻结后无关改动。新 tag 前两分支必须指向同一发布提交，workflow 预检强制核对 SHA 与版本。发布后的说明修订也按同样方式同步，不能只比较文件内容。已发布 tag 不移动，程序修复用补丁版本，禁止重建或覆盖已发布版本；发布步骤失败时仅重跑失败的 publish job，沿用已有 artifact ID 和镜像摘要，禁止重新运行全部成功构建。最终核对 main/develop/tag/Release/release-feed 和日期。
-- develop 相关推送／手动才发布 Android Beta，其他分支／PR 不发布。全部移动检查成功后签名并更新 android-beta；旧运行不覆盖新运行、失败不替换上一版。包名 com.ermao.library.beta，非调试配置，版本追加 -beta.<run_number>、versionCode=100000+run_number，重跑保持安装版本，附件以 SHA/attempt 区分，迁移不能重置计数。标签可变但不作 Latest，不进正式说明／更新源；先上传新验证附件，再更新标签／说明，最后清旧附件，后续成功运行可清中断遗留。
+- Android Beta 仅在 develop 手动运行 mobile workflow 且明确勾选 `build_android` 时发布；普通 push／PR 不构建或发布 Android，仍执行后端移动契约与公共 Reader／源码检查。全部移动检查成功后签名并更新 android-beta；旧运行不覆盖新运行、失败不替换上一版。包名 com.ermao.library.beta，非调试配置，版本追加 -beta.<run_number>、versionCode=100000+run_number，重跑保持安装版本，附件以 SHA/attempt 区分，迁移不能重置计数。标签可变但不作 Latest，不进正式说明／更新源；先上传新验证附件，再更新标签／说明，最后清旧附件，后续成功运行可清中断遗留。
 - 局部修复、集成与冻结 RC 按测试策略分别验证；最终 RC 满足该次完整门禁及设备证据，冻结后变化按影响重验。CI 冒烟不代替真机。
 - 删除协议：卷册源文件 DELETE /api/books/{book_id}/resources/{resource_id}/source 无必需请求体，旧 confirmation 可接受但不校验名称；先部署后端再发布不发送该字段的客户端。整书删除保留 DELETE_SOURCE_FILES 固定协议值，权限、归属、幂等和范围不变，不新增迁移。
 
 
+### 发布选择、并行与缓存
+
+- `fnos-package` 保持现有 full／code-only 服务端范围，`build_android` 是本次解析结果，不维护第二份长期配置。旧 tag 无选择时为 false；手动 tag 入口 Boolean `build_android` 默认 false，显式 true 可包含 Stable Android；分支手动入口不得选择 Stable Android。reusable `mobile` 同名 Boolean 默认 false，调用方须显式传入；PR 内容不能授权 Android 或取得发布凭据。独立 `mobile` 手动入口仅构建 Beta，稳定发布必须走正式 tag。
+- 自动 tag 要包含 Android 时，沿用 `release-request` schema，以 `release/requests/stable-<主版本>-<次版本>-<补丁>.json` 承载本次明确选择，`id` 与文件名一致，`targets` 包含 `android`，`android.destination` 为 `github-apk`，`versions.android` 和 `android.buildNumber` 对应本次源码。本入口只把请求中的 Android 选择接入现有服务端发布模式，不另建跨目标发布器，iOS 不走此入口。请求复用既有来源／版本／不可变历史校验；不得读取最近一次请求作为默认。
+- 先冻结源码提交，填写请求的完整 `sourceCommit`，再用单独提交接纳该请求；源提交到 tag 提交只能增加这一个请求文件，其他源码、版本、构建号和说明必须已经冻结。main/develop/tag 仍同步到接纳提交，请求必须在 origin/main 获接纳且历史不可改写。发布产物始终取同一 tag 提交；其应用源码与请求冻结提交相同。没有请求的旧入口维持原有校验，不要求历史迁移。已有请求时禁止同时传手动 Boolean（包括 false），出现冲突直接失败；这种发布通过推 tag 触发，失败阶段用原运行重试。
+- `validate → {backend-tests, server-package, mobile-contracts（无 Android）或 mobile-release → android-package（含 Android）} → package → publish`。服务端候选不等待 Android 或后端完整测试；最终 `package` 必须确认服务端验收成功、完整模式后端成功、公共移动契约成功及选中 Android 的全部检查／签名成功。互斥移动分支、未选择的 Android 及 code-only 不适用的检查只按本次计划跳过；选中的必要任务必须成功。各分支以当前运行 artifact ID 汇总；实际镜像验收、应用包和正式推广使用同一 digest。tag 不再另建一份 startup-acceptance 镜像，原监督进程测试保留在后端 job，实际镜像两项验收保留在服务端 job；PR／分支启动验收仍保留。
+- Docker 保留 GHA 分 scope 缓存，正式 tag 另读写 `gamersgu/shuku-starship-web:buildcache-release` registry 缓存，以避免 GHA 跨 tag 可见性限制。只有串行的受信任正式 tag 候选构建可写，PR／开发分支不能写；它不是正式版本／prod／latest，也不是发布产物来源。缓存丢失仍正常冷构建。Python wheel seed 仅依赖锁文件、项目依赖描述、安装脚本及固定运行环境；业务源码、原生库和环境指纹仍在后续正确阶段生成，amd64/arm64 保持独立。
+- 查看同一 Actions 运行的 job／step 时间和 selection summary，记录版本、SHA、Android 选择及原因、后端测试、镜像构建／验收、应用包与整体墙钟时间。分别说明少做 Android 的工作量、并行消除的等待、缓存命中的收益；本地缓存证据不能代替正式 Actions 的耗时／跨 tag registry 命中数据，不预先承诺节省分钟数。
+
+
 ### 快速应用更新（code-only）
 
-自本规则起，正式发布支持普通和 code-only 两个长期分支；仅用户明确要求“快速发布／快速应用更新／code-only 发布”时采用后者。未指定方式仍普通发布，讨论流程或修复不构成发布授权。本条取代仅针对快速发布的不分模式镜像、安装包和移动验收要求，普通发布与既有历史例外保持。
+自本规则起，正式发布支持普通和 code-only 两个长期分支；仅用户明确要求“快速发布／快速应用更新／code-only 发布”时采用后者。未指定方式仍普通发布，讨论流程或修复不构成发布授权。本条取代仅针对快速发布的不分模式镜像、安装包和移动验收要求，普通发布按上述显式目标选择执行。
 
 - 版本索引当前条目可选 `serverUpdate`，严格包含 `mode: "code-only"`、`baseVersion`、`runtimeImage`；缺省普通模式。baseVersion 是已公开稳定祖先版本，runtimeImage 是官方仓库不可变镜像摘要。连续快速版本继承前版摘要，追溯至完整发布的镜像种子版本；构建核对实际种子版本、协议和环境指纹。
 - 默认补丁版本递增，全仓版本同步和双语说明规则不变。资格由 `scripts/release-mode.mjs` 委托 `release-request.mjs` 唯一校验：允许可交付 Web/Python 应用修复和兼容调整；依赖输入、工作区包配置、补丁、迁移、契约、原生客户端功能及固定环境变更拒绝。原生版本同步字段和不交付的发布工具/文档允许变化。`ermao-library.wiki` 完全不参与发布检查：不读取或验证其内容、指针及同步状态，它与系统交付无关。新增未知构建输入默认拒绝；不得以扩大白名单掩盖真实依赖或运行时变化。
