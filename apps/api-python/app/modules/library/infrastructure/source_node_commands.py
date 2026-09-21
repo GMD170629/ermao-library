@@ -59,16 +59,19 @@ class SqlAlchemySourceNodeMetadata(SourceNodeMetadataPort):
         if metadata is None:
             metadata = LibrarySourceNodeMetadata(source_node_id=node.id)
             self._db.add(metadata)
-        metadata.protected_fields = protect_fields(
-            metadata.protected_fields,
-            (
-                "title",
-                "description",
-                *(("cover_path",) if changes.replace_cover else ()),
-            ),
+        selected = (
+            frozenset({"title", "description"})
+            if changes.changed_fields is None
+            else changes.changed_fields
         )
-        metadata.title = changes.title
-        metadata.description = changes.description
+        if not selected <= {"title", "description"}:
+            raise ValueError("unsupported source metadata fields")
+        protected = selected | ({"cover_path"} if changes.replace_cover else set())
+        metadata.protected_fields = protect_fields(metadata.protected_fields, protected)
+        if "title" in selected:
+            metadata.title = changes.title
+        if "description" in selected:
+            metadata.description = changes.description
         if changes.replace_cover:
             metadata.cover_path = changes.cover_path
             metadata.cover_status = "READY" if changes.cover_path else "PENDING"
@@ -82,16 +85,13 @@ class SqlAlchemySourceNodeMetadata(SourceNodeMetadataPort):
                 )
                 self._db.add(book_metadata)
             book_metadata.protected_fields = protect_fields(
-                book_metadata.protected_fields,
-                (
-                    "title",
-                    "description",
-                    *(("cover_path",) if changes.replace_cover else ()),
-                ),
+                book_metadata.protected_fields, protected
             )
-            book_metadata.title = changes.title
-            book_metadata.normalized_title = changes.title.casefold()
-            book_metadata.description = changes.description
+            if "title" in selected:
+                book_metadata.title = changes.title
+                book_metadata.normalized_title = changes.title.casefold()
+            if "description" in selected:
+                book_metadata.description = changes.description
             if changes.replace_cover:
                 book_metadata.cover_path = changes.cover_path
                 book_metadata.cover_status = (

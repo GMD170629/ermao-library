@@ -17,6 +17,7 @@ class SourceNodeMetadataChanges:
     description: str | None
     cover_path: str | None = None
     replace_cover: bool = False
+    changed_fields: frozenset[str] | None = None
     writeback_policy: MetadataSideEffectPolicy = (
         MetadataSideEffectPolicy.CONFIGURED_WRITEBACK
     )
@@ -117,6 +118,7 @@ class UpdateSourceNodeMetadata:
                 changes=SourceNodeMetadataChanges(
                     title=title,
                     writeback_policy=self._side_effect_policy,
+                    changed_fields=changes.changed_fields,
                     description=(changes.description or "").strip() or None,
                 ),
             )

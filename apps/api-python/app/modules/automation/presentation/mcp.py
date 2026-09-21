@@ -29,7 +29,12 @@ from app.modules.automation.domain.tools import (
     PLAN_LIFETIME_SECONDS,
     QUERY_MAX_LIMIT,
 )
-from app.modules.library.public import CatalogBookFilter
+from app.modules.automation.presentation.metadata import MetadataChangeInput
+from app.modules.library.public import (
+    CatalogBookFilter,
+    MetadataPatchError,
+    MetadataTarget,
+)
 
 Page = Annotated[int, Field(strict=True, ge=1)]
 Limit = Annotated[int, Field(strict=True, ge=1, le=QUERY_MAX_LIMIT)]
@@ -62,7 +67,7 @@ def build_catalog_server(
     async def invoke(operation: CatalogInvocation) -> dict[str, object]:
         try:
             return await run_in_threadpool(runtime.invoke, snapshot.access, operation)
-        except AutomationAccessError as error:
+        except (AutomationAccessError, MetadataPatchError) as error:
             raise ToolError(f"{error}: 请求被拒绝 / Request rejected") from None
         except ValueError:
             raise ToolError("INVALID_ARGUMENT: 参数无效 / Invalid argument") from None
@@ -151,10 +156,21 @@ def build_catalog_server(
             lambda catalog, access: catalog.get_shelf(access, shelf_id, page, page_size)
         )
 
+    @server.tool(annotations=read)
+    async def get_metadata_schema(
+        target_type: MetadataTarget, target_id: str
+    ) -> dict[str, object]:
+        """读取可编辑字段、当前值、保护状态和元数据版本 / Read editable fields, current values, protection and metadata revision."""
+        return await invoke(
+            lambda catalog, access: catalog.get_metadata_schema(
+                access, target_type, target_id
+            )
+        )
+
     async def write(operation: WriteInvocation) -> dict[str, object]:
         try:
             return await run_in_threadpool(runtime.write, snapshot.access, operation)
-        except AutomationAccessError as error:
+        except (AutomationAccessError, MetadataPatchError) as error:
             raise ToolError(f"{error}: 请求被拒绝 / Request rejected") from None
         except ValueError:
             raise ToolError("INVALID_ARGUMENT: 参数无效 / Invalid argument") from None
@@ -214,23 +230,62 @@ def build_catalog_server(
 
         @server.tool(annotations=mutation)
         async def add_book_tags(
-            request_id: RequestId, book_ids: BookIds, tags: Tags
+            request_id: RequestId,
+            book_ids: BookIds,
+            tags: Tags,
+            expected_revisions: dict[str, str] | None = None,
+            override_fields: Annotated[list[Literal["tags"]], Field(max_length=1)]
+            | None = None,
         ) -> dict[str, object]:
-            """仅追加系统标签，不写文件；受保护字段拒绝 / Append system tags only; protected fields are rejected."""
+            """仅追加系统标签；保护覆盖需独立权限、指定字段和版本 / Append system tags; protected overrides require permission, named fields and revisions."""
             return await write(
                 lambda commands, access: commands.book_tags(
-                    access, request_id, book_ids, tags, add=True
+                    access,
+                    request_id,
+                    book_ids,
+                    tags,
+                    add=True,
+                    expected_revisions=expected_revisions,
+                    override_fields=frozenset(override_fields or ()),
                 )
             )
 
         @server.tool(annotations=removal)
         async def remove_book_tags(
-            request_id: RequestId, book_ids: BookIds, tags: Tags
+            request_id: RequestId,
+            book_ids: BookIds,
+            tags: Tags,
+            expected_revisions: dict[str, str] | None = None,
+            override_fields: Annotated[list[Literal["tags"]], Field(max_length=1)]
+            | None = None,
         ) -> dict[str, object]:
             """仅删除指定系统标签，不写文件 / Remove specified system tags without writing files."""
             return await write(
                 lambda commands, access: commands.book_tags(
-                    access, request_id, book_ids, tags, add=False
+                    access,
+                    request_id,
+                    book_ids,
+                    tags,
+                    add=False,
+                    expected_revisions=expected_revisions,
+                    override_fields=frozenset(override_fields or ()),
+                )
+            )
+
+    if PermissionScope.METADATA_WRITE in snapshot.access.permissions.scopes:
+
+        @server.tool(annotations=removal)
+        async def update_metadata(
+            request_id: RequestId,
+            changes: Annotated[
+                list[MetadataChangeInput],
+                Field(min_length=1, max_length=METADATA_BATCH_LIMIT),
+            ],
+        ) -> dict[str, object]:
+            """按版本和明确字段更新系统元数据，不写任何图书文件 / Patch versioned system metadata only; never writes book files."""
+            return await write(
+                lambda commands, access: commands.update_metadata(
+                    access, request_id, tuple(item.to_domain() for item in changes)
                 )
             )
 
@@ -248,7 +303,7 @@ class AutomationMcpEndpoint:
             snapshot = await run_in_threadpool(
                 self._runtime.authenticate, request.headers.get("authorization")
             )
-        except AutomationAccessError as error:
+        except (AutomationAccessError, MetadataPatchError) as error:
             code = str(error)
             status = (
                 503 if code in {"AUTOMATION_DISABLED", "DATABASE_MAINTENANCE"} else 401

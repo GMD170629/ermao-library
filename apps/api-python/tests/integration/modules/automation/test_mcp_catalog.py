@@ -181,6 +181,7 @@ def test_official_sdk_real_catalog_and_revocation(db_session, test_settings, pre
                 listed = await client.list_tools()
                 assert {item.name for item in listed.tools} == {
                     "get_context",
+                    "get_metadata_schema",
                     "list_libraries",
                     "search_books",
                     "get_books",
@@ -251,7 +252,12 @@ def test_official_sdk_real_catalog_and_revocation(db_session, test_settings, pre
                     )
                 ).status_code == 403
             scopes = frozenset(
-                {Scope.LIBRARY_READ, Scope.SHELVES_WRITE, Scope.TAGS_WRITE}
+                {
+                    Scope.LIBRARY_READ,
+                    Scope.SHELVES_WRITE,
+                    Scope.TAGS_WRITE,
+                    Scope.METADATA_WRITE,
+                }
             )
             with factory() as db:
                 writer = build_grant_manager(db).create(
@@ -310,6 +316,36 @@ def test_official_sdk_real_catalog_and_revocation(db_session, test_settings, pre
                 )
                 assert not changed.is_error, changed
                 assert changed.structured_content["updated"] == 1
+                schema = await client.call_tool(
+                    "get_metadata_schema",
+                    {"target_type": "book", "target_id": "allowed"},
+                )
+                assert not schema.is_error, schema
+                metadata_args = {
+                    "request_id": "sdk-metadata",
+                    "changes": [
+                        {
+                            "target_type": "book",
+                            "target_id": "allowed",
+                            "expected_revision": schema.structured_content[
+                                "expected_revision"
+                            ],
+                            "fields": {"title": "来自 MCP"},
+                        }
+                    ],
+                }
+                metadata_result = await client.call_tool(
+                    "update_metadata", metadata_args
+                )
+                assert not metadata_result.is_error, metadata_result
+                assert metadata_result.structured_content["updated"] == 1
+                repeat = await client.call_tool("update_metadata", metadata_args)
+                assert repeat.structured_content == metadata_result.structured_content
+                stale = await client.call_tool(
+                    "update_metadata", {**metadata_args, "request_id": "sdk-stale"}
+                )
+                assert stale.is_error and "CONFLICT" in str(stale)
+
                 assert (
                     await client.call_tool("create_shelf", {**args, "name": "Changed"})
                 ).is_error

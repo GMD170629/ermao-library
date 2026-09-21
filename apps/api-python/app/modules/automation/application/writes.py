@@ -18,6 +18,7 @@ from app.modules.automation.domain.access import (
 )
 from app.modules.automation.domain.tools import METADATA_BATCH_LIMIT
 from app.modules.library.public import (
+    ApplyMetadataPatches,
     BulkBookAccessError,
     BulkBookAuthorizationError,
     BulkBookOperationResult,
@@ -26,6 +27,8 @@ from app.modules.library.public import (
     ExecuteBulkMetadata,
     ExecuteBulkShelfMembership,
     InvalidBulkBookOperationError,
+    MetadataChange,
+    MetadataPatchActor,
 )
 from app.modules.shelf.public import CreateShelf, CreateShelfCommand, ShelfKind
 
@@ -58,6 +61,7 @@ class AutomationWrites:
         uow: GrantUnitOfWork,
         clock_ms: Callable[[], int],
         new_id: Callable[[], str],
+        metadata: ApplyMetadataPatches,
     ) -> None:
         self._catalog = catalog
         self._create = create
@@ -67,6 +71,7 @@ class AutomationWrites:
         self._uow = uow
         self._clock = clock_ms
         self._new_id = new_id
+        self._metadata = metadata
 
     def create_shelf(
         self,
@@ -169,6 +174,8 @@ class AutomationWrites:
         tags: list[str],
         *,
         add: bool,
+        expected_revisions: dict[str, str] | None = None,
+        override_fields: frozenset[str] = frozenset(),
     ) -> dict[str, object]:
         access.require(Scope.TAGS_WRITE)
         if not 1 <= len(book_ids) <= METADATA_BATCH_LIMIT:
@@ -178,10 +185,25 @@ class AutomationWrites:
             for value in tags
         ):
             raise AutomationAccessError("INVALID_TAGS")
+        if override_fields:
+            access.require(Scope.METADATA_OVERRIDE)
+            if override_fields != {"tags"}:
+                raise AutomationAccessError("INVALID_OVERRIDE_FIELDS")
+            if expected_revisions is None:
+                raise AutomationAccessError("EXPECTED_REVISION_REQUIRED")
+        if expected_revisions is not None and set(expected_revisions) != set(book_ids):
+            raise AutomationAccessError("EXPECTED_REVISION_REQUIRED")
         self._catalog.get_books(access, book_ids)
         tool = "add_book_tags" if add else "remove_book_tags"
         fingerprint = request_fingerprint(
-            tool, {"book_ids": book_ids, "tags": tags}, request_id
+            tool,
+            {
+                "book_ids": book_ids,
+                "tags": tags,
+                "expected_revisions": expected_revisions,
+                "override_fields": sorted(override_fields),
+            },
+            request_id,
         )
         now = self._clock()
         normalized = tuple(dict.fromkeys(value.strip() for value in tags))
@@ -191,7 +213,7 @@ class AutomationWrites:
             {},
             normalized if add else (),
             () if add else normalized,
-            protected_overrides=frozenset(),
+            protected_overrides=override_fields,
         )
         receipt = CompleteReceipt(
             self._receipts, access.grant_id, request_id, bulk_result
@@ -203,6 +225,11 @@ class AutomationWrites:
             if previous is not None:
                 self._uow.rollback()
                 return previous
+            if expected_revisions is not None:
+                for book_id in book_ids:
+                    current = self._catalog.get_metadata_schema(access, "book", book_id)
+                    if current["expected_revision"] != expected_revisions[book_id]:
+                        raise AutomationAccessError("CONFLICT")
             return bulk_result(self._tags.execute(command, receipt=receipt))
         except InvalidBulkBookOperationError as error:
             self._uow.rollback()
@@ -215,6 +242,63 @@ class AutomationWrites:
         except (BulkBookAccessError, BulkBookAuthorizationError) as error:
             self._uow.rollback()
             raise AutomationAccessError("RESOURCE_NOT_FOUND") from error
+        except Exception:
+            self._uow.rollback()
+            raise
+
+    def update_metadata(
+        self,
+        access: EffectiveAccess,
+        request_id: str,
+        changes: tuple[MetadataChange, ...],
+    ) -> dict[str, object]:
+        access.require(Scope.METADATA_WRITE)
+        if not changes or len(changes) > METADATA_BATCH_LIMIT:
+            raise AutomationAccessError("INVALID_TARGETS")
+        arguments: dict[str, object] = {
+            "changes": [
+                {
+                    "target_type": item.target_type,
+                    "target_id": item.target_id,
+                    "expected_revision": item.expected_revision,
+                    "mode": item.mode,
+                    "fields": item.fields,
+                    "clear_fields": sorted(item.clear_fields),
+                    "override_fields": sorted(item.override_fields),
+                }
+                for item in changes
+            ]
+        }
+        fingerprint = request_fingerprint("update_metadata", arguments, request_id)
+        actor = MetadataPatchActor(
+            access.user_id,
+            access.grant_id,
+            access.permissions.library_ids,
+            True,
+            Scope.TAGS_WRITE in access.permissions.scopes,
+            Scope.METADATA_OVERRIDE in access.permissions.scopes,
+        )
+        now = self._clock()
+        receipt = CompleteReceipt(
+            self._receipts, access.grant_id, request_id, lambda result: result
+        )
+        try:
+            # Scope checks also apply to a replay after grant permissions shrink.
+            for item in changes:
+                access.require_metadata(
+                    changes_tags="tags" in (set(item.fields) | item.clear_fields),
+                    overrides_protection=bool(item.override_fields),
+                )
+                self._catalog.get_metadata_schema(
+                    access, item.target_type, item.target_id
+                )
+            previous = self._receipts.claim(
+                access.grant_id, request_id, "update_metadata", fingerprint, now
+            )
+            if previous is not None:
+                self._uow.rollback()
+                return previous
+            return self._metadata.execute(actor, changes, receipt=receipt)
         except Exception:
             self._uow.rollback()
             raise

@@ -16,6 +16,18 @@ from app.modules.library.application.metadata_effects import MetadataSideEffectP
 from app.modules.library.application.metadata_ownership import (
     protected_fields as protected_metadata_fields,
 )
+from app.modules.library.application.metadata_patches import (
+    ApplyMetadataPatches,
+    GetMetadataSchema,
+    MetadataPatchActor,
+    MetadataPatchPort,
+)
+from app.modules.library.domain.metadata_patch import (
+    MetadataChange,
+    MetadataPatchError,
+    MetadataTarget,
+    MetadataValue,
+)
 
 """Stable public contracts for the Book/ReadableResource capability."""
 
@@ -159,6 +171,7 @@ __all__ = [
     "FACET_KINDS",
     "LIBRARY_GROUPING_KINDS",
     "AdapterIdentity",
+    "ApplyMetadataPatches",
     "AssetImportState",
     "AssetRole",
     "AssetTitleCandidate",
@@ -200,6 +213,7 @@ __all__ = [
     "FilterExpression",
     "GetCatalogBook",
     "GetLibraryFilterSchema",
+    "GetMetadataSchema",
     "GetSmartShelfBookIds",
     "IdentifyImportedBook",
     "InterpretationRecord",
@@ -226,7 +240,13 @@ __all__ = [
     "ListCatalogBooks",
     "ListCatalogFacets",
     "ListLibraryGroupings",
+    "MetadataChange",
+    "MetadataPatchActor",
+    "MetadataPatchError",
+    "MetadataPatchPort",
     "MetadataSideEffectPolicy",
+    "MetadataTarget",
+    "MetadataValue",
     "ObservedSourceEntry",
     "OrganizationModeViolationCode",
     "PreparedBookFacet",

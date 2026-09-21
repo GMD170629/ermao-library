@@ -29,6 +29,7 @@ from app.modules.library.application.bulk_operations import (
     ExecuteBulkMetadata,
     ExecuteBulkShelfMembership,
 )
+from app.modules.library.application.metadata_patches import ApplyMetadataPatches
 from app.modules.library.application.queries import (
     GetSmartShelfBookIds,
     SmartShelfCriteria,
@@ -40,6 +41,9 @@ from app.modules.library.infrastructure.bulk_operations import (
     SqlAlchemyBulkBookOperations,
 )
 from app.modules.library.infrastructure.catalog import SqlAlchemyCatalogQueries
+from app.modules.library.infrastructure.metadata_patches import (
+    SqlAlchemyMetadataPatches,
+)
 from app.modules.library.infrastructure.queries import SqlAlchemyLibraryQueries
 from app.modules.shelf.application.commands import CreateShelf, ShelfWriteStore
 from app.modules.shelf.infrastructure import shelves as shelf_store
@@ -92,6 +96,7 @@ def build_automation_catalog(db: Session) -> AutomationCatalog:
                 SmartShelfCriteria.from_external(rules), user_id=user_id
             ),
         ),
+        SqlAlchemyMetadataPatches(db),
     )
 
 
@@ -125,4 +130,5 @@ def build_automation_writes(db: Session) -> AutomationWrites:
         db,
         now_timestamp_ms,
         lambda: uuid4().hex,
+        ApplyMetadataPatches(SqlAlchemyMetadataPatches(db), db),
     )

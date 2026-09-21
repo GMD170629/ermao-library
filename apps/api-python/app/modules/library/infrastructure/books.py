@@ -293,6 +293,8 @@ def update_book_fields(
             update(LibraryBook).where(LibraryBook.id == book_id).values(**book_values)
         )
     metadata_values = _metadata_values(values)
+    if "title" in metadata_values:
+        metadata_values["normalized_title"] = str(metadata_values["title"]).casefold()
     if "author" in metadata_values:
         author = metadata_values["author"]
         metadata_values["normalized_author"] = (

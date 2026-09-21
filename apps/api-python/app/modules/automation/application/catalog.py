@@ -13,8 +13,11 @@ from app.modules.library.public import (
     CatalogBookFilter,
     CatalogLibraryQueryPort,
     CatalogQueryPort,
+    GetMetadataSchema,
     ListCatalogBooks,
     ListCatalogFacets,
+    MetadataPatchPort,
+    MetadataTarget,
 )
 from app.modules.shelf.public import (
     CatalogShelfQueryPort,
@@ -50,6 +53,7 @@ class AutomationCatalog:
     libraries: CatalogLibraryQueryPort
     books: CatalogQueryPort
     shelves: CatalogShelfQueryPort
+    metadata: MetadataPatchPort
 
     def list_libraries(self, access: EffectiveAccess) -> dict[str, object]:
         access.require(Scope.LIBRARY_READ)
@@ -137,3 +141,11 @@ class AutomationCatalog:
         if result is None:
             raise AutomationAccessError("RESOURCE_NOT_FOUND")
         return asdict(result)
+
+    def get_metadata_schema(
+        self, access: EffectiveAccess, target_type: MetadataTarget, target_id: str
+    ) -> dict[str, object]:
+        access.require(Scope.LIBRARY_READ)
+        return GetMetadataSchema(self.metadata).execute(
+            target_type, target_id, access.permissions.library_ids
+        )
