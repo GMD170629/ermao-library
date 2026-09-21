@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.authorization import AuthorizationContext, library_visibility_predicate
 from app.models.library import Library
+from app.modules.library.application.catalog import CatalogLibrary
 
 
 class SqlAlchemyVisibleLibraryIds:
@@ -23,3 +24,17 @@ class SqlAlchemyVisibleLibraryIds:
                 )
             )
         )
+
+    def list_libraries(
+        self, context: AuthorizationContext
+    ) -> tuple[CatalogLibrary, ...]:
+        rows = self._db.execute(
+            select(Library.id, Library.name)
+            .where(
+                library_visibility_predicate(
+                    context, cast(ColumnElement[str], Library.id)
+                )
+            )
+            .order_by(Library.name, Library.id)
+        )
+        return tuple(CatalogLibrary(id=row.id, name=row.name) for row in rows)

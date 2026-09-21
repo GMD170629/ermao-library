@@ -86,3 +86,15 @@ uv run --extra dev --locked pytest -q tests/integration/modules/automation tests
 新增服务配置／HTTP／审计和身份接线的 Mypy 局部检查通过（21 个源文件），对应 Ruff 通过。未运行无关全仓回归。
 
 M1 仍有后续接线验证：最近使用时间在 M2 实际 MCP 调用中记录；当前 operation 授权入口已存在，但尚未与文件任务 worker 接线，待 M4–M6 引入带 grant 的实际任务后验证关键阶段撤权。只读挂载的真实文件行为也需在文件用例实现后验证。M2–M8 未开始，不应将这些基础测试视为整套 MCP 功能已交付。
+
+## M2：实际 MCP 传输与范围查询（进行中）
+
+已接入 `/api/mcp`：官方 SDK 无状态 JSON 传输，逐 HTTP 请求隔离工具定义与配置，逐工具调用重新验证用户／令牌／库权限和维护状态。仅 Bearer 认证，无会话回退，响应禁止缓存；公开 Host 和 Origin 使用管理员配置。数据库访问在线程池中使用独立会话，异常在协议边界脱敏。成功调用记录最近使用时间，遥测存储失败不把已完成操作变成失败。
+
+已开放七个查询工具：get_context、list_libraries、search_books、get_books、list_facets、list_shelves、get_shelf。返回既有 Catalog 投影（无正文、下载地址或绝对路径），允许暂无可读资源的 Book。批量指定目标中存在不可见／不存在项时整批拒绝。
+
+修复两个共用查询入口：Catalog facet 的名称和计数均按可见 Book 连接；智能书架在用户规则求值后再次按调用上下文过滤，再统计／分页。显式空 book_ids 现在匹配零项，修正旧测试中与其测试名称相反的扩大范围断言。未新建并行图书／书架查询逻辑。
+
+真实统一网关此前覆写 Host 为内部上游地址，与公开域名校验冲突；网关现在保留请求 authority，网络连接目标仍由固定配置决定。实际测试分别使用直接 HTTP 及 Node 统一网关 `/books/api/mcp`，经官方 SDK 验证工具发现、中文元数据、管理员限定库、静态和智能书架计数、范围外拒绝、即时撤销、无 Cookie 回退以及恶意 Host／Origin 拒绝。
+
+验证：授权／MCP／领域／架构／事务检查 91 passed；受影响 Catalog／Shelf／OPDS／智能筛选及真实网关集成 24 passed；Node 网关现有 5 项测试通过。M2 的基础写工具、文件只读／schema 仍待实现，M3–M8 尚未完成。没有运行生产文件操作或发布。

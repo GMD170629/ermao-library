@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
+from starlette.routing import Route
 from starlette.types import ExceptionHandler
 
 from app.api.diagnostics_middleware import DiagnosticBoundaryMiddleware
@@ -19,6 +20,7 @@ from app.api.error_handlers import (
 )
 from app.api.router import api_router
 from app.bootstrap.auth import build_password_authentication_runtime
+from app.bootstrap.automation import build_mcp_endpoint
 from app.bootstrap.opds import build_opds_router
 from app.bootstrap.prestart import verify_current_schema
 from app.bootstrap.publication_navigation import (
@@ -337,6 +339,13 @@ def create_app(
         respond_with_json=False,
     )
 
+    app.router.routes.append(
+        Route(
+            "/api/mcp",
+            build_mcp_endpoint(runtime_factory, settings.app_version),
+            methods=["GET", "POST", "DELETE"],
+        )
+    )
     app.include_router(api_router, prefix="/api")
     app.include_router(
         build_opds_router(runtime_factory, settings, password_authentication_runtime)

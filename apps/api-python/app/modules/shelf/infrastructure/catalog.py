@@ -99,6 +99,20 @@ class SqlAlchemyCatalogShelfQueries:
                 )
             except (TypeError, ValueError, json.JSONDecodeError):
                 book_ids = []
+            # Smart rules resolve for the user, while a caller may carry a
+            # narrower resource grant. Apply that scope before counts/pagination.
+            visible_ids = set(
+                self._db.scalars(
+                    select(LibraryBook.id).where(
+                        LibraryBook.id.in_(book_ids),
+                        LibraryBook.visibility_state == "VISIBLE",
+                        book_visibility_predicate(context),
+                    )
+                )
+            )
+            book_ids = list(
+                dict.fromkeys(book_id for book_id in book_ids if book_id in visible_ids)
+            )
             start = (page - 1) * page_size
             selected_ids = tuple(book_ids[start : start + page_size])
             catalog_shelf = CatalogShelf(

@@ -198,3 +198,15 @@ class ListCatalogFacets:
             page=max(1, page),
             page_size=min(100, max(1, page_size)),
         )
+
+
+@dataclass(frozen=True)
+class CatalogLibrary:
+    id: str
+    name: str
+
+
+class CatalogLibraryQueryPort(Protocol):
+    def list_libraries(
+        self, context: AuthorizationContext
+    ) -> tuple[CatalogLibrary, ...]: ...

@@ -21,7 +21,9 @@ function backendUpstreamPath(requestUrl, basePath) {
 }
 
 function forwardedHeaders(request, upstreamHost) {
-  const headers = { ...request.headers, host: upstreamHost };
+  // Preserve the public authority for backend Host/Origin validation. The
+  // connection target is chosen independently and never comes from Host.
+  const headers = { ...request.headers, host: request.headers.host || upstreamHost };
   const remoteAddress = request.socket.remoteAddress;
   if (remoteAddress) {
     const previous = request.headers['x-forwarded-for'];

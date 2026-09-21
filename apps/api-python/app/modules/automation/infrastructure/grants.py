@@ -97,3 +97,14 @@ class SqlAlchemyGrantStore:
             .values(revoked_at_ms=now_ms)
         )
         return True
+
+    def record_use(self, grant_id: str, now_ms: int) -> None:
+        self._db.execute(
+            update(AutomationGrantRow)
+            .where(
+                AutomationGrantRow.id == grant_id,
+                (AutomationGrantRow.last_used_at_ms.is_(None))
+                | (AutomationGrantRow.last_used_at_ms < now_ms),
+            )
+            .values(last_used_at_ms=now_ms)
+        )

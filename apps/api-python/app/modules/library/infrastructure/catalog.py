@@ -50,7 +50,7 @@ class SqlAlchemyCatalogQueries(CatalogQueryPort):
         page_size: int,
     ) -> CatalogBookPage:
         predicates = self._book_predicates(context)
-        if filters.book_ids:
+        if filters.book_ids is not None:
             predicates.append(self._book_id_column().in_(filters.book_ids))
         if filters.search:
             query = f"%{filters.search}%"
@@ -130,8 +130,8 @@ class SqlAlchemyCatalogQueries(CatalogQueryPort):
         )
         base = (
             select(LibraryFacet, func.count(LibraryBook.id))
-            .outerjoin(LibraryBookFacet, LibraryBookFacet.facet_id == LibraryFacet.id)
-            .outerjoin(
+            .join(LibraryBookFacet, LibraryBookFacet.facet_id == LibraryFacet.id)
+            .join(
                 LibraryBook,
                 (LibraryBook.id == LibraryBookFacet.book_id)
                 & LibraryBook.id.in_(visible_book_ids),
@@ -140,10 +140,7 @@ class SqlAlchemyCatalogQueries(CatalogQueryPort):
             .group_by(LibraryFacet.id)
         )
         total = int(
-            self._db.scalar(
-                select(func.count()).select_from(LibraryFacet).where(*predicates)
-            )
-            or 0
+            self._db.scalar(select(func.count()).select_from(base.subquery())) or 0
         )
         rows = self._db.execute(
             base.order_by(LibraryFacet.name.asc(), LibraryFacet.id.asc())

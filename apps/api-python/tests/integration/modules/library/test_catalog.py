@@ -226,4 +226,5 @@ def test_empty_book_id_filter_does_not_expand_to_every_book(
         page=1,
         page_size=10,
     )
-    assert result.total == 1
+    assert result.total == 0
+    assert result.books == ()

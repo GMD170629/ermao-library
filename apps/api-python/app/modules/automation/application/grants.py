@@ -52,6 +52,8 @@ class GrantStore(Protocol):
 
     def revoke(self, grant_id: str, user_id: str, now_ms: int) -> bool: ...
 
+    def record_use(self, grant_id: str, now_ms: int) -> None: ...
+
 
 class AutomationIdentityPort(Protocol):
     def current_actor(self, user_id: str) -> AutomationActor | None: ...
@@ -209,3 +211,23 @@ class AuthorizeAutomation:
             actor=actor,
             enabled_scopes=enabled_scopes,
         )
+
+
+class RecordGrantUse:
+    """Persist successful usage without changing the grant's authority."""
+
+    def __init__(
+        self, store: GrantStore, uow: GrantUnitOfWork, clock_ms: Callable[[], int]
+    ) -> None:
+        self._store = store
+        self._uow = uow
+        self._clock_ms = clock_ms
+
+    def execute(self, grant_id: str) -> None:
+        now = self._clock_ms()
+        try:
+            self._store.record_use(grant_id, now)
+            self._uow.commit()
+        except Exception:
+            self._uow.rollback()
+            raise
