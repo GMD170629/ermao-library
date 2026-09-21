@@ -1,11 +1,14 @@
 """ORM move intent persistence. The calling application owns every transaction."""
 
+from datetime import UTC, datetime
+
 from pydantic import TypeAdapter
 from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session, aliased
 
 from app.models import LibraryBook, LibraryImportTask
 from app.models.organize import MetadataWritebackOperation, MetadataWritebackTarget
+from app.modules.library.application.execute_file_moves import MoveExecution
 from app.modules.library.application.file_move_operations import (
     FileMoveProgress,
     require_plan_access,
@@ -16,6 +19,10 @@ from app.modules.library.infrastructure.file_move_schema import (
     LibraryFileMoveOperation,
     LibraryFileMovePlan,
     LibraryFileMoveTarget,
+)
+from app.modules.library.infrastructure.operations import (
+    prepare_operation_write,
+    write_prepared_operation,
 )
 
 _PLAN = TypeAdapter(FileMovePlan)
@@ -233,3 +240,128 @@ class SqlAlchemyFileMoveOperations:
             .values(status="PREPARING", updated_at_ms=now_ms)
             .returning(LibraryFileMoveOperation.id)
         )
+
+    def execution(self, operation_id: str) -> MoveExecution:
+        row = self._db.get(
+            LibraryFileMoveOperation, operation_id, populate_existing=True
+        )
+        if row is None:
+            raise FileMoveError("RESOURCE_NOT_FOUND")
+        if row.status == "QUEUED":
+            raise FileMoveError("OPERATION_NOT_CLAIMED")
+        plan_row = self._db.get(LibraryFileMovePlan, row.plan_id)
+        if plan_row is None:
+            raise FileMoveError("RESOURCE_NOT_FOUND")
+        plan = _PLAN.validate_python(plan_row.payload)
+        stages = tuple(
+            self._db.scalars(
+                select(LibraryFileMoveTarget.stage)
+                .where(
+                    LibraryFileMoveTarget.operation_id == operation_id,
+                )
+                .order_by(LibraryFileMoveTarget.ordinal)
+            )
+        )
+        return MoveExecution(plan, stages, row.cancel_requested)
+
+    def checkpoint(
+        self,
+        operation_id: str,
+        ordinal: int,
+        stage: str,
+        now_ms: int,
+        error_code: str | None = None,
+    ) -> None:
+        if stage == "INDEX_UPDATED":
+            execution = self.execution(operation_id)
+            move = execution.plan.moves[ordinal]
+            prepared = prepare_operation_write(
+                user_id=execution.plan.actor.user_id,
+                action="MOVE_FILES",
+                target_type="sourceNode",
+                target_id=move.source.node_id,
+                summary="已移动图书文件 / Book files moved",
+                payload={
+                    "grantId": execution.plan.actor.grant_id,
+                    "operationId": operation_id,
+                    "sourceLibraryId": move.source.library_id,
+                    "sourceRelativePath": move.source.relative_path,
+                    "destinationLibraryId": move.destination.library_id,
+                    "destinationRelativePath": move.destination.relative_path,
+                    "bookIds": move.source.book_ids,
+                },
+                inverse={},
+                now=datetime.fromtimestamp(now_ms / 1000, UTC),
+                undoable=False,
+            )
+            write_prepared_operation(self._db, prepared)
+        if stage == "RECOVERY_REQUIRED":
+            target = self._db.get(
+                LibraryFileMoveTarget, (operation_id, ordinal), populate_existing=True
+            )
+            if target is None:
+                raise FileMoveError("RESOURCE_NOT_FOUND")
+            if target.stage != "RECOVERY_REQUIRED":
+                target.recovery = {"resume_stage": target.stage}
+                self._db.flush()
+        self._db.execute(
+            update(LibraryFileMoveTarget)
+            .where(
+                LibraryFileMoveTarget.operation_id == operation_id,
+                LibraryFileMoveTarget.ordinal == ordinal,
+            )
+            .values(stage=stage, error_code=error_code)
+        )
+        self._db.execute(
+            update(LibraryFileMoveOperation)
+            .where(LibraryFileMoveOperation.id == operation_id)
+            .values(updated_at_ms=now_ms)
+        )
+
+    def finish(self, operation_id: str, now_ms: int) -> None:
+        stages = set(self.execution(operation_id).stages)
+        if "RECOVERY_REQUIRED" in stages:
+            status = "RECOVERY_REQUIRED"
+        elif stages == {"COMPLETED"}:
+            status = "COMPLETED"
+        elif stages == {"CANCELLED"}:
+            status = "CANCELLED"
+        elif stages == {"FAILED"}:
+            status = "FAILED"
+        elif stages <= {"COMPLETED", "FAILED", "CANCELLED"}:
+            status = "PARTIAL"
+        else:
+            status = "PREPARING"
+        self._db.execute(
+            update(LibraryFileMoveOperation)
+            .where(LibraryFileMoveOperation.id == operation_id)
+            .values(status=status, updated_at_ms=now_ms)
+        )
+
+    def prepare_recovery(self, operation_id: str, now_ms: int) -> None:
+        """Worker-start recovery only; no I/O or target expansion occurs here."""
+        targets = tuple(
+            self._db.scalars(
+                select(LibraryFileMoveTarget).where(
+                    LibraryFileMoveTarget.operation_id == operation_id,
+                    LibraryFileMoveTarget.stage == "RECOVERY_REQUIRED",
+                )
+            )
+        )
+        for target in targets:
+            resume = target.recovery.get("resume_stage")
+            if resume not in {
+                "QUEUED",
+                "PREPARING",
+                "FILES_PUBLISHED",
+                "INDEX_UPDATED",
+            }:
+                raise FileMoveError("RECOVERY_STAGE_UNKNOWN")
+            target.stage = str(resume)
+            target.error_code = None
+        self._db.execute(
+            update(LibraryFileMoveOperation)
+            .where(LibraryFileMoveOperation.id == operation_id)
+            .values(status="PREPARING", updated_at_ms=now_ms)
+        )
+        self._db.flush()

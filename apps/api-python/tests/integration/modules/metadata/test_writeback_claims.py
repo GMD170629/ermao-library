@@ -458,5 +458,28 @@ def test_file_move_gates_new_writeback_claims_but_allows_existing_publish(tmp_pa
             row = writeback_queue.claim_next_target(db, owner_id="worker", now=now)
             assert row is not None and row["id"] == "claim-target"
             db.rollback()
+            from app.contracts.source_relocation import SourceRelocation
+
+            change = SourceRelocation(
+                "test-library",
+                "book.txt",
+                "test-library",
+                "renamed.txt",
+                ("claim-resource-node",),
+                ("claim-book",),
+            )
+            with pytest.raises(RuntimeError, match="WRITEBACK_STILL_RUNNING"):
+                writeback_queue.discard_relocated_writebacks(db, change)
+            db.rollback()
+            db.execute(
+                update(MetadataWritebackTarget)
+                .where(MetadataWritebackTarget.id == "claim-target")
+                .values(status="PENDING")
+            )
+            assert writeback_queue.discard_relocated_writebacks(db, change) == 1
+            db.commit()
+            assert db.get(MetadataWritebackTarget, "claim-target") is None
+            assert db.get(MetadataWritebackPreparation, "claim-preparation") is None
+            assert source.read_text() == "book"
     finally:
         engine.dispose()

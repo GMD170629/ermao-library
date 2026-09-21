@@ -112,3 +112,99 @@ def test_move_intent_roundtrip_cancellation_and_scope(db_session, tmp_path):
     assert queue.next_queued().id == scan.id
     assert (root / "allowed/file.epub").read_bytes() == b"book"
     assert not (root / "renamed").exists()
+
+
+def test_same_disk_cross_library_move_keeps_book_resource_asset_and_shelf_ids(
+    db_session, tmp_path
+):
+    from datetime import UTC, datetime
+
+    from app.models import (
+        LibraryBook,
+        LibraryReadableResource,
+        LibraryResourceAsset,
+        LibrarySourceNode,
+    )
+    from app.models.shelf import ShelfBook
+    from app.modules.library.infrastructure.file_move_index import (
+        SqlAlchemyFileMoveIndex,
+    )
+    from app.modules.library.infrastructure.file_move_io import publish_same_device_move
+    from tests.integration.modules.automation.test_file_reads import add_file
+
+    access, root = file_access(db_session, tmp_path)
+    destination_root = tmp_path / "destination"
+    destination_root.mkdir()
+    db_session.get(Library, "test-library").organization_mode = "VOLUMES"
+    destination = db_session.get(Library, "private-library")
+    destination.organization_mode = "VOLUMES"
+    destination.root_path = str(destination_root)
+    db_session.commit()
+    (root / "allowed/book.epub").write_bytes(b"book bytes")
+    add_file(db_session, "resource-node", "allowed/book.epub")
+    db_session.add(
+        LibraryReadableResource(
+            id="move-resource",
+            library_id="test-library",
+            book_id="allowed",
+            source_node_id="resource-node",
+            adapter_id="epub",
+            adapter_version="1",
+            format="EPUB",
+            enablement_state="ENABLED",
+            import_state="READY",
+        )
+    )
+    db_session.flush()
+    db_session.add(
+        LibraryResourceAsset(
+            id="move-asset",
+            library_id="test-library",
+            resource_id="move-resource",
+            source_node_id="resource-node",
+            source_node_physical_kind="REGULAR_FILE",
+            role="PRIMARY",
+            import_state="READY",
+        )
+    )
+    db_session.commit()
+    actor = MoveActor(
+        access.user_id,
+        access.grant_id,
+        frozenset({"test-library", "private-library"}),
+        True,
+    )
+    plan = PrepareFileMovePlan(
+        SqlAlchemyMoveTopology(db_session),
+        AnchoredMoveInspection(),
+        lambda: 1000,
+        lambda: "plan",
+    ).execute(actor, (MoveRequest("allowed-node", "private-library", "renamed"),))
+    db_session.rollback()
+    publish_same_device_move(plan.moves[0])
+    ids = SqlAlchemyFileMoveIndex(db_session).apply(plan.moves[0], datetime.now(UTC))
+    db_session.commit()
+    db_session.expire_all()
+    assert set(ids) == {"allowed-node", "resource-node"}
+    assert db_session.get(LibraryBook, "allowed").library_id == "private-library"
+    assert (
+        db_session.get(LibraryReadableResource, "move-resource").library_id
+        == "private-library"
+    )
+    assert (
+        db_session.get(LibraryResourceAsset, "move-asset").library_id
+        == "private-library"
+    )
+    assert (
+        db_session.get(LibrarySourceNode, "resource-node").relative_path
+        == "renamed/book.epub"
+    )
+    assert (
+        db_session.get(LibrarySourceNode, "resource-node").parent_id == "allowed-node"
+    )
+    assert (
+        db_session.get(ShelfBook, {"shelf_id": "static", "book_id": "allowed"})
+        is not None
+    )
+    assert (destination_root / "renamed/book.epub").read_bytes() == b"book bytes"
+    assert not (root / "allowed").exists()

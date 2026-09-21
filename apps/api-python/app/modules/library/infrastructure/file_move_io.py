@@ -140,3 +140,60 @@ def published_same_device_identity(
     ):
         raise FileMoveError("RECOVERY_TARGET_CHANGED")
     return observed
+
+
+class SameDeviceMovePublication:
+    def validate(self, move: PlannedMove) -> None:
+        if move.cross_device:
+            raise FileMoveError("CROSS_DEVICE_COPY_REQUIRED")
+        if (
+            inspect_move_source(move.source.root, move.source.relative_path)
+            != move.inventory
+        ):
+            raise FileMoveError("SOURCE_CHANGED")
+        destination = inspect_move_destination(
+            move.destination.root, move.destination.relative_path
+        )
+        if destination != move.destination_inspection:
+            raise FileMoveError("DESTINATION_CHANGED")
+        if destination.missing_directories:
+            raise FileMoveError("DESTINATION_DIRECTORIES_NOT_PREPARED")
+
+    def publish(self, move: PlannedMove) -> None:
+        publish_same_device_move(move)
+
+    def is_published(self, move: PlannedMove) -> bool:
+        target = published_same_device_identity(
+            move.destination.root,
+            move.destination.relative_path,
+            move.inventory.entries[0].identity,
+        )
+        if target is None:
+            self.validate(move)
+            return False
+        inventory = inspect_move_source(
+            move.destination.root, move.destination.relative_path
+        )
+        if len(inventory.entries) != len(move.inventory.entries):
+            raise FileMoveError("RECOVERY_TARGET_CHANGED")
+        for index, (before, after) in enumerate(
+            zip(move.inventory.entries, inventory.entries, strict=True)
+        ):
+            expected_path = (
+                move.destination.relative_path
+                + before.relative_path[len(move.source.relative_path) :]
+            )
+            if (
+                after.relative_path != expected_path
+                or after.directory != before.directory
+            ):
+                raise FileMoveError("RECOVERY_TARGET_CHANGED")
+            if index and after.identity != before.identity:
+                raise FileMoveError("RECOVERY_TARGET_CHANGED")
+        parent, _, name = move.source.relative_path.rpartition("/")
+        with open_library_directory(move.source.root, parent) as descriptor:
+            try:
+                os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            except FileNotFoundError:
+                return True
+        raise FileMoveError("RECOVERY_SOURCE_STILL_EXISTS")

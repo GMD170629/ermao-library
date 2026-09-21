@@ -8,6 +8,7 @@ from app.modules.library.application.bulk_operations import (
     ExecuteBulkShelfMembership,
     InvalidBulkBookOperationError,
 )
+from app.modules.library.application.file_move_plans import MoveActor
 from app.modules.library.application.imported_book_metadata import (
     BookIdentificationRequests,
     IdentifyImportedBook,
@@ -28,6 +29,7 @@ from app.modules.library.application.source_browser import (
     SourceBrowserPort,
     SourceLocation,
 )
+from app.modules.library.domain.file_moves import FileMoveError
 from app.modules.library.domain.metadata_patch import (
     MetadataChange,
     MetadataPatchError,
@@ -216,6 +218,7 @@ __all__ = [
     "DirectoryImportMember",
     "ExecuteBulkMetadata",
     "ExecuteBulkShelfMembership",
+    "FileMoveError",
     "FilterCondition",
     "FilterExpression",
     "GetCatalogBook",
@@ -254,6 +257,7 @@ __all__ = [
     "MetadataSideEffectPolicy",
     "MetadataTarget",
     "MetadataValue",
+    "MoveActor",
     "ObservedSourceEntry",
     "OrganizationModeViolationCode",
     "PreparedBookFacet",

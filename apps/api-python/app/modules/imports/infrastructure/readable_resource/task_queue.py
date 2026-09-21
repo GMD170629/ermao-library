@@ -11,6 +11,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, aliased
 
 from app.contracts.library_file_activity import LibraryFileActivityBusy
+from app.contracts.source_relocation import SourceRelocation
 from app.models import (
     LibraryBook,
     LibraryBookMetadata,
@@ -525,6 +526,22 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         )
         self._session.flush()
         return int(getattr(result, "rowcount", 0) or 0)
+
+    def reconcile_relocation(self, change: SourceRelocation) -> None:
+        """Relocate scoped checkpoints and reconcile only the moved publication."""
+        source_scope = ScanScope(change.source_relative_path, True)
+        destination_scope = ScanScope(change.destination_relative_path, True)
+        # Composite node/resource foreign keys already move node-bound task scope.
+        # Keep unrelated and broad source gaps; only the removed subtree is cleared.
+        clear_scan_gaps(self._session, change.source_library_id, (source_scope,))
+        record_scan_gaps(
+            self._session, change.destination_library_id, (destination_scope,)
+        )
+        self.request_library_scan(
+            change.destination_library_id,
+            missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
+            scan_scopes=(destination_scope,),
+        )
 
     def has_incomplete_ranges(self, library_id: str) -> bool:
         row = self._session.get(LibraryImportScanGap, library_id)

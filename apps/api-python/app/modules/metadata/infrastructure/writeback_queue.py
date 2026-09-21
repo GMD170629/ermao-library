@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.contracts.source_relocation import SourceRelocation
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.models import (
     Library,
@@ -565,6 +566,30 @@ def discard_operations(db: Session, operation_ids: tuple[str, ...]) -> int:
             )
         )
     return target_count
+
+
+def discard_relocated_writebacks(db: Session, change: SourceRelocation) -> int:
+    """Frozen old-path intents cannot publish after the source tree has moved."""
+    ids = tuple(
+        db.scalars(
+            select(MetadataWritebackOperation.id).where(
+                MetadataWritebackOperation.book_id.in_(change.book_ids)
+            )
+        )
+    )
+    if (
+        db.scalar(
+            select(MetadataWritebackTarget.id)
+            .where(
+                MetadataWritebackTarget.operation_id.in_(ids),
+                MetadataWritebackTarget.status.in_(("RUNNING", "PREPARED")),
+            )
+            .limit(1)
+        )
+        is not None
+    ):
+        raise RuntimeError("WRITEBACK_STILL_RUNNING")
+    return discard_operations(db, ids)
 
 
 def claim_next_preparation(
