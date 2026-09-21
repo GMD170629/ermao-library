@@ -12,6 +12,31 @@ class SqlAlchemyReceiptStore:
     def __init__(self, db: Session) -> None:
         self._db = db
 
+    def lookup(
+        self, grant_id: str, request_id: str, tool: str, fingerprint: str
+    ) -> dict[str, object] | None:
+        row = self._db.scalar(
+            select(AutomationReceiptRow)
+            .where(
+                AutomationReceiptRow.grant_id == grant_id,
+                AutomationReceiptRow.request_id == request_id,
+            )
+            .execution_options(populate_existing=True)
+        )
+        if row is None:
+            return None
+        return self._result(row, tool, fingerprint)
+
+    @staticmethod
+    def _result(
+        row: AutomationReceiptRow, tool: str, fingerprint: str
+    ) -> dict[str, object]:
+        if row.fingerprint != fingerprint or row.tool != tool:
+            raise AutomationAccessError("REQUEST_ID_CONFLICT")
+        if row.result is None:
+            raise AutomationAccessError("REQUEST_INCOMPLETE")
+        return row.result
+
     def claim(
         self,
         grant_id: str,
@@ -39,17 +64,10 @@ class SqlAlchemyReceiptStore:
         )
         if inserted is not None:
             return None
-        row = self._db.scalar(
-            select(AutomationReceiptRow).where(
-                AutomationReceiptRow.grant_id == grant_id,
-                AutomationReceiptRow.request_id == request_id,
-            )
-        )
-        if row is None or row.fingerprint != fingerprint or row.tool != tool:
-            raise AutomationAccessError("REQUEST_ID_CONFLICT")
-        if row.result is None:
+        result = self.lookup(grant_id, request_id, tool, fingerprint)
+        if result is None:
             raise AutomationAccessError("REQUEST_INCOMPLETE")
-        return row.result
+        return result
 
     def complete(
         self, grant_id: str, request_id: str, result: dict[str, object]

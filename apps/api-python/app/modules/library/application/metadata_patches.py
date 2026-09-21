@@ -35,12 +35,14 @@ class MetadataSnapshot:
     protected: frozenset[str]
     linked_book_id: str | None = None
     linked_values: dict[str, MetadataValue] | None = None
+    source_node_id: str | None = None
 
 
 @dataclass(frozen=True)
 class PreparedMetadataPatch:
     before: MetadataSnapshot
     values: dict[str, MetadataValue]
+    provenance: dict[str, str] | None = None
 
 
 class MetadataPatchPort(Protocol):
@@ -130,7 +132,9 @@ class ApplyMetadataPatches:
                         for key, value in values.items()
                         if before.linked_values.get(key) in (None, "", ())
                     }
-                prepared.append(PreparedMetadataPatch(before, values))
+                prepared.append(
+                    PreparedMetadataPatch(before, values, change.provenance)
+                )
             # A root Node patch also changes its Book. Overlapping explicit
             # targets in one batch would otherwise evaluate against stale state.
             books = {

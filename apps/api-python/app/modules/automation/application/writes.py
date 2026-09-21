@@ -5,11 +5,16 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 from app.modules.automation.application.catalog import AutomationCatalog, scoped_context
+from app.modules.automation.application.execution import RecheckMutationAccess
 from app.modules.automation.application.grants import GrantUnitOfWork
 from app.modules.automation.application.receipts import (
     CompleteReceipt,
     ReceiptStore,
     request_fingerprint,
+)
+from app.modules.automation.application.refresh import (
+    RefreshMetadataChange,
+    project_file_metadata,
 )
 from app.modules.automation.domain.access import (
     AutomationAccessError,
@@ -62,6 +67,7 @@ class AutomationWrites:
         clock_ms: Callable[[], int],
         new_id: Callable[[], str],
         metadata: ApplyMetadataPatches,
+        authorization: RecheckMutationAccess,
     ) -> None:
         self._catalog = catalog
         self._create = create
@@ -72,6 +78,7 @@ class AutomationWrites:
         self._clock = clock_ms
         self._new_id = new_id
         self._metadata = metadata
+        self._authorization = authorization
 
     def create_shelf(
         self,
@@ -112,6 +119,7 @@ class AutomationWrites:
             previous = self._receipts.claim(
                 access.grant_id, request_id, "create_shelf", fingerprint, now_ms
             )
+            access = self._authorization.require(access, Scope.SHELVES_WRITE)
             if previous is not None:
                 self._catalog.get_shelf(access, str(previous["shelf_id"]), 1, 1)
                 self._uow.rollback()
@@ -151,6 +159,10 @@ class AutomationWrites:
             previous = self._receipts.claim(
                 access.grant_id, request_id, tool, fingerprint, now
             )
+            access = self._authorization.require(access, Scope.SHELVES_WRITE)
+            self._catalog.get_books(access, book_ids)
+            self._catalog.get_shelf(access, shelf_id, 1, 1)
+            command = replace(command, context=scoped_context(access))
             if previous is not None:
                 self._uow.rollback()
                 return previous
@@ -221,6 +233,13 @@ class AutomationWrites:
         try:
             previous = self._receipts.claim(
                 access.grant_id, request_id, tool, fingerprint, now
+            )
+            access = self._authorization.require(access, Scope.TAGS_WRITE)
+            if override_fields:
+                access.require(Scope.METADATA_OVERRIDE)
+            self._catalog.get_books(access, book_ids)
+            command = replace(
+                command, context=replace(scoped_context(access), can_manage_system=True)
             )
             if previous is not None:
                 self._uow.rollback()
@@ -295,9 +314,113 @@ class AutomationWrites:
             previous = self._receipts.claim(
                 access.grant_id, request_id, "update_metadata", fingerprint, now
             )
+            access = self._authorization.require(access, Scope.METADATA_WRITE)
+            for item in changes:
+                access.require_metadata(
+                    changes_tags="tags" in (set(item.fields) | item.clear_fields),
+                    overrides_protection=bool(item.override_fields),
+                )
+                self._catalog.get_metadata_schema(
+                    access, item.target_type, item.target_id
+                )
+            actor = replace(
+                actor,
+                library_ids=access.permissions.library_ids,
+                can_tags=Scope.TAGS_WRITE in access.permissions.scopes,
+                can_override=Scope.METADATA_OVERRIDE in access.permissions.scopes,
+            )
             if previous is not None:
                 self._uow.rollback()
                 return previous
+            return self._metadata.execute(actor, changes, receipt=receipt)
+        except Exception:
+            self._uow.rollback()
+            raise
+
+    def refresh_metadata(
+        self,
+        access: EffectiveAccess,
+        request_id: str,
+        requests: tuple[RefreshMetadataChange, ...],
+    ) -> dict[str, object]:
+        access.require(Scope.FILES_READ, Scope.METADATA_WRITE)
+        if not 1 <= len(requests) <= METADATA_BATCH_LIMIT:
+            raise AutomationAccessError("INVALID_TARGETS")
+        arguments: dict[str, object] = {
+            "changes": [
+                {
+                    "target_type": item.target_type,
+                    "target_id": item.target_id,
+                    "expected_revision": item.expected_revision,
+                    "node_id": item.node_id,
+                    "source": item.source,
+                    "fields": item.fields,
+                    "expected_file_revision": item.expected_file_revision,
+                    "mode": item.mode,
+                    "override_fields": sorted(item.override_fields),
+                    "sidecar_relative_path": item.sidecar_relative_path,
+                }
+                for item in requests
+            ]
+        }
+        fingerprint = request_fingerprint("refresh_metadata", arguments, request_id)
+        access = self._authorization.require(
+            access, Scope.FILES_READ, Scope.METADATA_WRITE
+        )
+        for item in requests:
+            access.require_metadata(
+                changes_tags="tags" in item.fields,
+                overrides_protection=bool(item.override_fields),
+            )
+            self._catalog.require_metadata_source(
+                access, item.target_type, item.target_id, item.node_id
+            )
+        # A successful replay must not parse a newer file or recreate a prior
+        # action. Only the original persisted result is returned after access checks.
+        previous = self._receipts.lookup(
+            access.grant_id, request_id, "refresh_metadata", fingerprint
+        )
+        if previous is not None:
+            return previous
+        changes = tuple(
+            project_file_metadata(
+                item,
+                self._catalog.observe_file_metadata(
+                    access, item.node_id, item.source, item.sidecar_relative_path
+                ),
+            )
+            for item in requests
+        )
+        now = self._clock()
+        receipt = CompleteReceipt(
+            self._receipts, access.grant_id, request_id, lambda result: result
+        )
+        try:
+            previous = self._receipts.claim(
+                access.grant_id, request_id, "refresh_metadata", fingerprint, now
+            )
+            access = self._authorization.require(
+                access, Scope.FILES_READ, Scope.METADATA_WRITE
+            )
+            for item in requests:
+                access.require_metadata(
+                    changes_tags="tags" in item.fields,
+                    overrides_protection=bool(item.override_fields),
+                )
+                self._catalog.require_metadata_source(
+                    access, item.target_type, item.target_id, item.node_id
+                )
+            if previous is not None:
+                self._uow.rollback()
+                return previous
+            actor = MetadataPatchActor(
+                access.user_id,
+                access.grant_id,
+                access.permissions.library_ids,
+                True,
+                Scope.TAGS_WRITE in access.permissions.scopes,
+                Scope.METADATA_OVERRIDE in access.permissions.scopes,
+            )
             return self._metadata.execute(actor, changes, receipt=receipt)
         except Exception:
             self._uow.rollback()

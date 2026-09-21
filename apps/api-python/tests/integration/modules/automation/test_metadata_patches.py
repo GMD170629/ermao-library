@@ -6,6 +6,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.bootstrap.automation import (
     build_automation_catalog,
+    build_automation_settings,
     build_automation_writes,
     build_grant_manager,
 )
@@ -18,6 +19,7 @@ from app.models import (
 )
 from app.models.library import LibraryOperation
 from app.models.organize import MetadataWritebackPreparation, OrganizePolicy
+from app.modules.automation.application.settings import AutomationServiceSettings
 from app.modules.automation.domain.access import (
     AutomationAccessError,
     EffectiveAccess,
@@ -43,6 +45,14 @@ def setup_metadata(db):
     )
     grant = build_grant_manager(db).create(
         user_id="mcp-owner", name="metadata", permissions=permissions
+    )
+    build_automation_settings(db).update(
+        "mcp-owner",
+        AutomationServiceSettings(
+            enabled=True,
+            enabled_scopes=permissions.scopes,
+            public_base_url="http://localhost",
+        ),
     )
     return EffectiveAccess(grant.grant.id, "mcp-owner", permissions)
 

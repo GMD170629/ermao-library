@@ -29,7 +29,10 @@ from app.modules.automation.domain.tools import (
     PLAN_LIFETIME_SECONDS,
     QUERY_MAX_LIMIT,
 )
-from app.modules.automation.presentation.metadata import MetadataChangeInput
+from app.modules.automation.presentation.metadata import (
+    MetadataChangeInput,
+    RefreshMetadataInput,
+)
 from app.modules.library.public import (
     CatalogBookFilter,
     MetadataPatchError,
@@ -327,6 +330,26 @@ def build_catalog_server(
             return await invoke(
                 lambda catalog, access: catalog.read_file_metadata(
                     access, node_id, source, sidecar_relative_path
+                )
+            )
+
+    if {
+        PermissionScope.FILES_READ,
+        PermissionScope.METADATA_WRITE,
+    } <= snapshot.access.permissions.scopes:
+
+        @server.tool(annotations=removal)
+        async def refresh_metadata(
+            request_id: RequestId,
+            changes: Annotated[
+                list[RefreshMetadataInput],
+                Field(min_length=1, max_length=METADATA_BATCH_LIMIT),
+            ],
+        ) -> dict[str, object]:
+            """从明确的本地来源及版本刷新选定系统字段，不写源文件、不联网 / Refresh selected system fields from an explicit local file revision; no file writes or network requests."""
+            return await write(
+                lambda commands, access: commands.refresh_metadata(
+                    access, request_id, tuple(item.to_domain() for item in changes)
                 )
             )
 

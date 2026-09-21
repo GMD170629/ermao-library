@@ -6,10 +6,15 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
-from app.bootstrap.automation import build_automation_writes, build_grant_manager
+from app.bootstrap.automation import (
+    build_automation_settings,
+    build_automation_writes,
+    build_grant_manager,
+)
 from app.models import Library, LibraryBookFacet, LibraryBookMetadata, LibraryFacet
 from app.models.organize import MetadataWritebackPreparation, OrganizePolicy
 from app.models.shelf import Shelf, ShelfBook
+from app.modules.automation.application.settings import AutomationServiceSettings
 from app.modules.automation.domain.access import (
     AutomationAccessError,
     EffectiveAccess,
@@ -27,6 +32,14 @@ def setup_access(db):
     )
     grant = build_grant_manager(db).create(
         user_id="mcp-owner", name="writer", permissions=permissions
+    )
+    build_automation_settings(db).update(
+        "mcp-owner",
+        AutomationServiceSettings(
+            enabled=True,
+            enabled_scopes=permissions.scopes,
+            public_base_url="http://localhost",
+        ),
     )
     return EffectiveAccess(grant.grant.id, "mcp-owner", permissions)
 
@@ -149,3 +162,29 @@ def test_tags_are_database_only_and_replay_does_not_override_protection(
     assert list(db_session.scalars(select(MetadataWritebackPreparation))) == []
     assert original.read_bytes() == b"original sidecar"
     assert list(source.iterdir()) == [original]
+
+
+def test_revocation_between_preflight_and_claim_prevents_the_write(db_session):
+    access = setup_access(db_session)
+    factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
+    commands = build_automation_writes(db_session)
+    original = commands._receipts
+
+    class RevokeBeforeClaim:
+        def claim(self, *args):
+            with factory() as other:
+                build_grant_manager(other).revoke(
+                    user_id=access.user_id, grant_id=access.grant_id
+                )
+            return original.claim(*args)
+
+        def complete(self, *args):
+            return original.complete(*args)
+
+    commands._receipts = RevokeBeforeClaim()
+    with pytest.raises(AutomationAccessError, match="UNAUTHORIZED"):
+        commands.create_shelf(access, "revoked-mid-call", "Must not exist", None)
+    assert (
+        db_session.scalar(select(Shelf).where(Shelf.name == "Must not exist")) is None
+    )
+    assert list(db_session.scalars(select(AutomationReceiptRow))) == []

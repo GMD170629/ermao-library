@@ -13,6 +13,7 @@ from app.modules.auth.infrastructure.automation_identity import (
     SqlAlchemyAutomationIdentity,
 )
 from app.modules.automation.application.catalog import AutomationCatalog
+from app.modules.automation.application.execution import RecheckMutationAccess
 from app.modules.automation.application.grants import (
     AuthorizeAutomation,
     ManageGrants,
@@ -140,4 +141,7 @@ def build_automation_writes(db: Session) -> AutomationWrites:
         now_timestamp_ms,
         lambda: uuid4().hex,
         ApplyMetadataPatches(SqlAlchemyMetadataPatches(db), db),
+        RecheckMutationAccess(
+            build_automation_authorizer(db), SqlAlchemyAutomationSettings(db)
+        ),
     )

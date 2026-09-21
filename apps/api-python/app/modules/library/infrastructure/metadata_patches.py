@@ -79,28 +79,40 @@ class SqlAlchemyMetadataPatches:
         owner_metadata = None
         if target_type == "book":
             entity = self._db.scalar(
-                select(LibraryBook).where(
+                select(LibraryBook)
+                .execution_options(populate_existing=True)
+                .where(
                     LibraryBook.id == target_id, LibraryBook.library_id.in_(library_ids)
                 )
             )
             if entity is None:
                 return None
-            metadata = self._db.get(LibraryBookMetadata, target_id)
+            metadata = self._db.get(
+                LibraryBookMetadata, target_id, populate_existing=True
+            )
+            source_node_id = entity.source_node_id
             book_id, library_id = entity.id, entity.library_id
         elif target_type == "resource":
             resource = self._db.scalar(
-                select(LibraryReadableResource).where(
+                select(LibraryReadableResource)
+                .execution_options(populate_existing=True)
+                .where(
                     LibraryReadableResource.id == target_id,
                     LibraryReadableResource.library_id.in_(library_ids),
                 )
             )
             if resource is None:
                 return None
-            metadata = self._db.get(LibraryReadableResourceMetadata, target_id)
+            metadata = self._db.get(
+                LibraryReadableResourceMetadata, target_id, populate_existing=True
+            )
+            source_node_id = resource.source_node_id
             book_id, library_id = resource.book_id, resource.library_id
         elif target_type == "source_node":
             node = self._db.scalar(
-                select(LibrarySourceNode).where(
+                select(LibrarySourceNode)
+                .execution_options(populate_existing=True)
+                .where(
                     LibrarySourceNode.id == target_id,
                     LibrarySourceNode.library_id.in_(library_ids),
                     LibrarySourceNode.physical_kind == "DIRECTORY",
@@ -108,6 +120,7 @@ class SqlAlchemyMetadataPatches:
             )
             if node is None:
                 return None
+            source_node_id = node.id
             node_name = node.name
             root = aliased(LibrarySourceNode)
             root_path = func.rtrim(root.relative_path, "/")
@@ -118,9 +131,7 @@ class SqlAlchemyMetadataPatches:
                     LibraryBook.library_id == node.library_id,
                     or_(
                         root.id == node.id,
-                        func.substr(
-                            node.relative_path, 1, func.length(root_path) + 1
-                        )
+                        func.substr(node.relative_path, 1, func.length(root_path) + 1)
                         == root_path + "/",
                     ),
                 )
@@ -129,10 +140,14 @@ class SqlAlchemyMetadataPatches:
             if len(owners) != 1:
                 return None
             book_id, library_id = owners[0].id, node.library_id
-            metadata = self._db.get(LibrarySourceNodeMetadata, target_id)
+            metadata = self._db.get(
+                LibrarySourceNodeMetadata, target_id, populate_existing=True
+            )
             if owners[0].source_node_id == node.id:
                 linked = book_id
-                owner_metadata = self._db.get(LibraryBookMetadata, book_id)
+                owner_metadata = self._db.get(
+                    LibraryBookMetadata, book_id, populate_existing=True
+                )
         else:
             return None
         values: dict[str, MetadataValue] = {}
@@ -202,6 +217,7 @@ class SqlAlchemyMetadataPatches:
             {"title": owner_metadata.title, "description": owner_metadata.description}
             if owner_metadata is not None
             else None,
+            source_node_id,
         )
 
     def apply(self, patch: PreparedMetadataPatch) -> None:
@@ -279,6 +295,7 @@ class SqlAlchemyMetadataPatches:
                             field: item.before.values[field] for field in item.values
                         },
                         "after": item.values,
+                        "source": item.provenance,
                     }
                     for item in patches
                 ],

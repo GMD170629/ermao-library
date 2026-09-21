@@ -9,9 +9,14 @@ import pytest
 from pypdf import PdfWriter
 from sqlalchemy import select
 
-from app.bootstrap.automation import build_automation_catalog
+from app.bootstrap.automation import (
+    build_automation_catalog,
+    build_automation_settings,
+    build_grant_manager,
+)
 from app.models import Library, LibrarySourceNode
 from app.models.organize import MetadataWritebackPreparation
+from app.modules.automation.application.settings import AutomationServiceSettings
 from app.modules.automation.domain.access import AutomationAccessError, Scope
 from app.modules.library.public import SourceAccessError
 from app.modules.metadata.application.opf import serialize_opf_metadata
@@ -25,6 +30,18 @@ def file_access(db, tmp_path):
         access,
         permissions=replace(
             access.permissions, scopes=access.permissions.scopes | {Scope.FILES_READ}
+        ),
+    )
+    grant = build_grant_manager(db).create(
+        user_id=access.user_id, name="file metadata", permissions=access.permissions
+    )
+    access = replace(access, grant_id=grant.grant.id)
+    build_automation_settings(db).update(
+        access.user_id,
+        AutomationServiceSettings(
+            enabled=True,
+            enabled_scopes=access.permissions.scopes,
+            public_base_url="http://localhost",
         ),
     )
     root = tmp_path / "library"

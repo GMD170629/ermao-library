@@ -230,6 +230,7 @@ class SqlAlchemySourceNodeRepository(SourceNodeRepositoryPort):
     ) -> SourceLocation | None:
         row = self._session.execute(
             select(LibrarySourceNode, Library.root_path)
+            .execution_options(populate_existing=True)
             .join(Library, Library.id == LibrarySourceNode.library_id)
             .where(
                 LibrarySourceNode.id == node_id,

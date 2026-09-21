@@ -21,7 +21,11 @@ from app.modules.library.public import (
     MetadataTarget,
     SourceBrowserPort,
 )
-from app.modules.metadata.public import MetadataFileSource, StandardFileMetadataReader
+from app.modules.metadata.public import (
+    MetadataFileSource,
+    StandardFileMetadataReader,
+    StandardMetadataObservation,
+)
 from app.modules.shelf.public import (
     CatalogShelfQueryPort,
     ListCatalogShelfBookIds,
@@ -190,13 +194,13 @@ class AutomationCatalog:
             "page_size": result.page_size,
         }
 
-    def read_file_metadata(
+    def observe_file_metadata(
         self,
         access: EffectiveAccess,
         node_id: str,
         source: MetadataFileSource,
         sidecar_relative_path: str | None,
-    ) -> dict[str, object]:
+    ) -> StandardMetadataObservation:
         access.require(Scope.FILES_READ)
         location = self.sources.location(node_id, access.permissions.library_ids)
         if location is None:
@@ -210,4 +214,51 @@ class AutomationCatalog:
             source=source,
             sidecar_relative_path=sidecar_relative_path,
         )
-        return {"node_id": node_id, **asdict(observation)}
+        return observation
+
+    def read_file_metadata(
+        self,
+        access: EffectiveAccess,
+        node_id: str,
+        source: MetadataFileSource,
+        sidecar_relative_path: str | None,
+    ) -> dict[str, object]:
+        return {
+            "node_id": node_id,
+            **asdict(
+                self.observe_file_metadata(
+                    access, node_id, source, sidecar_relative_path
+                )
+            ),
+        }
+
+    def require_metadata_source(
+        self,
+        access: EffectiveAccess,
+        target_type: MetadataTarget,
+        target_id: str,
+        node_id: str,
+    ) -> None:
+        access.require(Scope.FILES_READ, Scope.METADATA_WRITE)
+        target = self.metadata.snapshot(
+            target_type, target_id, access.permissions.library_ids
+        )
+        if target is None or target.source_node_id is None:
+            raise AutomationAccessError("RESOURCE_NOT_FOUND")
+        anchor = self.sources.location(
+            target.source_node_id, access.permissions.library_ids
+        )
+        node = self.sources.location(node_id, access.permissions.library_ids)
+        if (
+            anchor is None
+            or node is None
+            or anchor.node.library_id != node.node.library_id
+        ):
+            raise AutomationAccessError("RESOURCE_NOT_FOUND")
+        if node.node.id != anchor.node.id and not (
+            anchor.node.physical_kind.value == "DIRECTORY"
+            and node.node.relative_path.startswith(
+                anchor.node.relative_path.rstrip("/") + "/"
+            )
+        ):
+            raise AutomationAccessError("RESOURCE_NOT_FOUND")

@@ -116,6 +116,7 @@ class MetadataChange:
     fields: dict[str, MetadataValue]
     clear_fields: frozenset[str] = frozenset()
     override_fields: frozenset[str] = frozenset()
+    provenance: dict[str, str] | None = None
 
 
 def prepare_metadata_patch(

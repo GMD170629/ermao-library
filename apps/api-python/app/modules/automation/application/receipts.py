@@ -11,6 +11,9 @@ from app.modules.automation.domain.access import AutomationAccessError
 
 
 class ReceiptStore(Protocol):
+    def lookup(
+        self, grant_id: str, request_id: str, tool: str, fingerprint: str
+    ) -> dict[str, object] | None: ...
     def claim(
         self,
         grant_id: str,

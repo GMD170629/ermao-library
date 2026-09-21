@@ -122,7 +122,7 @@ def test_official_sdk_real_catalog_and_revocation(db_session, test_settings, pre
     (source_root / "allowed").mkdir(parents=True)
     source_opf = source_root / "allowed/metadata.opf"
     source_opf.write_bytes(
-        b'<package xmlns="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>File title</dc:title></metadata></package>'
+        b'<package xmlns="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>File title</dc:title><dc:creator>File author</dc:creator></metadata></package>'
     )
     db_session.get(Library, "test-library").root_path = str(source_root)
     db_session.commit()
@@ -374,6 +374,42 @@ def test_official_sdk_real_catalog_and_revocation(db_session, test_settings, pre
                     current_book.structured_content["books"][0]["title"] == "来自 MCP"
                 )
                 assert list((source_root / "allowed").iterdir()) == [source_opf]
+                refresh_schema = await client.call_tool(
+                    "get_metadata_schema",
+                    {"target_type": "book", "target_id": "allowed"},
+                )
+                refreshed = await client.call_tool(
+                    "refresh_metadata",
+                    {
+                        "request_id": "sdk-refresh",
+                        "changes": [
+                            {
+                                "target_type": "book",
+                                "target_id": "allowed",
+                                "expected_revision": refresh_schema.structured_content[
+                                    "expected_revision"
+                                ],
+                                "node_id": "allowed-node",
+                                "source": "sidecar",
+                                "expected_file_revision": observed.structured_content[
+                                    "file_revision"
+                                ],
+                                "fields": ["author"],
+                            }
+                        ],
+                    },
+                )
+                assert not refreshed.is_error, refreshed
+                after_refresh = await client.call_tool(
+                    "get_books", {"book_ids": ["allowed"]}
+                )
+                assert (
+                    after_refresh.structured_content["books"][0]["author"]
+                    == "File author"
+                )
+                assert (
+                    after_refresh.structured_content["books"][0]["title"] == "来自 MCP"
+                )
 
                 assert (
                     await client.call_tool("create_shelf", {**args, "name": "Changed"})
