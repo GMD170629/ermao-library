@@ -63,13 +63,6 @@ class SqlAlchemyMoveTopology:
             raise FileMoveError("RESOURCE_NOT_FOUND")
         nodes = self._nodes(node)
         ids = tuple(item.id for item in nodes)
-        books = tuple(
-            self._db.scalars(
-                select(LibraryBook)
-                .where(LibraryBook.source_node_id.in_(ids))
-                .order_by(LibraryBook.id)
-            )
-        )
         resources = tuple(
             self._db.scalars(
                 select(LibraryReadableResource)
@@ -84,16 +77,29 @@ class SqlAlchemyMoveTopology:
                 .order_by(LibraryResourceAsset.id)
             )
         )
-        # Moving a partial aggregate across libraries would change its ownership.
-        # Keep complete publication units as the admitted initial move boundary.
+        books = tuple(
+            self._db.scalars(
+                select(LibraryBook)
+                .where(
+                    LibraryBook.library_id == node.library_id,
+                    or_(
+                        LibraryBook.source_node_id.in_(ids),
+                        LibraryBook.id.in_(
+                            {resource.book_id for resource in resources}
+                        ),
+                    ),
+                )
+                .order_by(LibraryBook.id)
+                .execution_options(populate_existing=True)
+            )
+        )
         book_ids = {book.id for book in books}
+        complete_book_ids = {book.id for book in books if book.source_node_id in ids}
         resource_ids = {resource.id for resource in resources}
-        if (
-            not books
-            or any(resource.book_id not in book_ids for resource in resources)
-            or any(asset.resource_id not in resource_ids for asset in assets)
-        ):
-            raise FileMoveError("COMPLETE_BOOK_UNIT_REQUIRED")
+        if not books or any(asset.resource_id not in resource_ids for asset in assets):
+            # Individual pages/tracks can carry format-specific navigation and
+            # ordering semantics; admit complete Resource anchors, not loose assets.
+            raise FileMoveError("COMPLETE_RESOURCE_UNIT_REQUIRED")
         fingerprint = {
             "library": [library.id, library.root_path, library.organization_mode],
             "nodes": [
@@ -131,6 +137,7 @@ class SqlAlchemyMoveTopology:
             Path(library.root_path),
             revision,
             tuple(sorted(book_ids)),
+            tuple(sorted(complete_book_ids)),
         )
 
     def destination(
@@ -150,6 +157,10 @@ class SqlAlchemyMoveTopology:
         node = self._db.get(LibrarySourceNode, source.node_id, populate_existing=True)
         if node is None:
             raise FileMoveError("RESOURCE_NOT_FOUND")
+        if source.library_id != request.destination_library_id and set(
+            source.book_ids
+        ) != set(source.complete_book_ids):
+            raise FileMoveError("COMPLETE_BOOK_UNIT_REQUIRED")
         nodes = {item.id: item for item in self._nodes(node)}
         books = tuple(
             self._db.scalars(
@@ -163,8 +174,18 @@ class SqlAlchemyMoveTopology:
                 )
             )
         )
+        book_nodes = {
+            item.id: item
+            for item in self._db.scalars(
+                select(LibrarySourceNode)
+                .where(
+                    LibrarySourceNode.id.in_({book.source_node_id for book in books})
+                )
+                .execution_options(populate_existing=True)
+            )
+        }
         book_paths = {
-            book.id: nodes[book.source_node_id].relative_path for book in books
+            book.id: book_nodes[book.source_node_id].relative_path for book in books
         }
 
         def moved(path: str) -> str:
@@ -177,7 +198,9 @@ class SqlAlchemyMoveTopology:
         for resource in resources:
             resource_node = nodes.get(resource.source_node_id)
             if resource_node is None:
-                raise FileMoveError("COMPLETE_BOOK_UNIT_REQUIRED")
+                if resource.book_id in source.complete_book_ids:
+                    raise FileMoveError("COMPLETE_BOOK_UNIT_REQUIRED")
+                continue
             target_path = moved(resource_node.relative_path)
             decision = decide_book_anchor_for_resource(
                 organization_mode=TargetLibraryOrganizationMode(
@@ -191,7 +214,12 @@ class SqlAlchemyMoveTopology:
                 if decision.create_new_book_at_source_node
                 else decision.resource_root_folder_relative_path
             )
-            if expected_book_path != moved(book_paths[resource.book_id]):
+            expected_owner_path = (
+                moved(book_paths[resource.book_id])
+                if resource.book_id in source.complete_book_ids
+                else book_paths[resource.book_id]
+            )
+            if expected_book_path != expected_owner_path:
                 raise FileMoveError("BOOK_OWNERSHIP_WOULD_CHANGE")
         # Empty VOLUMES books must remain root directory books after a move.
         for book in books:

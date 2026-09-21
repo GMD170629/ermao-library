@@ -90,6 +90,12 @@ class LibraryFileMoveTarget(Base):
     destination_library_id: Mapped[str] = mapped_column(
         "destinationLibraryId", String(191)
     )
+    byte_count: Mapped[int] = mapped_column(
+        "byteCount", BigInteger, default=0, server_default="0"
+    )
+    copy_required: Mapped[bool] = mapped_column(
+        "copyRequired", Boolean, default=False, server_default="0"
+    )
     stage: Mapped[str] = mapped_column(String(32), default="QUEUED")
     recovery: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
     error_code: Mapped[str | None] = mapped_column("errorCode", String(100))

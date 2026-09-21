@@ -182,3 +182,27 @@ def test_real_cross_device_operation_verifies_copy_and_retains_recovery_source(
         assert read_copy_attributes(source.fileno()) == read_copy_attributes(
             target.fileno()
         )
+
+    from app.modules.library.application.file_move_recovery_cleanup import (
+        CleanExpiredMoveBackups,
+    )
+    from app.modules.library.domain.file_moves import RECOVERY_RETENTION_MS
+
+    assert (
+        CleanExpiredMoveBackups(store, files, db_session, lambda: 5000).execute() == 0
+    )
+    retained = root / plan.moves[0].backup_relative_path
+    if interruption == "publish":
+        (separate_volume / "renamed/publication.epub").write_bytes(b"new user content")
+    elif interruption == "backup":
+        (retained / "publication.epub").write_bytes(b"changed recovery copy")
+    cleaned = CleanExpiredMoveBackups(
+        store, files, db_session, lambda: RECOVERY_RETENTION_MS + 5000
+    ).execute()
+    assert cleaned == (1 if interruption is None else 0)
+    if interruption is None:
+        assert not retained.exists()
+        assert (separate_volume / "renamed/publication.epub").read_bytes() == original
+    else:
+        assert retained.exists()
+    assert store.expired_backups(RECOVERY_RETENTION_MS + 6000, 5) == ()

@@ -208,3 +208,57 @@ def test_same_disk_cross_library_move_keeps_book_resource_asset_and_shelf_ids(
     )
     assert (destination_root / "renamed/book.epub").read_bytes() == b"book bytes"
     assert not (root / "allowed").exists()
+
+
+def test_cross_device_recovery_quota_is_reserved_before_queueing(db_session, tmp_path):
+    from dataclasses import replace
+
+    from app.modules.library.infrastructure.file_move_operations import (
+        SqlAlchemyFileMoveOperations,
+    )
+
+    access, root = file_access(db_session, tmp_path)
+    db_session.get(Library, "test-library").organization_mode = "VOLUMES"
+    db_session.commit()
+    (root / "allowed/book").write_bytes(b"1234567890")
+    actor = MoveActor(
+        access.user_id, access.grant_id, access.permissions.library_ids, False
+    )
+    plan = PrepareFileMovePlan(
+        SqlAlchemyMoveTopology(db_session),
+        AnchoredMoveInspection(),
+        lambda: 1000,
+        lambda: "first",
+    ).execute(actor, (MoveRequest("allowed-node", "test-library", "renamed"),))
+    move = plan.moves[0]
+    # Only admission arithmetic is under test; actual cross-device I/O is covered
+    # using a separately mounted filesystem in test_cross_device_moves.py.
+    plan = replace(
+        plan,
+        moves=(
+            replace(
+                move,
+                destination_inspection=replace(
+                    move.destination_inspection,
+                    device=move.inventory.entries[0].identity.device + 1,
+                ),
+            ),
+        ),
+    )
+    second = replace(plan, id="second")
+    store = SqlAlchemyFileMoveOperations(db_session, recovery_byte_limit=15)
+    store.save_plan(plan)
+    store.save_plan(second)
+    store.enqueue(plan, "operation", "first-key", 2000)
+    db_session.commit()
+    with pytest.raises(FileMoveError, match="RECOVERY_QUOTA_EXCEEDED"):
+        store.enqueue(second, "second-operation", "second-key", 2000)
+    db_session.rollback()
+    store.cancel("operation", actor, 3000)
+    db_session.commit()
+    assert (
+        store.enqueue(second, "second-operation", "second-key", 3000)
+        == "second-operation"
+    )
+    db_session.rollback()
+    assert (root / "allowed/book").read_bytes() == b"1234567890"

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from app.modules.automation.application.catalog import AutomationCatalog
+from app.modules.automation.application.file_moves import AutomationFileMoves
 from app.modules.automation.application.settings import AutomationServiceSettings
 from app.modules.automation.application.writes import AutomationWrites
 from app.modules.automation.domain.access import EffectiveAccess
@@ -18,6 +19,9 @@ class AutomationRequest:
     settings: AutomationServiceSettings
 
 
+FileInvocation = Callable[[AutomationFileMoves, EffectiveAccess], dict[str, object]]
+
+
 WriteInvocation = Callable[[AutomationWrites, EffectiveAccess], dict[str, object]]
 
 
@@ -29,4 +33,8 @@ class AutomationRuntime(Protocol):
 
     def write(
         self, access: EffectiveAccess, operation: WriteInvocation
+    ) -> dict[str, object]: ...
+
+    def files(
+        self, access: EffectiveAccess, operation: FileInvocation
     ) -> dict[str, object]: ...

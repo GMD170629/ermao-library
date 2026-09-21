@@ -190,6 +190,8 @@ def test_official_sdk_real_catalog_and_revocation(db_session, test_settings, pre
                 listed = await client.list_tools()
                 assert {item.name for item in listed.tools} == {
                     "get_context",
+                    "get_operation",
+                    "cancel_operation",
                     "get_metadata_schema",
                     "list_libraries",
                     "search_books",
@@ -267,6 +269,7 @@ def test_official_sdk_real_catalog_and_revocation(db_session, test_settings, pre
                     Scope.TAGS_WRITE,
                     Scope.METADATA_WRITE,
                     Scope.FILES_READ,
+                    Scope.FILES_MOVE,
                 }
             )
             with factory() as db:
@@ -410,6 +413,83 @@ def test_official_sdk_real_catalog_and_revocation(db_session, test_settings, pre
                 assert (
                     after_refresh.structured_content["books"][0]["title"] == "来自 MCP"
                 )
+
+                with factory() as db:
+                    db.get(Library, "test-library").organization_mode = "VOLUMES"
+                    db.commit()
+                planned = await client.call_tool(
+                    "plan_file_operations",
+                    {
+                        "moves": [
+                            {
+                                "source_node_id": "allowed-node",
+                                "destination_library_id": "test-library",
+                                "template": "{title}",
+                                "template_values": {"title": "renamed"},
+                            }
+                        ]
+                    },
+                )
+                assert not planned.is_error, planned
+                assert str(source_root) not in str(planned)
+                assert source_opf.exists()
+                move_args = {
+                    "plan_id": planned.structured_content["plan_id"],
+                    "request_id": "sdk-move",
+                }
+                submitted = await client.call_tool("execute_file_operations", move_args)
+                assert not submitted.is_error, submitted
+                assert (
+                    await client.call_tool("execute_file_operations", move_args)
+                ).structured_content == submitted.structured_content
+                operation_id = submitted.structured_content["operation_id"]
+                queued = await client.call_tool(
+                    "get_operation", {"operation_id": operation_id}
+                )
+                assert queued.structured_content["status"] == "QUEUED"
+
+                def run_worker():
+                    from app.bootstrap.file_moves import build_file_move_worker
+
+                    with factory() as db:
+                        assert build_file_move_worker(db).process_once()
+
+                await asyncio.to_thread(run_worker)
+                completed = await client.call_tool(
+                    "get_operation", {"operation_id": operation_id}
+                )
+                assert not completed.is_error, completed
+                assert completed.structured_content["status"] == "COMPLETED"
+                assert (source_root / "renamed/metadata.opf").exists()
+                assert not source_opf.exists()
+                second_plan = await client.call_tool(
+                    "plan_file_operations",
+                    {
+                        "moves": [
+                            {
+                                "source_node_id": "allowed-node",
+                                "destination_library_id": "test-library",
+                                "destination_relative_path": "cancelled",
+                            }
+                        ]
+                    },
+                )
+                assert not second_plan.is_error, second_plan
+                second_task = await client.call_tool(
+                    "execute_file_operations",
+                    {
+                        "plan_id": second_plan.structured_content["plan_id"],
+                        "request_id": "sdk-cancel-move",
+                    },
+                )
+                assert not second_task.is_error, second_task
+                cancelled = await client.call_tool(
+                    "cancel_operation",
+                    {"operation_id": second_task.structured_content["operation_id"]},
+                )
+                assert not cancelled.is_error, cancelled
+                assert cancelled.structured_content["status"] == "CANCELLED"
+                assert not (source_root / "cancelled").exists()
 
                 assert (
                     await client.call_tool("create_shelf", {**args, "name": "Changed"})

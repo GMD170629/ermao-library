@@ -7,6 +7,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.modules.automation.application.catalog import AutomationCatalog
+from app.modules.automation.application.file_moves import AutomationFileMoves
 from app.modules.automation.application.grants import (
     AuthorizeAutomation,
     RecordGrantUse,
@@ -14,6 +15,7 @@ from app.modules.automation.application.grants import (
 from app.modules.automation.application.runtime import (
     AutomationRequest,
     CatalogInvocation,
+    FileInvocation,
     WriteInvocation,
 )
 from app.modules.automation.application.settings import AutomationSettingsPort
@@ -31,6 +33,7 @@ class DatabaseAutomationRuntime:
         maintenance: Callable[[Session], bool],
         usage: Callable[[Session], RecordGrantUse],
         writes: Callable[[Session], AutomationWrites],
+        files: Callable[[Session], AutomationFileMoves],
     ) -> None:
         self._sessions = session_factory
         self._settings = settings
@@ -39,6 +42,7 @@ class DatabaseAutomationRuntime:
         self._maintenance = maintenance
         self._usage = usage
         self._writes = writes
+        self._files = files
 
     def _check_maintenance(self, db: Session) -> None:
         if self._maintenance(db):
@@ -92,5 +96,21 @@ class DatabaseAutomationRuntime:
                 enabled_scopes=settings.enabled_scopes,
             )
             result = operation(self._writes(db), current)
+        self._record_usage(access.grant_id)
+        return result
+
+    def files(
+        self, access: EffectiveAccess, operation: FileInvocation
+    ) -> dict[str, object]:
+        with self._sessions() as db:
+            self._check_maintenance(db)
+            settings = self._settings(db).load()
+            current = self._authorize(db).operation(
+                grant_id=access.grant_id,
+                user_id=access.user_id,
+                service_enabled=settings.enabled,
+                enabled_scopes=settings.enabled_scopes,
+            )
+            result = operation(self._files(db), current)
         self._record_usage(access.grant_id)
         return result

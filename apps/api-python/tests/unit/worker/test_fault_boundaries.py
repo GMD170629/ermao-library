@@ -56,6 +56,9 @@ def runtime(monkeypatch, tmp_path):
         return value
 
     monkeypatch.setattr(worker_main, "BackgroundSessionLocal", session)
+    move_worker = Mock()
+    move_worker.process_once.return_value = False
+    monkeypatch.setattr(worker_main, "build_file_move_worker", lambda db: move_worker)
     processor = Mock()
     processor.process_once.return_value = "idle"
     monkeypatch.setattr(
@@ -86,6 +89,7 @@ def runtime(monkeypatch, tmp_path):
     monkeypatch.setattr(worker_main, "record_exception", diagnostics)
     return SimpleNamespace(
         processor=processor,
+        move_worker=move_worker,
         scanner=scanner,
         metadata=metadata,
         organizer=organizer,
@@ -115,7 +119,7 @@ def test_transient_recovery_uses_new_context_before_claim(runtime):
     ]
     worker_main.main()
     assert runtime.processor.startup.call_count == 3
-    assert len(runtime.sessions) == 3
+    assert len(runtime.sessions) == 4
     assert runtime.processor.process_once.called
 
 

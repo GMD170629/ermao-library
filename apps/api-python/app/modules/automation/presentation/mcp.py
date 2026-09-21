@@ -29,6 +29,7 @@ from app.modules.automation.domain.tools import (
     PLAN_LIFETIME_SECONDS,
     QUERY_MAX_LIMIT,
 )
+from app.modules.automation.presentation.file_moves import register_file_moves
 from app.modules.automation.presentation.metadata import (
     MetadataChangeInput,
     RefreshMetadataInput,
@@ -353,6 +354,7 @@ def build_catalog_server(
                 )
             )
 
+    register_file_moves(server, runtime, snapshot)
     return server
 
 

@@ -2,6 +2,8 @@
 
 import hashlib
 import os
+import shutil
+import stat
 
 from app.contracts.controlled_file_slots import is_controlled_file_slot
 from app.modules.library.application.file_move_plans import (
@@ -9,6 +11,7 @@ from app.modules.library.application.file_move_plans import (
     PreparedMoveCopy,
     StagedMoveSource,
 )
+from app.modules.library.application.file_move_recovery_cleanup import ExpiredMoveBackup
 from app.modules.library.domain.file_moves import FileMoveError
 from app.modules.library.infrastructure.file_move_io import (
     SameDeviceMovePublication,
@@ -205,3 +208,50 @@ class VerifiedMovePublication(SameDeviceMovePublication):
             if observed is None:
                 raise FileMoveError("RECOVERY_SOURCE_MISSING")
         return StagedMoveSource(backup, observed)
+
+    def remove_backup(self, backup: ExpiredMoveBackup) -> None:
+        move = backup.move
+        _, planned_backup = _slots(move)
+        if backup.backup.relative_path != planned_backup:
+            raise FileMoveError("BACKUP_SLOT_CHANGED")
+        with open_library_directory(move.source.root) as root_fd:
+            try:
+                current = file_identity(
+                    os.stat(planned_backup, dir_fd=root_fd, follow_symlinks=False)
+                )
+            except FileNotFoundError:
+                return  # Retry acknowledgement of an already removed, verified copy.
+            if not self.is_published(move, backup.copy):
+                raise FileMoveError("PUBLISHED_FILE_MISSING")
+            if current != backup.backup.identity:
+                raise FileMoveError("BACKUP_CHANGED")
+            inventory = inspect_move_source(move.source.root, planned_backup)
+            if len(inventory.entries) != len(move.inventory.entries):
+                raise FileMoveError("BACKUP_CHANGED")
+            for index, (before, after) in enumerate(
+                zip(move.inventory.entries, inventory.entries, strict=True)
+            ):
+                expected_path = (
+                    planned_backup
+                    + before.relative_path[len(move.source.relative_path) :]
+                )
+                if (
+                    expected_path != after.relative_path
+                    or before.directory != after.directory
+                    or (index and before.identity != after.identity)
+                ):
+                    raise FileMoveError("BACKUP_CHANGED")
+            if (
+                file_identity(
+                    os.stat(planned_backup, dir_fd=root_fd, follow_symlinks=False)
+                )
+                != current
+            ):
+                raise FileMoveError("BACKUP_CHANGED")
+            if stat.S_ISDIR(current.mode):
+                if not shutil.rmtree.avoids_symlink_attacks:
+                    raise FileMoveError("SAFE_BACKUP_CLEANUP_UNSUPPORTED")
+                shutil.rmtree(planned_backup, dir_fd=root_fd)
+            else:
+                os.unlink(planned_backup, dir_fd=root_fd)
+            os.fsync(root_fd)

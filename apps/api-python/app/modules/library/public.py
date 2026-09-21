@@ -8,7 +8,16 @@ from app.modules.library.application.bulk_operations import (
     ExecuteBulkShelfMembership,
     InvalidBulkBookOperationError,
 )
-from app.modules.library.application.file_move_plans import MoveActor
+from app.modules.library.application.file_move_operations import (
+    FileMoveOperationPort,
+    move_plan_result,
+    move_progress_result,
+    require_plan_access,
+)
+from app.modules.library.application.file_move_plans import (
+    MoveActor,
+    PrepareFileMovePlan,
+)
 from app.modules.library.application.imported_book_metadata import (
     BookIdentificationRequests,
     IdentifyImportedBook,
@@ -29,7 +38,11 @@ from app.modules.library.application.source_browser import (
     SourceBrowserPort,
     SourceLocation,
 )
-from app.modules.library.domain.file_moves import FileMoveError
+from app.modules.library.domain.file_moves import (
+    FileMoveError,
+    MoveRequest,
+    render_move_template,
+)
 from app.modules.library.domain.metadata_patch import (
     MetadataChange,
     MetadataPatchError,
@@ -219,6 +232,7 @@ __all__ = [
     "ExecuteBulkMetadata",
     "ExecuteBulkShelfMembership",
     "FileMoveError",
+    "FileMoveOperationPort",
     "FilterCondition",
     "FilterExpression",
     "GetCatalogBook",
@@ -258,8 +272,10 @@ __all__ = [
     "MetadataTarget",
     "MetadataValue",
     "MoveActor",
+    "MoveRequest",
     "ObservedSourceEntry",
     "OrganizationModeViolationCode",
+    "PrepareFileMovePlan",
     "PreparedBookFacet",
     "ReadableResourceAnchorViolationCode",
     "ReadableResourceRecord",
@@ -293,11 +309,15 @@ __all__ = [
     "is_strict_descendant_path",
     "is_transparent_audiobook_directory_name",
     "meets_minimum_ready_assets",
+    "move_plan_result",
+    "move_progress_result",
     "parse_filter_expression",
     "parse_source_node_relative_path",
     "parse_target_organization_mode",
     "prepare_book_facet",
     "protected_metadata_fields",
+    "render_move_template",
+    "require_plan_access",
     "resolve_asset_display_titles",
     "resource_is_openable",
     "resource_root_folder_creates_empty_book_on_discovery",

@@ -33,6 +33,7 @@ class MoveSource:
     root: Path
     revision: str
     book_ids: tuple[str, ...]
+    complete_book_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

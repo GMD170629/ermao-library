@@ -179,6 +179,7 @@ def test_real_grant_revocation_before_publish_prevents_file_and_index_changes(
 
 def test_move_creates_and_indexes_planned_parent_directories(db_session, tmp_path):
     from app.models import LibraryReadableResource
+    from tests.integration.modules.automation.test_file_reads import add_file
 
     access, root = file_access(db_session, tmp_path)
     (root / "allowed").rmdir()
@@ -202,6 +203,30 @@ def test_move_creates_and_indexes_planned_parent_directories(db_session, tmp_pat
         )
     )
     db_session.commit()
+    add_file(db_session, "second-node", "second.epub", parent=None)
+    (root / "second.epub").write_bytes(b"second publication")
+    db_session.add(
+        LibraryBook(
+            id="second-book",
+            library_id="test-library",
+            source_node_id="second-node",
+        )
+    )
+    db_session.flush()
+    db_session.add(
+        LibraryReadableResource(
+            id="second-resource",
+            library_id="test-library",
+            book_id="second-book",
+            source_node_id="second-node",
+            adapter_id="epub",
+            adapter_version="1",
+            format="EPUB",
+            enablement_state="ENABLED",
+            import_state="READY",
+        )
+    )
+    db_session.commit()
     actor = MoveActor(
         access.user_id, access.grant_id, access.permissions.library_ids, False
     )
@@ -211,7 +236,11 @@ def test_move_creates_and_indexes_planned_parent_directories(db_session, tmp_pat
         lambda: 1000,
         lambda: "plan",
     ).execute(
-        actor, (MoveRequest("allowed-node", "test-library", "author/series/book.epub"),)
+        actor,
+        (
+            MoveRequest("allowed-node", "test-library", "author/series/book.epub"),
+            MoveRequest("second-node", "test-library", "author/series/second.epub"),
+        ),
     )
     store = SqlAlchemyFileMoveOperations(db_session)
     store.save_plan(plan)
@@ -231,3 +260,67 @@ def test_move_creates_and_indexes_planned_parent_directories(db_session, tmp_pat
     assert parent.relative_path == "author/series"
     assert db_session.get(LibrarySourceNode, parent.parent_id).relative_path == "author"
     assert len(store.execution("operation").created_directories[0]) == 2
+    assert (root / "author/series/second.epub").read_bytes() == b"second publication"
+    assert db_session.get(LibrarySourceNode, "second-node").parent_id == moved.parent_id
+    assert store.execution("operation").created_directories[1] == ()
+
+
+def test_resource_rename_preserves_book_and_rejects_cross_book_move(
+    db_session, tmp_path
+):
+    from app.models import LibraryReadableResource
+    from tests.integration.modules.automation.test_file_reads import add_file
+
+    access, root = file_access(db_session, tmp_path)
+    db_session.get(Library, "test-library").organization_mode = "VOLUMES"
+    add_file(db_session, "volume-node", "allowed/volume.epub")
+    (root / "allowed/volume.epub").write_bytes(b"volume")
+    db_session.add(
+        LibraryReadableResource(
+            id="volume",
+            library_id="test-library",
+            book_id="allowed",
+            source_node_id="volume-node",
+            adapter_id="epub",
+            adapter_version="1",
+            format="EPUB",
+            enablement_state="ENABLED",
+            import_state="READY",
+        )
+    )
+    db_session.commit()
+    actor = MoveActor(
+        access.user_id, access.grant_id, access.permissions.library_ids, False
+    )
+    planner = PrepareFileMovePlan(
+        SqlAlchemyMoveTopology(db_session),
+        AnchoredMoveInspection(),
+        lambda: 1000,
+        lambda: "plan",
+    )
+    with pytest.raises(FileMoveError, match="BOOK_OWNERSHIP_WOULD_CHANGE"):
+        planner.execute(
+            actor, (MoveRequest("volume-node", "test-library", "other/volume.epub"),)
+        )
+    plan = planner.execute(
+        actor, (MoveRequest("volume-node", "test-library", "allowed/renamed.epub"),)
+    )
+    assert plan.moves[0].source.complete_book_ids == ()
+    store = SqlAlchemyFileMoveOperations(db_session)
+    store.save_plan(plan)
+    store.enqueue(plan, "operation", "request", 2000)
+    db_session.commit()
+    assert store.claim_next(3000) == "operation"
+    db_session.commit()
+    executor(
+        db_session, store, SameDeviceMovePublication(), lambda actor: actor
+    ).execute("operation")
+    assert store.progress("operation", actor).status == "COMPLETED"
+    db_session.expire_all()
+    assert db_session.get(LibraryBook, "allowed").source_node_id == "allowed-node"
+    assert db_session.get(LibraryReadableResource, "volume").book_id == "allowed"
+    assert (
+        db_session.get(LibrarySourceNode, "volume-node").relative_path
+        == "allowed/renamed.epub"
+    )
+    assert (root / "allowed/renamed.epub").read_bytes() == b"volume"

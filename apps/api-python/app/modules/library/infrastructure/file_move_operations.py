@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 
 from pydantic import TypeAdapter
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, aliased
 
 from app.models import LibraryBook, LibraryImportTask
@@ -20,7 +20,12 @@ from app.modules.library.application.file_move_plans import (
     PreparedMoveCopy,
     StagedMoveSource,
 )
-from app.modules.library.domain.file_moves import FileMoveError
+from app.modules.library.application.file_move_recovery_cleanup import ExpiredMoveBackup
+from app.modules.library.domain.file_moves import (
+    RECOVERY_BYTE_LIMIT,
+    RECOVERY_RETENTION_MS,
+    FileMoveError,
+)
 from app.modules.library.infrastructure.file_move_schema import (
     LibraryFileMoveOperation,
     LibraryFileMovePlan,
@@ -41,8 +46,11 @@ _TERMINAL = frozenset(
 
 
 class SqlAlchemyFileMoveOperations:
-    def __init__(self, db: Session) -> None:
+    def __init__(
+        self, db: Session, *, recovery_byte_limit: int = RECOVERY_BYTE_LIMIT
+    ) -> None:
         self._db = db
+        self._recovery_byte_limit = recovery_byte_limit
 
     def save_plan(self, plan: FileMovePlan) -> None:
         self._db.add(
@@ -84,6 +92,25 @@ class SqlAlchemyFileMoveOperations:
             return existing
         if plan.expires_at_ms <= now_ms:
             raise FileMoveError("PLAN_EXPIRED")
+        reserved = int(
+            self._db.scalar(
+                select(
+                    func.coalesce(func.sum(LibraryFileMoveTarget.byte_count), 0)
+                ).where(
+                    LibraryFileMoveTarget.copy_required.is_(True),
+                    LibraryFileMoveTarget.stage.not_in(("FAILED", "CANCELLED")),
+                    LibraryFileMoveTarget.recovery["source_backup_cleared_at"]
+                    .as_integer()
+                    .is_(None),
+                )
+            )
+            or 0
+        )
+        requested = sum(
+            move.inventory.byte_count for move in plan.moves if move.cross_device
+        )
+        if requested and reserved + requested > self._recovery_byte_limit:
+            raise FileMoveError("RECOVERY_QUOTA_EXCEEDED")
         self._db.add(
             LibraryFileMoveOperation(
                 id=operation_id,
@@ -105,6 +132,8 @@ class SqlAlchemyFileMoveOperations:
                     ordinal=index,
                     source_library_id=move.source.library_id,
                     destination_library_id=move.destination.library_id,
+                    byte_count=move.inventory.byte_count,
+                    copy_required=move.cross_device,
                     stage="QUEUED",
                     recovery={},
                 )
@@ -367,6 +396,24 @@ class SqlAlchemyFileMoveOperations:
             .values(status=status, updated_at_ms=now_ms)
         )
 
+    def next_recovery(self, after: str) -> str | None:
+        return self._db.scalar(
+            select(LibraryFileMoveOperation.id)
+            .where(
+                LibraryFileMoveOperation.id > after,
+                LibraryFileMoveOperation.status.in_(
+                    (
+                        "PREPARING",
+                        "FILES_PUBLISHED",
+                        "INDEX_UPDATED",
+                        "RECOVERY_REQUIRED",
+                    )
+                ),
+            )
+            .order_by(LibraryFileMoveOperation.id)
+            .limit(1)
+        )
+
     def prepare_recovery(self, operation_id: str, now_ms: int) -> None:
         """Worker-start recovery only; no I/O or target expansion occurs here."""
         targets = tuple(
@@ -427,7 +474,7 @@ class SqlAlchemyFileMoveOperations:
         self._db.flush()
 
     def record_source_backup(
-        self, operation_id: str, ordinal: int, backup: StagedMoveSource
+        self, operation_id: str, ordinal: int, backup: StagedMoveSource, now_ms: int
     ) -> None:
         target = self._db.get(
             LibraryFileMoveTarget, (operation_id, ordinal), populate_existing=True
@@ -437,5 +484,86 @@ class SqlAlchemyFileMoveOperations:
         target.recovery = {
             **target.recovery,
             "source_backup": _BACKUP.dump_python(backup, mode="json"),
+            "source_backup_expires_at": now_ms + RECOVERY_RETENTION_MS,
+        }
+        self._db.flush()
+
+    def expired_backups(self, now_ms: int, limit: int) -> tuple[ExpiredMoveBackup, ...]:
+        targets = tuple(
+            self._db.scalars(
+                select(LibraryFileMoveTarget)
+                .join(
+                    LibraryFileMoveOperation,
+                    LibraryFileMoveOperation.id == LibraryFileMoveTarget.operation_id,
+                )
+                .where(
+                    LibraryFileMoveOperation.status.in_(("COMPLETED", "PARTIAL")),
+                    LibraryFileMoveTarget.stage == "COMPLETED",
+                    LibraryFileMoveTarget.recovery[
+                        "source_backup_expires_at"
+                    ].as_integer()
+                    <= now_ms,
+                    LibraryFileMoveTarget.recovery["source_backup_cleared_at"]
+                    .as_integer()
+                    .is_(None),
+                    or_(
+                        LibraryFileMoveTarget.recovery["backup_retry_at"]
+                        .as_integer()
+                        .is_(None),
+                        LibraryFileMoveTarget.recovery["backup_retry_at"].as_integer()
+                        <= now_ms,
+                    ),
+                )
+                .order_by(
+                    LibraryFileMoveOperation.updated_at_ms,
+                    LibraryFileMoveTarget.ordinal,
+                )
+                .limit(min(max(limit, 1), 5))
+                .execution_options(populate_existing=True)
+            )
+        )
+        results: list[ExpiredMoveBackup] = []
+        for target in targets:
+            execution = self.execution(target.operation_id)
+            results.append(
+                ExpiredMoveBackup(
+                    target.operation_id,
+                    target.ordinal,
+                    execution.plan.moves[target.ordinal],
+                    _COPY.validate_python(target.recovery["copy"]),
+                    _BACKUP.validate_python(target.recovery["source_backup"]),
+                )
+            )
+        return tuple(results)
+
+    def clear_backup(self, backup: ExpiredMoveBackup, now_ms: int) -> None:
+        target = self._db.get(
+            LibraryFileMoveTarget,
+            (backup.operation_id, backup.ordinal),
+            populate_existing=True,
+        )
+        if target is None:
+            raise FileMoveError("RESOURCE_NOT_FOUND")
+        target.recovery = {
+            **target.recovery,
+            "source_backup_cleared_at": now_ms,
+            "backup_cleanup_error": None,
+        }
+        self._db.flush()
+
+    def retain_backup(
+        self, backup: ExpiredMoveBackup, error_code: str, now_ms: int
+    ) -> None:
+        target = self._db.get(
+            LibraryFileMoveTarget,
+            (backup.operation_id, backup.ordinal),
+            populate_existing=True,
+        )
+        if target is None:
+            raise FileMoveError("RESOURCE_NOT_FOUND")
+        target.recovery = {
+            **target.recovery,
+            "backup_cleanup_error": error_code,
+            "backup_retry_at": now_ms + 24 * 60 * 60_000,
         }
         self._db.flush()

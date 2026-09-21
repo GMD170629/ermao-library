@@ -34,7 +34,7 @@ class MoveExecutionStore(Protocol):
         self, operation_id: str, ordinal: int, copy: PreparedMoveCopy
     ) -> None: ...
     def record_source_backup(
-        self, operation_id: str, ordinal: int, backup: StagedMoveSource
+        self, operation_id: str, ordinal: int, backup: StagedMoveSource, now_ms: int
     ) -> None: ...
     def execution(self, operation_id: str) -> MoveExecution: ...
     def checkpoint(
@@ -69,6 +69,8 @@ class MovePublicationPort(Protocol):
 
 
 class MoveIndexPort(Protocol):
+    def validate(self, move: PlannedMove) -> None: ...
+
     def apply(
         self,
         move: PlannedMove,
@@ -107,6 +109,8 @@ class ExecuteFileMoveOperation:
                 require_plan_access(plan, self.authorize(plan.actor))
                 self.uow.rollback()
                 for move in plan.moves:
+                    self.index.validate(move)
+                    self.uow.rollback()
                     self.files.validate(move)
             except FileMoveError as error:
                 self.uow.rollback()
@@ -126,17 +130,26 @@ class ExecuteFileMoveOperation:
                 continue
             if stage == "RECOVERY_REQUIRED":
                 return
-            if stage == "FILES_PUBLISHED" and current.created_directories[ordinal]:
-                last_directory = current.created_directories[ordinal][-1]
-                move = replace(
-                    move,
-                    destination_inspection=DestinationInspection(
-                        (),
-                        last_directory.identity.device,
-                        last_directory.identity.inode,
-                        last_directory.relative_path,
-                    ),
+            # Earlier targets may have created a shared parent. Accept only
+            # directories whose identities were journalled by this operation.
+            known_directories = {
+                directory.relative_path: directory
+                for index, directories in enumerate(current.created_directories)
+                if plan.moves[index].destination.library_id
+                == move.destination.library_id
+                for directory in directories
+            }
+            destination = move.destination_inspection
+            missing = list(destination.missing_directories)
+            while missing and missing[0] in known_directories:
+                shared = known_directories[missing.pop(0)]
+                destination = DestinationInspection(
+                    tuple(missing),
+                    shared.identity.device,
+                    shared.identity.inode,
+                    shared.relative_path,
                 )
+            move = replace(move, destination_inspection=destination)
             publication_uncertain = stage != "QUEUED"
             try:
                 if stage == "QUEUED":
@@ -147,6 +160,8 @@ class ExecuteFileMoveOperation:
                         self.uow.commit()
                         continue
                     require_plan_access(plan, self.authorize(plan.actor))
+                    self.uow.rollback()
+                    self.index.validate(move)
                     self.uow.rollback()
                     self.files.validate(move)
                     self.store.checkpoint(
@@ -184,6 +199,7 @@ class ExecuteFileMoveOperation:
                     if move.cross_device and copy is None:
                         require_plan_access(plan, self.authorize(plan.actor))
                         self.uow.rollback()
+                        publication_uncertain = True
                         copy = self.files.prepare_copy(move)
                         if copy is None:
                             raise FileMoveError("COPY_NOT_PREPARED")
@@ -193,12 +209,15 @@ class ExecuteFileMoveOperation:
                     # and target. A published item receives minimal index repair,
                     # even if its token has since been revoked.
                     published = self.files.is_published(move, copy)
-                    publication_uncertain = published
+                    publication_uncertain = published or copy is not None
                     if not published:
                         require_plan_access(plan, self.authorize(plan.actor))
+                        self.index.validate(move)
                         cancelled = self.store.execution(operation_id).cancelled
                         self.uow.rollback()
                         if cancelled:
+                            if copy is not None:
+                                raise FileMoveError("CANCELLED_STAGED_COPY_RETAINED")
                             self.store.checkpoint(
                                 operation_id, ordinal, "CANCELLED", self.clock_ms()
                             )
@@ -236,7 +255,9 @@ class ExecuteFileMoveOperation:
                 self.uow.rollback()
                 backup = self.files.finish_source(move, copy)
                 if backup is not None:
-                    self.store.record_source_backup(operation_id, ordinal, backup)
+                    self.store.record_source_backup(
+                        operation_id, ordinal, backup, self.clock_ms()
+                    )
                 self.store.checkpoint(
                     operation_id, ordinal, "COMPLETED", self.clock_ms()
                 )

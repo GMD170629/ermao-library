@@ -10,7 +10,7 @@ from app.modules.library.application.file_move_plans import (
     CreatedMoveDirectory,
     PlannedMove,
 )
-from app.modules.library.domain.file_moves import FileMoveError
+from app.modules.library.domain.file_moves import FileMoveError, MoveRequest
 from app.modules.library.domain.source_nodes import SourceNodeRelativePath
 from app.modules.library.infrastructure.move_topology import SqlAlchemyMoveTopology
 from app.modules.library.infrastructure.readable_resource_schema import (
@@ -22,18 +22,32 @@ class SqlAlchemyFileMoveIndex:
     def __init__(self, db: Session) -> None:
         self._db = db
 
-    def apply(
-        self,
-        move: PlannedMove,
-        now: datetime,
-        directories: tuple[CreatedMoveDirectory, ...] = (),
-    ) -> tuple[str, ...]:
+    def validate(self, move: PlannedMove) -> None:
         libraries = frozenset({move.source.library_id, move.destination.library_id})
         current = SqlAlchemyMoveTopology(self._db).source(
             move.source.node_id, libraries
         )
         if current.revision != move.source.revision:
             raise FileMoveError("SOURCE_INDEX_CHANGED")
+        destination = SqlAlchemyMoveTopology(self._db).destination(
+            current,
+            MoveRequest(
+                current.node_id,
+                move.destination.library_id,
+                move.destination.relative_path,
+            ),
+            libraries,
+        )
+        if destination != move.destination:
+            raise FileMoveError("DESTINATION_CHANGED")
+
+    def apply(
+        self,
+        move: PlannedMove,
+        now: datetime,
+        directories: tuple[CreatedMoveDirectory, ...] = (),
+    ) -> tuple[str, ...]:
+        self.validate(move)
         parent_paths = {directory.relative_path for directory in directories}
         parent_paths.update(path.rpartition("/")[0] for path in tuple(parent_paths))
         existing_nodes = tuple(

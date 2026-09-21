@@ -24,7 +24,7 @@ TOOL_SCOPES = MappingProxyType(
         "update_metadata": frozenset({Scope.METADATA_WRITE}),
         "refresh_metadata": frozenset({Scope.FILES_READ, Scope.METADATA_WRITE}),
         "plan_file_operations": frozenset({Scope.FILES_READ, Scope.FILES_MOVE}),
-        "execute_file_operations": frozenset({Scope.FILES_READ, Scope.FILES_MOVE}),
+        "execute_file_operations": frozenset({Scope.FILES_MOVE}),
         "plan_metadata_writeback": frozenset(
             {Scope.FILES_READ, Scope.METADATA_WRITEBACK}
         ),

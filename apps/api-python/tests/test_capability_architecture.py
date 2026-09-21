@@ -509,6 +509,7 @@ def test_readable_resource_migrations_are_linear_and_baseline_is_self_contained(
         "0021_automation_grants.py",
         "0022_automation_receipts.py",
         "0023_file_move_operations.py",
+        "0024_file_move_recovery_limits.py",
     ]
     path = versions_dir / "0001_library_topology_baseline.py"
     source = path.read_text(encoding="utf-8")

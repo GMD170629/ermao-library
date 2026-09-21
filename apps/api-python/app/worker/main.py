@@ -12,6 +12,7 @@ from pathlib import Path
 from tempfile import gettempdir
 from time import monotonic
 
+from app.bootstrap.file_moves import build_file_move_worker
 from app.bootstrap.library_scan_runtime import (
     LibraryScanCoordinator,
 )
@@ -89,6 +90,8 @@ def main() -> None:
     verify_current_schema(engine)
 
     import_session = None
+    file_move_session = None
+    file_move_worker = None
     readable_worker = None
     scan_coordinator = None
     metadata_worker = None
@@ -160,7 +163,21 @@ def main() -> None:
         scan_paused = False
         next_scan_attempt = 0.0
         imports_paused = False
+        next_file_move_attempt = 0.0
         while not stop_event.is_set():
+            if monotonic() >= next_file_move_attempt:
+                try:
+                    if file_move_worker is None:
+                        file_move_session = BackgroundSessionLocal()
+                        file_move_worker = build_file_move_worker(file_move_session)
+                    file_move_worker.process_once()
+                except Exception as error:  # noqa: BLE001 - contain one durable file task.
+                    logger.warning(
+                        "worker.file_move_failed type=%s", type(error).__name__
+                    )
+                    if file_move_session is not None:
+                        _cleanup("file_move_rollback", file_move_session.rollback)
+                    next_file_move_attempt = monotonic() + 60
             if imports_paused or monotonic() < next_import_attempt:
                 stop_event.wait(settings.import_queue_interval_seconds)
                 continue
@@ -260,6 +277,8 @@ def main() -> None:
         for component in (metadata_worker, organizer_scheduler, scan_coordinator):
             if component is not None:
                 _cleanup("component_shutdown", component.shutdown)
+        if file_move_session is not None:
+            _cleanup("file_move_close", file_move_session.close)
         if import_session is not None:
             _cleanup("import_close", import_session.close)
 

@@ -14,6 +14,7 @@ from app.modules.auth.infrastructure.automation_identity import (
 )
 from app.modules.automation.application.catalog import AutomationCatalog
 from app.modules.automation.application.execution import RecheckMutationAccess
+from app.modules.automation.application.file_moves import AutomationFileMoves
 from app.modules.automation.application.grants import (
     AuthorizeAutomation,
     ManageGrants,
@@ -30,6 +31,7 @@ from app.modules.library.application.bulk_operations import (
     ExecuteBulkMetadata,
     ExecuteBulkShelfMembership,
 )
+from app.modules.library.application.file_move_plans import PrepareFileMovePlan
 from app.modules.library.application.metadata_patches import ApplyMetadataPatches
 from app.modules.library.application.queries import (
     GetSmartShelfBookIds,
@@ -42,9 +44,14 @@ from app.modules.library.infrastructure.bulk_operations import (
     SqlAlchemyBulkBookOperations,
 )
 from app.modules.library.infrastructure.catalog import SqlAlchemyCatalogQueries
+from app.modules.library.infrastructure.file_move_operations import (
+    SqlAlchemyFileMoveOperations,
+)
 from app.modules.library.infrastructure.metadata_patches import (
     SqlAlchemyMetadataPatches,
 )
+from app.modules.library.infrastructure.move_inventory import AnchoredMoveInspection
+from app.modules.library.infrastructure.move_topology import SqlAlchemyMoveTopology
 from app.modules.library.infrastructure.persistence.source_tree_repository import (
     SqlAlchemySourceNodeRepository,
 )
@@ -122,6 +129,7 @@ def build_mcp_endpoint(
             database_maintenance_is_active,
             lambda db: RecordGrantUse(SqlAlchemyGrantStore(db), db, now_timestamp_ms),
             build_automation_writes,
+            build_automation_file_moves,
         ),
         version,
     )
@@ -144,4 +152,23 @@ def build_automation_writes(db: Session) -> AutomationWrites:
         RecheckMutationAccess(
             build_automation_authorizer(db), SqlAlchemyAutomationSettings(db)
         ),
+    )
+
+
+def build_automation_file_moves(db: Session) -> AutomationFileMoves:
+    return AutomationFileMoves(
+        PrepareFileMovePlan(
+            SqlAlchemyMoveTopology(db),
+            AnchoredMoveInspection(),
+            now_timestamp_ms,
+            lambda: uuid4().hex,
+        ),
+        SqlAlchemyFileMoveOperations(db),
+        SqlAlchemyReceiptStore(db),
+        RecheckMutationAccess(
+            build_automation_authorizer(db), SqlAlchemyAutomationSettings(db)
+        ),
+        db,
+        now_timestamp_ms,
+        lambda: uuid4().hex,
     )

@@ -23,6 +23,8 @@ TEMPLATE_FIELDS = frozenset({"author", "title", "resource_title", "index", "ext"
 MAX_FILES = 10_000
 MAX_BYTES = 100 * 1024**3
 MAX_TARGETS = 100
+RECOVERY_BYTE_LIMIT = 100 * 1024**3
+RECOVERY_RETENTION_MS = 2 * 24 * 60 * 60 * 1000
 
 
 def collision_key(value: str) -> str:
