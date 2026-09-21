@@ -58,6 +58,11 @@ from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportScanGap,
     LibraryImportTask,
 )
+from app.modules.library.infrastructure.file_move_schema import (
+    LibraryFileMoveOperation,
+    LibraryFileMovePlan,
+    LibraryFileMoveTarget,
+)
 from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryBook,
     LibraryBookMetadata,
@@ -90,6 +95,9 @@ __all__ = [
     "LibraryBookFacet",
     "LibraryBookMetadata",
     "LibraryFacet",
+    "LibraryFileMoveOperation",
+    "LibraryFileMovePlan",
+    "LibraryFileMoveTarget",
     "LibraryImportScanGap",
     "LibraryImportTask",
     "LibraryOperation",

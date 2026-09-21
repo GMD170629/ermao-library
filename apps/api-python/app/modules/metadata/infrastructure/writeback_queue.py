@@ -23,6 +23,7 @@ from app.models import (
     Library,
     LibraryBook,
     LibraryBookMetadata,
+    LibraryFileMoveOperation,
     LibraryImportTask,
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
@@ -896,6 +897,17 @@ def claim_next_target(
         select(MetadataWritebackTarget.id)
         .where(
             or_(
+                MetadataWritebackTarget.status.in_(("RUNNING", "PREPARED")),
+                ~select(MetadataWritebackOperation.id)
+                .join(LibraryBook, LibraryBook.id == MetadataWritebackOperation.book_id)
+                .where(
+                    MetadataWritebackOperation.id
+                    == MetadataWritebackTarget.operation_id,
+                    LibraryFileMoveOperation.blocks_library(LibraryBook.library_id),
+                )
+                .exists(),
+            ),
+            or_(
                 (
                     (MetadataWritebackTarget.status == "PREPARED")
                     & or_(
@@ -914,7 +926,7 @@ def claim_next_target(
                     (MetadataWritebackTarget.status == "RUNNING")
                     & (MetadataWritebackTarget.lease_expires_at <= now)
                 ),
-            )
+            ),
         )
         .order_by(
             MetadataWritebackTarget.created_at.asc(),

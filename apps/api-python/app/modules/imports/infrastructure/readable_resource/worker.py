@@ -8,6 +8,7 @@ from datetime import datetime
 
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.contracts.library_file_activity import LibraryFileActivityBusy
 from app.core.exception_diagnostics import (
     persist_exception_diagnostic,
     prepare_exception_diagnostic,
@@ -81,10 +82,13 @@ class ReadableResourceWorkerProcessor:
 
         identification_deferred = not self._enqueue_ready_books()
         started_at = self._clock.now()
-        with self._uow.transaction():
-            task = self._queue.next_queued()
-            if task is not None:
-                self._queue.mark_running(task.id, started_at=started_at)
+        try:
+            with self._uow.transaction():
+                task = self._queue.next_queued()
+                if task is not None:
+                    self._queue.mark_running(task.id, started_at=started_at)
+        except LibraryFileActivityBusy:
+            return "deferred"
         if task is None:
             self._process_import.reset_inspection_cache()
             return "deferred" if identification_deferred else "idle"

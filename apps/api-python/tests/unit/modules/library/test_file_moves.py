@@ -171,3 +171,72 @@ def test_plan_authorizes_entire_batch_before_inspection_and_freezes_limits(tmp_p
     assert plan.moves[0].inventory.byte_count == 4
     assert not plan.moves[0].cross_device
     assert not (tmp_path / "author").exists()
+
+
+@pytest.mark.parametrize("directory", [False, True])
+def test_exclusive_publication_does_not_replace_an_existing_target(tmp_path, directory):
+    from app.modules.library.infrastructure.file_move_io import exclusive_rename
+    from app.modules.library.infrastructure.source_file_access import (
+        open_library_directory,
+    )
+
+    source = tmp_path / "source"
+    target = tmp_path / "target"
+    if directory:
+        source.mkdir()
+        target.mkdir()
+        (source / "book").write_bytes(b"source")
+        (target / "book").write_bytes(b"target")
+    else:
+        source.write_bytes(b"source")
+        target.write_bytes(b"target")
+    with open_library_directory(tmp_path) as descriptor:
+        with pytest.raises(FileMoveError, match="DESTINATION_EXISTS"):
+            exclusive_rename(descriptor, "source", descriptor, "target")
+        exclusive_rename(descriptor, "source", descriptor, "published")
+    assert not source.exists()
+    assert (
+        tmp_path / ("published/book" if directory else "published")
+    ).read_bytes() == b"source"
+    assert (target / "book" if directory else target).read_bytes() == b"target"
+
+
+def test_same_device_publication_checks_frozen_source_and_recovery_identity(tmp_path):
+    from app.modules.library.application.file_move_plans import (
+        MoveDestination,
+        MoveSource,
+        PlannedMove,
+    )
+    from app.modules.library.infrastructure.file_move_io import (
+        publish_same_device_move,
+        published_same_device_identity,
+    )
+    from app.modules.library.infrastructure.move_inventory import (
+        inspect_move_destination,
+    )
+
+    source = tmp_path / "book"
+    source.write_bytes(b"original")
+    plan = PlannedMove(
+        MoveSource("node", "library", "book", tmp_path, "revision", ("book",)),
+        MoveDestination("library", tmp_path, "renamed"),
+        inspect_move_source(tmp_path, "book"),
+        inspect_move_destination(tmp_path, "renamed"),
+    )
+    published = publish_same_device_move(plan)
+    assert (tmp_path / "renamed").read_bytes() == b"original"
+    assert not source.exists()
+    assert (
+        published_same_device_identity(
+            tmp_path, "renamed", plan.inventory.entries[0].identity
+        )
+        == published
+    )
+    (tmp_path / "renamed").write_bytes(b"external modification")
+    with pytest.raises(FileMoveError, match="RECOVERY_TARGET_CHANGED"):
+        published_same_device_identity(
+            tmp_path, "renamed", plan.inventory.entries[0].identity
+        )
+    source.write_bytes(b"new occupant")
+    with pytest.raises(FileMoveError, match="SOURCE_CHANGED"):
+        publish_same_device_move(plan)

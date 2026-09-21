@@ -146,3 +146,17 @@ read_file_metadata 明确 embedded／sidecar，报告真实来源相对文件、
 拓扑检查纳入节点／Book／Resource／Asset 关联与组织模式版本，复用 decide_book_anchor_for_resource 判断移动后是否更换 Book 归属。当前先接完整图书单元；不满足的局部移动明确拒绝，后续需按同一归属规则扩展。源／目标授权在文件读取前整批预检。
 
 验证：路径、模板注入、重叠与名称冲突、真实目录清单、伴随文件、目标不创建、symlink／硬链接／FIFO 拒绝及既有只读／刷新／架构／事务检查共 93 passed；实际 ORM 拓扑与领域检查 21 passed，Mypy 5 个源文件通过。尚未接入持久方案、执行／恢复、共享扫描冲突边界，不能将该基础视为文件移动已可用。
+
+### M4 持久意图与现有队列协调基础
+
+迁移 0023 添加固定方案、移动操作和逐项目标记录；方案唯一执行，保留 grant/user/request、阶段、取消及恢复信息。计划可完整持久化往返，客户端投影不含内部根路径。尚未开放提交工具，待执行与恢复链完整后接入。
+
+扫描／导入和 OPF 目标领取复用同一持久冲突查询：排队移动阻止新的冲突任务，已开始写回允许先完成；移动领取反向等待运行中的导入／写回。扫描领取在同一条件 UPDATE 再检查，竞争失败延迟而不执行 I/O。协调粒度当前为源、目标整库，不是仅进程内锁。
+
+新增不可覆盖目标的同盘发布原语：Linux renameat2 RENAME_NOREPLACE 与 macOS renameatx_np RENAME_EXCL；不支持时拒绝，不降级到覆盖式 rename。真实临时文件／目录验证目标已有内容不被覆盖；冻结源改变和恢复目标被修改均拒绝。已打开目录 FD 控制相对发布，发布后刷新目录并检查 inode。该原语尚未接入完整 worker，不表示文件任务已交付。
+
+参考：[Linux rename 手册](https://man7.org/linux/man-pages/man2/rename.2.html)、[Apple 独占重命名能力](https://developer.apple.com/documentation/foundation/urlresourcevalues/volumesupportsexclusiverenaming)。
+
+局部 Mypy 新增 4 个持久／发布源文件通过。扩到既有扫描队列／worker 时有 6 个既有类型错误；已用 HEAD 原文件逐项复现（scan_gating 参数类型及异常别名收窄），未新增忽略或削弱检查。
+
+本批定向验收（持久移动、迁移重入／回退、文件发布、现有扫描／写回领取和 worker、架构／事务）114 passed；对应 Ruff 通过。

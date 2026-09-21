@@ -386,3 +386,77 @@ def test_recovery_rolls_back_partial_failure_and_preserves_prepared_files(
             )
     finally:
         engine.dispose()
+
+
+def test_file_move_gates_new_writeback_claims_but_allows_existing_publish(tmp_path):
+    from app.models import (
+        LibraryFileMoveOperation,
+        LibraryFileMovePlan,
+        LibraryFileMoveTarget,
+    )
+
+    settings = type("Settings", (), {"database_path": tmp_path / "db.sqlite"})()
+    engine = create_sqlite_engine(settings.database_path)
+    bootstrap_database(engine, settings)
+    source = tmp_path / "book.txt"
+    source.write_text("book")
+    _seed_claim_rows(engine, source)
+    try:
+        with Session(engine) as db:
+            db.add(
+                LibraryFileMovePlan(
+                    id="move-plan",
+                    grant_id="grant",
+                    user_id="user",
+                    expires_at_ms=1000,
+                    payload={},
+                )
+            )
+            db.flush()
+            db.add(
+                LibraryFileMoveOperation(
+                    id="move",
+                    plan_id="move-plan",
+                    grant_id="grant",
+                    user_id="user",
+                    request_id="request",
+                    status="QUEUED",
+                    cancel_requested=False,
+                    created_at_ms=0,
+                    updated_at_ms=0,
+                )
+            )
+            db.flush()
+            db.add(
+                LibraryFileMoveTarget(
+                    operation_id="move",
+                    ordinal=0,
+                    source_library_id="test-library",
+                    destination_library_id="test-library",
+                    stage="QUEUED",
+                    recovery={},
+                )
+            )
+            db.commit()
+            now = datetime.now(UTC)
+            assert (
+                writeback_queue.claim_next_target(db, owner_id="worker", now=now)
+                is None
+            )
+            db.rollback()
+            # A write claimed before the move must reach its safe terminal point.
+            db.execute(
+                update(MetadataWritebackTarget)
+                .where(MetadataWritebackTarget.id == "claim-target")
+                .values(
+                    status="PREPARED",
+                    lease_owner_id="worker",
+                    lease_expires_at=now + timedelta(seconds=60),
+                )
+            )
+            db.commit()
+            row = writeback_queue.claim_next_target(db, owner_id="worker", now=now)
+            assert row is not None and row["id"] == "claim-target"
+            db.rollback()
+    finally:
+        engine.dispose()

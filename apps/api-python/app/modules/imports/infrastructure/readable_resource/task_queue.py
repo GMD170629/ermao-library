@@ -10,9 +10,11 @@ from sqlalchemy import and_, delete, exists, literal, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, aliased
 
+from app.contracts.library_file_activity import LibraryFileActivityBusy
 from app.models import (
     LibraryBook,
     LibraryBookMetadata,
+    LibraryFileMoveOperation,
     LibraryReadableResource,
     LibraryResourceAsset,
     LibrarySourceNode,
@@ -373,9 +375,11 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         scoped scan does not block it.
         """
         anchor = aliased(LibrarySourceNode)
-        blocked_by_gap = gap_covers_anchor(
-            LibraryImportTask.library_id, anchor
-        ).correlate(LibraryImportTask).correlate(anchor)
+        blocked_by_gap = (
+            gap_covers_anchor(LibraryImportTask.library_id, anchor)
+            .correlate(LibraryImportTask)
+            .correlate(anchor)
+        )
         is_directory_resource = exists(
             select(literal(1))
             .select_from(LibraryReadableResource)
@@ -406,6 +410,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             .outerjoin(anchor, anchor.id == LibraryImportTask.source_node_id)
             .where(
                 LibraryImportTask.state == "QUEUED",
+                ~LibraryFileMoveOperation.blocks_library(LibraryImportTask.library_id),
                 executable,
             )
             .order_by(
@@ -432,6 +437,18 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         row = self._session.get(LibraryImportTask, task_id)
         if row is None:
             raise LookupError(task_id)
+        claimed = self._session.scalar(
+            update(LibraryImportTask)
+            .where(
+                LibraryImportTask.id == task_id,
+                LibraryImportTask.state == "QUEUED",
+                ~LibraryFileMoveOperation.blocks_library(LibraryImportTask.library_id),
+            )
+            .values(state="RUNNING")
+            .returning(LibraryImportTask.id)
+        )
+        if claimed is None:
+            raise LibraryFileActivityBusy("LIBRARY_FILE_ACTIVITY_BUSY")
         row.state = "RUNNING"
         if row.kind == "IMPORT_RESOURCE":
             row.rerun_requested = False
@@ -530,9 +547,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
                     decode_scan_scopes(row.scan_scopes) or (), resolved_scopes
                 )
                 combined = merge_scan_scopes(remaining, incomplete_scopes) or ()
-                row.scan_scopes = (
-                    encode_scan_scopes(combined) if combined else None
-                )
+                row.scan_scopes = encode_scan_scopes(combined) if combined else None
         if resolved_scopes:
             clear_scan_gaps(self._session, library_id, resolved_scopes)
         if incomplete_scopes:
@@ -545,9 +560,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
                 scopes = (ScanScope("", True),)
         elif task.source_node_id is not None:
             node = self._session.get(LibrarySourceNode, task.source_node_id)
-            scopes = (
-                (ScanScope(node.relative_path, True),) if node is not None else ()
-            )
+            scopes = (ScanScope(node.relative_path, True),) if node is not None else ()
         else:
             return
         record_scan_gaps(self._session, task.library_id, scopes)
