@@ -14,8 +14,10 @@ from app.modules.automation.application.grants import (
 from app.modules.automation.application.runtime import (
     AutomationRequest,
     CatalogInvocation,
+    WriteInvocation,
 )
 from app.modules.automation.application.settings import AutomationSettingsPort
+from app.modules.automation.application.writes import AutomationWrites
 from app.modules.automation.domain.access import AutomationAccessError, EffectiveAccess
 
 
@@ -28,6 +30,7 @@ class DatabaseAutomationRuntime:
         catalog: Callable[[Session], AutomationCatalog],
         maintenance: Callable[[Session], bool],
         usage: Callable[[Session], RecordGrantUse],
+        writes: Callable[[Session], AutomationWrites],
     ) -> None:
         self._sessions = session_factory
         self._settings = settings
@@ -35,6 +38,7 @@ class DatabaseAutomationRuntime:
         self._catalog = catalog
         self._maintenance = maintenance
         self._usage = usage
+        self._writes = writes
 
     def _check_maintenance(self, db: Session) -> None:
         if self._maintenance(db):
@@ -64,11 +68,29 @@ class DatabaseAutomationRuntime:
                 enabled_scopes=settings.enabled_scopes,
             )
             result = operation(self._catalog(db), current)
-        # Usage telemetry must not turn an already completed business mutation
-        # into an apparent failure and trigger a client retry.
+        self._record_usage(access.grant_id)
+        return result
+
+    def _record_usage(self, grant_id: str) -> None:
+        # Usage telemetry cannot turn a committed mutation into an apparent failure.
         try:
             with self._sessions() as db:
-                self._usage(db).execute(access.grant_id)
+                self._usage(db).execute(grant_id)
         except SQLAlchemyError:
             logging.getLogger(__name__).warning("automation.usage_record_failed")
+
+    def write(
+        self, access: EffectiveAccess, operation: WriteInvocation
+    ) -> dict[str, object]:
+        with self._sessions() as db:
+            self._check_maintenance(db)
+            settings = self._settings(db).load()
+            current = self._authorize(db).operation(
+                grant_id=access.grant_id,
+                user_id=access.user_id,
+                service_enabled=settings.enabled,
+                enabled_scopes=settings.enabled_scopes,
+            )
+            result = operation(self._writes(db), current)
+        self._record_usage(access.grant_id)
         return result

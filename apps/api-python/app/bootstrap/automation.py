@@ -1,6 +1,8 @@
 """Compose automation grant use cases; no request or persistence behavior."""
 
 from collections.abc import Callable
+from typing import cast
+from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
@@ -17,10 +19,16 @@ from app.modules.automation.application.grants import (
     RecordGrantUse,
 )
 from app.modules.automation.application.settings import ConfigureAutomation
+from app.modules.automation.application.writes import AutomationWrites
 from app.modules.automation.infrastructure.credentials import AutomationCredentials
 from app.modules.automation.infrastructure.grants import SqlAlchemyGrantStore
+from app.modules.automation.infrastructure.receipts import SqlAlchemyReceiptStore
 from app.modules.automation.infrastructure.runtime import DatabaseAutomationRuntime
 from app.modules.automation.presentation.mcp import AutomationMcpEndpoint
+from app.modules.library.application.bulk_operations import (
+    ExecuteBulkMetadata,
+    ExecuteBulkShelfMembership,
+)
 from app.modules.library.application.queries import (
     GetSmartShelfBookIds,
     SmartShelfCriteria,
@@ -28,8 +36,13 @@ from app.modules.library.application.queries import (
 from app.modules.library.infrastructure.automation_access import (
     SqlAlchemyVisibleLibraryIds,
 )
+from app.modules.library.infrastructure.bulk_operations import (
+    SqlAlchemyBulkBookOperations,
+)
 from app.modules.library.infrastructure.catalog import SqlAlchemyCatalogQueries
 from app.modules.library.infrastructure.queries import SqlAlchemyLibraryQueries
+from app.modules.shelf.application.commands import CreateShelf, ShelfWriteStore
+from app.modules.shelf.infrastructure import shelves as shelf_store
 from app.modules.shelf.infrastructure.catalog import SqlAlchemyCatalogShelfQueries
 from app.modules.system.infrastructure.automation_audit import SqlAlchemyAutomationAudit
 from app.modules.system.infrastructure.automation_settings import (
@@ -93,6 +106,23 @@ def build_mcp_endpoint(
             build_automation_catalog,
             database_maintenance_is_active,
             lambda db: RecordGrantUse(SqlAlchemyGrantStore(db), db, now_timestamp_ms),
+            build_automation_writes,
         ),
         version,
+    )
+
+
+def build_automation_writes(db: Session) -> AutomationWrites:
+    port = SqlAlchemyBulkBookOperations(
+        db, reader_queries=reader_v5_library_queries(db)
+    )
+    return AutomationWrites(
+        build_automation_catalog(db),
+        CreateShelf(cast(ShelfWriteStore, shelf_store), db),
+        ExecuteBulkShelfMembership(port, db),
+        ExecuteBulkMetadata(port, db),
+        SqlAlchemyReceiptStore(db),
+        db,
+        now_timestamp_ms,
+        lambda: uuid4().hex,
     )

@@ -45,7 +45,10 @@ from app.modules.library.application.facet_sync import (
     BookFacetProjection,
     prepare_book_facet,
 )
-from app.modules.library.application.metadata_ownership import protect_fields
+from app.modules.library.application.metadata_ownership import (
+    protect_fields,
+    protected_fields,
+)
 from app.modules.library.application.source_node_commands import (
     PublishedSourceNodeCover,
     SourceNodeMetadataChanges,
@@ -312,6 +315,16 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
     def update_metadata(self, command: BulkMetadataCommand) -> BulkBookOperationResult:
         metadata = self._metadata_by_book(command.book_ids)
         tags = self._tags_by_book(command.book_ids)
+        if command.protected_overrides is not None:
+            affected = {
+                {"seriesName": "series_name"}.get(field, field)
+                for field in command.fields
+            } | ({"tags"} if command.add_tags or command.remove_tags else set())
+            for row in metadata.values():
+                if (
+                    affected & protected_fields(row.protected_fields)
+                ) - command.protected_overrides:
+                    raise InvalidBulkBookOperationError("PROTECTED_FIELD")
         now = _now()
         prepared = []
         changed_values = 0

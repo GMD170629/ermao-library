@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
+from app.contracts.mutation_receipt import MutationReceipt
 from app.core.authorization import AuthorizationContext
 from app.modules.library.application.resource_commands import OperationSummary
 
@@ -27,6 +28,7 @@ class BulkMetadataCommand:
     fields: Mapping[str, str]
     add_tags: tuple[str, ...]
     remove_tags: tuple[str, ...]
+    protected_overrides: frozenset[str] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,7 +204,12 @@ class ExecuteBulkMetadata:
         self._port = port
         self._unit_of_work = unit_of_work
 
-    def execute(self, command: BulkMetadataCommand) -> BulkBookOperationResult:
+    def execute(
+        self,
+        command: BulkMetadataCommand,
+        *,
+        receipt: MutationReceipt[BulkBookOperationResult] | None = None,
+    ) -> BulkBookOperationResult:
         _validate_selection(
             self._port, context=command.context, book_ids=command.book_ids
         )
@@ -212,10 +219,15 @@ class ExecuteBulkMetadata:
             raise InvalidBulkBookOperationError("UNSUPPORTED_METADATA_FIELD")
         if not command.fields and not command.add_tags and not command.remove_tags:
             raise InvalidBulkBookOperationError("EMPTY_METADATA_CHANGE")
-        return _execute(
-            self._unit_of_work,
-            lambda: self._port.update_metadata(command),
-        )
+        try:
+            result = self._port.update_metadata(command)
+            if receipt is not None:
+                receipt.complete(result)
+            self._unit_of_work.commit()
+        except Exception:
+            self._unit_of_work.rollback()
+            raise
+        return result
 
 
 class PreviewBulkFindReplace:
@@ -255,16 +267,26 @@ class ExecuteBulkShelfMembership:
         self._port = port
         self._unit_of_work = unit_of_work
 
-    def execute(self, command: BulkShelfMembershipCommand) -> BulkBookOperationResult:
+    def execute(
+        self,
+        command: BulkShelfMembershipCommand,
+        *,
+        receipt: MutationReceipt[BulkBookOperationResult] | None = None,
+    ) -> BulkBookOperationResult:
         _validate_selection(
             self._port, context=command.context, book_ids=command.book_ids
         )
         if not command.shelf_id:
             raise InvalidBulkBookOperationError("SHELF_REQUIRED")
-        return _execute(
-            self._unit_of_work,
-            lambda: self._port.update_shelf_membership(command),
-        )
+        try:
+            result = self._port.update_shelf_membership(command)
+            if receipt is not None:
+                receipt.complete(result)
+            self._unit_of_work.commit()
+        except Exception:
+            self._unit_of_work.rollback()
+            raise
+        return result
 
 
 class ExecuteBulkReadingStatus:

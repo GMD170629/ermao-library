@@ -28,3 +28,18 @@ class AutomationGrantRow(Base):
     expires_at_ms: Mapped[int] = mapped_column("expiresAt", BigInteger)
     revoked_at_ms: Mapped[int | None] = mapped_column("revokedAt", BigInteger)
     last_used_at_ms: Mapped[int | None] = mapped_column("lastUsedAt", BigInteger)
+
+
+class AutomationReceiptRow(Base):
+    __tablename__ = "AutomationReceipt"
+
+    grant_id: Mapped[str] = mapped_column(
+        "grantId",
+        ForeignKey("AutomationGrant.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    request_id: Mapped[str] = mapped_column("requestId", String(128), primary_key=True)
+    tool: Mapped[str] = mapped_column(String(64))
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    created_at_ms: Mapped[int] = mapped_column("createdAt", BigInteger)
+    result: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)

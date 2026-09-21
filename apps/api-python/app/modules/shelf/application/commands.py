@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
 
+from app.contracts.mutation_receipt import MutationReceipt
 from app.modules.shelf.domain.policies import ShelfKind
 
 
@@ -102,7 +103,12 @@ class CreateShelf:
         self._store = store
         self._unit_of_work = unit_of_work
 
-    def execute(self, command: CreateShelfCommand) -> dict[str, Any]:
+    def execute(
+        self,
+        command: CreateShelfCommand,
+        *,
+        receipt: MutationReceipt[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         static_book_ids = (
             list(command.book_ids) if command.kind is ShelfKind.STATIC else None
         )
@@ -150,6 +156,8 @@ class CreateShelf:
                     collection_ids,
                     now=command.now,
                 )
+            if receipt is not None:
+                receipt.complete(shelf)
             self._unit_of_work.commit()
         except Exception:
             self._unit_of_work.rollback()

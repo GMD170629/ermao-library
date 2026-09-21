@@ -98,3 +98,13 @@ M1 仍有后续接线验证：最近使用时间在 M2 实际 MCP 调用中记�
 真实统一网关此前覆写 Host 为内部上游地址，与公开域名校验冲突；网关现在保留请求 authority，网络连接目标仍由固定配置决定。实际测试分别使用直接 HTTP 及 Node 统一网关 `/books/api/mcp`，经官方 SDK 验证工具发现、中文元数据、管理员限定库、静态和智能书架计数、范围外拒绝、即时撤销、无 Cookie 回退以及恶意 Host／Origin 拒绝。
 
 验证：授权／MCP／领域／架构／事务检查 91 passed；受影响 Catalog／Shelf／OPDS／智能筛选及真实网关集成 24 passed；Node 网关现有 5 项测试通过。M2 的基础写工具、文件只读／schema 仍待实现，M3–M8 尚未完成。没有运行生产文件操作或发布。
+
+### M2 基础写入与持久回执
+
+新增五个已实现工具：create_shelf、add_shelf_books、remove_shelf_books、add_book_tags、remove_book_tags；根据当前授权逐请求注册。读授权不会因服务开启写 scope 或其他授权调用而获得写工具。
+
+迁移 `0022_automation_receipts` 保存 grant/request_id、动作、规范化参数摘要与结果；唯一约束串行化同一请求。既有 CreateShelf、ExecuteBulkShelfMembership、ExecuteBulkMetadata 通过小型结果回执端口在自身提交前保存结果，没有新增并行业务实现或隐藏事务。参数不一致拒绝重用 request_id，回执失败连同业务回滚；重放再次验证当前资源可见性。
+
+书架操作保持本人静态书架及增量成员语义。标签沿用既有批量元数据和 facet 更新，自动化要求显式保护策略，目前受保护标签拒绝；M3 将接入带具体字段和版本的覆盖。原 Web 默认手动编辑策略不变。标签工具不构造或登记文件写回意图。
+
+验证：并发同键创建仅一个书架、回执失败回滚、重放一致、参数冲突、智能书架写入拒绝、增量移除不损失范围外成员、全局自动写回开启时标签仍仅改数据库。相关迁移／架构／事务和原批量 API 共 74 passed；真实 SDK 直接及 `/books` 网关读写、授权隔离及专门事务测试 6 passed。新能力与被改用例 Mypy 局部检查通过（26 个源文件）。M2 文件只读／schema 与 M3–M8 继续待完成。

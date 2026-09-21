@@ -17,8 +17,10 @@ from app.modules.automation.application.runtime import (
     AutomationRequest,
     AutomationRuntime,
     CatalogInvocation,
+    WriteInvocation,
 )
 from app.modules.automation.domain.access import AutomationAccessError
+from app.modules.automation.domain.access import Scope as PermissionScope
 from app.modules.automation.domain.tools import (
     FILE_PLAN_BYTES_LIMIT,
     FILE_PLAN_EXPANDED_LIMIT,
@@ -36,6 +38,11 @@ BookIds = Annotated[
     Field(min_length=1, max_length=QUERY_MAX_LIMIT),
 ]
 Search = Annotated[str, Field(max_length=500)]
+RequestId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_.:-]{1,128}$")]
+Tags = Annotated[
+    list[Annotated[str, Field(min_length=1, max_length=191)]],
+    Field(min_length=1, max_length=50),
+]
 
 
 def build_catalog_server(
@@ -143,6 +150,89 @@ def build_catalog_server(
         return await invoke(
             lambda catalog, access: catalog.get_shelf(access, shelf_id, page, page_size)
         )
+
+    async def write(operation: WriteInvocation) -> dict[str, object]:
+        try:
+            return await run_in_threadpool(runtime.write, snapshot.access, operation)
+        except AutomationAccessError as error:
+            raise ToolError(f"{error}: 请求被拒绝 / Request rejected") from None
+        except ValueError:
+            raise ToolError("INVALID_ARGUMENT: 参数无效 / Invalid argument") from None
+        except Exception:  # noqa: BLE001 - redact all infrastructure failures at protocol boundary
+            raise ToolError("INTERNAL_ERROR: 操作失败 / Operation failed") from None
+
+    mutation = ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=False,
+    )
+    removal = ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    )
+    if PermissionScope.SHELVES_WRITE in snapshot.access.permissions.scopes:
+
+        @server.tool(annotations=mutation)
+        async def create_shelf(
+            request_id: RequestId,
+            name: Annotated[str, Field(min_length=1, max_length=191)],
+            description: Annotated[str, Field(max_length=2000)] | None = None,
+        ) -> dict[str, object]:
+            """创建本人的静态书架；重试须复用 request_id / Create an owned static shelf; reuse request_id on retry."""
+            return await write(
+                lambda commands, access: commands.create_shelf(
+                    access, request_id, name, description
+                )
+            )
+
+        @server.tool(annotations=mutation)
+        async def add_shelf_books(
+            request_id: RequestId, shelf_id: str, book_ids: BookIds
+        ) -> dict[str, object]:
+            """增量加入书架，不替换其他成员 / Add granted books without replacing existing membership."""
+            return await write(
+                lambda commands, access: commands.shelf_membership(
+                    access, request_id, shelf_id, book_ids, add=True
+                )
+            )
+
+        @server.tool(annotations=removal)
+        async def remove_shelf_books(
+            request_id: RequestId, shelf_id: str, book_ids: BookIds
+        ) -> dict[str, object]:
+            """仅移除点名成员 / Remove only the explicitly selected shelf members."""
+            return await write(
+                lambda commands, access: commands.shelf_membership(
+                    access, request_id, shelf_id, book_ids, add=False
+                )
+            )
+
+    if PermissionScope.TAGS_WRITE in snapshot.access.permissions.scopes:
+
+        @server.tool(annotations=mutation)
+        async def add_book_tags(
+            request_id: RequestId, book_ids: BookIds, tags: Tags
+        ) -> dict[str, object]:
+            """仅追加系统标签，不写文件；受保护字段拒绝 / Append system tags only; protected fields are rejected."""
+            return await write(
+                lambda commands, access: commands.book_tags(
+                    access, request_id, book_ids, tags, add=True
+                )
+            )
+
+        @server.tool(annotations=removal)
+        async def remove_book_tags(
+            request_id: RequestId, book_ids: BookIds, tags: Tags
+        ) -> dict[str, object]:
+            """仅删除指定系统标签，不写文件 / Remove specified system tags without writing files."""
+            return await write(
+                lambda commands, access: commands.book_tags(
+                    access, request_id, book_ids, tags, add=False
+                )
+            )
 
     return server
 

@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import socket
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -249,6 +250,88 @@ def test_official_sdk_real_catalog_and_revocation(db_session, test_settings, pre
                         url, headers={**auth, "Origin": "https://evil.invalid"}, json={}
                     )
                 ).status_code == 403
+            scopes = frozenset(
+                {Scope.LIBRARY_READ, Scope.SHELVES_WRITE, Scope.TAGS_WRITE}
+            )
+            with factory() as db:
+                writer = build_grant_manager(db).create(
+                    user_id="mcp-owner",
+                    name="writer",
+                    permissions=replace(created.grant.permissions, scopes=scopes),
+                )
+                build_automation_settings(db).update(
+                    "mcp-owner",
+                    AutomationServiceSettings(
+                        enabled=True,
+                        enabled_scopes=scopes,
+                        public_base_url=base + prefix,
+                    ),
+                )
+            async with (
+                httpx2.AsyncClient(
+                    headers={"Authorization": "Bearer " + writer.token}
+                ) as http,
+                Client(
+                    streamable_http_client(url, http_client=http),
+                    read_timeout_seconds=5,
+                ) as client,
+            ):
+                tools = {tool.name for tool in (await client.list_tools()).tools}
+                assert {
+                    "create_shelf",
+                    "add_shelf_books",
+                    "remove_shelf_books",
+                    "add_book_tags",
+                    "remove_book_tags",
+                } <= tools
+                args = {"request_id": "sdk-create", "name": "SDK 书架"}
+                first = await client.call_tool("create_shelf", args)
+                assert not first.is_error, first
+                again = await client.call_tool("create_shelf", args)
+                assert first.structured_content == again.structured_content
+                shelf_id = first.structured_content["shelf_id"]
+                added = await client.call_tool(
+                    "add_shelf_books",
+                    {
+                        "request_id": "sdk-add",
+                        "shelf_id": shelf_id,
+                        "book_ids": ["allowed"],
+                    },
+                )
+                assert not added.is_error, added
+                assert added.structured_content["updated"] == 1
+                changed = await client.call_tool(
+                    "add_book_tags",
+                    {
+                        "request_id": "sdk-tag",
+                        "book_ids": ["allowed"],
+                        "tags": ["文学"],
+                    },
+                )
+                assert not changed.is_error, changed
+                assert changed.structured_content["updated"] == 1
+                assert (
+                    await client.call_tool("create_shelf", {**args, "name": "Changed"})
+                ).is_error
+            # A previously created read-only grant must not inherit write tools
+            # when deployment permissions or another grant's discovery changes.
+            async with (
+                httpx2.AsyncClient(
+                    headers={"Authorization": "Bearer " + fresh.token}
+                ) as http,
+                Client(
+                    streamable_http_client(url, http_client=http),
+                    read_timeout_seconds=5,
+                ) as client,
+            ):
+                assert "create_shelf" not in {
+                    tool.name for tool in (await client.list_tools()).tools
+                }
+                assert (
+                    await client.call_tool(
+                        "create_shelf", {"request_id": "forbidden", "name": "Denied"}
+                    )
+                ).is_error
         finally:
             if gateway is not None and gateway.returncode is None:
                 gateway.terminate()
