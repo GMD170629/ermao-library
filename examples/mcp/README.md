@@ -17,6 +17,20 @@ Administrators enable the service and configure its public base URL and availabl
 
 LM Studio can use a local model with remote MCP tools. Cursor does not guarantee local inference. The Cursor example reads `ERMAO_MCP_TOKEN` from the client process environment, which may differ from your terminal. Replace the LM Studio placeholder explicitly. Use a model that supports tool calls.
 
+## Codex 接入 / Connect with Codex
+
+将 `codex.example.toml` 合并到 Codex 的 `config.toml`，或运行以下命令注册连接。先将一次性令牌安全地注入 **Codex 进程**的 `ERMAO_MCP_TOKEN` 环境变量，再启动客户端。已启动的桌面应用不会自动继承另一个终端后来设置的变量。保留客户端的工具确认设置；非交互模式如果禁止确认而写工具需要确认，会拒绝写入。
+
+Merge `codex.example.toml` into your Codex configuration, or register the connection below. Securely supply `ERMAO_MCP_TOKEN` to the Codex process before starting it. An already-running desktop app does not inherit variables later set in another terminal. Retain client tool approvals; non-interactive runs that prohibit prompts reject tools requiring approval.
+
+```sh
+codex mcp add ermao --url 'https://books.example/books/api/mcp' --bearer-token-env-var ERMAO_MCP_TOKEN
+```
+
+连接后可以要求 Codex：「查看我授权书库的图书，先预览整理方案；经我确认后执行并查询最终结果。」实际写操作仍受服务端书库、scope、版本和冻结方案限制。Codex 接入不代表本地模型推理；本地模型需另行配置和验收。[OpenAI 官方 MCP 配置说明](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)。
+
+After connecting, ask Codex to inspect the authorized library and preview a plan before execution, then poll the final result. Server-side library scopes, revisions and frozen plans still apply. Connecting Codex does not establish local inference; that requires separate model configuration and validation.
+
 ## Python 示例 / Python examples
 
 从仓库的 `apps/api-python` 目录执行，使用锁定的官方 `mcp==2.2.0` 及项目环境。不要另装无版本约束的 SDK。`.env.example` 是变量说明，脚本不会自动加载 `.env`，也不会把令牌写入文件。

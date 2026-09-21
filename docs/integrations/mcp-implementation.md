@@ -2,7 +2,7 @@
 
 规格唯一来源为 [v2 执行计划](../plans/mcp-integration-v2.md)。本文记录代码证据和阶段进度，不改变交付范围。
 
-当前：M0–M7 代码已交付；M8 自动化定向验证已完成，真实模型客户端验收仍有阻塞。下方按阶段保留历史记录，最新状态以文末和 [最终验收记录](mcp-acceptance-v2.md) 为准。
+当前：M0–M7 代码已交付；M8 自动化定向验证及用户指定的 Codex CLI 模型调用已通过，其他未覆盖组合仍列于验收记录。下方按阶段保留历史记录，最新状态以文末和 [最终验收记录](mcp-acceptance-v2.md) 为准。
 
 ## M0（2026-09-21）
 
@@ -258,3 +258,9 @@ MCP 新接入 plan_file_operations、execute_file_operations、get_operation、c
 - Cursor 3.20.21（arm64），选择 Cursor Grok 4.6 Medium；临时 MCP 连接完成 initialize、tools/list 等发现。模型调用被账户 usage limit 拦截，无 tools/call；不标记端到端通过，不购买额度。
 - 已安装并验证 Apple 公证的 LM Studio 0.4.24（build 1）。首次启动要求接受使用条款，按电脑操作工具规则已向用户请求当次确认；尚未接受条款、下载或运行本地模型。此项待确认，不能以 Python SDK 验收代替。
 - 未发布、未修改真实书库；未运行 Linux 文件发布或原生移动端活跃阅读实测。当前客户端限制与尚未覆盖的矩阵组合均明确保留，不将编译或模拟页面测试当作真实模型执行证据。
+
+### M8 追加：按用户要求改用 Codex
+
+用户明确要求「直接用 codex」，不再等待 LM Studio。Codex CLI 0.155.0-alpha.9.2 / 默认 gpt-6-astra 经真实 MCP 完成查询、当前 revision 下标题更新、固定方案目录移动、OPF 选择字段写回、书架创建/成员添加和回读。首轮确认策略拒绝系统更新/文件执行；按既有用户授权对临时连接的指定写工具设置进程内预授权后通过，未修改全局配置或服务器授权规则。文件目标均 COMPLETED；主任务独立核对数据库和物理文件结果一致，书架请求跨轮重放未重复创建。
+
+新增 Codex TOML 模板和中英说明，凭证从客户端进程环境变量读取，模板无明文令牌。原定 LM Studio/Cursor 和矩阵其他未验证组合仍如实保留；Codex CLI 不等于本地模型推理或桌面 UI 已验收。详细实际结果见 [验收记录](mcp-acceptance-v2.md)。

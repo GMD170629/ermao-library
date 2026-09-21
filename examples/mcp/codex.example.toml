@@ -1,0 +1,5 @@
+# Merge into your Codex config.toml. Replace the URL, including deployment prefix.
+# 合并到 Codex config.toml，替换服务地址并保留实际部署前缀。
+[mcp_servers.ermao]
+url = "https://books.example/books/api/mcp"
+bearer_token_env_var = "ERMAO_MCP_TOKEN"

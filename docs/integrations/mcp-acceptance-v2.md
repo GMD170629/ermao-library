@@ -1,6 +1,6 @@
 # MCP v2 验收记录（2026-09-21）
 
-实现范围见 [执行计划](../plans/mcp-integration-v2.md)，用法见 [模板与示例](../../examples/mcp/README.md)。M0–M7 已实现；M8 已完成下列自动化验证，**尚未全部验收通过**。真实桌面模型调用和部分组合场景仍缺证据，不能据此宣称最终发布通过。
+实现范围见 [执行计划](../plans/mcp-integration-v2.md)，用法见 [模板与示例](../../examples/mcp/README.md)。M0–M7 已实现；M8 已完成下列自动化验证，**尚未全部验收通过**。真实 Codex CLI 模型调用已补验通过，部分组合场景仍缺证据，不能据此宣称最终发布通过。
 
 ## 环境与结果
 
@@ -63,14 +63,28 @@
 | A44 网关/前缀/Origin/Host | 已验证 | A/test_mcp_catalog.py 直连及 /books 网关、test_sdk_transport.py 错误 Host/Origin，test_management_http.py Cookie Origin。 |
 | A45 Web 授权配置 | 已验证 | apps/web/e2e/automation-settings.spec.ts 六项桌面/窄屏检查，分组、一次性 token、显式导出、撤销、取消和英文普通用户；已查看截图。 |
 | A46 示例/模板 | 已验证 | A/test_cli_examples.py 五个独立 CLI 经真实 HTTP/SDK/worker，默认预览、显式系统更新/移动/写回/书架创建与状态轮询。 |
-| A47 真实桌面模型 | 阻塞 | 见下节，未把工具发现或 Python SDK 当作真实模型验收通过。 |
+| A47 真实模型客户端 | Codex 已验证 | 用户改用 Codex；CLI 0.155.0-alpha.9.2 / gpt-6-astra 已执行查询、系统修改、文件移动、OPF 写回及书架操作并读回。原定 LM Studio/Cursor 完整链路未通过，不作为本次等待条件。 |
 | A48 既有客户端相邻行为 | 部分 | Reader progress API、资源来源查询、OPDS、既有写回队列/claim 和架构约束通过；未做原生 App 真机、全 Web/批量操作全量回归。 |
 
-## 桌面客户端实际结果
+## 客户端实际结果
 
 Cursor **3.20.21 arm64**，模型选择 **Cursor Grok 4.6 Medium**。仅在临时工作区连接临时 MCP，服务日志确认 initialize、tools/list、prompts/list、resources/list。发送查询/更新/移动/OPF 写回的验收指令后，Cursor 提示账户 usage limit，未发生 tools/call。未升级订阅或购买额度。配置方式参考 [Cursor MCP 文档](https://cursor.com/docs/mcp)。
 
-LM Studio **0.4.24 build 1** 已安装，Apple 公证验证通过；首次启动在接受 [LM Studio 使用条款](https://lmstudio.ai/app-terms) 的页面停止。电脑操作工具要求接受法律条款前当次确认，已请求用户确认，尚未收到；没有点击接受、下载或运行模型。配置参考 [LM Studio MCP 文档](https://lmstudio.ai/docs/app/mcp)。
+LM Studio **0.4.24 build 1** 已安装，Apple 公证验证通过；首次启动在接受 [LM Studio 使用条款](https://lmstudio.ai/app-terms) 的页面停止。电脑操作工具要求接受法律条款前当次确认，已请求用户确认，未接受；后续用户明确改用 Codex，本次不再等待 LM Studio 条款确认，也未下载或运行其本地模型。配置参考 [LM Studio MCP 文档](https://lmstudio.ai/docs/app/mcp)。
+
+用户随后明确要求「直接用 codex」，本次追加使用 **Codex CLI 0.155.0-alpha.9.2 / gpt-6-astra**（CLI 默认模型，未指定模型覆盖；独立读回启动日志记录模型名）。通过 `--ignore-user-config --ephemeral` 和当前进程的 `mcp_servers.ermao` 参数，仅连接新的隔离 MCP。凭证通过环境变量传入，不出现在命令参数或模型消息中，未修改全局 Codex 配置。
+
+首次调用验证查询和客户端确认边界：系统更新/文件执行需要客户端确认而非交互运行禁止弹出确认，因此拒绝；书架创建及成员添加成功。随后对用户已授权的具体测试写工具配置本次进程的 `approval_mode = "approve"`，重新运行完整链路。书架请求复用原 request-id，返回同一个书架/回执，独立数据库检查确认只有一个书架和一个成员，没有重复创建。
+
+| Codex 实际操作 | 核验结果 |
+| --- | --- |
+| 查询与 schema | 确认 test-library / allowed，初始系统标题「二毛」、没有保护字段。 |
+| 系统更新 codex-title-1 | 只更新 title，当前 revision 校验；读回 `Codex acceptance title`。 |
+| 移动 codex-move-1 | 固定方案 cb7eb37feef74fafa5753831b233211c；任务 7abfc72b07b6448db05576fd48636534 为 COMPLETED。目录改为 codex-organized，Book/SourceNode ID 不变。 |
+| OPF codex-opf-1 | 固定方案 4da0afdda5da4af58c88bb7a900fed5d；任务 b19b6fade5574b689042ce061ed09c4a 的目标 COMPLETED。仅写 title，read_file_metadata 读回新标题。 |
+| 书架与成员 | Codex acceptance shelf，ID 8b30cb2f39e14a7aabfcfebb9b0e5f26；成员恰为 allowed，跨客户端重试无重复。 |
+
+主任务独立检查 SQLite 和磁盘文件：系统标题正确、两个文件任务的目标均 COMPLETED、旧目录不存在、新目录 OPF 标题正确、书架及成员无重复。追加新的只读 Codex 会话核验读回，避免仅依赖同一模型上下文。模型通过真实 MCP tools/call 操作，没有改用 shell/REST 代替。配置模板新增 `examples/mcp/codex.example.toml`，TOML 解析检查通过。Codex 模型调用通过**不等于本地推理或 Codex 桌面 UI 验收**，其他矩阵未验证项保持原状态。参数依据 [OpenAI MCP 文档](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)。
 
 临时服务已停止，临时授权已撤销，包含令牌的 Cursor 配置已删除。后续桌面验收须重新创建隔离服务和凭证；不保留可用测试令牌。Web 测试服务器也已停止。
 
