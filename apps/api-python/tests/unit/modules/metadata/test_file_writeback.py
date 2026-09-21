@@ -251,3 +251,24 @@ def test_orphan_cleanup_is_bounded_to_stale_unprotected_parts(
     assert protected.exists()
     assert unrelated.exists()
     assert nested_old.exists()
+
+
+def test_invalid_existing_opf_does_not_publish_cover_or_create_temporary(tmp_path):
+    source = tmp_path / "book.epub"
+    source.write_bytes(b"book")
+    (tmp_path / "book.opf").write_bytes(b"broken metadata")
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    (storage / "cover.jpg").write_bytes(b"cover")
+    before = {
+        path.relative_to(tmp_path): path.read_bytes()
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    }
+    with pytest.raises(MetadataWritebackError, match="INVALID_EXISTING_OPF"):
+        prepare_writeback(str(source), _payload(source, coverPath="cover.jpg"), storage)
+    assert {
+        path.relative_to(tmp_path): path.read_bytes()
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    } == before

@@ -200,3 +200,13 @@ MCP 新接入 plan_file_operations、execute_file_operations、get_operation、c
 同目录仅大小写不同的文件名通过服务端固定中间槽分两次独占 rename；恢复识别原名、中间槽、目标名的实际目录条目及冻结文件身份。临时目录测试覆盖正常完成和第一步 rename 后中断重启，业务 ID 和目录内容保持，不依靠大小写不敏感文件系统的 exists 判断。
 
 本批相关自动化／文件／架构／事务 147 passed；新伴随识别、规划、发布和索引相关 6 个文件局部 Mypy 通过，Ruff 通过。此前 worker 接线批次为 144 passed。M5 标准格式选择性写回、M6 音频/PDF、M7 Web 配置与示例、M8 全阶段验收继续实施。
+
+### M5 核心格式编辑器（接线前）
+
+新增选择字段的 OPF、ComicInfo 和 EPUB/CBZ 容器编辑器。OPF 保留未选字段、次标题、标识 ID、非作者创作者与扩展；共同解析入口识别 EPUB 3 role refinements，避免把插画者读成作者。ComicInfo 保留 Pages 页序映射和未知节点。EPUB 通过既有 container.xml 定位包内 OPF，保持成员顺序、正文哈希、压缩方式和归档注释；拒绝签名/加密标记，检查必需元数据。ZIP 逐块写入独立空预备流、复读所有未改成员哈希，限制结构读取、成员数和展开量。
+
+既有 OPF writer 在发现损坏、过大或符号链接旁车时，先失败再处理封面，不再吞掉解析错误并重建覆盖；现有写回行为相关测试通过。
+
+本批格式样本、既有 OPF/导入、文件读取、架构和事务测试 110 passed；5 个相关文件局部 Mypy 与 Ruff 通过。以上是格式编辑器验证，尚未接入 MCP 标准写回方案和既有队列，writable capability 仍未对外开放，不能视为 M5 完成。
+
+格式依据：[EPUB 3.3](https://www.w3.org/TR/epub-33/)。

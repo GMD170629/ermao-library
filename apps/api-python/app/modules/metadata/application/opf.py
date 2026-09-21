@@ -116,15 +116,31 @@ def _cover_href(root: etree._Element, metadata: dict[str, str]) -> str | None:
     return metadata.get("shuku:cover") or metadata.get("calibre:cover")
 
 
-def _narrators(root: etree._Element) -> tuple[str, ...]:
+def opf_role_refinements(root: etree._Element) -> dict[str, str]:
+    return {
+        str(node.get("refines") or "").removeprefix("#"): str(
+            node.text or ""
+        ).casefold()
+        for node in root.iter()
+        if isinstance(node.tag, str)
+        and _local_name(node) == "meta"
+        and node.get("property") == "role"
+        and node.get("refines")
+    }
+
+
+def _people(root: etree._Element, tag: str, roles: frozenset[str]) -> tuple[str, ...]:
     values: list[str] = []
+    refinements = opf_role_refinements(root)
     for node in root.iter():
-        if not isinstance(node.tag, str) or _local_name(node) != "contributor":
+        if not isinstance(node.tag, str) or _local_name(node) != tag:
             continue
-        role = _clean(
-            node.get(f"{{{OPF_NAMESPACE}}}role") or node.get("role"), limit=32
-        )
-        if str(role or "").casefold() not in {"nrt", "narrator"}:
+        role = str(
+            node.get(f"{{{OPF_NAMESPACE}}}role")
+            or node.get("role")
+            or refinements.get(str(node.get("id")), "")
+        ).casefold()
+        if role not in roles:
             continue
         value = _clean("".join(node.itertext()))
         if value and value not in values:
@@ -162,7 +178,7 @@ def parse_opf_metadata(content: bytes) -> PublicationMetadata:
 
     metadata = _meta_values(root)
     titles = _text_nodes(root, "title")
-    authors = _text_nodes(root, "creator")
+    authors = _people(root, "creator", frozenset({"", "aut", "author"}))
     identifiers = _text_nodes(root, "identifier")
     series_name = metadata.get("calibre:series")
     volume_index_raw = metadata.get("calibre:series_index")
@@ -208,7 +224,7 @@ def parse_opf_metadata(content: bytes) -> PublicationMetadata:
         title=publication_titles.work_title,
         volume_title=publication_titles.volume_title,
         authors=authors,
-        narrators=_narrators(root),
+        narrators=_people(root, "contributor", frozenset({"nrt", "narrator"})),
         abridged=_boolean(metadata.get("shuku:abridged")),
         description=next(iter(_text_nodes(root, "description")), None),
         subjects=_text_nodes(root, "subject"),

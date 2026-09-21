@@ -15,6 +15,7 @@ from lxml import etree  # type: ignore[import-untyped]
 
 from app.contracts.publication_metadata import PublicationMetadata
 from app.modules.metadata.application.opf import (
+    MAX_OPF_BYTES,
     OPF_NAMESPACE,
     OpfMetadataError,
     cover_media_type,
@@ -291,12 +292,16 @@ def _write_sidecar(
     source: Path, metadata: PublicationMetadata, cover: Path | None
 ) -> tuple[Path, Path]:
     output = _sidecar_output(source)
-    metadata = _publish_sidecar_cover(metadata, cover, output)
-    temporary = _temporary(output)
-    content: bytes | None = None
-    if output.is_file() and not output.is_symlink():
+    if output.is_symlink():
+        raise MetadataWritebackError("SIDECAR_SYMLINK_UNSUPPORTED")
+    package = None
+    existing = None
+    if output.exists():
         try:
-            existing_content = output.read_bytes()
+            if not output.is_file() or output.stat().st_size > MAX_OPF_BYTES:
+                raise MetadataWritebackError("INVALID_EXISTING_OPF")
+            with output.open("rb") as stream:
+                existing_content = stream.read(MAX_OPF_BYTES + 1)
             existing = parse_opf_metadata(existing_content)
             package = etree.fromstring(
                 existing_content,
@@ -307,12 +312,17 @@ def _write_sidecar(
                     huge_tree=False,
                 ),
             )
-            merged = _overlay_metadata(existing, metadata)
-            _replace_package_metadata(package, merged)
-            _set_cover_manifest(package, merged.cover_href)
-            content = etree.tostring(package, xml_declaration=True, encoding="utf-8")
-        except (OSError, OpfMetadataError, etree.XMLSyntaxError):
-            content = None
+        except (OSError, OpfMetadataError, etree.XMLSyntaxError) as error:
+            raise MetadataWritebackError("INVALID_EXISTING_OPF") from error
+    # Invalid existing metadata must fail before producing a cover or temporary.
+    metadata = _publish_sidecar_cover(metadata, cover, output)
+    content: bytes | None = None
+    if package is not None and existing is not None:
+        merged = _overlay_metadata(existing, metadata)
+        _replace_package_metadata(package, merged)
+        _set_cover_manifest(package, merged.cover_href)
+        content = etree.tostring(package, xml_declaration=True, encoding="utf-8")
+    temporary = _temporary(output)
     temporary.write_bytes(content or serialize_opf_metadata(metadata))
     return temporary, output
 
