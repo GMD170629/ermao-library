@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InstallRequest, PreparationState, UpdateCheck } from '@/generated/updates';
 import { fetchUpdateCheck, fetchUpdateState, installUpdate, prepareUpdate, UpdateRequestError } from '../api/operations';
-import { confirmedSuccess, installationPhases, observationTimeoutMs, pollIntervalMs, preparationPhases } from '../model/installation';
+import { confirmedSuccess, installationPhases, observationTimeoutMs, pollIntervalMs, preparationPhases, runningWithoutRecord } from '../model/installation';
 import { useReleaseFeed } from './release-feed-context';
 
 export function useUpdateOperations(enabled: boolean) {
@@ -11,6 +11,7 @@ export function useUpdateOperations(enabled: boolean) {
   const [check, setCheck] = useState<UpdateCheck | null>(null);
   const [state, setState] = useState<PreparationState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [observing, setObserving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -36,13 +37,35 @@ export function useUpdateOperations(enabled: boolean) {
     if (!deadline.current) deadline.current = Date.now() + observationTimeoutMs;
     async function poll() {
       try {
-        const next = await fetchUpdateState(controller.signal);
-        const info = await refreshRuntime(controller.signal);
+        const [statusResult, infoResult] = await Promise.allSettled([
+          fetchUpdateState(controller.signal), refreshRuntime(controller.signal),
+        ]);
+        if (controller.signal.aborted) return;
+        if (statusResult.status === 'rejected') {
+          setState(null);
+          if (infoResult.status === 'fulfilled' && runningWithoutRecord(infoResult.value.current_version, expected.current)) {
+            setError(null);
+            setNotice('目标版本已运行，更新记录暂不可用');
+            setObserving(false);
+            return;
+          }
+          throw statusResult.reason;
+        }
+        if (infoResult.status === 'rejected') throw infoResult.reason;
+        const next = statusResult.value;
+        const info = infoResult.value;
         if (controller.signal.aborted) return;
         setState(next);
-        if (confirmedSuccess(next, info.current_version, expected.current)) setError(null);
+        if (confirmedSuccess(next, info.current_version, expected.current)) {
+          setError(null); setNotice(null);
+        } else if (runningWithoutRecord(info.current_version, expected.current)) {
+          setError(null);
+          setNotice('目标版本已运行，更新记录暂不可用');
+          setObserving(false);
+          return;
+        }
         const pending = installationPhases.has(next.phase ?? '') || preparationPhases.has(next.phase ?? '') ||
-          (next.phase === 'success' && !confirmedSuccess(next, info.current_version, expected.current)) ||
+          ((next.phase === 'success' || next.phase === 'applied') && !confirmedSuccess(next, info.current_version, expected.current)) ||
           (expected.current !== null && !confirmedSuccess(next, info.current_version, expected.current) && next.phase !== 'failed');
         setObserving(pending);
         if (!pending) return;
@@ -51,7 +74,7 @@ export function useUpdateOperations(enabled: boolean) {
         setObserving(true);
       }
       if (Date.now() >= deadline.current) {
-        setError('确认更新状态超时，请检查容器日志和 STORAGE_ROOT/update-tmp/installation.log。');
+        setNotice('确认更新状态超时；程序会继续运行，可刷新页面重新确认。');
         setObserving(false);
         return;
       }
@@ -66,6 +89,7 @@ export function useUpdateOperations(enabled: boolean) {
     sending.current = true;
     setSubmitting(true);
     setError(null);
+    setNotice(null);
     expected.current = operation === 'install' ? target : null;
     deadline.current = Date.now() + observationTimeoutMs;
     try {
@@ -86,9 +110,9 @@ export function useUpdateOperations(enabled: boolean) {
       if (mounted.current) { setSubmitting(false); setAttempt(value => value + 1); }
     }
   }, []);
-  return { check, state, error, observing, submitting, submit, runtime,
+  return { check, state, error, notice, observing, submitting, submit, runtime,
     installRequested: expected.current !== null && !(state && runtime && confirmedSuccess(state, runtime.current_version, expected.current)),
     success: !!state && !!runtime && confirmedSuccess(state, runtime.current_version, expected.current),
-    refresh: () => { deadline.current = 0; setError(null); setAttempt(value => value + 1); }
+    refresh: () => { setNotice(null); deadline.current = 0; setError(null); setAttempt(value => value + 1); }
   };
 }

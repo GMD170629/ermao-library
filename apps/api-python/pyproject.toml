@@ -21,7 +21,7 @@ dependencies = [
   "lxml>=5.2.0",
   "mutagen==1.48.1",
   "pypdfium2>=4.30.0",
-  "pypdf==6.14.2",
+  "pypdf[crypto]==6.14.2",
   "rarfile>=4.4",
   "python-multipart>=0.0.20",
   "watchdog>=4.0.0",

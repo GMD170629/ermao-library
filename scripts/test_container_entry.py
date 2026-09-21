@@ -192,41 +192,6 @@ class ContainerEntryTests(unittest.TestCase):
         self.assertEqual(process.wait(timeout=10), 143)
         self.assertEqual([event[0] for event in self.events()], ["start", "stop"])
 
-    def test_core_readiness_is_polled_even_when_worker_is_missing(self) -> None:
-        ready = self.root / "missing-worker-ready"
-        with patch.object(
-            entry, "core_application_ready", side_effect=[False, True]
-        ) as core_ready:
-            # A cold core probe may time out. Keep probing during the startup
-            # window even when the Worker never publishes its ready marker.
-            self.assertFalse(entry.application_ready(os.getpid(), "1", ready))
-            self.assertFalse(entry.application_ready(os.getpid(), "1", ready))
-        self.assertEqual(core_ready.call_count, 2)
-        core_ready.assert_called_with("1")
-
-    @unittest.skipUnless(sys.platform == "linux", "requires Linux process identity")
-    def test_ready_rejects_stale_pid_identity_and_dead_process(self) -> None:
-        worker = subprocess.Popen(
-            [sys.executable, "-c", "import time; time.sleep(30)"],
-            start_new_session=True,
-        )
-        self.addCleanup(lambda: worker.poll() is None and worker.kill())
-        ready = self.root / "ready"
-        start_time = (
-            Path(f"/proc/{worker.pid}/stat").read_text().rsplit(")", 1)[1].split()[19]
-        )
-        ready.write_text(json.dumps({"pid": worker.pid, "startTime": start_time}))
-        with patch.object(entry, "core_application_ready", return_value=True):
-            self.assertTrue(entry.application_ready(os.getpid(), "1", ready))
-            with patch.object(entry, "core_application_ready", return_value=False):
-                self.assertFalse(entry.application_ready(os.getpid(), "1", ready))
-            ready.write_text(json.dumps({"pid": worker.pid, "startTime": "stale"}))
-            self.assertFalse(entry.application_ready(os.getpid(), "1", ready))
-            ready.write_text(json.dumps({"pid": worker.pid, "startTime": start_time}))
-            worker.terminate()
-            worker.wait(timeout=5)
-            self.assertFalse(entry.application_ready(os.getpid(), "1", ready))
-
     def test_worker_failure_keeps_core_processes_and_stop_cancels_restart(self) -> None:
         process = self.launch(FAIL_WORKER="1")
         self.await_starts(process, 5)
@@ -363,7 +328,7 @@ class ContainerEntryTests(unittest.TestCase):
         ):
             self.assertEqual((self.storage / name).read_bytes(), b"unchanged-user-data")
 
-    def test_copy_failure_leaves_incomplete_directory_and_refuses_retry(self) -> None:
+    def test_copy_failure_is_reported_without_old_marker_gate(self) -> None:
         original = shutil.copyfile
 
         def fail_copy(source: str, destination: str, **kwargs: object) -> str:
@@ -377,31 +342,25 @@ class ContainerEntryTests(unittest.TestCase):
         ):
             entry.initialize_runtime(self.seed, self.runtime)
         self.assertFalse((self.runtime / ".initialized").exists())
-        with self.assertRaisesRegex(entry.StartupError, "initialization record"):
-            entry.initialize_runtime(self.seed, self.runtime)
+        entry.initialize_runtime(self.seed, self.runtime)
 
     def test_unwritable_runtime_and_invalid_storage_fail_before_business(self) -> None:
         entry.initialize_runtime(self.seed, self.runtime)
-        with (
-            patch.object(entry.tempfile, "TemporaryFile", side_effect=PermissionError),
-            self.assertRaises(PermissionError),
-        ):
+        with patch.object(entry.tempfile, "TemporaryFile", side_effect=PermissionError):
             entry.initialize_runtime(self.seed, self.runtime)
         process = self.launch(STORAGE_ROOT=str(self.seed / "apps"))
         self.assertNotEqual(process.wait(timeout=5), 0)
         self.assertIn("must be separate", process.communicate()[1])
         self.assertEqual(self.events(), [])
 
-    def test_missing_files_never_marks_initialization_complete(self) -> None:
+    def test_existing_missing_files_are_left_to_application(self) -> None:
         (self.seed / "apps/web/server.js").unlink()
-        with self.assertRaisesRegex(entry.StartupError, "missing"):
-            entry.initialize_runtime(self.seed, self.runtime)
-        self.assertFalse((self.runtime / ".initialized").exists())
+        entry.initialize_runtime(self.seed, self.runtime)
+        self.assertFalse((self.runtime / "apps/web/server.js").exists())
 
     def test_unfinished_installation_does_not_block_or_replay_on_restart(self) -> None:
         state = self.storage / "update-tmp"
         state.mkdir()
-        (state / "installation-incomplete").write_text("{}")
         (state / "install-request.json").write_text("invalid old request")
         (state / "preparation.json").write_text(json.dumps({"phase": "checking"}))
         (state / "installation.log").write_text("old failure")
@@ -419,6 +378,27 @@ class ContainerEntryTests(unittest.TestCase):
             json.loads((state / "preparation.json").read_text())["error"],
             "CONTAINER_RESTARTED",
         )
+
+    def test_unarchivable_old_request_does_not_block_or_replay(self) -> None:
+        state = self.storage / "update-tmp"
+        state.mkdir()
+        request = state / "install-request.json"
+        request.write_text("invalid old request")
+        (state / "install-request.json.previous").mkdir()
+        process = self.launch()
+        self.await_starts(process, 5)
+        time.sleep(0.5)
+        self.assertIsNone(process.poll())
+        self.assertEqual(request.read_text(), "invalid old request")
+        self.assertFalse(any("update_install" in event[1] for event in self.events()))
+
+    def test_invalid_new_request_does_not_stop_running_service(self) -> None:
+        process = self.launch()
+        self.await_starts(process, 5)
+        (self.storage / "update-tmp/install-request.json").write_text("invalid request")
+        time.sleep(0.5)
+        self.assertIsNone(process.poll())
+        self.assertFalse(any(event[0] == "stop" for event in self.events()))
 
     def test_unreadable_previous_state_does_not_block_startup(self) -> None:
         state = self.storage / "update-tmp"
@@ -441,7 +421,7 @@ class ContainerEntryTests(unittest.TestCase):
 
     def test_runtime_link_cannot_redirect_initialization(self) -> None:
         self.runtime.symlink_to(self.seed, target_is_directory=True)
-        with self.assertRaisesRegex(entry.StartupError, "link"):
+        with self.assertRaisesRegex(entry.StartupError, "directory"):
             entry.initialize_runtime(self.seed, self.runtime)
 
 

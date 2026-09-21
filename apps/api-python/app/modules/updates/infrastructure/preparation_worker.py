@@ -198,6 +198,9 @@ class PreparationWorker:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 raise UpdateError("UPDATE_BUSY") from None
+            incomplete = self.root / "installation-incomplete"
+            if incomplete.exists() or incomplete.is_symlink():
+                raise UpdateError("INSTALLATION_RECORD_UNAVAILABLE")
             request = self.root / "install-request.json"
             if request.exists() or request.is_symlink():
                 raise UpdateError("UPDATE_BUSY")

@@ -42,7 +42,7 @@ export type Package = {
 };
 
 export type PreparationState = {
-  phase?: "idle" | "downloading" | "verifying" | "extracting" | "ready" | "failed" | "requested" | "checking" | "stopping" | "backup" | "copying" | "starting" | "success";
+  phase?: "idle" | "downloading" | "verifying" | "extracting" | "ready" | "failed" | "requested" | "checking" | "stopping" | "backup" | "copying" | "starting" | "success" | "applied";
   target?: Package | GHCRReleaseReference | ReleaseReference | null;
   summary?: PreparationSummary | null;
   downloaded?: number;

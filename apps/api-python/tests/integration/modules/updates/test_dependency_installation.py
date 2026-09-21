@@ -314,6 +314,7 @@ def test_dependency_failure_keeps_old_record_and_incomplete_marker(
     installer = Installation(p.storage)
     installer.state = downloads.worker.status().model_dump()
     installer.dependencies = executor
+    installer.reserve()
     with pytest.raises(DependencyInstallError, match="DEPENDENCY_OPERATION_FAILED"):
         installer.synchronize()
     installer.fail("DEPENDENCY_OPERATION_FAILED")
@@ -536,3 +537,33 @@ def test_code_only_install_does_not_rescan_kept_python(
     executor.apply()
     assert executor.result["python_records"] == json.loads(before)["python_records"]
     assert not (site / "shared/a.py").exists()
+
+
+def test_unwritable_installation_log_does_not_block_real_dependency_install(installed, downloads, monkeypatch):
+    p = installed
+    prepare.change_target(p)
+    (p.seed / "wheels/b-1-py3-none-any.whl").unlink()
+    wheel(p.seed / "wheels", "b", "2", {"shared/b.py": b"VALUE=2\n"})
+    executor = prepare_install(p, downloads, monkeypatch)
+    log = p.storage / "update-tmp/installation.log"
+    log.unlink(missing_ok=True)
+    log.mkdir()
+    executor.synchronize_code()
+    executor.apply()
+    assert executor.result is not None
+    assert subprocess.check_output(
+        [str(executor.python), "-c", "from shared.b import VALUE; print(VALUE)"], text=True
+    ).strip() == "2"
+
+
+def test_unrecorded_install_blocks_next_incremental_request(installed, downloads):
+    p = installed
+    prepare.change_target(p)
+    downloads.updates.prepare(True, "1.0.4")
+    state = prepare.finish(downloads)
+    marker = p.storage / "update-tmp/installation-incomplete"
+    marker.write_text('{"target":{"version":"1.0.3"}}')
+    with pytest.raises(UpdateError, match="INSTALLATION_RECORD_UNAVAILABLE"):
+        downloads.updates.install(True, "1.0.4", p.reference.sha256, state.summary.plan_sha256)
+    assert not (p.storage / "update-tmp/install-request.json").exists()
+    assert marker.exists()

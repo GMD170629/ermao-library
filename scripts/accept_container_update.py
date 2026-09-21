@@ -9,7 +9,6 @@ import http.cookiejar
 import io
 import json
 import shutil
-import sqlite3
 import subprocess
 import tempfile
 import time
@@ -499,9 +498,16 @@ print(hashlib.sha256(json.dumps(result).encode()).hexdigest())
                 )
                 if state["phase"] == "failed":
                     raise RuntimeError(f"actual installation failed: {state}")
-                return state["phase"] == "success"
+                return state["phase"] in {"applied", "success"}
 
             wait_for(installed, 300)
+            def serving_target():
+                try:
+                    docker("exec", name, "python", "-c", f"import json,urllib.request; assert json.load(urllib.request.urlopen('http://127.0.0.1:8000/openapi.json',timeout=1))['info']['version']=={target!r}; urllib.request.urlopen('http://127.0.0.1:3000/api/health',timeout=1)")
+                    return True
+                except subprocess.CalledProcessError:
+                    return False
+            wait_for(serving_target, 300)
             if args.dependencies:
                 # Compare exactly the pre-update keep files (the final set also contains E).
                 check = "import json,hashlib; from pathlib import Path; old=json.loads(Path('/tmp/d3-kept.json').read_text()); assert all([hashlib.sha256(Path(p).read_bytes()).hexdigest(),Path(p).stat().st_ino,Path(p).stat().st_mtime_ns]==v for p,v in old.items()); print(len(old))"
@@ -575,22 +581,7 @@ print('actual B API, migrated DB, progress, configuration, Worker and PID 1 veri
                 )
                 == ""
             )
-            backup = storage / "update-tmp/database-before-update.sqlite3"
-            assert backup.is_file() and backup.stat().st_size > 0
-            with sqlite3.connect(backup) as snapshot:
-                assert (
-                    snapshot.execute(
-                        "select position from ReaderResourceProgress where id=?",
-                        ("acceptance-progress",),
-                    ).fetchone()[0]
-                    == "42"
-                )
-                assert (
-                    snapshot.execute(
-                        "select version_num from alembic_version"
-                    ).fetchone()[0]
-                    != "acceptance_b"
-                )
+            assert not (storage / "update-tmp/database-before-update.sqlite3").exists()
             if args.browser and args.dependencies:
                 first_target = target
                 seed_version = first_target
@@ -625,12 +616,13 @@ print('actual B API, migrated DB, progress, configuration, Worker and PID 1 veri
                 offline_api = True
                 docker("kill", "--signal=CONT", name)
                 wait_for(installed, 300)
+                wait_for(serving_target, 300)
                 kept_count = docker("exec", name, "python", "-c", check)
                 second_log = docker(
                     "exec", name, "cat", "/app/storage/update-tmp/installation.log"
                 )
-                assert "dependency_operation=check packages=[]" in second_log
-                assert "application_update phase=success" in second_log
+                assert "dependency_operation=check" not in second_log
+                assert "application_update phase=applied" in second_log or "application_update phase=success" in second_log
                 assert not any(
                     operation in second_log
                     for operation in (
@@ -701,9 +693,6 @@ print('actual B API, migrated DB, progress, configuration, Worker and PID 1 veri
                         "versions": [initial_version, seed_version, target]
                         if args.browser and args.dependencies
                         else [initial_version, target],
-                        "backup_sha256": hashlib.sha256(
-                            backup.read_bytes()
-                        ).hexdigest(),
                         "result": "passed: real prepare/install, migration, persistence, normal and offline restart",
                     }
                 )

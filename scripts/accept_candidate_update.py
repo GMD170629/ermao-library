@@ -369,7 +369,7 @@ print(json.dumps({str(p):[os.readlink(p) if p.is_symlink() else hashlib.sha256(p
                     )
                     if state["phase"] == "failed":
                         raise RuntimeError("Installation failed: " + json.dumps(state))
-                    return state["phase"] == "success"
+                    return state["phase"] in {"applied", "success"}
 
                 wait(installed)
                 wait(lambda target=target: version() == target)

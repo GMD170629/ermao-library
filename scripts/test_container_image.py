@@ -2,7 +2,6 @@
 
 import json
 import shutil
-import signal
 import sqlite3
 import tempfile
 import unittest
@@ -73,6 +72,7 @@ class ImageSynchronizationTests(unittest.TestCase):
         (path / "python/bin").mkdir(parents=True)
         (path / "python/bin/python").write_text("new interpreter")
         write_json(path / "installed.json", {"protocol": 2})
+        return True
 
     def prepare(self):
         with patch.object(
@@ -105,16 +105,13 @@ class ImageSynchronizationTests(unittest.TestCase):
         self.assertEqual(
             json.loads((self.state / "image.json").read_text())["version"], "1.0.0"
         )
-        with sqlite3.connect(self.state / "database-before-image.sqlite3") as db:
+        self.assertFalse(list(self.state.glob("database-before-*.sqlite3")))
+        with sqlite3.connect(self.storage / "database/shuku.sqlite3") as db:
             self.assertEqual(
                 db.execute("SELECT value FROM preserved").fetchone()[0],
                 "reading progress",
             )
         self.installer.success()
-        self.assertEqual(
-            (self.state / "installation-incomplete.previous").read_text(),
-            "previous failure",
-        )
         self.assertEqual(
             (self.state / "install-request.json.previous").read_text(),
             "previous request",
@@ -125,6 +122,25 @@ class ImageSynchronizationTests(unittest.TestCase):
         self.assertEqual(
             json.loads((self.state / "image.json").read_text()), self.target
         )
+
+    def test_locked_database_does_not_block_image_switch(self):
+        with sqlite3.connect(self.storage / "database/shuku.sqlite3") as locked:
+            locked.execute("BEGIN EXCLUSIVE")
+            with patch.object(
+                sqlite3,
+                "connect",
+                side_effect=AssertionError("updater opened database"),
+            ):
+                self.assertTrue(self.prepare())
+        self.assertFalse(list(self.state.glob("database-before-*.sqlite3")))
+        self.assertFalse((self.runtime / "obsolete").exists())
+
+    def test_database_layout_is_left_to_application_startup(self):
+        database = self.storage / "database/shuku.sqlite3"
+        database.unlink()
+        database.symlink_to(self.storage / "missing-database")
+        self.assertTrue(self.prepare())
+        self.assertTrue(database.is_symlink())
 
     def test_same_image_preserves_newer_online_version_without_reading_dependencies(
         self,
@@ -165,7 +181,7 @@ class ImageSynchronizationTests(unittest.TestCase):
         )
         self.assertTrue(self.prepare())
 
-    def test_fresh_install_has_no_database_backup_and_waits_for_health(self):
+    def test_fresh_install_has_no_database_backup(self):
         for name in ("runtime", "dependencies", "database"):
             shutil.rmtree(self.storage / name)
         self.assertTrue(self.prepare())
@@ -174,38 +190,17 @@ class ImageSynchronizationTests(unittest.TestCase):
         self.assertTrue((self.runtime / ".initialized").exists())
 
     def test_preflight_errors_leave_old_program_untouched(self):
-        for fault in ("space", "permission", "backup", "dependency"):
-            with self.subTest(fault=fault):
-                target, method, kwargs = {
-                    "space": (
-                        container_image.shutil,
-                        "disk_usage",
-                        {"return_value": SimpleNamespace(free=0)},
-                    ),
-                    "permission": (
-                        container_image.os,
-                        "access",
-                        {"return_value": False},
-                    ),
-                    "backup": (
-                        container_image,
-                        "backup_database",
-                        {"side_effect": OSError("backup failed")},
-                    ),
-                    "dependency": (
-                        container_image,
-                        "validate_dependency_seed",
-                        {"side_effect": ValueError("bad seed")},
-                    ),
-                }[fault]
-                with (
-                    patch.object(target, method, **kwargs),
-                    self.assertRaises((InstallError, OSError, ValueError)),
-                ):
-                    self.prepare()
-                self.installer.close()
-                self.assertTrue((self.runtime / "obsolete").exists())
-                self.assertFalse((self.state / "installation-incomplete").exists())
+        with (
+            patch.object(
+                container_image,
+                "validate_dependency_seed",
+                side_effect=ValueError("bad seed"),
+            ),
+            self.assertRaises(ValueError),
+        ):
+            self.prepare()
+        self.assertTrue((self.runtime / "obsolete").exists())
+        self.assertFalse((self.state / "installation-incomplete").exists())
 
     def test_interruption_or_copy_failure_keeps_blocker_and_old_record(self):
         for failure in (OSError("copy failed"), SystemExit(143)):
@@ -236,8 +231,7 @@ class ImageSynchronizationTests(unittest.TestCase):
 
     def test_root_link_and_incomplete_layout_rejected(self):
         (self.runtime / ".initialized").unlink()
-        with self.assertRaisesRegex(InstallError, "UNINITIALIZED"):
-            self.installer.preflight()
+        self.installer.preflight()
         shutil.rmtree(self.runtime)
         self.runtime.symlink_to(self.seed)
         with self.assertRaisesRegex(InstallError, "UNSAFE_STORAGE"):
@@ -276,84 +270,46 @@ class ImageSynchronizationTests(unittest.TestCase):
         self.assertTrue((self.state / "installation-incomplete").exists())
         self.assertFalse((self.state / "image.json").exists())
 
-    def test_health_gate_commits_only_after_ready(self):
-        for outcome in (
-            "healthy",
-            "migration",
-            "timeout",
-            "worker",
-            "cancel",
-            "result-write",
-        ):
-            with self.subTest(outcome=outcome):
-                self.assert_health_outcome(outcome)
+    def test_corrupt_image_record_and_incomplete_runtime_are_replaced(self):
+        (self.state / "image.json").write_text("broken")
+        (self.runtime / ".initialized").unlink()
+        (self.runtime / "application.json").write_text("broken")
+        (self.runtime / REQUIRED_RUNTIME_FILES[0]).unlink()
+        self.assertTrue(self.prepare())
+        self.installer.success()
+        self.assertEqual(
+            json.loads((self.state / "image.json").read_text()), self.target
+        )
 
-    def assert_health_outcome(self, outcome):
-        pending = SimpleNamespace(target=self.target, success=lambda: None)
-        process = SimpleNamespace(pid=1234, returncode=None)
-        clock = [0]
-        exiting = [False]
-        accepted = []
-        handlers = {}
+    def test_cleanup_and_image_record_errors_do_not_block_completed_sync(self):
+        self.assertTrue(self.prepare())
+        original = container_image.write_json
 
-        def success():
-            if outcome == "result-write":
-                raise OSError("disk error")
-            accepted.append(True)
-            exiting[0] = True
-
-        pending.success = success
-
-        def waitpid(*args):
-            if process.returncode is not None:
-                raise ChildProcessError
-            if outcome == "cancel":
-                handlers[signal.SIGTERM](signal.SIGTERM, None)
-            if outcome == "migration":
-                return process.pid, 37 << 8
-            if exiting[0]:
-                return process.pid, 0
-            return 0, 0
-
-        def sleep(_):
-            clock[0] += 100
-            self.assertLess(clock[0], 1000)
-
-        def core_ready(_):
-            if outcome == "worker":
-                exiting[0] = True
-                return True
-            return False
+        def fail_image(path, value):
+            if path.name == "image.json":
+                raise PermissionError("injected")
+            return original(path, value)
 
         with (
-            patch.object(entry.sys, "platform", "darwin"),
-            patch.object(
-                entry.signal,
-                "signal",
-                side_effect=lambda sig, fn: handlers.update({sig: fn}),
-            ),
-            patch.object(entry.subprocess, "Popen", return_value=process),
-            patch.object(entry.os, "waitpid", side_effect=waitpid),
-            patch.object(
-                entry.os, "kill", side_effect=lambda *a: exiting.__setitem__(0, True)
-            ) as kill,
-            patch.object(entry.os, "killpg"),
-            patch.object(entry, "core_application_ready", side_effect=core_ready),
-            patch.object(entry.time, "monotonic", side_effect=lambda: clock[0]),
-            patch.object(entry.time, "sleep", side_effect=sleep),
-            patch.object(
-                entry,
-                "application_ready",
-                return_value=outcome in ("healthy", "result-write"),
-            ),
-            patch.object(entry.Installation, "claim") as claim,
+            patch.object(Path, "unlink", side_effect=PermissionError("injected")),
+            patch.object(container_image, "write_json", side_effect=fail_image),
         ):
-            result = entry.run_application(self.runtime, self.storage, pending)
-        self.assertEqual(bool(accepted), outcome == "healthy")
-        self.assertEqual(result == 0, outcome == "healthy")
-        claim.assert_not_called()
-        if outcome == "worker":
-            kill.assert_not_called()
+            self.installer.success()
+        self.assertIsNone(self.installer.lock)
+        self.assertEqual(
+            json.loads((self.runtime / "application.json").read_text()), self.target
+        )
+
+    def test_estimated_space_and_permissions_are_not_gates(self):
+        with (
+            patch.object(container_image.os, "access", return_value=False),
+            patch.object(
+                container_image.shutil,
+                "disk_usage",
+                return_value=SimpleNamespace(free=0),
+            ),
+        ):
+            self.assertTrue(self.prepare())
 
 
 if __name__ == "__main__":

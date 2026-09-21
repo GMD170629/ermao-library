@@ -252,7 +252,7 @@ def main() -> None:
             target = json.loads(execute(f"fault={fault!r}\n" + fixture, business))
             print("prepared real update:", target, flush=True)
             wait_for(
-                "import json; from pathlib import Path; s=json.loads(Path('/app/storage/update-tmp/preparation.json').read_text()); print('ready' if s['phase'] in ('success','failed') else 'waiting')",
+                "import json; from pathlib import Path; s=json.loads(Path('/app/storage/update-tmp/preparation.json').read_text()); print('ready' if s['phase'] in ('applied','success','failed') else 'waiting')",
                 timeout=240,
             )
             state = json.loads(
@@ -260,11 +260,15 @@ def main() -> None:
                     "from pathlib import Path; print(Path('/app/storage/update-tmp/preparation.json').read_text())"
                 )
             )
-            assert state["phase"] == ("success" if fault == "recovery" else "failed"), (
-                state
+            assert state["phase"] == "applied", state
+            wait_for(
+                "import json,urllib.request\ntry:\n"
+                f" version=json.load(urllib.request.urlopen('http://127.0.0.1:8000/openapi.json',timeout=1))['info']['version']\n"
+                " urllib.request.urlopen('http://127.0.0.1:3000/api/health',timeout=1)\n"
+                " urllib.request.urlopen('http://127.0.0.1:3000/login',timeout=1)\n"
+                f" print('ready' if version=={target['version']!r} else 'waiting')\n"
+                "except (OSError,ValueError): print('waiting')"
             )
-            if fault == "worker":
-                assert state["error"] == "WORKER_STARTUP_FAILED", state
             assert execute(
                 f"import urllib.request,json; assert json.load(urllib.request.urlopen('http://127.0.0.1:8000/openapi.json'))['info']['version']=={target['version']!r}; print('target version verified')"
             )
@@ -304,7 +308,7 @@ def main() -> None:
             "--upgrade-from must have a different version"
         )
         assert execute(
-            "import json,urllib.request; from pathlib import Path; s=Path('/app/storage'); target=json.loads(Path('/opt/shuku-image/application.json').read_text()); assert json.loads((s/'runtime/application.json').read_text())==target; assert json.loads((s/'update-tmp/image.json').read_text())==target; assert json.load(urllib.request.urlopen('http://127.0.0.1:8000/openapi.json'))['info']['version']==target['version']; assert not (s/'runtime/obsolete-image-file').exists(); assert not (s/'dependencies/obsolete-image-file').exists(); assert (s/'update-tmp/database-before-image.sqlite3').exists(); assert (s/'covers/sentinel').read_text()=='keep'; assert (s/'configuration').read_text()=='keep'; print('image and actual API aligned; obsolete code/dependencies removed')"
+            "import json,urllib.request; from pathlib import Path; s=Path('/app/storage'); target=json.loads(Path('/opt/shuku-image/application.json').read_text()); assert json.loads((s/'runtime/application.json').read_text())==target; assert json.loads((s/'update-tmp/image.json').read_text())==target; assert json.load(urllib.request.urlopen('http://127.0.0.1:8000/openapi.json'))['info']['version']==target['version']; assert not (s/'runtime/obsolete-image-file').exists(); assert not (s/'dependencies/obsolete-image-file').exists(); assert not (s/'update-tmp/database-before-image.sqlite3').exists(); assert (s/'covers/sentinel').read_text()=='keep'; assert (s/'configuration').read_text()=='keep'; print('image and actual API aligned; obsolete code/dependencies removed')"
         )
         assert secret == execute(
             "from pathlib import Path; import hashlib; print(hashlib.sha256(Path('/app/storage/secrets/session-secret').read_bytes()).hexdigest())"
@@ -315,7 +319,7 @@ def main() -> None:
         ).read_text(encoding="utf-8")
         online = json.loads(execute("fault='none'\n" + fixture, business))
         wait_for(
-            "import json; from pathlib import Path; s=json.loads(Path('/app/storage/update-tmp/preparation.json').read_text()); assert s['phase']!='failed',s; print('ready' if s['phase']=='success' else 'waiting')",
+            "import json; from pathlib import Path; s=json.loads(Path('/app/storage/update-tmp/preparation.json').read_text()); assert s['phase']!='failed',s; print('ready' if s['phase'] in ('applied','success') else 'waiting')",
             timeout=240,
         )
         snapshot_code = "from pathlib import Path; import hashlib,json; s=Path('/app/storage'); print(json.dumps({n:[(s/n).stat().st_ino,(s/n).stat().st_mtime_ns,hashlib.sha256((s/n).read_bytes()).hexdigest()] for n in ['runtime/application.json','dependencies/installed.json','dependencies/python/pyvenv.cfg','update-tmp/image.json']}))"
@@ -421,7 +425,7 @@ def main() -> None:
         )
         start()
         assert execute(
-            "from pathlib import Path; s=Path('/app/storage'); assert (s/'update-tmp/database-before-image.sqlite3').is_file(); assert (s/'covers/sentinel').read_text()=='keep'; print('automatic legacy adoption preserved data')"
+            "from pathlib import Path; s=Path('/app/storage'); assert not (s/'update-tmp/database-before-image.sqlite3').exists(); assert (s/'covers/sentinel').read_text()=='keep'; print('automatic legacy adoption preserved data')"
         )
         preserved = json.loads(
             execute(
@@ -435,7 +439,7 @@ def main() -> None:
             "import sqlite3; c=sqlite3.connect('/app/storage/database/shuku.sqlite3'); assert c.execute('PRAGMA user_version').fetchone()==(321,); c.close(); print('converted database retained')"
         )
         stop()
-        # A newer/unknown database must not be made acceptable by conversion.
+        # Application startup owns rejection of an unknown database schema.
         offline_command(
             "import sqlite3; c=sqlite3.connect('/app/storage/database/shuku.sqlite3'); c.execute(\"UPDATE alembic_version SET version_num='future_schema'\"); c.commit(); c.close()"
         )
@@ -466,7 +470,7 @@ def main() -> None:
         offline_command(
             "from pathlib import Path; import json,shutil,sqlite3; s=Path('/app/storage'); p=s/'runtime/application.json'; v=json.loads(p.read_text()); v.pop('protocol'); p.write_text(json.dumps(v)); shutil.rmtree(s/'dependencies'); c=sqlite3.connect(s/'database/shuku.sqlite3'); c.execute(\"UPDATE alembic_version SET version_num='future_schema'\"); c.commit(); c.close()"
         )
-        rejected = subprocess.run(
+        converted = subprocess.run(
             [
                 "docker",
                 "run",
@@ -486,9 +490,9 @@ def main() -> None:
             capture_output=True,
             check=False,
         )
-        assert rejected.returncode != 0
+        assert converted.returncode == 0
         assert offline_command(
-            "from pathlib import Path; import json,sqlite3; s=Path('/app/storage'); assert 'protocol' not in json.loads((s/'runtime/application.json').read_text()); c=sqlite3.connect(s/'database/shuku.sqlite3'); assert c.execute('SELECT version_num FROM alembic_version').fetchone()==('future_schema',); c.close(); print('unknown schema rejected without downgrade')"
+            "from pathlib import Path; import json,sqlite3; s=Path('/app/storage'); assert json.loads((s/'runtime/application.json').read_text())['protocol']==2; c=sqlite3.connect(s/'database/shuku.sqlite3'); assert c.execute('SELECT version_num FROM alembic_version').fetchone()==('future_schema',); c.close(); print('conversion left unknown schema unchanged for application startup')"
         )
         print(
             "PASS: API, Worker, schema, Web; non-root; offline initialization/restart; automatic legacy adoption, locked conversion, unknown-schema refusal"

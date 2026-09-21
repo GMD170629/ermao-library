@@ -127,6 +127,7 @@ class PreparationState(UpdateModel):
         "copying",
         "starting",
         "success",
+        "applied",
     ] = "idle"
     target: Package | GHCRReleaseReference | ReleaseReference | None = None
     summary: PreparationSummary | None = None

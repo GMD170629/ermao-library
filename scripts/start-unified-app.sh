@@ -53,7 +53,6 @@ if [ -z "${SESSION_SECRET:-}" ]; then
   export SESSION_SECRET
 fi
 
-if [ -n "${SHUKU_STARTUP_STATUS_FILE:-}" ]; then printf migration > "$SHUKU_STARTUP_STATUS_FILE"; fi
 (
   cd "$PYTHON_API_DIR"
   exec "$BUSINESS_PYTHON" -m app.bootstrap.prestart
@@ -61,7 +60,6 @@ if [ -n "${SHUKU_STARTUP_STATUS_FILE:-}" ]; then printf migration > "$SHUKU_STAR
 PRESTART_PID="$!"
 wait "$PRESTART_PID"
 PRESTART_PID=""
-if [ -n "${SHUKU_STARTUP_STATUS_FILE:-}" ]; then printf services > "$SHUKU_STARTUP_STATUS_FILE"; fi
 
 (
   cd "$PYTHON_API_DIR"
@@ -81,7 +79,7 @@ while :; do
 done
 
 start_worker() {
-  if [ -n "${IMPORT_WORKER_READY_FILE:-}" ]; then rm -f "$IMPORT_WORKER_READY_FILE"; fi
+  if [ -n "${IMPORT_WORKER_READY_FILE:-}" ]; then rm -f "$IMPORT_WORKER_READY_FILE" || echo "update warning / 更新提醒：WORKER_READY_CLEANUP_FAILED" >&2; fi
   (
     cd "$PYTHON_API_DIR"
     exec setsid "$BUSINESS_PYTHON" -m app.worker.main
@@ -115,7 +113,7 @@ while :; do
     wait "$WORKER_PID" || worker_exit=$?
     WORKER_RETIRED_GROUP="$WORKER_PID"
     WORKER_PID=""
-    if [ -n "${IMPORT_WORKER_READY_FILE:-}" ]; then rm -f "$IMPORT_WORKER_READY_FILE"; fi
+    if [ -n "${IMPORT_WORKER_READY_FILE:-}" ]; then rm -f "$IMPORT_WORKER_READY_FILE" || echo "update warning / 更新提醒：WORKER_READY_CLEANUP_FAILED" >&2; fi
     echo "worker.offline exit=$worker_exit restart_count=$WORKER_RESTARTS" >&2
     if [ "$WORKER_RESTARTS" -lt 3 ]; then
       WORKER_RESTART_AT=$(( $(date +%s) + 5 * (1 << WORKER_RESTARTS) ))

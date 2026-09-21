@@ -49,7 +49,7 @@ function parseSummary(value: unknown): PreparationSummary | null {
 export function parsePreparation(value: unknown): PreparationState {
   const data = object(value);
   const phase = string(data.phase);
-  if (!['idle', 'downloading', 'verifying', 'extracting', 'ready', 'failed', 'requested', 'checking', 'stopping', 'backup', 'copying', 'starting', 'success'].includes(phase)) throw new Error('更新响应无效');
+  if (!['idle', 'downloading', 'verifying', 'extracting', 'ready', 'failed', 'requested', 'checking', 'stopping', 'backup', 'copying', 'starting', 'applied', 'success'].includes(phase)) throw new Error('更新响应无效');
   return { phase: phase as PreparationState['phase'], target: data.target == null ? null : parsePackage(data.target), summary: parseSummary(data.summary), downloaded: number(data.downloaded), started_at: optional(data.started_at), updated_at: optional(data.updated_at), failed_phase: optional(data.failed_phase), error: optional(data.error) };
 }
 export function parseCheck(value: unknown): UpdateCheck {

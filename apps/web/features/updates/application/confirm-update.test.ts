@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { confirmUpdate } from './confirm-update';
-import { canInstall, confirmedSuccess, installationFailed } from '../model/installation';
+import { canInstall, confirmedSuccess, installationFailed, runningWithoutRecord } from '../model/installation';
 import { installUpdate, parsePreparation, prepareUpdate } from '../api/operations';
 import type { Package, PreparationState } from '@/generated/updates';
 
@@ -88,4 +88,14 @@ test('protocol 2 can install a ready package without a plan digest', () => {
   assert.equal(canInstall(ready, 1), false);
   assert.equal(canInstall(ready, 2), true);
   assert.equal(canInstall({ ...ready, phase: 'success' }, 2), false);
+});
+
+test('applied confirms only the target actually running, with request binding', () => {
+  const applied = parsePreparation({ ...ready, phase: 'applied' });
+  assert.equal(confirmedSuccess(applied, '1.0.4', target), false);
+  assert.equal(confirmedSuccess(applied, target.version, target), true);
+  assert.equal(confirmedSuccess(applied, target.version, { ...target, sha256: 'f'.repeat(64) }), false);
+  assert.equal(runningWithoutRecord(target.version, target), true);
+  assert.equal(runningWithoutRecord('1.0.4', target), false);
+  assert.equal(runningWithoutRecord(target.version, null), false);
 });

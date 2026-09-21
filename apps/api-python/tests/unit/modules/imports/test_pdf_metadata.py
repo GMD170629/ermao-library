@@ -41,6 +41,34 @@ def test_pdf_metadata_and_navigation_without_page_payload(
     assert not any(start <= path.stat().st_size // 2 < end for start, end in reads)
 
 
+def test_aes128_pdf_with_empty_password_reads_metadata_and_navigation(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "encrypted.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(200, 200)
+    writer.add_blank_page(200, 200)
+    writer.add_metadata(
+        {"/Title": "加密报告", "/Author": "测试作者", "/Keywords": "report,报告"}
+    )
+    writer.add_outline_item("第二章", 1)
+    writer.encrypt("", owner_password="owner-password", algorithm="AES-128")
+    writer.write(path)
+    original_bytes = path.read_bytes()
+
+    result = inspect_pdf(path)
+
+    assert result.embedded_title == "加密报告"
+    assert result.embedded_author == "测试作者"
+    assert result.tags == ("report", "报告")
+    assert result.page_count == 2
+    assert len(result.chapters) == 1
+    assert result.chapters[0].title == "第二章"
+    assert result.chapters[0].page_number == 2
+    assert result.text_evidence.inspected_pages == 0
+    assert path.read_bytes() == original_bytes
+
+
 def test_invalid_pdf_does_not_repair_or_invent_page_count(tmp_path: Path) -> None:
     path = tmp_path / "invalid.pdf"
     path.write_bytes(b"%PDF-1.4\n/Type /Page\n" + b"x" * 100_000)

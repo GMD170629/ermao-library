@@ -6,13 +6,10 @@ import fcntl
 import json
 import os
 import shutil
-import sqlite3
-import time
-from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
-from dependency_install import DependencyInstallation
+from dependency_install import DependencyInstallation, update_warning
 
 
 class InstallError(RuntimeError):
@@ -43,7 +40,10 @@ def replace_runtime(source: Path, runtime: Path) -> None:
 def read_json(path: Path) -> dict:
     if path.is_symlink() or path.stat().st_size > 16384:
         raise InstallError("INVALID_STATE")
-    return json.loads(path.read_bytes())
+    value = json.loads(path.read_bytes())
+    if not isinstance(value, dict):
+        raise InstallError("INVALID_STATE")
+    return value
 
 
 def write_json(path: Path, value: dict) -> None:
@@ -59,43 +59,45 @@ def write_json(path: Path, value: dict) -> None:
     os.replace(path.with_suffix(".tmp"), path)
 
 
-def retire_previous_installation(storage: Path) -> None:
-    """Keep restart diagnostics without replaying a previous install request."""
+def retire_previous_installation(storage: Path) -> bool:
+    """Retire old requests; failure disables consumption, never application startup."""
     root = storage / "update-tmp"
-    with os.fdopen(
-        os.open(root / "prepare.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600),
-        "w",
-    ) as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        for name in ("install-request.json", "installation-incomplete"):
-            path = root / name
-            if path.exists() or path.is_symlink():
-                path.replace(root / (name + ".previous"))
-        path = root / "preparation.json"
-        try:
-            state = read_json(path)
-        except (OSError, ValueError, InstallError) as error:
-            if not isinstance(error, FileNotFoundError):
-                print(
-                    "previous update state could not be read / 无法读取上次更新状态",
-                    flush=True,
-                )
-            return
-        if isinstance(state, dict) and state.get("phase") in {
-            "requested",
-            "checking",
-            "stopping",
-            "backup",
-            "copying",
-            "starting",
-        }:
-            state.update(
-                failed_phase=state["phase"],
-                phase="failed",
-                error="CONTAINER_RESTARTED",
-                updated_at=datetime.now(timezone.utc).isoformat(),
-            )
-            write_json(path, state)
+    try:
+        with os.fdopen(
+            os.open(
+                root / "prepare.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600
+            ),
+            "w",
+        ) as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            request = root / "install-request.json"
+            if request.exists() or request.is_symlink():
+                request.replace(root / "install-request.json.previous")
+            try:
+                state = read_json(root / "preparation.json")
+                if isinstance(state, dict) and state.get("phase") in {
+                    "requested",
+                    "checking",
+                    "stopping",
+                    "backup",
+                    "copying",
+                    "starting",
+                }:
+                    state.update(
+                        failed_phase=state["phase"],
+                        phase="failed",
+                        error="CONTAINER_RESTARTED",
+                        updated_at=datetime.now(timezone.utc).isoformat(),
+                    )
+                    write_json(root / "preparation.json", state)
+            except FileNotFoundError:
+                pass
+            except (OSError, ValueError, TypeError, KeyError, InstallError):
+                update_warning("PREVIOUS_STATE_UNAVAILABLE")
+        return True
+    except OSError:
+        update_warning("PREVIOUS_REQUEST_NOT_RETIRED")
+        return False
 
 
 class Installation:
@@ -107,6 +109,8 @@ class Installation:
         self.state = None
         self.dependencies = None
         self.cancelled = lambda: False
+        self.reserved = False
+        self.replacing = False
 
     def claim(self) -> bool:
         request = self.root / "install-request.json"
@@ -134,12 +138,19 @@ class Installation:
         ):
             raise InstallError("INVALID_INSTALL_REQUEST")
         self.reject_package_protocol()
-        log_fd = os.open(
-            self.root / "installation.log",
-            os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW,
-            0o600,
-        )
-        os.close(log_fd)
+        if (self.root / "installation-incomplete").exists() or (
+            self.root / "installation-incomplete"
+        ).is_symlink():
+            raise InstallError("INSTALLATION_RECORD_UNAVAILABLE")
+        try:
+            descriptor = os.open(
+                self.root / "installation.log",
+                os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW,
+                0o600,
+            )
+            os.close(descriptor)
+        except OSError:
+            update_warning("INSTALL_LOG_UNAVAILABLE")
         self.phase("checking")
         return True
 
@@ -150,16 +161,24 @@ class Installation:
         self.state.update(
             phase=phase, error=error, updated_at=datetime.now(timezone.utc).isoformat()
         )
-        write_json(self.root / "preparation.json", self.state)
+        try:
+            write_json(self.root / "preparation.json", self.state)
+        except OSError:
+            update_warning("INSTALL_STATE_WRITE_FAILED")
         message = f"application_update phase={phase} reason={error or 'none'}"
         print(message, flush=True)
-        log_fd = os.open(
-            self.root / "installation.log",
-            os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW,
-            0o600,
-        )
-        with os.fdopen(log_fd, "a") as stream:
-            stream.write(self.state["updated_at"] + " " + message + "\n")
+        try:
+            with os.fdopen(
+                os.open(
+                    self.root / "installation.log",
+                    os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW,
+                    0o600,
+                ),
+                "a",
+            ) as stream:
+                stream.write(self.state["updated_at"] + " " + message + "\n")
+        except OSError:
+            update_warning("INSTALL_LOG_UNAVAILABLE")
 
     def reject_package_protocol(self) -> None:
         target = self.state["target"] if self.state else {}
@@ -177,15 +196,15 @@ class Installation:
             or self.runtime.resolve() != self.storage / "runtime"
         ):
             raise InstallError("UNSAFE_RUNTIME")
-        if (
-            not (self.runtime / ".initialized").is_file()
-            or (self.runtime / ".initialized").is_symlink()
-        ):
-            raise InstallError("UNINITIALIZED_RUNTIME")
         if self.root.is_symlink() or (self.root / "prepared").is_symlink():
             raise InstallError("UNSAFE_STORAGE")
-        if not os.access(self.runtime, os.W_OK | os.X_OK):
-            raise InstallError("RUNTIME_NOT_WRITABLE")
+
+    def reserve(self) -> None:
+        # Required control record is created while the old application is still running.
+        write_json(
+            self.root / "installation-incomplete", {"target": self.state["target"]}
+        )
+        self.reserved = True
 
     def verify_dependencies(self) -> None:
         if self.state["target"].get("format", 1) == 2:
@@ -196,11 +215,6 @@ class Installation:
                 Path(__file__).with_name("environment.json"),
                 cancelled=self.cancelled,
             )
-
-    def backup(self) -> None:
-        self.verify_dependencies()
-        self.phase("backup")
-        backup_database(self.storage, self.root / "database-before-update.sqlite3")
 
     def synchronize(self) -> None:
         self.check_paths()
@@ -218,9 +232,9 @@ class Installation:
             self.dependencies.recheck()
         # Old processes are gone. Remove entries without following target links,
         # then copy the already validated tree; .initialized is launcher-owned.
-        write_json(
-            self.root / "installation-incomplete", {"target": self.state["target"]}
-        )
+        if not self.reserved:
+            raise InstallError("INSTALLATION_NOT_RESERVED")
+        self.replacing = True
         self.phase("copying")
         if self.dependencies is not None:
             self.dependencies.check_cancelled()
@@ -230,22 +244,37 @@ class Installation:
         replace_runtime(source, self.runtime)
 
     def success(self) -> None:
+        recorded = True
         if self.dependencies is not None:
             if self.dependencies.result is None:
-                raise InstallError("DEPENDENCIES_NOT_VERIFIED")
-            from shuku_dependencies.installed import collect_target
-
-            actual = collect_target(self.storage, self.dependencies.target)
-            if actual != self.dependencies.result:
-                raise InstallError("DEPENDENCIES_CHANGED_DURING_STARTUP")
-            write_json(self.storage / "dependencies/installed.json", actual)
-        self.phase("success")
-        (self.root / "installation-incomplete").unlink()
-        (self.root / "install-request.json").unlink()
+                recorded = False
+                update_warning("INSTALLATION_RECORD_UNAVAILABLE")
+            else:
+                try:
+                    write_json(
+                        self.storage / "dependencies/installed.json",
+                        self.dependencies.result,
+                    )
+                except OSError:
+                    recorded = False
+                    update_warning("INSTALLATION_RECORD_UNAVAILABLE")
+        self.phase("applied")
+        for name in (["installation-incomplete"] if recorded else []) + [
+            "install-request.json"
+        ]:
+            try:
+                (self.root / name).unlink(missing_ok=True)
+            except OSError:
+                update_warning("INSTALL_CLEANUP_FAILED")
         self.close()
 
     def fail(self, code: str) -> None:
         self.phase("failed", code)
+        if self.reserved and not self.replacing:
+            try:
+                (self.root / "installation-incomplete").unlink(missing_ok=True)
+            except OSError:
+                update_warning("INSTALL_CLEANUP_FAILED")
         # Keep reservation on any failure: never silently retry on startup.
         self.close()
 
@@ -253,25 +282,3 @@ class Installation:
         if self.lock:
             self.lock.close()
             self.lock = None
-
-
-def backup_database(storage: Path, destination: Path) -> None:
-    database = storage / "database/shuku.sqlite3"
-    backup = destination
-    if database.is_symlink() or database.parent.is_symlink() or backup.is_symlink():
-        raise InstallError("UNSAFE_DATABASE")
-    # SQLite's native backup API takes a consistent snapshot including WAL.
-    # No schema queries, migrations, logical exports or application imports.
-    deadline = time.monotonic() + 60
-
-    def progress(_status, _remaining, _total):
-        if time.monotonic() > deadline:
-            raise InstallError("BACKUP_TIMEOUT")
-
-    with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as source:
-        backup.unlink(missing_ok=True)
-        os.close(
-            os.open(backup, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
-        )
-        with closing(sqlite3.connect(backup)) as target:
-            source.backup(target, pages=256, progress=progress)

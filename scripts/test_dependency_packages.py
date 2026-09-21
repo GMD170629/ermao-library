@@ -19,9 +19,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import test_container_install
-from container_install import InstallError
+from container_install import REQUIRED_RUNTIME_FILES, InstallError
 from dependency_environment import (
-    DependencyError,
     business_environment,
     initialize_dependencies,
 )
@@ -128,8 +127,7 @@ class PackageTests(unittest.TestCase):
         ):
             initialize_dependencies(self.root, self.root / "absent")
         (self.root / "dependencies/installed.json").unlink()
-        with self.assertRaises(DependencyError):
-            initialize_dependencies(self.root, self.root / "absent")
+        initialize_dependencies(self.root, self.root / "absent")
 
     def test_python_environment_discards_injected_global_paths(self):
         with patch.dict(
@@ -229,6 +227,58 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaisesRegex(InstallError, "UNSUPPORTED_UPDATE_PROTOCOL"):
             self.installer.synchronize()
         self.assertTrue((self.runtime / "old").exists())
+
+    def test_conversion_does_not_open_or_validate_database(self):
+        import sqlite3
+
+        seed = self.storage / "seed"
+        dependency_seed = self.storage / "seed-deps"
+        dependency_seed.mkdir()
+        (dependency_seed / "manifest.json").write_text(
+            json.dumps({"packages": [], "node_links": [], "node_scopes": []})
+        )
+        identity = {"version": "1.0.5", "environment": {"platform": "linux-aarch64"}}
+        for root, protocol in ((seed, 2), (self.runtime, 1)):
+            (root / "scripts").mkdir(parents=True)
+            (root / "apps/api-python").mkdir(parents=True)
+            (root / "application.json").write_text(
+                json.dumps({**identity, "protocol": protocol})
+            )
+            (root / "apps/api-python/uv.lock").write_text("same lock")
+            (root / "scripts/start-unified-app.sh").write_text(
+                f"launch protocol {protocol}"
+            )
+        for relative in REQUIRED_RUNTIME_FILES:
+            path = self.runtime / relative
+            if not path.exists():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("existing application")
+        with (
+            sqlite3.connect(self.storage / "database/shuku.sqlite3") as locked,
+            patch("dependency_packages.node_packages", return_value=([], [], [])),
+            patch.object(entry, "initialize_dependencies") as initialize,
+            patch.object(
+                entry.subprocess,
+                "run",
+                side_effect=AssertionError("conversion invoked database validation"),
+            ),
+        ):
+            locked.execute("BEGIN EXCLUSIVE")
+            with patch.object(
+                sqlite3,
+                "connect",
+                side_effect=AssertionError("conversion opened database"),
+            ):
+                entry.convert_legacy(seed, self.runtime, self.storage, dependency_seed)
+        initialize.assert_called_once_with(self.storage, dependency_seed)
+        self.assertEqual(
+            json.loads((self.runtime / "application.json").read_text())["protocol"], 2
+        )
+        self.assertEqual(
+            (self.runtime / "scripts/start-unified-app.sh").read_text(),
+            "launch protocol 2",
+        )
+        self.assertFalse(list(self.installer.root.glob("database-before-*.sqlite3")))
 
     def test_conversion_refuses_version_change_before_any_write(self):
         seed = self.storage / "seed"

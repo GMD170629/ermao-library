@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tarfile
 from collections.abc import Callable
 from pathlib import Path
@@ -21,6 +22,10 @@ from shuku_dependencies.packages import dependency_key as key
 
 class DependencyInstallError(RuntimeError):
     pass
+
+
+def update_warning(code: str) -> None:
+    print(f"update warning / 更新提醒：{code}", file=sys.stderr, flush=True)
 
 
 def safe_destination(root: Path, relative: str) -> Path:
@@ -143,7 +148,14 @@ class DependencyInstallation:
             *arguments,
         ]
         log = self.storage / "update-tmp/installation.log"
-        with log.open("a") as output:
+        output = None
+        try:
+            output = os.fdopen(
+                os.open(
+                    log, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600
+                ),
+                "a",
+            )
             output.write(
                 "dependency_operation="
                 + operation
@@ -152,25 +164,43 @@ class DependencyInstallation:
                 + "\n"
             )
             output.flush()
+        except OSError:
+            if output is not None:
+                try:
+                    output.close()
+                except OSError:
+                    pass  # The open/write failure is reported below.
+                output = None
+            update_warning("INSTALL_LOG_UNAVAILABLE")
+        try:
             result = subprocess.run(
                 command, env=environment, stdout=output, stderr=output, check=False
             )
+        finally:
+            if output is not None:
+                try:
+                    output.close()
+                except OSError:
+                    update_warning("INSTALL_LOG_UNAVAILABLE")
         self.check_cancelled()
         if result.returncode:
             raise DependencyInstallError("DEPENDENCY_OPERATION_FAILED")
 
     def log_node(self, operation: str, package: dict) -> None:
-        with os.fdopen(
-            os.open(
-                self.storage / "update-tmp/installation.log",
-                os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW,
-                0o600,
-            ),
-            "a",
-        ) as output:
-            output.write(
-                f"dependency_operation=node_{operation} instance={package['location']} version={package['version']}\n"
-            )
+        try:
+            with os.fdopen(
+                os.open(
+                    self.storage / "update-tmp/installation.log",
+                    os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW,
+                    0o600,
+                ),
+                "a",
+            ) as output:
+                output.write(
+                    f"dependency_operation=node_{operation} instance={package['location']} version={package['version']}\n"
+                )
+        except OSError:
+            update_warning("INSTALL_LOG_UNAVAILABLE")
 
     def apply(self) -> None:
         self.check_cancelled()
@@ -280,12 +310,17 @@ class DependencyInstallation:
             for r in self.local.get("python_records", [])
             if "python:" + r["name"] in self.delta["keep"]
         ]
-        changed_records = installed_records(
-            self.storage / "dependencies/python", verify_contents=False, names=changed
-        )
-        self.result = {
-            **self.target,
-            "python_records": sorted(
-                kept_records + changed_records, key=lambda record: record["name"]
-            ),
-        }
+        try:
+            changed_records = installed_records(
+                self.storage / "dependencies/python",
+                verify_contents=False,
+                names=changed,
+            )
+            self.result = {
+                **self.target,
+                "python_records": sorted(
+                    kept_records + changed_records, key=lambda record: record["name"]
+                ),
+            }
+        except (OSError, ValueError, KeyError, TypeError):
+            update_warning("INSTALLATION_RECORD_UNAVAILABLE")

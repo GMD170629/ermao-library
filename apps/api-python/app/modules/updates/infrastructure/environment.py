@@ -22,7 +22,6 @@ def fixed_environment(storage: Path) -> Environment | None:
         or not (fixed.parent / "container_install.py").is_file()
         or runtime.is_symlink()
         or Path(__file__).resolve().parents[4] != runtime.resolve() / "apps/api-python"
-        or not (runtime / ".initialized").is_file()
     ):
         return None
     import fcntl

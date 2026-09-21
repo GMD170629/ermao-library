@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from container_install import write_json
+from dependency_install import update_warning
 from dependency_packages import canonical_digest, digest
 
 
@@ -30,22 +31,15 @@ def business_environment(storage: Path) -> dict[str, str]:
     return environment
 
 
-def initialize_dependencies(storage: Path, seed: Path) -> None:
+def initialize_dependencies(storage: Path, seed: Path) -> bool:
     dependencies = storage / "dependencies"
     python = dependencies / "python"
     installed = dependencies / "installed.json"
-    if dependencies.is_symlink() or python.is_symlink() or installed.is_symlink():
+    if dependencies.is_symlink() or python.is_symlink():
         raise DependencyError("unsafe dependency path / 依赖路径不安全")
     if dependencies.exists():
-        if not installed.is_file() or not (python / "bin/python").is_file():
-            raise DependencyError(
-                "incomplete dependencies; manual repair required / 依赖初始化未完成，请人工修复"
-            )
-        record = json.loads(installed.read_text())
-        if record.get("protocol") != 2:
-            raise DependencyError("unsupported dependency record / 不支持的依赖记录")
-        # Ordinary startup deliberately does not inspect the seed or scan files.
-        return
+        # Existing application decides whether its interpreter/dependencies can run.
+        return True
     manifest = validate_dependency_seed(seed)
     dependencies.mkdir()
     environment = business_environment(storage)
@@ -78,37 +72,22 @@ def initialize_dependencies(storage: Path, seed: Path) -> None:
         capture_output=True,
         env=environment,
     )
-    subprocess.run(
-        [
-            "/usr/local/bin/uv",
-            "--no-cache",
-            "pip",
-            "check",
-            "--python",
-            str(python / "bin/python"),
-        ],
-        check=True,
-        capture_output=True,
-        env=environment,
-    )
-    records = subprocess.check_output(
-        [
-            str(python / "bin/python"),
-            "-I",
-            str(Path(__file__).with_name("dependency_records.py")),
-        ],
-        env=environment,
-        stderr=subprocess.PIPE,
-    )
-    installed_packages = json.loads(records)
-    expected = {
-        item["name"]: item["version"]
-        for item in manifest["packages"]
-        if item["ecosystem"] == "python"
-    }
-    if {item["name"]: item["version"] for item in installed_packages} != expected:
-        raise DependencyError("installed package set differs / 安装后的依赖集合不一致")
-    write_json(installed, {**manifest, "python_records": installed_packages})
+    try:
+        records = subprocess.check_output(
+            [
+                str(python / "bin/python"),
+                "-I",
+                str(Path(__file__).with_name("dependency_records.py")),
+                "--no-verify",
+            ],
+            env=environment,
+            stderr=subprocess.PIPE,
+        )
+        write_json(installed, {**manifest, "python_records": json.loads(records)})
+    except (OSError, ValueError, subprocess.CalledProcessError):
+        update_warning("INSTALLATION_RECORD_UNAVAILABLE")
+        return False
+    return True
 
 
 def validate_dependency_seed(seed: Path) -> dict:

@@ -18,14 +18,14 @@ from app.bootstrap.library_scan_runtime import (
 )
 from app.bootstrap.metadata import build_automatic_metadata_request_gate
 from app.bootstrap.prestart import verify_current_schema
+from app.bootstrap.readable_resource_pipeline import (
+    build_readable_resource_pipeline,
+    build_readable_resource_worker,
+)
 from app.bootstrap.standard_writeback import (
     maintain_standard_writeback,
     process_standard_writeback,
     recover_standard_writeback,
-)
-from app.bootstrap.readable_resource_pipeline import (
-    build_readable_resource_pipeline,
-    build_readable_resource_worker,
 )
 from app.core.config import get_settings
 from app.core.database_errors import is_database_busy_error
@@ -153,18 +153,23 @@ def main() -> None:
             if organizer_scheduler is not None:
                 _cleanup("organizer_stop", organizer_scheduler.shutdown)
         if not stop_event.is_set():
-            birth = Path(f"/proc/{os.getpid()}/stat")
-            ready_file.write_text(
-                json.dumps(
-                    {
-                        "pid": os.getpid(),
-                        "startTime": birth.read_text().rsplit(")", 1)[1].split()[19]
-                        if birth.exists()
-                        else None,
-                    }
-                ),
-                encoding="utf-8",
-            )
+            try:
+                birth = Path(f"/proc/{os.getpid()}/stat")
+                ready_file.write_text(
+                    json.dumps(
+                        {
+                            "pid": os.getpid(),
+                            "startTime": birth.read_text().rsplit(")", 1)[1].split()[19]
+                            if birth.exists()
+                            else None,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            except OSError:
+                logger.warning(
+                    "WORKER_READY_WRITE_FAILED / 无法写入 Worker 就绪记录，继续运行"
+                )
             logger.info("readable_resource.worker.ready")
         next_import_attempt = 0.0
         import_failures = 0

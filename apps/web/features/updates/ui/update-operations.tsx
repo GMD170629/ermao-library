@@ -15,9 +15,11 @@ import { canInstall, installationFailed, installationPhases, preparationPhases }
 const phaseLabels: Record<string, string> = {
   downloading: '正在下载更新包', verifying: '正在校验更新包', extracting: '正在解压更新包',
   ready: '更新包已准备好，等待安装', requested: '安装请求已接受', checking: '正在检查安装条件', stopping: '正在等待业务停止',
-  backup: '正在备份数据库', copying: '正在更新程序文件', starting: '正在迁移数据库并启动服务', failed: '更新操作失败', success: '正在核对实际运行版本'
+  // Legacy launchers can still report the backup phase.
+  backup: '正在备份数据库', copying: '正在更新程序文件', starting: '正在启动服务', applied: '代码和依赖已替换，正在确认程序运行版本', failed: '更新操作失败', success: '正在核对实际运行版本'
 };
 const reasonLabels: Record<string, string> = {
+  INSTALLATION_RECORD_UNAVAILABLE: '依赖安装记录暂不可用；应用可继续运行，请使用完整镜像同步后再进行增量更新。',
   CONTAINER_RESTARTED: '容器已重启，上次安装请求已结束；未自动重试安装。',
   PLAN_CHANGED: '准备包已变化或失效，请重新查看并确认。',
   DEPENDENCY_OPERATION_FAILED: '依赖安装失败，请查看安装日志。',
@@ -60,7 +62,7 @@ export function UpdateOperations() {
   }, [success, state?.target]);
 
   const phase = state?.phase ?? 'idle';
-  const installing = installationPhases.has(phase) || (!!state && installationFailed(state));
+  const installing = !success && (installationPhases.has(phase) || (!!state && installationFailed(state)));
   const busy = operations.installRequested || operations.submitting || operations.observing || confirming || installing || preparationPhases.has(phase);
   const latest = check?.releases[0];
   const ready = phase === 'ready' && state?.target;
@@ -74,7 +76,7 @@ export function UpdateOperations() {
   const failed = !!operations.error || !!state?.error || phase === 'failed';
   const feedError = feed.state.status === 'error' ? feed.state.message : null;
   const checking = !runtime || (!releaseStatus && !check) || (allowed && !state);
-  const tone = failed || (!active && feedError && !check) ? 'error'
+  const tone = operations.notice ? 'neutral' : failed || (!active && feedError && !check) ? 'error'
     : active || newVersion ? 'update' : checking ? 'neutral' : 'current';
   const colors = {
     error: 'border-[#E8C8C1] bg-[#FFF4F1] text-[#8D3828]',
@@ -83,7 +85,7 @@ export function UpdateOperations() {
     current: 'border-[#CFE0CF] bg-[#F2F8F1] text-[#426443]'
   };
   const Icon = tone === 'error' ? AlertCircle : tone === 'update' ? Sparkles : tone === 'neutral' ? RefreshCw : CheckCircle2;
-  const message = active
+  const message = operations.notice ? t(operations.notice) : active
     ? t(ready && !installReady ? (preparationOnly ? '更新已准备，当前版本尚不支持安装此协议。' : '准备包已变化或失效，请重新查看并确认。') : phaseLabels[phase])
     : failed ? t('更新操作失败')
     : newVersion ? t('检查到新版本 v{version}', { version: newVersion })

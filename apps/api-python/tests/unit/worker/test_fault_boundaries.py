@@ -161,3 +161,20 @@ def test_stop_during_startup_prevents_claims(runtime):
     runtime.scanner.tick.assert_not_called()
     runtime.metadata.request_stop.assert_called()
     assert not runtime.ready.exists()
+
+
+def test_ready_record_failure_does_not_stop_worker(runtime, monkeypatch):
+    from pathlib import Path
+
+    original = Path.write_text
+
+    def fail_ready(path, *args, **kwargs):
+        if path == runtime.ready:
+            raise PermissionError("injected")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_ready)
+    worker_main.main()
+    assert runtime.processor.process_once.called
+    runtime.metadata.shutdown.assert_called_once()
+    runtime.organizer.shutdown.assert_called_once()

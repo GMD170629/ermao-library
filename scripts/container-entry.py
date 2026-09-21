@@ -10,23 +10,20 @@ import json
 import os
 import shutil
 import signal
-import sqlite3
 import subprocess
 import sys
 import tempfile
 import time
-import urllib.request
 import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from container_image import ImageSynchronization
 from container_install import (
-    REQUIRED_RUNTIME_FILES,
     Installation,
     InstallError,
-    backup_database,
     retire_previous_installation,
+    update_warning,
     write_json,
 )
 from dependency_environment import (
@@ -42,35 +39,20 @@ class StartupError(RuntimeError):
 
 
 def initialize_runtime(seed: Path, runtime: Path) -> None:
-    """Copy the image once; an incomplete existing directory is never replaced."""
-    marker = runtime / ".initialized"
-    initializing = not runtime.exists()
-    if runtime.is_symlink():
-        raise StartupError("runtime must not be a link / 程序目录不能是链接")
-    if runtime.exists():
-        if not runtime.is_dir() or not marker.is_file() or marker.is_symlink():
-            raise StartupError(
-                "invalid runtime directory or initialization record / "
-                "程序目录或初始化记录无效"
-            )
-    else:
-        # Create the destination before copying. Failure leaves no success marker;
-        # subsequent starts refuse it instead of overwriting possible user changes.
+    """Reuse existing runtime; the application owns its startup requirements."""
+    if runtime.is_symlink() or (runtime.exists() and not runtime.is_dir()):
+        raise StartupError("runtime must be a directory / 程序路径必须是目录")
+    if not runtime.exists():
         shutil.copytree(seed, runtime, symlinks=True)
-    if any(not (runtime / name).is_file() for name in REQUIRED_RUNTIME_FILES):
-        raise StartupError("runtime files are missing / 程序文件缺失")
-    # Probe with actual writes under the configured UID, without chmod/chown.
-    for directory in (runtime, runtime / "apps/web/.next/cache"):
-        directory.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryFile(dir=directory):
-            pass
-    if initializing:
-        marker.write_text("1\n", encoding="utf-8")
+    marker = runtime / ".initialized"
+    try:
+        if not marker.exists() and not marker.is_symlink():
+            marker.write_text("1\n", encoding="utf-8")
+    except OSError:
+        update_warning("INITIALIZATION_RECORD_WRITE_FAILED")
 
 
-def run_application(
-    runtime: Path, storage: Path, image_sync: ImageSynchronization | None = None
-) -> int:
+def run_application(runtime: Path, storage: Path, allow_updates: bool = True) -> int:
     stop_signal = 0
 
     def stop(signum: int, _frame: object) -> None:
@@ -100,19 +82,14 @@ def run_application(
     installing = False
     stopped = False
     deadline = 0.0
-    stage_file = storage / "update-tmp/startup-stage"
-    ready_file = storage / "update-tmp/worker-ready"
 
     def launch() -> subprocess.Popen:
-        stage_file.unlink(missing_ok=True)
-        ready_file.unlink(missing_ok=True)
         return subprocess.Popen(
             ["sh", str(runtime / "scripts/start-unified-app.sh")],
             cwd=runtime,
             env={
                 **environment,
-                "IMPORT_WORKER_READY_FILE": str(ready_file),
-                "SHUKU_STARTUP_STATUS_FILE": str(stage_file),
+                "IMPORT_WORKER_READY_FILE": str(storage / "update-tmp/worker-ready"),
             },
             start_new_session=True,
         )
@@ -123,9 +100,6 @@ def run_application(
         installing = False
 
     child = launch()
-    image_pending = image_sync is not None
-    image_failed = False
-    image_deadline = time.monotonic() + 180
     while True:
         if stop_signal and not forwarded:
             if installing:
@@ -149,40 +123,7 @@ def run_application(
                 preflight.returncode = os.waitstatus_to_exitcode(status)
             if pid == 0:
                 break
-        if image_pending:
-            if stop_signal or child.returncode is not None:
-                image_pending = False
-                image_failed = True
-                print(
-                    "image startup interrupted / 镜像程序启动中断，保留未完成标记",
-                    flush=True,
-                )
-            elif time.monotonic() >= image_deadline:
-                image_pending = False
-                image_failed = True
-                core_ready = core_application_ready(image_sync.target["version"])
-                print(
-                    "image worker verification timed out / 镜像 Worker 验证超时，保留未完成标记"
-                    if core_ready
-                    else "image startup verification timed out / 镜像程序启动验证超时，保留未完成标记",
-                    flush=True,
-                )
-                if not core_ready:
-                    os.kill(child.pid, signal.SIGTERM)
-            elif application_ready(child.pid, image_sync.target["version"], ready_file):
-                try:
-                    image_sync.success()
-                except (OSError, ValueError, InstallError):
-                    image_failed = True
-                    print(
-                        "image result write failed / 镜像同步结果写入失败，保留未完成标记",
-                        flush=True,
-                    )
-                    os.kill(child.pid, signal.SIGTERM)
-                else:
-                    image_sync = None
-                image_pending = False
-        elif installing and installer.state["phase"] == "checking":
+        if installing and installer.state["phase"] == "checking":
             if child.returncode is not None or time.monotonic() >= deadline:
                 if preflight is not None and preflight.returncode is None:
                     os.kill(preflight.pid, signal.SIGTERM)
@@ -193,6 +134,7 @@ def run_application(
                 else:
                     try:
                         installer.verify_dependencies()
+                        installer.reserve()
                     except Exception as error:  # noqa: BLE001 - owned preflight boundary
                         fail(
                             str(error)
@@ -210,7 +152,7 @@ def run_application(
                 try:
                     if child.returncode != 0:
                         raise InstallError("STOP_FAILED")
-                    installer.backup()
+                    installer.verify_dependencies()
                     if stop_signal:
                         raise InstallError("CONTAINER_STOPPED")
                     installer.synchronize()
@@ -218,7 +160,17 @@ def run_application(
                         raise InstallError("CONTAINER_STOPPED")
                     installer.phase("starting")
                     child = launch()
-                    deadline = time.monotonic() + 180
+                    installer.success()
+                    installing = False
+                    stopped = False
+                    allow_updates = not any(
+                        (installer.root / name).exists()
+                        or (installer.root / name).is_symlink()
+                        for name in ("install-request.json", "installation-incomplete")
+                    )
+                    if allow_updates:
+                        installer = Installation(storage)
+                        installer.cancelled = lambda: bool(stop_signal)
                 except Exception as error:  # noqa: BLE001 - owned installation boundary
                     fail(
                         str(error)
@@ -230,33 +182,9 @@ def run_application(
                 fail("STOP_TIMEOUT")
                 # No kill or restart: retain the old process group until it exits
                 # or the administrator stops the container.
-        elif installing and installer.state["phase"] == "starting":
-            if child.returncode is not None:
-                phase = stage_file.read_text().strip() if stage_file.exists() else ""
-                fail("MIGRATION_FAILED" if phase == "migration" else "STARTUP_FAILED")
-            elif time.monotonic() >= deadline:
-                core_ready = core_application_ready(
-                    installer.state["target"]["version"]
-                )
-                fail("WORKER_STARTUP_FAILED" if core_ready else "STARTUP_TIMEOUT")
-                if not core_ready:
-                    os.kill(child.pid, signal.SIGTERM)
-            elif application_ready(
-                child.pid, installer.state["target"]["version"], ready_file
-            ):
-                try:
-                    installer.success()
-                except (OSError, ValueError, DependencyInstallError, InstallError):
-                    fail("RESULT_WRITE_FAILED")
-                    os.kill(child.pid, signal.SIGTERM)
-                else:
-                    installer = Installation(storage)
-                    installer.cancelled = lambda: bool(stop_signal)
-                    installing = False
-                    stopped = False
         elif (  # noqa: SIM102
             not stop_signal
-            and image_sync is None
+            and allow_updates
             and child.returncode is None
             and installer.lock is None
             and not stopped
@@ -278,7 +206,7 @@ def run_application(
                             start_new_session=True,
                         )
                         deadline = time.monotonic() + 300
-                except Exception as error:
+                except Exception as error:  # noqa: BLE001 - isolate rejected installation requests.
                     if installer.state is not None:
                         fail(
                             str(error)
@@ -287,9 +215,8 @@ def run_application(
                         )
                     else:
                         installer.close()
-                        raise StartupError(
-                            "invalid install request / 安装请求无效"
-                        ) from error
+                        allow_updates = False
+                        update_warning("INVALID_INSTALL_REQUEST")
         if child.returncode is not None and not installing:
             if empty:
                 break
@@ -304,65 +231,8 @@ def run_application(
     return (
         128 + stop_signal
         if stop_signal
-        else (child.returncode or (1 if stopped or image_failed else 0))
+        else (child.returncode or (1 if stopped else 0))
     )
-
-
-def application_ready(group: int, version: str, ready_file: Path) -> bool:
-    # Probe the core throughout the startup window, even if the Worker fails.
-    # Otherwise its first (potentially cold) probe happens only at the deadline
-    # and can misclassify an isolated Worker failure as a core startup timeout.
-    if not core_application_ready(version):
-        return False
-    try:
-        identity = json.loads(ready_file.read_text())
-        worker_pid = int(identity["pid"])
-        fields = Path(f"/proc/{worker_pid}/stat").read_text().rsplit(")", 1)[1].split()
-        if (
-            fields[0] == "Z"
-            or int(fields[1]) != group
-            or fields[19] != identity["startTime"]
-        ):
-            return False
-        if os.getpgid(worker_pid) != worker_pid:
-            return False
-    except (OSError, ValueError, KeyError, TypeError, IndexError):
-        return False
-    return True
-
-
-def core_application_ready(version: str) -> bool:
-    """Core acceptance does not depend on optional queue recovery/maintenance."""
-    try:
-        with urllib.request.urlopen(
-            "http://127.0.0.1:8000/openapi.json", timeout=1
-        ) as response:
-            if json.load(response)["info"]["version"] != version:
-                return False
-        with urllib.request.urlopen(
-            "http://127.0.0.1:8000/api/health", timeout=1
-        ) as response:
-            if response.status != 200:
-                return False
-        port = int(os.environ.get("NEXT_INTERNAL_PORT", "3001"))
-        base_path = (
-            os.environ.get("NEXT_PUBLIC_BASE_PATH")
-            or os.environ.get("SHUKU_BASE_PATH")
-            or os.environ.get("COOKIE_PATH", "").rstrip("/")
-            or ""
-        )
-        with urllib.request.urlopen(
-            f"http://127.0.0.1:{port}{base_path}/", timeout=1
-        ) as response:
-            if response.status != 200:
-                return False
-        gateway_port = int(os.environ.get("PORT", "3000"))
-        with urllib.request.urlopen(
-            f"http://127.0.0.1:{gateway_port}{base_path}/api/health", timeout=1
-        ) as response:
-            return response.status == 200
-    except (OSError, ValueError, KeyError):
-        return False
 
 
 def convert_legacy(
@@ -418,22 +288,7 @@ def convert_legacy(
             raise StartupError(
                 "legacy Node layout differs from seed / 旧 Node 布局与种子不一致"
             )
-    backup_database(
-        storage, storage / "update-tmp/database-before-dependency-conversion.sqlite3"
-    )
     initialize_dependencies(storage, dependency_seed)
-    # Use the existing schema barrier. Unknown/newer schemas are never stamped or downgraded.
-    subprocess.run(
-        [
-            str(storage / "dependencies/python/bin/python"),
-            "-c",
-            "from app.bootstrap.prestart import verify_current_schema; from app.db.session import engine; verify_current_schema(engine)",
-        ],
-        cwd=runtime / "apps/api-python",
-        env=business_environment(storage),
-        check=True,
-        capture_output=True,
-    )
     # No application replacement and no v2 package installation. Only the known launch script changes.
     script = runtime / "scripts/start-unified-app.sh"
     staged = script.with_suffix(".conversion")
@@ -495,7 +350,7 @@ def main() -> int:
                 raise StartupError(
                     "application is already running / 应用已在运行"
                 ) from None
-            retire_previous_installation(storage)
+            allow_updates = retire_previous_installation(storage)
             dependency_seed = Path(
                 os.environ.get("SHUKU_DEPENDENCY_SEED", "/opt/shuku-dependency-seed")
             )
@@ -514,27 +369,12 @@ def main() -> int:
                 return 0
             image_sync = ImageSynchronization(storage, seed, dependency_seed)
             pending_image = image_sync.prepare()
-            if runtime.exists():
-                identity = json.loads((runtime / "application.json").read_text())
-                if identity.get("protocol") != 2:
-                    raise StartupError(
-                        "runtime protocol is not 2 / 程序更新协议不是 2"
-                    )
-                if not (storage / "dependencies/installed.json").is_file():
-                    raise StartupError(
-                        "missing business environment / 缺少业务依赖环境"
-                    )
+            if pending_image:
+                image_sync.success()
             initialize_runtime(seed, runtime)
-            fixed_environment = Path(__file__).with_name("environment.json")
-            if fixed_environment.is_file():
-                identity = json.loads((runtime / "application.json").read_text())
-                if identity.get("protocol") != 2:
-                    raise StartupError("runtime protocol is not 2 / 程序更新协议不是 2")
             initialize_dependencies(storage, dependency_seed)
             print("runtime ready / 持久化程序目录就绪", flush=True)
-            return run_application(
-                runtime, storage, image_sync if pending_image else None
-            )
+            return run_application(runtime, storage, allow_updates)
     except (
         OSError,
         ValueError,
@@ -545,7 +385,6 @@ def main() -> int:
         InstallError,
         KeyError,
         TypeError,
-        sqlite3.Error,
         zipfile.BadZipFile,
     ) as error:
         # Do not expose private paths or dump a traceback into container logs.
