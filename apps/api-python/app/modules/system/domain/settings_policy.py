@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.contracts.automation import AUTOMATION_SETTINGS_KEY
+
 SENSITIVE_SYSTEM_SETTING_KEYS = frozenset(
     {
         "email.smtp.password",
@@ -41,7 +43,7 @@ def public_system_settings(values: dict[str, Any]) -> dict[str, Any]:
         f"{key}Configured": False for key in SENSITIVE_SYSTEM_SETTING_KEYS
     }
     for key, value in values.items():
-        if key in RETIRED_SYSTEM_SETTING_KEYS:
+        if key in RETIRED_SYSTEM_SETTING_KEYS or key == AUTOMATION_SETTINGS_KEY:
             continue
         if key in SENSITIVE_SYSTEM_SETTING_KEYS:
             public[f"{key}Configured"] = (

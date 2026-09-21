@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from app.modules.automation.application.audit import AutomationAuditPort
 from app.modules.automation.domain.access import (
     AutomationAccessError,
     AutomationActor,
@@ -76,12 +77,14 @@ class ManageGrants:
         credentials: CredentialPort,
         unit_of_work: GrantUnitOfWork,
         clock_ms: Callable[[], int],
+        audit: AutomationAuditPort,
     ) -> None:
         self._store = store
         self._identities = identities
         self._credentials = credentials
         self._uow = unit_of_work
         self._clock_ms = clock_ms
+        self._audit = audit
 
     def _actor(self, user_id: str) -> AutomationActor:
         actor = self._identities.current_actor(user_id)
@@ -114,8 +117,10 @@ class ManageGrants:
             created_at_ms=now_ms,
             expires_at_ms=now_ms + lifetime_days * 86_400_000,
         )
+        event = self._audit.prepare("grant.created", user_id, grant.id)
         try:
             self._store.add(grant, credential.digest)
+            self._audit.write(event)
             self._uow.commit()
         except Exception:
             self._uow.rollback()
@@ -129,9 +134,11 @@ class ManageGrants:
     def revoke(self, *, user_id: str, grant_id: str) -> None:
         self._actor(user_id)
         now_ms = self._clock_ms()
+        event = self._audit.prepare("grant.revoked", user_id, grant_id)
         try:
             if not self._store.revoke(grant_id, user_id, now_ms):
                 raise AutomationAccessError("GRANT_NOT_FOUND")
+            self._audit.write(event)
             self._uow.commit()
         except Exception:
             self._uow.rollback()

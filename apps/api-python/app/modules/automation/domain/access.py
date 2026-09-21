@@ -35,6 +35,7 @@ class AutomationActor:
     can_manage_system: bool
     # Contains existing, currently accessible IDs, including for administrators.
     library_ids: frozenset[str]
+    is_admin: bool = False
 
 
 @dataclass(frozen=True, slots=True)

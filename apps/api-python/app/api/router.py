@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.typed_route import TypedContractRoute
 from app.modules.auth.presentation.router import router as auth_router
+from app.modules.automation.presentation.http import router as automation_router
 from app.modules.backup.presentation.http import router as backup_router
 from app.modules.download.presentation.http import router as download_router
 from app.modules.imports.presentation.http import router as imports_router
@@ -19,6 +20,7 @@ from app.modules.updates.presentation.http import router as updates_router
 
 api_router = APIRouter(route_class=TypedContractRoute)
 api_router.include_router(auth_router)
+api_router.include_router(automation_router)
 api_router.include_router(backup_router)
 api_router.include_router(reader_router)
 api_router.include_router(system_router)

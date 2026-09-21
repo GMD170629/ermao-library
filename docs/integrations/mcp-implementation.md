@@ -66,4 +66,23 @@ uv run --extra dev --locked pytest -q tests/integration/modules/automation tests
 
 覆盖：新／既有数据库升级与重复启动、默认无授权、令牌摘要及重开／撤销／到期、实际管理员库限制与权限降级、跨库和写回子权限、保护／标签权限交叉、目录 DB-only 更新且原件不变、原 Web 自动入队、预构造文件意图拒绝、模块边界及事务约束。改动文件 Ruff 通过；新授权模块、接线与身份适配器 Mypy 局部检查通过（15 个源文件）。
 
-尚未完成 M1：会话管理 HTTP 接口与 Origin/CSRF、持久服务开关和部署能力设置、授权操作审计／最近使用记录。当前 operation 授权入口已存在，但尚未与文件任务 worker 接线；待 M4–M6 引入带 grant 的实际任务后验证关键阶段撤权。只读挂载的真实文件行为也需在文件用例实现后验证。M2–M8 未开始，不应将这些基础测试视为整套 MCP 功能已交付。
+授权基础与 DB-only 边界提交：`d4ccde1b`。
+
+### 会话管理接口与服务配置
+
+新增 `/api/automation/grants` GET/POST、`/api/automation/grants/{grant_id}` DELETE，以及 `/api/automation/settings` GET/PUT。请求／响应有严格 Pydantic 契约；管理仅接受现有 Cookie 会话，修改必须同源 Origin。授权返回 `no-store`，明文仅创建时返回，列表没有 token/digest；用户不能列出或撤销其他人的授权。
+
+服务设置保存在既有 SystemSetting 中，默认关闭，仅真正的管理员可开启。配置验证公开地址、部署前缀、HTTPS；非回环 HTTP 需要显式选项，不执行 URL 探测。通用系统设置读写不暴露／修改该嵌套配置，避免绕过专用授权与校验。
+
+创建、撤销、服务设置与既有 SystemEvent 审计在同一事务提交，记录 actor、动作和目标 ID，不记录明文或摘要；审计失败回滚授权。日志按当前系统语言生成 zh-CN/en-US。
+
+最新验证（工作目录 `apps/api-python`）：
+
+```text
+uv run --extra dev --locked pytest -q tests/integration/modules/automation tests/unit/modules/automation tests/test_capability_architecture.py tests/architecture/test_write_transaction_contract.py tests/contract/api/test_auth_system_contract_regressions.py tests/contract/api/test_system_management_authorization.py tests/test_response_dto_schemas.py
+187 passed
+```
+
+新增服务配置／HTTP／审计和身份接线的 Mypy 局部检查通过（21 个源文件），对应 Ruff 通过。未运行无关全仓回归。
+
+M1 仍有后续接线验证：最近使用时间在 M2 实际 MCP 调用中记录；当前 operation 授权入口已存在，但尚未与文件任务 worker 接线，待 M4–M6 引入带 grant 的实际任务后验证关键阶段撤权。只读挂载的真实文件行为也需在文件用例实现后验证。M2–M8 未开始，不应将这些基础测试视为整套 MCP 功能已交付。

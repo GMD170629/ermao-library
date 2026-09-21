@@ -33,4 +33,5 @@ class SqlAlchemyAutomationIdentity:
             active=user.status == "active",
             can_manage_system=context.can_manage_system,
             library_ids=self._visible_library_ids(context),
+            is_admin=context.is_admin,
         )

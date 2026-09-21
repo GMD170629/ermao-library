@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.bootstrap.automation import build_automation_authorizer, build_grant_manager
 from app.models import Library
 from app.models.auth import User
+from app.models.settings import SystemEvent
 from app.modules.automation.application.grants import AuthorizeAutomation, ManageGrants
 from app.modules.automation.domain.access import (
     ALL_SCOPES,
@@ -18,6 +19,7 @@ from app.modules.automation.domain.access import (
 from app.modules.automation.infrastructure.credentials import AutomationCredentials
 from app.modules.automation.infrastructure.grants import SqlAlchemyGrantStore
 from app.modules.automation.infrastructure.models import AutomationGrantRow
+from app.modules.system.infrastructure.automation_audit import SqlAlchemyAutomationAudit
 
 
 class Identities:
@@ -44,6 +46,7 @@ def test_credential_storage_reopen_revoke_and_current_permissions(db_session):
         credentials,
         db_session,
         lambda: now,
+        SqlAlchemyAutomationAudit(db_session),
     )
     created = manager.create(
         user_id="owner",
@@ -104,7 +107,14 @@ def test_expiry_exact_boundary_and_cannot_revoke_another_users_grant(db_session)
     credential = AutomationCredentials()
     store = SqlAlchemyGrantStore(db_session)
     now = 1_800_000_000_000
-    manager = ManageGrants(store, identity, credential, db_session, lambda: now)
+    manager = ManageGrants(
+        store,
+        identity,
+        credential,
+        db_session,
+        lambda: now,
+        SqlAlchemyAutomationAudit(db_session),
+    )
     created = manager.create(
         user_id="owner",
         name="Reader",
@@ -165,3 +175,36 @@ def test_real_identity_rechecks_admin_downgrade_and_library_scope(db_session):
         )
         assert result.permissions.scopes == frozenset({Scope.LIBRARY_READ})
         assert result.permissions.library_ids == frozenset()
+
+
+def test_audit_failure_rolls_back_grant_and_event_together(db_session):
+    db_session.add(
+        User(
+            id="owner", email="owner@test.invalid", name="Owner", password_hash="unused"
+        )
+    )
+    db_session.commit()
+
+    class FailingAudit(SqlAlchemyAutomationAudit):
+        def write(self, event):
+            super().write(event)
+            raise RuntimeError("injected audit persistence failure")
+
+    manager = ManageGrants(
+        SqlAlchemyGrantStore(db_session),
+        Identities(),
+        AutomationCredentials(),
+        db_session,
+        lambda: 1_800_000_000_000,
+        FailingAudit(db_session),
+    )
+    with pytest.raises(RuntimeError, match="injected audit"):
+        manager.create(
+            user_id="owner",
+            name="Local",
+            permissions=GrantPermissions(
+                frozenset({Scope.LIBRARY_READ}), frozenset({"test-library"})
+            ),
+        )
+    assert list(db_session.scalars(select(AutomationGrantRow))) == []
+    assert list(db_session.scalars(select(SystemEvent))) == []
