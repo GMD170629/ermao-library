@@ -256,7 +256,7 @@ jobs:
   startup-acceptance:
     name: Verify real server startup fault boundaries
     needs: validate
-    if: needs.validate.outputs.release_mode != 'code-only'
+    if: needs.validate.outputs.release_mode != 'code-only' && github.ref_type != 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -339,34 +339,13 @@ jobs:
       # The optional full UI suite remains available from the mobile workflow.
       run_full_android_regression: false
 
-  package:
-    name: Build selected release artifacts
-    if: ${{ !cancelled() && needs.validate.result == 'success' && ((needs.validate.outputs.build_android == 'true' && needs.mobile-release.result == 'success') || (needs.validate.outputs.build_android == 'false' && needs.mobile-release.result == 'skipped')) && github.ref_type == 'tag' }}
-    needs: [validate, mobile-release]
-    outputs:
-      image_digest: ${{ steps.release_image.outputs.digest }}
-      bundle_id: ${{ steps.bundle.outputs.artifact-id }}
+  backend-tests:
+    name: Test backend with production runtime
+    needs: validate
+    if: github.ref_type == 'tag' && needs.validate.outputs.release_mode != 'code-only'
     runs-on: ubuntu-latest
-    env:
-      BUILD_ANDROID: ${{ needs.validate.outputs.build_android }}
-    permissions:
-      contents: write
-      packages: write
-
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Read and verify package version and bilingual release notes
-        id: version
-        shell: bash
-        run: |
-          if [[ "${GITHUB_REF_TYPE}" == 'tag' ]]; then
-            node scripts/validate-release-notes.mjs --tag "${GITHUB_REF_NAME}"
-          else
-            node scripts/validate-release-notes.mjs
-          fi
-
+      - uses: actions/checkout@v6
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -390,11 +369,27 @@ jobs:
           ctest --test-dir ../../packages/reader-core/native/chapters/build -C Release --output-on-failure
           uv run --extra dev --locked pytest -q
 
+      - name: Test supervisor with real child processes
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_container_entry.py'
+          python3 -m unittest discover -s scripts -p 'test_container_install.py'
+          python3 -m unittest discover -s scripts -p 'test_container_image.py'
+
+  android-package:
+    name: Sign selected Android artifact
+    needs: [validate, mobile-release]
+    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.validate.outputs.build_android == 'true' && needs.mobile-release.result == 'success' && github.ref_type == 'tag' }}
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_id: ${{ steps.android_bundle.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v6
       - name: Download checked stable Android APK
         if: needs.validate.outputs.build_android == 'true'
         uses: actions/download-artifact@v4
         with:
-          name: android-stable-unsigned
+          artifact-ids: ${{ needs.mobile-release.outputs.stable_artifact_id }}
+          merge-multiple: true
           path: unsigned-android
 
       - name: Set up JDK for stable signing
@@ -422,6 +417,46 @@ jobs:
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: bash scripts/sign-android-apk.sh unsigned-android dist/android stable
+
+      - name: Upload signed Android artifact
+        id: android_bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-android-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist
+          if-no-files-found: error
+
+  server-package:
+    name: Build and accept server candidate
+    needs: validate
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      image_digest: ${{ steps.release_image.outputs.digest }}
+      artifact_id: ${{ steps.server_bundle.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read and verify package version and bilingual release notes
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == 'tag' ]]; then
+            node scripts/validate-release-notes.mjs --tag "${GITHUB_REF_NAME}"
+          else
+            node scripts/validate-release-notes.mjs
+          fi
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: apps/api-python/.python-version
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.29"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -513,6 +548,55 @@ jobs:
           SEED_VERSION: ${{ needs.validate.outputs.seed_version }}
         run: bash scripts/build-release-app-packages.sh "$RUNTIME_IMAGE" dist/application code-only "$SEED_VERSION"
 
+      - name: Upload server candidate artifacts
+        id: server_bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist
+          if-no-files-found: error
+
+  package:
+    name: Assemble verified selected release artifacts
+    needs: [validate, backend-tests, server-package, mobile-release, android-package]
+    if: >-
+      ${{ !cancelled() && github.ref_type == 'tag' && needs.validate.result == 'success' &&
+          needs.server-package.result == 'success' &&
+          ((needs.validate.outputs.release_mode == 'code-only' && needs.backend-tests.result == 'skipped') ||
+           (needs.validate.outputs.release_mode != 'code-only' && needs.backend-tests.result == 'success')) &&
+          ((needs.validate.outputs.build_android == 'false' && needs.mobile-release.result == 'skipped' && needs.android-package.result == 'skipped') ||
+           (needs.validate.outputs.build_android == 'true' && needs.mobile-release.result == 'success' && needs.android-package.result == 'success')) }}
+    runs-on: ubuntu-latest
+    env:
+      BUILD_ANDROID: ${{ needs.validate.outputs.build_android }}
+    outputs:
+      image_digest: ${{ needs.server-package.outputs.image_digest }}
+      bundle_id: ${{ steps.bundle.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read and verify package version and bilingual release notes
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == 'tag' ]]; then
+            node scripts/validate-release-notes.mjs --tag "${GITHUB_REF_NAME}"
+          else
+            node scripts/validate-release-notes.mjs
+          fi
+
+      - name: Download this run's accepted server candidate
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.server-package.outputs.artifact_id }}
+          merge-multiple: true
+          path: dist
+      - name: Download this run's signed Android candidate
+        if: needs.validate.outputs.build_android == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.android-package.outputs.artifact_id }}
+          merge-multiple: true
+          path: dist
       - name: Validate complete release bundle
         run: node scripts/validate-release-assets.mjs dist '${{ steps.version.outputs.release_tag }}'
 

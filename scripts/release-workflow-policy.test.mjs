@@ -6,6 +6,7 @@ const releaseWorkflow = readFileSync('.github/workflows/fnos-package.yml', 'utf8
 const maintenanceWorkflow = readFileSync('.github/workflows/sync-release-notes.yml', 'utf8');
 const dockerPublisher = readFileSync('scripts/publish-docker-hub.sh', 'utf8');
 const unifiedAppStartup = readFileSync('scripts/start-unified-app.sh', 'utf8');
+const job = name => releaseWorkflow.split(`\n  ${name}:`)[1].split(/\n  [a-z][\w-]*:/)[0];
 const gitAttributes = readFileSync('.gitattributes', 'utf8');
 
 test('repository text normalization protects container entrypoints', () => {
@@ -35,10 +36,10 @@ test('Draft Release publication and release-feed updates have a strict order', (
 test('stable releases gate selected mobile checks before image promotion', () => {
   const packageJob = releaseWorkflow.split('\n  package:')[1].split('\n  publish:')[0];
   const publishJob = releaseWorkflow.split('\n  publish:')[1];
-  assert.match(packageJob, /needs: \[validate, mobile-release\]/);
+  assert.match(job('android-package'), /needs: \[validate, mobile-release\]/);
   assert.match(releaseWorkflow, /uses: \.\/\.github\/workflows\/mobile.yml/);
   assert.match(releaseWorkflow, /run_full_android_regression: false/);
-  assert.match(packageJob, /sign-android-apk.sh unsigned-android dist\/android stable/);
+  assert.match(job('android-package'), /sign-android-apk.sh unsigned-android dist\/android stable/);
   assert.match(publishJob, /assets=\(dist\/fnos\/\*\.fpk dist\/fnos\/\*\.sha256\)/);
   assert.match(publishJob, /if \[\[ "\$BUILD_ANDROID" == 'true' \]\]/);
   const verify = publishJob.indexOf('"$RUNNER_TEMP/release-assets.json"\n');
@@ -70,9 +71,7 @@ test('the standalone Docker publisher always validates release metadata', () => 
 
 test('develop pushes publish only the isolated develop image channel', () => {
   assert.match(releaseWorkflow, /branches:\s+- prod\s+- develop/u);
-  const developJob = releaseWorkflow.match(
-    /\n  publish-develop-image:[\s\S]*?(?=\n  package:)/
-  )?.[0];
+  const developJob = job('publish-develop-image');
 
   assert.ok(developJob, 'the develop image publishing job must exist');
   assert.match(developJob, /if: github\.ref == 'refs\/heads\/develop'/u);
@@ -81,10 +80,8 @@ test('develop pushes publish only the isolated develop image channel', () => {
   assert.doesNotMatch(developJob, /linux\/arm64/u);
   assert.match(developJob, /tags: gamersgu\/shuku-starship-web:develop/u);
   assert.doesNotMatch(developJob, /shuku-starship-web:(?:prod|latest)/u);
-  assert.match(
-    releaseWorkflow,
-    /name: Build selected release artifacts\s+if: [^\n]*github\.ref_type == 'tag'/u
-  );
+  assert.match(job('server-package'), /needs: validate/);
+  assert.match(job('server-package'), /if: github.ref_type == 'tag'/);
 });
 
 test('stable Android selection replaces historical exceptions and guards the entire APK chain', () => {
@@ -96,7 +93,7 @@ test('stable Android selection replaces historical exceptions and guards the ent
   assert.match(packageJob, /outputs.build_android == 'false' && needs.mobile-release.result == 'skipped'/);
   assert.match(packageJob, /outputs.build_android == 'true' && needs.mobile-release.result == 'success'/);
   for (const name of ['Download checked stable Android APK', 'Set up JDK for stable signing', 'Set up Android SDK for stable signing', 'Install signing tools', 'Sign and verify stable Android APK']) {
-    assert.ok(packageJob.includes(`- name: ${name}\n        if: needs.validate.outputs.build_android == 'true'`));
+    assert.ok(job('android-package').includes(`- name: ${name}\n        if: needs.validate.outputs.build_android == 'true'`));
   }
 });
 
@@ -104,8 +101,8 @@ test('authorized publication uses the exact build artifact and image digest with
   const packageJob = releaseWorkflow.split('\n  package:')[1].split('\n  publish:')[0];
   const publishJob = releaseWorkflow.split('\n  publish:')[1];
   assert.match(packageJob, /bundle_id: \$\{\{ steps.bundle.outputs.artifact-id \}\}/);
-  assert.match(packageJob, /image_digest: \$\{\{ steps.release_image.outputs.digest \}\}/);
-  assert.match(packageJob, /value=release-\$\{\{ github.sha \}\}-\$\{\{ github.run_id \}\}-\$\{\{ github.run_attempt \}\}/);
+  assert.match(job('server-package'), /image_digest: \$\{\{ steps.release_image.outputs.digest \}\}/);
+  assert.match(job('server-package'), /value=release-\$\{\{ github.sha \}\}-\$\{\{ github.run_id \}\}-\$\{\{ github.run_attempt \}\}/);
   assert.doesNotMatch(packageJob, /gh release (create|upload|edit)|imagetools create/);
   assert.match(publishJob, /needs: \[validate, package\]/);
   assert.match(publishJob, /!cancelled\(\) && needs.validate.result == 'success' && needs.package.result == 'success'/);
@@ -135,7 +132,7 @@ test('protocol 2 assets build offline per architecture before collision-checked 
 
 
 test('backend installation tests use the production uv version and report its executable', () => {
-  const packageJob = releaseWorkflow.split('\n  package:')[1].split('\n  publish:')[0];
+  const packageJob = job('backend-tests');
   assert.match(packageJob, /uses: astral-sh\/setup-uv@v6\n        with:\n          version: "0\.11\.29"/);
   assert.match(packageJob, /command -v uv\n          uv --version/);
   assert.match(packageJob, /uv run --extra dev --locked pytest -q/);
@@ -154,7 +151,7 @@ test('GHCR artifacts are anonymously verified before stable publication and stay
 test('explicit quick mode gates every image build, installer and promotion in the shared workflow', () => {
   const packageJob = releaseWorkflow.split('\n  package:')[1].split('\n  publish:')[0];
   for (const name of ['Build and push release Docker image', 'Build fnOS package', 'Hash fnOS packages', 'Accept the exact server release image before publication']) {
-    assert.ok(packageJob.includes(`- name: ${name}\n        if: needs.validate.outputs.release_mode != 'code-only'`), name);
+    assert.ok(job('server-package').includes(`- name: ${name}\n        if: needs.validate.outputs.release_mode != 'code-only'`), name);
   }
   for (const job of ['startup-acceptance', 'publish-develop-image', 'publish-prod-image', 'mobile-release']) {
     const text = releaseWorkflow.split(`\n  ${job}:`)[1].split(/\n  [a-z][\w-]*:/)[0];
@@ -172,4 +169,37 @@ test('system release checkout never initializes the unrelated Wiki submodule', (
   const packaging = readFileSync(new URL('./build-release-app-packages.sh', import.meta.url), 'utf8');
   assert.doesNotMatch(packaging, /--recurse-submodules/);
   assert.match(packaging, /name == 'ermao-library\.wiki'/);
+});
+
+
+test('server build and backend tests run independently, then require every selected result', () => {
+  for (const name of ['server-package', 'backend-tests']) {
+    assert.match(job(name), /needs: validate/);
+    assert.doesNotMatch(job(name), /needs: \[|mobile-release|android-package/);
+  }
+  assert.equal((releaseWorkflow.match(/uv run --extra dev --locked pytest -q/g) ?? []).length, 1);
+  assert.match(job('package'), /artifact-ids: \$\{\{ needs.server-package.outputs.artifact_id \}\}/);
+  assert.match(job('package'), /artifact-ids: \$\{\{ needs.android-package.outputs.artifact_id \}\}/);
+  assert.match(job('android-package'), /artifact-ids: \$\{\{ needs.mobile-release.outputs.stable_artifact_id \}\}/);
+  // Evaluate the actual, bounded job condition with all Actions result states.
+  const condition = job('package').match(/if: >-\s+\$\{\{([\s\S]*?)\}\}/)[1];
+  const permitted = ({ android = false, mode = 'full', cancelled = false, results = {} } = {}) => {
+    const needs = Object.fromEntries(['validate', 'backend-tests', 'server-package', 'mobile-release', 'android-package'].map(name => [name, { result: 'success' }]));
+    needs.validate.outputs = { build_android: String(android), release_mode: mode };
+    if (!android) for (const name of ['mobile-release', 'android-package']) needs[name].result = 'skipped';
+    if (mode === 'code-only') needs['backend-tests'].result = 'skipped';
+    for (const [name, result] of Object.entries(results)) needs[name].result = result;
+    const expression = condition.replace(/needs\.([\w-]+)/g, (_, name) => `needs[${JSON.stringify(name)}]`);
+    return Function('needs', 'github', 'cancelled', `return (${expression});`)(needs, { ref_type: 'tag' }, () => cancelled);
+  };
+  assert.equal(permitted(), true);
+  assert.equal(permitted({ android: true }), true);
+  assert.equal(permitted({ mode: 'code-only' }), true);
+  assert.equal(permitted({ cancelled: true }), false);
+  for (const android of [false, true]) {
+    for (const name of ['validate', 'backend-tests', 'server-package', ...(android ? ['mobile-release', 'android-package'] : [])]) {
+      for (const result of ['failure', 'cancelled', 'skipped']) assert.equal(permitted({ android, results: { [name]: result } }), false, `${name}: ${result}`);
+    }
+  }
+  assert.equal(permitted({ results: { 'mobile-release': 'success' } }), false);
 });
