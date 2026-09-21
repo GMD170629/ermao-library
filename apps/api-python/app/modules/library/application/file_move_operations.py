@@ -73,7 +73,13 @@ def move_plan_result(plan: FileMovePlan) -> dict[str, object]:
         "blocking_errors": [],
         "moves": [
             {
-                "source_node_id": move.source.node_id,
+                "source_node_id": move.source.node_id
+                if move.companion_owner is None
+                else None,
+                "companion_owner_node_id": move.companion_owner.node_id
+                if move.companion_owner
+                else None,
+                "companion": move.companion_owner is not None,
                 "source_library_id": move.source.library_id,
                 "source_relative_path": move.source.relative_path,
                 "destination_library_id": move.destination.library_id,

@@ -2,7 +2,7 @@
 
 import hashlib
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -13,6 +13,7 @@ from app.modules.library.domain.file_moves import (
     FileMoveError,
     MoveInventory,
     MoveRequest,
+    case_only_path,
     validate_move_set,
 )
 
@@ -65,6 +66,13 @@ class PlannedMove:
     destination_inspection: DestinationInspection
     staging_relative_path: str | None = None
     backup_relative_path: str | None = None
+    companion_owner: MoveSource | None = None
+
+    @property
+    def case_only(self) -> bool:
+        return self.source.library_id == self.destination.library_id and case_only_path(
+            self.source.relative_path, self.destination.relative_path
+        )
 
     @property
     def cross_device(self) -> bool:
@@ -112,8 +120,13 @@ class MoveTopologyPort(Protocol):
 
 
 class MoveInspectionPort(Protocol):
+    def companions(
+        self, source: MoveSource, destination: MoveDestination, *, directory: bool
+    ) -> tuple[tuple[str, str], ...]: ...
     def source(self, root: Path, relative_path: str) -> MoveInventory: ...
-    def destination(self, root: Path, relative_path: str) -> DestinationInspection: ...
+    def destination(
+        self, root: Path, relative_path: str, *, existing_source: str | None = None
+    ) -> DestinationInspection: ...
 
 
 @dataclass(frozen=True)
@@ -160,7 +173,12 @@ class PrepareFileMovePlan:
         for source, destination in zip(sources, destinations, strict=True):
             inventory = self.inspection.source(source.root, source.relative_path)
             target = self.inspection.destination(
-                destination.root, destination.relative_path
+                destination.root,
+                destination.relative_path,
+                existing_source=source.relative_path
+                if source.library_id == destination.library_id
+                and case_only_path(source.relative_path, destination.relative_path)
+                else None,
             )
             files += inventory.file_count
             size += inventory.byte_count
@@ -177,5 +195,50 @@ class PrepareFileMovePlan:
                     f".ermao-mcp-{slot}-source",
                 )
             )
+        expanded: list[PlannedMove] = []
+        for move in moves:
+            for source_path, target_path in self.inspection.companions(
+                move.source,
+                move.destination,
+                directory=move.inventory.entries[0].directory,
+            ):
+                companion_source = replace(move.source, relative_path=source_path)
+                companion_destination = replace(
+                    move.destination, relative_path=target_path
+                )
+                inventory = self.inspection.source(companion_source.root, source_path)
+                if inventory.entries[0].directory:
+                    raise FileMoveError("SIDECAR_REGULAR_FILE_REQUIRED")
+                files += inventory.file_count
+                size += inventory.byte_count
+                if files > MAX_FILES or size > MAX_BYTES:
+                    raise FileMoveError("INVENTORY_LIMIT")
+                slot = hashlib.sha256(
+                    f"{plan_id}:companion:{len(expanded)}".encode()
+                ).hexdigest()[:32]
+                expanded.append(
+                    PlannedMove(
+                        companion_source,
+                        companion_destination,
+                        inventory,
+                        self.inspection.destination(
+                            companion_destination.root, target_path
+                        ),
+                        f".ermao-mcp-{slot}-target",
+                        f".ermao-mcp-{slot}-source",
+                        move.source,
+                    )
+                )
+            expanded.append(move)
+        validate_move_set(
+            tuple(
+                (move.source.library_id, move.source.relative_path) for move in expanded
+            ),
+            tuple(
+                (move.destination.library_id, move.destination.relative_path)
+                for move in expanded
+            ),
+            expanded=True,
+        )
         now = self.clock_ms()
-        return FileMovePlan(plan_id, actor, now, now + 15 * 60_000, tuple(moves))
+        return FileMovePlan(plan_id, actor, now, now + 15 * 60_000, tuple(expanded))

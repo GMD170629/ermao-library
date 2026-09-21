@@ -31,6 +31,14 @@ def collision_key(value: str) -> str:
     return unicodedata.normalize("NFC", value).casefold()
 
 
+def case_only_path(source: str, destination: str) -> bool:
+    return (
+        source != destination
+        and source.rpartition("/")[0] == destination.rpartition("/")[0]
+        and collision_key(source) == collision_key(destination)
+    )
+
+
 def validate_move_path(value: str) -> str:
     validate_portable_file_path(value)
     if any(is_controlled_file_slot(part) for part in value.split("/")):
@@ -114,8 +122,11 @@ class MoveInventory:
 def validate_move_set(
     sources: tuple[tuple[str, str], ...],
     destinations: tuple[tuple[str, str], ...],
+    *,
+    expanded: bool = False,
 ) -> None:
-    if not 1 <= len(sources) <= MAX_TARGETS or len(sources) != len(destinations):
+    limit = MAX_FILES if expanded else MAX_TARGETS
+    if not 1 <= len(sources) <= limit or len(sources) != len(destinations):
         raise FileMoveError("INVALID_TARGET_COUNT")
     for library, path in (*sources, *destinations):
         if not library:
@@ -139,7 +150,7 @@ def validate_move_set(
             key, other = collision_key(path), collision_key(destination)
             # Case-only renames require an explicit journalled intermediate slot.
             if (
-                key == other
+                (key == other and not case_only_path(path, destination))
                 or key.startswith(other + "/")
                 or other.startswith(key + "/")
             ):

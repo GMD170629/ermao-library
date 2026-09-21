@@ -4,7 +4,11 @@ import os
 import stat
 from pathlib import Path
 
-from app.modules.library.application.file_move_plans import DestinationInspection
+from app.modules.library.application.file_move_plans import (
+    DestinationInspection,
+    MoveDestination,
+    MoveSource,
+)
 from app.modules.library.domain.file_moves import (
     MAX_BYTES,
     MAX_FILES,
@@ -12,9 +16,11 @@ from app.modules.library.domain.file_moves import (
     FileMoveError,
     MoveInventory,
     MoveInventoryEntry,
+    case_only_path,
     collision_key,
     validate_portable_file_path,
 )
+from app.modules.library.infrastructure.move_companions import move_companion_paths
 from app.modules.library.infrastructure.source_file_access import open_library_directory
 
 
@@ -92,8 +98,24 @@ def inspect_move_source(root: Path, relative_path: str) -> MoveInventory:
     return MoveInventory(tuple(entries), files, byte_count)
 
 
-def inspect_move_destination(root: Path, relative_path: str) -> DestinationInspection:
+def inspect_move_destination(
+    root: Path, relative_path: str, *, existing_source: str | None = None
+) -> DestinationInspection:
     validate_portable_file_path(relative_path)
+    if existing_source is not None:
+        if not case_only_path(existing_source, relative_path):
+            raise FileMoveError("INVALID_CASE_RENAME")
+        parent, _, old_name = existing_source.rpartition("/")
+        new_name = relative_path.rpartition("/")[2]
+        with open_library_directory(root, parent) as descriptor:
+            names = os.listdir(descriptor)
+            matches = [
+                name for name in names if collision_key(name) == collision_key(new_name)
+            ]
+            if matches != [old_name]:
+                raise FileMoveError("DESTINATION_COLLISION")
+            identity = os.fstat(descriptor)
+            return DestinationInspection((), identity.st_dev, identity.st_ino, parent)
     parts = relative_path.split("/")
     with open_library_directory(root) as root_fd:
         directory = root_fd
@@ -145,11 +167,20 @@ def require_writable_move_directory(root: Path, relative_path: str) -> None:
 
 
 class AnchoredMoveInspection:
+    def companions(
+        self, source: MoveSource, destination: MoveDestination, *, directory: bool
+    ) -> tuple[tuple[str, str], ...]:
+        return move_companion_paths(source, destination, directory=directory)
+
     def source(self, root: Path, relative_path: str) -> MoveInventory:
         require_writable_move_directory(root, relative_path.rpartition("/")[0])
         return inspect_move_source(root, relative_path)
 
-    def destination(self, root: Path, relative_path: str) -> DestinationInspection:
-        result = inspect_move_destination(root, relative_path)
+    def destination(
+        self, root: Path, relative_path: str, *, existing_source: str | None = None
+    ) -> DestinationInspection:
+        result = inspect_move_destination(
+            root, relative_path, existing_source=existing_source
+        )
         require_writable_move_directory(root, result.parent_relative_path)
         return result

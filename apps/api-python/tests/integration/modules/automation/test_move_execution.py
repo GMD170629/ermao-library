@@ -227,6 +227,17 @@ def test_move_creates_and_indexes_planned_parent_directories(db_session, tmp_pat
         )
     )
     db_session.commit()
+    from app.modules.metadata.application.opf import serialize_opf_metadata
+    from app.modules.metadata.public import PublicationMetadata
+
+    (root / "allowed.opf").write_bytes(
+        serialize_opf_metadata(
+            PublicationMetadata(title="Publication", cover_href="cover.jpg")
+        )
+    )
+    (root / "cover.jpg").write_bytes(b"cover bytes")
+    add_file(db_session, "sidecar-node", "allowed.opf", parent=None)
+    add_file(db_session, "cover-node", "cover.jpg", parent=None)
     actor = MoveActor(
         access.user_id, access.grant_id, access.permissions.library_ids, False
     )
@@ -260,6 +271,18 @@ def test_move_creates_and_indexes_planned_parent_directories(db_session, tmp_pat
     assert parent.relative_path == "author/series"
     assert db_session.get(LibrarySourceNode, parent.parent_id).relative_path == "author"
     assert len(store.execution("operation").created_directories[0]) == 2
+    assert (root / "author/series/book.opf").exists()
+    assert (root / "author/series/cover.jpg").read_bytes() == b"cover bytes"
+    assert not (root / "allowed.opf").exists()
+    assert not (root / "cover.jpg").exists()
+    assert (
+        db_session.get(LibrarySourceNode, "sidecar-node").relative_path
+        == "author/series/book.opf"
+    )
+    assert (
+        db_session.get(LibrarySourceNode, "cover-node").relative_path
+        == "author/series/cover.jpg"
+    )
     assert (root / "author/series/second.epub").read_bytes() == b"second publication"
     assert db_session.get(LibrarySourceNode, "second-node").parent_id == moved.parent_id
     assert store.execution("operation").created_directories[1] == ()
@@ -324,3 +347,63 @@ def test_resource_rename_preserves_book_and_rejects_cross_book_move(
         == "allowed/renamed.epub"
     )
     assert (root / "allowed/renamed.epub").read_bytes() == b"volume"
+
+
+@pytest.mark.parametrize("interrupt_staging", [False, True])
+def test_case_only_directory_rename_recovers_intermediate_slot(
+    db_session, tmp_path, monkeypatch, interrupt_staging
+):
+    from app.modules.library.infrastructure import file_move_io
+
+    actor, root, store = prepare(db_session, tmp_path)
+    # Build a second frozen plan with distinct case; discard the unused initial
+    # test operation before claiming the replacement.
+    from app.modules.library.infrastructure.file_move_schema import (
+        LibraryFileMoveOperation,
+    )
+
+    db_session.delete(db_session.get(LibraryFileMoveOperation, "operation"))
+    db_session.commit()
+    plan = PrepareFileMovePlan(
+        SqlAlchemyMoveTopology(db_session),
+        AnchoredMoveInspection(),
+        lambda: 1000,
+        lambda: "case-plan",
+    ).execute(actor, (MoveRequest("allowed-node", "test-library", "Allowed"),))
+    assert plan.moves[0].case_only
+    store.save_plan(plan)
+    store.enqueue(plan, "case-operation", "case-request", 2000)
+    db_session.commit()
+    assert store.claim_next(3000) == "case-operation"
+    db_session.commit()
+    rename = file_move_io.exclusive_rename
+    calls = 0
+
+    def interrupted(*args):
+        nonlocal calls
+        calls += 1
+        rename(*args)
+        if calls == 1 and interrupt_staging:
+            raise OSError("interrupted after staging")
+
+    monkeypatch.setattr(file_move_io, "exclusive_rename", interrupted)
+    command = executor(
+        db_session, store, SameDeviceMovePublication(), lambda actor: actor
+    )
+    if interrupt_staging:
+        with pytest.raises(OSError):
+            command.execute("case-operation")
+        assert store.progress("case-operation", actor).status == "RECOVERY_REQUIRED"
+        assert plan.moves[0].staging_relative_path in [
+            entry.name for entry in root.iterdir()
+        ]
+        store.prepare_recovery("case-operation", 5000)
+        db_session.commit()
+    command.execute("case-operation")
+    assert store.progress("case-operation", actor).status == "COMPLETED"
+    assert calls == 2
+    assert "Allowed" in [entry.name for entry in root.iterdir()]
+    assert "allowed" not in [entry.name for entry in root.iterdir()]
+    db_session.expire_all()
+    assert db_session.get(LibrarySourceNode, "allowed-node").relative_path == "Allowed"
+    assert (root / "Allowed/metadata.opf").read_bytes() == b"original metadata"

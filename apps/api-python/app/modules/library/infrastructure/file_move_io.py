@@ -6,6 +6,7 @@ import os
 import sys
 from pathlib import Path
 
+from app.contracts.controlled_file_slots import is_controlled_file_slot
 from app.modules.library.application.file_move_plans import (
     DestinationInspection,
     PlannedMove,
@@ -180,7 +181,9 @@ class SameDeviceMovePublication:
         ):
             raise FileMoveError("SOURCE_CHANGED")
         destination = inspect_move_destination(
-            move.destination.root, move.destination.relative_path
+            move.destination.root,
+            move.destination.relative_path,
+            existing_source=move.source.relative_path if move.case_only else None,
         )
         if destination != move.destination_inspection:
             raise FileMoveError("DESTINATION_CHANGED")
@@ -194,11 +197,21 @@ class SameDeviceMovePublication:
         return None
 
     def publish(self, move: PlannedMove, copy: PreparedMoveCopy | None = None) -> None:
+        if move.case_only:
+            publish_case_only_move(move)
+            return
         publish_same_device_move(move)
 
     def is_published(
         self, move: PlannedMove, copy: PreparedMoveCopy | None = None
     ) -> bool:
+        if move.case_only:
+            state = case_only_move_state(move)
+            if state == "published":
+                return True
+            if state == "source":
+                self.validate(move)
+            return False
         target = published_same_device_identity(
             move.destination.root,
             move.destination.relative_path,
@@ -233,3 +246,83 @@ class SameDeviceMovePublication:
             except FileNotFoundError:
                 return True
         raise FileMoveError("RECOVERY_SOURCE_STILL_EXISTS")
+
+
+def verify_relocated_move(move: PlannedMove, relative_path: str) -> None:
+    if (
+        published_same_device_identity(
+            move.source.root, relative_path, move.inventory.entries[0].identity
+        )
+        is None
+    ):
+        raise FileMoveError("RECOVERY_TARGET_MISSING")
+    inventory = inspect_move_source(move.source.root, relative_path)
+    if len(inventory.entries) != len(move.inventory.entries):
+        raise FileMoveError("RECOVERY_TARGET_CHANGED")
+    for index, (before, after) in enumerate(
+        zip(move.inventory.entries, inventory.entries, strict=True)
+    ):
+        if (
+            after.relative_path
+            != relative_path + before.relative_path[len(move.source.relative_path) :]
+            or after.directory != before.directory
+            or (index and after.identity != before.identity)
+        ):
+            raise FileMoveError("RECOVERY_TARGET_CHANGED")
+
+
+def case_only_move_state(move: PlannedMove) -> str:
+    slot = move.staging_relative_path
+    if slot is None or not is_controlled_file_slot(slot):
+        raise FileMoveError("CASE_RENAME_SLOT_MISSING")
+    parent, _, source_name = move.source.relative_path.rpartition("/")
+    target_name = move.destination.relative_path.rpartition("/")[2]
+    with (
+        open_library_directory(move.source.root) as root_fd,
+        open_library_directory(move.source.root, parent) as parent_fd,
+    ):
+        names = os.listdir(parent_fd)
+        staged = slot in os.listdir(root_fd)
+    if staged:
+        if source_name in names or target_name in names:
+            raise FileMoveError("CASE_RENAME_COLLISION")
+        verify_relocated_move(move, slot)
+        return "staged"
+    if target_name in names and source_name not in names:
+        verify_relocated_move(move, move.destination.relative_path)
+        return "published"
+    if source_name in names and target_name not in names:
+        return "source"
+    raise FileMoveError("CASE_RENAME_COLLISION")
+
+
+def publish_case_only_move(move: PlannedMove) -> None:
+    state = case_only_move_state(move)
+    if state == "published":
+        return
+    parent, _, source_name = move.source.relative_path.rpartition("/")
+    target_name = move.destination.relative_path.rpartition("/")[2]
+    slot = move.staging_relative_path
+    if slot is None:
+        raise FileMoveError("CASE_RENAME_SLOT_MISSING")
+    with (
+        open_library_directory(move.source.root) as root_fd,
+        open_library_directory(move.source.root, parent) as parent_fd,
+    ):
+        parent_identity = os.fstat(parent_fd)
+        if (parent_identity.st_dev, parent_identity.st_ino) != (
+            move.destination_inspection.device,
+            move.destination_inspection.parent_inode,
+        ):
+            raise FileMoveError("DESTINATION_CHANGED")
+        if state == "source":
+            SameDeviceMovePublication().validate(move)
+            exclusive_rename(parent_fd, source_name, root_fd, slot)
+            os.fsync(parent_fd)
+            os.fsync(root_fd)
+        verify_relocated_move(move, slot)
+        inspect_move_destination(move.destination.root, move.destination.relative_path)
+        exclusive_rename(root_fd, slot, parent_fd, target_name)
+        os.fsync(parent_fd)
+        os.fsync(root_fd)
+    verify_relocated_move(move, move.destination.relative_path)

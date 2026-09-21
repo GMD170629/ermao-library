@@ -6,6 +6,7 @@ from sqlalchemy import insert, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.models.common import cuid
+from app.models.library import Library
 from app.modules.library.application.file_move_plans import (
     CreatedMoveDirectory,
     PlannedMove,
@@ -14,6 +15,9 @@ from app.modules.library.domain.file_moves import FileMoveError, MoveRequest
 from app.modules.library.domain.source_nodes import SourceNodeRelativePath
 from app.modules.library.infrastructure.move_topology import SqlAlchemyMoveTopology
 from app.modules.library.infrastructure.readable_resource_schema import (
+    LibraryBook,
+    LibraryReadableResource,
+    LibraryResourceAsset,
     LibrarySourceNode,
 )
 
@@ -24,11 +28,33 @@ class SqlAlchemyFileMoveIndex:
 
     def validate(self, move: PlannedMove) -> None:
         libraries = frozenset({move.source.library_id, move.destination.library_id})
-        current = SqlAlchemyMoveTopology(self._db).source(
-            move.source.node_id, libraries
-        )
-        if current.revision != move.source.revision:
+        owner = move.companion_owner or move.source
+        current = SqlAlchemyMoveTopology(self._db).source(owner.node_id, libraries)
+        if current.revision != owner.revision:
             raise FileMoveError("SOURCE_INDEX_CHANGED")
+        if move.companion_owner is not None:
+            target_library = self._db.get(
+                Library, move.destination.library_id, populate_existing=True
+            )
+            if (
+                target_library is None
+                or not target_library.enabled
+                or target_library.root_path != str(move.destination.root)
+            ):
+                raise FileMoveError("DESTINATION_CHANGED")
+            nodes = select(LibrarySourceNode.id).where(
+                LibrarySourceNode.library_id == move.source.library_id,
+                LibrarySourceNode.relative_path == move.source.relative_path,
+            )
+            for model in (LibraryBook, LibraryReadableResource, LibraryResourceAsset):
+                if (
+                    self._db.scalar(
+                        select(model.id).where(model.source_node_id.in_(nodes)).limit(1)
+                    )
+                    is not None
+                ):
+                    raise FileMoveError("SIDECAR_HAS_RESOURCE_OWNERSHIP")
+            return
         destination = SqlAlchemyMoveTopology(self._db).destination(
             current,
             MoveRequest(
@@ -122,7 +148,7 @@ class SqlAlchemyFileMoveIndex:
             .where(
                 LibrarySourceNode.library_id == move.source.library_id,
                 or_(
-                    LibrarySourceNode.id == move.source.node_id,
+                    LibrarySourceNode.relative_path == move.source.relative_path,
                     LibrarySourceNode.relative_path.startswith(
                         move.source.relative_path + "/", autoescape=True
                     ),
@@ -142,7 +168,7 @@ class SqlAlchemyFileMoveIndex:
                 "name": path.name,
                 "updated_at": now,
             }
-            if node_id == move.source.node_id:
+            if old_path == move.source.relative_path:
                 changes.update(
                     parent_id=parent_id,
                     parent_physical_kind="DIRECTORY" if parent_id else None,

@@ -150,10 +150,18 @@ class ExecuteFileMoveOperation:
                     shared.relative_path,
                 )
             move = replace(move, destination_inspection=destination)
-            publication_uncertain = stage != "QUEUED"
+            companions_published = any(
+                previous.companion_owner == (move.companion_owner or move.source)
+                and current.stages[index]
+                in {"COMPLETED", "INDEX_UPDATED", "FILES_PUBLISHED"}
+                for index, previous in enumerate(plan.moves)
+            )
+            publication_uncertain = stage != "QUEUED" or companions_published
             try:
                 if stage == "QUEUED":
                     if current.cancelled:
+                        if companions_published:
+                            raise FileMoveError("CANCELLED_COMPANIONS_RETAINED")
                         self.store.checkpoint(
                             operation_id, ordinal, "CANCELLED", self.clock_ms()
                         )
@@ -209,13 +217,17 @@ class ExecuteFileMoveOperation:
                     # and target. A published item receives minimal index repair,
                     # even if its token has since been revoked.
                     published = self.files.is_published(move, copy)
-                    publication_uncertain = published or copy is not None
+                    publication_uncertain = (
+                        published or copy is not None or companions_published
+                    )
                     if not published:
                         require_plan_access(plan, self.authorize(plan.actor))
                         self.index.validate(move)
                         cancelled = self.store.execution(operation_id).cancelled
                         self.uow.rollback()
                         if cancelled:
+                            if companions_published:
+                                raise FileMoveError("CANCELLED_COMPANIONS_RETAINED")
                             if copy is not None:
                                 raise FileMoveError("CANCELLED_STAGED_COPY_RETAINED")
                             self.store.checkpoint(
