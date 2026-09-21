@@ -36,6 +36,9 @@ test('one-time credentials require explicit template inclusion and disappear aft
   await page.goto('/settings/automation');
   await expect(page.getByRole('heading', { name: '创建自动化授权' })).toBeVisible();
   await page.getByLabel('授权名称', { exact: true }).fill('Test client');
+  await page.getByRole('button', { name: '有效期', exact: true }).click();
+  await page.getByRole('option', { name: '30 天', exact: true }).click();
+  await expect(page.getByRole('button', { name: '有效期', exact: true })).toContainText('30 天');
   await page.getByRole('checkbox', { name: 'Test library' }).check();
   await page.getByRole('button', { name: '创建授权并显示令牌' }).click();
   await expect(page.getByLabel('新建的自动化令牌')).toHaveValue('test-once-token-grant-1');

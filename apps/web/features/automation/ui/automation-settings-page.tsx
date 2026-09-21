@@ -4,6 +4,7 @@ import { Copy, Download, KeyRound, ShieldCheck } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { useAppSession } from '../../../components/layout/app-session-context';
 import { Button } from '../../../components/ui/button';
+import { Select } from '../../../components/ui/select';
 import { useToast } from '../../../components/ui/feedback';
 import { useI18n } from '../../../i18n/provider';
 import type { CreateGrantRequest, Scope } from '../../../generated/automation';
@@ -65,9 +66,10 @@ function GrantForm({ libraries, available, busy, create }: { libraries: LibraryC
     <h3 className="mb-4 flex items-center gap-2 font-semibold"><KeyRound size={20} />{t('创建自动化授权')}</h3>
     <div className="grid gap-4 sm:grid-cols-2">
       <label className="text-sm">{t('授权名称')}<input required maxLength={100} value={name} onChange={(event) => setName(event.target.value)} className={`${input} mt-2`} /></label>
-      <label className="text-sm">{t('有效期')}<select className={`${input} mt-2`} value={lifetimeDays} onChange={(event) => { const value = Number(event.target.value); if (value === 30 || value === 90 || value === 365) setLifetime(value); }}>
-        <option value={30}>{t('30 天')}</option><option value={90}>{t('90 天')}</option><option value={365}>{t('365 天')}</option>
-      </select></label>
+      <div className="text-sm">{t('有效期')}<Select ariaLabel="有效期" className="mt-2" value={String(lifetimeDays)}
+        options={[{ value: '30', label: '30 天' }, { value: '90', label: '90 天' }, { value: '365', label: '365 天' }]}
+        onChange={(selected) => { const value = Number(selected); if (value === 30 || value === 90 || value === 365) setLifetime(value); }} />
+      </div>
     </div>
     <fieldset className="mt-5"><legend className="mb-3 text-sm font-medium">{t('授权书库')}</legend>
       {libraries.length ? <div className="grid gap-3 sm:grid-cols-2">{libraries.map((library) => <label className="flex items-center gap-3 text-sm" key={library.id}>

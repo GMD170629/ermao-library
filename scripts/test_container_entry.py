@@ -328,6 +328,16 @@ class ContainerEntryTests(unittest.TestCase):
         ):
             self.assertEqual((self.storage / name).read_bytes(), b"unchanged-user-data")
 
+    def test_initial_copy_preserves_writable_image_cache(self) -> None:
+        cache = self.seed / "apps/web/.next/cache"
+        cache.mkdir(parents=True)
+        (cache / "existing").write_bytes(b"cache contents")
+        entry.initialize_runtime(self.seed, self.runtime)
+        copied = self.runtime / "apps/web/.next/cache"
+        self.assertEqual((copied / "existing").read_bytes(), b"cache contents")
+        (copied / "new").write_bytes(b"new cache entry")
+        self.assertEqual((copied / "new").read_bytes(), b"new cache entry")
+
     def test_copy_failure_is_reported_without_old_marker_gate(self) -> None:
         original = shutil.copyfile
 

@@ -186,6 +186,7 @@ jobs:
         uses: astral-sh/setup-uv@v6
 
       - name: Compare executable Reader safety reports
+        id: reader_conformance
         if: steps.mode.outputs.release_mode != 'code-only'
         run: |
           pnpm --filter @shuku/web conformance:reader-safety
@@ -198,7 +199,7 @@ jobs:
             artifacts/reader-safety-conformance/web.json
 
       - name: Upload Reader safety reports
-        if: always() && steps.mode.outputs.release_mode != 'code-only'
+        if: always() && steps.mode.outputs.release_mode != 'code-only' && steps.reader_conformance.outcome != 'skipped'
         uses: actions/upload-artifact@v4
         with:
           name: reader-safety-web-backend-conformance

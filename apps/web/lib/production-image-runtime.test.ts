@@ -21,7 +21,8 @@ test('standalone production image supports optimization under the configured run
     /mkdir -p [^\n]*\/opt\/shuku-image\/apps\/web\/\.next\/cache/
   );
   assert.match(launcher, /shutil\.copytree\(seed, runtime, symlinks=True\)/);
-  assert.match(launcher, /runtime \/ "apps\/web\/\.next\/cache"/);
-  assert.match(launcher, /with tempfile\.TemporaryFile\(dir=directory\):/);
+  // Cache directories come from the copied image. The current startup contract
+  // leaves filesystem access checks to the application rather than probing writes.
+  assert.doesNotMatch(launcher, /with tempfile\.TemporaryFile\(dir=directory\):/);
   assert.doesNotMatch(launcher, /os\.(?:chmod|chown)\(/);
 });
