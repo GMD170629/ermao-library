@@ -7,8 +7,8 @@ import { pathToFileURL } from 'node:url';
 export const tag = 'android-beta';
 
 export function publicationContext(env) {
-  if (env.GITHUB_REF !== 'refs/heads/develop' || !['push', 'workflow_dispatch'].includes(env.GITHUB_EVENT_NAME)) {
-    throw new Error('Beta publication is restricted to develop push/manual runs');
+  if (env.GITHUB_REF !== 'refs/heads/develop' || env.GITHUB_EVENT_NAME !== 'workflow_dispatch' || env.BUILD_ANDROID !== 'true') {
+    throw new Error('Beta publication is restricted to explicitly selected develop manual runs');
   }
   if (!/^\d+$/.test(env.GITHUB_RUN_NUMBER ?? '') || !/^\d+$/.test(env.GITHUB_RUN_ATTEMPT ?? '') ||
       Number(env.GITHUB_RUN_NUMBER) < 1 || Number(env.GITHUB_RUN_NUMBER) > 2_099_899_999 ||

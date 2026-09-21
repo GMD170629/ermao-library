@@ -69,7 +69,14 @@ on:
       - 'apps/web/public/brand/ermao-library-app-icon-v1.png'
       - 'apps/web/public/fonts/reader/android-legacy/**'
   workflow_call:
+    outputs:
+      stable_artifact_id:
+        value: ${{ jobs.android.outputs.stable_artifact_id }}
     inputs:
+      build_android:
+        description: '本次明确构建 Android / Explicitly build Android this run'
+        type: boolean
+        default: false
       stable_release:
         type: boolean
         default: false
@@ -78,6 +85,10 @@ on:
         default: false
   workflow_dispatch:
     inputs:
+      build_android:
+        description: '本次明确构建 Android / Explicitly build Android this run'
+        type: boolean
+        default: false
       run_full_android_regression:
         description: Run the complete Android instrumented regression suite instead of the shell smoke test.
         required: false
@@ -160,21 +171,16 @@ jobs:
           path: apps/api-python/mobile-contract-results.xml
           if-no-files-found: error
 
-  android:
+  public-contracts:
     needs: release-mode
     if: needs.release-mode.outputs.mode != 'code-only'
-    name: Shared and Android
+    name: Public Reader and mobile source contracts
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: apps/mobile
-
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-        with:
-          lfs: true
-
+      - uses: actions/checkout@v6
       - name: Check approved iOS Readium baseline
         run: |
           python3 iosApp/verify_readium.py
@@ -187,26 +193,6 @@ jobs:
           python3 ../../packages/reader-contracts/check-reader-safety-boundaries.py
           python3 -m unittest discover \
             -s ../../packages/reader-contracts/tests -p 'test_*.py'
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: platform-tools
-
-      - name: Install Android API 37
-        run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
-
-      - name: Verify accepted Android PDFium artifact
-        run: python3 native/pdfium/scripts/verify-lock.py --platform android
 
       - name: Check source boundaries
         shell: bash
@@ -227,6 +213,43 @@ jobs:
             echo 'Production mobile source contains direct logging.' >&2
             exit 1
           fi
+
+  android:
+    needs: release-mode
+    if: needs.release-mode.outputs.mode != 'code-only' && inputs.build_android == true && github.event_name != 'pull_request' && github.event_name != 'pull_request_target'
+    name: Shared and Android
+    outputs:
+      stable_artifact_id: ${{ steps.stable_apk.outputs.artifact-id }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          lfs: true
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install Android API 37
+        run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
+
+      - name: Verify accepted Android PDFium artifact
+        run: python3 native/pdfium/scripts/verify-lock.py --platform android
 
       - name: Install pinned host JNI compiler
         shell: bash
@@ -254,6 +277,7 @@ jobs:
         run: node --test ../../scripts/android-beta-release.test.mjs
 
       - name: Assemble and lint unsigned beta
+        if: inputs.stable_release != true
         run: ./gradlew --stacktrace :androidApp:assembleBeta :androidApp:lintBeta -PbetaBuildNumber=${{ github.run_number }}
 
       - name: Assemble and lint stable Android APK
@@ -261,6 +285,7 @@ jobs:
         run: ./gradlew --stacktrace :androidApp:assembleRelease :androidApp:lintRelease
 
       - name: Upload unsigned stable APK for unified publication
+        id: stable_apk
         if: inputs.stable_release == true
         uses: actions/upload-artifact@v4
         with:
@@ -269,6 +294,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload unsigned beta for this run
+        if: inputs.stable_release != true
         uses: actions/upload-artifact@v4
         with:
           name: android-beta-unsigned
@@ -297,8 +323,8 @@ jobs:
 
   publish-android-beta:
     name: Publish Android beta
-    needs: [backend-contract, android, android-emulator]
-    if: github.ref == 'refs/heads/develop' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    needs: [backend-contract, public-contracts, android, android-emulator]
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'workflow_dispatch' && inputs.build_android == true && inputs.stable_release != true
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -340,11 +366,12 @@ jobs:
       - name: Update Android beta prerelease
         env:
           GH_TOKEN: ${{ github.token }}
+          BUILD_ANDROID: ${{ inputs.build_android }}
         run: node scripts/publish-android-beta.mjs dist/android-beta
 
   android-emulator:
     needs: release-mode
-    if: needs.release-mode.outputs.mode != 'code-only'
+    if: needs.release-mode.outputs.mode != 'code-only' && inputs.build_android == true && github.event_name != 'pull_request' && github.event_name != 'pull_request_target'
     name: Android emulator smoke and safety conformance
     runs-on: ubuntu-latest
     defaults:

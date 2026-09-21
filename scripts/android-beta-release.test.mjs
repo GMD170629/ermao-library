@@ -6,15 +6,16 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { publicationContext, publish, shouldPublish } from './publish-android-beta.mjs';
 
-const env = { GITHUB_REF: 'refs/heads/develop', GITHUB_EVENT_NAME: 'push', GITHUB_RUN_NUMBER: '42',
+const env = { GITHUB_REF: 'refs/heads/develop', GITHUB_EVENT_NAME: 'workflow_dispatch', BUILD_ANDROID: 'true', GITHUB_RUN_NUMBER: '42',
   GITHUB_RUN_ATTEMPT: '2', GITHUB_SHA: 'a'.repeat(40), GITHUB_REPOSITORY: 'owner/repo', GITHUB_RUN_ID: '123' };
 const context = publicationContext(env);
 const previous = { id: 1, prerelease: true, body: '<!-- android-beta run=41 attempt=1 -->' };
 
-test('only develop push and manual runs can publish', () => {
-  for (const GITHUB_EVENT_NAME of ['pull_request', 'pull_request_target', 'workflow_run']) {
+test('only explicitly selected develop manual runs can publish', () => {
+  for (const GITHUB_EVENT_NAME of ['push', 'pull_request', 'pull_request_target', 'workflow_run']) {
     assert.throws(() => publicationContext({ ...env, GITHUB_EVENT_NAME }));
   }
+  for (const BUILD_ANDROID of [undefined, 'false', 'TRUE', '1']) assert.throws(() => publicationContext({ ...env, BUILD_ANDROID }));
   assert.throws(() => publicationContext({ ...env, GITHUB_REF: 'refs/heads/prod' }));
   assert.throws(() => publicationContext({ ...env, GITHUB_RUN_NUMBER: '2147483647' }));
   assert.equal(publicationContext({ ...env, GITHUB_EVENT_NAME: 'workflow_dispatch' }).number, 42);
@@ -80,7 +81,7 @@ test('stale commit and corrupt APK cannot mutate releases', t => {
 test('CI gates signing/publication behind all existing mobile checks', () => {
   const workflow = readFileSync(new URL('../.github/workflows/mobile.yml', import.meta.url), 'utf8');
   const job = workflow.split('\n  publish-android-beta:')[1].split('\n  android-emulator:')[0];
-  assert.match(job, /needs: \[backend-contract, android, android-emulator\]/);
+  assert.match(job, /needs: \[backend-contract, public-contracts, android, android-emulator\]/);
   assert.match(job, /github.ref == 'refs\/heads\/develop'/);
   assert.match(job, /contents: write/);
   assert.match(job, /cancel-in-progress: false/);

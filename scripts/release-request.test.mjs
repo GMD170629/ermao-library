@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { requestDigest, selectTasks, validateRequest, validateSource, validateMode } from './release-request.mjs';
+import { requestDigest, selectTasks, validateRequest, validateSource, validateMode, selectAndroidBuild, workflowAndroidSelection } from './release-request.mjs';
 
 const image = `gamersgu/shuku-starship-web@sha256:${'a'.repeat(64)}`;
 export function sample(target = 'server-update') {
@@ -112,4 +112,31 @@ test('mode validates real Git inputs and ignores only application version in dep
   r.server.mode = 'application'; assert.doesNotThrow(() => validateMode(r, { root }));
   put('scripts/container-entry.py', 'changed runtime'); r.sourceCommit = commit();
   assert.throws(() => validateMode(r, { root }), /Fixed runtime/);
+});
+
+
+test('Android defaults off; only strict explicit inputs or request targets select it', () => {
+  for (const eventName of ['push', 'pull_request', 'workflow_dispatch', 'workflow_call']) {
+    for (const input of [undefined, '', false, 'false']) assert.equal(selectAndroidBuild({ eventName, input }), false);
+  }
+  for (const input of [true, 'true']) {
+    for (const eventName of ['workflow_dispatch', 'workflow_call']) assert.equal(selectAndroidBuild({ eventName, input }), true);
+    for (const eventName of ['push', 'pull_request', 'pull_request_target']) assert.throws(() => selectAndroidBuild({ eventName, input }));
+  }
+  for (const input of ['TRUE', '1', 1, null, [], {}]) assert.throws(() => selectAndroidBuild({ input }), /boolean/);
+  assert.equal(selectAndroidBuild({ request: sample('android'), eventName: 'push' }), true);
+  assert.equal(selectAndroidBuild({ request: sample(), eventName: 'push' }), false);
+  for (const input of [true, false, 'false']) assert.throws(() => selectAndroidBuild({ request: sample('android'), input }), /conflict/);
+  assert.throws(() => selectAndroidBuild({ request: sample('android'), mode: 'code-only' }), /code-only/);
+  assert.throws(() => selectAndroidBuild({ request: sample('android'), eventName: 'pull_request' }), /PRs/);
+});
+
+test('legacy tag and branch entries do not inherit an Android selection', async t => {
+  const { root, put, commit } = repository(t);
+  put('package.json', JSON.stringify({ version: '1.3.1' })); commit();
+  for (const GITHUB_EVENT_NAME of ['push', 'pull_request', 'workflow_dispatch']) {
+    const result = await workflowAndroidSelection({ root, env: { GITHUB_EVENT_NAME, GITHUB_REF_TYPE: 'tag', RELEASE_MODE: 'full' } });
+    assert.equal(result.buildAndroid, false);
+  }
+  await assert.rejects(workflowAndroidSelection({ root, env: { GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF_TYPE: 'branch', BUILD_ANDROID_INPUT: 'true' } }), /version tag/);
 });

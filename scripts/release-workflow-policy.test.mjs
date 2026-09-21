@@ -32,14 +32,15 @@ test('Draft Release publication and release-feed updates have a strict order', (
   assert.match(releaseWorkflow, /Release body differs from the authoritative bilingual release note/u);
 });
 
-test('stable releases wait for mobile checks and publish both packages before image promotion', () => {
+test('stable releases gate selected mobile checks before image promotion', () => {
   const packageJob = releaseWorkflow.split('\n  package:')[1].split('\n  publish:')[0];
   const publishJob = releaseWorkflow.split('\n  publish:')[1];
   assert.match(packageJob, /needs: \[validate, mobile-release\]/);
   assert.match(releaseWorkflow, /uses: \.\/\.github\/workflows\/mobile.yml/);
   assert.match(releaseWorkflow, /run_full_android_regression: false/);
   assert.match(packageJob, /sign-android-apk.sh unsigned-android dist\/android stable/);
-  assert.match(publishJob, /gh release upload[^\n]*dist\/fnos\/\*\.fpk[^\n]*dist\/android\/\*\.apk/);
+  assert.match(publishJob, /assets=\(dist\/fnos\/\*\.fpk dist\/fnos\/\*\.sha256\)/);
+  assert.match(publishJob, /if \[\[ "\$BUILD_ANDROID" == 'true' \]\]/);
   const verify = publishJob.indexOf('"$RUNNER_TEMP/release-assets.json"\n');
   const promote = publishJob.indexOf('Promote verified release Docker image');
   const publish = publishJob.indexOf('Verify and publish strict bilingual Release');
@@ -86,21 +87,18 @@ test('develop pushes publish only the isolated develop image channel', () => {
   );
 });
 
-test('owner-approved server-only releases retain server validation', () => {
+test('stable Android selection replaces historical exceptions and guards the entire APK chain', () => {
   const mobileJob = releaseWorkflow.split('\n  mobile-release:')[1].split('\n  package:')[0];
   const packageJob = releaseWorkflow.split('\n  package:')[1].split('\n  publish:')[0];
-  const publishJob = releaseWorkflow.split('\n  publish:')[1];
-  const serverOnly = `contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version)`;
-  assert.ok(mobileJob.includes(`if: github.ref_type == 'tag' && needs.validate.outputs.release_mode != 'code-only' && !${serverOnly}`));
-  assert.match(packageJob, /if: always\(\) && needs.validate.result == 'success'/);
-  assert.ok(packageJob.includes(`needs.mobile-release.result == 'success' || (${serverOnly} && needs.mobile-release.result == 'skipped')`));
+  assert.match(mobileJob, /outputs.build_android == 'true'/);
+  assert.match(mobileJob, /build_android: true/);
+  assert.doesNotMatch(releaseWorkflow, /1\.0\.3|1\.0\.4|1\.1\.0|1\.2\.0/);
+  assert.match(packageJob, /outputs.build_android == 'false' && needs.mobile-release.result == 'skipped'/);
+  assert.match(packageJob, /outputs.build_android == 'true' && needs.mobile-release.result == 'success'/);
   for (const name of ['Download checked stable Android APK', 'Set up JDK for stable signing', 'Set up Android SDK for stable signing', 'Install signing tools', 'Sign and verify stable Android APK']) {
-    assert.ok(packageJob.includes(`- name: ${name}\n        if: ` + "${{ needs.validate.outputs.release_mode != 'code-only' && !" + serverOnly + ' }}'));
+    assert.ok(packageJob.includes(`- name: ${name}\n        if: needs.validate.outputs.build_android == 'true'`));
   }
-  assert.ok(publishJob.includes(`if [[ "$RELEASE_TAG" == 'v1.0.3' || "$RELEASE_TAG" == 'v1.0.4' || "$RELEASE_TAG" == 'v1.1.0' || "$RELEASE_TAG" == 'v1.2.0' ]]; then`));
-  assert.ok(publishJob.includes('gh release upload "$RELEASE_TAG" dist/fnos/*.fpk dist/fnos/*.sha256 --clobber'));
 });
-
 
 test('authorized publication uses the exact build artifact and image digest without rebuilding', () => {
   const packageJob = releaseWorkflow.split('\n  package:')[1].split('\n  publish:')[0];

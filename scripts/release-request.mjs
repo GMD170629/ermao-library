@@ -1,7 +1,7 @@
 // The release request is the sole input to both dry-run and publication.
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { basename, resolve, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseStableVersion, readApplicationVersions, validateApplicationVersions } from './validate-release-notes.mjs';
@@ -179,14 +179,66 @@ export async function validateRequestVersions(request, { root = process.cwd() } 
   }
 }
 
+// An invocation has one authority: an accepted request, or an explicit manual input.
+export function parseAndroidInput(value) {
+  if (value === undefined || value === '' || value === false || value === 'false') return false;
+  if (value === true || value === 'true') return true;
+  throw Error('build_android must be a boolean');
+}
+
+export function selectAndroidBuild({ request, input, eventName, mode = 'full' } = {}) {
+  const manual = parseAndroidInput(input);
+  if (request) {
+    validateRequest(request);
+    requireValue(input === undefined || input === '', 'Request and manual Android input conflict');
+  }
+  const selected = request ? request.targets.includes('android') : manual;
+  requireValue(!selected || !['pull_request', 'pull_request_target'].includes(eventName), 'PRs cannot authorize Android');
+  requireValue(!manual || eventName === 'workflow_dispatch' || eventName === 'workflow_call', 'Android input requires an explicit invocation');
+  requireValue(!selected || mode !== 'code-only', 'code-only cannot select Android');
+  return selected;
+}
+
+export async function workflowAndroidSelection({ root = process.cwd(), env = process.env } = {}) {
+  const version = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')).version;
+  // Version-specific, never the latest request or the previous run's selection.
+  const requestPath = `release/requests/stable-${version.replaceAll('.', '-')}.json`;
+  const formal = env.GITHUB_REF_TYPE === 'tag' && env.GITHUB_EVENT_NAME !== 'pull_request';
+  let request;
+  if (formal && existsSync(resolve(root, requestPath))) {
+    request = validateRequest(JSON.parse(readFileSync(resolve(root, requestPath), 'utf8')), requestPath);
+    validateSource(request, { root, requestPath, accepted: true });
+    requireValue(request.channel === 'stable', 'Stable tag requires stable request');
+    requireValue(!request.targets.includes('ios'), 'The legacy stable workflow does not deliver iOS');
+    // Admission necessarily follows the frozen source commit. Only this request may differ.
+    const changed = gitRead(root, ['diff', '--name-only', request.sourceCommit, 'HEAD']).split('\n').filter(Boolean);
+    requireValue(changed.every(file => file === requestPath), 'Release source differs from accepted request');
+    await validateRequestVersions(request, { root });
+    validateMode(request, { root });
+    if (request.server) requireValue((request.server.mode === 'code-only') === (env.RELEASE_MODE === 'code-only'), 'Request and committed server mode conflict');
+  }
+  const input = env.GITHUB_EVENT_NAME === 'workflow_dispatch' ? env.BUILD_ANDROID_INPUT : undefined;
+  const buildAndroid = selectAndroidBuild({ request, input, eventName: env.GITHUB_EVENT_NAME, mode: env.RELEASE_MODE });
+  requireValue(!buildAndroid || formal, 'Stable Android requires a version tag');
+  return { buildAndroid, reason: request ? `request:${request.id}` : buildAndroid ? 'explicit manual input' : 'not selected' };
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
     const [file, ...args] = process.argv.slice(2);
+    if (file === '--workflow') {
+      const { buildAndroid, reason } = await workflowAndroidSelection();
+      if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `build_android=${buildAndroid}\n`);
+      const summary = `Android: ${buildAndroid ? '构建 / build' : '不构建 / skip'} (${reason})\nSource: ${process.env.GITHUB_SHA}\nServer: ${process.env.RELEASE_MODE}\n`;
+      if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
+      console.log(summary);
+    } else {
     requireValue(file && args.every(arg => arg === '--accepted' || arg.startsWith('--ref=')), 'Usage: node scripts/release-request.mjs FILE [--accepted] [--ref=REF] (read-only dry-run)');
     const request = validateRequest(JSON.parse(readFileSync(file, 'utf8')), file);
     validateSource(request, { requestPath: file, accepted: args.includes('--accepted'), authorizedRef: args.find(arg => arg.startsWith('--ref='))?.slice(6) ?? 'origin/main' });
     validateMode(request);
     await validateRequestVersions(request);
     console.log(JSON.stringify({ dryRun: true, id: request.id, tasks: selectTasks(request) }, null, 2));
+    }
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

@@ -67,6 +67,11 @@ on:
     tags:
       - 'v*.*.*'
   workflow_dispatch:
+    inputs:
+      build_android:
+        description: '本次明确构建 Android / Explicitly build Android (tag only; omit when using a request)'
+        type: boolean
+        default: false
 
 # A release waiting for device acceptance must not be replaced by another release.
 concurrency:
@@ -85,6 +90,7 @@ jobs:
     name: Validate fnOS package templates
     runs-on: ubuntu-latest
     outputs:
+      build_android: ${{ steps.selection.outputs.build_android }}
       app_version: ${{ steps.version.outputs.app_version }}
       release_mode: ${{ steps.mode.outputs.release_mode }}
       runtime_image: ${{ steps.mode.outputs.runtime_image }}
@@ -107,6 +113,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/validate-release-source.mjs
+
+      - name: Resolve explicit Android selection
+        id: selection
+        env:
+          RELEASE_MODE: ${{ steps.mode.outputs.release_mode }}
+          BUILD_ANDROID_INPUT: ${{ github.event_name == 'workflow_dispatch' && toJSON(inputs.build_android) || '' }}
+        run: node scripts/release-request.mjs --workflow
 
       - name: Test strict bilingual release-note validation
         run: node --test scripts/release-request.test.mjs scripts/release-mode.test.mjs scripts/ghcr-updates.test.mjs scripts/validate-release-notes.test.mjs scripts/validate-release-assets.test.mjs scripts/release-workflow-policy.test.mjs scripts/validate-release-source.test.mjs scripts/assemble-release-feed.test.mjs scripts/build-release-app-packages.test.mjs
@@ -314,13 +327,13 @@ jobs:
           cache-to: type=gha,mode=max,scope=develop-image
 
   mobile-release:
-    # v1.0.3, v1.0.4, v1.1.0 and v1.2.0 are owner-approved server-only releases; other tags retain mobile gates.
-    if: github.ref_type == 'tag' && needs.validate.outputs.release_mode != 'code-only' && !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version)
+    if: github.ref_type == 'tag' && needs.validate.outputs.release_mode != 'code-only' && needs.validate.outputs.build_android == 'true'
     needs: validate
     permissions:
       contents: write
     uses: ./.github/workflows/mobile.yml
     with:
+      build_android: true
       stable_release: true
       # Stable releases use the existing smoke/safety checks plus owner device acceptance.
       # The optional full UI suite remains available from the mobile workflow.
@@ -328,12 +341,14 @@ jobs:
 
   package:
     name: Build selected release artifacts
-    if: always() && needs.validate.result == 'success' && (needs.validate.outputs.release_mode == 'code-only' || needs.mobile-release.result == 'success' || (contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) && needs.mobile-release.result == 'skipped')) && github.ref_type == 'tag'
+    if: ${{ !cancelled() && needs.validate.result == 'success' && ((needs.validate.outputs.build_android == 'true' && needs.mobile-release.result == 'success') || (needs.validate.outputs.build_android == 'false' && needs.mobile-release.result == 'skipped')) && github.ref_type == 'tag' }}
     needs: [validate, mobile-release]
     outputs:
       image_digest: ${{ steps.release_image.outputs.digest }}
       bundle_id: ${{ steps.bundle.outputs.artifact-id }}
     runs-on: ubuntu-latest
+    env:
+      BUILD_ANDROID: ${{ needs.validate.outputs.build_android }}
     permissions:
       contents: write
       packages: write
@@ -376,31 +391,31 @@ jobs:
           uv run --extra dev --locked pytest -q
 
       - name: Download checked stable Android APK
-        if: ${{ needs.validate.outputs.release_mode != 'code-only' && !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) }}
+        if: needs.validate.outputs.build_android == 'true'
         uses: actions/download-artifact@v4
         with:
           name: android-stable-unsigned
           path: unsigned-android
 
       - name: Set up JDK for stable signing
-        if: ${{ needs.validate.outputs.release_mode != 'code-only' && !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) }}
+        if: needs.validate.outputs.build_android == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Set up Android SDK for stable signing
-        if: ${{ needs.validate.outputs.release_mode != 'code-only' && !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) }}
+        if: needs.validate.outputs.build_android == 'true'
         uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
 
       - name: Install signing tools
-        if: ${{ needs.validate.outputs.release_mode != 'code-only' && !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) }}
+        if: needs.validate.outputs.build_android == 'true'
         run: sdkmanager 'build-tools;36.0.0'
 
       - name: Sign and verify stable Android APK
-        if: ${{ needs.validate.outputs.release_mode != 'code-only' && !contains(fromJSON('["1.0.3","1.0.4","1.1.0","1.2.0"]'), needs.validate.outputs.app_version) }}
+        if: needs.validate.outputs.build_android == 'true'
         env:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
@@ -514,6 +529,8 @@ jobs:
     if: ${{ !cancelled() && needs.validate.result == 'success' && needs.package.result == 'success' && github.ref_type == 'tag' }}
     needs: [validate, package]
     runs-on: ubuntu-latest
+    env:
+      BUILD_ANDROID: ${{ needs.validate.outputs.build_android }}
     permissions:
       contents: write
       packages: write
@@ -603,11 +620,11 @@ jobs:
           RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
         run: |
           node scripts/validate-release-assets.mjs dist "$RELEASE_TAG"
-          if [[ "$RELEASE_TAG" == 'v1.0.3' || "$RELEASE_TAG" == 'v1.0.4' || "$RELEASE_TAG" == 'v1.1.0' || "$RELEASE_TAG" == 'v1.2.0' ]]; then
-            gh release upload "$RELEASE_TAG" dist/fnos/*.fpk dist/fnos/*.sha256 --clobber
-          else
-            gh release upload "$RELEASE_TAG" dist/fnos/*.fpk dist/fnos/*.sha256 dist/android/*.apk dist/android/*.sha256 --clobber
+          assets=(dist/fnos/*.fpk dist/fnos/*.sha256)
+          if [[ "$BUILD_ANDROID" == 'true' ]]; then
+            assets+=(dist/android/*.apk dist/android/*.sha256)
           fi
+          gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
           gh release view "$RELEASE_TAG" --json assets > "$RUNNER_TEMP/release-assets.json"
           node scripts/validate-release-assets.mjs dist "$RELEASE_TAG" "$RUNNER_TEMP/release-assets.json"
 

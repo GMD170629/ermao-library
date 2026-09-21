@@ -20,19 +20,19 @@ test('publication requires both intact packages locally and remotely', t => {
     }
   }
   addApplications(root, '1.0.1', remote.assets);
-  validateReleaseAssets(root, 'v1.0.1', remote);
-  assert.throws(() => validateReleaseAssets(root, 'v1.0.1', { assets: remote.assets.slice(0, 2) }), /Remote/);
+  validateReleaseAssets(root, 'v1.0.1', remote, 'full', true);
+  assert.throws(() => validateReleaseAssets(root, 'v1.0.1', { assets: remote.assets.slice(0, 2) }, 'full', true), /Remote/);
   const apk = join(root, 'android', 'ermao-library-v1.0.1-android.apk');
   writeFileSync(apk, 'corrupt');
-  assert.throws(() => validateReleaseAssets(root, 'v1.0.1'), /SHA-256/);
+  assert.throws(() => validateReleaseAssets(root, 'v1.0.1', undefined, 'full', true), /SHA-256/);
   writeFileSync(apk, 'fixture');
   rmSync(join(root, 'fnos', 'ermao-books-1.0.1-all.fpk'));
-  assert.throws(() => validateReleaseAssets(root, 'v1.0.1'), /Incomplete/);
+  assert.throws(() => validateReleaseAssets(root, 'v1.0.1', undefined, 'full', true), /Incomplete/);
   rmSync(apk);
-  assert.throws(() => validateReleaseAssets(root, 'v1.0.1'), /Incomplete/);
+  assert.throws(() => validateReleaseAssets(root, 'v1.0.1', undefined, 'full', true), /Incomplete/);
 });
 
-for (const version of ['1.0.3', '1.0.4', '1.1.0', '1.2.0']) {
+for (const version of ['1.0.3', '1.0.4', '1.1.0', '1.2.0', '1.3.1', '2.0.0']) {
 test(`${version} permits a server-only bundle and still verifies remote digests`, t => {
   const root = mkdtempSync(join(tmpdir(), 'server-release-assets-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -45,14 +45,17 @@ test(`${version} permits a server-only bundle and still verifies remote digests`
     assets.push({ name: file, state: 'uploaded', size: Buffer.byteLength(data), digest: `sha256:${createHash('sha256').update(data).digest('hex')}` });
   }
   addApplications(root, version, assets);
-  if (['1.1.0', '1.2.0'].includes(version)) {
+  if (!version.startsWith('1.0.')) {
     assert.throws(() => validateReleaseAssets(root, `v${version}`, { assets }), /belong in GHCR/);
     assets.splice(2);
   }
   validateReleaseAssets(root, `v${version}`, { assets });
-  assert.throws(() => validateReleaseAssets(root, 'v1.0.5'), /android/);
+  assert.throws(() => validateReleaseAssets(root, `v${version}`, undefined, 'full', true), /android/);
   assert.throws(() => validateReleaseAssets(root, `v${version}`, { assets: assets.slice(0, 1) }), /Remote/);
   assert.throws(() => validateReleaseAssets(root, `v${version}`, { assets: [...assets, { name: 'old.apk' }] }), /must not contain mobile/);
+  mkdirSync(join(root, 'android'));
+  assert.throws(() => validateReleaseAssets(root, `v${version}`), /must not contain mobile/);
+  rmSync(join(root, 'android'), { recursive: true });
   writeFileSync(join(root, 'fnos', name), 'corrupt');
   assert.throws(() => validateReleaseAssets(root, `v${version}`), /SHA-256/);
 });
