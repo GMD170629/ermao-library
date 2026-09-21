@@ -34,6 +34,7 @@ METADATA_FIELDS = MappingProxyType(
                 "series_name": TEXT,
                 "series_index": MetadataField("number"),
                 "tags": MetadataField("tags"),
+                "cover_ref": MetadataField("text", max_length=80),
             }
         ),
         "resource": MappingProxyType(
@@ -48,9 +49,16 @@ METADATA_FIELDS = MappingProxyType(
                 "narrator": TEXT,
                 "abridged": MetadataField("boolean"),
                 "resource_index": MetadataField("number"),
+                "cover_ref": MetadataField("text", max_length=80),
             }
         ),
-        "source_node": MappingProxyType({"title": TITLE, "description": DESCRIPTION}),
+        "source_node": MappingProxyType(
+            {
+                "title": TITLE,
+                "description": DESCRIPTION,
+                "cover_ref": MetadataField("text", max_length=80),
+            }
+        ),
     }
 )
 

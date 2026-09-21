@@ -131,6 +131,7 @@ class SqlAlchemyResourceMetadata:
             "narrator",
             "abridged",
             "resource_index",
+            "cover_path",
         }
         metadata.protected_fields = protect_fields(
             metadata.protected_fields, changes.keys()
@@ -138,6 +139,8 @@ class SqlAlchemyResourceMetadata:
         for field, value in changes.items():
             if field in metadata_fields:
                 setattr(metadata, field, value)
+        if "cover_path" in changes:
+            metadata.cover_status = "READY" if changes["cover_path"] else "PENDING"
         metadata.updated_at = now
 
 

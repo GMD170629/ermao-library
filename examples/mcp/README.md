@@ -71,3 +71,7 @@ Start with `get_context`. For authentication failures check token expiry/revocat
 方案过期、元数据版本变化或源文件变化应重新预览并核对，再以新操作执行。若原操作已经受理，只查原任务，勿因等待超时重新建任务。`RECOVERY_REQUIRED` 表示文件被保留但一致性尚需核对：保留任务标识及备份，由管理员检查原路径、目标和任务记录；不要覆盖目标、删除临时槽或修改数据库状态来“强制成功”。有完整发布证明的任务会在 worker 重启时按租约恢复必要索引；未知部分写入保留人工核查。
 
 Expired or changed plans require a new reviewed preview. If an operation was already accepted, inspect that operation instead of submitting again. `RECOVERY_REQUIRED` retains files for review: preserve the operation ID and backups, and have an administrator reconcile source, destination and recorded results. Do not overwrite targets, delete staging slots or edit database state to force success. On worker restart, operations with verified publication proofs can repair the index under their lease; uncertain partial writes remain for manual review.
+
+封面可用 `get_metadata_schema` 中的 `cover_references` 选择，通过系统字段 `cover_ref` 更新。仅列出当前图书已保存的不可变本地封面，最多 50 项；不接受 URL、文件路径或其他图书的引用，不复制图片。`values.cover_ref` 表示当前值，不一定是可重新选择的候选。清空封面仍须显式选择并满足人工保护权限。
+
+For covers, select a `cover_references` entry returned by `get_metadata_schema` and update the system field `cover_ref`. Only up to 50 immutable local covers already saved for this book are eligible. URLs, filesystem paths and other books' references are rejected; no image is copied. The current `values.cover_ref` is not necessarily an eligible candidate. Clearing requires explicit selection and the applicable protected-field permission.

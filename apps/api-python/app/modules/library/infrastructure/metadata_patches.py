@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 from datetime import UTC, datetime
 from typing import cast
 
@@ -16,6 +17,7 @@ from app.models import (
     LibraryFacet,
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
+    LibraryResourceAsset,
     LibrarySourceNode,
     LibrarySourceNodeMetadata,
 )
@@ -61,9 +63,60 @@ from app.modules.library.infrastructure.source_node_commands import (
 )
 
 
+def _cover_reference(path: str | None) -> str | None:
+    return "cover:" + hashlib.sha256(path.encode()).hexdigest() if path else None
+
+
 class SqlAlchemyMetadataPatches:
     def __init__(self, db: Session) -> None:
         self._db = db
+
+    def _cover_candidates(self, book_id: str, library_id: str) -> dict[str, str]:
+        # Only immutable publications from local import are reusable. User-upload
+        # slots can be replaced/deleted and must never become shared references.
+        rows = self._db.execute(
+            select(
+                LibraryResourceAsset.local_cover_path, LibraryResourceAsset.resource_id
+            )
+            .join(
+                LibraryReadableResource,
+                LibraryReadableResource.id == LibraryResourceAsset.resource_id,
+            )
+            .where(
+                LibraryReadableResource.book_id == book_id,
+                LibraryReadableResource.library_id == library_id,
+                LibraryResourceAsset.library_id == library_id,
+                LibraryResourceAsset.local_cover_path.is_not(None),
+            )
+            .order_by(LibraryResourceAsset.id)
+            .limit(50)
+        )
+        candidates: dict[str, str] = {}
+        for path, resource_id in rows:
+            if (
+                not path
+                or not re.fullmatch(
+                    r"covers/resources/"
+                    + re.escape(resource_id)
+                    + r"(?:\.[0-9a-f]{32}\.(?:jpg|png|gif|webp)|-candidate-[0-9a-f]{64})",
+                    path,
+                )
+                or "/" in resource_id
+                or "\\" in resource_id
+            ):
+                continue
+            reference = _cover_reference(path)
+            if reference is not None:
+                candidates[reference] = path
+        return candidates
+
+    def resolve_cover(self, before: MetadataSnapshot, reference: str) -> str:
+        candidate = self._cover_candidates(before.book_id, before.library_id).get(
+            reference
+        )
+        if candidate is None:
+            raise MetadataPatchError("INVALID_COVER_REFERENCE")
+        return candidate
 
     def snapshot(
         self, target_type: MetadataTarget, target_id: str, library_ids: frozenset[str]
@@ -152,7 +205,11 @@ class SqlAlchemyMetadataPatches:
             return None
         values: dict[str, MetadataValue] = {}
         for field in METADATA_FIELDS[target_type]:
-            value = getattr(metadata, field, None)
+            value = (
+                _cover_reference(metadata.cover_path if metadata else None)
+                if field == "cover_ref"
+                else getattr(metadata, field, None)
+            )
             if isinstance(value, datetime):
                 value = value.astimezone(UTC).isoformat(timespec="milliseconds")
             values[field] = value
@@ -182,13 +239,18 @@ class SqlAlchemyMetadataPatches:
             protected |= protected_fields(owner_metadata.protected_fields) & {
                 "title",
                 "description",
+                "cover_path",
             }
             related = (
                 owner_metadata.title,
                 owner_metadata.description,
+                _cover_reference(owner_metadata.cover_path),
                 owner_metadata.protected_fields,
                 to_timestamp_ms(owner_metadata.updated_at),
             )
+        protected = frozenset(
+            "cover_ref" if field == "cover_path" else field for field in protected
+        )
         revision = hashlib.sha256(
             json.dumps(
                 [
@@ -214,10 +276,15 @@ class SqlAlchemyMetadataPatches:
             values,
             protected,
             linked,
-            {"title": owner_metadata.title, "description": owner_metadata.description}
+            {
+                "title": owner_metadata.title,
+                "description": owner_metadata.description,
+                "cover_ref": _cover_reference(owner_metadata.cover_path),
+            }
             if owner_metadata is not None
             else None,
             source_node_id,
+            tuple(self._cover_candidates(book_id, library_id)),
         )
 
     def apply(self, patch: PreparedMetadataPatch) -> None:
@@ -227,8 +294,25 @@ class SqlAlchemyMetadataPatches:
         )
         if current is None or current.revision != before.revision:
             raise MetadataPatchError("CONFLICT")
+        resolved_cover = patch.resolved_cover_path
+        if "cover_ref" in values and values["cover_ref"] is not None:
+            reference = values["cover_ref"]
+            if (
+                not isinstance(reference, str)
+                or self.resolve_cover(before, reference) != resolved_cover
+            ):
+                raise MetadataPatchError("CONFLICT")
         if before.target_type == "book":
-            changes = {key: value for key, value in values.items() if key != "tags"}
+            changes = {
+                key: value
+                for key, value in values.items()
+                if key not in {"tags", "cover_ref"}
+            }
+            if "cover_ref" in values:
+                changes.update(
+                    cover_path=resolved_cover,
+                    cover_status="READY" if resolved_cover else "PENDING",
+                )
             if changes:
                 SqlAlchemyBookMutation(self._db).update_book(
                     book_id=before.target_id, values=changes
@@ -250,7 +334,11 @@ class SqlAlchemyMetadataPatches:
                     raise MetadataPatchError("RESOURCE_NOT_FOUND")
                 row.protected_fields = protect_fields(row.protected_fields, {"tags"})
         elif before.target_type == "resource":
-            resource_values: dict[str, object] = dict(values)
+            resource_values: dict[str, object] = {
+                key: value for key, value in values.items() if key != "cover_ref"
+            }
+            if "cover_ref" in values:
+                resource_values["cover_path"] = resolved_cover
             if isinstance(resource_values.get("published_at"), str):
                 resource_values["published_at"] = datetime.fromisoformat(
                     str(resource_values["published_at"])
@@ -268,7 +356,11 @@ class SqlAlchemyMetadataPatches:
                 changes=SourceNodeMetadataChanges(
                     title=str(merged["title"]),
                     description=cast(str | None, merged["description"]),
-                    changed_fields=frozenset(values),
+                    changed_fields=frozenset(
+                        key for key in values if key != "cover_ref"
+                    ),
+                    replace_cover="cover_ref" in values,
+                    cover_path=resolved_cover,
                     writeback_policy=MetadataSideEffectPolicy.DATABASE_ONLY,
                 ),
             )

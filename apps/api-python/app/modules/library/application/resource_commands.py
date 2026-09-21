@@ -34,6 +34,7 @@ class ResourceMetadataChanges(TypedDict, total=False):
     narrator: NotRequired[str | None]
     abridged: NotRequired[bool | None]
     resource_index: NotRequired[float | None]
+    cover_path: NotRequired[str | None]
 
 
 @dataclass(frozen=True, slots=True)

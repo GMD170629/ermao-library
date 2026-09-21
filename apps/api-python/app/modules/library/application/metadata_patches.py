@@ -36,6 +36,7 @@ class MetadataSnapshot:
     linked_book_id: str | None = None
     linked_values: dict[str, MetadataValue] | None = None
     source_node_id: str | None = None
+    cover_references: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -43,12 +44,14 @@ class PreparedMetadataPatch:
     before: MetadataSnapshot
     values: dict[str, MetadataValue]
     provenance: dict[str, str] | None = None
+    resolved_cover_path: str | None = None
 
 
 class MetadataPatchPort(Protocol):
     def snapshot(
         self, target_type: MetadataTarget, target_id: str, library_ids: frozenset[str]
     ) -> MetadataSnapshot | None: ...
+    def resolve_cover(self, before: MetadataSnapshot, reference: str) -> str: ...
     def apply(self, patch: PreparedMetadataPatch) -> None: ...
     def record(
         self, actor: MetadataPatchActor, patches: tuple[PreparedMetadataPatch, ...]
@@ -82,6 +85,7 @@ class GetMetadataSchema:
                 name: asdict(field)
                 for name, field in METADATA_FIELDS[target_type].items()
             },
+            "cover_references": list(snapshot.cover_references),
             "linked_book_id": snapshot.linked_book_id,
             "linked_values": snapshot.linked_values,
         }
@@ -132,8 +136,14 @@ class ApplyMetadataPatches:
                         for key, value in values.items()
                         if before.linked_values.get(key) in (None, "", ())
                     }
+                cover_path = None
+                reference = values.get("cover_ref")
+                if reference is not None:
+                    if not isinstance(reference, str):
+                        raise MetadataPatchError("INVALID_COVER_REFERENCE")
+                    cover_path = self.port.resolve_cover(before, reference)
                 prepared.append(
-                    PreparedMetadataPatch(before, values, change.provenance)
+                    PreparedMetadataPatch(before, values, change.provenance, cover_path)
                 )
             # A root Node patch also changes its Book. Overlapping explicit
             # targets in one batch would otherwise evaluate against stale state.
