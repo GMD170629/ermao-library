@@ -14,16 +14,16 @@ from pathlib import Path
 # adapter boundary.
 from lxml import etree  # type: ignore[import-untyped]
 
+from app.infrastructure.bounded_inspection import (
+    COVER_BYTES,
+    METADATA_BYTES,
+    read_optional_file,
+)
 from app.modules.imports.application.reflowable_types import (
     EmbeddedBookCover,
     ReflowableBookMetadata,
 )
 from app.modules.imports.domain.volume_index import parse_structured_volume_index
-from app.modules.imports.infrastructure.limited_read import (
-    COVER_BYTES,
-    METADATA_BYTES,
-    read_optional_file,
-)
 from app.modules.imports.infrastructure.text_encoding import (
     TXT_ENCODING_MAX_SEQUENCE_BYTES,
     TXT_ENCODING_SAMPLE_BYTES,

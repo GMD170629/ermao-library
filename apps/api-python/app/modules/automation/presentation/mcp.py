@@ -34,7 +34,9 @@ from app.modules.library.public import (
     CatalogBookFilter,
     MetadataPatchError,
     MetadataTarget,
+    SourceAccessError,
 )
+from app.modules.metadata.public import MetadataFileSource, StandardMetadataError
 
 Page = Annotated[int, Field(strict=True, ge=1)]
 Limit = Annotated[int, Field(strict=True, ge=1, le=QUERY_MAX_LIMIT)]
@@ -67,7 +69,12 @@ def build_catalog_server(
     async def invoke(operation: CatalogInvocation) -> dict[str, object]:
         try:
             return await run_in_threadpool(runtime.invoke, snapshot.access, operation)
-        except (AutomationAccessError, MetadataPatchError) as error:
+        except (
+            AutomationAccessError,
+            MetadataPatchError,
+            SourceAccessError,
+            StandardMetadataError,
+        ) as error:
             raise ToolError(f"{error}: 请求被拒绝 / Request rejected") from None
         except ValueError:
             raise ToolError("INVALID_ARGUMENT: 参数无效 / Invalid argument") from None
@@ -170,7 +177,12 @@ def build_catalog_server(
     async def write(operation: WriteInvocation) -> dict[str, object]:
         try:
             return await run_in_threadpool(runtime.write, snapshot.access, operation)
-        except (AutomationAccessError, MetadataPatchError) as error:
+        except (
+            AutomationAccessError,
+            MetadataPatchError,
+            SourceAccessError,
+            StandardMetadataError,
+        ) as error:
             raise ToolError(f"{error}: 请求被拒绝 / Request rejected") from None
         except ValueError:
             raise ToolError("INVALID_ARGUMENT: 参数无效 / Invalid argument") from None
@@ -289,6 +301,35 @@ def build_catalog_server(
                 )
             )
 
+    if PermissionScope.FILES_READ in snapshot.access.permissions.scopes:
+
+        @server.tool(annotations=read)
+        async def list_source_nodes(
+            library_id: str,
+            parent_id: str | None = None,
+            page: Page = 1,
+            page_size: Limit = 20,
+        ) -> dict[str, object]:
+            """分页列出授权书库的目录与文件节点，只返回相对位置 / Browse granted source nodes, returning library-relative locations only."""
+            return await invoke(
+                lambda catalog, access: catalog.list_source_nodes(
+                    access, library_id, parent_id, page, page_size
+                )
+            )
+
+        @server.tool(annotations=read)
+        async def read_file_metadata(
+            node_id: str,
+            source: MetadataFileSource,
+            sidecar_relative_path: str | None = None,
+        ) -> dict[str, object]:
+            """只读指定内嵌或伴随文件元数据；不刷新系统，不写文件 / Read explicit embedded or sidecar metadata without updating the system or files."""
+            return await invoke(
+                lambda catalog, access: catalog.read_file_metadata(
+                    access, node_id, source, sidecar_relative_path
+                )
+            )
+
     return server
 
 
@@ -303,7 +344,12 @@ class AutomationMcpEndpoint:
             snapshot = await run_in_threadpool(
                 self._runtime.authenticate, request.headers.get("authorization")
             )
-        except (AutomationAccessError, MetadataPatchError) as error:
+        except (
+            AutomationAccessError,
+            MetadataPatchError,
+            SourceAccessError,
+            StandardMetadataError,
+        ) as error:
             code = str(error)
             status = (
                 503 if code in {"AUTOMATION_DISABLED", "DATABASE_MAINTENANCE"} else 401

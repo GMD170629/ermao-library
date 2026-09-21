@@ -6,7 +6,7 @@ from zipfile import ZIP_STORED, ZipFile
 import pytest
 
 from app.infrastructure.comic_archives import inspect_comic_archive
-from app.modules.imports.infrastructure.limited_read import (
+from app.infrastructure.bounded_inspection import (
     InspectionLimitReached,
     LimitedReader,
 )

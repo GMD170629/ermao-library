@@ -34,6 +34,10 @@ from app.infrastructure.archive_integrity import (
     UnsafeArchivePathError,
     normalize_archive_path,
 )
+from app.infrastructure.bounded_inspection import (
+    COVER_BYTES,
+    ZipInspectionReader,
+)
 from app.modules.imports.application.comic_types import (
     ComicArchiveInspection,
     ComicInfoMetadata,
@@ -45,10 +49,6 @@ from app.modules.imports.application.errors import (
     ComicArchiveError,
     ComicArchiveInvalidError,
     ComicArchiveMultiVolumeError,
-)
-from app.modules.imports.infrastructure.limited_read import (
-    COVER_BYTES,
-    ZipInspectionReader,
 )
 
 _NUMBER = r"(?P<value>\d+(?:\.\d+)?)"
@@ -564,7 +564,7 @@ def inspect_comic_archive(
             archive._archive, rarfile.RarFile
         ):
             try:
-                comic_info = _parse_comic_info(
+                comic_info = parse_comic_info(
                     archive.read(comic_info_entry).decode("utf-8", "replace")
                 )
             except (ComicArchiveError, OSError, UnicodeError):
@@ -729,7 +729,7 @@ def extract_comic_cover(
     return str(target)
 
 
-def _parse_comic_info(xml: str) -> ComicInfoMetadata:
+def parse_comic_info(xml: str) -> ComicInfoMetadata:
     raw: dict[str, str] = {}
     for tag in [
         "Title",

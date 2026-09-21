@@ -1,4 +1,4 @@
-"""Read budgets for import inspection, never publication admission limits."""
+"""Read budgets shared by local metadata inspection, never publication admission limits."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ class InspectionLimitReached(ValueError):
 class LimitedReader(FileIO):
     """Count actual parser reads; prohibit unbounded read-all requests."""
 
-    def __init__(self, path: Path, budget: int = STRUCTURE_BYTES) -> None:
+    def __init__(self, path: Path | int, budget: int = STRUCTURE_BYTES) -> None:
         super().__init__(path, "rb")
         self.remaining = budget
 

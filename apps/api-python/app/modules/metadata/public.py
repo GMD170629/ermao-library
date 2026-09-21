@@ -1,3 +1,9 @@
+from app.modules.metadata.application.standard_files import (
+    MetadataFileSource,
+    StandardFileMetadataReader,
+    StandardMetadataError,
+    StandardMetadataObservation,
+)
 from app.modules.metadata.domain.source_name import metadata_from_source_name
 
 """Public metadata capability contracts."""
@@ -50,6 +56,7 @@ __all__ = [
     "FilesystemLocalMetadataInspector",
     "LocalAudioMetadata",
     "LocalMetadataCandidate",
+    "MetadataFileSource",
     "MetadataWritebackAssetProjection",
     "MetadataWritebackImportProjection",
     "MetadataWritebackProjection",
@@ -60,6 +67,9 @@ __all__ = [
     "ProviderManifest",
     "PublicationMetadata",
     "ResolvedLocalMetadata",
+    "StandardFileMetadataReader",
+    "StandardMetadataError",
+    "StandardMetadataObservation",
     "cover_media_type",
     "load_metadata_writeback_projection",
     "metadata_from_source_name",

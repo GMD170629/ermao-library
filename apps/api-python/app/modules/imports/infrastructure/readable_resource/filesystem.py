@@ -8,6 +8,8 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 
+from app.infrastructure.bounded_inspection import read_optional_file
+from app.infrastructure.sidecar_paths import sidecar_opf_paths
 from app.modules.imports.application.readable_resource.ports import (
     DirectoryEntry,
     RegularFileObservation,
@@ -23,10 +25,8 @@ from app.modules.imports.domain.ignore_rules import should_ignore_source_entry
 from app.modules.imports.domain.resource_adapters import (
     is_supported_source_tree_filename,
 )
-from app.modules.imports.infrastructure.limited_read import read_optional_file
 from app.modules.imports.infrastructure.sidecar_opf import (
     safe_sidecar_cover_path,
-    sidecar_opf_paths,
 )
 from app.modules.library.public import SourceNodePhysicalKind
 from app.modules.metadata.public import (

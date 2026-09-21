@@ -118,6 +118,15 @@ def seed(db):
 @pytest.mark.parametrize("prefix", ["", "/books"])
 def test_official_sdk_real_catalog_and_revocation(db_session, test_settings, prefix):
     created = seed(db_session)
+    source_root = test_settings.resolved_storage_root.parent / "mcp-library"
+    (source_root / "allowed").mkdir(parents=True)
+    source_opf = source_root / "allowed/metadata.opf"
+    source_opf.write_bytes(
+        b'<package xmlns="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>File title</dc:title></metadata></package>'
+    )
+    db_session.get(Library, "test-library").root_path = str(source_root)
+    db_session.commit()
+
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
     app = create_app(test_settings, session_factory=factory)
 
@@ -257,6 +266,7 @@ def test_official_sdk_real_catalog_and_revocation(db_session, test_settings, pre
                     Scope.SHELVES_WRITE,
                     Scope.TAGS_WRITE,
                     Scope.METADATA_WRITE,
+                    Scope.FILES_READ,
                 }
             )
             with factory() as db:
@@ -345,6 +355,25 @@ def test_official_sdk_real_catalog_and_revocation(db_session, test_settings, pre
                     "update_metadata", {**metadata_args, "request_id": "sdk-stale"}
                 )
                 assert stale.is_error and "CONFLICT" in str(stale)
+                listing = await client.call_tool(
+                    "list_source_nodes", {"library_id": "test-library"}
+                )
+                assert not listing.is_error, listing
+                assert listing.structured_content["total"] == 1
+                assert str(source_root) not in str(listing)
+                observed = await client.call_tool(
+                    "read_file_metadata",
+                    {"node_id": "allowed-node", "source": "sidecar"},
+                )
+                assert not observed.is_error, observed
+                assert observed.structured_content["metadata"]["title"] == "File title"
+                current_book = await client.call_tool(
+                    "get_books", {"book_ids": ["allowed"]}
+                )
+                assert (
+                    current_book.structured_content["books"][0]["title"] == "来自 MCP"
+                )
+                assert list((source_root / "allowed").iterdir()) == [source_opf]
 
                 assert (
                     await client.call_tool("create_shelf", {**args, "name": "Changed"})

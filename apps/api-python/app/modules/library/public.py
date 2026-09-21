@@ -22,6 +22,12 @@ from app.modules.library.application.metadata_patches import (
     MetadataPatchActor,
     MetadataPatchPort,
 )
+from app.modules.library.application.source_browser import (
+    BrowseSourceNodes,
+    SourceAccessError,
+    SourceBrowserPort,
+    SourceLocation,
+)
 from app.modules.library.domain.metadata_patch import (
     MetadataChange,
     MetadataPatchError,
@@ -188,6 +194,7 @@ __all__ = [
     "BookResourceRepositoryPort",
     "BookshelfItemQueryPort",
     "BookshelfItemSummary",
+    "BrowseSourceNodes",
     "BulkBookAccessError",
     "BulkBookAuthorizationError",
     "BulkBookOperationResult",
@@ -262,6 +269,9 @@ __all__ = [
     "SearchLibraryFilterOptions",
     "SmartShelfCriteria",
     "SmartShelfQueryPort",
+    "SourceAccessError",
+    "SourceBrowserPort",
+    "SourceLocation",
     "SourceNodePhysicalKind",
     "SourceNodeRecord",
     "SourceNodeRelativePath",

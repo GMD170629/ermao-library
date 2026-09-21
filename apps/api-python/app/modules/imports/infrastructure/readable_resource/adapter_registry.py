@@ -16,10 +16,17 @@ from app.contracts.media_capabilities import resolve_asset_mime_type
 from app.contracts.publication_metadata import PublicationMetadata
 from app.contracts.publication_titles import titles_from_local_source
 from app.core.safe_errors import safe_error_message
+from app.infrastructure.bounded_inspection import (
+    COVER_BYTES,
+    METADATA_BYTES,
+    InspectionLimitReached,
+    ZipInspectionReader,
+)
 from app.infrastructure.comic_archives import (
     ComicArchiveError,
     inspect_comic_archive,
 )
+from app.infrastructure.epub_metadata import read_zip_metadata
 from app.modules.imports.application.audio_types import (
     AudioFileMetadata,
     audio_episode_number,
@@ -38,12 +45,6 @@ from app.modules.imports.domain.resource_adapters import (
     ResourceAdapterId,
     ResourceAdapterSpec,
     source_format_for_filename,
-)
-from app.modules.imports.infrastructure.limited_read import (
-    COVER_BYTES,
-    METADATA_BYTES,
-    InspectionLimitReached,
-    ZipInspectionReader,
 )
 from app.modules.imports.infrastructure.sidecar_opf import (
     discover_directory_sidecar_opf,
@@ -429,16 +430,6 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
             local_metadata=resolved,
         )
 
-    @staticmethod
-    def _read_zip_metadata(archive: ZipFile, name: str) -> bytes:
-        if archive.getinfo(name).file_size > METADATA_BYTES:
-            raise ValueError("metadata inspection limit")
-        with archive.open(name) as source:
-            content = source.read(METADATA_BYTES + 1)
-        if len(content) > METADATA_BYTES:
-            raise ValueError("metadata inspection limit")
-        return content
-
     def _inspect_epub(self, path: Path) -> LocalMetadataCandidate | None:
         return self._inspect_epub_details(path)[0]
 
@@ -449,7 +440,7 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
         units: tuple[ResourceNavigationUnitInput, ...] = ()
         try:
             with ZipInspectionReader(path) as source, ZipFile(source) as archive:
-                container = self._read_zip_metadata(archive, "META-INF/container.xml")
+                container = read_zip_metadata(archive, "META-INF/container.xml")
                 match = re.search(
                     rb"full-path\s*=\s*['\"]([^'\"]+)['\"]",
                     container,
@@ -459,7 +450,7 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
                 opf_name = normpath(match.group(1).decode("utf-8"))
                 if opf_name.startswith(("../", "/")):
                     return None, ()
-                opf_content = self._read_zip_metadata(archive, opf_name)
+                opf_content = read_zip_metadata(archive, opf_name)
                 metadata = parse_opf_metadata(opf_content)
                 candidate = LocalMetadataCandidate(
                     source="EMBEDDED", metadata=metadata, cover=None
@@ -499,7 +490,7 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
         name = normpath(join(dirname(opf_name), nav.get("href", "")))
         if name.startswith(("../", "/")):
             return ()
-        document = ElementTree.fromstring(self._read_zip_metadata(archive, name))
+        document = ElementTree.fromstring(read_zip_metadata(archive, name))
         units: list[ResourceNavigationUnitInput] = []
         entries: list[tuple[str, str]] = []
         if nav.get("media-type") == "application/x-dtbncx+xml":

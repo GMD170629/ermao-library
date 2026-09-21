@@ -3,7 +3,7 @@ from pathlib import Path
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, NameObject
 
-from app.modules.imports.infrastructure.limited_read import LimitedReader
+from app.infrastructure.bounded_inspection import LimitedReader
 from app.modules.imports.infrastructure.pdf_inspection import inspect_pdf
 
 

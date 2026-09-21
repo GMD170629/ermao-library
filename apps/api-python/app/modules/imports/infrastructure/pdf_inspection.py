@@ -2,33 +2,14 @@
 
 import re
 from pathlib import Path
-from typing import BinaryIO
 
-from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 from pypdf.generic import Destination
 
+from app.infrastructure.bounded_inspection import LimitedReader
+from app.infrastructure.pdf_metadata_reader import StrictMetadataPdfReader
 from app.modules.imports.application.pdf_types import PdfChapter, PdfInspection
 from app.modules.imports.domain.pdf_content import PdfContentKind, PdfTextEvidence
-from app.modules.imports.infrastructure.limited_read import LimitedReader
-
-
-class _ImportPdfReader(PdfReader):
-    def _find_eof_marker(self, stream: BinaryIO) -> None:
-        end = stream.seek(0, 2)
-        start = max(0, end - 65558)
-        stream.seek(start)
-        tail = stream.read(end - start)
-        matches = list(re.finditer(rb"startxref\s+(\d+)\s+%%EOF", tail))
-        if not matches:
-            raise PdfReadError("Import PDF trailer unavailable in tail window")
-        self._import_startxref = int(matches[-1].group(1))
-
-    def _find_startxref_pos(self, stream: BinaryIO) -> int:
-        return self._import_startxref
-
-    def _rebuild_xref_table(self, stream: BinaryIO) -> None:
-        raise PdfReadError("Import does not repair PDF cross references")
 
 
 def inspect_pdf(path: Path, original_name: str | None = None) -> PdfInspection:
@@ -37,7 +18,7 @@ def inspect_pdf(path: Path, original_name: str | None = None) -> PdfInspection:
     count: int | None = None
     try:
         with LimitedReader(path) as source:
-            pdf = _ImportPdfReader(source, strict=True, root_object_recovery_limit=0)
+            pdf = StrictMetadataPdfReader(source, strict=True, root_object_recovery_limit=0)
             info = pdf.metadata
             if info:
                 metadata = {str(k).lstrip("/"): str(v).strip() for k, v in info.items()}

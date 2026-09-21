@@ -30,6 +30,10 @@ from app.modules.library.application.commands.manage_ports import (
     ManagedBookSourceTarget,
 )
 from app.modules.library.application.metadata_ownership import protected_fields
+from app.modules.library.application.source_browser import (
+    SourceLocation,
+    SourceNodePage,
+)
 from app.modules.library.application.source_tree_ports import (
     AdapterIdentity,
     BookResourceRepositoryPort,
@@ -185,26 +189,54 @@ class SqlAlchemySourceNodeRepository(SourceNodeRepositoryPort):
         row = self._session.get(LibrarySourceNode, source_node_id)
         return None if row is None else self._to_record(row)
 
-    def list_direct_children(
-        self, *, library_id: str, parent_id: str | None
-    ) -> tuple[SourceNodeRecord, ...]:
-        parent_filter = (
-            LibrarySourceNode.parent_id.is_(None)
-            if parent_id is None
-            else LibrarySourceNode.parent_id == parent_id
-        )
-        rows = self._session.scalars(
+    @staticmethod
+    def _children_query(library_id: str, parent_id: str | None):
+        return (
             select(LibrarySourceNode)
             .where(
                 LibrarySourceNode.library_id == library_id,
-                parent_filter,
+                LibrarySourceNode.parent_id.is_(None)
+                if parent_id is None
+                else LibrarySourceNode.parent_id == parent_id,
             )
-            .order_by(
-                LibrarySourceNode.path_key.asc(),
-                LibrarySourceNode.id.asc(),
-            )
-        ).all()
+            .order_by(LibrarySourceNode.path_key.asc(), LibrarySourceNode.id.asc())
+        )
+
+    def list_direct_children(
+        self, *, library_id: str, parent_id: str | None
+    ) -> tuple[SourceNodeRecord, ...]:
+        rows = self._session.scalars(self._children_query(library_id, parent_id)).all()
         return tuple(self._to_record(row) for row in rows)
+
+    def page_children(
+        self, library_id: str, parent_id: str | None, page: int, page_size: int
+    ) -> SourceNodePage:
+        query = self._children_query(library_id, parent_id)
+        total = int(
+            self._session.scalar(
+                select(func.count()).select_from(query.order_by(None).subquery())
+            )
+            or 0
+        )
+        rows = self._session.scalars(
+            query.offset((page - 1) * page_size).limit(page_size)
+        )
+        return SourceNodePage(
+            tuple(self._to_record(row) for row in rows), total, page, page_size
+        )
+
+    def location(
+        self, node_id: str, library_ids: frozenset[str]
+    ) -> SourceLocation | None:
+        row = self._session.execute(
+            select(LibrarySourceNode, Library.root_path)
+            .join(Library, Library.id == LibrarySourceNode.library_id)
+            .where(
+                LibrarySourceNode.id == node_id,
+                LibrarySourceNode.library_id.in_(library_ids),
+            )
+        ).first()
+        return SourceLocation(self._to_record(row[0]), Path(row[1])) if row else None
 
     def reconcile_batch(
         self,

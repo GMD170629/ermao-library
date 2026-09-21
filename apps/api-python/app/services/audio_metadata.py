@@ -627,7 +627,7 @@ def _read_with_mutagen(path: Path) -> dict[str, Any]:
         from mutagen.mp4 import MP4
         from mutagen.wave import WAVE
 
-        from app.modules.imports.infrastructure.limited_read import LimitedReader
+        from app.infrastructure.bounded_inspection import LimitedReader
 
         # These readers use tag/header offsets; Ogg and WavPack duration
         # recovery may traverse the entire stream and are not import readers.

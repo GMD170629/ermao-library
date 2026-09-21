@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from app.contracts.publication_metadata import PublicationMetadata
-from app.modules.imports.infrastructure.limited_read import read_optional_file
+from app.infrastructure.bounded_inspection import read_optional_file
+from app.infrastructure.sidecar_paths import sidecar_opf_paths
 from app.modules.metadata.public import (
     MAX_OPF_BYTES,
     OpfMetadataError,
@@ -20,20 +21,6 @@ MAX_SIDECAR_COVER_BYTES = 20 * 1024 * 1024
 class SidecarOpfResult:
     metadata: PublicationMetadata
     cover_content: bytes | None
-
-
-def sidecar_opf_paths(source: Path, *, directory: bool) -> tuple[Path, ...]:
-    if directory:
-        return (
-            source / "metadata.opf",
-            source / f"{source.name}.opf",
-            source.with_suffix(".opf"),
-        )
-    return (
-        source.with_suffix(".opf"),
-        source.parent / "metadata.opf",
-        source.parent / f"{source.parent.name}.opf",
-    )
 
 
 def discover_sidecar_opf(source: Path) -> SidecarOpfResult | None:

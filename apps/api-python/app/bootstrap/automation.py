@@ -44,7 +44,14 @@ from app.modules.library.infrastructure.catalog import SqlAlchemyCatalogQueries
 from app.modules.library.infrastructure.metadata_patches import (
     SqlAlchemyMetadataPatches,
 )
+from app.modules.library.infrastructure.persistence.source_tree_repository import (
+    SqlAlchemySourceNodeRepository,
+)
 from app.modules.library.infrastructure.queries import SqlAlchemyLibraryQueries
+from app.modules.library.infrastructure.source_file_access import open_library_file
+from app.modules.metadata.infrastructure.standard_files import (
+    AnchoredStandardMetadataReader,
+)
 from app.modules.shelf.application.commands import CreateShelf, ShelfWriteStore
 from app.modules.shelf.infrastructure import shelves as shelf_store
 from app.modules.shelf.infrastructure.catalog import SqlAlchemyCatalogShelfQueries
@@ -97,6 +104,8 @@ def build_automation_catalog(db: Session) -> AutomationCatalog:
             ),
         ),
         SqlAlchemyMetadataPatches(db),
+        SqlAlchemySourceNodeRepository(db),
+        AnchoredStandardMetadataReader(open_library_file),
     )
 
 
