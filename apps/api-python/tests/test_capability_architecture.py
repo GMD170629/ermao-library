@@ -8,6 +8,7 @@ APP_ROOT = Path(__file__).parents[1] / "app"
 API_ROOT = APP_ROOT.parent
 CAPABILITIES = (
     "auth",
+    "automation",
     "backup",
     "download",
     "imports",
@@ -505,6 +506,7 @@ def test_readable_resource_migrations_are_linear_and_baseline_is_self_contained(
         "0018_library_import_scan_gaps.py",
         "0019_backfill_scan_gaps.py",
         "0020_recheck_scan_gaps.py",
+        "0021_automation_grants.py",
     ]
     path = versions_dir / "0001_library_topology_baseline.py"
     source = path.read_text(encoding="utf-8")

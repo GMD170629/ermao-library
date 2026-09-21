@@ -14,6 +14,7 @@ from app.models import (
     LibrarySourceNodeMetadata,
 )
 from app.models.common import db_timestamp
+from app.modules.library.application.metadata_effects import MetadataSideEffectPolicy
 from app.modules.library.application.metadata_ownership import protect_fields
 from app.modules.library.application.source_node_commands import (
     SourceNodeMetadataChanges,
@@ -97,7 +98,10 @@ class SqlAlchemySourceNodeMetadata(SourceNodeMetadataPort):
                     "READY" if changes.cover_path else "PENDING"
                 )
         self._db.flush()
-        if metadata_writeback_enabled(self._db):
+        if (
+            changes.writeback_policy is MetadataSideEffectPolicy.CONFIGURED_WRITEBACK
+            and metadata_writeback_enabled(self._db)
+        ):
             source_directory = self._source_directory(library=library, node=node)
             intent = prepare_source_node_metadata_writeback_intent(
                 book_id=book.id,

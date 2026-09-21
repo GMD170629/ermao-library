@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from app.modules.library.application.metadata_effects import MetadataSideEffectPolicy
+
 MAX_SOURCE_NODE_COVER_BYTES = 10 * 1024 * 1024
 
 
@@ -15,6 +17,9 @@ class SourceNodeMetadataChanges:
     description: str | None
     cover_path: str | None = None
     replace_cover: bool = False
+    writeback_policy: MetadataSideEffectPolicy = (
+        MetadataSideEffectPolicy.CONFIGURED_WRITEBACK
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,8 +93,11 @@ class UpdateSourceNodeMetadata:
         self,
         port: SourceNodeMetadataPort,
         unit_of_work: SourceNodeMetadataUnitOfWork,
+        *,
+        side_effect_policy: MetadataSideEffectPolicy = MetadataSideEffectPolicy.CONFIGURED_WRITEBACK,
     ) -> None:
         self._port = port
+        self._side_effect_policy = side_effect_policy
         self._unit_of_work = unit_of_work
 
     def execute(
@@ -108,6 +116,7 @@ class UpdateSourceNodeMetadata:
                 source_node_id=source_node_id,
                 changes=SourceNodeMetadataChanges(
                     title=title,
+                    writeback_policy=self._side_effect_policy,
                     description=(changes.description or "").strip() or None,
                 ),
             )

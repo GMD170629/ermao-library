@@ -50,6 +50,7 @@ from app.models.settings import (
     SystemSetting,
 )
 from app.models.shelf import Shelf, ShelfBook
+from app.modules.automation.infrastructure.models import AutomationGrantRow
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportScanGap,
     LibraryImportTask,
@@ -75,6 +76,7 @@ from app.modules.reader.infrastructure.persistence.models import (
 from app.modules.shelf.infrastructure.models import ShelfCollectionMembership
 
 __all__ = [
+    "AutomationGrantRow",
     "BookDetailPreference",
     "DownloadTask",
     "ExternalMetadataCache",

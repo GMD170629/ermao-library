@@ -44,4 +44,26 @@
 - 命令（工作目录 `apps/api-python`）：`uv run --extra dev --locked pytest -q tests/integration/modules/automation/test_sdk_transport.py`：1 passed；对应 `ruff check` 通过。
 - 该探针只证明 SDK 最小集成；没有上线业务工具，也没有证明 Bearer、网关前缀、真实 LM Studio/Cursor 或文件操作通过。
 
-M0 已完成；M1–M8 待实施。应用服务未启用 MCP，未操作生产书库，未发布。
+M0 已完成（提交 `3a16e61a`）；应用服务未启用 MCP，未操作生产书库，未发布。
+
+## M1：授权基础与 DB-only 边界（进行中）
+
+已落地：
+
+- `modules/automation/domain/access.py` 为八个 scope、固定库范围、sidecar/embedded、跨库选项和当前权限交集的唯一规则；`domain/tools.py` 固定 23 工具名称与最小权限、执行上限，尚未注册业务工具。
+- `application/grants.py` 实现创建、本人列表、撤销、Bearer 校验与持久操作重检入口。有效期限定 30/90/365 天，秘密只在创建返回，授权没有原地扩权方法。
+- `infrastructure/credentials.py` 使用 32 字节随机秘密，`infrastructure/grants.py` 只存 SHA-256 摘要，不缓存有效身份。迁移 `0021_automation_grants` 创建独立授权表，不生成默认授权，不改现有用户权限。
+- `auth/infrastructure/automation_identity.py` 复用现有用户授权；`library/infrastructure/automation_access.py` 查询真实可见库 ID。`bootstrap/automation.py` 只接线。实际授权始终与 grant 的固定库集合取交集。
+- `library/application/metadata_effects.py` 定义可信 DB-only 策略。Book/Bulk/Apply 元数据事务在调用持久层前拒绝该策略下的文件意图；目录元数据用例将策略传至意图生成点，跳过全局自动写回。原 Web 默认行为保留。
+- ADR 0031 记录本次跨能力归属与执行边界。
+
+验证（工作目录 `apps/api-python`）：
+
+```text
+uv run --extra dev --locked pytest -q tests/integration/modules/automation tests/unit/modules/automation tests/test_capability_architecture.py tests/unit/modules/library/test_mutation_use_cases.py tests/unit/modules/metadata/test_source_node_writeback.py tests/integration/modules/library/test_request_mutations.py tests/architecture/test_write_transaction_contract.py
+88 passed
+```
+
+覆盖：新／既有数据库升级与重复启动、默认无授权、令牌摘要及重开／撤销／到期、实际管理员库限制与权限降级、跨库和写回子权限、保护／标签权限交叉、目录 DB-only 更新且原件不变、原 Web 自动入队、预构造文件意图拒绝、模块边界及事务约束。改动文件 Ruff 通过；新授权模块、接线与身份适配器 Mypy 局部检查通过（15 个源文件）。
+
+尚未完成 M1：会话管理 HTTP 接口与 Origin/CSRF、持久服务开关和部署能力设置、授权操作审计／最近使用记录。当前 operation 授权入口已存在，但尚未与文件任务 worker 接线；待 M4–M6 引入带 grant 的实际任务后验证关键阶段撤权。只读挂载的真实文件行为也需在文件用例实现后验证。M2–M8 未开始，不应将这些基础测试视为整套 MCP 功能已交付。

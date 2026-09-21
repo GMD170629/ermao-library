@@ -8,6 +8,10 @@ from datetime import datetime
 from typing import Protocol
 
 from app.core.authorization import AuthorizationContext
+from app.modules.library.application.metadata_effects import (
+    MetadataSideEffectPolicy,
+    validate_writeback_intents,
+)
 
 
 class LibraryRequestUnitOfWork(Protocol):
@@ -146,11 +150,15 @@ class UpdateBookRecord:
         self,
         gateway: LibraryRequestMutationGateway,
         unit_of_work: LibraryRequestUnitOfWork,
+        *,
+        side_effect_policy: MetadataSideEffectPolicy = MetadataSideEffectPolicy.CONFIGURED_WRITEBACK,
     ) -> None:
         self._gateway = gateway
+        self._side_effect_policy = side_effect_policy
         self._unit_of_work = unit_of_work
 
     def execute(self, command: BookRecordMutation) -> Mapping[str, object] | None:
+        validate_writeback_intents(self._side_effect_policy, command.writeback_intents)
         try:
             result = self._gateway.update_book(command)
             self._unit_of_work.commit()
@@ -165,11 +173,15 @@ class UpdateBulkBooks:
         self,
         gateway: LibraryRequestMutationGateway,
         unit_of_work: LibraryRequestUnitOfWork,
+        *,
+        side_effect_policy: MetadataSideEffectPolicy = MetadataSideEffectPolicy.CONFIGURED_WRITEBACK,
     ) -> None:
         self._gateway = gateway
+        self._side_effect_policy = side_effect_policy
         self._unit_of_work = unit_of_work
 
     def execute(self, command: BulkBookMutation) -> int:
+        validate_writeback_intents(self._side_effect_policy, command.writeback_intents)
         try:
             updated = self._gateway.update_books(command)
             self._unit_of_work.commit()
@@ -241,11 +253,15 @@ class ApplyBookMetadata:
         self,
         gateway: LibraryRequestMutationGateway,
         unit_of_work: LibraryRequestUnitOfWork,
+        *,
+        side_effect_policy: MetadataSideEffectPolicy = MetadataSideEffectPolicy.CONFIGURED_WRITEBACK,
     ) -> None:
         self._gateway = gateway
+        self._side_effect_policy = side_effect_policy
         self._unit_of_work = unit_of_work
 
     def execute(self, command: MetadataApplyMutation) -> MetadataApplyResult:
+        validate_writeback_intents(self._side_effect_policy, command.writeback_intents)
         try:
             result = self._gateway.apply_metadata(command)
             self._unit_of_work.commit()
