@@ -925,6 +925,7 @@ def process_next_metadata_lookup_task(
     prefer_preparation: bool = True,
     lookup_ready: bool = True,
     writeback_ready: bool = True,
+    standard_handler: Callable[[Session, dict[str, Any], str], None] | None = None,
 ) -> bool:
     if (
         writeback_ready
@@ -934,6 +935,7 @@ def process_next_metadata_lookup_task(
             settings,
             owner_id=owner_id,
             prefer_preparation=prefer_preparation,
+            standard_handler=standard_handler,
         )
     ):
         return True
@@ -948,6 +950,7 @@ def process_next_metadata_lookup_task(
         settings,
         owner_id=owner_id,
         prefer_preparation=prefer_preparation,
+        standard_handler=standard_handler,
     )
 
 
@@ -967,11 +970,17 @@ class MetadataLookupWorker:
         poll_seconds: float = 2.0,
         heartbeat_db_factory: Callable[[], Session] | None = None,
         automatic_request_gate: AutomaticMetadataRequestGate | None = None,
+        standard_handler: Callable[[Session, dict[str, Any], str], None] | None = None,
+        standard_maintenance: Callable[[Session], None] | None = None,
+        standard_recovery: Callable[[Session], int] | None = None,
     ) -> None:
         self._db_factory = db_factory
         self._settings = settings
         self._poll_seconds = poll_seconds
         self._automatic_request_gate = automatic_request_gate
+        self._standard_handler = standard_handler
+        self._standard_maintenance = standard_maintenance
+        self._standard_recovery = standard_recovery
         self._stop = threading.Event()
         self._last_busy_log_at: float | None = None
         self._thread = threading.Thread(
@@ -1025,6 +1034,12 @@ class MetadataLookupWorker:
             state.ready = True
             state.error = None
 
+    def _recover_writebacks(self, db: Session) -> int:
+        recovered = recover_interrupted_metadata_writebacks(db)
+        if self._standard_recovery is not None:
+            recovered += self._standard_recovery(db)
+        return recovered
+
     def _maintain(self) -> None:
         if (
             not self._writeback_recovery.ready
@@ -1035,6 +1050,8 @@ class MetadataLookupWorker:
         self._next_maintenance = monotonic() + 300.0
         try:
             with self._db_factory() as db:
+                if self._standard_maintenance is not None:
+                    self._standard_maintenance(db)
                 self._maintenance_cursor = maintain_metadata_writebacks(
                     db, self._settings, after_id=self._maintenance_cursor
                 )
@@ -1080,6 +1097,7 @@ class MetadataLookupWorker:
                             prefer_preparation=prefer_preparation,
                             lookup_ready=lookup_ready,
                             writeback_ready=writeback_ready,
+                            standard_handler=self._standard_handler,
                         )
                     )
             except OperationalError as error:
@@ -1121,7 +1139,7 @@ class MetadataLookupWorker:
                 )
                 self._recover(
                     self._writeback_recovery,
-                    recover_interrupted_metadata_writebacks,
+                    self._recover_writebacks,
                     "writeback",
                 )
                 if self._stop.is_set():

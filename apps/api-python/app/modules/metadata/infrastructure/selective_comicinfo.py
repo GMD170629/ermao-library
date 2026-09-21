@@ -60,6 +60,10 @@ def patch_comicinfo(
                 for index, name in enumerate(("Year", "Month", "Day"))
             }
         else:
+            if field == "volume_index" and value is not None:
+                if not float(value).is_integer() or value < 0:
+                    raise StandardMetadataError("INVALID_COMIC_VOLUME")
+                value = int(value)
             text = (
                 ", ".join(value)
                 if isinstance(value, tuple)

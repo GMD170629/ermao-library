@@ -23,6 +23,10 @@ from app.modules.library.application.imported_book_metadata import (
     IdentifyImportedBook,
 )
 from app.modules.library.application.metadata_effects import MetadataSideEffectPolicy
+from app.modules.library.application.metadata_file_targets import (
+    MetadataFileTarget,
+    MetadataFileTargetPort,
+)
 from app.modules.library.application.metadata_ownership import (
     protected_fields as protected_metadata_fields,
 )
@@ -42,6 +46,9 @@ from app.modules.library.domain.file_moves import (
     FileMoveError,
     MoveRequest,
     render_move_template,
+)
+from app.modules.library.domain.file_moves import (
+    collision_key as file_path_collision_key,
 )
 from app.modules.library.domain.metadata_patch import (
     MetadataChange,
@@ -265,6 +272,8 @@ __all__ = [
     "ListCatalogFacets",
     "ListLibraryGroupings",
     "MetadataChange",
+    "MetadataFileTarget",
+    "MetadataFileTargetPort",
     "MetadataPatchActor",
     "MetadataPatchError",
     "MetadataPatchPort",
@@ -303,6 +312,7 @@ __all__ = [
     "audiobook_resource_owns_path",
     "decide_book_anchor_for_resource",
     "evaluate_path_key_occupancy",
+    "file_path_collision_key",
     "is_asset_path_within_resource_scope",
     "is_resource_anchor_within_book_scope",
     "is_same_or_descendant_path",

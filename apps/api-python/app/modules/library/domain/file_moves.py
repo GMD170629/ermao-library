@@ -5,15 +5,12 @@ from dataclasses import dataclass
 from string import Formatter
 
 from app.contracts.controlled_file_slots import is_controlled_file_slot
+from app.contracts.file_operation import FileIdentity
+from app.contracts.file_operation import FileOperationError as FileMoveError
 from app.modules.library.domain.source_nodes import (
     SourceNodeRelativePath,
     parse_source_node_relative_path,
 )
-
-
-class FileMoveError(ValueError):
-    """A stable rejection code without filesystem diagnostics."""
-
 
 RESERVED_NAMES = frozenset(
     {"con", "prn", "aux", "nul"}
@@ -92,17 +89,6 @@ class MoveRequest:
     node_id: str
     destination_library_id: str
     destination_relative_path: str
-
-
-@dataclass(frozen=True)
-class FileIdentity:
-    device: int
-    inode: int
-    size: int
-    mtime_ns: int
-    ctime_ns: int
-    mode: int
-    link_count: int
 
 
 @dataclass(frozen=True)

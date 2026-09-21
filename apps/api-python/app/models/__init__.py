@@ -75,6 +75,11 @@ from app.modules.library.infrastructure.readable_resource_schema import (
     LibrarySourceNodeInterpretation,
     LibrarySourceNodeMetadata,
 )
+from app.modules.metadata.infrastructure.standard_writeback_schema import (
+    MetadataStandardWriteOperation,
+    MetadataStandardWritePlan,
+    MetadataStandardWriteTarget,
+)
 from app.modules.reader.infrastructure.persistence.models import (
     ReaderBookmarkV5,
     ReaderProgressMutationV5,
@@ -113,6 +118,9 @@ __all__ = [
     "MetadataLookupTask",
     "MetadataOpfQueueState",
     "MetadataProviderExecution",
+    "MetadataStandardWriteOperation",
+    "MetadataStandardWritePlan",
+    "MetadataStandardWriteTarget",
     "MetadataSuggestion",
     "MetadataWritebackOperation",
     "MetadataWritebackPreparation",

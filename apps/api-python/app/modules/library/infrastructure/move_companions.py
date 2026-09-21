@@ -3,7 +3,7 @@
 import os
 from pathlib import Path, PurePosixPath
 
-from app.infrastructure.sidecar_paths import sidecar_opf_paths
+from app.infrastructure.sidecar_paths import same_stem_source_names, sidecar_opf_paths
 from app.modules.library.application.file_move_plans import MoveDestination, MoveSource
 from app.modules.library.domain.file_moves import (
     MAX_FILES,
@@ -52,14 +52,8 @@ def move_companion_paths(
             # metadata.opf / directory-name.opf can describe multiple sibling
             # resources. Moving one resource cannot take another one's metadata.
             raise FileMoveError("SHARED_SIDECAR_REQUIRES_DIRECTORY_MOVE")
-        peers = [
-            name
-            for name in names
-            if collision_key(Path(name).stem) == collision_key(source_path.stem)
-            and Path(name).suffix.lower()
-            not in {".opf", ".jpg", ".jpeg", ".png", ".webp", ".gif"}
-        ]
-        if peers != [source_path.name]:
+        peers = same_stem_source_names(tuple(names), source_path.name)
+        if peers != (source_path.name,):
             raise FileMoveError("AMBIGUOUS_SIDECAR")
         target_opf = target_path.with_suffix(".opf")
         if (

@@ -4,6 +4,7 @@ import os
 import stat
 from pathlib import Path
 
+from app.infrastructure.file_identity import file_identity
 from app.modules.library.application.file_move_plans import (
     DestinationInspection,
     MoveDestination,
@@ -12,7 +13,6 @@ from app.modules.library.application.file_move_plans import (
 from app.modules.library.domain.file_moves import (
     MAX_BYTES,
     MAX_FILES,
-    FileIdentity,
     FileMoveError,
     MoveInventory,
     MoveInventoryEntry,
@@ -22,18 +22,6 @@ from app.modules.library.domain.file_moves import (
 )
 from app.modules.library.infrastructure.move_companions import move_companion_paths
 from app.modules.library.infrastructure.source_file_access import open_library_directory
-
-
-def file_identity(value: os.stat_result) -> FileIdentity:
-    return FileIdentity(
-        value.st_dev,
-        value.st_ino,
-        value.st_size,
-        value.st_mtime_ns,
-        value.st_ctime_ns,
-        value.st_mode,
-        value.st_nlink,
-    )
 
 
 def inspect_move_source(root: Path, relative_path: str) -> MoveInventory:

@@ -58,7 +58,7 @@ class ArchiveWriteProof:
     unchanged_members: tuple[tuple[str, str], ...]
 
 
-def _entries(archive: ZipFile) -> list[ZipInfo]:
+def inspect_archive_entries(archive: ZipFile) -> list[ZipInfo]:
     entries = archive.infolist()
     if (
         len(entries) > ARCHIVE_MEMBER_LIMIT
@@ -85,7 +85,7 @@ def _entries(archive: ZipFile) -> list[ZipInfo]:
     return entries
 
 
-def _metadata_change(
+def preview_archive_metadata(
     archive: ZipFile,
     format: Literal["EPUB", "CBZ", "ZIP"],
     values: PublicationMetadata,
@@ -141,8 +141,8 @@ def write_archive_metadata(
     if destination.seek(0, 2) != 0:
         raise StandardMetadataError("EMPTY_PREPARATION_REQUIRED")
     with ZipFile(BoundedArchiveStream(source)) as original:
-        entries = _entries(original)
-        member, changed = _metadata_change(original, format, values, fields)
+        entries = inspect_archive_entries(original)
+        member, changed = preview_archive_metadata(original, format, values, fields)
         hashes: list[tuple[str, str]] = []
         with ZipFile(destination, "w") as output:
             output.comment = original.comment

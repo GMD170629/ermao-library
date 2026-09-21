@@ -7,6 +7,7 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from app.bootstrap.reader import reader_v5_library_queries
+from app.core.config import get_settings
 from app.core.time import now_timestamp_ms
 from app.db.maintenance import database_maintenance_is_active
 from app.modules.auth.infrastructure.automation_identity import (
@@ -21,6 +22,8 @@ from app.modules.automation.application.grants import (
     RecordGrantUse,
 )
 from app.modules.automation.application.settings import ConfigureAutomation
+from app.modules.automation.application.writeback_plans import BuildStandardWritePlan
+from app.modules.automation.application.writebacks import AutomationWritebacks
 from app.modules.automation.application.writes import AutomationWrites
 from app.modules.automation.infrastructure.credentials import AutomationCredentials
 from app.modules.automation.infrastructure.grants import SqlAlchemyGrantStore
@@ -47,6 +50,9 @@ from app.modules.library.infrastructure.catalog import SqlAlchemyCatalogQueries
 from app.modules.library.infrastructure.file_move_operations import (
     SqlAlchemyFileMoveOperations,
 )
+from app.modules.library.infrastructure.metadata_file_targets import (
+    SqlAlchemyMetadataFileTargets,
+)
 from app.modules.library.infrastructure.metadata_patches import (
     SqlAlchemyMetadataPatches,
 )
@@ -56,9 +62,18 @@ from app.modules.library.infrastructure.persistence.source_tree_repository impor
     SqlAlchemySourceNodeRepository,
 )
 from app.modules.library.infrastructure.queries import SqlAlchemyLibraryQueries
-from app.modules.library.infrastructure.source_file_access import open_library_file
+from app.modules.library.infrastructure.source_file_access import (
+    open_library_directory,
+    open_library_file,
+)
 from app.modules.metadata.infrastructure.standard_files import (
     AnchoredStandardMetadataReader,
+)
+from app.modules.metadata.infrastructure.standard_publication import (
+    StandardMetadataPublication,
+)
+from app.modules.metadata.infrastructure.standard_writeback_store import (
+    SqlAlchemyStandardWritePlans,
 )
 from app.modules.shelf.application.commands import CreateShelf, ShelfWriteStore
 from app.modules.shelf.infrastructure import shelves as shelf_store
@@ -130,6 +145,7 @@ def build_mcp_endpoint(
             lambda db: RecordGrantUse(SqlAlchemyGrantStore(db), db, now_timestamp_ms),
             build_automation_writes,
             build_automation_file_moves,
+            build_automation_writebacks,
         ),
         version,
     )
@@ -164,6 +180,28 @@ def build_automation_file_moves(db: Session) -> AutomationFileMoves:
             lambda: uuid4().hex,
         ),
         SqlAlchemyFileMoveOperations(db),
+        SqlAlchemyReceiptStore(db),
+        RecheckMutationAccess(
+            build_automation_authorizer(db), SqlAlchemyAutomationSettings(db)
+        ),
+        db,
+        now_timestamp_ms,
+        lambda: uuid4().hex,
+    )
+
+
+def build_automation_writebacks(db: Session) -> AutomationWritebacks:
+    return AutomationWritebacks(
+        BuildStandardWritePlan(
+            build_automation_catalog(db),
+            SqlAlchemyMetadataFileTargets(db),
+            StandardMetadataPublication(open_library_directory, open_library_file),
+            now_timestamp_ms,
+            lambda: uuid4().hex,
+        ),
+        SqlAlchemyStandardWritePlans(
+            db, queue_capacity=get_settings().metadata_opf_queue_max_pending
+        ),
         SqlAlchemyReceiptStore(db),
         RecheckMutationAccess(
             build_automation_authorizer(db), SqlAlchemyAutomationSettings(db)

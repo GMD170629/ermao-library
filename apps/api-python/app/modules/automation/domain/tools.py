@@ -28,9 +28,7 @@ TOOL_SCOPES = MappingProxyType(
         "plan_metadata_writeback": frozenset(
             {Scope.FILES_READ, Scope.METADATA_WRITEBACK}
         ),
-        "execute_metadata_writeback": frozenset(
-            {Scope.FILES_READ, Scope.METADATA_WRITEBACK}
-        ),
+        "execute_metadata_writeback": frozenset({Scope.METADATA_WRITEBACK}),
         # Ownership, current target visibility, and the original write scope are
         # checked by operation use cases, not merely by tool discovery.
         "get_operation": frozenset({Scope.LIBRARY_READ}),

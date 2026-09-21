@@ -12,10 +12,10 @@ from sqlalchemy.orm import Session, aliased
 
 from app.contracts.library_file_activity import LibraryFileActivityBusy
 from app.contracts.source_relocation import SourceRelocation
+from app.infrastructure.file_operation_conflicts import file_operation_blocks_library
 from app.models import (
     LibraryBook,
     LibraryBookMetadata,
-    LibraryFileMoveOperation,
     LibraryReadableResource,
     LibraryResourceAsset,
     LibrarySourceNode,
@@ -411,7 +411,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             .outerjoin(anchor, anchor.id == LibraryImportTask.source_node_id)
             .where(
                 LibraryImportTask.state == "QUEUED",
-                ~LibraryFileMoveOperation.blocks_library(LibraryImportTask.library_id),
+                ~file_operation_blocks_library(LibraryImportTask.library_id),
                 executable,
             )
             .order_by(
@@ -443,7 +443,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             .where(
                 LibraryImportTask.id == task_id,
                 LibraryImportTask.state == "QUEUED",
-                ~LibraryFileMoveOperation.blocks_library(LibraryImportTask.library_id),
+                ~file_operation_blocks_library(LibraryImportTask.library_id),
             )
             .values(state="RUNNING")
             .returning(LibraryImportTask.id)

@@ -7,7 +7,7 @@ import stat
 import sys
 from dataclasses import dataclass
 
-from app.modules.library.domain.file_moves import FileMoveError
+from app.contracts.file_operation import FileOperationError
 
 MAX_ATTRIBUTE_BYTES = 2 * 1024 * 1024
 
@@ -47,16 +47,16 @@ def _get_attribute(descriptor: int, name: str) -> bytes:
         ]
         suffix = []
     else:
-        raise FileMoveError("COPY_ATTRIBUTES_UNSUPPORTED")
+        raise FileOperationError("COPY_ATTRIBUTES_UNSUPPORTED")
     size = getter(*arguments, None, 0, *suffix)
     if size < 0:
-        raise FileMoveError("COPY_ATTRIBUTES_UNAVAILABLE")
+        raise FileOperationError("COPY_ATTRIBUTES_UNAVAILABLE")
     if size > MAX_ATTRIBUTE_BYTES:
-        raise FileMoveError("COPY_ATTRIBUTE_LIMIT")
+        raise FileOperationError("COPY_ATTRIBUTE_LIMIT")
     buffer = ctypes.create_string_buffer(size)
     observed = getter(*arguments, buffer, size, *suffix)
     if observed != size:
-        raise FileMoveError("SOURCE_ATTRIBUTES_CHANGED")
+        raise FileOperationError("SOURCE_ATTRIBUTES_CHANGED")
     return buffer.raw
 
 
@@ -77,12 +77,12 @@ def _list_attributes(descriptor: int) -> tuple[str, ...]:
         suffix = []
     size = function(descriptor, None, 0, *suffix)
     if size < 0:
-        raise FileMoveError("COPY_ATTRIBUTES_UNAVAILABLE")
+        raise FileOperationError("COPY_ATTRIBUTES_UNAVAILABLE")
     if size > MAX_ATTRIBUTE_BYTES:
-        raise FileMoveError("COPY_ATTRIBUTE_LIMIT")
+        raise FileOperationError("COPY_ATTRIBUTE_LIMIT")
     buffer = ctypes.create_string_buffer(size)
     if function(descriptor, buffer, size, *suffix) != size:
-        raise FileMoveError("SOURCE_ATTRIBUTES_CHANGED")
+        raise FileOperationError("SOURCE_ATTRIBUTES_CHANGED")
     return tuple(sorted(os.fsdecode(name) for name in buffer.raw.split(b"\0") if name))
 
 
@@ -121,7 +121,7 @@ def _set_attribute(descriptor: int, name: str, value: bytes | None) -> None:
             ]
             result = setter(descriptor, os.fsencode(name), buffer, len(value), 0)
     if result != 0:
-        raise FileMoveError("COPY_ATTRIBUTES_UNSUPPORTED")
+        raise FileOperationError("COPY_ATTRIBUTES_UNSUPPORTED")
 
 
 def _darwin_acl(descriptor: int, replacement: bytes | None = None) -> bytes:
@@ -142,10 +142,10 @@ def _darwin_acl(descriptor: int, replacement: bytes | None = None) -> bytes:
         encoded = ctypes.create_string_buffer(replacement)
         acl = library.acl_copy_int(encoded)
         if not acl:
-            raise FileMoveError("COPY_ACL_UNAVAILABLE")
+            raise FileOperationError("COPY_ACL_UNAVAILABLE")
         try:
             if library.acl_set_fd_np(descriptor, acl, 0x100) != 0:
-                raise FileMoveError("COPY_ACL_UNSUPPORTED")
+                raise FileOperationError("COPY_ACL_UNSUPPORTED")
         finally:
             library.acl_free(acl)
     acl = library.acl_get_fd_np(descriptor, 0x100)
@@ -156,15 +156,15 @@ def _darwin_acl(descriptor: int, replacement: bytes | None = None) -> bytes:
         library.acl_init.restype = ctypes.c_void_p
         acl = library.acl_init(0)
     if not acl:
-        raise FileMoveError("COPY_ACL_UNAVAILABLE")
+        raise FileOperationError("COPY_ACL_UNAVAILABLE")
     try:
         size = library.acl_size(acl)
         if not 0 <= size <= MAX_ATTRIBUTE_BYTES:
-            raise FileMoveError("COPY_ATTRIBUTE_LIMIT")
+            raise FileOperationError("COPY_ATTRIBUTE_LIMIT")
         buffer = ctypes.create_string_buffer(size)
         count = library.acl_copy_ext(buffer, acl, size)
         if count < 0 or count > size:
-            raise FileMoveError("COPY_ACL_UNAVAILABLE")
+            raise FileOperationError("COPY_ACL_UNAVAILABLE")
         return buffer.raw[:count]
     finally:
         library.acl_free(acl)
@@ -172,7 +172,7 @@ def _darwin_acl(descriptor: int, replacement: bytes | None = None) -> bytes:
 
 def read_copy_attributes(descriptor: int) -> CopiedFileAttributes:
     if sys.platform != "darwin" and not sys.platform.startswith("linux"):
-        raise FileMoveError("COPY_ATTRIBUTES_UNSUPPORTED")
+        raise FileOperationError("COPY_ATTRIBUTES_UNSUPPORTED")
     value = os.fstat(descriptor)
     attributes: list[tuple[str, bytes]] = []
     total = 0
@@ -180,7 +180,7 @@ def read_copy_attributes(descriptor: int) -> CopiedFileAttributes:
         data = _get_attribute(descriptor, name)
         total += len(data)
         if total > MAX_ATTRIBUTE_BYTES:
-            raise FileMoveError("COPY_ATTRIBUTE_LIMIT")
+            raise FileOperationError("COPY_ATTRIBUTE_LIMIT")
         attributes.append((name, data))
     return CopiedFileAttributes(
         value.st_uid,
@@ -208,12 +208,12 @@ def apply_copy_attributes(descriptor: int, expected: CopiedFileAttributes) -> No
         _darwin_acl(descriptor, expected.acl)
     if expected.flags:
         if sys.platform != "darwin":
-            raise FileMoveError("COPY_FLAGS_UNSUPPORTED")
+            raise FileOperationError("COPY_FLAGS_UNSUPPORTED")
         library = ctypes.CDLL(None, use_errno=True)
         library.fchflags.argtypes = [ctypes.c_int, ctypes.c_uint]
         library.fchflags.restype = ctypes.c_int
         if library.fchflags(descriptor, expected.flags) != 0:
-            raise FileMoveError("COPY_FLAGS_UNSUPPORTED")
+            raise FileOperationError("COPY_FLAGS_UNSUPPORTED")
     os.utime(descriptor, ns=(observed.st_atime_ns, expected.mtime_ns))
     if read_copy_attributes(descriptor) != expected:
-        raise FileMoveError("COPY_ATTRIBUTES_NOT_PRESERVED")
+        raise FileOperationError("COPY_ATTRIBUTES_NOT_PRESERVED")

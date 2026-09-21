@@ -34,6 +34,7 @@ from app.modules.automation.presentation.metadata import (
     MetadataChangeInput,
     RefreshMetadataInput,
 )
+from app.modules.automation.presentation.writebacks import register_writebacks
 from app.modules.library.public import (
     CatalogBookFilter,
     MetadataPatchError,
@@ -355,6 +356,7 @@ def build_catalog_server(
             )
 
     register_file_moves(server, runtime, snapshot)
+    register_writebacks(server, runtime, snapshot)
     return server
 
 

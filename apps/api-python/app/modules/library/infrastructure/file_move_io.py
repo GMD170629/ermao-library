@@ -1,12 +1,10 @@
 """Descriptor-relative exclusive publication for journalled file moves."""
 
-import ctypes
-import errno
 import os
-import sys
 from pathlib import Path
 
 from app.contracts.controlled_file_slots import is_controlled_file_slot
+from app.infrastructure.exclusive_rename import exclusive_rename
 from app.modules.library.application.file_move_plans import (
     DestinationInspection,
     PlannedMove,
@@ -21,56 +19,6 @@ from app.modules.library.infrastructure.move_inventory import (
     require_writable_move_directory,
 )
 from app.modules.library.infrastructure.source_file_access import open_library_directory
-
-
-def exclusive_rename(
-    source_fd: int, source: str, destination_fd: int, destination: str
-) -> None:
-    """No fallback to overwrite-capable rename, even on unsupported mounts.
-
-    Linux: https://man7.org/linux/man-pages/man2/rename.2.html
-    Darwin: renameatx_np RENAME_EXCL, defined as 0x00000004 in stdio.h.
-    """
-    if any(
-        name in ("", ".", "..") or "/" in name or "\\" in name or "\x00" in name
-        for name in (source, destination)
-    ):
-        raise FileMoveError("INVALID_FILE_NAME")
-    library = ctypes.CDLL(None, use_errno=True)
-    if sys.platform == "darwin":
-        function = getattr(library, "renameatx_np", None)
-        flag = 4
-    elif sys.platform.startswith("linux"):
-        function = getattr(library, "renameat2", None)
-        flag = 1
-    else:
-        raise FileMoveError("EXCLUSIVE_RENAME_UNSUPPORTED")
-    if function is None:
-        raise FileMoveError("EXCLUSIVE_RENAME_UNSUPPORTED")
-    function.argtypes = [
-        ctypes.c_int,
-        ctypes.c_char_p,
-        ctypes.c_int,
-        ctypes.c_char_p,
-        ctypes.c_uint,
-    ]
-    function.restype = ctypes.c_int
-    if (
-        function(
-            source_fd,
-            os.fsencode(source),
-            destination_fd,
-            os.fsencode(destination),
-            flag,
-        )
-        != 0
-    ):
-        code = ctypes.get_errno()
-        if code == errno.EEXIST:
-            raise FileMoveError("DESTINATION_EXISTS")
-        if code in (errno.ENOSYS, errno.ENOTSUP, errno.EINVAL):
-            raise FileMoveError("EXCLUSIVE_RENAME_UNSUPPORTED")
-        raise FileMoveError("FILE_PUBLISH_FAILED") from OSError(code, os.strerror(code))
 
 
 def publish_same_device_move(move: PlannedMove) -> FileIdentity:

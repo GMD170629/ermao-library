@@ -239,7 +239,7 @@ class AutomationCatalog:
         target_id: str,
         node_id: str,
     ) -> None:
-        access.require(Scope.FILES_READ, Scope.METADATA_WRITE)
+        access.require(Scope.FILES_READ)
         target = self.metadata.snapshot(
             target_type, target_id, access.permissions.library_ids
         )

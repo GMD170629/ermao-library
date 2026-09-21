@@ -14,22 +14,23 @@ from uuid import uuid4
 from sqlalchemy import case, delete, func, insert, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 from sqlalchemy.sql.base import Executable
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.contracts.source_relocation import SourceRelocation
 from app.core.sql_batches import sqlite_parameter_chunks
+from app.infrastructure.file_operation_conflicts import file_operation_blocks_library
 from app.models import (
     Library,
     LibraryBook,
     LibraryBookMetadata,
-    LibraryFileMoveOperation,
     LibraryImportTask,
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
     LibrarySourceNode,
+    MetadataStandardWriteTarget,
 )
 from app.models.common import db_timestamp
 from app.models.organize import (
@@ -309,6 +310,38 @@ def load_metadata_writeback_projection(
     )
 
 
+def reserve_direct_writeback_targets(
+    db: Session, count: int, capacity: int, now: datetime
+) -> bool:
+    """Use the existing queue counter for already-expanded explicit targets."""
+    db.execute(
+        sqlite_insert(MetadataOpfQueueState)
+        .values(
+            id=QUEUE_STATE_ID,
+            pending_targets=0,
+            pending_preparations=0,
+            updated_at=now,
+        )
+        .on_conflict_do_nothing(index_elements=[MetadataOpfQueueState.id])
+    )
+    result = db.execute(_target_capacity_reservation(count, capacity, now))
+    return bool(cast(CursorResult[Any], result).rowcount)
+
+
+def _target_capacity_reservation(count: int, capacity: int, now: datetime):
+    return (
+        update(MetadataOpfQueueState)
+        .where(
+            MetadataOpfQueueState.id == QUEUE_STATE_ID,
+            MetadataOpfQueueState.pending_targets <= capacity - count,
+        )
+        .values(
+            pending_targets=MetadataOpfQueueState.pending_targets + count,
+            updated_at=now,
+        )
+    )
+
+
 def enqueue_prepared_writeback_intents(
     db: Session,
     intents: tuple[PreparedWritebackIntent, ...],
@@ -582,13 +615,25 @@ def discard_relocated_writebacks(db: Session, change: SourceRelocation) -> int:
             select(MetadataWritebackTarget.id)
             .where(
                 MetadataWritebackTarget.operation_id.in_(ids),
-                MetadataWritebackTarget.status.in_(("RUNNING", "PREPARED")),
+                MetadataWritebackTarget.status.in_(("RUNNING", "PREPARED", "REVIEW")),
             )
             .limit(1)
         )
         is not None
     ):
         raise RuntimeError("WRITEBACK_STILL_RUNNING")
+    db.execute(
+        update(MetadataStandardWriteTarget)
+        .where(
+            MetadataStandardWriteTarget.queue_target_id.in_(
+                select(MetadataWritebackTarget.id).where(
+                    MetadataWritebackTarget.operation_id.in_(ids)
+                )
+            ),
+            MetadataStandardWriteTarget.stage == "QUEUED",
+        )
+        .values(stage="FAILED", error_code="SOURCE_MOVED", recovery_released=True)
+    )
     return discard_operations(db, ids)
 
 
@@ -812,15 +857,7 @@ def prepare_preparation_finalization(
         ),
     )
     reserve_statement = (
-        update(MetadataOpfQueueState)
-        .where(
-            MetadataOpfQueueState.id == QUEUE_STATE_ID,
-            MetadataOpfQueueState.pending_targets <= max_pending_targets - len(targets),
-        )
-        .values(
-            pending_targets=MetadataOpfQueueState.pending_targets + len(targets),
-            updated_at=now,
-        )
+        _target_capacity_reservation(len(targets), max_pending_targets, now)
         if targets
         else None
     )
@@ -918,9 +955,42 @@ def claim_next_target(
     now: datetime,
     lease_seconds: int = WRITEBACK_LEASE_SECONDS,
 ) -> dict[str, Any] | None:
+    competing_queue = aliased(MetadataWritebackTarget)
+    competing_operation = aliased(MetadataWritebackOperation)
+    competing_book = aliased(LibraryBook)
+    standard_busy = (
+        select(MetadataStandardWriteTarget.queue_target_id)
+        .where(
+            MetadataStandardWriteTarget.queue_target_id == MetadataWritebackTarget.id,
+            or_(
+                select(LibraryImportTask.id)
+                .where(
+                    LibraryImportTask.library_id
+                    == MetadataStandardWriteTarget.library_id,
+                    LibraryImportTask.state == "RUNNING",
+                )
+                .exists(),
+                select(competing_queue.id)
+                .join(
+                    competing_operation,
+                    competing_operation.id == competing_queue.operation_id,
+                )
+                .join(competing_book, competing_book.id == competing_operation.book_id)
+                .where(
+                    competing_book.library_id == MetadataStandardWriteTarget.library_id,
+                    competing_queue.id != MetadataWritebackTarget.id,
+                    competing_queue.status.in_(("RUNNING", "PREPARED", "REVIEW")),
+                )
+                .correlate(MetadataStandardWriteTarget, MetadataWritebackTarget)
+                .exists(),
+            ),
+        )
+        .exists()
+    )
     candidate_id = (
         select(MetadataWritebackTarget.id)
         .where(
+            ~standard_busy,
             or_(
                 MetadataWritebackTarget.status.in_(("RUNNING", "PREPARED")),
                 ~select(MetadataWritebackOperation.id)
@@ -928,7 +998,7 @@ def claim_next_target(
                 .where(
                     MetadataWritebackOperation.id
                     == MetadataWritebackTarget.operation_id,
-                    LibraryFileMoveOperation.blocks_library(LibraryBook.library_id),
+                    file_operation_blocks_library(LibraryBook.library_id),
                 )
                 .exists(),
             ),

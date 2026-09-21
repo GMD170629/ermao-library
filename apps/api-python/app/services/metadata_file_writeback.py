@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -294,6 +295,7 @@ def process_next_metadata_writeback(
     *,
     owner_id: str = "metadata-writeback-worker",
     prefer_preparation: bool = True,
+    standard_handler: Callable[[Session, dict[str, Any], str], None] | None = None,
 ) -> bool:
     if prefer_preparation:
         preparation = _claim_preparation_uow(db, owner_id)
@@ -322,6 +324,11 @@ def process_next_metadata_writeback(
             return True
     if target is None:
         return False
+    if "standard_operation_id" in target.get("payload", {}):
+        if standard_handler is None:
+            raise RuntimeError("STANDARD_WRITE_HANDLER_REQUIRED")
+        standard_handler(db, target, owner_id)
+        return True
     target_id = str(target["id"])
     prepared_path = str(target.get("preparedPath") or "")
     try:

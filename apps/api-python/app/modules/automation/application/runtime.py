@@ -6,9 +6,18 @@ from typing import Protocol
 
 from app.modules.automation.application.catalog import AutomationCatalog
 from app.modules.automation.application.file_moves import AutomationFileMoves
+from app.modules.automation.application.operations import AutomationOperations
 from app.modules.automation.application.settings import AutomationServiceSettings
+from app.modules.automation.application.writebacks import AutomationWritebacks
 from app.modules.automation.application.writes import AutomationWrites
 from app.modules.automation.domain.access import EffectiveAccess
+
+WritebackInvocation = Callable[
+    [AutomationWritebacks, EffectiveAccess], dict[str, object]
+]
+OperationInvocation = Callable[
+    [AutomationOperations, EffectiveAccess], dict[str, object]
+]
 
 CatalogInvocation = Callable[[AutomationCatalog, EffectiveAccess], dict[str, object]]
 
@@ -37,4 +46,11 @@ class AutomationRuntime(Protocol):
 
     def files(
         self, access: EffectiveAccess, operation: FileInvocation
+    ) -> dict[str, object]: ...
+
+    def writebacks(
+        self, access: EffectiveAccess, operation: WritebackInvocation
+    ) -> dict[str, object]: ...
+    def operations(
+        self, access: EffectiveAccess, operation: OperationInvocation
     ) -> dict[str, object]: ...

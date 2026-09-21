@@ -4,6 +4,16 @@ from app.modules.metadata.application.standard_files import (
     StandardMetadataError,
     StandardMetadataObservation,
 )
+from app.modules.metadata.application.standard_writeback import (
+    PlannedStandardWrite,
+    PreparedStandardFile,
+    StandardWriteFile,
+    StandardWriteFormat,
+    StandardWriteInspectionPort,
+    StandardWritePlan,
+    StandardWritePlanStore,
+    StandardWriteStatus,
+)
 from app.modules.metadata.domain.source_name import metadata_from_source_name
 
 """Public metadata capability contracts."""
@@ -62,6 +72,8 @@ __all__ = [
     "MetadataWritebackProjection",
     "MetadataWritebackResourceProjection",
     "OpfMetadataError",
+    "PlannedStandardWrite",
+    "PreparedStandardFile",
     "PreparedWritebackIntent",
     "ProviderConfigField",
     "ProviderManifest",
@@ -70,6 +82,12 @@ __all__ = [
     "StandardFileMetadataReader",
     "StandardMetadataError",
     "StandardMetadataObservation",
+    "StandardWriteFile",
+    "StandardWriteFormat",
+    "StandardWriteInspectionPort",
+    "StandardWritePlan",
+    "StandardWritePlanStore",
+    "StandardWriteStatus",
     "cover_media_type",
     "load_metadata_writeback_projection",
     "metadata_from_source_name",

@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-from app.modules.library.infrastructure.copied_file_attributes import (
+from app.infrastructure.copied_file_attributes import (
     apply_copy_attributes,
     read_copy_attributes,
 )

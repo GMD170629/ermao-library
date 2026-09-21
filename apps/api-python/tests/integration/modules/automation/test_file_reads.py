@@ -107,7 +107,8 @@ def test_opf_read_is_pure_and_ambiguous_sidecars_need_selection(db_session, tmp_
     assert result["metadata"]["title"] == "文件标题"
     assert result["relative_path"] == "allowed/metadata.opf"
     assert len(result["file_revision"]) == 64
-    assert result["writable_fields"] == ()
+    assert "title" in result["writable_fields"]
+    assert "cover" not in result["writable_fields"]
     assert {
         str(path): path.read_bytes() for path in root.rglob("*") if path.is_file()
     } == initial

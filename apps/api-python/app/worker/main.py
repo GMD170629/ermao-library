@@ -18,6 +18,11 @@ from app.bootstrap.library_scan_runtime import (
 )
 from app.bootstrap.metadata import build_automatic_metadata_request_gate
 from app.bootstrap.prestart import verify_current_schema
+from app.bootstrap.standard_writeback import (
+    maintain_standard_writeback,
+    process_standard_writeback,
+    recover_standard_writeback,
+)
 from app.bootstrap.readable_resource_pipeline import (
     build_readable_resource_pipeline,
     build_readable_resource_worker,
@@ -129,6 +134,9 @@ def main() -> None:
                 settings,
                 heartbeat_db_factory=HeartbeatSessionLocal,
                 automatic_request_gate=build_automatic_metadata_request_gate(),
+                standard_handler=process_standard_writeback,
+                standard_maintenance=maintain_standard_writeback,
+                standard_recovery=recover_standard_writeback,
             )
             if not stop_event.is_set():
                 metadata_worker.start()

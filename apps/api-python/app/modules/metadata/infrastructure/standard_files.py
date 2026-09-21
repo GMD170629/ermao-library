@@ -1,6 +1,7 @@
 """Read standard metadata from an anchored, bounded stream, without extraction."""
 
 import hashlib
+import math
 import os
 from collections.abc import Callable
 from contextlib import AbstractContextManager
@@ -28,6 +29,19 @@ from app.modules.metadata.application.standard_files import (
     StandardMetadataError,
     StandardMetadataObservation,
 )
+from app.modules.metadata.infrastructure.archive_writeback import (
+    BoundedArchiveStream,
+    inspect_archive_entries,
+    preview_archive_metadata,
+)
+from app.modules.metadata.infrastructure.selective_comicinfo import (
+    COMIC_WRITABLE_FIELDS,
+    patch_comicinfo,
+)
+from app.modules.metadata.infrastructure.selective_opf import (
+    OPF_WRITABLE_FIELDS,
+    patch_opf_metadata,
+)
 
 FileOpener = Callable[[Path, str], AbstractContextManager[int]]
 
@@ -38,7 +52,7 @@ def file_revision(stat: os.stat_result) -> str:
     ).hexdigest()
 
 
-def _comic_metadata(content: bytes) -> PublicationMetadata:
+def read_comic_metadata(content: bytes) -> PublicationMetadata:
     if b"<!DOCTYPE" in content.upper() or b"<!ENTITY" in content.upper():
         raise StandardMetadataError("INVALID_METADATA")
     root = etree.fromstring(
@@ -48,6 +62,22 @@ def _comic_metadata(content: bytes) -> PublicationMetadata:
         raise StandardMetadataError("INVALID_METADATA")
     parsed = parse_comic_info(etree.tostring(root, encoding="unicode"))
     author = parsed.get("writer") or parsed.get("penciller")
+
+    def number(name: str) -> float | None:
+        try:
+            value = float(root.findtext(name) or "")
+            return value if math.isfinite(value) else None
+        except ValueError:
+            return None
+
+    date = (
+        "-".join(
+            str(root.findtext(name))
+            for name in ("Year", "Month", "Day")
+            if root.findtext(name)
+        )
+        or None
+    )
     return PublicationMetadata(
         title=parsed.get("title"),
         authors=(author,) if author else (),
@@ -56,6 +86,10 @@ def _comic_metadata(content: bytes) -> PublicationMetadata:
         subjects=tuple(parsed.get("tags") or ()),
         series_name=parsed.get("series"),
         volume_index=parsed.get("volume"),
+        series_index=number("Number"),
+        language=root.findtext("LanguageISO"),
+        isbn=root.findtext("GTIN"),
+        published_at=date,
     )
 
 
@@ -164,6 +198,7 @@ class AnchoredStandardMetadataReader:
     def _read_one(
         self, root: Path, relative_path: str, source: MetadataFileSource
     ) -> StandardMetadataObservation:
+        writable: tuple[str, ...] = ()
         suffix = Path(relative_path).suffix.lower()
         with self._open(root, relative_path) as descriptor:
             before = os.fstat(descriptor)
@@ -181,11 +216,22 @@ class AnchoredStandardMetadataReader:
                         metadata = (
                             parse_opf_metadata(content)
                             if suffix == ".opf"
-                            else _comic_metadata(content)
+                            else read_comic_metadata(content)
                         )
                         format_name = "OPF" if suffix == ".opf" else "ComicInfo"
+                        try:
+                            if suffix == ".opf":
+                                patch_opf_metadata(
+                                    content, metadata, frozenset({"title"})
+                                )
+                                writable = tuple(sorted(OPF_WRITABLE_FIELDS))
+                            else:
+                                patch_comicinfo(content, metadata, frozenset({"title"}))
+                                writable = tuple(sorted(COMIC_WRITABLE_FIELDS))
+                        except StandardMetadataError:
+                            writable = ()
                     elif suffix in {".epub", ".cbz", ".zip"}:
-                        with ZipFile(stream) as archive:
+                        with ZipFile(BoundedArchiveStream(stream)) as archive:
                             if suffix == ".epub":
                                 _name, content = read_epub_package(archive)
                                 metadata = parse_opf_metadata(content)
@@ -198,10 +244,27 @@ class AnchoredStandardMetadataReader:
                                 ]
                                 if len(entries) != 1:
                                     raise StandardMetadataError("METADATA_NOT_FOUND")
-                                metadata = _comic_metadata(
+                                metadata = read_comic_metadata(
                                     read_zip_metadata(archive, entries[0])
                                 )
                                 format_name = "ComicInfo"
+                            try:
+                                inspect_archive_entries(archive)
+                                preview_archive_metadata(
+                                    archive,
+                                    "EPUB" if suffix == ".epub" else "CBZ",
+                                    metadata,
+                                    frozenset({"title"}),
+                                )
+                                writable = tuple(
+                                    sorted(
+                                        OPF_WRITABLE_FIELDS
+                                        if suffix == ".epub"
+                                        else COMIC_WRITABLE_FIELDS
+                                    )
+                                )
+                            except StandardMetadataError:
+                                writable = ()
                     elif suffix == ".pdf":
                         pdf = StrictMetadataPdfReader(
                             stream, strict=True, root_object_recovery_limit=0
@@ -240,5 +303,10 @@ class AnchoredStandardMetadataReader:
         # Covers and unparsed extension blobs are not exposed by this read API.
         metadata = replace(metadata, cover_href=None, unparsed_values=())
         return StandardMetadataObservation(
-            source, relative_path, format_name, file_revision(before), metadata
+            source,
+            relative_path,
+            format_name,
+            file_revision(before),
+            metadata,
+            writable,
         )

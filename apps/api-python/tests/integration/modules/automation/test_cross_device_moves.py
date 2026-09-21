@@ -169,7 +169,7 @@ def test_real_cross_device_operation_verifies_copy_and_retains_recovery_source(
     db_session.expire_all()
     assert db_session.get(LibraryBook, "allowed").library_id == "private-library"
 
-    from app.modules.library.infrastructure.copied_file_attributes import (
+    from app.infrastructure.copied_file_attributes import (
         read_copy_attributes,
     )
 

@@ -3,9 +3,10 @@
 from datetime import UTC, datetime
 
 from pydantic import TypeAdapter
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session, aliased
 
+from app.infrastructure.file_recovery_budget import reserved_file_recovery_bytes
 from app.models import LibraryBook, LibraryImportTask
 from app.models.organize import MetadataWritebackOperation, MetadataWritebackTarget
 from app.modules.library.application.execute_file_moves import MoveExecution
@@ -92,20 +93,7 @@ class SqlAlchemyFileMoveOperations:
             return existing
         if plan.expires_at_ms <= now_ms:
             raise FileMoveError("PLAN_EXPIRED")
-        reserved = int(
-            self._db.scalar(
-                select(
-                    func.coalesce(func.sum(LibraryFileMoveTarget.byte_count), 0)
-                ).where(
-                    LibraryFileMoveTarget.copy_required.is_(True),
-                    LibraryFileMoveTarget.stage.not_in(("FAILED", "CANCELLED")),
-                    LibraryFileMoveTarget.recovery["source_backup_cleared_at"]
-                    .as_integer()
-                    .is_(None),
-                )
-            )
-            or 0
-        )
+        reserved = reserved_file_recovery_bytes(self._db)
         requested = sum(
             move.inventory.byte_count for move in plan.moves if move.cross_device
         )
@@ -229,7 +217,7 @@ class SqlAlchemyFileMoveOperations:
             .join(LibraryBook, LibraryBook.id == MetadataWritebackOperation.book_id)
             .where(
                 LibraryBook.library_id.in_(libraries),
-                MetadataWritebackTarget.status.in_(("RUNNING", "PREPARED")),
+                MetadataWritebackTarget.status.in_(("RUNNING", "PREPARED", "REVIEW")),
             )
             .exists()
         )

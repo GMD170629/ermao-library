@@ -27,7 +27,11 @@ from app.models import (
 from app.models.auth import User
 from app.models.shelf import Shelf, ShelfBook
 from app.modules.automation.application.settings import AutomationServiceSettings
-from app.modules.automation.domain.access import GrantPermissions, Scope
+from app.modules.automation.domain.access import (
+    GrantPermissions,
+    Scope,
+    WritebackTarget,
+)
 
 
 def seed(db):
@@ -270,13 +274,18 @@ def test_official_sdk_real_catalog_and_revocation(db_session, test_settings, pre
                     Scope.METADATA_WRITE,
                     Scope.FILES_READ,
                     Scope.FILES_MOVE,
+                    Scope.METADATA_WRITEBACK,
                 }
             )
             with factory() as db:
                 writer = build_grant_manager(db).create(
                     user_id="mcp-owner",
                     name="writer",
-                    permissions=replace(created.grant.permissions, scopes=scopes),
+                    permissions=replace(
+                        created.grant.permissions,
+                        scopes=scopes,
+                        writeback_targets=frozenset({WritebackTarget.SIDECAR}),
+                    ),
                 )
                 build_automation_settings(db).update(
                     "mcp-owner",
@@ -490,6 +499,71 @@ def test_official_sdk_real_catalog_and_revocation(db_session, test_settings, pre
                 assert not cancelled.is_error, cancelled
                 assert cancelled.structured_content["status"] == "CANCELLED"
                 assert not (source_root / "cancelled").exists()
+                schema = await client.call_tool(
+                    "get_metadata_schema",
+                    {"target_type": "book", "target_id": "allowed"},
+                )
+                before_writeback = (source_root / "renamed/metadata.opf").read_bytes()
+                standard_plan = await client.call_tool(
+                    "plan_metadata_writeback",
+                    {
+                        "targets": [
+                            {
+                                "target_type": "book",
+                                "target_id": "allowed",
+                                "node_id": "allowed-node",
+                                "expected_revision": schema.structured_content[
+                                    "expected_revision"
+                                ],
+                                "mode": "opf",
+                                "fields": ["title"],
+                            }
+                        ]
+                    },
+                )
+                assert not standard_plan.is_error, standard_plan
+                assert str(source_root) not in str(standard_plan)
+                assert (
+                    source_root / "renamed/metadata.opf"
+                ).read_bytes() == before_writeback
+                writeback_args = {
+                    "plan_id": standard_plan.structured_content["plan_id"],
+                    "request_id": "sdk-writeback",
+                }
+                standard_task = await client.call_tool(
+                    "execute_metadata_writeback", writeback_args
+                )
+                assert not standard_task.is_error, standard_task
+                assert (
+                    await client.call_tool("execute_metadata_writeback", writeback_args)
+                ).structured_content == standard_task.structured_content
+                standard_id = standard_task.structured_content["operation_id"]
+
+                def writeback_worker():
+                    from app.bootstrap.standard_writeback import (
+                        process_standard_writeback,
+                    )
+                    from app.services.metadata_file_writeback import (
+                        process_next_metadata_writeback,
+                    )
+
+                    with factory() as db:
+                        assert process_next_metadata_writeback(
+                            db,
+                            test_settings,
+                            standard_handler=process_standard_writeback,
+                        )
+
+                await asyncio.to_thread(writeback_worker)
+                standard_result = await client.call_tool(
+                    "get_operation", {"operation_id": standard_id}
+                )
+                assert not standard_result.is_error, standard_result
+                assert (
+                    standard_result.structured_content["targets"][0]["stage"]
+                    == "COMPLETED"
+                )
+                assert "来自 MCP" in (source_root / "renamed/metadata.opf").read_text()
 
                 assert (
                     await client.call_tool("create_shelf", {**args, "name": "Changed"})

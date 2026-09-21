@@ -12,9 +12,11 @@ from app.modules.automation.application.runtime import (
     AutomationRequest,
     AutomationRuntime,
     FileInvocation,
+    OperationInvocation,
 )
 from app.modules.automation.domain.access import AutomationAccessError, Scope
 from app.modules.library.public import FileMoveError, MoveRequest, render_move_template
+from app.modules.metadata.public import StandardMetadataError
 
 Identifier = Annotated[str, Field(min_length=1, max_length=191)]
 RelativePath = Annotated[str, Field(min_length=1, max_length=4096)]
@@ -43,7 +45,8 @@ class FileMoveInput(BaseModel):
         destination = self.destination_relative_path
         if destination is None:
             destination = render_move_template(
-                self.template or "", {str(key): value for key, value in self.template_values.items()}
+                self.template or "",
+                {str(key): value for key, value in self.template_values.items()},
             )
         return MoveRequest(
             self.source_node_id, self.destination_library_id, destination
@@ -101,16 +104,26 @@ def register_file_moves(
                 lambda commands, access: commands.execute(access, plan_id, request_id)
             )
 
+    async def invoke_operation(operation: OperationInvocation) -> dict[str, object]:
+        try:
+            return await run_in_threadpool(
+                runtime.operations, snapshot.access, operation
+            )
+        except (AutomationAccessError, FileMoveError, StandardMetadataError) as error:
+            raise ToolError(f"{error}: 请求被拒绝 / Request rejected") from None
+        except Exception:  # noqa: BLE001 - redact infrastructure diagnostics.
+            raise ToolError("INTERNAL_ERROR: 操作失败 / Operation failed") from None
+
     @server.tool(annotations=read)
     async def get_operation(operation_id: Identifier) -> dict[str, object]:
         """查询本人授权范围内文件任务的真实阶段与逐项结果 / Read the actual stages and per-target results of an owned file operation."""
-        return await invoke(
+        return await invoke_operation(
             lambda commands, access: commands.progress(access, operation_id)
         )
 
     @server.tool(annotations=write)
     async def cancel_operation(operation_id: Identifier) -> dict[str, object]:
         """取消尚未执行的文件项目；已发布项目完成必要的一致性修复 / Cancel unstarted file targets; published targets finish required consistency repair."""
-        return await invoke(
+        return await invoke_operation(
             lambda commands, access: commands.cancel(access, operation_id)
         )
