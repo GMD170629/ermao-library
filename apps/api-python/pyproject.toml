@@ -24,7 +24,8 @@ dependencies = [
   "pypdf>=5.7.0",
   "rarfile>=4.4",
   "python-multipart>=0.0.20",
-  "watchdog>=4.0.0"
+  "watchdog>=4.0.0",
+  "mcp==2.2.0",
 ]
 
 [project.optional-dependencies]
