@@ -23,6 +23,7 @@ from app.infrastructure.sidecar_paths import same_stem_source_names, sidecar_opf
 from app.modules.metadata.application.opf import MAX_OPF_BYTES, parse_opf_metadata
 from app.modules.metadata.application.standard_files import StandardMetadataError
 from app.modules.metadata.application.standard_writeback import (
+    STANDARD_PREPARATION_OVERHEAD,
     PreparedStandardFile,
     StandardPreparationError,
     StandardWriteFile,
@@ -34,6 +35,14 @@ from app.modules.metadata.infrastructure.archive_writeback import (
     inspect_archive_entries,
     preview_archive_metadata,
     write_archive_metadata,
+)
+from app.modules.metadata.infrastructure.audio_writeback import (
+    inspect_audio_write,
+    write_audio_metadata,
+)
+from app.modules.metadata.infrastructure.pdf_writeback import (
+    inspect_pdf_write,
+    write_pdf_metadata,
 )
 from app.modules.metadata.infrastructure.selective_comicinfo import patch_comicinfo
 from app.modules.metadata.infrastructure.selective_opf import patch_opf_metadata
@@ -124,6 +133,8 @@ class StandardMetadataPublication:
                 else:
                     raise StandardMetadataError("SOURCE_REQUIRED")
             else:
+                if original.mode & 0o222 == 0:
+                    raise StandardMetadataError("READ_ONLY_FILE")
                 if not stat.S_ISREG(original.mode) or original.link_count != 1:
                     raise StandardMetadataError("SOURCE_CHANGED_OR_HARDLINK")
                 with self._file(root, relative_path) as descriptor:
@@ -151,6 +162,10 @@ class StandardMetadataPublication:
                                     before = read_comic_metadata(
                                         read_zip_metadata(archive, member)
                                     )
+                        elif format in {"MP3", "M4A", "M4B", "FLAC"}:
+                            before = inspect_audio_write(source, format, values, fields)
+                        elif format == "PDF":
+                            before = inspect_pdf_write(source, values, fields)
                         else:
                             raise StandardMetadataError("WRITER_NOT_AVAILABLE")
                     if file_identity(os.fstat(descriptor)) != original:
@@ -184,8 +199,21 @@ class StandardMetadataPublication:
 
     def prepare(self, target: StandardWriteFile) -> PreparedStandardFile:
         self._validate_slots(target)
-        if target.format not in {"OPF", "ComicInfo", "EPUB", "CBZ", "ZIP"}:
+        if target.format not in {
+            "OPF",
+            "ComicInfo",
+            "EPUB",
+            "CBZ",
+            "ZIP",
+            "MP3",
+            "M4A",
+            "M4B",
+            "FLAC",
+            "PDF",
+        }:
             raise StandardMetadataError("WRITER_NOT_AVAILABLE")
+        if target.original and target.original.mode & 0o222 == 0:
+            raise StandardMetadataError("READ_ONLY_FILE")
         if target.original and (
             target.original.link_count != 1 or not stat.S_ISREG(target.original.mode)
         ):
@@ -197,7 +225,9 @@ class StandardMetadataPublication:
             if not _same_identity(_identity(directory, name), target.original):
                 raise StandardMetadataError("SOURCE_CHANGED")
             available = os.fstatvfs(directory)
-            required = (target.original.size if target.original else 0) + MAX_OPF_BYTES
+            required = (
+                target.original.size if target.original else 0
+            ) + STANDARD_PREPARATION_OVERHEAD
             if (
                 available.f_flag & os.ST_RDONLY
                 or available.f_bavail * available.f_frsize < required
@@ -251,6 +281,21 @@ class StandardMetadataPublication:
                                     source,
                                     output,
                                     format=target.format,
+                                    values=target.values,
+                                    fields=target.fields,
+                                )
+                            elif target.format in {"MP3", "M4A", "M4B", "FLAC"}:
+                                write_audio_metadata(
+                                    source,
+                                    output,
+                                    format=target.format,
+                                    values=target.values,
+                                    fields=target.fields,
+                                )
+                            elif target.format == "PDF":
+                                write_pdf_metadata(
+                                    source,
+                                    output,
                                     values=target.values,
                                     fields=target.fields,
                                 )

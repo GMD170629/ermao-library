@@ -14,9 +14,9 @@ from app.models.organize import MetadataWritebackOperation, MetadataWritebackTar
 from app.modules.metadata.application.execute_standard_writeback import (
     StandardWriteExecution,
 )
-from app.modules.metadata.application.opf import MAX_OPF_BYTES
 from app.modules.metadata.application.standard_files import StandardMetadataError
 from app.modules.metadata.application.standard_writeback import (
+    STANDARD_PREPARATION_OVERHEAD,
     PreparedStandardFile,
     StandardWritePlan,
     StandardWriteStatus,
@@ -89,7 +89,8 @@ class SqlAlchemyStandardWritePlans:
         if not 1 <= len(plan.targets) <= 20:
             raise StandardMetadataError("INVALID_TARGETS")
         sizes = [
-            (target.file.original.size if target.file.original else 0) + MAX_OPF_BYTES
+            (target.file.original.size if target.file.original else 0)
+            + STANDARD_PREPARATION_OVERHEAD
             for target in plan.targets
         ]
         if reserved_file_recovery_bytes(self._db) + sum(sizes) > self._recovery_limit:

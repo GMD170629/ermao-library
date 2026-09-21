@@ -130,3 +130,38 @@ def test_cancel_prepared_restores_original_and_removes_only_known_slots(
     publisher.discard_prepared(request, prepared)
     assert (tmp_path / "book.opf").read_bytes() == SOURCE
     assert sorted(item.name for item in tmp_path.iterdir()) == ["book.opf"]
+
+
+def test_preparation_rejects_insufficient_space_without_creating_slots(
+    tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+
+    request = target(tmp_path)
+    monkeypatch.setattr(
+        standard_publication.os,
+        "fstatvfs",
+        lambda _: SimpleNamespace(f_flag=0, f_bavail=0, f_frsize=4096),
+    )
+    with pytest.raises(StandardMetadataError, match="PREPARATION_SPACE_UNAVAILABLE"):
+        files().prepare(request)
+    assert sorted(item.name for item in tmp_path.iterdir()) == ["book.opf"]
+    assert (tmp_path / "book.opf").read_bytes() == SOURCE
+
+
+def test_read_only_source_is_rejected_during_preview(tmp_path):
+    request = target(tmp_path)
+    source = tmp_path / "book.opf"
+    source.chmod(0o444)
+    try:
+        with pytest.raises(StandardMetadataError, match="READ_ONLY_FILE"):
+            files().inspect(
+                tmp_path,
+                request.relative_path,
+                request.format,
+                request.values,
+                request.fields,
+            )
+        assert sorted(item.name for item in tmp_path.iterdir()) == ["book.opf"]
+    finally:
+        source.chmod(0o644)

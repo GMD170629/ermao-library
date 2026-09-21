@@ -8,6 +8,8 @@ from app.contracts.file_operation import FileIdentity
 from app.contracts.publication_metadata import PublicationMetadata
 from app.modules.metadata.application.standard_files import StandardMetadataError
 
+STANDARD_PREPARATION_OVERHEAD = 8 * 1024**2
+
 StandardWriteFormat = Literal[
     "OPF", "ComicInfo", "EPUB", "CBZ", "ZIP", "MP3", "M4A", "M4B", "FLAC", "PDF"
 ]

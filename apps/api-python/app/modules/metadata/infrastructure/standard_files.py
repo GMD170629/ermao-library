@@ -18,7 +18,11 @@ from mutagen.mp4 import MP4
 from pypdf.errors import PdfReadError
 
 from app.contracts.publication_metadata import PublicationMetadata
-from app.infrastructure.bounded_inspection import LimitedReader, ZipInspectionReader
+from app.infrastructure.bounded_inspection import (
+    InspectionLimitReached,
+    LimitedReader,
+    ZipInspectionReader,
+)
 from app.infrastructure.comic_archives import parse_comic_info
 from app.infrastructure.epub_metadata import read_epub_package, read_zip_metadata
 from app.infrastructure.pdf_metadata_reader import StrictMetadataPdfReader
@@ -33,6 +37,16 @@ from app.modules.metadata.infrastructure.archive_writeback import (
     BoundedArchiveStream,
     inspect_archive_entries,
     preview_archive_metadata,
+)
+from app.modules.metadata.infrastructure.audio_structure import (
+    flac_structure,
+    mp3_structure,
+    mp4_structure,
+)
+from app.modules.metadata.infrastructure.audio_writeback import AUDIO_WRITABLE_FIELDS
+from app.modules.metadata.infrastructure.pdf_writeback import (
+    PDF_WRITABLE_FIELDS,
+    inspect_pdf_write,
 )
 from app.modules.metadata.infrastructure.selective_comicinfo import (
     COMIC_WRITABLE_FIELDS,
@@ -280,11 +294,30 @@ class AnchoredStandardMetadataReader:
                             else None,
                         )
                         format_name = "PDF"
+                        try:
+                            inspect_pdf_write(stream, metadata, frozenset({"title"}))
+                            writable = tuple(sorted(PDF_WRITABLE_FIELDS))
+                        except (
+                            StandardMetadataError,
+                            InspectionLimitReached,
+                            PdfReadError,
+                        ):
+                            writable = ()
                     elif suffix in {".mp3", ".m4a", ".m4b", ".flac"}:
                         metadata = _audio_metadata(stream, suffix)
                         format_name = {".mp3": "ID3", ".flac": "FLAC"}.get(
                             suffix, "MP4"
                         )
+                        try:
+                            if suffix == ".mp3":
+                                mp3_structure(stream, frozenset(), verify_payload=False)
+                            elif suffix == ".flac":
+                                flac_structure(stream, verify_payload=False)
+                            else:
+                                mp4_structure(stream, verify_payload=False)
+                            writable = tuple(sorted(AUDIO_WRITABLE_FIELDS))
+                        except (StandardMetadataError, InspectionLimitReached):
+                            writable = ()
                     else:
                         raise StandardMetadataError("UNSUPPORTED_FORMAT")
             except StandardMetadataError:
