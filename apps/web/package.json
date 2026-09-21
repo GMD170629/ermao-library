@@ -14,6 +14,7 @@
     "pwa:ios": "pnpm build && pnpm start:ios",
     "generate:reader-api": "cd ../api-python && uv run python scripts/export_openapi.py ../web/.reader-openapi.json && cd ../web && node scripts/generate-reader-api.mjs .reader-openapi.json generated/reader-v5.ts",
     "generate:updates-api": "cd ../api-python && uv run python scripts/export_openapi.py ../web/.updates-openapi.json && cd ../web && node scripts/generate-reader-api.mjs .updates-openapi.json generated/updates.ts updates",
+    "generate:automation-api": "cd ../api-python && uv run python scripts/export_openapi.py ../web/.automation-openapi.json && cd ../web && node scripts/generate-reader-api.mjs .automation-openapi.json generated/automation.ts automation",
     "build:chapters-wasm": "node scripts/build-chapters-wasm.mjs",
     "verify:chapters-wasm": "node scripts/verify-chapters-wasm.mjs",
     "build:mobi-wasm": "node scripts/build-mobi-wasm.mjs",

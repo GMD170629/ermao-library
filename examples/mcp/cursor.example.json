@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ermao-library": {
+      "url": "https://YOUR_LIBRARY_HOST/api/mcp",
+      "headers": { "Authorization": "Bearer ${env:ERMAO_MCP_TOKEN}" }
+    }
+  }
+}

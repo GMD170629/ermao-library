@@ -3,7 +3,7 @@ import path from 'node:path';
 import process from 'node:process';
 
 const [, , inputArg, outputArg, scope = 'reader'] = process.argv;
-if (!['reader', 'updates'].includes(scope)) throw new Error('Unknown contract scope');
+if (!['reader', 'updates', 'automation'].includes(scope)) throw new Error('Unknown contract scope');
 if (!inputArg || !outputArg) throw new Error('usage: generate-reader-api.mjs OPENAPI.json OUTPUT.ts');
 
 const input = path.resolve(inputArg);
@@ -11,7 +11,7 @@ const output = path.resolve(outputArg);
 const document = JSON.parse(await readFile(input, 'utf8'));
 const schemas = document.components?.schemas ?? {};
 const included = new Set(
-  Object.keys(schemas).filter((name) => (scope === 'updates' ? /^(RuntimeInfo|UpdateCheck|PreparationState|PrepareRequest|InstallRequest)$/ : /^(Appearance|Audio|Epub|Reflowable|Comic|Pdf|Reader)/).test(name))
+  Object.keys(schemas).filter((name) => (scope === 'automation' ? /^(CreateGrantRequest|CreatedGrantPayload|GrantListPayload|GrantView|ServiceSettingsFields|RevokedGrantPayload|OperationListPayload|OperationPayload)$/ : scope === 'updates' ? /^(RuntimeInfo|UpdateCheck|PreparationState|PrepareRequest|InstallRequest)$/ : /^(Appearance|Audio|Epub|Reflowable|Comic|Pdf|Reader)/).test(name))
 );
 let discoveredReference = true;
 while (discoveredReference) {
@@ -85,8 +85,8 @@ if (missingRefs.size) throw new Error(`Reader schemas reference excluded models:
 
 const generated = [
   '/* eslint-disable */',
-  scope === 'reader' ? '// AUTO-GENERATED from the Reader v5 FastAPI OpenAPI contract.' : '// AUTO-GENERATED from the updates FastAPI OpenAPI contract.',
-  scope === 'reader' ? '// Run `pnpm --filter @shuku/web generate:reader-api`; do not edit by hand.' : '// Run pnpm --filter @shuku/web generate:updates-api; do not edit by hand.',
+  scope === 'reader' ? '// AUTO-GENERATED from the Reader v5 FastAPI OpenAPI contract.' : `// AUTO-GENERATED from the ${scope} FastAPI OpenAPI contract.`,
+  scope === 'reader' ? '// Run `pnpm --filter @shuku/web generate:reader-api`; do not edit by hand.' : `// Run pnpm --filter @shuku/web generate:${scope}-api; do not edit by hand.`,
   '',
   ...includedNames.flatMap((name) => [`export type ${typeName(name)} = ${typeExpression(schemas[name])};`, ''])
 ].join('\n');

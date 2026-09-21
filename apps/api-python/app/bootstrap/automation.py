@@ -21,12 +21,19 @@ from app.modules.automation.application.grants import (
     ManageGrants,
     RecordGrantUse,
 )
+from app.modules.automation.application.operation_management import (
+    ManageAutomationOperations,
+)
+from app.modules.automation.application.operations import AutomationOperations
 from app.modules.automation.application.settings import ConfigureAutomation
 from app.modules.automation.application.writeback_plans import BuildStandardWritePlan
 from app.modules.automation.application.writebacks import AutomationWritebacks
 from app.modules.automation.application.writes import AutomationWrites
 from app.modules.automation.infrastructure.credentials import AutomationCredentials
 from app.modules.automation.infrastructure.grants import SqlAlchemyGrantStore
+from app.modules.automation.infrastructure.operation_history import (
+    SqlAlchemyOperationHistory,
+)
 from app.modules.automation.infrastructure.receipts import SqlAlchemyReceiptStore
 from app.modules.automation.infrastructure.runtime import DatabaseAutomationRuntime
 from app.modules.automation.presentation.mcp import AutomationMcpEndpoint
@@ -209,4 +216,17 @@ def build_automation_writebacks(db: Session) -> AutomationWritebacks:
         db,
         now_timestamp_ms,
         lambda: uuid4().hex,
+    )
+
+
+def build_automation_operation_manager(db: Session) -> ManageAutomationOperations:
+    return ManageAutomationOperations(
+        SqlAlchemyOperationHistory(db),
+        SqlAlchemyGrantStore(db),
+        SqlAlchemyAutomationIdentity(db, SqlAlchemyVisibleLibraryIds(db)),
+        AutomationOperations(
+            build_automation_file_moves(db), build_automation_writebacks(db)
+        ),
+        db,
+        now_timestamp_ms,
     )

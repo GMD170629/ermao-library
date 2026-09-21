@@ -1,11 +1,13 @@
 """Strict grant management contracts; no caller-controlled identity or digest."""
 
+from dataclasses import asdict
 from typing import Literal
 
 from pydantic import Field, StrictBool
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.modules.automation.application.grants import AutomationGrant
+from app.modules.automation.application.operation_management import ManagedOperationView
 from app.modules.automation.application.settings import AutomationServiceSettings
 from app.modules.automation.domain.access import (
     GrantPermissions,
@@ -107,3 +109,37 @@ CreatedGrantResponse = SuccessEnvelope[CreatedGrantPayload]
 GrantListResponse = SuccessEnvelope[GrantListPayload]
 RevokedGrantResponse = SuccessEnvelope[RevokedGrantPayload]
 ServiceSettingsResponse = SuccessEnvelope[ServiceSettingsFields]
+
+
+class OperationTargetFields(HttpContractModel):
+    stage: str
+    relative_path: str
+    destination_relative_path: str | None
+    error_code: str | None
+
+
+class ManagedOperationFields(HttpContractModel):
+    operation_id: str
+    grant_id: str
+    kind: str
+    created_at_ms: int
+    status: str
+    cancel_requested: bool
+    total_targets: int
+    targets: list[OperationTargetFields]
+
+    @classmethod
+    def from_domain(cls, value: ManagedOperationView) -> "ManagedOperationFields":
+        return cls.model_validate(asdict(value))
+
+
+class OperationListPayload(HttpContractModel):
+    operations: list[ManagedOperationFields]
+
+
+class OperationPayload(HttpContractModel):
+    operation: ManagedOperationFields
+
+
+OperationListResponse = SuccessEnvelope[OperationListPayload]
+OperationResponse = SuccessEnvelope[OperationPayload]

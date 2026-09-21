@@ -8,7 +8,11 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
-from app.bootstrap.automation import build_automation_settings, build_grant_manager
+from app.bootstrap.automation import (
+    build_automation_operation_manager,
+    build_automation_settings,
+    build_grant_manager,
+)
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.modules.automation.domain.access import AutomationAccessError
@@ -19,11 +23,18 @@ from app.modules.automation.presentation.schemas import (
     GrantListPayload,
     GrantListResponse,
     GrantView,
+    ManagedOperationFields,
+    OperationListPayload,
+    OperationListResponse,
+    OperationPayload,
+    OperationResponse,
     RevokedGrantPayload,
     RevokedGrantResponse,
     ServiceSettingsFields,
     ServiceSettingsResponse,
 )
+from app.modules.library.public import FileMoveError
+from app.modules.metadata.public import StandardMetadataError
 from app.schemas.responses import fail, ok
 
 router = APIRouter(
@@ -47,7 +58,13 @@ def _error(request: Request, error: AutomationAccessError) -> Response:
         else 404
         if code.endswith("NOT_FOUND")
         else 403
-        if code in {"ORIGIN_REQUIRED", "SYSTEM_MANAGER_REQUIRED", "ADMIN_REQUIRED"}
+        if code
+        in {
+            "ORIGIN_REQUIRED",
+            "SYSTEM_MANAGER_REQUIRED",
+            "ADMIN_REQUIRED",
+            "SCOPE_REQUIRED",
+        }
         else 400
     )
     message = (
@@ -172,3 +189,51 @@ def update_service_settings(
         return _private(ok(ServiceSettingsFields.from_domain(saved)))
     except AutomationAccessError as error:
         return _error(request, error)
+
+
+@router.get("/operations", response_model=OperationListResponse)
+def list_operations(
+    request: Request, db: Database, settings: Configuration
+) -> OperationListResponse | Response:
+    user, auth_error = require_user(db, request, settings)
+    if auth_error is not None or user is None:
+        return _private(
+            auth_error or fail("UNAUTHORIZED", status_code=401, code="UNAUTHORIZED")
+        )
+    try:
+        operations = build_automation_operation_manager(db).recent(user.id)
+        return _private(
+            ok(
+                OperationListPayload(
+                    operations=[
+                        ManagedOperationFields.from_domain(value)
+                        for value in operations
+                    ]
+                )
+            )
+        )
+    except (AutomationAccessError, FileMoveError, StandardMetadataError) as error:
+        return _error(request, AutomationAccessError(str(error)))
+
+
+@router.post("/operations/{operation_id}/cancel", response_model=OperationResponse)
+def cancel_operation(
+    operation_id: str, request: Request, db: Database, settings: Configuration
+) -> OperationResponse | Response:
+    user, auth_error = require_user(db, request, settings)
+    if auth_error is not None or user is None:
+        return _private(
+            auth_error or fail("UNAUTHORIZED", status_code=401, code="UNAUTHORIZED")
+        )
+    try:
+        _check_origin(request)
+        operation = build_automation_operation_manager(db).cancel(user.id, operation_id)
+        return _private(
+            ok(
+                OperationPayload(
+                    operation=ManagedOperationFields.from_domain(operation)
+                )
+            )
+        )
+    except (AutomationAccessError, FileMoveError, StandardMetadataError) as error:
+        return _error(request, AutomationAccessError(str(error)))

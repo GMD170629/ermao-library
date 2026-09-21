@@ -21,7 +21,8 @@ export const settingsGroups: readonly SettingsGroup[] = [
     label: '用户设置',
     items: [
       { href: '/settings', label: '个人信息', icon: UserRound, access: 'account' },
-      { href: '/settings/email', label: '邮件与 Kindle', icon: Mail, access: 'account' }
+      { href: '/settings/email', label: '邮件与 Kindle', icon: Mail, access: 'account' },
+      { href: '/settings/automation', label: '自动化授权', icon: BookKey, access: 'account' }
     ]
   },
   {
