@@ -80,6 +80,20 @@ class RuntimeInstallTests(unittest.TestCase):
         self.assertNotEqual(self.run_helper().returncode, 0)
         self.assertFalse(self.calls.exists())
 
+    def test_production_wheel_seed_has_only_locked_dependency_inputs(self) -> None:
+        dockerfile = (ROOT / "apps/web/Dockerfile.prod").read_text()
+        seed = dockerfile.split("FROM python-runtime AS python-seed\n")[1].split("FROM python-runtime AS runner")[0]
+        self.assertIn("COPY apps/api-python/pyproject.toml apps/api-python/uv.lock", seed)
+        self.assertIn("COPY scripts/install-python-runtime.sh", seed)
+        self.assertNotIn("--from=builder", seed)
+        self.assertNotIn("/app ", seed)
+        runner = dockerfile.split("FROM python-runtime AS runner")[1]
+        self.assertIn("COPY --from=python-seed /opt/shuku-dependency-seed", runner)
+        self.assertNotIn("--wheel-seed", runner)
+        self.assertIn("dependency_packages.py --program-root", runner)
+        self.assertIn("build-runtime-environment.py", runner)
+        self.assertNotIn("--platform=$BUILDPLATFORM", dockerfile)
+
     def test_both_images_use_helper_lock_without_ffmpeg(self) -> None:
         for relative in ("apps/web/Dockerfile.prod", "apps/api-python/Dockerfile"):
             with self.subTest(dockerfile=relative):

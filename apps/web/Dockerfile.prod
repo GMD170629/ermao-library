@@ -30,7 +30,7 @@ COPY packages/reader-core/native/chapters /src/chapters
 RUN cmake -S /src/chapters -B /build/chapters -DBUILD_TESTING=OFF \
   && cmake --build /build/chapters --config Release --target ermao_chapters_shared
 
-FROM python:3.11.15-slim-bookworm AS runner
+FROM python:3.11.15-slim-bookworm AS python-runtime
 WORKDIR /opt/shuku-image
 ENV SHUKU_CONTAINER=1 \
   STORAGE_ROOT=/app/storage \
@@ -52,14 +52,23 @@ RUN apt-get update \
   && node --version \
   && python --version
 
+# Export only locked third-party wheels before any application/standalone copy.
+# Every stage uses the target platform; native wheels are never shared across architectures.
+FROM python-runtime AS python-seed
+COPY apps/api-python/pyproject.toml apps/api-python/uv.lock ./apps/api-python/
+COPY scripts/install-python-runtime.sh ./scripts/install-python-runtime.sh
+RUN UV_NO_CACHE=1 sh ./scripts/install-python-runtime.sh /opt/shuku-image/apps/api-python /opt/shuku-dependency-seed --wheel-seed
+
+FROM python-runtime AS runner
+COPY --from=python-seed /opt/shuku-dependency-seed /opt/shuku-dependency-seed
 COPY --from=builder /app/scripts/start-unified-app.sh ./scripts/start-unified-app.sh
 COPY --from=builder /app/scripts/unified-http-gateway.mjs ./scripts/unified-http-gateway.mjs
 COPY --from=builder /app/apps/web/.next/standalone ./
 COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=builder /app/apps/web/public ./apps/web/public
 COPY --from=builder /app/apps/api-python/app ./apps/api-python/app
-COPY --from=builder /app/apps/api-python/pyproject.toml ./apps/api-python/pyproject.toml
-COPY --from=builder /app/apps/api-python/uv.lock ./apps/api-python/uv.lock
+COPY apps/api-python/pyproject.toml ./apps/api-python/pyproject.toml
+COPY apps/api-python/uv.lock ./apps/api-python/uv.lock
 COPY scripts/install-python-runtime.sh ./scripts/install-python-runtime.sh
 COPY scripts/container-entry.py /opt/shuku-launcher/container-entry.py
 COPY scripts/container_install.py /opt/shuku-launcher/container_install.py
@@ -75,8 +84,7 @@ COPY --from=mobi-core-builder /src/chapters /usr/share/shuku/source/chapters
 COPY --from=mobi-core-builder /src/mobi-core/LICENSE /usr/share/licenses/shuku-mobi-core/LICENSE
 COPY --from=mobi-core-builder /src/mobi-core/UPSTREAM.md /usr/share/licenses/shuku-mobi-core/UPSTREAM.md
 COPY --from=mobi-core-builder /src/mobi-core /usr/share/shuku/source/mobi-core
-RUN UV_NO_CACHE=1 sh ./scripts/install-python-runtime.sh /opt/shuku-image/apps/api-python /opt/shuku-dependency-seed --wheel-seed \
-  && python -m compileall -q ./apps/api-python/app \
+RUN python -m compileall -q ./apps/api-python/app \
   && rm -rf ./apps/api-python/build ./apps/api-python/*.egg-info \
   && chmod +x ./scripts/start-unified-app.sh \
   && mkdir -p /opt/shuku-image/apps/web/.next/cache /app/storage /books

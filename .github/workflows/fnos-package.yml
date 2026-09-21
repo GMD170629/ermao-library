@@ -493,8 +493,14 @@ jobs:
           push: true
           tags: ${{ steps.docker_meta.outputs.tags }}
           labels: ${{ steps.docker_meta.outputs.labels }}
-          cache-from: type=gha,scope=fnos-versioned-image
-          cache-to: type=gha,mode=max,scope=fnos-versioned-image
+          # GHA caches are ref-scoped; a registry cache survives the next version tag.
+          # Only the serialized trusted tag job writes this cache, never PRs/branches.
+          cache-from: |
+            type=gha,scope=fnos-versioned-image
+            type=registry,ref=gamersgu/shuku-starship-web:buildcache-release
+          cache-to: |
+            type=gha,mode=max,scope=fnos-versioned-image
+            type=registry,ref=gamersgu/shuku-starship-web:buildcache-release,mode=max
 
       - name: Build and validate applications from the exact target environments
         if: needs.validate.outputs.release_mode != 'code-only'
