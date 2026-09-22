@@ -140,6 +140,8 @@ test('backend installation tests use the production uv version and report its ex
   assert.match(packageJob, /uv run --extra dev --locked pytest -q/);
   assert.ok(packageJob.indexOf('uses: astral-sh/setup-uv') < packageJob.indexOf('command -v uv'));
   assert.ok(packageJob.indexOf('ctest --test-dir') < packageJob.indexOf('uv run --extra dev --locked pytest -q'));
+  assert.match(packageJob, /sudo apt-get install -y ffmpeg/);
+  assert.ok(packageJob.indexOf('sudo apt-get install -y ffmpeg') < packageJob.indexOf('uv run --extra dev --locked pytest -q'));
 });
 
 test('GHCR artifacts are anonymously verified before stable publication and stay out of Releases', () => {

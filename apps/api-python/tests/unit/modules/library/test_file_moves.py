@@ -281,3 +281,44 @@ def test_system_move_skip_cannot_report_success_or_overwrite(
     else:
         assert (source / "book" if directory else source).read_bytes() == b"original"
     assert (target / "book" if directory else target).read_bytes() == b"other"
+
+
+@pytest.mark.parametrize("target_exists", [False, True])
+def test_native_move_failure_preserves_cause_and_inspects_destination(
+    tmp_path, monkeypatch, target_exists
+):
+    import subprocess
+
+    from app.modules.library.application.file_move_plans import (
+        MoveDestination,
+        MoveSource,
+        PlannedMove,
+    )
+    from app.modules.library.infrastructure.file_move_io import SystemMovePublication
+    from app.modules.library.infrastructure.move_inventory import inspect_move_destination
+
+    source, target = tmp_path / "source", tmp_path / "target"
+    source.write_bytes(b"original")
+    plan = PlannedMove(
+        MoveSource("node", "library", "source", tmp_path, "revision", ("book",)),
+        MoveDestination("library", tmp_path, "target"),
+        inspect_move_source(tmp_path, "source"),
+        inspect_move_destination(tmp_path, "target"),
+    )
+    failure = subprocess.CalledProcessError(1, ["mv"], stderr=b"native failure")
+
+    def fail_move(*args):
+        if target_exists:
+            target.write_bytes(b"other")
+        raise failure
+
+    monkeypatch.setattr(SystemMovePublication, "_move", staticmethod(fail_move))
+    expected = "DESTINATION_EXISTS" if target_exists else "FILE_MOVE_FAILED"
+    with pytest.raises(FileMoveError, match=expected) as caught:
+        SystemMovePublication().publish(plan)
+    assert caught.value.__cause__ is failure
+    assert source.read_bytes() == b"original"
+    if target_exists:
+        assert target.read_bytes() == b"other"
+    else:
+        assert not target.exists()

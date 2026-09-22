@@ -78,7 +78,15 @@ class SystemMovePublication:
                     )
                 else:
                     self._move(move, source_fd, target_fd, source_name, target_name)
-            except (OSError, subprocess.CalledProcessError) as error:
+            except subprocess.CalledProcessError as error:
+                # mv implementations differ on the exit status for -n skips.
+                # Inspect the actual outcome while retaining the native failure.
+                try:
+                    self.is_published(move)
+                except FileMoveError as outcome:
+                    raise outcome from error
+                raise FileMoveError("FILE_MOVE_FAILED") from error
+            except OSError as error:
                 raise FileMoveError("FILE_MOVE_FAILED") from error
         if not self.is_published(move):
             raise FileMoveError("FILE_MOVE_INCOMPLETE")
@@ -141,7 +149,7 @@ class SystemMovePublication:
             target_exists = target_name in os.listdir(target_fd)
             if source_exists:
                 if target_exists:
-                    # mv -n returns zero when it skips an existing destination.
+                    # mv -n may return zero when skipping an existing destination.
                     raise FileMoveError("DESTINATION_EXISTS")
                 return False
             if not target_exists:

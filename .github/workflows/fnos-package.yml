@@ -368,6 +368,11 @@ jobs:
         with:
           version: "0.11.29"
 
+      - name: Install audio test runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
       - name: Test Python backend with production runtime version
         if: needs.validate.outputs.release_mode != 'code-only'
         # The production image builds this same native library; host tests need it too.
