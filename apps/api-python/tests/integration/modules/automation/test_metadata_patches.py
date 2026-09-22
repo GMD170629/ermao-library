@@ -43,9 +43,6 @@ def setup_metadata(db):
             }
         ),
     )
-    grant = build_grant_manager(db).create(
-        user_id="mcp-owner", name="metadata", permissions=permissions
-    )
     build_automation_settings(db).update(
         "mcp-owner",
         AutomationServiceSettings(
@@ -54,6 +51,10 @@ def setup_metadata(db):
             public_base_url="http://localhost",
         ),
     )
+    grant = build_grant_manager(db).create(
+        user_id="mcp-owner", name="metadata", permissions=permissions
+    )
+
     return EffectiveAccess(grant.grant.id, "mcp-owner", permissions)
 
 

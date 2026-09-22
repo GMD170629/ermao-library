@@ -27,14 +27,15 @@ def files(db_session, tmp_path, monkeypatch, test_settings):
     permissions = replace(
         access.permissions, scopes=frozenset({Scope.SYSTEM_READ, Scope.FILES_MODIFY})
     )
-    grant = build_grant_manager(db_session).create(
-        user_id=access.user_id, name="files", permissions=permissions
-    )
-    access = replace(access, grant_id=grant.grant.id, permissions=permissions)
     build_automation_settings(db_session).update(
         access.user_id,
         AutomationServiceSettings(True, permissions.scopes, "http://localhost"),
     )
+    grant = build_grant_manager(db_session).create(
+        user_id=access.user_id, name="files", permissions=permissions
+    )
+    access = replace(access, grant_id=grant.grant.id, permissions=permissions)
+
     (root / "allowed/book.cbz").write_bytes(b"original")
     add_file(db_session, "replace-node", "allowed/book.cbz")
     db_session.commit()
@@ -88,6 +89,9 @@ def test_replace_exact_bytes_and_upload_only_rejected(files, db_session):
             access.permissions,
             scopes=frozenset({Scope.SYSTEM_READ, Scope.FILES_UPLOAD}),
         ),
+    )
+    build_automation_settings(db_session).update(
+        access.user_id, AutomationServiceSettings(True, access.permissions.scopes | upload_only.permissions.scopes, "http://localhost")
     )
     limited = build_grant_manager(db_session).create(
         user_id=access.user_id, name="upload only", permissions=upload_only.permissions

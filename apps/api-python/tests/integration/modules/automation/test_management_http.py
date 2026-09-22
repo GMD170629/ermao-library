@@ -170,9 +170,9 @@ def test_audit_has_localized_message_and_never_credential(
     assert created["token"] not in str(event.metadata_json)
 
 
-def enable_service(db):
+def enable_service(db, scopes=frozenset({"system:read"})):
     SqlAlchemyAutomationSettings(db).save(
-        AutomationServiceSettings(enabled=True, public_base_url="http://testserver")
+        AutomationServiceSettings(enabled=True, enabled_scopes=scopes, public_base_url="http://testserver")
     )
     db.commit()
 
@@ -198,7 +198,7 @@ def test_update_grant_keeps_token_expiry_and_enforces_owner(
     from app.bootstrap.automation import build_automation_authorizer
     from app.modules.automation.domain.access import ALL_SCOPES
 
-    enable_service(db_session)
+    enable_service(db_session, frozenset({"system:read", "shelves:write"}))
     sign_in(client, db_session, "editor")
     created = client.post(
         "/api/automation/grants", headers=ORIGIN, json=grant_request()
@@ -276,3 +276,65 @@ def test_update_cannot_reactivate_grants(client, db_session, inactive):
     )
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "GRANT_INACTIVE"
+
+
+def test_service_allowance_controls_new_grant_scopes(client, db_session):
+    enable_service(db_session)
+    sign_in(client, db_session, "admin", admin=True)
+    extra = grant_request(scopes=["system:read", "files:modify"])
+    rejected = client.post("/api/automation/grants", json=extra)
+    assert rejected.status_code == 403
+    assert rejected.json()["error"]["code"] == "SCOPE_REQUIRED"
+    assert list(db_session.scalars(select(AutomationGrantRow))) == []
+    created = client.post("/api/automation/grants", json=grant_request()).json()["data"]
+    path = f"/api/automation/grants/{created['grant']['id']}"
+    assert client.patch(path, json=extra).status_code == 403
+    assert client.get("/api/automation/grants").json()["data"]["grants"][0]["scopes"] == ["system:read"]
+    enable_service(db_session, frozenset({"system:read", "files:modify"}))
+    assert client.patch(path, json=extra).status_code == 200
+    enable_service(db_session)
+    assert client.patch(path, json={**extra, "name": "Keep existing"}).status_code == 200
+    assert client.patch(path, json=grant_request()).status_code == 200
+    assert client.patch(path, json=extra).status_code == 403
+
+
+@pytest.mark.parametrize("value,expected", [
+    ("https://BOOKS.example/books", "https://books.example/books"),
+    ("https://books.example:443/books", "https://books.example/books"),
+    ("http://books.example:80/books", "http://books.example/books"),
+    ("http://BOOKS.example:12443/books", "http://books.example:12443/books"),
+    ("http://[0:0:0:0:0:0:0:1]:80/books", "http://[::1]/books"),
+])
+def test_public_url_matches_client_and_sdk(client, db_session, value, expected):
+    import asyncio
+    from urllib.parse import urlsplit
+
+    import httpx
+    from mcp.server.transport_security import (
+        TransportSecurityMiddleware,
+        TransportSecuritySettings,
+    )
+    from starlette.requests import Request
+
+    sign_in(client, db_session, "admin", admin=True)
+    saved = client.put("/api/automation/settings", json={"enabled": True, "publicBaseUrl": value})
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["data"]["publicBaseUrl"] == expected
+    # Existing saved configurations are normalized on read too.
+    SqlAlchemyAutomationSettings(db_session).save(
+        AutomationServiceSettings(enabled=True, public_base_url=value)
+    )
+    db_session.commit()
+    assert client.get("/api/automation/settings").json()["data"]["publicBaseUrl"] == expected
+    public = urlsplit(expected)
+    outgoing = httpx.Request("GET", expected + "/api/mcp")
+    middleware = TransportSecurityMiddleware(TransportSecuritySettings(
+        allowed_hosts=[public.netloc], allowed_origins=[f"{public.scheme}://{public.netloc}"]
+    ))
+    request = Request({"type": "http", "method": "GET", "path": "/api/mcp",
+                       "headers": [(b"host", outgoing.headers["host"].encode()),
+                                   (b"origin", f"{public.scheme}://{public.netloc}".encode())]})
+    assert asyncio.run(middleware.validate_request(request)) is None
+    bad = Request({"type": "http", "method": "GET", "path": "/api/mcp",
+                   "headers": [(b"host", b"other.invalid")]})
+    assert asyncio.run(middleware.validate_request(bad)).status_code == 421

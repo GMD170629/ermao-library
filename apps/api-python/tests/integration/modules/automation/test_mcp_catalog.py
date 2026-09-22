@@ -296,6 +296,14 @@ def test_official_sdk_real_catalog_and_revocation(
                 }
             )
             with factory() as db:
+                build_automation_settings(db).update(
+                    "mcp-owner",
+                    AutomationServiceSettings(
+                        enabled=True,
+                        enabled_scopes=scopes,
+                        public_base_url=base.replace("127.0.0.1", public_host) + prefix,
+                    ),
+                )
                 writer = build_grant_manager(db).create(
                     user_id="mcp-owner",
                     name="writer",
@@ -305,14 +313,7 @@ def test_official_sdk_real_catalog_and_revocation(
 
                     ),
                 )
-                build_automation_settings(db).update(
-                    "mcp-owner",
-                    AutomationServiceSettings(
-                        enabled=True,
-                        enabled_scopes=scopes,
-                        public_base_url=base.replace("127.0.0.1", public_host) + prefix,
-                    ),
-                )
+
             async with (
                 httpx2.AsyncClient(
                     headers={**headers, "Authorization": "Bearer " + writer.token}

@@ -17,9 +17,9 @@ Administrators enable MCP in Settings → Automation access → MCP service. HTT
 
 The creation form selects all capabilities currently available to your account, including available file sub-options. Lifetimes are 30, 90 (default), 365 days, or no expiration. Non-expiring grants remain subject to revocation, current account permissions and service activation. API clients explicitly send `lifetimeDays: null` for no expiration; omitting it keeps the 90-day default. Responses use `expiresAtMs: null` for non-expiring grants.
 
-服务端令牌采用 AES-GCM 加密保存，同时保留认证摘要。请持久化并独立备份 `storage/secrets/automation-token.key`（权限 0600），与数据库配套恢复。密钥丢失、损坏或权限不安全时明确报错，不覆盖已有密钥；已有密文时也不生成替代密钥。密钥错误不影响已有摘要令牌的认证。仅本人有效 Cookie 会话可通过 `POST /api/automation/grants/{id}/reveal` 取回有效令牌，响应禁止缓存，审计不记录秘密。
+服务端令牌采用 AES-GCM 加密保存，同时保留认证摘要。请持久化并独立备份 `storage/secrets/automation-token.key`（创建时使用 0600，不以挂载文件系统返回的权限位阻止读取），与数据库配套恢复。密钥无法读取或格式损坏时明确报错，不覆盖已有密钥；已有密文时也不生成替代密钥。密钥错误不影响已有摘要令牌的认证。仅本人有效 Cookie 会话可通过 `POST /api/automation/grants/{id}/reveal` 取回有效令牌，响应禁止缓存，审计不记录秘密。
 
-Persist and separately back up `storage/secrets/automation-token.key` with mode 0600, and restore it alongside the database. Tokens are encrypted with AES-GCM and authenticated by their existing digests. A missing or invalid key causes an explicit recovery error; the server never replaces an existing key or generates a replacement while encrypted grants remain. Only the owner’s valid Cookie session can reveal an active token. Responses are not cached and audit events contain no secrets.
+Persist and separately back up `storage/secrets/automation-token.key` alongside the database. New keys request mode 0600; reported filesystem permission bits do not block reading an otherwise valid key. Tokens are encrypted with AES-GCM and authenticated by their existing digests. A missing or invalid key causes an explicit recovery error; the server never replaces an existing key or generates a replacement while encrypted grants remain. Only the owner’s valid Cookie session can reveal an active token. Responses are not cached and audit events contain no secrets.
 
 [LM Studio 官方配置](https://lmstudio.ai/docs/app/mcp) 支持远程 URL 和请求头，可选择自己的本地模型。[Cursor MCP 配置](https://cursor.com/docs/mcp) 支持远程 URL 和环境变量请求头；Cursor 不保证本地推理。示例 Cursor 模板从**客户端进程**的 `ERMAO_MCP_TOKEN` 环境变量读取，终端设置变量不一定传给已启动的桌面应用。LM Studio 模板使用显式占位符。
 
@@ -133,3 +133,8 @@ Choose **Edit** on an active grant to change its name, libraries, permissions or
 Basic queries are mandatory but retain account and library boundaries. System managers may read structured logs, queue status and redacted configuration; `system:manage` enables only the named configuration categories. `books:write` changes system metadata and display covers; explicit protected fields and current revisions remain required. `shelves:write` manages personal static and smart shelves. New imports require `files:upload`; moves, permanent deletion, writeback and whole-file replacement require `files:modify`.
 
 Migration preserves credentials, scope, expiry and history, resetting old permissions and service capabilities to basic queries. Administrators enable capabilities in service settings and edit grants to reassign them. Deletion executes a frozen inventory with durable per-target recovery; recreated names and newly added children are never silently deleted.
+
+
+服务“允许用户授权的能力”约束新授权及编辑时新增的能力。暂时关闭的已有能力可以保留或移除，但调用时仍受当前服务设置限制。公开地址保存与读取会统一域名大小写、国际化域名、IPv6 和默认端口，部署路径及非默认端口保留。
+
+The service allowance limits new grants and capabilities added during editing. Existing disabled capabilities can be retained or removed, but remain unavailable during execution. Public URLs normalize hostname case, IDNA, IPv6 and default ports on save and read, preserving deployment paths and non-default ports.

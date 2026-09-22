@@ -54,6 +54,7 @@ def test_credential_storage_reopen_revoke_and_current_permissions(db_session, tm
         SqlAlchemyAutomationAudit(db_session),
         AutomationTokenVault(tmp_path / "secrets"),
         lambda: True,
+        lambda: ALL_SCOPES,
     )
     created = manager.create(
         user_id="owner",
@@ -125,6 +126,7 @@ def test_expiry_exact_boundary_and_cannot_revoke_another_users_grant(
         SqlAlchemyAutomationAudit(db_session),
         AutomationTokenVault(tmp_path / "secrets"),
         lambda: True,
+        lambda: ALL_SCOPES,
     )
     created = manager.create(
         user_id="owner",
@@ -214,6 +216,7 @@ def test_audit_failure_rolls_back_grant_and_event_together(db_session, tmp_path)
         FailingAudit(db_session),
         AutomationTokenVault(tmp_path / "secrets"),
         lambda: True,
+        lambda: ALL_SCOPES,
     )
     with pytest.raises(RuntimeError, match="injected audit"):
         manager.create(

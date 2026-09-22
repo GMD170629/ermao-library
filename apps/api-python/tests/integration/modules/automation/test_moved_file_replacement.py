@@ -35,14 +35,15 @@ def test_moved_file_replacement_reaches_completed(
     permissions = replace(
         access.permissions, scopes=access.permissions.scopes | {Scope.FILES_MODIFY}
     )
-    grant = build_grant_manager(db_session).create(
-        user_id=access.user_id, name="move and replace", permissions=permissions
-    )
-    access = replace(access, grant_id=grant.grant.id, permissions=permissions)
     build_automation_settings(db_session).update(
         access.user_id,
         AutomationServiceSettings(True, permissions.scopes, "http://localhost"),
     )
+    grant = build_grant_manager(db_session).create(
+        user_id=access.user_id, name="move and replace", permissions=permissions
+    )
+    access = replace(access, grant_id=grant.grant.id, permissions=permissions)
+
     library = db_session.get(Library, "test-library")
     library.organization_mode = "FLAT"
     library.min_file_size_bytes = 0

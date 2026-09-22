@@ -40,13 +40,6 @@ def prepare(db, tmp_path, *, dynamic=False, batch=False):
     permissions = replace(
         access.permissions, scopes=access.permissions.scopes | {Scope.FILES_MODIFY}
     )
-    grant = build_grant_manager(db).create(
-        user_id=access.user_id,
-        name="move",
-        permissions=replace(permissions, library_scope="all", library_ids=frozenset())
-        if dynamic
-        else permissions,
-    )
     build_automation_settings(db).update(
         access.user_id,
         AutomationServiceSettings(
@@ -55,6 +48,14 @@ def prepare(db, tmp_path, *, dynamic=False, batch=False):
             public_base_url="http://localhost",
         ),
     )
+    grant = build_grant_manager(db).create(
+        user_id=access.user_id,
+        name="move",
+        permissions=replace(permissions, library_scope="all", library_ids=frozenset())
+        if dynamic
+        else permissions,
+    )
+
     actor = MoveActor(access.user_id, grant.grant.id, permissions.library_ids, False)
     requests = [MoveRequest("allowed-node", "test-library", "renamed")]
     if batch:

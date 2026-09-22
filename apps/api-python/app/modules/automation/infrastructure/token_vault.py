@@ -5,6 +5,7 @@ import binascii
 import json
 import os
 import stat
+import sys
 import tempfile
 from pathlib import Path
 
@@ -20,11 +21,21 @@ class AutomationTokenVault:
         self._key_path = directory / "automation-token.key"
 
     def _read_key(self) -> bytes:
-        fd = os.open(self._key_path, os.O_RDONLY | os.O_NOFOLLOW)
+        before = self._key_path.lstat()
+        if not stat.S_ISREG(before.st_mode):
+            raise AutomationAccessError("TOKEN_KEY_INVALID")
+        fd = os.open(self._key_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
         with os.fdopen(fd, "rb") as stream:
             info = os.fstat(stream.fileno())
             key = stream.read(33)
-            if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or len(key) != 32:
+            after = self._key_path.lstat()
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or not stat.S_ISREG(after.st_mode)
+                or not os.path.samestat(before, info)
+                or not os.path.samestat(after, info)
+                or len(key) != 32
+            ):
                 raise AutomationAccessError("TOKEN_KEY_INVALID")
             return key
 
@@ -48,11 +59,14 @@ class AutomationTokenVault:
                     os.link(temporary, self._key_path)
                 except FileExistsError:
                     pass  # A concurrent first issuer published the authoritative key.
-                directory_fd = os.open(self._directory, os.O_RDONLY)
-                try:
-                    os.fsync(directory_fd)
-                finally:
-                    os.close(directory_fd)
+                # Windows does not expose directory handles through os.open.
+                # The key file itself is flushed on every supported platform.
+                if sys.platform != "win32":
+                    directory_fd = os.open(self._directory, os.O_RDONLY)
+                    try:
+                        os.fsync(directory_fd)
+                    finally:
+                        os.close(directory_fd)
             finally:
                 os.unlink(temporary)
             return self._read_key()

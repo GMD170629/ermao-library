@@ -1,6 +1,7 @@
 """Admin-controlled service activation and an explicit public transport origin."""
 
 from dataclasses import dataclass, replace
+from ipaddress import IPv6Address
 from typing import Protocol
 from urllib.parse import urlsplit, urlunsplit
 
@@ -61,10 +62,23 @@ def normalize_service_settings(
         or any(part in {".", ".."} for part in url.path.split("/"))
     ):
         raise AutomationAccessError("INVALID_PUBLIC_URL")
+    # Match the authority emitted by clients (case, IDNA and default ports).
+    try:
+        hostname = (
+            f"[{IPv6Address(url.hostname).compressed}]"
+            if ":" in url.hostname
+            else url.hostname.encode("idna").decode("ascii").lower()
+        )
+    except (ValueError, UnicodeError) as error:
+        raise AutomationAccessError("INVALID_PUBLIC_URL") from error
+    port = url.port
+    authority = hostname
+    if port is not None and port != (443 if url.scheme == "https" else 80):
+        authority += f":{port}"
     return replace(
         settings,
         public_base_url=urlunsplit(
-            (url.scheme, url.netloc, url.path.rstrip("/"), "", "")
+            (url.scheme, authority, url.path.rstrip("/"), "", "")
         ),
     )
 

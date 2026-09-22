@@ -31,6 +31,7 @@ def test_sdk_upload_disconnect_server_restart_cover_and_redaction(
 ):
     caplog.set_level(logging.INFO)
     access, root = upload_access(db_session, tmp_path, monkeypatch, test_settings)
+    build_automation_settings(db_session).update(access.user_id, AutomationServiceSettings(True, ALL_SCOPES, "http://localhost"))
     grant = build_grant_manager(db_session).create(user_id=access.user_id, name="six scopes SDK", permissions=replace(access.permissions, scopes=ALL_SCOPES))
     access = replace(access, grant_id=grant.grant.id, permissions=grant.grant.permissions)
     comic = BytesIO()

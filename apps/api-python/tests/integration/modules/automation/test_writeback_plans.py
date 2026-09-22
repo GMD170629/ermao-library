@@ -36,6 +36,12 @@ def setup(db, tmp_path):
 
         ),
     )
+    from app.bootstrap.automation import build_automation_settings
+    from app.modules.automation.application.settings import AutomationServiceSettings
+
+    build_automation_settings(db).update(
+        access.user_id, AutomationServiceSettings(True, access.permissions.scopes, "http://localhost")
+    )
     catalog = build_automation_catalog(db)
     planner = BuildStandardWritePlan(
         catalog,

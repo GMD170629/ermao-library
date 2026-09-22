@@ -94,6 +94,7 @@ class ManageGrants:
         audit: AutomationAuditPort,
         secrets: GrantSecretPort,
         service_enabled: Callable[[], bool],
+        enabled_scopes: Callable[[], frozenset[Scope]],
     ) -> None:
         self._store = store
         self._identities = identities
@@ -103,6 +104,7 @@ class ManageGrants:
         self._audit = audit
         self._secrets = secrets
         self._service_enabled = service_enabled
+        self._enabled_scopes = enabled_scopes
 
     def _actor(self, user_id: str) -> AutomationActor:
         actor = self._identities.current_actor(user_id)
@@ -122,6 +124,8 @@ class ManageGrants:
         validate_permissions(permissions, actor)
         if not self._service_enabled():
             raise AutomationAccessError("AUTOMATION_DISABLED")
+        if not permissions.scopes <= self._enabled_scopes():
+            raise AutomationAccessError("SCOPE_REQUIRED")
         name = self._validate_fields(name, lifetime_days)
         now_ms = self._clock_ms()
         credential = self._credentials.issue()
@@ -182,6 +186,10 @@ class ManageGrants:
         ):
             raise AutomationAccessError("GRANT_INACTIVE")
         validate_permissions(permissions, actor)
+        # Existing disabled scopes may be retained or removed; only new grants
+        # of authority must be within the current service allowance.
+        if not permissions.scopes - grant.permissions.scopes <= self._enabled_scopes():
+            raise AutomationAccessError("SCOPE_REQUIRED")
         name = self._validate_fields(
             name, None if lifetime_days == "keep" else lifetime_days
         )

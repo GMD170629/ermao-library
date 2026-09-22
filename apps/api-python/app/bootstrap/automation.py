@@ -167,6 +167,7 @@ def build_grant_manager(db: Session, settings: Settings | None = None) -> Manage
             (settings or get_settings()).resolved_storage_root / "secrets"
         ),
         lambda: SqlAlchemyAutomationSettings(db).load().enabled,
+        lambda: SqlAlchemyAutomationSettings(db).load().enabled_scopes,
     )
 
 

@@ -30,9 +30,6 @@ def setup_access(db):
         read_grant.grant.permissions,
         scopes=frozenset({Scope.SYSTEM_READ, Scope.SHELVES_WRITE, Scope.BOOKS_WRITE}),
     )
-    grant = build_grant_manager(db).create(
-        user_id="mcp-owner", name="writer", permissions=permissions
-    )
     build_automation_settings(db).update(
         "mcp-owner",
         AutomationServiceSettings(
@@ -41,6 +38,10 @@ def setup_access(db):
             public_base_url="http://localhost",
         ),
     )
+    grant = build_grant_manager(db).create(
+        user_id="mcp-owner", name="writer", permissions=permissions
+    )
+
     return EffectiveAccess(grant.grant.id, "mcp-owner", permissions)
 
 

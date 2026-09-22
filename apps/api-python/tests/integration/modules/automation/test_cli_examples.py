@@ -39,6 +39,7 @@ def test_five_shipped_examples_default_preview_and_explicit_execution(
     library.root_path = str(root)
     library.organization_mode = "VOLUMES"
     db_session.commit()
+    build_automation_settings(db_session).update("mcp-owner", AutomationServiceSettings(True, ALL_SCOPES, "http://localhost"))
     grant = build_grant_manager(db_session).create(
         user_id="mcp-owner",
         name="examples",

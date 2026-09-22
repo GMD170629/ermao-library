@@ -34,14 +34,15 @@ def upload_access(db, tmp_path, monkeypatch, test_settings):
             scopes=access.permissions.scopes | {Scope.FILES_UPLOAD, Scope.BOOKS_WRITE},
         ),
     )
-    grant = build_grant_manager(db).create(
-        user_id=access.user_id, name="uploads", permissions=access.permissions
-    )
-    access = replace(access, grant_id=grant.grant.id)
     build_automation_settings(db).update(
         access.user_id,
         AutomationServiceSettings(True, access.permissions.scopes, "http://localhost"),
     )
+    grant = build_grant_manager(db).create(
+        user_id=access.user_id, name="uploads", permissions=access.permissions
+    )
+    access = replace(access, grant_id=grant.grant.id)
+
     return access, root
 
 

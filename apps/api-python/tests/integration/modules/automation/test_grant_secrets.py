@@ -1,3 +1,5 @@
+import os
+import stat
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
@@ -56,6 +58,43 @@ def test_vault_binding_corruption_and_immutable_key(tmp_path):
     key.write_bytes(original)
     key.chmod(0o600)
     assert vault.decrypt("owner", "grant", encrypted) == "secret"
+
+
+@pytest.mark.parametrize("existing_key", [False, True])
+def test_grant_creation_and_reveal_accept_mounted_key_permissions(
+    client, db_session, test_settings, monkeypatch, existing_key
+):
+    enable_service(db_session)
+    sign_in(client, db_session, "owner")
+    directory = test_settings.resolved_storage_root / "secrets"
+    key = directory / "automation-token.key"
+    original = None
+    if existing_key:
+        AutomationTokenVault(directory).encrypt(
+            "owner", "existing", "existing-secret", initialize=True
+        )
+        original = key.read_bytes()
+    real_fstat = os.fstat
+
+    def mounted_fstat(fd):
+        info = real_fstat(fd)
+        if stat.S_ISREG(info.st_mode):
+            fields = list(info)
+            fields[0] = stat.S_IFREG | 0o666
+            return os.stat_result(fields)
+        return info
+
+    # Model a mount that reports broad mode bits even for a file created as 0600.
+    monkeypatch.setattr(os, "fstat", mounted_fstat)
+    created = client.post("/api/automation/grants", json=grant_request())
+    assert created.status_code == 200, created.text
+    data = created.json()["data"]
+    revealed = client.post(f"/api/automation/grants/{data['grant']['id']}/reveal")
+    assert revealed.status_code == 200, revealed.text
+    assert revealed.json()["data"]["token"] == data["token"]
+    assert len(key.read_bytes()) == 32
+    if original is not None:
+        assert key.read_bytes() == original
 
 
 def test_concurrent_key_creation_uses_one_complete_key(tmp_path):
@@ -269,6 +308,7 @@ def test_explicit_non_expiring_grant_remains_valid_and_revocable(
         SqlAlchemyAutomationAudit(db_session),
         AutomationTokenVault(test_settings.resolved_storage_root / "secrets"),
         lambda: True,
+        lambda: ALL_SCOPES,
     )
     assert manager.list_owned("owner")[0].expires_at_ms is None
     assert (
@@ -294,3 +334,39 @@ def test_explicit_non_expiring_grant_remains_valid_and_revocable(
         "/api/automation/grants", headers=ORIGIN, json=grant_request()
     ).json()["data"]["grant"]
     assert ordinary["expiresAtMs"] - ordinary["createdAtMs"] == 90 * 86_400_000
+
+
+def test_vault_windows_read_create_and_link_rejection(tmp_path, monkeypatch):
+    from app.modules.automation.infrastructure import token_vault
+
+    monkeypatch.delattr(os, "O_NOFOLLOW", raising=False)
+    monkeypatch.setattr(token_vault.sys, "platform", "win32")
+    vault = AutomationTokenVault(tmp_path / "secrets")
+    encrypted = vault.encrypt("owner", "grant", "secret", initialize=True)
+    assert vault.decrypt("owner", "grant", encrypted) == "secret"
+    key = tmp_path / "secrets/automation-token.key"
+    original = key.read_bytes()
+    other = tmp_path / "original.key"
+    key.rename(other)
+    key.symlink_to(other)
+    with pytest.raises(AutomationAccessError, match="TOKEN_KEY_INVALID"):
+        vault.decrypt("owner", "grant", encrypted)
+    assert other.read_bytes() == original
+
+
+def test_vault_read_failure_does_not_replace_key(tmp_path, monkeypatch):
+    vault = AutomationTokenVault(tmp_path)
+    encrypted = vault.encrypt("owner", "grant", "secret", initialize=True)
+    key = tmp_path / "automation-token.key"
+    original = key.read_bytes()
+    real_open = os.open
+
+    def denied(path, flags, *args, **kwargs):
+        if path == key:
+            raise PermissionError("denied")
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", denied)
+    with pytest.raises(AutomationAccessError, match="TOKEN_KEY_UNAVAILABLE"):
+        vault.decrypt("owner", "grant", encrypted)
+    assert key.read_bytes() == original

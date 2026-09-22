@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.modules.automation.public import (
     AUTOMATION_SETTINGS_KEY,
     AutomationServiceSettings,
+    normalize_service_settings,
 )
 from app.modules.system.infrastructure.settings import (
     get_setting,
@@ -23,8 +24,8 @@ class SqlAlchemyAutomationSettings:
         self._db = db
 
     def load(self) -> AutomationServiceSettings:
-        return _SETTINGS.validate_python(
-            get_setting(self._db, AUTOMATION_SETTINGS_KEY, {})
+        return normalize_service_settings(
+            _SETTINGS.validate_python(get_setting(self._db, AUTOMATION_SETTINGS_KEY, {}))
         )
 
     def save(self, settings: AutomationServiceSettings) -> None:

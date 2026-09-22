@@ -15,6 +15,7 @@ from app.modules.automation.application.settings import (
     AUTOMATION_SETTINGS_KEY,
     AutomationServiceSettings,
     AutomationSettingsPort,
+    normalize_service_settings,
 )
 from app.modules.automation.application.system import ConfigurationGroup
 from app.modules.automation.domain.access import (
@@ -44,4 +45,5 @@ __all__ = [
     "ManageGrants",
     "Scope",
     "WritebackTarget",
+    "normalize_service_settings",
 ]
