@@ -1,10 +1,11 @@
-"""Preserve and verify ownership, mode, xattrs and Darwin ACLs on staged copies."""
+"""Best-effort attribute preservation; content publication owns success checks."""
 
 import ctypes
 import errno
 import os
 import stat
 import sys
+from contextlib import suppress
 from dataclasses import dataclass
 
 from app.contracts.file_operation import FileOperationError
@@ -170,18 +171,28 @@ def _darwin_acl(descriptor: int, replacement: bytes | None = None) -> bytes:
         library.acl_free(acl)
 
 
-def read_copy_attributes(descriptor: int) -> CopiedFileAttributes:
-    if sys.platform != "darwin" and not sys.platform.startswith("linux"):
-        raise FileOperationError("COPY_ATTRIBUTES_UNSUPPORTED")
-    value = os.fstat(descriptor)
+def read_copy_attributes(descriptor: int) -> CopiedFileAttributes | None:
+    # Descriptor identity remains mandatory at the publication/copy boundary.
+    try:
+        value = os.fstat(descriptor)
+    except OSError:
+        return None
     attributes: list[tuple[str, bytes]] = []
     total = 0
-    for name in _list_attributes(descriptor):
-        data = _get_attribute(descriptor, name)
-        total += len(data)
-        if total > MAX_ATTRIBUTE_BYTES:
-            raise FileOperationError("COPY_ATTRIBUTE_LIMIT")
-        attributes.append((name, data))
+    names: tuple[str, ...] = ()
+    with suppress(OSError, FileOperationError):
+        names = _list_attributes(descriptor)
+    for name in names:
+        # A protected or disappearing attribute must not prevent other copies.
+        with suppress(OSError, FileOperationError):
+            data = _get_attribute(descriptor, name)
+            if total + len(data) <= MAX_ATTRIBUTE_BYTES:
+                total += len(data)
+                attributes.append((name, data))
+    acl = None
+    if sys.platform == "darwin":
+        with suppress(OSError, FileOperationError):
+            acl = _darwin_acl(descriptor)
     return CopiedFileAttributes(
         value.st_uid,
         value.st_gid,
@@ -189,31 +200,40 @@ def read_copy_attributes(descriptor: int) -> CopiedFileAttributes:
         value.st_mtime_ns,
         getattr(value, "st_flags", 0),
         tuple(attributes),
-        _darwin_acl(descriptor) if sys.platform == "darwin" else None,
+        acl,
     )
 
 
-def apply_copy_attributes(descriptor: int, expected: CopiedFileAttributes) -> None:
-    observed = os.fstat(descriptor)
-    if (observed.st_uid, observed.st_gid) != (expected.uid, expected.gid):
-        os.fchown(descriptor, expected.uid, expected.gid)
-    os.fchmod(descriptor, expected.mode)
-    wanted = dict(expected.attributes)
-    for name in _list_attributes(descriptor):
-        if name not in wanted:
-            _set_attribute(descriptor, name, None)
+def apply_copy_attributes(
+    descriptor: int, expected: CopiedFileAttributes | None
+) -> None:
+    """Attempt each attribute independently, without read-back equality gates.
+
+    Attribute failures are optional here only; callers still verify content,
+    source identity, persistence and publication. Do not remove destination
+    xattrs because the source snapshot may omit unreadable attributes.
+    """
+    if expected is None:
+        return
+    with suppress(OSError):
+        observed = os.fstat(descriptor)
+        if (observed.st_uid, observed.st_gid) != (expected.uid, expected.gid):
+            os.fchown(descriptor, expected.uid, expected.gid)
+    with suppress(OSError):
+        os.fchmod(descriptor, expected.mode)
     for name, value in expected.attributes:
-        _set_attribute(descriptor, name, value)
+        with suppress(OSError, FileOperationError):
+            _set_attribute(descriptor, name, value)
     if expected.acl is not None:
-        _darwin_acl(descriptor, expected.acl)
-    if expected.flags:
-        if sys.platform != "darwin":
-            raise FileOperationError("COPY_FLAGS_UNSUPPORTED")
-        library = ctypes.CDLL(None, use_errno=True)
-        library.fchflags.argtypes = [ctypes.c_int, ctypes.c_uint]
-        library.fchflags.restype = ctypes.c_int
-        if library.fchflags(descriptor, expected.flags) != 0:
-            raise FileOperationError("COPY_FLAGS_UNSUPPORTED")
-    os.utime(descriptor, ns=(observed.st_atime_ns, expected.mtime_ns))
-    if read_copy_attributes(descriptor) != expected:
-        raise FileOperationError("COPY_ATTRIBUTES_NOT_PRESERVED")
+        with suppress(OSError, FileOperationError):
+            _darwin_acl(descriptor, expected.acl)
+    # Set time before flags, which can make a file immutable on Darwin.
+    with suppress(OSError):
+        observed = os.fstat(descriptor)
+        os.utime(descriptor, ns=(observed.st_atime_ns, expected.mtime_ns))
+    if sys.platform == "darwin":
+        with suppress(OSError):
+            library = ctypes.CDLL(None, use_errno=True)
+            library.fchflags.argtypes = [ctypes.c_int, ctypes.c_uint]
+            library.fchflags.restype = ctypes.c_int
+            library.fchflags(descriptor, expected.flags)

@@ -226,3 +226,69 @@ def test_same_size_replacement_changes_millisecond_reader_identity(tmp_path):
     fresh = send_file(source, http_request(), "user", asset_id="fixture")
     assert fresh.headers["x-asset-version"] != old_version
     assert asyncio.run(consume(fresh)) == source.read_bytes()
+
+
+@pytest.mark.parametrize("failure", ["read", "set", "mismatch"])
+def test_cbz_publication_succeeds_despite_optional_attributes(
+    tmp_path, monkeypatch, failure
+):
+    from zipfile import ZipFile
+
+    from app.infrastructure import copied_file_attributes as attributes
+
+    request = target(tmp_path)
+    comic = tmp_path / "book.cbz"
+    page = b"unchanged comic page bytes"
+    with ZipFile(comic, "w") as archive:
+        archive.writestr("001.jpg", page)
+    original = comic.read_bytes()
+    request = replace(
+        request,
+        relative_path="book.cbz",
+        format="CBZ",
+        original=file_identity(comic.stat()),
+    )
+
+    def unavailable(*_):
+        raise OSError("attribute unavailable")
+
+    monkeypatch.setattr(
+        attributes, "_list_attributes", lambda _: ("com.apple.provenance",)
+    )
+    monkeypatch.setattr(
+        attributes,
+        "_get_attribute",
+        unavailable if failure == "read" else lambda *_: b"source",
+    )
+    monkeypatch.setattr(
+        attributes,
+        "_set_attribute",
+        unavailable if failure == "set" else lambda *_: None,
+    )
+    publisher = files()
+    proof = publisher.prepare(request)
+    publisher.publish(request, proof)
+    assert publisher.published(request, proof)
+    assert (tmp_path / request.backup_name).read_bytes() == original
+    with ZipFile(comic) as archive:
+        assert archive.read("001.jpg") == page
+        assert b">New<" in archive.read("ComicInfo.xml")
+
+
+def test_publication_persistence_failure_does_not_replace_original(
+    tmp_path, monkeypatch
+):
+    from app.modules.metadata.application.standard_writeback import (
+        StandardPreparationError,
+    )
+
+    request = target(tmp_path)
+
+    def failed(_):
+        raise OSError("persistence failed")
+
+    monkeypatch.setattr(standard_publication.os, "fsync", failed)
+    with pytest.raises(StandardPreparationError, match="FILE_PREPARATION_FAILED"):
+        files().prepare(request)
+    assert (tmp_path / request.relative_path).read_bytes() == SOURCE
+    assert not (tmp_path / request.backup_name).exists()

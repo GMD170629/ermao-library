@@ -46,7 +46,6 @@ def copy_verified_tree(
             with open_library_directory(source_root, item.relative_path) as source_fd:
                 if file_identity(os.fstat(source_fd)) != item.identity:
                     raise FileMoveError("SOURCE_CHANGED")
-                attributes = read_copy_attributes(source_fd)
             directory_attributes.append(
                 (item.relative_path, destination, item.identity)
             )
@@ -85,7 +84,6 @@ def copy_verified_tree(
                     if (
                         size != item.identity.size
                         or file_identity(os.fstat(source_fd)) != item.identity
-                        or read_copy_attributes(source_fd) != attributes
                     ):
                         raise FileMoveError("SOURCE_CHANGED")
                     os.fsync(target_fd)

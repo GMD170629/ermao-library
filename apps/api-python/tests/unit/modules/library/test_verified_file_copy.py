@@ -8,7 +8,29 @@ from app.modules.library.infrastructure.move_inventory import inspect_move_sourc
 from app.modules.library.infrastructure.verified_file_copy import copy_verified_tree
 
 
-def test_verified_copy_preserves_bytes_and_keeps_source(tmp_path):
+@pytest.mark.parametrize("attribute_failure", [None, "read", "set", "mismatch"])
+def test_verified_copy_preserves_bytes_and_keeps_source(
+    tmp_path, monkeypatch, attribute_failure
+):
+    from app.infrastructure import copied_file_attributes as attributes
+
+    def unavailable(*_):
+        raise OSError("attribute unavailable")
+
+    if attribute_failure:
+        monkeypatch.setattr(
+            attributes, "_list_attributes", lambda _: ("com.apple.provenance",)
+        )
+        monkeypatch.setattr(
+            attributes,
+            "_get_attribute",
+            unavailable if attribute_failure == "read" else lambda *_: b"source",
+        )
+        monkeypatch.setattr(
+            attributes,
+            "_set_attribute",
+            unavailable if attribute_failure == "set" else lambda *_: None,
+        )
     source_root, destination_root = tmp_path / "source", tmp_path / "destination"
     (source_root / "book/pages").mkdir(parents=True)
     destination_root.mkdir()
@@ -20,6 +42,7 @@ def test_verified_copy_preserves_bytes_and_keeps_source(tmp_path):
     manifest = copy_verified_tree(
         source_root, "book", destination_root, ".move-stage", inventory
     )
+    assert (destination_root / ".move-stage/metadata.opf").read_bytes() == b"metadata"
     assert len(manifest) == 2
     assert (
         next(
@@ -71,3 +94,32 @@ def test_source_changed_or_existing_stage_is_never_overwritten(tmp_path):
             source_root, "book", destination_root, ".new-stage", inventory
         )
     assert not (destination_root / ".new-stage").exists()
+
+
+@pytest.mark.parametrize("failure", ["corrupt", "fsync"])
+def test_content_or_persistence_failure_keeps_source(tmp_path, monkeypatch, failure):
+    from app.modules.library.infrastructure import verified_file_copy as copy_module
+
+    source_root, destination_root = tmp_path / "source", tmp_path / "destination"
+    source_root.mkdir()
+    destination_root.mkdir()
+    (source_root / "book").write_bytes(b"original")
+    inventory = inspect_move_source(source_root, "book")
+    write = os.write
+
+    def corrupt(fd, content):
+        return write(fd, b"x" * len(content))
+
+    def disk_error(_):
+        raise OSError("persistence failed")
+
+    if failure == "corrupt":
+        monkeypatch.setattr(copy_module.os, "write", corrupt)
+    else:
+        monkeypatch.setattr(copy_module.os, "fsync", disk_error)
+    with pytest.raises(
+        (FileMoveError, OSError), match="COPY_VERIFICATION_FAILED|persistence failed"
+    ):
+        copy_verified_tree(source_root, "book", destination_root, ".stage", inventory)
+    assert (source_root / "book").read_bytes() == b"original"
+    assert not (destination_root / "book").exists()
