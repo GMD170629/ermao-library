@@ -193,6 +193,7 @@ class ChapterCore:
                 str(build / "Release/ermao_chapters.dll"),
                 str(build / "ermao_chapters.dll"),
                 str(build / "libermao_chapters.so"),
+                str(build / "libermao_chapters.dylib"),
             ]
         )
         last_error: OSError | None = None

@@ -34,6 +34,7 @@ WEB_MODE="${WEB_MODE:-dev}"
 STORAGE_ROOT="${STORAGE_ROOT:-$ROOT_DIR/storage}"
 SESSION_SECRET="${SESSION_SECRET:-dev-test-session-secret-change-me-at-least-32-chars}"
 MOBI_CORE_BUILD_DIR="${MOBI_CORE_BUILD_DIR:-$ROOT_DIR/build/mobi-core-runtime}"
+CHAPTER_CORE_BUILD_DIR="$ROOT_DIR/packages/reader-core/native/chapters/build"
 
 run_cmake() {
   if command -v cmake >/dev/null 2>&1; then
@@ -156,7 +157,28 @@ if [ ! -f "$ERMAO_MOBI_CORE_LIBRARY" ]; then
   exit 1
 fi
 
-export STORAGE_ROOT SESSION_SECRET WEB_PORT ERMAO_MOBI_CORE_LIBRARY
+if [ -z "${ERMAO_CHAPTER_CORE_LIBRARY:-}" ]; then
+  CHAPTER_CORE_C_COMPILER="$(find_host_compiler "${CHAPTER_CORE_C_COMPILER:-}" cc gcc clang)"
+  run_cmake \
+    -S "$ROOT_DIR/packages/reader-core/native/chapters" \
+    -B "$CHAPTER_CORE_BUILD_DIR" \
+    -DCMAKE_C_COMPILER="$CHAPTER_CORE_C_COMPILER" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_TESTING=OFF
+  run_cmake --build "$CHAPTER_CORE_BUILD_DIR" --config Release --target ermao_chapters_shared
+  case "$(uname -s)" in
+    Darwin) ERMAO_CHAPTER_CORE_LIBRARY="$CHAPTER_CORE_BUILD_DIR/libermao_chapters.dylib" ;;
+    Linux) ERMAO_CHAPTER_CORE_LIBRARY="$CHAPTER_CORE_BUILD_DIR/libermao_chapters.so" ;;
+    *) ERMAO_CHAPTER_CORE_LIBRARY="$CHAPTER_CORE_BUILD_DIR/Release/ermao_chapters.dll" ;;
+  esac
+fi
+
+if [ ! -f "$ERMAO_CHAPTER_CORE_LIBRARY" ]; then
+  echo "Chapter runtime is unavailable / 章节引擎不可用: $ERMAO_CHAPTER_CORE_LIBRARY" >&2
+  exit 1
+fi
+
+export STORAGE_ROOT SESSION_SECRET WEB_PORT ERMAO_MOBI_CORE_LIBRARY ERMAO_CHAPTER_CORE_LIBRARY
 
 (
   cd apps/api-python
