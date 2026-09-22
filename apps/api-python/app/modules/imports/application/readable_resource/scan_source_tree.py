@@ -341,12 +341,12 @@ class ScanLibrarySourceTree:
                     task_id, config.library_id, resolved=(scope,), incomplete=()
                 )
                 continue
-            if (
-                node is not None
-                and node.physical_kind is not SourceNodePhysicalKind.DIRECTORY
+            if node is not None and node.physical_kind not in (
+                SourceNodePhysicalKind.DIRECTORY,
+                SourceNodePhysicalKind.REGULAR_FILE,
             ):
                 continue
-            if relative:
+            if relative and node.physical_kind is SourceNodePhysicalKind.DIRECTORY:
                 self._uow.release_before_io()
                 absolute = self._filesystem.resolve_under_root(
                     config.root_path, relative
@@ -368,15 +368,28 @@ class ScanLibrarySourceTree:
             visited.add(relative)
             failed_paths: set[str] = set()
             try:
-                result = self._walk(
-                    config=config,
-                    start_parent_id=node.id if node else None,
-                    start_parent_rel=relative or None,
-                    task_id=task_id,
-                    missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
-                    recursive=scope.recursive,
-                    incomplete_paths=failed_paths,
-                )
+                if (
+                    node is not None
+                    and node.physical_kind is SourceNodePhysicalKind.REGULAR_FILE
+                ):
+                    try:
+                        result = self.execute_source(node.id, task_id=task_id)
+                    except SourceScanStartUnavailableError:
+                        # Confirm absence before reconciling the parent. An
+                        # unreadable file must keep its existing scan gap.
+                        parent = self._confirmed_missing_parent(config, relative)
+                        pending[0:0] = [ScanScope(parent), scope]
+                        continue
+                else:
+                    result = self._walk(
+                        config=config,
+                        start_parent_id=node.id if node else None,
+                        start_parent_rel=relative or None,
+                        task_id=task_id,
+                        missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
+                        recursive=scope.recursive,
+                        incomplete_paths=failed_paths,
+                    )
                 for index, value in enumerate(
                     (
                         result.nodes_inserted,
