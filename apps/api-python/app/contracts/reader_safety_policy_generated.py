@@ -846,6 +846,7 @@ def reader_safety_format_policy(source_format: str) -> ReaderSafetyFormatDefinit
     try:
         format_id = ReaderSafetyFormat(source_format.strip().upper())
     except ValueError:
+        # diagnostics-control-flow: unknown formats intentionally return no policy; require_reader_safety_format_policy rejects them.
         return None
     return READER_SAFETY_FORMATS[format_id]
 

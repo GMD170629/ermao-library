@@ -19,6 +19,7 @@
 
 - 书库身份为 SourceNode／Book／ReadableResource／ResourceAsset，见[书库结构](library-root-layout.md)。
 - 导入的发现、资源识别和任务处理由 imports 能力与 bootstrap 装配协作，HTTP 与 Worker 复用应用入口。
+- 书库原文件新增／替换复用 imports 保存入口，移动／删除归属 library；MCP 与网页经应用入口调用系统／标准库文件能力，再复用原身份路径更新、删除收尾和 `RequestLibraryScan`，不新增搬运或扫描管线。
 - 第一方阅读进度使用 Reader v5。引擎 Locator 保持不透明，展示进度另行传递，见[Reader 架构](mobile-reader-architecture.md)。
 - 章节识别复用[共享章节核心](mobile-reader-architecture.md#统一章节核心)，不在详情页和各端 Reader 各写一套解析规则。
 - Reader 安全规则唯一源为 `packages/reader-contracts/reader-safety-policy.json`；生成绑定不手改。

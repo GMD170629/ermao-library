@@ -55,9 +55,9 @@ uv run --locked python ../../examples/mcp/move_books_example.py --node-id NODE_I
 uv run --locked python ../../examples/mcp/writeback_metadata_example.py --target-type book --target-id BOOK_ID --node-id NODE_ID --mode opf --field title
 ```
 
-以上默认只读取或预览，不修改图书记录和书库文件；文件预览会保存短期方案。写入必须追加 `--execute --request-id YOUR_STABLE_KEY`。书架、系统修改即时返回结果；文件任务提交后最多查询五分钟。退出或网络中断不会取消后台任务。通过设置页或 `get_operation` 查看真实逐项结果；`cancel_operation` 只取消尚未发布的文件。
+以上默认只读取或预览，不修改图书记录和书库文件；文件预览会保存短期方案。写入必须追加 `--execute --request-id YOUR_STABLE_KEY`。书架、系统修改即时返回结果；文件任务提交后最多查询五分钟。退出或网络中断不会取消后台任务。通过设置页或 `get_operation` 查看真实逐项结果；`cancel_operation` 只取消尚未开始的文件操作，已完成的文件操作不会撤回。
 
-All examples default to reads or previews. File previews persist temporary plans but do not modify library files. Writes require `--execute --request-id YOUR_STABLE_KEY`. File examples poll for up to five minutes; disconnecting does not cancel server work. Inspect results with `get_operation` or the settings page. Cancellation only affects unpublished work.
+All examples default to reads or previews. File previews persist temporary plans but do not modify library files. Writes require `--execute --request-id YOUR_STABLE_KEY`. File examples poll for up to five minutes; disconnecting does not cancel server work. Inspect results with `get_operation` or the settings page. Cancellation only affects file operations that have not started; completed file operations are not undone.
 
 超时重试须保留同一个请求标识、方案标识和参数，不能换键反复提交。文件示例可直接使用已打印的方案：
 
@@ -81,14 +81,14 @@ Book and cover attachment uploads use pure MCP tools with separate permissions. 
 ## 能力与限制 / Capabilities and limits
 
 - 系统更新：输入值 → 数据库。刷新：文件 → 数据库。写回：已确认的系统值 → 指定文件。三个方向独立；系统更新权限不会触发文件自动写回。
-- 移动：固定书库内的安全相对路径；完整图书可明确授权跨库/跨盘。保持图书和资源 ID；单资源不能隐式拆书或换归属。目录和伴随文件先展开清单。禁止任意路径、脚本及覆盖现有目标。
+- 移动：固定书库内的安全相对路径；完整图书可明确授权跨库/跨挂载点。系统命令负责搬运，成功后更新原图书及子节点的位置，再触发现有扫描。保持图书和资源 ID、进度和书架关联；单资源不能隐式拆书或换归属。禁止任意路径、脚本及覆盖现有目标。
 - OPF/EPUB/ComicInfo 选择字段写入，未选字段和正文保持。实际支持字段以 `get_metadata_schema` 和 `read_file_metadata` 返回为准。
 - MP3/M4A/M4B/FLAC、PDF 当前只写标题、作者、简介。PDF 最大 64 MiB，签名或加密拒绝。PDF 使用增量修订，清空只影响最新元数据，**旧修订仍保留原值，不是敏感信息擦除**。
 - MP3 仅受支持的 ID3v2.3/v2.4 结构；拒绝共存 ID3v1 或需要调整绝对章节偏移的文件。未知结构、无法保真保存、只读源、空间不足都拒绝写入。
 - 查询每页最多 50，元数据批次最多 20；文件方案最多 100 个顶层移动，展开最多 10,000 项/100 GiB，有效期 15 分钟。写回方案最多 20 项。
-- 文件原件恢复副本保留两天；移动和写回共用 100 GiB 恢复预算。到期仅在验证目标与备份未被改动后清理。校验失败保留待核查，不能把目录中的备份手工当作普通书籍导入。
+- 新增、完整替换、移动与删除不额外创建恢复副本；系统或标准库执行文件操作，现有流程处理书库记录与扫描。旧任务的暂存和备份保留核查，不能当作普通书籍导入。标准格式元数据写回仍沿用其格式验证和恢复副本规则。
 
-System updates, file-to-system refresh, and system-to-file writeback are separately authorized. Moves preserve identities and reject implicit ownership changes, arbitrary paths and overwrites. OPF/EPUB/ComicInfo writes are selective. Audio/PDF support is limited to title, authors and description. PDF writes append a revision; clearing current metadata does **not** erase old revisions. Unsupported, signed, encrypted, read-only or unsafe structures fail closed. Limits are 50 query items, 20 metadata/writeback targets, 100 top-level moves, 10,000 expanded entries and 100 GiB per move plan; plans expire after 15 minutes. Recovery backups share a 100 GiB quota, retain originals for two days, and require verification before cleanup.
+System updates, file-to-system refresh, and system-to-file writeback are separately authorized. Moves use system commands, then update existing locations and request the existing scan. They preserve book/resource IDs, reading progress and shelf links, and reject implicit ownership changes, arbitrary paths and overwrites. OPF/EPUB/ComicInfo writes are selective. Audio/PDF support is limited to title, authors and description. PDF writes append a revision; clearing current metadata does **not** erase old revisions. Unsupported, signed, encrypted, read-only or unsafe structures fail closed. Limits are 50 query items, 20 metadata/writeback targets, 100 top-level moves, 10,000 expanded entries and 100 GiB per move plan; plans expire after 15 minutes. New uploads, whole-file replacements, moves and deletions do not create additional recovery backups. Existing staging files and backups are retained for review. Selective metadata writeback retains its separate format-verification and recovery rules.
 
 ## 排错与恢复 / Troubleshooting and recovery
 
@@ -96,9 +96,9 @@ System updates, file-to-system refresh, and system-to-file writeback are separat
 
 Start with `get_context`. For authentication failures check token expiry/revocation and service status; for authorization failures check current user permissions, fixed library scope and writeback subpermissions. Management endpoints do not validate Origin; MCP transport still validates the public Host and any supplied Origin. A remote client's `localhost` refers to that client, and a container's `localhost` refers to that container.
 
-方案过期、元数据版本变化或源文件变化应重新预览并核对，再以新操作执行。若原操作已经受理，只查原任务，勿因等待超时重新建任务。`RECOVERY_REQUIRED` 表示文件被保留但一致性尚需核对：保留任务标识及备份，由管理员检查原路径、目标和任务记录；不要覆盖目标、删除临时槽或修改数据库状态来“强制成功”。有完整发布证明的任务会在 worker 重启时按租约恢复必要索引；未知部分写入保留人工核查。
+方案过期、元数据版本变化或源文件变化应重新预览并核对，再以新操作执行。若原操作已经受理，只查原任务，勿因等待超时重新建任务。`RECOVERY_REQUIRED` 表示任务未完成，需要核对文件和书库记录；它不保证原文件或备份仍然存在。保留任务标识，由管理员检查原路径、目标和实际执行阶段，不重复提交相同操作或修改数据库状态来“强制成功”。移动或删除中断不自动重放，也不自动回滚；扫描失败沿用扫描任务处理，不重复文件操作。旧执行版本的未完成计划不能直接按新流程执行，历史暂存和备份保留。
 
-Expired or changed plans require a new reviewed preview. If an operation was already accepted, inspect that operation instead of submitting again. `RECOVERY_REQUIRED` retains files for review: preserve the operation ID and backups, and have an administrator reconcile source, destination and recorded results. Do not overwrite targets, delete staging slots or edit database state to force success. On worker restart, operations with verified publication proofs can repair the index under their lease; uncertain partial writes remain for manual review.
+Expired or changed plans require a new reviewed preview. If an operation was already accepted, inspect that operation instead of submitting again. `RECOVERY_REQUIRED` means the operation is incomplete and its files and library records need review; it does not guarantee an original or backup still exists. Keep the operation ID and have an administrator check source, destination and recorded stages. Do not resubmit the same operation or edit database state to force success. Interrupted moves and deletions are not automatically repeated or rolled back. Scan failures remain with the existing scan task and do not repeat file operations. Unfinished plans from an older execution version cannot run under the new behavior; historical staging files and backups are retained.
 
 封面可用 `get_metadata_schema` 中的 `cover_references` 选择，通过系统字段 `cover_ref` 更新。仅列出当前图书已保存的不可变本地封面，最多 50 项；不接受 URL、文件路径或其他图书的引用，不复制图片。`values.cover_ref` 表示当前值，不一定是可重新选择的候选。清空封面仍须显式选择并满足人工保护权限。
 
@@ -126,13 +126,13 @@ Choose **Edit** on an active grant to change its name, libraries, permissions or
 
 书架沿用 `create_shelf`，增加 `kind=SMART` 与 `rules`；`update_shelf`、`delete_shelf` 使用个人书架 ID 和幂等 request_id。规则复用现有筛选模型，结果随当前可见图书动态变化。
 
-`plan_file_deletions(source_node_ids)` 返回实际文件清单与影响字节数，`execute_file_deletions(plan_id)` 执行永久删除。只删除冻结清单内且身份仍匹配的文件；新出现文件不会被递归删除。每个目标保存阶段，索引同步走现有导入队列；不确定阶段返回需要恢复，重复执行同一方案继续一致性处理。不会自动重跑历史任务。
+`plan_file_deletions(source_node_ids)` 预览选定的永久删除目标，`execute_file_deletions(plan_id)` 使用系统或标准库删除所选文件或完整目录。目录按执行时全部内容删除，包括预览后新加入的文件；不再冻结内部逐项清单。每个目标保存实际阶段，文件删除后复用现有书库删除收尾和扫描；删除最后一本书无需关闭普通扫描的空库保护。已完成的目标不会再次删除，中断或结果不确定的操作保留核对，不自动重放。
 
 ### Six capabilities (English)
 
 Basic queries are mandatory but retain account and library boundaries. System managers may read structured logs, queue status and redacted configuration; `system:manage` enables only the named configuration categories. `books:write` changes system metadata and display covers; explicit protected fields and current revisions remain required. `shelves:write` manages personal static and smart shelves. New imports require `files:upload`; moves, permanent deletion, writeback and whole-file replacement require `files:modify`.
 
-Migration preserves credentials, scope, expiry and history, resetting old permissions and service capabilities to basic queries. Administrators enable capabilities in service settings and edit grants to reassign them. Deletion executes a frozen inventory with durable per-target recovery; recreated names and newly added children are never silently deleted.
+Migration preserves credentials, scope, expiry and history, resetting old permissions and service capabilities to basic queries. Administrators enable capabilities in service settings and edit grants to reassign them. Deletion previews selected targets, then uses system or standard-library operations to delete each file or entire directory. A directory includes all contents present at execution, including files added after preview. Existing library cleanup and scanning follow successful deletion, including deletion of the last book without disabling empty-library protection. Completed targets are not deleted again; interrupted or uncertain operations remain for review instead of automatic replay.
 
 
 服务“允许用户授权的能力”约束新授权及编辑时新增的能力。暂时关闭的已有能力可以保留或移除，但调用时仍受当前服务设置限制。公开地址保存与读取会统一域名大小写、国际化域名、IPv6 和默认端口，部署路径及非默认端口保留。
