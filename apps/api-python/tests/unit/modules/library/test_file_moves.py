@@ -169,7 +169,7 @@ def test_plan_authorizes_entire_batch_before_inspection_and_freezes_limits(tmp_p
     )
     assert plan.expires_at_ms == 901000
     assert plan.moves[0].inventory.byte_count == 4
-    assert plan.execution_version == 2
+    assert plan.execution_version == 3
     assert not (tmp_path / "author").exists()
 
 

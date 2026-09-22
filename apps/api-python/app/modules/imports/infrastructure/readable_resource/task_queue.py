@@ -559,6 +559,14 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         # Composite node/resource foreign keys already move node-bound task scope.
         # Keep unrelated and broad source gaps; only the removed subtree is cleared.
         clear_scan_gaps(self._session, change.source_library_id, (source_scope,))
+        if change.reimport:
+            self.request_library_scan(
+                change.source_library_id,
+                missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
+                scan_scopes=(
+                    ScanScope(change.source_relative_path.rpartition("/")[0], False),
+                ),
+            )
         record_scan_gaps(
             self._session, change.destination_library_id, (destination_scope,)
         )

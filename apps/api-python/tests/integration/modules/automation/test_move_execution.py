@@ -99,6 +99,13 @@ def failure_diagnostics(db):
 
 
 def executor(db, store, files, authorize):
+    from app.bootstrap.readable_resource_pipeline import (
+        build_readable_resource_pipeline,
+    )
+    from app.modules.imports.infrastructure.readable_resource.source_node_deletion import (
+        LibrarySourceNodeDeletionAdapter,
+    )
+
     return ExecuteFileMoveOperation(
         store,
         files,
@@ -110,6 +117,9 @@ def executor(db, store, files, authorize):
         lambda: 4000,
         lambda: datetime.now(UTC),
         diagnostics=failure_diagnostics(db),
+        delete_source_node=LibrarySourceNodeDeletionAdapter(
+            build_readable_resource_pipeline(db).delete_source_node
+        ).delete_source_node,
     )
 
 
@@ -325,7 +335,7 @@ def test_move_creates_and_indexes_planned_parent_directories(db_session, tmp_pat
     assert store.execution("operation").created_directories[1] == ()
 
 
-def test_resource_rename_preserves_book_and_rejects_cross_book_move(
+def test_resource_rename_preserves_parent_book_and_discards_resource_identity(
     db_session, tmp_path
 ):
     from app.models import LibraryReadableResource
@@ -358,10 +368,10 @@ def test_resource_rename_preserves_book_and_rejects_cross_book_move(
         lambda: 1000,
         lambda: "plan",
     )
-    with pytest.raises(FileMoveError, match="BOOK_OWNERSHIP_WOULD_CHANGE"):
-        planner.execute(
-            actor, (MoveRequest("volume-node", "test-library", "other/volume.epub"),)
-        )
+    other_plan = planner.execute(
+        actor, (MoveRequest("volume-node", "test-library", "other/volume.epub"),)
+    )
+    assert other_plan.moves[0].destination.identity_policy == "REIMPORT"
     plan = planner.execute(
         actor, (MoveRequest("volume-node", "test-library", "allowed/renamed.epub"),)
     )
@@ -378,11 +388,8 @@ def test_resource_rename_preserves_book_and_rejects_cross_book_move(
     assert store.progress("operation", actor).status == "COMPLETED"
     db_session.expire_all()
     assert db_session.get(LibraryBook, "allowed").source_node_id == "allowed-node"
-    assert db_session.get(LibraryReadableResource, "volume").book_id == "allowed"
-    assert (
-        db_session.get(LibrarySourceNode, "volume-node").relative_path
-        == "allowed/renamed.epub"
-    )
+    assert db_session.get(LibraryReadableResource, "volume") is None
+    assert db_session.get(LibrarySourceNode, "volume-node") is None
     assert (root / "allowed/renamed.epub").read_bytes() == b"volume"
 
 
@@ -671,16 +678,17 @@ def test_recovery_move_does_not_block_new_same_source_task(
     assert store.progress("operation", actor).stages[0] == "RECOVERY_REQUIRED"
 
 
+@pytest.mark.parametrize("version", [1, 2])
 @pytest.mark.parametrize("started", [False, True])
 def test_legacy_move_plan_never_replays_files_or_cleans_backup(
-    db_session, tmp_path, started
+    db_session, tmp_path, started, version
 ):
     from app.modules.library.infrastructure.file_move_schema import LibraryFileMovePlan
 
     actor, root, store = prepare(db_session, tmp_path)
     row = db_session.get(LibraryFileMovePlan, "plan")
     payload = dict(row.payload)
-    payload.pop("execution_version")
+    payload["execution_version"] = version
     payload["moves"][0]["staging_relative_path"] = ".ermao-mcp-legacy-target"
     payload["moves"][0]["backup_relative_path"] = ".ermao-mcp-legacy-source"
     row.payload = payload
@@ -702,17 +710,18 @@ def test_legacy_move_plan_never_replays_files_or_cleans_backup(
     assert not hasattr(files, "clear_backup")
 
 
-def test_old_preview_requires_refresh_before_new_enqueue(db_session, tmp_path):
+@pytest.mark.parametrize("version", [1, 2])
+def test_old_preview_requires_refresh_before_new_enqueue(db_session, tmp_path, version):
     from dataclasses import replace
 
     actor, root, store = prepare(db_session, tmp_path)
     legacy = replace(
-        store.load_plan("plan", actor), id="old-preview", execution_version=1
+        store.load_plan("plan", actor), id="old-preview", execution_version=version
     )
     store.save_plan(legacy)
     db_session.commit()
     with pytest.raises(FileMoveError, match="MOVE_PLAN_REQUIRES_REFRESH"):
         store.enqueue(legacy, "never-enqueued", "legacy-request", 4000)
     db_session.rollback()
-    assert store.load_plan("old-preview", actor).execution_version == 1
+    assert store.load_plan("old-preview", actor).execution_version == version
     assert (root / "allowed").is_dir()

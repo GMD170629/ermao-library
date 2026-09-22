@@ -83,7 +83,7 @@ class SqlAlchemyFileMoveOperations:
             return existing
         if plan.expires_at_ms <= now_ms:
             raise FileMoveError("PLAN_EXPIRED")
-        if plan.execution_version != 2:
+        if plan.execution_version != 3:
             raise FileMoveError("MOVE_PLAN_REQUIRES_REFRESH")
         self._db.add(
             LibraryFileMoveOperation(

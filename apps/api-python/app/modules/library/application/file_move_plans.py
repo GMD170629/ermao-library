@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from app.modules.library.domain.file_moves import (
     MAX_BYTES,
@@ -41,6 +41,8 @@ class MoveDestination:
     library_id: str
     root: Path
     relative_path: str
+    identity_policy: Literal["PRESERVE_IDENTITY", "REIMPORT"] = "PRESERVE_IDENTITY"
+    topology_revision: str = ""
 
 
 @dataclass(frozen=True)
@@ -87,7 +89,7 @@ class MoveTopologyPort(Protocol):
     def destination(
         self, source: MoveSource, request: MoveRequest, library_ids: frozenset[str]
     ) -> MoveDestination:
-        """Reject moves changing book/resource ownership or organization mode."""
+        """Freeze target topology and the identity policy for a complete unit."""
         ...
 
 
@@ -166,6 +168,11 @@ class PrepareFileMovePlan:
             )
         expanded: list[PlannedMove] = []
         for move in moves:
+            if move.destination.identity_policy == "REIMPORT":
+                # Reimport only the selected file/subtree. Shared or adjacent
+                # metadata belongs to the source book and must stay there.
+                expanded.append(move)
+                continue
             for source_path, target_path in self.inspection.companions(
                 move.source,
                 move.destination,
@@ -206,5 +213,5 @@ class PrepareFileMovePlan:
         )
         now = self.clock_ms()
         return FileMovePlan(
-            plan_id, actor, now, now + 15 * 60_000, tuple(expanded), execution_version=2
+            plan_id, actor, now, now + 15 * 60_000, tuple(expanded), execution_version=3
         )

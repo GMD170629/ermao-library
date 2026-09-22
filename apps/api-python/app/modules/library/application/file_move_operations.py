@@ -60,6 +60,10 @@ def move_progress_result(progress: FileMoveProgress) -> dict[str, object]:
         "cancelled": progress.stages.count("CANCELLED"),
         "failed": progress.stages.count("FAILED"),
         "recovery_required": progress.stages.count("RECOVERY_REQUIRED"),
+        "completion_description": {
+            "zh-CN": "移动完成表示文件与索引收尾完成，扫描导入由书库任务继续处理。",
+            "en-US": "Move completion covers files and index reconciliation; library tasks continue scanning and importing.",
+        },
         "targets": [
             {"index": index, "stage": stage, "error_code": error}
             for index, (stage, error) in enumerate(
@@ -102,6 +106,19 @@ def move_plan_result(plan: FileMovePlan) -> dict[str, object]:
                     if not item.directory
                 ],
                 "execution_strategy": "system_move_index_scan",
+                "identity_policy": move.destination.identity_policy,
+                "discards_identity": move.destination.identity_policy == "REIMPORT",
+                "identity_description": (
+                    {
+                        "zh-CN": "移动后清理旧索引及关联信息，扫描重新生成卷册身份；仅移动所选文件或目录内容。",
+                        "en-US": "Remove the old index and associated data, then scan to create new resource identities; move only the selected file or directory contents.",
+                    }
+                    if move.destination.identity_policy == "REIMPORT"
+                    else {
+                        "zh-CN": "保留图书与卷册身份、元数据、阅读进度及书架关联，仅更新位置。",
+                        "en-US": "Preserve book and resource identities, metadata, reading progress and shelf links; update locations only.",
+                    }
+                ),
             }
             for move in plan.moves
         ],

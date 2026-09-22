@@ -34,10 +34,10 @@ def test_scoped_complete_directory_plan_preserves_identity_and_is_pure(
     assert plan.moves[0].inventory.byte_count == 12
     assert (root / "allowed/metadata.opf").read_bytes() == b"keep exactly"
     assert not (root / "renamed").exists()
-    with pytest.raises(FileMoveError, match="BOOK_OWNERSHIP_WOULD_CHANGE"):
-        prepare.execute(
-            actor, (MoveRequest("allowed-node", "test-library", "group/book"),)
-        )
+    nested_plan = prepare.execute(
+        actor, (MoveRequest("allowed-node", "test-library", "group/book"),)
+    )
+    assert nested_plan.moves[0].destination.identity_policy == "REIMPORT"
     with pytest.raises(FileMoveError, match="RESOURCE_NOT_FOUND"):
         topology.source("secret-node", actor.library_ids)
     # Layout configuration is part of the frozen source version.

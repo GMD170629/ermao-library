@@ -80,6 +80,7 @@ class ExecuteFileMoveOperation:
     clock_ms: Callable[[], int]
     clock: Callable[[], datetime]
     diagnostics: FailureDiagnostics
+    delete_source_node: Callable[[str], None]
 
     def execute(self, operation_id: str) -> None:
         execution = self.store.execution(operation_id)
@@ -122,7 +123,7 @@ class ExecuteFileMoveOperation:
             publication_uncertain = stage != "QUEUED" or companions_published
             step = "validate_target"
             try:
-                if plan.execution_version != 2:
+                if plan.execution_version != 3:
                     raise FileMoveError("MOVE_PLAN_REQUIRES_REFRESH")
                 if stage == "PREPARING":
                     raise FileMoveError("FILE_OPERATION_INTERRUPTED")
@@ -230,9 +231,13 @@ class ExecuteFileMoveOperation:
                         move.destination.relative_path,
                         node_ids,
                         move.source.book_ids,
+                        move.destination.identity_policy == "REIMPORT",
                     )
                     step = "discard_relocated_writebacks"
                     self.discard_writebacks(change)
+                    if change.reimport:
+                        step = "delete_source_index"
+                        self.delete_source_node(move.source.node_id)
                     step = "reconcile_imports"
                     self.reconcile_imports(change)
                     step = "checkpoint"

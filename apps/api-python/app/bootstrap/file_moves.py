@@ -6,9 +6,13 @@ from datetime import UTC, datetime
 from sqlalchemy.orm import Session
 
 from app.bootstrap.automation import build_automation_authorizer
+from app.bootstrap.readable_resource_pipeline import build_readable_resource_pipeline
 from app.core.failure_diagnostics import RuntimeFailureDiagnostics
 from app.core.time import now_timestamp_ms
 from app.modules.automation.application.execution import RecheckMoveAccess
+from app.modules.imports.infrastructure.readable_resource.source_node_deletion import (
+    LibrarySourceNodeDeletionAdapter,
+)
 from app.modules.imports.infrastructure.readable_resource.task_queue import (
     SqlAlchemyLibraryImportTaskQueue,
 )
@@ -48,6 +52,9 @@ def build_file_move_worker(db: Session) -> FileMoveWorker:
             now_timestamp_ms,
             lambda: datetime.now(UTC),
             diagnostics,
+            LibrarySourceNodeDeletionAdapter(
+                build_readable_resource_pipeline(db).delete_source_node
+            ).delete_source_node,
         ),
         db,
         now_timestamp_ms,

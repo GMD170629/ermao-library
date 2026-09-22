@@ -11,3 +11,4 @@ class SourceRelocation:
     destination_relative_path: str
     node_ids: tuple[str, ...]
     book_ids: tuple[str, ...]
+    reimport: bool = False

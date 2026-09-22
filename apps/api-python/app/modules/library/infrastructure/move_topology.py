@@ -167,10 +167,7 @@ class SqlAlchemyMoveTopology:
         node = self._db.get(LibrarySourceNode, source.node_id, populate_existing=True)
         if node is None:
             raise FileMoveError("RESOURCE_NOT_FOUND")
-        if source.library_id != request.destination_library_id and set(
-            source.book_ids
-        ) != set(source.complete_book_ids):
-            raise FileMoveError("COMPLETE_BOOK_UNIT_REQUIRED")
+        preserve_identity = set(source.book_ids) == set(source.complete_book_ids)
         nodes = {item.id: item for item in self._nodes(node)}
         books = tuple(
             self._db.scalars(
@@ -230,14 +227,59 @@ class SqlAlchemyMoveTopology:
                 else book_paths[resource.book_id]
             )
             if expected_book_path != expected_owner_path:
-                raise FileMoveError("BOOK_OWNERSHIP_WOULD_CHANGE")
+                preserve_identity = False
         # Empty VOLUMES books must remain root directory books after a move.
         for book in books:
             if not any(resource.book_id == book.id for resource in resources) and (
                 library.organization_mode != "VOLUMES"
                 or "/" in moved(book_paths[book.id])
             ):
-                raise FileMoveError("BOOK_OWNERSHIP_WOULD_CHANGE")
+                preserve_identity = False
+        # Only semantic ancestors are frozen: ordinary parent directories may
+        # legitimately be indexed by an earlier target in this same operation.
+        parts = request.destination_relative_path.split("/")
+        ancestor_paths = tuple("/".join(parts[:i]) for i in range(1, len(parts)))
+        ancestors = tuple(
+            self._db.execute(
+                select(LibrarySourceNode.id, LibrarySourceNode.relative_path)
+                .where(
+                    LibrarySourceNode.library_id == library.id,
+                    LibrarySourceNode.relative_path.in_(ancestor_paths),
+                )
+                .order_by(LibrarySourceNode.relative_path)
+            )
+        )
+        ancestor_ids = tuple(item.id for item in ancestors)
+        target_books = tuple(
+            self._db.execute(
+                select(LibraryBook.id, LibraryBook.source_node_id)
+                .where(LibraryBook.source_node_id.in_(ancestor_ids))
+                .order_by(LibraryBook.id)
+            )
+        )
+        target_resources = tuple(
+            self._db.execute(
+                select(LibraryReadableResource.id, LibraryReadableResource.source_node_id)
+                .where(LibraryReadableResource.source_node_id.in_(ancestor_ids))
+                .order_by(LibraryReadableResource.id)
+            )
+        )
+        if target_resources:
+            preserve_identity = False
+        revision = hashlib.sha256(
+            json.dumps(
+                {
+                    "library": [library.id, library.root_path, library.organization_mode],
+                    "books": [tuple(row) for row in target_books],
+                    "resources": [tuple(row) for row in target_resources],
+                },
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()
         return MoveDestination(
-            library.id, Path(library.root_path), request.destination_relative_path
+            library.id,
+            Path(library.root_path),
+            request.destination_relative_path,
+            "PRESERVE_IDENTITY" if preserve_identity else "REIMPORT",
+            revision,
         )

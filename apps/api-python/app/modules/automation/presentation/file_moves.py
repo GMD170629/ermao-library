@@ -104,7 +104,7 @@ def register_file_moves(
         async def plan_file_operations(
             moves: Annotated[list[FileMoveInput], Field(min_length=1, max_length=100)],
         ) -> dict[str, object]:
-            """预览并保存明确移动或固定模板整理方案，不改动书库文件；模板值由客户端明确提供 / Preview explicit moves or fixed templates without changing library files; supply template values explicitly."""
+            """预览整书或完整卷册移动；整书结构不变保留身份，卷册及归属变化清理旧信息后扫描重建。预览返回每项身份策略，不改动文件；模板值由客户端提供 / Preview complete book or resource moves. Preserve identities only for unchanged book structure; otherwise discard old data and reimport. Returns each identity policy without changing files; supply template values explicitly."""
             return await invoke(
                 lambda commands, access: commands.plan(
                     access, tuple(item.command() for item in moves)
@@ -118,7 +118,7 @@ def register_file_moves(
             plan_id: Identifier,
             request_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9_.:-]{1,128}$")],
         ) -> dict[str, object]:
-            """提交已有方案，由系统移动文件并更新原图书位置；重试复用 request_id / Enqueue an existing plan to move files using system operations and update existing book locations; reuse request_id on retry."""
+            """提交已有方案，按预览策略保留整书身份或清理旧索引重新扫描；移动完成不代表扫描导入完成，重试复用 request_id / Enqueue the previewed identity-preserving move or reimport. Move completion does not mean scan/import completion; reuse request_id on retry."""
             return await invoke(
                 lambda commands, access: commands.execute(access, plan_id, request_id)
             )

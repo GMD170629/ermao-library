@@ -14,6 +14,9 @@ from app.modules.library.application.file_move_plans import (
 from app.modules.library.domain.file_moves import FileMoveError, MoveRequest
 from app.modules.library.domain.source_nodes import SourceNodeRelativePath
 from app.modules.library.infrastructure.move_topology import SqlAlchemyMoveTopology
+from app.modules.library.infrastructure.persistence.source_tree_repository import (
+    SqlAlchemySourceNodeRepository,
+)
 from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryBook,
     LibraryReadableResource,
@@ -74,6 +77,10 @@ class SqlAlchemyFileMoveIndex:
         directories: tuple[CreatedMoveDirectory, ...] = (),
     ) -> tuple[str, ...]:
         self.validate(move)
+        if move.destination.identity_policy == "REIMPORT":
+            return SqlAlchemySourceNodeRepository(self._db).list_subtree_ids(
+                move.source.node_id
+            )
         parent_paths = {directory.relative_path for directory in directories}
         parent_paths.update(path.rpartition("/")[0] for path in tuple(parent_paths))
         existing_nodes = tuple(
