@@ -9,6 +9,7 @@ from app.models import Library
 from app.models.auth import User
 from app.models.settings import SystemEvent
 from app.modules.automation.application.grants import AuthorizeAutomation, ManageGrants
+from app.modules.automation.application.settings import AutomationServiceSettings
 from app.modules.automation.domain.access import (
     ALL_SCOPES,
     AutomationAccessError,
@@ -19,7 +20,11 @@ from app.modules.automation.domain.access import (
 from app.modules.automation.infrastructure.credentials import AutomationCredentials
 from app.modules.automation.infrastructure.grants import SqlAlchemyGrantStore
 from app.modules.automation.infrastructure.models import AutomationGrantRow
+from app.modules.automation.infrastructure.token_vault import AutomationTokenVault
 from app.modules.system.infrastructure.automation_audit import SqlAlchemyAutomationAudit
+from app.modules.system.infrastructure.automation_settings import (
+    SqlAlchemyAutomationSettings,
+)
 
 
 class Identities:
@@ -30,7 +35,7 @@ class Identities:
         return self.actor if self.actor.user_id == user_id else None
 
 
-def test_credential_storage_reopen_revoke_and_current_permissions(db_session):
+def test_credential_storage_reopen_revoke_and_current_permissions(db_session, tmp_path):
     db_session.add(
         User(
             id="owner", email="owner@test.invalid", name="Owner", password_hash="unused"
@@ -47,6 +52,8 @@ def test_credential_storage_reopen_revoke_and_current_permissions(db_session):
         db_session,
         lambda: now,
         SqlAlchemyAutomationAudit(db_session),
+        AutomationTokenVault(tmp_path / "secrets"),
+        lambda: True,
     )
     created = manager.create(
         user_id="owner",
@@ -96,7 +103,9 @@ def test_credential_storage_reopen_revoke_and_current_permissions(db_session):
             )
 
 
-def test_expiry_exact_boundary_and_cannot_revoke_another_users_grant(db_session):
+def test_expiry_exact_boundary_and_cannot_revoke_another_users_grant(
+    db_session, tmp_path
+):
     db_session.add(
         User(
             id="owner", email="owner@test.invalid", name="Owner", password_hash="unused"
@@ -114,6 +123,8 @@ def test_expiry_exact_boundary_and_cannot_revoke_another_users_grant(db_session)
         db_session,
         lambda: now,
         SqlAlchemyAutomationAudit(db_session),
+        AutomationTokenVault(tmp_path / "secrets"),
+        lambda: True,
     )
     created = manager.create(
         user_id="owner",
@@ -135,7 +146,7 @@ def test_expiry_exact_boundary_and_cannot_revoke_another_users_grant(db_session)
     assert store.by_id(created.grant.id).revoked_at_ms is None
 
 
-def test_real_identity_rechecks_admin_downgrade_and_library_scope(db_session):
+def test_real_identity_rechecks_admin_downgrade_and_library_scope(db_session, tmp_path):
     user = User(
         id="admin",
         email="admin@test.invalid",
@@ -146,6 +157,10 @@ def test_real_identity_rechecks_admin_downgrade_and_library_scope(db_session):
     db_session.add(user)
     db_session.add(
         Library(id="other", name="Other", root_path="/other", organization_mode="FLAT")
+    )
+    db_session.commit()
+    SqlAlchemyAutomationSettings(db_session).save(
+        AutomationServiceSettings(enabled=True, public_base_url="http://localhost")
     )
     db_session.commit()
     created = build_grant_manager(db_session).create(
@@ -177,7 +192,7 @@ def test_real_identity_rechecks_admin_downgrade_and_library_scope(db_session):
         assert result.permissions.library_ids == frozenset()
 
 
-def test_audit_failure_rolls_back_grant_and_event_together(db_session):
+def test_audit_failure_rolls_back_grant_and_event_together(db_session, tmp_path):
     db_session.add(
         User(
             id="owner", email="owner@test.invalid", name="Owner", password_hash="unused"
@@ -197,6 +212,8 @@ def test_audit_failure_rolls_back_grant_and_event_together(db_session):
         db_session,
         lambda: 1_800_000_000_000,
         FailingAudit(db_session),
+        AutomationTokenVault(tmp_path / "secrets"),
+        lambda: True,
     )
     with pytest.raises(RuntimeError, match="injected audit"):
         manager.create(

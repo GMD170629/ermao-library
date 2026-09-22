@@ -110,6 +110,10 @@ def seed(db):
         ]
     )
     db.commit()
+    build_automation_settings(db).update(
+        "mcp-owner",
+        AutomationServiceSettings(enabled=True, public_base_url="http://localhost"),
+    )
     return build_grant_manager(db).create(
         user_id="mcp-owner",
         name="client",
@@ -119,8 +123,12 @@ def seed(db):
     )
 
 
-@pytest.mark.parametrize("prefix", ["", "/books"])
-def test_official_sdk_real_catalog_and_revocation(db_session, test_settings, prefix):
+@pytest.mark.parametrize(
+    ("prefix", "public_host"), [("", "127.0.0.1"), ("/books", "books.example")]
+)
+def test_official_sdk_real_catalog_and_revocation(
+    db_session, test_settings, prefix, public_host
+):
     created = seed(db_session)
     source_root = test_settings.resolved_storage_root.parent / "mcp-library"
     (source_root / "allowed").mkdir(parents=True)
@@ -179,11 +187,16 @@ def test_official_sdk_real_catalog_and_revocation(db_session, test_settings, pre
                     build_automation_settings(db).update(
                         "mcp-owner",
                         AutomationServiceSettings(
-                            enabled=True, public_base_url=base + prefix
+                            enabled=True,
+                            public_base_url=base.replace("127.0.0.1", public_host)
+                            + prefix,
                         ),
                     )
             url = base + prefix + "/api/mcp"
-            headers = {"Authorization": "Bearer " + created.token}
+            headers = {
+                "Authorization": "Bearer " + created.token,
+                "Host": base.removeprefix("http://").replace("127.0.0.1", public_host),
+            }
             async with (
                 httpx2.AsyncClient(headers=headers) as http,
                 Client(
@@ -255,7 +268,7 @@ def test_official_sdk_real_catalog_and_revocation(db_session, test_settings, pre
                         url, headers={"Cookie": "shuku_session=anything"}, json={}
                     )
                 ).status_code == 401
-                auth = {"Authorization": "Bearer " + fresh.token}
+                auth = {**headers, "Authorization": "Bearer " + fresh.token}
                 assert (
                     await http.post(
                         url, headers={**auth, "Host": "evil.invalid"}, json={}
@@ -292,12 +305,12 @@ def test_official_sdk_real_catalog_and_revocation(db_session, test_settings, pre
                     AutomationServiceSettings(
                         enabled=True,
                         enabled_scopes=scopes,
-                        public_base_url=base + prefix,
+                        public_base_url=base.replace("127.0.0.1", public_host) + prefix,
                     ),
                 )
             async with (
                 httpx2.AsyncClient(
-                    headers={"Authorization": "Bearer " + writer.token}
+                    headers={**headers, "Authorization": "Bearer " + writer.token}
                 ) as http,
                 Client(
                     streamable_http_client(url, http_client=http),
@@ -572,7 +585,7 @@ def test_official_sdk_real_catalog_and_revocation(db_session, test_settings, pre
             # when deployment permissions or another grant's discovery changes.
             async with (
                 httpx2.AsyncClient(
-                    headers={"Authorization": "Bearer " + fresh.token}
+                    headers={**headers, "Authorization": "Bearer " + fresh.token}
                 ) as http,
                 Client(
                     streamable_http_client(url, http_client=http),

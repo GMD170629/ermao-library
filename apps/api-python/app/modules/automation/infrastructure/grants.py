@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.modules.automation.application.grants import AutomationGrant
 from app.modules.automation.domain.access import (
+    AutomationAccessError,
     GrantPermissions,
     Scope,
     WritebackTarget,
@@ -13,6 +14,8 @@ from app.modules.automation.infrastructure.models import AutomationGrantRow
 
 
 def _grant(row: AutomationGrantRow) -> AutomationGrant:
+    if row.library_scope not in {"all", "selected"}:
+        raise AutomationAccessError("INVALID_LIBRARY_SCOPE")
     return AutomationGrant(
         id=row.id,
         user_id=row.user_id,
@@ -24,17 +27,29 @@ def _grant(row: AutomationGrantRow) -> AutomationGrant:
                 WritebackTarget(v) for v in row.writeback_targets
             ),
             allow_cross_library=row.allow_cross_library,
+            library_scope="all" if row.library_scope == "all" else "selected",
         ),
         created_at_ms=row.created_at_ms,
         expires_at_ms=row.expires_at_ms,
         revoked_at_ms=row.revoked_at_ms,
         last_used_at_ms=row.last_used_at_ms,
+        token_ciphertext=row.token_ciphertext,
     )
 
 
 class SqlAlchemyGrantStore:
     def __init__(self, db: Session) -> None:
         self._db = db
+
+    def has_secrets(self) -> bool:
+        return (
+            self._db.scalar(
+                select(AutomationGrantRow.id)
+                .where(AutomationGrantRow.token_ciphertext.is_not(None))
+                .limit(1)
+            )
+            is not None
+        )
 
     def add(self, grant: AutomationGrant, digest: str) -> None:
         self._db.add(
@@ -45,6 +60,8 @@ class SqlAlchemyGrantStore:
                 token_digest=digest,
                 scopes=sorted(grant.permissions.scopes),
                 library_ids=sorted(grant.permissions.library_ids),
+                library_scope=grant.permissions.library_scope,
+                token_ciphertext=grant.token_ciphertext,
                 writeback_targets=sorted(grant.permissions.writeback_targets),
                 allow_cross_library=grant.permissions.allow_cross_library,
                 created_at_ms=grant.created_at_ms,
@@ -94,7 +111,7 @@ class SqlAlchemyGrantStore:
                 AutomationGrantRow.user_id == user_id,
                 AutomationGrantRow.revoked_at_ms.is_(None),
             )
-            .values(revoked_at_ms=now_ms)
+            .values(revoked_at_ms=now_ms, token_ciphertext=None)
         )
         return True
 

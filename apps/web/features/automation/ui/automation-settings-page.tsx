@@ -1,16 +1,18 @@
 'use client';
 
 import { Copy, Download, KeyRound, ShieldCheck } from 'lucide-react';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAppSession } from '../../../components/layout/app-session-context';
 import { Button } from '../../../components/ui/button';
 import { Select } from '../../../components/ui/select';
 import { useToast } from '../../../components/ui/feedback';
 import { useI18n } from '../../../i18n/provider';
-import type { CreateGrantRequest, Scope } from '../../../generated/automation';
-import { SettingsCenterShell } from '../../settings/public';
+import type { CreateGrantRequest, GrantView, Scope } from '../../../generated/automation';
+import { SettingsCenterShell, SettingsTabs } from '../../settings/public';
+import { revealGrant } from '../api/client';
 import { useAutomation } from '../application/use-automation';
-import { canCancelOperation, operationStatusLabel, clientTemplate, connectionUrl, scopeLabels, scopes, selectedScopes, type LibraryChoice, type ServiceSettings } from '../model/configuration';
+import { canCancelOperation, operationStatusLabel, clientTemplate, connectionUrl, scopeLabels, scopes, selectedScopes, type LibraryChoice, type ServiceSettings, type McpClient } from '../model/configuration';
 
 const panel = 'rounded-[20px] border border-[var(--visual-color-app-divider-strong)] bg-[var(--visual-color-app-surface-raised)] p-5';
 const input = 'w-full rounded-xl border border-[var(--visual-color-app-divider-strong)] bg-white px-3 py-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--visual-color-app-focus-ring)]';
@@ -31,7 +33,7 @@ function ScopeChoices({ selected, available, change }: { selected: Scope[]; avai
   })}</div>;
 }
 
-function ServiceForm({ settings, busy, save }: { settings: ServiceSettings; busy: boolean; save: (value: ServiceSettings) => Promise<void> }) {
+function ServiceForm({ settings, busy, save }: { settings: ServiceSettings; busy: boolean; save: (value: ServiceSettings) => Promise<boolean | undefined> }) {
   const { t } = useI18n();
   const [draft, setDraft] = useState(settings);
   return <form className={panel} onSubmit={(event) => { event.preventDefault(); void save(draft); }}>
@@ -41,15 +43,15 @@ function ServiceForm({ settings, busy, save }: { settings: ServiceSettings; busy
     <label className="mt-4 block text-sm">{t('公开 URL')}<input type="url" required={draft.enabled} className={`${input} mt-2`} value={draft.publicBaseUrl} onChange={(event) => setDraft({ ...draft, publicBaseUrl: event.target.value })} placeholder="https://books.example.com/books" data-i18n-skip /></label>
     <p className="mt-2 text-xs text-[#77716A]">{t('填写网站根地址，包含部署前缀；系统会自动添加 /api/mcp。')}</p>
     <fieldset className="mt-5"><legend className="mb-3 text-sm font-medium">{t('允许用户授权的能力')}</legend><ScopeChoices selected={draft.enabledScopes} available={scopes} change={(enabledScopes) => setDraft({ ...draft, enabledScopes })} /></fieldset>
-    <label className="mt-5 flex items-start gap-3 text-sm"><input type="checkbox" checked={draft.allowInsecureHttp} onChange={(event) => setDraft({ ...draft, allowInsecureHttp: event.target.checked })} />{t('允许受信任局域网使用 HTTP（令牌将明文传输）')}</label>
     <Button className="mt-5" type="submit" loading={busy}>{t('保存服务设置')}</Button>
   </form>;
 }
 
-function GrantForm({ libraries, available, busy, create }: { libraries: LibraryChoice[]; available: Scope[]; busy: boolean; create: (input: CreateGrantRequest) => Promise<void> }) {
+function GrantForm({ libraries, available, busy, create, cancel }: { libraries: LibraryChoice[]; available: Scope[]; busy: boolean; create: (input: CreateGrantRequest) => Promise<boolean | undefined>; cancel: () => void }) {
   const { t } = useI18n();
   const [name, setName] = useState('');
   const [selected, setSelected] = useState<Scope[]>(['library:read']);
+  const [libraryScope, setLibraryScope] = useState<'all' | 'selected'>('all');
   const [libraryIds, setLibraryIds] = useState<string[]>([]);
   const [lifetimeDays, setLifetime] = useState<30 | 90 | 365>(90);
   const [sidecar, setSidecar] = useState(true);
@@ -58,7 +60,7 @@ function GrantForm({ libraries, available, busy, create }: { libraries: LibraryC
   const canWriteback = selected.includes('metadata:writeback');
   function submit(event: FormEvent) {
     event.preventDefault();
-    void create({ name: name.trim(), libraryIds, scopes: selected, lifetimeDays,
+    void create({ name: name.trim(), libraryScope, libraryIds: libraryScope === 'all' ? [] : libraryIds, scopes: selected, lifetimeDays,
       writebackTargets: canWriteback ? [...(sidecar ? ['sidecar' as const] : []), ...(embedded ? ['embedded' as const] : [])] : [],
       allowCrossLibrary: selected.includes('files:move') && crossLibrary });
   }
@@ -72,10 +74,11 @@ function GrantForm({ libraries, available, busy, create }: { libraries: LibraryC
       </div>
     </div>
     <fieldset className="mt-5"><legend className="mb-3 text-sm font-medium">{t('授权书库')}</legend>
-      {libraries.length ? <div className="grid gap-3 sm:grid-cols-2">{libraries.map((library) => <label className="flex items-center gap-3 text-sm" key={library.id}>
+      <div className="mb-4 flex flex-wrap gap-4 text-sm">{(['all', 'selected'] as const).map((scope) => <label key={scope} className="flex items-center gap-2"><input type="radio" name="libraryScope" value={scope} checked={libraryScope === scope} onChange={() => setLibraryScope(scope)} />{t(scope === 'all' ? '全部书库（动态）' : '指定书库')}</label>)}</div>
+      {libraryScope === 'selected' ? libraries.length ? <div className="grid gap-3 sm:grid-cols-2">{libraries.map((library) => <label className="flex items-center gap-3 text-sm" key={library.id}>
         <input type="checkbox" checked={libraryIds.includes(library.id)} onChange={(event) => setLibraryIds(event.target.checked ? [...libraryIds, library.id] : libraryIds.filter((id) => id !== library.id))} /><span data-i18n-skip>{library.name}</span>
-      </label>)}</div> : <p className="text-sm text-[#77716A]">{t('没有可授权的书库。')}</p>}
-      <p className="mt-3 text-xs text-[#77716A]">{t('授权范围固定；以后新增的书库不会自动加入。')}</p>
+      </label>)}</div> : <p className="text-sm text-[#77716A]">{t('没有可授权的书库。')}</p> : null}
+      <p className="mt-3 text-xs text-[#77716A]">{t(libraryScope === 'all' ? '自动包含当前及以后可访问的书库；失去访问权限后立即移除。' : '只授权所选书库；以后新增的书库不会自动加入。')}</p>
     </fieldset>
     <fieldset className="mt-5"><legend className="mb-3 text-sm font-medium">{t('授权能力')}</legend><ScopeChoices selected={selected} available={available} change={setSelected} /></fieldset>
     <p className="mt-4 text-sm text-[#77716A]">{t('更新系统元数据不会改动文件；写回文件与覆盖人工保护字段需要分别授权。')}</p>
@@ -85,64 +88,118 @@ function GrantForm({ libraries, available, busy, create }: { libraries: LibraryC
       <p>{t('文件操作先生成方案，再执行。发生冲突或无法保真写入时会拒绝修改。')}</p>
     </fieldset> : null}
     {selected.includes('files:move') ? <label className="mt-4 flex gap-3 text-sm"><input type="checkbox" checked={crossLibrary} onChange={(event) => setCrossLibrary(event.target.checked)} />{t('允许在所选书库之间移动完整图书')}</label> : null}
-    <Button className="mt-5" type="submit" loading={busy} disabled={!name.trim() || libraryIds.length === 0 || (canWriteback && !sidecar && !embedded)}>{t('创建授权并显示令牌')}</Button>
+    <Button className="mt-5" type="submit" loading={busy} disabled={!name.trim() || (libraryScope === 'selected' && libraryIds.length === 0) || (canWriteback && !sidecar && !embedded)}>{t('创建授权')}</Button><Button className="ml-2 mt-5" variant="secondary" onClick={cancel}>{t('取消')}</Button>
   </form>;
+}
+
+function ConfigurationPanel({ grant, endpoint, close }: { grant: GrantView; endpoint: string; close: () => void }) {
+  const { t } = useI18n();
+  const toast = useToast();
+  const [client, setClient] = useState<McpClient>('codex');
+  const [token, setToken] = useState<string>();
+  const [error, setError] = useState<string>();
+  useEffect(() => {
+    const controller = new AbortController();
+    let expiry: number;
+    function checkExpiry() {
+      const remaining = grant.expiresAtMs - Date.now();
+      if (remaining <= 0) { controller.abort(); setToken(undefined); setError('GRANT_INACTIVE'); }
+      else expiry = window.setTimeout(checkExpiry, Math.min(remaining, 2_147_483_647));
+    }
+    checkExpiry();
+    void Promise.resolve().then(async () => {
+      if (controller.signal.aborted) return;
+      const value = await revealGrant(grant.id, controller.signal);
+      if (!controller.signal.aborted) setToken(value);
+    })
+      .catch((error: unknown) => { if (!controller.signal.aborted) setError(error instanceof Error ? error.message : 'AUTOMATION_REQUEST_FAILED'); });
+    return () => { controller.abort(); window.clearTimeout(expiry); };
+  }, [grant.id, grant.expiresAtMs]);
+  const template = token ? clientTemplate(endpoint, token, client) : '';
+  async function copy() {
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(template);
+      else {
+        const previous = document.activeElement;
+        const field = document.createElement('textarea'); field.value = template;
+        field.style.position = 'fixed'; field.style.opacity = '0'; document.body.appendChild(field);
+        try { field.select(); if (!document.execCommand('copy')) throw new Error('COPY_FAILED'); }
+        finally { field.remove(); if (previous instanceof HTMLElement) previous.focus(); }
+      }
+      toast.success(t('已复制'));
+    } catch { toast.error(t('复制失败，请手动复制')); }
+  }
+  function download() {
+    const url = URL.createObjectURL(new Blob([template], { type: client === 'codex' ? 'text/plain' : 'application/json' }));
+    const link = document.createElement('a'); link.href = url; link.download = client === 'codex' ? 'ermao-mcp.toml' : 'ermao-mcp.json'; link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+  const message = error === 'TOKEN_NOT_RECOVERABLE' ? '历史令牌无法取回，请重新创建授权' : error === 'GRANT_INACTIVE' ? '授权已过期或撤销，请重新创建授权。' : ['TOKEN_KEY_UNAVAILABLE', 'TOKEN_KEY_INVALID', 'TOKEN_DECRYPTION_FAILED'].includes(error ?? '') ? '令牌密钥不可用或解密失败，请联系管理员恢复密钥。' : '配置读取失败，请关闭后重试。';
+  return <section className="mt-4 rounded-xl border border-[#E2DED8] p-4" aria-label={t('授权配置')}>
+    <div className="flex items-center justify-between gap-3"><h4 className="font-medium">{t('客户端配置')} · <span data-i18n-skip>{grant.name}</span></h4><Button variant="ghost" onClick={close}>{t('关闭配置')}</Button></div>
+    <Select ariaLabel="AI 客户端" className="mt-3" value={client} options={[{ value: 'codex', label: 'Codex' }, { value: 'lm-studio', label: 'LM Studio' }, { value: 'cursor', label: 'Cursor' }]} onChange={(value) => { if (value === 'codex' || value === 'lm-studio' || value === 'cursor') setClient(value); }} />
+    <p className="mt-3 text-sm text-[#77716A]">{t(client === 'codex' ? '将此配置合并到 Codex 的 config.toml。' : '将此配置合并到客户端的 mcp.json。')}</p>
+    {error ? <p role="alert" className="mt-3 text-sm text-red-700">{t(message)}</p> : !token ? <p role="status" className="mt-3 text-sm">{t('正在读取授权配置…')}</p> : <>
+      <p className="mt-3 text-xs text-[#77716A]">{t('配置包含此授权的完整令牌，请勿分享或提交到仓库。')}</p>
+      <pre className="mt-3 overflow-x-auto rounded-xl bg-[#F7F5F2] p-4 text-xs leading-6" data-i18n-skip>{template}</pre>
+      <div className="mt-3 flex flex-wrap gap-2"><Button icon={Copy} variant="secondary" disabled={!endpoint} onClick={() => void copy()}>{t('复制配置')}</Button><Button icon={Download} variant="secondary" disabled={!endpoint} onClick={download}>{t('下载配置')}</Button></div>
+    </>}
+    {!endpoint ? <p className="mt-3 text-sm">{t('管理员尚未配置公开 URL。')}</p> : null}
+  </section>;
+}
+
+function GrantsPanel({ automation, canManage, admin, openService }: { automation: ReturnType<typeof useAutomation>; canManage: boolean; admin: boolean; openService: () => void }) {
+  const { t, locale } = useI18n();
+  const [creating, setCreating] = useState(false);
+  const [configurationId, setConfigurationId] = useState<string>();
+  const { data, busy } = automation;
+  if (!data) return null;
+  const formatTime = (value: number | null) => value === null ? t('尚未使用') : new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(value);
+  return <div className="space-y-5">
+    <div className="flex items-center justify-between gap-3"><h3 className="font-semibold">{t('我的授权')}</h3><Button disabled={!data.settings.enabled && !admin} onClick={() => { if (!data.settings.enabled) openService(); else setCreating(true); }}>{t(data.settings.enabled ? '创建授权' : '请先开启 MCP 服务')}</Button></div>
+    {!data.settings.enabled && !admin ? <p className="text-sm text-[#77716A]">{t('请联系管理员开启 MCP 服务后创建授权。')}</p> : null}
+    {creating && data.settings.enabled ? <GrantForm libraries={data.libraries} available={data.settings.enabledScopes.filter((scope) => canManage || scope === 'library:read' || scope === 'shelves:write')} busy={busy} cancel={() => setCreating(false)} create={async (input) => { const success = await automation.create(input); if (success) setCreating(false); return success; }} /> : null}
+    <section className={panel} aria-label={t('授权列表')}>
+      {data.grants.length === 0 ? <p className="text-sm text-[#77716A]">{t('尚未创建自动化授权。')}</p> : <ul className="divide-y divide-[#E2DED8]">{data.grants.map((grant) => {
+        const active = grant.revokedAtMs === null && grant.expiresAtMs > Date.now();
+        return <li key={grant.id} className="py-4 first:pt-0 last:pb-0">
+          <div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><h4 className="break-all font-medium" data-i18n-skip>{grant.name}</h4><p className="mt-1 text-xs text-[#77716A]">{t(grant.revokedAtMs !== null ? '已撤销' : active ? '有效' : '已过期')}</p></div>
+            <div className="flex flex-wrap gap-2"><Button variant="secondary" disabled={!active || !grant.tokenAvailable} onClick={() => setConfigurationId(configurationId === grant.id ? undefined : grant.id)}>{t('复制配置')}</Button><Button variant="danger" disabled={busy || grant.revokedAtMs !== null} onClick={() => { setConfigurationId(undefined); void automation.revoke(grant.id); }}>{t('撤销授权')}</Button></div></div>
+          <dl className="mt-3 grid gap-3 text-xs sm:grid-cols-2">
+            <div><dt className="text-[#77716A]">{t('授权书库')}</dt><dd className="mt-1 break-all" data-i18n-skip>{grant.libraryScope === 'all' ? t('全部书库（动态）') : (grant.libraryIds ?? []).map((id) => data.libraries.find((library) => library.id === id)?.name ?? id).join(' · ')}</dd></div>
+            <div><dt className="text-[#77716A]">{t('授权能力')}</dt><dd className="mt-1">{(grant.scopes ?? []).map((scope) => t(scopeLabels[scope])).join(' · ')}</dd></div>
+            <div><dt className="text-[#77716A]">{t('到期时间')}</dt><dd className="mt-1">{formatTime(grant.expiresAtMs)}</dd></div>
+            <div><dt className="text-[#77716A]">{t('最近使用')}</dt><dd className="mt-1">{formatTime(grant.lastUsedAtMs)}</dd></div>
+          </dl>
+          {active && !grant.tokenAvailable ? <p className="mt-3 text-sm text-[#77716A]">{t('历史令牌无法取回，请重新创建授权')}</p> : null}
+          {active && grant.tokenAvailable && configurationId === grant.id ? <ConfigurationPanel key={grant.id} grant={grant} endpoint={connectionUrl(data.settings)} close={() => setConfigurationId(undefined)} /> : null}
+        </li>;
+      })}</ul>}
+    </section>
+  </div>;
 }
 
 export function AutomationSettingsPage() {
   const session = useAppSession();
   const { t, locale } = useI18n();
-  const toast = useToast();
+  const router = useRouter();
+  const search = useSearchParams();
+  const requestedTab = search.get('tab');
+  const tab = requestedTab === 'service' || requestedTab === 'operations' ? requestedTab : 'grants';
   const automation = useAutomation(session?.user?.id);
-  const { data, created, busy } = automation;
-  const [includeToken, setIncludeToken] = useState<string>();
-  const endpoint = data ? connectionUrl(data.settings) : '';
-  const template = clientTemplate(endpoint, includeToken === created?.grant.id ? created?.token : undefined);
+  const { data, busy } = automation;
   const formatTime = (value: number | null) => value === null ? t('尚未使用') : new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(value);
-  async function copy(value: string) {
-    try { await navigator.clipboard.writeText(value); toast.success(t('已复制')); }
-    catch { toast.error(t('复制失败，请手动复制')); }
-  }
-  function download() {
-    const url = URL.createObjectURL(new Blob([template], { type: 'application/json' }));
-    const link = document.createElement('a'); link.href = url; link.download = 'ermao-mcp.json'; link.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
-  }
+  const tabs = [{ key: 'service', label: 'MCP 服务' }, { key: 'grants', label: '授权服务' }, { key: 'operations', label: '操作列表' }].map((item) => ({ ...item, href: `/settings/automation?tab=${item.key}` }));
   return <SettingsCenterShell title="自动化授权" description="连接你自己的 AI 客户端，分别授权书库查询、元数据整理和文件操作。">
     <div className="max-w-[960px] space-y-5">
+      <SettingsTabs tabs={tabs} active={tab} />
       {automation.error ? <div role="alert" className={`${panel} text-red-700`}><p>{t('自动化请求未完成，请检查权限和配置后重试。')}</p><Button variant="secondary" className="mt-3" onClick={automation.retry}>{t('重新读取')}</Button></div> : null}
       {!data && !automation.error ? <p role="status">{t('正在读取自动化配置…')}</p> : null}
       {data ? <>
         <div role="status" className="flex flex-wrap items-center justify-between gap-3 text-sm"><span>{t(data.settings.enabled ? 'MCP 服务已开启' : 'MCP 服务已关闭')}</span><span className="text-[#77716A]">{t('仅支持手动 Bearer Token，不提供 OAuth 登录。')}</span></div>
-        {session?.authorization?.isAdmin ? <ServiceForm key={JSON.stringify(data.settings)} settings={data.settings} busy={busy} save={automation.save} /> : null}
-        <GrantForm key={`${session?.authorization?.canManageSystem}:${data.settings.enabledScopes.join(',')}`} libraries={data.libraries} available={data.settings.enabledScopes.filter((scope) => session?.authorization?.canManageSystem || scope === 'library:read' || scope === 'shelves:write')} busy={busy} create={automation.create} />
-        {created ? <section className={`${panel} border-[#EF4D2F]`} aria-labelledby="new-token-title"><h3 id="new-token-title" className="font-semibold">{t('令牌仅显示这一次')}</h3>
-          <p className="mt-2 text-sm text-[#77716A]">{t('请保存到可信客户端。关闭或刷新后无法再次查看；丢失时请撤销并重新创建。')}</p>
-          <div className="mt-3 flex gap-2"><input className={input} readOnly value={created.token} aria-label={t('新建的自动化令牌')} data-i18n-skip /><Button icon={Copy} variant="secondary" onClick={() => void copy(created.token)}>{t('复制令牌')}</Button></div>
-          <Button variant="ghost" className="mt-3" onClick={() => { setIncludeToken(undefined); automation.dismissToken(); }}>{t('我已保存，关闭令牌')}</Button>
-        </section> : null}
-        <section className={panel} aria-labelledby="automation-template-title"><h3 id="automation-template-title" className="font-semibold">{t('LM Studio / Cursor 配置模板')}</h3>
-          <p className="mt-2 text-sm text-[#77716A]">{t('在客户端的 mcp.json 中合并此配置，再选择支持工具调用的模型。LM Studio 可使用本地模型；Cursor 不保证本地推理。')}</p>
-          <p className="mt-2 break-all text-sm" data-i18n-skip>{endpoint || t('管理员尚未配置公开 URL。')}</p>
-          {created ? <label className="mt-4 flex items-start gap-3 text-sm"><input type="checkbox" checked={includeToken === created.grant.id} onChange={(event) => setIncludeToken(event.target.checked ? created.grant.id : undefined)} />{t('在复制和下载的配置中包含本次令牌（请勿分享或提交到仓库）')}</label> : null}
-          <pre className="mt-4 overflow-x-auto rounded-xl bg-[#F7F5F2] p-4 text-xs leading-6" data-i18n-skip>{template}</pre>
-          <div className="mt-4 flex flex-wrap gap-2"><Button icon={Copy} variant="secondary" disabled={!endpoint} onClick={() => void copy(template)}>{t('复制配置')}</Button><Button icon={Download} variant="secondary" disabled={!endpoint} onClick={download}>{t('下载配置')}</Button></div>
-          <details className="mt-5 text-sm"><summary className="cursor-pointer font-medium">{t('支持范围与使用说明')}</summary><div className="mt-3 space-y-2 text-[#77716A]">
-            <p>{t('OPF、EPUB 和 ComicInfo 按所选字段写入；音频与 PDF 当前支持标题、作者和简介。PDF 最大 64 MiB，签名或加密文件拒绝写入。')}</p>
-            <p>{t('先让客户端查询 get_context 和 get_metadata_schema；文件改动先预览方案，确认实际目标后再执行。')}</p>
-            <p>{t('任务已接收不代表文件已修改。通过 get_operation 查询逐项结果，cancel_operation 取消尚未完成的项目。')}</p>
-            <p><a href="https://lmstudio.ai/docs/app/mcp" target="_blank" rel="noreferrer" className="underline">LM Studio</a><span> · </span><a href="https://cursor.com/docs/mcp" target="_blank" rel="noreferrer" className="underline">Cursor</a></p>
-          </div></details>
-        </section>
-        <section className={panel} aria-labelledby="automation-grants-title"><h3 id="automation-grants-title" className="font-semibold">{t('我的授权')}</h3>
-          {data.grants.length === 0 ? <p className="mt-3 text-sm text-[#77716A]">{t('尚未创建自动化授权。')}</p> : <ul className="mt-3 divide-y divide-[#E2DED8]">{data.grants.map((grant) => <li key={grant.id} className="py-4">
-            <div className="flex items-start justify-between gap-3"><div><h4 className="font-medium" data-i18n-skip>{grant.name}</h4><p className="mt-1 text-xs text-[#77716A]">{t(grant.revokedAtMs !== null ? '已撤销' : grant.expiresAtMs <= Date.now() ? '已过期' : '有效')} · {t('到期时间')} {formatTime(grant.expiresAtMs)}</p></div>
-              <Button variant="danger" disabled={busy || grant.revokedAtMs !== null} onClick={() => void automation.revoke(grant.id)}>{t('撤销授权')}</Button></div>
-            <p className="mt-2 text-xs text-[#77716A]">{(grant.scopes ?? []).map((scope) => t(scopeLabels[scope])).join(' · ')}</p>
-            <p className="mt-2 text-xs text-[#77716A]" data-i18n-skip>{grant.libraryIds.map((id) => data.libraries.find((library) => library.id === id)?.name ?? id).join(' · ')}</p>
-            <p className="mt-2 text-xs text-[#77716A]">{t('最近使用')} {formatTime(grant.lastUsedAtMs)}</p>
-          </li>)}</ul>}
-        </section>
+        {tab === 'service' ? session?.authorization?.isAdmin ? <ServiceForm key={JSON.stringify(data.settings)} settings={data.settings} busy={busy} save={automation.save} /> : <p>{t('请联系管理员管理 MCP 服务设置。')}</p> : null}
+        {tab === 'grants' ? <GrantsPanel key={session?.user?.id} automation={automation} admin={!!session?.authorization?.isAdmin} canManage={!!session?.authorization?.canManageSystem} openService={() => router.push('/settings/automation?tab=service')} /> : null}
+        {tab === 'operations' ? <>
         <section className={panel} aria-labelledby="automation-operations-title">
           <div className="flex items-center justify-between gap-3"><h3 id="automation-operations-title" className="font-semibold">{t('最近的文件任务')}</h3><Button variant="secondary" disabled={busy} onClick={() => void automation.refreshOperations()}>{t('刷新任务')}</Button></div>
           <p className="mt-2 text-sm text-[#77716A]">{t('显示当前权限内最近 50 项任务。已接收不代表已完成；取消只影响尚未发布的文件。')}</p>
@@ -156,6 +213,7 @@ export function AutomationSettingsPage() {
             </li>)}</ul></details>
           </li>)}</ul>}
         </section>
+        </> : null}
       </> : null}
     </div>
   </SettingsCenterShell>;

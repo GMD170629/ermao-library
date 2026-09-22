@@ -11,7 +11,7 @@ const output = path.resolve(outputArg);
 const document = JSON.parse(await readFile(input, 'utf8'));
 const schemas = document.components?.schemas ?? {};
 const included = new Set(
-  Object.keys(schemas).filter((name) => (scope === 'automation' ? /^(CreateGrantRequest|CreatedGrantPayload|GrantListPayload|GrantView|ServiceSettingsFields|RevokedGrantPayload|OperationListPayload|OperationPayload)$/ : scope === 'updates' ? /^(RuntimeInfo|UpdateCheck|PreparationState|PrepareRequest|InstallRequest)$/ : /^(Appearance|Audio|Epub|Reflowable|Comic|Pdf|Reader)/).test(name))
+  Object.keys(schemas).filter((name) => (scope === 'automation' ? /^(CreateGrantRequest|CreatedGrantPayload|GrantListPayload|GrantView|ServiceSettingsFields|RevealedTokenPayload|RevokedGrantPayload|OperationListPayload|OperationPayload)$/ : scope === 'updates' ? /^(RuntimeInfo|UpdateCheck|PreparationState|PrepareRequest|InstallRequest)$/ : /^(Appearance|Audio|Epub|Reflowable|Comic|Pdf|Reader)/).test(name))
 );
 let discoveredReference = true;
 while (discoveredReference) {

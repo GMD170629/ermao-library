@@ -4,7 +4,8 @@
 
 export type CreateGrantRequest = {
   scopes?: Array<Scope>;
-  libraryIds: Array<string>;
+  libraryIds?: Array<string>;
+  libraryScope?: "all" | "selected";
   writebackTargets?: Array<WritebackTarget>;
   allowCrossLibrary?: boolean;
   name: string;
@@ -22,10 +23,12 @@ export type GrantListPayload = {
 
 export type GrantView = {
   scopes?: Array<Scope>;
-  libraryIds: Array<string>;
+  libraryIds?: Array<string>;
+  libraryScope?: "all" | "selected";
   writebackTargets?: Array<WritebackTarget>;
   allowCrossLibrary?: boolean;
   id: string;
+  tokenAvailable: boolean;
   name: string;
   createdAtMs: number;
   expiresAtMs: number;
@@ -59,6 +62,10 @@ export type OperationTargetFields = {
   error_code: string | null;
 };
 
+export type RevealedTokenPayload = {
+  token: string;
+};
+
 export type RevokedGrantPayload = {
   revoked?: true;
 };
@@ -69,7 +76,6 @@ export type ServiceSettingsFields = {
   enabled?: boolean;
   enabledScopes?: Array<Scope>;
   publicBaseUrl?: string;
-  allowInsecureHttp?: boolean;
 };
 
 export type WritebackTarget = "sidecar" | "embedded";

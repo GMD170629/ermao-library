@@ -18,6 +18,12 @@ class AutomationGrantRow(Base):
     token_digest: Mapped[str] = mapped_column("tokenDigest", String(64), unique=True)
     scopes: Mapped[list[str]] = mapped_column(JSON)
     library_ids: Mapped[list[str]] = mapped_column("libraryIds", JSON)
+    library_scope: Mapped[str] = mapped_column(
+        "libraryScope", String(16), default="selected", server_default="selected"
+    )
+    token_ciphertext: Mapped[str | None] = mapped_column(
+        "tokenCiphertext", String(1024), nullable=True
+    )
     writeback_targets: Mapped[list[str]] = mapped_column(
         "writebackTargets", JSON, default=list, server_default="[]"
     )

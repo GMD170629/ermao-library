@@ -19,7 +19,10 @@ from app.modules.automation.domain.access import (
 class GrantPermissionFields(HttpContractModel):
     scopes: frozenset[Scope] = frozenset({Scope.LIBRARY_READ})
     library_ids: frozenset[str] = Field(
-        alias="libraryIds", min_length=1, max_length=500
+        default=frozenset(), alias="libraryIds", max_length=500
+    )
+    library_scope: Literal["all", "selected"] = Field(
+        default="selected", alias="libraryScope"
     )
     writeback_targets: frozenset[WritebackTarget] = Field(
         default=frozenset(), alias="writebackTargets"
@@ -32,6 +35,7 @@ class GrantPermissionFields(HttpContractModel):
             self.library_ids,
             self.writeback_targets,
             self.allow_cross_library,
+            self.library_scope,
         )
 
 
@@ -42,6 +46,7 @@ class CreateGrantRequest(GrantPermissionFields):
 
 class GrantView(GrantPermissionFields):
     id: str
+    token_available: bool = Field(alias="tokenAvailable")
     name: str
     created_at_ms: int = Field(alias="createdAtMs")
     expires_at_ms: int = Field(alias="expiresAtMs")
@@ -52,6 +57,8 @@ class GrantView(GrantPermissionFields):
     def from_grant(cls, grant: AutomationGrant) -> "GrantView":
         return cls(
             id=grant.id,
+            libraryScope=grant.permissions.library_scope,
+            tokenAvailable=grant.token_ciphertext is not None,
             name=grant.name,
             scopes=grant.permissions.scopes,
             libraryIds=grant.permissions.library_ids,
@@ -83,14 +90,12 @@ class ServiceSettingsFields(HttpContractModel):
         default=frozenset({Scope.LIBRARY_READ}), alias="enabledScopes"
     )
     public_base_url: str = Field(default="", max_length=2048, alias="publicBaseUrl")
-    allow_insecure_http: StrictBool = Field(default=False, alias="allowInsecureHttp")
 
     def to_domain(self) -> AutomationServiceSettings:
         return AutomationServiceSettings(
             self.enabled,
             self.enabled_scopes,
             self.public_base_url,
-            self.allow_insecure_http,
         )
 
     @classmethod
@@ -101,7 +106,6 @@ class ServiceSettingsFields(HttpContractModel):
             enabled=settings.enabled,
             enabledScopes=settings.enabled_scopes,
             publicBaseUrl=settings.public_base_url,
-            allowInsecureHttp=settings.allow_insecure_http,
         )
 
 
@@ -143,3 +147,10 @@ class OperationPayload(HttpContractModel):
 
 OperationListResponse = SuccessEnvelope[OperationListPayload]
 OperationResponse = SuccessEnvelope[OperationPayload]
+
+
+class RevealedTokenPayload(HttpContractModel):
+    token: str = Field(repr=False)
+
+
+RevealedTokenResponse = SuccessEnvelope[RevealedTokenPayload]

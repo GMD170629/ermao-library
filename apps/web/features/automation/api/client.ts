@@ -41,6 +41,7 @@ function targets(value: unknown): WritebackTarget[] {
 export function parseGrant(value: unknown): GrantView {
   const data = record(value);
   return { id: text(data.id), name: text(data.name), scopes: permissions(data.scopes), libraryIds: strings(data.libraryIds),
+    libraryScope: data.libraryScope === "all" ? "all" : data.libraryScope === "selected" ? "selected" : (() => { throw new Error("INVALID_AUTOMATION_RESPONSE"); })(), tokenAvailable: boolean(data.tokenAvailable),
     writebackTargets: targets(data.writebackTargets), allowCrossLibrary: boolean(data.allowCrossLibrary),
     createdAtMs: number(data.createdAtMs), expiresAtMs: number(data.expiresAtMs),
     revokedAtMs: data.revokedAtMs === null ? null : number(data.revokedAtMs),
@@ -49,7 +50,7 @@ export function parseGrant(value: unknown): GrantView {
 export function parseSettings(value: unknown): ServiceSettings {
   const data = record(value);
   return { enabled: boolean(data.enabled), enabledScopes: permissions(data.enabledScopes),
-    publicBaseUrl: text(data.publicBaseUrl), allowInsecureHttp: boolean(data.allowInsecureHttp) };
+    publicBaseUrl: text(data.publicBaseUrl) };
 }
 export function parseOperation(value: unknown): ManagedOperationFields {
   const data = record(value);
@@ -78,7 +79,7 @@ async function request(path: string, signal: AbortSignal, method = 'GET', body?:
     body: body === undefined ? undefined : JSON.stringify(body) });
   const payload: unknown = JSON.parse(new TextDecoder().decode(await readBoundedResponse(response, 2 * 1024 ** 2)));
   const envelope = record(payload);
-  if (!response.ok || envelope.ok !== true) throw new Error('AUTOMATION_REQUEST_FAILED');
+  if (!response.ok || envelope.ok !== true) throw new Error(isRecord(envelope.error) && typeof envelope.error.code === 'string' ? envelope.error.code : 'AUTOMATION_REQUEST_FAILED');
   return record(envelope.data);
 }
 export async function loadAutomation(signal: AbortSignal) {
@@ -101,4 +102,8 @@ export async function revokeGrant(id: string, signal: AbortSignal): Promise<void
 }
 export async function saveSettings(settings: ServiceSettings, signal: AbortSignal): Promise<ServiceSettings> {
   return parseSettings(await request('/api/automation/settings', signal, 'PUT', settings));
+}
+
+export async function revealGrant(id: string, signal: AbortSignal): Promise<string> {
+  return text((await request(`/api/automation/grants/${encodeURIComponent(id)}/reveal`, signal, "POST")).token);
 }

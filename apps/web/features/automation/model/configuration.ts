@@ -13,7 +13,10 @@ export function connectionUrl(settings: ServiceSettings): string {
   return settings.publicBaseUrl ? `${settings.publicBaseUrl.replace(/\/$/u, '')}/api/mcp` : '';
 }
 
-export function clientTemplate(url: string, token?: string): string {
+export type McpClient = "codex" | "lm-studio" | "cursor";
+
+export function clientTemplate(url: string, token?: string, client: McpClient = "codex"): string {
+  if (client === "codex") return `[mcp_servers.ermao-library]\nurl = ${JSON.stringify(url)}\nhttp_headers = { Authorization = ${JSON.stringify(`Bearer ${token ?? "<ERMAO_TOKEN>"}`)} }\n`;
   return JSON.stringify({ mcpServers: { 'ermao-library': { url, headers: { Authorization: `Bearer ${token ?? '<ERMAO_TOKEN>'}` } } } }, null, 2);
 }
 

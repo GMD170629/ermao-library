@@ -1,7 +1,7 @@
 """Grant lifecycle and fresh authorization shared by HTTP and file workers."""
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Protocol
 
 from app.modules.automation.application.audit import AutomationAuditPort
@@ -26,6 +26,7 @@ class AutomationGrant:
     expires_at_ms: int
     revoked_at_ms: int | None = None
     last_used_at_ms: int | None = None
+    token_ciphertext: str | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,7 +42,16 @@ class CreatedGrant:
     token: str = field(repr=False)
 
 
+class GrantSecretPort(Protocol):
+    def encrypt(
+        self, user_id: str, grant_id: str, token: str, *, initialize: bool
+    ) -> str: ...
+    def decrypt(self, user_id: str, grant_id: str, ciphertext: str) -> str: ...
+
+
 class GrantStore(Protocol):
+    def has_secrets(self) -> bool: ...
+
     def add(self, grant: AutomationGrant, digest: str) -> None: ...
 
     def by_digest(self, digest: str) -> AutomationGrant | None: ...
@@ -80,6 +90,8 @@ class ManageGrants:
         unit_of_work: GrantUnitOfWork,
         clock_ms: Callable[[], int],
         audit: AutomationAuditPort,
+        secrets: GrantSecretPort,
+        service_enabled: Callable[[], bool],
     ) -> None:
         self._store = store
         self._identities = identities
@@ -87,6 +99,8 @@ class ManageGrants:
         self._uow = unit_of_work
         self._clock_ms = clock_ms
         self._audit = audit
+        self._secrets = secrets
+        self._service_enabled = service_enabled
 
     def _actor(self, user_id: str) -> AutomationActor:
         actor = self._identities.current_actor(user_id)
@@ -104,6 +118,8 @@ class ManageGrants:
     ) -> CreatedGrant:
         actor = self._actor(user_id)
         validate_permissions(permissions, actor)
+        if not self._service_enabled():
+            raise AutomationAccessError("AUTOMATION_DISABLED")
         name = name.strip()
         if not name or len(name) > 100 or any(ord(char) < 32 for char in name):
             raise AutomationAccessError("INVALID_GRANT_NAME")
@@ -121,6 +137,15 @@ class ManageGrants:
         )
         event = self._audit.prepare("grant.created", user_id, grant.id)
         try:
+            grant = replace(
+                grant,
+                token_ciphertext=self._secrets.encrypt(
+                    user_id,
+                    grant.id,
+                    credential.token,
+                    initialize=not self._store.has_secrets(),
+                ),
+            )
             self._store.add(grant, credential.digest)
             self._audit.write(event)
             self._uow.commit()
@@ -132,6 +157,25 @@ class ManageGrants:
     def list_owned(self, user_id: str) -> tuple[AutomationGrant, ...]:
         self._actor(user_id)
         return self._store.list_owned(user_id)
+
+    def reveal(self, *, user_id: str, grant_id: str) -> str:
+        self._actor(user_id)
+        grant = self._store.by_id(grant_id)
+        if grant is None or grant.user_id != user_id:
+            raise AutomationAccessError("GRANT_NOT_FOUND")
+        if grant.revoked_at_ms is not None or grant.expires_at_ms <= self._clock_ms():
+            raise AutomationAccessError("GRANT_INACTIVE")
+        if grant.token_ciphertext is None:
+            raise AutomationAccessError("TOKEN_NOT_RECOVERABLE")
+        event = self._audit.prepare("grant.revealed", user_id, grant_id)
+        try:
+            token = self._secrets.decrypt(user_id, grant_id, grant.token_ciphertext)
+            self._audit.write(event)
+            self._uow.commit()
+            return token
+        except Exception:
+            self._uow.rollback()
+            raise
 
     def revoke(self, *, user_id: str, grant_id: str) -> None:
         self._actor(user_id)

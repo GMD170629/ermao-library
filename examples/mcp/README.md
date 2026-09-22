@@ -6,12 +6,16 @@ The MCP service runs inside the existing backend at your public base URL plus `/
 
 ## 配置 / Connect
 
-1. 管理员在「设置 → 自动化授权」开启 MCP，填写公开根地址（含部署前缀，不含 `/api/mcp`），选择可授权能力。默认使用 HTTPS；可信局域网 HTTP 必须明确允许。
-2. 用户创建自己的授权，选择固定书库、有效期和能力。新增书库不会自动加入。文件写回另选伴随文件或内嵌格式；跨库移动另行授权。
-3. 保存只显示一次的令牌。页面复制/下载模板默认使用占位符，只有明确勾选才包含本次令牌。丢失后撤销重建。
-4. 合并 `lm-studio.example.json` 或 `cursor.example.json` 到客户端 MCP 配置，替换地址与令牌。模板不是完整 OAuth 登录；仅适用于支持手动 Bearer 请求头的客户端。
+1. 管理员在「设置 → 自动化授权 → MCP 服务」开启服务，填写公开根地址（含部署前缀，不含 `/api/mcp`），选择可授权能力。HTTP 和 HTTPS 均支持域名、IP 与端口，无额外 HTTP 开关。
+2. 「授权服务」默认显示授权列表，右上角「创建授权」展开表单。默认全部书库（动态），包含账户当前及未来可访问书库；也可选择指定书库固定范围。旧授权不会自动扩展。服务关闭时请管理员先开启。
+3. 每条授权的「复制配置」打开该授权的配置面板，默认 Codex，可切换 LM Studio / Cursor，预览、复制或下载完整配置。配置包含令牌，请勿分享或提交仓库。刷新后可再次取回；关闭面板或离开分区会清除浏览器内存令牌，不保存在浏览器存储中。
+4. 过期或撤销的授权不能取回配置。历史摘要令牌仍可使用，但无法取回；需要完整配置时重新创建授权。操作列表提供原有任务状态、逐项结果、刷新和取消。
 
-Administrators enable the service and configure its public base URL and available capabilities under Settings → Automation grants. Each user creates an expiring, fixed-library grant and saves the one-time token. Template exports omit credentials unless explicitly selected. Merge the provided configuration into your client's MCP settings. This service supports manually configured Bearer tokens, not an OAuth authorization server.
+Administrators enable MCP in Settings → Automation access → MCP service. HTTP and HTTPS support domains, IPs, ports and deployment prefixes without an extra HTTP opt-in. The Access grants tab defaults to the grant list. Create a grant for all currently and subsequently accessible libraries (dynamic), or explicitly select fixed libraries. Existing grants remain fixed. Each row opens its own complete client configuration, defaulting to Codex, with LM Studio and Cursor options. Secrets can be retrieved again after reload but are never persisted in browser storage. Revoked or expired grants cannot export configuration; legacy hash-only tokens cannot be recovered. The Operations tab preserves task status, per-file results, refresh and cancellation.
+
+服务端令牌采用 AES-GCM 加密保存，同时保留认证摘要。请持久化并独立备份 `storage/secrets/automation-token.key`（权限 0600），与数据库配套恢复。密钥丢失、损坏或权限不安全时明确报错，不覆盖已有密钥；已有密文时也不生成替代密钥。密钥错误不影响已有摘要令牌的认证。仅本人有效 Cookie 会话可通过带合法 Origin 的 `POST /api/automation/grants/{id}/reveal` 取回有效令牌，响应禁止缓存，审计不记录秘密。
+
+Persist and separately back up `storage/secrets/automation-token.key` with mode 0600, and restore it alongside the database. Tokens are encrypted with AES-GCM and authenticated by their existing digests. A missing or invalid key causes an explicit recovery error; the server never replaces an existing key or generates a replacement while encrypted grants remain. Only the owner’s valid Cookie session and Origin can reveal an active token. Responses are not cached and audit events contain no secrets.
 
 [LM Studio 官方配置](https://lmstudio.ai/docs/app/mcp) 支持远程 URL 和请求头，可选择自己的本地模型。[Cursor MCP 配置](https://cursor.com/docs/mcp) 支持远程 URL 和环境变量请求头；Cursor 不保证本地推理。示例 Cursor 模板从**客户端进程**的 `ERMAO_MCP_TOKEN` 环境变量读取，终端设置变量不一定传给已启动的桌面应用。LM Studio 模板使用显式占位符。
 
@@ -19,7 +23,7 @@ LM Studio can use a local model with remote MCP tools. Cursor does not guarantee
 
 ## Codex 接入 / Connect with Codex
 
-将 `codex.example.toml` 合并到 Codex 的 `config.toml`，或运行以下命令注册连接。先将一次性令牌安全地注入 **Codex 进程**的 `ERMAO_MCP_TOKEN` 环境变量，再启动客户端。已启动的桌面应用不会自动继承另一个终端后来设置的变量。保留客户端的工具确认设置；非交互模式如果禁止确认而写工具需要确认，会拒绝写入。
+可直接从授权行复制完整配置到 Codex 的 `config.toml`。仓库提供的 `codex.example.toml` 和以下命令则使用环境变量方式注册连接。也可将授权令牌安全地注入 **Codex 进程**的 `ERMAO_MCP_TOKEN` 环境变量，再启动客户端。已启动的桌面应用不会自动继承另一个终端后来设置的变量。保留客户端的工具确认设置；非交互模式如果禁止确认而写工具需要确认，会拒绝写入。
 
 Merge `codex.example.toml` into your Codex configuration, or register the connection below. Securely supply `ERMAO_MCP_TOKEN` to the Codex process before starting it. An already-running desktop app does not inherit variables later set in another terminal. Retain client tool approvals; non-interactive runs that prohibit prompts reject tools requiring approval.
 

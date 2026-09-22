@@ -4,7 +4,11 @@ from sqlalchemy import select
 from app.core.auth import create_session
 from app.models.auth import User, UserLibraryAccess
 from app.models.settings import SystemEvent, SystemSetting
+from app.modules.automation.application.settings import AutomationServiceSettings
 from app.modules.automation.infrastructure.models import AutomationGrantRow
+from app.modules.system.infrastructure.automation_settings import (
+    SqlAlchemyAutomationSettings,
+)
 
 ORIGIN = {"Origin": "http://testserver"}
 
@@ -33,7 +37,8 @@ def grant_request(**overrides):
     return {"name": "Local model", "libraryIds": ["test-library"], **overrides}
 
 
-def test_management_cookie_origin_one_time_secret_and_ownership(client, db_session):
+def test_management_cookie_origin_secret_and_ownership(client, db_session):
+    enable_service(db_session)
     sign_in(client, db_session, "first")
     assert (
         client.post("/api/automation/grants", json=grant_request()).status_code == 403
@@ -117,21 +122,25 @@ def test_service_off_by_default_admin_only_activation_and_no_generic_bypass(
     assert "automation.mcp" not in generic.json()["data"]["settings"]
 
 
-def test_http_activation_requires_explicit_insecure_opt_in(client, db_session):
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://books.example:8080/books",
+        "http://192.168.1.10/books",
+        "http://[::1]:8080/books",
+        "https://books.example/books",
+    ],
+)
+def test_http_and_https_activation_without_extra_permission(client, db_session, url):
     sign_in(client, db_session, "admin", admin=True)
-    payload = {"enabled": True, "publicBaseUrl": "http://books.example"}
-    assert (
-        client.put("/api/automation/settings", headers=ORIGIN, json=payload).json()[
-            "error"
-        ]["code"]
-        == "HTTPS_REQUIRED"
+    response = client.put(
+        "/api/automation/settings",
+        headers=ORIGIN,
+        json={"enabled": True, "publicBaseUrl": url},
     )
-    payload["allowInsecureHttp"] = True
-    assert (
-        client.put("/api/automation/settings", headers=ORIGIN, json=payload).status_code
-        == 200
-    )
-    for url in (
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["publicBaseUrl"] == url
+    for invalid_url in (
         "https://user:pass@example.com",
         "https://example.com?token=secret",
         "https://example.com/../escape",
@@ -139,7 +148,7 @@ def test_http_activation_requires_explicit_insecure_opt_in(client, db_session):
         invalid = client.put(
             "/api/automation/settings",
             headers=ORIGIN,
-            json={"enabled": True, "publicBaseUrl": url},
+            json={"enabled": True, "publicBaseUrl": invalid_url},
         )
         assert invalid.status_code == 400
 
@@ -154,6 +163,7 @@ def test_http_activation_requires_explicit_insecure_opt_in(client, db_session):
 def test_audit_has_localized_message_and_never_credential(
     client, db_session, language, message
 ):
+    enable_service(db_session)
     sign_in(client, db_session, "member")
     db_session.add(SystemSetting(key="language", value=f'"{language}"'))
     db_session.commit()
@@ -168,3 +178,25 @@ def test_audit_has_localized_message_and_never_credential(
     assert event.target_id == created["grant"]["id"]
     assert created["token"] not in event.message
     assert created["token"] not in str(event.metadata_json)
+
+
+def enable_service(db):
+    SqlAlchemyAutomationSettings(db).save(
+        AutomationServiceSettings(enabled=True, public_base_url="http://testserver")
+    )
+    db.commit()
+
+
+def test_old_http_option_does_not_restrict_or_reappear(client, db_session):
+    sign_in(client, db_session, "admin", admin=True)
+    db_session.add(
+        SystemSetting(
+            key="automation.mcp",
+            value='{"enabled": true, "public_base_url": "http://books.example/books", "allow_insecure_http": false, "enabled_scopes": ["library:read"]}',
+        )
+    )
+    db_session.commit()
+    response = client.get("/api/automation/settings")
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["publicBaseUrl"] == "http://books.example/books"
+    assert "allowInsecureHttp" not in response.text

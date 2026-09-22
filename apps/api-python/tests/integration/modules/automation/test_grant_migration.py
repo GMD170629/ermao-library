@@ -1,3 +1,6 @@
+from datetime import UTC, datetime
+
+import sqlalchemy as sa
 from alembic import command
 from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
@@ -48,5 +51,51 @@ def test_fresh_database_includes_grants(tmp_path):
     try:
         apply_schema(engine)
         assert "AutomationGrant" in inspect(engine).get_table_names()
+    finally:
+        engine.dispose()
+
+
+def test_existing_grants_keep_fixed_scope_and_hash_through_migration(tmp_path):
+    engine = create_sqlite_engine(tmp_path / "migration.sqlite")
+    try:
+        config = alembic_config_for_engine(engine)
+        command.upgrade(config, "0025_standard_writeback_plans")
+        metadata = sa.MetaData()
+        users = sa.Table("User", metadata, autoload_with=engine)
+        grants = sa.Table("AutomationGrant", metadata, autoload_with=engine)
+        with engine.begin() as connection:
+            connection.execute(
+                users.insert().values(
+                    id="owner",
+                    email="owner@test.invalid",
+                    name="Owner",
+                    passwordHash="unused",
+                    updatedAt=datetime.now(UTC),
+                )
+            )
+            connection.execute(
+                grants.insert().values(
+                    id="legacy",
+                    userId="owner",
+                    name="Legacy",
+                    tokenDigest="a" * 64,
+                    scopes=["library:read"],
+                    libraryIds=["fixed"],
+                    writebackTargets=[],
+                    allowCrossLibrary=False,
+                    createdAt=1,
+                    expiresAt=2000000000000,
+                )
+            )
+        for _ in range(2):
+            command.upgrade(config, "0026_automation_grant_secrets")
+            current = sa.Table("AutomationGrant", sa.MetaData(), autoload_with=engine)
+            with engine.connect() as connection:
+                row = connection.execute(sa.select(current)).mappings().one()
+                assert row["libraryScope"] == "selected"
+                assert row["tokenCiphertext"] is None
+                assert row["libraryIds"] == ["fixed"]
+                assert row["tokenDigest"] == "a" * 64
+            command.downgrade(config, "0025_standard_writeback_plans")
     finally:
         engine.dispose()

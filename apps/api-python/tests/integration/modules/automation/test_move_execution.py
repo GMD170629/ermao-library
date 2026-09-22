@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import select
 
 from app.models import Library, LibraryBook, LibrarySourceNode
 from app.modules.imports.infrastructure.readable_resource.task_queue import (
@@ -25,7 +26,7 @@ from app.modules.metadata.infrastructure.writeback_queue import (
 from tests.integration.modules.automation.test_file_reads import file_access
 
 
-def prepare(db, tmp_path):
+def prepare(db, tmp_path, *, dynamic=False):
     access, root = file_access(db, tmp_path)
     db.get(Library, "test-library").organization_mode = "VOLUMES"
     db.commit()
@@ -40,7 +41,11 @@ def prepare(db, tmp_path):
         access.permissions, scopes=access.permissions.scopes | {Scope.FILES_MOVE}
     )
     grant = build_grant_manager(db).create(
-        user_id=access.user_id, name="move", permissions=permissions
+        user_id=access.user_id,
+        name="move",
+        permissions=replace(permissions, library_scope="all", library_ids=frozenset())
+        if dynamic
+        else permissions,
     )
     build_automation_settings(db).update(
         access.user_id,
@@ -407,3 +412,71 @@ def test_case_only_directory_rename_recovers_intermediate_slot(
     db_session.expire_all()
     assert db_session.get(LibrarySourceNode, "allowed-node").relative_path == "Allowed"
     assert (root / "Allowed/metadata.opf").read_bytes() == b"original metadata"
+
+
+@pytest.mark.parametrize("withdraw_access", [False, True])
+def test_dynamic_grant_rechecks_worker_and_history_without_expanding_frozen_plan(
+    client, db_session, tmp_path, withdraw_access
+):
+    from app.bootstrap.automation import build_automation_authorizer
+    from app.models.auth import User, UserLibraryAccess
+    from app.modules.automation.application.execution import RecheckMoveAccess
+    from app.modules.system.infrastructure.automation_settings import (
+        SqlAlchemyAutomationSettings,
+    )
+    from tests.integration.modules.automation.test_operation_management import cookie
+
+    actor, root, store = prepare(db_session, tmp_path, dynamic=True)
+    user = db_session.get(User, actor.user_id)
+    user.role = "member"
+    user.can_manage_system = True
+    db_session.add(UserLibraryAccess(user_id=actor.user_id, library_id="test-library"))
+    new_root = tmp_path / "new-library"
+    new_root.mkdir()
+    (new_root / "untouched.txt").write_text("untouched")
+    db_session.add(
+        Library(
+            id="new-dynamic-library",
+            name="New",
+            root_path=str(new_root),
+            organization_mode="FLAT",
+        )
+    )
+    db_session.flush()
+    db_session.add(
+        UserLibraryAccess(user_id=actor.user_id, library_id="new-dynamic-library")
+    )
+    db_session.commit()
+    cookie(client, db_session)
+    authorizer = RecheckMoveAccess(
+        build_automation_authorizer(db_session),
+        SqlAlchemyAutomationSettings(db_session),
+    )
+    assert authorizer(actor).library_ids == frozenset(
+        {"test-library", "new-dynamic-library"}
+    )
+    visible = client.get("/api/automation/operations").json()["data"]["operations"]
+    assert len(visible) == 1 and visible[0]["total_targets"] == 1
+    if withdraw_access:
+        db_session.delete(
+            db_session.scalar(
+                select(UserLibraryAccess).where(
+                    UserLibraryAccess.user_id == actor.user_id,
+                    UserLibraryAccess.library_id == "test-library",
+                )
+            )
+        )
+        db_session.commit()
+        assert (
+            client.get("/api/automation/operations").json()["data"]["operations"] == []
+        )
+    executor(db_session, store, SameDeviceMovePublication(), authorizer).execute(
+        "operation"
+    )
+    assert store.progress("operation", actor).status == (
+        "FAILED" if withdraw_access else "COMPLETED"
+    )
+    assert (new_root / "untouched.txt").read_text() == "untouched"
+    assert (
+        root / ("allowed" if withdraw_access else "renamed") / "metadata.opf"
+    ).read_bytes() == b"original metadata"

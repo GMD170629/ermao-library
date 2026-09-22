@@ -1,6 +1,5 @@
 """Admin-controlled service activation and an explicit public transport origin."""
 
-import ipaddress
 from dataclasses import dataclass, replace
 from typing import Protocol
 from urllib.parse import urlsplit, urlunsplit
@@ -27,7 +26,6 @@ class AutomationServiceSettings:
     enabled: bool = False
     enabled_scopes: frozenset[Scope] = frozenset({Scope.LIBRARY_READ})
     public_base_url: str = ""
-    allow_insecure_http: bool = False
 
 
 class AutomationSettingsPort(Protocol):
@@ -68,13 +66,6 @@ def normalize_service_settings(
         or any(part in {".", ".."} for part in url.path.split("/"))
     ):
         raise AutomationAccessError("INVALID_PUBLIC_URL")
-    loopback = url.hostname.casefold() == "localhost"
-    try:
-        loopback = loopback or ipaddress.ip_address(url.hostname).is_loopback
-    except ValueError:
-        pass  # Hostnames are not resolved or probed.
-    if url.scheme == "http" and not loopback and not settings.allow_insecure_http:
-        raise AutomationAccessError("HTTPS_REQUIRED")
     return replace(
         settings,
         public_base_url=urlunsplit(

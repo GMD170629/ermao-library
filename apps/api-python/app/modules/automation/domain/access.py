@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Literal
 
 
 class Scope(StrEnum):
@@ -44,6 +45,7 @@ class GrantPermissions:
     library_ids: frozenset[str]
     writeback_targets: frozenset[WritebackTarget] = frozenset()
     allow_cross_library: bool = False
+    library_scope: Literal["all", "selected"] = "selected"
 
 
 def validate_permissions(permissions: GrantPermissions, actor: AutomationActor) -> None:
@@ -55,7 +57,14 @@ def validate_permissions(permissions: GrantPermissions, actor: AutomationActor) 
         raise AutomationAccessError("LIBRARY_READ_REQUIRED")
     if not actor.can_manage_system and not permissions.scopes <= MEMBER_SCOPES:
         raise AutomationAccessError("SYSTEM_MANAGER_REQUIRED")
-    if not permissions.library_ids or not permissions.library_ids <= actor.library_ids:
+    if permissions.library_scope not in {"all", "selected"}:
+        raise AutomationAccessError("INVALID_LIBRARY_SCOPE")
+    if permissions.library_scope == "all":
+        if permissions.library_ids:
+            raise AutomationAccessError("INVALID_LIBRARY_SCOPE")
+    elif (
+        not permissions.library_ids or not permissions.library_ids <= actor.library_ids
+    ):
         raise AutomationAccessError("LIBRARY_NOT_FOUND")
     if (
         permissions.scopes & {Scope.FILES_MOVE, Scope.METADATA_WRITEBACK}
@@ -145,7 +154,9 @@ def effective_access(
         user_id=user_id,
         permissions=GrantPermissions(
             scopes=scopes,
-            library_ids=permissions.library_ids & actor.library_ids,
+            library_ids=actor.library_ids
+            if permissions.library_scope == "all"
+            else permissions.library_ids & actor.library_ids,
             writeback_targets=permissions.writeback_targets
             if Scope.METADATA_WRITEBACK in scopes
             else frozenset(),

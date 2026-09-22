@@ -7,7 +7,7 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from app.bootstrap.reader import reader_v5_library_queries
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.time import now_timestamp_ms
 from app.db.maintenance import database_maintenance_is_active
 from app.modules.auth.infrastructure.automation_identity import (
@@ -36,6 +36,7 @@ from app.modules.automation.infrastructure.operation_history import (
 )
 from app.modules.automation.infrastructure.receipts import SqlAlchemyReceiptStore
 from app.modules.automation.infrastructure.runtime import DatabaseAutomationRuntime
+from app.modules.automation.infrastructure.token_vault import AutomationTokenVault
 from app.modules.automation.presentation.mcp import AutomationMcpEndpoint
 from app.modules.library.application.bulk_operations import (
     ExecuteBulkMetadata,
@@ -100,7 +101,7 @@ def build_automation_settings(db: Session) -> ConfigureAutomation:
     )
 
 
-def build_grant_manager(db: Session) -> ManageGrants:
+def build_grant_manager(db: Session, settings: Settings | None = None) -> ManageGrants:
     return ManageGrants(
         SqlAlchemyGrantStore(db),
         SqlAlchemyAutomationIdentity(db, SqlAlchemyVisibleLibraryIds(db)),
@@ -108,6 +109,10 @@ def build_grant_manager(db: Session) -> ManageGrants:
         db,
         now_timestamp_ms,
         SqlAlchemyAutomationAudit(db),
+        AutomationTokenVault(
+            (settings or get_settings()).resolved_storage_root / "secrets"
+        ),
+        lambda: SqlAlchemyAutomationSettings(db).load().enabled,
     )
 
 

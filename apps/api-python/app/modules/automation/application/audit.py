@@ -4,7 +4,9 @@ from typing import Literal, Protocol
 
 from app.modules.system.public import PreparedSystemEvent
 
-AutomationAuditAction = Literal["grant.created", "grant.revoked", "settings.updated"]
+AutomationAuditAction = Literal[
+    "grant.created", "grant.revoked", "grant.revealed", "settings.updated"
+]
 
 
 class AutomationAuditPort(Protocol):

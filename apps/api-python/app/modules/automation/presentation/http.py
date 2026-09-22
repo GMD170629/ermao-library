@@ -28,6 +28,8 @@ from app.modules.automation.presentation.schemas import (
     OperationListResponse,
     OperationPayload,
     OperationResponse,
+    RevealedTokenPayload,
+    RevealedTokenResponse,
     RevokedGrantPayload,
     RevokedGrantResponse,
     ServiceSettingsFields,
@@ -93,7 +95,7 @@ def list_grants(
             auth_error or fail("UNAUTHORIZED", status_code=401, code="UNAUTHORIZED")
         )
     try:
-        grants = build_grant_manager(db).list_owned(user.id)
+        grants = build_grant_manager(db, settings).list_owned(user.id)
         return _private(
             ok(
                 GrantListPayload(
@@ -116,7 +118,7 @@ def create_grant(
         )
     try:
         _check_origin(request)
-        created = build_grant_manager(db).create(
+        created = build_grant_manager(db, settings).create(
             user_id=user.id,
             name=payload.name,
             permissions=payload.permissions(),
@@ -144,7 +146,7 @@ def revoke_grant(
         )
     try:
         _check_origin(request)
-        build_grant_manager(db).revoke(user_id=user.id, grant_id=grant_id)
+        build_grant_manager(db, settings).revoke(user_id=user.id, grant_id=grant_id)
         return _private(ok(RevokedGrantPayload()))
     except AutomationAccessError as error:
         return _error(request, error)
@@ -237,3 +239,22 @@ def cancel_operation(
         )
     except (AutomationAccessError, FileMoveError, StandardMetadataError) as error:
         return _error(request, AutomationAccessError(str(error)))
+
+
+@router.post("/grants/{grant_id}/reveal", response_model=RevealedTokenResponse)
+def reveal_grant(
+    grant_id: str, request: Request, db: Database, settings: Configuration
+) -> RevealedTokenResponse | Response:
+    user, auth_error = require_user(db, request, settings)
+    if auth_error is not None or user is None:
+        return _private(
+            auth_error or fail("UNAUTHORIZED", status_code=401, code="UNAUTHORIZED")
+        )
+    try:
+        _check_origin(request)
+        token = build_grant_manager(db, settings).reveal(
+            user_id=user.id, grant_id=grant_id
+        )
+        return _private(ok(RevealedTokenPayload(token=token)))
+    except AutomationAccessError as error:
+        return _error(request, error)
