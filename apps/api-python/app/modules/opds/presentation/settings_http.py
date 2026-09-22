@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
+from app.bootstrap.opds import get_opds_settings
 from app.bootstrap.system import (
-    get_setting,
     persist_opds_settings_update,
     prepare_system_event,
 )
@@ -21,7 +21,6 @@ from app.modules.opds.application.settings import (
     OPDS_PUBLIC_BASE_URL_SETTING_KEY,
     OpdsPublicBaseUrlInvalid,
     OpdsPublicBaseUrlRequired,
-    resolve_opds_settings,
     validate_opds_activation,
 )
 from app.modules.opds.presentation.settings_schemas import (
@@ -35,10 +34,7 @@ router = APIRouter(tags=["system"], route_class=TypedContractRoute)
 
 
 def _settings_payload(db: Session) -> OpdsSystemSettingsPayload:
-    snapshot = resolve_opds_settings(
-        get_setting(db, OPDS_ENABLED_SETTING_KEY, None),
-        stored_public_base_url=get_setting(db, OPDS_PUBLIC_BASE_URL_SETTING_KEY, None),
-    )
+    snapshot = get_opds_settings(db)
     return OpdsSystemSettingsPayload(
         enabled=snapshot.enabled,
         configured=snapshot.configured,

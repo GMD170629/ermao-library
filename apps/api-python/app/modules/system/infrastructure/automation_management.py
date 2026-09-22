@@ -5,6 +5,7 @@ from collections.abc import Callable
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.exception_diagnostics import sanitize_diagnostic_text
 from app.core.time import to_timestamp_ms
 from app.models import LibraryImportTask, QueueRuntimeState
 from app.models.settings import SystemEvent
@@ -15,7 +16,9 @@ from app.modules.opds.public import (
 )
 from app.modules.system.application.commands import SystemWriteTransaction
 from app.modules.system.infrastructure.events import (
+    normalize_stored_event_metadata,
     prepare_system_event,
+    system_event_search_filter,
     write_prepared_system_events,
 )
 from app.modules.system.infrastructure.settings import (
@@ -28,6 +31,86 @@ from app.services.email_settings import (
     public_email_settings,
     write_prepared_email_settings,
 )
+
+_CORRELATION_KEYS = (
+    "requestId",
+    "taskId",
+    "operationId",
+    "planId",
+    "uploadId",
+    "nodeId",
+    "parentDiagnosticId",
+    "targetIndex",
+    "targetOrdinal",
+    "libraryId",
+    "resourceId",
+    "sourceNodeId",
+    "taskKind",
+    "stage",
+    "step",
+    "attempt",
+)
+_CAUSE_KEYS = (
+    "type",
+    "message",
+    "errno",
+    "errorName",
+    "databaseCode",
+    "databaseErrorName",
+    "protocolStatus",
+    "exitCode",
+    "relationship",
+    "chainIndex",
+    "parentIndex",
+)
+
+
+def _diagnostic_summary(metadata: object) -> dict[str, object]:
+    """Only current diagnostics can expose an explicitly allowlisted summary."""
+    if not isinstance(metadata, dict) or not isinstance(
+        metadata.get("diagnostics"), dict
+    ):
+        return {"diagnostic_status": "HISTORICAL_INFORMATION_UNAVAILABLE"}
+    diagnostics = metadata["diagnostics"]
+
+    def safe(value: object) -> str | int | bool | None:
+        if isinstance(value, str):
+            return sanitize_diagnostic_text(value)[:1000]
+        return value if isinstance(value, (int, bool)) or value is None else None
+
+    summary: dict[str, object] = {
+        key: safe(diagnostics[key])
+        for key in (
+            "id", "exceptionType", "message", "causeStatus", "causeProvided",
+            "chainTruncated", "contextProvided", "contextsTruncated",
+        )
+        if key in diagnostics
+    }
+    for name in ("directException", "directCause", "rootCause"):
+        cause = diagnostics.get(name)
+        if isinstance(cause, dict):
+            summary[name] = {
+                key: safe(cause[key]) for key in _CAUSE_KEYS if key in cause
+            }
+    contexts = diagnostics.get("contexts")
+    if isinstance(contexts, list):
+        summary["contexts"] = [
+            {key: safe(context[key]) for key in _CAUSE_KEYS if key in context}
+            for context in contexts[:8]
+            if isinstance(context, dict)
+        ]
+        summary["contextsTruncated"] = (
+            diagnostics.get("contextsTruncated") is True or len(contexts) > 8
+        )
+    return {
+        "diagnostic_status": "RECORDED"
+        if "rootCause" in diagnostics
+        else "HISTORICAL_INFORMATION_UNAVAILABLE",
+        "diagnostics": summary,
+        "correlation": {
+            key: safe(metadata[key]) for key in _CORRELATION_KEYS if key in metadata
+        },
+    }
 
 
 class SqlAlchemyAutomationSystem:
@@ -88,10 +171,14 @@ class SqlAlchemyAutomationSystem:
             ]
         }
 
-    def logs(self, page: int, limit: int) -> dict[str, object]:
+    def logs(
+        self, page: int, limit: int, search: str | None = None
+    ) -> dict[str, object]:
+        statement = select(SystemEvent)
+        if search:
+            statement = statement.where(system_event_search_filter(search))
         rows = self.db.scalars(
-            select(SystemEvent)
-            .order_by(SystemEvent.created_at.desc(), SystemEvent.id)
+            statement.order_by(SystemEvent.created_at.desc(), SystemEvent.id)
             .offset((page - 1) * limit)
             .limit(limit)
         )
@@ -105,6 +192,9 @@ class SqlAlchemyAutomationSystem:
                     "action": r.action,
                     "target_type": r.target_type,
                     "created_at_ms": to_timestamp_ms(r.created_at),
+                    **_diagnostic_summary(
+                        normalize_stored_event_metadata(r.metadata_json, event_id=r.id)
+                    ),
                 }
                 for r in rows
             ],

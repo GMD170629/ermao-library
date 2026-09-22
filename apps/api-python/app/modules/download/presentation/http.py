@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from time import time_ns
 from typing import Annotated, Any
@@ -26,6 +27,7 @@ from app.bootstrap.download import (
 )
 from app.bootstrap.system import prepare_system_event
 from app.core.config import Settings, get_settings
+from app.core.exception_diagnostics import record_exception
 from app.db.session import get_db
 from app.modules.download.presentation.schemas import (
     CreateDownloadTaskRequest,
@@ -35,6 +37,7 @@ from app.modules.download.presentation.schemas import (
     UpdateDownloadTaskRequest,
 )
 from app.modules.download.public import CreateDownloadTask, UpdateDownloadTask
+from app.modules.imports.public import InvalidTargetDirectory
 from app.modules.imports.public import (
     target_directory_from_path as _target_directory_from_path,
 )
@@ -56,12 +59,24 @@ def _enabled_library_for_path(
 
     try:
         real_target = target.expanduser().resolve()
-    except OSError:
+    except OSError as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.download.presentation.http._enabled_library_for_path.failed",
+            error,
+            context={"stage": "_enabled_library_for_path"},
+        )
         return None
     for folder in folders:
         try:
             root = Path(str(folder.get("rootPath") or "")).expanduser().resolve()
-        except OSError:
+        except OSError as error:
+            record_exception(
+                logging.getLogger(__name__),
+                "modules.download.presentation.http._enabled_library_for_path.failed",
+                error,
+                context={"stage": "_enabled_library_for_path"},
+            )
             continue
         if root == real_target or is_inside_path(root, real_target):
             return folder
@@ -83,7 +98,13 @@ def _parse_json(value: Any, fallback: Any) -> Any:
         return value
     try:
         return json.loads(str(value))
-    except ValueError:
+    except ValueError as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.download.presentation.http._parse_json.failed",
+            error,
+            context={"stage": "_parse_json"},
+        )
         return fallback
 
 
@@ -141,7 +162,13 @@ async def create_download_task(
     values = payload.model_dump(by_alias=True, exclude_unset=True)
     try:
         target_dir = _target_directory_from_path(values.get("targetPath"), "下载")
-    except ValueError as exc:
+    except InvalidTargetDirectory as exc:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.download.presentation.http.create_download_task.failed",
+            exc,
+            context={"stage": "create_download_task"},
+        )
         return fail(str(exc), status_code=400)
     save_path = str(target_dir)
     progress_value = values.get("progress")

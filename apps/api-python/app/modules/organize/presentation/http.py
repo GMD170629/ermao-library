@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
@@ -15,8 +16,10 @@ from app.bootstrap.library import book_view, get_book
 from app.bootstrap.organize import organize_job_queries, organize_runs
 from app.contracts.http_errors import ErrorResponses
 from app.core.config import Settings, get_settings
+from app.core.exception_diagnostics import record_exception
 from app.core.time import timestamp_ms_to_iso
 from app.db.session import get_db
+from app.modules.organize.application.commands import InvalidOrganizeRequestError
 from app.modules.organize.application.dto import OrganizeJobListItem
 from app.modules.organize.presentation.schemas import (
     DeletedOrganizeJobPayload,
@@ -66,7 +69,13 @@ def _parse_json(value: Any, fallback: Any) -> Any:
         return value
     try:
         return json.loads(str(value))
-    except ValueError:
+    except ValueError as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.organize.presentation.http._parse_json.failed",
+            error,
+            context={"stage": "_parse_json"},
+        )
         return fallback
 
 
@@ -89,7 +98,13 @@ def _book_view(
 def _positive_int(value: Any, fallback: int, maximum: int) -> int:
     try:
         parsed = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.organize.presentation.http._positive_int.failed",
+            error,
+            context={"stage": "_positive_int"},
+        )
         return fallback
     return min(maximum, max(1, parsed))
 
@@ -199,6 +214,12 @@ def get_organize_policy_route(
             )
         )
     except ValueError as exc:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.organize.presentation.http.get_organize_policy_route.failed",
+            exc,
+            context={"stage": "get_organize_policy_route"},
+        )
         return fail(str(exc), status_code=503)
 
 
@@ -220,7 +241,13 @@ async def update_organize_policy_route(
         return OrganizePolicyResponse(
             data=OrganizePolicyPayload.model_validate({"policy": policy})
         )
-    except (TypeError, ValueError) as exc:
+    except InvalidOrganizeRequestError as exc:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.organize.presentation.http.update_organize_policy_route.failed",
+            exc,
+            context={"stage": "update_organize_policy_route"},
+        )
         return fail(str(exc), status_code=400)
 
 
@@ -240,6 +267,12 @@ def get_organize_candidates_route(
             )
         )
     except ValueError as exc:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.organize.presentation.http.get_organize_candidates_route.failed",
+            exc,
+            context={"stage": "get_organize_candidates_route"},
+        )
         return fail(str(exc), status_code=503)
 
 
@@ -392,7 +425,13 @@ def recognize_organize_job_route(
                 }
             )
         )
-    except ValueError as exc:
+    except InvalidOrganizeRequestError as exc:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.organize.presentation.http.recognize_organize_job_route.failed",
+            exc,
+            context={"stage": "recognize_organize_job_route"},
+        )
         body = OrganizeErrorBody(message=str(exc))
         if "不存在" in str(exc):
             raise OrganizeNotFoundError(body) from exc
@@ -418,7 +457,13 @@ def delete_organize_job_route(
                 delete_organize_job(db, job_id)
             )
         )
-    except ValueError as exc:
+    except InvalidOrganizeRequestError as exc:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.organize.presentation.http.delete_organize_job_route.failed",
+            exc,
+            context={"stage": "delete_organize_job_route"},
+        )
         body = OrganizeErrorBody(message=str(exc))
         if "不存在" in str(exc):
             raise OrganizeNotFoundError(body) from exc

@@ -1,11 +1,18 @@
 """A fresh database session and authorization snapshot for every invocation."""
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.core.exception_diagnostics import (
+    DiagnosticSnapshot,
+    deferred_exception_persistence,
+    persist_exception_diagnostic,
+    prepare_exception_diagnostic,
+    record_exception,
+)
 from app.modules.automation.application.catalog import AutomationCatalog
 from app.modules.automation.application.deletions import AutomationDeletions
 from app.modules.automation.application.file_moves import AutomationFileMoves
@@ -62,6 +69,48 @@ class DatabaseAutomationRuntime:
         self._system = system
         self._deletions = deletions
 
+    @contextmanager
+    def _session(self, *, stage: str = "automation_invocation") -> Iterator[Session]:
+        """Capture the first failure before releasing a business transaction."""
+        logger = logging.getLogger(__name__)
+        pending: list[DiagnosticSnapshot] = []
+        try:
+            with deferred_exception_persistence() as pending:
+                db = self._sessions()
+                original: DiagnosticSnapshot | None = None
+                try:
+                    yield db
+                except Exception as error:
+                    original = prepare_exception_diagnostic(
+                        logger,
+                        "automation.invocation_failed",
+                        error,
+                        context={"stage": stage},
+                        source="automation",
+                    )
+                    raise
+                finally:
+                    try:
+                        db.close()
+                    except Exception as error:
+                        prepare_exception_diagnostic(
+                            logger,
+                            "automation.session_close_failed",
+                            error,
+                            context={
+                                "stage": "session_close",
+                                "parent_diagnostic_id": original.diagnostic_id
+                                if original
+                                else None,
+                            },
+                            source="automation",
+                        )
+                        if original is None:
+                            raise
+        finally:
+            for snapshot in pending:
+                persist_exception_diagnostic(logger, snapshot, self._sessions)
+
     def _check_maintenance(self, db: Session) -> None:
         if self._maintenance(db):
             raise AutomationAccessError("DATABASE_MAINTENANCE")
@@ -81,7 +130,7 @@ class DatabaseAutomationRuntime:
         )
 
     def authenticate(self, authorization: str | None) -> AutomationRequest:
-        with self._sessions() as db:
+        with self._session(stage="mcp_authentication") as db:
             self._check_maintenance(db)
             settings = self._settings(db).load()
             access = self._authorize(db).bearer(
@@ -101,10 +150,18 @@ class DatabaseAutomationRuntime:
     def _record_usage(self, grant_id: str) -> None:
         # Usage telemetry cannot turn a committed mutation into an apparent failure.
         try:
-            with self._sessions() as db:
+            with self._session(stage="record_grant_usage") as db:
                 self._usage(db).execute(grant_id)
-        except SQLAlchemyError:
-            logging.getLogger(__name__).warning("automation.usage_record_failed")
+        except Exception as error:  # noqa: BLE001 - usage telemetry is non-fatal but diagnosed
+            record_exception(
+                logging.getLogger(__name__),
+                "automation.usage_record_failed",
+                error,
+                level="warning",
+                context={"stage": "record_grant_usage", "resource_id": grant_id},
+                source="automation",
+                session_factory=self._sessions,
+            )
 
     def write(
         self, access: EffectiveAccess, operation: WriteInvocation
@@ -155,7 +212,7 @@ class DatabaseAutomationRuntime:
         access: EffectiveAccess,
         operation: Callable[[Session, EffectiveAccess], dict[str, object]],
     ) -> dict[str, object]:
-        with self._sessions() as db:
+        with self._session() as db:
             self._check_maintenance(db)
             settings = self._settings(db).load()
             current = self._authorize(db).operation(

@@ -1,9 +1,8 @@
 """Typed system tools; no arbitrary setting keys or transport forwarding."""
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from mcp.server import MCPServer
-from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field, StrictBool
 from starlette.concurrency import run_in_threadpool
@@ -91,14 +90,7 @@ def register_system(
     )
 
     async def invoke(operation: SystemInvocation) -> dict[str, object]:
-        try:
-            return await run_in_threadpool(runtime.system, snapshot.access, operation)
-        except ValueError:
-            raise ToolError(
-                "SYSTEM_REQUEST_REJECTED: 系统请求被拒绝 / System request rejected"
-            ) from None
-        except Exception:  # noqa: BLE001 - redact credentials and filesystem diagnostics
-            raise ToolError("INTERNAL_ERROR: 操作失败 / Operation failed") from None
+        return await run_in_threadpool(runtime.system, snapshot.access, operation)
 
     @server.tool(annotations=read)
     async def list_import_queue(
@@ -115,10 +107,14 @@ def register_system(
         return await invoke(lambda service, access: service.queue_status(access))
 
     @server.tool(annotations=read)
-    async def list_system_logs(page: int = 1, page_size: int = 20) -> dict[str, object]:
+    async def list_system_logs(
+        page: int = 1,
+        page_size: int = 20,
+        search: Annotated[str | None, Field(max_length=200)] = None,
+    ) -> dict[str, object]:
         """分页查询脱敏系统事件 / List redacted system events."""
         return await invoke(
-            lambda service, access: service.logs(access, page, page_size)
+            lambda service, access: service.logs(access, page, page_size, search)
         )
 
     @server.tool(annotations=read)

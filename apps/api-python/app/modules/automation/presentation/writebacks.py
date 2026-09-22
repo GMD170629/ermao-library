@@ -3,7 +3,6 @@
 from typing import Annotated, Literal
 
 from mcp.server import MCPServer
-from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
@@ -14,9 +13,7 @@ from app.modules.automation.application.runtime import (
     WritebackInvocation,
 )
 from app.modules.automation.application.writeback_plans import StandardWriteSelection
-from app.modules.automation.domain.access import AutomationAccessError, Scope
-from app.modules.library.public import FileMoveError, MetadataPatchError
-from app.modules.metadata.public import StandardMetadataError
+from app.modules.automation.domain.access import Scope
 
 Identifier = Annotated[str, Field(min_length=1, max_length=191)]
 FieldName = Annotated[str, Field(min_length=1, max_length=100)]
@@ -50,21 +47,7 @@ def register_writebacks(
     server: MCPServer, runtime: AutomationRuntime, snapshot: AutomationRequest
 ) -> None:
     async def invoke(operation: WritebackInvocation) -> dict[str, object]:
-        try:
-            return await run_in_threadpool(
-                runtime.writebacks, snapshot.access, operation
-            )
-        except (
-            AutomationAccessError,
-            StandardMetadataError,
-            MetadataPatchError,
-            FileMoveError,
-        ) as error:
-            raise ToolError(f"{error}: 请求被拒绝 / Request rejected") from None
-        except ValueError:
-            raise ToolError("INVALID_ARGUMENT: 参数无效 / Invalid argument") from None
-        except Exception:  # noqa: BLE001 - transport boundary redacts paths and diagnostics.
-            raise ToolError("INTERNAL_ERROR: 操作失败 / Operation failed") from None
+        return await run_in_threadpool(runtime.writebacks, snapshot.access, operation)
 
     if {
         Scope.SYSTEM_READ,

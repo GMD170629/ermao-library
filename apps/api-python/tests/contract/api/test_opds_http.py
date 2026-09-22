@@ -215,7 +215,11 @@ def test_opds_catalog_keeps_download_and_retires_progression_without_writes(
     finally:
         event.remove(db_session.bind, "before_cursor_execute", capture_dml)
 
-    assert dml_statements == []
+    assert dml_statements
+    assert all(
+        statement.startswith('INSERT INTO "SystemEvent"')
+        for statement in dml_statements
+    )
     progress = db_session.scalar(
         select(ReaderResourceProgress).where(
             ReaderResourceProgress.user_id == "opds-user",
@@ -260,7 +264,11 @@ def test_opds_missing_resource_page_does_not_read_or_create_navigation_units(
             event.remove(db_session.bind, "before_cursor_execute", capture_dml)
 
     assert response.status_code == 404
-    assert dml_statements == []
+    assert dml_statements
+    assert all(
+        statement.startswith('INSERT INTO "SystemEvent"')
+        for statement in dml_statements
+    )
     assert (
         db_session.scalar(
             select(func.count()).select_from(ReadableResourceNavigationUnit)
@@ -295,8 +303,14 @@ def test_opds_authentication_is_read_only_and_does_not_log_credentials(
             == 200
         )
 
-    assert db_session.scalar(select(func.count()).select_from(SystemEvent)) == 0
+    events = db_session.scalars(select(SystemEvent)).all()
+    assert len(events) == 2
+    assert all(event.metadata_json["diagnostics"]["id"] == event.id for event in events)
     assert "reader-password" not in caplog.text
+    assert "wrong-password" not in caplog.text
+    assert "reader-password" not in str(
+        [(event.message, event.metadata_json) for event in events]
+    )
 
 
 def test_opds_routes_are_absent_when_disabled(

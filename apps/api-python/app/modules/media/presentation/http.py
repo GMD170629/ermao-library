@@ -42,6 +42,7 @@ from app.core.authorization import (
     can_access_resource,
 )
 from app.core.config import Settings, get_settings
+from app.core.exception_diagnostics import record_exception
 from app.db.session import get_db
 from app.models import LibraryReadableResource
 from app.modules.media.application.page_index import comic_manifest_policy_failure
@@ -85,7 +86,13 @@ def _parse_json(value: Any, fallback: Any) -> Any:
         return value
     try:
         return json.loads(str(value))
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.media.presentation.http._parse_json.failed",
+            error,
+            context={"stage": "_parse_json"},
+        )
         return fallback
 
 
@@ -203,9 +210,21 @@ def get_resource_preview(
             resource_id=resource_id,
             page_index=page_index,
         )
-    except ResourcePreviewNotFoundError:
+    except ResourcePreviewNotFoundError as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.media.presentation.http.get_resource_preview.failed",
+            error,
+            context={"stage": "get_resource_preview"},
+        )
         return fail("预览不存在", status_code=404, code="PREVIEW_NOT_FOUND")
-    except ResourcePreviewUnavailableError:
+    except ResourcePreviewUnavailableError as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.media.presentation.http.get_resource_preview.failed",
+            error,
+            context={"stage": "get_resource_preview"},
+        )
         return fail("预览暂时不可用", status_code=422, code="PREVIEW_UNAVAILABLE")
     headers = {
         "Cache-Control": "private, max-age=86400",
@@ -368,7 +387,12 @@ def metadata_cover_proxy(
                 return fail("远程地址不是图片", status_code=400)
             data = remote_response.read(8 * 1024 * 1024)
     except (HTTPError, OSError) as exc:
-        logger.warning("failed to proxy metadata cover url=%s error=%s", url, exc)
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.media.presentation.http.metadata_cover_proxy.failed",
+            exc,
+            context={"stage": "metadata_cover_proxy"},
+        )
         return fail("封面预览加载失败", status_code=502)
     return Response(
         data,

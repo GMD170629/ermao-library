@@ -14,6 +14,7 @@ from sqlalchemy import Connection, create_engine, event, select
 from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
 
 from app.core.auth import hash_password
+from app.core.failure_diagnostics import RuntimeFailureDiagnostics
 from app.db.base import Base
 from app.models import (
     Library,
@@ -680,6 +681,7 @@ def test_v5_storage_failure_rolls_back_application_transaction() -> None:
         unit_of_work,  # type: ignore[arg-type]
         _FixedClock(),  # type: ignore[arg-type]
         _UnusedReadingStateQueries(),
+        diagnostics=RuntimeFailureDiagnostics(logging.getLogger(__name__), "reader"),
     )
     position = ReaderV5PositionDto(
         locator=OpaqueLocator.from_object({}),
@@ -844,6 +846,9 @@ def test_v5_concurrent_writes_allocate_monotonic_revisions(
                 session,
                 SystemReaderClock(),
                 SqlAlchemyReaderV5LibraryPresentationQueries(session),
+                diagnostics=RuntimeFailureDiagnostics(
+                    logging.getLogger(__name__), "reader"
+                ),
             )
             return service.save_progress(commands[mutation_id]).accepted_revision
         finally:

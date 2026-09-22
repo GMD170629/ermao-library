@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, Response, status
@@ -21,6 +22,7 @@ from app.contracts.http_errors import AdditionalStatusCodes, ErrorResponses
 from app.core.auth import get_current_user
 from app.core.authorization import can_manage_system
 from app.core.config import Settings, get_settings
+from app.core.exception_diagnostics import record_exception
 from app.db.session import get_db
 from app.modules.system.domain.events import validate_log_max_bytes
 from app.modules.system.presentation.health_schemas import (
@@ -176,7 +178,13 @@ def stream_health_run(
     )
     try:
         initial_version = max(0, int(raw_last_id))
-    except ValueError:
+    except ValueError as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.system.presentation.health.stream_health_run.failed",
+            error,
+            context={"stage": "stream_health_run"},
+        )
         initial_version = 0
     factory = request.app.state.session_factory
     close_sessions = bool(request.app.state.close_factory_sessions)
@@ -270,7 +278,13 @@ def update_log_settings(
     user = _system_manager(db, request, settings)
     try:
         max_bytes = validate_log_max_bytes(payload.max_bytes)
-    except ValueError:
+    except ValueError as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.system.presentation.health.update_log_settings.failed",
+            error,
+            context={"stage": "update_log_settings"},
+        )
         raise InvalidLogMaxBytesError(
             InvalidLogMaxBytesBody(message="日志容量上限必须在 1 MB 到 100 MB 之间")
         )

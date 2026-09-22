@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import smtplib
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 from time import time_ns
@@ -33,6 +35,7 @@ from app.core.authorization import (
     read_user_preferences,
 )
 from app.core.config import Settings, get_settings
+from app.core.exception_diagnostics import record_exception
 from app.core.i18n import configured_locale
 from app.db.session import get_db
 from app.models.auth import User
@@ -431,7 +434,16 @@ def create_kindle_send_task(
     )
     try:
         create_kindle_send_task_command(db, params, event=prepared_event)
-    except IntegrityError:
+    except IntegrityError as error:
+        record_exception(
+            logging.getLogger(__name__), "kindle.enqueue_failed", error,
+            context={"step": "enqueue_kindle_task", "resource_id": asset_id},
+        )
+        if (
+            getattr(error.orig, "sqlite_errorcode", None) != sqlite3.SQLITE_CONSTRAINT_UNIQUE
+            or str(error.orig) != "UNIQUE constraint failed: KindleSendTask.assetId, KindleSendTask.recipientEmail"
+        ):
+            raise
         existing = find_active_kindle_task(
             db, asset_id=asset_id, recipient_email=recipient
         )

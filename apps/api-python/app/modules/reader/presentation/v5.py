@@ -8,6 +8,7 @@ from the client's required ``presentation`` projection.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -32,6 +33,7 @@ from app.contracts.reader_safety_policy_generated import (
 from app.core.auth import get_current_user
 from app.core.authorization import authorization_context, can_access_resource
 from app.core.config import Settings, get_settings
+from app.core.exception_diagnostics import record_exception
 from app.db.session import get_db
 from app.models.auth import User
 from app.modules.media.public import comic_manifest_policy_failure
@@ -204,6 +206,12 @@ def _authorized_bootstrap(
             access_scope=scope,
         )
     except (ReaderV5ResourceNotFound, ReaderV5ResourceFormatUnsupported) as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.reader.presentation.v5._authorized_bootstrap.failed",
+            error,
+            context={"stage": "_authorized_bootstrap"},
+        )
         _raise_service_error(error)
     return user, scope, bootstrap
 
@@ -492,7 +500,13 @@ def reader_bootstrap_v5(
 def _metadata(raw_json: str) -> dict[str, ReaderJsonValue]:
     try:
         return _METADATA_ADAPTER.validate_python(json.loads(raw_json))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.reader.presentation.v5._metadata.failed",
+            error,
+            context={"stage": "_metadata"},
+        )
         return {}
 
 
@@ -536,8 +550,20 @@ def save_progress_v5(
         ReaderV5ResourceFormatUnsupported,
         ReaderV5CapturedAtInvalid,
     ) as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.reader.presentation.v5.save_progress_v5.failed",
+            error,
+            context={"stage": "save_progress_v5"},
+        )
         _raise_service_error(error)
     except ReaderV5MutationReuse as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.reader.presentation.v5.save_progress_v5.failed",
+            error,
+            context={"stage": "save_progress_v5"},
+        )
         raise ReaderV5MutationReuseError(
             ReaderV5MutationReuseBody(
                 message="mutationId 已被不同 payload 使用",
@@ -632,6 +658,12 @@ def get_publication_resource_v5(
         PublicationResourceTooLargeError,
         PublicationUnsupportedError,
     ) as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.reader.presentation.v5.get_publication_resource_v5.failed",
+            error,
+            context={"stage": "get_publication_resource_v5"},
+        )
         _raise_publication_error(error)
     etag = f'"reader-v5-publication-{sha256(publication.content).hexdigest()}"'
     headers = {
@@ -677,6 +709,12 @@ def get_progress_v5(
             access_scope=_access_scope(db, user),
         )
     except (ReaderV5ResourceNotFound, ReaderV5ResourceFormatUnsupported) as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.reader.presentation.v5.get_progress_v5.failed",
+            error,
+            context={"stage": "get_progress_v5"},
+        )
         _raise_service_error(error)
     headers = {
         "Cache-Control": "private, no-cache",
@@ -726,6 +764,12 @@ def list_bookmarks_v5(
             access_scope=_access_scope(db, user),
         )
     except (ReaderV5ResourceNotFound, ReaderV5ResourceFormatUnsupported) as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.reader.presentation.v5.list_bookmarks_v5.failed",
+            error,
+            context={"stage": "list_bookmarks_v5"},
+        )
         _raise_service_error(error)
     return ReaderV5BookmarksResponse(
         ok=True,
@@ -775,6 +819,12 @@ def replace_bookmarks_v5(
             )
         )
     except (ReaderV5ResourceNotFound, ReaderV5ResourceFormatUnsupported) as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.reader.presentation.v5.replace_bookmarks_v5.failed",
+            error,
+            context={"stage": "replace_bookmarks_v5"},
+        )
         _raise_service_error(error)
     return ReaderV5BookmarksResponse(
         ok=True,
@@ -822,6 +872,12 @@ def set_reading_status_v5(
             access_scope=_access_scope(db, user),
         )
     except (ReaderV5ResourceNotFound, ReaderV5ResourceFormatUnsupported) as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.reader.presentation.v5.set_reading_status_v5.failed",
+            error,
+            context={"stage": "set_reading_status_v5"},
+        )
         _raise_service_error(error)
     return ReaderReadingStatusResponse(
         data=ReaderReadingStatusData(
@@ -871,6 +927,12 @@ def get_reading_status_v5(
             access_scope=_access_scope(db, user),
         )
     except (ReaderV5ResourceNotFound, ReaderV5ResourceFormatUnsupported) as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.reader.presentation.v5.get_reading_status_v5.failed",
+            error,
+            context={"stage": "get_reading_status_v5"},
+        )
         _raise_service_error(error)
     return ReaderReadingStatusResponse(
         data=ReaderReadingStatusData(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Annotated
 
@@ -15,11 +16,13 @@ from app.bootstrap.backup import build_backup_use_cases
 from app.bootstrap.media import media_streaming
 from app.contracts.http_errors import ErrorResponses
 from app.core.config import Settings, get_settings
+from app.core.exception_diagnostics import record_exception
 from app.db.session import get_db
 from app.modules.backup.application.operations import (
     BackupArchive,
     BackupFormatError,
     BackupNotFoundError,
+    BackupRequestError,
 )
 from app.modules.backup.application.restore import BackupRecordValidationError
 from app.modules.backup.presentation.schemas import (
@@ -77,7 +80,13 @@ def get_backup(
         return auth_error
     try:
         backup = build_backup_use_cases(db, settings).get.execute(backup_id)
-    except (BackupNotFoundError, ValueError):
+    except (BackupNotFoundError, BackupRequestError) as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.backup.presentation.http.get_backup.failed",
+            error,
+            context={"stage": "get_backup"},
+        )
         return fail("备份不存在", status_code=404)
     return ok({"backup": _backup_payload(backup)})
 
@@ -110,11 +119,29 @@ def restore_backup(
         return auth_error
     try:
         result = build_backup_use_cases(db, settings).restore.execute(backup_id)
-    except BackupNotFoundError:
+    except BackupNotFoundError as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.backup.presentation.http.restore_backup.failed",
+            error,
+            context={"stage": "restore_backup"},
+        )
         return fail("备份不存在", status_code=404)
     except (BackupFormatError, BackupRecordValidationError) as exc:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.backup.presentation.http.restore_backup.failed",
+            exc,
+            context={"stage": "restore_backup"},
+        )
         return fail(str(exc), status_code=400, code="BACKUP_CONTENT_INVALID")
-    except ValueError as exc:
+    except BackupRequestError as exc:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.backup.presentation.http.restore_backup.failed",
+            exc,
+            context={"stage": "restore_backup"},
+        )
         if str(exc) == "BACKUP_REVISION_UNSUPPORTED":
             return fail(
                 "备份数据库版本不受支持，请使用旧版应用恢复后再升级。 "
@@ -150,7 +177,13 @@ def delete_backup(
         return auth_error
     try:
         deleted = build_backup_use_cases(db, settings).delete.execute(backup_id)
-    except ValueError:
+    except BackupRequestError as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.backup.presentation.http.delete_backup.failed",
+            error,
+            context={"stage": "delete_backup"},
+        )
         deleted = False
     return ok({"deleted": deleted, "id": backup_id})
 
@@ -167,7 +200,13 @@ def download_backup(
         return auth_error
     try:
         descriptor = build_backup_use_cases(db, settings).download.execute(backup_id)
-    except (BackupNotFoundError, ValueError):
+    except (BackupNotFoundError, BackupRequestError) as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.backup.presentation.http.download_backup.failed",
+            error,
+            context={"stage": "download_backup"},
+        )
         return fail("备份不存在", status_code=404)
     return media_streaming.send_file(
         Path(descriptor.archive_path),

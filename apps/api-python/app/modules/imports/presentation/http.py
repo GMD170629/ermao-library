@@ -23,6 +23,7 @@ from app.bootstrap.imports import (
     get_library_mount_resolver,
     get_library_root_resolver,
     library_has_topology,
+    library_path_diagnostics,
     list_import_tasks_page,
     list_libraries,
     list_library_access_user_ids,
@@ -119,10 +120,14 @@ def list_library_roots(
     return ok(_libraries_payload(db, folders))
 
 
-def _libraries_payload(db: Session, folders: list[dict[str, object]]) -> dict[str, object]:
+def _libraries_payload(
+    db: Session, folders: list[dict[str, object]]
+) -> dict[str, object]:
     return {
         "libraries": folders,
-        "lastUploadTargetPath": _system_setting_value(db, "library.lastUploadTargetPath"),
+        "lastUploadTargetPath": _system_setting_value(
+            db, "library.lastUploadTargetPath"
+        ),
         "lastDownloadTargetPath": _system_setting_value(
             db, "library.lastDownloadTargetPath"
         ),
@@ -282,6 +287,7 @@ def library_tree(
         path,
         mount_root_for_path=mount_root_for_path,
         browse_roots=mount_root_for_path.browse_roots,
+        diagnostics=library_path_diagnostics(db),
     )
     if error:
         return fail(error, status_code=status_code)

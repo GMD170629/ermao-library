@@ -3,19 +3,18 @@
 from typing import Annotated, Literal
 
 from mcp.server import MCPServer
-from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field
 from starlette.concurrency import run_in_threadpool
 
-from app.contracts.automation_upload import UploadError, UploadSpec
+from app.contracts.automation_upload import UploadSpec
 from app.modules.automation.application.runtime import (
     AutomationRequest,
     AutomationRuntime,
     UploadInvocation,
 )
 from app.modules.automation.application.uploads import BOOK_BYTES, CHUNK_BYTES
-from app.modules.automation.domain.access import AutomationAccessError, Scope
+from app.modules.automation.domain.access import Scope
 
 Identifier = Annotated[str, Field(min_length=1, max_length=191)]
 UploadId = Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")]
@@ -31,16 +30,7 @@ def register_uploads(
         return
 
     async def invoke(operation: UploadInvocation) -> dict[str, object]:
-        try:
-            return await run_in_threadpool(runtime.uploads, snapshot.access, operation)
-        except (UploadError, AutomationAccessError) as error:
-            raise ToolError(f"{error}: 请求被拒绝 / Request rejected") from None
-        except ValueError:
-            raise ToolError("INVALID_ARGUMENT: 参数无效 / Invalid argument") from None
-        except Exception:  # noqa: BLE001 - no filesystem paths, data or credentials in tool errors.
-            raise ToolError(
-                "INTERNAL_ERROR: 上传操作失败 / Upload operation failed"
-            ) from None
+        return await run_in_threadpool(runtime.uploads, snapshot.access, operation)
 
     write = ToolAnnotations(
         read_only_hint=False,
@@ -106,7 +96,7 @@ def register_uploads(
         )
     )
     async def complete_upload(upload_id: UploadId) -> dict[str, object]:
-        """校验并提交附件：同名图书拒绝覆盖，封面检查权限和修订；通过 get_operation 查询真实结果 / Verify and submit an attachment: books never overwrite existing names; covers check authority and revision. Query get_operation for actual results."""
+        """确认附件接收完整并保存，再复用现有导入或封面流程；新图书同名拒绝覆盖，替换检查原文件版本。通过 get_operation 查询结果 / Confirm complete receipt and save the attachment through existing import or cover flows; new books reject existing names and replacements check the source version. Query get_operation for results."""
         return await invoke(
             lambda commands, access: commands.complete(access, upload_id)
         )

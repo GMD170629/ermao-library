@@ -41,6 +41,7 @@ from app.services.metadata_file_writeback import (
     metadata_writeback_view,
 )
 from app.services.metadata_provider_registry import (
+    MetadataProviderRequestError,
     get_metadata_provider,
     list_metadata_providers,
     persist_metadata_provider_order_update,
@@ -129,7 +130,7 @@ async def update_registered_metadata_provider_order(
     items = [item.model_dump(by_alias=True) for item in payload.items]
     try:
         prepared = prepare_metadata_provider_order_update(db, items)
-    except ValueError as exc:
+    except MetadataProviderRequestError as exc:
         raise BasicBadRequestError(MessageError(message=str(exc))) from exc
     event = prepare_system_event(
         level="warning",
@@ -195,7 +196,7 @@ async def update_registered_metadata_provider(
     values = payload.model_dump(by_alias=True, exclude_unset=True)
     try:
         prepared = prepare_metadata_provider_update(db, provider_id, values)
-    except ValueError as exc:
+    except MetadataProviderRequestError as exc:
         error_type = (
             BasicNotFoundError if "不存在" in str(exc) else BasicBadRequestError
         )
@@ -234,7 +235,7 @@ def test_registered_metadata_provider(
     _auth(db, request, settings)
     try:
         result, provider = test_metadata_provider(db, provider_id)
-    except ValueError as exc:
+    except MetadataProviderRequestError as exc:
         error_type = (
             BasicNotFoundError if "不存在" in str(exc) else BasicBadRequestError
         )

@@ -17,7 +17,9 @@ class AutomationSystemPort(Protocol):
         self, library_ids: frozenset[str], page: int, limit: int
     ) -> dict[str, object]: ...
     def queue_status(self) -> dict[str, object]: ...
-    def logs(self, page: int, limit: int) -> dict[str, object]: ...
+    def logs(
+        self, page: int, limit: int, search: str | None = None
+    ) -> dict[str, object]: ...
     def configuration(
         self, group: ConfigurationGroup, library_id: str | None
     ) -> dict[str, object]: ...
@@ -50,10 +52,12 @@ class AutomationSystem:
         self._manager(access)
         return self._port.queue_status()
 
-    def logs(self, access: EffectiveAccess, page: int, limit: int) -> dict[str, object]:
+    def logs(
+        self, access: EffectiveAccess, page: int, limit: int, search: str | None = None
+    ) -> dict[str, object]:
         self._manager(access)
         validate_page(page, limit)
-        return self._port.logs(page, limit)
+        return self._port.logs(page, limit, search)
 
     def configuration(
         self, access: EffectiveAccess, group: ConfigurationGroup, library_id: str | None

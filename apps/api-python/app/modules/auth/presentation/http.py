@@ -56,10 +56,14 @@ from app.core.database_errors import (
     is_database_busy_error,
     is_database_operation_timeout,
 )
+from app.core.exception_diagnostics import record_exception
 from app.core.i18n import configured_locale
 from app.db.session import get_db, get_short_write_db
 from app.models.auth import PasswordResetToken, User, cuid, db_timestamp
-from app.modules.auth.application.avatar_delivery import AvatarUnavailable
+from app.modules.auth.application.avatar_delivery import (
+    AvatarUnavailable,
+    InvalidAvatarContent,
+)
 from app.modules.auth.application.password_authentication import normalize_login_email
 from app.modules.auth.presentation.requests import (
     LoginRequest,
@@ -186,7 +190,13 @@ def _raise_avatar_update_deferred(error: OperationalError) -> None:
 def _remove_unreferenced_avatar(path: Path, *, user_id: str) -> None:
     try:
         path.unlink(missing_ok=True)
-    except OSError:
+    except OSError as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.auth.presentation.http._remove_unreferenced_avatar.failed",
+            error,
+            context={"stage": "_remove_unreferenced_avatar"},
+        )
         LOGGER.warning(
             "auth.avatar.cleanup outcome=deferred user_id=%s",
             user_id,
@@ -249,7 +259,13 @@ def setup(
             prepared_at=now,
             user_session=user_session,
         )
-    except IntegrityError:
+    except IntegrityError as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.auth.presentation.http.setup.failed",
+            error,
+            context={"stage": "setup"},
+        )
         raise BasicConflictError(MessageError(message="系统已经完成初始化，请直接登录"))
     persisted_user = db.get(User, user_id)
     if persisted_user is None:
@@ -357,6 +373,12 @@ def refresh_session(
             expires_at=next_expiry,
         )
     except OperationalError as exc:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.auth.presentation.http.refresh_session.failed",
+            exc,
+            context={"stage": "refresh_session"},
+        )
         if not (is_database_busy_error(exc) or is_database_operation_timeout(exc)):
             raise
         raise SessionRefreshDeferredError(
@@ -417,7 +439,13 @@ def update_email(
             email=email,
             updated_at=updated_at,
         )
-    except IntegrityError:
+    except IntegrityError as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.auth.presentation.http.update_email.failed",
+            error,
+            context={"stage": "update_email"},
+        )
         raise BasicConflictError(
             MessageError(message="该邮箱已被使用", code="EMAIL_IN_USE")
         )
@@ -531,7 +559,13 @@ async def upload_avatar(
             data,
             target_directory=target_dir,
         )
-    except ValueError as exc:
+    except InvalidAvatarContent as exc:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.auth.presentation.http.upload_avatar.failed",
+            exc,
+            context={"stage": "upload_avatar"},
+        )
         raise BasicBadRequestError(MessageError(message=str(exc))) from exc
     try:
         publication.publish()
@@ -544,7 +578,19 @@ async def upload_avatar(
             updated_at=db_timestamp(),
         )
     except Exception as exc:
-        publication.discard()
+        diagnostic_id = record_exception(
+            logging.getLogger(__name__),
+            "modules.auth.presentation.http.upload_avatar.failed",
+            exc,
+            context={"stage": "upload_avatar"},
+        )
+        try:
+            publication.discard()
+        except OSError as cleanup_error:
+            record_exception(
+                logging.getLogger(__name__), "auth.avatar_cleanup_failed", cleanup_error,
+                context={"step": "discard_avatar", "parent_diagnostic_id": diagnostic_id},
+            )
         if isinstance(exc, OperationalError):
             _raise_avatar_update_deferred(exc)
         raise
@@ -571,6 +617,12 @@ def get_avatar(
     try:
         image = build_get_account_avatar(db, settings).execute(actor_id=user.id)
     except AvatarUnavailable as exc:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.auth.presentation.http.get_avatar.failed",
+            exc,
+            context={"stage": "get_avatar"},
+        )
         raise BasicNotFoundError(MessageError(message="头像不存在")) from exc
     response = AvatarFileResponse(image.path, media_type="image/webp")
     response.headers["Cache-Control"] = "private, no-cache"
@@ -599,6 +651,12 @@ def delete_avatar(
             updated_at=db_timestamp(),
         )
     except OperationalError as exc:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.auth.presentation.http.delete_avatar.failed",
+            exc,
+            context={"stage": "delete_avatar"},
+        )
         _raise_avatar_update_deferred(exc)
     if path is not None:
         _remove_unreferenced_avatar(path, user_id=user.id)
@@ -655,8 +713,13 @@ def request_password_reset(
             reset_url = password_reset_url(_request_app_base_url(request), raw_token)
             try:
                 write_password_reset_file(settings, reset_url, reset_locale)
-            except OSError:
-                LOGGER.exception("failed to write local password reset file")
+            except OSError as error:
+                record_exception(
+                    logging.getLogger(__name__),
+                    "modules.auth.presentation.http.request_password_reset.failed",
+                    error,
+                    context={"stage": "request_password_reset"},
+                )
                 remove_password_reset_request(db, token_id=reset_token_id)
                 raise BasicInternalError(
                     MessageError(message="无法在本地目录创建密码重置文件")
@@ -705,8 +768,13 @@ def confirm_password_reset(
     )
     try:
         password_reset_file_path(settings).unlink(missing_ok=True)
-    except OSError:
-        LOGGER.warning("failed to remove used local password reset file", exc_info=True)
+    except OSError as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.auth.presentation.http.confirm_password_reset.failed",
+            error,
+            context={"stage": "confirm_password_reset"},
+        )
     delete_session_cookie(response, settings)
     return PasswordResetResponse(data=PasswordResetPayload())
 

@@ -57,6 +57,7 @@ from app.core.authorization import (
     can_manage_system,
 )
 from app.core.config import Settings, get_settings
+from app.core.exception_diagnostics import record_exception
 from app.db.session import get_db
 from app.models import LibraryReadableResource
 from app.models.auth import User
@@ -116,6 +117,7 @@ from app.modules.library.application.resource_commands import (
 )
 from app.modules.library.application.resource_cover import (
     MAX_RESOURCE_COVER_BYTES,
+    InvalidResourceCover,
     UploadResourceCoverCommand,
 )
 from app.modules.library.application.resource_details import (
@@ -124,11 +126,14 @@ from app.modules.library.application.resource_details import (
 )
 from app.modules.library.application.source_node_commands import (
     MAX_SOURCE_NODE_COVER_BYTES,
+    InvalidSourceNodeCover,
+    InvalidSourceNodeTitle,
     SourceNodeMetadataChanges,
 )
 from app.modules.library.application.source_node_metadata_recognition import (
     MetadataProviderSearchError,
 )
+from app.modules.library.domain.facets import InvalidLibraryFacetRequest
 from app.modules.library.presentation.filter_mappers import (
     filter_options_payload,
     filter_schema_payload,
@@ -875,7 +880,7 @@ def list_library_facets(
             page=page,
             page_size=pageSize,
         )
-    except ValueError as error:
+    except InvalidLibraryFacetRequest as error:
         return _facet_page_response(
             fail(str(error), status_code=422, code="INVALID_LIBRARY_FACET_QUERY")
         )
@@ -924,7 +929,7 @@ def list_library_groupings(
             page=page,
             page_size=pageSize,
         )
-    except ValueError as error:
+    except InvalidLibraryFacetRequest as error:
         return _grouping_page_response(
             fail(str(error), status_code=422, code="INVALID_LIBRARY_GROUPING_QUERY")
         )
@@ -1002,7 +1007,7 @@ def get_library_filter_options(
             query=query,
             limit=limit,
         )
-    except ValueError as error:
+    except InvalidLibraryFacetRequest as error:
         return _filter_options_response(
             fail(str(error), status_code=422, code="INVALID_LIBRARY_FILTER_QUERY")
         )
@@ -1028,7 +1033,7 @@ def merge_facets(
             payload.target_id,
             user.id,
         )
-    except ValueError as error:
+    except InvalidLibraryFacetRequest as error:
         return _facet_merge_response(
             fail(str(error), status_code=422, code="INVALID_LIBRARY_FACET_MUTATION")
         )
@@ -1052,7 +1057,7 @@ def rename_facet(
         return _facet_rename_response(manager_error)
     try:
         result = rename_library_facet(db).execute(facet_id, payload.name, user.id)
-    except ValueError as error:
+    except InvalidLibraryFacetRequest as error:
         return _facet_rename_response(
             fail(str(error), status_code=422, code="INVALID_LIBRARY_FACET_MUTATION")
         )
@@ -1075,7 +1080,7 @@ def delete_facet(
         return _facet_delete_response(manager_error)
     try:
         result = delete_library_facet(db).execute(facet_id, user.id)
-    except ValueError as error:
+    except InvalidLibraryFacetRequest as error:
         return _facet_delete_response(
             fail(str(error), status_code=422, code="INVALID_LIBRARY_FACET_MUTATION")
         )
@@ -1110,7 +1115,7 @@ def list_library_books(
         try:
             filter_payload = json.loads(filters)
             filter_expression = parse_filter_expression(filter_payload)
-        except (InvalidFilterExpression, json.JSONDecodeError, TypeError, ValueError):
+        except (InvalidFilterExpression, json.JSONDecodeError):
             return _books_response(
                 fail(
                     "筛选参数无效",
@@ -1299,7 +1304,7 @@ def update_book_source_node_metadata(
                 description=payload.description,
             ),
         )
-    except ValueError:
+    except InvalidSourceNodeTitle:
         return _source_node_updated_response(
             fail(
                 "来源目录标题不能为空",
@@ -1357,7 +1362,11 @@ async def update_book_source_node_presentation(
             cover_content=cover_content,
             remove_cover=removeCover,
         )
-    except ValueError:
+    except InvalidSourceNodeTitle:
+        return _source_node_updated_response(
+            fail("来源目录标题不能为空", status_code=400, code="INVALID_SOURCE_NODE_TITLE")
+        )
+    except InvalidSourceNodeCover:
         return _source_node_updated_response(
             fail(
                 "目录封面必须是不超过 10 MB 的 JPEG、PNG 或 WebP 图片",
@@ -1406,14 +1415,16 @@ def search_book_source_node_metadata(
             provider_id=payload.provider_id,
             query=payload.query,
         )
-    except MetadataProviderSearchError:
-        LOGGER.warning(
-            "metadata_search provider=%s source_node_id=%s stage=provider "
-            "outcome=unavailable book_id=%s",
-            payload.provider_id,
-            source_node_id,
-            book_id,
-            exc_info=True,
+    except MetadataProviderSearchError as error:
+        record_exception(
+            LOGGER,
+            "metadata_search.provider_failed",
+            error,
+            context={
+                "stage": "metadata_provider_search",
+                "source_node_id": source_node_id,
+                "resource_id": book_id,
+            },
         )
         return _source_node_search_response(
             fail(
@@ -1863,7 +1874,7 @@ async def upload_library_resource_cover(
         return _resource_response(
             fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
         )
-    except ValueError:
+    except InvalidResourceCover:
         return _resource_response(
             fail(
                 "资源封面必须是不超过 10 MB 的 JPEG、PNG 或 WebP 图片",

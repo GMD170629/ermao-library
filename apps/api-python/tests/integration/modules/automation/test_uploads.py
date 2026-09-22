@@ -1,6 +1,7 @@
 """Exact-byte MCP attachment transfers using real journals and publication."""
 
 import base64
+import errno
 import hashlib
 from dataclasses import replace
 from io import BytesIO
@@ -18,7 +19,7 @@ from app.bootstrap.automation import (
     build_grant_manager,
 )
 from app.contracts.automation_upload import UploadError, UploadSpec
-from app.models import LibraryBookMetadata, LibraryImportTask
+from app.models import LibraryBookMetadata, LibraryImportTask, SystemEvent
 from app.modules.automation.application.settings import AutomationServiceSettings
 from app.modules.automation.domain.access import AutomationAccessError, Scope
 from tests.integration.modules.automation.test_file_reads import file_access
@@ -260,7 +261,7 @@ def test_published_book_reaches_actual_import_completion(
     assert results[upload_id] == "COMPLETED" and results[conflicting] == "FAILED"
 
 
-def test_failure_after_publish_resumes_without_overwrite_or_duplicate_queue(
+def test_failure_after_publish_is_not_replayed_and_keeps_diagnostic(
     uploads, db_session, monkeypatch
 ):
     commands, access, root = uploads
@@ -269,7 +270,7 @@ def test_failure_after_publish_resumes_without_overwrite_or_duplicate_queue(
 
     def crash(publication):
         original(publication)
-        raise OSError("simulated process failure")
+        raise OSError(errno.EIO, "simulated publication failure")
 
     monkeypatch.setattr(commands.books, "publish", crash)
     with pytest.raises(OSError):
@@ -277,10 +278,16 @@ def test_failure_after_publish_resumes_without_overwrite_or_duplicate_queue(
     assert (root / "test.epub").read_bytes() == b"bytes"
     with Session(db_session.get_bind()) as restarted:
         commands = build_automation_uploads(restarted)
-        assert commands.complete(access, upload_id)["status"] == "QUEUED"
+        assert commands.complete(access, upload_id)["status"] == "RECOVERY_REQUIRED"
         assert (
-            restarted.scalar(select(func.count()).select_from(LibraryImportTask)) == 1
+            restarted.scalar(select(func.count()).select_from(LibraryImportTask)) == 0
         )
+        event = restarted.scalar(
+            select(SystemEvent).where(SystemEvent.action == "upload.complete_failed")
+        )
+        assert event.metadata_json["operationId"] == upload_id
+        assert event.metadata_json["step"] == "publish_upload"
+        assert event.metadata_json["diagnostics"]["rootCause"]["errno"] == errno.EIO
 
 
 def test_unacknowledged_bytes_retry_and_expiry_cleanup(uploads):
@@ -485,7 +492,8 @@ def test_expiry_preserves_book_published_before_checkpoint(uploads, monkeypatch)
         commands, clock_ms=lambda: commands.clock_ms() + 25 * 60 * 60 * 1000
     ).cleanup()
     assert (root / "test.epub").read_bytes() == b"published"
-    assert commands.progress(access, upload_id)["status"] == "EXPIRED"
+    assert commands.progress(access, upload_id)["status"] == "RECOVERY_REQUIRED"
+    assert (commands.files.root / f"{upload_id}.part").exists()
 
 
 def test_unavailable_expired_targets_do_not_starve_other_cleanup(
@@ -540,3 +548,180 @@ def test_scan_continuation_is_not_misreported_as_unrecognized(uploads, db_sessio
     db_session.get(LibraryImportTask, "continued").state = "SUCCEEDED"
     db_session.commit()
     assert commands.progress(access, upload_id)["status"] == "FAILED"
+
+
+def test_upload_digest_is_verified_once_before_standard_library_copy(
+    uploads, monkeypatch
+):
+    commands, access, root = uploads
+    data = b"one transfer verification"
+    upload_id = transmit(commands, access, spec(data), data)
+    verify = commands.files.verify
+    verified = []
+
+    def verify_once(*args):
+        verified.append(args[0])
+        return verify(*args)
+
+    def unexpected_digest(*args, **kwargs):
+        raise AssertionError("publication must not hash the copied upload again")
+
+    monkeypatch.setattr(commands.files, "verify", verify_once)
+    monkeypatch.setattr(hashlib, "file_digest", unexpected_digest)
+    result = commands.complete(access, upload_id)
+    assert result["status"] == "QUEUED"
+    assert commands.complete(access, upload_id)["status"] == "QUEUED"
+    assert verified == [upload_id]
+    assert (root / "test.epub").read_bytes() == data
+
+
+def test_saved_upload_retries_only_scan_registration(
+    uploads, db_session, monkeypatch
+):
+    commands, access, root = uploads
+    upload_id = transmit(commands, access, spec(b"saved"), b"saved")
+    register = commands.books.register
+
+    def unavailable(*args):
+        raise OSError(errno.EIO, "scan queue unavailable")
+
+    monkeypatch.setattr(commands.books, "register", unavailable)
+    with pytest.raises(OSError):
+        commands.complete(access, upload_id)
+    pending = commands.progress(access, upload_id)
+    assert pending["status"] == "RECOVERY_REQUIRED" and pending["file_saved"]
+    assert (root / "test.epub").read_bytes() == b"saved"
+
+    def forbidden(*args):
+        raise AssertionError("a saved upload must not be published again")
+
+    monkeypatch.setattr(commands.books, "register", register)
+    monkeypatch.setattr(commands.books, "prepare", forbidden)
+    monkeypatch.setattr(commands.books, "publish", forbidden)
+    assert commands.complete(access, upload_id)["status"] == "QUEUED"
+    assert db_session.scalar(select(func.count()).select_from(LibraryImportTask)) == 1
+
+
+def test_legacy_upload_publication_and_backup_are_retained_without_replay(
+    uploads, db_session
+):
+    from app.modules.automation.infrastructure.upload_schema import AutomationUploadRow
+
+    commands, access, root = uploads
+    upload_id = transmit(commands, access, spec(b"legacy"), b"legacy")
+    record = commands.store.get(upload_id, access.user_id, access.grant_id)
+    source = commands.files.verify(upload_id, record.spec.size_bytes, record.spec.sha256)
+    publication = commands.books.prepare(upload_id, record.spec, record.target, source)
+    backup = root / f".ermao-mcp-{upload_id}-source"
+    backup.write_bytes(b"historical backup")
+    commands.store.save(
+        replace(
+            record,
+            status="PUBLISHING",
+            publication=replace(publication, backup_name=backup.name),
+        )
+    )
+    db_session.commit()
+    row = db_session.get(AutomationUploadRow, upload_id)
+    payload = dict(row.payload)
+    payload.pop("execution_version")
+    payload["publication"].pop("execution_version")
+    row.payload = payload
+    db_session.commit()
+    result = commands.complete(access, upload_id)
+    assert result["status"] == "RECOVERY_REQUIRED"
+    assert result["error_code"] == "UPLOAD_PLAN_REQUIRES_REFRESH"
+    replace(
+        commands, clock_ms=lambda: commands.clock_ms() + 25 * 60 * 60 * 1000
+    ).cleanup()
+    assert not (root / "test.epub").exists()
+    assert (root / publication.staged_name).read_bytes() == b"legacy"
+    assert backup.read_bytes() == b"historical backup"
+    assert (commands.files.root / f"{upload_id}.part").read_bytes() == b"legacy"
+    assert db_session.scalar(select(func.count()).select_from(LibraryImportTask)) == 0
+
+
+@pytest.mark.parametrize("scan_fails", [False, True])
+def test_partial_browser_upload_keeps_files_requests_existing_scan_and_reports_failure(
+    client, uploads, db_session, monkeypatch, test_settings, scan_fails
+):
+    from app.bootstrap.readable_resource_pipeline import (
+        build_readable_resource_pipeline,
+        build_readable_resource_worker,
+    )
+    from app.models import Library, LibrarySourceNode
+    from app.modules.imports.infrastructure.uploaded_file_publication import (
+        AtomicUploadedFilePublisher,
+    )
+    from tests.integration.modules.automation.test_operation_management import cookie
+
+    _, _, root = uploads
+    db_session.get(Library, "test-library").min_file_size_bytes = 0
+    db_session.commit()
+    cookie(client, db_session)
+    copy = AtomicUploadedFilePublisher._copy_stream
+    calls = 0
+
+    def fail_second(source, target, *, max_bytes):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            target.write_bytes(b"partial")
+            raise OSError(errno.ENOSPC, "injected storage failure")
+        return copy(source, target, max_bytes=max_bytes)
+
+    monkeypatch.setattr(
+        AtomicUploadedFilePublisher, "_copy_stream", staticmethod(fail_second)
+    )
+    if scan_fails:
+        def failed_scan(*args, **kwargs):
+            raise OSError(errno.EIO, "scan request failed")
+
+        monkeypatch.setattr(
+            "app.modules.imports.presentation.writes.continue_library_import",
+            failed_scan,
+        )
+    response = client.post(
+        "/api/books/import",
+        headers={"Origin": "http://testserver"},
+        data={"targetPath": str(root)},
+        files=[
+            ("files", ("saved.txt", b"Saved readable text.", "text/plain")),
+            ("files", ("failed.txt", b"Later upload.", "text/plain")),
+        ],
+    )
+    assert response.status_code == 500, response.text
+    assert (root / "saved.txt").read_bytes() == b"Saved readable text."
+    assert not (root / "failed.txt").exists()
+    assert next(root.glob(".upload-*.part")).read_bytes() == b"partial"
+    primary = db_session.scalar(
+        select(SystemEvent).where(
+            SystemEvent.action
+            == "modules.imports.presentation.writes.import_book_files.failed"
+        )
+    )
+    assert primary.metadata_json["diagnostics"]["rootCause"]["errno"] == errno.ENOSPC
+    assert response.headers["X-Error-Id"] == primary.id
+    if scan_fails:
+        secondary = db_session.scalar(
+            select(SystemEvent).where(SystemEvent.action == "upload.partial_batch_scan_failed")
+        )
+        assert secondary.metadata_json["parentDiagnosticId"] == primary.id
+        assert secondary.metadata_json["diagnostics"]["directException"]["errno"] == errno.EIO
+        assert secondary.metadata_json["diagnostics"]["rootCause"]["errno"] == errno.EIO
+        assert secondary.metadata_json["diagnostics"]["directCause"] is None
+        assert secondary.metadata_json["diagnostics"]["contextProvided"] is True
+        assert any(
+            item.get("errno") == errno.ENOSPC
+            for item in secondary.metadata_json["diagnostics"]["chain"]
+        )
+    else:
+        worker = build_readable_resource_worker(
+            build_readable_resource_pipeline(db_session, test_settings)
+        )
+        assert worker.process_once() == "scan"
+        assert db_session.scalar(
+            select(LibrarySourceNode.id).where(
+                LibrarySourceNode.relative_path == "saved.txt"
+            )
+        ) is not None

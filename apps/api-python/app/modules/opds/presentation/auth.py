@@ -9,15 +9,19 @@ from app.modules.opds.domain.errors import OpdsAuthenticationRequired
 
 def parse_basic_authorization(value: str | None) -> BasicCredentialsDto:
     if value is None:
-        raise OpdsAuthenticationRequired
+        raise OpdsAuthenticationRequired("Authorization header is absent")
     scheme, separator, encoded = value.partition(" ")
     if separator != " " or scheme.lower() != "basic" or not encoded.strip():
-        raise OpdsAuthenticationRequired
+        raise OpdsAuthenticationRequired(
+            "Authorization must use a nonempty Basic credential"
+        )
     try:
         decoded = base64.b64decode(encoded.strip(), validate=True).decode("utf-8")
     except (binascii.Error, UnicodeDecodeError, ValueError) as exc:
-        raise OpdsAuthenticationRequired from exc
+        raise OpdsAuthenticationRequired("Basic credential decoding failed") from exc
     username, separator, password = decoded.partition(":")
     if separator != ":" or not username or not password:
-        raise OpdsAuthenticationRequired
+        raise OpdsAuthenticationRequired(
+            "Basic credential requires username and password fields"
+        )
     return BasicCredentialsDto(username=username, password=password)
