@@ -1,6 +1,6 @@
 'use client';
 
-import { BookCheck, BookPlus, BookX, Edit3, RefreshCw, ScanSearch, Send, Sparkles, Trash2, type LucideIcon } from 'lucide-react';
+import { BookCheck, BookPlus, BookX, Download, Edit3, RefreshCw, ScanSearch, Send, Sparkles, Trash2, type LucideIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import {
   ContextActionMenu,
@@ -31,6 +31,9 @@ import { BookMetadataEditor } from './book-metadata-editor';
 import { KindleSendModal } from '../kindle-send-modal';
 import { kindleSendOptions } from '../model/kindle-send';
 import { BookShelfDialog } from './book-shelf-dialog';
+import { BookDownloadDialog } from './book-download-dialog';
+import { bookDownloadVolumes } from '../model/book-download';
+import { downloadOriginalFiles } from './download-original-files';
 
 export type BookActionTarget = Readonly<{
   id: string;
@@ -58,6 +61,7 @@ const actionDetails: Record<Exclude<BookActionId, 'reading-status'>, { label: st
   rescan: { label: '重新扫描文件', icon: ScanSearch },
   kindle: { label: '发送到 Kindle', icon: Send },
   'add-to-shelf': { label: '加入书架', icon: BookPlus },
+  download: { label: '下载', icon: Download },
   delete: { label: '删除', icon: Trash2, destructive: true }
 };
 
@@ -82,6 +86,7 @@ export function BookActionController({
   const [kindleBook, setKindleBook] = useState<BookView | null>(null);
   const [shelfRequest, setShelfRequest] = useState<BookActionMenuRequest | null>(null);
   const [menuBook, setMenuBook] = useState<BookView | null>(null);
+  const [downloadRequest, setDownloadRequest] = useState<{ book: BookView; anchor: HTMLElement | null } | null>(null);
   const resolvedMenuBook = request?.book ?? (menuBook?.id === request?.target.id ? menuBook : null);
 
   useEffect(() => {
@@ -103,7 +108,21 @@ export function BookActionController({
 
   async function invoke(action: BookActionId) {
     const currentRequest = request;
-    if (!currentRequest || busy || (!['reading-status', 'kindle', 'add-to-shelf'].includes(action) && !canManage)) return;
+    if (!currentRequest || busy || (!['reading-status', 'kindle', 'add-to-shelf', 'download'].includes(action) && !canManage)) return;
+    if (action === 'download') {
+      if (!resolvedMenuBook) return;
+      const volumes = bookDownloadVolumes(resolvedMenuBook);
+      if (!volumes.some((volume) => volume.assets.length > 0)) return;
+      onRequestClose();
+      if (volumes.length === 1 && volumes[0].assets.length === 1) {
+        downloadOriginalFiles(volumes[0].assets);
+        feedback.info(t('已发起下载'));
+        currentRequest.anchor?.focus();
+      } else {
+        setDownloadRequest({ book: resolvedMenuBook, anchor: currentRequest.anchor });
+      }
+      return;
+    }
     onRequestClose();
     if (action === 'add-to-shelf') {
       setShelfRequest(currentRequest);
@@ -202,11 +221,12 @@ export function BookActionController({
       icon: details.icon,
       destructive: details.destructive,
       separatorBefore: action === 'delete',
-      disabled: busy !== null
+      disabled: busy !== null || (action === 'download' && (!resolvedMenuBook || !bookDownloadVolumes(resolvedMenuBook).some((volume) => volume.assets.length > 0)))
     };
   }) : [];
 
   return <>
+    {downloadRequest ? <BookDownloadDialog book={downloadRequest.book} returnFocusTo={downloadRequest.anchor} onClose={() => setDownloadRequest(null)} /> : null}
     {shelfRequest ? <BookShelfDialog key={shelfRequest.target.id} book={shelfRequest.target} returnFocusTo={shelfRequest.anchor} onClose={() => setShelfRequest(null)} /> : null}
     {kindleBook ? <KindleSendModal book={kindleBook} open preferredResourceId={null} onClose={() => setKindleBook(null)} /> : null}
     {request ? <ContextActionMenu<BookActionId>

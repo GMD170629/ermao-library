@@ -2301,5 +2301,14 @@
   "配置下载已开始": "Configuration download started",
   "配置下载失败": "Could not download configuration",
   "自动化配置已重新读取": "Automation configuration reloaded",
-  "重新读取自动化配置失败": "Could not reload automation configuration"
+  "重新读取自动化配置失败": "Could not reload automation configuration",
+  "{count} 个文件": "{count} files",
+  "下载 {value0}": "Download {value0}",
+  "下载所选文件": "Download selected files",
+  "全选": "Select all",
+  "已发起下载": "Downloads requested",
+  "暂无可下载文件": "No files available to download",
+  "正在读取目录…": "Loading folder…",
+  "若浏览器拦截多个下载，请允许多个文件下载，或使用行内下载按钮。": "If your browser blocks multiple downloads, allow them or use the download button on each row.",
+  "选择下载卷册": "Select volumes to download"
 }

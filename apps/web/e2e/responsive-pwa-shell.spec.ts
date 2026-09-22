@@ -1,3 +1,4 @@
+import { createServer, type Server } from 'node:http';
 import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
 
 type ApiRouteOverride = (route: Route, url: URL) => Promise<boolean>;
@@ -329,8 +330,8 @@ test('book detail resource covers support selection, keyboard-accessible context
   const topBookActions = page.getByRole('button', { name: '管理图书 右键菜单测试图书', exact: true });
   await topBookActions.click();
   const topBookMenu = page.getByRole('menu', { name: '管理图书' });
-  await expect(topBookMenu.getByRole('menuitem')).toHaveCount(7);
-  await expect(topBookMenu.getByRole('menuitem')).toHaveText(['编辑', '重新生成图片', '设为已读', '加入书架', '识别', '重新扫描文件', '删除']);
+  await expect(topBookMenu.getByRole('menuitem')).toHaveCount(8);
+  await expect(topBookMenu.getByRole('menuitem')).toHaveText(['编辑', '重新生成图片', '设为已读', '加入书架', '下载', '识别', '重新扫描文件', '删除']);
   await expectMenuHorizontallyAlignedToAnchor(page, topBookActions, topBookMenu);
   const membershipRequests: unknown[] = [];
   let rejectMembership = true;
@@ -1543,7 +1544,7 @@ test('desktop book list opens details from both the cover and title', async ({ p
   await expect(managedBookActions).toHaveCount(1);
   await managedBookActions.click();
   const managedBookMenu = page.getByRole('menu', { name: '管理图书' });
-  await expect(managedBookMenu.getByRole('menuitem')).toHaveText(['编辑', '重新生成图片', '设为已读', '加入书架', '识别', '重新扫描文件', '删除']);
+  await expect(managedBookMenu.getByRole('menuitem')).toHaveText(['编辑', '重新生成图片', '设为已读', '加入书架', '下载', '识别', '重新扫描文件', '删除']);
   await expectMenuHorizontallyAlignedToAnchor(page, managedBookActions, managedBookMenu);
   await page.keyboard.press('Escape');
   await expect(managedBookActions).toBeFocused();
@@ -1660,4 +1661,166 @@ test('existing smart shelf loads editable rules, guards unsaved changes and pres
   expect(savedBody).not.toHaveProperty('pinned');
   await expect(page).toHaveURL(/shelves\?shelf=smart-path$/);
   await expect(page.getByText('螺丝人', { exact: true })).toBeVisible();
+});
+
+const downloadServers: Server[] = [];
+test.afterEach(async () => {
+  await Promise.all(downloadServers.splice(0).map((server) => new Promise<void>((resolve, reject) => {
+    server.closeAllConnections();
+    server.close((error) => error ? reject(error) : resolve());
+  })));
+});
+
+async function mockDownloadBook(page: Page, counts: number[], english = false) {
+  const requests: string[] = [];
+  const server = createServer((request, response) => {
+    const url = new URL(request.url ?? '/', 'http://localhost');
+    requests.push(url.pathname + url.search);
+    response.writeHead(200, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Disposition': `attachment; filename="${url.pathname.split('/').at(-1)}.txt"`
+    });
+    response.end(`original:${url.pathname}`);
+  });
+  downloadServers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Download server did not bind a TCP port');
+  const origin = `http://127.0.0.1:${address.port}`;
+  const resources = counts.map((count, index) => ({
+    id: `download-volume-${index}`, bookId: 'download-book', sourceNodeId: `volume-node-${index}`,
+    title: `Volume ${index + 1}`, format: count > 1 ? 'AUDIOBOOK_DIR' : 'TXT',
+    sortOrder: index, hidden: false, readable: true, importStatus: 'READY',
+    assets: Array.from({ length: count }, (_, file) => ({
+      id: `download-${index}-${file}`, resourceId: `download-volume-${index}`, sourceNodeId: `file-${index}-${file}`,
+      title: `original-${index}-${file}.txt`, role: count > 1 ? 'TRACK' : 'PRIMARY', mimeType: 'text/plain',
+      sizeBytes: 12, sortOrder: file, url: `/api/assets/download-${index}-${file}`,
+      downloadUrl: `${origin}/api/assets/download-${index}-${file}?download=true`
+    }))
+  }));
+  await page.unroute('**/api/**');
+  await mockWebAppApi(page, async (route, url) => {
+    if (url.pathname.endsWith('/api/auth/me')) {
+      await route.fulfill({ json: { ok: true, data: {
+        user: { id: 'web-user', email: 'member@example.com', name: 'Member', role: 'member' },
+        authorization: { isAdmin: false, canManageSystem: false, allLibraryScopes: true, libraryIds: [], canViewManualImports: false, authzVersion: 1 }
+      } } });
+      return true;
+    }
+    if (url.pathname.endsWith('/api/app-config')) {
+      await route.fulfill({ json: { ok: true, data: { language: english ? 'en-US' : 'zh-CN' } } });
+      return true;
+    }
+    if (url.pathname.endsWith('/api/books/download-book/contents')) {
+      const entry = (index: number) => ({
+        sourceNodeId: `volume-node-${index}`, parentSourceNodeId: index === 1 ? 'series-node' : 'download-node',
+        name: resources[index].title, title: resources[index].title, kind: counts[index] === 1 ? 'FILE' : 'FOLDER',
+        physicalKind: counts[index] === 1 ? 'REGULAR_FILE' : 'DIRECTORY',
+        hasChildren: counts[index] > 1, resourceId: resources[index].id, sizeBytes: 12 * counts[index]
+      });
+      const nested = url.searchParams.get('sourceNodeId') === 'series-node';
+      const entries = nested ? [entry(1)] : resources.map((_, index) => index === 1 ? {
+        sourceNodeId: 'series-node', parentSourceNodeId: 'download-node', name: 'Series', title: 'Series',
+        kind: 'FOLDER', physicalKind: 'DIRECTORY', hasChildren: true, resourceId: null, sizeBytes: null
+      } : entry(index));
+      await route.fulfill({ json: { ok: true, data: {
+        bookId: 'download-book', currentSourceNodeId: nested ? 'series-node' : 'download-node', currentResourceId: null,
+        entries, page: 1, pageSize: 100, total: entries.length, totalPages: 1
+      } } });
+      return true;
+    }
+    if (url.pathname.endsWith('/api/books/download-book')) {
+      await route.fulfill({ json: { ok: true, data: { id: 'download-book', sourceNodeId: 'download-node', title: 'Download Book', resources } } });
+      return true;
+    }
+    if (url.pathname.includes('/api/assets/') || url.pathname.endsWith('/resources/download')) {
+      requests.push(url.pathname + url.search);
+      await route.fulfill({ body: `original:${url.pathname}`, headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${url.pathname.split('/').at(-1)}.txt"` } });
+      return true;
+    }
+    return false;
+  });
+  await page.goto('/books/download-book');
+  const anchor = page.getByRole('button', { name: english ? 'Manage book Download Book' : '管理图书 Download Book', exact: true });
+  async function open() {
+    await anchor.click();
+    await page.getByRole('menuitem', { name: english ? 'Download' : '下载', exact: true }).click();
+  }
+  return { requests, anchor, open };
+}
+
+test('book downloads select volumes, preserve individual links, and reset selection with focus on close', async ({ page }) => {
+  const { requests, anchor, open } = await mockDownloadBook(page, [1, 2, 0]);
+  await open();
+  const dialog = page.getByRole('dialog', { name: '选择下载卷册' });
+  const submit = dialog.getByRole('button', { name: '下载所选文件' });
+  await expect(submit).toBeDisabled();
+  await expect(dialog.getByRole('checkbox', { name: 'Volume 3' })).toBeDisabled();
+  let folderUnavailable = true;
+  await page.route((url) => url.pathname.endsWith('/api/books/download-book/contents'), async (route) => {
+    if (new URL(route.request().url()).searchParams.get('sourceNodeId') === 'series-node' && folderUnavailable) {
+      await route.fulfill({ status: 503, json: { ok: false, error: { message: 'Unavailable' } } });
+    } else await route.fallback();
+  });
+  await expect(dialog.getByRole('checkbox', { name: 'Volume 2' })).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Series', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toHaveText('读取目录失败');
+  expect(requests).toEqual([]);
+  folderUnavailable = false;
+  await dialog.getByRole('button', { name: '重试', exact: true }).click();
+  await dialog.getByRole('button', { name: /Volume 2/ }).click();
+  await expect(dialog.getByRole('link')).toHaveCount(3);
+  expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath('download-tree.png') });
+  await dialog.getByRole('checkbox', { name: '全选', exact: true }).check();
+  await expect(dialog.getByRole('checkbox', { name: 'original-0-0.txt' })).toBeChecked();
+  await dialog.getByRole('checkbox', { name: 'original-0-0.txt' }).uncheck();
+  await submit.click();
+  await expect.poll(() => requests.length).toBe(2);
+  expect(requests).toEqual(['/api/assets/download-1-0?download=true', '/api/assets/download-1-1?download=true']);
+  await expect(dialog.getByRole('status')).toHaveText('已发起下载');
+  await expect(dialog.getByRole('link')).toHaveCount(3);
+  await page.keyboard.press('Escape');
+  await expect(dialog).not.toBeVisible();
+  await expect(anchor).toBeFocused();
+  await open();
+  await expect(submit).toBeDisabled();
+  await dialog.getByRole('button', { name: 'Series', exact: true }).click();
+  await expect(dialog.getByRole('checkbox', { name: 'Volume 2' })).not.toBeChecked();
+  await expect(dialog.getByRole('status')).toHaveCount(0);
+  const manual = page.waitForEvent('download');
+  await dialog.getByRole('link', { name: '下载 original-0-0.txt', exact: true }).click();
+  expect((await manual).suggestedFilename()).toBe('download-0-0.txt');
+  await dialog.getByRole('button', { name: '关闭', exact: true }).last().click();
+  expect(requests).toHaveLength(3);
+});
+
+test('book downloads send the sole original directly and disable books without files', async ({ page }) => {
+  const { requests, open } = await mockDownloadBook(page, [1]);
+  const downloaded = page.waitForEvent('download');
+  await open();
+  const file = await downloaded;
+  expect(file.suggestedFilename()).toBe('download-0-0.txt');
+  const stream = await file.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+  expect(Buffer.concat(chunks).toString()).toBe('original:/api/assets/download-0-0');
+  expect(requests).toEqual(['/api/assets/download-0-0?download=true']);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const empty = await mockDownloadBook(page, [0]);
+  await empty.anchor.click();
+  await expect(page.getByRole('menuitem', { name: '下载', exact: true })).toBeDisabled();
+  expect(empty.requests).toEqual([]);
+});
+
+test('book downloads show English controls and preserve user file titles', async ({ page }) => {
+  const { open, requests } = await mockDownloadBook(page, [2], true);
+  await open();
+  const dialog = page.getByRole('dialog', { name: 'Select volumes to download' });
+  await expect(dialog.getByRole('button', { name: 'Download selected files' })).toBeDisabled();
+  await expect(dialog.getByRole('checkbox', { name: 'Select all', exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: /Volume 1/ }).click();
+  await expect(dialog.getByRole('link', { name: /original-0-0.txt/ })).toBeVisible();
+  await page.keyboard.press('Escape');
+  expect(requests).toEqual([]);
 });

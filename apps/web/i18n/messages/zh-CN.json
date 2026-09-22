@@ -2301,5 +2301,14 @@
   "TXT 解码器无法解码此文件。": "TXT 解码器无法解码此文件。",
   "TXT 解析器未找到可读文本。": "TXT 解析器未找到可读文本。",
   "URL 加 ?debug=0 可关闭持久开关": "URL 加 ?debug=0 可关闭持久开关",
-  "useAudioPlayback 必须在 AudioPlaybackProvider 内使用": "useAudioPlayback 必须在 AudioPlaybackProvider 内使用"
+  "useAudioPlayback 必须在 AudioPlaybackProvider 内使用": "useAudioPlayback 必须在 AudioPlaybackProvider 内使用",
+  "{count} 个文件": "{count} 个文件",
+  "下载 {value0}": "下载 {value0}",
+  "下载所选文件": "下载所选文件",
+  "全选": "全选",
+  "已发起下载": "已发起下载",
+  "暂无可下载文件": "暂无可下载文件",
+  "正在读取目录…": "正在读取目录…",
+  "若浏览器拦截多个下载，请允许多个文件下载，或使用行内下载按钮。": "若浏览器拦截多个下载，请允许多个文件下载，或使用行内下载按钮。",
+  "选择下载卷册": "选择下载卷册"
 }

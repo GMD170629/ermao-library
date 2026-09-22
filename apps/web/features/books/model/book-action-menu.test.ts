@@ -29,9 +29,9 @@ function book(resources: ReadableResourceView[], continueResourceId: string | nu
 }
 
 test('offers the complete manager menu and personal reading and shelf actions to members', () => {
-  assert.deepEqual(bookActionIds(true), ['edit', 'regenerate-image', 'reading-status', 'add-to-shelf', 'recognize', 'rescan', 'delete']);
-  assert.deepEqual(bookActionIds(false), ['reading-status', 'add-to-shelf']);
-  assert.deepEqual(bookActionIds(false, true), ['reading-status', 'add-to-shelf', 'kindle']);
+  assert.deepEqual(bookActionIds(true), ['edit', 'regenerate-image', 'reading-status', 'add-to-shelf', 'download', 'recognize', 'rescan', 'delete']);
+  assert.deepEqual(bookActionIds(false), ['reading-status', 'add-to-shelf', 'download']);
+  assert.deepEqual(bookActionIds(false, true), ['reading-status', 'add-to-shelf', 'download', 'kindle']);
   assert.ok(bookActionIds(true, true).includes('kindle'));
 });
 
