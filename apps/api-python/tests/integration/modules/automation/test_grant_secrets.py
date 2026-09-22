@@ -73,8 +73,9 @@ def test_concurrent_key_creation_uses_one_complete_key(tmp_path):
     assert len(list(tmp_path.iterdir())) == 1
 
 
-def test_reveal_cookie_owner_origin_cache_revocation_and_service_off(
-    client, db_session, test_settings, caplog
+@pytest.mark.parametrize("headers", [{}, {"Origin": "https://different.invalid"}])
+def test_reveal_cookie_owner_cache_revocation_and_service_off(
+    client, db_session, test_settings, caplog, headers
 ):
     enable_service(db_session)
     sign_in(client, db_session, "owner")
@@ -83,11 +84,7 @@ def test_reveal_cookie_owner_origin_cache_revocation_and_service_off(
     ).json()["data"]
     token, grant_id = created["token"], created["grant"]["id"]
     path = f"/api/automation/grants/{grant_id}/reveal"
-    assert client.post(path).status_code == 403
-    assert (
-        client.post(path, headers={"Origin": "https://evil.invalid"}).status_code == 403
-    )
-    response = client.post(path, headers=ORIGIN)
+    response = client.post(path, headers=headers)
     assert response.status_code == 200
     assert response.json()["data"]["token"] == token
     assert response.headers["cache-control"] == "no-store"
@@ -119,7 +116,7 @@ def test_reveal_cookie_owner_origin_cache_revocation_and_service_off(
     db_session.commit()
     client.cookies.set("shuku_session", cookie)
     assert (
-        client.delete(f"/api/automation/grants/{grant_id}", headers=ORIGIN).status_code
+        client.delete(f"/api/automation/grants/{grant_id}", headers=headers).status_code
         == 200
     )
     assert client.post(path, headers=ORIGIN).json()["error"]["code"] == "GRANT_INACTIVE"

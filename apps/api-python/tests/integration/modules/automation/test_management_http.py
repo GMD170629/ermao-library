@@ -37,23 +37,12 @@ def grant_request(**overrides):
     return {"name": "Local model", "libraryIds": ["test-library"], **overrides}
 
 
-def test_management_cookie_origin_secret_and_ownership(client, db_session):
+@pytest.mark.parametrize("headers", [{}, {"Origin": "https://different.invalid"}])
+def test_management_cookie_secret_and_ownership(client, db_session, headers):
     enable_service(db_session)
     sign_in(client, db_session, "first")
-    assert (
-        client.post("/api/automation/grants", json=grant_request()).status_code == 403
-    )
-    assert (
-        client.post(
-            "/api/automation/grants",
-            headers={"Origin": "https://evil.invalid"},
-            json=grant_request(),
-        ).status_code
-        == 403
-    )
-    assert list(db_session.scalars(select(AutomationGrantRow))) == []
     response = client.post(
-        "/api/automation/grants", headers=ORIGIN, json=grant_request()
+        "/api/automation/grants", headers=headers, json=grant_request()
     )
     assert response.status_code == 200, response.text
     assert response.headers["cache-control"] == "no-store"
@@ -94,8 +83,9 @@ def test_scope_creation_cannot_elevate_member(client, db_session):
     assert list(db_session.scalars(select(AutomationGrantRow))) == []
 
 
+@pytest.mark.parametrize("headers", [{}, {"Origin": "https://different.invalid"}])
 def test_service_off_by_default_admin_only_activation_and_no_generic_bypass(
-    client, db_session
+    client, db_session, headers
 ):
     sign_in(client, db_session, "manager", manager=True)
     initial = client.get("/api/automation/settings")
@@ -103,7 +93,7 @@ def test_service_off_by_default_admin_only_activation_and_no_generic_bypass(
     assert initial.json()["data"]["enabled"] is False
     payload = {"enabled": True, "publicBaseUrl": "https://books.example/books"}
     assert (
-        client.put("/api/automation/settings", headers=ORIGIN, json=payload).status_code
+        client.put("/api/automation/settings", headers=headers, json=payload).status_code
         == 403
     )
     blocked = client.put(
@@ -112,7 +102,7 @@ def test_service_off_by_default_admin_only_activation_and_no_generic_bypass(
     assert blocked.status_code == 400
     assert blocked.json()["error"]["code"] == "AUTOMATION_SETTINGS_ENDPOINT_REQUIRED"
     sign_in(client, db_session, "admin", admin=True)
-    enabled = client.put("/api/automation/settings", headers=ORIGIN, json=payload)
+    enabled = client.put("/api/automation/settings", headers=headers, json=payload)
     assert enabled.status_code == 200, enabled.text
     assert enabled.json()["data"]["publicBaseUrl"] == "https://books.example/books"
     assert client.get("/api/automation/settings").json()["data"]["enabled"] is True
@@ -221,8 +211,7 @@ def test_update_grant_keeps_token_expiry_and_enforces_owner(
         libraryIds=[],
         scopes=["system:read", "shelves:write"],
     )
-    assert client.patch(path, json=body).status_code == 403
-    changed = client.patch(path, headers=ORIGIN, json=body)
+    changed = client.patch(path, json=body)
     assert changed.status_code == 200, changed.text
     assert changed.headers["cache-control"] == "no-store"
     updated = changed.json()["data"]["grant"]

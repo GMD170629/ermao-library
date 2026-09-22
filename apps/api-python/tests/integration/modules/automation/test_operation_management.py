@@ -47,8 +47,11 @@ def writeback(db, tmp_path):
     return access.grant_id, root
 
 
+@pytest.mark.parametrize("headers", [{}, {"Origin": "https://different.invalid"}])
 @pytest.mark.parametrize("kind", ["file_move", "metadata_writeback"])
-def test_cookie_history_and_cancel_after_revocation(client, db_session, tmp_path, kind):
+def test_cookie_history_and_cancel_after_revocation(
+    client, db_session, tmp_path, kind, headers
+):
     if kind == "file_move":
         actor, root, _ = prepare(db_session, tmp_path)
         grant_id = actor.grant_id
@@ -68,16 +71,15 @@ def test_cookie_history_and_cancel_after_revocation(client, db_session, tmp_path
     assert operation["operation_id"] == "operation"
     assert operation["targets"][0]["relative_path"].startswith("allowed")
     assert str(root) not in response.text
-    assert client.post("/api/automation/operations/operation/cancel").status_code == 403
     assert (
-        client.delete(f"/api/automation/grants/{grant_id}", headers=ORIGIN).status_code
+        client.delete(f"/api/automation/grants/{grant_id}", headers=headers).status_code
         == 200
     )
     assert (
         len(client.get("/api/automation/operations").json()["data"]["operations"]) == 1
     )
     cancelled = client.post(
-        "/api/automation/operations/operation/cancel", headers=ORIGIN
+        "/api/automation/operations/operation/cancel", headers=headers
     )
     assert cancelled.status_code == 200, cancelled.text
     assert cancelled.json()["data"]["operation"]["cancel_requested"]
@@ -90,7 +92,7 @@ def test_cookie_history_and_cancel_after_revocation(client, db_session, tmp_path
     assert client.get("/api/automation/operations").json()["data"]["operations"] == []
     assert (
         client.post(
-            "/api/automation/operations/operation/cancel", headers=ORIGIN
+            "/api/automation/operations/operation/cancel", headers=headers
         ).status_code
         == 404
     )

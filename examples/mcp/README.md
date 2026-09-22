@@ -17,9 +17,9 @@ Administrators enable MCP in Settings → Automation access → MCP service. HTT
 
 The creation form selects all capabilities currently available to your account, including available file sub-options. Lifetimes are 30, 90 (default), 365 days, or no expiration. Non-expiring grants remain subject to revocation, current account permissions and service activation. API clients explicitly send `lifetimeDays: null` for no expiration; omitting it keeps the 90-day default. Responses use `expiresAtMs: null` for non-expiring grants.
 
-服务端令牌采用 AES-GCM 加密保存，同时保留认证摘要。请持久化并独立备份 `storage/secrets/automation-token.key`（权限 0600），与数据库配套恢复。密钥丢失、损坏或权限不安全时明确报错，不覆盖已有密钥；已有密文时也不生成替代密钥。密钥错误不影响已有摘要令牌的认证。仅本人有效 Cookie 会话可通过带合法 Origin 的 `POST /api/automation/grants/{id}/reveal` 取回有效令牌，响应禁止缓存，审计不记录秘密。
+服务端令牌采用 AES-GCM 加密保存，同时保留认证摘要。请持久化并独立备份 `storage/secrets/automation-token.key`（权限 0600），与数据库配套恢复。密钥丢失、损坏或权限不安全时明确报错，不覆盖已有密钥；已有密文时也不生成替代密钥。密钥错误不影响已有摘要令牌的认证。仅本人有效 Cookie 会话可通过 `POST /api/automation/grants/{id}/reveal` 取回有效令牌，响应禁止缓存，审计不记录秘密。
 
-Persist and separately back up `storage/secrets/automation-token.key` with mode 0600, and restore it alongside the database. Tokens are encrypted with AES-GCM and authenticated by their existing digests. A missing or invalid key causes an explicit recovery error; the server never replaces an existing key or generates a replacement while encrypted grants remain. Only the owner’s valid Cookie session and Origin can reveal an active token. Responses are not cached and audit events contain no secrets.
+Persist and separately back up `storage/secrets/automation-token.key` with mode 0600, and restore it alongside the database. Tokens are encrypted with AES-GCM and authenticated by their existing digests. A missing or invalid key causes an explicit recovery error; the server never replaces an existing key or generates a replacement while encrypted grants remain. Only the owner’s valid Cookie session can reveal an active token. Responses are not cached and audit events contain no secrets.
 
 [LM Studio 官方配置](https://lmstudio.ai/docs/app/mcp) 支持远程 URL 和请求头，可选择自己的本地模型。[Cursor MCP 配置](https://cursor.com/docs/mcp) 支持远程 URL 和环境变量请求头；Cursor 不保证本地推理。示例 Cursor 模板从**客户端进程**的 `ERMAO_MCP_TOKEN` 环境变量读取，终端设置变量不一定传给已启动的桌面应用。LM Studio 模板使用显式占位符。
 
@@ -92,9 +92,9 @@ System updates, file-to-system refresh, and system-to-file writeback are separat
 
 ## 排错与恢复 / Troubleshooting and recovery
 
-先调用 `get_context` 检查有效权限和范围。401 检查令牌、有效期、撤销、服务开关；权限错误检查当前账户、授权书库及 sidecar/embedded 子权限。403 Origin 错误通常说明管理页面地址或代理可信配置不一致，不能通过关闭校验解决。部署前缀必须同时体现在网站和 MCP 地址；远程客户端的 `localhost` 指它自身，容器内 `localhost` 也不是宿主机。
+先调用 `get_context` 检查有效权限和范围。401 检查令牌、有效期、撤销、服务开关；权限错误检查当前账户、授权书库及 sidecar/embedded 子权限。自动化管理接口不校验 Origin；MCP 传输仍校验公开 Host 和请求携带的 Origin。部署前缀必须同时体现在网站和 MCP 地址；远程客户端的 `localhost` 指它自身，容器内 `localhost` 也不是宿主机。
 
-Start with `get_context`. For authentication failures check token expiry/revocation and service status; for authorization failures check current user permissions, fixed library scope and writeback subpermissions. Management Origin errors require a consistent public/proxy configuration. A remote client's `localhost` refers to that client, and a container's `localhost` refers to that container.
+Start with `get_context`. For authentication failures check token expiry/revocation and service status; for authorization failures check current user permissions, fixed library scope and writeback subpermissions. Management endpoints do not validate Origin; MCP transport still validates the public Host and any supplied Origin. A remote client's `localhost` refers to that client, and a container's `localhost` refers to that container.
 
 方案过期、元数据版本变化或源文件变化应重新预览并核对，再以新操作执行。若原操作已经受理，只查原任务，勿因等待超时重新建任务。`RECOVERY_REQUIRED` 表示文件被保留但一致性尚需核对：保留任务标识及备份，由管理员检查原路径、目标和任务记录；不要覆盖目标、删除临时槽或修改数据库状态来“强制成功”。有完整发布证明的任务会在 worker 重启时按租约恢复必要索引；未知部分写入保留人工核查。
 

@@ -67,7 +67,6 @@ def _error(request: Request, error: AutomationAccessError) -> Response:
         else 403
         if code
         in {
-            "ORIGIN_REQUIRED",
             "SYSTEM_MANAGER_REQUIRED",
             "ADMIN_REQUIRED",
             "SCOPE_REQUIRED",
@@ -80,14 +79,6 @@ def _error(request: Request, error: AutomationAccessError) -> Response:
         else "自动化请求被拒绝。"
     )
     return _private(fail(message, status_code=status, code=code))
-
-
-def _check_origin(request: Request) -> None:
-    # Rely on the ASGI server's trusted proxy policy, never arbitrary forwarded
-    # headers supplied by the caller. The deployment prefix does not affect origin.
-    expected = f"{request.url.scheme}://{request.url.netloc}"
-    if request.headers.get("origin") != expected:
-        raise AutomationAccessError("ORIGIN_REQUIRED")
 
 
 @router.get("/grants", response_model=GrantListResponse)
@@ -122,7 +113,6 @@ def create_grant(
             auth_error or fail("UNAUTHORIZED", status_code=401, code="UNAUTHORIZED")
         )
     try:
-        _check_origin(request)
         created = build_grant_manager(db, settings).create(
             user_id=user.id,
             name=payload.name,
@@ -154,7 +144,6 @@ def update_grant(
             auth_error or fail("UNAUTHORIZED", status_code=401, code="UNAUTHORIZED")
         )
     try:
-        _check_origin(request)
         grant = build_grant_manager(db, settings).update(
             user_id=user.id,
             grant_id=grant_id,
@@ -179,7 +168,6 @@ def revoke_grant(
             auth_error or fail("UNAUTHORIZED", status_code=401, code="UNAUTHORIZED")
         )
     try:
-        _check_origin(request)
         build_grant_manager(db, settings).revoke(user_id=user.id, grant_id=grant_id)
         return _private(ok(RevokedGrantPayload()))
     except AutomationAccessError as error:
@@ -220,7 +208,6 @@ def update_service_settings(
             auth_error or fail("UNAUTHORIZED", status_code=401, code="UNAUTHORIZED")
         )
     try:
-        _check_origin(request)
         saved = build_automation_settings(db).update(user.id, payload.to_domain())
         return _private(ok(ServiceSettingsFields.from_domain(saved)))
     except AutomationAccessError as error:
@@ -267,7 +254,6 @@ def cancel_operation(
             auth_error or fail("UNAUTHORIZED", status_code=401, code="UNAUTHORIZED")
         )
     try:
-        _check_origin(request)
         operation = build_automation_operation_manager(db).cancel(user.id, operation_id)
         return _private(
             ok(
@@ -295,7 +281,6 @@ def reveal_grant(
             auth_error or fail("UNAUTHORIZED", status_code=401, code="UNAUTHORIZED")
         )
     try:
-        _check_origin(request)
         token = build_grant_manager(db, settings).reveal(
             user_id=user.id, grant_id=grant_id
         )

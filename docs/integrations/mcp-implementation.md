@@ -77,7 +77,7 @@ uv run --extra dev --locked pytest -q tests/integration/modules/automation tests
 
 ### 会话管理接口与服务配置
 
-新增 `/api/automation/grants` GET/POST、`/api/automation/grants/{grant_id}` DELETE，以及 `/api/automation/settings` GET/PUT。请求／响应有严格 Pydantic 契约；管理仅接受现有 Cookie 会话，修改必须同源 Origin。授权返回 `no-store`，明文仅创建时返回，列表没有 token/digest；用户不能列出或撤销其他人的授权。
+新增 `/api/automation/grants` GET/POST、`/api/automation/grants/{grant_id}` DELETE，以及 `/api/automation/settings` GET/PUT。请求／响应有严格 Pydantic 契约；管理仅接受现有 Cookie 会话，不额外校验 Origin，修改仍校验账户角色和资源归属。授权返回 `no-store`，明文仅创建时返回，列表没有 token/digest；用户不能列出或撤销其他人的授权。
 
 服务设置保存在既有 SystemSetting 中，默认关闭，仅真正的管理员可开启。配置验证公开地址、部署前缀、HTTPS；非回环 HTTP 需要显式选项，不执行 URL 探测。通用系统设置读写不暴露／修改该嵌套配置，避免绕过专用授权与校验。
 
