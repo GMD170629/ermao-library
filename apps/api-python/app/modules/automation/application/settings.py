@@ -24,7 +24,7 @@ __all__ = [
 @dataclass(frozen=True, slots=True)
 class AutomationServiceSettings:
     enabled: bool = False
-    enabled_scopes: frozenset[Scope] = frozenset({Scope.LIBRARY_READ})
+    enabled_scopes: frozenset[Scope] = frozenset({Scope.SYSTEM_READ})
     public_base_url: str = ""
 
 
@@ -36,13 +36,8 @@ class AutomationSettingsPort(Protocol):
 def normalize_service_settings(
     settings: AutomationServiceSettings,
 ) -> AutomationServiceSettings:
-    if Scope.LIBRARY_READ not in settings.enabled_scopes:
-        raise AutomationAccessError("LIBRARY_READ_REQUIRED")
-    if (
-        settings.enabled_scopes & {Scope.FILES_MOVE, Scope.METADATA_WRITEBACK}
-        and Scope.FILES_READ not in settings.enabled_scopes
-    ):
-        raise AutomationAccessError("FILES_READ_REQUIRED")
+    if Scope.SYSTEM_READ not in settings.enabled_scopes:
+        raise AutomationAccessError("SYSTEM_READ_REQUIRED")
     value = settings.public_base_url.strip().rstrip("/")
     if not value:
         if settings.enabled:

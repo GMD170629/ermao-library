@@ -8,11 +8,11 @@ from app.modules.automation.domain.access import (
     AutomationAccessError,
     GrantPermissions,
     Scope,
-    WritebackTarget,
 )
 from app.modules.automation.infrastructure.models import AutomationGrantRow
 
 
+# Storage reserves epoch 0 for explicitly non-expiring grants; public/domain values use None.
 def _grant(row: AutomationGrantRow) -> AutomationGrant:
     if row.library_scope not in {"all", "selected"}:
         raise AutomationAccessError("INVALID_LIBRARY_SCOPE")
@@ -23,14 +23,10 @@ def _grant(row: AutomationGrantRow) -> AutomationGrant:
         permissions=GrantPermissions(
             scopes=frozenset(Scope(value) for value in row.scopes),
             library_ids=frozenset(row.library_ids),
-            writeback_targets=frozenset(
-                WritebackTarget(v) for v in row.writeback_targets
-            ),
-            allow_cross_library=row.allow_cross_library,
             library_scope="all" if row.library_scope == "all" else "selected",
         ),
         created_at_ms=row.created_at_ms,
-        expires_at_ms=row.expires_at_ms,
+        expires_at_ms=None if row.expires_at_ms == 0 else row.expires_at_ms,
         revoked_at_ms=row.revoked_at_ms,
         last_used_at_ms=row.last_used_at_ms,
         token_ciphertext=row.token_ciphertext,
@@ -62,10 +58,8 @@ class SqlAlchemyGrantStore:
                 library_ids=sorted(grant.permissions.library_ids),
                 library_scope=grant.permissions.library_scope,
                 token_ciphertext=grant.token_ciphertext,
-                writeback_targets=sorted(grant.permissions.writeback_targets),
-                allow_cross_library=grant.permissions.allow_cross_library,
                 created_at_ms=grant.created_at_ms,
-                expires_at_ms=grant.expires_at_ms,
+                expires_at_ms=0 if grant.expires_at_ms is None else grant.expires_at_ms,
             )
         )
 
@@ -114,6 +108,27 @@ class SqlAlchemyGrantStore:
             .values(revoked_at_ms=now_ms, token_ciphertext=None)
         )
         return True
+
+    def update(self, grant: AutomationGrant, now_ms: int) -> bool:
+        changed = self._db.execute(
+            update(AutomationGrantRow)
+            .where(
+                AutomationGrantRow.id == grant.id,
+                AutomationGrantRow.user_id == grant.user_id,
+                AutomationGrantRow.revoked_at_ms.is_(None),
+                (AutomationGrantRow.expires_at_ms == 0)
+                | (AutomationGrantRow.expires_at_ms > now_ms),
+            )
+            .values(
+                name=grant.name,
+                scopes=sorted(grant.permissions.scopes),
+                library_ids=sorted(grant.permissions.library_ids),
+                library_scope=grant.permissions.library_scope,
+                expires_at_ms=0 if grant.expires_at_ms is None else grant.expires_at_ms,
+            )
+            .returning(AutomationGrantRow.id)
+        ).scalar_one_or_none()
+        return changed is not None
 
     def record_use(self, grant_id: str, now_ms: int) -> None:
         self._db.execute(

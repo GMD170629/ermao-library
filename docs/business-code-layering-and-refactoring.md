@@ -33,6 +33,8 @@
 
 生产统一镜像由固定入口 scripts/container-entry.py 初始化 STORAGE_ROOT/runtime；scripts/container_image.py 在镜像身份变化时同步镜像程序及配套依赖，同一镜像普通重启保留在线更新。入口再调用 runtime 中的 scripts/start-unified-app.sh 启动 Web、FastAPI、Worker 和单端口网关；业务数据仍位于 STORAGE_ROOT 原有子目录，原书目录单独挂载。目录与验证见[容器程序启动说明](container-runtime.md)。API/Worker 开始工作前验证 schema，初始化与升级遵循架构决策，不在 Web 路由建立第二套后端。
 
+macOS／Linux 的 `scripts/dev-test.sh` 在启动 API 和 Worker 前构建并校验 libmobi 与统一章节核心，导出 `ERMAO_MOBI_CORE_LIBRARY`、`ERMAO_CHAPTER_CORE_LIBRARY`。已有外部构建可显式指定对应库路径；缺失时启动失败，避免导入成功后才在详情章节查询时报错。章节核心的本地构建目录为 `packages/reader-core/native/chapters/build`，macOS 使用 `.dylib`。
+
 Windows 使用 start-windows.cmd 或 pnpm dev:test:windows，基础解释器在 .runtime-windows/python，环境在 apps/api-python/.venv-windows，日志与 PID 在 .tmp/windows-dev；启动前检查依赖再停止旧实例，Ctrl+C 结束全部服务，不调用 WSL。按 apps/api-python/.python-version 用 uv 安装基础 Python，再设置 UV_PROJECT_ENVIRONMENT 同步 --extra dev --locked；移动目录或删除基础解释器后重建环境，不能只复制 python.exe。独立后端设置见[API README](../apps/api-python/README.md)。
 
 移动 Web 调试用 pnpm dev:ios，Service Worker 调试用 pnpm pwa:ios 的 production 服务，SW 仅 production 注册且需 HTTPS/localhost。真机用服务器局域网地址／HTTPS，不能用设备 localhost；?debug=1/0 控制调试面板，网络与存储通过 Safari Web Inspector 查看。仅启动 Web 不足以验证登录与 API。

@@ -8,9 +8,11 @@ from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.concurrency import run_in_threadpool
 
+from app.contracts.automation_upload import UploadError
 from app.modules.automation.application.runtime import (
     AutomationRequest,
     AutomationRuntime,
+    DeletionInvocation,
     FileInvocation,
     OperationInvocation,
 )
@@ -69,6 +71,40 @@ def register_file_moves(
         open_world_hint=False,
     )
 
+    async def delete_invoke(operation: DeletionInvocation) -> dict[str, object]:
+        try:
+            return await run_in_threadpool(
+                runtime.deletions, snapshot.access, operation
+            )
+        except (AutomationAccessError, FileMoveError) as error:
+            raise ToolError(f"{error}: 请求被拒绝 / Request rejected") from None
+        except Exception:  # noqa: BLE001 - redact filesystem diagnostics
+            raise ToolError("INTERNAL_ERROR: 操作失败 / Operation failed") from None
+
+    @server.tool(
+        annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False)
+    )
+    async def plan_file_deletions(
+        source_node_ids: Annotated[
+            list[Identifier], Field(min_length=1, max_length=100)
+        ],
+    ) -> dict[str, object]:
+        """冻结永久删除清单，包含所选目录中的文件 / Freeze a permanent deletion inventory, including files inside selected directories."""
+        return await delete_invoke(
+            lambda service, access: service.plan(access, tuple(source_node_ids))
+        )
+
+    @server.tool(
+        annotations=ToolAnnotations(
+            read_only_hint=False, destructive_hint=True, idempotent_hint=True
+        )
+    )
+    async def execute_file_deletions(plan_id: Identifier) -> dict[str, object]:
+        """永久删除方案内文件；不会删除执行时新增的文件 / Permanently delete frozen targets; never delete newly added files."""
+        return await delete_invoke(
+            lambda service, access: service.execute(access, plan_id)
+        )
+
     async def invoke(operation: FileInvocation) -> dict[str, object]:
         try:
             return await run_in_threadpool(runtime.files, snapshot.access, operation)
@@ -79,7 +115,7 @@ def register_file_moves(
         except Exception:  # noqa: BLE001 - redact infrastructure diagnostics.
             raise ToolError("INTERNAL_ERROR: 操作失败 / Operation failed") from None
 
-    if {Scope.FILES_READ, Scope.FILES_MOVE} <= snapshot.access.permissions.scopes:
+    if {Scope.SYSTEM_READ, Scope.FILES_MODIFY} <= snapshot.access.permissions.scopes:
 
         @server.tool(annotations=read)
         async def plan_file_operations(
@@ -92,7 +128,7 @@ def register_file_moves(
                 )
             )
 
-    if Scope.FILES_MOVE in snapshot.access.permissions.scopes:
+    if Scope.FILES_MODIFY in snapshot.access.permissions.scopes:
 
         @server.tool(annotations=write)
         async def execute_file_operations(
@@ -109,7 +145,12 @@ def register_file_moves(
             return await run_in_threadpool(
                 runtime.operations, snapshot.access, operation
             )
-        except (AutomationAccessError, FileMoveError, StandardMetadataError) as error:
+        except (
+            AutomationAccessError,
+            FileMoveError,
+            StandardMetadataError,
+            UploadError,
+        ) as error:
             raise ToolError(f"{error}: 请求被拒绝 / Request rejected") from None
         except Exception:  # noqa: BLE001 - redact infrastructure diagnostics.
             raise ToolError("INTERNAL_ERROR: 操作失败 / Operation failed") from None

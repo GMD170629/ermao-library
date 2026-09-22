@@ -1,22 +1,31 @@
-"""Shared durable file-write conflicts for import, move and writeback claims."""
+"""Active file-write conflicts shared by import, move and writeback claims."""
 
-from sqlalchemy import SQLColumnExpression, String, cast, func, literal, or_, select
-from sqlalchemy.orm import Session, aliased
+from datetime import UTC, datetime
+
+from sqlalchemy import SQLColumnExpression, and_, func, or_, select, true
+from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.models import (
+    AutomationUploadRow,
+    FileDeletePlanRow,
     LibraryFileMoveOperation,
-    LibraryFileMovePlan,
-    LibraryFileMoveTarget,
-    MetadataStandardWriteOperation,
-    MetadataStandardWritePlan,
     MetadataStandardWriteTarget,
 )
 from app.models.organize import MetadataWritebackTarget
 
 
+def writeback_has_live_lease(
+    status: SQLColumnExpression[str],
+    lease_expires_at: SQLColumnExpression[datetime | None],
+    now: datetime,
+) -> ColumnElement[bool]:
+    return and_(status.in_(("RUNNING", "PREPARED")), lease_expires_at > now)
+
+
 def standard_write_blocks_library(
     library_id: SQLColumnExpression[str],
+    now: datetime,
 ) -> ColumnElement[bool]:
     queue = aliased(MetadataWritebackTarget)
     return (
@@ -24,7 +33,7 @@ def standard_write_blocks_library(
         .join(queue, queue.id == MetadataStandardWriteTarget.queue_target_id)
         .where(
             MetadataStandardWriteTarget.library_id == library_id,
-            queue.status.in_(("RUNNING", "PREPARED", "REVIEW")),
+            writeback_has_live_lease(queue.status, queue.lease_expires_at, now),
         )
         .exists()
     )
@@ -32,71 +41,46 @@ def standard_write_blocks_library(
 
 def file_operation_blocks_library(
     library_id: SQLColumnExpression[str],
+    now: datetime | None = None,
 ) -> ColumnElement[bool]:
-    return or_(
-        LibraryFileMoveOperation.blocks_library(library_id),
-        standard_write_blocks_library(library_id),
+    targets = (
+        func.json_each(FileDeletePlanRow.payload, "$.targets")
+        .table_valued("value")
+        .alias("delete_targets")
     )
-
-
-def recovery_holds_source_nodes(db: Session, node_ids: tuple[str, ...]) -> bool:
-    """Do not relocate a published file while its backup still needs that locator.
-
-    Plans remain immutable. The ordinal selects a server-created plan item, never
-    an input JSON path; current source-node IDs also cover a moved parent directory.
-    """
-    write_node = func.json_extract(
-        MetadataStandardWritePlan.payload,
-        literal("$.targets[")
-        + cast(MetadataStandardWriteTarget.ordinal, String)
-        + literal("].source_node_id"),
-    )
-    pending_write = (
-        select(MetadataStandardWriteTarget.operation_id)
-        .join(
-            MetadataStandardWriteOperation,
-            MetadataStandardWriteOperation.id
-            == MetadataStandardWriteTarget.operation_id,
-        )
-        .join(
-            MetadataStandardWritePlan,
-            MetadataStandardWritePlan.id == MetadataStandardWriteOperation.plan_id,
-        )
+    deletion = (
+        select(FileDeletePlanRow.id)
+        .select_from(FileDeletePlanRow)
+        .join(targets, true())
         .where(
-            MetadataStandardWriteTarget.stage == "COMPLETED",
-            MetadataStandardWriteTarget.recovery_released.is_(False),
-            write_node.in_(node_ids),
+            FileDeletePlanRow.payload["executing"].as_boolean().is_(True),
+            func.json_extract(targets.c.value, "$.source.library_id") == library_id,
+            or_(
+                func.json_extract(targets.c.value, "$.stage").in_(
+                    ("STAGING", "STAGED")
+                ),
+                and_(
+                    func.json_extract(targets.c.value, "$.stage") == "QUEUED",
+                    FileDeletePlanRow.payload["cancelled"].as_boolean().is_(False),
+                ),
+            ),
         )
-        .limit(1)
+        .exists()
     )
-    if db.scalar(pending_write) is not None:
-        return True
-    moved_node = func.json_extract(
-        LibraryFileMovePlan.payload,
-        literal("$.moves[")
-        + cast(LibraryFileMoveTarget.ordinal, String)
-        + literal("].source.node_id"),
-    )
-    return (
-        db.scalar(
-            select(LibraryFileMoveTarget.operation_id)
-            .join(
-                LibraryFileMoveOperation,
-                LibraryFileMoveOperation.id == LibraryFileMoveTarget.operation_id,
-            )
-            .join(
-                LibraryFileMovePlan,
-                LibraryFileMovePlan.id == LibraryFileMoveOperation.plan_id,
-            )
-            .where(
-                LibraryFileMoveTarget.stage == "COMPLETED",
-                LibraryFileMoveTarget.copy_required.is_(True),
-                LibraryFileMoveTarget.recovery["source_backup_cleared_at"]
-                .as_integer()
-                .is_(None),
-                moved_node.in_(node_ids),
-            )
-            .limit(1)
+    replacement = (
+        select(AutomationUploadRow.id)
+        .where(
+            AutomationUploadRow.library_id == library_id,
+            AutomationUploadRow.payload["spec"]["purpose"].as_string() == "replace",
+            AutomationUploadRow.status.in_(
+                ("PUBLISHING", "SAVED", "RECOVERY_REQUIRED")
+            ),
         )
-        is not None
+        .exists()
+    )
+    return or_(
+        deletion,
+        replacement,
+        LibraryFileMoveOperation.blocks_library(library_id),
+        standard_write_blocks_library(library_id, now or datetime.now(UTC)),
     )

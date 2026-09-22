@@ -6,14 +6,12 @@ from typing import Literal
 
 
 class Scope(StrEnum):
-    LIBRARY_READ = "library:read"
+    SYSTEM_READ = "system:read"
+    SYSTEM_MANAGE = "system:manage"
+    BOOKS_WRITE = "books:write"
     SHELVES_WRITE = "shelves:write"
-    TAGS_WRITE = "tags:write"
-    FILES_READ = "files:read"
-    FILES_MOVE = "files:move"
-    METADATA_WRITE = "metadata:write"
-    METADATA_OVERRIDE = "metadata:override"
-    METADATA_WRITEBACK = "metadata:writeback"
+    FILES_UPLOAD = "files:upload"
+    FILES_MODIFY = "files:modify"
 
 
 class WritebackTarget(StrEnum):
@@ -21,7 +19,7 @@ class WritebackTarget(StrEnum):
     EMBEDDED = "embedded"
 
 
-MEMBER_SCOPES = frozenset({Scope.LIBRARY_READ, Scope.SHELVES_WRITE})
+MEMBER_SCOPES = frozenset({Scope.SYSTEM_READ, Scope.SHELVES_WRITE})
 ALL_SCOPES = frozenset(Scope)
 
 
@@ -43,8 +41,6 @@ class AutomationActor:
 class GrantPermissions:
     scopes: frozenset[Scope]
     library_ids: frozenset[str]
-    writeback_targets: frozenset[WritebackTarget] = frozenset()
-    allow_cross_library: bool = False
     library_scope: Literal["all", "selected"] = "selected"
 
 
@@ -53,8 +49,8 @@ def validate_permissions(permissions: GrantPermissions, actor: AutomationActor) 
         raise AutomationAccessError("UNAUTHORIZED")
     if not permissions.scopes <= ALL_SCOPES:
         raise AutomationAccessError("INVALID_SCOPES")
-    if Scope.LIBRARY_READ not in permissions.scopes:
-        raise AutomationAccessError("LIBRARY_READ_REQUIRED")
+    if Scope.SYSTEM_READ not in permissions.scopes:
+        raise AutomationAccessError("SYSTEM_READ_REQUIRED")
     if not actor.can_manage_system and not permissions.scopes <= MEMBER_SCOPES:
         raise AutomationAccessError("SYSTEM_MANAGER_REQUIRED")
     if permissions.library_scope not in {"all", "selected"}:
@@ -66,24 +62,6 @@ def validate_permissions(permissions: GrantPermissions, actor: AutomationActor) 
         not permissions.library_ids or not permissions.library_ids <= actor.library_ids
     ):
         raise AutomationAccessError("LIBRARY_NOT_FOUND")
-    if (
-        permissions.scopes & {Scope.FILES_MOVE, Scope.METADATA_WRITEBACK}
-        and Scope.FILES_READ not in permissions.scopes
-    ):
-        raise AutomationAccessError("FILES_READ_REQUIRED")
-    if Scope.METADATA_OVERRIDE in permissions.scopes and not permissions.scopes & {
-        Scope.METADATA_WRITE,
-        Scope.TAGS_WRITE,
-    }:
-        raise AutomationAccessError("METADATA_WRITE_REQUIRED")
-    if not permissions.writeback_targets <= frozenset(WritebackTarget):
-        raise AutomationAccessError("INVALID_WRITEBACK_TARGET")
-    if bool(permissions.writeback_targets) != (
-        Scope.METADATA_WRITEBACK in permissions.scopes
-    ):
-        raise AutomationAccessError("WRITEBACK_TARGET_REQUIRED")
-    if permissions.allow_cross_library and Scope.FILES_MOVE not in permissions.scopes:
-        raise AutomationAccessError("FILES_MOVE_REQUIRED")
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +69,8 @@ class EffectiveAccess:
     grant_id: str
     user_id: str
     permissions: GrantPermissions
+    can_manage_system: bool = False
+    is_admin: bool = False
 
     def require(
         self, *scopes: Scope, library_ids: frozenset[str] = frozenset()
@@ -102,33 +82,22 @@ class EffectiveAccess:
 
     def require_move(self, source_library: str, target_library: str) -> None:
         self.require(
-            Scope.FILES_READ,
-            Scope.FILES_MOVE,
+            Scope.SYSTEM_READ,
+            Scope.FILES_MODIFY,
             library_ids=frozenset({source_library, target_library}),
         )
-        if (
-            source_library != target_library
-            and not self.permissions.allow_cross_library
-        ):
-            raise AutomationAccessError("CROSS_LIBRARY_NOT_ALLOWED")
 
     def require_writeback(self, target: WritebackTarget, library_id: str) -> None:
         self.require(
-            Scope.FILES_READ,
-            Scope.METADATA_WRITEBACK,
+            Scope.SYSTEM_READ,
+            Scope.FILES_MODIFY,
             library_ids=frozenset({library_id}),
         )
-        if target not in self.permissions.writeback_targets:
-            raise AutomationAccessError("WRITEBACK_TARGET_NOT_ALLOWED")
 
     def require_metadata(
         self, *, changes_tags: bool, overrides_protection: bool
     ) -> None:
-        self.require(Scope.METADATA_WRITE)
-        if changes_tags:
-            self.require(Scope.TAGS_WRITE)
-        if overrides_protection:
-            self.require(Scope.METADATA_OVERRIDE)
+        self.require(Scope.BOOKS_WRITE)
 
 
 def effective_access(
@@ -143,24 +112,17 @@ def effective_access(
         raise AutomationAccessError("UNAUTHORIZED")
     allowed = ALL_SCOPES if actor.can_manage_system else MEMBER_SCOPES
     scopes = permissions.scopes & allowed & enabled_scopes
-    if Scope.LIBRARY_READ not in scopes:
+    if Scope.SYSTEM_READ not in scopes:
         raise AutomationAccessError("SCOPE_REQUIRED")
-    if Scope.FILES_READ not in scopes:
-        scopes = scopes - {Scope.FILES_MOVE, Scope.METADATA_WRITEBACK}
-    if not scopes & {Scope.METADATA_WRITE, Scope.TAGS_WRITE}:
-        scopes = scopes - {Scope.METADATA_OVERRIDE}
     return EffectiveAccess(
         grant_id=grant_id,
         user_id=user_id,
+        can_manage_system=actor.can_manage_system,
+        is_admin=actor.is_admin,
         permissions=GrantPermissions(
             scopes=scopes,
             library_ids=actor.library_ids
             if permissions.library_scope == "all"
             else permissions.library_ids & actor.library_ids,
-            writeback_targets=permissions.writeback_targets
-            if Scope.METADATA_WRITEBACK in scopes
-            else frozenset(),
-            allow_cross_library=permissions.allow_cross_library
-            and Scope.FILES_MOVE in scopes,
         ),
     )

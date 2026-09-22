@@ -368,6 +368,29 @@ class SqlAlchemyMetadataPatches:
                 raise MetadataPatchError("RESOURCE_NOT_FOUND")
         self._db.flush()
 
+    def apply_uploaded_cover(self, before: MetadataSnapshot, stored_path: str) -> None:
+        """A validated upload path is internal; external cover_ref still resolves candidates."""
+        current = self.snapshot("book", before.book_id, frozenset({before.library_id}))
+        if current is None or current.revision != before.revision:
+            raise MetadataPatchError("CONFLICT")
+        if before.source_node_id is None:
+            raise MetadataPatchError("RESOURCE_NOT_FOUND")
+        changed = SqlAlchemySourceNodeMetadata(self._db).update_metadata(
+            book_id=before.book_id,
+            source_node_id=before.source_node_id,
+            changes=SourceNodeMetadataChanges(
+                title=str(before.values["title"]),
+                description=cast(str | None, before.values.get("description")),
+                cover_path=stored_path,
+                replace_cover=True,
+                changed_fields=frozenset(),
+                writeback_policy=MetadataSideEffectPolicy.DATABASE_ONLY,
+            ),
+        )
+        if not changed:
+            raise MetadataPatchError("RESOURCE_NOT_FOUND")
+        self._db.flush()
+
     def record(
         self, actor: MetadataPatchActor, patches: tuple[PreparedMetadataPatch, ...]
     ) -> str:

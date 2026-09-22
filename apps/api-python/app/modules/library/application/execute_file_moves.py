@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Protocol
 
 from app.contracts.source_relocation import SourceRelocation
-from app.modules.library.application.file_move_operations import require_plan_access
+from app.modules.library.application.file_move_operations import require_move_access
 from app.modules.library.application.file_move_plans import (
     CreatedMoveDirectory,
     DestinationInspection,
@@ -100,27 +100,6 @@ class ExecuteFileMoveOperation:
         execution = self.store.execution(operation_id)
         self.uow.rollback()  # Read snapshot released before filesystem validation.
         plan = execution.plan
-        # A newly claimed request must preflight all targets before any publication.
-        if (
-            all(stage == "QUEUED" for stage in execution.stages)
-            and not execution.cancelled
-        ):
-            try:
-                require_plan_access(plan, self.authorize(plan.actor))
-                self.uow.rollback()
-                for move in plan.moves:
-                    self.index.validate(move)
-                    self.uow.rollback()
-                    self.files.validate(move)
-            except FileMoveError as error:
-                self.uow.rollback()
-                for index in range(len(plan.moves)):
-                    self.store.checkpoint(
-                        operation_id, index, "FAILED", self.clock_ms(), str(error)
-                    )
-                self.store.finish(operation_id, self.clock_ms())
-                self.uow.commit()
-                return
         for ordinal, move in enumerate(plan.moves):
             current = self.store.execution(operation_id)
             stage = current.stages[ordinal]
@@ -129,7 +108,7 @@ class ExecuteFileMoveOperation:
             if stage in {"COMPLETED", "FAILED", "CANCELLED"}:
                 continue
             if stage == "RECOVERY_REQUIRED":
-                return
+                continue
             # Earlier targets may have created a shared parent. Accept only
             # directories whose identities were journalled by this operation.
             known_directories = {
@@ -167,7 +146,7 @@ class ExecuteFileMoveOperation:
                         )
                         self.uow.commit()
                         continue
-                    require_plan_access(plan, self.authorize(plan.actor))
+                    require_move_access(plan.actor, move, self.authorize(plan.actor))
                     self.uow.rollback()
                     self.index.validate(move)
                     self.uow.rollback()
@@ -190,7 +169,9 @@ class ExecuteFileMoveOperation:
                             None,
                         )
                         if saved is None:
-                            require_plan_access(plan, self.authorize(plan.actor))
+                            require_move_access(
+                                plan.actor, move, self.authorize(plan.actor)
+                            )
                             self.uow.rollback()
                             identity = self.files.create_directory(
                                 move.destination.root, relative, destination
@@ -205,7 +186,9 @@ class ExecuteFileMoveOperation:
                     if created:
                         move = replace(move, destination_inspection=destination)
                     if move.cross_device and copy is None:
-                        require_plan_access(plan, self.authorize(plan.actor))
+                        require_move_access(
+                            plan.actor, move, self.authorize(plan.actor)
+                        )
                         self.uow.rollback()
                         publication_uncertain = True
                         copy = self.files.prepare_copy(move)
@@ -221,7 +204,9 @@ class ExecuteFileMoveOperation:
                         published or copy is not None or companions_published
                     )
                     if not published:
-                        require_plan_access(plan, self.authorize(plan.actor))
+                        require_move_access(
+                            plan.actor, move, self.authorize(plan.actor)
+                        )
                         self.index.validate(move)
                         cancelled = self.store.execution(operation_id).cancelled
                         self.uow.rollback()
@@ -280,17 +265,8 @@ class ExecuteFileMoveOperation:
                 self.store.checkpoint(
                     operation_id, ordinal, state, self.clock_ms(), str(error)
                 )
-                if state == "FAILED":
-                    remaining = self.store.execution(operation_id)
-                    for pending, pending_stage in enumerate(remaining.stages):
-                        if pending_stage == "QUEUED":
-                            self.store.checkpoint(
-                                operation_id, pending, "CANCELLED", self.clock_ms()
-                            )
-                self.store.finish(operation_id, self.clock_ms())
                 self.uow.commit()
-                return
-            except Exception:
+            except Exception:  # noqa: BLE001 - persist this target's failure before continuing siblings.
                 self.uow.rollback()
                 self.store.checkpoint(
                     operation_id,
@@ -299,8 +275,6 @@ class ExecuteFileMoveOperation:
                     self.clock_ms(),
                     "FILE_OPERATION_INTERRUPTED",
                 )
-                self.store.finish(operation_id, self.clock_ms())
                 self.uow.commit()
-                raise
         self.store.finish(operation_id, self.clock_ms())
         self.uow.commit()

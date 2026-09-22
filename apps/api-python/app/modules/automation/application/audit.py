@@ -5,7 +5,11 @@ from typing import Literal, Protocol
 from app.modules.system.public import PreparedSystemEvent
 
 AutomationAuditAction = Literal[
-    "grant.created", "grant.revoked", "grant.revealed", "settings.updated"
+    "grant.updated",
+    "grant.created",
+    "grant.revoked",
+    "grant.revealed",
+    "settings.updated",
 ]
 
 

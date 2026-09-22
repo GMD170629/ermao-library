@@ -83,7 +83,7 @@ def test_scope_creation_cannot_elevate_member(client, db_session):
     response = client.post(
         "/api/automation/grants",
         headers=ORIGIN,
-        json=grant_request(scopes=["library:read", "files:read"]),
+        json=grant_request(scopes=["system:read", "system:manage"]),
     )
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "SYSTEM_MANAGER_REQUIRED"
@@ -192,7 +192,7 @@ def test_old_http_option_does_not_restrict_or_reappear(client, db_session):
     db_session.add(
         SystemSetting(
             key="automation.mcp",
-            value='{"enabled": true, "public_base_url": "http://books.example/books", "allow_insecure_http": false, "enabled_scopes": ["library:read"]}',
+            value='{"enabled": true, "public_base_url": "http://books.example/books", "allow_insecure_http": false, "enabled_scopes": ["system:read"]}',
         )
     )
     db_session.commit()
@@ -200,3 +200,90 @@ def test_old_http_option_does_not_restrict_or_reappear(client, db_session):
     assert response.status_code == 200, response.text
     assert response.json()["data"]["publicBaseUrl"] == "http://books.example/books"
     assert "allowInsecureHttp" not in response.text
+
+
+def test_update_grant_keeps_token_expiry_and_enforces_owner(
+    client, db_session, test_settings
+):
+    from app.bootstrap.automation import build_automation_authorizer
+    from app.modules.automation.domain.access import ALL_SCOPES
+
+    enable_service(db_session)
+    sign_in(client, db_session, "editor")
+    created = client.post(
+        "/api/automation/grants", headers=ORIGIN, json=grant_request()
+    ).json()["data"]
+    grant = created["grant"]
+    path = f"/api/automation/grants/{grant['id']}"
+    body = grant_request(
+        name="Renamed",
+        libraryScope="all",
+        libraryIds=[],
+        scopes=["system:read", "shelves:write"],
+    )
+    assert client.patch(path, json=body).status_code == 403
+    changed = client.patch(path, headers=ORIGIN, json=body)
+    assert changed.status_code == 200, changed.text
+    assert changed.headers["cache-control"] == "no-store"
+    updated = changed.json()["data"]["grant"]
+    assert updated["name"] == "Renamed"
+    assert updated["expiresAtMs"] == grant["expiresAtMs"]
+    assert updated["id"] == grant["id"]
+    assert created["token"] not in changed.text
+    assert (
+        client.post(path + "/reveal", headers=ORIGIN).json()["data"]["token"]
+        == created["token"]
+    )
+    access = build_automation_authorizer(db_session).bearer(
+        "Bearer " + created["token"], service_enabled=True, enabled_scopes=ALL_SCOPES
+    )
+    assert "shelves:write" in access.permissions.scopes
+    body["scopes"] = ["system:read"]
+    body["lifetimeDays"] = None
+    updated = client.patch(path, headers=ORIGIN, json=body).json()["data"]["grant"]
+    assert updated["expiresAtMs"] is None
+    access = build_automation_authorizer(db_session).bearer(
+        "Bearer " + created["token"], service_enabled=True, enabled_scopes=ALL_SCOPES
+    )
+    assert "shelves:write" not in access.permissions.scopes
+    assert (
+        client.patch(
+            path,
+            headers=ORIGIN,
+            json={**body, "scopes": ["system:read", "files:modify"]},
+        ).status_code
+        == 403
+    )
+    client.cookies.clear()
+    assert (
+        client.patch(
+            path,
+            headers={**ORIGIN, "Authorization": "Bearer " + created["token"]},
+            json=body,
+        ).status_code
+        == 401
+    )
+    sign_in(client, db_session, "other-editor")
+    assert client.patch(path, headers=ORIGIN, json=body).status_code == 404
+
+
+@pytest.mark.parametrize("inactive", ["revoked", "expired"])
+def test_update_cannot_reactivate_grants(client, db_session, inactive):
+    enable_service(db_session)
+    sign_in(client, db_session, "editor")
+    grant = client.post(
+        "/api/automation/grants", headers=ORIGIN, json=grant_request()
+    ).json()["data"]["grant"]
+    row = db_session.get(AutomationGrantRow, grant["id"])
+    if inactive == "revoked":
+        row.revoked_at_ms = 1
+    else:
+        row.expires_at_ms = 1
+    db_session.commit()
+    response = client.patch(
+        f"/api/automation/grants/{grant['id']}",
+        headers=ORIGIN,
+        json=grant_request(lifetimeDays=None),
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "GRANT_INACTIVE"

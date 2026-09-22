@@ -67,8 +67,8 @@ def register_writebacks(
             raise ToolError("INTERNAL_ERROR: 操作失败 / Operation failed") from None
 
     if {
-        Scope.FILES_READ,
-        Scope.METADATA_WRITEBACK,
+        Scope.SYSTEM_READ,
+        Scope.FILES_MODIFY,
     } <= snapshot.access.permissions.scopes:
 
         @server.tool(
@@ -91,7 +91,7 @@ def register_writebacks(
                 )
             )
 
-    if Scope.METADATA_WRITEBACK in snapshot.access.permissions.scopes:
+    if Scope.FILES_MODIFY in snapshot.access.permissions.scopes:
 
         @server.tool(
             annotations=ToolAnnotations(

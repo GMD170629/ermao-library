@@ -28,7 +28,7 @@ def setup_access(db):
     read_grant = seed(db)
     permissions = replace(
         read_grant.grant.permissions,
-        scopes=frozenset({Scope.LIBRARY_READ, Scope.SHELVES_WRITE, Scope.TAGS_WRITE}),
+        scopes=frozenset({Scope.SYSTEM_READ, Scope.SHELVES_WRITE, Scope.BOOKS_WRITE}),
     )
     grant = build_grant_manager(db).create(
         user_id="mcp-owner", name="writer", permissions=permissions
@@ -188,3 +188,21 @@ def test_revocation_between_preflight_and_claim_prevents_the_write(db_session):
         db_session.scalar(select(Shelf).where(Shelf.name == "Must not exist")) is None
     )
     assert list(db_session.scalars(select(AutomationReceiptRow))) == []
+
+
+def test_smart_shelf_update_delete_and_dynamic_result(db_session):
+    from app.bootstrap.automation import build_automation_catalog
+
+    access = setup_access(db_session)
+    commands = build_automation_writes(db_session)
+    created = commands.create_shelf(access, "smart-create", "Dynamic", None, "SMART", {"search": "二毛"})
+    shelf_id = created["shelf_id"]
+    catalog = build_automation_catalog(db_session)
+    assert catalog.get_shelf(access, shelf_id, 1, 20)["total"] == 1
+    updated = commands.update_shelf(access, "smart-update", shelf_id, "Empty", None, "SMART", {"search": "does-not-match"})
+    assert updated["kind"] == "SMART"
+    assert catalog.get_shelf(access, shelf_id, 1, 20)["total"] == 0
+    deleted = commands.delete_shelf(access, "smart-delete", shelf_id)
+    assert deleted["deleted"] is True
+    assert commands.delete_shelf(access, "smart-delete", shelf_id) == deleted
+    assert db_session.get(Shelf, shelf_id) is None

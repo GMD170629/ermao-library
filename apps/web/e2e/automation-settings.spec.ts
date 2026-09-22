@@ -1,20 +1,24 @@
 import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
-import type { CreateGrantRequest, GrantView, ManagedOperationFields, Scope } from '../generated/automation';
+import type { CreateGrantRequest, UpdateGrantRequest, GrantView, ManagedOperationFields, Scope } from '../generated/automation';
 
 function grant(id: string, changes: Partial<GrantView> = {}): GrantView {
-  return { id, name: id, scopes: ['library:read'], libraryScope: 'all', libraryIds: [], tokenAvailable: true, writebackTargets: [], allowCrossLibrary: false, createdAtMs: Date.now(), expiresAtMs: Date.now() + 86400000, revokedAtMs: null, lastUsedAtMs: null, ...changes };
+  return { id, name: id, scopes: ['system:read'], libraryScope: 'all', libraryIds: [], tokenAvailable: true, createdAtMs: Date.now(), expiresAtMs: Date.now() + 86400000, revokedAtMs: null, lastUsedAtMs: null, ...changes };
 }
-async function mockApi(page: Page, { admin = true, locale = 'zh-CN', enabled = true } = {}) {
+async function mockApi(page: Page, { admin = true, locale = 'zh-CN', enabled = true, uploads = false } = {}) {
   await page.context().addCookies([{ name: 'shuku_session', value: 'test-session', domain: '127.0.0.1', path: '/' }]);
   const grants: GrantView[] = [grant('Client A'), grant('Client B'), grant('Legacy', { tokenAvailable: false, libraryScope: 'selected', libraryIds: ['library'] }), grant('Revoked', { revokedAtMs: Date.now(), tokenAvailable: false }), grant('Expired', { expiresAtMs: 1 })];
   const created: CreateGrantRequest[] = [];
   const revealed: string[] = [];
-  const scopes: Scope[] = ['library:read', 'shelves:write', 'metadata:write', 'metadata:override', 'files:read', 'files:move', 'metadata:writeback'];
+  const updated: { id: string; input: UpdateGrantRequest }[] = [];
+  const scopes: Scope[] = ['system:read', 'system:manage', 'books:write', 'shelves:write', 'files:upload', 'files:modify'];
   const operation: ManagedOperationFields = { operation_id: 'job-1', grant_id: 'grant-1', kind: 'file_move', created_at_ms: 1700000000000,
     status: 'RUNNING', cancel_requested: false, total_targets: 1,
     targets: [{ stage: 'PREPARED', relative_path: 'Before/book.epub', destination_relative_path: 'After/book.epub', error_code: null }] };
-  await page.route('**/api/**', async (route) => {
+  const uploaded: ManagedOperationFields = { operation_id: 'upload-1', grant_id: 'grant-1', kind: 'book_upload', created_at_ms: 1700000000000, status: 'FAILED', cancel_requested: false, total_targets: 1, received_bytes: 1024, size_bytes: 1024, file_saved: true,
+    upload_result: { status: 'FAILED', error_code: 'UPLOAD_IMPORT_FAILED', book_ids: [], resource_ids: [] },
+    targets: [{ stage: 'FAILED', relative_path: 'Books/new.epub', destination_relative_path: null, error_code: 'UPLOAD_IMPORT_FAILED' }] };
+  await page.route('**/api/**' , async (route) => {
     const path = decodeURIComponent(new URL(route.request().url()).pathname);
     const method = route.request().method();
     let data: object = {};
@@ -25,32 +29,49 @@ async function mockApi(page: Page, { admin = true, locale = 'zh-CN', enabled = t
     if (path === '/api/automation/settings') data = { enabled, enabledScopes: scopes, publicBaseUrl: 'http://books.example:8080/books' };
     if (path === '/api/automation/grants' && method === 'POST') {
       const input: CreateGrantRequest = route.request().postDataJSON(); created.push(input);
-      const item = grant(input.name, input); grants.unshift(item); data = { grant: item, token: `secret-${item.id}` };
+      const item = grant(input.name, { ...input, expiresAtMs: input.lifetimeDays === null ? null : Date.now() + 86400000 }); grants.unshift(item); data = { grant: item, token: `secret-${item.id}` };
     } else if (path === '/api/automation/grants') data = { grants };
     if (path.endsWith('/reveal')) { const id = path.split('/').at(-2)!; revealed.push(id); data = { token: `secret-${id}` }; }
+    if (path.startsWith('/api/automation/grants/') && method === 'PATCH') {
+      const item = grants.find((entry) => path.endsWith(entry.id));
+      const input: UpdateGrantRequest = route.request().postDataJSON();
+      if (item) { updated.push({ id: item.id, input }); Object.assign(item, input); if (input.lifetimeDays === null) item.expiresAtMs = null; data = { grant: item }; }
+    }
     if (path.startsWith('/api/automation/grants/') && method === 'DELETE') {
       const item = grants.find((entry) => path.endsWith(entry.id));
       if (item) { item.revokedAtMs = Date.now(); item.tokenAvailable = false; } data = { revoked: true };
     }
-    if (path === '/api/automation/operations') data = { operations: admin ? [operation] : [] };
+    if (path === '/api/automation/operations') data = { operations: admin ? (uploads ? [operation, uploaded] : [operation]) : [] };
     if (path.endsWith('/cancel')) { operation.cancel_requested = true; data = { operation }; }
     await route.fulfill({ json: { ok: true, data } });
   });
-  return { created, revealed };
+  return { created, revealed, updated };
 }
 const row = (page: Page, name: string) => page.getByRole('region', { name: '授权列表' }).getByRole('listitem').filter({ has: page.getByRole('heading', { name, exact: true }) });
 
-test('grant list defaults, expandable creation and browser tab history', async ({ page }) => {
+test('grant list defaults, expandable creation and browser tab history', async ({ page }, testInfo) => {
   const state = await mockApi(page);
   await page.goto('/settings/automation');
   await expect(page.getByRole('link', { name: '授权服务', exact: true })).toHaveAttribute('aria-current', 'page');
   await expect(page.getByRole('heading', { name: '创建自动化授权' })).toHaveCount(0);
   await page.getByRole('button', { name: '创建授权', exact: true }).click();
   await expect(page.getByRole('radio', { name: '全部书库（动态）', exact: true })).toBeChecked();
+  const nameBounds = await page.getByLabel('授权名称', { exact: true }).boundingBox();
+  const lifetimeBounds = await page.getByRole('button', { name: '有效期', exact: true }).boundingBox();
+  expect(Math.abs(nameBounds!.height - lifetimeBounds!.height)).toBeLessThanOrEqual(1);
+  if (testInfo.project.name === 'chrome') expect(Math.abs(nameBounds!.y - lifetimeBounds!.y)).toBeLessThanOrEqual(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('create-grant-aligned.png'), fullPage: true });
+
+  for (const checkbox of await page.locator('form').getByRole('checkbox').all()) await expect(checkbox).toBeChecked();
+  await page.getByRole('button', { name: '有效期', exact: true }).click();
+  await page.getByRole('option', { name: '长期', exact: true }).click();
   await page.getByLabel('授权名称', { exact: true }).fill('Dynamic');
   await page.getByRole('button', { name: '创建授权', exact: true }).last().click();
   await expect(row(page, 'Dynamic')).toBeVisible();
-  expect(state.created[0]).toMatchObject({ libraryScope: 'all', libraryIds: [] });
+  expect(state.created[0]).toMatchObject({ libraryScope: 'all', libraryIds: [], lifetimeDays: null });
+  expect(state.created[0].scopes).toContain('files:modify');
+  await expect(row(page, 'Dynamic')).toContainText('长期');
   await expect(page.getByRole('heading', { name: '创建自动化授权' })).toHaveCount(0);
   await expect(page.locator('pre')).toHaveCount(0);
   await page.getByRole('button', { name: '创建授权', exact: true }).click();
@@ -144,8 +165,9 @@ test('ordinary account has English labels and bounded creation choices', async (
   await page.goto('/settings/automation');
   await page.getByRole('button', { name: 'Create access', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Create automation access' })).toBeVisible();
-  await expect(page.getByRole('checkbox', { name: 'Browse libraries', exact: true })).toBeVisible();
-  await expect(page.getByRole('checkbox', { name: 'Move and organize files', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('checkbox', { name: 'Basic queries', exact: true })).toBeChecked();
+  await expect(page.getByRole('checkbox', { name: 'Manage shelves', exact: true })).toBeChecked();
+  await expect(page.getByRole('checkbox', { name: 'Modify book files', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Save service settings' })).toHaveCount(0);
 });
 
@@ -219,4 +241,50 @@ test('service save feedback uses the current English locale', async ({ page }) =
   await page.goto('/settings/automation?tab=service');
   await page.getByRole('button', { name: 'Save service settings', exact: true }).click();
   await expect(page.locator('.shuku-toast-region')).toContainText('MCP service settings saved');
+});
+
+for (const locale of ['zh-CN', 'en-US']) {
+  test(`attachment scopes and saved import failure (${locale})`, async ({ page }) => {
+    await mockApi(page, { locale, uploads: true });
+    await page.goto('/settings/automation?tab=grants');
+    await page.getByRole('button', { name: locale === 'zh-CN' ? '创建授权' : 'Create access', exact: true }).click();
+    await expect(page.getByRole('checkbox', { name: locale === 'zh-CN' ? '上传图书' : 'Upload books', exact: true })).toBeChecked();
+    await expect(page.getByRole('checkbox', { name: locale === 'zh-CN' ? '更新图书元数据' : 'Update book metadata', exact: true })).toBeChecked();
+    await page.goto('/settings/automation?tab=operations');
+    const upload = page.getByRole('listitem').filter({ has: page.getByRole('heading', { name: locale === 'zh-CN' ? '上传图书附件 · 失败' : 'Upload book attachments · Failed' }) });
+    await expect(upload).toContainText('1,024 / 1,024');
+    await expect(upload).toContainText(locale === 'zh-CN' ? '原文件已保存；导入失败也不会删除原文件。' : 'Original file saved; an import failure will not delete it.');
+    await expect(upload.getByRole('button')).toHaveCount(0);
+    await upload.getByText(locale === 'zh-CN' ? '查看逐项结果（最多 50 项）' : 'View individual results (up to 50)').click();
+    await expect(upload).toContainText('UPLOAD_IMPORT_FAILED');
+  });
+}
+
+
+test('edit grant keeps row identity and original configuration', async ({ page }, testInfo) => {
+  const state = await mockApi(page);
+  await page.goto('/settings/automation');
+  await row(page, 'Client A').getByRole('button', { name: '复制配置', exact: true }).click();
+  await expect(page.locator('pre')).toContainText('secret-Client A');
+  await row(page, 'Client A').getByRole('button', { name: '修改', exact: true }).click();
+  await expect(page.locator('pre')).toHaveCount(0);
+  await expect(page.getByLabel('授权名称', { exact: true })).toHaveValue('Client A');
+  await expect(page.getByRole('button', { name: '有效期', exact: true })).toContainText('保持原到期时间');
+  await page.getByLabel('授权名称', { exact: true }).fill('Edited A');
+  await page.getByRole('button', { name: '保存修改', exact: true }).click();
+  await expect(row(page, 'Edited A')).toBeVisible();
+  expect(state.updated[0].id).toBe('Client A');
+  expect(state.updated[0].input).not.toHaveProperty('lifetimeDays');
+  await expect(page.getByRole('heading', { name: '修改自动化授权' })).toHaveCount(0);
+  await row(page, 'Edited A').getByRole('button', { name: '复制配置', exact: true }).click();
+  await expect(page.locator('pre')).toContainText('secret-Client A');
+  await row(page, 'Client B').getByRole('button', { name: '修改', exact: true }).click();
+  await expect(page.getByLabel('授权名称', { exact: true })).toHaveValue('Client B');
+  await page.getByRole('button', { name: '有效期', exact: true }).click();
+  await page.getByRole('option', { name: '长期', exact: true }).click();
+  await page.getByRole('button', { name: '保存修改', exact: true }).click();
+  await expect(row(page, 'Client B')).toContainText('长期');
+  await expect(row(page, 'Revoked').getByRole('button', { name: '修改', exact: true })).toBeDisabled();
+  await expect(row(page, 'Expired').getByRole('button', { name: '修改', exact: true })).toBeDisabled();
+  await page.screenshot({ path: testInfo.outputPath('grant-edit.png'), fullPage: true });
 });

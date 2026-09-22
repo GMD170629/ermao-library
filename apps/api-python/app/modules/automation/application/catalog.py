@@ -1,5 +1,6 @@
 """Bounded catalog operations using existing library and shelf public contracts."""
 
+import hashlib
 from dataclasses import asdict, dataclass
 
 from app.core.authorization import AuthorizationContext
@@ -65,7 +66,7 @@ class AutomationCatalog:
     file_metadata: StandardFileMetadataReader
 
     def list_libraries(self, access: EffectiveAccess) -> dict[str, object]:
-        access.require(Scope.LIBRARY_READ)
+        access.require(Scope.SYSTEM_READ)
         return {
             "libraries": [
                 asdict(item)
@@ -80,7 +81,7 @@ class AutomationCatalog:
         page: int,
         page_size: int,
     ) -> dict[str, object]:
-        access.require(Scope.LIBRARY_READ)
+        access.require(Scope.SYSTEM_READ)
         validate_page(page, page_size)
         return asdict(
             ListCatalogBooks(self.books).execute(
@@ -94,7 +95,7 @@ class AutomationCatalog:
     def get_books(
         self, access: EffectiveAccess, book_ids: list[str]
     ) -> dict[str, object]:
-        access.require(Scope.LIBRARY_READ)
+        access.require(Scope.SYSTEM_READ)
         if (
             not 1 <= len(book_ids) <= QUERY_MAX_LIMIT
             or len(set(book_ids)) != len(book_ids)
@@ -113,7 +114,7 @@ class AutomationCatalog:
     def list_facets(
         self, access: EffectiveAccess, kind: str, search: str, page: int, page_size: int
     ) -> dict[str, object]:
-        access.require(Scope.LIBRARY_READ)
+        access.require(Scope.SYSTEM_READ)
         validate_page(page, page_size)
         return asdict(
             ListCatalogFacets(self.books).execute(
@@ -128,7 +129,7 @@ class AutomationCatalog:
     def list_shelves(
         self, access: EffectiveAccess, page: int, page_size: int
     ) -> dict[str, object]:
-        access.require(Scope.LIBRARY_READ)
+        access.require(Scope.SYSTEM_READ)
         validate_page(page, page_size)
         return asdict(
             ListCatalogShelves(self.shelves).execute(
@@ -139,7 +140,7 @@ class AutomationCatalog:
     def get_shelf(
         self, access: EffectiveAccess, shelf_id: str, page: int, page_size: int
     ) -> dict[str, object]:
-        access.require(Scope.LIBRARY_READ)
+        access.require(Scope.SYSTEM_READ)
         validate_page(page, page_size)
         result = ListCatalogShelfBookIds(self.shelves).execute(
             context=scoped_context(access),
@@ -154,7 +155,7 @@ class AutomationCatalog:
     def get_metadata_schema(
         self, access: EffectiveAccess, target_type: MetadataTarget, target_id: str
     ) -> dict[str, object]:
-        access.require(Scope.LIBRARY_READ)
+        access.require(Scope.SYSTEM_READ)
         return GetMetadataSchema(self.metadata).execute(
             target_type, target_id, access.permissions.library_ids
         )
@@ -167,7 +168,7 @@ class AutomationCatalog:
         page: int,
         page_size: int,
     ) -> dict[str, object]:
-        access.require(Scope.FILES_READ)
+        access.require(Scope.SYSTEM_READ)
         result = BrowseSourceNodes(self.sources).execute(
             library_ids=access.permissions.library_ids,
             library_id=library_id,
@@ -186,6 +187,9 @@ class AutomationCatalog:
                     "physical_kind": node.physical_kind.value,
                     "size_bytes": node.observed_size_bytes,
                     "observed_mtime_ns": node.observed_mtime_ns,
+                    "source_version": hashlib.sha256(
+                        f"{node.observed_size_bytes}:{node.observed_mtime_ns}".encode()
+                    ).hexdigest(),
                 }
                 for node in result.nodes
             ],
@@ -201,7 +205,7 @@ class AutomationCatalog:
         source: MetadataFileSource,
         sidecar_relative_path: str | None,
     ) -> StandardMetadataObservation:
-        access.require(Scope.FILES_READ)
+        access.require(Scope.SYSTEM_READ)
         location = self.sources.location(node_id, access.permissions.library_ids)
         if location is None:
             raise AutomationAccessError("RESOURCE_NOT_FOUND")
@@ -239,7 +243,7 @@ class AutomationCatalog:
         target_id: str,
         node_id: str,
     ) -> None:
-        access.require(Scope.FILES_READ)
+        access.require(Scope.SYSTEM_READ)
         target = self.metadata.snapshot(
             target_type, target_id, access.permissions.library_ids
         )

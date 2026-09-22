@@ -13,11 +13,19 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import Receive, Scope, Send
 
+from app.contracts.automation_upload import UploadError
 from app.modules.automation.application.runtime import (
     AutomationRequest,
     AutomationRuntime,
     CatalogInvocation,
     WriteInvocation,
+)
+from app.modules.automation.application.uploads import (
+    BOOK_BYTES,
+    CHUNK_BYTES,
+    COVER_BYTES,
+    LIFETIME_MS,
+    UPLOAD_COUNT,
 )
 from app.modules.automation.domain.access import AutomationAccessError
 from app.modules.automation.domain.access import Scope as PermissionScope
@@ -28,12 +36,15 @@ from app.modules.automation.domain.tools import (
     METADATA_BATCH_LIMIT,
     PLAN_LIFETIME_SECONDS,
     QUERY_MAX_LIMIT,
+    visible_tools,
 )
 from app.modules.automation.presentation.file_moves import register_file_moves
 from app.modules.automation.presentation.metadata import (
     MetadataChangeInput,
     RefreshMetadataInput,
 )
+from app.modules.automation.presentation.system import register_system
+from app.modules.automation.presentation.uploads import register_uploads
 from app.modules.automation.presentation.writebacks import register_writebacks
 from app.modules.library.public import (
     CatalogBookFilter,
@@ -76,6 +87,7 @@ def build_catalog_server(
             return await run_in_threadpool(runtime.invoke, snapshot.access, operation)
         except (
             AutomationAccessError,
+            UploadError,
             MetadataPatchError,
             SourceAccessError,
             StandardMetadataError,
@@ -95,10 +107,16 @@ def build_catalog_server(
             lambda _catalog, access: {
                 "version": version,
                 "scopes": sorted(access.permissions.scopes),
+                "can_manage_system": access.can_manage_system,
+                "is_admin": access.is_admin,
                 "library_ids": sorted(access.permissions.library_ids),
-                "writeback_targets": sorted(access.permissions.writeback_targets),
-                "allow_cross_library": access.permissions.allow_cross_library,
                 "limits": {
+                    "upload_chunk_bytes": CHUNK_BYTES,
+                    "upload_book_bytes": BOOK_BYTES,
+                    "upload_cover_bytes": COVER_BYTES,
+                    "upload_count": UPLOAD_COUNT,
+                    "upload_staging_bytes": BOOK_BYTES,
+                    "upload_lifetime_ms": LIFETIME_MS,
                     "query": QUERY_MAX_LIMIT,
                     "metadata_batch": METADATA_BATCH_LIMIT,
                     "file_targets": FILE_PLAN_TARGET_LIMIT,
@@ -184,6 +202,7 @@ def build_catalog_server(
             return await run_in_threadpool(runtime.write, snapshot.access, operation)
         except (
             AutomationAccessError,
+            UploadError,
             MetadataPatchError,
             SourceAccessError,
             StandardMetadataError,
@@ -213,11 +232,40 @@ def build_catalog_server(
             request_id: RequestId,
             name: Annotated[str, Field(min_length=1, max_length=191)],
             description: Annotated[str, Field(max_length=2000)] | None = None,
+            kind: Literal["STATIC", "SMART"] = "STATIC",
+            rules: dict[str, object] | None = None,
         ) -> dict[str, object]:
-            """创建本人的静态书架；重试须复用 request_id / Create an owned static shelf; reuse request_id on retry."""
+            """创建本人的静态或智能书架；重试复用 request_id / Create an owned static or smart shelf; reuse request_id on retry."""
             return await write(
                 lambda commands, access: commands.create_shelf(
-                    access, request_id, name, description
+                    access, request_id, name, description, kind, rules
+                )
+            )
+
+        @server.tool(annotations=mutation)
+        async def update_shelf(
+            request_id: RequestId,
+            shelf_id: str,
+            name: Annotated[str, Field(min_length=1, max_length=191)],
+            kind: Literal["STATIC", "SMART"],
+            description: Annotated[str, Field(max_length=2000)] | None = None,
+            rules: dict[str, object] | None = None,
+        ) -> dict[str, object]:
+            """更新本人书架及智能规则 / Update owned shelf details and smart rules."""
+            return await write(
+                lambda commands, access: commands.update_shelf(
+                    access, request_id, shelf_id, name, description, kind, rules
+                )
+            )
+
+        @server.tool(annotations=removal)
+        async def delete_shelf(
+            request_id: RequestId, shelf_id: str
+        ) -> dict[str, object]:
+            """删除本人书架，不删除图书 / Delete an owned shelf without deleting books."""
+            return await write(
+                lambda commands, access: commands.delete_shelf(
+                    access, request_id, shelf_id
                 )
             )
 
@@ -243,7 +291,7 @@ def build_catalog_server(
                 )
             )
 
-    if PermissionScope.TAGS_WRITE in snapshot.access.permissions.scopes:
+    if PermissionScope.BOOKS_WRITE in snapshot.access.permissions.scopes:
 
         @server.tool(annotations=mutation)
         async def add_book_tags(
@@ -289,7 +337,7 @@ def build_catalog_server(
                 )
             )
 
-    if PermissionScope.METADATA_WRITE in snapshot.access.permissions.scopes:
+    if PermissionScope.BOOKS_WRITE in snapshot.access.permissions.scopes:
 
         @server.tool(annotations=removal)
         async def update_metadata(
@@ -306,7 +354,7 @@ def build_catalog_server(
                 )
             )
 
-    if PermissionScope.FILES_READ in snapshot.access.permissions.scopes:
+    if PermissionScope.SYSTEM_READ in snapshot.access.permissions.scopes:
 
         @server.tool(annotations=read)
         async def list_source_nodes(
@@ -336,8 +384,8 @@ def build_catalog_server(
             )
 
     if {
-        PermissionScope.FILES_READ,
-        PermissionScope.METADATA_WRITE,
+        PermissionScope.SYSTEM_READ,
+        PermissionScope.BOOKS_WRITE,
     } <= snapshot.access.permissions.scopes:
 
         @server.tool(annotations=removal)
@@ -357,6 +405,8 @@ def build_catalog_server(
 
     register_file_moves(server, runtime, snapshot)
     register_writebacks(server, runtime, snapshot)
+    register_system(server, runtime, snapshot)
+    register_uploads(server, runtime, snapshot)
     return server
 
 
@@ -373,6 +423,7 @@ class AutomationMcpEndpoint:
             )
         except (
             AutomationAccessError,
+            UploadError,
             MetadataPatchError,
             SourceAccessError,
             StandardMetadataError,
@@ -397,6 +448,10 @@ class AutomationMcpEndpoint:
             await response(scope, receive, send)
             return
         server = build_catalog_server(self._runtime, snapshot, self._version)
+        registered = frozenset(tool.name for tool in await server.list_tools())
+        allowed = frozenset(visible_tools(snapshot.access, registered))
+        for name in registered - allowed:
+            server.remove_tool(name)
         public = urlsplit(snapshot.settings.public_base_url)
         transport = server.streamable_http_app(
             streamable_http_path="/api/mcp",

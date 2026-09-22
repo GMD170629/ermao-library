@@ -7,7 +7,6 @@ from pathlib import Path
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.infrastructure.file_operation_conflicts import recovery_holds_source_nodes
 from app.models.library import Library
 from app.modules.library.application.file_move_plans import MoveDestination, MoveSource
 from app.modules.library.domain.book_placement import decide_book_anchor_for_resource
@@ -49,6 +48,14 @@ class SqlAlchemyMoveTopology:
         return nodes
 
     def source(self, node_id: str, library_ids: frozenset[str]) -> MoveSource:
+        return self._source(node_id, library_ids, require_complete=True)
+
+    def deletion_source(self, node_id: str, library_ids: frozenset[str]) -> MoveSource:
+        return self._source(node_id, library_ids, require_complete=False)
+
+    def _source(
+        self, node_id: str, library_ids: frozenset[str], *, require_complete: bool
+    ) -> MoveSource:
         node = self._db.scalar(
             select(LibrarySourceNode)
             .where(
@@ -64,8 +71,6 @@ class SqlAlchemyMoveTopology:
             raise FileMoveError("RESOURCE_NOT_FOUND")
         nodes = self._nodes(node)
         ids = tuple(item.id for item in nodes)
-        if recovery_holds_source_nodes(self._db, ids):
-            raise FileMoveError("RECOVERY_BACKUP_PENDING")
         resources = tuple(
             self._db.scalars(
                 select(LibraryReadableResource)
@@ -99,7 +104,9 @@ class SqlAlchemyMoveTopology:
         book_ids = {book.id for book in books}
         complete_book_ids = {book.id for book in books if book.source_node_id in ids}
         resource_ids = {resource.id for resource in resources}
-        if not books or any(asset.resource_id not in resource_ids for asset in assets):
+        if require_complete and (
+            not books or any(asset.resource_id not in resource_ids for asset in assets)
+        ):
             # Individual pages/tracks can carry format-specific navigation and
             # ordering semantics; admit complete Resource anchors, not loose assets.
             raise FileMoveError("COMPLETE_RESOURCE_UNIT_REQUIRED")

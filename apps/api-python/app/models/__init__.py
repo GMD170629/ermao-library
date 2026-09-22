@@ -54,6 +54,8 @@ from app.modules.automation.infrastructure.models import (
     AutomationGrantRow,
     AutomationReceiptRow,
 )
+from app.modules.automation.infrastructure.upload_schema import AutomationUploadRow
+from app.modules.library.infrastructure.file_delete_schema import FileDeletePlanRow
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportScanGap,
     LibraryImportTask,
@@ -89,7 +91,9 @@ from app.modules.reader.infrastructure.persistence.models import (
 from app.modules.shelf.infrastructure.models import ShelfCollectionMembership
 
 __all__ = [
+    "FileDeletePlanRow",
     "AutomationGrantRow",
+    "AutomationUploadRow",
     "AutomationReceiptRow",
     "BookDetailPreference",
     "DownloadTask",

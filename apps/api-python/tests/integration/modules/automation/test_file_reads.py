@@ -29,7 +29,7 @@ def file_access(db, tmp_path):
     access = replace(
         access,
         permissions=replace(
-            access.permissions, scopes=access.permissions.scopes | {Scope.FILES_READ}
+            access.permissions, scopes=access.permissions.scopes | {Scope.SYSTEM_READ}
         ),
     )
     grant = build_grant_manager(db).create(

@@ -100,13 +100,22 @@ def test_move_intent_roundtrip_cancellation_and_scope(db_session, tmp_path):
     queue = SqlAlchemyLibraryImportTaskQueue(db_session)
     scan = queue.enqueue(kind="SCAN_LIBRARY", library_id="test-library")
     db_session.commit()
-    assert queue.next_queued() is None
+    assert queue.next_queued().id == scan.id
     assert store.claim_next(3500) == "operation"
-    db_session.rollback()
+    db_session.commit()
     with pytest.raises(LibraryFileActivityBusy):
         queue.mark_running(scan.id, started_at=datetime.now(UTC))
-    result = store.cancel("operation", actor, 4000)
+    store.cancel("operation", actor, 4000)
     db_session.commit()
+    from app.modules.library.infrastructure.file_move_io import (
+        SameDeviceMovePublication,
+    )
+    from tests.integration.modules.automation.test_move_execution import executor
+
+    executor(
+        db_session, store, SameDeviceMovePublication(), lambda actor: actor
+    ).execute("operation")
+    result = store.progress("operation", actor)
     assert move_progress_result(result)["cancelled"] == 1
     assert result.status == "CANCELLED"
     assert queue.next_queued().id == scan.id
@@ -287,9 +296,7 @@ def test_cross_device_recovery_quota_is_reserved_before_queueing(db_session, tmp
     assert (root / "allowed/book").read_bytes() == b"1234567890"
 
 
-def test_directory_with_unknown_recovery_slot_cannot_relocate_backup(
-    db_session, tmp_path
-):
+def test_directory_move_preserves_existing_recovery_slot(db_session, tmp_path):
     access, root = file_access(db_session, tmp_path)
     db_session.get(Library, "test-library").organization_mode = "VOLUMES"
     db_session.commit()
@@ -304,9 +311,31 @@ def test_directory_with_unknown_recovery_slot_cannot_relocate_backup(
     actor = MoveActor(
         access.user_id, access.grant_id, access.permissions.library_ids, False
     )
-    with pytest.raises(FileMoveError, match="RECOVERY_BACKUP_PENDING"):
-        planner.execute(
-            actor, (MoveRequest("allowed-node", "test-library", "renamed"),)
-        )
+    plan = planner.execute(
+        actor, (MoveRequest("allowed-node", "test-library", "renamed"),)
+    )
+    assert any(
+        entry.relative_path.endswith(backup.name)
+        for entry in plan.moves[0].inventory.entries
+    )
     assert backup.read_bytes() == b"retained original"
     assert not (root / "renamed").exists()
+    from app.modules.library.infrastructure.file_move_io import (
+        SameDeviceMovePublication,
+    )
+    from app.modules.library.infrastructure.file_move_operations import (
+        SqlAlchemyFileMoveOperations,
+    )
+    from tests.integration.modules.automation.test_move_execution import executor
+
+    store = SqlAlchemyFileMoveOperations(db_session)
+    store.save_plan(plan)
+    store.enqueue(plan, "move-backup", "request", 2000)
+    db_session.commit()
+    assert store.claim_next(3000) == "move-backup"
+    db_session.commit()
+    executor(
+        db_session, store, SameDeviceMovePublication(), lambda actor: actor
+    ).execute("move-backup")
+    assert store.progress("move-backup", actor).status == "COMPLETED"
+    assert (root / "renamed" / backup.name).read_bytes() == b"retained original"

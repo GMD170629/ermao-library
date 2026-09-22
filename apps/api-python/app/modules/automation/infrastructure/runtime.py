@@ -7,6 +7,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.modules.automation.application.catalog import AutomationCatalog
+from app.modules.automation.application.deletions import AutomationDeletions
 from app.modules.automation.application.file_moves import AutomationFileMoves
 from app.modules.automation.application.grants import (
     AuthorizeAutomation,
@@ -16,12 +17,17 @@ from app.modules.automation.application.operations import AutomationOperations
 from app.modules.automation.application.runtime import (
     AutomationRequest,
     CatalogInvocation,
+    DeletionInvocation,
     FileInvocation,
     OperationInvocation,
+    SystemInvocation,
+    UploadInvocation,
     WritebackInvocation,
     WriteInvocation,
 )
 from app.modules.automation.application.settings import AutomationSettingsPort
+from app.modules.automation.application.system import AutomationSystem
+from app.modules.automation.application.uploads import AutomationUploads
 from app.modules.automation.application.writebacks import AutomationWritebacks
 from app.modules.automation.application.writes import AutomationWrites
 from app.modules.automation.domain.access import AutomationAccessError, EffectiveAccess
@@ -39,6 +45,9 @@ class DatabaseAutomationRuntime:
         writes: Callable[[Session], AutomationWrites],
         files: Callable[[Session], AutomationFileMoves],
         writebacks: Callable[[Session], AutomationWritebacks],
+        uploads: Callable[[Session], AutomationUploads],
+        system: Callable[[Session], AutomationSystem],
+        deletions: Callable[[Session], AutomationDeletions],
     ) -> None:
         self._sessions = session_factory
         self._settings = settings
@@ -49,10 +58,27 @@ class DatabaseAutomationRuntime:
         self._writes = writes
         self._files = files
         self._writebacks = writebacks
+        self._uploads = uploads
+        self._system = system
+        self._deletions = deletions
 
     def _check_maintenance(self, db: Session) -> None:
         if self._maintenance(db):
             raise AutomationAccessError("DATABASE_MAINTENANCE")
+
+    def deletions(
+        self, access: EffectiveAccess, operation: DeletionInvocation
+    ) -> dict[str, object]:
+        return self._invoke_current(
+            access, lambda db, current: operation(self._deletions(db), current)
+        )
+
+    def system(
+        self, access: EffectiveAccess, operation: SystemInvocation
+    ) -> dict[str, object]:
+        return self._invoke_current(
+            access, lambda db, current: operation(self._system(db), current)
+        )
 
     def authenticate(self, authorization: str | None) -> AutomationRequest:
         with self._sessions() as db:
@@ -101,13 +127,26 @@ class DatabaseAutomationRuntime:
             access, lambda db, current: operation(self._writebacks(db), current)
         )
 
+    def uploads(
+        self, access: EffectiveAccess, operation: UploadInvocation
+    ) -> dict[str, object]:
+        return self._invoke_current(
+            access, lambda db, current: operation(self._uploads(db), current)
+        )
+
     def operations(
         self, access: EffectiveAccess, operation: OperationInvocation
     ) -> dict[str, object]:
         return self._invoke_current(
             access,
             lambda db, current: operation(
-                AutomationOperations(self._files(db), self._writebacks(db)), current
+                AutomationOperations(
+                    self._files(db),
+                    self._writebacks(db),
+                    self._uploads(db),
+                    self._deletions(db),
+                ),
+                current,
             ),
         )
 

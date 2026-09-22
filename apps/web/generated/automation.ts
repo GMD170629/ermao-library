@@ -6,10 +6,8 @@ export type CreateGrantRequest = {
   scopes?: Array<Scope>;
   libraryIds?: Array<string>;
   libraryScope?: "all" | "selected";
-  writebackTargets?: Array<WritebackTarget>;
-  allowCrossLibrary?: boolean;
   name: string;
-  lifetimeDays?: 30 | 90 | 365;
+  lifetimeDays?: 30 | 90 | 365 | null;
 };
 
 export type CreatedGrantPayload = {
@@ -25,13 +23,11 @@ export type GrantView = {
   scopes?: Array<Scope>;
   libraryIds?: Array<string>;
   libraryScope?: "all" | "selected";
-  writebackTargets?: Array<WritebackTarget>;
-  allowCrossLibrary?: boolean;
   id: string;
   tokenAvailable: boolean;
   name: string;
   createdAtMs: number;
-  expiresAtMs: number;
+  expiresAtMs: number | null;
   revokedAtMs: number | null;
   lastUsedAtMs: number | null;
 };
@@ -45,6 +41,10 @@ export type ManagedOperationFields = {
   cancel_requested: boolean;
   total_targets: number;
   targets: Array<OperationTargetFields>;
+  received_bytes?: number | null;
+  size_bytes?: number | null;
+  upload_result?: UploadOutcomeFields | null;
+  file_saved?: boolean | null;
 };
 
 export type OperationListPayload = {
@@ -70,7 +70,7 @@ export type RevokedGrantPayload = {
   revoked?: true;
 };
 
-export type Scope = "library:read" | "shelves:write" | "tags:write" | "files:read" | "files:move" | "metadata:write" | "metadata:override" | "metadata:writeback";
+export type Scope = "system:read" | "system:manage" | "books:write" | "shelves:write" | "files:upload" | "files:modify";
 
 export type ServiceSettingsFields = {
   enabled?: boolean;
@@ -78,4 +78,24 @@ export type ServiceSettingsFields = {
   publicBaseUrl?: string;
 };
 
-export type WritebackTarget = "sidecar" | "embedded";
+export type UpdateGrantRequest = {
+  scopes?: Array<Scope>;
+  libraryIds?: Array<string>;
+  libraryScope?: "all" | "selected";
+  name: string;
+  lifetimeDays?: 30 | 90 | 365 | null;
+};
+
+export type UpdatedGrantPayload = {
+  grant: GrantView;
+};
+
+export type UploadOutcomeFields = {
+  status: string;
+  task_id?: string | null;
+  book_ids?: Array<string>;
+  resource_ids?: Array<string>;
+  cover_url?: string | null;
+  revision?: string | null;
+  error_code?: string | null;
+};

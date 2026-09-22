@@ -1,3 +1,5 @@
+from app.contracts.automation_upload import UploadError
+
 """Cookie-only grant management; MCP credentials never authenticate these routes."""
 
 from typing import Annotated
@@ -34,6 +36,9 @@ from app.modules.automation.presentation.schemas import (
     RevokedGrantResponse,
     ServiceSettingsFields,
     ServiceSettingsResponse,
+    UpdatedGrantPayload,
+    UpdatedGrantResponse,
+    UpdateGrantRequest,
 )
 from app.modules.library.public import FileMoveError
 from app.modules.metadata.public import StandardMetadataError
@@ -135,6 +140,35 @@ def create_grant(
         return _error(request, error)
 
 
+@router.patch("/grants/{grant_id}", response_model=UpdatedGrantResponse)
+def update_grant(
+    grant_id: str,
+    payload: UpdateGrantRequest,
+    request: Request,
+    db: Database,
+    settings: Configuration,
+) -> UpdatedGrantResponse | Response:
+    user, auth_error = require_user(db, request, settings)
+    if auth_error is not None or user is None:
+        return _private(
+            auth_error or fail("UNAUTHORIZED", status_code=401, code="UNAUTHORIZED")
+        )
+    try:
+        _check_origin(request)
+        grant = build_grant_manager(db, settings).update(
+            user_id=user.id,
+            grant_id=grant_id,
+            name=payload.name,
+            permissions=payload.permissions(),
+            lifetime_days=payload.lifetime_days
+            if "lifetime_days" in payload.model_fields_set
+            else "keep",
+        )
+        return _private(ok(UpdatedGrantPayload(grant=GrantView.from_grant(grant))))
+    except AutomationAccessError as error:
+        return _error(request, error)
+
+
 @router.delete("/grants/{grant_id}", response_model=RevokedGrantResponse)
 def revoke_grant(
     grant_id: str, request: Request, db: Database, settings: Configuration
@@ -214,7 +248,12 @@ def list_operations(
                 )
             )
         )
-    except (AutomationAccessError, FileMoveError, StandardMetadataError) as error:
+    except (
+        AutomationAccessError,
+        FileMoveError,
+        StandardMetadataError,
+        UploadError,
+    ) as error:
         return _error(request, AutomationAccessError(str(error)))
 
 
@@ -237,7 +276,12 @@ def cancel_operation(
                 )
             )
         )
-    except (AutomationAccessError, FileMoveError, StandardMetadataError) as error:
+    except (
+        AutomationAccessError,
+        FileMoveError,
+        StandardMetadataError,
+        UploadError,
+    ) as error:
         return _error(request, AutomationAccessError(str(error)))
 
 

@@ -12,6 +12,7 @@ from pathlib import Path
 from tempfile import gettempdir
 from time import monotonic
 
+from app.bootstrap.automation import build_automation_uploads
 from app.bootstrap.file_moves import build_file_move_worker
 from app.bootstrap.library_scan_runtime import (
     LibraryScanCoordinator,
@@ -25,7 +26,6 @@ from app.bootstrap.readable_resource_pipeline import (
 from app.bootstrap.standard_writeback import (
     maintain_standard_writeback,
     process_standard_writeback,
-    recover_standard_writeback,
 )
 from app.core.config import get_settings
 from app.core.database_errors import is_database_busy_error
@@ -136,7 +136,6 @@ def main() -> None:
                 automatic_request_gate=build_automatic_metadata_request_gate(),
                 standard_handler=process_standard_writeback,
                 standard_maintenance=maintain_standard_writeback,
-                standard_recovery=recover_standard_writeback,
             )
             if not stop_event.is_set():
                 metadata_worker.start()
@@ -176,8 +175,18 @@ def main() -> None:
         scan_paused = False
         next_scan_attempt = 0.0
         imports_paused = False
+        next_upload_cleanup = 0.0
         next_file_move_attempt = 0.0
         while not stop_event.is_set():
+            if monotonic() >= next_upload_cleanup:
+                try:
+                    with BackgroundSessionLocal() as upload_session:
+                        build_automation_uploads(upload_session).cleanup()
+                except Exception as error:  # noqa: BLE001 - maintenance must not stop imports.
+                    logger.warning(
+                        "worker.upload_cleanup_failed type=%s", type(error).__name__
+                    )
+                next_upload_cleanup = monotonic() + 60
             if monotonic() >= next_file_move_attempt:
                 try:
                     if file_move_worker is None:

@@ -11,7 +11,6 @@ from app.modules.automation.application.writeback_plans import (
 from app.modules.automation.domain.access import (
     AutomationAccessError,
     Scope,
-    WritebackTarget,
 )
 from app.modules.library.infrastructure.metadata_file_targets import (
     SqlAlchemyMetadataFileTargets,
@@ -32,9 +31,9 @@ def setup(db, tmp_path):
         access,
         permissions=replace(
             access.permissions,
-            scopes=(access.permissions.scopes | {Scope.METADATA_WRITEBACK})
-            - {Scope.METADATA_WRITE},
-            writeback_targets=frozenset({WritebackTarget.SIDECAR}),
+            scopes=(access.permissions.scopes | {Scope.FILES_MODIFY})
+            - {Scope.BOOKS_WRITE},
+
         ),
     )
     catalog = build_automation_catalog(db)

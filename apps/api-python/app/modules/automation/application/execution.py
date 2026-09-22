@@ -43,12 +43,12 @@ class RecheckMoveAccess:
                 service_enabled=settings.enabled,
                 enabled_scopes=settings.enabled_scopes,
             )
-            current.require(Scope.FILES_MOVE)
+            current.require(Scope.FILES_MODIFY)
         except AutomationAccessError as error:
             raise FileMoveError("AUTHORIZATION_REVOKED") from error
         return MoveActor(
             current.user_id,
             current.grant_id,
             current.permissions.library_ids,
-            current.permissions.allow_cross_library,
+            Scope.FILES_MODIFY in current.permissions.scopes,
         )

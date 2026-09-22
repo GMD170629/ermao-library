@@ -6,33 +6,47 @@ from app.modules.automation.domain.access import EffectiveAccess, Scope
 
 TOOL_SCOPES = MappingProxyType(
     {
-        "get_context": frozenset({Scope.LIBRARY_READ}),
-        "list_libraries": frozenset({Scope.LIBRARY_READ}),
-        "search_books": frozenset({Scope.LIBRARY_READ}),
-        "get_books": frozenset({Scope.LIBRARY_READ}),
-        "list_facets": frozenset({Scope.LIBRARY_READ}),
-        "list_shelves": frozenset({Scope.LIBRARY_READ}),
-        "get_shelf": frozenset({Scope.LIBRARY_READ}),
+        "begin_upload": frozenset({Scope.SYSTEM_READ}),
+        "upload_chunk": frozenset({Scope.SYSTEM_READ}),
+        "complete_upload": frozenset({Scope.SYSTEM_READ}),
+        "list_import_queue": frozenset({Scope.SYSTEM_READ}),
+        "get_system_queue_status": frozenset({Scope.SYSTEM_READ}),
+        "list_system_logs": frozenset({Scope.SYSTEM_READ}),
+        "get_system_configuration": frozenset({Scope.SYSTEM_READ}),
+        "update_site_settings": frozenset({Scope.SYSTEM_MANAGE}),
+        "update_email_settings": frozenset({Scope.SYSTEM_MANAGE}),
+        "update_opds_settings": frozenset({Scope.SYSTEM_MANAGE}),
+        "update_library_settings": frozenset({Scope.SYSTEM_MANAGE}),
+        "update_organize_settings": frozenset({Scope.SYSTEM_MANAGE}),
+        "get_context": frozenset({Scope.SYSTEM_READ}),
+        "list_libraries": frozenset({Scope.SYSTEM_READ}),
+        "search_books": frozenset({Scope.SYSTEM_READ}),
+        "get_books": frozenset({Scope.SYSTEM_READ}),
+        "list_facets": frozenset({Scope.SYSTEM_READ}),
+        "list_shelves": frozenset({Scope.SYSTEM_READ}),
+        "get_shelf": frozenset({Scope.SYSTEM_READ}),
+        "update_shelf": frozenset({Scope.SHELVES_WRITE}),
+        "delete_shelf": frozenset({Scope.SHELVES_WRITE}),
         "create_shelf": frozenset({Scope.SHELVES_WRITE}),
         "add_shelf_books": frozenset({Scope.SHELVES_WRITE}),
         "remove_shelf_books": frozenset({Scope.SHELVES_WRITE}),
-        "add_book_tags": frozenset({Scope.TAGS_WRITE}),
-        "remove_book_tags": frozenset({Scope.TAGS_WRITE}),
-        "list_source_nodes": frozenset({Scope.FILES_READ}),
-        "get_metadata_schema": frozenset({Scope.LIBRARY_READ}),
-        "read_file_metadata": frozenset({Scope.FILES_READ}),
-        "update_metadata": frozenset({Scope.METADATA_WRITE}),
-        "refresh_metadata": frozenset({Scope.FILES_READ, Scope.METADATA_WRITE}),
-        "plan_file_operations": frozenset({Scope.FILES_READ, Scope.FILES_MOVE}),
-        "execute_file_operations": frozenset({Scope.FILES_MOVE}),
-        "plan_metadata_writeback": frozenset(
-            {Scope.FILES_READ, Scope.METADATA_WRITEBACK}
-        ),
-        "execute_metadata_writeback": frozenset({Scope.METADATA_WRITEBACK}),
+        "add_book_tags": frozenset({Scope.BOOKS_WRITE}),
+        "remove_book_tags": frozenset({Scope.BOOKS_WRITE}),
+        "list_source_nodes": frozenset({Scope.SYSTEM_READ}),
+        "get_metadata_schema": frozenset({Scope.SYSTEM_READ}),
+        "read_file_metadata": frozenset({Scope.SYSTEM_READ}),
+        "update_metadata": frozenset({Scope.BOOKS_WRITE}),
+        "refresh_metadata": frozenset({Scope.SYSTEM_READ, Scope.BOOKS_WRITE}),
+        "plan_file_deletions": frozenset({Scope.FILES_MODIFY}),
+        "execute_file_deletions": frozenset({Scope.FILES_MODIFY}),
+        "plan_file_operations": frozenset({Scope.SYSTEM_READ, Scope.FILES_MODIFY}),
+        "execute_file_operations": frozenset({Scope.FILES_MODIFY}),
+        "plan_metadata_writeback": frozenset({Scope.SYSTEM_READ, Scope.FILES_MODIFY}),
+        "execute_metadata_writeback": frozenset({Scope.FILES_MODIFY}),
         # Ownership, current target visibility, and the original write scope are
         # checked by operation use cases, not merely by tool discovery.
-        "get_operation": frozenset({Scope.LIBRARY_READ}),
-        "cancel_operation": frozenset({Scope.LIBRARY_READ}),
+        "get_operation": frozenset({Scope.SYSTEM_READ}),
+        "cancel_operation": frozenset({Scope.SYSTEM_READ}),
     }
 )
 
@@ -52,5 +66,28 @@ def visible_tools(
     return tuple(
         name
         for name, required in TOOL_SCOPES.items()
-        if name in implemented and required <= access.permissions.scopes
+        if name in implemented
+        and required <= access.permissions.scopes
+        and (
+            access.can_manage_system
+            or name
+            not in {
+                "list_import_queue",
+                "get_system_queue_status",
+                "list_system_logs",
+                "get_system_configuration",
+                "update_site_settings",
+                "update_email_settings",
+                "update_library_settings",
+                "update_opds_settings",
+                "update_organize_settings",
+            }
+        )
+        and (
+            name not in {"begin_upload", "upload_chunk", "complete_upload"}
+            or bool(
+                access.permissions.scopes
+                & {Scope.FILES_UPLOAD, Scope.BOOKS_WRITE, Scope.FILES_MODIFY}
+            )
+        )
     )

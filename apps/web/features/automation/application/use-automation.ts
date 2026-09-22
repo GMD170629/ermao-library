@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { CreateGrantRequest } from '../../../generated/automation';
-import { cancelOperation, createGrant, loadAutomation, loadOperations, revokeGrant, saveSettings } from '../api/client';
+import type { CreateGrantRequest, UpdateGrantRequest } from '../../../generated/automation';
+import { cancelOperation, createGrant, updateGrant, loadAutomation, loadOperations, revokeGrant, saveSettings } from '../api/client';
 import type { ServiceSettings } from '../model/configuration';
 
 type Data = Awaited<ReturnType<typeof loadAutomation>>;
@@ -39,6 +39,11 @@ export function useAutomation(userId: string | undefined) {
       const result = await createGrant(input, signal);
       if (signal.aborted) return;
       setData((previous) => previous ? { ...previous, grants: [result.grant, ...previous.grants] } : previous);
+    }),
+    update: (id: string, input: UpdateGrantRequest) => mutate(async (signal) => {
+      const grant = await updateGrant(id, input, signal);
+      if (!signal.aborted) setData((previous) => previous ? { ...previous,
+        grants: previous.grants.map((item) => item.id === id ? grant : item) } : previous);
     }),
     revoke: (id: string) => mutate(async (signal) => {
       await revokeGrant(id, signal);

@@ -19,7 +19,10 @@ _IMAGE_SUFFIXES = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
 
 
 class FilesystemSourceNodeCoverPublication(SourceNodeCoverPublicationPort):
-    def __init__(self, storage_root: Path) -> None:
+    def __init__(
+        self, storage_root: Path, *, max_bytes: int = MAX_SOURCE_NODE_COVER_BYTES
+    ) -> None:
+        self._max_bytes = max_bytes
         self._storage_root = storage_root.resolve()
         self._cover_root = self._storage_root / "covers" / "source-nodes"
 
@@ -28,7 +31,7 @@ class FilesystemSourceNodeCoverPublication(SourceNodeCoverPublicationPort):
     ) -> PreparedSourceNodeCover:
         if not source_node_id or Path(source_node_id).name != source_node_id:
             raise ValueError("invalid source node identifier")
-        if not content or len(content) > MAX_SOURCE_NODE_COVER_BYTES:
+        if not content or len(content) > self._max_bytes:
             raise ValueError("source node cover exceeds the supported size")
         self._cover_root.mkdir(parents=True, exist_ok=True)
         temporary_path = self._cover_root / f".{source_node_id}.{uuid4().hex}.part"

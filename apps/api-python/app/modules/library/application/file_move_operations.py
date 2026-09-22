@@ -3,7 +3,11 @@
 from dataclasses import dataclass
 from typing import Protocol
 
-from app.modules.library.application.file_move_plans import FileMovePlan, MoveActor
+from app.modules.library.application.file_move_plans import (
+    FileMovePlan,
+    MoveActor,
+    PlannedMove,
+)
 from app.modules.library.domain.file_moves import FileMoveError
 
 
@@ -30,19 +34,20 @@ class FileMoveOperationPort(Protocol):
 
 
 def require_plan_access(plan: FileMovePlan, actor: MoveActor) -> None:
-    if plan.actor.grant_id != actor.grant_id or plan.actor.user_id != actor.user_id:
-        raise FileMoveError("RESOURCE_NOT_FOUND")
     for move in plan.moves:
-        if (
-            not {move.source.library_id, move.destination.library_id}
-            <= actor.library_ids
-        ):
-            raise FileMoveError("RESOURCE_NOT_FOUND")
-        if (
-            move.source.library_id != move.destination.library_id
-            and not actor.allow_cross_library
-        ):
-            raise FileMoveError("CROSS_LIBRARY_NOT_AUTHORIZED")
+        require_move_access(plan.actor, move, actor)
+
+
+def require_move_access(owner: MoveActor, move: PlannedMove, actor: MoveActor) -> None:
+    if owner.grant_id != actor.grant_id or owner.user_id != actor.user_id:
+        raise FileMoveError("RESOURCE_NOT_FOUND")
+    if not {move.source.library_id, move.destination.library_id} <= actor.library_ids:
+        raise FileMoveError("RESOURCE_NOT_FOUND")
+    if (
+        move.source.library_id != move.destination.library_id
+        and not actor.allow_cross_library
+    ):
+        raise FileMoveError("CROSS_LIBRARY_NOT_AUTHORIZED")
 
 
 def move_progress_result(progress: FileMoveProgress) -> dict[str, object]:

@@ -59,7 +59,7 @@ def test_credential_storage_reopen_revoke_and_current_permissions(db_session, tm
         user_id="owner",
         name="Local client",
         permissions=GrantPermissions(
-            frozenset({Scope.LIBRARY_READ}), frozenset({"test-library"})
+            frozenset({Scope.SYSTEM_READ}), frozenset({"test-library"})
         ),
     )
     assert created.token not in repr(created)
@@ -131,7 +131,7 @@ def test_expiry_exact_boundary_and_cannot_revoke_another_users_grant(
         name="Reader",
         lifetime_days=30,
         permissions=GrantPermissions(
-            frozenset({Scope.LIBRARY_READ}), frozenset({"test-library"})
+            frozenset({Scope.SYSTEM_READ}), frozenset({"test-library"})
         ),
     )
     expiry = created.grant.expires_at_ms
@@ -167,7 +167,7 @@ def test_real_identity_rechecks_admin_downgrade_and_library_scope(db_session, tm
         user_id="admin",
         name="Bounded",
         permissions=GrantPermissions(
-            frozenset({Scope.LIBRARY_READ, Scope.FILES_READ}),
+            frozenset({Scope.SYSTEM_READ, Scope.SYSTEM_READ}),
             frozenset({"test-library"}),
         ),
     )
@@ -180,7 +180,7 @@ def test_real_identity_rechecks_admin_downgrade_and_library_scope(db_session, tm
         )
         assert result.permissions.library_ids == frozenset({"test-library"})
         with pytest.raises(AutomationAccessError, match="RESOURCE_NOT_FOUND"):
-            result.require(Scope.FILES_READ, library_ids=frozenset({"other"}))
+            result.require(Scope.SYSTEM_READ, library_ids=frozenset({"other"}))
         user.role = "member"
         db_session.commit()
         result = authorizer.bearer(
@@ -188,7 +188,7 @@ def test_real_identity_rechecks_admin_downgrade_and_library_scope(db_session, tm
             service_enabled=True,
             enabled_scopes=ALL_SCOPES,
         )
-        assert result.permissions.scopes == frozenset({Scope.LIBRARY_READ})
+        assert result.permissions.scopes == frozenset({Scope.SYSTEM_READ})
         assert result.permissions.library_ids == frozenset()
 
 
@@ -220,7 +220,7 @@ def test_audit_failure_rolls_back_grant_and_event_together(db_session, tmp_path)
             user_id="owner",
             name="Local",
             permissions=GrantPermissions(
-                frozenset({Scope.LIBRARY_READ}), frozenset({"test-library"})
+                frozenset({Scope.SYSTEM_READ}), frozenset({"test-library"})
             ),
         )
     assert list(db_session.scalars(select(AutomationGrantRow))) == []

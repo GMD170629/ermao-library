@@ -1,15 +1,17 @@
 """Bounded owned job references from the two existing durable operation stores."""
 
-from sqlalchemy import literal, select, union_all
+from sqlalchemy import case, literal, select, union_all
 from sqlalchemy.orm import Session
 
 from app.models import (
+    FileDeletePlanRow,
     LibraryFileMoveOperation,
     LibraryFileMoveTarget,
     MetadataStandardWriteOperation,
     MetadataStandardWriteTarget,
 )
 from app.modules.automation.application.operation_management import OperationReference
+from app.modules.automation.infrastructure.upload_schema import AutomationUploadRow
 
 
 class SqlAlchemyOperationHistory:
@@ -18,6 +20,35 @@ class SqlAlchemyOperationHistory:
 
     def _query(self, user_id: str):
         return union_all(
+            select(
+                FileDeletePlanRow.id.label("id"),
+                FileDeletePlanRow.grant_id.label("grant_id"),
+                FileDeletePlanRow.payload["created_at_ms"]
+                .as_integer()
+                .label("created_at_ms"),
+                literal("file_delete").label("kind"),
+            ).where(
+                FileDeletePlanRow.user_id == user_id,
+                FileDeletePlanRow.payload["executing"].as_boolean().is_(True),
+            ),
+            select(
+                AutomationUploadRow.id.label("id"),
+                AutomationUploadRow.grant_id.label("grant_id"),
+                AutomationUploadRow.created_at_ms.label("created_at_ms"),
+                case(
+                    (
+                        AutomationUploadRow.payload["spec"]["purpose"].as_string()
+                        == "book",
+                        "book_upload",
+                    ),
+                    (
+                        AutomationUploadRow.payload["spec"]["purpose"].as_string()
+                        == "replace",
+                        "file_replace",
+                    ),
+                    else_="cover_upload",
+                ).label("kind"),
+            ).where(AutomationUploadRow.user_id == user_id),
             select(
                 LibraryFileMoveOperation.id.label("id"),
                 LibraryFileMoveOperation.grant_id.label("grant_id"),
@@ -39,6 +70,12 @@ class SqlAlchemyOperationHistory:
         visible = (
             select(rows)
             .where(
+                ~select(AutomationUploadRow.id)
+                .where(
+                    AutomationUploadRow.id == rows.c.id,
+                    AutomationUploadRow.library_id.not_in(library_ids),
+                )
+                .exists(),
                 ~select(LibraryFileMoveTarget.operation_id)
                 .where(
                     LibraryFileMoveTarget.operation_id == rows.c.id,

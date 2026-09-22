@@ -15,6 +15,8 @@ class CatalogShelf:
     name: str
     description: str | None
     updated_at: datetime
+    kind: str = "STATIC"
+    rules_json: str = "{}"
 
 
 @dataclass(frozen=True)

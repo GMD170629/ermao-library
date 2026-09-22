@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from typing import Protocol
+from typing import Literal, Protocol
 
 from app.modules.automation.application.audit import AutomationAuditPort
 from app.modules.automation.domain.access import (
@@ -23,7 +23,7 @@ class AutomationGrant:
     name: str
     permissions: GrantPermissions
     created_at_ms: int
-    expires_at_ms: int
+    expires_at_ms: int | None
     revoked_at_ms: int | None = None
     last_used_at_ms: int | None = None
     token_ciphertext: str | None = field(default=None, repr=False)
@@ -61,6 +61,8 @@ class GrantStore(Protocol):
     def list_owned(self, user_id: str) -> tuple[AutomationGrant, ...]: ...
 
     def revoke(self, grant_id: str, user_id: str, now_ms: int) -> bool: ...
+
+    def update(self, grant: AutomationGrant, now_ms: int) -> bool: ...
 
     def record_use(self, grant_id: str, now_ms: int) -> None: ...
 
@@ -114,17 +116,13 @@ class ManageGrants:
         user_id: str,
         name: str,
         permissions: GrantPermissions,
-        lifetime_days: int = 90,
+        lifetime_days: int | None = 90,
     ) -> CreatedGrant:
         actor = self._actor(user_id)
         validate_permissions(permissions, actor)
         if not self._service_enabled():
             raise AutomationAccessError("AUTOMATION_DISABLED")
-        name = name.strip()
-        if not name or len(name) > 100 or any(ord(char) < 32 for char in name):
-            raise AutomationAccessError("INVALID_GRANT_NAME")
-        if isinstance(lifetime_days, bool) or lifetime_days not in {30, 90, 365}:
-            raise AutomationAccessError("INVALID_GRANT_LIFETIME")
+        name = self._validate_fields(name, lifetime_days)
         now_ms = self._clock_ms()
         credential = self._credentials.issue()
         grant = AutomationGrant(
@@ -133,7 +131,9 @@ class ManageGrants:
             name=name,
             permissions=permissions,
             created_at_ms=now_ms,
-            expires_at_ms=now_ms + lifetime_days * 86_400_000,
+            expires_at_ms=None
+            if lifetime_days is None
+            else now_ms + lifetime_days * 86_400_000,
         )
         event = self._audit.prepare("grant.created", user_id, grant.id)
         try:
@@ -154,6 +154,58 @@ class ManageGrants:
             raise
         return CreatedGrant(grant, credential.token)
 
+    @staticmethod
+    def _validate_fields(name: str, lifetime_days: int | None) -> str:
+        name = name.strip()
+        if not name or len(name) > 100 or any(ord(char) < 32 for char in name):
+            raise AutomationAccessError("INVALID_GRANT_NAME")
+        if isinstance(lifetime_days, bool) or lifetime_days not in {None, 30, 90, 365}:
+            raise AutomationAccessError("INVALID_GRANT_LIFETIME")
+        return name
+
+    def update(
+        self,
+        *,
+        user_id: str,
+        grant_id: str,
+        name: str,
+        permissions: GrantPermissions,
+        lifetime_days: int | None | Literal["keep"] = "keep",
+    ) -> AutomationGrant:
+        actor = self._actor(user_id)
+        grant = self._store.by_id(grant_id)
+        if grant is None or grant.user_id != user_id:
+            raise AutomationAccessError("GRANT_NOT_FOUND")
+        now = self._clock_ms()
+        if grant.revoked_at_ms is not None or (
+            grant.expires_at_ms is not None and grant.expires_at_ms <= now
+        ):
+            raise AutomationAccessError("GRANT_INACTIVE")
+        validate_permissions(permissions, actor)
+        name = self._validate_fields(
+            name, None if lifetime_days == "keep" else lifetime_days
+        )
+        expiry = (
+            grant.expires_at_ms
+            if lifetime_days == "keep"
+            else None
+            if lifetime_days is None
+            else now + lifetime_days * 86_400_000
+        )
+        updated = replace(
+            grant, name=name, permissions=permissions, expires_at_ms=expiry
+        )
+        event = self._audit.prepare("grant.updated", user_id, grant_id)
+        try:
+            if not self._store.update(updated, now):
+                raise AutomationAccessError("GRANT_INACTIVE")
+            self._audit.write(event)
+            self._uow.commit()
+        except Exception:
+            self._uow.rollback()
+            raise
+        return updated
+
     def list_owned(self, user_id: str) -> tuple[AutomationGrant, ...]:
         self._actor(user_id)
         return self._store.list_owned(user_id)
@@ -163,7 +215,9 @@ class ManageGrants:
         grant = self._store.by_id(grant_id)
         if grant is None or grant.user_id != user_id:
             raise AutomationAccessError("GRANT_NOT_FOUND")
-        if grant.revoked_at_ms is not None or grant.expires_at_ms <= self._clock_ms():
+        if grant.revoked_at_ms is not None or (
+            grant.expires_at_ms is not None and grant.expires_at_ms <= self._clock_ms()
+        ):
             raise AutomationAccessError("GRANT_INACTIVE")
         if grant.token_ciphertext is None:
             raise AutomationAccessError("TOKEN_NOT_RECOVERABLE")
@@ -242,7 +296,10 @@ class AuthorizeAutomation:
         if (
             grant is None
             or grant.revoked_at_ms is not None
-            or grant.expires_at_ms <= self._clock_ms()
+            or (
+                grant.expires_at_ms is not None
+                and grant.expires_at_ms <= self._clock_ms()
+            )
         ):
             raise AutomationAccessError("UNAUTHORIZED")
         actor = self._identities.current_actor(grant.user_id)

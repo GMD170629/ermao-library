@@ -2,7 +2,7 @@
 
 import re
 
-_SLOT = re.compile(r"\.ermao-mcp-[0-9a-f]{32}-(?:source|target)\Z")
+_SLOT = re.compile(r"(?:\.ermao-mcp-[0-9a-f]{32}-(?:source|target)|\.ermao-delete-[0-9a-f]{32}-[0-9]+)\Z")
 
 
 def is_controlled_file_slot(name: str) -> bool:

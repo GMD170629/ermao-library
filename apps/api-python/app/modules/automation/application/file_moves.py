@@ -26,7 +26,7 @@ def move_actor(access: EffectiveAccess) -> MoveActor:
         access.user_id,
         access.grant_id,
         access.permissions.library_ids,
-        access.permissions.allow_cross_library,
+        Scope.FILES_MODIFY in access.permissions.scopes,
     )
 
 
@@ -43,11 +43,11 @@ class AutomationFileMoves:
     def plan(
         self, access: EffectiveAccess, requests: tuple[MoveRequest, ...]
     ) -> dict[str, object]:
-        access.require(Scope.FILES_READ, Scope.FILES_MOVE)
+        access.require(Scope.SYSTEM_READ, Scope.FILES_MODIFY)
         plan = self.planner.execute(move_actor(access), requests)
         try:
             current = self.authorization.require(
-                access, Scope.FILES_READ, Scope.FILES_MOVE
+                access, Scope.SYSTEM_READ, Scope.FILES_MODIFY
             )
             require_plan_access(plan, move_actor(current))
             self.store.save_plan(plan)
@@ -60,14 +60,14 @@ class AutomationFileMoves:
     def execute(
         self, access: EffectiveAccess, plan_id: str, request_id: str
     ) -> dict[str, object]:
-        access.require(Scope.FILES_MOVE)
+        access.require(Scope.FILES_MODIFY)
         tool = "execute_file_operations"
         fingerprint = request_fingerprint(tool, {"plan_id": plan_id}, request_id)
         try:
             previous = self.receipts.claim(
                 access.grant_id, request_id, tool, fingerprint, self.clock_ms()
             )
-            current = self.authorization.require(access, Scope.FILES_MOVE)
+            current = self.authorization.require(access, Scope.FILES_MODIFY)
             actor = move_actor(current)
             plan = self.store.load_plan(plan_id, actor)
             if previous is not None:
@@ -89,20 +89,20 @@ class AutomationFileMoves:
             raise
 
     def progress(self, access: EffectiveAccess, operation_id: str) -> dict[str, object]:
-        access.require(Scope.FILES_MOVE)
+        access.require(Scope.FILES_MODIFY)
         return move_progress_result(
             self.store.progress(operation_id, move_actor(access))
         )
 
     def cancel(self, access: EffectiveAccess, operation_id: str) -> dict[str, object]:
-        access.require(Scope.FILES_MOVE)
+        access.require(Scope.FILES_MODIFY)
         try:
             # The conditional cancellation update obtains the same transaction
             # reservation as other commands; revoke races are rechecked before commit.
             progress = self.store.cancel(
                 operation_id, move_actor(access), self.clock_ms()
             )
-            current = self.authorization.require(access, Scope.FILES_MOVE)
+            current = self.authorization.require(access, Scope.FILES_MODIFY)
             self.store.progress(operation_id, move_actor(current))
             self.uow.commit()
             return move_progress_result(progress)

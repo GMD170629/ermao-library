@@ -22,7 +22,7 @@ from app.modules.metadata.public import (
 
 
 def require_writeback_plan(access: EffectiveAccess, plan: StandardWritePlan) -> None:
-    access.require(Scope.METADATA_WRITEBACK)
+    access.require(Scope.FILES_MODIFY)
     for target in plan.targets:
         access.require_writeback(
             WritebackTarget.SIDECAR
@@ -96,7 +96,7 @@ class AutomationWritebacks:
         plan = self.planner.execute(access, requests)
         try:
             current = self.authorization.require(
-                access, Scope.FILES_READ, Scope.METADATA_WRITEBACK
+                access, Scope.SYSTEM_READ, Scope.FILES_MODIFY
             )
             require_writeback_plan(current, plan)
             self.store.save(plan)
@@ -109,14 +109,14 @@ class AutomationWritebacks:
     def execute(
         self, access: EffectiveAccess, plan_id: str, request_id: str
     ) -> dict[str, object]:
-        access.require(Scope.METADATA_WRITEBACK)
+        access.require(Scope.FILES_MODIFY)
         tool = "execute_metadata_writeback"
         fingerprint = request_fingerprint(tool, {"plan_id": plan_id}, request_id)
         try:
             previous = self.receipts.claim(
                 access.grant_id, request_id, tool, fingerprint, self.clock_ms()
             )
-            current = self.authorization.require(access, Scope.METADATA_WRITEBACK)
+            current = self.authorization.require(access, Scope.FILES_MODIFY)
             plan = self.store.load(plan_id, current.grant_id, current.user_id)
             require_writeback_plan(current, plan)
             if previous is not None:
@@ -137,18 +137,18 @@ class AutomationWritebacks:
             raise
 
     def progress(self, access: EffectiveAccess, operation_id: str) -> dict[str, object]:
-        access.require(Scope.METADATA_WRITEBACK)
+        access.require(Scope.FILES_MODIFY)
         status = self.store.progress(operation_id, access.grant_id, access.user_id)
         require_writeback_plan(access, status.plan)
         return writeback_progress_result(status)
 
     def cancel(self, access: EffectiveAccess, operation_id: str) -> dict[str, object]:
-        access.require(Scope.METADATA_WRITEBACK)
+        access.require(Scope.FILES_MODIFY)
         try:
             status = self.store.cancel(
                 operation_id, access.grant_id, access.user_id, self.clock_ms()
             )
-            current = self.authorization.require(access, Scope.METADATA_WRITEBACK)
+            current = self.authorization.require(access, Scope.FILES_MODIFY)
             require_writeback_plan(current, status.plan)
             self.uow.commit()
             return writeback_progress_result(status)

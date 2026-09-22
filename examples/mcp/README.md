@@ -8,10 +8,14 @@ The MCP service runs inside the existing backend at your public base URL plus `/
 
 1. 管理员在「设置 → 自动化授权 → MCP 服务」开启服务，填写公开根地址（含部署前缀，不含 `/api/mcp`），选择可授权能力。HTTP 和 HTTPS 均支持域名、IP 与端口，无额外 HTTP 开关。
 2. 「授权服务」默认显示授权列表，右上角「创建授权」展开表单。默认全部书库（动态），包含账户当前及未来可访问书库；也可选择指定书库固定范围。旧授权不会自动扩展。服务关闭时请管理员先开启。
+   创建表单默认勾选当前账户可授权的全部能力及文件子选项，可按需取消。有效期支持 30 天、90 天、365 天和长期，默认 90 天；长期授权没有到期时间，仍受撤销、账户权限与服务开关限制。
+
 3. 每条授权的「复制配置」打开该授权的配置面板，默认 Codex，可切换 LM Studio / Cursor，预览、复制或下载完整配置。配置包含令牌，请勿分享或提交仓库。刷新后可再次取回；关闭面板或离开分区会清除浏览器内存令牌，不保存在浏览器存储中。
 4. 过期或撤销的授权不能取回配置。历史摘要令牌仍可使用，但无法取回；需要完整配置时重新创建授权。操作列表提供原有任务状态、逐项结果、刷新和取消。
 
 Administrators enable MCP in Settings → Automation access → MCP service. HTTP and HTTPS support domains, IPs, ports and deployment prefixes without an extra HTTP opt-in. The Access grants tab defaults to the grant list. Create a grant for all currently and subsequently accessible libraries (dynamic), or explicitly select fixed libraries. Existing grants remain fixed. Each row opens its own complete client configuration, defaulting to Codex, with LM Studio and Cursor options. Secrets can be retrieved again after reload but are never persisted in browser storage. Revoked or expired grants cannot export configuration; legacy hash-only tokens cannot be recovered. The Operations tab preserves task status, per-file results, refresh and cancellation.
+
+The creation form selects all capabilities currently available to your account, including available file sub-options. Lifetimes are 30, 90 (default), 365 days, or no expiration. Non-expiring grants remain subject to revocation, current account permissions and service activation. API clients explicitly send `lifetimeDays: null` for no expiration; omitting it keeps the 90-day default. Responses use `expiresAtMs: null` for non-expiring grants.
 
 服务端令牌采用 AES-GCM 加密保存，同时保留认证摘要。请持久化并独立备份 `storage/secrets/automation-token.key`（权限 0600），与数据库配套恢复。密钥丢失、损坏或权限不安全时明确报错，不覆盖已有密钥；已有密文时也不生成替代密钥。密钥错误不影响已有摘要令牌的认证。仅本人有效 Cookie 会话可通过带合法 Origin 的 `POST /api/automation/grants/{id}/reveal` 取回有效令牌，响应禁止缓存，审计不记录秘密。
 
@@ -68,6 +72,12 @@ uv run --locked python ../../examples/mcp/writeback_metadata_example.py --plan-i
 
 For an exact system-metadata retry, also supply `--expected-revision ORIGINAL_REVISION` and keep the original fields. `--clear FIELD` explicitly clears a nullable field; `--override FIELD` requires separate permission to overwrite a protected field. Do not pass tokens as command-line arguments.
 
+## 对话附件 / Conversation attachments
+
+已增加纯 MCP 图书附件上传与展示封面更新，使用独立 `files:upload` / `books:write` 权限。调用顺序、限制与客户端字节能力要求见 [附件调用说明](attachment-uploads.md)。仅能提供私有附件链接的客户端暂不支持。
+
+Book and cover attachment uploads use pure MCP tools with separate permissions. See [attachment calls and client requirements](attachment-uploads.md). Private attachment links alone are insufficient.
+
 ## 能力与限制 / Capabilities and limits
 
 - 系统更新：输入值 → 数据库。刷新：文件 → 数据库。写回：已确认的系统值 → 指定文件。三个方向独立；系统更新权限不会触发文件自动写回。
@@ -94,6 +104,32 @@ Expired or changed plans require a new reviewed preview. If an operation was alr
 
 For covers, select a `cover_references` entry returned by `get_metadata_schema` and update the system field `cover_ref`. Only up to 50 immutable local covers already saved for this book are eligible. URLs, filesystem paths and other books' references are rejected; no image is copied. The current `values.cover_ref` is not necessarily an eligible candidate. Clearing requires explicit selection and the applicable protected-field permission.
 
-已完成任务的恢复副本尚未验证清理时，相关文件及其父目录移动返回 `RECOVERY_BACKUP_PENDING`，避免改变恢复位置；其他图书不受影响。正常保留期为两天，目标被改动而无法验证时继续保留，需核查任务记录。标准元数据写回更新文件修改时间，使阅读缓存识别新版本；纯移动保留原修改时间。ID3v2.3 使用标准斜线分隔多个作者，作者名字自身包含斜线时拒绝写入，以免读回歧义。
+失败、等待、需要恢复的历史任务和未释放备份不阻塞后续条目或任务，包括同一文件。后续操作校验自己的当前文件、授权、版本和目标条件；正在执行的操作继续互斥。历史恢复副本仍保留核查。标准元数据写回更新修改时间以失效阅读缓存；纯移动保留原修改时间。
 
-While a completed operation retains an unverified recovery backup, moves of the affected file or its parent return `RECOVERY_BACKUP_PENDING`; unrelated books remain movable. The normal retention is two days; changed targets retain backups for review. Metadata writeback advances the file modification time to invalidate reader caches; moves preserve it. ID3v2.3 uses slash-separated authors and rejects author names containing literal slashes to prevent ambiguous round trips.
+Historical failures, waiting/recovery states and retained backups do not block later entries or tasks, including the same file. Each operation validates its own current authority, source and destination; live execution stays serialized. Recovery evidence remains available for review. Metadata writeback advances modification time; moves preserve it.
+
+### 修改已有授权 / Edit an existing grant
+
+在授权行点击“修改”可调整名称、书库、能力和有效期，保存后原令牌与配置继续使用。默认保留原到期时间；选择天数则从保存时重新计算，选择“长期”取消到期限制。已撤销或过期授权不能修改。
+
+Choose **Edit** on an active grant to change its name, libraries, permissions or expiration. The token and client configuration stay unchanged. Expiration is preserved by default; selecting a duration counts from the time you save, and **No expiration** removes the expiry. Revoked or expired grants cannot be edited.
+
+## 三组六项授权
+
+- 系统能力：`system:read` 基础查询固定开启；`system:manage` 修改站点、邮件、授权书库、智能整理和 OPDS 配置。普通账户不能通过基础查询读取全局日志、队列详情或系统配置。
+- 图书数据：`books:write` 更新标题、标签、展示封面和已有可编辑元数据；人工保护覆盖仍明确指定字段与当前修订版本。`shelves:write` 管理个人静态／智能书架、成员及规则。
+- 源文件操作：`files:upload` 导入新文件；`files:modify` 移动、整理、永久删除、标准格式写回和完整文件替换。系统元数据修改不会隐式写入原文件。跨库移动检查源、目标当前授权范围。
+
+升级迁移会保留授权码、有效期、范围和历史任务，将旧授权与服务允许能力重置为基础查询。管理员先在 MCP 服务中开启所需能力，再编辑具体授权。不会将旧权限自动映射为删除或管理能力。
+
+系统工具为 `list_import_queue`、`get_system_queue_status`、`list_system_logs`、`get_system_configuration` 及五个 `update_*_settings` 工具。日志只返回结构化事件标识、级别、来源、动作与时间，省略自由文本和诊断元数据；敏感配置只返回已配置状态，写入密码不回显。不支持任意设置键、用户角色、MCP 授权修改、系统命令、恢复数据库或发布。
+
+书架沿用 `create_shelf`，增加 `kind=SMART` 与 `rules`；`update_shelf`、`delete_shelf` 使用个人书架 ID 和幂等 request_id。规则复用现有筛选模型，结果随当前可见图书动态变化。
+
+`plan_file_deletions(source_node_ids)` 返回实际文件清单与影响字节数，`execute_file_deletions(plan_id)` 执行永久删除。只删除冻结清单内且身份仍匹配的文件；新出现文件不会被递归删除。每个目标保存阶段，索引同步走现有导入队列；不确定阶段返回需要恢复，重复执行同一方案继续一致性处理。不会自动重跑历史任务。
+
+### Six capabilities (English)
+
+Basic queries are mandatory but retain account and library boundaries. System managers may read structured logs, queue status and redacted configuration; `system:manage` enables only the named configuration categories. `books:write` changes system metadata and display covers; explicit protected fields and current revisions remain required. `shelves:write` manages personal static and smart shelves. New imports require `files:upload`; moves, permanent deletion, writeback and whole-file replacement require `files:modify`.
+
+Migration preserves credentials, scope, expiry and history, resetting old permissions and service capabilities to basic queries. Administrators enable capabilities in service settings and edit grants to reassign them. Deletion executes a frozen inventory with durable per-target recovery; recreated names and newly added children are never silently deleted.

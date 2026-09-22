@@ -175,7 +175,7 @@ class BuildStandardWritePlan:
     def execute(
         self, access: EffectiveAccess, requests: tuple[StandardWriteSelection, ...]
     ) -> StandardWritePlan:
-        access.require(Scope.FILES_READ, Scope.METADATA_WRITEBACK)
+        access.require(Scope.SYSTEM_READ, Scope.FILES_MODIFY)
         if not 1 <= len(requests) <= METADATA_BATCH_LIMIT:
             raise AutomationAccessError("INVALID_TARGETS")
         prepared = []

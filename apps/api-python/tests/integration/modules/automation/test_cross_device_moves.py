@@ -73,9 +73,18 @@ def separate_volume(tmp_path):
         pytest.skip("No disposable second filesystem available on this host")
 
 
-@pytest.mark.parametrize("interruption", [None, "publish", "backup"])
+@pytest.mark.parametrize(
+    "interruption,cleanup_change",
+    [
+        (None, None),
+        (None, "publish"),
+        (None, "backup"),
+        ("publish", None),
+        ("backup", None),
+    ],
+)
 def test_real_cross_device_operation_verifies_copy_and_retains_recovery_source(
-    db_session, tmp_path, separate_volume, interruption
+    db_session, tmp_path, separate_volume, interruption, cleanup_change
 ):
     access, root = file_access(db_session, tmp_path)
     assert os.stat(root).st_dev != os.stat(separate_volume).st_dev
@@ -151,11 +160,22 @@ def test_real_cross_device_operation_verifies_copy_and_retains_recovery_source(
     files = Publication()
     command = executor(db_session, store, files, lambda actor: actor)
     if interruption:
-        with pytest.raises(OSError, match="simulated interruption"):
-            command.execute("operation")
+        command.execute("operation")
         assert store.progress("operation", actor).status == "RECOVERY_REQUIRED"
         store.prepare_recovery("operation", 5000)
         db_session.commit()
+        command.execute("operation")
+        assert store.progress("operation", actor).status == "RECOVERY_REQUIRED"
+        assert files.copies == 1
+        assert (separate_volume / "renamed/publication.epub").read_bytes() == original
+        retained = root / (
+            "allowed"
+            if interruption == "publish"
+            else plan.moves[0].backup_relative_path
+        )
+        assert (retained / "publication.epub").read_bytes() == original
+        assert store.expired_backups(10**12, 5) == ()
+        return
     command.execute("operation")
     assert files.copies == 1
     assert store.progress("operation", actor).status == "COMPLETED"
@@ -191,20 +211,22 @@ def test_real_cross_device_operation_verifies_copy_and_retains_recovery_source(
     assert (
         CleanExpiredMoveBackups(store, files, db_session, lambda: 5000).execute() == 0
     )
-    from app.modules.library.domain.file_moves import FileMoveError
-
-    with pytest.raises(FileMoveError, match="RECOVERY_BACKUP_PENDING"):
-        SqlAlchemyMoveTopology(db_session).source("allowed-node", actor.library_ids)
+    assert (
+        SqlAlchemyMoveTopology(db_session)
+        .source("allowed-node", actor.library_ids)
+        .relative_path
+        == "renamed"
+    )
     retained = root / plan.moves[0].backup_relative_path
-    if interruption == "publish":
+    if cleanup_change == "publish":
         (separate_volume / "renamed/publication.epub").write_bytes(b"new user content")
-    elif interruption == "backup":
+    elif cleanup_change == "backup":
         (retained / "publication.epub").write_bytes(b"changed recovery copy")
     cleaned = CleanExpiredMoveBackups(
         store, files, db_session, lambda: RECOVERY_RETENTION_MS + 5000
     ).execute()
-    assert cleaned == (1 if interruption is None else 0)
-    if interruption is None:
+    assert cleaned == (1 if cleanup_change is None else 0)
+    if cleanup_change is None:
         assert not retained.exists()
         assert (
             SqlAlchemyMoveTopology(db_session)

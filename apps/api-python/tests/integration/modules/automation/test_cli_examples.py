@@ -20,7 +20,6 @@ from app.modules.automation.application.settings import AutomationServiceSetting
 from app.modules.automation.domain.access import (
     ALL_SCOPES,
     GrantPermissions,
-    WritebackTarget,
 )
 from app.services.metadata_file_writeback import process_next_metadata_writeback
 from tests.integration.modules.automation.test_mcp_catalog import seed
@@ -46,7 +45,6 @@ def test_five_shipped_examples_default_preview_and_explicit_execution(
         permissions=GrantPermissions(
             ALL_SCOPES,
             frozenset({"test-library"}),
-            frozenset({WritebackTarget.SIDECAR}),
         ),
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)

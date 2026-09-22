@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from functools import partial
 from time import time_ns
 from typing import Any, cast
 
@@ -29,6 +30,9 @@ from app.modules.shelf.application import (
     validate_member_replacement,
 )
 from app.modules.shelf.application.commands import ShelfWriteStore
+from app.modules.shelf.application.smart_rules import (
+    normalize_smart_shelf_rules as _normalize_smart_shelf_rules,
+)
 from app.modules.shelf.domain import (
     ShelfCollectionPolicyError,
     ShelfKind,
@@ -50,6 +54,8 @@ from app.modules.shelf.public import (
 )
 from app.schemas.responses import fail, ok
 from app.services.library_filters import normalize_filter_rules
+
+normalize_smart_shelf_rules = partial(_normalize_smart_shelf_rules, normalize_filter_rules=normalize_filter_rules)
 
 router = APIRouter(tags=["shelf"], route_class=TypedContractRoute)
 
@@ -412,48 +418,6 @@ def _collection_detail_view(
     return result
 
 
-def _normalized_smart_shelf_rules(value: Any) -> tuple[dict[str, Any], str | None]:
-    if value is None:
-        return {}, None
-    if not isinstance(value, dict):
-        return {}, "智能书架规则格式不正确"
-    rules: dict[str, Any] = {}
-    search = str(value.get("search") or "").strip()
-    if search:
-        rules["search"] = search[:200]
-    statuses = [str(item).upper() for item in value.get("statuses") or []]
-    if any(item not in {"UNREAD", "READING", "FINISHED"} for item in statuses):
-        return {}, "阅读状态规则无效"
-    if statuses:
-        rules["statuses"] = list(dict.fromkeys(statuses))
-    if value.get("publishers"):
-        return {}, "不支持的筛选维度：publisher"
-    for key in ("tags", "authors"):
-        values = [
-            str(item).strip() for item in value.get(key) or [] if str(item).strip()
-        ]
-        if values:
-            rules[key] = list(dict.fromkeys(values))[:100]
-    dynamic_rules, dynamic_error = normalize_filter_rules(
-        {
-            "combinator": value.get("combinator", "ALL"),
-            "conditions": value.get("conditions") or [],
-        }
-    )
-    if dynamic_error:
-        return {}, dynamic_error
-    if dynamic_rules["conditions"]:
-        rules.update(dynamic_rules)
-    included_book_ids = [
-        str(item).strip()
-        for item in value.get("includedBookIds") or []
-        if str(item).strip()
-    ]
-    if included_book_ids:
-        rules["includedBookIds"] = list(dict.fromkeys(included_book_ids))[:500]
-    return rules, None
-
-
 def _normalized_shelf_book_ids(
     db: Session, value: Any, user: User
 ) -> tuple[list[str], str | None]:
@@ -627,7 +591,7 @@ def create_shelf(
         kind = ShelfKind.parse(payload.get("kind"))
     except ShelfCollectionPolicyError as error:
         return _collection_policy_response(error)
-    rules, rules_error = _normalized_smart_shelf_rules(payload.get("rules"))
+    rules, rules_error = normalize_smart_shelf_rules(payload.get("rules"))
     if rules_error:
         return fail(
             rules_error,
@@ -739,7 +703,7 @@ def update_shelf(
             raise ShelfCollectionPolicyError("INVALID_SHELF_KIND_TRANSITION")
     except ShelfCollectionPolicyError as error:
         return _collection_policy_response(error)
-    rules, rules_error = _normalized_smart_shelf_rules(
+    rules, rules_error = normalize_smart_shelf_rules(
         payload.get("rules", _parse_json(existing_shelf.get("rulesJson"), {}))
     )
     if rules_error:

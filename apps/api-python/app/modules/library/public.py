@@ -332,3 +332,10 @@ __all__ = [
     "resource_is_openable",
     "resource_root_folder_creates_empty_book_on_discovery",
 ]
+
+from app.modules.library.application.file_deletions import FileDeletions, DeletePlan
+
+__all__ += ["FileDeletions", "DeletePlan"]
+
+from app.modules.library.application.file_move_plans import MoveSource
+__all__ += ["MoveSource"]

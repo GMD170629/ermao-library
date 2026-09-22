@@ -35,13 +35,9 @@ def test_upgrade_creates_no_grants_and_is_reentrant(tmp_path):
             column["name"]: column
             for column in inspect(engine).get_columns("AutomationGrant")
         }
-        assert columns["writebackTargets"]["default"] == "'[]'"
-        assert columns["allowCrossLibrary"]["default"] == "'0'"
+        assert "writebackTargets" not in columns
+        assert "allowCrossLibrary" not in columns
         assert "token" not in columns
-        command.downgrade(config, "0020_recheck_scan_gaps")
-        assert "AutomationGrant" not in inspect(engine).get_table_names()
-        with Session(engine) as db:
-            assert db.get(User, "existing") is not None
     finally:
         engine.dispose()
 
@@ -79,7 +75,7 @@ def test_existing_grants_keep_fixed_scope_and_hash_through_migration(tmp_path):
                     userId="owner",
                     name="Legacy",
                     tokenDigest="a" * 64,
-                    scopes=["library:read"],
+                    scopes=["system:read"],
                     libraryIds=["fixed"],
                     writebackTargets=[],
                     allowCrossLibrary=False,
@@ -97,5 +93,88 @@ def test_existing_grants_keep_fixed_scope_and_hash_through_migration(tmp_path):
                 assert row["libraryIds"] == ["fixed"]
                 assert row["tokenDigest"] == "a" * 64
             command.downgrade(config, "0025_standard_writeback_plans")
+    finally:
+        engine.dispose()
+
+
+def test_six_capabilities_reset_preserves_credentials_and_history(tmp_path):
+    import json
+
+    engine = create_sqlite_engine(tmp_path / "capabilities.sqlite")
+    try:
+        config = alembic_config_for_engine(engine)
+        command.upgrade(config, "0027_automation_uploads")
+        metadata = sa.MetaData()
+        grants = sa.Table("AutomationGrant", metadata, autoload_with=engine)
+        users = sa.Table("User", metadata, autoload_with=engine)
+        settings = sa.Table("SystemSetting", metadata, autoload_with=engine)
+        receipts = sa.Table("AutomationReceipt", metadata, autoload_with=engine)
+        with engine.begin() as connection:
+            connection.execute(
+                users.insert().values(
+                    id="owner",
+                    email="owner@example.com",
+                    name="Owner",
+                    passwordHash="test",
+                    updatedAt=datetime.now(UTC),
+                )
+            )
+            connection.execute(
+                grants.insert().values(
+                    id="retained",
+                    userId="owner",
+                    name="Retained",
+                    tokenDigest="d" * 64,
+                    tokenCiphertext="encrypted-test-value",
+                    libraryScope="all",
+                    libraryIds=[],
+                    scopes=["library:read", "files:move", "metadata:writeback"],
+                    writebackTargets=["embedded"],
+                    allowCrossLibrary=True,
+                    createdAt=42,
+                    expiresAt=0,
+                )
+            )
+            connection.execute(receipts.insert().values(grantId="retained", requestId="historical", tool="update_metadata", fingerprint="f"*64, createdAt=42, result={"updated":1}))
+            connection.execute(
+                settings.insert().values(
+                    key="automation.mcp",
+                    updatedAt=datetime.now(UTC),
+                    value=json.dumps(
+                        {
+                            "enabled": True,
+                            "enabled_scopes": ["library:read", "files:move"],
+                            "public_base_url": "http://localhost/books",
+                        }
+                    ),
+                )
+            )
+        command.upgrade(config, "head")
+        command.upgrade(config, "head")
+        current = sa.Table("AutomationGrant", sa.MetaData(), autoload_with=engine)
+        with engine.connect() as connection:
+            grant = connection.execute(sa.select(current)).mappings().one()
+            assert grant["id"] == "retained" and grant["name"] == "Retained"
+            assert (
+                grant["tokenDigest"] == "d" * 64
+                and grant["tokenCiphertext"] == "encrypted-test-value"
+            )
+            assert grant["libraryScope"] == "all" and grant["libraryIds"] == []
+            assert grant["createdAt"] == 42 and grant["expiresAt"] == 0
+            assert grant["scopes"] == ["system:read"]
+            assert connection.execute(sa.select(receipts.c.result)).scalar_one() == {"updated":1}
+            assert "writebackTargets" not in grant and "allowCrossLibrary" not in grant
+            value = json.loads(
+                connection.execute(
+                    sa.select(settings.c.value).where(
+                        settings.c.key == "automation.mcp"
+                    )
+                ).scalar_one()
+            )
+            assert value == {
+                "enabled": True,
+                "enabled_scopes": ["system:read"],
+                "public_base_url": "http://localhost/books",
+            }
     finally:
         engine.dispose()

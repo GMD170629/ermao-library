@@ -6,6 +6,7 @@ from pydantic import TypeAdapter
 from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session, aliased
 
+from app.infrastructure.file_operation_conflicts import writeback_has_live_lease
 from app.infrastructure.file_recovery_budget import reserved_file_recovery_bytes
 from app.models import LibraryBook, LibraryImportTask
 from app.models.organize import MetadataWritebackOperation, MetadataWritebackTarget
@@ -171,17 +172,30 @@ class SqlAlchemyFileMoveOperations:
         self, operation_id: str, actor: MoveActor, now_ms: int
     ) -> FileMoveProgress:
         row = self._owned(operation_id, actor)
-        if row.status not in _TERMINAL:
+        has_queued = (
+            self._db.scalar(
+                select(LibraryFileMoveTarget.operation_id)
+                .where(
+                    LibraryFileMoveTarget.operation_id == operation_id,
+                    LibraryFileMoveTarget.stage == "QUEUED",
+                )
+                .limit(1)
+            )
+            is not None
+        )
+        if row.status not in _TERMINAL or has_queued:
             row.cancel_requested = True
             row.updated_at_ms = now_ms
             if row.status == "QUEUED":
-                row.status = "CANCELLED"
                 for target in self._db.scalars(
                     select(LibraryFileMoveTarget).where(
-                        LibraryFileMoveTarget.operation_id == operation_id
+                        LibraryFileMoveTarget.operation_id == operation_id,
+                        LibraryFileMoveTarget.stage == "QUEUED",
                     )
                 ):
                     target.stage = "CANCELLED"
+                self._db.flush()
+                self.finish(operation_id, now_ms)
             self._db.flush()
         return self.progress(operation_id, actor)
 
@@ -217,7 +231,11 @@ class SqlAlchemyFileMoveOperations:
             .join(LibraryBook, LibraryBook.id == MetadataWritebackOperation.book_id)
             .where(
                 LibraryBook.library_id.in_(libraries),
-                MetadataWritebackTarget.status.in_(("RUNNING", "PREPARED", "REVIEW")),
+                writeback_has_live_lease(
+                    MetadataWritebackTarget.status,
+                    MetadataWritebackTarget.lease_expires_at,
+                    datetime.fromtimestamp(now_ms / 1000, UTC),
+                ),
             )
             .exists()
         )
@@ -233,7 +251,6 @@ class SqlAlchemyFileMoveOperations:
                         "PREPARING",
                         "FILES_PUBLISHED",
                         "INDEX_UPDATED",
-                        "RECOVERY_REQUIRED",
                     )
                 ),
                 or_(
@@ -246,8 +263,15 @@ class SqlAlchemyFileMoveOperations:
         candidate = (
             select(LibraryFileMoveOperation.id)
             .where(
-                LibraryFileMoveOperation.status == "QUEUED",
-                LibraryFileMoveOperation.cancel_requested.is_(False),
+                LibraryFileMoveOperation.status.in_(
+                    ("QUEUED", "RECOVERY_REQUIRED", "PARTIAL", "FAILED")
+                ),
+                select(LibraryFileMoveTarget.operation_id)
+                .where(
+                    LibraryFileMoveTarget.operation_id == LibraryFileMoveOperation.id,
+                    LibraryFileMoveTarget.stage == "QUEUED",
+                )
+                .exists(),
                 ~running_import,
                 ~running_writeback,
                 ~active_move,
@@ -365,9 +389,22 @@ class SqlAlchemyFileMoveOperations:
         )
 
     def finish(self, operation_id: str, now_ms: int) -> None:
-        stages = set(self.execution(operation_id).stages)
+        stages = set(
+            self._db.scalars(
+                select(LibraryFileMoveTarget.stage).where(
+                    LibraryFileMoveTarget.operation_id == operation_id
+                )
+            )
+        )
         if "RECOVERY_REQUIRED" in stages:
             status = "RECOVERY_REQUIRED"
+        elif "QUEUED" in stages and stages <= {
+            "QUEUED",
+            "COMPLETED",
+            "FAILED",
+            "CANCELLED",
+        }:
+            status = "QUEUED"
         elif stages == {"COMPLETED"}:
             status = "COMPLETED"
         elif stages == {"CANCELLED"}:
@@ -394,7 +431,6 @@ class SqlAlchemyFileMoveOperations:
                         "PREPARING",
                         "FILES_PUBLISHED",
                         "INDEX_UPDATED",
-                        "RECOVERY_REQUIRED",
                     )
                 ),
             )
@@ -403,32 +439,26 @@ class SqlAlchemyFileMoveOperations:
         )
 
     def prepare_recovery(self, operation_id: str, now_ms: int) -> None:
-        """Worker-start recovery only; no I/O or target expansion occurs here."""
+        """Quarantine interrupted entries; leave queued siblings executable."""
         targets = tuple(
             self._db.scalars(
                 select(LibraryFileMoveTarget).where(
                     LibraryFileMoveTarget.operation_id == operation_id,
-                    LibraryFileMoveTarget.stage == "RECOVERY_REQUIRED",
+                    LibraryFileMoveTarget.stage.in_(
+                        ("PREPARING", "FILES_PUBLISHED", "INDEX_UPDATED")
+                    ),
                 )
             )
         )
         for target in targets:
-            resume = target.recovery.get("resume_stage")
-            if resume not in {
-                "QUEUED",
-                "PREPARING",
-                "FILES_PUBLISHED",
-                "INDEX_UPDATED",
-            }:
-                raise FileMoveError("RECOVERY_STAGE_UNKNOWN")
-            target.stage = str(resume)
-            target.error_code = None
-        self._db.execute(
-            update(LibraryFileMoveOperation)
-            .where(LibraryFileMoveOperation.id == operation_id)
-            .values(status="PREPARING", updated_at_ms=now_ms)
-        )
-        self._db.flush()
+            self.checkpoint(
+                operation_id,
+                target.ordinal,
+                "RECOVERY_REQUIRED",
+                now_ms,
+                "FILE_OPERATION_INTERRUPTED",
+            )
+        self.finish(operation_id, now_ms)
 
     def record_directory(
         self, operation_id: str, ordinal: int, directory: CreatedMoveDirectory

@@ -258,7 +258,11 @@ class SqlAlchemyStandardWritePlans:
             else "RUNNING"
         )
         queue.updated_at = now
-        queue.lease_expires_at = now + timedelta(seconds=60)
+        if stage == "RECOVERY_REQUIRED":
+            queue.lease_owner_id = None
+            queue.lease_expires_at = None
+        else:
+            queue.lease_expires_at = now + timedelta(seconds=60)
         self._db.flush()
 
     def complete(
@@ -394,25 +398,3 @@ class SqlAlchemyStandardWritePlans:
             .values(cancel_requested=True, updated_at_ms=now_ms)
         )
         return self.progress(operation_id, grant_id, user_id)
-
-    def recover_verified_targets(self, now_ms: int) -> int:
-        """Once at startup, let the existing lease-aware queue retry known proofs."""
-        rows = self._db.scalars(
-            select(MetadataStandardWriteTarget).where(
-                MetadataStandardWriteTarget.stage == "RECOVERY_REQUIRED",
-                MetadataStandardWriteTarget.recovery["proof"].is_not(None),
-            )
-        )
-        count = 0
-        for row in rows:
-            if row.recovery.get("proof") is None:
-                continue
-            queue = self._db.get(MetadataWritebackTarget, row.queue_target_id)
-            if queue is None or queue.status != "REVIEW":
-                continue
-            _PROOF.validate_python(row.recovery["proof"])
-            queue.status = "PREPARED"
-            queue.updated_at = datetime.fromtimestamp(now_ms / 1000, UTC)
-            count += 1
-        self._db.flush()
-        return count

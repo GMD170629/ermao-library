@@ -137,7 +137,7 @@ def test_legacy_expired_and_lost_key_never_regenerates(
     sign_in(client, db_session, "owner")
     manager = build_grant_manager(db_session, test_settings)
     permissions = GrantPermissions(
-        frozenset({Scope.LIBRARY_READ}), frozenset(), library_scope="all"
+        frozenset({Scope.SYSTEM_READ}), frozenset(), library_scope="all"
     )
     created = manager.create(user_id="owner", name="Encrypted", permissions=permissions)
     key = test_settings.resolved_storage_root / "secrets/automation-token.key"
@@ -227,3 +227,73 @@ def test_dynamic_libraries_follow_current_access_and_fixed_grants_do_not_expand(
         ).json()["error"]["code"]
         == "LIBRARY_NOT_FOUND"
     )
+
+
+def test_explicit_non_expiring_grant_remains_valid_and_revocable(
+    client, db_session, test_settings
+):
+    from app.modules.auth.infrastructure.automation_identity import (
+        SqlAlchemyAutomationIdentity,
+    )
+    from app.modules.automation.application.grants import (
+        AuthorizeAutomation,
+        ManageGrants,
+    )
+    from app.modules.automation.infrastructure.credentials import AutomationCredentials
+    from app.modules.automation.infrastructure.grants import SqlAlchemyGrantStore
+    from app.modules.system.infrastructure.automation_audit import (
+        SqlAlchemyAutomationAudit,
+    )
+
+    enable_service(db_session)
+    sign_in(client, db_session, "owner")
+    response = client.post(
+        "/api/automation/grants", headers=ORIGIN, json=grant_request(lifetimeDays=None)
+    )
+    assert response.status_code == 200, response.text
+    created = response.json()["data"]
+    assert created["grant"]["expiresAtMs"] is None
+    store = SqlAlchemyGrantStore(db_session)
+    from app.modules.library.infrastructure.automation_access import (
+        SqlAlchemyVisibleLibraryIds,
+    )
+
+    identity = SqlAlchemyAutomationIdentity(
+        db_session, SqlAlchemyVisibleLibraryIds(db_session)
+    )
+    future = lambda: 9_000_000_000_000
+    authorizer = AuthorizeAutomation(store, identity, AutomationCredentials(), future)
+    manager = ManageGrants(
+        store,
+        identity,
+        AutomationCredentials(),
+        db_session,
+        future,
+        SqlAlchemyAutomationAudit(db_session),
+        AutomationTokenVault(test_settings.resolved_storage_root / "secrets"),
+        lambda: True,
+    )
+    assert manager.list_owned("owner")[0].expires_at_ms is None
+    assert (
+        manager.reveal(user_id="owner", grant_id=created["grant"]["id"])
+        == created["token"]
+    )
+    assert (
+        authorizer.bearer(
+            f"Bearer {created['token']}",
+            service_enabled=True,
+            enabled_scopes=ALL_SCOPES,
+        ).grant_id
+        == created["grant"]["id"]
+    )
+    manager.revoke(user_id="owner", grant_id=created["grant"]["id"])
+    with pytest.raises(AutomationAccessError, match="UNAUTHORIZED"):
+        authorizer.bearer(
+            f"Bearer {created['token']}",
+            service_enabled=True,
+            enabled_scopes=ALL_SCOPES,
+        )
+    ordinary = client.post(
+        "/api/automation/grants", headers=ORIGIN, json=grant_request()
+    ).json()["data"]["grant"]
+    assert ordinary["expiresAtMs"] - ordinary["createdAtMs"] == 90 * 86_400_000

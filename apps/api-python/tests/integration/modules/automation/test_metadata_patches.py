@@ -36,10 +36,10 @@ def setup_metadata(db):
         original.grant.permissions,
         scopes=frozenset(
             {
-                Scope.LIBRARY_READ,
-                Scope.METADATA_WRITE,
-                Scope.METADATA_OVERRIDE,
-                Scope.TAGS_WRITE,
+                Scope.SYSTEM_READ,
+                Scope.BOOKS_WRITE,
+                Scope.BOOKS_WRITE,
+                Scope.BOOKS_WRITE,
             }
         ),
     )
@@ -90,7 +90,7 @@ def test_patch_version_protection_clear_fill_and_receipt(db_session):
         access,
         permissions=replace(
             access.permissions,
-            scopes=access.permissions.scopes - {Scope.METADATA_OVERRIDE},
+            scopes=access.permissions.scopes - {Scope.BOOKS_WRITE},
         ),
     )
     with pytest.raises(AutomationAccessError, match="SCOPE_REQUIRED"):
@@ -274,14 +274,7 @@ def test_root_fill_does_not_overwrite_nonempty_linked_book(db_session):
 
 def test_tag_only_override_requires_exact_fields_and_revision(db_session):
     access = setup_metadata(db_session)
-    # This token has no general metadata write permission.
-    access = replace(
-        access,
-        permissions=replace(
-            access.permissions,
-            scopes=access.permissions.scopes - {Scope.METADATA_WRITE},
-        ),
-    )
+    # Book writes include tags; explicit fields and revisions remain required.
     commands = build_automation_writes(db_session)
     commands.book_tags(access, "tag-first", ["allowed"], ["One"], add=True)
     with pytest.raises(AutomationAccessError, match="EXPECTED_REVISION_REQUIRED"):

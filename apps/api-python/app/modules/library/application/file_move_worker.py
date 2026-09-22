@@ -36,10 +36,9 @@ class FileMoveWorker:
             if operation_id is not None:
                 # A failure stays visible for manual recovery or the next process
                 # start. Never retry an uncertain publication in a hot loop.
-                self.recovery_cursor = operation_id
                 self.store.prepare_recovery(operation_id, self.clock_ms())
                 self.uow.commit()
-                self.execute.execute(operation_id)
+                self.recovery_cursor = operation_id
                 return True
             self.recovered = True
             self.uow.rollback()

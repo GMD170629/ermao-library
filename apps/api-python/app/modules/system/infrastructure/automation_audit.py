@@ -15,6 +15,7 @@ _MESSAGES = {
         "已读取自动化授权配置",
         "Automation grant configuration revealed",
     ),
+    "grant.updated": ("已修改自动化授权", "Automation grant updated"),
     "grant.created": ("已创建自动化授权", "Automation grant created"),
     "grant.revoked": ("已撤销自动化授权", "Automation grant revoked"),
     "settings.updated": ("已更新 MCP 服务设置", "MCP service settings updated"),

@@ -1,9 +1,11 @@
 """Cookie-session history and cancellation; never an alternative execution path."""
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal, Protocol
 
+from app.contracts.automation_upload import UploadError, UploadOutcome
+from app.modules.automation.application.deletions import deletion_result
 from app.modules.automation.application.file_moves import move_actor
 from app.modules.automation.application.grants import (
     AutomationIdentityPort,
@@ -26,7 +28,7 @@ from app.modules.metadata.public import StandardMetadataError
 class OperationReference:
     operation_id: str
     grant_id: str
-    kind: Literal["file_move", "metadata_writeback"]
+    kind: Literal["file_move", "metadata_writeback", "book_upload", "cover_upload"]
     created_at_ms: int
 
 
@@ -55,6 +57,10 @@ class ManagedOperationView:
     cancel_requested: bool
     total_targets: int
     targets: tuple[OperationTargetView, ...]
+    received_bytes: int | None = None
+    size_bytes: int | None = None
+    upload_result: UploadOutcome | None = None
+    file_saved: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -88,8 +94,60 @@ class ManageAutomationOperations:
         if reference is None:
             raise AutomationAccessError("RESOURCE_NOT_FOUND")
         access = self._access(user_id, reference)
+        if reference.kind in {"book_upload", "cover_upload", "file_replace"}:
+            upload = self.operations.uploads.describe(access, operation_id)
+            relative = (
+                upload.target.relative_path
+                if upload.spec.purpose == "book"
+                else upload.spec.filename
+            )
+            return ManagedOperationView(
+                upload.id,
+                upload.grant_id,
+                reference.kind,
+                upload.created_at_ms,
+                upload.status,
+                upload.status == "CANCELLED",
+                1,
+                (
+                    OperationTargetView(
+                        upload.status, relative, None, upload.error_code
+                    ),
+                ),
+                upload.offset,
+                upload.spec.size_bytes,
+                upload.outcome,
+                upload.file_saved,
+            )
+        if reference.kind == "file_delete":
+            access.require(Scope.FILES_MODIFY)
+            files = self.operations.deletions.files
+            plan = files.observed(
+                files.store.load(operation_id, access.user_id, access.grant_id)
+            )
+            if any(
+                target.source.library_id not in access.permissions.library_ids
+                for target in plan.targets
+            ):
+                raise AutomationAccessError("RESOURCE_NOT_FOUND")
+            result = deletion_result(plan)
+            return ManagedOperationView(
+                plan.id,
+                plan.grant_id,
+                "file_delete",
+                plan.created_at_ms,
+                str(result["status"]),
+                plan.cancelled,
+                len(plan.targets),
+                tuple(
+                    OperationTargetView(
+                        target.stage, target.source.relative_path, None, target.error
+                    )
+                    for target in plan.targets[:50]
+                ),
+            )
         if reference.kind == "file_move":
-            access.require(Scope.FILES_MOVE)
+            access.require(Scope.FILES_MODIFY)
             progress = self.operations.moves.store.progress(
                 operation_id, move_actor(access)
             )
@@ -172,7 +230,12 @@ class ManageAutomationOperations:
         for reference in self.history.recent(user_id, actor.library_ids):
             try:
                 results.append(self.get(user_id, reference.operation_id))
-            except (AutomationAccessError, FileMoveError, StandardMetadataError):
+            except (
+                AutomationAccessError,
+                FileMoveError,
+                StandardMetadataError,
+                UploadError,
+            ):
                 continue  # Current scope loss hides the whole operation, not a partial count.
         return tuple(results)
 
@@ -183,7 +246,13 @@ class ManageAutomationOperations:
         try:
             access = self._access(user_id, reference)
             self.get(user_id, operation_id)
-            if reference.kind == "file_move":
+            if reference.kind in {"book_upload", "cover_upload", "file_replace"}:
+                self.operations.uploads.cancel(access, operation_id)
+            elif reference.kind == "file_delete":
+                store = self.operations.deletions.files.store
+                plan = store.load(operation_id, access.user_id, access.grant_id)
+                store.save(replace(plan, cancelled=True))
+            elif reference.kind == "file_move":
                 self.operations.moves.store.cancel(
                     operation_id, move_actor(access), self.clock_ms()
                 )

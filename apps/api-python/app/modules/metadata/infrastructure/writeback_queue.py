@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
@@ -20,7 +20,10 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from app.contracts.source_relocation import SourceRelocation
 from app.core.sql_batches import sqlite_parameter_chunks
-from app.infrastructure.file_operation_conflicts import file_operation_blocks_library
+from app.infrastructure.file_operation_conflicts import (
+    file_operation_blocks_library,
+    writeback_has_live_lease,
+)
 from app.models import (
     Library,
     LibraryBook,
@@ -602,11 +605,22 @@ def discard_operations(db: Session, operation_ids: tuple[str, ...]) -> int:
 
 
 def discard_relocated_writebacks(db: Session, change: SourceRelocation) -> int:
-    """Frozen old-path intents cannot publish after the source tree has moved."""
+    """Discard legacy intents; frozen standard tasks validate their own source."""
     ids = tuple(
         db.scalars(
             select(MetadataWritebackOperation.id).where(
-                MetadataWritebackOperation.book_id.in_(change.book_ids)
+                MetadataWritebackOperation.book_id.in_(change.book_ids),
+                ~select(MetadataStandardWriteTarget.operation_id)
+                .join(
+                    MetadataWritebackTarget,
+                    MetadataWritebackTarget.id
+                    == MetadataStandardWriteTarget.queue_target_id,
+                )
+                .where(
+                    MetadataWritebackTarget.operation_id
+                    == MetadataWritebackOperation.id
+                )
+                .exists(),
             )
         )
     )
@@ -615,25 +629,17 @@ def discard_relocated_writebacks(db: Session, change: SourceRelocation) -> int:
             select(MetadataWritebackTarget.id)
             .where(
                 MetadataWritebackTarget.operation_id.in_(ids),
-                MetadataWritebackTarget.status.in_(("RUNNING", "PREPARED", "REVIEW")),
+                writeback_has_live_lease(
+                    MetadataWritebackTarget.status,
+                    MetadataWritebackTarget.lease_expires_at,
+                    datetime.now(UTC),
+                ),
             )
             .limit(1)
         )
         is not None
     ):
         raise RuntimeError("WRITEBACK_STILL_RUNNING")
-    db.execute(
-        update(MetadataStandardWriteTarget)
-        .where(
-            MetadataStandardWriteTarget.queue_target_id.in_(
-                select(MetadataWritebackTarget.id).where(
-                    MetadataWritebackTarget.operation_id.in_(ids)
-                )
-            ),
-            MetadataStandardWriteTarget.stage == "QUEUED",
-        )
-        .values(stage="FAILED", error_code="SOURCE_MOVED", recovery_released=True)
-    )
     return discard_operations(db, ids)
 
 
@@ -979,7 +985,9 @@ def claim_next_target(
                 .where(
                     competing_book.library_id == MetadataStandardWriteTarget.library_id,
                     competing_queue.id != MetadataWritebackTarget.id,
-                    competing_queue.status.in_(("RUNNING", "PREPARED", "REVIEW")),
+                    writeback_has_live_lease(
+                        competing_queue.status, competing_queue.lease_expires_at, now
+                    ),
                 )
                 .correlate(MetadataStandardWriteTarget, MetadataWritebackTarget)
                 .exists(),
@@ -998,7 +1006,7 @@ def claim_next_target(
                 .where(
                     MetadataWritebackOperation.id
                     == MetadataWritebackTarget.operation_id,
-                    file_operation_blocks_library(LibraryBook.library_id),
+                    file_operation_blocks_library(LibraryBook.library_id, now),
                 )
                 .exists(),
             ),

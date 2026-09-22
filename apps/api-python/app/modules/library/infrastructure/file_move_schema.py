@@ -51,18 +51,16 @@ class LibraryFileMoveOperation(Base):
     def blocks_library(
         cls, library_id: SQLColumnExpression[str]
     ) -> ColumnElement[bool]:
-        """One durable conflict predicate shared by scan and writeback claims."""
+        """Only an executing move excludes concurrent scan and writeback claims."""
         return (
             select(LibraryFileMoveTarget.operation_id)
             .join(cls, cls.id == LibraryFileMoveTarget.operation_id)
             .where(
                 cls.status.in_(
                     (
-                        "QUEUED",
                         "PREPARING",
                         "FILES_PUBLISHED",
                         "INDEX_UPDATED",
-                        "RECOVERY_REQUIRED",
                     )
                 ),
                 or_(

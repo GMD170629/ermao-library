@@ -26,7 +26,7 @@ from app.modules.metadata.infrastructure.writeback_queue import (
 from tests.integration.modules.automation.test_file_reads import file_access
 
 
-def prepare(db, tmp_path, *, dynamic=False):
+def prepare(db, tmp_path, *, dynamic=False, batch=False):
     access, root = file_access(db, tmp_path)
     db.get(Library, "test-library").organization_mode = "VOLUMES"
     db.commit()
@@ -38,7 +38,7 @@ def prepare(db, tmp_path, *, dynamic=False):
     from app.modules.automation.domain.access import Scope
 
     permissions = replace(
-        access.permissions, scopes=access.permissions.scopes | {Scope.FILES_MOVE}
+        access.permissions, scopes=access.permissions.scopes | {Scope.FILES_MODIFY}
     )
     grant = build_grant_manager(db).create(
         user_id=access.user_id,
@@ -56,12 +56,29 @@ def prepare(db, tmp_path, *, dynamic=False):
         ),
     )
     actor = MoveActor(access.user_id, grant.grant.id, permissions.library_ids, False)
+    requests = [MoveRequest("allowed-node", "test-library", "renamed")]
+    if batch:
+        from tests.integration.modules.automation.test_file_reads import add_file
+
+        for name in ("second", "third"):
+            (root / name).mkdir()
+            (root / name / "book.txt").write_text(name)
+            add_file(db, name + "-node", name, parent=None, kind="DIRECTORY")
+            db.add(
+                LibraryBook(
+                    id=name, library_id="test-library", source_node_id=name + "-node"
+                )
+            )
+            db.commit()
+            requests.append(
+                MoveRequest(name + "-node", "test-library", name + "-moved")
+            )
     plan = PrepareFileMovePlan(
         SqlAlchemyMoveTopology(db),
         AnchoredMoveInspection(),
         lambda: 1000,
         lambda: "plan",
-    ).execute(actor, (MoveRequest("allowed-node", "test-library", "renamed"),))
+    ).execute(actor, tuple(requests))
     store = SqlAlchemyFileMoveOperations(db)
     store.save_plan(plan)
     store.enqueue(plan, "operation", "request", 2000)
@@ -86,7 +103,7 @@ def executor(db, store, files, authorize):
 
 
 @pytest.mark.parametrize("crash_after_publish", [False, True])
-def test_move_publication_and_restart_repair_keep_files_and_identity(
+def test_move_publication_and_interruption_keep_files_and_identity(
     db_session, tmp_path, crash_after_publish
 ):
     actor, root, store = prepare(db_session, tmp_path)
@@ -114,18 +131,22 @@ def test_move_publication_and_restart_repair_keep_files_and_identity(
     files = Files()
     command = executor(db_session, store, files, authorize)
     if crash_after_publish:
-        with pytest.raises(OSError):
-            command.execute("operation")
+        command.execute("operation")
         assert store.progress("operation", actor).status == "RECOVERY_REQUIRED"
         assert (
             db_session.get(LibrarySourceNode, "allowed-node").relative_path == "allowed"
         )
         assert (root / "renamed/metadata.opf").read_bytes() == b"original metadata"
-        # A revoked token prevents new targets, but does not forbid completing
-        # the exact already-published target's minimum consistency repair.
         revoked = True
         store.prepare_recovery("operation", 5000)
         db_session.commit()
+        command.execute("operation")
+        assert store.progress("operation", actor).status == "RECOVERY_REQUIRED"
+        assert files.calls == 1
+        assert (
+            db_session.get(LibrarySourceNode, "allowed-node").relative_path == "allowed"
+        )
+        return
     command.execute("operation")
     assert files.calls == 1
     assert store.progress("operation", actor).status == "COMPLETED"
@@ -396,14 +417,20 @@ def test_case_only_directory_rename_recovers_intermediate_slot(
         db_session, store, SameDeviceMovePublication(), lambda actor: actor
     )
     if interrupt_staging:
-        with pytest.raises(OSError):
-            command.execute("case-operation")
+        command.execute("case-operation")
         assert store.progress("case-operation", actor).status == "RECOVERY_REQUIRED"
         assert plan.moves[0].staging_relative_path in [
             entry.name for entry in root.iterdir()
         ]
         store.prepare_recovery("case-operation", 5000)
         db_session.commit()
+        command.execute("case-operation")
+        assert store.progress("case-operation", actor).status == "RECOVERY_REQUIRED"
+        assert calls == 1
+        assert (
+            root / plan.moves[0].staging_relative_path / "metadata.opf"
+        ).read_bytes() == b"original metadata"
+        return
     command.execute("case-operation")
     assert store.progress("case-operation", actor).status == "COMPLETED"
     assert calls == 2
@@ -480,3 +507,149 @@ def test_dynamic_grant_rechecks_worker_and_history_without_expanding_frozen_plan
     assert (
         root / ("allowed" if withdraw_access else "renamed") / "metadata.opf"
     ).read_bytes() == b"original metadata"
+
+
+@pytest.mark.parametrize("failure_index", [0, 1])
+@pytest.mark.parametrize("failure", ["validation", "publication", "unexpected"])
+def test_move_batch_isolates_failed_targets(
+    client, db_session, tmp_path, failure_index, failure
+):
+    actor, root, store = prepare(db_session, tmp_path, batch=True)
+    plan = store.execution("operation").plan
+    failing = plan.moves[failure_index].source.relative_path
+
+    class Files(SameDeviceMovePublication):
+        def validate(self, move):
+            if failure == "validation" and move.source.relative_path == failing:
+                raise FileMoveError("SOURCE_CHANGED")
+            super().validate(move)
+
+        def publish(self, move, copy=None):
+            if move.source.relative_path == failing:
+                if failure == "publication":
+                    raise FileMoveError("DESTINATION_COLLISION")
+                if failure == "unexpected":
+                    raise OSError("unavailable target")
+            super().publish(move, copy)
+
+    executor(db_session, store, Files(), lambda actor: actor).execute("operation")
+    expected = ["COMPLETED"] * 3
+    expected[failure_index] = (
+        "FAILED" if failure == "validation" else "RECOVERY_REQUIRED"
+    )
+    assert store.progress("operation", actor).stages == tuple(expected)
+    for index, move in enumerate(plan.moves):
+        assert (root / move.destination.relative_path).exists() == (
+            index != failure_index
+        )
+        assert (root / move.source.relative_path).exists() == (index == failure_index)
+    from tests.integration.modules.automation.test_operation_management import cookie
+
+    cookie(client, db_session)
+    response = client.get("/api/automation/operations")
+    assert response.status_code == 200
+    operation = next(
+        item
+        for item in response.json()["data"]["operations"]
+        if item["operation_id"] == "operation"
+    )
+    assert [item["stage"] for item in operation["targets"]] == expected
+
+
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_restart_claims_queued_siblings_without_replaying_failed_move(
+    db_session, tmp_path, interrupted
+):
+    from app.modules.library.application.file_move_recovery_cleanup import (
+        CleanExpiredMoveBackups,
+    )
+    from app.modules.library.application.file_move_worker import FileMoveWorker
+    from app.modules.library.infrastructure.file_move_schema import (
+        LibraryFileMoveOperation,
+    )
+
+    actor, root, store = prepare(db_session, tmp_path, batch=True)
+    store.checkpoint(
+        "operation",
+        0,
+        "PREPARING" if interrupted else "RECOVERY_REQUIRED",
+        3500,
+        None if interrupted else "COPY_ATTRIBUTES_NOT_PRESERVED",
+    )
+    if not interrupted:
+        store.finish("operation", 3500)
+    db_session.commit()
+    files = SameDeviceMovePublication()
+    restarted = SqlAlchemyFileMoveOperations(db_session)
+    worker = FileMoveWorker(
+        restarted,
+        executor(db_session, restarted, files, lambda actor: actor),
+        CleanExpiredMoveBackups(restarted, files, db_session, lambda: 4000),
+        db_session,
+        lambda: 4000,
+    )
+    if interrupted:
+        assert worker.process_once()  # Quarantine interrupted target before new claims.
+        assert (
+            db_session.get(LibraryFileMoveOperation, "operation").status
+            == "RECOVERY_REQUIRED"
+        )
+    assert worker.process_once()
+    assert restarted.progress("operation", actor).stages == (
+        "RECOVERY_REQUIRED",
+        "COMPLETED",
+        "COMPLETED",
+    )
+    assert (root / "allowed/metadata.opf").read_bytes() == b"original metadata"
+    assert not (root / "renamed").exists()
+    assert (root / "second-moved/book.txt").read_text() == "second"
+    assert restarted.claim_next(5000) is None
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+def test_recovery_move_does_not_block_new_same_source_task(
+    db_session, tmp_path, cancel
+):
+    actor, root, store = prepare(db_session, tmp_path, batch=True)
+    store.checkpoint(
+        "operation", 0, "RECOVERY_REQUIRED", 3500, "COPY_ATTRIBUTES_NOT_PRESERVED"
+    )
+    store.finish("operation", 3500)
+    db_session.commit()
+    if cancel:
+        store.cancel("operation", actor, 3600)
+        db_session.commit()
+    assert store.claim_next(4000) == "operation"
+    db_session.commit()
+    assert store.claim_next(4000) is None  # Already owned; not claimed twice.
+    db_session.rollback()
+    executor(
+        db_session, store, SameDeviceMovePublication(), lambda actor: actor
+    ).execute("operation")
+    sibling = "CANCELLED" if cancel else "COMPLETED"
+    assert store.progress("operation", actor).stages == (
+        "RECOVERY_REQUIRED",
+        sibling,
+        sibling,
+    )
+    fresh = PrepareFileMovePlan(
+        SqlAlchemyMoveTopology(db_session),
+        AnchoredMoveInspection(),
+        lambda: 5000,
+        lambda: "fresh-plan",
+    ).execute(
+        actor, (MoveRequest("allowed-node", "test-library", "fresh-destination"),)
+    )
+    store.save_plan(fresh)
+    store.enqueue(fresh, "fresh", "fresh-request", 6000)
+    db_session.commit()
+    assert store.claim_next(7000) == "fresh"
+    db_session.commit()
+    executor(
+        db_session, store, SameDeviceMovePublication(), lambda actor: actor
+    ).execute("fresh")
+    assert store.progress("fresh", actor).status == "COMPLETED"
+    assert (
+        root / "fresh-destination/metadata.opf"
+    ).read_bytes() == b"original metadata"
+    assert store.progress("operation", actor).stages[0] == "RECOVERY_REQUIRED"

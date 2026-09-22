@@ -1,6 +1,6 @@
 """Persist fixed grants; no mutable permission expansion endpoint."""
 
-from sqlalchemy import JSON, BigInteger, Boolean, ForeignKey, Index, String
+from sqlalchemy import JSON, BigInteger, ForeignKey, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -23,12 +23,6 @@ class AutomationGrantRow(Base):
     )
     token_ciphertext: Mapped[str | None] = mapped_column(
         "tokenCiphertext", String(1024), nullable=True
-    )
-    writeback_targets: Mapped[list[str]] = mapped_column(
-        "writebackTargets", JSON, default=list, server_default="[]"
-    )
-    allow_cross_library: Mapped[bool] = mapped_column(
-        "allowCrossLibrary", Boolean, default=False, server_default="0"
     )
     created_at_ms: Mapped[int] = mapped_column("createdAt", BigInteger)
     expires_at_ms: Mapped[int] = mapped_column("expiresAt", BigInteger)

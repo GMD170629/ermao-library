@@ -30,7 +30,6 @@ from app.modules.automation.application.settings import AutomationServiceSetting
 from app.modules.automation.domain.access import (
     GrantPermissions,
     Scope,
-    WritebackTarget,
 )
 
 
@@ -118,7 +117,7 @@ def seed(db):
         user_id="mcp-owner",
         name="client",
         permissions=GrantPermissions(
-            frozenset({Scope.LIBRARY_READ}), frozenset({"test-library"})
+            frozenset({Scope.SYSTEM_READ}), frozenset({"test-library"})
         ),
     )
 
@@ -206,6 +205,12 @@ def test_official_sdk_real_catalog_and_revocation(
             ):
                 listed = await client.list_tools()
                 assert {item.name for item in listed.tools} == {
+                    "list_source_nodes",
+                    "read_file_metadata",
+                    "list_import_queue",
+                    "get_system_queue_status",
+                    "list_system_logs",
+                    "get_system_configuration",
                     "get_context",
                     "get_operation",
                     "cancel_operation",
@@ -281,13 +286,13 @@ def test_official_sdk_real_catalog_and_revocation(
                 ).status_code == 403
             scopes = frozenset(
                 {
-                    Scope.LIBRARY_READ,
+                    Scope.SYSTEM_READ,
                     Scope.SHELVES_WRITE,
-                    Scope.TAGS_WRITE,
-                    Scope.METADATA_WRITE,
-                    Scope.FILES_READ,
-                    Scope.FILES_MOVE,
-                    Scope.METADATA_WRITEBACK,
+                    Scope.BOOKS_WRITE,
+                    Scope.BOOKS_WRITE,
+                    Scope.SYSTEM_READ,
+                    Scope.FILES_MODIFY,
+                    Scope.FILES_MODIFY,
                 }
             )
             with factory() as db:
@@ -297,7 +302,7 @@ def test_official_sdk_real_catalog_and_revocation(
                     permissions=replace(
                         created.grant.permissions,
                         scopes=scopes,
-                        writeback_targets=frozenset({WritebackTarget.SIDECAR}),
+
                     ),
                 )
                 build_automation_settings(db).update(

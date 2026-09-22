@@ -388,7 +388,10 @@ def test_recovery_rolls_back_partial_failure_and_preserves_prepared_files(
         engine.dispose()
 
 
-def test_file_move_gates_new_writeback_claims_but_allows_existing_publish(tmp_path):
+@pytest.mark.parametrize("move_status", ["QUEUED", "PREPARING", "RECOVERY_REQUIRED"])
+def test_file_move_gates_only_active_work_but_allows_existing_publish(
+    tmp_path, move_status
+):
     from app.models import (
         LibraryFileMoveOperation,
         LibraryFileMovePlan,
@@ -420,7 +423,7 @@ def test_file_move_gates_new_writeback_claims_but_allows_existing_publish(tmp_pa
                     grant_id="grant",
                     user_id="user",
                     request_id="request",
-                    status="QUEUED",
+                    status=move_status,
                     cancel_requested=False,
                     created_at_ms=0,
                     updated_at_ms=0,
@@ -439,10 +442,8 @@ def test_file_move_gates_new_writeback_claims_but_allows_existing_publish(tmp_pa
             )
             db.commit()
             now = datetime.now(UTC)
-            assert (
-                writeback_queue.claim_next_target(db, owner_id="worker", now=now)
-                is None
-            )
+            claimed = writeback_queue.claim_next_target(db, owner_id="worker", now=now)
+            assert (claimed is None) == (move_status == "PREPARING")
             db.rollback()
             # A write claimed before the move must reach its safe terminal point.
             db.execute(
@@ -481,5 +482,47 @@ def test_file_move_gates_new_writeback_claims_but_allows_existing_publish(tmp_pa
             assert db.get(MetadataWritebackTarget, "claim-target") is None
             assert db.get(MetadataWritebackPreparation, "claim-preparation") is None
             assert source.read_text() == "book"
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("waiting_status", ["REVIEW", "PENDING", "RUNNING"])
+def test_unavailable_target_does_not_hold_queue_head(tmp_path, waiting_status):
+    settings = type("Settings", (), {"database_path": tmp_path / "db.sqlite"})()
+    engine = create_sqlite_engine(settings.database_path)
+    bootstrap_database(engine, settings)
+    source = tmp_path / "book.txt"
+    source.write_text("book")
+    _seed_claim_rows(engine, source)
+    try:
+        with Session(engine) as db:
+            now = datetime.now(UTC)
+            blocked = db.get(MetadataWritebackTarget, "claim-target")
+            blocked.status = waiting_status
+            blocked.next_attempt_at = now + timedelta(hours=1)
+            blocked.lease_expires_at = now + timedelta(hours=1)
+            blocked.lease_owner_id = "other-worker"
+            db.add(
+                MetadataWritebackTarget(
+                    id="ready-target",
+                    operation_id="claim-operation",
+                    target_key="ready",
+                    source_path=str(tmp_path / "ready.txt"),
+                    format="TXT",
+                    payload_json="{}",
+                    status="PENDING",
+                    attempts=0,
+                    written_fields_json="[]",
+                    created_at=now + timedelta(seconds=1),
+                    updated_at=now,
+                )
+            )
+            db.commit()
+            claimed = writeback_queue.claim_next_target(db, owner_id="worker", now=now)
+            assert claimed is not None and claimed["id"] == "ready-target"
+            db.commit()
+            assert (
+                db.get(MetadataWritebackTarget, "claim-target").status == waiting_status
+            )
     finally:
         engine.dispose()

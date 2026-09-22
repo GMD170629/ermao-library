@@ -16,6 +16,7 @@ from app.modules.automation.application.settings import (
     AutomationServiceSettings,
     AutomationSettingsPort,
 )
+from app.modules.automation.application.system import ConfigurationGroup
 from app.modules.automation.domain.access import (
     AutomationAccessError,
     AutomationActor,
@@ -36,6 +37,7 @@ __all__ = [
     "AutomationIdentityPort",
     "AutomationServiceSettings",
     "AutomationSettingsPort",
+    "ConfigurationGroup",
     "CreatedGrant",
     "EffectiveAccess",
     "GrantPermissions",

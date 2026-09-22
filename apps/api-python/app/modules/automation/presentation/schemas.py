@@ -12,36 +12,37 @@ from app.modules.automation.application.settings import AutomationServiceSetting
 from app.modules.automation.domain.access import (
     GrantPermissions,
     Scope,
-    WritebackTarget,
 )
 
 
 class GrantPermissionFields(HttpContractModel):
-    scopes: frozenset[Scope] = frozenset({Scope.LIBRARY_READ})
+    scopes: frozenset[Scope] = frozenset({Scope.SYSTEM_READ})
     library_ids: frozenset[str] = Field(
         default=frozenset(), alias="libraryIds", max_length=500
     )
     library_scope: Literal["all", "selected"] = Field(
         default="selected", alias="libraryScope"
     )
-    writeback_targets: frozenset[WritebackTarget] = Field(
-        default=frozenset(), alias="writebackTargets"
-    )
-    allow_cross_library: StrictBool = Field(default=False, alias="allowCrossLibrary")
 
     def permissions(self) -> GrantPermissions:
         return GrantPermissions(
             self.scopes,
             self.library_ids,
-            self.writeback_targets,
-            self.allow_cross_library,
             self.library_scope,
         )
 
 
 class CreateGrantRequest(GrantPermissionFields):
     name: str = Field(min_length=1, max_length=100)
-    lifetime_days: Literal[30, 90, 365] = Field(default=90, alias="lifetimeDays")
+    lifetime_days: Literal[30, 90, 365] | None = Field(default=90, alias="lifetimeDays")
+
+
+class UpdateGrantRequest(GrantPermissionFields):
+    name: str = Field(min_length=1, max_length=100)
+    # Omitted keeps the current expiry; null explicitly selects no expiration.
+    lifetime_days: Literal[30, 90, 365] | None = Field(
+        default=None, alias="lifetimeDays"
+    )
 
 
 class GrantView(GrantPermissionFields):
@@ -49,7 +50,7 @@ class GrantView(GrantPermissionFields):
     token_available: bool = Field(alias="tokenAvailable")
     name: str
     created_at_ms: int = Field(alias="createdAtMs")
-    expires_at_ms: int = Field(alias="expiresAtMs")
+    expires_at_ms: int | None = Field(alias="expiresAtMs")
     revoked_at_ms: int | None = Field(alias="revokedAtMs")
     last_used_at_ms: int | None = Field(alias="lastUsedAtMs")
 
@@ -62,13 +63,18 @@ class GrantView(GrantPermissionFields):
             name=grant.name,
             scopes=grant.permissions.scopes,
             libraryIds=grant.permissions.library_ids,
-            writebackTargets=grant.permissions.writeback_targets,
-            allowCrossLibrary=grant.permissions.allow_cross_library,
             createdAtMs=grant.created_at_ms,
             expiresAtMs=grant.expires_at_ms,
             revokedAtMs=grant.revoked_at_ms,
             lastUsedAtMs=grant.last_used_at_ms,
         )
+
+
+class UpdatedGrantPayload(HttpContractModel):
+    grant: GrantView
+
+
+UpdatedGrantResponse = SuccessEnvelope[UpdatedGrantPayload]
 
 
 class CreatedGrantPayload(HttpContractModel):
@@ -87,7 +93,7 @@ class RevokedGrantPayload(HttpContractModel):
 class ServiceSettingsFields(HttpContractModel):
     enabled: StrictBool = False
     enabled_scopes: frozenset[Scope] = Field(
-        default=frozenset({Scope.LIBRARY_READ}), alias="enabledScopes"
+        default=frozenset({Scope.SYSTEM_READ}), alias="enabledScopes"
     )
     public_base_url: str = Field(default="", max_length=2048, alias="publicBaseUrl")
 
@@ -122,6 +128,16 @@ class OperationTargetFields(HttpContractModel):
     error_code: str | None
 
 
+class UploadOutcomeFields(HttpContractModel):
+    status: str
+    task_id: str | None = None
+    book_ids: list[str] = Field(default_factory=list)
+    resource_ids: list[str] = Field(default_factory=list)
+    cover_url: str | None = None
+    revision: str | None = None
+    error_code: str | None = None
+
+
 class ManagedOperationFields(HttpContractModel):
     operation_id: str
     grant_id: str
@@ -131,6 +147,10 @@ class ManagedOperationFields(HttpContractModel):
     cancel_requested: bool
     total_targets: int
     targets: list[OperationTargetFields]
+    received_bytes: int | None = None
+    size_bytes: int | None = None
+    upload_result: UploadOutcomeFields | None = None
+    file_saved: bool | None = None
 
     @classmethod
     def from_domain(cls, value: ManagedOperationView) -> "ManagedOperationFields":

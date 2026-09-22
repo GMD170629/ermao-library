@@ -174,7 +174,7 @@ class UpdateShelf:
         self._store = store
         self._unit_of_work = unit_of_work
 
-    def execute(self, command: UpdateShelfCommand) -> dict[str, Any] | None:
+    def execute(self, command: UpdateShelfCommand, *, receipt: MutationReceipt[dict[str, Any]] | None = None) -> dict[str, Any] | None:
         replacement_book_ids = (
             list(command.book_ids)
             if command.book_ids is not None and command.kind is ShelfKind.STATIC
@@ -248,6 +248,8 @@ class UpdateShelf:
                     touched_collection_ids,
                     now=command.now,
                 )
+            if receipt is not None:
+                receipt.complete(shelf)
             self._unit_of_work.commit()
         except Exception:
             self._unit_of_work.rollback()
@@ -264,7 +266,7 @@ class DeleteShelf:
         self._store = store
         self._unit_of_work = unit_of_work
 
-    def execute(self, command: DeleteShelfCommand) -> bool:
+    def execute(self, command: DeleteShelfCommand, *, receipt: MutationReceipt[bool] | None = None) -> bool:
         try:
             if command.is_collection and self._store.collection_has_members(
                 self._unit_of_work,
@@ -280,6 +282,8 @@ class DeleteShelf:
                 self._unit_of_work,
                 command.shelf_id,
             )
+            if receipt is not None:
+                receipt.complete(deleted)
             self._unit_of_work.commit()
         except Exception:
             self._unit_of_work.rollback()

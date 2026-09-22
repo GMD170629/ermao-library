@@ -61,6 +61,7 @@ class SqlAlchemyCatalogShelfQueries:
                 name=shelf.name,
                 description=shelf.description,
                 updated_at=shelf.updated_at,
+                kind=shelf.kind, rules_json=shelf.rules_json or "{}",
             )
             for shelf in rows
         )
@@ -120,6 +121,7 @@ class SqlAlchemyCatalogShelfQueries:
                 name=shelf.name,
                 description=shelf.description,
                 updated_at=shelf.updated_at,
+                kind=shelf.kind, rules_json=shelf.rules_json or "{}",
             )
             return CatalogShelfBookPage(
                 shelf=catalog_shelf,
@@ -156,6 +158,7 @@ class SqlAlchemyCatalogShelfQueries:
             name=shelf.name,
             description=shelf.description,
             updated_at=shelf.updated_at,
+                kind=shelf.kind, rules_json=shelf.rules_json or "{}",
         )
         return CatalogShelfBookPage(
             shelf=catalog_shelf,

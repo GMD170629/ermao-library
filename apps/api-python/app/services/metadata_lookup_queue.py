@@ -972,7 +972,6 @@ class MetadataLookupWorker:
         automatic_request_gate: AutomaticMetadataRequestGate | None = None,
         standard_handler: Callable[[Session, dict[str, Any], str], None] | None = None,
         standard_maintenance: Callable[[Session], None] | None = None,
-        standard_recovery: Callable[[Session], int] | None = None,
     ) -> None:
         self._db_factory = db_factory
         self._settings = settings
@@ -980,7 +979,6 @@ class MetadataLookupWorker:
         self._automatic_request_gate = automatic_request_gate
         self._standard_handler = standard_handler
         self._standard_maintenance = standard_maintenance
-        self._standard_recovery = standard_recovery
         self._stop = threading.Event()
         self._last_busy_log_at: float | None = None
         self._thread = threading.Thread(
@@ -1033,12 +1031,6 @@ class MetadataLookupWorker:
         else:
             state.ready = True
             state.error = None
-
-    def _recover_writebacks(self, db: Session) -> int:
-        recovered = recover_interrupted_metadata_writebacks(db)
-        if self._standard_recovery is not None:
-            recovered += self._standard_recovery(db)
-        return recovered
 
     def _maintain(self) -> None:
         if (
@@ -1139,7 +1131,7 @@ class MetadataLookupWorker:
                 )
                 self._recover(
                     self._writeback_recovery,
-                    self._recover_writebacks,
+                    recover_interrupted_metadata_writebacks,
                     "writeback",
                 )
                 if self._stop.is_set():
