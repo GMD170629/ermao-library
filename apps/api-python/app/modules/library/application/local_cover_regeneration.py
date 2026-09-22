@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
 
+from app.contracts.diagnostics import FailureDiagnostics
 from app.contracts.local_metadata import LocalMetadataSource
 from app.modules.library.application.bulk_operations import (
     BulkCoverCommand,
@@ -143,6 +144,7 @@ class RegenerateLocalMetadataCovers:
         resource_covers: ResourceCoverPublicationPort,
         source_covers: SourceNodeCoverPublicationPort,
         unit_of_work: ResourceCoverUnitOfWork,
+        diagnostics: FailureDiagnostics,
     ) -> None:
         self._access = access
         self._sources = sources
@@ -150,6 +152,7 @@ class RegenerateLocalMetadataCovers:
         self._resource_covers = resource_covers
         self._source_covers = source_covers
         self._unit_of_work = unit_of_work
+        self._diagnostics = diagnostics
 
     def regenerate_resource(
         self, *, actor: LibraryActor, book_id: str, resource_id: str
@@ -275,7 +278,13 @@ class RegenerateLocalMetadataCovers:
                 resource_id=resource_id,
                 content=extraction,
             )
-        except ValueError:
+        except ValueError as error:
+            diagnostic = self._diagnostics.prepare(
+                error,
+                event="local_cover.prepare_failed",
+                context={"resource_id": resource_id, "step": "prepare_resource_cover"},
+            )
+            self._diagnostics.persist(diagnostic)
             return LocalCoverSkipped(
                 resource_id=resource_id,
                 reason="LOCAL_COVER_INVALID",
@@ -290,9 +299,31 @@ class RegenerateLocalMetadataCovers:
                 cover_path=prepared.stored_path,
             )
             self._unit_of_work.commit()
-        except Exception:
-            self._unit_of_work.rollback()
-            self._resource_covers.revert(published)
+        except Exception as error:
+            diagnostic = self._diagnostics.prepare(
+                error,
+                event="local_cover.resource_state_failed",
+                context={"resource_id": resource_id, "step": "save_resource_cover"},
+            )
+            recovery_step = "rollback"
+            try:
+                self._unit_of_work.rollback()
+                recovery_step = "revert_resource_cover"
+                self._resource_covers.revert(published)
+            except Exception as recovery_error:
+                secondary = self._diagnostics.prepare(
+                    recovery_error,
+                    event="local_cover.resource_recovery_failed",
+                    context={
+                        "resource_id": resource_id,
+                        "step": recovery_step,
+                        "parent_diagnostic_id": diagnostic.diagnostic_id,
+                    },
+                )
+                self._diagnostics.persist(secondary)
+                raise
+            finally:
+                self._diagnostics.persist(diagnostic)
             raise
         self._resource_covers.complete(
             published,
@@ -327,10 +358,35 @@ class RegenerateLocalMetadataCovers:
                 cover_path=prepared.stored_path if prepared else None,
             )
             self._unit_of_work.commit()
-        except Exception:
-            self._unit_of_work.rollback()
-            if published is not None:
-                self._source_covers.revert(published)
+        except Exception as error:
+            diagnostic = self._diagnostics.prepare(
+                error,
+                event="local_cover.source_state_failed",
+                context={
+                    "source_node_id": scope.source_node_id,
+                    "step": "save_source_cover",
+                },
+            )
+            recovery_step = "rollback"
+            try:
+                self._unit_of_work.rollback()
+                if published is not None:
+                    recovery_step = "revert_source_cover"
+                    self._source_covers.revert(published)
+            except Exception as recovery_error:
+                secondary = self._diagnostics.prepare(
+                    recovery_error,
+                    event="local_cover.source_recovery_failed",
+                    context={
+                        "source_node_id": scope.source_node_id,
+                        "step": recovery_step,
+                        "parent_diagnostic_id": diagnostic.diagnostic_id,
+                    },
+                )
+                self._diagnostics.persist(secondary)
+                raise
+            finally:
+                self._diagnostics.persist(diagnostic)
             raise
         if published is not None:
             self._source_covers.complete(
@@ -357,10 +413,12 @@ class RegenerateBulkBookCovers:
         covers: RegenerateLocalMetadataCovers,
         operations: BulkCoverRegenerationOperationPort,
         unit_of_work: ResourceCoverUnitOfWork,
+        diagnostics: FailureDiagnostics,
     ) -> None:
         self._covers = covers
         self._operations = operations
         self._unit_of_work = unit_of_work
+        self._diagnostics = diagnostics
 
     def execute(self, command: BulkCoverCommand) -> BulkCoverResult:
         actor = LibraryActor(
@@ -380,6 +438,13 @@ class RegenerateBulkBookCovers:
                     book_id=book_id,
                 )
             except LocalCoverUnavailableError as exc:
+                diagnostic = self._diagnostics.prepare(
+                    exc,
+                    event="local_cover.bulk_target_unavailable",
+                    context={"resource_id": book_id, "step": "regenerate_book_cover"},
+                )
+                self._unit_of_work.rollback()
+                self._diagnostics.persist(diagnostic)
                 skipped.append(BulkCoverSkipped(book_id=book_id, reason=exc.code))
                 continue
             results.append(result)
@@ -393,8 +458,27 @@ class RegenerateBulkBookCovers:
                 results=tuple(results),
             )
             self._unit_of_work.commit()
-        except Exception:
-            self._unit_of_work.rollback()
+        except Exception as error:
+            diagnostic = self._diagnostics.prepare(
+                error,
+                event="local_cover.bulk_state_failed",
+                context={"step": "record_bulk_cover_result"},
+            )
+            try:
+                self._unit_of_work.rollback()
+            except Exception as recovery_error:
+                secondary = self._diagnostics.prepare(
+                    recovery_error,
+                    event="local_cover.bulk_rollback_failed",
+                    context={
+                        "step": "rollback",
+                        "parent_diagnostic_id": diagnostic.diagnostic_id,
+                    },
+                )
+                self._diagnostics.persist(secondary)
+                raise
+            finally:
+                self._diagnostics.persist(diagnostic)
             raise
         return BulkCoverResult(
             updated=len(updated_book_ids),

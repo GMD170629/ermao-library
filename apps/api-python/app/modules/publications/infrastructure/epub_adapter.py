@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import mimetypes
 import posixpath
 import stat
@@ -16,6 +17,7 @@ from app.contracts.reader_safety_policy_generated import (
     ReaderSafetyRuleId,
     reader_safety_budget,
 )
+from app.core.exception_diagnostics import record_exception
 from app.infrastructure.archive_integrity import (
     UnsafeArchivePathError,
     normalize_archive_path,
@@ -228,6 +230,7 @@ def _validated_entries(archive: zipfile.ZipFile) -> _ValidatedArchive:
             # An unused escaped name cannot be extracted through this adapter.
             # Quarantine it while retaining the archive-wide bounds above; a
             # required package/manifest lookup will fail when it is addressed.
+            # diagnostics-control-flow: Unused unsafe archive members are quarantined; required resources still fail.
             key = None
         unix_mode = info.external_attr >> 16
         if stat.S_ISLNK(unix_mode):
@@ -433,7 +436,9 @@ def _chapter_xml_projection(
                 posixpath.dirname(document_path),
                 posixpath.basename(document_path) + raw if raw.startswith("#") else raw,
             )
-        except (PublicationCorruptError, PublicationResourceNotFoundError, ValueError):
+        except (PublicationCorruptError, PublicationResourceNotFoundError, ValueError) as error:
+            record_exception(logging.getLogger(__name__), "modules.publications.infrastructure.epub_adapter.target.failed", error,
+                             context={"step": "target"})
             return None
         return href if _entry_key(href) in known_hrefs else None
 
@@ -524,11 +529,13 @@ def _index_epub(
                     PublicationCorruptError,
                     PublicationResourceNotFoundError,
                     ValueError,
-                ):
+                ) as error:
                     # An optional manifest item cannot be addressed safely.  It
                     # is omitted from the in-memory publication; an itemref
                     # that requires it is reported as a missing required item
                     # below.
+                    record_exception(logging.getLogger(__name__), "modules.publications.infrastructure.epub_adapter._index_epub.failed", error,
+                                     context={"step": "_index_epub"})
                     continue
                 if key not in entries:
                     continue
@@ -617,7 +624,9 @@ def _index_epub(
                 PublicationMarkupError,
                 PublicationStructureError,
                 PublicationResourceBlockedError,
-            ):
+            ) as error:
+                record_exception(logging.getLogger(__name__), "modules.publications.infrastructure.epub_adapter._index_epub.failed", error,
+                                 context={"step": "_index_epub"})
                 toc = ()
             if not toc:
                 try:
@@ -628,7 +637,9 @@ def _index_epub(
                     PublicationMarkupError,
                     PublicationStructureError,
                     PublicationResourceBlockedError,
-                ):
+                ) as error:
+                    record_exception(logging.getLogger(__name__), "modules.publications.infrastructure.epub_adapter._index_epub.failed", error,
+                                     context={"step": "_index_epub"})
                     toc = ()
             publication = NormalizedPublication(
                 identifier=f"urn:shuku:volume:{source_path.name}",

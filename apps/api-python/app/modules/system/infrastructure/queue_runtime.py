@@ -6,7 +6,6 @@ import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
-from time import monotonic
 from typing import Any
 
 from sqlalchemy import case, update
@@ -14,7 +13,11 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import (
+    deferred_exception_persistence,
+    persist_exception_diagnostic,
+    record_exception,
+)
 from app.core.time import now_timestamp_ms, to_timestamp_ms
 from app.models import QueueRuntimeState
 from app.modules.system.application.commands import SystemWriteTransaction
@@ -121,8 +124,8 @@ class QueueHeartbeatPump:
         self._heartbeat_interval = min(10.0, max(1.0, poll_interval_seconds))
         self._stop_event = threading.Event()
         self._write_lock = threading.Lock()
+        self._write_attempt = 0
         self._thread: threading.Thread | None = None
-        self._last_write_warning_at = 0.0
         self._status = "running"
         self._owner_thread: threading.Thread | None = None
 
@@ -144,26 +147,33 @@ class QueueHeartbeatPump:
         status: str | None = None,
     ) -> None:
         with self._write_lock:
-            if status is not None:
-                self._status = status
-            prepared = prepare_queue_heartbeat(
-                queue_name=self._queue_name,
-                instance_id=self._instance_id,
-                poll_interval_seconds=self._poll_interval_seconds,
-                recorded_at=now_timestamp_ms(),
-                processed=processed,
-                error=error,
-                status=self._status,
-            )
-            prepared_write = prepare_queue_heartbeat_write(prepared)
-            try:
-                with self._session_factory() as db, SystemWriteTransaction(db):
-                    write_prepared_queue_runtime(db, prepared_write)
-            # Heartbeat persistence is best-effort; contain adapter failures so
-            # they cannot terminate the worker loop.
-            except Exception as exc:  # noqa: BLE001
-                now = monotonic()
-                if now - self._last_write_warning_at >= 30:
+            self._write_attempt += 1
+            with deferred_exception_persistence(
+                context={
+                    "task_id": self._instance_id,
+                    "task_kind": self._queue_name,
+                    "attempt": self._write_attempt,
+                    "step": "heartbeat_write",
+                }
+            ) as pending:
+                if status is not None:
+                    self._status = status
+                prepared = prepare_queue_heartbeat(
+                    queue_name=self._queue_name,
+                    instance_id=self._instance_id,
+                    poll_interval_seconds=self._poll_interval_seconds,
+                    recorded_at=now_timestamp_ms(),
+                    processed=processed,
+                    error=error,
+                    status=self._status,
+                )
+                prepared_write = prepare_queue_heartbeat_write(prepared)
+                try:
+                    with self._session_factory() as db, SystemWriteTransaction(db):
+                        write_prepared_queue_runtime(db, prepared_write)
+                # Heartbeat persistence is best-effort; contain adapter failures so
+                # they cannot terminate the worker loop.
+                except Exception as exc:  # noqa: BLE001
                     record_exception(
                         LOGGER,
                         "queue.heartbeat_write_deferred",
@@ -173,11 +183,15 @@ class QueueHeartbeatPump:
                             "stage": "heartbeat",
                             "outcome": "deferred",
                             "path": self._queue_name,
+                            "attempt": self._write_attempt,
+                            "task_id": self._instance_id,
                         },
                         source="system",
                         action="queue.heartbeat_deferred",
+                        session_factory=self._session_factory,
                     )
-                    self._last_write_warning_at = now
+            for snapshot in pending:
+                persist_exception_diagnostic(LOGGER, snapshot, self._session_factory)
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -189,30 +203,53 @@ class QueueHeartbeatPump:
             now=now_timestamp_ms(),
         )
         with self._write_lock:
-            try:
-                with self._session_factory() as db, SystemWriteTransaction(db):
-                    write_prepared_queue_runtime(db, prepared_stop)
-            # Stopping must remain best-effort after the worker has been told to
-            # exit; an unavailable database cannot block process shutdown.
-            except Exception as exc:  # noqa: BLE001
-                record_exception(
-                    LOGGER,
-                    "queue.stopped_state_write_deferred",
-                    exc,
-                    level="warning",
-                    context={
-                        "stage": "heartbeat",
-                        "outcome": "deferred",
-                        "path": self._queue_name,
-                    },
-                    source="system",
-                    action="queue.stopped_state_deferred",
-                )
+            with deferred_exception_persistence(
+                context={
+                    "task_id": self._instance_id,
+                    "task_kind": self._queue_name,
+                    "step": "heartbeat_stop",
+                }
+            ) as pending:
+                try:
+                    with self._session_factory() as db, SystemWriteTransaction(db):
+                        write_prepared_queue_runtime(db, prepared_stop)
+                # Stopping must remain best-effort after the worker has been told to
+                # exit; an unavailable database cannot block process shutdown.
+                except Exception as exc:  # noqa: BLE001
+                    record_exception(
+                        LOGGER,
+                        "queue.stopped_state_write_deferred",
+                        exc,
+                        level="warning",
+                        context={
+                            "stage": "heartbeat",
+                            "outcome": "deferred",
+                            "path": self._queue_name,
+                        },
+                        source="system",
+                        action="queue.stopped_state_deferred",
+                        session_factory=self._session_factory,
+                    )
+            for snapshot in pending:
+                persist_exception_diagnostic(LOGGER, snapshot, self._session_factory)
 
     def _run(self) -> None:
         while not self._stop_event.wait(self._heartbeat_interval):
             try:
                 if self._owner_thread is not None and not self._owner_thread.is_alive():
+                    record_exception(
+                        LOGGER,
+                        "queue.consumer_thread_exited",
+                        RuntimeError(
+                            "Queue consumer thread is no longer alive; no further exception was provided"
+                        ),
+                        context={
+                            "stage": "consumer_liveness",
+                            "task_id": self._instance_id,
+                            "task_kind": self._queue_name,
+                        },
+                        session_factory=self._session_factory,
+                    )
                     self.pulse(status="failed", error="consumer-thread-exited")
                     return
                 self.pulse()
@@ -224,6 +261,7 @@ class QueueHeartbeatPump:
                     context={"stage": "heartbeat", "outcome": "error"},
                     source="system",
                     action="queue.heartbeat_loop_failure",
+                    session_factory=self._session_factory,
                 )
 
 

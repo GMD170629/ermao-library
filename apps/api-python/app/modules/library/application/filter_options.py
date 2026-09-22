@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Literal, Protocol
 
 from app.core.authorization import AuthorizationContext
+from app.modules.library.domain.facets import InvalidLibraryFacetRequest
 
 LibraryFilterOptionSource = Literal["authors", "tags", "series"]
 LibraryFilterFieldType = Literal["text", "select", "number", "date", "boolean"]
@@ -246,9 +247,9 @@ class SearchLibraryFilterOptions:
     ) -> LibraryFilterOptionPage:
         normalized_query = query.strip()
         if len(normalized_query) > 100:
-            raise ValueError("library filter query must be at most 100 characters")
+            raise InvalidLibraryFacetRequest("library filter query must be at most 100 characters")
         if not 1 <= limit <= 50:
-            raise ValueError("library filter option limit must be between 1 and 50")
+            raise InvalidLibraryFacetRequest("library filter option limit must be between 1 and 50")
         return self.query.search_options(
             context,
             source=source,

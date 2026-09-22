@@ -327,7 +327,15 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
         }.isdisjoint(import_task_columns)
         for table_name in Base.metadata.tables:
             for foreign_key in inspector.get_foreign_keys(table_name):
-                assert foreign_key["options"].get("onupdate") == "CASCADE", (
+                model_key = next(
+                    constraint
+                    for constraint in Base.metadata.tables[
+                        table_name
+                    ].foreign_key_constraints
+                    if tuple(column.name for column in constraint.columns)
+                    == tuple(foreign_key["constrained_columns"])
+                )
+                assert foreign_key["options"].get("onupdate") == model_key.onupdate, (
                     table_name,
                     foreign_key,
                 )
@@ -343,7 +351,13 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
                 None,
             )
             if created_at is not None:
-                assert "unixepoch()" in str(created_at["default"]), table_name
+                model_default = Base.metadata.tables[
+                    table_name
+                ].c.createdAt.server_default
+                if model_default is None:
+                    assert created_at["default"] is None, table_name
+                else:
+                    assert "unixepoch()" in str(created_at["default"]), table_name
 
         with Session(engine) as db:
             assert db.scalar(select(SystemSetting).where(False)) is None
@@ -384,10 +398,19 @@ def test_alembic_script_directory_has_one_linear_head() -> None:
     config = alembic_config_for_engine(create_engine("sqlite+pysqlite:///:memory:"))
     script = ScriptDirectory.from_config(config)
     revisions = list(script.walk_revisions())
-    assert len(revisions) == 20
-    assert script.get_heads() == ["0020_recheck_scan_gaps"]
-    assert head_revision() == "0020_recheck_scan_gaps"
+    assert len(revisions) == 29
+    assert script.get_heads() == ["0029_file_deletions"]
+    assert head_revision() == "0029_file_deletions"
     assert [revision.revision for revision in revisions] == [
+        "0029_file_deletions",
+        "0028_automation_capabilities",
+        "0027_automation_uploads",
+        "0026_automation_grant_secrets",
+        "0025_standard_writeback_plans",
+        "0024_file_move_recovery_limits",
+        "0023_file_move_operations",
+        "0022_automation_receipts",
+        "0021_automation_grants",
         "0020_recheck_scan_gaps",
         "0019_backfill_scan_gaps",
         "0018_library_import_scan_gaps",
@@ -420,7 +443,7 @@ def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
     engine = create_sqlite_engine(settings.database_path)
     try:
         runner_module.apply_schema(engine, settings)
-        assert _current_revision(engine) == "0020_recheck_scan_gaps"
+        assert _current_revision(engine) == "0029_file_deletions"
         operation_columns = {
             column["name"]: column
             for column in inspect(engine).get_columns("MetadataWritebackOperation")
@@ -461,7 +484,7 @@ def test_source_node_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None
         }
 
         runner_module.apply_schema(engine)
-        assert _current_revision(engine) == "0020_recheck_scan_gaps"
+        assert _current_revision(engine) == "0029_file_deletions"
         source_node_indexes = {
             index["name"]: tuple(index["column_names"])
             for index in inspect(engine).get_indexes("LibrarySourceNode")
@@ -512,7 +535,7 @@ def test_foreign_key_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None
             }
 
         runner_module.apply_schema(engine)
-        assert _current_revision(engine) == "0020_recheck_scan_gaps"
+        assert _current_revision(engine) == "0029_file_deletions"
         for table_name, index_name in expected_indexes.items():
             assert index_name in {
                 index["name"] for index in inspect(engine).get_indexes(table_name)

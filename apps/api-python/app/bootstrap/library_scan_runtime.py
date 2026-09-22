@@ -12,6 +12,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.core.exception_diagnostics import (
+    persist_exception_diagnostic,
+    prepare_exception_diagnostic,
+    record_exception,
+)
 from app.models.library import Library
 from app.models.settings import SystemSetting
 from app.modules.imports.application.readable_resource.ports import UnitOfWorkPort
@@ -140,13 +145,10 @@ class LibraryScanCoordinator:
                 libraries,
                 enabled=scan_settings.watch_enabled,
             )
-        except (OSError, RuntimeError):
+        except (OSError, RuntimeError) as error:
             rebuilt = False
-            logger.warning(
-                "library_scan.watcher_unavailable",
-                extra={"library_count": len(libraries)},
-                exc_info=True,
-            )
+            record_exception(logger, "library_scan.watcher_unavailable", error,
+                             context={"step": "reconcile_watcher"})
         if not self._started or libraries_changed or rebuilt:
             for library in libraries:
                 if not self._request(library.library_id, "STARTUP"):
@@ -175,13 +177,17 @@ class LibraryScanCoordinator:
                     library_id=library_id, trigger=trigger, scan_scopes=scan_scopes
                 )
             )
-        except (OSError, RuntimeError, SQLAlchemyError):
-            self._uow.recover_after_failure()
-            logger.warning(
-                "library_scan.request_deferred",
-                extra={"library_id": library_id, "trigger": trigger},
-                exc_info=True,
-            )
+        except (OSError, RuntimeError, SQLAlchemyError) as error:
+            snapshot = prepare_exception_diagnostic(logger, "library_scan.request_deferred", error,
+                                                    context={"library_id": library_id, "step": "request_scan", "stage": trigger})
+            try:
+                self._uow.recover_after_failure()
+            except Exception as recovery_error:
+                record_exception(logger, "library_scan.recovery_failed", recovery_error,
+                                 context={"library_id": library_id, "step": "recover_scan", "parent_diagnostic_id": snapshot.diagnostic_id})
+                raise
+            finally:
+                persist_exception_diagnostic(logger, snapshot)
             return False
         return True
 

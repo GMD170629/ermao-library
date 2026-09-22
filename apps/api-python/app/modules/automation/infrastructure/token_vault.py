@@ -43,9 +43,10 @@ class AutomationTokenVault:
         try:
             try:
                 return self._read_key()
-            except FileNotFoundError:
+            except FileNotFoundError as error:
+                # diagnostics-control-flow: Only an explicitly authorized first initialization may create the absent key; decrypt/non-initializing calls preserve FileNotFoundError as their cause, covered by immutable-key tests.
                 if not initialize:
-                    raise AutomationAccessError("TOKEN_KEY_UNAVAILABLE") from None
+                    raise AutomationAccessError("TOKEN_KEY_UNAVAILABLE") from error
             self._directory.mkdir(mode=0o700, parents=True, exist_ok=True)
             fd, temporary = tempfile.mkstemp(
                 prefix=".automation-key-", dir=self._directory
@@ -58,6 +59,7 @@ class AutomationTokenVault:
                 try:
                     os.link(temporary, self._key_path)
                 except FileExistsError:
+                    # diagnostics-control-flow: A concurrent first issuer already published the authoritative immutable key; tested by concurrent key creation.
                     pass  # A concurrent first issuer published the authoritative key.
                 # Windows does not expose directory handles through os.open.
                 # The key file itself is flushed on every supported platform.
@@ -70,8 +72,8 @@ class AutomationTokenVault:
             finally:
                 os.unlink(temporary)
             return self._read_key()
-        except OSError:
-            raise AutomationAccessError("TOKEN_KEY_UNAVAILABLE") from None
+        except OSError as error:
+            raise AutomationAccessError("TOKEN_KEY_UNAVAILABLE") from error
 
     @staticmethod
     def _binding(user_id: str, grant_id: str) -> bytes:
@@ -96,5 +98,5 @@ class AutomationTokenVault:
             return cipher.decrypt(
                 payload[:12], payload[12:], self._binding(user_id, grant_id)
             ).decode("utf-8")
-        except (ValueError, binascii.Error, InvalidTag):
-            raise AutomationAccessError("TOKEN_DECRYPTION_FAILED") from None
+        except (ValueError, binascii.Error, InvalidTag) as error:
+            raise AutomationAccessError("TOKEN_DECRYPTION_FAILED") from error

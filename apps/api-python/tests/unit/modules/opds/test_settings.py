@@ -1,5 +1,8 @@
+import logging
+
 import pytest
 
+from app.core.failure_diagnostics import RuntimeFailureDiagnostics
 from app.modules.opds.application.settings import (
     OpdsPublicBaseUrlInvalid,
     OpdsPublicBaseUrlRequired,
@@ -12,10 +15,12 @@ from app.modules.opds.application.settings import (
 def test_database_settings_control_opds_availability() -> None:
     disabled = resolve_opds_settings(
         False,
+        diagnostics=RuntimeFailureDiagnostics(logging.getLogger(__name__), "opds"),
         stored_public_base_url="https://books.example.com/",
     )
     enabled = resolve_opds_settings(
         True,
+        diagnostics=RuntimeFailureDiagnostics(logging.getLogger(__name__), "opds"),
         stored_public_base_url="https://books.example.com/",
     )
 
@@ -29,7 +34,11 @@ def test_opds_cannot_activate_without_public_base_url() -> None:
     with pytest.raises(OpdsPublicBaseUrlRequired):
         validate_opds_activation(True, None)
 
-    snapshot = resolve_opds_settings(True, stored_public_base_url=None)
+    snapshot = resolve_opds_settings(
+        True,
+        diagnostics=RuntimeFailureDiagnostics(logging.getLogger(__name__), "opds"),
+        stored_public_base_url=None,
+    )
     assert snapshot.configured is False
     assert snapshot.enabled is False
 
@@ -58,3 +67,18 @@ def test_public_url_accepts_http_and_https() -> None:
     assert normalize_opds_public_base_url("http://127.0.0.1:8000") == (
         "http://127.0.0.1:8000"
     )
+
+
+def test_invalid_stored_public_url_is_disabled_with_the_exact_rule_logged(
+    caplog,
+) -> None:
+    snapshot = resolve_opds_settings(
+        True,
+        stored_public_base_url="https://user:secret@books.example.test",
+        diagnostics=RuntimeFailureDiagnostics(logging.getLogger(__name__), "opds"),
+    )
+    assert snapshot.enabled is False and snapshot.configured is False
+    assert "opds.stored_public_url_invalid" in caplog.text
+    assert "OpdsPublicBaseUrlInvalid" in caplog.text
+    assert "omit credentials" in caplog.text
+    assert "user:secret" not in caplog.text

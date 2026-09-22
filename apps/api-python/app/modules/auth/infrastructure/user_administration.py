@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import cast
 
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.bootstrap.system import prepare_system_event
 from app.core.auth import hash_password
 from app.core.config import Settings
+from app.core.exception_diagnostics import record_exception
 from app.models.auth import User, cuid, db_timestamp
 from app.modules.auth.application.user_management import (
     AdminUserView,
@@ -223,8 +225,9 @@ class SqlAlchemyUserAdministrationGateway:
             try:
                 candidate.relative_to(self._settings.resolved_storage_root)
                 avatar_path = candidate
-            except ValueError:
-                pass
+            except ValueError as error:
+                record_exception(logging.getLogger(__name__), "modules.auth.infrastructure.user_administration.delete_user.failed", error,
+                                 context={"step": "delete_user"})
         event = prepare_system_event(
             source="authorization",
             action="user.deleted",
@@ -245,5 +248,6 @@ class SqlAlchemyUserAdministrationGateway:
             avatar_path.unlink(missing_ok=True)
             try:
                 avatar_path.parent.rmdir()
-            except OSError:
-                pass
+            except OSError as error:
+                record_exception(logging.getLogger(__name__), "modules.auth.infrastructure.user_administration.delete_user.failed", error,
+                                 context={"step": "delete_user"})

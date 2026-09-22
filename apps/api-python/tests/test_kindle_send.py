@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import smtplib
+import sqlite3
 from datetime import UTC, datetime
 from email.message import EmailMessage
 from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.bootstrap.kindle import recover_interrupted_kindle_tasks_command
 from app.core.auth import hash_password
@@ -23,6 +25,7 @@ from app.models import (
 from app.models.auth import User
 from app.models.import_pipeline import KindleSendTask
 from app.models.settings import SystemEvent
+from app.modules.kindle.presentation import http as kindle_http
 from app.modules.system.infrastructure.settings import upsert_setting
 from app.services import kindle_queue
 from app.services.kindle_queue import (
@@ -422,7 +425,7 @@ def test_worker_does_not_retry_permanent_authentication_failure(
 
 
 def test_worker_retries_transient_failure_and_recovers_interrupted_send(
-    client, db_session, test_settings, monkeypatch
+    client, db_session, test_settings, monkeypatch, caplog
 ) -> None:
     _prepare(client, db_session, test_settings)
     task = _enqueue(client)
@@ -453,6 +456,10 @@ def test_worker_retries_transient_failure_and_recovers_interrupted_send(
     stored.status = "sending"
     db_session.commit()
     assert recover_interrupted_tasks(db_session) == 1
+    record = next(record for record in caplog.records if "kindle.send_result_unknown" in record.message)
+    assert record.task_id == task["id"]
+    assert "without a terminal SMTP result" in record.message
+    assert "interruption cause were not provided" in record.message
     # Recovery deliberately closes/opens the unit-of-work boundary; reload
     # the canonical task rather than refreshing an expunged ORM instance.
     stored = db_session.get(KindleSendTask, task["id"])
@@ -466,3 +473,43 @@ def test_worker_retries_transient_failure_and_recovers_interrupted_send(
     assert cancelled.status_code == 200
     deleted = client.delete(f"/api/kindle-send-tasks/{task['id']}")
     assert deleted.status_code == 200
+
+
+@pytest.mark.parametrize("competing_failure", ["same_asset_recipient", "unrelated_constraint"])
+def test_enqueue_records_actual_constraint_and_only_reuses_matching_conflict(
+    client, db_session, test_settings, monkeypatch, caplog, competing_failure
+):
+    _prepare(client, db_session, test_settings)
+    original = kindle_http.create_kindle_send_task_command
+
+    def competing_insert(db, params, *, event):
+        original(db, {**params, "id": "competing-kindle-task"}, event=event)
+        if competing_failure == "same_asset_recipient":
+            original(db, params, event=event)
+        else:
+            # Obtain a real SQLite NOT NULL error, while an existing active
+            # task is present: it must never be mistaken for deduplication.
+            connection = sqlite3.connect(":memory:")
+            try:
+                connection.execute("CREATE TABLE unrelated (value TEXT NOT NULL)")
+                connection.execute("INSERT INTO unrelated VALUES (NULL)")
+            except sqlite3.IntegrityError as original_error:
+                raise IntegrityError("INSERT INTO unrelated VALUES (?)", (None,), original_error) from original_error
+            finally:
+                connection.close()
+
+    monkeypatch.setattr(kindle_http, "create_kindle_send_task_command", competing_insert)
+    response = client.post("/api/kindle-send-tasks", json={"bookId": "book-kindle", "assetId": "asset-kindle"})
+    if competing_failure == "same_asset_recipient":
+        assert response.status_code == 200, response.text
+        assert response.json()["data"]["alreadyQueued"] is True
+        expected = "SQLITE_CONSTRAINT_UNIQUE"
+    else:
+        assert response.status_code == 500, response.text
+        assert response.json()["error"]["code"] == "INTERNAL_ERROR"
+        expected = "SQLITE_CONSTRAINT_NOTNULL"
+    events = db_session.scalars(select(SystemEvent)).all()
+    failures = [row for row in events if row.metadata_json and row.metadata_json.get("diagnostics", {}).get("rootCause", {}).get("databaseErrorName") == expected]
+    assert len(failures) == 1
+    assert failures[0].id in caplog.text
+    assert failures[0].metadata_json["requestId"] == response.headers["X-Request-Id"]

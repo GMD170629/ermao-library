@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 
 from sqlalchemy import select
@@ -13,6 +14,7 @@ from app.contracts.local_metadata import (
     LocalMetadataSource,
     validate_local_metadata_priority,
 )
+from app.core.exception_diagnostics import record_exception
 from app.models.organize import OrganizePolicy
 
 
@@ -43,12 +45,14 @@ def prepare_local_metadata_priority(
 ) -> tuple[LocalMetadataSource, ...]:
     """Validate persisted priority outside the database transaction."""
 
-    if not projection.available:
+    if not projection.available or projection.stored_json is None:
         return DEFAULT_LOCAL_METADATA_PRIORITY
     try:
         parsed = json.loads(projection.stored_json or "[]")
         return validate_local_metadata_priority(parsed)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as error:
+        record_exception(logging.getLogger(__name__), "infrastructure.local_metadata_policy.prepare_local_metadata_priority.failed", error,
+                         context={"step": "prepare_local_metadata_priority"})
         return DEFAULT_LOCAL_METADATA_PRIORITY
 
 

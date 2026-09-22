@@ -7,7 +7,7 @@ from time import monotonic
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select, update
+from sqlalchemy import event, func, select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -162,7 +162,7 @@ def _seed_comic(engine: Engine, settings: Settings) -> tuple[datetime, str]:
 
 
 def test_missing_comic_page_index_does_not_fallback_while_writer_is_held(
-    tmp_path: Path,
+    tmp_path: Path, caplog, capsys,
 ) -> None:
     settings = Settings(
         storage_root=str(tmp_path / "storage"),
@@ -182,6 +182,12 @@ def test_missing_comic_page_index_does_not_fallback_while_writer_is_held(
     )
     app = create_app(settings, session_factory=reader_factory)
     blocker = Session(writer_engine)
+    writes: list[str] = []
+
+    def capture_writes(_connection, _cursor, statement, _parameters, context, _many):
+        if context.isinsert or context.isupdate or context.isdelete:
+            writes.append(statement)
+
     try:
         with TestClient(app) as client:
             login = client.post(
@@ -198,6 +204,7 @@ def test_missing_comic_page_index_does_not_fallback_while_writer_is_held(
                 .values(value="writer owns SQLite slot")
             )
 
+            event.listen(reader_engine, "before_cursor_execute", capture_writes)
             with StatementRecorder(reader_engine) as recorder:
                 recorder.reset_after_warmup()
                 started_at = monotonic()
@@ -217,7 +224,16 @@ def test_missing_comic_page_index_does_not_fallback_while_writer_is_held(
             assert page.status_code == 404
             assert list_elapsed < 0.75
             assert page_elapsed < 0.75
-            assert recorder.dml_count == 0
+            # A real 404 has a diagnostic write; no resource/navigation mutation
+            # or fallback indexing may run while the writer owns SQLite.
+            assert recorder.dml_count == len(writes) == 1
+            assert all(statement.startswith('INSERT INTO "SystemEvent"') for statement in writes)
+            diagnostic_id = page.headers["X-Error-Id"]
+            assert diagnostic_id in caplog.text
+            assert "HTTP 404" in caplog.text
+            storage_fallback = capsys.readouterr().err
+            assert diagnostic_id in storage_fallback
+            assert "SQLITE_BUSY" in storage_fallback
 
             with Session(reader_engine) as verification:
                 page_rows = verification.scalar(
@@ -231,6 +247,8 @@ def test_missing_comic_page_index_does_not_fallback_while_writer_is_held(
             assert page_rows == 0
             assert resource_state == (preserved_updated_at,)
     finally:
+        if event.contains(reader_engine, "before_cursor_execute", capture_writes):
+            event.remove(reader_engine, "before_cursor_execute", capture_writes)
         blocker.rollback()
         blocker.close()
         reader_engine.dispose()

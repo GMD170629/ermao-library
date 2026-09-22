@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -11,6 +12,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 
+from app.core.exception_diagnostics import record_exception
 from app.models.organize import OrganizeJob, OrganizeRun
 from app.modules.organize.infrastructure.policy import DEFAULT_RULES
 
@@ -68,7 +70,9 @@ def _json_dict(value: Any, fallback: dict[str, Any]) -> dict[str, Any]:
         return value
     try:
         parsed = json.loads(str(value or "{}"))
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        record_exception(logging.getLogger(__name__), "modules.organize.infrastructure.runs._json_dict.failed", error,
+                         context={"step": "_json_dict"})
         return dict(fallback)
     return parsed if isinstance(parsed, dict) else dict(fallback)
 

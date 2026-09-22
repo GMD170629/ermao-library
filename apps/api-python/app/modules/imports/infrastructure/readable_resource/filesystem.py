@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import time
 from collections.abc import Iterator
 from pathlib import Path
 
+from app.core.exception_diagnostics import record_exception
 from app.infrastructure.bounded_inspection import read_optional_file
 from app.infrastructure.sidecar_paths import sidecar_opf_paths
 from app.modules.imports.application.readable_resource.ports import (
@@ -43,7 +45,9 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
         observations = []
         for path in sidecar_opf_paths(source, directory=directory):
             observed = (
-                self.observe_readable_file(path) if not path.is_symlink() else None
+                self.observe_readable_file(path, missing_ok=True)
+                if not path.is_symlink()
+                else None
             )
             observations.append(
                 (
@@ -59,7 +63,13 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
                 if content is None:
                     continue
                 metadata = parse_opf_metadata(content)
-            except (OSError, OpfMetadataError):
+            except (OSError, OpfMetadataError) as error:
+                record_exception(
+                    logging.getLogger(__name__),
+                    "modules.imports.infrastructure.readable_resource.filesystem.metadata_input_observations.failed",
+                    error,
+                    context={"step": "metadata_input_observations"},
+                )
                 continue
             cover = safe_sidecar_cover_path(path, metadata.cover_href)
             if cover is not None:
@@ -104,8 +114,14 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
                         if kind is SourceNodePhysicalKind.DIRECTORY
                         else int(stat.st_size)
                     )
-                except OSError:
-                    yield UnreadableDirectoryEntry(name=entry.name)
+                except OSError as error:
+                    record_exception(
+                        logging.getLogger(__name__),
+                        "modules.imports.infrastructure.readable_resource.filesystem.iter_directory_entries.failed",
+                        error,
+                        context={"step": "iter_directory_entries"},
+                    )
+                    yield UnreadableDirectoryEntry(name=entry.name, error=error)
                     continue
                 yield (entry.name, kind, size, mtime_ns)
         finally:
@@ -159,7 +175,13 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
                     if cached is not None
                     else self.iter_directory_entries(absolute)
                 )
-            except OSError:
+            except OSError as error:
+                record_exception(
+                    logging.getLogger(__name__),
+                    "modules.imports.infrastructure.readable_resource.filesystem.probe_directory.failed",
+                    error,
+                    context={"step": "probe_directory"},
+                )
                 termination = ProbeTerminationReason.LOCAL_IO_ERROR
                 break
             try:
@@ -206,7 +228,13 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
                 else:
                     if cached is None and listings is not None:
                         listings[relative_dir] = tuple(complete)
-            except OSError:
+            except OSError as error:
+                record_exception(
+                    logging.getLogger(__name__),
+                    "modules.imports.infrastructure.readable_resource.filesystem.probe_directory.failed",
+                    error,
+                    context={"step": "probe_directory"},
+                )
                 termination = ProbeTerminationReason.LOCAL_IO_ERROR
                 break
             finally:
@@ -230,10 +258,18 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
             iterator = os.scandir(resolved)
             iterator.close()
             return True
-        except OSError:
+        except OSError as error:
+            record_exception(
+                logging.getLogger(__name__),
+                "modules.imports.infrastructure.readable_resource.filesystem.path_is_readable_directory.failed",
+                error,
+                context={"step": "path_is_readable_directory"},
+            )
             return False
 
-    def observe_readable_file(self, path: Path) -> RegularFileObservation | None:
+    def observe_readable_file(
+        self, path: Path, *, missing_ok: bool = False
+    ) -> RegularFileObservation | None:
         try:
             resolved = path.resolve(strict=True)
             if not resolved.is_file():
@@ -244,7 +280,24 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
                 observed_size_bytes=int(observed.st_size),
                 observed_mtime_ns=int(observed.st_mtime_ns),
             )
-        except OSError:
+        except FileNotFoundError as error:
+            # diagnostics-control-flow: optional metadata candidates may be absent;
+            # required source files and referenced cover assets still record ENOENT.
+            if not missing_ok:
+                record_exception(
+                    logging.getLogger(__name__),
+                    "modules.imports.infrastructure.readable_resource.filesystem.observe_readable_file.failed",
+                    error,
+                    context={"step": "observe_readable_file"},
+                )
+            return None
+        except OSError as error:
+            record_exception(
+                logging.getLogger(__name__),
+                "modules.imports.infrastructure.readable_resource.filesystem.observe_readable_file.failed",
+                error,
+                context={"step": "observe_readable_file"},
+            )
             return None
 
     def delete_source(

@@ -12,6 +12,8 @@ from urllib.request import urlopen
 from sqlalchemy.orm import Session
 
 from app.bootstrap.system import write_prepared_system_events
+from app.core.exception_diagnostics import record_exception
+from app.core.i18n import configured_locale
 from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
 from app.modules.metadata.domain.providers import BUILTIN_MANIFESTS, ProviderManifest
@@ -29,6 +31,10 @@ from app.modules.system.public import PreparedSystemEvent
 
 LOGGER = logging.getLogger(__name__)
 ENTRY_POINT_GROUP = "shuku_starship.metadata_providers"
+
+
+class MetadataProviderRequestError(ValueError):
+    """A known provider selection or configuration rule rejected the request."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +73,7 @@ def _json_value(value: Any, fallback: Any = None) -> Any:
     try:
         return json.loads(str(value))
     except (TypeError, ValueError, json.JSONDecodeError):
+        # diagnostics-control-flow: Provider preferences accept literal strings as well as structured JSON.
         return value
 
 
@@ -187,19 +194,16 @@ class MetadataProviderRegistry:
         try:
             entry_points = importlib_metadata.entry_points()
             selected = entry_points.select(group=ENTRY_POINT_GROUP)
-        except Exception:
-            LOGGER.exception("failed to discover metadata provider entry points")
+        except Exception as error:  # noqa: BLE001 - isolate third-party provider discovery failures
+            record_exception(LOGGER, "metadata_provider.discovery_failed", error, context={"step": "discover_plugins"})
             return
         for entry_point in selected:
             try:
                 loaded = entry_point.load()
                 plugin = loaded() if isinstance(loaded, type) else loaded
                 self.register(plugin)
-            except Exception:
-                LOGGER.exception(
-                    "failed to load metadata provider entry point name=%s",
-                    getattr(entry_point, "name", "unknown"),
-                )
+            except Exception as error:  # noqa: BLE001 - isolate third-party provider discovery failures
+                record_exception(LOGGER, "metadata_provider.load_failed", error, context={"step": "load_plugin", "resource_id": getattr(entry_point, "name", "unknown")})
 
     def get(self, provider_id: str) -> MetadataProviderPlugin | None:
         return self._plugins.get(provider_id)
@@ -207,7 +211,7 @@ class MetadataProviderRegistry:
     def require(self, provider_id: str) -> MetadataProviderPlugin:
         plugin = self.get(provider_id)
         if not plugin:
-            raise ValueError("不支持的元数据来源")
+            raise MetadataProviderRequestError("不支持的元数据来源")
         return plugin
 
     def all(self) -> list[MetadataProviderPlugin]:
@@ -239,7 +243,7 @@ def prepare_metadata_provider_order_update(
     db: Session, items: list[dict[str, Any]]
 ) -> PreparedMetadataProviderOrderUpdate:
     if not isinstance(items, list):
-        raise ValueError("数据源顺序格式不正确")  # noqa: TRY004
+        raise MetadataProviderRequestError("数据源顺序格式不正确")
     registry = metadata_provider_registry()
     provider_ids = [
         str(item.get("providerId") or "").strip()
@@ -251,21 +255,21 @@ def prepare_metadata_provider_order_update(
         or not all(provider_ids)
         or len(set(provider_ids)) != len(provider_ids)
     ):
-        raise ValueError("数据源列表包含无效或重复项目")
+        raise MetadataProviderRequestError("数据源列表包含无效或重复项目")
     expected_ids = {str(plugin.manifest.id) for plugin in registry.all()}
     if set(provider_ids) != expected_ids:
-        raise ValueError("数据源列表必须包含全部可用数据源")
+        raise MetadataProviderRequestError("数据源列表必须包含全部可用数据源")
     for item, provider_id in zip(items, provider_ids):
         plugin = registry.get(provider_id)
         if not plugin:
-            raise ValueError(f"不支持的数据源：{provider_id}")
+            raise MetadataProviderRequestError(f"不支持的数据源：{provider_id}")
         if bool(item.get("enabled")):
             source = _provider_source(db, provider_id)
             errors = _validate_config(
                 plugin.manifest, _source_config(source, plugin.manifest), True
             )
             if errors:
-                raise ValueError(f"{plugin.manifest.name}：{'；'.join(errors)}")
+                raise MetadataProviderRequestError(f"{plugin.manifest.name}：{'；'.join(errors)}")
     now = _now()
     provider_rows = tuple(
         {
@@ -386,11 +390,11 @@ def prepare_metadata_provider_update(
     plugin = metadata_provider_registry().require(provider_id)
     source = _provider_source(db, provider_id)
     if not source:
-        raise ValueError("元数据插件配置不存在")
+        raise MetadataProviderRequestError("元数据插件配置不存在")
     current_config = _source_config(source, plugin.manifest)
     incoming = payload.get("config")
     if incoming is not None and not isinstance(incoming, dict):
-        raise ValueError("插件配置格式不正确")
+        raise MetadataProviderRequestError("插件配置格式不正确")
     next_config = {**current_config}
     if isinstance(incoming, dict):
         for field in plugin.manifest.config_fields:
@@ -403,14 +407,14 @@ def prepare_metadata_provider_update(
     clear_secrets = payload.get("clearSecrets") or []
     if not isinstance(clear_secrets, list):
         # Preserve the established provider-validation error contract.
-        raise ValueError("清除凭据格式不正确")  # noqa: TRY004
+        raise MetadataProviderRequestError("清除凭据格式不正确")
     for key in clear_secrets:
         if str(key) in _secret_fields(plugin.manifest):
             next_config.pop(str(key), None)
     enabled = bool(source.get("enabled"))
     errors = _validate_config(plugin.manifest, next_config, enabled)
     if errors:
-        raise ValueError("；".join(errors))
+        raise MetadataProviderRequestError("；".join(errors))
     now = _now()
     write = prepare_provider_update_write(
         source_id=str(source["id"]),
@@ -435,7 +439,7 @@ def persist_metadata_provider_update(
     plugin = metadata_provider_registry().require(provider_id)
     updated = _provider_source(db, provider_id)
     if not updated:
-        raise ValueError("元数据插件配置不存在")
+        raise MetadataProviderRequestError("元数据插件配置不存在")
     return _provider_public_view(updated, plugin)
 
 
@@ -446,17 +450,24 @@ def update_metadata_provider(
     return persist_metadata_provider_update(db, prepared)
 
 
+class MetadataProviderTestRejected(RuntimeError):
+    """Observed provider/configuration rejection, with no invented lower cause."""
+
+
 def test_metadata_provider(
     db: Session, provider_id: str
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     plugin = metadata_provider_registry().require(provider_id)
     source = _provider_source(db, provider_id)
     if not source:
-        raise ValueError("元数据插件配置不存在")
+        raise MetadataProviderRequestError("元数据插件配置不存在")
     config = _source_config(source, plugin.manifest)
     validation = _validate_config(plugin.manifest, config, True)
     source_id = str(source["id"])
     source_updated_at = source.get("updatedAt")
+    locale = configured_locale(db)
+    failure_message = "Provider test failed" if locale == "en-US" else "连接测试失败"
+    configuration_message = "Provider configuration rejected" if locale == "en-US" else "插件配置校验失败"
     if not isinstance(source_updated_at, datetime):
         # Treat malformed persisted configuration as a domain validation error.
         raise TypeError("METADATA_PROVIDER_UPDATED_AT_MISSING")
@@ -466,15 +477,24 @@ def test_metadata_provider(
     # transaction spans the network call.
     db.close()
     if validation:
-        result = {"ok": False, "message": "；".join(validation)}
+        reason = "；".join(validation)
+        diagnostic_id = record_exception(LOGGER, "metadata_provider.configuration_rejected", MetadataProviderTestRejected(reason), context={"step": "validate_provider_configuration", "resource_id": provider_id})
+        result = {"ok": False, "message": configuration_message, "diagnosticId": diagnostic_id}
     else:
         try:
             result = plugin.test(config)
+            if not result.get("ok"):
+                diagnostic_id = record_exception(LOGGER, "metadata_provider.test_rejected", MetadataProviderTestRejected(str(result.get("message") or "Provider returned ok=false; further reason not provided")), context={"step": "test_provider", "resource_id": provider_id})
+                result = {"ok": False, "message": failure_message, "diagnosticId": diagnostic_id}
         except Exception as exc:  # noqa: BLE001 - contains provider failures.
-            result = {"ok": False, "message": str(exc)}
+            diagnostic_id = record_exception(logging.getLogger(__name__), "services.metadata_provider_registry.test_metadata_provider.failed", exc,
+                             context={"step": "test_metadata_provider", "resource_id": provider_id})
+            result = {"ok": False, "message": failure_message, "diagnosticId": diagnostic_id}
     now = _now()
     status = "ok" if result.get("ok") else "failed"
     error = None if result.get("ok") else str(result.get("message") or "连接测试失败")
+    if error and result.get("diagnosticId"):
+        error = f"{error} (diagnostic_id={result['diagnosticId']})"
     with MetadataWriteTransaction(db):
         update_source_test_result(
             db,

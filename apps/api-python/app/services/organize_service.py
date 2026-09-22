@@ -16,6 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.database_errors import is_database_busy_error
+from app.core.exception_diagnostics import record_exception
 from app.core.time import now_timestamp_ms
 from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
@@ -44,6 +45,7 @@ def parse_json_value(value: Any) -> Any:
         try:
             return json.loads(stripped)
         except json.JSONDecodeError:
+            # diagnostics-control-flow: Organizer preferences accept literal strings as well as structured JSON.
             return value
     return value
 
@@ -247,7 +249,9 @@ def local_metadata_summary(context: dict[str, Any]) -> dict[str, Any]:
 def normalize_ai_confidence(value: Any) -> float:
     try:
         parsed = float(value if value is not None else 0.6)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as error:
+        record_exception(logging.getLogger(__name__), "services.organize_service.normalize_ai_confidence.failed", error,
+                         context={"step": "normalize_ai_confidence"})
         parsed = 0.6
     return min(0.74, max(0.0, parsed))
 
@@ -395,7 +399,9 @@ def publication_datetime_or_none(*values: Any) -> str | None:
             int(match.group("day") or 1),
             tzinfo=UTC,
         )
-    except ValueError:
+    except ValueError as error:
+        record_exception(logging.getLogger(__name__), "services.organize_service.publication_datetime_or_none.failed", error,
+                         context={"step": "publication_datetime_or_none"})
         return None
     return parsed.isoformat()
 
@@ -451,7 +457,9 @@ def parse_json_ld_book(html: str) -> dict[str, Any] | None:
     try:
         payload = json.loads(match.group(1).strip())
         return payload if isinstance(payload, dict) else None
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as error:
+        record_exception(logging.getLogger(__name__), "services.organize_service.parse_json_ld_book.failed", error,
+                         context={"step": "parse_json_ld_book"})
         return None
 
 
@@ -579,7 +587,9 @@ def parse_douban_search_html(html: str, confidence: float) -> list[dict[str, Any
         return []
     try:
         payload = json.loads(match.group(1))
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as error:
+        record_exception(logging.getLogger(__name__), "services.organize_service.parse_douban_search_html.failed", error,
+                         context={"step": "parse_douban_search_html"})
         return []
     items: list[Any] = cast(
         list[Any],
@@ -790,7 +800,9 @@ def run_douban_crawler_provider(
                 else None
             )
         # A failed optional detail fetch must not discard the valid search result.
-        except (OSError, ValueError, TypeError, KeyError):
+        except (OSError, ValueError, TypeError, KeyError) as error:
+            record_exception(logging.getLogger(__name__), "services.organize_service.run_douban_crawler_provider.failed", error,
+                             context={"step": "run_douban_crawler_provider"})
             subject_candidate = None
         candidate = subject_candidate or selected
         if candidate:
@@ -1281,12 +1293,12 @@ def external_metadata_cache_put(
         ):
             metadata_cache.write_prepared_cache_entry(writer, prepared)
     except SQLAlchemyError as exc:
+        record_exception(
+            LOGGER, "metadata.cache_write_failed", exc,
+            context={"step": "write_metadata_cache", "resource_id": provider},
+        )
         if not is_database_busy_error(exc):
             raise
-        LOGGER.info(
-            "metadata_cache_write outcome=deferred reason=database_busy provider=%s",
-            provider,
-        )
 
 
 def metadata_search_candidates(

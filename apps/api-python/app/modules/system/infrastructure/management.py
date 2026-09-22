@@ -16,6 +16,7 @@ from app.models import (
 from app.modules.system.application.projections import (
     summarize_diagnostic_metadata,
 )
+from app.modules.system.infrastructure.events import normalize_stored_event_metadata
 
 
 def management_card_counts(db: Session) -> dict[str, int]:
@@ -90,7 +91,9 @@ def recent_system_events(db: Session, *, limit: int = 8) -> list[dict[str, Any]]
             "targetType": row.target_type,
             "targetId": row.target_id,
             "message": row.message,
-            "metadata": summarize_diagnostic_metadata(row.metadata_json),
+            "metadata": summarize_diagnostic_metadata(
+                normalize_stored_event_metadata(row.metadata_json, event_id=row.id)
+            ),
             "createdAt": row.created_at,
         }
         for row in rows

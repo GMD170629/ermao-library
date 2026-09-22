@@ -32,6 +32,7 @@ from app.contracts.reader_safety_policy_generated import (
     reader_safety_rule,
 )
 from app.core.config import Settings, get_settings
+from app.core.exception_diagnostics import record_exception
 from app.infrastructure.atomic_files import write_atomic_bytes
 from app.infrastructure.comic_archives import (
     ComicArchiveBackendUnavailableError,
@@ -79,7 +80,9 @@ def _revalidate_regular_file(path: Path | None) -> Path | None:
     try:
         candidate = path.expanduser()
         resolved = candidate.resolve(strict=True)
-    except OSError:
+    except OSError as error:
+        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._revalidate_regular_file.failed", error,
+                         context={"step": "_revalidate_regular_file"})
         return None
     if resolved != candidate or not resolved.is_file():
         return None
@@ -106,7 +109,9 @@ def _read_regular_file(
         if not stat_module.S_ISREG(stat_result.st_mode):
             return None
         return resolved, stat_result, handle.read()
-    except OSError:
+    except OSError as error:
+        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._read_regular_file.failed", error,
+                         context={"step": "_read_regular_file"})
         return None
     finally:
         if handle is not None:
@@ -128,7 +133,9 @@ def _stored_path(
         source_roots = tuple(
             source_root.expanduser().resolve() for source_root in allowed_source_roots
         )
-    except OSError:
+    except OSError as error:
+        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._stored_path.failed", error,
+                         context={"step": "_stored_path"})
         return None
 
     # Relative source-node paths belong to their owning Library root. Only
@@ -143,7 +150,9 @@ def _stored_path(
     for candidate in candidates:
         try:
             resolved = candidate.expanduser().resolve()
-        except OSError:
+        except OSError as error:
+            record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._stored_path.failed", error,
+                             context={"step": "_stored_path"})
             continue
         roots = source_roots if source_roots else (storage,)
         if any(resolved == root or root in resolved.parents for root in roots):
@@ -167,7 +176,9 @@ def _parse_byte_range(
     if not raw_start:
         try:
             suffix_length = int(raw_end)
-        except ValueError:
+        except ValueError as error:
+            record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._parse_byte_range.failed", error,
+                             context={"step": "_parse_byte_range"})
             return "unsatisfiable", None
         if suffix_length <= 0:
             return "unsatisfiable", None
@@ -175,7 +186,9 @@ def _parse_byte_range(
     try:
         start = int(raw_start)
         end = int(raw_end) if raw_end else size - 1
-    except ValueError:
+    except ValueError as error:
+        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._parse_byte_range.failed", error,
+                         context={"step": "_parse_byte_range"})
         return "unsatisfiable", None
     if start < 0 or end < start or start >= size:
         return "unsatisfiable", None
@@ -203,7 +216,9 @@ def _not_modified(request: Request, etag: str, last_modified: str) -> bool:
             since = parsedate_to_datetime(if_modified_since)
             modified = parsedate_to_datetime(last_modified)
             return modified <= since
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as error:
+            record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._not_modified.failed", error,
+                             context={"step": "_not_modified"})
             return False
     return False
 
@@ -221,7 +236,9 @@ def _should_use_range(request: Request, etag: str, last_modified: str) -> bool:
         if_range_date = parsedate_to_datetime(if_range)
         modified = parsedate_to_datetime(last_modified)
         return modified <= if_range_date
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as error:
+        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._should_use_range.failed", error,
+                         context={"step": "_should_use_range"})
         return False
 
 
@@ -423,6 +440,8 @@ def _pse_image_bytes(
             )
             return output.getvalue()
     except (OSError, ValueError, UnidentifiedImageError) as exc:
+        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._pse_image_bytes.failed", exc,
+                         context={"step": "_pse_image_bytes"})
         logger.debug("failed to create OPDS PSE JPEG page: %s", exc)
         return None
 
@@ -562,6 +581,8 @@ def _small_cover_webp_bytes(path: Path) -> bytes | None:
                     return None
                 prepared = prepared.resize(next_size, Image.Resampling.LANCZOS)
     except (OSError, ValueError, UnidentifiedImageError) as exc:
+        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._small_cover_webp_bytes.failed", exc,
+                         context={"step": "_small_cover_webp_bytes"})
         logger.debug("failed to create small cover image path=%s error=%s", path, exc)
         return None
 
@@ -620,6 +641,8 @@ def _comic_page_webp_bytes(data: bytes) -> bytes | None:
             optimized = output.getvalue()
             return optimized if len(optimized) < len(data) else None
     except (OSError, ValueError, UnidentifiedImageError) as exc:
+        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._comic_page_webp_bytes.failed", exc,
+                         context={"step": "_comic_page_webp_bytes"})
         logger.debug("skipping comic page data-saver image variant: %s", exc)
         return None
 

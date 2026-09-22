@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Protocol
 
 from app.core.authorization import AuthorizationContext
+from app.modules.library.domain.facets import InvalidLibraryFacetRequest
 
 LIBRARY_GROUPING_KINDS = frozenset({"AUTHOR", "SERIES"})
 
@@ -63,7 +64,7 @@ class ListLibraryGroupings:
     ) -> LibraryGroupingPage:
         normalized_kind = kind.strip().upper()
         if normalized_kind not in LIBRARY_GROUPING_KINDS:
-            raise ValueError("分组类型无效")
+            raise InvalidLibraryFacetRequest("分组类型无效")
         return self.query.list_groupings(
             kind=normalized_kind,
             context=context,

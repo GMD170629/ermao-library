@@ -1,9 +1,11 @@
 """Read visible Linux mounts without exposing host filesystem paths."""
 
+import logging
 import os
 import re
 from pathlib import Path, PurePath, PurePosixPath
 
+from app.core.exception_diagnostics import record_exception
 from app.modules.imports.application.library_paths import DirectoryMountSnapshot
 
 _SYSTEM_FILESYSTEMS = frozenset({
@@ -23,12 +25,15 @@ def directory_mount_resolver(
     try:
         content = mountinfo_path.read_text(encoding="utf-8", errors="surrogateescape")
     except OSError:
+        # diagnostics-control-flow: Linux mount metadata is an optional capability probe on other hosts.
         content = ""  # Mount metadata is optional on non-Linux/restricted hosts.
     for line in content.splitlines():
         fields = line.split()
         try:
             separator = fields.index("-")
-        except ValueError:
+        except ValueError as error:
+            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.directory_mounts.directory_mount_resolver.failed", error,
+                             context={"step": "directory_mount_resolver"})
             continue
         if separator < 6 or len(fields) < separator + 4:
             continue

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, Protocol
@@ -174,6 +174,7 @@ class UnreadableDirectoryEntry:
     """A visible directory entry whose type or stat facts could not be read."""
 
     name: str
+    error: OSError | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -370,6 +371,9 @@ class PipelineLogPort(Protocol):
         task_id: str | None = None,
         stage: str | None = None,
         outcome: str | None = None,
+        error: BaseException | None = None,
+        step: str | None = None,
+        source_node_id: str | None = None,
     ) -> None: ...
 
 

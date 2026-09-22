@@ -18,6 +18,10 @@ class AvatarUnavailable(Exception):
     """The account or its required display asset is unavailable."""
 
 
+class InvalidAvatarContent(ValueError):
+    """The supplied avatar violates the supported image rules."""
+
+
 class AccountAvatarRepository(Protocol):
     def find_for_actor(self, actor_id: str) -> AccountAvatar | None: ...
 

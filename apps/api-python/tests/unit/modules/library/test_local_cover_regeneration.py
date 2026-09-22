@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
 
+from app.core.failure_diagnostics import RuntimeFailureDiagnostics
 from app.modules.library.application.local_cover_regeneration import (
     LocalCoverFailureCode,
     LocalCoverScope,
@@ -231,6 +233,9 @@ def _use_case(
             resource_covers=resource_covers,
             source_covers=source_covers,
             unit_of_work=unit_of_work,
+            diagnostics=RuntimeFailureDiagnostics(
+                logging.getLogger(__name__), "library"
+            ),
         ),
         resource_covers,
         source_covers,
@@ -274,7 +279,7 @@ def test_resource_failure_preserves_the_existing_cover() -> None:
     assert unit_of_work.commits == 0
 
 
-def test_resource_commit_failure_reverts_the_published_cover() -> None:
+def test_resource_commit_failure_reverts_the_published_cover(caplog) -> None:
     sources = _Sources()
     parser = _Parser({"r1": b"new-cover"})
     resource_covers = _ResourceCovers()
@@ -287,6 +292,7 @@ def test_resource_commit_failure_reverts_the_published_cover() -> None:
         resource_covers=resource_covers,
         source_covers=source_covers,
         unit_of_work=unit_of_work,
+        diagnostics=RuntimeFailureDiagnostics(logging.getLogger(__name__), "library"),
     )
 
     with pytest.raises(RuntimeError, match="commit failed"):
@@ -297,6 +303,9 @@ def test_resource_commit_failure_reverts_the_published_cover() -> None:
         )
 
     assert resource_covers.reverted == ["r1"]
+    assert "local_cover.resource_state_failed" in caplog.text
+    assert "commit failed" in caplog.text
+    assert "diagnostic_id=diag_" in caplog.text
     assert resource_covers.completed == []
     assert resource_covers.contents == {}
 

@@ -77,11 +77,10 @@ def test_upgrade_backfills_newest_first_and_is_reentrant(tmp_path: Path) -> None
 def test_downgrade_removes_the_sort_order_column(tmp_path: Path) -> None:
     engine = _engine(tmp_path)
     config = alembic_config_for_engine(engine)
-    command.upgrade(config, "head")
+    # Test this reversible migration without traversing later irreversible migrations.
+    command.upgrade(config, "0016_library_sort_order")
 
     command.downgrade(config, _PREVIOUS_REVISION)
 
-    columns = {
-        column["name"] for column in sa.inspect(engine).get_columns("Library")
-    }
+    columns = {column["name"] for column in sa.inspect(engine).get_columns("Library")}
     assert "sortOrder" not in columns

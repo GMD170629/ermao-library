@@ -6,9 +6,12 @@ resource-role decisions; no archive member is extracted to the filesystem.
 
 from __future__ import annotations
 
+import logging
 import struct
 import zipfile
 from enum import StrEnum
+
+from app.core.exception_diagnostics import record_exception
 
 
 class ArchivePathProblem(StrEnum):
@@ -71,7 +74,9 @@ def zip_entry_data_span(
         name_length, extra_length = struct.unpack("<HH", header)
         start = info.header_offset + 30 + name_length + extra_length
         return start, start + info.compress_size
-    except (OSError, ValueError):
+    except (OSError, ValueError) as error:
+        record_exception(logging.getLogger(__name__), "infrastructure.archive_integrity.zip_entry_data_span.failed", error,
+                         context={"step": "zip_entry_data_span"})
         return None
     finally:
         file_pointer.seek(position)

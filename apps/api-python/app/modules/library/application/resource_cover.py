@@ -18,6 +18,10 @@ from app.modules.library.application.resource_commands import (
 MAX_RESOURCE_COVER_BYTES = 10 * 1024 * 1024
 
 
+class InvalidResourceCover(ValueError):
+    """The supplied resource cover violates a supported cover rule."""
+
+
 class ResourceCoverPort(Protocol):
     """Persistence operations for a Resource cover replacement."""
 

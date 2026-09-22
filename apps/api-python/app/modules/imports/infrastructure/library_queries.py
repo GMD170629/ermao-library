@@ -8,6 +8,7 @@ queries.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import cast
 
@@ -19,6 +20,7 @@ from app.core.authorization import (
     AuthorizationContext,
     library_visibility_predicate,
 )
+from app.core.exception_diagnostics import record_exception
 from app.models import (
     Library,
     LibraryBookMetadata,
@@ -126,13 +128,17 @@ def list_library_access_user_ids(db: Session, library_id: str) -> tuple[str, ...
 def library_id_for_path(db: Session, target: Path) -> str | None:
     try:
         resolved_target = target.expanduser().resolve()
-    except OSError:
+    except OSError as error:
+        record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.library_queries.library_id_for_path.failed", error,
+                         context={"step": "library_id_for_path"})
         return None
     for row in db.scalars(select(Library).where(Library.enabled.is_(True))).all():
         try:
             root = Path(row.root_path).expanduser().resolve()
             resolved_target.relative_to(root)
-        except (OSError, ValueError):
+        except (OSError, ValueError) as error:
+            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.library_queries.library_id_for_path.failed", error,
+                             context={"step": "library_id_for_path"})
             continue
         return row.id
     return None

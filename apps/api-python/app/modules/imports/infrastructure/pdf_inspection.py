@@ -1,11 +1,13 @@
 """Import-only PDF structure inspection; no page content or repair scans."""
 
+import logging
 import re
 from pathlib import Path
 
 from pypdf.errors import PdfReadError
 from pypdf.generic import Destination
 
+from app.core.exception_diagnostics import record_exception
 from app.infrastructure.bounded_inspection import LimitedReader
 from app.infrastructure.pdf_metadata_reader import StrictMetadataPdfReader
 from app.modules.imports.application.pdf_types import PdfChapter, PdfInspection
@@ -41,10 +43,11 @@ def inspect_pdf(path: Path, original_name: str | None = None) -> PdfInspection:
                         )
 
             visit(pdf.outline)
-    except (OSError, ValueError, PdfReadError, KeyError, TypeError, RecursionError):
+    except (OSError, ValueError, PdfReadError, KeyError, TypeError, RecursionError) as error:
         # Optional metadata inspection cannot turn a readable file into a
         # failed import. Actual reader errors remain owned by the reader.
-        pass
+        record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.pdf_inspection.inspect_pdf.failed", error,
+                         context={"step": "inspect_pdf"})
     title = metadata.get("Title")
     if title and re.sub(r"[\s._-]+", "", title).casefold() in {
         "cover",

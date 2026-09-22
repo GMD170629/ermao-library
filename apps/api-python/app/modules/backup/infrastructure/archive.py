@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import tempfile
 import zipfile
@@ -15,7 +16,9 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.core.exception_diagnostics import record_exception
 from app.db.bootstrap import bootstrap_database
+from app.db.diagnostic_session import DiagnosticSession
 from app.db.maintenance import (
     DATABASE_MAINTENANCE_RESTORE_VALUE,
     DATABASE_MAINTENANCE_SETTING_KEY,
@@ -24,10 +27,12 @@ from app.db.maintenance import (
 )
 from app.db.runner import head_revision
 from app.db.sqlite import create_sqlite_engine
-from app.modules.backup.application.operations import BackupFormatError
+from app.modules.backup.application.operations import (
+    BackupFormatError,
+    BackupRequestError,
+)
 from app.modules.backup.application.restore import (
     ApplyValidatedBackupRestore,
-    BackupRecordValidationError,
     PreparedRestorePlan,
 )
 from app.modules.backup.infrastructure.persistence import (
@@ -111,7 +116,7 @@ def backup_id(kind: str = "manual", created_at: datetime | None = None) -> str:
 
 def assert_backup_id(value: str) -> None:
     if not re.fullmatch(r"(manual|automatic)-\d{8}-\d{6}-[a-z0-9]+|backup-\d+", value):
-        raise ValueError("INVALID_BACKUP_ID")
+        raise BackupRequestError("INVALID_BACKUP_ID")
 
 
 def backup_path(settings: Settings, backup_id_value: str) -> Path:
@@ -209,7 +214,7 @@ def create_backup(
     db: Session, settings: Settings, kind: str = "manual"
 ) -> BackupResult:
     if kind != "manual":
-        raise ValueError("BACKUP_KIND_UNSUPPORTED")
+        raise BackupRequestError("BACKUP_KIND_UNSUPPORTED")
     created_at = datetime.now(UTC)
     backup_id_value = backup_id(kind, created_at)
     database_export = {
@@ -286,7 +291,9 @@ def read_backup_metadata(path: Path) -> dict[str, Any] | None:
     try:
         with zipfile.ZipFile(path) as archive:
             return json.loads(archive.read("metadata.json").decode("utf-8"))
-    except (OSError, KeyError, ValueError, zipfile.BadZipFile):
+    except (OSError, KeyError, ValueError, zipfile.BadZipFile) as error:
+        record_exception(logging.getLogger(__name__), "modules.backup.infrastructure.archive.read_backup_metadata.failed", error,
+                         context={"step": "read_backup_metadata"})
         return None
 
 
@@ -328,7 +335,7 @@ def parse_backup(path: Path) -> tuple[dict[str, Any], dict[str, object]]:
             database_export = json.loads(
                 archive.read("database-export.json").decode("utf-8")
             )
-    except (OSError, KeyError, ValueError, zipfile.BadZipFile) as exc:
+    except (KeyError, json.JSONDecodeError, UnicodeDecodeError, zipfile.BadZipFile) as exc:
         raise BackupFormatError("BACKUP_FORMAT_INVALID") from exc
     if not isinstance(metadata, dict) or not isinstance(database_export, dict):
         raise BackupFormatError("BACKUP_FORMAT_INVALID")
@@ -336,7 +343,7 @@ def parse_backup(path: Path) -> tuple[dict[str, Any], dict[str, object]]:
         metadata.get("app") != "ermao-books"
         or metadata.get("version") != BACKUP_FORMAT_VERSION
     ):
-        raise ValueError("BACKUP_REVISION_UNSUPPORTED")
+        raise BackupRequestError("BACKUP_REVISION_UNSUPPORTED")
     return metadata, database_export
 
 
@@ -396,16 +403,11 @@ def _validate_restore_against_temporary_database(
         validation_engine = create_sqlite_engine(validation_settings.database_path)
         try:
             bootstrap_database(validation_engine, validation_settings)
-            with Session(validation_engine) as validation_db:
-                try:
-                    ApplyValidatedBackupRestore(
-                        SqlAlchemyBackupRestoreWriter(validation_db),
-                        validation_db,
-                    ).execute(plan)
-                except BackupRecordValidationError:
-                    raise
-                except Exception as exc:
-                    raise BackupRecordValidationError("BACKUP_CONTENT_INVALID") from exc
+            with DiagnosticSession(validation_engine) as validation_db:
+                ApplyValidatedBackupRestore(
+                    SqlAlchemyBackupRestoreWriter(validation_db),
+                    validation_db,
+                ).execute(plan)
         finally:
             validation_engine.dispose()
 
@@ -423,7 +425,7 @@ def restore_backup(
         metadata.get("databaseRevision") != supported_revision
         or _engine_database_revision(live_engine) != supported_revision
     ):
-        raise ValueError("BACKUP_REVISION_UNSUPPORTED")
+        raise BackupRequestError("BACKUP_REVISION_UNSUPPORTED")
     plan = _prepare_restore(database_export)
     _validate_restore_against_temporary_database(plan)
     writer = SqlAlchemyBackupRestoreWriter(db)

@@ -201,6 +201,7 @@ def read_user_preferences(db: Session, user_id: str) -> dict[str, Any]:
         try:
             preferences[str(row.key)] = json.loads(str(raw))
         except (TypeError, ValueError, json.JSONDecodeError):
+            # diagnostics-control-flow: User preference values support literal strings in addition to JSON encoded values.
             preferences[str(row.key)] = raw
     return preferences
 

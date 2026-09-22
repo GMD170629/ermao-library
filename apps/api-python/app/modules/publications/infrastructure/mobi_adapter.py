@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.util
+import logging
 import os
 import posixpath
 from collections.abc import Callable, Iterator
@@ -18,6 +19,7 @@ from app.contracts.reader_safety_policy_generated import (
     ReaderSafetyRuleId,
     reader_safety_budget,
 )
+from app.core.exception_diagnostics import record_exception
 from app.modules.publications.application.ports import (
     PublicationAdapter,
     PublicationSource,
@@ -170,7 +172,14 @@ class _MobiCore:
                 continue
             try:
                 return cls(candidate)
-            except OSError:
+            except OSError as error:
+                # diagnostics-control-flow: Missing optional default native-library candidates are probes; configured/discovered/existing load failures are recorded below.
+                # Optional default locations are discovery probes. An explicitly
+                # configured, discoverable or existing library that cannot load
+                # is a real adapter failure and retains the loader exception.
+                if candidate == configured or not candidate.startswith("/") or Path(candidate).exists():
+                    record_exception(logging.getLogger(__name__), "modules.publications.infrastructure.mobi_adapter.load.failed", error,
+                                     context={"step": "load"})
                 continue
         return None
 

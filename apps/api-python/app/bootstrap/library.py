@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from sqlalchemy import select
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.bootstrap.media import build_cover_url_resolver
 from app.bootstrap.reader import reader_v5_library_queries
 from app.core.config import Settings
+from app.core.failure_diagnostics import RuntimeFailureDiagnostics
 from app.models import MetadataLookupTask
 from app.models.auth import User
 from app.modules.library.application.asset_commands import DeleteResourceAsset
@@ -333,7 +335,14 @@ def apply_recognized_metadata(
         FilesystemRecognizedCoverPublication(settings.resolved_storage_root),
         db,
     )
-    return ApplyRecognizedMetadata(adapter, db, covers)
+    return ApplyRecognizedMetadata(
+        adapter,
+        db,
+        covers,
+        RuntimeFailureDiagnostics(
+            logging.getLogger(__name__), "library", lambda: Session(db.get_bind())
+        ),
+    )
 
 
 def delete_resource_asset(db: Session) -> DeleteResourceAsset:

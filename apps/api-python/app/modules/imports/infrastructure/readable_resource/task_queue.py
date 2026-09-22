@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from datetime import datetime
 from typing import cast
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session, aliased
 
 from app.contracts.library_file_activity import LibraryFileActivityBusy
 from app.contracts.source_relocation import SourceRelocation
+from app.core.exception_diagnostics import prepare_exception_diagnostic
 from app.infrastructure.file_operation_conflicts import file_operation_blocks_library
 from app.models import (
     LibraryBook,
@@ -51,6 +53,10 @@ from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
 )
 from app.modules.library.public import AssetRole
+
+
+class ImportTaskInterrupted(RuntimeError):
+    """Startup observed a task still running from the previous worker lifetime."""
 
 
 class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
@@ -449,6 +455,13 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             .returning(LibraryImportTask.id)
         )
         if claimed is None:
+            current = self._session.get(
+                LibraryImportTask, task_id, populate_existing=True
+            )
+            if current is None:
+                raise LookupError(task_id)
+            if current.state != "QUEUED":
+                raise ValueError("IMPORT_TASK_NOT_QUEUED")
             raise LibraryFileActivityBusy("LIBRARY_FILE_ACTIVITY_BUSY")
         row.state = "RUNNING"
         if row.kind == "IMPORT_RESOURCE":
@@ -510,11 +523,23 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         running = self._session.scalars(
             select(LibraryImportTask).where(
                 LibraryImportTask.state == "RUNNING",
-                LibraryImportTask.kind.in_(("SCAN_LIBRARY", "CONTINUE_SOURCE")),
             )
         ).all()
         for task in running:
-            self._record_gaps_for_task(task)
+            prepare_exception_diagnostic(
+                logging.getLogger(__name__), "import.task_interrupted",
+                ImportTaskInterrupted(
+                    "Startup observed a persisted RUNNING task without a terminal result from the previous worker lifetime; interruption cause was not provided"
+                ),
+                context={
+                    "task_id": task.id, "task_kind": task.kind,
+                    "library_id": task.library_id, "resource_id": task.resource_id,
+                    "source_node_id": task.source_node_id, "step": "startup_recovery",
+                    "outcome": "FAILED", "code": WORKER_INTERRUPTED,
+                },
+            )
+            if task.kind in {"SCAN_LIBRARY", "CONTINUE_SOURCE"}:
+                self._record_gaps_for_task(task)
         result = self._session.execute(
             update(LibraryImportTask)
             .where(LibraryImportTask.state == "RUNNING")

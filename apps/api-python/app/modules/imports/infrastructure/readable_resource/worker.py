@@ -10,6 +10,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.contracts.library_file_activity import LibraryFileActivityBusy
 from app.core.exception_diagnostics import (
+    deferred_exception_persistence,
+    exception_diagnostic_boundary,
     persist_exception_diagnostic,
     prepare_exception_diagnostic,
 )
@@ -64,7 +66,7 @@ class ReadableResourceWorkerProcessor:
 
     def startup(self) -> int:
         finished_at = self._clock.now()
-        with self._uow.transaction():
+        with exception_diagnostic_boundary(logger, "readable_resource.startup_failed", context={"step": "startup_recovery"}), self._uow.transaction():
             return self._queue.fail_interrupted_tasks_on_startup(
                 finished_at=finished_at
             )
@@ -77,103 +79,106 @@ class ReadableResourceWorkerProcessor:
     def process_once(self) -> str:
         # A claimed task remains owned until its terminal state is committed.
         # Retrying this write must never rerun scanning, parsing, or metadata I/O.
-        if self._pending_completion is not None:
+        with exception_diagnostic_boundary(logger, "readable_resource.worker.failed", context={}):
+            if self._pending_completion is not None:
+                return self._finish_pending_completion()
+
+            identification_deferred = not self._enqueue_ready_books()
+            started_at = self._clock.now()
+            try:
+                with self._uow.transaction():
+                    task = self._queue.next_queued()
+                    if task is not None:
+                        self._queue.mark_running(task.id, started_at=started_at)
+            except LibraryFileActivityBusy:
+                # diagnostics-control-flow: The active file operation owns the lease; defer this import without failing it.
+                return "deferred"
+            if task is None:
+                self._process_import.reset_inspection_cache()
+                return "deferred" if identification_deferred else "idle"
+
+            try:
+                outcome = self._execute_task(task)
+                pending = _PendingCompletion(
+                    task.id,
+                    task.library_id,
+                    self._clock.now(),
+                    outcome,
+                    "UNKNOWN_KIND" if outcome == "unknown_kind" else None,
+                )
+            except Exception as error:  # noqa: BLE001 - task containment boundary
+                # Preserve the original failure before rollback or cleanup so a
+                # failing rollback cannot mask the root cause.
+                scan_failure = isinstance(error, SourceScanStartUnavailableError)
+                event = (
+                    "readable_resource.worker.scan_failed"
+                    if scan_failure
+                    else "readable_resource.worker.containment_failure"
+                )
+                snapshot = prepare_exception_diagnostic(
+                    logger,
+                    event,
+                    error,
+                    level="warning" if scan_failure else "error",
+                    context={
+                        "stage": "scan" if scan_failure else "worker",
+                        "outcome": error.code if scan_failure else "error",
+                        "task_id": task.id,
+                        "task_kind": task.kind,
+                        "library_id": task.library_id,
+                        "resource_id": task.resource_id,
+                        "source_node_id": task.source_node_id,
+                    },
+                    source="import",
+                    action="readable_resource.task_failed",
+                    target_type="importTask",
+                    target_id=task.id,
+                )
+                try:
+                    self._uow.rollback()
+                finally:
+                    # Persist only after the business transaction released its lock.
+                    persist_exception_diagnostic(logger, snapshot)
+                pending = _PendingCompletion(
+                    task.id,
+                    task.library_id,
+                    self._clock.now(),
+                    "error",
+                    error.code
+                    if isinstance(error, SourceScanStartUnavailableError)
+                    else "WORKER_ERROR",
+                )
+            self._pending_completion = pending
             return self._finish_pending_completion()
 
-        identification_deferred = not self._enqueue_ready_books()
-        started_at = self._clock.now()
-        try:
-            with self._uow.transaction():
-                task = self._queue.next_queued()
-                if task is not None:
-                    self._queue.mark_running(task.id, started_at=started_at)
-        except LibraryFileActivityBusy:
-            return "deferred"
-        if task is None:
-            self._process_import.reset_inspection_cache()
-            return "deferred" if identification_deferred else "idle"
-
-        try:
-            outcome = self._execute_task(task)
-            pending = _PendingCompletion(
-                task.id,
-                task.library_id,
-                self._clock.now(),
-                outcome,
-                "UNKNOWN_KIND" if outcome == "unknown_kind" else None,
-            )
-        except Exception as error:  # noqa: BLE001 - task containment boundary
-            # Preserve the original failure before rollback or cleanup so a
-            # failing rollback cannot mask the root cause.
-            scan_failure = isinstance(error, SourceScanStartUnavailableError)
-            event = (
-                "readable_resource.worker.scan_failed"
-                if scan_failure
-                else "readable_resource.worker.containment_failure"
-            )
-            snapshot = prepare_exception_diagnostic(
-                logger,
-                event,
-                error,
-                level="warning" if scan_failure else "error",
-                context={
-                    "stage": "scan" if scan_failure else "worker",
-                    "outcome": error.code if scan_failure else "error",
-                    "task_id": task.id,
-                    "task_kind": task.kind,
-                    "library_id": task.library_id,
-                    "resource_id": task.resource_id,
-                    "source_node_id": task.source_node_id,
-                },
-                source="import",
-                action="readable_resource.task_failed",
-                target_type="importTask",
-                target_id=task.id,
-            )
-            try:
-                self._uow.rollback()
-            finally:
-                # Persist only after the business transaction released its lock.
-                persist_exception_diagnostic(logger, snapshot)
-            pending = _PendingCompletion(
-                task.id,
-                task.library_id,
-                self._clock.now(),
-                "error",
-                error.code
-                if isinstance(error, SourceScanStartUnavailableError)
-                else "WORKER_ERROR",
-            )
-        self._pending_completion = pending
-        return self._finish_pending_completion()
-
     def _execute_task(self, task: LibraryImportTaskRecord) -> str:
-        if task.kind in {"SCAN_LIBRARY", "CONTINUE_SOURCE"}:
-            self._process_import.reset_inspection_cache()
-        if task.kind == "SCAN_LIBRARY":
-            self._scan.execute_library(
-                task.library_id,
-                task_id=task.id,
-                missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
-                scan_scopes=task.scan_scopes,
-            )
-            return "scan"
-        if task.kind == "CONTINUE_SOURCE":
-            if task.source_node_id is None:
-                raise RuntimeError("CONTINUE_SOURCE missing source_node_id")
-            self._scan.execute_source(
-                task.source_node_id,
-                task_id=task.id,
-                missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
-            )
-            return "continue_source"
-        if task.kind == "IDENTIFY_BOOK":
-            if self._identify_book is None or task.source_node_id is None:
-                raise RuntimeError("Book metadata processor is not configured")
-            return self._identify_book.execute(task.source_node_id)
-        if task.kind == "IMPORT_RESOURCE":
-            return self._process_import.execute(task.id).outcome
-        return "unknown_kind"
+        with deferred_exception_persistence(context={"task_id": task.id, "library_id": task.library_id, "task_kind": task.kind, "resource_id": task.resource_id, "source_node_id": task.source_node_id}):
+            if task.kind in {"SCAN_LIBRARY", "CONTINUE_SOURCE"}:
+                self._process_import.reset_inspection_cache()
+            if task.kind == "SCAN_LIBRARY":
+                self._scan.execute_library(
+                    task.library_id,
+                    task_id=task.id,
+                    missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
+                    scan_scopes=task.scan_scopes,
+                )
+                return "scan"
+            if task.kind == "CONTINUE_SOURCE":
+                if task.source_node_id is None:
+                    raise RuntimeError("CONTINUE_SOURCE missing source_node_id")
+                self._scan.execute_source(
+                    task.source_node_id,
+                    task_id=task.id,
+                    missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
+                )
+                return "continue_source"
+            if task.kind == "IDENTIFY_BOOK":
+                if self._identify_book is None or task.source_node_id is None:
+                    raise RuntimeError("Book metadata processor is not configured")
+                return self._identify_book.execute(task.source_node_id)
+            if task.kind == "IMPORT_RESOURCE":
+                return self._process_import.execute(task.id).outcome
+            return "unknown_kind"
 
     def _finish_pending_completion(self) -> str:
         pending = self._pending_completion

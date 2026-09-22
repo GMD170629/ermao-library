@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
+from app.core.exception_diagnostics import record_exception
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.models import (
     ReaderProgressMutation,
@@ -87,13 +89,15 @@ def _bookmark_datetime(value: str, fallback: datetime) -> datetime:
         try:
             return datetime.fromisoformat(normalized)
         except ValueError:
+            # diagnostics-control-flow: ISO timestamp parse is a probe before the supported numeric timestamp format.
             try:
                 timestamp = float(normalized)
                 if abs(timestamp) >= 10_000_000_000:
                     timestamp /= 1000
                 return datetime.fromtimestamp(timestamp, tz=UTC)
-            except (OSError, OverflowError, ValueError):
-                pass
+            except (OSError, OverflowError, ValueError) as error:
+                record_exception(logging.getLogger(__name__), "modules.reader.infrastructure.resource_repository._bookmark_datetime.failed", error,
+                                 context={"step": "_bookmark_datetime"})
     return fallback if fallback.tzinfo is not None else fallback.replace(tzinfo=UTC)
 
 

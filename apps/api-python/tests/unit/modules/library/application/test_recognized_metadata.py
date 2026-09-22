@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 import pytest
 
+from app.core.failure_diagnostics import RuntimeFailureDiagnostics
 from app.modules.library.application.recognized_metadata import (
     ApplyRecognizedMetadata,
     ApplyRecognizedMetadataCommand,
@@ -155,7 +157,12 @@ def test_book_apply_normalizes_tags_and_only_writes_changed_selected_fields() ->
     port = FakePort(_state())
     unit_of_work = FakeUnitOfWork()
     covers = FakeCovers()
-    use_case = ApplyRecognizedMetadata(port, unit_of_work, covers)
+    use_case = ApplyRecognizedMetadata(
+        port,
+        unit_of_work,
+        covers,
+        diagnostics=RuntimeFailureDiagnostics(logging.getLogger(__name__), "reader"),
+    )
 
     result = use_case.execute(
         _command(
@@ -194,13 +201,18 @@ def test_book_apply_normalizes_tags_and_only_writes_changed_selected_fields() ->
     assert unit_of_work.rollbacks == 0
 
 
-def test_resource_apply_updates_book_and_resource_before_isolated_cover_failure() -> (
-    None
-):
+def test_resource_apply_updates_book_and_resource_before_isolated_cover_failure(
+    caplog,
+) -> None:
     port = FakePort(_state(resource=True))
     unit_of_work = FakeUnitOfWork()
     covers = FakeCovers(should_fail=True)
-    use_case = ApplyRecognizedMetadata(port, unit_of_work, covers)
+    use_case = ApplyRecognizedMetadata(
+        port,
+        unit_of_work,
+        covers,
+        diagnostics=RuntimeFailureDiagnostics(logging.getLogger(__name__), "reader"),
+    )
 
     result = use_case.execute(
         _command(
@@ -228,6 +240,9 @@ def test_resource_apply_updates_book_and_resource_before_isolated_cover_failure(
         RecognizedMetadataField.RESOURCE_ABRIDGED,
     )
     assert result.cover_status == "failed"
+    assert "metadata.cover_apply_failed" in caplog.text
+    assert "ValueError: cover failed" in caplog.text
+    assert "diagnostic_id=diag_" in caplog.text
     assert port.calls == [
         (
             "book-1",
@@ -279,7 +294,10 @@ def test_invalid_or_unavailable_selected_fields_are_rejected(
     command: ApplyRecognizedMetadataCommand,
 ) -> None:
     use_case = ApplyRecognizedMetadata(
-        FakePort(_state()), FakeUnitOfWork(), FakeCovers()
+        FakePort(_state()),
+        FakeUnitOfWork(),
+        FakeCovers(),
+        diagnostics=RuntimeFailureDiagnostics(logging.getLogger(__name__), "reader"),
     )
 
     with pytest.raises(InvalidRecognizedMetadataError):
@@ -288,7 +306,10 @@ def test_invalid_or_unavailable_selected_fields_are_rejected(
 
 def test_only_system_managers_may_apply_recognized_metadata() -> None:
     use_case = ApplyRecognizedMetadata(
-        FakePort(_state()), FakeUnitOfWork(), FakeCovers()
+        FakePort(_state()),
+        FakeUnitOfWork(),
+        FakeCovers(),
+        diagnostics=RuntimeFailureDiagnostics(logging.getLogger(__name__), "reader"),
     )
 
     with pytest.raises(RecognizedMetadataAuthorizationError):

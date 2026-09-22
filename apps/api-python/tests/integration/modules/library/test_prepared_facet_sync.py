@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import replace
 from datetime import UTC, datetime
 
+import pytest
 from sqlalchemy import select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
@@ -127,3 +129,17 @@ def test_prepared_facet_sync_uses_existing_real_ids_and_preserves_updated_at(
     assert refreshed_metadata is not None
     assert refreshed_metadata.updated_at == original_updated_at
     assert recorder.statement_count <= 6
+
+
+@pytest.mark.parametrize(
+    "source, exception",
+    [("[broken", json.JSONDecodeError), ('{"tags": []}', ValueError)],
+)
+def test_corrupt_tag_source_is_not_silently_treated_as_empty(source, exception):
+    from app.modules.library.application.facet_sync import BookFacetProjection
+
+    projection = BookFacetProjection(
+        book_id="book-1", author=None, tags_source=source, series_name=None
+    )
+    with pytest.raises(exception):
+        prepare_book_facet(projection)

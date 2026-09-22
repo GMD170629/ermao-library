@@ -1,10 +1,15 @@
 """System runtime adapters and transaction orchestration."""
 
+import logging
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.core.exception_diagnostics import (
+    deferred_exception_persistence,
+    persist_exception_diagnostic,
+)
 from app.core.time import now_timestamp_ms
 from app.modules.system.application.commands import SystemWriteTransaction
 from app.modules.system.domain.events import (
@@ -254,12 +259,16 @@ def create_or_reuse_health_run(
 
 
 def fail_abandoned_health_runs(db: Session) -> int:
-    prepared = prepare_abandoned_health_runs(db)
-    if not prepared.rows:
-        return 0
-    with SystemWriteTransaction(db):
-        changed = write_prepared_abandoned_health_runs(db, prepared)
-    return changed
+    try:
+        with deferred_exception_persistence() as pending:
+            prepared = prepare_abandoned_health_runs(db)
+            if not prepared.rows:
+                return 0
+            with SystemWriteTransaction(db):
+                return write_prepared_abandoned_health_runs(db, prepared)
+    finally:
+        for diagnostic in pending:
+            persist_exception_diagnostic(logging.getLogger(__name__), diagnostic)
 
 
 def prune_old_health_runs(db: Session, max_age_hours: int = 24) -> int:

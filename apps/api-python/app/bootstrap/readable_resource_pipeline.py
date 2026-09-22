@@ -140,7 +140,7 @@ def build_readable_resource_pipeline(
     adapters = RegistryResourceAdapterExecutor(BoundedAudioMetadataInspector())
     uow = SqlAlchemyUnitOfWork(session)
     clock = UtcClock()
-    log = StructuredPipelineLog()
+    log = StructuredPipelineLog(lambda: Session(session.get_bind()))
     # Best-effort sidecar: no durable fake queue; failures never roll back import.
     sidecar = BestEffortSidecarWriteback(None)
 

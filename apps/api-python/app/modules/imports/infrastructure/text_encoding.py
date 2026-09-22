@@ -76,6 +76,7 @@ def detect_sample_encoding(prefix: bytes) -> str:
         _decode_sample(sample, continuation, encoding="utf-8")
         return "utf-8"
     except UnicodeDecodeError:
+        # diagnostics-control-flow: UTF-8 is the first encoding probe; the configured encoding is tried next.
         pass
     try:
         decoded = _decode_sample(sample, continuation, encoding="gb18030")

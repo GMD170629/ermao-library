@@ -14,6 +14,10 @@ MIN_INTERVAL_MINUTES = 15
 MAX_INTERVAL_MINUTES = 7 * 24 * 60
 
 
+class InvalidOrganizeRequestError(ValueError):
+    """An explicit organize input or business rule rejected the request."""
+
+
 class OrganizeUnitOfWork(Protocol):
     def commit(self) -> None: ...
 
@@ -49,20 +53,20 @@ def prepare_organize_policy_update(
 ) -> PreparedOrganizePolicyUpdate:
     schedule_mode = str(payload.get("scheduleMode", current["scheduleMode"])).upper()
     if schedule_mode not in {"MANUAL", "INTERVAL"}:
-        raise ValueError("执行方式仅支持手动或定时间隔")
+        raise InvalidOrganizeRequestError("执行方式仅支持手动或定时间隔")
     try:
         interval = int(payload.get("intervalMinutes", current["intervalMinutes"]))
-    except (TypeError, ValueError):
-        raise ValueError("执行间隔格式不正确") from None
+    except (TypeError, ValueError) as error:
+        raise InvalidOrganizeRequestError("执行间隔格式不正确") from error
     if interval < MIN_INTERVAL_MINUTES or interval > MAX_INTERVAL_MINUTES:
-        raise ValueError(
+        raise InvalidOrganizeRequestError(
             f"执行间隔需在 {MIN_INTERVAL_MINUTES} 到 {MAX_INTERVAL_MINUTES} 分钟之间"
         )
     enabled = bool(payload.get("enabled", current["enabled"]))
     auto_run_on_new = bool(payload.get("autoRunOnNew", current["autoRunOnNew"]))
     rules_payload = payload.get("rules", current["rules"])
     if not isinstance(rules_payload, dict):
-        raise TypeError("识别范围配置格式不正确")
+        raise InvalidOrganizeRequestError("识别范围配置格式不正确")
     rules = {
         "unrecognized": bool(
             rules_payload.get("unrecognized", current["rules"]["unrecognized"])
@@ -76,7 +80,7 @@ def prepare_organize_policy_update(
             payload.get("localMetadataPriority", current["localMetadataPriority"])
         )
     except (TypeError, ValueError) as exc:
-        raise ValueError(str(exc)) from exc
+        raise InvalidOrganizeRequestError(str(exc)) from exc
     newly_enabled_for_new = auto_run_on_new and not current["autoRunOnNew"]
     auto_since = (
         timestamp if newly_enabled_for_new else current.get("autoRunOnNewSince")
@@ -106,7 +110,7 @@ def prepare_organize_policy_update(
             try:
                 next_run_at = datetime.fromisoformat(str(supplied_next_run))
             except ValueError as exc:
-                raise ValueError("下次执行时间格式不正确") from exc
+                raise InvalidOrganizeRequestError("下次执行时间格式不正确") from exc
     return PreparedOrganizePolicyUpdate(
         enabled=enabled,
         schedule_mode=schedule_mode,

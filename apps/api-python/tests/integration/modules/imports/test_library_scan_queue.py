@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -304,3 +305,25 @@ def test_requeue_failed_source_task_retains_original_policy(tmp_path: Path) -> N
             assert retried.missing_entry_policy is MissingEntryPolicy.PRUNE_MISSING
     finally:
         engine.dispose()
+
+
+@pytest.mark.parametrize("state", ["RUNNING", "SUCCEEDED", "FAILED"])
+def test_nonqueued_task_is_not_reported_as_file_activity_busy(db_session, state):
+    queue = SqlAlchemyLibraryImportTaskQueue(db_session)
+    task = queue.enqueue(kind="SCAN_LIBRARY", library_id="test-library")
+    row = db_session.get(LibraryImportTask, task.id)
+    row.state = state
+    started = datetime(2026, 9, 1, tzinfo=UTC)
+    row.started_at = started
+    row.error_summary = "previous-result"
+    db_session.commit()
+    db_session.refresh(row)
+    previous_started_at = row.started_at
+
+    with pytest.raises(ValueError, match="IMPORT_TASK_NOT_QUEUED"):
+        queue.mark_running(task.id, started_at=datetime(2026, 9, 2, tzinfo=UTC))
+    db_session.rollback()
+    current = db_session.get(LibraryImportTask, task.id)
+    assert current is not None and current.state == state
+    assert current.started_at == previous_started_at
+    assert current.error_summary == "previous-result"

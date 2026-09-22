@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 from io import BytesIO
 from pathlib import Path
@@ -10,6 +11,7 @@ from uuid import uuid4
 
 from PIL import Image, UnidentifiedImageError
 
+from app.core.exception_diagnostics import record_exception
 from app.modules.imports.application.readable_resource.ports import PreparedLocalCover
 
 _MAX_COVER_BYTES = 20 * 1024 * 1024
@@ -78,7 +80,9 @@ class FilesystemLocalCoverPublication:
             if target.stat().st_size > _MAX_COVER_BYTES:
                 return None
             return target.read_bytes()
-        except OSError:
+        except OSError as error:
+            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.local_cover_publication.read_candidate.failed", error,
+                             context={"step": "read_candidate"})
             return None
 
     def matches(self, stored_path: str | None, content: bytes) -> bool:
@@ -91,7 +95,9 @@ class FilesystemLocalCoverPublication:
             return (
                 target.stat().st_size == len(content) and target.read_bytes() == content
             )
-        except OSError:
+        except OSError as error:
+            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.local_cover_publication.matches.failed", error,
+                             context={"step": "matches"})
             return False
 
     def publish(self, prepared: PreparedLocalCover) -> None:

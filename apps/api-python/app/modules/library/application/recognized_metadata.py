@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import math
 import re
 from dataclasses import dataclass
@@ -11,9 +10,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Literal, NotRequired, Protocol, TypedDict
 
+from app.contracts.diagnostics import FailureDiagnostics
 from app.modules.library.application.resource_commands import LibraryActor
-
-LOGGER = logging.getLogger(__name__)
 
 
 class MetadataTargetScope(StrEnum):
@@ -390,10 +388,12 @@ class ApplyRecognizedMetadata:
         port: RecognizedMetadataPort,
         unit_of_work: RecognizedMetadataUnitOfWork,
         covers: RecognizedCoverApplication,
+        diagnostics: FailureDiagnostics,
     ) -> None:
         self._port = port
         self._unit_of_work = unit_of_work
         self._covers = covers
+        self._diagnostics = diagnostics
 
     def execute(
         self, command: ApplyRecognizedMetadataCommand
@@ -498,16 +498,19 @@ class ApplyRecognizedMetadata:
                     cover_url=str(command.candidate.cover_url),
                     now=command.now,
                 )
-            except Exception:
-                LOGGER.warning(
-                    "metadata_apply provider=%s target_scope=%s resource_id=%s "
-                    "stage=cover outcome=failed book_id=%s",
-                    command.candidate.source,
-                    command.scope.value,
-                    command.resource_id,
-                    command.book_id,
-                    exc_info=True,
+            except Exception as error:  # noqa: BLE001 - metadata remains applied when cover publication fails.
+                diagnostic = self._diagnostics.prepare(
+                    error,
+                    event="metadata.cover_apply_failed",
+                    context={
+                        "resource_id": command.resource_id or command.book_id,
+                        "step": "apply_provider_cover",
+                    },
                 )
+                try:
+                    self._unit_of_work.rollback()
+                finally:
+                    self._diagnostics.persist(diagnostic)
                 cover_status = "failed"
             else:
                 cover_status = "applied"

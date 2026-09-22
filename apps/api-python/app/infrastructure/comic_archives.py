@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 import shutil
@@ -29,6 +30,7 @@ from app.contracts.reader_safety_policy_generated import (
     reader_safety_comic_page_mime_type,
     reader_safety_rule,
 )
+from app.core.exception_diagnostics import record_exception
 from app.core.natural_sort import natural_sort_key
 from app.infrastructure.archive_integrity import (
     UnsafeArchivePathError,
@@ -168,6 +170,7 @@ def _safe_entry_name(name: str) -> bool:
     try:
         normalize_archive_path(name)
     except UnsafeArchivePathError:
+        # diagnostics-control-flow: Unsafe names are quarantined, never extracted; required entries are validated separately.
         return False
     return True
 
@@ -206,8 +209,9 @@ def _first_text(xml: str, tag: str) -> str | None:
     value = re.sub(r"<[^>]+>", " ", value)
     try:
         value = ElementTree.fromstring(f"<x>{value}</x>").text or value
-    except ElementTree.ParseError:
-        pass
+    except ElementTree.ParseError as error:
+        record_exception(logging.getLogger(__name__), "infrastructure.comic_archives._first_text.failed", error,
+                         context={"step": "_first_text"})
     return re.sub(r"\s+", " ", value).strip() or None
 
 
@@ -567,9 +571,11 @@ def inspect_comic_archive(
                 comic_info = parse_comic_info(
                     archive.read(comic_info_entry).decode("utf-8", "replace")
                 )
-            except (ComicArchiveError, OSError, UnicodeError):
+            except (ComicArchiveError, OSError, UnicodeError) as error:
                 # ComicInfo is optional metadata; a bad copy must not hide
                 # otherwise readable pages.
+                record_exception(logging.getLogger(__name__), "infrastructure.comic_archives.inspect_comic_archive.failed", error,
+                                 context={"step": "inspect_comic_archive"})
                 comic_info = None
         pages: list[ComicPageInspection] = [
             {
@@ -625,8 +631,9 @@ def inspect_comic_archive(
                         candidate = stream.read(COVER_BYTES + 1)
                     if len(candidate) <= COVER_BYTES:
                         cover_content = candidate
-                except (ComicArchiveError, OSError, ValueError):
-                    pass
+                except (ComicArchiveError, OSError, ValueError) as error:
+                    record_exception(logging.getLogger(__name__), "infrastructure.comic_archives.inspect_comic_archive.failed", error,
+                                     context={"step": "inspect_comic_archive"})
         return {
             "coverContent": cover_content,
             "title": (comic_info or {}).get("title")
@@ -679,6 +686,7 @@ def _validate_comic_entries(
         except UnsafeArchivePathError:
             # No member is extracted. An unaddressable entry is isolated while
             # its declared bytes still count toward the archive-wide budgets.
+            # diagnostics-control-flow: Unused unsafe archive members are quarantined; budgets still count them.
             continue
         if canonical_name in names:
             integrity_entries.add(canonical_name)

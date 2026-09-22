@@ -145,7 +145,9 @@ def test_legacy_failed_scan_variants_backfill_scopes(tmp_path: Path) -> None:
             assert decode_scan_scopes(db.get(LibraryImportScanGap, "local").scopes) == (  # type: ignore[union-attr]
                 ScanScope("part", False),
             )
-            assert decode_scan_scopes(db.get(LibraryImportScanGap, "source").scopes) == (  # type: ignore[union-attr]
+            assert decode_scan_scopes(
+                db.get(LibraryImportScanGap, "source").scopes
+            ) == (  # type: ignore[union-attr]
                 ScanScope("source", True),
             )
             # A later successful full scan already recovered this library.
@@ -273,11 +275,14 @@ def test_legacy_failed_scan_backfilled_and_recovered_without_revival(
                 )
                 is None
             )
-            assert db.scalar(
-                select(LibraryReadableResource.import_state).where(
-                    LibraryReadableResource.library_id == "legacy"
+            assert (
+                db.scalar(
+                    select(LibraryReadableResource.import_state).where(
+                        LibraryReadableResource.library_id == "legacy"
+                    )
                 )
-            ) == "READY"
+                == "READY"
+            )
             gap = db.get(LibraryImportScanGap, "legacy")
             assert gap is None or not gap.scopes
 
@@ -333,15 +338,11 @@ def test_upgrade_from_0018_handles_existing_gap_rows(tmp_path: Path) -> None:
         with Session(engine) as db:
             for library_id in ("v-none", "v-null", "v-other"):
                 _add_library(db, library_id, root)
-            db.add(
-                LibraryImportScanGap(library_id="v-null", scopes=None)
-            )
+            db.add(LibraryImportScanGap(library_id="v-null", scopes=None))
             db.add(
                 LibraryImportScanGap(
                     library_id="v-other",
-                    scopes=json.dumps(
-                        [{"relativePath": "keep", "recursive": True}]
-                    ),
+                    scopes=json.dumps([{"relativePath": "keep", "recursive": True}]),
                 )
             )
             db.add_all(
@@ -377,7 +378,9 @@ def test_upgrade_from_0018_handles_existing_gap_rows(tmp_path: Path) -> None:
         apply_schema(engine, settings)
 
         with Session(engine) as db:
-            assert decode_scan_scopes(db.get(LibraryImportScanGap, "v-none").scopes) == (  # type: ignore[union-attr]
+            assert decode_scan_scopes(
+                db.get(LibraryImportScanGap, "v-none").scopes
+            ) == (  # type: ignore[union-attr]
                 ScanScope("", True),
             )
             null_gap = db.get(LibraryImportScanGap, "v-null")
@@ -415,6 +418,15 @@ def test_backfill_uses_execution_time_not_creation_order(tmp_path: Path) -> None
             db.commit()
             queue = SqlAlchemyLibraryImportTaskQueue(db)
 
+            def mark_historical_running(task_id: str, *, started_at: datetime) -> None:
+                # Seed the 0018 state directly: current task claiming requires later tables.
+                row = db.get(LibraryImportTask, task_id)
+                assert row is not None and row.state == "QUEUED"
+                row.state = "RUNNING"
+                row.started_at = started_at
+                row.error_summary = None
+                db.flush()
+
             # r1: early-created A is retried and fails last; the later-created
             # B succeeded earlier, so it cannot release A's range.
             a = queue.enqueue(kind="SCAN_LIBRARY", library_id="r1")
@@ -422,14 +434,14 @@ def test_backfill_uses_execution_time_not_creation_order(tmp_path: Path) -> None
             assert a_row is not None
             a_row.created_at = base
             db.flush()
-            queue.mark_running(a.id, started_at=base)
+            mark_historical_running(a.id, started_at=base)
             queue.mark_failed(
                 a.id,
                 error_summary="SOURCE_SCAN_INCOMPLETE",
                 finished_at=base + timedelta(seconds=100),
             )
             queue.requeue_failed_task(a.id)
-            queue.mark_running(a.id, started_at=base + timedelta(seconds=150))
+            mark_historical_running(a.id, started_at=base + timedelta(seconds=150))
             queue.mark_failed(
                 a.id,
                 error_summary="SOURCE_SCAN_INCOMPLETE",
@@ -440,7 +452,7 @@ def test_backfill_uses_execution_time_not_creation_order(tmp_path: Path) -> None
             assert b_row is not None
             b_row.created_at = base + timedelta(seconds=1)
             db.flush()
-            queue.mark_running(b.id, started_at=base)
+            mark_historical_running(b.id, started_at=base)
             queue.mark_succeeded(b.id, finished_at=base + timedelta(seconds=100))
 
             # r2: early-created A is retried and succeeds last; the later-created
@@ -450,21 +462,21 @@ def test_backfill_uses_execution_time_not_creation_order(tmp_path: Path) -> None
             assert a2_row is not None
             a2_row.created_at = base
             db.flush()
-            queue.mark_running(a2.id, started_at=base)
+            mark_historical_running(a2.id, started_at=base)
             queue.mark_failed(
                 a2.id,
                 error_summary="SOURCE_SCAN_INCOMPLETE",
                 finished_at=base + timedelta(seconds=100),
             )
             queue.requeue_failed_task(a2.id)
-            queue.mark_running(a2.id, started_at=base + timedelta(seconds=150))
+            mark_historical_running(a2.id, started_at=base + timedelta(seconds=150))
             queue.mark_succeeded(a2.id, finished_at=base + timedelta(seconds=200))
             b2 = queue.enqueue(kind="SCAN_LIBRARY", library_id="r2")
             b2_row = db.get(LibraryImportTask, b2.id)
             assert b2_row is not None
             b2_row.created_at = base + timedelta(seconds=1)
             db.flush()
-            queue.mark_running(b2.id, started_at=base)
+            mark_historical_running(b2.id, started_at=base)
             queue.mark_failed(
                 b2.id,
                 error_summary="SOURCE_SCAN_INCOMPLETE",
@@ -474,7 +486,7 @@ def test_backfill_uses_execution_time_not_creation_order(tmp_path: Path) -> None
             # r3: failure finish time missing; a later success cannot prove order.
             f3 = queue.enqueue(kind="SCAN_LIBRARY", library_id="r3")
             db.flush()
-            queue.mark_running(f3.id, started_at=base)
+            mark_historical_running(f3.id, started_at=base)
             queue.mark_failed(
                 f3.id,
                 error_summary="SOURCE_SCAN_INCOMPLETE",
@@ -482,7 +494,7 @@ def test_backfill_uses_execution_time_not_creation_order(tmp_path: Path) -> None
             )
             s3 = queue.enqueue(kind="SCAN_LIBRARY", library_id="r3")
             db.flush()
-            queue.mark_running(s3.id, started_at=base)
+            mark_historical_running(s3.id, started_at=base)
             queue.mark_succeeded(s3.id, finished_at=base + timedelta(seconds=200))
             f3_row = db.get(LibraryImportTask, f3.id)
             assert f3_row is not None
@@ -491,7 +503,7 @@ def test_backfill_uses_execution_time_not_creation_order(tmp_path: Path) -> None
             # r4: success finish time missing; it cannot prove recovery.
             f4 = queue.enqueue(kind="SCAN_LIBRARY", library_id="r4")
             db.flush()
-            queue.mark_running(f4.id, started_at=base)
+            mark_historical_running(f4.id, started_at=base)
             queue.mark_failed(
                 f4.id,
                 error_summary="SOURCE_SCAN_INCOMPLETE",
@@ -499,7 +511,7 @@ def test_backfill_uses_execution_time_not_creation_order(tmp_path: Path) -> None
             )
             s4 = queue.enqueue(kind="SCAN_LIBRARY", library_id="r4")
             db.flush()
-            queue.mark_running(s4.id, started_at=base)
+            mark_historical_running(s4.id, started_at=base)
             queue.mark_succeeded(s4.id, finished_at=base + timedelta(seconds=200))
             s4_row = db.get(LibraryImportTask, s4.id)
             assert s4_row is not None
@@ -511,9 +523,9 @@ def test_backfill_uses_execution_time_not_creation_order(tmp_path: Path) -> None
         with Session(engine) as db:
             r1 = db.get(LibraryImportScanGap, "r1")
             assert r1 is not None and r1.scopes
-            assert {scope.relative_path for scope in decode_scan_scopes(r1.scopes) or ()} == {
-                ""
-            }
+            assert {
+                scope.relative_path for scope in decode_scan_scopes(r1.scopes) or ()
+            } == {""}
             # r2 recovered by the retried success, so no gap is rebuilt.
             r2 = db.get(LibraryImportScanGap, "r2")
             assert r2 is None or not r2.scopes
@@ -585,9 +597,7 @@ def _add_import_graph(db: Session, library_id: str) -> None:
         )
     )
     db.flush()
-    db.add(
-        LibraryBook(id=book_id, library_id=library_id, source_node_id=node_id)
-    )
+    db.add(LibraryBook(id=book_id, library_id=library_id, source_node_id=node_id))
     db.flush()
     db.add(
         LibraryReadableResource(
@@ -749,8 +759,7 @@ def test_backfill_ignores_and_is_not_cleared_by_ordinary_tasks(tmp_path: Path) -
             source = db.get(LibraryImportScanGap, "source-import")
             assert source is not None
             assert {
-                scope.relative_path
-                for scope in decode_scan_scopes(source.scopes) or ()
+                scope.relative_path for scope in decode_scan_scopes(source.scopes) or ()
             } == {"book"}
             covered = db.get(LibraryImportScanGap, "covered")
             assert covered is None or not covered.scopes

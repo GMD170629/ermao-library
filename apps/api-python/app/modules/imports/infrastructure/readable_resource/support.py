@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
+from app.core.exception_diagnostics import SessionFactory, record_exception
 from app.modules.imports.application.readable_resource.ports import (
     ClockPort,
     PipelineLogPort,
@@ -20,6 +21,9 @@ logger = logging.getLogger("ermao.readable_resource_pipeline")
 
 
 class StructuredPipelineLog(PipelineLogPort):
+    def __init__(self, session_factory: SessionFactory | None = None) -> None:
+        self._session_factory = session_factory
+
     def emit(
         self,
         event: str,
@@ -29,7 +33,30 @@ class StructuredPipelineLog(PipelineLogPort):
         task_id: str | None = None,
         stage: str | None = None,
         outcome: str | None = None,
+        error: BaseException | None = None,
+        step: str | None = None,
+        source_node_id: str | None = None,
     ) -> None:
+        if error is not None:
+            record_exception(
+                logger,
+                event,
+                error,
+                context={
+                    "library_id": library_id,
+                    "resource_id": resource_id,
+                    "task_id": task_id,
+                    "stage": stage,
+                    "outcome": outcome,
+                    "step": step or stage,
+                    "source_node_id": source_node_id,
+                },
+                source="import",
+                target_type="importTask",
+                target_id=task_id,
+                session_factory=self._session_factory,
+            )
+            return
         logger.info(
             event,
             extra={
@@ -111,10 +138,13 @@ class BestEffortSidecarWriteback(SidecarWritebackPort):
                     "outcome": "ok",
                 },
             )
-        except Exception:
-            logger.exception(
+        except Exception as error:  # noqa: BLE001 - sidecar failure remains observable after primary import.
+            record_exception(
+                logger,
                 "readable_resource.sidecar.failed",
-                extra={
+                error,
+                source="import",
+                context={
                     "resource_id": resource_id,
                     "stage": "sidecar",
                     "outcome": "error",

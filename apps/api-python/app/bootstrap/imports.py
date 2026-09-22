@@ -8,6 +8,7 @@ which ORM adapter owns them; task processing is exclusively delegated to
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from pathlib import Path
 
@@ -21,6 +22,8 @@ from app.bootstrap.readable_resource_pipeline import (
     continue_library_import,
     continue_source_import,
 )
+from app.contracts.diagnostics import FailureDiagnostics
+from app.core.failure_diagnostics import RuntimeFailureDiagnostics
 from app.modules.imports.application.library_commands import (
     CreateLibrary,
     DeleteLibrary,
@@ -116,7 +119,7 @@ def persist_import_library_delete(
 def save_uploaded_files(
     command: SaveUploadedFilesCommand,
 ) -> tuple[SavedUploadFile, ...]:
-    """Publish upload files atomically, outside any database transaction."""
+    """Save each upload atomically outside a database transaction; retain prior successes."""
 
     return SaveUploadedFiles(AtomicUploadedFilePublisher()).execute(command)
 
@@ -174,3 +177,9 @@ __all__ = [
     "source_node_library_id",
     "update_library_scan_settings",
 ]
+
+
+def library_path_diagnostics(db: Session) -> FailureDiagnostics:
+    return RuntimeFailureDiagnostics(
+        logging.getLogger(__name__), "import", lambda: Session(db.get_bind())
+    )

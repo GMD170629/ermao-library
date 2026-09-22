@@ -25,7 +25,9 @@ class SqlAlchemyAutomationSettings:
 
     def load(self) -> AutomationServiceSettings:
         return normalize_service_settings(
-            _SETTINGS.validate_python(get_setting(self._db, AUTOMATION_SETTINGS_KEY, {}))
+            _SETTINGS.validate_python(
+                get_setting(self._db, AUTOMATION_SETTINGS_KEY, {})
+            )
         )
 
     def save(self, settings: AutomationServiceSettings) -> None:

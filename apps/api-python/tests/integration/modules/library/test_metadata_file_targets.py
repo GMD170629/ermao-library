@@ -6,8 +6,9 @@ from tests.integration.modules.automation.test_file_reads import add_file, file_
 
 
 def test_file_target_keeps_canonical_resource_identity_and_library_scope(
-    db_session, tmp_path
+    db_session, tmp_path, monkeypatch, test_settings
 ):
+    monkeypatch.setattr("app.bootstrap.automation.get_settings", lambda: test_settings)
     _, root = file_access(db_session, tmp_path)
     add_file(db_session, "comic-node", "allowed/comic.cbz")
     db_session.add(

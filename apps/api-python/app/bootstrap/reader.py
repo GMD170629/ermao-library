@@ -1,10 +1,12 @@
 """Reader capability composition root."""
 
+import logging
 from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.core.failure_diagnostics import RuntimeFailureDiagnostics
 from app.modules.reader.application.resource_reader_v5 import ResourceReaderV5Service
 from app.modules.reader.application.v5_library_queries import (
     ReaderV5LibraryPresentationQueryPort,
@@ -64,6 +66,9 @@ def reader_v5_service(session: Session, settings: Settings) -> ResourceReaderV5S
         session,
         SystemReaderClock(),
         SqlAlchemyReaderV5LibraryPresentationQueries(session),
+        RuntimeFailureDiagnostics(
+            logging.getLogger(__name__), "reader", lambda: Session(session.get_bind())
+        ),
     )
 
 

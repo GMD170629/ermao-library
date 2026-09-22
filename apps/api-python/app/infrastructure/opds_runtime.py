@@ -32,6 +32,8 @@ from app.core.authorization import (
     read_user_preferences,
 )
 from app.core.config import Settings
+from app.core.exception_diagnostics import record_exception
+from app.core.failure_diagnostics import RuntimeFailureDiagnostics
 from app.core.i18n import configured_locale
 from app.models.auth import User
 from app.modules.auth.infrastructure.password_authentication import (
@@ -101,6 +103,9 @@ def get_opds_settings(db: Session) -> OpdsSettingsSnapshot:
     return resolve_opds_settings(
         get_setting(db, OPDS_ENABLED_SETTING_KEY, None),
         stored_public_base_url=get_setting(db, OPDS_PUBLIC_BASE_URL_SETTING_KEY, None),
+        diagnostics=RuntimeFailureDiagnostics(
+            LOGGER, "opds", lambda: Session(db.get_bind())
+        ),
     )
 
 
@@ -609,6 +614,17 @@ class OpdsMediaResources:
         self._session_factory = session_factory
         self._settings = settings
 
+    @staticmethod
+    def _not_found(observation: str, resource_id: str | None) -> Response:
+        diagnostic_id = record_exception(
+            LOGGER,
+            "opds.media_unavailable",
+            OpdsPublicationNotFound(observation),
+            level="warning",
+            context={"stage": "opds_media", "resource_id": resource_id},
+        )
+        return Response(status_code=404, headers={"X-Error-Id": diagnostic_id})
+
     def book_cover(self, actor_id: str, book_id: str, request: Request) -> Response:
         return self._cover(actor_id, request, book_id=book_id)
 
@@ -629,11 +645,15 @@ class OpdsMediaResources:
         try:
             user = _active_user(db, actor_id)
             if book_id is not None and not can_access_book(db, user, book_id):
-                return Response(status_code=404)
+                return self._not_found(
+                    "Book is unavailable to the current actor", book_id
+                )
             if resource_id is not None and not can_access_resource(
                 db, user, resource_id
             ):
-                return Response(status_code=404)
+                return self._not_found(
+                    "Resource is unavailable to the current actor", resource_id
+                )
             path = None
             if book_id is not None:
                 for candidate in effective_book_cover_query(db).execute(book_id):
@@ -649,7 +669,10 @@ class OpdsMediaResources:
                 )
                 path = media_streaming.stored_path(path_value, self._settings)
             if path is None or not path.is_file():
-                return Response(status_code=404)
+                return self._not_found(
+                    "No regular cover file was found among the selected candidates",
+                    book_id or resource_id,
+                )
             return media_streaming.send_pse_page_file(
                 path,
                 request,
@@ -668,7 +691,9 @@ class OpdsMediaResources:
         try:
             user = _active_user(db, actor_id)
             if not can_access_resource(db, user, resource_id):
-                return Response(status_code=404)
+                return self._not_found(
+                    "Resource is unavailable to the current actor", resource_id
+                )
             resource = media_resource_query(db).first_resource_asset(resource_id)
             return media_streaming.send_file(
                 media_streaming.stored_path(
@@ -693,7 +718,9 @@ class OpdsMediaResources:
         try:
             user = _active_user(db, actor_id)
             if not can_access_resource(db, user, page.resource_id):
-                return Response(status_code=404)
+                return self._not_found(
+                    "Resource is unavailable to the current actor", page.resource_id
+                )
             user_id = user.id
             projection = media_page_index.load_read_only(db, page.resource_id)
         finally:
@@ -701,7 +728,10 @@ class OpdsMediaResources:
         resolved = media_page_index.resolve_read_only(projection)
         unit = resolved.page(page.internal_page_index)
         if unit is None:
-            return Response(status_code=404)
+            return self._not_found(
+                "The requested page index has no existing navigation unit",
+                page.resource_id,
+            )
         source = resolved.source_for(unit.asset_id)
         width = normalize_pse_max_width(page.max_width)
         output_media_type = select_pse_stream_media_type(
@@ -742,7 +772,13 @@ class OpdsMediaResources:
 def _json_object(value: object) -> dict[str, object]:
     try:
         parsed: object = json.loads(str(value))
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "infrastructure.opds_runtime._json_object.failed",
+            error,
+            context={"step": "_json_object"},
+        )
         return {}
     return parsed if isinstance(parsed, dict) else {}
 

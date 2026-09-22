@@ -210,8 +210,8 @@ class SqlAlchemyLibraryOperationManagement(LibraryOperationManagementGateway):
             raise InvalidLibraryOperationError("该操作不支持撤销")
         try:
             inverse = json.loads(operation.inverse_json)
-        except (json.JSONDecodeError, TypeError):
-            raise InvalidLibraryOperationError("撤销快照格式无效") from None
+        except (json.JSONDecodeError, TypeError) as error:
+            raise InvalidLibraryOperationError("撤销快照格式无效") from error
         if not isinstance(inverse, dict):
             raise InvalidLibraryOperationError("撤销快照格式无效")
 

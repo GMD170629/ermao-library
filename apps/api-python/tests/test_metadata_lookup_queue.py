@@ -277,3 +277,51 @@ def test_resource_cover_does_not_block_recognition_of_book_cover(
         db_session.get(LibraryReadableResourceMetadata, resource_id).cover_path
         == "covers/resource.png"
     )
+
+
+@pytest.mark.parametrize("reason", ["missing_book", "local_identification", "missing_context", "no_provider"])
+def test_observed_lookup_rejection_logs_facts_before_failed_state(db_session, test_settings, monkeypatch, caplog, reason):
+    book, resource = _seed_lookup_graph(db_session)
+    task = _lookup_task(db_session, book, resource, status="RUNNING")
+    task_id, book_id, resource_id = task.id, book.id, resource.id
+    if reason == "missing_book":
+        monkeypatch.setattr(queue.lookup_persist, "get_book", lambda *args: None)
+    elif reason == "local_identification":
+        monkeypatch.setattr(queue.lookup_persist, "local_identification_failed", lambda *args: True)
+    elif reason == "missing_context":
+        monkeypatch.setattr(queue, "metadata_context_for_book", lambda *args: None)
+    else:
+        monkeypatch.setattr(queue, "metadata_context_for_book", lambda *args: {"title": "fixture"})
+        monkeypatch.setattr(queue, "_provider_order", lambda *args: [])
+    result = queue.process_metadata_lookup_task(db_session, test_settings, {
+        "id": task_id, "bookId": book_id, "resourceId": resource_id,
+        "status": "RUNNING", "attempts": 0,
+    })
+    assert result == ("NO_PROVIDER" if reason == "no_provider" else "FAILED")
+    row = db_session.get(MetadataLookupTask, task_id)
+    assert row.status == result
+    record = next(record for record in caplog.records if "metadata.lookup_rule_failed" in record.message)
+    assert record.task_id == task_id
+    assert record.book_id == book_id
+    assert record.resource_id == resource_id
+    assert row.error_summary in record.message
+    assert "MetadataLookupRuleFailure" in record.message
+
+
+def test_import_wait_exhaustion_logs_observed_upstream_state_and_returns_failed(db_session, test_settings, monkeypatch, caplog):
+    book, resource = _seed_lookup_graph(db_session)
+    task = _lookup_task(db_session, book, resource, status="RUNNING")
+    task_id, book_id, resource_id = task.id, book.id, resource.id
+    monkeypatch.setattr(queue.lookup_persist, "get_import_task_status", lambda *args: "QUEUED")
+    result = queue.process_metadata_lookup_task(db_session, test_settings, {
+        "id": task_id, "bookId": book_id, "resourceId": resource_id,
+        "importTaskId": "import-task-1", "status": "RUNNING",
+        "attempts": len(queue.RETRY_DELAYS_SECONDS),
+    })
+    assert result == "FAILED"
+    assert db_session.get(MetadataLookupTask, task_id).status == "FAILED"
+    record = next(record for record in caplog.records if "metadata.lookup_retry_limit_reached" in record.message)
+    assert record.task_id == task_id
+    assert record.import_task_id == "import-task-1"
+    assert "upstream import state=QUEUED" in record.message
+    assert "Attempt 4 exhausted 3" in record.message

@@ -318,7 +318,7 @@ def test_metadata_worker_retries_transient_database_locks(
     assert session_factory.sessions[0].closed is True
 
 
-def test_metadata_worker_throttles_expected_database_busy_logs(
+def test_metadata_worker_records_each_database_busy_failure(
     caplog: pytest.LogCaptureFixture,
     tmp_path: Path,
 ) -> None:
@@ -326,19 +326,31 @@ def test_metadata_worker_throttles_expected_database_busy_logs(
         RecordingSessionFactory(),
         Settings(storage_root=str(tmp_path)),
     )
-    busy = _operational_error("database is locked")
-
     with caplog.at_level(logging.WARNING):
-        worker._record_iteration_error(busy)
-        worker._record_iteration_error(busy)
+        worker._record_iteration_error(_operational_error("database is locked"))
+        worker._record_iteration_error(_operational_error("database is locked"))
 
     deferred = [
         record
         for record in caplog.records
-        if "outcome=deferred reason=database_busy" in record.getMessage()
+        if "metadata.iteration_failed diagnostic_id=" in record.getMessage()
     ]
-    assert len(deferred) == 1
-    assert deferred[0].exc_info is None
+    assert len(deferred) == 2
+    assert (
+        len(
+            {
+                record.getMessage().split("diagnostic_id=", 1)[1].split()[0]
+                for record in deferred
+            }
+        )
+        == 2
+    )
+    assert all(
+        "OperationalError" in record.getMessage()
+        and "database is locked" in record.getMessage()
+        for record in deferred
+    )
+    assert all(record.exc_info is None for record in deferred)
 
 
 def test_metadata_worker_rotates_lookup_preparation_and_target_priority(
@@ -434,24 +446,35 @@ def test_organizer_scheduler_retries_transient_database_locks(
     assert session_factory.sessions[0].closed is True
 
 
-def test_organizer_scheduler_throttles_expected_database_busy_logs(
+def test_organizer_scheduler_records_each_database_busy_failure(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     scheduler = organize_scheduler.OrganizerScheduler(RecordingSessionFactory())
-    busy = _operational_error("database is locked")
-
     with caplog.at_level(logging.WARNING):
-        scheduler._record_iteration_error(busy)
-        scheduler._record_iteration_error(busy)
+        scheduler._record_iteration_error(_operational_error("database is locked"))
+        scheduler._record_iteration_error(_operational_error("database is locked"))
 
     deferred = [
         record
         for record in caplog.records
-        if "outcome=deferred reason=database_busy" in record.getMessage()
-        and "organizer_schedule_iteration" in record.getMessage()
+        if "organize.iteration_failed diagnostic_id=" in record.getMessage()
     ]
-    assert len(deferred) == 1
-    assert deferred[0].exc_info is None
+    assert len(deferred) == 2
+    assert (
+        len(
+            {
+                record.getMessage().split("diagnostic_id=", 1)[1].split()[0]
+                for record in deferred
+            }
+        )
+        == 2
+    )
+    assert all(
+        "OperationalError" in record.getMessage()
+        and "database is locked" in record.getMessage()
+        for record in deferred
+    )
+    assert all(record.exc_info is None for record in deferred)
 
 
 def test_organizer_scheduler_preserves_pending_state_under_real_writer_lock(
@@ -509,9 +532,11 @@ def test_organizer_scheduler_preserves_pending_state_under_real_writer_lock(
         deferred = [
             record
             for record in caplog.records
-            if "organizer_schedule_iteration " in record.getMessage()
+            if "organize.database_attempt_failed diagnostic_id=" in record.getMessage()
         ]
         assert len(deferred) == 1
+        assert "database is locked" in deferred[0].getMessage()
+        assert "attempt=1" in deferred[0].getMessage()
         assert deferred[0].exc_info is None
     finally:
         blocker_engine.dispose()

@@ -37,6 +37,7 @@ def to_timestamp_ms(value: Any, *, naive_timezone=None) -> int | None:
         try:
             parsed = datetime.fromisoformat(text_value)
         except ValueError:
+            # diagnostics-control-flow: This optional legacy timestamp decoder returns None for unsupported representations.
             return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=naive_timezone or UTC)

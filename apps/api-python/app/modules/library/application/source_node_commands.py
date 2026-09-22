@@ -11,6 +11,14 @@ from app.modules.library.application.metadata_effects import MetadataSideEffectP
 MAX_SOURCE_NODE_COVER_BYTES = 10 * 1024 * 1024
 
 
+class InvalidSourceNodeTitle(ValueError):
+    """The supplied directory title violates the title rule."""
+
+
+class InvalidSourceNodeCover(ValueError):
+    """The supplied directory cover violates a supported cover rule."""
+
+
 @dataclass(frozen=True, slots=True)
 class SourceNodeMetadataChanges:
     title: str
@@ -110,7 +118,7 @@ class UpdateSourceNodeMetadata:
     ) -> bool:
         title = changes.title.strip()
         if not title:
-            raise ValueError("title must not be empty")
+            raise InvalidSourceNodeTitle("title must not be empty")
         try:
             updated = self._port.update_metadata(
                 book_id=book_id,
@@ -157,9 +165,9 @@ class UpdateSourceNodePresentation:
     ) -> bool:
         normalized_title = title.strip()
         if not normalized_title:
-            raise ValueError("title must not be empty")
+            raise InvalidSourceNodeTitle("title must not be empty")
         if cover_content is not None and remove_cover:
-            raise ValueError("cover cannot be replaced and removed together")
+            raise InvalidSourceNodeCover("cover cannot be replaced and removed together")
         state = self._port.get_state(
             book_id=book_id,
             source_node_id=source_node_id,

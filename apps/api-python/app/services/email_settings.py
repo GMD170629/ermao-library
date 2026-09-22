@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import smtplib
 import ssl
 from dataclasses import dataclass
@@ -8,6 +9,7 @@ from typing import Any
 from email_validator import EmailNotValidError, validate_email
 from sqlalchemy.orm import Session
 
+from app.core.exception_diagnostics import record_exception
 from app.modules.system.infrastructure.settings import (
     PreparedSettingsWrite,
     delete_setting,
@@ -76,8 +78,8 @@ def _port(value: Any) -> int:
         return 587
     try:
         port = int(value)
-    except (TypeError, ValueError):
-        raise EmailSettingsError("SMTP 端口必须是整数") from None
+    except (TypeError, ValueError) as error:
+        raise EmailSettingsError("SMTP 端口必须是整数") from error
     if not 1 <= port <= 65535:
         raise EmailSettingsError("SMTP 端口必须在 1 到 65535 之间")
     return port
@@ -88,8 +90,8 @@ def _max_attachment_mb(value: Any, *, stored: bool = False) -> float:
         return MAXIMUM_ATTACHMENT_MB
     try:
         size = float(value)
-    except (TypeError, ValueError):
-        raise EmailSettingsError("附件大小上限必须是数字") from None
+    except (TypeError, ValueError) as error:
+        raise EmailSettingsError("附件大小上限必须是数字") from error
     if stored and 1 <= size <= 1000:
         size = min(size, MAXIMUM_ATTACHMENT_MB)
     if not 1 <= size <= MAXIMUM_ATTACHMENT_MB:
@@ -107,8 +109,8 @@ def _email(value: Any, label: str, *, required: bool = False) -> str:
         raise EmailSettingsError(f"{label}格式不正确")
     try:
         return validate_email(candidate, check_deliverability=False).normalized
-    except EmailNotValidError:
-        raise EmailSettingsError(f"{label}格式不正确") from None
+    except EmailNotValidError as error:
+        raise EmailSettingsError(f"{label}格式不正确") from error
 
 
 def _header(value: Any, label: str) -> str:
@@ -292,5 +294,7 @@ def test_smtp_connection(values: dict[str, Any], *, timeout: int = 30) -> None:
         if client is not None:
             try:
                 client.quit()
-            except (OSError, smtplib.SMTPException):
+            except (OSError, smtplib.SMTPException) as error:
+                record_exception(logging.getLogger(__name__), "services.email_settings.test_smtp_connection.failed", error,
+                                 context={"step": "test_smtp_connection"})
                 client.close()

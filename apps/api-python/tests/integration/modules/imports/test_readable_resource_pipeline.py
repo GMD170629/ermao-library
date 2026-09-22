@@ -316,7 +316,7 @@ def test_pdf_import_persists_inspected_page_count(tmp_path: Path) -> None:
         engine.dispose()
 
 
-def test_startup_marks_running_as_worker_interrupted(tmp_path: Path) -> None:
+def test_startup_marks_running_as_worker_interrupted(tmp_path: Path, caplog) -> None:
     engine = _bootstrap(tmp_path)
     root = tmp_path / "books"
     try:
@@ -334,6 +334,12 @@ def test_startup_marks_running_as_worker_interrupted(tmp_path: Path) -> None:
             assert row is not None
             assert row.state == "FAILED"
             assert row.error_summary == "WORKER_INTERRUPTED"
+            record = next(record for record in caplog.records if "import.task_interrupted" in record.message)
+            assert record.task_id == task.id
+            assert record.library_id == "lib-1"
+            assert record.task_kind == "SCAN_LIBRARY"
+            assert "persisted RUNNING task" in record.message
+            assert "interruption cause was not provided" in record.message
             assert worker.process_once() == "idle"
     finally:
         engine.dispose()

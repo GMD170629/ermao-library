@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from sqlalchemy import ColumnElement
 from sqlalchemy.orm import Session
 
 from app.core.authorization import AuthorizationContext, authorization_context
+from app.core.exception_diagnostics import record_exception
 from app.models.auth import User
 from app.modules.library.application.filter_ast import (
     InvalidFilterExpression,
@@ -125,6 +127,8 @@ def compile_filter_predicate(
     try:
         expression = parse_filter_expression(normalized)
     except InvalidFilterExpression as exc:
+        record_exception(logging.getLogger(__name__), "services.library_filters.compile_filter_predicate.failed", exc,
+                         context={"step": "compile_filter_predicate"})
         return None, str(exc)
     context = _authorization_context_for_user(db, user_id)
     try:
@@ -141,6 +145,8 @@ def compile_filter_predicate(
             None,
         )
     except ValueError as exc:
+        record_exception(logging.getLogger(__name__), "services.library_filters.compile_filter_predicate.failed", exc,
+                         context={"step": "compile_filter_predicate"})
         return None, str(exc)
 
 

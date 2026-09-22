@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import smtplib
 import threading
@@ -20,9 +21,17 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.dml import Delete
 
 from app.core.config import Settings
+from app.core.exception_diagnostics import (
+    DiagnosticSnapshot,
+    deferred_exception_persistence,
+    persist_exception_diagnostic,
+    prepare_exception_diagnostic,
+    record_exception,
+)
 from app.core.safe_errors import safe_error_message
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import now_timestamp_ms, timestamp_ms_to_iso
+from app.db.diagnostic_session import DiagnosticSession
 from app.models import DownloadTask, KindleSendTask, LibraryImportTask
 from app.models.auth import UserPreference
 from app.models.library import Library
@@ -33,6 +42,7 @@ from app.modules.system.application.commands import (
     reset_failed_system_transaction,
 )
 from app.modules.system.domain.health import (
+    HealthCheckFailure,
     HealthRunItem,
     HealthRunSnapshot,
     normalize_health_run_snapshot,
@@ -96,6 +106,7 @@ class PreparedHealthRunCreation:
 @dataclass(frozen=True, slots=True)
 class PreparedAbandonedHealthRuns:
     rows: tuple[dict[str, object], ...]
+    diagnostics: tuple[DiagnosticSnapshot, ...] = ()
 
 
 def _session(factory: SessionFactory) -> Session:
@@ -106,7 +117,7 @@ def _isolated_session(factory: SessionFactory, close_sessions: bool) -> Session:
     source = factory()
     if close_sessions:
         return source
-    return Session(
+    return DiagnosticSession(
         bind=source.get_bind(),
         autoflush=False,
         expire_on_commit=False,
@@ -453,6 +464,12 @@ def _directory_result(options: dict[str, Any]) -> tuple[str, str, dict[str, Any]
     try:
         next(path.iterdir(), None)
     except OSError as exc:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.system.infrastructure.health_runs._directory_result.failed",
+            exc,
+            context={"stage": "_directory_result"},
+        )
         details["error"] = safe_error_message(exc)
         return "error", "health.directory.notReadable", details
     if not os.access(path, os.R_OK | os.X_OK):
@@ -463,6 +480,12 @@ def _directory_result(options: dict[str, Any]) -> tuple[str, str, dict[str, Any]
                 probe.write(b"ok")
                 probe.flush()
         except OSError as exc:
+            record_exception(
+                logging.getLogger(__name__),
+                "modules.system.infrastructure.health_runs._directory_result.failed",
+                exc,
+                context={"stage": "_directory_result"},
+            )
             details["error"] = safe_error_message(exc)
             return "error", "health.directory.notWritable", details
     return "ok", "health.directory.ok", details
@@ -473,6 +496,12 @@ def _database_result(db: Session) -> tuple[str, str, dict[str, Any]]:
         probe_database(db)
         return "ok", "health.database.ok", {}
     except SQLAlchemyError as exc:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.system.infrastructure.health_runs._database_result.failed",
+            exc,
+            context={"stage": "_database_result"},
+        )
         reset_failed_system_transaction(db)
         return "error", "health.database.error", {"error": safe_error_message(exc)}
 
@@ -509,7 +538,11 @@ def _queue_result(
         if details["failed"]:
             return "warning", "health.queue.failed", details
         runtime = queue_runtime_view(db, queue)
-        if runtime is None or runtime.get("status") != "running" or runtime.get("stale"):
+        if (
+            runtime is None
+            or runtime.get("status") != "running"
+            or runtime.get("stale")
+        ):
             return "error", "health.queue.stale", details
         return "ok", "health.queue.ok", details
 
@@ -548,6 +581,12 @@ def _smtp_result(db: Session) -> tuple[str, str, dict[str, Any]]:
     try:
         values = get_email_settings(db, include_password=True)
     except EmailSettingsError as exc:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.system.infrastructure.health_runs._smtp_result.failed",
+            exc,
+            context={"stage": "_smtp_result"},
+        )
         return "error", "health.smtp.invalid", {"error": safe_error_message(exc)}
     recipient_count = int(
         db.scalar(
@@ -570,6 +609,12 @@ def _smtp_result(db: Session) -> tuple[str, str, dict[str, Any]]:
     try:
         test_smtp_connection(values, timeout=10)
     except (EmailSettingsError, OSError, smtplib.SMTPException) as exc:
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.system.infrastructure.health_runs._smtp_result.failed",
+            exc,
+            context={"stage": "_smtp_result"},
+        )
         return (
             "error",
             "health.smtp.connectionFailed",
@@ -613,6 +658,12 @@ def _providers_result(db: Session) -> tuple[str, str, dict[str, Any]]:
         # A provider is an external health-check boundary; one broken plugin
         # must become a failed provider item without aborting the run.
         except Exception as exc:  # noqa: BLE001
+            record_exception(
+                logging.getLogger(__name__),
+                "modules.system.infrastructure.health_runs._providers_result.failed",
+                exc,
+                context={"stage": "_providers_result"},
+            )
             failed += 1
             details["providers"].append(
                 {"id": provider_id, "ok": False, "message": safe_error_message(exc)}
@@ -623,6 +674,31 @@ def _providers_result(db: Session) -> tuple[str, str, dict[str, Any]]:
 
 
 def _execute_item(
+    factory: SessionFactory,
+    close_sessions: bool,
+    item: HealthRunItem,
+    settings: Settings,
+) -> tuple[str, str, dict[str, Any]]:
+    with deferred_exception_persistence(
+        context={
+            "resource_id": str(item.get("id") or ""),
+            "step": str(item.get("kind") or "health_check"),
+        }
+    ) as pending:
+        before = len(pending)
+        result = _execute_item_result(factory, close_sessions, item, settings)
+        status, message_code, details = result
+        if status == "error" and len(pending) == before:
+            record_exception(
+                logging.getLogger(__name__),
+                "system.health_rule_failed",
+                HealthCheckFailure(f"Health check reported {message_code}"),
+                context={"stage": "health_check_result", "outcome": message_code},
+            )
+        return status, message_code, details
+
+
+def _execute_item_result(
     factory: SessionFactory,
     close_sessions: bool,
     item: HealthRunItem,
@@ -648,6 +724,20 @@ def _execute_item(
 
 
 def run_health_checks(
+    factory: SessionFactory, close_sessions: bool, settings: Settings, run_id: str
+) -> None:
+    pending: list[DiagnosticSnapshot] = []
+    try:
+        with deferred_exception_persistence(
+            context={"task_id": run_id, "task_kind": "health"}
+        ) as pending:
+            _run_health_checks(factory, close_sessions, settings, run_id)
+    finally:
+        for snapshot in pending:
+            persist_exception_diagnostic(logging.getLogger(__name__), snapshot, factory)
+
+
+def _run_health_checks(
     factory: SessionFactory, close_sessions: bool, settings: Settings, run_id: str
 ) -> None:
     actor_user_id = ""
@@ -721,6 +811,12 @@ def run_health_checks(
             # Each health item is isolated so an adapter failure cannot strand
             # the remaining items in a pending state.
             except Exception as exc:  # noqa: BLE001
+                record_exception(
+                    logging.getLogger(__name__),
+                    "modules.system.infrastructure.health_runs.run_health_checks.failed",
+                    exc,
+                    context={"stage": "run_health_checks"},
+                )
                 finished = now_timestamp_ms()
                 db = _isolated_session(factory, close_sessions)
                 try:
@@ -746,6 +842,19 @@ def run_health_checks(
             db.close()
         for item in snapshot.get("items", []):
             if item.get("status") in {"pending", "running"}:
+                record_exception(
+                    logging.getLogger(__name__),
+                    "system.health_item_incomplete",
+                    HealthCheckFailure(
+                        f"Health item remained {item.get('status')} after all scheduled checks completed; further reason was not provided"
+                    ),
+                    context={
+                        "task_id": run_id,
+                        "resource_id": str(item["id"]),
+                        "stage": "terminal_state_check",
+                        "outcome": str(item.get("status")),
+                    },
+                )
                 finished_at = now_timestamp_ms()
                 db = _isolated_session(factory, close_sessions)
                 try:
@@ -811,6 +920,12 @@ def run_health_checks(
             db.close()
     # The worker boundary must persist an interrupted run before terminating.
     except Exception as exc:  # noqa: BLE001
+        record_exception(
+            logging.getLogger(__name__),
+            "modules.system.infrastructure.health_runs.run_health_checks.failed",
+            exc,
+            context={"stage": "run_health_checks"},
+        )
         db = _isolated_session(factory, close_sessions)
         try:
             snapshot = health_run_snapshot(db, run_id)
@@ -853,18 +968,29 @@ def start_health_run(
         thread.start()
 
 
-def fail_abandoned_health_runs(db: Session) -> int:
-    prepared = prepare_abandoned_health_runs(db)
-    return write_prepared_abandoned_health_runs(db, prepared)
-
-
 def prepare_abandoned_health_runs(db: Session) -> PreparedAbandonedHealthRuns:
     rows = db.scalars(
         select(SystemHealthRun).where(SystemHealthRun.status == "running")
     ).all()
     now = now_timestamp_ms()
     prepared_updates: list[dict[str, object]] = []
+    diagnostics: list[DiagnosticSnapshot] = []
     for row in rows:
+        diagnostics.append(
+            prepare_exception_diagnostic(
+                logging.getLogger(__name__),
+                "system.health_run_recovery_required",
+                HealthCheckFailure(
+                    "Startup recovery observed a persisted health run still in running state; preceding process failure reason was not provided"
+                ),
+                context={
+                    "task_id": row.id,
+                    "task_kind": "health",
+                    "stage": "startup_recovery",
+                    "outcome": "interrupted",
+                },
+            )
+        )
         snapshot = json.loads(str(row.snapshot))
         for item in snapshot.get("items", []):
             if item.get("status") in {"pending", "running"}:
@@ -889,7 +1015,9 @@ def prepare_abandoned_health_runs(db: Session) -> PreparedAbandonedHealthRuns:
                 "updated_at": now,
             }
         )
-    return PreparedAbandonedHealthRuns(rows=tuple(prepared_updates))
+    return PreparedAbandonedHealthRuns(
+        rows=tuple(prepared_updates), diagnostics=tuple(diagnostics)
+    )
 
 
 def write_prepared_abandoned_health_runs(

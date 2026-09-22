@@ -84,6 +84,7 @@ def _decode_txt(content: bytes) -> str:
         try:
             decoded = payload.decode(encoding, errors="strict")
         except UnicodeDecodeError as error:
+            # diagnostics-control-flow: Try candidate encodings; the final decoder failure is propagated with cause.
             last_decode_error = error
             continue
         return decoded

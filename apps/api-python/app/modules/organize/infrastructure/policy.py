@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime
 from typing import Any
 
@@ -15,6 +16,7 @@ from app.contracts.local_metadata import (
     DEFAULT_LOCAL_METADATA_PRIORITY,
     validate_local_metadata_priority,
 )
+from app.core.exception_diagnostics import record_exception
 from app.models.organize import OrganizePolicy
 from app.modules.organize.application.dto import PreparedOrganizePolicyUpdate
 
@@ -55,7 +57,9 @@ def _json_dict(value: Any, fallback: dict[str, Any]) -> dict[str, Any]:
         return value
     try:
         parsed = json.loads(str(value or "{}"))
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        record_exception(logging.getLogger(__name__), "modules.organize.infrastructure.policy._json_dict.failed", error,
+                         context={"step": "_json_dict"})
         return dict(fallback)
     return parsed if isinstance(parsed, dict) else dict(fallback)
 
@@ -147,11 +151,17 @@ def write_prepared_organize_policy_update(db: Session, statement: Executable) ->
 def _json_list(value: Any, fallback: list[str]) -> list[object]:
     if isinstance(value, list):
         return value
-    try:
-        parsed = json.loads(str(value or "[]"))
-    except (TypeError, ValueError):
+    if value is None or value == "":
         return list(fallback)
-    return parsed if isinstance(parsed, list) else list(fallback)
+    try:
+        parsed = json.loads(str(value))
+        if not isinstance(parsed, list):
+            raise TypeError("Stored organize policy list must be a JSON array")
+    except (TypeError, ValueError) as error:
+        record_exception(logging.getLogger(__name__), "modules.organize.infrastructure.policy._json_list.failed", error,
+                         context={"step": "_json_list"})
+        return list(fallback)
+    return parsed
 
 
 def _stored_local_metadata_priority(value: object) -> tuple[str, ...]:
@@ -159,7 +169,9 @@ def _stored_local_metadata_priority(value: object) -> tuple[str, ...]:
         return validate_local_metadata_priority(
             _json_list(value, list(DEFAULT_LOCAL_METADATA_PRIORITY))
         )
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as error:
+        record_exception(logging.getLogger(__name__), "modules.organize.infrastructure.policy._stored_local_metadata_priority.failed", error,
+                         context={"step": "_stored_local_metadata_priority"})
         return DEFAULT_LOCAL_METADATA_PRIORITY
 
 

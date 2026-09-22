@@ -278,7 +278,7 @@ class ScanLibrarySourceTree:
         except OSError as error:
             raise SourceScanStartUnavailableError() from error
         if isinstance(first, UnreadableDirectoryEntry):
-            raise SourceScanStartUnavailableError()
+            raise SourceScanStartUnavailableError() from first.error
         if first is None and not config.allow_empty_library_cleanup:
             with self._uow.transaction():
                 if self._libraries.source_node_count(config.library_id):
@@ -356,6 +356,15 @@ class ScanLibrarySourceTree:
                         parent = self._confirmed_missing_parent(config, relative)
                         pending.insert(0, ScanScope(parent))
                     except SourceScanIncompleteError as error:
+                        self._log.emit(
+                            "source_tree.scan.scope_unavailable",
+                            error=error,
+                            library_id=config.library_id,
+                            task_id=task_id,
+                            stage="scan",
+                            step="inspect_scope",
+                            outcome="incomplete",
+                        )
                         failed = True
                         failed_error = failed_error or error
                         self._apply_scan_round(
@@ -375,6 +384,7 @@ class ScanLibrarySourceTree:
                     try:
                         result = self.execute_source(node.id, task_id=task_id)
                     except SourceScanStartUnavailableError:
+                        # diagnostics-control-flow: confirmed deletion reschedules the parent; unreadability raises below.
                         # Confirm absence before reconciling the parent. An
                         # unreadable file must keep its existing scan gap.
                         parent = self._confirmed_missing_parent(config, relative)
@@ -400,6 +410,15 @@ class ScanLibrarySourceTree:
                 ):
                     totals[index] += value
             except SourceScanIncompleteError as error:
+                self._log.emit(
+                    "source_tree.scan.scope_unavailable",
+                    error=error,
+                    library_id=config.library_id,
+                    task_id=task_id,
+                    stage="scan",
+                    step="inspect_scope",
+                    outcome="incomplete",
+                )
                 failed = True
                 failed_error = failed_error or error
                 # The visited scope is resolved and replaced by the exact
@@ -475,14 +494,23 @@ class ScanLibrarySourceTree:
             try:
                 entries = list(self._filesystem.iter_directory_entries(absolute))
             except FileNotFoundError as error:
+                # diagnostics-control-flow: a removed intermediate directory requires checking its parent; a missing library root propagates as incomplete.
                 if not parent:
                     raise SourceScanIncompleteError() from error
                 candidate = parent
                 continue
             except OSError as error:
                 raise SourceScanIncompleteError() from error
-            if any(isinstance(entry, UnreadableDirectoryEntry) for entry in entries):
-                raise SourceScanIncompleteError()
+            unreadable = next(
+                (
+                    entry
+                    for entry in entries
+                    if isinstance(entry, UnreadableDirectoryEntry)
+                ),
+                None,
+            )
+            if unreadable is not None:
+                raise SourceScanIncompleteError() from unreadable.error
             if any(
                 entry[0] == name
                 for entry in entries
@@ -535,7 +563,9 @@ class ScanLibrarySourceTree:
                 absolute = (
                     config.root_path
                     if parent_rel is None
-                    else self._filesystem.resolve_under_root(config.root_path, parent_rel)
+                    else self._filesystem.resolve_under_root(
+                        config.root_path, parent_rel
+                    )
                 )
                 self._uow.release_before_io()
                 try:
@@ -544,12 +574,15 @@ class ScanLibrarySourceTree:
                         collected = []
                         for item in self._filesystem.iter_directory_entries(absolute):
                             if isinstance(item, UnreadableDirectoryEntry):
-                                raise OSError("directory entry unavailable")
+                                raise SourceScanIncompleteError() from item.error
                             collected.append(item)
                         observations = tuple(collected)
-                except OSError as error:
+                except (OSError, SourceScanIncompleteError) as error:
                     self._log.emit(
                         "source_tree.scan.directory_unreadable",
+                        error=error,
+                        task_id=task_id,
+                        step="list_directory",
                         library_id=config.library_id,
                         stage="scan",
                         outcome="io_error",
@@ -583,13 +616,24 @@ class ScanLibrarySourceTree:
                             ownership_changed = bool(created_r)
                             tasks_enqueued += enqueued
                             with self._uow.transaction():
-                                owner = self._books_resources.get_resource_by_source_node(
-                                    parent_id
+                                owner = (
+                                    self._books_resources.get_resource_by_source_node(
+                                        parent_id
+                                    )
                                 )
                         else:
                             with self._uow.transaction():
                                 self._mark_node_covered_by_directory_resource(parent_id)
                     except SourceScanIncompleteError as error:
+                        self._log.emit(
+                            "source_tree.scan.scope_unavailable",
+                            error=error,
+                            library_id=config.library_id,
+                            task_id=task_id,
+                            stage="scan",
+                            step="inspect_scope",
+                            outcome="incomplete",
+                        )
                         failed = True
                         failed_error = failed_error or error
                         if incomplete_paths is not None:
@@ -660,7 +704,9 @@ class ScanLibrarySourceTree:
                         continue
                     seen_path_keys.add(relative.path_key)
                     entries.append(
-                        ObservedSourceEntry(relative, kind, size, mtime, self._clock.now())
+                        ObservedSourceEntry(
+                            relative, kind, size, mtime, self._clock.now()
+                        )
                     )
                 for offset in range(0, len(entries), 200):
                     batch = tuple(entries[offset : offset + 200])
@@ -675,7 +721,8 @@ class ScanLibrarySourceTree:
                                         config.metadata_priority,
                                         self._filesystem.metadata_input_observations(
                                             self._filesystem.resolve_under_root(
-                                                config.root_path, entry.relative_path.value
+                                                config.root_path,
+                                                entry.relative_path.value,
                                             ),
                                             directory=False,
                                         ),
@@ -683,14 +730,17 @@ class ScanLibrarySourceTree:
                                 ).encode()
                             ).hexdigest()
                             for entry in batch
-                            if entry.physical_kind is SourceNodePhysicalKind.REGULAR_FILE
+                            if entry.physical_kind
+                            is SourceNodePhysicalKind.REGULAR_FILE
                         }
                     )
                     with self._uow.transaction():
                         if self._task_was_cancelled_in_transaction(task_id):
                             raise SourceScanCancelledError()
                         results = self._source_nodes.reconcile_batch(
-                            library_id=config.library_id, parent_id=parent_id, entries=batch
+                            library_id=config.library_id,
+                            parent_id=parent_id,
+                            entries=batch,
                         )
                         affected = False
                         covered_ids = []
@@ -743,7 +793,10 @@ class ScanLibrarySourceTree:
                                             else None,
                                         )
                                     )
-                            elif entry.physical_kind is SourceNodePhysicalKind.REGULAR_FILE:
+                            elif (
+                                entry.physical_kind
+                                is SourceNodePhysicalKind.REGULAR_FILE
+                            ):
                                 if owner is not None:
                                     if changed or ownership_changed:
                                         covered_ids.append(node.id)

@@ -13,6 +13,10 @@ class BackupFormatError(ValueError):
     """The archive cannot be mapped to the supported backup contract."""
 
 
+class BackupRequestError(ValueError):
+    """The supplied backup identifier or revision is unsupported."""
+
+
 @dataclass(frozen=True, slots=True)
 class BackupArchive:
     id: str

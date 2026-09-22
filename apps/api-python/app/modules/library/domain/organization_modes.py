@@ -21,4 +21,5 @@ def parse_target_organization_mode(
     try:
         return TargetLibraryOrganizationMode(value)
     except ValueError:
+        # diagnostics-control-flow: enum membership is the domain validation result; the caller handles UNSUPPORTED_MODE.
         return OrganizationModeViolationCode.UNSUPPORTED_MODE

@@ -33,9 +33,7 @@ from app.modules.imports.infrastructure.readable_resource_import_schema import (
 )
 
 
-def _drain(
-    worker: ReadableResourceWorkerProcessor, *, limit: int = 200
-) -> list[str]:
+def _drain(worker: ReadableResourceWorkerProcessor, *, limit: int = 200) -> list[str]:
     outcomes: list[str] = []
     for _ in range(limit):
         outcome = worker.process_once()
@@ -91,11 +89,14 @@ def test_cross_library_move_with_source_and_target_scan_failures(
                 )
             )
             assert len(a_assets) == 2
-            assert db.scalar(
-                select(LibraryReadableResource.import_state).where(
-                    LibraryReadableResource.library_id == "lib-a"
+            assert (
+                db.scalar(
+                    select(LibraryReadableResource.import_state).where(
+                        LibraryReadableResource.library_id == "lib-a"
+                    )
                 )
-            ) == "READY"
+                == "READY"
+            )
 
             # Move one member from the source library to the target library.
             moved = roots["lib-b"] / "Moved"
@@ -184,8 +185,10 @@ def test_cross_library_move_with_source_and_target_scan_failures(
                 )
             )
             assert any(
-                record.getMessage() == "source_tree.scan.directory_unreadable"
+                "source_tree.scan.directory_unreadable" in record.getMessage()
                 and getattr(record, "library_id", None) == "lib-a"
+                and "PermissionError" in record.getMessage()
+                and "diagnostic_id=diag_" in record.getMessage()
                 for record in caplog.records
             )
 

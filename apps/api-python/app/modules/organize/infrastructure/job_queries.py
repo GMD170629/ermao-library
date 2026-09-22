@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Any, cast
@@ -10,6 +11,7 @@ from typing import Any, cast
 from sqlalchemy import case, exists, func, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.exception_diagnostics import record_exception
 from app.models import LibraryBook, LibraryBookMetadata
 from app.models.organize import (
     MetadataLookupTask,
@@ -88,7 +90,9 @@ def _json_string_list(value: object) -> list[str]:
         return []
     try:
         parsed = json.loads(str(value))
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        record_exception(logging.getLogger(__name__), "modules.organize.infrastructure.job_queries._json_string_list.failed", error,
+                         context={"step": "_json_string_list"})
         return []
     if not isinstance(parsed, list):
         return []

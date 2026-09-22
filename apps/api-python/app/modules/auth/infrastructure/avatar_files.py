@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from io import BytesIO
@@ -9,6 +10,9 @@ from pathlib import Path
 from secrets import token_hex
 
 from PIL import Image, ImageOps, UnidentifiedImageError
+
+from app.core.exception_diagnostics import record_exception
+from app.modules.auth.application.avatar_delivery import InvalidAvatarContent
 
 MAX_AVATAR_PIXELS = 25_000_000
 AVATAR_SIZE = 512
@@ -38,13 +42,13 @@ def _normalized_avatar(data: bytes) -> Image.Image:
     try:
         with Image.open(BytesIO(data)) as probe:
             if probe.format not in ALLOWED_AVATAR_FORMATS:
-                raise ValueError("不支持的头像格式")
+                raise InvalidAvatarContent("不支持的头像格式")
             if probe.width * probe.height > MAX_AVATAR_PIXELS:
-                raise ValueError("头像像素尺寸过大")
+                raise InvalidAvatarContent("头像像素尺寸过大")
             probe.verify()
         with Image.open(BytesIO(data)) as source:
             if source.width * source.height > MAX_AVATAR_PIXELS:
-                raise ValueError("头像像素尺寸过大")
+                raise InvalidAvatarContent("头像像素尺寸过大")
             normalized = ImageOps.exif_transpose(source).convert("RGB")
             return ImageOps.fit(
                 normalized,
@@ -53,7 +57,7 @@ def _normalized_avatar(data: bytes) -> Image.Image:
                 centering=(0.5, 0.5),
             )
     except (Image.DecompressionBombError, UnidentifiedImageError, OSError) as exc:
-        raise ValueError("头像文件不是有效的图片") from exc
+        raise InvalidAvatarContent("头像文件不是有效的图片") from exc
 
 
 def prepare_avatar_publication(
@@ -81,9 +85,19 @@ def prepare_avatar_publication(
                 AVATAR_SIZE,
                 AVATAR_SIZE,
             ):
-                raise ValueError("头像文件写入校验失败")
-    except Exception:
-        publication.discard()
+                raise RuntimeError("Generated avatar failed WEBP format or dimension verification")
+    except Exception as error:
+        diagnostic_id = record_exception(
+            logging.getLogger(__name__), "auth.avatar_stage_failed", error,
+            context={"step": "stage_avatar"},
+        )
+        try:
+            publication.discard()
+        except OSError as cleanup_error:
+            record_exception(
+                logging.getLogger(__name__), "auth.avatar_cleanup_failed", cleanup_error,
+                context={"step": "discard_avatar", "parent_diagnostic_id": diagnostic_id},
+            )
         raise
     finally:
         processed.close()

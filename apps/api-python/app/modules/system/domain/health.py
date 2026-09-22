@@ -9,6 +9,10 @@ from app.core.time import to_timestamp_ms
 TERMINAL_CHECK_STATUSES = frozenset({"ok", "warning", "error", "skipped"})
 
 
+class HealthCheckFailure(Exception):
+    """A check reported a concrete failing rule without a lower-level exception."""
+
+
 class HealthRunItem(TypedDict):
     id: str
     group: str

@@ -318,6 +318,16 @@ def test_fallback_publication_preserves_previous_cover_on_cancel_failure_or_prot
             db.commit()
 
         monkeypatch.setattr(FilesystemLocalCoverPublication, "publish", publish)
+    task = pipeline.queue.get_task(task_id)
+    assert task is not None
+    requested = pipeline.queue.request_import_resource(
+        library_id=task.library_id,
+        resource_id=task.resource_id,
+        source_node_id=task.source_node_id,
+        changed=True,
+    )
+    assert requested is not None and requested.id == task_id
+    assert requested.state == "QUEUED"
     db.commit()
     result = pipeline.process_import_task.execute(task_id)
     assert result.outcome == ("ok" if outcome == "protected" else outcome)
@@ -530,6 +540,18 @@ def test_unchanged_resource_reuses_committed_result_without_cover_publication(
     monkeypatch.setattr(FilesystemLocalCoverPublication, "prepare", forbidden)
     assert scan(db, pipeline) == tasks
     assert db.get(LibraryImportTask, task_id).state == "SUCCEEDED"
+    # A duplicate change notification requeues work without discarding the
+    # committed source version; the processor must still reuse that result.
+    task = pipeline.queue.get_task(task_id)
+    assert task is not None
+    requested = pipeline.queue.request_import_resource(
+        library_id=task.library_id,
+        resource_id=task.resource_id,
+        source_node_id=task.source_node_id,
+        changed=True,
+    )
+    assert requested is not None and requested.id == task_id
+    assert requested.state == "QUEUED"
     import_task(db, pipeline, task_id)
     assert db.scalar(select(LibraryResourceAsset.id)) == asset_id
     assert db.scalar(select(LibraryReadableResourceMetadata)).cover_path == old_cover

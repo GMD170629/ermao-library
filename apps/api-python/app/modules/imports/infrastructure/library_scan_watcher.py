@@ -122,6 +122,7 @@ class _LibraryEventHandler(FileSystemEventHandler):
         try:
             relative = path.relative_to(self._library.root_path)
         except ValueError:
+            # diagnostics-control-flow: An event outside the watched root is intentionally ignored.
             return
         parent = relative.parent.as_posix()
         scopes = [ScanScope("" if parent == "." else parent)]

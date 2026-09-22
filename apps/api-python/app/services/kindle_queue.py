@@ -25,7 +25,10 @@ from app.bootstrap.kindle import (
 from app.bootstrap.system import prepare_system_event
 from app.core.config import Settings
 from app.core.database_errors import is_database_busy_error
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import (
+    exception_diagnostic_boundary,
+    record_exception,
+)
 from app.core.i18n import configured_locale
 from app.core.safe_errors import mask_email, safe_error_message
 from app.core.time import now_timestamp_ms
@@ -71,7 +74,9 @@ def _library_asset_path(file_row: dict[str, Any]) -> Path | None:
         resolved = (library_root / relative_path).resolve()
         if resolved == library_root or library_root in resolved.parents:
             return resolved
-    except OSError:
+    except OSError as error:
+        record_exception(logging.getLogger(__name__), "services.kindle_queue._library_asset_path.failed", error,
+                         context={"step": "_library_asset_path"})
         return None
     return None
 
@@ -249,109 +254,127 @@ def _send_task(db: Session, _settings: Settings, task: dict[str, Any]) -> None:
         if client is not None:
             try:
                 client.quit()
-            except (OSError, smtplib.SMTPException):
+            except (OSError, smtplib.SMTPException) as error:
+                record_exception(logging.getLogger(__name__), "services.kindle_queue._send_task.failed", error,
+                                 context={"step": "_send_task", "task_id": str(task.get("id") or "")})
                 client.close()
 
 
 def process_next_kindle_send_task(db: Session, settings: Settings) -> bool:
-    queued = next_queued_task(db)
-    db.close()
-    if not queued:
-        return False
-    task = _claim_task(db, str(queued["id"]))
-    if not task:
-        return True
-    try:
-        _send_task(db, settings, task)
-    # Task processing is a queue containment boundary: translate every
-    # adapter failure into the durable retry/failure state for this task.
-    except Exception as exc:  # noqa: BLE001
-        record_exception(
-            LOGGER,
-            "kindle_queue.task_failed",
-            exc,
-            level="warning",
-            context={
-                "stage": "kindle_send",
-                "outcome": "failed",
-                "task_id": str(task.get("id")) if task.get("id") else None,
-                "resource_id": str(task.get("assetId"))
-                if task.get("assetId")
-                else None,
-            },
-            source="kindle",
-            action="kindle.task_failed",
-            target_type="kindleSendTask",
-            target_id=str(task.get("id")) if task.get("id") else None,
-        )
-        error = (
-            exc
-            if isinstance(exc, KindleSendError)
-            else KindleSendError(safe_error_message(exc))
-        )
-        attempt_count = int(task.get("attemptCount") or 0)
-        now = datetime.now(UTC)
-        if error.transient and attempt_count < MAX_SEND_ATTEMPTS:
-            delay = RETRY_DELAYS_SECONDS[
-                min(attempt_count - 1, len(RETRY_DELAYS_SECONDS) - 1)
-            ]
-            retry_at = now + timedelta(seconds=delay)
+    with exception_diagnostic_boundary(LOGGER, "kindle.task_failed", context={"step": "kindle_send"}):
+        try:
+            queued = next_queued_task(db)
+            db.close()
+            if not queued:
+                return False
+            task = _claim_task(db, str(queued["id"]))
+            if not task:
+                return True
+            try:
+                _send_task(db, settings, task)
+            # Task processing is a queue containment boundary: translate every
+            # adapter failure into the durable retry/failure state for this task.
+            except Exception as exc:  # noqa: BLE001
+                record_exception(
+                    LOGGER,
+                    "kindle_queue.task_failed",
+                    exc,
+                    level="warning",
+                    context={
+                        "stage": "kindle_send",
+                        "outcome": "failed",
+                        "task_id": str(task.get("id")) if task.get("id") else None,
+                        "resource_id": str(task.get("assetId"))
+                        if task.get("assetId")
+                        else None,
+                    },
+                    source="kindle",
+                    action="kindle.task_failed",
+                    target_type="kindleSendTask",
+                    target_id=str(task.get("id")) if task.get("id") else None,
+                )
+                error = (
+                    exc
+                    if isinstance(exc, KindleSendError)
+                    else KindleSendError(safe_error_message(exc))
+                )
+                attempt_count = int(task.get("attemptCount") or 0)
+                now = datetime.now(UTC)
+                if error.transient and attempt_count < MAX_SEND_ATTEMPTS:
+                    delay = RETRY_DELAYS_SECONDS[
+                        min(attempt_count - 1, len(RETRY_DELAYS_SECONDS) - 1)
+                    ]
+                    retry_at = now + timedelta(seconds=delay)
+                    prepared_event = _prepared_event(
+                        task,
+                        action="send.retry_scheduled",
+                        level="warning",
+                        message=f"Kindle 发送失败，等待第 {attempt_count + 1} 次尝试：{task.get('bookTitle')}",
+                        metadata={
+                            "attemptCount": attempt_count,
+                            "nextAttemptAt": retry_at,
+                            "errorMessage": str(error),
+                        },
+                    )
+                    schedule_kindle_retry_command(
+                        db,
+                        str(task["id"]),
+                        retry_at=retry_at,
+                        error_message=str(error),
+                        timestamp=now,
+                        event=prepared_event,
+                    )
+                else:
+                    prepared_event = _prepared_event(
+                        task,
+                        action="send.failed",
+                        level="error",
+                        message=f"Kindle 发送失败：{task.get('bookTitle')}",
+                        metadata={"attemptCount": attempt_count, "errorMessage": str(error)},
+                    )
+                    fail_kindle_send_task_command(
+                        db,
+                        str(task["id"]),
+                        error_message=str(error),
+                        timestamp=now,
+                        event=prepared_event,
+                    )
+                return True
+
+            sent_at = datetime.now(UTC)
             prepared_event = _prepared_event(
                 task,
-                action="send.retry_scheduled",
-                level="warning",
-                message=f"Kindle 发送失败，等待第 {attempt_count + 1} 次尝试：{task.get('bookTitle')}",
+                action="send.succeeded",
+                message=f"Kindle 邮件已提交：{task.get('bookTitle')}",
                 metadata={
-                    "attemptCount": attempt_count,
-                    "nextAttemptAt": retry_at,
-                    "errorMessage": str(error),
+                    "attemptCount": task.get("attemptCount"),
+                    "messageId": task.get("messageId"),
                 },
             )
-            schedule_kindle_retry_command(
-                db,
-                str(task["id"]),
-                retry_at=retry_at,
-                error_message=str(error),
-                timestamp=now,
-                event=prepared_event,
+            complete_kindle_send_task_command(
+                db, str(task["id"]), sent_at=sent_at, event=prepared_event
             )
-        else:
-            prepared_event = _prepared_event(
-                task,
-                action="send.failed",
-                level="error",
-                message=f"Kindle 发送失败：{task.get('bookTitle')}",
-                metadata={"attemptCount": attempt_count, "errorMessage": str(error)},
-            )
-            fail_kindle_send_task_command(
-                db,
-                str(task["id"]),
-                error_message=str(error),
-                timestamp=now,
-                event=prepared_event,
-            )
-        return True
-
-    sent_at = datetime.now(UTC)
-    prepared_event = _prepared_event(
-        task,
-        action="send.succeeded",
-        message=f"Kindle 邮件已提交：{task.get('bookTitle')}",
-        metadata={
-            "attemptCount": task.get("attemptCount"),
-            "messageId": task.get("messageId"),
-        },
-    )
-    complete_kindle_send_task_command(
-        db, str(task["id"]), sent_at=sent_at, event=prepared_event
-    )
-    return True
+            return True
+        finally:
+            db.close()
 
 
 def recover_interrupted_tasks(db: Session) -> int:
     rows = list_sending_kindle_tasks(db)
     db.close()
     now = datetime.now(UTC)
+    for task in rows:
+        record_exception(
+            LOGGER, "kindle.send_result_unknown",
+            KindleSendError(
+                "Startup observed persisted sending state without a terminal SMTP result; delivery outcome and interruption cause were not provided"
+            ),
+            context={
+                "task_id": str(task["id"]), "resource_id": task.get("assetId"),
+                "book_id": task.get("bookId"), "step": "startup_recovery", "outcome": "unknown",
+                "attempt": task.get("attemptCount"),
+            },
+        )
     prepared_events = [
         _prepared_event(
             {**task, "status": "unknown"},
@@ -407,25 +430,26 @@ class KindleSendQueueWorker:
             self._thread.join()
 
     def process_once(self) -> bool:
-        if not self._process_lock.acquire(blocking=False):
-            return False
-        try:
-            with self.db_factory() as db:
-                return process_next_kindle_send_task(db, self.settings)
-        # The worker boundary must keep the queue alive after an unexpected
-        # database or adapter failure.
-        except Exception as exc:
-            record_exception(
-                LOGGER,
-                "kindle_queue.task_failed",
-                exc,
-                context={"stage": "kindle_queue", "outcome": "error"},
-                source="kindle",
-                action="kindle.task_failed",
-            )
-            raise
-        finally:
-            self._process_lock.release()
+        with exception_diagnostic_boundary(LOGGER, "kindle_queue.execution", context={}):
+            if not self._process_lock.acquire(blocking=False):
+                return False
+            try:
+                with self.db_factory() as db:
+                    return process_next_kindle_send_task(db, self.settings)
+            # The worker boundary must keep the queue alive after an unexpected
+            # database or adapter failure.
+            except Exception as exc:
+                record_exception(
+                    LOGGER,
+                    "kindle_queue.task_failed",
+                    exc,
+                    context={"stage": "kindle_queue", "outcome": "error"},
+                    source="kindle",
+                    action="kindle.task_failed",
+                )
+                raise
+            finally:
+                self._process_lock.release()
 
     def _run(self) -> None:
         self._heartbeat.start()

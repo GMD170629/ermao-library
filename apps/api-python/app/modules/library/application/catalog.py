@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Literal, Protocol, cast
 
 from app.core.authorization import AuthorizationContext
+from app.modules.library.domain.facets import InvalidLibraryFacetRequest
 
 CATALOG_FACET_KINDS = frozenset({"AUTHOR", "SERIES", "TAG"})
 CatalogFacetKind = Literal["AUTHOR", "SERIES", "TAG"]
@@ -144,7 +145,7 @@ class ListCatalogBooks:
         if (normalized_filters.facet_kind is None) != (
             normalized_filters.facet_id is None
         ):
-            raise ValueError("facet kind and id must be provided together")
+            raise InvalidLibraryFacetRequest("facet kind and id must be provided together")
         return self.query.list_books(
             context=context,
             filters=CatalogBookFilter(
@@ -190,7 +191,7 @@ class ListCatalogFacets:
     ) -> CatalogFacetPage:
         normalized_kind = kind.strip().upper()
         if normalized_kind not in CATALOG_FACET_KINDS:
-            raise ValueError("invalid catalog facet kind")
+            raise InvalidLibraryFacetRequest("invalid catalog facet kind")
         return self.query.list_facets(
             context=context,
             kind=cast(CatalogFacetKind, normalized_kind),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -22,6 +23,11 @@ from app.bootstrap.download import (
 )
 from app.bootstrap.system import prepare_system_event
 from app.core.config import Settings
+from app.core.exception_diagnostics import (
+    exception_diagnostic_boundary,
+    record_exception,
+    sanitize_diagnostic_text,
+)
 from app.modules.download.infrastructure.tasks import (
     find_active_download_task as find_active_download_task_row,
 )
@@ -88,7 +94,9 @@ def remote_ref(value: Any) -> dict[str, Any]:
         try:
             parsed = json.loads(value)
             return parsed if isinstance(parsed, dict) else {}
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as error:
+            record_exception(logging.getLogger(__name__), "services.download_executor.remote_ref.failed", error,
+                             context={"step": "remote_ref"})
             return {}
     return {}
 
@@ -104,6 +112,7 @@ def system_setting(db: Session, key: str) -> str | None:
     try:
         parsed = json.loads(str(value))
     except json.JSONDecodeError:
+        # diagnostics-control-flow: Headers accept both JSON and legacy literal forms; continue legacy parsing.
         parsed = value
     return string_value(parsed) or None
 
@@ -445,81 +454,87 @@ def run_task(settings: Settings, task: dict[str, Any], qbit: QbittorrentConfig) 
 
 
 def error_summary(error: Exception) -> str:
-    return str(error or "下载执行失败")[:500]
+    return sanitize_diagnostic_text(error)[:500]
 
 
 def execute_download_task(
     db: Session, settings: Settings, task_id: str
 ) -> DownloadExecutionResult:
-    task = get_download_task(db, task_id)
-    db.close()
-    if not task:
-        raise ValueError("下载任务不存在")
-    if task.get("status") not in {"queued", "failed", "PENDING", "FAILED"}:
-        return DownloadExecutionResult(task)
-    qbit = qbittorrent_config(db, settings)
-    db.close()
-    claim_timestamp = now()
-    claimed = claim_download_task_command(db, task_id, timestamp=claim_timestamp)
-    if claimed is None:
-        return DownloadExecutionResult(task)
-    task = claimed
-    try:
-        file_path = run_task(settings, {**task, "status": "downloading"}, qbit)
-        prepared_event = prepare_system_event(
-            source="download",
-            action="completed",
-            message="下载完成，等待后台导入",
-            target_type="downloadTask",
-            target_id=task_id,
-            metadata={
-                "status": "downloaded",
-                "filePath": str(file_path),
-                "displayName": str(task.get("displayName") or ""),
-            },
-        )
-        completed_at = now()
-        updated = finalize_download_task_command(
-            db,
-            task_id,
-            values={
-                "status": "downloaded",
-                "progress": 100,
-                "filePath": str(file_path),
-                "savePath": str(file_path.parent),
-                "errorMessage": None,
-                "updatedAt": completed_at,
-            },
-            event=prepared_event,
-        )
-        return DownloadExecutionResult(updated or task)
-    except Exception as exc:  # noqa: BLE001 - task boundary persists failure state.
-        summary = error_summary(exc)
-        prepared_event = prepare_system_event(
-            source="download",
-            action="failed",
-            level="error",
-            message="下载失败",
-            target_type="downloadTask",
-            target_id=task_id,
-            metadata={
-                "status": "failed",
-                "errorMessage": summary,
-                "displayName": str(task.get("displayName") or ""),
-            },
-        )
-        failed_at = now()
-        updated = finalize_download_task_command(
-            db,
-            task_id,
-            values={
-                "status": "failed",
-                "errorMessage": summary,
-                "updatedAt": failed_at,
-            },
-            event=prepared_event,
-        )
-        return DownloadExecutionResult(updated or task)
+    with exception_diagnostic_boundary(logging.getLogger(__name__), "download.task_failed", context={"task_id": task_id, "step": "download"}):
+        try:
+            task = get_download_task(db, task_id)
+            db.close()
+            if not task:
+                raise ValueError("下载任务不存在")
+            if task.get("status") not in {"queued", "failed", "PENDING", "FAILED"}:
+                return DownloadExecutionResult(task)
+            qbit = qbittorrent_config(db, settings)
+            db.close()
+            claim_timestamp = now()
+            claimed = claim_download_task_command(db, task_id, timestamp=claim_timestamp)
+            if claimed is None:
+                return DownloadExecutionResult(task)
+            task = claimed
+            try:
+                file_path = run_task(settings, {**task, "status": "downloading"}, qbit)
+                prepared_event = prepare_system_event(
+                    source="download",
+                    action="completed",
+                    message="下载完成，等待后台导入",
+                    target_type="downloadTask",
+                    target_id=task_id,
+                    metadata={
+                        "status": "downloaded",
+                        "filePath": str(file_path),
+                        "displayName": str(task.get("displayName") or ""),
+                    },
+                )
+                completed_at = now()
+                updated = finalize_download_task_command(
+                    db,
+                    task_id,
+                    values={
+                        "status": "downloaded",
+                        "progress": 100,
+                        "filePath": str(file_path),
+                        "savePath": str(file_path.parent),
+                        "errorMessage": None,
+                        "updatedAt": completed_at,
+                    },
+                    event=prepared_event,
+                )
+                return DownloadExecutionResult(updated or task)
+            except Exception as exc:  # noqa: BLE001 - task boundary persists failure state.
+                record_exception(logging.getLogger(__name__), "services.download_executor.execute_download_task.failed", exc,
+                                 context={"step": "execute_download_task", "task_id": task_id})
+                summary = error_summary(exc)
+                prepared_event = prepare_system_event(
+                    source="download",
+                    action="failed",
+                    level="error",
+                    message="下载失败",
+                    target_type="downloadTask",
+                    target_id=task_id,
+                    metadata={
+                        "status": "failed",
+                        "errorMessage": summary,
+                        "displayName": str(task.get("displayName") or ""),
+                    },
+                )
+                failed_at = now()
+                updated = finalize_download_task_command(
+                    db,
+                    task_id,
+                    values={
+                        "status": "failed",
+                        "errorMessage": summary,
+                        "updatedAt": failed_at,
+                    },
+                    event=prepared_event,
+                )
+                return DownloadExecutionResult(updated or task)
+        finally:
+            db.close()
 
 
 def find_active_download_task(db: Session, record_id: str) -> dict[str, Any] | None:

@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from uuid import uuid4
 
 from PIL import Image, UnidentifiedImageError
 
+from app.core.exception_diagnostics import record_exception
 from app.modules.library.application.source_node_commands import (
     MAX_SOURCE_NODE_COVER_BYTES,
+    InvalidSourceNodeCover,
     PreparedSourceNodeCover,
     PublishedSourceNodeCover,
     SourceNodeCoverPublicationPort,
@@ -30,15 +33,25 @@ class FilesystemSourceNodeCoverPublication(SourceNodeCoverPublicationPort):
         self, *, source_node_id: str, content: bytes
     ) -> PreparedSourceNodeCover:
         if not source_node_id or Path(source_node_id).name != source_node_id:
-            raise ValueError("invalid source node identifier")
+            raise InvalidSourceNodeCover("invalid source node identifier")
         if not content or len(content) > self._max_bytes:
-            raise ValueError("source node cover exceeds the supported size")
+            raise InvalidSourceNodeCover("source node cover exceeds the supported size")
         self._cover_root.mkdir(parents=True, exist_ok=True)
         temporary_path = self._cover_root / f".{source_node_id}.{uuid4().hex}.part"
         try:
             temporary_path.write_bytes(content)
-        except OSError:
-            temporary_path.unlink(missing_ok=True)
+        except OSError as error:
+            diagnostic_id = record_exception(
+                logging.getLogger(__name__), "library.source_node_cover.stage_failed", error,
+                context={"step": "stage_uploaded_cover", "resource_id": source_node_id},
+            )
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError as cleanup_error:
+                record_exception(
+                    logging.getLogger(__name__), "library.source_node_cover.cleanup_failed", cleanup_error,
+                    context={"step": "remove_rejected_cover", "parent_diagnostic_id": diagnostic_id, "resource_id": source_node_id},
+                )
             raise
         try:
             with Image.open(temporary_path) as image:
@@ -46,15 +59,22 @@ class FilesystemSourceNodeCoverPublication(SourceNodeCoverPublicationPort):
                 image.verify()
             suffix = _IMAGE_SUFFIXES.get(image_format)
             if suffix is None:
-                raise ValueError("source node cover is not a supported image")
-        except (
-            OSError,
-            UnidentifiedImageError,
-            ValueError,
-            Image.DecompressionBombError,
-        ) as exc:
-            temporary_path.unlink(missing_ok=True)
-            raise ValueError("source node cover could not be validated") from exc
+                raise InvalidSourceNodeCover("source node cover is not a supported image")
+        except Exception as exc:
+            diagnostic_id = record_exception(
+                logging.getLogger(__name__), "library.source_node_cover.validation_failed", exc,
+                context={"step": "validate_uploaded_cover", "resource_id": source_node_id},
+            )
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError as cleanup_error:
+                record_exception(
+                    logging.getLogger(__name__), "library.source_node_cover.cleanup_failed", cleanup_error,
+                    context={"step": "remove_rejected_cover", "parent_diagnostic_id": diagnostic_id, "resource_id": source_node_id},
+                )
+            if isinstance(exc, (UnidentifiedImageError, Image.DecompressionBombError, InvalidSourceNodeCover)):
+                raise InvalidSourceNodeCover("source node cover could not be validated") from exc
+            raise
         final_path = self._cover_root / f"{source_node_id}{suffix}"
         return PreparedSourceNodeCover(
             temporary_path=temporary_path,
@@ -111,6 +131,7 @@ class FilesystemSourceNodeCoverPublication(SourceNodeCoverPublicationPort):
         try:
             candidate.relative_to(self._cover_root.resolve())
         except ValueError:
+            # diagnostics-control-flow: Relative-path containment probe rejects an out-of-root optional cover.
             return
         candidate.unlink(missing_ok=True)
 

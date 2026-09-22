@@ -30,7 +30,10 @@ from app.core.database_errors import (
     is_database_busy_error,
     is_database_operation_timeout,
 )
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import (
+    exception_diagnostic_boundary,
+    record_exception,
+)
 from app.models.common import db_timestamp
 from app.modules.imports.public import (
     UNKNOWN_AUTHOR,
@@ -62,9 +65,16 @@ from app.services.queue_runtime import QueueHeartbeatPump
 LOGGER = logging.getLogger(__name__)
 RETRY_DELAYS_SECONDS = (60, 300, 1800)
 DATABASE_BUSY_RETRY_DELAYS_SECONDS = (0.25, 1.0)
-DATABASE_BUSY_LOG_INTERVAL_SECONDS = 30.0
 STALE_RUNNING_MINUTES = lookup_persist.STALE_RUNNING_MINUTES
 ORPHAN_COVER_PART_MAX_AGE_SECONDS = 24 * 60 * 60
+
+
+class MetadataLookupRuleFailure(RuntimeError):
+    """An observed lookup precondition failed without a lower exception."""
+
+
+class MetadataLookupRetryLimitReached(RuntimeError):
+    """The recorded lookup attempt count exhausted its configured retry budget."""
 
 
 def _now() -> datetime:
@@ -98,7 +108,9 @@ def claim_next_metadata_lookup_task(
 def _provider_order(task: dict[str, Any]) -> list[str]:
     try:
         parsed = json.loads(str(task.get("providerOrder") or "[]"))
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as error:
+        record_exception(logging.getLogger(__name__), "services.metadata_lookup_queue._provider_order.failed", error,
+                         context={"step": "_provider_order", "task_id": str(task.get("id") or ""), "attempt": int(task.get("attempts") or 0) + 1})
         parsed = []
     registered = metadata_provider_registry().ids()
     return [str(item) for item in parsed if str(item) in registered]
@@ -195,7 +207,9 @@ def _parse_tags(value: Any) -> list[str]:
     if isinstance(value, str):
         try:
             parsed = json.loads(value)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as error:
+            record_exception(logging.getLogger(__name__), "services.metadata_lookup_queue._parse_tags.failed", error,
+                             context={"step": "_parse_tags"})
             return []
         return _parse_tags(parsed)
     return []
@@ -238,8 +252,9 @@ def _cleanup_orphan_remote_cover_parts(
                 continue
             part_path.unlink(missing_ok=True)
             removed += 1
-        except OSError:
-            LOGGER.debug("orphan remote cover cleanup skipped path=%s", part_path)
+        except OSError as error:
+            record_exception(logging.getLogger(__name__), "services.metadata_lookup_queue._cleanup_orphan_remote_cover_parts.failed", error,
+                             context={"step": "_cleanup_orphan_remote_cover_parts"})
     return removed
 
 
@@ -289,8 +304,13 @@ def _download_remote_cover(
 def _publish_remote_cover(prepared: _PreparedRemoteCover) -> None:
     try:
         os.replace(prepared.temporary_path, prepared.final_path)
-    except OSError:
-        prepared.temporary_path.unlink(missing_ok=True)
+    except OSError as error:
+        primary_id = record_exception(LOGGER, "metadata.cover_replace_failed", error, context={"step": "replace_cover"})
+        try:
+            prepared.temporary_path.unlink(missing_ok=True)
+        except OSError as cleanup_error:
+            record_exception(LOGGER, "metadata.cover_cleanup_failed", cleanup_error,
+                             context={"step": "cleanup_cover", "parent_diagnostic_id": primary_id})
         raise
 
 
@@ -382,8 +402,9 @@ def _prepare_candidate_application(
         try:
             book_patch["seriesIndex"] = float(candidate["seriesIndex"])
             applied.append("seriesIndex")
-        except (TypeError, ValueError):
-            pass
+        except (TypeError, ValueError) as error:
+            record_exception(logging.getLogger(__name__), "services.metadata_lookup_queue._prepare_candidate_application.failed", error,
+                             context={"step": "_prepare_candidate_application", "task_id": str(task.get("id") or ""), "attempt": int(task.get("attempts") or 0) + 1, "stage": str(provider)})
     if (
         "cover_path"
         not in protected_metadata_fields(str(book.get("protectedFields") or "[]"))
@@ -395,7 +416,7 @@ def _prepare_candidate_application(
                 str(book["id"]), str(candidate["coverUrl"]).strip(), settings
             )
         except Exception as exc:  # noqa: BLE001 - optional cover failure is isolated.
-            LOGGER.warning("remote metadata cover skipped book=%s: %s", book["id"], exc)
+            record_exception(LOGGER, "metadata.remote_cover_failed", exc, context={"task_id": str(task["id"]), "step": "download_remote_cover", "attempt": int(task.get("attempts") or 0) + 1})
         else:
             if remote_cover:
                 book_patch.update(
@@ -593,6 +614,17 @@ def _finish_without_match(
     candidates: list[dict[str, Any]],
     message: str,
 ) -> None:
+    if status in {"FAILED", "NO_PROVIDER"}:
+        record_exception(
+            LOGGER, "metadata.lookup_rule_failed", MetadataLookupRuleFailure(message),
+            context={
+                "task_id": str(task["id"]), "resource_id": task.get("resourceId"),
+                "book_id": task.get("bookId"), "import_task_id": task.get("importTaskId"),
+                "step": "finish_lookup",
+                "outcome": status, "attempt": int(task.get("attempts") or 0) + 1,
+            },
+            target_type="book", target_id=task.get("bookId"),
+        )
     candidate_json = json.dumps(candidates, ensure_ascii=False)
     finished_at = _now()
     unresolved = _prepare_unresolved_organize_update(
@@ -621,12 +653,23 @@ def _finish_without_match(
 
 
 def _schedule_retry(
-    db: Session, task: dict[str, Any], message: str, candidates: list[dict[str, Any]]
-) -> None:
+    db: Session, task: dict[str, Any], message: str, candidates: list[dict[str, Any]],
+    *, import_status: str | None = None,
+) -> str:
     attempts = int(task.get("attempts") or 0) + 1
     candidate_json = json.dumps(candidates, ensure_ascii=False)
     now = _now()
     retry_exhausted = attempts > len(RETRY_DELAYS_SECONDS)
+    if retry_exhausted:
+        record_exception(
+            LOGGER, "metadata.lookup_retry_limit_reached",
+            MetadataLookupRetryLimitReached(
+                f"Attempt {attempts} exhausted {len(RETRY_DELAYS_SECONDS)} scheduled retries; last observed result: {message}"
+                + (f"; upstream import state={import_status}" if import_status is not None else "")
+            ),
+            context={"task_id": str(task["id"]), "resource_id": task.get("resourceId"), "book_id": task.get("bookId"), "import_task_id": task.get("importTaskId"), "step": "schedule_lookup_retry", "attempt": attempts},
+            target_type="book", target_id=task.get("bookId"),
+        )
     unresolved = (
         _prepare_unresolved_organize_update(
             db,
@@ -681,6 +724,7 @@ def _schedule_retry(
                 error=message,
                 now=now,
             )
+    return "FAILED" if retry_exhausted else "PENDING"
 
 
 def process_metadata_lookup_task(
@@ -689,230 +733,239 @@ def process_metadata_lookup_task(
     task: dict[str, Any],
     automatic_request_gate: AutomaticMetadataRequestGate | None = None,
 ) -> str:
-    import_status = lookup_persist.get_import_task_status(db, task.get("importTaskId"))
-    if import_status is not None and import_status != "SUCCEEDED":
-        _schedule_retry(db, task, "等待本地导入任务完成", [])
-        return "PENDING"
-    book = lookup_persist.get_book(db, task.get("bookId"))
-    if not book:
-        _finish_without_match(db, task, "FAILED", [], "图书已不存在")
-        return "FAILED"
-    metadata_guard = lookup_persist.book_metadata_guard(db, str(book["id"]))
-    if metadata_guard is not None and metadata_guard[-1]:
-        task_id = str(task["id"])
-        now = _now()
-        owner_id = str(task.get("leaseOwnerId") or "") or None
-        db.close()
-        with MetadataWriteTransaction(db):
-            _update_task(
-                db,
-                task_id,
-                updated_at=now,
-                owner_id=owner_id,
-                status="PENDING",
-                startedAt=None,
-                leaseOwnerId=None,
-                leaseExpiresAt=None,
-            )
-        return "PENDING"
-    if lookup_persist.local_identification_failed(db, str(book["id"])):
-        _finish_without_match(db, task, "FAILED", [], "本地元数据识别失败，请重试识别")
-        return "FAILED"
-    context = metadata_context_for_book(db, str(book["id"]))
-    if not context:
-        _finish_without_match(
-            db,
-            task,
-            "FAILED",
-            [],
-            "无法建立元数据查询上下文",
-        )
-        return "FAILED"
-    effective_request_gate = (
-        automatic_request_gate
-        if lookup_persist.automatic_rate_limit_applies(db, task)
-        else None
-    )
-
-    enabled_providers = 0
-    errors: list[str] = []
-    inspected: list[dict[str, Any]] = []
-    for provider in _provider_order(task):
-        execution_id = _start_provider_execution(db, task, provider)
+    with exception_diagnostic_boundary(LOGGER, "metadata.task_failed", context={"task_id": str(task["id"]), "attempt": int(task.get("attempts") or 0) + 1}):
         try:
-            result = _search_provider(
-                db,
-                context,
-                provider,
-                str(book.get("title") or ""),
-                effective_request_gate,
-            )
-        except Exception as exc:  # noqa: BLE001 - contains one provider attempt.
-            _finish_provider_execution(
-                db, execution_id, status="FAILED", error=str(exc)
-            )
-            errors.append(f"{provider}: {exc}")
-            continue
-        if not result.get("enabled"):
-            _finish_provider_execution(
-                db, execution_id, status="SKIPPED", result=result
-            )
-            continue
-        enabled_providers += 1
-        raw_candidates = result.get("candidates")
-        candidates: list[dict[str, Any]] = (
-            [
-                {str(key): value for key, value in candidate.items()}
-                for candidate in raw_candidates
-                if isinstance(candidate, dict)
-            ]
-            if isinstance(raw_candidates, list)
-            else []
-        )
-        candidate, exact = _choose_exact_candidate(
-            candidates,
-            str(book.get("title") or ""),
-            str(book.get("author") or UNKNOWN_AUTHOR),
-        )
-        inspected.append(
-            {
-                "provider": provider,
-                "exactCandidates": exact,
-                "cacheHit": bool(result.get("cacheHit")),
-            }
-        )
-        if not candidate:
-            _finish_provider_execution(
-                db, execution_id, status="NO_MATCH", result=result
-            )
-            continue
-        if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
-            return "CANCELLED"
-        prepared_application: _PreparedCandidateApplication | None = None
-        try:
-            prepared_application = _prepare_candidate_application(
-                db,
-                settings,
-                task,
-                provider,
-                candidate,
-            )
-            applied = list(prepared_application.applied)
-            selected_result_json = json.dumps(
-                {"selected": candidate, "attempted": inspected},
-                ensure_ascii=False,
-            )
-            applied_fields_json = json.dumps(applied, ensure_ascii=False)
-            finished_at = _now()
-            execution_result = {
-                "selected": candidate,
-                "appliedFields": applied,
-            }
-            execution_result_json = json.dumps(
-                execution_result,
-                ensure_ascii=False,
-            )
-            completed_attempts = int(task.get("attempts") or 0) + 1
-            prepared_execution_finish = (
-                lookup_persist.prepare_provider_execution_finish(
-                    execution_id,
-                    status="COMPLETED",
-                    raw_result_json=execution_result_json,
-                    now=finished_at,
-                )
-            )
-            task_id = str(task["id"])
-            owner_id = str(task.get("leaseOwnerId") or "") or None
-            guarded_book_id = str(book["id"])
-            with MetadataWriteTransaction(db):
-                if (
-                    lookup_persist.book_metadata_guard(db, guarded_book_id)
-                    != metadata_guard
-                ):
-                    raise RuntimeError("BOOK_METADATA_CHANGED")
-                _persist_candidate_application(db, prepared_application)
-            if prepared_application.remote_cover is not None:
-                try:
-                    _publish_remote_cover(prepared_application.remote_cover)
-                except OSError as publish_error:
-                    try:
-                        _compensate_remote_cover_publish_failure(
-                            db,
-                            prepared_application,
-                        )
-                    except Exception as compensation_error:
-                        raise RuntimeError(
-                            "REMOTE_COVER_PUBLISH_COMPENSATION_FAILED"
-                        ) from compensation_error
-                    raise RuntimeError("REMOTE_COVER_PUBLISH_FAILED") from publish_error
-            with MetadataWriteTransaction(db):
-                _update_task(
+            import_status = lookup_persist.get_import_task_status(db, task.get("importTaskId"))
+            if import_status is not None and import_status != "SUCCEEDED":
+                return _schedule_retry(db, task, "等待本地导入任务完成", [], import_status=import_status)
+            book = lookup_persist.get_book(db, task.get("bookId"))
+            if not book:
+                _finish_without_match(db, task, "FAILED", [], "图书已不存在")
+                return "FAILED"
+            metadata_guard = lookup_persist.book_metadata_guard(db, str(book["id"]))
+            if metadata_guard is not None and metadata_guard[-1]:
+                task_id = str(task["id"])
+                now = _now()
+                owner_id = str(task.get("leaseOwnerId") or "") or None
+                db.close()
+                with MetadataWriteTransaction(db):
+                    _update_task(
+                        db,
+                        task_id,
+                        updated_at=now,
+                        owner_id=owner_id,
+                        status="PENDING",
+                        startedAt=None,
+                        leaseOwnerId=None,
+                        leaseExpiresAt=None,
+                    )
+                return "PENDING"
+            if lookup_persist.local_identification_failed(db, str(book["id"])):
+                _finish_without_match(db, task, "FAILED", [], "本地元数据识别失败，请重试识别")
+                return "FAILED"
+            context = metadata_context_for_book(db, str(book["id"]))
+            if not context:
+                _finish_without_match(
                     db,
-                    task_id,
-                    updated_at=finished_at,
-                    owner_id=owner_id,
-                    status="COMPLETED",
-                    attempts=completed_attempts,
-                    nextAttemptAt=None,
-                    resultSource=provider,
-                    candidateRawJson=selected_result_json,
-                    appliedFields=applied_fields_json,
-                    errorSummary=None,
-                    finishedAt=finished_at,
+                    task,
+                    "FAILED",
+                    [],
+                    "无法建立元数据查询上下文",
                 )
-                lookup_persist.write_prepared_provider_execution(
-                    db, prepared_execution_finish
-                )
-            projection = writeback_queue.load_metadata_writeback_projection(
-                db,
-                book_id=str(book["id"]),
-                resource_id=(
-                    str(task["resourceId"]) if task.get("resourceId") else None
-                ),
-            )
-            db.close()
-            intents = prepare_metadata_writeback_intents(
-                projection,
-                source="AUTOMATIC",
-                lookup_task_id=str(task["id"]),
-            )
-            with MetadataWriteTransaction(db):
-                writeback_queue.enqueue_prepared_writeback_intents(db, intents)
-            return "COMPLETED"
-        except Exception as exc:  # noqa: BLE001 - contains candidate application.
-            _discard_remote_cover(
-                prepared_application.remote_cover
-                if prepared_application is not None
+                return "FAILED"
+            effective_request_gate = (
+                automatic_request_gate
+                if lookup_persist.automatic_rate_limit_applies(db, task)
                 else None
             )
-            _finish_provider_execution(
-                db, execution_id, status="FAILED", error=f"apply: {exc}"
-            )
-            errors.append(f"{provider} apply: {exc}")
 
-    if enabled_providers == 0 and not errors:
-        if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
-            return "CANCELLED"
-        _finish_without_match(
-            db,
-            task,
-            "NO_PROVIDER",
-            inspected,
-            "所有适用的元数据插件均未启用",
-        )
-        return "NO_PROVIDER"
-    if errors:
-        if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
-            return "CANCELLED"
-        _schedule_retry(db, task, "；".join(errors), inspected)
-        refreshed_status = lookup_persist.get_lookup_task_status(db, str(task["id"]))
-        return str(refreshed_status or "FAILED")
-    if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
-        return "CANCELLED"
-    _finish_without_match(
-        db, task, "NO_MATCH", inspected, "未找到可唯一确定的标题精确候选"
-    )
-    return "NO_MATCH"
+            enabled_providers = 0
+            errors: list[str] = []
+            inspected: list[dict[str, Any]] = []
+            for provider in _provider_order(task):
+                execution_id = _start_provider_execution(db, task, provider)
+                try:
+                    result = _search_provider(
+                        db,
+                        context,
+                        provider,
+                        str(book.get("title") or ""),
+                        effective_request_gate,
+                    )
+                except Exception as exc:  # noqa: BLE001 - contains one provider attempt.
+                    record_exception(logging.getLogger(__name__), "services.metadata_lookup_queue.process_metadata_lookup_task.failed", exc,
+                                     context={"step": "process_metadata_lookup_task", "task_id": str(task.get("id") or ""), "attempt": int(task.get("attempts") or 0) + 1})
+                    _finish_provider_execution(
+                        db, execution_id, status="FAILED", error=str(exc)
+                    )
+                    errors.append(f"{provider}: {exc}")
+                    continue
+                if not result.get("enabled"):
+                    _finish_provider_execution(
+                        db, execution_id, status="SKIPPED", result=result
+                    )
+                    continue
+                enabled_providers += 1
+                raw_candidates = result.get("candidates")
+                candidates: list[dict[str, Any]] = (
+                    [
+                        {str(key): value for key, value in candidate.items()}
+                        for candidate in raw_candidates
+                        if isinstance(candidate, dict)
+                    ]
+                    if isinstance(raw_candidates, list)
+                    else []
+                )
+                candidate, exact = _choose_exact_candidate(
+                    candidates,
+                    str(book.get("title") or ""),
+                    str(book.get("author") or UNKNOWN_AUTHOR),
+                )
+                inspected.append(
+                    {
+                        "provider": provider,
+                        "exactCandidates": exact,
+                        "cacheHit": bool(result.get("cacheHit")),
+                    }
+                )
+                if not candidate:
+                    _finish_provider_execution(
+                        db, execution_id, status="NO_MATCH", result=result
+                    )
+                    continue
+                if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
+                    return "CANCELLED"
+                prepared_application: _PreparedCandidateApplication | None = None
+                try:
+                    prepared_application = _prepare_candidate_application(
+                        db,
+                        settings,
+                        task,
+                        provider,
+                        candidate,
+                    )
+                    applied = list(prepared_application.applied)
+                    selected_result_json = json.dumps(
+                        {"selected": candidate, "attempted": inspected},
+                        ensure_ascii=False,
+                    )
+                    applied_fields_json = json.dumps(applied, ensure_ascii=False)
+                    finished_at = _now()
+                    execution_result = {
+                        "selected": candidate,
+                        "appliedFields": applied,
+                    }
+                    execution_result_json = json.dumps(
+                        execution_result,
+                        ensure_ascii=False,
+                    )
+                    completed_attempts = int(task.get("attempts") or 0) + 1
+                    prepared_execution_finish = (
+                        lookup_persist.prepare_provider_execution_finish(
+                            execution_id,
+                            status="COMPLETED",
+                            raw_result_json=execution_result_json,
+                            now=finished_at,
+                        )
+                    )
+                    task_id = str(task["id"])
+                    owner_id = str(task.get("leaseOwnerId") or "") or None
+                    guarded_book_id = str(book["id"])
+                    with MetadataWriteTransaction(db):
+                        if (
+                            lookup_persist.book_metadata_guard(db, guarded_book_id)
+                            != metadata_guard
+                        ):
+                            raise RuntimeError("BOOK_METADATA_CHANGED")
+                        _persist_candidate_application(db, prepared_application)
+                    if prepared_application.remote_cover is not None:
+                        try:
+                            _publish_remote_cover(prepared_application.remote_cover)
+                        except OSError as publish_error:
+                            primary_id = record_exception(LOGGER, "metadata.cover_publish_failed", publish_error, context={"task_id": str(task["id"]), "step": "publish_cover"})
+                            try:
+                                _compensate_remote_cover_publish_failure(
+                                    db,
+                                    prepared_application,
+                                )
+                            except Exception as compensation_error:
+                                record_exception(LOGGER, "metadata.cover_compensation_failed", compensation_error, context={"task_id": str(task["id"]), "step": "compensate_cover", "parent_diagnostic_id": primary_id})
+                                raise RuntimeError(
+                                    "REMOTE_COVER_PUBLISH_COMPENSATION_FAILED"
+                                ) from compensation_error
+                            raise RuntimeError("REMOTE_COVER_PUBLISH_FAILED") from publish_error
+                    with MetadataWriteTransaction(db):
+                        _update_task(
+                            db,
+                            task_id,
+                            updated_at=finished_at,
+                            owner_id=owner_id,
+                            status="COMPLETED",
+                            attempts=completed_attempts,
+                            nextAttemptAt=None,
+                            resultSource=provider,
+                            candidateRawJson=selected_result_json,
+                            appliedFields=applied_fields_json,
+                            errorSummary=None,
+                            finishedAt=finished_at,
+                        )
+                        lookup_persist.write_prepared_provider_execution(
+                            db, prepared_execution_finish
+                        )
+                    projection = writeback_queue.load_metadata_writeback_projection(
+                        db,
+                        book_id=str(book["id"]),
+                        resource_id=(
+                            str(task["resourceId"]) if task.get("resourceId") else None
+                        ),
+                    )
+                    db.close()
+                    intents = prepare_metadata_writeback_intents(
+                        projection,
+                        source="AUTOMATIC",
+                        lookup_task_id=str(task["id"]),
+                    )
+                    with MetadataWriteTransaction(db):
+                        writeback_queue.enqueue_prepared_writeback_intents(db, intents)
+                    return "COMPLETED"
+                except Exception as exc:  # noqa: BLE001 - contains candidate application.
+                    record_exception(logging.getLogger(__name__), "services.metadata_lookup_queue.process_metadata_lookup_task.failed", exc,
+                                     context={"step": "process_metadata_lookup_task", "task_id": str(task.get("id") or ""), "attempt": int(task.get("attempts") or 0) + 1})
+                    _discard_remote_cover(
+                        prepared_application.remote_cover
+                        if prepared_application is not None
+                        else None
+                    )
+                    _finish_provider_execution(
+                        db, execution_id, status="FAILED", error=f"apply: {exc}"
+                    )
+                    errors.append(f"{provider} apply: {exc}")
+
+            if enabled_providers == 0 and not errors:
+                if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
+                    return "CANCELLED"
+                _finish_without_match(
+                    db,
+                    task,
+                    "NO_PROVIDER",
+                    inspected,
+                    "所有适用的元数据插件均未启用",
+                )
+                return "NO_PROVIDER"
+            if errors:
+                if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
+                    return "CANCELLED"
+                _schedule_retry(db, task, "；".join(errors), inspected)
+                refreshed_status = lookup_persist.get_lookup_task_status(db, str(task["id"]))
+                return str(refreshed_status or "FAILED")
+            if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
+                return "CANCELLED"
+            _finish_without_match(
+                db, task, "NO_MATCH", inspected, "未找到可唯一确定的标题精确候选"
+            )
+            return "NO_MATCH"
+        finally:
+            db.close()
 
 
 def process_next_metadata_lookup_task(
@@ -980,7 +1033,6 @@ class MetadataLookupWorker:
         self._standard_handler = standard_handler
         self._standard_maintenance = standard_maintenance
         self._stop = threading.Event()
-        self._last_busy_log_at: float | None = None
         self._thread = threading.Thread(
             target=self._run, name="metadata-lookup-worker", daemon=True
         )
@@ -1068,58 +1120,45 @@ class MetadataLookupWorker:
     def _process_iteration(
         self, *, lookup_ready: bool = True, writeback_ready: bool = True
     ) -> bool | None:
-        prefer_writeback = self._prefer_writeback
-        prefer_preparation = self._prefer_preparation
-        self._prefer_writeback = not self._prefer_writeback
-        self._prefer_preparation = not self._prefer_preparation
-        for attempt in range(len(DATABASE_BUSY_RETRY_DELAYS_SECONDS) + 1):
-            if attempt and self._stop.wait(
-                DATABASE_BUSY_RETRY_DELAYS_SECONDS[attempt - 1]
-            ):
-                return None
-            try:
-                with self._db_factory() as db:
-                    return bool(
-                        process_next_metadata_lookup_task(
-                            db,
-                            self._settings,
-                            self._automatic_request_gate,
-                            owner_id=self._instance_id,
-                            prefer_writeback=prefer_writeback,
-                            prefer_preparation=prefer_preparation,
-                            lookup_ready=lookup_ready,
-                            writeback_ready=writeback_ready,
-                            standard_handler=self._standard_handler,
-                        )
-                    )
-            except OperationalError as error:
-                if not is_database_busy_error(error) or attempt == len(
-                    DATABASE_BUSY_RETRY_DELAYS_SECONDS
+        with exception_diagnostic_boundary(LOGGER, "metadata.iteration_failed", context={}):
+            prefer_writeback = self._prefer_writeback
+            prefer_preparation = self._prefer_preparation
+            self._prefer_writeback = not self._prefer_writeback
+            self._prefer_preparation = not self._prefer_preparation
+            for attempt in range(len(DATABASE_BUSY_RETRY_DELAYS_SECONDS) + 1):
+                if attempt and self._stop.wait(
+                    DATABASE_BUSY_RETRY_DELAYS_SECONDS[attempt - 1]
                 ):
-                    raise
-        raise AssertionError("metadata retry loop exhausted")
+                    return None
+                try:
+                    with self._db_factory() as db:
+                        return bool(
+                            process_next_metadata_lookup_task(
+                                db,
+                                self._settings,
+                                self._automatic_request_gate,
+                                owner_id=self._instance_id,
+                                prefer_writeback=prefer_writeback,
+                                prefer_preparation=prefer_preparation,
+                                lookup_ready=lookup_ready,
+                                writeback_ready=writeback_ready,
+                                standard_handler=self._standard_handler,
+                            )
+                        )
+                except OperationalError as error:
+                    record_exception(LOGGER, "metadata.database_attempt_failed", error, context={"step": "iteration", "attempt": attempt + 1})
+                    if not is_database_busy_error(error) or attempt == len(
+                        DATABASE_BUSY_RETRY_DELAYS_SECONDS
+                    ):
+                        raise
+            raise AssertionError("metadata retry loop exhausted")
 
     def _record_iteration_error(self, error: BaseException) -> None:
-        if not is_database_busy_error(error):
-            record_exception(
-                LOGGER,
-                "metadata.iteration_paused",
-                error,
-                context={"stage": "iteration", "outcome": "paused"},
-                source="metadata",
-                action="metadata.iteration_paused",
-            )
-            return
-        now = monotonic()
-        if (
-            self._last_busy_log_at is not None
-            and now - self._last_busy_log_at < DATABASE_BUSY_LOG_INTERVAL_SECONDS
-        ):
-            return
-        LOGGER.warning(
-            "metadata_lookup_iteration outcome=deferred reason=database_busy"
+        record_exception(
+            LOGGER, "metadata.iteration_failed", error,
+            context={"step": "iteration", "outcome": "retrying" if is_database_busy_error(error) else "paused"},
+            source="metadata",
         )
-        self._last_busy_log_at = now
 
     def _run(self) -> None:
         self._heartbeat.start()

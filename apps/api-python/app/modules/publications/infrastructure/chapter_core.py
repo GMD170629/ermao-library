@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.util
+import logging
 import os
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from xml.etree import ElementTree
 
+from app.core.exception_diagnostics import record_exception
 from app.modules.publications.domain.model import (
     PublicationReadError,
     PublicationStructureError,
@@ -202,6 +204,10 @@ class ChapterCore:
                 try:
                     return cls(candidate)
                 except OSError as error:
+                    # diagnostics-control-flow: Probe native-library candidates; the final loader cause is raised if all candidates fail.
+                    if candidate == configured or not candidate.startswith("/") or Path(candidate).exists():
+                        record_exception(logging.getLogger(__name__), "modules.publications.infrastructure.chapter_core.load.failed", error,
+                                         context={"step": "load"})
                     last_error = error
         raise PublicationReadError("Chapter engine is unavailable") from last_error
 

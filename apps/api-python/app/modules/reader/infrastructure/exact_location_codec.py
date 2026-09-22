@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Mapping
 from typing import Literal, cast
 
+from app.core.exception_diagnostics import record_exception
 from app.modules.reader.application.dto import (
     ReaderAudioExactLocationDto,
     ReaderComicExactLocationDto,
@@ -80,7 +82,9 @@ def decode_exact_location(raw_json: str | None) -> ReaderExactLocationDto | None
                 position_millis=_integer(root, "positionMillis"),
                 engine_locator=_optional_engine(root),
             )
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        record_exception(logging.getLogger(__name__), "modules.reader.infrastructure.exact_location_codec.decode_exact_location.failed", error,
+                         context={"step": "decode_exact_location"})
         return None
     return None
 

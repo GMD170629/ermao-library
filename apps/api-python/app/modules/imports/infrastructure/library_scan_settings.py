@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
+from app.core.exception_diagnostics import record_exception
 from app.models.common import db_timestamp
 from app.models.settings import SystemSetting
 from app.modules.imports.application.library_scan_settings import (
@@ -54,7 +56,9 @@ class SqlAlchemyLibraryScanSettingsRepository(LibraryScanSettingsRepositoryPort)
                 watch_enabled=watch_enabled,
                 interval_minutes=interval_minutes,
             )
-        except ValueError:
+        except ValueError as error:
+            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.library_scan_settings.load.failed", error,
+                             context={"step": "load"})
             return LibraryScanSettings(watch_enabled=watch_enabled)
 
     @staticmethod
@@ -63,7 +67,9 @@ class SqlAlchemyLibraryScanSettingsRepository(LibraryScanSettingsRepositoryPort)
             return None
         try:
             return json.loads(raw)
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.library_scan_settings._parse.failed", error,
+                             context={"step": "_parse"})
             return None
 
     def save(self, settings: LibraryScanSettings) -> None:

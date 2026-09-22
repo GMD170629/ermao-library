@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from app.contracts.publication_metadata import PublicationMetadata
+from app.core.exception_diagnostics import record_exception
 from app.infrastructure.bounded_inspection import read_optional_file
 from app.infrastructure.sidecar_paths import sidecar_opf_paths
 from app.modules.metadata.public import (
@@ -42,7 +44,9 @@ def _discover_candidates(candidates: tuple[Path, ...]) -> SidecarOpfResult | Non
             if content is None:
                 continue
             metadata = parse_opf_metadata(content)
-        except (OSError, OpfMetadataError):
+        except (OSError, OpfMetadataError) as error:
+            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.sidecar_opf._discover_candidates.failed", error,
+                             context={"step": "_discover_candidates"})
             continue
         return SidecarOpfResult(
             metadata=metadata,
@@ -67,7 +71,9 @@ def safe_sidecar_cover_path(opf_path: Path, href: str | None) -> Path | None:
         if not candidate.is_file() or candidate.is_symlink():
             return None
         return candidate
-    except (OSError, ValueError):
+    except (OSError, ValueError) as error:
+        record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.sidecar_opf.safe_sidecar_cover_path.failed", error,
+                         context={"step": "safe_sidecar_cover_path"})
         return None
 
 
@@ -77,7 +83,9 @@ def _safe_cover_content(opf_path: Path, href: str | None) -> bytes | None:
         return None
     try:
         content = read_optional_file(candidate, MAX_SIDECAR_COVER_BYTES)
-    except (OSError, ValueError):
+    except (OSError, ValueError) as error:
+        record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.sidecar_opf._safe_cover_content.failed", error,
+                         context={"step": "_safe_cover_content"})
         return None
     if (
         content is None

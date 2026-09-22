@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, replace
 from datetime import datetime
@@ -22,6 +23,7 @@ from app.contracts.reader_safety_policy_generated import (
     READER_SAFETY_AUDIO_PROFILE,
     READER_SAFETY_COMIC_PROFILE,
 )
+from app.core.exception_diagnostics import record_exception
 from app.core.natural_sort import natural_sort_key
 from app.infrastructure.local_metadata_policy import SqlAlchemyLocalMetadataPriority
 from app.models.common import cuid
@@ -1716,5 +1718,7 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
 def _parse_publication_datetime(value: str) -> datetime | None:
     try:
         return datetime.fromisoformat(value)
-    except ValueError:
+    except ValueError as error:
+        record_exception(logging.getLogger(__name__), "modules.library.infrastructure.persistence.source_tree_repository._parse_publication_datetime.failed", error,
+                         context={"step": "_parse_publication_datetime"})
         return None

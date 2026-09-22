@@ -46,6 +46,36 @@ class BudgetedFilesystem(OsSourceTreeFilesystem):
             self.exhausted = True
 
 
+def test_absent_optional_metadata_candidates_are_not_failures(tmp_path, caplog):
+    filesystem = OsSourceTreeFilesystem()
+    observations = filesystem.metadata_input_observations(tmp_path, directory=True)
+    assert observations
+    assert all(size is None and version is None for _, size, version in observations)
+    assert "observe_readable_file.failed" not in caplog.text
+
+
+def test_required_file_absence_and_optional_io_failure_keep_actual_reason(
+    tmp_path, monkeypatch, caplog
+):
+    import errno
+
+    filesystem = OsSourceTreeFilesystem()
+    assert filesystem.observe_readable_file(tmp_path / "missing") is None
+    assert "FileNotFoundError" in caplog.text
+    caplog.clear()
+
+    def inaccessible(self, *args, **kwargs):
+        raise PermissionError(errno.EACCES, "injected candidate read denial")
+
+    monkeypatch.setattr(Path, "resolve", inaccessible)
+    assert (
+        filesystem.observe_readable_file(tmp_path / "metadata.opf", missing_ok=True)
+        is None
+    )
+    assert "PermissionError" in caplog.text
+    assert "injected candidate read denial" in caplog.text
+
+
 @pytest.mark.parametrize("reuse_listings", [False, True])
 def test_probe_does_not_materialize_full_directory_listing(
     tmp_path: Path, reuse_listings: bool

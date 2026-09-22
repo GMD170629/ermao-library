@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -16,6 +17,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from app.core.authorization import AuthorizationContext, book_visibility_predicate
+from app.core.exception_diagnostics import record_exception
 from app.models import (
     LibraryBook,
     LibraryBookFacet,
@@ -171,7 +173,7 @@ def _replace_text(
             command.find if command.regex else re.escape(command.find), flags
         )
     except re.error as error:
-        raise InvalidBulkBookOperationError(f"INVALID_REGEX:{error}") from None
+        raise InvalidBulkBookOperationError(f"INVALID_REGEX:{error}") from error
 
     def replace_match(match: re.Match[str]) -> str:
         return _render_template(
@@ -847,6 +849,7 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
         try:
             candidate.relative_to(self._storage_root)
         except ValueError:
+            # diagnostics-control-flow: Relative-path containment probe excludes an out-of-root optional cover.
             return None
         return candidate if candidate.is_file() else None
 
@@ -866,8 +869,8 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
                 with Image.open(BytesIO(command.cover_content)) as image:
                     image.load()
                     uploaded_image = image.copy()
-            except (OSError, UnidentifiedImageError, Image.DecompressionBombError):
-                raise InvalidBulkBookOperationError("INVALID_COVER_IMAGE") from None
+            except (OSError, UnidentifiedImageError, Image.DecompressionBombError) as error:
+                raise InvalidBulkBookOperationError("INVALID_COVER_IMAGE") from error
 
         rows = self._db.execute(
             select(LibraryBook, LibraryBookMetadata)
@@ -921,7 +924,9 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
                         OSError,
                         UnidentifiedImageError,
                         Image.DecompressionBombError,
-                    ):
+                    ) as error:
+                        record_exception(logging.getLogger(__name__), "modules.library.infrastructure.bulk_operations.prepare_covers.failed", error,
+                                         context={"step": "prepare_covers"})
                         skipped.append(
                             BulkCoverSkipped(book.id, "BOOK_COVER_UNREADABLE")
                         )

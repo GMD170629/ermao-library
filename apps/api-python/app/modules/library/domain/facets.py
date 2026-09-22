@@ -12,6 +12,10 @@ FacetKind = Literal["AUTHOR", "TAG", "SERIES"]
 FACET_KINDS = frozenset({"AUTHOR", "TAG", "SERIES"})
 
 
+class InvalidLibraryFacetRequest(ValueError):
+    """A named facet query or mutation rule rejected the supplied request."""
+
+
 @dataclass(frozen=True, slots=True)
 class BookFacetValue:
     kind: FacetKind
@@ -58,13 +62,12 @@ def split_author_names(value: str | None) -> tuple[str, ...]:
 def parse_tag_names(value: str) -> tuple[str, ...]:
     """Parse the persisted tag source during the pure preparation phase."""
 
-    try:
-        parsed = json.loads(value or "[]")
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return ()
+    parsed = json.loads(value or "[]")
     if isinstance(parsed, list):
         return unique_facet_names(str(item) for item in parsed)
-    return ()
+    raise ValueError(
+        f"Persisted tag source must be a JSON array, got {type(parsed).__name__}"
+    )
 
 
 def build_book_facet_values(

@@ -12,7 +12,10 @@ from sqlalchemy.orm import Session
 from app.bootstrap.download import continue_download_import_command
 from app.core.config import Settings
 from app.core.database_errors import is_database_busy_error
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import (
+    exception_diagnostic_boundary,
+    record_exception,
+)
 from app.modules.download.infrastructure.tasks import (
     list_enabled_libraries,
     next_queued_download_task,
@@ -58,23 +61,24 @@ class DownloadQueueWorker:
             self._thread.join()
 
     def process_once(self) -> bool:
-        if not self._process_lock.acquire(blocking=False):
-            return False
-        try:
-            with self.db_factory() as db:
-                return process_next_download_task(db, self.settings)
-        except Exception as exc:
-            record_exception(
-                logger,
-                "download_queue.task_failed",
-                exc,
-                context={"stage": "download_queue", "outcome": "error"},
-                source="download",
-                action="download.task_failed",
-            )
-            raise
-        finally:
-            self._process_lock.release()
+        with exception_diagnostic_boundary(logger, "download_queue.execution", context={}):
+            if not self._process_lock.acquire(blocking=False):
+                return False
+            try:
+                with self.db_factory() as db:
+                    return process_next_download_task(db, self.settings)
+            except Exception as exc:
+                record_exception(
+                    logger,
+                    "download_queue.task_failed",
+                    exc,
+                    context={"stage": "download_queue", "outcome": "error"},
+                    source="download",
+                    action="download.task_failed",
+                )
+                raise
+            finally:
+                self._process_lock.release()
 
     def _run(self) -> None:
         self._heartbeat.start()
@@ -144,10 +148,9 @@ def process_next_download_task(db: Session, settings: Settings) -> bool:
                     flush=True,
                 )
             except Exception as exc:  # noqa: BLE001 - import handoff containment.
-                print(
-                    f"[download-queue] downloaded {task['id']} but import enqueue failed: {exc}",
-                    flush=True,
-                )
+                record_exception(logging.getLogger(__name__), "services.download_queue.process_next_download_task.failed", exc,
+                                 context={"step": "process_next_download_task"})
+
     return True
 
 
@@ -159,7 +162,9 @@ def _library_id(db: Session, path: Path) -> str | None:
     for folder in folders:
         try:
             root = Path(str(folder["rootPath"])).expanduser().resolve()
-        except OSError:
+        except OSError as error:
+            record_exception(logging.getLogger(__name__), "services.download_queue._library_id.failed", error,
+                             context={"step": "_library_id"})
             continue
         if resolved == root or root in resolved.parents:
             matches.append((len(root.parts), str(folder["id"])))

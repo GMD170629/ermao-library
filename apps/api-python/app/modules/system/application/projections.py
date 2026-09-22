@@ -13,10 +13,7 @@ def _parse_json(value: Any, fallback: Any) -> Any:
         return fallback
     if isinstance(value, (dict, list)):
         return value
-    try:
-        return json.loads(str(value))
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return fallback
+    return json.loads(str(value))
 
 
 _DIAGNOSTIC_LIST_OMITTED_KEYS = frozenset({"traceback", "chain", "members"})

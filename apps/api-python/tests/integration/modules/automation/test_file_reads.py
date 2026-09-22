@@ -126,6 +126,19 @@ def test_opf_read_is_pure_and_ambiguous_sidecars_need_selection(db_session, tmp_
         catalog.read_file_metadata(access, "allowed-node", "sidecar", "../secret.opf")
 
 
+def test_missing_requested_sidecar_keeps_the_filesystem_cause(db_session, tmp_path):
+    import errno
+
+    access, _root = file_access(db_session, tmp_path)
+    catalog = build_automation_catalog(db_session)
+    with pytest.raises(StandardMetadataError, match="METADATA_NOT_FOUND") as failure:
+        catalog.read_file_metadata(
+            access, "allowed-node", "sidecar", "allowed/metadata.opf"
+        )
+    assert isinstance(failure.value.__cause__, FileNotFoundError)
+    assert failure.value.__cause__.errno == errno.ENOENT
+
+
 def test_embedded_epub_comic_pdf_read_without_extracting(db_session, tmp_path):
     access, root = file_access(db_session, tmp_path)
     epub = root / "allowed/book.epub"

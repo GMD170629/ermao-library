@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Iterable
 from hashlib import sha1
@@ -12,6 +13,7 @@ from sqlalchemy import case, delete, distinct, exists, func, or_, select, tuple_
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, aliased
 
+from app.core.exception_diagnostics import record_exception
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import to_timestamp_ms
 from app.models import (
@@ -22,7 +24,11 @@ from app.models import (
 )
 from app.models.common import db_timestamp
 from app.modules.library.domain.authors import UNKNOWN_AUTHOR_PLACEHOLDER
-from app.modules.library.domain.facets import FACET_KINDS, normalize_facet_name
+from app.modules.library.domain.facets import (
+    FACET_KINDS,
+    InvalidLibraryFacetRequest,
+    normalize_facet_name,
+)
 
 
 def parse_json(value: Any, fallback: Any) -> Any:
@@ -30,7 +36,9 @@ def parse_json(value: Any, fallback: Any) -> Any:
         return value
     try:
         return json.loads(str(value))
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        record_exception(logging.getLogger(__name__), "modules.library.infrastructure.facets.parse_json.failed", error,
+                         context={"step": "parse_json"})
         return fallback
 
 
@@ -75,7 +83,7 @@ def _facet_id(kind: str, normalized: str) -> str:
 def ensure_facet(db: Session, kind: str, name: str) -> str:
     normalized = normalized_name(name)
     if kind not in FACET_KINDS or not normalized:
-        raise ValueError("分类名称无效")
+        raise InvalidLibraryFacetRequest("分类名称无效")
     facet_id = _facet_id(kind, normalized)
     now = db_timestamp()
     db.execute(
@@ -253,7 +261,7 @@ def sync_books_facets(db: Session, book_ids: Iterable[str]) -> None:
 def count_categories(db: Session, kind: str, search: str = "") -> int:
     normalized_kind = kind.strip().upper()
     if normalized_kind not in FACET_KINDS:
-        raise ValueError("分类类型无效")
+        raise InvalidLibraryFacetRequest("分类类型无效")
     statement = (
         select(func.count())
         .select_from(LibraryFacet)
@@ -275,9 +283,9 @@ def list_categories(
 ) -> list[dict[str, Any]]:
     normalized_kind = kind.strip().upper()
     if normalized_kind not in FACET_KINDS:
-        raise ValueError("分类类型无效")
+        raise InvalidLibraryFacetRequest("分类类型无效")
     if limit is not None and (limit <= 0 or offset < 0):
-        raise ValueError("分页参数无效")
+        raise InvalidLibraryFacetRequest("分页参数无效")
 
     book_count = func.count(
         distinct(
@@ -320,9 +328,9 @@ def list_categories_page(
 
     normalized_kind = kind.strip().upper()
     if normalized_kind not in FACET_KINDS:
-        raise ValueError("分类类型无效")
+        raise InvalidLibraryFacetRequest("分类类型无效")
     if page <= 0 or page_size <= 0:
-        raise ValueError("分页参数无效")
+        raise InvalidLibraryFacetRequest("分页参数无效")
 
     count_link = aliased(LibraryBookFacet)
     count_book = aliased(LibraryBook)

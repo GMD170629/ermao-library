@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import tempfile
 from pathlib import Path
@@ -11,6 +12,7 @@ from sqlalchemy import false, select, true
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.core.exception_diagnostics import record_exception
 from app.core.natural_sort import natural_sort_key
 from app.models import (
     Library,
@@ -178,7 +180,9 @@ class FilesystemResourcePreview:
             candidate = root.joinpath(*Path(relative_value).parts)
             resolved = candidate.resolve(strict=True)
             resolved.relative_to(root)
-        except (OSError, ValueError):
+        except (OSError, ValueError) as error:
+            record_exception(logging.getLogger(__name__), "modules.media.infrastructure.resource_preview._safe_source_path.failed", error,
+                             context={"step": "_safe_source_path"})
             return None
         if resolved != candidate or not resolved.is_file():
             return None

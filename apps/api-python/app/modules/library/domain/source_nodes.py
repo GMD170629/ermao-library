@@ -109,6 +109,7 @@ def parse_source_node_relative_path(
     try:
         return SourceNodeRelativePath(relative_path)
     except InvalidSourceNodeRelativePathError as error:
+        # diagnostics-control-flow: path validation returns its exact violation code to the calling operation.
         return SourceNodeViolation(
             code=error.code,
             relative_path=error.relative_path,

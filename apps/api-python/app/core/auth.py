@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -15,6 +16,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.dml import Delete, Update
 
 from app.core.config import Settings
+from app.core.exception_diagnostics import record_exception
 from app.models.auth import Session as UserSession
 from app.models.auth import User, cuid
 
@@ -72,7 +74,8 @@ def verify_password(password: str, stored: str) -> bool:
             p=1,
             dklen=64,
         ).hex()
-    except ValueError:
+    except ValueError as error:
+        record_exception(logging.getLogger(__name__), "authentication.password_hash_failed", error, context={"step": "password_verification"})
         return False
     return compare_digest(candidate, expected)
 

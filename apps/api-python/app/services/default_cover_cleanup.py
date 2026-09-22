@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.bootstrap.system import get_setting, upsert_setting
 from app.core.config import Settings
+from app.core.exception_diagnostics import record_exception
 from app.modules.system.application.commands import SystemWriteTransaction
 
 LOGGER = logging.getLogger(__name__)
@@ -53,8 +54,8 @@ def _remove_legacy_default_covers(storage_root: Path) -> int:
             if _is_default_cover_copy(path):
                 path.unlink()
                 removed += 1
-        except OSError:
-            LOGGER.warning("default_cover_cleanup skipped path=%s", path.name)
+        except OSError as error:
+            record_exception(LOGGER, "default_cover_cleanup.failed", error, context={"step": "remove_cover_residue"})
     return removed
 
 

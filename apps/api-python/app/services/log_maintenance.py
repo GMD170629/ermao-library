@@ -87,10 +87,16 @@ class SystemEventMaintenanceWorker:
             self._recover_startup_maintenance()
             try:
                 self.run_once()
-            except Exception as exc:
-                if is_database_busy_error(exc):
-                    LOGGER.info(
-                        "system maintenance outcome=deferred reason=database_busy"
-                    )
-                else:
-                    LOGGER.exception("system maintenance iteration failed")
+            except Exception as exc:  # noqa: BLE001 - iteration boundary records every failed attempt
+                record_exception(
+                    LOGGER,
+                    "system.maintenance_failed",
+                    exc,
+                    context={
+                        "stage": "system_maintenance",
+                        "outcome": "deferred"
+                        if is_database_busy_error(exc)
+                        else "failed",
+                    },
+                    session_factory=self._db_factory,
+                )

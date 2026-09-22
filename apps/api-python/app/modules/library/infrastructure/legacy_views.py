@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import replace
 from datetime import datetime
 from typing import Any
@@ -16,6 +17,7 @@ from app.contracts.media_capabilities import (
     require_reader_type_for_format,
     resolve_asset_mime_type,
 )
+from app.core.exception_diagnostics import record_exception
 from app.core.natural_sort import natural_sort_key
 from app.models import (
     Library,
@@ -57,7 +59,9 @@ def _parse_json(value: object, fallback: object) -> object:
         return value
     try:
         parsed = json.loads(str(value))
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        record_exception(logging.getLogger(__name__), "modules.library.infrastructure.legacy_views._parse_json.failed", error,
+                         context={"step": "_parse_json"})
         return fallback
     return parsed
 

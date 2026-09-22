@@ -579,10 +579,7 @@ def _external_location_json(
 def _progress_references(progress: ReaderProgressDto) -> tuple[str, ...]:
     if not progress.location_json:
         return ()
-    try:
-        location: object = json.loads(progress.location_json)
-    except json.JSONDecodeError:
-        return ()
+    location: object = json.loads(progress.location_json)
     if not isinstance(location, dict):
         return ()
     location_type = location.get("type")

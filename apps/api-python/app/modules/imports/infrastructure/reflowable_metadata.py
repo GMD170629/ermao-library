@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import html
+import logging
 import re
 import struct
 from dataclasses import replace
@@ -14,6 +15,7 @@ from pathlib import Path
 # adapter boundary.
 from lxml import etree  # type: ignore[import-untyped]
 
+from app.core.exception_diagnostics import record_exception
 from app.infrastructure.bounded_inspection import (
     COVER_BYTES,
     METADATA_BYTES,
@@ -159,7 +161,9 @@ def _inspect_fb2(path: Path) -> ReflowableBookMetadata:
     series_index_raw = _attribute(sequence, "number") or None
     try:
         series_index = float(series_index_raw) if series_index_raw else None
-    except ValueError:
+    except ValueError as error:
+        record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.reflowable_metadata._inspect_fb2.failed", error,
+                         context={"step": "_inspect_fb2"})
         series_index = None
     cover = _fb2_cover(root, title_info)
     return ReflowableBookMetadata(
@@ -349,7 +353,9 @@ def _sidecar_cover(path: Path) -> EmbeddedBookCover | None:
                 cover = _image_cover(content) if content else None
                 if cover is not None:
                     return cover
-        except OSError:
+        except OSError as error:
+            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.reflowable_metadata._sidecar_cover.failed", error,
+                             context={"step": "_sidecar_cover"})
             continue
     return None
 
@@ -376,7 +382,9 @@ def _fb2_cover(
         content = base64.b64decode(
             re.sub(rb"\s+", b"", (binary.text or "").encode("ascii")), validate=True
         )
-    except (UnicodeEncodeError, binascii.Error, ValueError):
+    except (UnicodeEncodeError, binascii.Error, ValueError) as error:
+        record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.reflowable_metadata._fb2_cover.failed", error,
+                         context={"step": "_fb2_cover"})
         return None
     return _image_cover(content)
 

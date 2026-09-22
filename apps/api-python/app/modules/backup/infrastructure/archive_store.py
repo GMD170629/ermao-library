@@ -10,6 +10,7 @@ from app.modules.backup.application.operations import (
     BackupDownloadDescriptor,
     BackupFormatError,
     BackupNotFoundError,
+    BackupRequestError,
     BackupRestoreResult,
 )
 from app.modules.backup.infrastructure import archive
@@ -93,7 +94,7 @@ class FileSystemBackupArchiveStore:
             result = archive.restore_backup(self._db, self._settings, backup_id)
         except FileNotFoundError as exc:
             raise BackupNotFoundError(backup_id) from exc
-        except ValueError as exc:
+        except BackupRequestError as exc:
             if str(exc) == "INVALID_BACKUP_ID":
                 raise BackupNotFoundError(backup_id) from exc
             raise

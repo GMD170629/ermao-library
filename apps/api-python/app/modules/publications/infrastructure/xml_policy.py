@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import codecs
 import html
+import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -23,6 +24,7 @@ from app.contracts.reader_safety_policy_generated import (
     ReaderSafetyAlgorithmId,
     ReaderSafetyRuleId,
 )
+from app.core.exception_diagnostics import record_exception
 
 _NAME = r"[A-Za-z_:][A-Za-z0-9_.:-]*"
 _ENTITY_REFERENCE = re.compile(
@@ -411,7 +413,9 @@ def _reference_operations(
                 match.group("decimal") or match.group("hex") or "",
                 16 if match.group("hex") is not None else 10,
             )
-        except ValueError:
+        except ValueError as error:
+            record_exception(logging.getLogger(__name__), "modules.publications.infrastructure.xml_policy.numeric_value.failed", error,
+                             context={"step": "numeric_value"})
             return None
         if (
             codepoint in {0x9, 0xA, 0xD}

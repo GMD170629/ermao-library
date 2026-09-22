@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
+from app.contracts.diagnostics import FailureDiagnostics
+
 OPDS_ENABLED_SETTING_KEY = "opds.enabled"
 OPDS_PUBLIC_BASE_URL_SETTING_KEY = "opds.publicBaseUrl"
 
@@ -27,7 +29,12 @@ class OpdsPublicBaseUrlInvalid(ValueError):
 
 def normalize_opds_public_base_url(public_base_url: str) -> str:
     normalized = public_base_url.strip().rstrip("/")
-    parsed = urlsplit(normalized)
+    try:
+        parsed = urlsplit(normalized)
+    except ValueError as error:
+        raise OpdsPublicBaseUrlInvalid(
+            "Configured public URL could not be parsed"
+        ) from error
     if (
         parsed.scheme not in {"http", "https"}
         or not parsed.hostname
@@ -36,7 +43,9 @@ def normalize_opds_public_base_url(public_base_url: str) -> str:
         or parsed.query
         or parsed.fragment
     ):
-        raise OpdsPublicBaseUrlInvalid
+        raise OpdsPublicBaseUrlInvalid(
+            "Public URL must use HTTP(S), contain a hostname and omit credentials, query and fragment"
+        )
     return normalized
 
 
@@ -44,6 +53,7 @@ def resolve_opds_settings(
     stored_enabled: object,
     *,
     stored_public_base_url: object,
+    diagnostics: FailureDiagnostics,
 ) -> OpdsSettingsSnapshot:
     try:
         normalized_base_url = (
@@ -52,7 +62,13 @@ def resolve_opds_settings(
             and stored_public_base_url.strip()
             else None
         )
-    except OpdsPublicBaseUrlInvalid:
+    except OpdsPublicBaseUrlInvalid as error:
+        diagnostic = diagnostics.prepare(
+            error,
+            event="opds.stored_public_url_invalid",
+            context={"step": "validate_stored_public_url"},
+        )
+        diagnostics.persist(diagnostic)
         normalized_base_url = None
     configured = normalized_base_url is not None
     requested_enabled = stored_enabled if isinstance(stored_enabled, bool) else False

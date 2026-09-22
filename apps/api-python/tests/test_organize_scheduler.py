@@ -17,6 +17,7 @@ from app.models import (
     MetadataLookupTask,
 )
 from app.models.organize import OrganizeJob
+from app.modules.organize.application.commands import InvalidOrganizeRequestError
 from app.services.metadata_provider_registry import (
     enabled_metadata_provider_ids,
     update_metadata_provider_order,
@@ -29,6 +30,44 @@ from app.services.organize_scheduler import (
     recognize_organize_job,
     update_organize_policy,
 )
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_message", "cause_type"),
+    [
+        ({"scheduleMode": "UNKNOWN"}, "执行方式", None),
+        ({"intervalMinutes": "invalid"}, "执行间隔格式", ValueError),
+        ({"intervalMinutes": 0}, "执行间隔需在", None),
+        ({"rules": []}, "识别范围配置", None),
+        ({"localMetadataPriority": []}, "本地元数据识别顺序", ValueError),
+        ({"nextRunAt": "invalid"}, "下次执行时间", ValueError),
+    ],
+)
+def test_known_policy_validation_has_named_error_and_original_cause(
+    db_session, payload, expected_message, cause_type
+):
+    with pytest.raises(InvalidOrganizeRequestError, match=expected_message) as failure:
+        update_organize_policy(db_session, payload)
+    assert (
+        isinstance(failure.value.__cause__, cause_type)
+        if cause_type
+        else failure.value.__cause__ is None
+    )
+
+
+def test_unknown_organize_value_error_is_not_reclassified(db_session, monkeypatch):
+    original = ValueError("injected unexpected policy projection invariant")
+
+    def corrupt_projection(_db):
+        raise original
+
+    monkeypatch.setattr(
+        "app.services.organize_scheduler.get_organize_policy", corrupt_projection
+    )
+    with pytest.raises(ValueError) as failure:
+        update_organize_policy(db_session, {"enabled": False})
+    assert failure.value is original
+    assert not isinstance(failure.value, InvalidOrganizeRequestError)
 
 
 def _node(node_id: str, path: str, *, directory: bool = False) -> LibrarySourceNode:

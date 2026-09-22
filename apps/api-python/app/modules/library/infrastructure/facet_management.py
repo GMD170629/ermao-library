@@ -21,7 +21,7 @@ from app.modules.library.application.management_commands import (
     LibraryFacetManagementGateway,
 )
 from app.modules.library.domain.authors import UNKNOWN_AUTHOR_PLACEHOLDER
-from app.modules.library.domain.facets import FACET_KINDS
+from app.modules.library.domain.facets import FACET_KINDS, InvalidLibraryFacetRequest
 from app.modules.library.infrastructure import categories as facet_store
 from app.modules.library.infrastructure import operations as operation_store
 from app.modules.library.infrastructure.facets import (
@@ -173,7 +173,7 @@ class SqlAlchemyLibraryFacetManagement(LibraryFacetManagementGateway):
     ) -> dict[str, object]:
         normalized_kind = kind.strip().upper()
         if normalized_kind not in FACET_KINDS:
-            raise ValueError("Facet 类型无效")
+            raise InvalidLibraryFacetRequest("Facet 类型无效")
         target = facet_store.get_facet_of_kind(self._db, target_id, normalized_kind)
         sources = [
             facet_id for facet_id in dict.fromkeys(source_ids) if facet_id != target_id
@@ -182,7 +182,7 @@ class SqlAlchemyLibraryFacetManagement(LibraryFacetManagementGateway):
             self._db, sources, normalized_kind
         )
         if target is None or not sources or len(source_rows) != len(sources):
-            raise ValueError("请选择同一 Facet 类型中的有效合并项")
+            raise InvalidLibraryFacetRequest("请选择同一 Facet 类型中的有效合并项")
 
         all_ids = [target_id, *sources]
         book_links = facet_store.list_book_facet_links(self._db, all_ids)
@@ -258,20 +258,20 @@ class SqlAlchemyLibraryFacetManagement(LibraryFacetManagementGateway):
         facet = facet_store.get_facet(self._db, facet_id)
         next_name = re.sub(r"\s+", " ", name).strip()
         if facet is None or not next_name:
-            raise ValueError("Facet 不存在或名称无效")
+            raise InvalidLibraryFacetRequest("Facet 不存在或名称无效")
         kind = str(facet["kind"])
         if kind not in FACET_KINDS:
-            raise ValueError("Facet 类型无效")
+            raise InvalidLibraryFacetRequest("Facet 类型无效")
         normalized = normalized_name(next_name)
         if not normalized:
-            raise ValueError("Facet 名称无效")
+            raise InvalidLibraryFacetRequest("Facet 名称无效")
         if facet_store.find_normalized_name_conflict(
             self._db,
             kind=kind,
             normalized_name=normalized,
             exclude_facet_id=facet_id,
         ):
-            raise ValueError("同名 Facet 已存在，请使用合并")
+            raise InvalidLibraryFacetRequest("同名 Facet 已存在，请使用合并")
 
         book_ids = facet_store.list_book_ids_for_facet(self._db, facet_id)
         source_name = str(facet["name"])
@@ -317,10 +317,10 @@ class SqlAlchemyLibraryFacetManagement(LibraryFacetManagementGateway):
     def delete_facet(self, facet_id: str, user_id: str | None) -> dict[str, object]:
         facet = facet_store.get_facet(self._db, facet_id)
         if facet is None:
-            raise ValueError("Facet 不存在")
+            raise InvalidLibraryFacetRequest("Facet 不存在")
         kind = str(facet["kind"])
         if kind not in FACET_KINDS:
-            raise ValueError("Facet 类型无效")
+            raise InvalidLibraryFacetRequest("Facet 类型无效")
         book_links = facet_store.list_book_facet_links(self._db, [facet_id])
         resource_links = facet_store.list_resource_facet_links(self._db, [facet_id])
         book_ids = _linked_book_ids(book_links)

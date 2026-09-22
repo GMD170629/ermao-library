@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID
 
+from app.contracts.diagnostics import FailureDiagnostics
 from app.modules.reader.application.dto import (
     ReaderAccessScope,
     ReaderResourceContextDto,
@@ -53,6 +54,9 @@ class ReaderV5MutationReuse(Exception):
     """A mutation id was reused with a different normalized payload."""
 
     existing: ReaderV5MutationDto
+
+    def __str__(self) -> str:
+        return "Mutation identifier already has a different normalized payload hash"
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,11 +124,13 @@ class ResourceReaderV5Service:
         unit_of_work: ReaderUnitOfWork,
         clock: ReaderClock,
         reading_states: ReaderReadingStateQueryPort,
+        diagnostics: FailureDiagnostics,
     ) -> None:
         self._repository = repository
         self._unit_of_work = unit_of_work
         self._clock = clock
         self._reading_states = reading_states
+        self._diagnostics = diagnostics
 
     def load_bootstrap(
         self,
@@ -182,16 +188,17 @@ class ResourceReaderV5Service:
                 command.captured_at_epoch_millis / 1000, tz=UTC
             )
         except (OverflowError, OSError, ValueError) as error:
-            LOGGER.warning(
-                "reader_v5_progress_rejected",
-                extra={
-                    "event": "reader_v5_progress_rejected",
-                    "outcome": "captured_at_invalid",
+            diagnostic = self._diagnostics.prepare(
+                error,
+                event="reader_v5.progress_rejected",
+                context={
                     "resource_id": command.resource_id,
-                    "mutation_id": command.mutation_id,
-                    "locator_size_bytes": command.position.locator.size_bytes,
+                    "operation_id": command.mutation_id,
+                    "step": "convert_captured_at",
+                    "outcome": "captured_at_invalid",
                 },
             )
+            self._diagnostics.persist(diagnostic)
             raise ReaderV5CapturedAtInvalid from error
         received_at = _aware_utc(self._clock.now())
         stored_position = serialize_position(command.position)
@@ -206,17 +213,19 @@ class ResourceReaderV5Service:
         )
         if repeated is not None:
             if repeated.payload_hash != request_hash:
-                LOGGER.warning(
-                    "reader_v5_progress_rejected",
-                    extra={
-                        "event": "reader_v5_progress_rejected",
-                        "outcome": "mutation_reuse",
+                rejection = ReaderV5MutationReuse(existing=repeated)
+                diagnostic = self._diagnostics.prepare(
+                    rejection,
+                    event="reader_v5.progress_rejected",
+                    context={
                         "resource_id": command.resource_id,
-                        "mutation_id": command.mutation_id,
-                        "locator_size_bytes": command.position.locator.size_bytes,
+                        "operation_id": command.mutation_id,
+                        "step": "validate_mutation_payload",
+                        "outcome": "mutation_reuse",
                     },
                 )
-                raise ReaderV5MutationReuse(existing=repeated)
+                self._diagnostics.persist(diagnostic)
+                raise rejection
             current = self._repository.get_v5_progress(
                 command.user_id, command.resource_id
             )
@@ -258,35 +267,52 @@ class ResourceReaderV5Service:
             )
             self._unit_of_work.commit()
         except Exception as error:
-            self._unit_of_work.rollback()
-            if not self._repository.is_mutation_conflict(error):
-                LOGGER.exception(
-                    "reader_v5_progress_failed",
-                    extra={
-                        "event": "reader_v5_progress_failed",
-                        "outcome": "storage_failure",
+            diagnostic = self._diagnostics.prepare(
+                error,
+                event="reader_v5.progress_storage_failed",
+                context={
+                    "resource_id": command.resource_id,
+                    "operation_id": command.mutation_id,
+                    "step": "save_progress_transaction",
+                },
+            )
+            try:
+                self._unit_of_work.rollback()
+            except Exception as rollback_error:
+                secondary = self._diagnostics.prepare(
+                    rollback_error,
+                    event="reader_v5.progress_rollback_failed",
+                    context={
                         "resource_id": command.resource_id,
-                        "mutation_id": command.mutation_id,
-                        "locator_size_bytes": command.position.locator.size_bytes,
+                        "operation_id": command.mutation_id,
+                        "step": "rollback",
+                        "parent_diagnostic_id": diagnostic.diagnostic_id,
                     },
                 )
+                self._diagnostics.persist(secondary)
+                raise
+            finally:
+                self._diagnostics.persist(diagnostic)
+            if not self._repository.is_mutation_conflict(error):
                 raise
             repeated = self._repository.get_v5_mutation(
                 command.user_id, command.resource_id, command.mutation_id
             )
             if repeated is not None:
                 if repeated.payload_hash != request_hash:
-                    LOGGER.warning(
-                        "reader_v5_progress_rejected",
-                        extra={
-                            "event": "reader_v5_progress_rejected",
-                            "outcome": "mutation_reuse",
+                    rejection = ReaderV5MutationReuse(existing=repeated)
+                    diagnostic = self._diagnostics.prepare(
+                        rejection,
+                        event="reader_v5.progress_rejected",
+                        context={
                             "resource_id": command.resource_id,
-                            "mutation_id": command.mutation_id,
-                            "locator_size_bytes": command.position.locator.size_bytes,
+                            "operation_id": command.mutation_id,
+                            "step": "validate_mutation_payload",
+                            "outcome": "mutation_reuse",
                         },
                     )
-                    raise ReaderV5MutationReuse(existing=repeated) from error
+                    self._diagnostics.persist(diagnostic)
+                    raise rejection from error
                 current = self._repository.get_v5_progress(
                     command.user_id, command.resource_id
                 )
@@ -310,16 +336,6 @@ class ResourceReaderV5Service:
                     accepted_revision=repeated.accepted_revision,
                     current_progress=current,
                 )
-            LOGGER.exception(
-                "reader_v5_progress_failed",
-                extra={
-                    "event": "reader_v5_progress_failed",
-                    "outcome": "mutation_conflict_without_receipt",
-                    "resource_id": command.resource_id,
-                    "mutation_id": command.mutation_id,
-                    "locator_size_bytes": command.position.locator.size_bytes,
-                },
-            )
             raise
         LOGGER.info(
             "reader_v5_progress_accepted",

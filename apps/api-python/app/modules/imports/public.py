@@ -7,6 +7,7 @@ from app.modules.imports.application.identity_policy import (
     normalize_identity_part,
 )
 from app.modules.imports.application.library_paths import (
+    InvalidTargetDirectory,
     LibraryPathError,
     is_inside_path,
     library_directory_tree_node,
@@ -53,6 +54,7 @@ __all__ = [
     "ContinueImportResult",
     "ContinueLibraryImport",
     "ContinueSourceImport",
+    "InvalidTargetDirectory",
     "LibraryPathError",
     "LibraryScanSettings",
     "LibraryScanTrigger",

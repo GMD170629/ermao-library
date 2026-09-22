@@ -5,11 +5,11 @@ from zipfile import ZIP_STORED, ZipFile
 
 import pytest
 
-from app.infrastructure.comic_archives import inspect_comic_archive
 from app.infrastructure.bounded_inspection import (
     InspectionLimitReached,
     LimitedReader,
 )
+from app.infrastructure.comic_archives import inspect_comic_archive
 from app.modules.imports.infrastructure.reflowable_metadata import (
     inspect_reflowable_book,
 )
@@ -135,12 +135,12 @@ def test_fb2_stops_before_body(tmp_path, monkeypatch):
 
 
 def test_epub_reads_metadata_toc_and_cover_without_chapter(tmp_path, monkeypatch):
-    from app.modules.imports.infrastructure.readable_resource.adapter_registry import (
-        RegistryResourceAdapterExecutor,
-    )
     from app.modules.imports.domain.resource_adapters import (
         ADAPTER_SPECS,
         ResourceAdapterId,
+    )
+    from app.modules.imports.infrastructure.readable_resource.adapter_registry import (
+        RegistryResourceAdapterExecutor,
     )
 
     path = tmp_path / "book.epub"

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from urllib.parse import quote
 
 from app.core.config import Settings
+from app.core.exception_diagnostics import record_exception
 from app.modules.media.infrastructure.http_streaming import stored_path
 from app.services.default_cover import is_default_cover_path
 
@@ -26,7 +28,9 @@ def versioned_cover_url(
         if not path.is_file():
             return ""
         info = path.stat()
-    except OSError:
+    except OSError as error:
+        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.cover_identity.versioned_cover_url.failed", error,
+                         context={"step": "versioned_cover_url"})
         return ""
     if info.st_size <= 0:
         return ""

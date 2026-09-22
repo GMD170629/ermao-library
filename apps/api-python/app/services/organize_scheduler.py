@@ -5,7 +5,6 @@ import logging
 import threading
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from time import monotonic
 from typing import Any
 from uuid import uuid4
 
@@ -42,7 +41,14 @@ from app.bootstrap.organize import (
     update_organize_policy_command as persist_organize_policy,
 )
 from app.core.database_errors import is_database_busy_error
-from app.modules.organize.application.commands import prepare_organize_policy_update
+from app.core.exception_diagnostics import (
+    exception_diagnostic_boundary,
+    record_exception,
+)
+from app.modules.organize.application.commands import (
+    InvalidOrganizeRequestError,
+    prepare_organize_policy_update,
+)
 from app.modules.organize.application.dto import PreparedOrganizeJobEnqueue
 from app.modules.organize.infrastructure import eligibility as organize_eligibility
 from app.modules.organize.infrastructure import jobs as organize_jobs
@@ -51,7 +57,6 @@ from app.services.metadata_provider_registry import enabled_metadata_provider_id
 
 LOGGER = logging.getLogger(__name__)
 DATABASE_BUSY_RETRY_DELAYS_SECONDS = (0.25, 1.0)
-DATABASE_BUSY_LOG_INTERVAL_SECONDS = 30.0
 ACTIVE_JOB_STATUSES = (
     "LOOKUP_PENDING",
     "PENDING",
@@ -182,7 +187,7 @@ def create_organize_run(
 ) -> dict[str, Any]:
     normalized_trigger = str(trigger or "MANUAL").upper()
     if normalized_trigger not in {"MANUAL", "SCHEDULE", "NEW"}:
-        raise ValueError("不支持的整理任务触发方式")
+        raise InvalidOrganizeRequestError("不支持的整理任务触发方式")
     policy = get_organize_policy(db)
     selected = [str(item) for item in (book_ids or []) if str(item).strip()]
     books = eligible_organize_books(
@@ -260,9 +265,9 @@ def create_organize_run(
 def cancel_organize_job(db: Session, job_id: str) -> dict[str, Any]:
     job = organize_runs.get_job_row(db, job_id)
     if not job:
-        raise ValueError("整理任务不存在")
+        raise InvalidOrganizeRequestError("整理任务不存在")
     if str(job.get("status")) in TERMINAL_JOB_STATUSES:
-        raise ValueError("当前状态无法取消")
+        raise InvalidOrganizeRequestError("当前状态无法取消")
     now = _now()
     persist_cancel_organize_job(
         db, job_id=job_id, book_id=str(job["bookId"]), timestamp=now
@@ -273,10 +278,10 @@ def cancel_organize_job(db: Session, job_id: str) -> dict[str, Any]:
 def recognize_organize_job(db: Session, job_id: str) -> dict[str, Any]:
     job = organize_runs.get_job_row(db, job_id)
     if not job:
-        raise ValueError("整理记录不存在")
+        raise InvalidOrganizeRequestError("整理记录不存在")
     book = organize_jobs.get_book_row(db, str(job["bookId"]))
     if not book:
-        raise ValueError("图书已不存在")
+        raise InvalidOrganizeRequestError("图书已不存在")
     current_unresolved = organize_jobs.get_unresolved_job_for_book(
         db,
         book_id=str(job["bookId"]),
@@ -294,7 +299,7 @@ def recognize_organize_job(db: Session, job_id: str) -> dict[str, Any]:
         str(job.get("resourceId") or "") or None,
     )
     if selection is None:
-        raise ValueError("图书没有可整理的资源")
+        raise InvalidOrganizeRequestError("图书没有可整理的资源")
     resource_id, _resource_format = selection
     providers = enabled_metadata_provider_ids(db)
     task_ids = organize_jobs.list_lookup_task_ids_for_job(db, job_id)
@@ -326,7 +331,7 @@ def retry_organize_job(db: Session, job_id: str) -> dict[str, Any]:
 def delete_organize_job(db: Session, job_id: str) -> dict[str, Any]:
     job = organize_runs.get_job_row(db, job_id)
     if not job:
-        raise ValueError("整理记录不存在")
+        raise InvalidOrganizeRequestError("整理记录不存在")
 
     book_id = str(job.get("bookId") or "")
     run_id = str(job.get("runId") or "") or None
@@ -372,7 +377,13 @@ def process_organize_schedule_tick(db: Session) -> int:
     if next_run:
         try:
             next_due = datetime.fromisoformat(str(next_run)) <= now
-        except ValueError:
+        except ValueError as error:
+            record_exception(
+                logging.getLogger(__name__),
+                "services.organize_scheduler.process_organize_schedule_tick.failed",
+                error,
+                context={"step": "process_organize_schedule_tick"},
+            )
             next_due = True
     if policy["enabled"] and policy["scheduleMode"] == "INTERVAL" and next_due:
         due_key = f"schedule:{next_run!s}"
@@ -396,7 +407,6 @@ class OrganizerScheduler:
         self._db_factory = db_factory
         self._poll_seconds = poll_seconds
         self._stop = threading.Event()
-        self._last_busy_log_at: float | None = None
         self._thread = threading.Thread(
             target=self._run, name="organizer-scheduler", daemon=True
         )
@@ -413,36 +423,42 @@ class OrganizerScheduler:
             self._thread.join()
 
     def _process_iteration(self) -> bool:
-        for attempt in range(len(DATABASE_BUSY_RETRY_DELAYS_SECONDS) + 1):
-            if attempt and self._stop.wait(
-                DATABASE_BUSY_RETRY_DELAYS_SECONDS[attempt - 1]
-            ):
-                return False
-            try:
-                with self._db_factory() as db:
-                    process_organize_schedule_tick(db)
-                return True
-            except OperationalError as error:
-                if not is_database_busy_error(error) or attempt == len(
-                    DATABASE_BUSY_RETRY_DELAYS_SECONDS
+        with exception_diagnostic_boundary(
+            LOGGER, "organize.iteration_failed", context={}
+        ):
+            for attempt in range(len(DATABASE_BUSY_RETRY_DELAYS_SECONDS) + 1):
+                if attempt and self._stop.wait(
+                    DATABASE_BUSY_RETRY_DELAYS_SECONDS[attempt - 1]
                 ):
-                    raise
-        raise AssertionError("organize retry loop exhausted")
+                    return False
+                try:
+                    with self._db_factory() as db:
+                        process_organize_schedule_tick(db)
+                    return True
+                except OperationalError as error:
+                    record_exception(
+                        LOGGER,
+                        "organize.database_attempt_failed",
+                        error,
+                        context={"step": "iteration", "attempt": attempt + 1},
+                    )
+                    if not is_database_busy_error(error) or attempt == len(
+                        DATABASE_BUSY_RETRY_DELAYS_SECONDS
+                    ):
+                        raise
+            raise AssertionError("organize retry loop exhausted")
 
     def _record_iteration_error(self, error: BaseException) -> None:
-        if not is_database_busy_error(error):
-            LOGGER.exception("organizer scheduler iteration failed")
-            return
-        now = monotonic()
-        if (
-            self._last_busy_log_at is not None
-            and now - self._last_busy_log_at < DATABASE_BUSY_LOG_INTERVAL_SECONDS
-        ):
-            return
-        LOGGER.warning(
-            "organizer_schedule_iteration outcome=deferred reason=database_busy"
+        record_exception(
+            LOGGER,
+            "organize.iteration_failed",
+            error,
+            context={
+                "step": "iteration",
+                "outcome": "retrying" if is_database_busy_error(error) else "paused",
+            },
+            source="organize",
         )
-        self._last_busy_log_at = now
 
     def _run(self) -> None:
         while not self._stop.is_set():

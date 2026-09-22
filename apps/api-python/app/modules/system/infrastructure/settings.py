@@ -54,6 +54,7 @@ def parse_setting_value(raw: Any, fallback: Any = None) -> Any:
     try:
         return json.loads(text)
     except (TypeError, ValueError, json.JSONDecodeError):
+        # diagnostics-control-flow: Stored settings support literal strings and JSON; non-JSON text is a successful legacy representation.
         return text if text else fallback
 
 

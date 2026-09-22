@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy.orm import Session
 
 from app.bootstrap.media import first_page_covers
 from app.bootstrap.reader import reader_v5_library_queries
 from app.core.config import Settings
+from app.core.failure_diagnostics import RuntimeFailureDiagnostics
 from app.modules.imports.infrastructure.readable_resource.adapter_registry import (
     RegistryResourceAdapterExecutor,
 )
@@ -57,6 +60,9 @@ def regenerate_local_metadata_covers(
             settings.resolved_storage_root
         ),
         unit_of_work=db,
+        diagnostics=RuntimeFailureDiagnostics(
+            logging.getLogger(__name__), "library", lambda: Session(db.get_bind())
+        ),
     )
 
 
@@ -82,6 +88,9 @@ def bulk_covers(db: Session, settings: Settings) -> ExecuteBulkCovers:
             covers=local_covers,
             operations=SqlAlchemyBulkCoverRegenerationOperations(db),
             unit_of_work=db,
+            diagnostics=RuntimeFailureDiagnostics(
+                logging.getLogger(__name__), "library", lambda: Session(db.get_bind())
+            ),
         ),
     )
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from importlib import import_module
 from typing import Protocol, cast
 
@@ -16,6 +17,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.contracts.library_navigation import navigation_entry_id
+from app.core.exception_diagnostics import record_exception
 from app.models import (
     Library,
     LibraryReadableResource,
@@ -269,7 +271,9 @@ class SqlAlchemyResourceDetailQueries:
             pdfium = cast(_PdfiumModule, import_module("pypdfium2"))
             document = pdfium.PdfDocument(str(path))
             return max(0, len(document))
-        except (OSError, RuntimeError, TypeError, ValueError):
+        except (OSError, RuntimeError, TypeError, ValueError) as error:
+            record_exception(logging.getLogger(__name__), "modules.library.infrastructure.resource_details.resolve_pdf_page_count.failed", error,
+                             context={"step": "resolve_pdf_page_count", "resource_id": resource_id})
             return None
         finally:
             if document is not None:
