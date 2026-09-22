@@ -29,6 +29,7 @@ export function selectedScopes(previous: Scope[], scope: Scope, enabled: boolean
 
 export function operationStatusLabel(status: string): string {
   switch (status) {
+    case 'DELETING': return '正在删除文件';
     case 'STAGING': return '正在准备删除';
     case 'STAGED': return '等待删除';
     case 'FILES_DELETED': return '文件已删除';

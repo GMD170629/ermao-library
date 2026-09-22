@@ -220,14 +220,14 @@ export function AutomationSettingsPage() {
         {tab === 'operations' ? <>
         <section className={panel} aria-labelledby="automation-operations-title">
           <div className="flex items-center justify-between gap-3"><h3 id="automation-operations-title" className="font-semibold">{t('最近的文件任务')}</h3><Button variant="secondary" disabled={busy} onClick={() => void automation.refreshOperations()}>{t('刷新任务')}</Button></div>
-          <p className="mt-2 text-sm text-[#77716A]">{t('显示当前权限内最近 50 项任务。已接收不代表已完成；取消只影响尚未发布的文件。')}</p>
+          <p className="mt-2 text-sm text-[#77716A]">{t('显示当前权限内最近 50 项任务。已接收不代表已完成；取消只影响尚未开始的文件操作。')}</p>
           {data.operations.length === 0 ? <p className="mt-3 text-sm text-[#77716A]">{t('暂无文件任务。')}</p> : <ul className="mt-3 divide-y divide-[#E2DED8]">{data.operations.map((operation) => <li key={operation.operation_id} className="py-4">
             <div className="flex items-start justify-between gap-3"><div><h4 className="font-medium">{t(operation.kind === 'file_delete' ? '永久删除图书文件' : operation.kind === 'file_replace' ? '替换图书文件' : operation.kind === 'file_move' ? '移动和整理文件' : operation.kind === 'book_upload' ? '上传图书附件' : operation.kind === 'cover_upload' ? '更新图书展示封面' : '写回文件元数据')} · {t(operation.kind === 'book_upload' && operation.status === 'QUEUED' ? '等待导入' : operationStatusLabel(operation.status))}</h4><p className="mt-1 text-xs text-[#77716A]">{formatTime(operation.created_at_ms)} · {new Intl.NumberFormat(locale).format(operation.total_targets)} {t('个文件目标')}</p></div>
               {canCancelOperation(operation.status, operation.kind) ? <Button variant="secondary" disabled={busy || operation.cancel_requested} onClick={() => void automation.cancel(operation.operation_id)}>{t(operation.cancel_requested ? '已请求取消' : '取消任务')}</Button> : null}</div>
             {operation.kind === 'book_upload' && operation.file_saved ? <p className="mt-2 text-xs">{t('原文件已保存；导入失败也不会删除原文件。')}</p> : null}
             {operation.received_bytes != null && operation.size_bytes != null ? <p className="mt-2 text-xs">{t('附件传输字节数')} <span data-i18n-skip>{new Intl.NumberFormat(locale).format(operation.received_bytes)} / {new Intl.NumberFormat(locale).format(operation.size_bytes)}</span></p> : null}
             <p className="mt-2 break-all text-xs text-[#77716A]" data-i18n-skip>{operation.operation_id}</p>
-            {operation.status === 'RECOVERY_REQUIRED' ? <p role="alert" className="mt-2 text-sm text-amber-800">{t('文件已保留，任务需要核对恢复。请保留任务标识和备份，不要重复提交相同文件。')}</p> : null}
+            {operation.status === 'RECOVERY_REQUIRED' ? <p role="alert" className="mt-2 text-sm text-amber-800">{t('任务未完成，需要核对文件和书库记录。请保留任务标识，不要重复提交相同操作。')}</p> : null}
             <details className="mt-3 text-sm"><summary className="cursor-pointer">{t('查看逐项结果（最多 50 项）')}</summary><ul className="mt-2 space-y-2">{operation.targets.map((target, index) => <li key={`${target.relative_path}:${index}`} className="rounded-lg bg-[#F7F5F2] p-3">
               <p className="break-all" data-i18n-skip>{target.relative_path}{target.destination_relative_path ? ` → ${target.destination_relative_path}` : ''}</p><p className="mt-1 text-xs">{t(operationStatusLabel(target.stage))}{target.error_code ? <span data-i18n-skip>{` · ${target.error_code}`}</span> : null}</p>
             </li>)}</ul></details>

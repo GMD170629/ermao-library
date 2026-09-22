@@ -5,7 +5,7 @@ import type { CreateGrantRequest, UpdateGrantRequest, GrantView, ManagedOperatio
 function grant(id: string, changes: Partial<GrantView> = {}): GrantView {
   return { id, name: id, scopes: ['system:read'], libraryScope: 'all', libraryIds: [], tokenAvailable: true, createdAtMs: Date.now(), expiresAtMs: Date.now() + 86400000, revokedAtMs: null, lastUsedAtMs: null, ...changes };
 }
-async function mockApi(page: Page, { admin = true, locale = 'zh-CN', enabled = true, uploads = false } = {}) {
+async function mockApi(page: Page, { admin = true, locale = 'zh-CN', enabled = true, uploads = false, fileOperations = false } = {}) {
   await page.context().addCookies([{ name: 'shuku_session', value: 'test-session', domain: '127.0.0.1', path: '/' }]);
   const grants: GrantView[] = [grant('Client A'), grant('Client B'), grant('Legacy', { tokenAvailable: false, libraryScope: 'selected', libraryIds: ['library'] }), grant('Revoked', { revokedAtMs: Date.now(), tokenAvailable: false }), grant('Expired', { expiresAtMs: 1 })];
   const created: CreateGrantRequest[] = [];
@@ -18,6 +18,12 @@ async function mockApi(page: Page, { admin = true, locale = 'zh-CN', enabled = t
   const uploaded: ManagedOperationFields = { operation_id: 'upload-1', grant_id: 'grant-1', kind: 'book_upload', created_at_ms: 1700000000000, status: 'FAILED', cancel_requested: false, total_targets: 1, received_bytes: 1024, size_bytes: 1024, file_saved: true,
     upload_result: { status: 'FAILED', error_code: 'UPLOAD_IMPORT_FAILED', book_ids: [], resource_ids: [] },
     targets: [{ stage: 'FAILED', relative_path: 'Books/new.epub', destination_relative_path: null, error_code: 'UPLOAD_IMPORT_FAILED' }] };
+  const deleting: ManagedOperationFields = { operation_id: 'delete-1', grant_id: 'grant-1', kind: 'file_delete', created_at_ms: 1700000000000,
+    status: 'RUNNING', cancel_requested: false, total_targets: 1,
+    targets: [{ stage: 'DELETING', relative_path: 'Books/old', destination_relative_path: null, error_code: null }] };
+  const recovery: ManagedOperationFields = { operation_id: 'recovery-1', grant_id: 'grant-1', kind: 'file_move', created_at_ms: 1700000000000,
+    status: 'RECOVERY_REQUIRED', cancel_requested: false, total_targets: 1,
+    targets: [{ stage: 'RECOVERY_REQUIRED', relative_path: 'Before/book.epub', destination_relative_path: 'After/book.epub', error_code: 'FILE_MOVE_INCOMPLETE' }] };
   await page.route('**/api/**' , async (route) => {
     const path = decodeURIComponent(new URL(route.request().url()).pathname);
     const method = route.request().method();
@@ -41,7 +47,7 @@ async function mockApi(page: Page, { admin = true, locale = 'zh-CN', enabled = t
       const item = grants.find((entry) => path.endsWith(entry.id));
       if (item) { item.revokedAtMs = Date.now(); item.tokenAvailable = false; } data = { revoked: true };
     }
-    if (path === '/api/automation/operations') data = { operations: admin ? (uploads ? [operation, uploaded] : [operation]) : [] };
+    if (path === '/api/automation/operations') data = { operations: admin ? (fileOperations ? [deleting, recovery] : uploads ? [operation, uploaded] : [operation]) : [] };
     if (path.endsWith('/cancel')) { operation.cancel_requested = true; data = { operation }; }
     await route.fulfill({ json: { ok: true, data } });
   });
@@ -244,6 +250,21 @@ test('service save feedback uses the current English locale', async ({ page }) =
 });
 
 for (const locale of ['zh-CN', 'en-US']) {
+  test(`file deletion stage and incomplete move guidance (${locale})`, async ({ page }) => {
+    await mockApi(page, { locale, fileOperations: true });
+    await page.goto('/settings/automation?tab=operations');
+    await expect(page.getByText(locale === 'zh-CN'
+      ? '显示当前权限内最近 50 项任务。已接收不代表已完成；取消只影响尚未开始的文件操作。'
+      : 'Shows the latest 50 operations within your current permissions. Accepted does not mean completed; cancellation only affects file operations that have not started.')).toBeVisible();
+    const deletion = page.getByRole('listitem').filter({ hasText: 'delete-1' });
+    await deletion.getByText(locale === 'zh-CN' ? '查看逐项结果（最多 50 项）' : 'View individual results (up to 50)').click();
+    await expect(deletion).toContainText(locale === 'zh-CN' ? '正在删除文件' : 'Deleting files');
+    const recovery = page.getByRole('listitem').filter({ hasText: 'recovery-1' });
+    await expect(recovery.getByRole('alert')).toHaveText(locale === 'zh-CN'
+      ? '任务未完成，需要核对文件和书库记录。请保留任务标识，不要重复提交相同操作。'
+      : 'The operation is incomplete. Review the files and library records, keep the operation ID, and do not submit the same operation again.');
+    await expect(recovery.getByRole('button')).toHaveCount(0);
+  });
   test(`attachment scopes and saved import failure (${locale})`, async ({ page }) => {
     await mockApi(page, { locale, uploads: true });
     await page.goto('/settings/automation?tab=grants');
