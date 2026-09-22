@@ -232,3 +232,152 @@ def test_system_settings_and_event_use_two_bounded_set_writes(db_session):
         )
 
     assert len(statements) == 2
+
+
+def test_diagnostic_metadata_retains_causes_and_all_correlation_when_clipped():
+    import errno
+
+    from app.modules.system.domain.events import prepare_event_metadata
+
+    cause = {
+        "type": "OSError",
+        "message": "No space left on device",
+        "errno": errno.ENOSPC,
+        "errorName": "ENOSPC",
+    }
+    metadata = {
+        "requestId": "request-id",
+        "taskId": "task-id",
+        "operationId": "operation-id",
+        "targetOrdinal": 7,
+        "attempt": 3,
+        "parentDiagnosticId": "diag-original",
+        "diagnostics": {
+            "id": "diag-failed",
+            "exceptionType": "FileMoveError",
+            "directException": {
+                "type": "FileMoveError",
+                "message": "FILE_PUBLISH_FAILED",
+            },
+            "directCause": cause,
+            "rootCause": cause,
+            "causeStatus": "PROVIDED",
+            "contextProvided": True,
+            "contextsTruncated": False,
+            "contexts": [{"type": "ValueError", "message": "earlier failure", "relationship": "context", "chainIndex": 2, "parentIndex": 0}],
+            "traceback": "long trace" * 20000,
+        },
+    }
+    clipped = prepare_event_metadata(metadata)
+    assert clipped["truncated"] is True
+    for key in (
+        "requestId",
+        "taskId",
+        "operationId",
+        "targetOrdinal",
+        "attempt",
+        "parentDiagnosticId",
+    ):
+        assert clipped[key] == metadata[key]
+    assert clipped["diagnostics"]["directCause"] == cause
+    assert clipped["diagnostics"]["rootCause"] == cause
+    assert clipped["diagnostics"]["contextProvided"] is True
+    assert clipped["diagnostics"]["contextsTruncated"] is False
+    assert clipped["diagnostics"]["contexts"] == metadata["diagnostics"]["contexts"]
+
+
+def test_corrupt_historical_metadata_and_capacity_are_diagnosed(db_session, caplog):
+    import logging
+
+    from sqlalchemy.orm import sessionmaker
+
+    from app.core.exception_diagnostics import (
+        deferred_exception_persistence,
+        persist_exception_diagnostic,
+    )
+    from app.models.settings import SystemSetting
+    from app.modules.system.domain.events import (
+        DEFAULT_MAX_EVENT_BYTES,
+        LOG_MAX_BYTES_SETTING,
+    )
+    from app.modules.system.infrastructure.events import (
+        configured_max_event_bytes,
+        get_system_event,
+    )
+
+    db_session.add(
+        SystemEvent(
+            id="historic-broken",
+            source="system",
+            action="legacy",
+            message="legacy",
+            metadata_json="not valid JSON",
+        )
+    )
+    db_session.add(SystemSetting(key=LOG_MAX_BYTES_SETTING, value="invalid JSON"))
+    db_session.commit()
+    factory = sessionmaker(bind=db_session.get_bind())
+    with deferred_exception_persistence() as pending:
+        event = get_system_event(db_session, "historic-broken")
+        assert (
+            event["metadata"]["diagnosticStatus"]
+            == "HISTORICAL_INFORMATION_UNAVAILABLE"
+        )
+        assert configured_max_event_bytes(db_session) == DEFAULT_MAX_EVENT_BYTES
+    db_session.rollback()
+    for snapshot in pending:
+        persist_exception_diagnostic(logging.getLogger(__name__), snapshot, factory)
+    assert len(pending) == 2
+    for snapshot in pending:
+        event = db_session.get(SystemEvent, snapshot.diagnostic_id)
+        assert event is not None
+        assert (
+            event.metadata_json["diagnostics"]["directException"]["type"]
+            == "json.decoder.JSONDecodeError"
+        )
+    assert "JSONDecodeError" in caplog.text
+
+
+def test_global_diagnostic_writer_with_malformed_retention_is_finite(
+    db_session, monkeypatch
+):
+    import logging
+
+    from sqlalchemy.orm import sessionmaker
+
+    from app.core import exception_diagnostics
+    from app.models.settings import SystemSetting
+    from app.modules.system.domain.events import (
+        DEFAULT_MAX_EVENT_BYTES,
+        LOG_MAX_BYTES_SETTING,
+    )
+    from app.modules.system.infrastructure.events import configured_max_event_bytes
+
+    db_session.add(SystemSetting(key=LOG_MAX_BYTES_SETTING, value="not a JSON number"))
+    db_session.commit()
+    factory = sessionmaker(bind=db_session.get_bind())
+    monkeypatch.setattr(exception_diagnostics, "_session_factory", factory)
+    diagnostic_id = exception_diagnostics.record_exception(
+        logging.getLogger(__name__),
+        "retention.original_failure",
+        ValueError("observed independent failure"),
+    )
+    with factory() as db:
+        assert configured_max_event_bytes(db) == DEFAULT_MAX_EVENT_BYTES
+    with factory() as db:
+        events = db.scalars(select(SystemEvent)).all()
+        assert len(events) == 2
+        original = next(event for event in events if event.id == diagnostic_id)
+        assert (
+            original.metadata_json["diagnostics"]["message"]
+            == "observed independent failure"
+        )
+        capacity = next(
+            event
+            for event in events
+            if event.action == "system.log_capacity_parse_failed"
+        )
+        assert (
+            capacity.metadata_json["diagnostics"]["directException"]["type"]
+            == "json.decoder.JSONDecodeError"
+        )

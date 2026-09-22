@@ -3,6 +3,7 @@ from collections.abc import Generator
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
+from app.db.diagnostic_session import DiagnosticSession
 from app.db.sqlite import (
     SHORT_WRITE_LOCK_TIMEOUT_SECONDS,
     SQLITE_STATEMENT_TIMEOUT_SECONDS,
@@ -28,24 +29,28 @@ metadata_maintenance_engine = create_sqlite_engine(
     statement_time_budget_seconds=SQLITE_STATEMENT_TIMEOUT_SECONDS,
 )
 SessionLocal = sessionmaker(
+    class_=DiagnosticSession,
     bind=engine,
     autoflush=False,
     autocommit=False,
     expire_on_commit=False,
 )
 BackgroundSessionLocal = sessionmaker(
+    class_=DiagnosticSession,
     bind=background_engine,
     autoflush=False,
     autocommit=False,
     expire_on_commit=False,
 )
 HeartbeatSessionLocal = sessionmaker(
+    class_=DiagnosticSession,
     bind=heartbeat_engine,
     autoflush=False,
     autocommit=False,
     expire_on_commit=False,
 )
 MetadataMaintenanceSessionLocal = sessionmaker(
+    class_=DiagnosticSession,
     bind=metadata_maintenance_engine,
     autoflush=False,
     autocommit=False,

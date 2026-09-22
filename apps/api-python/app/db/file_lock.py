@@ -79,6 +79,7 @@ else:
         try:
             fcntl.flock(handle.fileno(), operation | fcntl.LOCK_NB)
         except BlockingIOError:
+            # diagnostics-control-flow: Nonblocking lease contention is the documented False result, not an I/O failure.
             return False
         return True
 

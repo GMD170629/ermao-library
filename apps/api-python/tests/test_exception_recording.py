@@ -113,6 +113,7 @@ def test_unhandled_api_exception_records_correlation_and_hides_stack(
 def test_record_exception_survives_business_rollback_and_storage_failure(
     db_session: Session,
     caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     def factory() -> Session:
         return _session_for(db_session)
@@ -151,7 +152,7 @@ def test_record_exception_survives_business_rollback_and_storage_failure(
                     LOGGER, "unit.storage_failure", error
                 )
         assert fallback_id.startswith("diag_")
-        assert "exception_diagnostics.persist_failed" in caplog.text
+        assert "exception_diagnostics.persist_failed" in capsys.readouterr().err
     finally:
         reset_exception_storage()
 
@@ -378,13 +379,14 @@ def test_outer_boundary_records_maintenance_failure_and_still_propagates(
     with caplog.at_level(logging.ERROR), pytest.raises(OperationalError):
         client.post("/api/app-config")
 
-    assert "http_boundary" in caplog.text
+    assert "db down" in caplog.text
     events = [
         event
         for event in _all_events(db_session, source="system")
-        if event.action == "api.request_failed"
+        if event.action == "operation.failed_before_cleanup"
     ]
     assert len(events) == 1
+    assert events[0].id in caplog.text
     assert events[0].metadata_json["stage"] == "http_boundary"
     assert events[0].metadata_json["method"] == "POST"
     assert "db down" in events[0].metadata_json["diagnostics"]["traceback"]
@@ -404,13 +406,14 @@ def test_outer_boundary_records_permission_query_failure_and_still_propagates(
     with caplog.at_level(logging.ERROR), pytest.raises(RuntimeError):
         client.get("/api/management/events")
 
-    assert "http_boundary" in caplog.text
+    assert "auth lookup failed" in caplog.text
     events = [
         event
         for event in _all_events(db_session, source="system")
-        if event.action == "api.request_failed"
+        if event.action == "operation.failed_before_cleanup"
     ]
     assert len(events) == 1
+    assert events[0].id in caplog.text
     assert events[0].metadata_json["stage"] == "http_boundary"
 
 
@@ -527,6 +530,7 @@ class _FailingWriteSession:
 
 def test_logging_session_failures_never_replace_the_original_failure(
     caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     try:
         raise ValueError("original business failure")
@@ -556,7 +560,9 @@ def test_logging_session_failures_never_replace_the_original_failure(
 
     assert "original business failure" in caplog.text
     assert "second business failure" in caplog.text
-    assert "exception_diagnostics.persist_failed" in caplog.text
+    output = capsys.readouterr().err
+    for message in ("write failed", "rollback failed", "close failed too", "exception_diagnostics.persist_failed"):
+        assert message in output
 
 
 def test_recording_degrades_bounded_under_business_write_lock_then_persists(

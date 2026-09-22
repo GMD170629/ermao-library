@@ -10,16 +10,27 @@ written later at a safe boundary.
 from __future__ import annotations
 
 import asyncio
+import errno
+import json
 import logging
+import os
 import re
+import subprocess
 import sys
 import threading
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError
 from uuid import uuid4
 
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
+from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Session
 
 from app.core.database_errors import is_database_operation_timeout
@@ -40,11 +51,23 @@ _CONTEXT_WIRE_KEYS = {
     "library_id": "libraryId",
     "resource_id": "resourceId",
     "source_node_id": "sourceNodeId",
+    "plan_id": "planId",
+    "upload_id": "uploadId",
+    "node_id": "nodeId",
+    "book_id": "bookId",
+    "import_task_id": "importTaskId",
     "stage": "stage",
     "outcome": "outcome",
     "path": "path",
     "method": "method",
     "attempt": "attempt",
+    "operation_id": "operationId",
+    "target_ordinal": "targetOrdinal",
+    "step": "step",
+    "parent_diagnostic_id": "parentDiagnosticId",
+    "code": "code",
+    "protocol_status": "protocolStatus",
+    "exit_code": "exitCode",
 }
 
 _LOG_EXTRA_KEYS = (
@@ -54,11 +77,23 @@ _LOG_EXTRA_KEYS = (
     "library_id",
     "resource_id",
     "source_node_id",
+    "plan_id",
+    "upload_id",
+    "node_id",
+    "book_id",
+    "import_task_id",
     "stage",
     "outcome",
     "path",
     "method",
     "attempt",
+    "operation_id",
+    "target_ordinal",
+    "step",
+    "parent_diagnostic_id",
+    "code",
+    "protocol_status",
+    "exit_code",
     "diagnostic_id",
 )
 
@@ -85,6 +120,58 @@ _EMAIL = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
 
 _session_factory: SessionFactory | None = None
 _hooks_installed = False
+_pending: ContextVar[list[DiagnosticSnapshot] | None] = ContextVar("diagnostic_pending", default=None)
+_context: ContextVar[dict[str, Any] | None] = ContextVar("diagnostic_context", default=None)
+_persisting: ContextVar[str | None] = ContextVar("diagnostic_persisting", default=None)
+
+
+@contextmanager
+def deferred_exception_persistence(
+    *, context: dict[str, Any] | None = None,
+) -> Iterator[list[DiagnosticSnapshot]]:
+    """Capture now; the owning boundary flushes after releasing its transaction.
+
+    Nested scopes share the same queue. Only the outer owner flushes it, outside
+    this context, using persist_exception_diagnostic. This is also inherited by
+    ASGI worker threads through their copied context.
+    """
+    existing = _pending.get()
+    pending = existing if existing is not None else []
+    token = _pending.set(pending)
+    context_token = _context.set({**(_context.get() or {}), **(context or {})})
+    try:
+        yield pending
+    finally:
+        _context.reset(context_token)
+        _pending.reset(token)
+
+
+
+@contextmanager
+def exception_diagnostic_boundary(
+    logger: logging.Logger, event: str, *, context: dict[str, Any] | None = None,
+    session_factory: SessionFactory | None = None,
+) -> Iterator[None]:
+    """Own a request/worker queue and flush after enclosed resources close."""
+    pending: list[DiagnosticSnapshot] = []
+    owns_queue = _pending.get() is None
+    try:
+        with deferred_exception_persistence(context=context) as pending:
+            try:
+                yield
+            except Exception as error:
+                prepare_exception_diagnostic(logger, event, error)
+                raise
+    finally:
+        if owns_queue:
+            for snapshot in pending:
+                persist_exception_diagnostic(logger, snapshot, session_factory)
+
+def _enqueue(snapshot: DiagnosticSnapshot) -> None:
+    pending = _pending.get()
+    if pending is not None and not any(item is snapshot for item in pending):
+        pending.append(snapshot)
+
 
 
 @dataclass
@@ -112,18 +199,19 @@ def configure_exception_storage(factory: SessionFactory | None) -> None:
     _session_factory = factory
 
 
-def reset_exception_storage() -> None:
-    configure_exception_storage(None)
+def reset_exception_storage(*, expected_factory: SessionFactory | None = None) -> None:
+    """Release an app's storage without clearing a newer app's factory."""
+    if expected_factory is None or _session_factory is expected_factory:
+        configure_exception_storage(None)
 
 
-def _redact_sql_parameters(text: str) -> str:
-    """Redact every ``[parameters: ...]`` block with bracket/quote awareness.
+def _redact_sql_block(text: str, marker: str) -> str:
+    """Redact SQLAlchemy SQL/parameter blocks with bracket/quote awareness.
 
     Parameter values may contain ``]``, newlines, or nested lists/dicts, so a
     non-greedy regex would stop early and leave later parameters exposed.
     """
 
-    marker = _SQL_PARAMETERS_MARKER
     result: list[str] = []
     index = 0
     length = len(text)
@@ -160,15 +248,19 @@ def _redact_sql_parameters(text: str) -> str:
                     cursor += 1
                     break
             cursor += 1
-        result.append("[parameters: [redacted]]")
+        result.append(f"{marker} [redacted]]")
         index = cursor
     return "".join(result)
 
 
 def sanitize_diagnostic_text(text: object) -> str:
-    """Redact credentials and SQL parameters from diagnostic text."""
+    """Redact credentials, SQL statements and parameters from diagnostics."""
 
-    value = _redact_sql_parameters(str(text))
+    value = _redact_sql_block(str(text), _SQL_PARAMETERS_MARKER)
+    # SQL may contain inline literals rather than bound parameters. The driver
+    # message, type and database codes carry the failure; statement text is not
+    # safe even after its separate parameters block has been removed.
+    value = _redact_sql_block(value, "[SQL:")
     value = _SQL_BACKGROUND.sub("", value)
     value = _SENSITIVE_ASSIGNMENT.sub(
         lambda match: f"{match.group(1)}[redacted]", value
@@ -177,6 +269,13 @@ def sanitize_diagnostic_text(text: object) -> str:
     value = _BEARER.sub("Bearer [redacted]", value)
     value = _QUERY_SECRET.sub(r"\1[redacted]", value)
     value = _EMAIL.sub(lambda match: mask_email(match.group(0)), value)
+    # Never retain URL userinfo or query strings containing resource contents.
+    value = re.sub(r"(https?://)[^/\s@]+@", r"\1[redacted]@", value)
+    value = re.sub(r"(?i)([?&](?:body|content|payload|query|sql)=)[^&\s]+", r"\1[redacted]", value)
+    # Source locations are rendered separately from code objects. Absolute
+    # paths in exception messages identify private filesystem resources.
+    value = re.sub(r'''(["'])(?:[A-Za-z]:[\\/]|/)[^\r\n]*?\1''', "'[private-path]'", value)
+    value = re.sub(r"(?<![\w:/])(?:[A-Za-z]:[\\/]|/)(?:[^\s\"'<>:;,()\[\]]+[\\/])+[^\s\"'<>:;,()\[\]]*", "[private-path]", value)
     return value
 
 
@@ -196,26 +295,174 @@ def _bound_text(text: str, limit: int) -> tuple[str, bool]:
     return text[:head_limit] + marker + text[-tail_limit:], True
 
 
-def _chain_entries(error: BaseException) -> list[dict[str, str]]:
-    entries: list[dict[str, str]] = []
+def _safe_message(
+    error: BaseException, *, limit: int | None = MAX_DIAGNOSTIC_MESSAGE_CHARS,
+    report_formatting_failure: bool = True,
+) -> str:
+    try:
+        # SDK wrappers may repeat the validation exception's raw input_value
+        # in their own message. Keep their type, but use the actual validation
+        # details without rejected inputs for every wrapper in that chain.
+        validation = None
+        current: BaseException | None = error
+        seen: set[int] = set()
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            if isinstance(current, (ValidationError, RequestValidationError)):
+                validation = current
+                break
+            # An implicit context may be a separate rollback/cleanup failure;
+            # do not replace its actual message with the earlier validation.
+            current = current.__cause__
+        if validation is not None:
+            message = json.dumps([
+                {"type": item.get("type"), "loc": item.get("loc"),
+                 "message": sanitize_diagnostic_text(item.get("msg", ""))}
+                for item in validation.errors()
+            ], ensure_ascii=True)
+        # Commands and arbitrary child output can contain unlabelled secrets.
+        elif isinstance(error, subprocess.CalledProcessError):
+            message = f"Process exited with status {error.returncode}"
+            stderr_summary = _subprocess_stderr_summary(error)
+            if stderr_summary:
+                message += f": {stderr_summary}"
+        elif isinstance(error, subprocess.TimeoutExpired):
+            message = f"Process timed out after {error.timeout} seconds"
+        else:
+            raw_message = str(error)
+            if isinstance(error, OSError):
+                for filename in (error.filename, error.filename2):
+                    if filename is not None:
+                        path = os.fsdecode(filename)
+                        raw_message = raw_message.replace(repr(path), "'[private-path]'").replace(path, "[private-path]")
+            message = sanitize_diagnostic_text(raw_message)
+    except Exception as formatting_error:  # noqa: BLE001 - diagnostic failure isolation
+        # diagnostics-control-flow: The emergency serializer disables recursive reporting of its own formatting probe; its returned diagnostic still names the original and formatter types.
+        if report_formatting_failure:
+            emergency_diagnostic(
+                "exception_diagnostics.message_format_failed", formatting_error,
+                diagnostic_id=f"diag_{uuid4().hex}",
+            )
+        # The emergency serializer uses this same path with reporting disabled:
+        # even a second broken __str__ cannot recursively invoke the logger.
+        message = f"[message unavailable: {_qualified_type(formatting_error)} while formatting {_qualified_type(error)}]"
+    return message if limit is None else _bound_text(message, limit)[0]
+
+
+def _subprocess_stderr_summary(error: subprocess.CalledProcessError) -> str | None:
+    """Keep child diagnostic lines, never its command, stdout or document data."""
+    stderr = error.stderr
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="replace")
+    if not isinstance(stderr, str) or not stderr.strip():
+        return None
+    # Child output is not a typed error. Restrict it to recognizable diagnostic
+    # lines; arbitrary output can be the contents of the document being parsed.
+    arguments = error.cmd if isinstance(error.cmd, (list, tuple)) else ()
+    command = arguments[0] if arguments else error.cmd
+    known_diagnostics = isinstance(command, (str, os.PathLike)) and Path(command).name in {"mv", "cp", "rm", "ffprobe"}
+    if known_diagnostics:
+        for argument in arguments[1:]:
+            if isinstance(argument, (str, os.PathLike)) and Path(argument).is_absolute():
+                stderr = stderr.replace(os.fspath(argument), "[private-path]")
+    lines = [line for line in stderr.splitlines() if known_diagnostics or re.search(
+        r"(?i)(?:^(?:mv|cp|rm|install|uv|pip|unzip|tar):|\berror\b|\bfailed\b|"
+        r"\bdenied\b|no space left|read.only file system|cross.device link|"
+        r"no such file|cannot |unable to |not found|invalid )", line
+    )]
+    return _bound_text(sanitize_diagnostic_text("\n".join(lines[-3:])), 2_000)[0] if lines else None
+
+
+def _source_location(error: BaseException) -> str | None:
+    current = error.__traceback__
+    if current is None:
+        return None
+    while current.tb_next is not None:
+        current = current.tb_next
+    code = current.tb_frame.f_code
+    return f"{_source_file(code.co_filename)}:{current.tb_lineno} in {code.co_name}"
+
+
+def _source_file(filename: str) -> str:
+    parts = Path(filename).parts
+    for anchor in ("app", "tests", "scripts", "site-packages"):
+        if anchor in parts:
+            return "/".join(parts[parts.index(anchor):])
+    return Path(filename).name
+
+
+def _exception_facts(error: BaseException, *, report_formatting_failure: bool = True) -> dict[str, Any]:
+    facts: dict[str, Any] = {
+        "type": _qualified_type(error),
+        "message": _safe_message(error, report_formatting_failure=report_formatting_failure),
+        "location": _source_location(error),
+    }
+    for attribute, key in (
+        ("errno", "errno"), ("sqlite_errorcode", "databaseCode"),
+        ("sqlite_errorname", "databaseErrorName"), ("sqlstate", "databaseCode"),
+        ("pgcode", "databaseCode"), ("status_code", "protocolStatus"),
+        ("returncode", "exitCode"), ("winerror", "winerror"),
+        ("smtp_code", "protocolStatus"), ("code", "code"),
+        ("verify_code", "certificateVerifyCode"),
+        ("verify_message", "certificateVerifyMessage"),
+    ):
+        value = getattr(error, attribute, None)
+        if isinstance(value, (int, str)) and not isinstance(value, bool):
+            facts[key] = sanitize_diagnostic_text(value) if isinstance(value, str) else value
+    if isinstance(facts.get("errno"), int):
+        facts["errorName"] = errno.errorcode.get(facts["errno"], "NOT_PROVIDED")
+    response = getattr(error, "response", None)
+    status = getattr(response, "status_code", None)
+    if isinstance(status, int):
+        facts["protocolStatus"] = status
+    if isinstance(error, HTTPError):
+        facts["protocolStatus"] = error.code
+    if isinstance(error, subprocess.CalledProcessError) and error.stderr:
+        summary = _subprocess_stderr_summary(error)
+        if summary:
+            facts["stderrSummary"] = summary
+        else:
+            facts["stderrStatus"] = "OMITTED_UNSTRUCTURED_OUTPUT"
+    if isinstance(error, StatementError) and error.statement is not None:
+        facts["statementOmitted"] = True
+    return facts
+
+
+def _explicit_cause(error: BaseException) -> BaseException | None:
+    if error.__cause__ is not None:
+        return error.__cause__
+    original = getattr(error, "orig", None)
+    return original if isinstance(original, BaseException) else None
+
+
+def _exception_chain(error: BaseException) -> list[tuple[BaseException, str, int | None]]:
+    """Keep causal and temporal links distinct, including separate contexts.
+
+    Each relationship points to its parent entry. A context says only that the
+    exception was raised while handling another; it does not establish cause.
+    """
+    result: list[tuple[BaseException, str, int | None]] = []
     seen: set[int] = set()
-    current: BaseException | None = error
-    while current is not None and id(current) not in seen:
+    pending: list[tuple[BaseException, str, int | None]] = [(error, "exception", None)]
+    while pending:
+        current, relationship, parent_index = pending.pop()
+        if id(current) in seen:
+            continue
+        index = len(result)
+        result.append((current, relationship, parent_index))
         seen.add(id(current))
         cause = current.__cause__
-        context = current.__context__ if cause is None else None
-        entries.append(
-            {
-                "type": _qualified_type(current),
-                "message": sanitize_diagnostic_text(current)[
-                    :MAX_DIAGNOSTIC_MESSAGE_CHARS
-                ],
-            }
-        )
-        current = cause if cause is not None else context
-        if len(entries) >= MAX_CHAIN_ITEMS:
-            break
-    return entries
+        original = getattr(current, "orig", None)
+        context = current.__context__
+        # The stack visits explicit causes first. A distinct context remains a
+        # separate history branch instead of silently replacing the root cause.
+        if context is not None and context is not cause and context is not original:
+            pending.append((context, "context", index))
+        if isinstance(original, BaseException) and original is not cause:
+            pending.append((original, "original", index))
+        if cause is not None:
+            pending.append((cause, "cause", index))
+    return result
 
 
 def format_exception_diagnostics(
@@ -223,33 +470,120 @@ def format_exception_diagnostics(
     *,
     max_traceback_chars: int = MAX_TRACEBACK_CHARS,
 ) -> dict[str, Any]:
-    """Return sanitized structured diagnostics for one original exception."""
-
-    raw_traceback = "".join(
-        traceback.format_exception(type(error), error, error.__traceback__)
-    )
-    traceback_text, truncated = _bound_text(
-        sanitize_diagnostic_text(raw_traceback), max_traceback_chars
-    )
-    location: str | None = None
-    if error.__traceback__ is not None:
-        frames = traceback.extract_tb(error.__traceback__)
-        if frames:
-            last = frames[-1]
-            location = f"{last.filename}:{last.lineno}"
+    """Record observed facts; never infer a permission/network/input cause."""
+    linked_errors = _exception_chain(error)
+    entries = [
+        {**_exception_facts(item), "relationship": relationship,
+         "chainIndex": index, "parentIndex": parent_index}
+        for index, (item, relationship, parent_index) in enumerate(linked_errors)
+    ]
+    by_identity = {id(item): entry for (item, _, _), entry in zip(linked_errors, entries, strict=True)}
+    cause = _explicit_cause(error)
+    root = error
+    seen = {id(root)}
+    while (next_cause := _explicit_cause(root)) is not None and id(next_cause) not in seen:
+        seen.add(id(next_cause))
+        root = next_cause
+    root_entry = by_identity[id(root)]
+    contexts = [entry for entry in entries if entry["relationship"] == "context"]
+    chain_truncated = len(entries) > MAX_CHAIN_ITEMS
+    # Dedicated cause fields retain the actual causal root even when temporal
+    # contexts make it an interior entry of a long display chain.
+    chain = entries[:MAX_CHAIN_ITEMS - 1] if chain_truncated else entries[:]
+    if chain_truncated:
+        chain.append(root_entry if root_entry not in chain else entries[-1])
+    trace: list[str] = []
+    for (item, relationship, parent_index), facts in reversed(list(zip(linked_errors, entries, strict=True))):
+        if len(entries) > 1:
+            trace.append(f"Exception {facts['chainIndex']} ({relationship}, parent={parent_index}):\n")
+        if item.__traceback__ is not None:
+            trace.append("Traceback (most recent call last):\n")
+            for frame in traceback.extract_tb(item.__traceback__):
+                # No source lines or locals: they can contain SQL/body literals.
+                trace.append(f'  File "{_source_file(frame.filename)}", line {frame.lineno}, in {frame.name}\n')
+        trace.append(f"{facts['type']}: {facts['message']}\n")
+    # Traceback may be longer than the structured summary, retain both ends.
+    # Keep full exception message here (bounded below), as before.
+    if len(linked_errors) == 1 and not isinstance(error, (subprocess.CalledProcessError, subprocess.TimeoutExpired, ValidationError, RequestValidationError)):
+        full_message = _safe_message(error, limit=None, report_formatting_failure=False)
+        trace[-1] = f"{entries[0]['type']}: {full_message}\n"
+    traceback_text, truncated = _bound_text("".join(trace), max_traceback_chars)
     return {
-        "exceptionType": _qualified_type(error),
-        "message": sanitize_diagnostic_text(error)[:MAX_DIAGNOSTIC_MESSAGE_CHARS],
-        "traceback": traceback_text,
-        "chain": _chain_entries(error),
-        "location": sanitize_diagnostic_text(location) if location else None,
-        "truncated": truncated,
-        **(
-            {"reason": "time_budget_exceeded"}
-            if is_database_operation_timeout(error)
-            else {}
-        ),
+        "exceptionType": entries[0]["type"], "message": entries[0]["message"],
+        "traceback": traceback_text, "chain": chain,
+        "location": entries[0]["location"],
+        "directException": entries[0],
+        "directCause": by_identity[id(cause)] if cause is not None else None,
+        "rootCause": root_entry, "causeProvided": cause is not None,
+        "causeStatus": "PROVIDED" if cause is not None else "NOT_PROVIDED",
+        "contexts": contexts[:MAX_CHAIN_ITEMS], "contextProvided": bool(contexts),
+        "contextsTruncated": len(contexts) > MAX_CHAIN_ITEMS,
+        "chainTruncated": chain_truncated, "chainLength": len(entries),
+        "truncated": truncated or chain_truncated,
+        **({"reason": "time_budget_exceeded"} if is_database_operation_timeout(error) else {}),
     }
+
+
+def emergency_diagnostic(
+    event: str, error: BaseException, *, diagnostic_id: str,
+    parent_diagnostic_id: str | None = None,
+    _minimal: bool = False,
+) -> None:
+    """Last-resort sanitized stderr; never invokes logging or the database."""
+    try:
+        if _minimal:
+            output = (
+                f"{event} diagnostic_id={diagnostic_id} parent_diagnostic_id={parent_diagnostic_id} "
+                f"exception_type={_qualified_type(error)} "
+                f"message={_safe_message(error, report_formatting_failure=False)}\n"
+            )
+        else:
+            payload = {
+                "event": event, "diagnosticId": diagnostic_id,
+                "parentDiagnosticId": parent_diagnostic_id,
+                "chain": [
+                    {**_exception_facts(item, report_formatting_failure=False),
+                     "relationship": relationship, "chainIndex": index, "parentIndex": parent_index}
+                    for index, (item, relationship, parent_index) in enumerate(_exception_chain(error))
+                ],
+            }
+            if isinstance(error, BaseExceptionGroup):
+                payload["members"] = [
+                    [{**_exception_facts(item, report_formatting_failure=False),
+                      "relationship": relationship, "chainIndex": index, "parentIndex": parent_index}
+                     for index, (item, relationship, parent_index) in enumerate(_exception_chain(leaf))]
+                    for leaf in _iter_leaves(error) if leaf is not error
+                ]
+            output = json.dumps(payload, ensure_ascii=True) + "\n"
+    except Exception as formatter_error:  # noqa: BLE001 - diagnostic failure isolation
+        emergency_diagnostic(event, error, diagnostic_id=diagnostic_id,
+                             parent_diagnostic_id=parent_diagnostic_id, _minimal=True)
+        emergency_diagnostic(
+            "exception_diagnostics.emergency_format_failed", formatter_error,
+            diagnostic_id=f"diag_{uuid4().hex}", parent_diagnostic_id=diagnostic_id, _minimal=True,
+        )
+        return
+    try:
+        sys.stderr.write(output)
+        sys.stderr.flush()
+    except Exception as stream_error:  # noqa: BLE001 - independent last output
+        # The stream may be replaced/broken; fd 2 is an independent last exit.
+        _write_fd_fallback(output, stream_error, diagnostic_id=diagnostic_id)
+
+
+def _write_fd_fallback(output: str, error: BaseException, *, diagnostic_id: str) -> None:
+    """Terminal diagnostic sink when the configured stderr object is broken."""
+    output += (
+        f"exception_diagnostics.stderr_failed diagnostic_id=diag_{uuid4().hex} "
+        f"parent_diagnostic_id={diagnostic_id} "
+        f"exception_type={_qualified_type(error)} "
+        f"message={_safe_message(error, report_formatting_failure=False)}\n"
+    )
+    try:
+        os.write(2, output.encode("utf-8", errors="replace"))
+    except OSError:
+        # diagnostics-control-flow: Both independent stderr exits are unavailable; return preserves the original business failure, proven by sink-failure injection.
+        return
 
 
 def _sanitized_context(context: dict[str, Any] | None) -> dict[str, Any]:
@@ -258,6 +592,10 @@ def _sanitized_context(context: dict[str, Any] | None) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in context.items():
         if value is None:
+            continue
+        if key == "path" and context.get("method") and isinstance(value, str):
+            # The ASGI path is public routing context, not a filesystem path.
+            result[key] = value.split("?", 1)[0][:MAX_DIAGNOSTIC_MESSAGE_CHARS]
             continue
         result[key] = (
             sanitize_diagnostic_text(value)[:MAX_DIAGNOSTIC_MESSAGE_CHARS]
@@ -327,6 +665,8 @@ def _format_log_text(
     body = traceback_text if traceback_text else str(diagnostics.get("message") or "")
     if location and str(location) not in body:
         body = f"{body}\nlocation={location}"
+    if not location and diagnostics.get("observedAt"):
+        body = f"{body}\nobserved_at={diagnostics['observedAt']}"
     return f"{header}\n{body}".rstrip()
 
 
@@ -334,6 +674,7 @@ def _attach_snapshot(error: BaseException, snapshot: DiagnosticSnapshot) -> None
     try:
         setattr(error, _DIAGNOSTIC_ATTR, snapshot)
     except Exception:  # noqa: BLE001, S110 - some exceptions forbid attributes
+        # diagnostics-control-flow: Exception snapshot attachment is an optional deduplication probe; immutable exceptions still produce the returned snapshot and log.
         pass
 
 
@@ -371,6 +712,19 @@ def _build_snapshot(
     target_type: str | None,
     target_id: str | None,
 ) -> DiagnosticSnapshot:
+    if error.__traceback__ is None and diagnostics.get("location") is None:
+        # This is where an unraised rule failure was observed, not an invented
+        # origin traceback. Skip shared response/recording wrappers.
+        frame = sys._getframe(1)
+        while frame is not None:
+            filename = _source_file(frame.f_code.co_filename)
+            if filename.startswith("app/") and filename not in {
+                "app/core/exception_diagnostics.py", "app/schemas/responses.py",
+            }:
+                diagnostics.setdefault("observedAt", f"{filename}:{frame.f_lineno} in {frame.f_code.co_name}")
+                break
+            frame = frame.f_back
+        del frame
     try:
         log_text = _format_log_text(event, diagnostic_id, diagnostics, context)
         logger.log(
@@ -378,14 +732,11 @@ def _build_snapshot(
             log_text,
             extra=_log_extra(context, diagnostic_id),
         )
-    except Exception:  # noqa: BLE001 - diagnostics must never mask the failure
-        logger.log(
-            logging.WARNING if level == "warning" else logging.ERROR,
-            "%s diagnostic_id=%s exception_type=%s",
-            event,
-            diagnostic_id,
-            _qualified_type(error),
-            extra=_log_extra(context, diagnostic_id),
+    except Exception as logging_error:  # noqa: BLE001 - independent stderr fallback
+        emergency_diagnostic(event, error, diagnostic_id=diagnostic_id)
+        emergency_diagnostic(
+            "exception_diagnostics.log_failed", logging_error,
+            diagnostic_id=f"diag_{uuid4().hex}", parent_diagnostic_id=diagnostic_id,
         )
     metadata = {
         "diagnostics": {"id": diagnostic_id, **diagnostics},
@@ -405,6 +756,7 @@ def _build_snapshot(
         target_id=target_id,
     )
     _attach_snapshot(error, snapshot)
+    _enqueue(snapshot)
     return snapshot
 
 
@@ -442,26 +794,20 @@ def _prepare_group_diagnostic(
         return reused
 
     diagnostic_id = f"diag_{uuid4().hex}"
+    group_diagnostics = format_exception_diagnostics(group)
     member_diagnostics = [format_exception_diagnostics(leaf) for leaf in unrecorded]
     combined_traceback, truncated = _bound_text(
-        "\n".join(str(item.get("traceback") or "") for item in member_diagnostics),
+        "\n".join(str(item.get("traceback") or "") for item in [group_diagnostics, *member_diagnostics]),
         MAX_TRACEBACK_CHARS,
     )
-    first = member_diagnostics[0]
     diagnostics: dict[str, Any] = {
-        "exceptionType": _qualified_type(group),
-        "message": str(first.get("message") or f"{len(unrecorded)} failures"),
+        **group_diagnostics,
         "traceback": combined_traceback,
-        "chain": [],
-        "location": first.get("location"),
         "truncated": truncated
+        or group_diagnostics["truncated"]
         or any(item.get("truncated") for item in member_diagnostics),
         "members": [
-            {
-                "exceptionType": item.get("exceptionType"),
-                "message": item.get("message"),
-                "location": item.get("location"),
-            }
+            {key: value for key, value in item.items() if key != "traceback"}
             for item in member_diagnostics
         ],
         "memberCount": len(leaves),
@@ -508,31 +854,58 @@ def prepare_exception_diagnostic(
     single main event and diagnostic id.
     """
 
+    context = {**(_context.get() or {}), **(context or {})}
+    if _persisting.get() is not None:
+        context.setdefault("parent_diagnostic_id", _persisting.get())
     existing = _direct_snapshot(error)
+    # Explicit wrappers preserve the same incident. Implicit __context__ often
+    # describes a *secondary* rollback failure and must not be deduplicated.
+    if existing is None and not context.get("parent_diagnostic_id"):
+        cause = error.__cause__
+        seen = {id(error)}
+        while cause is not None and id(cause) not in seen:
+            seen.add(id(cause))
+            existing = _direct_snapshot(cause)
+            if existing is not None:
+                break
+            cause = cause.__cause__
     if existing is not None:
-        return existing
-    if isinstance(error, BaseExceptionGroup):
-        return _prepare_group_diagnostic(
-            logger,
-            event,
-            error,
-            level=level,
-            context=context,
-            source=source,
-            action=action,
-            actor_type=actor_type,
-            actor_id=actor_id,
-            target_type=target_type,
-            target_id=target_id,
+        changed_attempt = any(
+            key in context and wire in existing.metadata and context[key] != existing.metadata[wire]
+            for key, wire in (("operation_id", "operationId"), ("target_ordinal", "targetOrdinal"), ("attempt", "attempt"))
         )
-
+        if not changed_attempt:
+            for key, value in _context_metadata(context).items():
+                existing.metadata.setdefault(key, value)
+            _attach_snapshot(error, existing)
+            _enqueue(existing)
+            return existing
     diagnostic_id = f"diag_{uuid4().hex}"
     try:
+        if isinstance(error, BaseExceptionGroup):
+            return _prepare_group_diagnostic(
+                logger,
+                event,
+                error,
+                level=level,
+                context=context,
+                source=source,
+                action=action,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                target_type=target_type,
+                target_id=target_id,
+            )
         diagnostics = format_exception_diagnostics(error)
-    except Exception:  # noqa: BLE001 - diagnostics must never mask the failure
+    except Exception as formatting_error:  # noqa: BLE001 - keep original + formatter fault
+        emergency_diagnostic(event, error, diagnostic_id=diagnostic_id)
+        emergency_diagnostic("exception_diagnostics.format_failed", formatting_error,
+                             diagnostic_id=f"diag_{uuid4().hex}", parent_diagnostic_id=diagnostic_id)
         diagnostics = {
             "exceptionType": _qualified_type(error),
-            "message": "",
+            "message": _safe_message(error),
+            "formattingErrorType": _qualified_type(formatting_error),
+            "formattingErrorMessage": _safe_message(formatting_error),
             "traceback": "",
             "chain": [],
             "location": None,
@@ -555,42 +928,42 @@ def prepare_exception_diagnostic(
     )
 
 
-def _safe_rollback(session: Session) -> None:
-    try:
-        session.rollback()
-    except Exception:  # noqa: BLE001, S110 - never mask the original failure
-        pass
-
-
-def _safe_close(session: Session) -> None:
-    try:
-        session.close()
-    except Exception:  # noqa: BLE001, S110 - never mask the original failure
-        pass
+def _storage_failure(event: str, error: BaseException, snapshot: DiagnosticSnapshot) -> None:
+    emergency_diagnostic(event, error, diagnostic_id=f"diag_{uuid4().hex}",
+                         parent_diagnostic_id=snapshot.diagnostic_id)
 
 
 def persist_exception_diagnostic(
     logger: logging.Logger,
     snapshot: DiagnosticSnapshot,
     session_factory: SessionFactory | None = None,
+    *, force: bool = False,
 ) -> bool:
     """Best-effort persist one snapshot; never raises into business flow."""
 
     if snapshot.persisted:
         return True
+    if _persisting.get() is not None:
+        # A logging database failure already has a running-log snapshot. Never
+        # recursively use the same database to report its own write failure.
+        return False
+    if _pending.get() is not None and not force:
+        _enqueue(snapshot)
+        return False
     factory = session_factory or _session_factory
     if factory is None:
         return False
 
-    # Imported lazily so this cross-cutting core module does not pull the
-    # system capability into every importer and cannot create an import cycle.
-    from app.modules.system.infrastructure.events import (
-        prepare_system_event,
-        write_prepared_system_events,
-    )
-
     session: Session | None = None
+    token = _persisting.set(snapshot.diagnostic_id)
     try:
+        # Lazy import also belongs to this boundary: unavailable dependencies
+        # must not replace the operation failure whose event is being stored.
+        from app.modules.system.infrastructure.events import (
+            prepare_system_event,
+            write_prepared_system_events,
+        )
+
         prepared = prepare_system_event(
             event_id=snapshot.diagnostic_id,
             level=snapshot.level,
@@ -604,24 +977,30 @@ def persist_exception_diagnostic(
             metadata=snapshot.metadata,
         )
         session = factory()
+        info = getattr(session, "info", None)
+        if isinstance(info, dict):
+            info["diagnostics_storage"] = True
         write_prepared_system_events(session, [prepared])
         session.commit()
         snapshot.persisted = True
         return True
-    except Exception as persistence_error:  # noqa: BLE001 - bounded degradation
+    except Exception as persistence_error:  # noqa: BLE001 - preserve storage failure before rollback
+        _storage_failure("exception_diagnostics.persist_failed", persistence_error, snapshot)
         if session is not None:
-            _safe_rollback(session)
-        logger.warning(
-            "exception_diagnostics.persist_failed diagnostic_id=%s event=%s "
-            "error_type=%s",
-            snapshot.diagnostic_id,
-            snapshot.event,
-            type(persistence_error).__name__,
-        )
+            try:
+                session.rollback()
+            except Exception as rollback_error:  # noqa: BLE001 - diagnostic failure isolation
+                _storage_failure("exception_diagnostics.rollback_failed", rollback_error, snapshot)
         return False
     finally:
-        if session is not None:
-            _safe_close(session)
+        try:
+            if session is not None:
+                try:
+                    session.close()
+                except Exception as close_error:  # noqa: BLE001 - diagnostic failure isolation
+                    _storage_failure("exception_diagnostics.close_failed", close_error, snapshot)
+        finally:
+            _persisting.reset(token)
 
 
 def record_exception(
@@ -690,8 +1069,8 @@ def install_exception_hooks() -> None:
                 exc,
                 context={"stage": "process"},
             )
-        except Exception:  # noqa: BLE001, S110 - hooks must not mask failures
-            pass
+        except Exception as hook_error:  # noqa: BLE001 - independent output
+            emergency_diagnostic("exception_diagnostics.hook_failed", hook_error, diagnostic_id=f"diag_{uuid4().hex}")
 
     sys.excepthook = _sys_hook
 
@@ -709,8 +1088,8 @@ def install_exception_hooks() -> None:
                 args.exc_value,
                 context={"stage": "thread", "path": thread_name},
             )
-        except Exception:  # noqa: BLE001, S110 - hooks must not mask failures
-            pass
+        except Exception as hook_error:  # noqa: BLE001 - independent output
+            emergency_diagnostic("exception_diagnostics.hook_failed", hook_error, diagnostic_id=f"diag_{uuid4().hex}")
 
     threading.excepthook = _thread_hook
 
@@ -734,8 +1113,8 @@ def install_loop_exception_handler(loop: Any) -> None:
                     error,
                     context={"stage": "event_loop"},
                 )
-            except Exception:  # noqa: BLE001, S110 - hooks must not mask failures
-                pass
+            except Exception as hook_error:  # noqa: BLE001 - independent output
+                emergency_diagnostic("exception_diagnostics.hook_failed", hook_error, diagnostic_id=f"diag_{uuid4().hex}")
             return
         if previous is not None:
             previous(active_loop, context)
@@ -749,6 +1128,9 @@ __all__ = [
     "DiagnosticSnapshot",
     "build_exception_metadata",
     "configure_exception_storage",
+    "deferred_exception_persistence",
+    "emergency_diagnostic",
+    "exception_diagnostic_boundary",
     "format_exception_diagnostics",
     "install_exception_hooks",
     "install_loop_exception_handler",

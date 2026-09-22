@@ -24,7 +24,7 @@ from app.db.maintenance import (
     DATABASE_MAINTENANCE_SETTING_KEY,
 )
 from app.main import create_app
-from app.models.settings import SystemSetting
+from app.models.settings import SystemEvent, SystemSetting
 
 
 @dataclass
@@ -59,6 +59,7 @@ def maintenance_app(
     )
     assert isinstance(engine.pool, QueuePool)
     SystemSetting.__table__.create(engine)
+    SystemEvent.__table__.create(engine)
     settings = Settings(
         storage_root=str(tmp_path / "storage"),
         download_queue_enabled=False,
@@ -189,6 +190,7 @@ def test_maintenance_blocks_writes_and_preserves_safe_methods(
     maintenance_app: MaintenanceApp, method: str, locale: str
 ) -> None:
     harness = maintenance_app
+    diagnostic_ids: list[str] = []
     with Session(harness.engine) as db, db.begin():
         db.add(
             SystemSetting(
@@ -211,6 +213,7 @@ def test_maintenance_blocks_writes_and_preserves_safe_methods(
                 },
             }
             assert response.headers["Vary"] == "Cookie"
+            diagnostic_ids.append(response.headers["X-Error-Id"])
             assert harness.reached == []
             assert harness.pool.checkedout() == 0
             for safe_method in ("GET", "HEAD", "OPTIONS"):
@@ -220,11 +223,19 @@ def test_maintenance_blocks_writes_and_preserves_safe_methods(
             assert harness.reached == ["GET", "HEAD", "OPTIONS"]
 
     asyncio.run(exercise())
-    assert [phase for phase, _, _ in harness.lifecycle] == ["create", "query", "close"]
-    assert len({session_id for _, session_id, _ in harness.lifecycle}) == 1
-    thread_ids = {thread_id for _, _, thread_id in harness.lifecycle}
-    assert len(thread_ids) == 1
-    assert get_ident() not in thread_ids
+    # The maintenance read closes before the independent failure-event write.
+    assert [phase for phase, _, _ in harness.lifecycle] == [
+        "create", "query", "close", "create", "query", "close"
+    ]
+    for lifecycle in (harness.lifecycle[:3], harness.lifecycle[3:]):
+        assert len({session_id for _, session_id, _ in lifecycle}) == 1
+        thread_ids = {thread_id for _, _, thread_id in lifecycle}
+        assert len(thread_ids) == 1
+        assert get_ident() not in thread_ids
+    with Session(harness.engine) as db:
+        failure = db.get(SystemEvent, diagnostic_ids[0])
+        assert failure is not None
+        assert failure.metadata_json["outcome"] == "DATABASE_MAINTENANCE"
 
 
 def test_maintenance_query_error_closes_session_and_does_not_allow_write(

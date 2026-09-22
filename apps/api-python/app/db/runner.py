@@ -16,6 +16,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
 
 from app.core.config import Settings
+from app.core.exception_diagnostics import record_exception
 
 LOGGER = logging.getLogger(__name__)
 SCHEMA_LOCK_RETRY_SECONDS = 60.0
@@ -124,12 +125,9 @@ def _is_ancestor_revision(engine: Engine, current_revision: str, head: str) -> b
             revision.revision == current_revision
             for revision in script.iterate_revisions(head, "base")
         )
-    except ResolutionError:
-        LOGGER.warning(
-            "database revision lookup failed",
-            extra={"current_revision": current_revision, "head": head},
-            exc_info=True,
-        )
+    except ResolutionError as error:
+        record_exception(LOGGER, "database.revision_lookup_failed", error,
+                         context={"step": "resolve_migration_revision"})
         return False
 
 
@@ -143,6 +141,7 @@ def apply_schema(engine: Engine, settings: Settings | None = None) -> None:
             _apply_schema_once(engine, settings)
             return
         except OperationalError as exc:
+            record_exception(LOGGER, "database.schema_attempt_failed", exc, context={"step": "initialize_schema"})
             if "locked" not in str(exc).lower() or time.monotonic() >= deadline:
                 raise
             remaining = max(0.0, deadline - time.monotonic())

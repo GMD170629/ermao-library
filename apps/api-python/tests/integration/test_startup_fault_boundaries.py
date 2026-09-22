@@ -155,3 +155,26 @@ def test_core_schema_failure_still_refuses_startup(monkeypatch, test_settings):
         TestClient(main.create_app(test_settings)),
     ):
         pytest.fail("must not be ready")
+
+
+def test_lifespan_releases_its_diagnostic_factory(monkeypatch, db_session, test_settings):
+    from app.core import exception_diagnostics
+
+    monkeypatch.setattr(main, "start_download_queue_worker", Mock(return_value=None))
+    monkeypatch.setattr(main, "start_kindle_send_queue_worker", Mock(return_value=None))
+    monkeypatch.setattr(main, "SystemEventMaintenanceWorker", Mock())
+    factory = lambda: db_session
+    app = main.create_app(test_settings, session_factory=factory)
+    with TestClient(app):
+        assert exception_diagnostics._session_factory is not None
+    assert exception_diagnostics._session_factory is None
+
+
+def test_failed_schema_startup_releases_diagnostic_factory(monkeypatch, test_settings):
+    from app.core import exception_diagnostics
+
+    monkeypatch.setattr(main, "verify_current_schema", Mock(side_effect=RuntimeError("schema unavailable")))
+    app = main.create_app(test_settings)
+    with pytest.raises(RuntimeError, match="schema unavailable"), TestClient(app):
+        pass
+    assert exception_diagnostics._session_factory is None

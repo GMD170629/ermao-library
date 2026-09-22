@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from io import FileIO, UnsupportedOperation
 from typing import TYPE_CHECKING
+
+from app.core.exception_diagnostics import record_exception
 
 if TYPE_CHECKING:
     from _typeshed import WriteableBuffer
@@ -83,7 +86,12 @@ def read_optional_file(path: Path, limit: int) -> bytes | None:
                 return None
             content = source.read(limit + 1)
             return content if len(content) <= limit else None
-    except OSError:
+    except FileNotFoundError:
+        # diagnostics-control-flow: An optional sidecar is permitted to be absent; no read operation is required.
+        return None
+    except OSError as error:
+        record_exception(logging.getLogger(__name__), "infrastructure.bounded_inspection.read_optional_file.failed", error,
+                         context={"step": "read_optional_file"})
         return None
 
 

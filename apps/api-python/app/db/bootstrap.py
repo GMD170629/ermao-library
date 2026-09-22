@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
+from app.db.diagnostic_session import DiagnosticSession
 from app.db.runner import _apply_schema_once, apply_schema
 from app.db.seed import seed_baseline_data
 
@@ -22,7 +22,7 @@ def bootstrap_database(engine: Engine, settings: Settings) -> None:
 
     settings.database_path.parent.mkdir(parents=True, exist_ok=True)
     apply_schema(engine, settings)
-    with Session(engine) as db:
+    with DiagnosticSession(engine) as db:
         seed_baseline_data(db)
 
 

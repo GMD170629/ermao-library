@@ -2,15 +2,22 @@
 
 import ctypes
 import errno
+import logging
 import os
 import stat
 import sys
-from contextlib import suppress
 from dataclasses import dataclass
 
 from app.contracts.file_operation import FileOperationError
+from app.core.exception_diagnostics import record_exception
 
 MAX_ATTRIBUTE_BYTES = 2 * 1024 * 1024
+
+
+def _system_call_failure(number: int) -> OSError:
+    # A failing libc operation without errno must never be reported as Success.
+    return OSError(number, os.strerror(number)) if number else OSError("System call failed; errno not provided")
+
 
 
 @dataclass(frozen=True)
@@ -51,11 +58,15 @@ def _get_attribute(descriptor: int, name: str) -> bytes:
         raise FileOperationError("COPY_ATTRIBUTES_UNSUPPORTED")
     size = getter(*arguments, None, 0, *suffix)
     if size < 0:
-        raise FileOperationError("COPY_ATTRIBUTES_UNAVAILABLE")
+        number = ctypes.get_errno()
+        raise FileOperationError("COPY_ATTRIBUTES_UNAVAILABLE") from _system_call_failure(number)
     if size > MAX_ATTRIBUTE_BYTES:
         raise FileOperationError("COPY_ATTRIBUTE_LIMIT")
     buffer = ctypes.create_string_buffer(size)
     observed = getter(*arguments, buffer, size, *suffix)
+    if observed < 0:
+        number = ctypes.get_errno()
+        raise FileOperationError("COPY_ATTRIBUTES_UNAVAILABLE") from _system_call_failure(number)
     if observed != size:
         raise FileOperationError("SOURCE_ATTRIBUTES_CHANGED")
     return buffer.raw
@@ -78,11 +89,16 @@ def _list_attributes(descriptor: int) -> tuple[str, ...]:
         suffix = []
     size = function(descriptor, None, 0, *suffix)
     if size < 0:
-        raise FileOperationError("COPY_ATTRIBUTES_UNAVAILABLE")
+        number = ctypes.get_errno()
+        raise FileOperationError("COPY_ATTRIBUTES_UNAVAILABLE") from _system_call_failure(number)
     if size > MAX_ATTRIBUTE_BYTES:
         raise FileOperationError("COPY_ATTRIBUTE_LIMIT")
     buffer = ctypes.create_string_buffer(size)
-    if function(descriptor, buffer, size, *suffix) != size:
+    observed = function(descriptor, buffer, size, *suffix)
+    if observed < 0:
+        number = ctypes.get_errno()
+        raise FileOperationError("COPY_ATTRIBUTES_UNAVAILABLE") from _system_call_failure(number)
+    if observed != size:
         raise FileOperationError("SOURCE_ATTRIBUTES_CHANGED")
     return tuple(sorted(os.fsdecode(name) for name in buffer.raw.split(b"\0") if name))
 
@@ -122,7 +138,8 @@ def _set_attribute(descriptor: int, name: str, value: bytes | None) -> None:
             ]
             result = setter(descriptor, os.fsencode(name), buffer, len(value), 0)
     if result != 0:
-        raise FileOperationError("COPY_ATTRIBUTES_UNSUPPORTED")
+        number = ctypes.get_errno()
+        raise FileOperationError("COPY_ATTRIBUTES_UNSUPPORTED") from _system_call_failure(number)
 
 
 def _darwin_acl(descriptor: int, replacement: bytes | None = None) -> bytes:
@@ -143,12 +160,16 @@ def _darwin_acl(descriptor: int, replacement: bytes | None = None) -> bytes:
         encoded = ctypes.create_string_buffer(replacement)
         acl = library.acl_copy_int(encoded)
         if not acl:
-            raise FileOperationError("COPY_ACL_UNAVAILABLE")
+            number = ctypes.get_errno()
+            raise FileOperationError("COPY_ACL_UNAVAILABLE") from _system_call_failure(number)
         try:
             if library.acl_set_fd_np(descriptor, acl, 0x100) != 0:
-                raise FileOperationError("COPY_ACL_UNSUPPORTED")
+                number = ctypes.get_errno()
+                raise FileOperationError("COPY_ACL_UNSUPPORTED") from _system_call_failure(number)
         finally:
-            library.acl_free(acl)
+            if library.acl_free(acl) != 0:
+                number = ctypes.get_errno()
+                record_exception(logging.getLogger(__name__), "file_attributes.acl_free_failed", _system_call_failure(number), context={"step": "free_acl"})
     acl = library.acl_get_fd_np(descriptor, 0x100)
     if not acl and ctypes.get_errno() == errno.ENOENT:
         # Darwin reports absent extended ACLs as ENOENT for an otherwise valid FD.
@@ -157,42 +178,59 @@ def _darwin_acl(descriptor: int, replacement: bytes | None = None) -> bytes:
         library.acl_init.restype = ctypes.c_void_p
         acl = library.acl_init(0)
     if not acl:
-        raise FileOperationError("COPY_ACL_UNAVAILABLE")
+        number = ctypes.get_errno()
+        raise FileOperationError("COPY_ACL_UNAVAILABLE") from _system_call_failure(number)
     try:
         size = library.acl_size(acl)
-        if not 0 <= size <= MAX_ATTRIBUTE_BYTES:
+        if size < 0:
+            number = ctypes.get_errno()
+            raise FileOperationError("COPY_ACL_UNAVAILABLE") from _system_call_failure(number)
+        if size > MAX_ATTRIBUTE_BYTES:
             raise FileOperationError("COPY_ATTRIBUTE_LIMIT")
         buffer = ctypes.create_string_buffer(size)
         count = library.acl_copy_ext(buffer, acl, size)
-        if count < 0 or count > size:
-            raise FileOperationError("COPY_ACL_UNAVAILABLE")
+        if count < 0:
+            number = ctypes.get_errno()
+            raise FileOperationError("COPY_ACL_UNAVAILABLE") from _system_call_failure(number)
+        if count > size:
+            raise FileOperationError("COPY_ACL_UNAVAILABLE") from ValueError(f"acl_copy_ext returned {count} bytes for {size}-byte buffer")
         return buffer.raw[:count]
     finally:
-        library.acl_free(acl)
+        if library.acl_free(acl) != 0:
+            number = ctypes.get_errno()
+            record_exception(logging.getLogger(__name__), "file_attributes.acl_free_failed", _system_call_failure(number), context={"step": "free_acl"})
 
 
 def read_copy_attributes(descriptor: int) -> CopiedFileAttributes | None:
     # Descriptor identity remains mandatory at the publication/copy boundary.
     try:
         value = os.fstat(descriptor)
-    except OSError:
+    except OSError as error:
+        record_exception(logging.getLogger(__name__), "infrastructure.copied_file_attributes.read_copy_attributes.failed", error,
+                         context={"step": "read_copy_attributes"})
         return None
     attributes: list[tuple[str, bytes]] = []
     total = 0
     names: tuple[str, ...] = ()
-    with suppress(OSError, FileOperationError):
+    try:
         names = _list_attributes(descriptor)
+    except (OSError, FileOperationError) as error:
+        record_exception(logging.getLogger(__name__), "file_attributes.list_xattrs_failed", error, context={"step": "list_xattrs"})
     for name in names:
         # A protected or disappearing attribute must not prevent other copies.
-        with suppress(OSError, FileOperationError):
+        try:
             data = _get_attribute(descriptor, name)
             if total + len(data) <= MAX_ATTRIBUTE_BYTES:
                 total += len(data)
                 attributes.append((name, data))
+        except (OSError, FileOperationError) as error:
+            record_exception(logging.getLogger(__name__), "file_attributes.get_xattr_failed", error, context={"step": "get_xattr"})
     acl = None
     if sys.platform == "darwin":
-        with suppress(OSError, FileOperationError):
+        try:
             acl = _darwin_acl(descriptor)
+        except (OSError, FileOperationError) as error:
+            record_exception(logging.getLogger(__name__), "file_attributes.read_acl_failed", error, context={"step": "read_acl"})
     return CopiedFileAttributes(
         value.st_uid,
         value.st_gid,
@@ -215,25 +253,39 @@ def apply_copy_attributes(
     """
     if expected is None:
         return
-    with suppress(OSError):
+    try:
         observed = os.fstat(descriptor)
         if (observed.st_uid, observed.st_gid) != (expected.uid, expected.gid):
             os.fchown(descriptor, expected.uid, expected.gid)
-    with suppress(OSError):
+    except (OSError) as error:
+        record_exception(logging.getLogger(__name__), "file_attributes.set_owner_failed", error, context={"step": "set_owner"})
+    try:
         os.fchmod(descriptor, expected.mode)
+    except (OSError) as error:
+        record_exception(logging.getLogger(__name__), "file_attributes.set_mode_failed", error, context={"step": "set_mode"})
     for name, value in expected.attributes:
-        with suppress(OSError, FileOperationError):
+        try:
             _set_attribute(descriptor, name, value)
+        except (OSError, FileOperationError) as error:
+            record_exception(logging.getLogger(__name__), "file_attributes.set_xattr_failed", error, context={"step": "set_xattr"})
     if expected.acl is not None:
-        with suppress(OSError, FileOperationError):
+        try:
             _darwin_acl(descriptor, expected.acl)
+        except (OSError, FileOperationError) as error:
+            record_exception(logging.getLogger(__name__), "file_attributes.set_acl_failed", error, context={"step": "set_acl"})
     # Set time before flags, which can make a file immutable on Darwin.
-    with suppress(OSError):
+    try:
         observed = os.fstat(descriptor)
         os.utime(descriptor, ns=(observed.st_atime_ns, expected.mtime_ns))
+    except (OSError) as error:
+        record_exception(logging.getLogger(__name__), "file_attributes.set_timestamps_failed", error, context={"step": "set_timestamps"})
     if sys.platform == "darwin":
-        with suppress(OSError):
+        try:
             library = ctypes.CDLL(None, use_errno=True)
             library.fchflags.argtypes = [ctypes.c_int, ctypes.c_uint]
             library.fchflags.restype = ctypes.c_int
-            library.fchflags(descriptor, expected.flags)
+            if library.fchflags(descriptor, expected.flags) != 0:
+                number = ctypes.get_errno()
+                raise _system_call_failure(number)
+        except (OSError) as error:
+            record_exception(logging.getLogger(__name__), "file_attributes.set_flags_failed", error, context={"step": "set_flags"})

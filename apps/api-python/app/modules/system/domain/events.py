@@ -46,11 +46,12 @@ def clamp_max_event_bytes(value: object) -> int:
 def parse_max_event_bytes(raw: object | None) -> int:
     if raw is None:
         return DEFAULT_MAX_EVENT_BYTES
-    try:
-        parsed = json.loads(str(raw)) if not isinstance(raw, (int, float)) else raw
-        return clamp_max_event_bytes(parsed)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return DEFAULT_MAX_EVENT_BYTES
+    parsed = json.loads(str(raw)) if not isinstance(raw, (int, float)) else raw
+    if not isinstance(parsed, (str, int, float)):
+        raise TypeError(
+            f"Stored log capacity must be numeric, received {type(parsed).__name__}"
+        )
+    return clamp_max_event_bytes(parsed)
 
 
 def normalize_event_level(level: str) -> str:
@@ -79,7 +80,22 @@ def _lift_diagnostic_root(
     if not isinstance(diagnostics, dict):
         return
     root: dict[str, Any] = {"truncated": True}
-    for key in ("id", "exceptionType", "location", "stage"):
+    for key in (
+        "id",
+        "exceptionType",
+        "location",
+        "stage",
+        "directException",
+        "directCause",
+        "rootCause",
+        "causeStatus",
+        "causeProvided",
+        "chainTruncated",
+        "chainLength",
+        "contexts",
+        "contextProvided",
+        "contextsTruncated",
+    ):
         value = diagnostics.get(key)
         if value is not None:
             root[key] = value
@@ -114,6 +130,26 @@ def prepare_event_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
         "preview": serialized[:head],
         "tail": serialized[-tail:],
     }
+    for key in (
+        "requestId",
+        "taskId",
+        "operationId",
+        "planId",
+        "uploadId",
+        "nodeId",
+        "parentDiagnosticId",
+        "targetIndex",
+        "targetOrdinal",
+        "libraryId",
+        "resourceId",
+        "sourceNodeId",
+        "taskKind",
+        "stage",
+        "step",
+        "attempt",
+    ):
+        if key in payload:
+            truncated[key] = payload[key]
     _lift_diagnostic_root(payload, truncated)
     return truncated
 

@@ -10,11 +10,13 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
+from starlette.exceptions import HTTPException
 from starlette.routing import Route
 from starlette.types import ExceptionHandler
 
 from app.api.diagnostics_middleware import DiagnosticBoundaryMiddleware
 from app.api.error_handlers import (
+    diagnostic_http_exception_handler,
     request_validation_error_handler,
     typed_http_error_handler,
 )
@@ -33,11 +35,14 @@ from app.core.authorization import can_manage_system
 from app.core.config import Settings, get_settings
 from app.core.exception_diagnostics import (
     configure_exception_storage,
+    emergency_diagnostic,
     install_exception_hooks,
     install_loop_exception_handler,
     record_exception,
+    reset_exception_storage,
 )
 from app.core.logging_config import configure_logging
+from app.db.diagnostic_session import DiagnosticSession
 from app.db.maintenance import database_maintenance_is_active
 from app.db.session import (
     BackgroundSessionLocal,
@@ -124,6 +129,7 @@ def create_app(
         injected_session = factory()
         try:
             runtime_factory = sessionmaker(
+                class_=DiagnosticSession,
                 bind=injected_session.get_bind(),
                 autoflush=False,
                 autocommit=False,
@@ -143,112 +149,124 @@ def create_app(
     async def lifespan(app: FastAPI):
         configure_logging()
         configure_exception_storage(background_runtime_factory)
-        install_exception_hooks()
-        if session_factory is None:
-            verify_current_schema(engine)
+        try:
+            install_exception_hooks()
+            if session_factory is None:
+                verify_current_schema(engine)
 
-        def report(stage: str, error: Exception) -> None:
+            def report(stage: str, error: Exception) -> None:
+                try:
+                    record_exception(
+                        LOGGER,
+                        "api.background_unavailable",
+                        error,
+                        context={"stage": stage, "outcome": "paused"},
+                        source="system",
+                        action="api.background_unavailable",
+                    )
+                except Exception as diagnostic_error:  # noqa: BLE001 - safe fallback.
+                    from uuid import uuid4
+
+                    diagnostic_id = f"diag_{uuid4().hex}"
+                    emergency_diagnostic(
+                        f"api.background_unavailable.{stage}", error,
+                        diagnostic_id=diagnostic_id,
+                    )
+                    emergency_diagnostic(
+                        "api.diagnostic_record_failed", diagnostic_error,
+                        diagnostic_id=f"diag_{uuid4().hex}", parent_diagnostic_id=diagnostic_id,
+                    )
+
+            def release(stage: str, action: Callable[[], object]) -> None:
+                try:
+                    action()
+                except Exception as error:  # noqa: BLE001 - continue releasing other owners.
+                    report(stage, error)
+
+            download_queue_worker = None
+            kindle_send_queue_worker = None
+            log_maintenance_worker = None
             try:
-                record_exception(
-                    LOGGER,
-                    "api.background_unavailable",
-                    error,
-                    context={"stage": stage, "outcome": "paused"},
-                    source="system",
-                    action="api.background_unavailable",
+                download_queue_worker = start_download_queue_worker(
+                    background_runtime_factory,
+                    settings,
+                    heartbeat_runtime_factory,
                 )
-            except Exception as diagnostic_error:  # noqa: BLE001 - safe fallback.
-                LOGGER.error(
-                    "api.background_unavailable stage=%s type=%s diagnostic_type=%s",
-                    stage,
-                    type(error).__name__,
-                    type(diagnostic_error).__name__,
-                )
-
-        def release(stage: str, action: Callable[[], object]) -> None:
+            except Exception as error:  # noqa: BLE001 - optional component boundary.
+                report("download_start", error)
             try:
-                action()
-            except Exception as error:  # noqa: BLE001 - continue releasing other owners.
-                report(stage, error)
+                kindle_send_queue_worker = start_kindle_send_queue_worker(
+                    background_runtime_factory,
+                    settings,
+                    heartbeat_runtime_factory,
+                )
+            except Exception as error:  # noqa: BLE001 - optional component boundary.
+                report("kindle_start", error)
+            try:
+                log_maintenance_worker = SystemEventMaintenanceWorker(
+                    background_runtime_factory,
+                    settings=settings,
+                )
+                log_maintenance_worker.start()
+            except Exception as error:  # noqa: BLE001 - optional component boundary.
+                report("maintenance_start", error)
+                if log_maintenance_worker is not None:
+                    release("maintenance_stop", log_maintenance_worker.stop)
+            app.state.download_queue_worker = download_queue_worker
+            app.state.kindle_send_queue_worker = kindle_send_queue_worker
+            app.state.update_runtime = UpdateRuntime(settings)
 
-        download_queue_worker = None
-        kindle_send_queue_worker = None
-        log_maintenance_worker = None
-        try:
-            download_queue_worker = start_download_queue_worker(
-                background_runtime_factory,
-                settings,
-                heartbeat_runtime_factory,
-            )
-        except Exception as error:  # noqa: BLE001 - optional component boundary.
-            report("download_start", error)
-        try:
-            kindle_send_queue_worker = start_kindle_send_queue_worker(
-                background_runtime_factory,
-                settings,
-                heartbeat_runtime_factory,
-            )
-        except Exception as error:  # noqa: BLE001 - optional component boundary.
-            report("kindle_start", error)
-        try:
-            log_maintenance_worker = SystemEventMaintenanceWorker(
-                background_runtime_factory,
-                settings=settings,
-            )
-            log_maintenance_worker.start()
-        except Exception as error:  # noqa: BLE001 - optional component boundary.
-            report("maintenance_start", error)
-            if log_maintenance_worker is not None:
-                release("maintenance_stop", log_maintenance_worker.stop)
-        app.state.download_queue_worker = download_queue_worker
-        app.state.kindle_send_queue_worker = kindle_send_queue_worker
-        app.state.update_runtime = UpdateRuntime(settings)
+            def stop_background() -> None:
+                for worker in (
+                    download_queue_worker,
+                    kindle_send_queue_worker,
+                    log_maintenance_worker,
+                ):
+                    if worker is not None:
+                        release("request_stop", worker.request_stop)
 
-        def stop_background() -> None:
-            for worker in (
-                download_queue_worker,
-                kindle_send_queue_worker,
-                log_maintenance_worker,
-            ):
-                if worker is not None:
-                    release("request_stop", worker.request_stop)
-
-        loop = asyncio.get_running_loop()
-        install_loop_exception_handler(loop)
-        signal_installed = (
-            hasattr(signal, "SIGUSR1")
-            and threading.current_thread() is threading.main_thread()
-        )
-        if signal_installed:
-            loop.add_signal_handler(signal.SIGUSR1, stop_background)
-        try:
-            yield
-        finally:
-            stop_background()
+            loop = asyncio.get_running_loop()
+            install_loop_exception_handler(loop)
+            signal_installed = (
+                hasattr(signal, "SIGUSR1")
+                and threading.current_thread() is threading.main_thread()
+            )
             if signal_installed:
-                loop.remove_signal_handler(signal.SIGUSR1)
-            await run_in_threadpool(
-                release, "update_stop", app.state.update_runtime.close
-            )
-            if download_queue_worker is not None:
+                loop.add_signal_handler(signal.SIGUSR1, stop_background)
+            try:
+                yield
+            finally:
+                stop_background()
+                if signal_installed:
+                    loop.remove_signal_handler(signal.SIGUSR1)
                 await run_in_threadpool(
-                    release, "download_stop", download_queue_worker.stop
+                    release, "update_stop", app.state.update_runtime.close
                 )
-            if kindle_send_queue_worker is not None:
-                await run_in_threadpool(
-                    release, "kindle_stop", kindle_send_queue_worker.stop
-                )
-            if log_maintenance_worker is not None:
-                await run_in_threadpool(
-                    release, "maintenance_stop", log_maintenance_worker.stop
-                )
-            release("navigation_stop", publication_navigation_runtime.close)
+                if download_queue_worker is not None:
+                    await run_in_threadpool(
+                        release, "download_stop", download_queue_worker.stop
+                    )
+                if kindle_send_queue_worker is not None:
+                    await run_in_threadpool(
+                        release, "kindle_stop", kindle_send_queue_worker.stop
+                    )
+                if log_maintenance_worker is not None:
+                    await run_in_threadpool(
+                        release, "maintenance_stop", log_maintenance_worker.stop
+                    )
+                release("navigation_stop", publication_navigation_runtime.close)
+        finally:
+            reset_exception_storage(expected_factory=background_runtime_factory)
 
     app = FastAPI(
         title=settings.app_name, version=settings.app_version, lifespan=lifespan
     )
     # Starlette types handlers against ``Exception`` while dispatching the
     # registered exception class guarantees the narrower concrete type.
+    app.add_exception_handler(
+        HTTPException,
+        cast(ExceptionHandler, diagnostic_http_exception_handler),
+    )
     app.add_exception_handler(
         HttpContractError,
         cast(ExceptionHandler, typed_http_error_handler),

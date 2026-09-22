@@ -29,9 +29,17 @@ def exclusive_rename(
         function = getattr(library, "renameat2", None)
         flag = 1
     else:
-        raise FileOperationError("EXCLUSIVE_RENAME_UNSUPPORTED")
+        raise FileOperationError(
+            "EXCLUSIVE_RENAME_UNSUPPORTED"
+        ) from NotImplementedError(
+            f"Exclusive rename is unavailable on platform {sys.platform}"
+        )
     if function is None:
-        raise FileOperationError("EXCLUSIVE_RENAME_UNSUPPORTED")
+        raise FileOperationError(
+            "EXCLUSIVE_RENAME_UNSUPPORTED"
+        ) from NotImplementedError(
+            "The platform C library does not export the exclusive rename function"
+        )
     function.argtypes = [
         ctypes.c_int,
         ctypes.c_char_p,
@@ -51,10 +59,9 @@ def exclusive_rename(
         != 0
     ):
         code = ctypes.get_errno()
+        failure = OSError(code, os.strerror(code))
         if code == errno.EEXIST:
-            raise FileOperationError("DESTINATION_EXISTS")
+            raise FileOperationError("DESTINATION_EXISTS") from failure
         if code in (errno.ENOSYS, errno.ENOTSUP, errno.EINVAL):
-            raise FileOperationError("EXCLUSIVE_RENAME_UNSUPPORTED")
-        raise FileOperationError("FILE_PUBLISH_FAILED") from OSError(
-            code, os.strerror(code)
-        )
+            raise FileOperationError("EXCLUSIVE_RENAME_UNSUPPORTED") from failure
+        raise FileOperationError("FILE_PUBLISH_FAILED") from failure

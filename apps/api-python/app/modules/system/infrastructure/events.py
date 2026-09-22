@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -13,10 +15,12 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
+from app.core.exception_diagnostics import record_exception
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.models.common import db_timestamp
 from app.models.settings import SystemEvent
 from app.modules.system.domain.events import (
+    DEFAULT_MAX_EVENT_BYTES,
     LAST_PRUNED_AT_SETTING,
     LOG_MAX_BYTES_SETTING,
     PROTECTED_ERROR_ACTIONS,
@@ -88,9 +92,21 @@ def system_event_size_bytes(db: Session) -> int:
 
 
 def configured_max_event_bytes(db: Session) -> int:
-    return parse_max_event_bytes(
-        setting_store.get_setting_raw(db, LOG_MAX_BYTES_SETTING)
-    )
+    try:
+        return parse_max_event_bytes(
+            setting_store.get_setting_raw(db, LOG_MAX_BYTES_SETTING)
+        )
+    except (TypeError, ValueError) as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "system.log_capacity_parse_failed",
+            error,
+            context={
+                "stage": "parse_log_capacity",
+                "resource_id": LOG_MAX_BYTES_SETTING,
+            },
+        )
+        return DEFAULT_MAX_EVENT_BYTES
 
 
 def system_event_storage_view(db: Session) -> dict[str, Any]:
@@ -292,6 +308,29 @@ def record_system_event(
     return prepared.id
 
 
+def normalize_stored_event_metadata(value: object, *, event_id: str) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    try:
+        parsed = json.loads(str(value))
+        if not isinstance(parsed, dict):
+            raise TypeError("SystemEvent metadata must be a JSON object")
+        return parsed
+    except (TypeError, ValueError) as error:
+        diagnostic_id = record_exception(
+            logging.getLogger(__name__),
+            "system.event_metadata_parse_failed",
+            error,
+            context={"stage": "parse_event_metadata", "resource_id": event_id},
+        )
+        return {
+            "diagnosticStatus": "HISTORICAL_INFORMATION_UNAVAILABLE",
+            "metadataReadDiagnosticId": diagnostic_id,
+        }
+
+
 def get_system_event(db: Session, event_id: str) -> dict[str, Any] | None:
     row = db.get(SystemEvent, event_id)
     if row is None:
@@ -306,7 +345,7 @@ def get_system_event(db: Session, event_id: str) -> dict[str, Any] | None:
         "targetType": row.target_type,
         "targetId": row.target_id,
         "message": row.message,
-        "metadata": row.metadata_json,
+        "metadata": normalize_stored_event_metadata(row.metadata_json, event_id=row.id),
         "createdAt": row.created_at,
     }
 
@@ -331,6 +370,33 @@ def list_event_level_facets(db: Session) -> list[dict[str, Any]]:
             .order_by(SystemEvent.level.asc())
         ).all()
     ]
+
+
+def system_event_search_filter(search: str) -> Any:
+    """Search facts and explicit correlation IDs, never arbitrary stored payloads."""
+    term = f"%{search.strip()}%"
+    expression = (
+        SystemEvent.id.like(term)
+        | SystemEvent.message.like(term)
+        | SystemEvent.action.like(term)
+        | func.coalesce(SystemEvent.target_id, "").like(term)
+    )
+    for key in (
+        "requestId",
+        "taskId",
+        "operationId",
+        "planId",
+        "uploadId",
+        "nodeId",
+        "parentDiagnosticId",
+    ):
+        expression |= func.coalesce(
+            SystemEvent.metadata_json[key].as_string(), ""
+        ).like(term)
+    expression |= func.coalesce(
+        SystemEvent.metadata_json["diagnostics"]["id"].as_string(), ""
+    ).like(term)
+    return expression
 
 
 def list_system_events_page(
@@ -372,12 +438,7 @@ def list_system_events_page(
     if target_type:
         filters.append(SystemEvent.target_type == target_type)
     if search:
-        term = f"%{search.strip()}%"
-        filters.append(
-            SystemEvent.message.like(term)
-            | SystemEvent.action.like(term)
-            | func.coalesce(SystemEvent.target_id, "").like(term)
-        )
+        filters.append(system_event_search_filter(search))
     created_at_ms = _event_created_at_ms_expression()
     if date_from_ms is not None:
         filters.append(created_at_ms >= date_from_ms)
@@ -413,7 +474,9 @@ def list_system_events_page(
                 "targetType": row.target_type,
                 "targetId": row.target_id,
                 "message": row.message,
-                "metadata": row.metadata_json,
+                "metadata": normalize_stored_event_metadata(
+                    row.metadata_json, event_id=row.id
+                ),
                 "createdAt": row.created_at,
             }
             for row in rows

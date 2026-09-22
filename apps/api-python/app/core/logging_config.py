@@ -11,9 +11,14 @@ from __future__ import annotations
 
 import logging
 import sys
-import traceback
+from types import MethodType
+from uuid import uuid4
 
-from app.core.exception_diagnostics import sanitize_diagnostic_text
+from app.core.exception_diagnostics import (
+    emergency_diagnostic,
+    format_exception_diagnostics,
+    sanitize_diagnostic_text,
+)
 
 LOGGER_NAME = "ermao.diagnostics"
 
@@ -26,11 +31,21 @@ _CONTEXT_EXTRA_KEYS = (
     "library_id",
     "resource_id",
     "source_node_id",
+    "plan_id",
+    "upload_id",
+    "node_id",
+    "book_id",
+    "import_task_id",
     "stage",
     "outcome",
     "path",
     "method",
     "diagnostic_id",
+    "operation_id",
+    "target_ordinal",
+    "step",
+    "attempt",
+    "parent_diagnostic_id",
 )
 
 _configured = False
@@ -64,12 +79,21 @@ class SanitizingFilter(logging.Filter):
         return True
 
     def _sanitize_exception(self, record: logging.LogRecord) -> None:
-        if record.exc_info and not record.exc_text:
+        if record.exc_info:
+            original = record.exc_info[1]
             try:
-                text = "".join(traceback.format_exception(*record.exc_info))
-            except Exception:  # noqa: BLE001 - never break logging on diagnostics
-                text = ""
+                text = format_exception_diagnostics(original)["traceback"] if original else ""
+            except Exception as formatting_error:  # noqa: BLE001 - independent stderr
+                diagnostic_id = getattr(record, "diagnostic_id", None) or f"diag_{uuid4().hex}"
+                if original is not None:
+                    emergency_diagnostic("logging.original_exception", original,
+                                         diagnostic_id=diagnostic_id)
+                emergency_diagnostic("logging.exception_format_failed", formatting_error,
+                                     diagnostic_id=f"diag_{uuid4().hex}", parent_diagnostic_id=diagnostic_id)
+                text = "[exception formatting failed; see stderr diagnostic]"
             record.exc_text = sanitize_diagnostic_text(text)
+        elif record.exc_text:
+            record.exc_text = sanitize_diagnostic_text(record.exc_text)
 
     def _sanitize_args_in_place(self, record: logging.LogRecord) -> None:
         if isinstance(record.args, tuple):
@@ -82,8 +106,12 @@ class SanitizingFilter(logging.Filter):
     def _collapse_message(self, record: logging.LogRecord) -> None:
         try:
             message = record.getMessage()
-        except Exception:  # noqa: BLE001 - fall back without reprinting args
-            message = str(record.msg)
+        except Exception as error:  # noqa: BLE001 - retain formatter cause
+            emergency_diagnostic("logging.message_format_failed", error,
+                                 diagnostic_id=f"diag_{uuid4().hex}")
+            # Do not call the same broken __str__ a second time. A literal
+            # template is safe to retain; non-text objects retain their type.
+            message = record.msg if isinstance(record.msg, str) else f"[unformattable {type(record.msg).__name__}]"
         record.msg = sanitize_diagnostic_text(message)
         record.args = None
 
@@ -116,6 +144,28 @@ def install_uvicorn_sanitizer() -> None:
             logger.addFilter(SanitizingFilter(preserve_args=preserve_args))
 
 
+def _handler_failure(handler: logging.Handler, record: logging.LogRecord) -> None:
+    """Replace logging.handleError's raw traceback/argument dump safely."""
+    error = sys.exception()
+    if error is None:
+        error = RuntimeError("logging handler reported failure without an exception")
+    diagnostic_id = getattr(record, "diagnostic_id", None) or f"diag_{uuid4().hex}"
+    if record.exc_info and record.exc_info[1] is not None:
+        emergency_diagnostic("logging.original_exception", record.exc_info[1],
+                             diagnostic_id=diagnostic_id)
+    emergency_diagnostic("logging.handler_failed", error,
+                         diagnostic_id=f"diag_{uuid4().hex}", parent_diagnostic_id=diagnostic_id)
+    try:
+        sys.stderr.write(sanitize_diagnostic_text(record.getMessage()) + "\n")
+    except Exception as secondary:  # noqa: BLE001 - independent last output
+        emergency_diagnostic("logging.primary_fallback_failed", secondary,
+                             diagnostic_id=f"diag_{uuid4().hex}", parent_diagnostic_id=diagnostic_id)
+
+
+def install_handler_fallback(handler: logging.Handler) -> None:
+    handler.handleError = MethodType(_handler_failure, handler)
+
+
 def configure_logging(level: int = logging.INFO, *, force: bool = False) -> None:
     """Attach one context formatter to the root logger (idempotent).
 
@@ -138,6 +188,13 @@ def configure_logging(level: int = logging.INFO, *, force: bool = False) -> None
             ContextFormatter("%(asctime)s %(levelname)s %(name)s %(message)s")
         )
         root.addHandler(handler)
+    for handler in root.handlers:
+        if not any(isinstance(existing, SanitizingFilter) for existing in handler.filters):
+            handler.addFilter(SanitizingFilter())
+        install_handler_fallback(handler)
+    for name in UVICORN_SANITIZED_LOGGERS:
+        for handler in logging.getLogger(name).handlers:
+            install_handler_fallback(handler)
     if root.level == logging.NOTSET or root.level > level:
         root.setLevel(level)
 

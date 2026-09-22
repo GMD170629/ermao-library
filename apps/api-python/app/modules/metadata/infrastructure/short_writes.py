@@ -9,6 +9,7 @@ from pathlib import Path
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import Session
 
+from app.db.diagnostic_session import DiagnosticSession
 from app.db.sqlite import (
     SHORT_WRITE_LOCK_TIMEOUT_SECONDS,
     SQLITE_STATEMENT_TIMEOUT_SECONDS,
@@ -25,7 +26,7 @@ def metadata_short_write_session(source: Session) -> Iterator[Session]:
     source.close()
     writer_engine, owns_engine = _short_writer_engine(source_engine)
     try:
-        with Session(
+        with DiagnosticSession(
             bind=writer_engine,
             autoflush=False,
             expire_on_commit=False,

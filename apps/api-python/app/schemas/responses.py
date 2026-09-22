@@ -1,6 +1,10 @@
+import logging
+import sys
+
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
+from app.core.exception_diagnostics import record_exception
 from app.core.time import timestamp_ms_to_iso
 
 
@@ -29,6 +33,10 @@ def ok(
     )
 
 
+class HttpResponseFailure(Exception):
+    """An explicit HTTP rejection with its observed status and public rule."""
+
+
 def fail(
     message: str,
     status_code: int = 400,
@@ -44,7 +52,17 @@ def fail(
         error["params"] = params
     if details is not None:
         error["details"] = details
+    diagnostic_id = record_exception(
+        logging.getLogger("ermao.api_diagnostics"),
+        "api.request_rejected" if status_code < 500 else "api.request_failed",
+        sys.exception()
+        or HttpResponseFailure(f"HTTP {status_code}: {code or message}: {message}"),
+        level="warning" if status_code < 500 else "error",
+        context={"stage": "http_response", "outcome": code or str(status_code)},
+        source="system",
+    )
     return JSONResponse(
         jsonable_encoder({"ok": False, "error": _normalize_timestamps(error)}),
         status_code=status_code,
+        headers={"X-Error-Id": diagnostic_id},
     )
