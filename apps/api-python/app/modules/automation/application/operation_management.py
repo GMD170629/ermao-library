@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 from typing import Literal, Protocol
 
 from app.contracts.automation_upload import UploadError, UploadOutcome
+from app.contracts.diagnostics import FailureDiagnostics
 from app.modules.automation.application.deletions import deletion_result
 from app.modules.automation.application.file_moves import move_actor
 from app.modules.automation.application.grants import (
@@ -71,6 +72,7 @@ class ManageAutomationOperations:
     operations: AutomationOperations
     uow: GrantUnitOfWork
     clock_ms: Callable[[], int]
+    diagnostics: FailureDiagnostics
 
     def _access(self, user_id: str, reference: OperationReference) -> EffectiveAccess:
         actor = self.identities.current_actor(user_id)
@@ -235,7 +237,13 @@ class ManageAutomationOperations:
                 FileMoveError,
                 StandardMetadataError,
                 UploadError,
-            ):
+            ) as error:
+                diagnostic = self.diagnostics.prepare(
+                    error, event="automation.operation_unavailable",
+                    context={"operation_id": reference.operation_id, "step": "read_operation"},
+                )
+                self.uow.rollback()
+                self.diagnostics.persist(diagnostic)
                 continue  # Current scope loss hides the whole operation, not a partial count.
         return tuple(results)
 

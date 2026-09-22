@@ -11,6 +11,10 @@ from sqlalchemy.orm import Session
 
 from app.bootstrap.system import prepare_system_event, write_prepared_system_events
 from app.core.config import Settings, get_settings
+from app.core.exception_diagnostics import (
+    exception_diagnostic_boundary,
+    record_exception,
+)
 from app.models.common import db_timestamp
 from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.application.writeback import (
@@ -300,101 +304,118 @@ def process_next_metadata_writeback(
     if prefer_preparation:
         preparation = _claim_preparation_uow(db, owner_id)
         if preparation is not None:
-            targets = writeback_queue.prepare_targets_from_snapshot(preparation)
-            _finalize_preparation_uow(
-                db,
-                preparation,
-                owner_id,
-                targets,
-                settings.metadata_opf_queue_max_pending,
-            )
-            return True
+            with exception_diagnostic_boundary(
+                LOGGER, "metadata.writeback_preparation_failed",
+                context={"task_id": str(preparation["id"]), "operation_id": str(preparation["operationId"]), "step": "prepare_writeback_targets"},
+            ):
+                try:
+                    targets = writeback_queue.prepare_targets_from_snapshot(preparation)
+                    _finalize_preparation_uow(
+                        db,
+                        preparation,
+                        owner_id,
+                        targets,
+                        settings.metadata_opf_queue_max_pending,
+                    )
+                    return True
+                finally:
+                    db.close()
     target = _claim_target_uow(db, owner_id)
     if target is None and not prefer_preparation:
         preparation = _claim_preparation_uow(db, owner_id)
         if preparation is not None:
-            targets = writeback_queue.prepare_targets_from_snapshot(preparation)
-            _finalize_preparation_uow(
-                db,
-                preparation,
-                owner_id,
-                targets,
-                settings.metadata_opf_queue_max_pending,
-            )
-            return True
+            with exception_diagnostic_boundary(
+                LOGGER, "metadata.writeback_preparation_failed",
+                context={"task_id": str(preparation["id"]), "operation_id": str(preparation["operationId"]), "step": "prepare_writeback_targets"},
+            ):
+                try:
+                    targets = writeback_queue.prepare_targets_from_snapshot(preparation)
+                    _finalize_preparation_uow(
+                        db,
+                        preparation,
+                        owner_id,
+                        targets,
+                        settings.metadata_opf_queue_max_pending,
+                    )
+                    return True
+                finally:
+                    db.close()
     if target is None:
         return False
-    if "standard_operation_id" in target.get("payload", {}):
-        if standard_handler is None:
-            raise RuntimeError("STANDARD_WRITE_HANDLER_REQUIRED")
-        standard_handler(db, target, owner_id)
-        return True
-    target_id = str(target["id"])
-    prepared_path = str(target.get("preparedPath") or "")
-    try:
-        if target["status"] != "PREPARED":
-            prepared = file_writeback.prepare_writeback(
-                str(target["sourcePath"]),
-                dict(target["payload"]),
-                settings.resolved_storage_root,
-            )
-            prepared_path = str(prepared.prepared_path)
-            _mark_target_prepared_uow(
-                db,
-                target_id=target_id,
-                owner_id=owner_id,
-                prepared_path=prepared_path,
-                warning_code=prepared.warning_code,
-            )
-            written_fields = prepared.written_fields
-            warning_code = prepared.warning_code
-        else:
-            written_fields = tuple(
-                str(item)
-                for item in target.get("payload", {})
-                if item not in {"sourceSize", "sourceMtimeMs", "coverPath"}
-            )
-            warning_code = (
-                str(target.get("warningCode")) if target.get("warningCode") else None
-            )
-        output, published_size_bytes, published_mtime_ms = (
-            file_writeback.publish_prepared(str(target["sourcePath"]), prepared_path)
-        )
-        size_bytes: int | None = published_size_bytes
-        mtime_ms: int | None = published_mtime_ms
-        source = Path(str(target["sourcePath"])).expanduser().resolve()
-        if output.resolve() != source:
-            size_bytes = None
-            mtime_ms = None
-        _complete_target_uow(
-            db,
-            target_id=target_id,
-            owner_id=owner_id,
-            written_fields=written_fields,
-            size_bytes=size_bytes,
-            mtime_ms=mtime_ms,
-            warning_code=warning_code,
-        )
-    except Exception as exc:
-        if prepared_path:
-            # Publication or its acknowledgement may already have happened.
-            # Preserve the prepared file, lease and durable state for inspection;
-            # do not translate uncertainty into a failed task or replay it.
-            raise RuntimeError("WRITEBACK_OUTCOME_REQUIRES_REVIEW") from exc
-        LOGGER.warning(
-            "metadata OPF sidecar save failed target=%s operation=%s: %s",
-            target_id,
-            target.get("operationId"),
-            exc,
-        )
-        _fail_target_uow(
-            db,
-            target=target,
-            owner_id=owner_id,
-            summary=str(exc),
-            error_type=type(exc).__name__,
-        )
-    return True
+    with exception_diagnostic_boundary(
+        LOGGER, "metadata.writeback_target_failed",
+        context={"task_id": str(target["id"]), "operation_id": str(target.get("payload", {}).get("standard_operation_id") or target.get("operationId") or ""), "step": "writeback_target"},
+    ):
+        try:
+            if "standard_operation_id" in target.get("payload", {}):
+                if standard_handler is None:
+                    raise RuntimeError("STANDARD_WRITE_HANDLER_REQUIRED")
+                standard_handler(db, target, owner_id)
+                return True
+            target_id = str(target["id"])
+            prepared_path = str(target.get("preparedPath") or "")
+            try:
+                if target["status"] != "PREPARED":
+                    prepared = file_writeback.prepare_writeback(
+                        str(target["sourcePath"]),
+                        dict(target["payload"]),
+                        settings.resolved_storage_root,
+                    )
+                    prepared_path = str(prepared.prepared_path)
+                    _mark_target_prepared_uow(
+                        db,
+                        target_id=target_id,
+                        owner_id=owner_id,
+                        prepared_path=prepared_path,
+                        warning_code=prepared.warning_code,
+                    )
+                    written_fields = prepared.written_fields
+                    warning_code = prepared.warning_code
+                else:
+                    written_fields = tuple(
+                        str(item)
+                        for item in target.get("payload", {})
+                        if item not in {"sourceSize", "sourceMtimeMs", "coverPath"}
+                    )
+                    warning_code = (
+                        str(target.get("warningCode")) if target.get("warningCode") else None
+                    )
+                output, published_size_bytes, published_mtime_ms = (
+                    file_writeback.publish_prepared(str(target["sourcePath"]), prepared_path)
+                )
+                size_bytes: int | None = published_size_bytes
+                mtime_ms: int | None = published_mtime_ms
+                source = Path(str(target["sourcePath"])).expanduser().resolve()
+                if output.resolve() != source:
+                    size_bytes = None
+                    mtime_ms = None
+                _complete_target_uow(
+                    db,
+                    target_id=target_id,
+                    owner_id=owner_id,
+                    written_fields=written_fields,
+                    size_bytes=size_bytes,
+                    mtime_ms=mtime_ms,
+                    warning_code=warning_code,
+                )
+            except Exception as exc:
+                if prepared_path:
+                    # Publication or its acknowledgement may already have happened.
+                    # Preserve the prepared file, lease and durable state for inspection;
+                    # do not translate uncertainty into a failed task or replay it.
+                    raise RuntimeError("WRITEBACK_OUTCOME_REQUIRES_REVIEW") from exc
+                record_exception(LOGGER, "metadata.opf_prepare_failed", exc,
+                                 context={"operation_id": target.get("operationId"), "task_id": target_id, "step": "prepare_opf"})
+                _fail_target_uow(
+                    db,
+                    target=target,
+                    owner_id=owner_id,
+                    summary=str(exc),
+                    error_type=type(exc).__name__,
+                )
+            return True
+        finally:
+            db.close()
 
 
 def recover_interrupted_metadata_writebacks(

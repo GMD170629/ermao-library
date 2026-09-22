@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
+import shutil
 import stat
 from collections.abc import Callable
 from contextlib import AbstractContextManager
@@ -29,7 +29,7 @@ from app.modules.imports.application.save_uploaded_files import (
 
 
 class AtomicUploadedFilePublisher:
-    """Publish a complete batch via hidden temporary files and atomic renames."""
+    """Save uploads via standard copying and per-file atomic publication."""
 
     def __init__(
         self,
@@ -47,8 +47,6 @@ class AtomicUploadedFilePublisher:
             raise UploadPublicationError("target directory is not available")
 
         reserved_paths: set[Path] = set()
-        staged_paths: list[Path] = []
-        published_paths: list[Path] = []
         saved_files: list[SavedUploadFile] = []
         remaining_audio_bytes = command.audio_bundle_max_bytes
         nonce = self._nonce_factory()
@@ -58,7 +56,6 @@ class AtomicUploadedFilePublisher:
                 target = self._unique_target(directory, source.filename, reserved_paths)
                 reserved_paths.add(target)
                 staged = directory / f".upload-{nonce}-{index}.part"
-                staged_paths.append(staged)
                 copied = self._copy_stream(
                     source.stream,
                     staged,
@@ -77,8 +74,6 @@ class AtomicUploadedFilePublisher:
                             "audio batch exceeds configured size"
                         )
                 staged.replace(target)
-                staged_paths.remove(staged)
-                published_paths.append(target)
                 saved_files.append(
                     SavedUploadFile(
                         filename=target.name,
@@ -87,15 +82,16 @@ class AtomicUploadedFilePublisher:
                     )
                 )
         except OSError as exc:
-            self._cleanup(staged_paths, published_paths)
-            raise UploadPublicationError("unable to save upload files") from exc
-        except UploadPublicationError:
-            self._cleanup(staged_paths, published_paths)
+            raise UploadPublicationError(
+                "unable to save upload files", saved_files=tuple(saved_files)
+            ) from exc
+        except UploadPublicationError as exc:
+            exc.saved_files = tuple(saved_files)
             raise
         return tuple(saved_files)
 
     def prepare_strict(
-        self, upload_id: str, target: UploadTarget, source: Path, size: int, digest: str
+        self, upload_id: str, target: UploadTarget, source: Path, size: int
     ) -> UploadPublication:
         """Stage one exact name without changing the browser's auto-rename policy."""
         if self._directories is None:
@@ -107,6 +103,7 @@ class AtomicUploadedFilePublisher:
             try:
                 existing = os.stat(name, dir_fd=directory, follow_symlinks=False)
             except FileNotFoundError:
+                # diagnostics-control-flow: absence is expected for a new upload.
                 if target.original is not None:
                     raise UploadError("SOURCE_CHANGED") from None
             else:
@@ -122,6 +119,7 @@ class AtomicUploadedFilePublisher:
                     dir_fd=directory,
                 )
             except FileExistsError:
+                # diagnostics-control-flow: an uncheckpointed prepare may be retried.
                 descriptor = os.open(
                     staged, os.O_RDWR | os.O_NOFOLLOW, dir_fd=directory
                 )
@@ -131,17 +129,13 @@ class AtomicUploadedFilePublisher:
                     or os.fstat(output.fileno()).st_nlink != 1
                 ):
                     raise UploadError("UPLOAD_STAGING_CONFLICT")
-                # No publication checkpoint exists yet; recopy a interrupted prepare.
+                # No publication checkpoint exists yet; recopy an interrupted prepare.
                 output.truncate(0)
                 source_fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
                 with os.fdopen(source_fd, "rb") as input_file:
-                    copied = 0
-                    while block := input_file.read(1024 * 1024):
-                        copied += len(block)
-                        if copied > size:
-                            raise UploadError("UPLOAD_SIZE_MISMATCH")
-                        output.write(block)
-                output.flush()
+                    if os.fstat(input_file.fileno()).st_size != size:
+                        raise UploadError("UPLOAD_SIZE_MISMATCH")
+                    self._copy_contents(input_file, output, max_bytes=size)
                 if target.original is not None:
                     original_fd = os.open(
                         name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory
@@ -156,19 +150,15 @@ class AtomicUploadedFilePublisher:
                         os.close(original_fd)
                     os.utime(output.fileno(), None)
                 os.fsync(output.fileno())
-                output.seek(0)
-                observed = hashlib.file_digest(output, "sha256").hexdigest()
                 identity = file_identity(os.fstat(output.fileno()))
-                if identity.size != size or observed != digest:
+                if identity.size != size:
                     raise UploadError("UPLOAD_STAGING_CONFLICT")
             os.fsync(directory)
         return UploadPublication(
             target,
             staged,
             identity,
-            backup_name=f".ermao-mcp-{upload_id}-source"
-            if target.original is not None
-            else None,
+            execution_version=2,
         )
 
     @staticmethod
@@ -181,6 +171,8 @@ class AtomicUploadedFilePublisher:
             raise UploadError("UPLOAD_TARGET_CHANGED")
 
     def publish_strict(self, publication: UploadPublication) -> None:
+        if publication.execution_version != 2:
+            raise UploadError("UPLOAD_PLAN_REQUIRES_REFRESH")
         if self._directories is None:
             raise RuntimeError("anchored upload directories are required")
         target = publication.target
@@ -190,59 +182,13 @@ class AtomicUploadedFilePublisher:
             try:
                 observed = os.stat(name, dir_fd=directory, follow_symlinks=False)
             except FileNotFoundError:
+                # diagnostics-control-flow: a new upload has no destination yet.
                 observed = None
-            if observed is not None:
-                identity = publication.identity
-                if (
-                    observed.st_dev,
-                    observed.st_ino,
-                    observed.st_size,
-                    observed.st_mtime_ns,
-                ) == (
-                    identity.device,
-                    identity.inode,
-                    identity.size,
-                    identity.mtime_ns,
-                ):
-                    return  # Publication completed before its database checkpoint.
-                if (
-                    file_identity(
-                        os.stat(
-                            publication.staged_name,
-                            dir_fd=directory,
-                            follow_symlinks=False,
-                        )
-                    )
-                    != publication.identity
-                ):
-                    raise UploadError("UPLOAD_STAGING_CHANGED")
-                if (
-                    target.original is None
-                    or file_identity(observed) != target.original
-                    or publication.backup_name is None
-                ):
+            if target.original is None:
+                if observed is not None:
                     raise UploadError("UPLOAD_NAME_CONFLICT")
-                exclusive_rename(directory, name, directory, publication.backup_name)
-                os.fsync(directory)
-            elif target.original is not None:
-                if publication.backup_name is None:
-                    raise UploadError("SOURCE_CHANGED")
-                backup = os.stat(
-                    publication.backup_name, dir_fd=directory, follow_symlinks=False
-                )
-                original = target.original
-                if (
-                    backup.st_dev,
-                    backup.st_ino,
-                    backup.st_size,
-                    backup.st_mtime_ns,
-                ) != (
-                    original.device,
-                    original.inode,
-                    original.size,
-                    original.mtime_ns,
-                ):
-                    raise UploadError("SOURCE_CHANGED")
+            elif observed is None or file_identity(observed) != target.original:
+                raise UploadError("SOURCE_CHANGED")
             if (
                 file_identity(
                     os.stat(
@@ -253,7 +199,17 @@ class AtomicUploadedFilePublisher:
             ):
                 raise UploadError("UPLOAD_STAGING_CHANGED")
             try:
-                exclusive_rename(directory, publication.staged_name, directory, name)
+                if target.original is None:
+                    exclusive_rename(
+                        directory, publication.staged_name, directory, name
+                    )
+                else:
+                    os.replace(
+                        publication.staged_name,
+                        name,
+                        src_dir_fd=directory,
+                        dst_dir_fd=directory,
+                    )
             except FileOperationError as error:
                 raise UploadError(
                     "UPLOAD_NAME_CONFLICT"
@@ -284,23 +240,35 @@ class AtomicUploadedFilePublisher:
 
     @staticmethod
     def _copy_stream(source: BinaryIO, target: Path, *, max_bytes: int | None) -> int:
-        copied = 0
         with target.open("xb") as handle:
-            while True:
-                chunk = source.read(1024 * 1024)
-                if not chunk:
-                    break
-                copied += len(chunk)
-                if max_bytes is not None and copied > max_bytes:
-                    raise UploadFileTooLargeError("upload exceeds configured size")
-                handle.write(chunk)
-            handle.flush()
+            copied = AtomicUploadedFilePublisher._copy_contents(
+                source, handle, max_bytes=max_bytes
+            )
             os.fsync(handle.fileno())
         return copied
 
     @staticmethod
-    def _cleanup(staged_paths: list[Path], published_paths: list[Path]) -> None:
-        for path in reversed(staged_paths):
-            path.unlink(missing_ok=True)
-        for path in reversed(published_paths):
-            path.unlink(missing_ok=True)
+    def _copy_contents(
+        source: BinaryIO, target: BinaryIO, *, max_bytes: int | None
+    ) -> int:
+        reader = _LimitedUploadReader(source, max_bytes)
+        shutil.copyfileobj(reader, target, length=1024 * 1024)
+        target.flush()
+        return reader.copied
+
+
+class _LimitedUploadReader:
+    """Enforce the existing upload quota while stdlib performs stream copying."""
+
+    def __init__(self, source: BinaryIO, max_bytes: int | None) -> None:
+        self.source, self.max_bytes, self.copied = source, max_bytes, 0
+
+    def read(self, size: int = -1) -> bytes:
+        if self.max_bytes is not None:
+            remaining = max(1, self.max_bytes - self.copied + 1)
+            size = remaining if size < 0 else min(size, remaining)
+        value = self.source.read(size)
+        self.copied += len(value)
+        if self.max_bytes is not None and self.copied > self.max_bytes:
+            raise UploadFileTooLargeError("upload exceeds configured size")
+        return value

@@ -1,4 +1,4 @@
-"""Deletion journals and descriptor-anchored permanent deletion."""
+"""Deletion journals and an adapter to the standard source-deletion capability."""
 
 import os
 from collections.abc import Iterator
@@ -12,12 +12,15 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.db.file_lock import try_file_lock, unlock_file
-from app.infrastructure.exclusive_rename import exclusive_rename
 from app.infrastructure.file_operation_conflicts import file_operation_blocks_library
 from app.models import Library, LibraryImportTask
+from app.modules.library.application.commands.manage_ports import (
+    ManageSourceDeletionFilesystemPort,
+)
 from app.modules.library.application.file_deletions import DeletePlan, DeleteTarget
 from app.modules.library.application.file_move_plans import MoveSource
 from app.modules.library.domain.file_moves import FileMoveError, MoveInventory
+from app.modules.library.domain.source_nodes import SourceNodePhysicalKind
 from app.modules.library.infrastructure.file_delete_schema import FileDeletePlanRow
 from app.modules.library.infrastructure.move_inventory import inspect_move_source
 from app.modules.library.infrastructure.source_file_access import open_library_directory
@@ -80,9 +83,12 @@ class SqlAlchemyDeleteStore:
         return _PLAN.validate_python(row.payload)
 
 
-class AnchoredDeleteFiles:
-    def __init__(self, lock_root: Path) -> None:
+class StandardDeleteFiles:
+    def __init__(
+        self, lock_root: Path, filesystem: ManageSourceDeletionFilesystemPort
+    ) -> None:
         self.lock_root = lock_root
+        self.filesystem = filesystem
 
     @contextmanager
     def lock(self, plan_id: str) -> Iterator[None]:
@@ -100,54 +106,29 @@ class AnchoredDeleteFiles:
     def inspect(self, source: MoveSource) -> MoveInventory:
         return inspect_move_source(source.root, source.relative_path)
 
-    def stage(self, target: DeleteTarget) -> None:
+    def validate(self, target: DeleteTarget) -> None:
         source = target.source
         parent, _, name = source.relative_path.rpartition("/")
-        stage_name = target.staging_path.rpartition("/")[2]
         expected = target.inventory.entries[0].identity
         with open_library_directory(source.root, parent) as directory:
-            try:
-                staged = os.stat(stage_name, dir_fd=directory, follow_symlinks=False)
-            except FileNotFoundError:
-                staged = None
-            if staged is not None:
-                if (staged.st_dev, staged.st_ino) != (expected.device, expected.inode):
-                    raise FileMoveError("STAGING_CONFLICT")
-                return
-            if self.inspect(source) != target.inventory:
+            observed = os.stat(name, dir_fd=directory, follow_symlinks=False)
+            if (observed.st_dev, observed.st_ino, observed.st_mode) != (
+                expected.device, expected.inode, expected.mode
+            ):
                 raise FileMoveError("SOURCE_CHANGED")
-            exclusive_rename(directory, name, directory, stage_name)
-            os.fsync(directory)
+            if not target.inventory.entries[0].directory and (
+                observed.st_size, observed.st_mtime_ns
+            ) != (expected.size, expected.mtime_ns):
+                raise FileMoveError("SOURCE_CHANGED")
 
-    def erase(self, target: DeleteTarget) -> None:
-        source = target.source
-        for item in reversed(target.inventory.entries):
-            suffix = item.relative_path[len(source.relative_path) :]
-            relative = target.staging_path + suffix
-            parent, _, name = relative.rpartition("/")
-            try:
-                with open_library_directory(source.root, parent) as directory:
-                    try:
-                        observed = os.stat(
-                            name, dir_fd=directory, follow_symlinks=False
-                        )
-                    except FileNotFoundError:
-                        continue
-                    expected = item.identity
-                    if (observed.st_dev, observed.st_ino) != (
-                        expected.device,
-                        expected.inode,
-                    ):
-                        raise FileMoveError("SOURCE_CHANGED")
-                    if not item.directory and (
-                        observed.st_size,
-                        observed.st_mtime_ns,
-                    ) != (expected.size, expected.mtime_ns):
-                        raise FileMoveError("SOURCE_CHANGED")
-                    if item.directory:
-                        os.rmdir(name, dir_fd=directory)
-                    else:
-                        os.unlink(name, dir_fd=directory)
-                    os.fsync(directory)
-            except FileNotFoundError:
-                continue
+    def delete(self, target: DeleteTarget) -> None:
+        try:
+            self.filesystem.delete_source(
+                root=target.source.root,
+                relative_path=target.source.relative_path,
+                physical_kind=SourceNodePhysicalKind.DIRECTORY
+                if target.inventory.entries[0].directory
+                else SourceNodePhysicalKind.REGULAR_FILE,
+            )
+        except ValueError as error:
+            raise FileMoveError("SOURCE_CHANGED") from error

@@ -91,7 +91,6 @@ def move_plan_result(plan: FileMovePlan) -> dict[str, object]:
                 "destination_relative_path": move.destination.relative_path,
                 "source_revision": move.source.revision,
                 "book_ids": list(move.source.book_ids),
-                "cross_device": move.cross_device,
                 "visibility_changes": move.source.library_id
                 != move.destination.library_id,
                 "create_directories": list(
@@ -102,9 +101,7 @@ def move_plan_result(plan: FileMovePlan) -> dict[str, object]:
                     for item in move.inventory.entries
                     if not item.directory
                 ],
-                "recovery_strategy": "verified_copy_publish_index_cleanup"
-                if move.cross_device
-                else "exclusive_rename_index",
+                "execution_strategy": "system_move_index_scan",
             }
             for move in plan.moves
         ],

@@ -51,6 +51,8 @@ class UploadPublication:
     identity: FileIdentity
     stored_cover_path: str | None = None
     backup_name: str | None = None
+    # Missing versions describe historical publishers and must never be replayed.
+    execution_version: int = 1
 
 
 @dataclass(frozen=True)

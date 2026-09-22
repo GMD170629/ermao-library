@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+from app.contracts.diagnostics import FailureDiagnostics
 from app.contracts.file_operation import FileIdentity, FileOperationError
 from app.modules.metadata.application.standard_files import StandardMetadataError
 from app.modules.metadata.application.standard_writeback import (
@@ -80,6 +81,7 @@ class ExecuteStandardWrite:
     ]
     uow: StandardWriteUnitOfWork
     clock_ms: Callable[[], int]
+    diagnostics: FailureDiagnostics
 
     def execute(self, operation_id: str, ordinal: int, owner_id: str) -> None:
         entry = self.store.execution(operation_id, ordinal, owner_id)
@@ -87,6 +89,7 @@ class ExecuteStandardWrite:
         target = entry.plan.targets[ordinal]
         proof = entry.proof
         uncertain = proof is not None or entry.stage != "QUEUED"
+        step = "authorize_target"
         try:
             if proof is None:
                 self.authorize(entry.plan, target)
@@ -97,14 +100,19 @@ class ExecuteStandardWrite:
                     self.store.complete(
                         operation_id, ordinal, owner_id, self.clock_ms(), cancelled=True
                     )
+                    step = "commit"
                     self.uow.commit()
                     return
+                step = "checkpoint"
                 self.store.checkpoint(
                     operation_id, ordinal, owner_id, "PREPARING", self.clock_ms()
                 )
+                step = "commit"
                 self.uow.commit()
+                step = "prepare_file"
                 proof = self.files.prepare(target.file)
                 uncertain = True
+                step = "checkpoint"
                 self.store.checkpoint(
                     operation_id,
                     ordinal,
@@ -113,8 +121,10 @@ class ExecuteStandardWrite:
                     self.clock_ms(),
                     proof=proof,
                 )
+                step = "commit"
                 self.uow.commit()
             self.uow.rollback()
+            step = "inspect_publication"
             published = self.files.published(target.file, proof)
             if not published:
                 self.authorize(entry.plan, target)
@@ -123,13 +133,17 @@ class ExecuteStandardWrite:
                 ).cancelled
                 self.uow.rollback()
                 if cancelled:
+                    step = "discard_prepared"
                     self.files.discard_prepared(target.file, proof)
                     self.store.complete(
                         operation_id, ordinal, owner_id, self.clock_ms(), cancelled=True
                     )
+                    step = "commit"
                     self.uow.commit()
                     return
+                step = "publish_file"
                 self.files.publish(target.file, proof)
+            step = "checkpoint"
             self.store.checkpoint(
                 operation_id,
                 ordinal,
@@ -138,46 +152,80 @@ class ExecuteStandardWrite:
                 self.clock_ms(),
                 proof=proof,
             )
+            step = "commit"
             self.uow.commit()
+            step = "record_publication"
             self.record_publication(operation_id, entry.plan, target, proof)
             self.store.complete(operation_id, ordinal, owner_id, self.clock_ms())
+            step = "commit"
             self.uow.commit()
-        except StandardPreparationError as error:
-            self.uow.rollback()
-            self.store.checkpoint(
-                operation_id,
-                ordinal,
-                owner_id,
-                "RECOVERY_REQUIRED",
-                self.clock_ms(),
-                partial=error.prepared_identity,
-                error_code=str(error),
+        except Exception as error:  # noqa: BLE001 - uncertain I/O remains journalled with its real cause.
+            diagnostic = self.diagnostics.prepare(
+                error,
+                event="standard_write.target_failed",
+                context={
+                    "operation_id": operation_id,
+                    "target_ordinal": ordinal,
+                    "stage": entry.stage,
+                    "step": step,
+                },
             )
-            self.uow.commit()
-        except (StandardMetadataError, FileOperationError) as error:
-            self.uow.rollback()
-            if uncertain:
+            try:
+                self.uow.rollback()
+            except Exception as rollback_error:
+                secondary = self.diagnostics.prepare(
+                    rollback_error,
+                    event="standard_write.rollback_failed",
+                    context={
+                        "operation_id": operation_id,
+                        "target_ordinal": ordinal,
+                        "step": "rollback",
+                        "parent_diagnostic_id": diagnostic.diagnostic_id,
+                    },
+                )
+                self.diagnostics.persist(secondary)
+                raise
+            finally:
+                self.diagnostics.persist(diagnostic)
+            if isinstance(error, StandardPreparationError):
+                step = "checkpoint"
                 self.store.checkpoint(
                     operation_id,
                     ordinal,
                     owner_id,
                     "RECOVERY_REQUIRED",
                     self.clock_ms(),
+                    partial=error.prepared_identity,
                     error_code=str(error),
                 )
+            elif isinstance(error, (StandardMetadataError, FileOperationError)):
+                if uncertain:
+                    step = "checkpoint"
+                    self.store.checkpoint(
+                        operation_id,
+                        ordinal,
+                        owner_id,
+                        "RECOVERY_REQUIRED",
+                        self.clock_ms(),
+                        error_code=str(error),
+                    )
+                else:
+                    self.store.complete(
+                        operation_id,
+                        ordinal,
+                        owner_id,
+                        self.clock_ms(),
+                        failed=str(error),
+                    )
             else:
-                self.store.complete(
-                    operation_id, ordinal, owner_id, self.clock_ms(), failed=str(error)
+                step = "checkpoint"
+                self.store.checkpoint(
+                    operation_id,
+                    ordinal,
+                    owner_id,
+                    "RECOVERY_REQUIRED",
+                    self.clock_ms(),
+                    error_code="FILE_WRITE_INTERRUPTED",
                 )
-            self.uow.commit()
-        except Exception:  # noqa: BLE001 - uncertain I/O must remain journalled, never silently replayed.
-            self.uow.rollback()
-            self.store.checkpoint(
-                operation_id,
-                ordinal,
-                owner_id,
-                "RECOVERY_REQUIRED",
-                self.clock_ms(),
-                error_code="FILE_WRITE_INTERRUPTED",
-            )
+            step = "commit"
             self.uow.commit()

@@ -1,6 +1,5 @@
 """Freeze authorized moves without creating or moving any library file."""
 
-import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -64,8 +63,6 @@ class PlannedMove:
     destination: MoveDestination
     inventory: MoveInventory
     destination_inspection: DestinationInspection
-    staging_relative_path: str | None = None
-    backup_relative_path: str | None = None
     companion_owner: MoveSource | None = None
 
     @property
@@ -73,32 +70,6 @@ class PlannedMove:
         return self.source.library_id == self.destination.library_id and case_only_path(
             self.source.relative_path, self.destination.relative_path
         )
-
-    @property
-    def cross_device(self) -> bool:
-        return (
-            self.inventory.entries[0].identity.device
-            != self.destination_inspection.device
-        )
-
-
-@dataclass(frozen=True)
-class CopiedContent:
-    relative_path: str
-    size: int
-    sha256: str
-
-
-@dataclass(frozen=True)
-class PreparedMoveCopy:
-    inventory: MoveInventory
-    contents: tuple[CopiedContent, ...]
-
-
-@dataclass(frozen=True)
-class StagedMoveSource:
-    relative_path: str
-    identity: FileIdentity
 
 
 @dataclass(frozen=True)
@@ -108,6 +79,7 @@ class FileMovePlan:
     created_at_ms: int
     expires_at_ms: int
     moves: tuple[PlannedMove, ...]
+    execution_version: int = 1
 
 
 class MoveTopologyPort(Protocol):
@@ -184,15 +156,12 @@ class PrepareFileMovePlan:
             size += inventory.byte_count
             if files > MAX_FILES or size > MAX_BYTES:
                 raise FileMoveError("INVENTORY_LIMIT")
-            slot = hashlib.sha256(f"{plan_id}:{len(moves)}".encode()).hexdigest()[:32]
             moves.append(
                 PlannedMove(
                     source,
                     destination,
                     inventory,
                     target,
-                    f".ermao-mcp-{slot}-target",
-                    f".ermao-mcp-{slot}-source",
                 )
             )
         expanded: list[PlannedMove] = []
@@ -213,9 +182,6 @@ class PrepareFileMovePlan:
                 size += inventory.byte_count
                 if files > MAX_FILES or size > MAX_BYTES:
                     raise FileMoveError("INVENTORY_LIMIT")
-                slot = hashlib.sha256(
-                    f"{plan_id}:companion:{len(expanded)}".encode()
-                ).hexdigest()[:32]
                 expanded.append(
                     PlannedMove(
                         companion_source,
@@ -224,8 +190,6 @@ class PrepareFileMovePlan:
                         self.inspection.destination(
                             companion_destination.root, target_path
                         ),
-                        f".ermao-mcp-{slot}-target",
-                        f".ermao-mcp-{slot}-source",
                         move.source,
                     )
                 )
@@ -241,4 +205,6 @@ class PrepareFileMovePlan:
             expanded=True,
         )
         now = self.clock_ms()
-        return FileMovePlan(plan_id, actor, now, now + 15 * 60_000, tuple(expanded))
+        return FileMovePlan(
+            plan_id, actor, now, now + 15 * 60_000, tuple(expanded), execution_version=2
+        )

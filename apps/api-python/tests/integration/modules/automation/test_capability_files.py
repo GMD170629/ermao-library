@@ -1,5 +1,6 @@
-"""Permanent deletion and replacement operate only on frozen temporary sources."""
+"""Standard source deletion and replacement preserve task ownership and outcomes."""
 
+import errno
 import hashlib
 from dataclasses import replace
 
@@ -13,9 +14,11 @@ from app.bootstrap.automation import (
     build_grant_manager,
 )
 from app.contracts.automation_upload import UploadSpec
-from app.models import LibraryImportTask
+from app.infrastructure.file_operation_conflicts import file_operation_blocks_library
+from app.models import FileDeletePlanRow, Library, LibraryImportTask, SystemEvent
 from app.modules.automation.application.settings import AutomationServiceSettings
 from app.modules.automation.domain.access import AutomationAccessError, Scope
+from app.modules.library.domain.file_moves import FileMoveError
 from tests.integration.modules.automation.test_file_reads import add_file, file_access
 from tests.integration.modules.automation.test_uploads import transmit
 
@@ -91,7 +94,12 @@ def test_replace_exact_bytes_and_upload_only_rejected(files, db_session):
         ),
     )
     build_automation_settings(db_session).update(
-        access.user_id, AutomationServiceSettings(True, access.permissions.scopes | upload_only.permissions.scopes, "http://localhost")
+        access.user_id,
+        AutomationServiceSettings(
+            True,
+            access.permissions.scopes | upload_only.permissions.scopes,
+            "http://localhost",
+        ),
     )
     limited = build_grant_manager(db_session).create(
         user_id=access.user_id, name="upload only", permissions=upload_only.permissions
@@ -104,6 +112,7 @@ def test_replace_exact_bytes_and_upload_only_rejected(files, db_session):
     assert result["status"] == "QUEUED", result
     assert source.read_bytes() == data
     assert commands.complete(access, identifier)["file_saved"] is True
+    assert list(root.rglob(".ermao-mcp-*-source")) == []
 
 
 def test_deleted_source_index_reconciles_with_existing_import_worker(
@@ -126,45 +135,67 @@ def test_deleted_source_index_reconciles_with_existing_import_worker(
     assert service.progress(access, plan["plan_id"])["status"] == "COMPLETED"
 
 
-def test_delete_crash_after_unlink_recovers_without_touching_new_source(
-    files, db_session, monkeypatch
+def test_delete_crash_after_unlink_does_not_replay_or_touch_new_source(
+    files, db_session, monkeypatch, caplog
 ):
     access, root = files
     service = build_automation_deletions(db_session)
     plan = service.plan(access, ("replace-node",))
-    erase = service.files.files.erase
+    delete = service.files.files.delete
 
     def interrupted(target):
-        erase(target)
+        delete(target)
         raise OSError("injected interruption")
 
-    monkeypatch.setattr(service.files.files, "erase", interrupted)
+    monkeypatch.setattr(service.files.files, "delete", interrupted)
     result = service.execute(access, plan["plan_id"])
     assert result["status"] == "RECOVERY_REQUIRED"
     (root / "allowed/book.cbz").write_bytes(b"new same name")
-    monkeypatch.setattr(service.files.files, "erase", erase)
+    monkeypatch.setattr(service.files.files, "delete", delete)
     result = service.execute(access, plan["plan_id"])
-    assert result["targets"][0]["stage"] == "INDEX_PENDING"
+    assert result["status"] == "RECOVERY_REQUIRED"
+    assert result["targets"][0]["stage"] == "DELETING"
     assert (root / "allowed/book.cbz").read_bytes() == b"new same name"
+    assert list(db_session.scalars(select(LibraryImportTask))) == []
+    event = db_session.scalar(
+        select(SystemEvent).where(
+            SystemEvent.action == "file_delete.previous_result_unavailable",
+            SystemEvent.target_id == plan["plan_id"],
+        )
+    )
+    assert event is not None and event.id in caplog.text
+    assert event.metadata_json["step"] == "inspect_recovery_state"
+    assert event.metadata_json["diagnostics"]["causeStatus"] == "NOT_PROVIDED"
+    assert (
+        "previous deletion result was not provided"
+        in event.metadata_json["diagnostics"]["message"]
+    )
 
 
-def test_delete_never_removes_unlisted_child(files, db_session, monkeypatch):
+def test_directory_delete_uses_standard_deletion_for_all_current_contents(
+    files, db_session, monkeypatch
+):
     access, root = files
     service = build_automation_deletions(db_session)
     plan = service.plan(access, ("allowed-node",))
-    stage = service.files.files.stage
+    delete = service.files.files.delete
+    outside = root.parent / "outside.cbz"
+    outside.write_bytes(b"not part of the directory")
 
     def add_child(target):
-        stage(target)
-        (root / target.staging_path / "new.cbz").write_bytes(b"not frozen")
+        (root / "allowed/new.cbz").write_bytes(b"added after the preview")
+        (root / "allowed/outside.cbz").symlink_to(outside)
+        delete(target)
 
-    monkeypatch.setattr(service.files.files, "stage", add_child)
+    monkeypatch.setattr(service.files.files, "delete", add_child)
     result = service.execute(access, plan["plan_id"])
-    assert result["status"] == "RECOVERY_REQUIRED"
-    assert next(iter(root.glob(".ermao-delete-*/new.cbz"))).read_bytes() == b"not frozen"
+    assert result["targets"][0]["stage"] == "INDEX_PENDING"
+    assert not (root / "allowed").exists()
+    assert list(root.iterdir()) == []
+    assert outside.read_bytes() == b"not part of the directory"
 
 
-def test_replace_recovers_after_publication_checkpoint_loss(
+def test_replace_preserves_file_without_replay_after_publication_checkpoint_loss(
     files, db_session, monkeypatch
 ):
     access, root = files
@@ -195,11 +226,15 @@ def test_replace_recovers_after_publication_checkpoint_loss(
         commands.complete(access, identifier)
     assert source.read_bytes() == data
     monkeypatch.setattr(publisher, "publish_strict", original)
-    assert commands.complete(access, identifier)["status"] == "QUEUED"
+    assert commands.complete(access, identifier)["status"] == "RECOVERY_REQUIRED"
     assert source.read_bytes() == data
+    assert list(db_session.scalars(select(LibraryImportTask))) == []
+    assert list(root.rglob(".ermao-mcp-*-source")) == []
 
 
-def test_deleting_last_directory_cleans_index_without_disabling_empty_root_guard(files, db_session, test_settings):
+def test_deleting_last_directory_cleans_index_without_disabling_empty_root_guard(
+    files, db_session, test_settings
+):
     from app.bootstrap.readable_resource_pipeline import (
         build_readable_resource_pipeline,
         build_readable_resource_worker,
@@ -216,3 +251,96 @@ def test_deleting_last_directory_cleans_index_without_disabling_empty_root_guard
     pipeline = build_readable_resource_pipeline(db_session, test_settings)
     assert build_readable_resource_worker(pipeline).process_once() == "scan"
     assert service.progress(access, plan["plan_id"])["status"] == "COMPLETED"
+
+
+def test_delete_cancel_before_execution_preserves_files(files, db_session):
+    access, root = files
+    service = build_automation_deletions(db_session)
+    plan = service.plan(access, ("allowed-node",))
+    service.cancel(access, plan["plan_id"])
+    result = service.execute(access, plan["plan_id"])
+    assert result["targets"][0]["stage"] == "CANCELLED"
+    assert (root / "allowed/book.cbz").read_bytes() == b"original"
+    assert list(db_session.scalars(select(LibraryImportTask))) == []
+
+
+@pytest.mark.parametrize("stage", ["QUEUED", "STAGING", "STAGED", "FILES_DELETED"])
+def test_legacy_delete_is_readable_and_cancellable_but_never_replayed(
+    files, db_session, stage
+):
+    access, root = files
+    service = build_automation_deletions(db_session)
+    plan = service.plan(access, ("replace-node",))
+    row = db_session.get(FileDeletePlanRow, plan["plan_id"])
+    payload = dict(row.payload)
+    assert payload.pop("execution_version") == 2
+    staging = "allowed/.ermao-delete-legacy"
+    if stage in {"STAGING", "STAGED"}:
+        (root / "allowed/book.cbz").rename(root / staging)
+        (root / "allowed/book.cbz").write_bytes(b"new same name")
+    payload["targets"] = [
+        {**payload["targets"][0], "stage": stage, "staging_path": staging}
+    ]
+    payload["executing"] = stage != "QUEUED"
+    row.payload = payload
+    db_session.commit()
+
+    with pytest.raises(FileMoveError, match="DELETE_PLAN_REQUIRES_REFRESH"):
+        service.execute(access, plan["plan_id"])
+    assert service.progress(access, plan["plan_id"])["targets"][0]["stage"] == stage
+    assert service.cancel(access, plan["plan_id"])["cancel_requested"] is True
+    expected = b"new same name" if stage in {"STAGING", "STAGED"} else b"original"
+    assert (root / "allowed/book.cbz").read_bytes() == expected
+    if stage in {"STAGING", "STAGED"}:
+        assert (root / staging).read_bytes() == b"original"
+    assert list(db_session.scalars(select(LibraryImportTask))) == []
+
+
+def test_delete_failure_retains_diagnostics_and_is_not_retried(
+    files, db_session, monkeypatch
+):
+    access, root = files
+    service = build_automation_deletions(db_session)
+    plan = service.plan(access, ("replace-node",))
+    calls = 0
+
+    def denied(**_kwargs):
+        nonlocal calls
+        calls += 1
+        assert (
+            db_session.scalar(
+                select(file_operation_blocks_library(Library.id)).where(
+                    Library.id == "test-library"
+                )
+            )
+            is True
+        )
+        raise PermissionError(errno.EACCES, "source deletion denied")
+
+    monkeypatch.setattr(service.files.files.filesystem, "delete_source", denied)
+    result = service.execute(access, plan["plan_id"])
+    assert result["status"] == "RECOVERY_REQUIRED"
+    event = db_session.scalar(
+        select(SystemEvent).where(SystemEvent.action == "file_delete.target_failed")
+    )
+    assert event.metadata_json["step"] == "delete_files"
+    assert event.metadata_json["diagnostics"]["rootCause"]["errno"] == errno.EACCES
+    service.execute(access, plan["plan_id"])
+    assert calls == 1
+    assert (root / "allowed/book.cbz").read_bytes() == b"original"
+    assert list(db_session.scalars(select(LibraryImportTask))) == []
+
+
+def test_delete_rejects_a_source_replaced_by_symlink(files, db_session, tmp_path):
+    access, root = files
+    service = build_automation_deletions(db_session)
+    plan = service.plan(access, ("replace-node",))
+    outside = tmp_path / "outside.cbz"
+    outside.write_bytes(b"outside the library")
+    source = root / "allowed/book.cbz"
+    source.unlink()
+    source.symlink_to(outside)
+    result = service.execute(access, plan["plan_id"])
+    assert result["targets"][0]["stage"] == "FAILED"
+    assert source.is_symlink()
+    assert outside.read_bytes() == b"outside the library"

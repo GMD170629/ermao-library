@@ -48,6 +48,20 @@ def deletion_result(plan: DeletePlan) -> dict[str, object]:
 
 
 @dataclass(frozen=True)
+class RecheckDeleteAccess:
+    authorization: RecheckMutationAccess
+    access: EffectiveAccess
+
+    def library_ids(self) -> frozenset[str]:
+        try:
+            return self.authorization.require(
+                self.access, Scope.FILES_MODIFY
+            ).permissions.library_ids
+        except AutomationAccessError as error:
+            raise FileMoveError("AUTHORIZATION_REVOKED") from error
+
+
+@dataclass(frozen=True)
 class AutomationDeletions:
     files: FileDeletions
     authorization: RecheckMutationAccess
@@ -66,12 +80,7 @@ class AutomationDeletions:
         )
 
     def _authorize(self, access: EffectiveAccess) -> frozenset[str]:
-        try:
-            return self.authorization.require(
-                access, Scope.FILES_MODIFY
-            ).permissions.library_ids
-        except AutomationAccessError as error:
-            raise FileMoveError("AUTHORIZATION_REVOKED") from error
+        return RecheckDeleteAccess(self.authorization, access).library_ids()
 
     def execute(self, access: EffectiveAccess, plan_id: str) -> dict[str, object]:
         self._authorize(access)
@@ -80,7 +89,7 @@ class AutomationDeletions:
                 plan_id,
                 access.user_id,
                 access.grant_id,
-                lambda: self._authorize(access),
+                RecheckDeleteAccess(self.authorization, access),
             )
         )
 

@@ -20,6 +20,7 @@ from app.modules.metadata.infrastructure.standard_writeback_store import (
     SqlAlchemyStandardWritePlans,
 )
 from app.services.metadata_file_writeback import process_next_metadata_writeback
+from tests.integration.modules.automation.test_move_execution import failure_diagnostics
 from tests.integration.modules.automation.test_writeback_plans import opf, setup
 
 
@@ -82,6 +83,7 @@ def test_existing_worker_queue_publishes_standard_file_and_records_result(
         SqlAlchemyStandardWriteIndex(db_session).record,
         db_session,
         lambda: 3000,
+        diagnostics=failure_diagnostics(db_session),
     )
 
     def handler(db, target, owner):
@@ -113,7 +115,13 @@ def test_interruption_after_publication_retains_result_without_replay(
         raise RuntimeError("simulated process failure before index commit")
 
     executor = ExecuteStandardWrite(
-        store, files, lambda *_: None, interrupted, db_session, lambda: 3000
+        store,
+        files,
+        lambda *_: None,
+        interrupted,
+        db_session,
+        lambda: 3000,
+        diagnostics=failure_diagnostics(db_session),
     )
 
     def handler(db, target, owner):
@@ -154,6 +162,7 @@ def test_expired_backup_requires_unchanged_published_file(db_session, tmp_path):
         SqlAlchemyStandardWriteIndex(db_session).record,
         db_session,
         lambda: 3000,
+        diagnostics=failure_diagnostics(db_session),
     )
     assert process_next_metadata_writeback(
         db_session,
@@ -190,6 +199,7 @@ def test_successful_backup_cleanup_releases_shared_reservation(db_session, tmp_p
         SqlAlchemyStandardWriteIndex(db_session).record,
         db_session,
         lambda: 3000,
+        diagnostics=failure_diagnostics(db_session),
     )
     assert process_next_metadata_writeback(
         db_session,
@@ -306,6 +316,7 @@ def test_completed_writeback_backup_does_not_hold_locator(db_session, tmp_path):
         SqlAlchemyStandardWriteIndex(db_session).record,
         db_session,
         lambda: 3000,
+        diagnostics=failure_diagnostics(db_session),
     )
     assert process_next_metadata_writeback(
         db_session,
@@ -381,6 +392,7 @@ def test_writeback_failure_does_not_block_batch_or_same_file_task(
         SqlAlchemyStandardWriteIndex(db_session).record,
         db_session,
         lambda: 3000,
+        diagnostics=failure_diagnostics(db_session),
     )
 
     def handler(db, target, owner):

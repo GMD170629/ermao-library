@@ -1,5 +1,6 @@
 """Wire standard-file writeback into the existing metadata worker queue."""
 
+import logging
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -9,6 +10,7 @@ from app.bootstrap.automation import (
     build_automation_catalog,
 )
 from app.core.config import get_settings
+from app.core.failure_diagnostics import RuntimeFailureDiagnostics
 from app.core.time import now_timestamp_ms
 from app.modules.automation.application.writeback_access import (
     RecheckStandardWriteAccess,
@@ -62,6 +64,9 @@ def process_standard_writeback(
         SqlAlchemyStandardWriteIndex(db).record,
         db,
         now_timestamp_ms,
+        RuntimeFailureDiagnostics(
+            logging.getLogger(__name__), "metadata", lambda: Session(db.get_bind())
+        ),
     ).execute(operation_id, ordinal, owner_id)
 
 
@@ -73,4 +78,7 @@ def maintain_standard_writeback(db: Session) -> None:
         StandardMetadataPublication(open_library_directory, open_library_file),
         db,
         now_timestamp_ms,
+        RuntimeFailureDiagnostics(
+            logging.getLogger(__name__), "metadata", lambda: Session(db.get_bind())
+        ),
     ).execute()

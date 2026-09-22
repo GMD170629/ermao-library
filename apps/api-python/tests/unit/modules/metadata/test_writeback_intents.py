@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import json
+from dataclasses import replace
+
+import pytest
+
 from app.modules.metadata.application.writeback import (
     MetadataWritebackProjection,
     MetadataWritebackResourceProjection,
@@ -7,8 +12,8 @@ from app.modules.metadata.application.writeback import (
 )
 
 
-def test_null_source_revision_uses_stable_epoch_sentinel() -> None:
-    projection = MetadataWritebackProjection(
+def _projection() -> MetadataWritebackProjection:
+    return MetadataWritebackProjection(
         book_id="book-1",
         title="Book",
         author=None,
@@ -41,6 +46,9 @@ def test_null_source_revision_uses_stable_epoch_sentinel() -> None:
         imports=(),
     )
 
+
+def test_null_source_revision_uses_stable_epoch_sentinel() -> None:
+    projection = _projection()
     first = prepare_metadata_writeback_intents(projection, source="TEST")
     second = prepare_metadata_writeback_intents(projection, source="TEST")
 
@@ -49,3 +57,10 @@ def test_null_source_revision_uses_stable_epoch_sentinel() -> None:
     assert first[0].resource_id == "resource-1"
     assert first[0].source_revision == "1970-01-01T00:00:00+00:00"
     assert first[0].idempotency_key
+
+
+def test_corrupt_stored_tags_do_not_silently_write_an_empty_tag_list() -> None:
+    with pytest.raises(json.JSONDecodeError):
+        prepare_metadata_writeback_intents(
+            replace(_projection(), tags_json="[broken"), source="TEST"
+        )

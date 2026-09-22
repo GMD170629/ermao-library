@@ -81,10 +81,7 @@ def _authors(value: str | None) -> list[str]:
 
 
 def _tags(value: str) -> list[str]:
-    try:
-        parsed = json.loads(value or "[]")
-    except json.JSONDecodeError:
-        return []
+    parsed = json.loads(value or "[]")
     return (
         [str(item).strip() for item in parsed if str(item).strip()]
         if isinstance(parsed, list)

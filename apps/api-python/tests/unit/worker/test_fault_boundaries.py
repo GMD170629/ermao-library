@@ -1,6 +1,6 @@
 import signal
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
 import pytest
 from sqlalchemy.exc import OperationalError
@@ -51,11 +51,14 @@ def runtime(monkeypatch, tmp_path):
     sessions = []
 
     def session():
-        value = Mock()
+        value = MagicMock()
+        value.__enter__.return_value = value
+        value.__exit__.side_effect = lambda *_args: value.close()
         sessions.append(value)
         return value
 
     monkeypatch.setattr(worker_main, "BackgroundSessionLocal", session)
+    monkeypatch.setattr(worker_main, "build_automation_uploads", lambda db: Mock())
     move_worker = Mock()
     move_worker.process_once.return_value = False
     monkeypatch.setattr(worker_main, "build_file_move_worker", lambda db: move_worker)
@@ -119,11 +122,13 @@ def test_transient_recovery_uses_new_context_before_claim(runtime):
     ]
     worker_main.main()
     assert runtime.processor.startup.call_count == 3
-    assert len(runtime.sessions) == 4
+    assert len(runtime.sessions) == 5  # cleanup, moves and three import recovery attempts
     assert runtime.processor.process_once.called
 
 
-def test_loop_and_rollback_and_diagnostics_failure_do_not_escape(runtime):
+def test_loop_and_rollback_and_diagnostics_failure_do_not_escape(runtime, monkeypatch):
+    emergency = Mock()
+    monkeypatch.setattr(worker_main, "emergency_diagnostic", emergency)
     runtime.processor.process_once.side_effect = RuntimeError("original")
     runtime.processor.recover_after_loop_failure.side_effect = RuntimeError("rollback")
     runtime.diagnostics.side_effect = RuntimeError("diagnostics")
@@ -132,8 +137,25 @@ def test_loop_and_rollback_and_diagnostics_failure_do_not_escape(runtime):
     assert runtime.processor.recover_after_loop_failure.call_count == 1
     errors = [call.args[2] for call in runtime.diagnostics.call_args_list]
     assert [str(e) for e in errors] == ["original", "rollback"]
+    original, original_logger, rollback, rollback_logger = emergency.call_args_list
+    assert rollback.kwargs["parent_diagnostic_id"] == original.kwargs["diagnostic_id"]
+    assert original_logger.kwargs["parent_diagnostic_id"] == original.kwargs["diagnostic_id"]
+    assert rollback_logger.kwargs["parent_diagnostic_id"] == rollback.kwargs["diagnostic_id"]
     runtime.metadata.shutdown.assert_called_once()
     runtime.organizer.shutdown.assert_called_once()
+
+
+def test_diagnostic_fallback_preserves_original_and_secondary_failure(monkeypatch):
+    original = OSError(5, "Input/output error")
+    secondary = RuntimeError("diagnostic storage unavailable")
+    monkeypatch.setattr(worker_main, "record_exception", Mock(side_effect=secondary))
+    emergency = Mock()
+    monkeypatch.setattr(worker_main, "emergency_diagnostic", emergency)
+    worker_main._report_failure("import_loop", original)
+    first, second = emergency.call_args_list
+    assert first.args[1] is original
+    assert second.args[1] is secondary
+    assert second.kwargs["parent_diagnostic_id"] == first.kwargs["diagnostic_id"]
 
 
 def test_scan_bug_does_not_block_import_after_successful_rollback(runtime):
@@ -178,3 +200,11 @@ def test_ready_record_failure_does_not_stop_worker(runtime, monkeypatch):
     assert runtime.processor.process_once.called
     runtime.metadata.shutdown.assert_called_once()
     runtime.organizer.shutdown.assert_called_once()
+    errors = [
+        call
+        for call in runtime.diagnostics.call_args_list
+        if call.kwargs["context"]["stage"] == "ready_write"
+    ]
+    assert len(errors) == 1
+    assert isinstance(errors[0].args[2], PermissionError)
+    assert str(errors[0].args[2]) == "injected"

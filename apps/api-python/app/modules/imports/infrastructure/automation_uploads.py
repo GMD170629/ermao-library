@@ -149,7 +149,7 @@ class ImportAttachmentUploads:
         self, upload_id: str, spec: UploadSpec, target: UploadTarget, source: Path
     ) -> UploadPublication:
         return self.publisher.prepare_strict(
-            upload_id, target, source, spec.size_bytes, spec.sha256
+            upload_id, target, source, spec.size_bytes
         )
 
     def publish(self, publication: UploadPublication) -> None:
@@ -192,6 +192,7 @@ class ImportAttachmentUploads:
                 try:
                     os.unlink(f".upload-{upload_id}.part", dir_fd=directory)
                 except FileNotFoundError:
+                    # diagnostics-control-flow: staging cleanup is idempotent after publication or earlier cleanup.
                     pass
         except ValueError as error:
             if isinstance(error, UploadError):

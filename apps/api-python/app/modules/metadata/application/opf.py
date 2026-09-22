@@ -69,6 +69,7 @@ def _float(value: str | None) -> float | None:
     try:
         parsed = float(str(value or "").strip())
     except ValueError:
+        # diagnostics-control-flow: optional OPF numeric/date values remain in unparsed_values when unsupported.
         return None
     return parsed if parsed >= 0 else None
 
@@ -85,6 +86,7 @@ def _date(value: str | None) -> str | None:
         else:
             datetime.fromisoformat(cleaned)
     except ValueError:
+        # diagnostics-control-flow: optional OPF numeric/date values remain in unparsed_values when unsupported.
         return None
     return cleaned
 

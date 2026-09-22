@@ -17,6 +17,7 @@ from app.contracts.automation_upload import (
     UploadSpec,
     UploadTarget,
 )
+from app.contracts.diagnostics import FailureDiagnostics
 from app.modules.automation.application.execution import RecheckMutationAccess
 from app.modules.automation.application.receipts import (
     ReceiptStore,
@@ -51,6 +52,7 @@ class UploadRecord:
     error_code: str | None = None
     staging_cleaned: bool = False
     file_saved: bool = False
+    execution_version: int = 1
 
 
 class UploadStore(Protocol):
@@ -107,6 +109,7 @@ class AutomationUploads:
     uow: UploadUnitOfWork
     clock_ms: Callable[[], int]
     new_id: Callable[[], str]
+    diagnostics: FailureDiagnostics
 
     def _gateway(self, spec: UploadSpec) -> UploadGateway:
         return self.books if spec.purpose != "cover" else self.covers
@@ -227,6 +230,7 @@ class AutomationUploads:
         target = self._gateway(spec).target(actor, spec)
         self.uow.rollback()
         now = self.clock_ms()
+        step = "claim_receipt"
         try:
             previous = self.receipts.claim(
                 access.grant_id, request_id, "begin_upload", fingerprint, now
@@ -248,15 +252,38 @@ class AutomationUploads:
                 target,
                 now,
                 now + LIFETIME_MS,
+                execution_version=2,
             )
+            step = "save_state"
             self.store.save(record)
             self.receipts.complete(
                 access.grant_id, request_id, {"upload_id": record.id}
             )
+            step = "commit"
             self.uow.commit()
             return self.view(record)
-        except Exception:
-            self.uow.rollback()
+        except Exception as error:
+            diagnostic = self.diagnostics.prepare(
+                error,
+                event="upload.begin_failed",
+                context={"request_id": request_id, "step": step},
+            )
+            try:
+                self.uow.rollback()
+            except Exception as rollback_error:
+                secondary = self.diagnostics.prepare(
+                    rollback_error,
+                    event="upload.rollback_failed",
+                    context={
+                        "request_id": request_id,
+                        "step": "rollback",
+                        "parent_diagnostic_id": diagnostic.diagnostic_id,
+                    },
+                )
+                self.diagnostics.persist(secondary)
+                raise
+            finally:
+                self.diagnostics.persist(diagnostic)
             raise
 
     def chunk(
@@ -304,11 +331,13 @@ class AutomationUploads:
             actor = self._current_actor(access, record)
             if (
                 record.status == "RECOVERY_REQUIRED"
-                and record.spec.purpose == "replace"
+                and record.spec.purpose != "cover"
+                and record.execution_version == 2
+                and record.file_saved
             ):
                 record = replace(
                     record,
-                    status="SAVED" if record.file_saved else "PUBLISHING",
+                    status="SAVED",
                     error_code=None,
                 )
             if record.status in TERMINAL_STATES or record.status in {
@@ -324,57 +353,115 @@ class AutomationUploads:
             if record.offset != record.spec.size_bytes:
                 raise UploadError("UPLOAD_INCOMPLETE")
             gateway = self._gateway(record.spec)
+            step = "validate_target"
             try:
+                if record.spec.purpose != "cover":
+                    if record.execution_version != 2 or (
+                        record.publication is not None
+                        and record.publication.execution_version != 2
+                    ):
+                        raise UploadError("UPLOAD_PLAN_REQUIRES_REFRESH")
+                    if record.status == "PUBLISHING":
+                        # A restart cannot establish whether the file operation ran.
+                        # Retain its files and journal instead of replaying publication.
+                        raise UploadError("UPLOAD_PUBLICATION_INTERRUPTED")
                 if record.publication is None:
                     target = gateway.target(actor, record.spec)
                     if target != record.target:
                         raise UploadError("UPLOAD_TARGET_CHANGED")
                     self.uow.rollback()
+                    step = "verify_upload"
                     source = self.files.verify(
                         upload_id, record.spec.size_bytes, record.spec.sha256
                     )
+                    step = "prepare_upload"
                     publication = gateway.prepare(
                         upload_id, record.spec, target, source
                     )
                     record = replace(
                         record, status="PUBLISHING", publication=publication
                     )
+                    step = "save_state"
                     self.store.save(record)
+                    step = "commit"
                     self.uow.commit()
                 actor = self._current_actor(access, record)
-                # Replacement publication verifies its frozen source/backup itself;
-                # the original name may already contain the new file after a crash.
-                if record.spec.purpose != "replace":
+                # A saved file needs only scan registration on a subsequent call.
+                if record.spec.purpose != "replace" and not record.file_saved:
                     target = gateway.target(actor, record.spec)
                     if target != record.target:
                         raise UploadError("UPLOAD_TARGET_CHANGED")
                 self.uow.rollback()
                 if record.status == "PUBLISHING":
                     assert record.publication is not None
+                    step = "publish_upload"
                     gateway.publish(record.publication)
                     record = replace(record, status="SAVED", file_saved=True)
+                    step = "save_state"
                     self.store.save(record)
+                    step = "commit"
                     self.uow.commit()
                 actor = self._current_actor(access, record)
                 assert record.publication is not None
+                step = "register_upload"
                 outcome = gateway.register(actor, record.spec, record.publication)
                 record = replace(record, status=outcome.status, outcome=outcome)
+                step = "save_state"
                 self.store.save(record)
+                step = "commit"
                 self.uow.commit()
-            except UploadError as error:
-                self.uow.rollback()
+            except Exception as error:
+                diagnostic = self.diagnostics.prepare(
+                    error,
+                    event="upload.complete_failed",
+                    context={
+                        "operation_id": upload_id,
+                        "library_id": record.target.library_id,
+                        "stage": record.status,
+                        "step": step,
+                    },
+                )
+                try:
+                    self.uow.rollback()
+                except Exception as rollback_error:
+                    secondary = self.diagnostics.prepare(
+                        rollback_error,
+                        event="upload.rollback_failed",
+                        context={
+                            "operation_id": upload_id,
+                            "step": "rollback",
+                            "parent_diagnostic_id": diagnostic.diagnostic_id,
+                        },
+                    )
+                    self.diagnostics.persist(secondary)
+                    raise
+                finally:
+                    self.diagnostics.persist(diagnostic)
+                if (
+                    not isinstance(error, UploadError)
+                    and record.spec.purpose == "cover"
+                ):
+                    raise
                 if str(error) == "LIBRARY_BUSY":
                     record = replace(record, publication=None)
                 record = replace(
                     record,
                     status="RECOVERY_REQUIRED"
-                    if record.spec.purpose == "replace"
+                    if record.spec.purpose != "cover"
                     and record.publication is not None
                     else "FAILED",
-                    error_code=str(error),
+                    error_code=str(error)
+                    if isinstance(error, UploadError)
+                    else "UPLOAD_PUBLICATION_INTERRUPTED"
+                    if record.publication is not None
+                    else "UPLOAD_SAVE_FAILED",
                 )
+                step = "save_state"
                 self.store.save(record)
+                step = "commit"
                 self.uow.commit()
+                if not isinstance(error, UploadError):
+                    raise
                 return self.view(record)
             finally:
                 self.uow.rollback()
@@ -383,7 +470,9 @@ class AutomationUploads:
             )
             self.files.remove(upload_id)
             record = replace(record, staging_cleaned=True)
+            step = "save_state"
             self.store.save(record)
+            step = "commit"
             self.uow.commit()
             return self.view(record)
 
@@ -435,6 +524,7 @@ class AutomationUploads:
         records = self.store.expired(self.clock_ms())
         self.uow.rollback()
         for candidate in records:
+            step = "lock_upload"
             try:
                 with self.files.lock(candidate.id):
                     record = self.store.get(
@@ -443,32 +533,70 @@ class AutomationUploads:
                     if record.staging_cleaned or record.expires_at_ms > self.clock_ms():
                         continue
                     if (
-                        record.spec.purpose == "replace"
+                        record.spec.purpose != "cover"
                         and record.publication is not None
-                        and not record.file_saved
+                        and (
+                            record.execution_version != 2
+                            or record.publication.execution_version != 2
+                            or not record.file_saved
+                        )
                     ):
                         self.store.defer_cleanup(
                             candidate.id, self.clock_ms() + LIFETIME_MS
                         )
+                        step = "commit"
                         self.uow.commit()
                         continue
                     if record.status in TRANSFER_STATES or record.status == "SAVED":
                         record = replace(
                             record, status="EXPIRED", error_code="UPLOAD_EXPIRED"
                         )
+                        step = "save_state"
                         self.store.save(record)
+                        step = "commit"
                         self.uow.commit()
                     self.uow.rollback()
+                    step = "discard_staging"
                     self._gateway(record.spec).discard(
                         record.id, record.target, record.publication
                     )
+                    step = "remove_staging"
                     self.files.remove(record.id)
                     self.store.mark_cleaned(record)
+                    step = "commit"
                     self.uow.commit()
-            except (UploadError, OSError):
+            except Exception as error:
+                diagnostic = self.diagnostics.prepare(
+                    error,
+                    event="upload.cleanup_failed",
+                    context={
+                        "operation_id": candidate.id,
+                        "library_id": candidate.target.library_id,
+                        "stage": candidate.status,
+                        "step": step,
+                    },
+                )
+                try:
+                    self.uow.rollback()
+                except Exception as rollback_error:
+                    secondary = self.diagnostics.prepare(
+                        rollback_error,
+                        event="upload.cleanup_rollback_failed",
+                        context={
+                            "operation_id": candidate.id,
+                            "step": "rollback",
+                            "parent_diagnostic_id": diagnostic.diagnostic_id,
+                        },
+                    )
+                    self.diagnostics.persist(secondary)
+                    raise
+                finally:
+                    self.diagnostics.persist(diagnostic)
+                if not isinstance(error, (UploadError, OSError)):
+                    raise
                 # Retain uncertain staging, but do not let 20 such rows starve cleanup.
-                self.uow.rollback()
                 self.store.defer_cleanup(candidate.id, self.clock_ms() + 5 * 60 * 1000)
+                step = "commit"
                 self.uow.commit()
             finally:
                 self.uow.rollback()

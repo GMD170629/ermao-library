@@ -57,7 +57,7 @@ def file_operation_blocks_library(
             func.json_extract(targets.c.value, "$.source.library_id") == library_id,
             or_(
                 func.json_extract(targets.c.value, "$.stage").in_(
-                    ("STAGING", "STAGED")
+                    ("STAGING", "STAGED", "DELETING")
                 ),
                 and_(
                     func.json_extract(targets.c.value, "$.stage") == "QUEUED",

@@ -70,6 +70,7 @@ def _identity(directory: int, name: str) -> FileIdentity | None:
     try:
         return file_identity(os.stat(name, dir_fd=directory, follow_symlinks=False))
     except FileNotFoundError:
+        # diagnostics-control-flow: absent optional staging/backup slots are an explicit identity observation.
         return None
 
 

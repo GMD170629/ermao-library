@@ -1,5 +1,6 @@
 """Compose automation grant use cases; no request or persistence behavior."""
 
+import logging
 from collections.abc import Callable
 from typing import cast
 from uuid import uuid4
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.bootstrap.readable_resource_pipeline import build_readable_resource_pipeline
 from app.bootstrap.reader import reader_v5_library_queries
 from app.core.config import Settings, get_settings
+from app.core.failure_diagnostics import RuntimeFailureDiagnostics
 from app.core.time import now_timestamp_ms
 from app.db.maintenance import database_maintenance_is_active
 from app.modules.auth.infrastructure.automation_identity import (
@@ -53,6 +55,9 @@ from app.modules.imports.infrastructure.automation_uploads import (
     ImportAttachmentUploads,
 )
 from app.modules.imports.infrastructure.deletion_index import DeletedSourceIndex
+from app.modules.imports.infrastructure.readable_resource.filesystem import (
+    OsSourceTreeFilesystem,
+)
 from app.modules.imports.infrastructure.readable_resource.source_node_deletion import (
     LibrarySourceNodeDeletionAdapter,
 )
@@ -78,8 +83,8 @@ from app.modules.library.infrastructure.bulk_operations import (
 )
 from app.modules.library.infrastructure.catalog import SqlAlchemyCatalogQueries
 from app.modules.library.infrastructure.file_deletions import (
-    AnchoredDeleteFiles,
     SqlAlchemyDeleteStore,
+    StandardDeleteFiles,
 )
 from app.modules.library.infrastructure.file_move_operations import (
     SqlAlchemyFileMoveOperations,
@@ -143,6 +148,9 @@ def build_automation_uploads(db: Session) -> AutomationUploads:
         db,
         now_timestamp_ms,
         lambda: uuid4().hex,
+        RuntimeFailureDiagnostics(
+            logging.getLogger(__name__), "automation", lambda: Session(db.get_bind())
+        ),
     )
 
 
@@ -301,6 +309,7 @@ def build_automation_operation_manager(db: Session) -> ManageAutomationOperation
         ),
         db,
         now_timestamp_ms,
+        RuntimeFailureDiagnostics(logging.getLogger(__name__), "automation", lambda: Session(db.get_bind())),
     )
 
 
@@ -318,20 +327,26 @@ def build_automation_system(db: Session) -> AutomationSystem:
 
 
 def build_automation_deletions(db: Session) -> AutomationDeletions:
-    from_delete = LibrarySourceNodeDeletionAdapter(build_readable_resource_pipeline(db, get_settings()).delete_source_node)
+    from_delete = LibrarySourceNodeDeletionAdapter(
+        build_readable_resource_pipeline(db, get_settings()).delete_source_node
+    )
     index = DeletedSourceIndex(db, from_delete.delete_source_node)
     return AutomationDeletions(
         FileDeletions(
             SqlAlchemyMoveTopology(db).deletion_source,
             SqlAlchemyDeleteStore(db),
             db,
-            AnchoredDeleteFiles(
-                get_settings().resolved_storage_root / "automation" / "delete-locks"
+            StandardDeleteFiles(
+                get_settings().resolved_storage_root / "automation" / "delete-locks",
+                OsSourceTreeFilesystem(),
             ),
             index.enqueue,
             index.status,
             now_timestamp_ms,
             lambda: uuid4().hex,
+            RuntimeFailureDiagnostics(
+                logging.getLogger(__name__), "library", lambda: Session(db.get_bind())
+            ),
         ),
         RecheckMutationAccess(
             build_automation_authorizer(db), SqlAlchemyAutomationSettings(db)

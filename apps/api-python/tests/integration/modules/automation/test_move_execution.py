@@ -1,8 +1,11 @@
+import logging
 from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
+from app.core.failure_diagnostics import RuntimeFailureDiagnostics
 from app.models import Library, LibraryBook, LibrarySourceNode
 from app.modules.imports.infrastructure.readable_resource.task_queue import (
     SqlAlchemyLibraryImportTaskQueue,
@@ -14,7 +17,7 @@ from app.modules.library.application.file_move_plans import (
 )
 from app.modules.library.domain.file_moves import FileMoveError, MoveRequest
 from app.modules.library.infrastructure.file_move_index import SqlAlchemyFileMoveIndex
-from app.modules.library.infrastructure.file_move_io import SameDeviceMovePublication
+from app.modules.library.infrastructure.file_move_io import SystemMovePublication
 from app.modules.library.infrastructure.file_move_operations import (
     SqlAlchemyFileMoveOperations,
 )
@@ -89,6 +92,12 @@ def prepare(db, tmp_path, *, dynamic=False, batch=False):
     return actor, root, store
 
 
+def failure_diagnostics(db):
+    return RuntimeFailureDiagnostics(
+        logging.getLogger(__name__), "library", lambda: Session(db.get_bind())
+    )
+
+
 def executor(db, store, files, authorize):
     return ExecuteFileMoveOperation(
         store,
@@ -100,6 +109,7 @@ def executor(db, store, files, authorize):
         db,
         lambda: 4000,
         lambda: datetime.now(UTC),
+        diagnostics=failure_diagnostics(db),
     )
 
 
@@ -115,16 +125,16 @@ def test_move_publication_and_interruption_keep_files_and_identity(
             raise FileMoveError("AUTHORIZATION_REVOKED")
         return current
 
-    class Files(SameDeviceMovePublication):
+    class Files(SystemMovePublication):
         calls = 0
 
         def validate(self, move):
             assert not db_session.in_transaction()
             super().validate(move)
 
-        def publish(self, move, copy=None):
+        def publish(self, move):
             assert not db_session.in_transaction()
-            super().publish(move, copy)
+            super().publish(move)
             self.calls += 1
             if crash_after_publish:
                 raise OSError("simulated interruption after rename")
@@ -163,9 +173,9 @@ def test_cancel_before_publication_leaves_source_untouched(db_session, tmp_path)
     actor, root, store = prepare(db_session, tmp_path)
     store.cancel("operation", actor, 3500)
     db_session.commit()
-    executor(
-        db_session, store, SameDeviceMovePublication(), lambda actor: actor
-    ).execute("operation")
+    executor(db_session, store, SystemMovePublication(), lambda actor: actor).execute(
+        "operation"
+    )
     assert store.progress("operation", actor).status == "CANCELLED"
     assert (root / "allowed/metadata.opf").read_bytes() == b"original metadata"
     assert not (root / "renamed").exists()
@@ -185,9 +195,9 @@ def test_real_grant_revocation_before_publish_prevents_file_and_index_changes(
 
     actor, root, store = prepare(db_session, tmp_path)
 
-    class RevokeBeforePublish(SameDeviceMovePublication):
-        def is_published(self, move, copy=None):
-            published = super().is_published(move, copy)
+    class RevokeBeforePublish(SystemMovePublication):
+        def is_published(self, move):
+            published = super().is_published(move)
             build_grant_manager(db_session).revoke(
                 user_id=actor.user_id, grant_id=actor.grant_id
             )
@@ -286,9 +296,9 @@ def test_move_creates_and_indexes_planned_parent_directories(db_session, tmp_pat
     db_session.commit()
     assert store.claim_next(3000) == "operation"
     db_session.commit()
-    executor(
-        db_session, store, SameDeviceMovePublication(), lambda actor: actor
-    ).execute("operation")
+    executor(db_session, store, SystemMovePublication(), lambda actor: actor).execute(
+        "operation"
+    )
     assert store.progress("operation", actor).status == "COMPLETED"
     assert (root / "author/series/book.epub").read_bytes() == b"publication"
     db_session.expire_all()
@@ -362,9 +372,9 @@ def test_resource_rename_preserves_book_and_rejects_cross_book_move(
     db_session.commit()
     assert store.claim_next(3000) == "operation"
     db_session.commit()
-    executor(
-        db_session, store, SameDeviceMovePublication(), lambda actor: actor
-    ).execute("operation")
+    executor(db_session, store, SystemMovePublication(), lambda actor: actor).execute(
+        "operation"
+    )
     assert store.progress("operation", actor).status == "COMPLETED"
     db_session.expire_all()
     assert db_session.get(LibraryBook, "allowed").source_node_id == "allowed-node"
@@ -376,9 +386,9 @@ def test_resource_rename_preserves_book_and_rejects_cross_book_move(
     assert (root / "allowed/renamed.epub").read_bytes() == b"volume"
 
 
-@pytest.mark.parametrize("interrupt_staging", [False, True])
-def test_case_only_directory_rename_recovers_intermediate_slot(
-    db_session, tmp_path, monkeypatch, interrupt_staging
+@pytest.mark.parametrize("interrupt_rename", [False, True])
+def test_case_only_directory_rename_uses_native_rename_without_staging(
+    db_session, tmp_path, monkeypatch, interrupt_rename
 ):
     from app.modules.library.infrastructure import file_move_io
 
@@ -403,38 +413,32 @@ def test_case_only_directory_rename_recovers_intermediate_slot(
     db_session.commit()
     assert store.claim_next(3000) == "case-operation"
     db_session.commit()
-    rename = file_move_io.exclusive_rename
+    rename = file_move_io.os.rename
     calls = 0
 
-    def interrupted(*args):
+    def interrupted(*args, **kwargs):
         nonlocal calls
         calls += 1
-        rename(*args)
-        if calls == 1 and interrupt_staging:
+        rename(*args, **kwargs)
+        if calls == 1 and interrupt_rename:
             raise OSError("interrupted after staging")
 
-    monkeypatch.setattr(file_move_io, "exclusive_rename", interrupted)
-    command = executor(
-        db_session, store, SameDeviceMovePublication(), lambda actor: actor
-    )
-    if interrupt_staging:
+    monkeypatch.setattr(file_move_io.os, "rename", interrupted)
+    command = executor(db_session, store, SystemMovePublication(), lambda actor: actor)
+    if interrupt_rename:
         command.execute("case-operation")
         assert store.progress("case-operation", actor).status == "RECOVERY_REQUIRED"
-        assert plan.moves[0].staging_relative_path in [
-            entry.name for entry in root.iterdir()
-        ]
+        assert (root / "Allowed/metadata.opf").read_bytes() == b"original metadata"
+        assert not any(path.name.startswith(".ermao-mcp-") for path in root.iterdir())
         store.prepare_recovery("case-operation", 5000)
         db_session.commit()
         command.execute("case-operation")
         assert store.progress("case-operation", actor).status == "RECOVERY_REQUIRED"
         assert calls == 1
-        assert (
-            root / plan.moves[0].staging_relative_path / "metadata.opf"
-        ).read_bytes() == b"original metadata"
         return
     command.execute("case-operation")
     assert store.progress("case-operation", actor).status == "COMPLETED"
-    assert calls == 2
+    assert calls == 1
     assert "Allowed" in [entry.name for entry in root.iterdir()]
     assert "allowed" not in [entry.name for entry in root.iterdir()]
     db_session.expire_all()
@@ -498,7 +502,7 @@ def test_dynamic_grant_rechecks_worker_and_history_without_expanding_frozen_plan
         assert (
             client.get("/api/automation/operations").json()["data"]["operations"] == []
         )
-    executor(db_session, store, SameDeviceMovePublication(), authorizer).execute(
+    executor(db_session, store, SystemMovePublication(), authorizer).execute(
         "operation"
     )
     assert store.progress("operation", actor).status == (
@@ -519,19 +523,19 @@ def test_move_batch_isolates_failed_targets(
     plan = store.execution("operation").plan
     failing = plan.moves[failure_index].source.relative_path
 
-    class Files(SameDeviceMovePublication):
+    class Files(SystemMovePublication):
         def validate(self, move):
             if failure == "validation" and move.source.relative_path == failing:
                 raise FileMoveError("SOURCE_CHANGED")
             super().validate(move)
 
-        def publish(self, move, copy=None):
+        def publish(self, move):
             if move.source.relative_path == failing:
                 if failure == "publication":
                     raise FileMoveError("DESTINATION_COLLISION")
                 if failure == "unexpected":
                     raise OSError("unavailable target")
-            super().publish(move, copy)
+            super().publish(move)
 
     executor(db_session, store, Files(), lambda actor: actor).execute("operation")
     expected = ["COMPLETED"] * 3
@@ -559,11 +563,8 @@ def test_move_batch_isolates_failed_targets(
 
 @pytest.mark.parametrize("interrupted", [False, True])
 def test_restart_claims_queued_siblings_without_replaying_failed_move(
-    db_session, tmp_path, interrupted
+    db_session, tmp_path, interrupted, caplog
 ):
-    from app.modules.library.application.file_move_recovery_cleanup import (
-        CleanExpiredMoveBackups,
-    )
     from app.modules.library.application.file_move_worker import FileMoveWorker
     from app.modules.library.infrastructure.file_move_schema import (
         LibraryFileMoveOperation,
@@ -580,17 +581,31 @@ def test_restart_claims_queued_siblings_without_replaying_failed_move(
     if not interrupted:
         store.finish("operation", 3500)
     db_session.commit()
-    files = SameDeviceMovePublication()
+    files = SystemMovePublication()
     restarted = SqlAlchemyFileMoveOperations(db_session)
     worker = FileMoveWorker(
         restarted,
         executor(db_session, restarted, files, lambda actor: actor),
-        CleanExpiredMoveBackups(restarted, files, db_session, lambda: 4000),
         db_session,
         lambda: 4000,
+        diagnostics=failure_diagnostics(db_session),
     )
     if interrupted:
         assert worker.process_once()  # Quarantine interrupted target before new claims.
+        from app.models import SystemEvent
+
+        event = db_session.scalar(
+            select(SystemEvent).where(
+                SystemEvent.action == "file_move.previous_result_unavailable"
+            )
+        )
+        assert event is not None
+        assert event.metadata_json["operationId"] == "operation"
+        assert event.metadata_json["targetOrdinal"] == 0
+        assert event.metadata_json["stage"] == "PREPARING"
+        assert event.metadata_json["step"] == "inspect_recovery_state"
+        assert event.metadata_json["diagnostics"]["causeStatus"] == "NOT_PROVIDED"
+        assert "previous move result was not provided" in caplog.text
         assert (
             db_session.get(LibraryFileMoveOperation, "operation").status
             == "RECOVERY_REQUIRED"
@@ -624,9 +639,9 @@ def test_recovery_move_does_not_block_new_same_source_task(
     db_session.commit()
     assert store.claim_next(4000) is None  # Already owned; not claimed twice.
     db_session.rollback()
-    executor(
-        db_session, store, SameDeviceMovePublication(), lambda actor: actor
-    ).execute("operation")
+    executor(db_session, store, SystemMovePublication(), lambda actor: actor).execute(
+        "operation"
+    )
     sibling = "CANCELLED" if cancel else "COMPLETED"
     assert store.progress("operation", actor).stages == (
         "RECOVERY_REQUIRED",
@@ -646,11 +661,58 @@ def test_recovery_move_does_not_block_new_same_source_task(
     db_session.commit()
     assert store.claim_next(7000) == "fresh"
     db_session.commit()
-    executor(
-        db_session, store, SameDeviceMovePublication(), lambda actor: actor
-    ).execute("fresh")
+    executor(db_session, store, SystemMovePublication(), lambda actor: actor).execute(
+        "fresh"
+    )
     assert store.progress("fresh", actor).status == "COMPLETED"
     assert (
         root / "fresh-destination/metadata.opf"
     ).read_bytes() == b"original metadata"
     assert store.progress("operation", actor).stages[0] == "RECOVERY_REQUIRED"
+
+
+@pytest.mark.parametrize("started", [False, True])
+def test_legacy_move_plan_never_replays_files_or_cleans_backup(
+    db_session, tmp_path, started
+):
+    from app.modules.library.infrastructure.file_move_schema import LibraryFileMovePlan
+
+    actor, root, store = prepare(db_session, tmp_path)
+    row = db_session.get(LibraryFileMovePlan, "plan")
+    payload = dict(row.payload)
+    payload.pop("execution_version")
+    payload["moves"][0]["staging_relative_path"] = ".ermao-mcp-legacy-target"
+    payload["moves"][0]["backup_relative_path"] = ".ermao-mcp-legacy-source"
+    row.payload = payload
+    backup = root / ".ermao-mcp-legacy-source"
+    backup.write_bytes(b"legacy recovery content")
+    if started:
+        store.checkpoint("operation", 0, "PREPARING", 3500)
+    db_session.commit()
+    files = SystemMovePublication()
+    command = executor(db_session, store, files, lambda value: value)
+    command.execute("operation")
+    progress = store.progress("operation", actor)
+    assert progress.status == ("RECOVERY_REQUIRED" if started else "FAILED")
+    assert progress.error_codes == ("MOVE_PLAN_REQUIRES_REFRESH",)
+    command.execute("operation")
+    assert (root / "allowed/metadata.opf").read_bytes() == b"original metadata"
+    assert not (root / "renamed").exists()
+    assert backup.read_bytes() == b"legacy recovery content"
+    assert not hasattr(files, "clear_backup")
+
+
+def test_old_preview_requires_refresh_before_new_enqueue(db_session, tmp_path):
+    from dataclasses import replace
+
+    actor, root, store = prepare(db_session, tmp_path)
+    legacy = replace(
+        store.load_plan("plan", actor), id="old-preview", execution_version=1
+    )
+    store.save_plan(legacy)
+    db_session.commit()
+    with pytest.raises(FileMoveError, match="MOVE_PLAN_REQUIRES_REFRESH"):
+        store.enqueue(legacy, "never-enqueued", "legacy-request", 4000)
+    db_session.rollback()
+    assert store.load_plan("old-preview", actor).execution_version == 1
+    assert (root / "allowed").is_dir()

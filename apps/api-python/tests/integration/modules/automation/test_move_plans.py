@@ -108,13 +108,13 @@ def test_move_intent_roundtrip_cancellation_and_scope(db_session, tmp_path):
     store.cancel("operation", actor, 4000)
     db_session.commit()
     from app.modules.library.infrastructure.file_move_io import (
-        SameDeviceMovePublication,
+        SystemMovePublication,
     )
     from tests.integration.modules.automation.test_move_execution import executor
 
-    executor(
-        db_session, store, SameDeviceMovePublication(), lambda actor: actor
-    ).execute("operation")
+    executor(db_session, store, SystemMovePublication(), lambda actor: actor).execute(
+        "operation"
+    )
     result = store.progress("operation", actor)
     assert move_progress_result(result)["cancelled"] == 1
     assert result.status == "CANCELLED"
@@ -138,7 +138,7 @@ def test_same_disk_cross_library_move_keeps_book_resource_asset_and_shelf_ids(
     from app.modules.library.infrastructure.file_move_index import (
         SqlAlchemyFileMoveIndex,
     )
-    from app.modules.library.infrastructure.file_move_io import publish_same_device_move
+    from app.modules.library.infrastructure.file_move_io import SystemMovePublication
     from app.modules.reader.infrastructure.persistence.models import (
         ReaderResourceProgressV5,
     )
@@ -208,7 +208,7 @@ def test_same_disk_cross_library_move_keeps_book_resource_asset_and_shelf_ids(
         lambda: "plan",
     ).execute(actor, (MoveRequest("allowed-node", "private-library", "renamed"),))
     db_session.rollback()
-    publish_same_device_move(plan.moves[0])
+    SystemMovePublication().publish(plan.moves[0])
     ids = SqlAlchemyFileMoveIndex(db_session).apply(plan.moves[0], datetime.now(UTC))
     db_session.commit()
     db_session.expire_all()
@@ -242,7 +242,7 @@ def test_same_disk_cross_library_move_keeps_book_resource_asset_and_shelf_ids(
     assert progress.locator_json == '{"href":"chapter-2.xhtml"}'
 
 
-def test_cross_device_recovery_quota_is_reserved_before_queueing(db_session, tmp_path):
+def test_moves_do_not_reserve_application_recovery_space(db_session, tmp_path):
     from dataclasses import replace
 
     from app.modules.library.infrastructure.file_move_operations import (
@@ -278,21 +278,20 @@ def test_cross_device_recovery_quota_is_reserved_before_queueing(db_session, tmp
         ),
     )
     second = replace(plan, id="second")
-    store = SqlAlchemyFileMoveOperations(db_session, recovery_byte_limit=15)
+    store = SqlAlchemyFileMoveOperations(db_session)
     store.save_plan(plan)
     store.save_plan(second)
     store.enqueue(plan, "operation", "first-key", 2000)
     db_session.commit()
-    with pytest.raises(FileMoveError, match="RECOVERY_QUOTA_EXCEEDED"):
-        store.enqueue(second, "second-operation", "second-key", 2000)
-    db_session.rollback()
-    store.cancel("operation", actor, 3000)
-    db_session.commit()
     assert (
-        store.enqueue(second, "second-operation", "second-key", 3000)
+        store.enqueue(second, "second-operation", "second-key", 2000)
         == "second-operation"
     )
-    db_session.rollback()
+    db_session.commit()
+    from app.infrastructure.file_recovery_budget import reserved_file_recovery_bytes
+
+    assert reserved_file_recovery_bytes(db_session) == 0
+    assert not hasattr(plan.moves[0], "cross_device")
     assert (root / "allowed/book").read_bytes() == b"1234567890"
 
 
@@ -321,7 +320,7 @@ def test_directory_move_preserves_existing_recovery_slot(db_session, tmp_path):
     assert backup.read_bytes() == b"retained original"
     assert not (root / "renamed").exists()
     from app.modules.library.infrastructure.file_move_io import (
-        SameDeviceMovePublication,
+        SystemMovePublication,
     )
     from app.modules.library.infrastructure.file_move_operations import (
         SqlAlchemyFileMoveOperations,
@@ -334,8 +333,8 @@ def test_directory_move_preserves_existing_recovery_slot(db_session, tmp_path):
     db_session.commit()
     assert store.claim_next(3000) == "move-backup"
     db_session.commit()
-    executor(
-        db_session, store, SameDeviceMovePublication(), lambda actor: actor
-    ).execute("move-backup")
+    executor(db_session, store, SystemMovePublication(), lambda actor: actor).execute(
+        "move-backup"
+    )
     assert store.progress("move-backup", actor).status == "COMPLETED"
     assert (root / "renamed" / backup.name).read_bytes() == b"retained original"

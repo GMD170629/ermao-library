@@ -7,7 +7,6 @@ from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session, aliased
 
 from app.infrastructure.file_operation_conflicts import writeback_has_live_lease
-from app.infrastructure.file_recovery_budget import reserved_file_recovery_bytes
 from app.models import LibraryBook, LibraryImportTask
 from app.models.organize import MetadataWritebackOperation, MetadataWritebackTarget
 from app.modules.library.application.execute_file_moves import MoveExecution
@@ -19,13 +18,8 @@ from app.modules.library.application.file_move_plans import (
     CreatedMoveDirectory,
     FileMovePlan,
     MoveActor,
-    PreparedMoveCopy,
-    StagedMoveSource,
 )
-from app.modules.library.application.file_move_recovery_cleanup import ExpiredMoveBackup
 from app.modules.library.domain.file_moves import (
-    RECOVERY_BYTE_LIMIT,
-    RECOVERY_RETENTION_MS,
     FileMoveError,
 )
 from app.modules.library.infrastructure.file_move_schema import (
@@ -40,19 +34,14 @@ from app.modules.library.infrastructure.operations import (
 
 _PLAN = TypeAdapter(FileMovePlan)
 _DIRECTORIES = TypeAdapter(tuple[CreatedMoveDirectory, ...])
-_COPY = TypeAdapter(PreparedMoveCopy)
-_BACKUP = TypeAdapter(StagedMoveSource)
 _TERMINAL = frozenset(
     {"COMPLETED", "PARTIAL", "FAILED", "CANCELLED", "RECOVERY_REQUIRED"}
 )
 
 
 class SqlAlchemyFileMoveOperations:
-    def __init__(
-        self, db: Session, *, recovery_byte_limit: int = RECOVERY_BYTE_LIMIT
-    ) -> None:
+    def __init__(self, db: Session) -> None:
         self._db = db
-        self._recovery_byte_limit = recovery_byte_limit
 
     def save_plan(self, plan: FileMovePlan) -> None:
         self._db.add(
@@ -94,12 +83,8 @@ class SqlAlchemyFileMoveOperations:
             return existing
         if plan.expires_at_ms <= now_ms:
             raise FileMoveError("PLAN_EXPIRED")
-        reserved = reserved_file_recovery_bytes(self._db)
-        requested = sum(
-            move.inventory.byte_count for move in plan.moves if move.cross_device
-        )
-        if requested and reserved + requested > self._recovery_byte_limit:
-            raise FileMoveError("RECOVERY_QUOTA_EXCEEDED")
+        if plan.execution_version != 2:
+            raise FileMoveError("MOVE_PLAN_REQUIRES_REFRESH")
         self._db.add(
             LibraryFileMoveOperation(
                 id=operation_id,
@@ -122,7 +107,7 @@ class SqlAlchemyFileMoveOperations:
                     source_library_id=move.source.library_id,
                     destination_library_id=move.destination.library_id,
                     byte_count=move.inventory.byte_count,
-                    copy_required=move.cross_device,
+                    copy_required=False,
                     stage="QUEUED",
                     recovery={},
                 )
@@ -321,18 +306,7 @@ class SqlAlchemyFileMoveOperations:
                 .execution_options(populate_existing=True)
             )
         )
-        copies = tuple(
-            _COPY.validate_python(target.recovery["copy"])
-            if "copy" in target.recovery
-            else None
-            for target in self._db.scalars(
-                select(LibraryFileMoveTarget)
-                .where(LibraryFileMoveTarget.operation_id == operation_id)
-                .order_by(LibraryFileMoveTarget.ordinal)
-                .execution_options(populate_existing=True)
-            )
-        )
-        return MoveExecution(plan, stages, row.cancel_requested, directories, copies)
+        return MoveExecution(plan, stages, row.cancel_requested, directories)
 
     def checkpoint(
         self,
@@ -438,11 +412,13 @@ class SqlAlchemyFileMoveOperations:
             .limit(1)
         )
 
-    def prepare_recovery(self, operation_id: str, now_ms: int) -> None:
-        """Quarantine interrupted entries; leave queued siblings executable."""
-        targets = tuple(
-            self._db.scalars(
-                select(LibraryFileMoveTarget).where(
+    def interrupted_targets(self, operation_id: str) -> tuple[tuple[int, str], ...]:
+        return tuple(
+            (ordinal, stage)
+            for ordinal, stage in self._db.execute(
+                select(
+                    LibraryFileMoveTarget.ordinal, LibraryFileMoveTarget.stage
+                ).where(
                     LibraryFileMoveTarget.operation_id == operation_id,
                     LibraryFileMoveTarget.stage.in_(
                         ("PREPARING", "FILES_PUBLISHED", "INDEX_UPDATED")
@@ -450,10 +426,13 @@ class SqlAlchemyFileMoveOperations:
                 )
             )
         )
-        for target in targets:
+
+    def prepare_recovery(self, operation_id: str, now_ms: int) -> None:
+        """Quarantine interrupted entries; leave queued siblings executable."""
+        for ordinal, _stage in self.interrupted_targets(operation_id):
             self.checkpoint(
                 operation_id,
-                target.ordinal,
+                ordinal,
                 "RECOVERY_REQUIRED",
                 now_ms,
                 "FILE_OPERATION_INTERRUPTED",
@@ -474,114 +453,5 @@ class SqlAlchemyFileMoveOperations:
             "directories": _DIRECTORIES.dump_python(
                 (*existing, directory), mode="json"
             ),
-        }
-        self._db.flush()
-
-    def record_copy(
-        self, operation_id: str, ordinal: int, copy: PreparedMoveCopy
-    ) -> None:
-        target = self._db.get(
-            LibraryFileMoveTarget, (operation_id, ordinal), populate_existing=True
-        )
-        if target is None:
-            raise FileMoveError("RESOURCE_NOT_FOUND")
-        target.recovery = {
-            **target.recovery,
-            "copy": _COPY.dump_python(copy, mode="json"),
-        }
-        self._db.flush()
-
-    def record_source_backup(
-        self, operation_id: str, ordinal: int, backup: StagedMoveSource, now_ms: int
-    ) -> None:
-        target = self._db.get(
-            LibraryFileMoveTarget, (operation_id, ordinal), populate_existing=True
-        )
-        if target is None:
-            raise FileMoveError("RESOURCE_NOT_FOUND")
-        target.recovery = {
-            **target.recovery,
-            "source_backup": _BACKUP.dump_python(backup, mode="json"),
-            "source_backup_expires_at": now_ms + RECOVERY_RETENTION_MS,
-        }
-        self._db.flush()
-
-    def expired_backups(self, now_ms: int, limit: int) -> tuple[ExpiredMoveBackup, ...]:
-        targets = tuple(
-            self._db.scalars(
-                select(LibraryFileMoveTarget)
-                .join(
-                    LibraryFileMoveOperation,
-                    LibraryFileMoveOperation.id == LibraryFileMoveTarget.operation_id,
-                )
-                .where(
-                    LibraryFileMoveOperation.status.in_(("COMPLETED", "PARTIAL")),
-                    LibraryFileMoveTarget.stage == "COMPLETED",
-                    LibraryFileMoveTarget.recovery[
-                        "source_backup_expires_at"
-                    ].as_integer()
-                    <= now_ms,
-                    LibraryFileMoveTarget.recovery["source_backup_cleared_at"]
-                    .as_integer()
-                    .is_(None),
-                    or_(
-                        LibraryFileMoveTarget.recovery["backup_retry_at"]
-                        .as_integer()
-                        .is_(None),
-                        LibraryFileMoveTarget.recovery["backup_retry_at"].as_integer()
-                        <= now_ms,
-                    ),
-                )
-                .order_by(
-                    LibraryFileMoveOperation.updated_at_ms,
-                    LibraryFileMoveTarget.ordinal,
-                )
-                .limit(min(max(limit, 1), 5))
-                .execution_options(populate_existing=True)
-            )
-        )
-        results: list[ExpiredMoveBackup] = []
-        for target in targets:
-            execution = self.execution(target.operation_id)
-            results.append(
-                ExpiredMoveBackup(
-                    target.operation_id,
-                    target.ordinal,
-                    execution.plan.moves[target.ordinal],
-                    _COPY.validate_python(target.recovery["copy"]),
-                    _BACKUP.validate_python(target.recovery["source_backup"]),
-                )
-            )
-        return tuple(results)
-
-    def clear_backup(self, backup: ExpiredMoveBackup, now_ms: int) -> None:
-        target = self._db.get(
-            LibraryFileMoveTarget,
-            (backup.operation_id, backup.ordinal),
-            populate_existing=True,
-        )
-        if target is None:
-            raise FileMoveError("RESOURCE_NOT_FOUND")
-        target.recovery = {
-            **target.recovery,
-            "source_backup_cleared_at": now_ms,
-            "backup_cleanup_error": None,
-        }
-        self._db.flush()
-
-    def retain_backup(
-        self, backup: ExpiredMoveBackup, error_code: str, now_ms: int
-    ) -> None:
-        target = self._db.get(
-            LibraryFileMoveTarget,
-            (backup.operation_id, backup.ordinal),
-            populate_existing=True,
-        )
-        if target is None:
-            raise FileMoveError("RESOURCE_NOT_FOUND")
-        target.recovery = {
-            **target.recovery,
-            "backup_cleanup_error": error_code,
-            "backup_retry_at": now_ms + 24 * 60 * 60_000,
         }
         self._db.flush()

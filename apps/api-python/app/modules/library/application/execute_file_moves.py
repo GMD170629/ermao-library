@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
+from app.contracts.diagnostics import FailureDiagnostics
 from app.contracts.source_relocation import SourceRelocation
 from app.modules.library.application.file_move_operations import require_move_access
 from app.modules.library.application.file_move_plans import (
@@ -14,8 +15,6 @@ from app.modules.library.application.file_move_plans import (
     FileMovePlan,
     MoveActor,
     PlannedMove,
-    PreparedMoveCopy,
-    StagedMoveSource,
 )
 from app.modules.library.domain.file_moves import FileIdentity, FileMoveError
 
@@ -26,16 +25,9 @@ class MoveExecution:
     stages: tuple[str, ...]
     cancelled: bool
     created_directories: tuple[tuple[CreatedMoveDirectory, ...], ...]
-    copies: tuple[PreparedMoveCopy | None, ...]
 
 
 class MoveExecutionStore(Protocol):
-    def record_copy(
-        self, operation_id: str, ordinal: int, copy: PreparedMoveCopy
-    ) -> None: ...
-    def record_source_backup(
-        self, operation_id: str, ordinal: int, backup: StagedMoveSource, now_ms: int
-    ) -> None: ...
     def execution(self, operation_id: str) -> MoveExecution: ...
     def checkpoint(
         self,
@@ -56,16 +48,8 @@ class MovePublicationPort(Protocol):
         self, root: Path, relative_path: str, parent: DestinationInspection
     ) -> FileIdentity: ...
     def validate(self, move: PlannedMove) -> None: ...
-    def prepare_copy(self, move: PlannedMove) -> PreparedMoveCopy | None: ...
-    def publish(
-        self, move: PlannedMove, copy: PreparedMoveCopy | None = None
-    ) -> None: ...
-    def is_published(
-        self, move: PlannedMove, copy: PreparedMoveCopy | None = None
-    ) -> bool: ...
-    def finish_source(
-        self, move: PlannedMove, copy: PreparedMoveCopy | None = None
-    ) -> StagedMoveSource | None: ...
+    def publish(self, move: PlannedMove) -> None: ...
+    def is_published(self, move: PlannedMove) -> bool: ...
 
 
 class MoveIndexPort(Protocol):
@@ -95,6 +79,7 @@ class ExecuteFileMoveOperation:
     uow: MoveExecutionUnitOfWork
     clock_ms: Callable[[], int]
     clock: Callable[[], datetime]
+    diagnostics: FailureDiagnostics
 
     def execute(self, operation_id: str) -> None:
         execution = self.store.execution(operation_id)
@@ -103,7 +88,6 @@ class ExecuteFileMoveOperation:
         for ordinal, move in enumerate(plan.moves):
             current = self.store.execution(operation_id)
             stage = current.stages[ordinal]
-            copy = current.copies[ordinal]
             self.uow.rollback()
             if stage in {"COMPLETED", "FAILED", "CANCELLED"}:
                 continue
@@ -136,24 +120,36 @@ class ExecuteFileMoveOperation:
                 for index, previous in enumerate(plan.moves)
             )
             publication_uncertain = stage != "QUEUED" or companions_published
+            step = "validate_target"
             try:
+                if plan.execution_version != 2:
+                    raise FileMoveError("MOVE_PLAN_REQUIRES_REFRESH")
+                if stage == "PREPARING":
+                    raise FileMoveError("FILE_OPERATION_INTERRUPTED")
                 if stage == "QUEUED":
                     if current.cancelled:
                         if companions_published:
                             raise FileMoveError("CANCELLED_COMPANIONS_RETAINED")
+                        step = "checkpoint"
                         self.store.checkpoint(
                             operation_id, ordinal, "CANCELLED", self.clock_ms()
                         )
+                        step = "commit"
                         self.uow.commit()
                         continue
+                    step = "authorize_target"
                     require_move_access(plan.actor, move, self.authorize(plan.actor))
                     self.uow.rollback()
+                    step = "validate_index"
                     self.index.validate(move)
                     self.uow.rollback()
+                    step = "validate_files"
                     self.files.validate(move)
+                    step = "checkpoint"
                     self.store.checkpoint(
                         operation_id, ordinal, "PREPARING", self.clock_ms()
                     )
+                    step = "commit"
                     self.uow.commit()
                     stage = "PREPARING"
                 if stage == "PREPARING":
@@ -173,11 +169,13 @@ class ExecuteFileMoveOperation:
                                 plan.actor, move, self.authorize(plan.actor)
                             )
                             self.uow.rollback()
+                            step = "create_directory"
                             identity = self.files.create_directory(
                                 move.destination.root, relative, destination
                             )
                             saved = CreatedMoveDirectory(relative, identity)
                             self.store.record_directory(operation_id, ordinal, saved)
+                            step = "commit"
                             self.uow.commit()
                             created.append(saved)
                         destination = DestinationInspection(
@@ -185,51 +183,41 @@ class ExecuteFileMoveOperation:
                         )
                     if created:
                         move = replace(move, destination_inspection=destination)
-                    if move.cross_device and copy is None:
-                        require_move_access(
-                            plan.actor, move, self.authorize(plan.actor)
-                        )
-                        self.uow.rollback()
-                        publication_uncertain = True
-                        copy = self.files.prepare_copy(move)
-                        if copy is None:
-                            raise FileMoveError("COPY_NOT_PREPARED")
-                        self.store.record_copy(operation_id, ordinal, copy)
-                        self.uow.commit()
-                    # Reopening an uncertain rename observes only the frozen source
-                    # and target. A published item receives minimal index repair,
-                    # even if its token has since been revoked.
-                    published = self.files.is_published(move, copy)
-                    publication_uncertain = (
-                        published or copy is not None or companions_published
-                    )
+                    step = "inspect_publication"
+                    published = self.files.is_published(move)
+                    publication_uncertain = published or companions_published
                     if not published:
                         require_move_access(
                             plan.actor, move, self.authorize(plan.actor)
                         )
+                        step = "validate_index"
                         self.index.validate(move)
                         cancelled = self.store.execution(operation_id).cancelled
                         self.uow.rollback()
                         if cancelled:
                             if companions_published:
                                 raise FileMoveError("CANCELLED_COMPANIONS_RETAINED")
-                            if copy is not None:
-                                raise FileMoveError("CANCELLED_STAGED_COPY_RETAINED")
+                            step = "checkpoint"
                             self.store.checkpoint(
                                 operation_id, ordinal, "CANCELLED", self.clock_ms()
                             )
+                            step = "commit"
                             self.uow.commit()
                             continue
                         publication_uncertain = True
-                        self.files.publish(move, copy)
+                        step = "publish_files"
+                        self.files.publish(move)
+                    step = "checkpoint"
                     self.store.checkpoint(
                         operation_id, ordinal, "FILES_PUBLISHED", self.clock_ms()
                     )
+                    step = "commit"
                     self.uow.commit()
                     stage = "FILES_PUBLISHED"
                 if stage == "FILES_PUBLISHED":
-                    if not self.files.is_published(move, copy):
+                    if not self.files.is_published(move):
                         raise FileMoveError("PUBLISHED_FILE_MISSING")
+                    step = "update_index"
                     node_ids = self.index.apply(
                         move,
                         self.clock(),
@@ -243,38 +231,69 @@ class ExecuteFileMoveOperation:
                         node_ids,
                         move.source.book_ids,
                     )
+                    step = "discard_relocated_writebacks"
                     self.discard_writebacks(change)
+                    step = "reconcile_imports"
                     self.reconcile_imports(change)
+                    step = "checkpoint"
                     self.store.checkpoint(
                         operation_id, ordinal, "INDEX_UPDATED", self.clock_ms()
                     )
+                    step = "commit"
                     self.uow.commit()
                 self.uow.rollback()
-                backup = self.files.finish_source(move, copy)
-                if backup is not None:
-                    self.store.record_source_backup(
-                        operation_id, ordinal, backup, self.clock_ms()
-                    )
+                step = "checkpoint"
                 self.store.checkpoint(
                     operation_id, ordinal, "COMPLETED", self.clock_ms()
                 )
+                step = "commit"
                 self.uow.commit()
-            except FileMoveError as error:
-                self.uow.rollback()
-                state = "RECOVERY_REQUIRED" if publication_uncertain else "FAILED"
-                self.store.checkpoint(
-                    operation_id, ordinal, state, self.clock_ms(), str(error)
+            except Exception as error:  # noqa: BLE001 - diagnose each target before continuing siblings.
+                diagnostic = self.diagnostics.prepare(
+                    error,
+                    event="file_move.target_failed",
+                    context={
+                        "operation_id": operation_id,
+                        "target_ordinal": ordinal,
+                        "library_id": move.source.library_id,
+                        "source_node_id": move.source.node_id,
+                        "stage": stage,
+                        "step": step,
+                    },
                 )
-                self.uow.commit()
-            except Exception:  # noqa: BLE001 - persist this target's failure before continuing siblings.
-                self.uow.rollback()
+                try:
+                    self.uow.rollback()
+                except Exception as rollback_error:
+                    secondary = self.diagnostics.prepare(
+                        rollback_error,
+                        event="file_move.rollback_failed",
+                        context={
+                            "operation_id": operation_id,
+                            "target_ordinal": ordinal,
+                            "step": "rollback",
+                            "parent_diagnostic_id": diagnostic.diagnostic_id,
+                        },
+                    )
+                    self.diagnostics.persist(secondary)
+                    raise
+                finally:
+                    self.diagnostics.persist(diagnostic)
+                known = isinstance(error, FileMoveError)
+                state = (
+                    "RECOVERY_REQUIRED"
+                    if publication_uncertain or not known
+                    else "FAILED"
+                )
+                step = "checkpoint"
                 self.store.checkpoint(
                     operation_id,
                     ordinal,
-                    "RECOVERY_REQUIRED",
+                    state,
                     self.clock_ms(),
-                    "FILE_OPERATION_INTERRUPTED",
+                    str(error) if known else "FILE_OPERATION_INTERRUPTED",
                 )
+                step = "commit"
                 self.uow.commit()
         self.store.finish(operation_id, self.clock_ms())
+        step = "commit"
         self.uow.commit()

@@ -1,6 +1,7 @@
 """Read standard metadata from an anchored, bounded stream, without extraction."""
 
 import hashlib
+import logging
 import math
 import os
 from collections.abc import Callable
@@ -18,6 +19,7 @@ from mutagen.mp4 import MP4
 from pypdf.errors import PdfReadError
 
 from app.contracts.publication_metadata import PublicationMetadata
+from app.core.exception_diagnostics import record_exception
 from app.infrastructure.bounded_inspection import (
     InspectionLimitReached,
     LimitedReader,
@@ -79,10 +81,20 @@ def read_comic_metadata(content: bytes) -> PublicationMetadata:
     author = parsed.get("writer") or parsed.get("penciller")
 
     def number(name: str) -> float | None:
+        raw = root.findtext(name)
+        if not raw or not raw.strip():
+            return None
         try:
-            value = float(root.findtext(name) or "")
+            value = float(raw)
             return value if math.isfinite(value) else None
-        except ValueError:
+        except ValueError as error:
+            record_exception(
+                logging.getLogger(__name__),
+                "metadata.comic_number_invalid",
+                error,
+                context={"step": "parse_comic_number"},
+                source="metadata",
+            )
             return None
 
     date = (
@@ -155,13 +167,16 @@ class AnchoredStandardMetadataReader:
                 raise StandardMetadataError("INVALID_SIDECAR_TARGET")
             candidates = (sidecar_relative_path,)
         found: list[StandardMetadataObservation] = []
+        last_missing: FileNotFoundError | None = None
         for candidate in candidates:
             try:
                 found.append(self._read_one(root, candidate, source))
-            except FileNotFoundError:
+            except FileNotFoundError as error:
+                # diagnostics-control-flow: optional sidecar candidates may be absent; no match is rejected below.
+                last_missing = error
                 continue
         if not found:
-            raise StandardMetadataError("METADATA_NOT_FOUND")
+            raise StandardMetadataError("METADATA_NOT_FOUND") from last_missing
         if len(found) != 1:
             raise StandardMetadataError("AMBIGUOUS_SIDECAR")
         return found[0]
@@ -199,7 +214,14 @@ class AnchoredStandardMetadataReader:
                             else:
                                 patch_comicinfo(content, metadata, frozenset({"title"}))
                                 writable = tuple(sorted(COMIC_WRITABLE_FIELDS))
-                        except StandardMetadataError:
+                        except StandardMetadataError as error:
+                            record_exception(
+                                logging.getLogger(__name__),
+                                "metadata.sidecar_write_capability_unavailable",
+                                error,
+                                context={"step": "inspect_sidecar_write"},
+                                source="metadata",
+                            )
                             writable = ()
                     elif suffix in {".epub", ".cbz", ".zip"}:
                         with ZipFile(BoundedArchiveStream(stream)) as archive:
@@ -234,7 +256,14 @@ class AnchoredStandardMetadataReader:
                                         else COMIC_WRITABLE_FIELDS
                                     )
                                 )
-                            except StandardMetadataError:
+                            except StandardMetadataError as error:
+                                record_exception(
+                                    logging.getLogger(__name__),
+                                    "metadata.archive_write_capability_unavailable",
+                                    error,
+                                    context={"step": "inspect_archive_write"},
+                                    source="metadata",
+                                )
                                 writable = ()
                     elif suffix == ".pdf":
                         pdf = StrictMetadataPdfReader(
@@ -258,7 +287,14 @@ class AnchoredStandardMetadataReader:
                             StandardMetadataError,
                             InspectionLimitReached,
                             PdfReadError,
-                        ):
+                        ) as error:
+                            record_exception(
+                                logging.getLogger(__name__),
+                                "metadata.pdf_write_capability_unavailable",
+                                error,
+                                context={"step": "inspect_pdf_write"},
+                                source="metadata",
+                            )
                             writable = ()
                     elif suffix in {".mp3", ".m4a", ".m4b", ".flac"}:
                         metadata = _audio_metadata(stream, suffix)
@@ -273,7 +309,14 @@ class AnchoredStandardMetadataReader:
                             else:
                                 mp4_structure(stream, verify_payload=False)
                             writable = tuple(sorted(AUDIO_WRITABLE_FIELDS))
-                        except (StandardMetadataError, InspectionLimitReached):
+                        except (StandardMetadataError, InspectionLimitReached) as error:
+                            record_exception(
+                                logging.getLogger(__name__),
+                                "metadata.audio_write_capability_unavailable",
+                                error,
+                                context={"step": "inspect_audio_write"},
+                                source="metadata",
+                            )
                             writable = ()
                     else:
                         raise StandardMetadataError("UNSUPPORTED_FORMAT")

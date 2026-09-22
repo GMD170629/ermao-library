@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import tempfile
@@ -14,6 +15,7 @@ from pathlib import Path
 from lxml import etree  # type: ignore[import-untyped]
 
 from app.contracts.publication_metadata import PublicationMetadata
+from app.core.exception_diagnostics import record_exception
 from app.modules.metadata.application.opf import (
     MAX_OPF_BYTES,
     OPF_NAMESPACE,
@@ -62,7 +64,9 @@ def cleanup_orphan_prepared_files(
             continue
         try:
             resolved_directory = directory.resolve()
-        except OSError:
+        except OSError as error:
+            record_exception(logging.getLogger(__name__), "modules.metadata.infrastructure.file_writeback.cleanup_orphan_prepared_files.failed", error,
+                             context={"step": "cleanup_orphan_prepared_files"})
             continue
         if not resolved_directory.is_dir():
             continue
@@ -76,7 +80,9 @@ def cleanup_orphan_prepared_files(
                     resolved_candidate = candidate.resolve()
                     resolved_candidate.relative_to(resolved_directory)
                     stat = candidate.lstat()
-                except (OSError, ValueError):
+                except (OSError, ValueError) as error:
+                    record_exception(logging.getLogger(__name__), "modules.metadata.infrastructure.file_writeback.cleanup_orphan_prepared_files.failed", error,
+                                     context={"step": "cleanup_orphan_prepared_files"})
                     continue
                 if (
                     resolved_candidate in protected
@@ -89,10 +95,14 @@ def cleanup_orphan_prepared_files(
                     continue
                 try:
                     candidate.unlink()
-                except OSError:
+                except OSError as error:
+                    record_exception(logging.getLogger(__name__), "modules.metadata.infrastructure.file_writeback.cleanup_orphan_prepared_files.failed", error,
+                                     context={"step": "cleanup_orphan_prepared_files"})
                     continue
                 removed += 1
-        except OSError:
+        except OSError as error:
+            record_exception(logging.getLogger(__name__), "modules.metadata.infrastructure.file_writeback.cleanup_orphan_prepared_files.failed", error,
+                             context={"step": "cleanup_orphan_prepared_files"})
             continue
     return removed
 
@@ -113,7 +123,9 @@ def _publication(
         try:
             resolved = candidate.resolve()
             resolved.relative_to(storage_root.resolve())
-        except (OSError, ValueError):
+        except (OSError, ValueError) as error:
+            record_exception(logging.getLogger(__name__), "modules.metadata.infrastructure.file_writeback._publication.failed", error,
+                             context={"step": "_publication"})
             resolved = None
         if resolved is not None and resolved.is_file() and not resolved.is_symlink():
             cover_path = resolved

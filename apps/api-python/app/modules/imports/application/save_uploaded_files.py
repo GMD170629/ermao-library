@@ -11,6 +11,12 @@ from typing import BinaryIO, Protocol
 class UploadPublicationError(RuntimeError):
     """A filesystem failure while publishing a selected upload batch."""
 
+    def __init__(
+        self, message: str, *, saved_files: tuple[SavedUploadFile, ...] = ()
+    ) -> None:
+        super().__init__(message)
+        self.saved_files = saved_files
+
 
 class UploadFileTooLargeError(UploadPublicationError):
     """An upload exceeded its configured safety limit."""

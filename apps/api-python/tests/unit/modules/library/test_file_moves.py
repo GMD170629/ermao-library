@@ -169,13 +169,13 @@ def test_plan_authorizes_entire_batch_before_inspection_and_freezes_limits(tmp_p
     )
     assert plan.expires_at_ms == 901000
     assert plan.moves[0].inventory.byte_count == 4
-    assert not plan.moves[0].cross_device
+    assert plan.execution_version == 2
     assert not (tmp_path / "author").exists()
 
 
 @pytest.mark.parametrize("directory", [False, True])
 def test_exclusive_publication_does_not_replace_an_existing_target(tmp_path, directory):
-    from app.modules.library.infrastructure.file_move_io import exclusive_rename
+    from app.infrastructure.exclusive_rename import exclusive_rename
     from app.modules.library.infrastructure.source_file_access import (
         open_library_directory,
     )
@@ -201,16 +201,13 @@ def test_exclusive_publication_does_not_replace_an_existing_target(tmp_path, dir
     assert (target / "book" if directory else target).read_bytes() == b"target"
 
 
-def test_same_device_publication_checks_frozen_source_and_recovery_identity(tmp_path):
+def test_system_move_checks_source_and_completion_without_recovery_copy(tmp_path):
     from app.modules.library.application.file_move_plans import (
         MoveDestination,
         MoveSource,
         PlannedMove,
     )
-    from app.modules.library.infrastructure.file_move_io import (
-        publish_same_device_move,
-        published_same_device_identity,
-    )
+    from app.modules.library.infrastructure.file_move_io import SystemMovePublication
     from app.modules.library.infrastructure.move_inventory import (
         inspect_move_destination,
     )
@@ -223,20 +220,64 @@ def test_same_device_publication_checks_frozen_source_and_recovery_identity(tmp_
         inspect_move_source(tmp_path, "book"),
         inspect_move_destination(tmp_path, "renamed"),
     )
-    published = publish_same_device_move(plan)
+    files = SystemMovePublication()
+    assert not files.is_published(plan)
+    files.publish(plan)
     assert (tmp_path / "renamed").read_bytes() == b"original"
     assert not source.exists()
-    assert (
-        published_same_device_identity(
-            tmp_path, "renamed", plan.inventory.entries[0].identity
-        )
-        == published
-    )
+    assert files.is_published(plan)
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["renamed"]
     (tmp_path / "renamed").write_bytes(b"external modification")
-    with pytest.raises(FileMoveError, match="RECOVERY_TARGET_CHANGED"):
-        published_same_device_identity(
-            tmp_path, "renamed", plan.inventory.entries[0].identity
-        )
+    with pytest.raises(FileMoveError, match="FILE_MOVE_INCOMPLETE"):
+        files.is_published(plan)
     source.write_bytes(b"new occupant")
     with pytest.raises(FileMoveError, match="SOURCE_CHANGED"):
-        publish_same_device_move(plan)
+        files.publish(plan)
+
+
+@pytest.mark.parametrize("directory", [False, True])
+def test_system_move_skip_cannot_report_success_or_overwrite(
+    tmp_path, monkeypatch, directory
+):
+    from app.modules.library.application.file_move_plans import (
+        MoveDestination,
+        MoveSource,
+        PlannedMove,
+    )
+    from app.modules.library.infrastructure import file_move_io
+    from app.modules.library.infrastructure.move_inventory import (
+        inspect_move_destination,
+    )
+
+    source, target = tmp_path / "source", tmp_path / "target"
+    if directory:
+        source.mkdir()
+        (source / "book").write_bytes(b"original")
+    else:
+        source.write_bytes(b"original")
+    plan = PlannedMove(
+        MoveSource("node", "library", "source", tmp_path, "revision", ("book",)),
+        MoveDestination("library", tmp_path, "target"),
+        inspect_move_source(tmp_path, "source"),
+        inspect_move_destination(tmp_path, "target"),
+    )
+    run = file_move_io.subprocess.run
+
+    def concurrent_target(*args, **kwargs):
+        if directory:
+            target.mkdir()
+            (target / "book").write_bytes(b"other")
+        else:
+            target.write_bytes(b"other")
+        return run(*args, **kwargs)
+
+    monkeypatch.setattr(file_move_io.subprocess, "run", concurrent_target)
+    with pytest.raises(FileMoveError, match="DESTINATION_EXISTS|FILE_MOVE_INCOMPLETE"):
+        file_move_io.SystemMovePublication().publish(plan)
+    if directory and not source.exists():
+        # BSD mv lacks -T: an external directory race must be reported as
+        # incomplete, retaining both the moved content and the existing target.
+        assert (target / "source/book").read_bytes() == b"original"
+    else:
+        assert (source / "book" if directory else source).read_bytes() == b"original"
+    assert (target / "book" if directory else target).read_bytes() == b"other"
