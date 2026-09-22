@@ -182,7 +182,9 @@ def main() -> None:
             "from pathlib import Path; p=Path('/app/storage/update-tmp'); assert (p/'recovery-attempts').read_text()=='3'; assert (p/'claimed-tasks').read_text().splitlines().count('acceptance-lookup')==1; assert (p/'maintenance-failed').exists(); print('recovery gated, retried, and processed once')"
         )
         print(execute(probe, business))
-        assert "metadata.maintenance_deferred" in docker("logs", name)
+        # DiagnosticSession captures the exception before cleanup; the worker
+        # reuses that diagnostic instead of emitting a second event name.
+        assert "RuntimeError: acceptance maintenance fault" in docker("logs", name)
         stop()
         restore(queue_file)
         # Crash before publication with a persisted PREPARED target, then allow

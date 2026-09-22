@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core import exception_diagnostics as diagnostics
 from app.db.session import DiagnosticSession
 from app.models.settings import SystemEvent, SystemSetting
-from app.services import organize_service
+from app.services import metadata_lookup_queue, organize_service
 
 
 @pytest.fixture
@@ -62,6 +62,35 @@ def test_real_business_write_is_released_before_event_insert(database, caplog):
         assert events[0].id in caplog.text
     assert sequence == ["rollback", "insert_event"]
     assert "/private/library" not in caplog.text
+
+
+def test_metadata_maintenance_retains_cause_with_real_diagnostic_session(
+    database, test_settings, monkeypatch, caplog
+):
+    engine, recorder = database
+    worker = metadata_lookup_queue.MetadataLookupWorker(
+        sessionmaker(bind=engine, class_=DiagnosticSession), test_settings
+    )
+    worker._writeback_recovery.ready = True
+    monkeypatch.setattr(metadata_lookup_queue, "monotonic", lambda: 0.0)
+    calls = []
+
+    def fail(*args, **kwargs):
+        calls.append(True)
+        raise RuntimeError("acceptance maintenance fault")
+
+    monkeypatch.setattr(metadata_lookup_queue, "maintain_metadata_writebacks", fail)
+    worker._maintain()
+    worker._maintain()
+
+    assert calls == [True]
+    assert worker._writeback_recovery.ready
+    assert "RuntimeError: acceptance maintenance fault" in caplog.text
+    with recorder() as session:
+        events = session.scalars(select(SystemEvent)).all()
+        assert len(events) == 1
+        assert events[0].message == "acceptance maintenance fault"
+        assert events[0].id in caplog.text
 
 
 def test_rollback_failure_keeps_original_and_secondary(database, monkeypatch, caplog):
