@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO
 
+from app.core.exception_diagnostics import record_exception
 from shuku_dependencies import canonical_digest
 
 from ..application.dependency_release import (
@@ -46,6 +47,10 @@ from .official_source import ByteSource, artifact_url, package_url
 LOGGER = logging.getLogger(__name__)
 
 ACTIVE = {"downloading", "verifying", "extracting"}
+
+
+class PreparationOwnerMissing(RuntimeError):
+    """An active persisted preparation has no process holding its worker lock."""
 
 
 class PreparationWorker:
@@ -125,9 +130,17 @@ class PreparationWorker:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
+                # diagnostics-control-flow: the preparation lock is held by the active worker.
                 return self._read()
             state = self._read()
             if state.phase in ACTIVE:
+                record_exception(
+                    LOGGER, "application_update.preparation_owner_missing",
+                    PreparationOwnerMissing(
+                        f"Persisted preparation phase is {state.phase}, but the exclusive worker lock is available; interruption cause was not provided"
+                    ),
+                    context={"stage": state.phase, "step": "recover_preparation", "code": "PREPARATION_INTERRUPTED"},
+                )
                 state = self._write(
                     state.model_copy(
                         update={
@@ -152,6 +165,7 @@ class PreparationWorker:
                 try:
                     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError:
+                    # diagnostics-control-flow: lock contention is the explicit UPDATE_BUSY outcome.
                     raise UpdateError("UPDATE_BUSY") from None
                 if (self.root / "install-request.json").exists():
                     raise UpdateError("UPDATE_BUSY")
@@ -197,6 +211,7 @@ class PreparationWorker:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
+                # diagnostics-control-flow: lock contention is the explicit UPDATE_BUSY outcome.
                 raise UpdateError("UPDATE_BUSY") from None
             incomplete = self.root / "installation-incomplete"
             if incomplete.exists() or incomplete.is_symlink():
@@ -267,7 +282,27 @@ class PreparationWorker:
                 raise UpdateError("PREPARATION_CANCELLED")
             self._write(state.model_copy(update={"phase": "ready"}))
         except Exception as error:  # noqa: BLE001 - owned background task boundary
-            state = self._read()
+            # Record before reading/writing failure state: storage may be the cause.
+            diagnostic_id = record_exception(
+                LOGGER,
+                "application_update.preparation_failed",
+                error,
+                context={"stage": "prepare_package"},
+                source="updates",
+            )
+            try:
+                state = self._read()
+            except UpdateError as state_error:
+                record_exception(
+                    LOGGER,
+                    "application_update.failure_state_read_failed",
+                    state_error,
+                    context={
+                        "stage": "read_failure_state",
+                        "parent_diagnostic_id": diagnostic_id,
+                    },
+                    source="updates",
+                )
             # This is the owned task boundary. Do not persist private URLs/paths.
             if isinstance(error, UpdateError):
                 code = error.code
@@ -279,7 +314,6 @@ class PreparationWorker:
                 code = "INSUFFICIENT_SPACE"
             else:
                 code = "PREPARATION_FAILED"
-            LOGGER.error("application_update phase=%s reason=%s", state.phase, code)
             try:
                 self._write(
                     state.model_copy(
@@ -291,13 +325,27 @@ class PreparationWorker:
                     )
                 )
             except UpdateError as persistence_error:
-                LOGGER.error(
-                    "application_update phase=%s reason=%s",
-                    state.phase,
-                    persistence_error.code,
+                record_exception(
+                    LOGGER,
+                    "application_update.failure_state_write_failed",
+                    persistence_error,
+                    context={
+                        "stage": "write_failure_state",
+                        "parent_diagnostic_id": diagnostic_id,
+                    },
+                    source="updates",
                 )
         finally:
-            lock.close()
+            try:
+                lock.close()
+            except OSError as error:
+                record_exception(
+                    LOGGER,
+                    "application_update.lock_close_failed",
+                    error,
+                    context={"stage": "release_lock"},
+                    source="updates",
+                )
 
     def _download(
         self, url: str, path: Path, size: int, sha256: str, state: PreparationState

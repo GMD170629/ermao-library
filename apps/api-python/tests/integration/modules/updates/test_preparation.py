@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import http.client
 import importlib.util
 import io
 import json
+import logging
 import shutil
 import subprocess
 import tarfile
@@ -16,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from app.modules.updates.application.models import UpdateError
+from app.modules.updates.application.models import PreparationState, UpdateError
 from app.modules.updates.application.preparation import UpdatePreparation
 from app.modules.updates.infrastructure.archive import program_path
 from app.modules.updates.infrastructure.official_source import (
@@ -217,6 +219,79 @@ def finished(worker):
             return state
         time.sleep(0.02)
     pytest.fail("preparation did not finish")
+
+
+def test_preparation_logs_original_error_before_failure_state_io(
+    preparation, source, monkeypatch, caplog
+):
+    _, worker, _ = preparation
+    worker.root.mkdir()
+    package = source[0].package
+
+    def download_failed(*_args):
+        raise OSError(errno.ENOSPC, "No space left on device", "/private/books/package")
+
+    def read_failed():
+        try:
+            raise OSError(errno.EIO, "Input/output error", "/private/state")
+        except OSError as cause:
+            raise UpdateError("INVALID_STATE") from cause
+
+    def write_failed(_state):
+        try:
+            raise OSError(errno.EROFS, "Read-only file system", "/private/state")
+        except OSError as cause:
+            raise UpdateError("STATE_WRITE_FAILED") from cause
+
+    monkeypatch.setattr(worker, "_download", download_failed)
+    monkeypatch.setattr(worker, "_read", read_failed)
+    monkeypatch.setattr(worker, "_write", write_failed)
+    lock = io.StringIO()
+    with caplog.at_level(logging.ERROR):
+        worker._run(
+            package, PreparationState(phase="downloading", target=package), lock
+        )
+    assert lock.closed
+    messages = [record.getMessage() for record in caplog.records]
+    primary = next(
+        index
+        for index, value in enumerate(messages)
+        if "application_update.preparation_failed" in value
+    )
+    read = next(
+        index
+        for index, value in enumerate(messages)
+        if "application_update.failure_state_read_failed" in value
+    )
+    write = next(
+        index
+        for index, value in enumerate(messages)
+        if "application_update.failure_state_write_failed" in value
+    )
+    assert primary < read < write
+    assert "No space left on device" in messages[primary]
+    assert "Input/output error" in messages[read]
+    assert "Read-only file system" in messages[write]
+    assert "parent_diagnostic_id" in messages[read]
+    assert "/private/books" not in caplog.text
+
+
+def test_update_error_response_correlates_real_transport_cause(caplog):
+    from app.modules.updates.presentation.http import update_error
+
+    with caplog.at_level(logging.ERROR):
+        try:
+            try:
+                raise ConnectionResetError(errno.ECONNRESET, "Connection reset by peer")
+            except ConnectionResetError as cause:
+                raise UpdateError("DOWNLOAD_FAILED") from cause
+        except UpdateError as error:
+            response = update_error(error)
+    assert response.status_code == 400
+    assert response.headers["X-Error-Id"].startswith("diag_")
+    assert "Connection reset by peer" in caplog.text
+    assert "ConnectionResetError" in caplog.text
+    assert "Connection reset by peer" not in response.body.decode()
 
 
 def assert_package_prepared(program_package, preparation, source):
@@ -474,7 +549,7 @@ def test_extra_fields_cross_site_and_application_authorization(
     assert source[0].downloads == 0
 
 
-def test_abandoned_preparation_is_failed_without_resuming(preparation, source):
+def test_abandoned_preparation_is_failed_without_resuming(preparation, source, caplog):
     _, worker, storage = preparation
     from app.modules.updates.application.models import PreparationState
 
@@ -484,6 +559,9 @@ def test_abandoned_preparation_is_failed_without_resuming(preparation, source):
     assert recovered.phase == "failed" and recovered.error == "PREPARATION_INTERRUPTED"
     assert source[0].downloads == 0
     assert not (storage / "update-tmp/prepared").exists()
+    assert "application_update.preparation_owner_missing" in caplog.text
+    assert "exclusive worker lock is available" in caplog.text
+    assert "interruption cause was not provided" in caplog.text
 
 
 @pytest.mark.parametrize(

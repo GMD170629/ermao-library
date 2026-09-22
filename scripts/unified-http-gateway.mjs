@@ -1,6 +1,47 @@
 import http from 'node:http';
 import net from 'node:net';
+import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+
+function safeDiagnosticText(value) {
+  let text = String(value ?? '')
+    .replace(/(authorization\s*[:=]\s*)(?:bearer|basic)\s+\S+/gi, '$1[redacted]')
+    .replace(/((?:token|password|secret|cookie|api[_-]?key)\s*['"]?\s*[:=]\s*['"]?)[^\s,'";]+/gi, '$1[redacted]')
+    .replace(/https?:\/\/[^\s'"]+/g, '[url]')
+    .replace(/(?<![\w])(?:[A-Za-z]:[\\/]|\/)[^\s'"<>:,)]+/g, '[path]');
+  for (const [name, secret] of Object.entries(process.env)) {
+    if (secret && secret.length >= 6 && /token|password|secret|cookie|api[_-]?key/i.test(name)) {
+      text = text.replaceAll(secret, '[redacted]');
+    }
+  }
+  return text;
+}
+
+function diagnosticRecorder() {
+  const seen = new WeakSet();
+  const requestId = randomUUID();
+  return (stage, error) => {
+    if (error && typeof error === 'object') {
+      if (seen.has(error)) return;
+      seen.add(error);
+    }
+    const chain = [];
+    const visited = new Set();
+    function append(value) {
+      if (!value || visited.has(value)) return;
+      visited.add(value);
+      chain.push({
+        type: value.name ?? typeof value, message: safeDiagnosticText(value.message ?? value),
+        code: value.code, errno: value.errno, syscall: value.syscall,
+        stack: safeDiagnosticText(value.stack)
+      });
+      if (value.cause) append(value.cause);
+      if (Array.isArray(value.errors)) value.errors.forEach(append);
+    }
+    append(error);
+    console.error('gateway.request_failed', { requestId, stage, chain });
+  };
+}
 
 function normalizeBasePath(value) {
   const trimmed = String(value ?? '').trim();
@@ -34,7 +75,7 @@ function forwardedHeaders(request, upstreamHost) {
   return headers;
 }
 
-function proxyHttpRequest(request, response, target) {
+function proxyHttpRequest(request, response, target, recordFailure) {
   const upstream = http.request({
     hostname: target.hostname,
     port: target.port,
@@ -48,24 +89,31 @@ function proxyHttpRequest(request, response, target) {
     responseStarted = true;
     response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.statusMessage, upstreamResponse.headers);
     upstreamResponse.pipe(response);
-    upstreamResponse.on('error', (error) => response.destroy(error));
+    upstreamResponse.on('error', (error) => {
+      recordFailure('upstream_response', error);
+      response.destroy(error);
+    });
     response.on('close', () => upstreamResponse.destroy());
   });
   upstream.on('error', (error) => {
+    recordFailure('upstream_request', error);
     if (responseStarted || response.destroyed) return;
-    console.error('gateway.upstream_failed', {
-      upstream: `${target.hostname}:${target.port}`,
-      code: error.code
-    });
     response.writeHead(502, { 'content-type': 'application/json; charset=utf-8' });
     response.end(JSON.stringify({ ok: false, error: { code: 'UPSTREAM_UNAVAILABLE', message: '服务暂时不可用' } }));
   });
   request.on('aborted', () => upstream.destroy());
-  request.on('error', (error) => upstream.destroy(error));
+  request.on('error', (error) => {
+    recordFailure('client_request', error);
+    upstream.destroy(error);
+  });
+  response.on('error', (error) => {
+    recordFailure('client_response', error);
+    upstream.destroy(error);
+  });
   request.pipe(upstream);
 }
 
-function proxyUpgrade(request, socket, head, target) {
+function proxyUpgrade(request, socket, head, target, recordFailure) {
   const upstream = net.connect(target.port, target.hostname);
   upstream.on('connect', () => {
     const headers = forwardedHeaders(request, `${target.hostname}:${target.port}`);
@@ -77,8 +125,8 @@ function proxyUpgrade(request, socket, head, target) {
     if (head.length > 0) upstream.write(head);
     socket.pipe(upstream).pipe(socket);
   });
-  upstream.on('error', () => socket.destroy());
-  socket.on('error', () => upstream.destroy());
+  upstream.on('error', (error) => { recordFailure('upgrade_upstream', error); socket.destroy(); });
+  socket.on('error', (error) => { recordFailure('upgrade_client', error); upstream.destroy(); });
   socket.on('close', () => upstream.destroy());
 }
 
@@ -98,11 +146,30 @@ export function createUnifiedGateway({
     return { hostname: webHostname, port: webPort, path: requestUrl || '/' };
   };
   const server = http.createServer((request, response) => {
-    proxyHttpRequest(request, response, resolveTarget(request.url));
+    const recordFailure = diagnosticRecorder();
+    try {
+      proxyHttpRequest(request, response, resolveTarget(request.url), recordFailure);
+    } catch (error) {
+      recordFailure('create_upstream_request', error);
+      response.destroy();
+    }
   });
   server.on('upgrade', (request, socket, head) => {
-    proxyUpgrade(request, socket, head, resolveTarget(request.url));
+    const recordFailure = diagnosticRecorder();
+    try {
+      proxyUpgrade(request, socket, head, resolveTarget(request.url), recordFailure);
+    } catch (error) {
+      recordFailure('create_upgrade', error);
+      socket.destroy();
+    }
   });
+  server.on('clientError', (error, socket) => {
+    diagnosticRecorder()('parse_request', error);
+    const status = error.code === 'HPE_HEADER_OVERFLOW' ? '431 Request Header Fields Too Large' : '400 Bad Request';
+    if (socket.writable) socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
+    else socket.destroy();
+  });
+  server.on('error', (error) => diagnosticRecorder()('listen', error));
   return server;
 }
 
@@ -121,6 +188,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     webPort: integerEnvironmentValue('WEB_UPSTREAM_PORT', 3001),
     basePath: process.env.NEXT_PUBLIC_BASE_PATH || process.env.SHUKU_BASE_PATH || process.env.COOKIE_PATH
   });
+  server.on('error', () => { process.exitCode = 1; });
   server.listen(listenPort, listenHost, () => {
     process.stdout.write(`Unified gateway listening on http://${listenHost}:${listenPort}\n`);
   });

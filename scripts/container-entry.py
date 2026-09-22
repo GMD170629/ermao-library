@@ -48,8 +48,8 @@ def initialize_runtime(seed: Path, runtime: Path) -> None:
     try:
         if not marker.exists() and not marker.is_symlink():
             marker.write_text("1\n", encoding="utf-8")
-    except OSError:
-        update_warning("INITIALIZATION_RECORD_WRITE_FAILED")
+    except OSError as error:
+        update_warning("INITIALIZATION_RECORD_WRITE_FAILED", error)
 
 
 def run_application(runtime: Path, storage: Path, allow_updates: bool = True) -> int:
@@ -64,7 +64,10 @@ def run_application(runtime: Path, storage: Path, allow_updates: bool = True) ->
     if sys.platform == "linux":
         libc = ctypes.CDLL(None, use_errno=True)
         if libc.prctl(36, 1, 0, 0, 0) != 0:
-            raise StartupError("cannot enable child reaping / 无法启用子进程回收")
+            error_number = ctypes.get_errno()
+            raise StartupError(
+                "cannot enable child reaping / 无法启用子进程回收"
+            ) from OSError(error_number, os.strerror(error_number))
 
     environment = {
         **business_environment(storage),
@@ -115,6 +118,7 @@ def run_application(runtime: Path, storage: Path, allow_updates: bool = True) ->
             try:
                 pid, status = os.waitpid(-1, os.WNOHANG)
             except ChildProcessError:
+                # diagnostics-control-flow: ECHILD is the waitpid proof that all children were reaped.
                 empty = True
                 break
             if pid == child.pid:
@@ -130,12 +134,23 @@ def run_application(runtime: Path, storage: Path, allow_updates: bool = True) ->
                 fail("PREFLIGHT_INTERRUPTED")
             elif preflight.returncode is not None:
                 if preflight.returncode != 0:
+                    update_warning(
+                        "PREFLIGHT_FAILED",
+                        subprocess.CalledProcessError(
+                            preflight.returncode,
+                            ["python", "-m", "app.bootstrap.update_install"],
+                        ),
+                        stage="preflight_process",
+                    )
                     fail("PREFLIGHT_FAILED")
                 else:
                     try:
                         installer.verify_dependencies()
                         installer.reserve()
                     except Exception as error:  # noqa: BLE001 - owned preflight boundary
+                        update_warning(
+                            "PREFLIGHT_FAILED", error, stage="verify_and_reserve"
+                        )
                         fail(
                             str(error)
                             if isinstance(error, (InstallError, DependencyInstallError))
@@ -151,7 +166,11 @@ def run_application(runtime: Path, storage: Path, allow_updates: bool = True) ->
                 stopped = True
                 try:
                     if child.returncode != 0:
-                        raise InstallError("STOP_FAILED")
+                        raise InstallError(
+                            "STOP_FAILED"
+                        ) from subprocess.CalledProcessError(
+                            child.returncode, ["start-unified-app"]
+                        )
                     installer.verify_dependencies()
                     if stop_signal:
                         raise InstallError("CONTAINER_STOPPED")
@@ -172,6 +191,9 @@ def run_application(runtime: Path, storage: Path, allow_updates: bool = True) ->
                         installer = Installation(storage)
                         installer.cancelled = lambda: bool(stop_signal)
                 except Exception as error:  # noqa: BLE001 - owned installation boundary
+                    update_warning(
+                        "INSTALLATION_FAILED", error, stage=installer.state["phase"]
+                    )
                     fail(
                         str(error)
                         if isinstance(error, (InstallError, DependencyInstallError))
@@ -207,6 +229,9 @@ def run_application(runtime: Path, storage: Path, allow_updates: bool = True) ->
                         )
                         deadline = time.monotonic() + 300
                 except Exception as error:  # noqa: BLE001 - isolate rejected installation requests.
+                    update_warning(
+                        "INSTALL_REQUEST_FAILED", error, stage="claim_and_preflight"
+                    )
                     if installer.state is not None:
                         fail(
                             str(error)
@@ -216,7 +241,6 @@ def run_application(runtime: Path, storage: Path, allow_updates: bool = True) ->
                     else:
                         installer.close()
                         allow_updates = False
-                        update_warning("INVALID_INSTALL_REQUEST")
         if child.returncode is not None and not installing:
             if empty:
                 break
@@ -226,6 +250,7 @@ def run_application(runtime: Path, storage: Path, allow_updates: bool = True) ->
                 try:
                     os.killpg(child.pid, signal.SIGTERM)
                 except ProcessLookupError:
+                    # diagnostics-control-flow: process group exited between waitpid and orphan cleanup.
                     pass
         time.sleep(0.2)
     return (
@@ -347,6 +372,7 @@ def main() -> int:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
+                # diagnostics-control-flow: lock contention means an existing launcher owns startup.
                 raise StartupError(
                     "application is already running / 应用已在运行"
                 ) from None
@@ -387,17 +413,7 @@ def main() -> int:
         TypeError,
         zipfile.BadZipFile,
     ) as error:
-        # Do not expose private paths or dump a traceback into container logs.
-        detail = (
-            str(error)
-            if isinstance(error, (StartupError, DependencyError, InstallError))
-            else type(error).__name__
-        )
-        print(
-            f"container startup failed / 容器启动失败：{detail}",
-            file=sys.stderr,
-            flush=True,
-        )
+        update_warning("CONTAINER_STARTUP_FAILED", error, stage="startup")
         return 1
     finally:
         if image_sync is not None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
@@ -21,6 +22,7 @@ from app.contracts.http_errors import (
 )
 from app.core.authorization import can_manage_system
 from app.core.config import Settings, get_settings
+from app.core.exception_diagnostics import record_exception
 from app.db.session import get_db
 from app.schemas.responses import fail, ok
 
@@ -28,6 +30,7 @@ from ..application.models import PreparationState, UpdateCheck, UpdateError
 from ..application.preparation import UpdatePreparation
 
 router = APIRouter(tags=["updates"], route_class=TypedContractRoute)
+LOGGER = logging.getLogger(__name__)
 
 
 class RuntimeInfo(HttpContractModel):
@@ -52,11 +55,20 @@ def use_cases(request: Request) -> UpdatePreparation:
 
 
 def update_error(error: UpdateError) -> Response:
-    return fail(
+    diagnostic_id = record_exception(
+        LOGGER,
+        "application_update.request_failed",
+        error,
+        context={"stage": "update_request", "code": error.code},
+        source="updates",
+    )
+    response = fail(
         "应用更新请求失败，请查看错误码。 / Application update request failed; see the error code.",
         status_code=409 if error.code == "UPDATE_BUSY" else 400,
         code=error.code,
     )
+    response.headers["X-Error-Id"] = diagnostic_id
+    return response
 
 
 @router.get("/updates/check", response_model=SuccessEnvelope[UpdateCheck])

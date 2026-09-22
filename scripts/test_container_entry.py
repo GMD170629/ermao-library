@@ -101,6 +101,17 @@ class ContainerEntryTests(unittest.TestCase):
         executable.chmod(0o755)
         for name in ("python", "uvicorn", "node"):
             (self.bin / name).symlink_to(executable.name)
+        if shutil.which("setsid") is None:
+            # macOS has the POSIX syscall but no util-linux CLI. Exercise the same
+            # new-session behavior instead of silently omitting the worker fixture.
+            launcher = self.bin / "setsid"
+            launcher.write_text(
+                f"#!{sys.executable}\n"
+                "import os, sys\n"
+                "os.setsid()\n"
+                "os.execvp(sys.argv[1], sys.argv[1:])\n"
+            )
+            launcher.chmod(0o755)
 
         (dependencies / "python/bin/python").symlink_to(self.bin / "fixture")
 
@@ -296,6 +307,9 @@ class ContainerEntryTests(unittest.TestCase):
         self.assertEqual(process.wait(timeout=10), 37)
         self.assertEqual(len(self.events()), 1)
         self.assertIn("prestart", self.events()[0][1])
+        _, error = process.communicate(timeout=5)
+        self.assertIn("component=prestart exit=37", error)
+        self.assertIn("stage=prestart", error)
 
     def test_same_image_restart_preserves_runtime_and_user_data(self) -> None:
         for name in (

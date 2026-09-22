@@ -1,14 +1,99 @@
 """Isolated installation behavior; real Docker acceptance is separate."""
 
+import contextlib
+import errno
+import io
 import json
 import shutil
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from container_install import Installation, InstallError, retire_previous_installation
+from dependency_install import update_warning
+
+
+class LauncherDiagnosticTests(unittest.TestCase):
+    def test_original_errno_chain_and_private_values_are_preserved_and_redacted(self):
+        output = io.StringIO()
+        try:
+            try:
+                raise OSError(
+                    errno.ENOSPC,
+                    "No space left on device token=private-token",
+                    "/private/library/book.epub",
+                )
+            except OSError as original:
+                raise InstallError("INSTALLATION_FAILED") from original
+        except InstallError as error:
+            with contextlib.redirect_stderr(output):
+                update_warning("INSTALLATION_FAILED", error, stage="copy_runtime")
+        log = output.getvalue()
+        self.assertIn('"errno_name": "ENOSPC"', log)
+        self.assertIn("No space left on device", log)
+        self.assertIn("stage=copy_runtime", log)
+        self.assertIn("builtins.OSError", log)
+        self.assertNotIn("private-token", log)
+        self.assertNotIn("/private/library", log)
+
+    def test_subprocess_exit_and_stderr_are_not_replaced_by_generic_installation_code(
+        self,
+    ):
+        output = io.StringIO()
+        error = subprocess.CalledProcessError(
+            17,
+            ["uv", "install", "unlabelled-command-secret"],
+            stderr=b"wheel verification failed token=private-token",
+            output=b"private stdout body",
+        )
+        with contextlib.redirect_stderr(output):
+            update_warning(
+                "DEPENDENCY_OPERATION_FAILED", error, stage="dependency_install"
+            )
+        log = output.getvalue()
+        self.assertIn('"exit_code": 17', log)
+        self.assertIn("wheel verification failed", log)
+        self.assertNotIn("private-token", log)
+        self.assertNotIn("unlabelled-command-secret", log)
+        self.assertNotIn("private stdout body", log)
+
+    def test_broken_stderr_keeps_original_and_output_failure(self):
+        stream = Mock()
+        stream.write.side_effect = OSError(errno.ENOSPC, "log disk full")
+        with patch("dependency_install.sys.stderr", stream), patch("dependency_install.os.write") as write:
+            update_warning("FAILED", OSError(errno.EROFS, "read only"))
+        output = write.call_args.args[1].decode()
+        self.assertIn("read only", output)
+        self.assertIn("log disk full", output)
+
+    def test_broken_exception_message_keeps_formatter_reason(self):
+        class BrokenMessage(Exception):
+            def __str__(self):
+                raise TypeError("formatting bug token=private-token")
+
+        output = io.StringIO()
+        with contextlib.redirect_stderr(output):
+            update_warning("FAILED", BrokenMessage())
+        log = output.getvalue()
+        self.assertIn("BrokenMessage", log)
+        self.assertIn("TypeError", log)
+        self.assertIn("formatting bug", log)
+        self.assertNotIn("private-token", log)
+
+    def test_quoted_multiword_credentials_are_redacted_without_losing_errno(self):
+        output = io.StringIO()
+        error = OSError(errno.EIO, 'device failure password="secret with spaces"', "/private/書名 with spaces/卷一.epub")
+        with contextlib.redirect_stderr(output):
+            update_warning("FAILED", error)
+        log = output.getvalue()
+        self.assertIn('"errno_name": "EIO"', log)
+        self.assertIn("device failure", log)
+        self.assertNotIn("secret with spaces", log)
+        self.assertNotIn("書名", log)
+        self.assertNotIn("卷一", log)
 
 
 class InstallationTests(unittest.TestCase):

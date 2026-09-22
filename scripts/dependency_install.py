@@ -5,14 +5,17 @@ from __future__ import annotations
 import errno
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tarfile
+import traceback
 from collections.abc import Callable
 from pathlib import Path
 
 from dependency_packages import digest
+
 from shuku_dependencies.installed import (
     bounded_json,
 )
@@ -24,8 +27,103 @@ class DependencyInstallError(RuntimeError):
     pass
 
 
-def update_warning(code: str) -> None:
-    print(f"update warning / 更新提醒：{code}", file=sys.stderr, flush=True)
+def _diagnostic_text(value: object, *, _formatting_failure: bool = False) -> str:
+    """The fixed launcher runs before app dependencies exist; redact without imports."""
+    try:
+        if isinstance(value, subprocess.CalledProcessError):
+            text = f"Process exited with status {value.returncode}"
+        else:
+            text = value.decode("utf-8", "replace") if isinstance(value, bytes) else str(value)
+        if isinstance(value, OSError):
+            for filename in (value.filename, value.filename2):
+                if filename is not None:
+                    path = os.fsdecode(filename)
+                    text = text.replace(repr(path), "'[path]'").replace(path, "[path]")
+    except Exception as formatting_error:  # noqa: BLE001 - diagnostic formatter boundary
+        # diagnostics-control-flow: this diagnostic renderer substitutes the observed formatter type/message in its returned log text; a second broken formatter retains both types without recursion.
+        text = f"<{type(value).__module__}.{type(value).__qualname__} message unavailable: {type(formatting_error).__module__}.{type(formatting_error).__qualname__}"
+        if not _formatting_failure:
+            text += f": {_diagnostic_text(formatting_error, _formatting_failure=True)}"
+        text += ">"
+    text = re.sub(
+        r"(?i)(authorization\s*[:=]\s*)(?:bearer|basic)\s+\S+", r"\1[redacted]", text
+    )
+    text = re.sub(
+        r'''(?i)(["']?\b(?:authorization|proxy-authorization|token|password|secret|cookie|api[_-]?key)\b["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\r\n]+)''',
+        r"\1[redacted]",
+        text,
+    )
+    text = re.sub(r"https?://[^\s'\"]+", "[url]", text)
+    # Paths are private, but exception classes, strerror and stack function/line survive.
+    text = re.sub(r'''(["'])(?:[A-Za-z]:[\\/]|/)[^\r\n]*?\1''', "'[path]'", text)
+    text = re.sub(r"(?<![\w])(?:[A-Za-z]:[\\/]|/)[^\s'\"<>:,]+", "[path]", text)
+    for name, secret in os.environ.items():
+        if len(secret) >= 6 and re.search(
+            r"(?i)token|password|secret|cookie|api[_-]?key", name
+        ):
+            text = text.replace(secret, "[redacted]")
+    return text
+
+
+def update_warning(
+    code: str, error: BaseException | None = None, *, stage: str | None = None
+) -> None:
+    """Record the original failure before an installer converts or contains it."""
+    message = f"update warning / 更新提醒：{_diagnostic_text(code)} stage={_diagnostic_text(stage or code)}"
+    if error is not None:
+        chain: list[dict[str, object]] = []
+        seen: set[int] = set()
+        current: BaseException | None = error
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            item: dict[str, object] = {
+                "type": f"{type(current).__module__}.{type(current).__qualname__}",
+                "message": _diagnostic_text(current),
+            }
+            if isinstance(current, OSError):
+                item.update(
+                    errno=current.errno,
+                    errno_name=errno.errorcode.get(current.errno),
+                    strerror=_diagnostic_text(current.strerror),
+                )
+            if isinstance(current, subprocess.CalledProcessError):
+                item.update(
+                    exit_code=current.returncode,
+                    stderr=_diagnostic_text(current.stderr or ""),
+                )
+                # Never include the command, arbitrary stdout or source lines.
+                # Installer subprocess stderr is its operational error channel.
+            chain.append(item)
+            current = current.__cause__ or current.__context__
+        message += " " + json.dumps(
+            {
+                "chain": chain,
+                "traceback": _diagnostic_text(
+                    "\n".join(
+                        f"{Path(frame.filename).name}:{frame.lineno} in {frame.name}"
+                        for frame in traceback.extract_tb(error.__traceback__)
+                    )
+                ),
+            },
+            ensure_ascii=False,
+        )
+    # All dynamic values are sanitized before JSON encoding. Re-sanitizing the
+    # encoded object could mistake an embedded assignment for JSON structure.
+    rendered = message
+    try:
+        print(rendered, file=sys.stderr, flush=True)
+    except (OSError, ValueError) as stream_error:
+        _write_fd_warning(rendered, stream_error)
+
+
+def _write_fd_warning(rendered: str, error: BaseException) -> None:
+    """Preserve the primary and stderr failure using the independent fd sink."""
+    rendered += f"\nupdate.stderr_failed {type(error).__module__}.{type(error).__qualname__}: {_diagnostic_text(error)}"
+    try:
+        os.write(2, (rendered + "\n").encode("utf-8", "replace"))
+    except OSError:
+        # diagnostics-control-flow: both stderr outputs are unavailable; preserve the business failure instead of replacing it.
+        return
 
 
 def safe_destination(root: Path, relative: str) -> Path:
@@ -164,14 +262,20 @@ class DependencyInstallation:
                 + "\n"
             )
             output.flush()
-        except OSError:
+        except OSError as error:
+            update_warning(
+                "INSTALL_LOG_UNAVAILABLE", error, stage="dependency_log_open"
+            )
             if output is not None:
                 try:
                     output.close()
-                except OSError:
-                    pass  # The open/write failure is reported below.
+                except OSError as cleanup_error:
+                    update_warning(
+                        "INSTALL_LOG_UNAVAILABLE",
+                        cleanup_error,
+                        stage="dependency_log_close",
+                    )
                 output = None
-            update_warning("INSTALL_LOG_UNAVAILABLE")
         try:
             result = subprocess.run(
                 command, env=environment, stdout=output, stderr=output, check=False
@@ -180,11 +284,17 @@ class DependencyInstallation:
             if output is not None:
                 try:
                     output.close()
-                except OSError:
-                    update_warning("INSTALL_LOG_UNAVAILABLE")
+                except OSError as error:
+                    update_warning(
+                        "INSTALL_LOG_UNAVAILABLE", error, stage="dependency_log_close"
+                    )
         self.check_cancelled()
         if result.returncode:
-            raise DependencyInstallError("DEPENDENCY_OPERATION_FAILED")
+            raise DependencyInstallError(
+                "DEPENDENCY_OPERATION_FAILED"
+            ) from subprocess.CalledProcessError(
+                result.returncode, ["uv", "pip", operation]
+            )
 
     def log_node(self, operation: str, package: dict) -> None:
         try:
@@ -199,8 +309,8 @@ class DependencyInstallation:
                 output.write(
                     f"dependency_operation=node_{operation} instance={package['location']} version={package['version']}\n"
                 )
-        except OSError:
-            update_warning("INSTALL_LOG_UNAVAILABLE")
+        except OSError as error:
+            update_warning("INSTALL_LOG_UNAVAILABLE", error, stage="node_operation_log")
 
     def apply(self) -> None:
         self.check_cancelled()
@@ -264,6 +374,7 @@ class DependencyInstallation:
             try:
                 path.rmdir()
             except OSError as error:
+                # diagnostics-control-flow: kept dependency children intentionally leave nonempty parent directories.
                 if error.errno not in (errno.ENOTEMPTY, errno.EEXIST):
                     raise
         for k in self.delta["install"]:
@@ -322,5 +433,7 @@ class DependencyInstallation:
                     kept_records + changed_records, key=lambda record: record["name"]
                 ),
             }
-        except (OSError, ValueError, KeyError, TypeError):
-            update_warning("INSTALLATION_RECORD_UNAVAILABLE")
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            update_warning(
+                "INSTALLATION_RECORD_UNAVAILABLE", error, stage="installed_records"
+            )

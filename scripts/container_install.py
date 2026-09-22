@@ -91,12 +91,13 @@ def retire_previous_installation(storage: Path) -> bool:
                     )
                     write_json(root / "preparation.json", state)
             except FileNotFoundError:
+                # diagnostics-control-flow: a first startup has no previous preparation state.
                 pass
-            except (OSError, ValueError, TypeError, KeyError, InstallError):
-                update_warning("PREVIOUS_STATE_UNAVAILABLE")
+            except (OSError, ValueError, TypeError, KeyError, InstallError) as error:
+                update_warning("PREVIOUS_STATE_UNAVAILABLE", error)
         return True
-    except OSError:
-        update_warning("PREVIOUS_REQUEST_NOT_RETIRED")
+    except OSError as error:
+        update_warning("PREVIOUS_REQUEST_NOT_RETIRED", error)
         return False
 
 
@@ -127,6 +128,7 @@ class Installation:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
+            # diagnostics-control-flow: another live preparation owns the lock; retry next poll.
             lock.close()
             return False
         self.lock = lock
@@ -149,8 +151,8 @@ class Installation:
                 0o600,
             )
             os.close(descriptor)
-        except OSError:
-            update_warning("INSTALL_LOG_UNAVAILABLE")
+        except OSError as log_error:
+            update_warning("INSTALL_LOG_UNAVAILABLE", log_error)
         self.phase("checking")
         return True
 
@@ -163,8 +165,8 @@ class Installation:
         )
         try:
             write_json(self.root / "preparation.json", self.state)
-        except OSError:
-            update_warning("INSTALL_STATE_WRITE_FAILED")
+        except OSError as state_error:
+            update_warning("INSTALL_STATE_WRITE_FAILED", state_error)
         message = f"application_update phase={phase} reason={error or 'none'}"
         print(message, flush=True)
         try:
@@ -177,8 +179,8 @@ class Installation:
                 "a",
             ) as stream:
                 stream.write(self.state["updated_at"] + " " + message + "\n")
-        except OSError:
-            update_warning("INSTALL_LOG_UNAVAILABLE")
+        except OSError as log_error:
+            update_warning("INSTALL_LOG_UNAVAILABLE", log_error)
 
     def reject_package_protocol(self) -> None:
         target = self.state["target"] if self.state else {}
@@ -255,17 +257,17 @@ class Installation:
                         self.storage / "dependencies/installed.json",
                         self.dependencies.result,
                     )
-                except OSError:
+                except OSError as error:
                     recorded = False
-                    update_warning("INSTALLATION_RECORD_UNAVAILABLE")
+                    update_warning("INSTALLATION_RECORD_UNAVAILABLE", error)
         self.phase("applied")
         for name in (["installation-incomplete"] if recorded else []) + [
             "install-request.json"
         ]:
             try:
                 (self.root / name).unlink(missing_ok=True)
-            except OSError:
-                update_warning("INSTALL_CLEANUP_FAILED")
+            except OSError as error:
+                update_warning("INSTALL_CLEANUP_FAILED", error)
         self.close()
 
     def fail(self, code: str) -> None:
@@ -273,12 +275,16 @@ class Installation:
         if self.reserved and not self.replacing:
             try:
                 (self.root / "installation-incomplete").unlink(missing_ok=True)
-            except OSError:
-                update_warning("INSTALL_CLEANUP_FAILED")
+            except OSError as error:
+                update_warning("INSTALL_CLEANUP_FAILED", error)
         # Keep reservation on any failure: never silently retry on startup.
         self.close()
 
     def close(self) -> None:
         if self.lock:
-            self.lock.close()
-            self.lock = None
+            try:
+                self.lock.close()
+            except OSError as error:
+                update_warning("INSTALL_LOCK_CLOSE_FAILED", error)
+            finally:
+                self.lock = None

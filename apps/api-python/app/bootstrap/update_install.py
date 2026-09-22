@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import shutil
 import threading
 from pathlib import Path
 
 from app.core.config import get_settings
+from app.core.exception_diagnostics import (
+    prepare_exception_diagnostic,
+    record_exception,
+)
 from app.modules.updates.application.models import (
     Environment,
     PreparationState,
@@ -80,6 +85,14 @@ if __name__ == "__main__":
     try:
         validate()
     except Exception as error:  # noqa: BLE001 - offline command boundary
+        logger = logging.getLogger(__name__)
+        snapshot = prepare_exception_diagnostic(
+            logger,
+            "application_update.preflight_failed",
+            error,
+            context={"stage": "offline_preflight"},
+            source="updates",
+        )
         if isinstance(error, UpdateError):
             code = error.code
         elif isinstance(error, PermissionError):
@@ -99,11 +112,19 @@ if __name__ == "__main__":
             with os.fdopen(
                 os.open(log, os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW), "a"
             ) as output:
-                output.write(message + "\n")
-        except (OSError, ValueError):
-            print(
-                "application_update preflight_log=WRITE_FAILED",
-                file=sys.stderr,
-                flush=True,
+                output.write(
+                    message + " diagnostic_id=" + snapshot.diagnostic_id + "\n"
+                )
+                output.write(json.dumps(snapshot.metadata, ensure_ascii=False) + "\n")
+        except (OSError, ValueError) as log_error:
+            record_exception(
+                logger,
+                "application_update.preflight_log_write_failed",
+                log_error,
+                context={
+                    "stage": "write_preflight_log",
+                    "parent_diagnostic_id": snapshot.diagnostic_id,
+                },
+                source="updates",
             )
         sys.exit(1)

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import http from 'node:http';
+import net from 'node:net';
 import os from 'node:os';
 import test from 'node:test';
 import { createUnifiedGateway } from './unified-http-gateway.mjs';
@@ -23,6 +24,68 @@ async function close(server) {
     server.close((error) => error ? reject(error) : resolve());
   });
 }
+
+test('records the direct connection failure without request credentials', async (context) => {
+  const unavailable = http.createServer();
+  const apiPort = await listen(unavailable);
+  await close(unavailable);
+  const messages = [];
+  context.mock.method(console, 'error', (...parts) => messages.push(parts));
+  const gateway = createUnifiedGateway({ apiPort });
+  const port = await listen(gateway);
+  context.after(() => close(gateway));
+  const response = await fetch(`http://127.0.0.1:${port}/api/private?token=query-secret`, {
+    headers: { authorization: 'Bearer header-secret' }
+  });
+  assert.equal(response.status, 502);
+  const record = messages.find(([event]) => event === 'gateway.request_failed')[1];
+  assert.equal(record.stage, 'upstream_request');
+  assert.ok(record.requestId);
+  assert.equal(record.chain[0].code, 'ECONNREFUSED');
+  assert.match(record.chain[0].message, /ECONNREFUSED/);
+  assert.ok(record.chain[0].stack);
+  assert.doesNotMatch(JSON.stringify(messages), /query-secret|header-secret/);
+});
+
+test('records interrupted upstream response after headers were published', async (context) => {
+  const messages = [];
+  context.mock.method(console, 'error', (...parts) => messages.push(parts));
+  const api = http.createServer((_request, response) => {
+    response.writeHead(200, { 'content-length': '1000' });
+    response.write('part');
+    setImmediate(() => response.destroy());
+  });
+  const apiPort = await listen(api);
+  const gateway = createUnifiedGateway({ apiPort });
+  const port = await listen(gateway);
+  context.after(() => Promise.all([close(gateway), close(api)]));
+  await assert.rejects(async () => {
+    const response = await fetch(`http://127.0.0.1:${port}/api/stream`);
+    await response.arrayBuffer();
+  });
+  assert.ok(messages.some(([, record]) => record.stage === 'upstream_response'
+    && record.chain[0].code === 'ECONNRESET'));
+});
+
+test('records the original websocket upgrade failure', async (context) => {
+  const unavailable = http.createServer();
+  const webPort = await listen(unavailable);
+  await close(unavailable);
+  const messages = [];
+  context.mock.method(console, 'error', (...parts) => messages.push(parts));
+  const gateway = createUnifiedGateway({ webPort });
+  const port = await listen(gateway);
+  context.after(() => close(gateway));
+  await new Promise((resolve, reject) => {
+    const socket = net.connect(port, '127.0.0.1', () => {
+      socket.write('GET /socket HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n');
+    });
+    socket.on('error', reject);
+    socket.on('close', resolve);
+  });
+  assert.ok(messages.some(([, record]) => record.stage === 'upgrade_upstream'
+    && record.chain[0].code === 'ECONNREFUSED'));
+});
 
 test('streams API request bodies larger than the Next.js proxy limit without truncation', async (context) => {
   const expected = Buffer.alloc(12 * 1024 * 1024, 0x5a);

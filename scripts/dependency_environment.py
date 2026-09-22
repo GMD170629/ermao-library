@@ -84,8 +84,8 @@ def initialize_dependencies(storage: Path, seed: Path) -> bool:
             stderr=subprocess.PIPE,
         )
         write_json(installed, {**manifest, "python_records": json.loads(records)})
-    except (OSError, ValueError, subprocess.CalledProcessError):
-        update_warning("INSTALLATION_RECORD_UNAVAILABLE")
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        update_warning("INSTALLATION_RECORD_UNAVAILABLE", error)
         return False
     return True
 

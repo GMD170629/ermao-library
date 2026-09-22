@@ -66,9 +66,12 @@ class ImageSynchronization:
     def prepare(self) -> bool:
         try:
             same_image = image_identity(self.record) == self.target
-        except (OSError, ValueError, TypeError, KeyError, InstallError):
+        except FileNotFoundError:
+            # diagnostics-control-flow: the first image startup has no installed-image identity.
             same_image = False
-            update_warning("IMAGE_RECORD_UNAVAILABLE")
+        except (OSError, ValueError, TypeError, KeyError, InstallError) as error:
+            same_image = False
+            update_warning("IMAGE_RECORD_UNAVAILABLE", error)
         incomplete = self.state / "installation-incomplete"
         if (
             same_image
@@ -99,8 +102,8 @@ class ImageSynchronization:
         try:
             if not marker.exists() and not marker.is_symlink():
                 marker.write_text("1\n", encoding="utf-8")
-        except OSError:
-            update_warning("INITIALIZATION_RECORD_WRITE_FAILED")
+        except OSError as error:
+            update_warning("INITIALIZATION_RECORD_WRITE_FAILED", error)
         dependencies = self.storage / "dependencies"
         if dependencies.exists():
             shutil.rmtree(dependencies)
@@ -146,17 +149,17 @@ class ImageSynchronization:
                     path.unlink(missing_ok=True)
                 else:
                     shutil.rmtree(path)
-            except OSError:
-                update_warning("IMAGE_CLEANUP_FAILED")
+            except OSError as error:
+                update_warning("IMAGE_CLEANUP_FAILED", error)
         try:
             write_json(self.record, self.target)
-        except OSError:
-            update_warning("IMAGE_RECORD_WRITE_FAILED")
+        except OSError as error:
+            update_warning("IMAGE_RECORD_WRITE_FAILED", error)
         if self.dependencies_recorded:
             try:
                 (self.state / "installation-incomplete").unlink(missing_ok=True)
-            except OSError:
-                update_warning("IMAGE_CLEANUP_FAILED")
+            except OSError as error:
+                update_warning("IMAGE_CLEANUP_FAILED", error)
         self.close()
         print(
             f"image synchronization complete version={self.target['version']} / 镜像程序同步完成",
@@ -165,5 +168,9 @@ class ImageSynchronization:
 
     def close(self) -> None:
         if self.lock is not None:
-            self.lock.close()
-            self.lock = None
+            try:
+                self.lock.close()
+            except OSError as error:
+                update_warning("IMAGE_LOCK_CLOSE_FAILED", error)
+            finally:
+                self.lock = None

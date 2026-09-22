@@ -9,16 +9,31 @@ PYTHON_API_DIR="${PYTHON_API_DIR:-$ROOT_DIR/apps/api-python}"
 BUSINESS_PYTHON="${SHUKU_BUSINESS_PYTHON:?fixed launcher must select business Python / 固定入口必须指定业务 Python}"
 NEXT_SERVER="${NEXT_SERVER:-$ROOT_DIR/apps/web/server.js}"
 GATEWAY_SERVER="${GATEWAY_SERVER:-$ROOT_DIR/scripts/unified-http-gateway.mjs}"
+STARTUP_STAGE="prepare_storage"
+
+wait_component() {
+  component_exit=0
+  wait "$2" || component_exit=$?
+  echo "runtime.component_exited stage=$STARTUP_STAGE component=$1 exit=$component_exit" >&2
+  if [ "$component_exit" -eq 0 ]; then component_exit=1; fi
+  exit "$component_exit"
+}
 
 shutdown() {
+  shutdown_exit=$?
+  if [ "$shutdown_exit" -ne 0 ] && [ "$shutdown_exit" -ne 130 ] && [ "$shutdown_exit" -ne 143 ]; then
+    echo "runtime.start_failed stage=$STARTUP_STAGE exit=$shutdown_exit" >&2
+  fi
   trap '' INT TERM
   trap - EXIT
   for group in ${WORKER_PID:-} ${WORKER_RETIRED_GROUP:-}; do
-    kill -TERM "-$group" 2>/dev/null || true
+    if kill -0 "-$group" 2>/dev/null; then
+      kill -TERM "-$group" || echo "runtime.signal_failed component=worker_group exit=$?" >&2
+    fi
   done
   for pid in ${GATEWAY_PID:-} ${PRESTART_PID:-} ${API_PID:-} ${WORKER_PID:-} ${WEB_PID:-}; do
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-      kill "$pid" 2>/dev/null || true
+      kill "$pid" || echo "runtime.signal_failed component=$pid exit=$?" >&2
     fi
   done
   wait ${PRESTART_PID:-} ${API_PID:-} ${WORKER_PID:-} ${WEB_PID:-} ${GATEWAY_PID:-} 2>/dev/null || true
@@ -26,8 +41,8 @@ shutdown() {
 
 drain_for_update() {
   # Stop public ingress, notify API background consumers before request draining.
-  if [ -n "${GATEWAY_PID:-}" ]; then kill "$GATEWAY_PID" 2>/dev/null || true; fi
-  if [ -n "${API_PID:-}" ]; then kill -USR1 "$API_PID" 2>/dev/null || true; fi
+  if [ -n "${GATEWAY_PID:-}" ] && kill -0 "$GATEWAY_PID" 2>/dev/null; then kill "$GATEWAY_PID" || echo "runtime.signal_failed component=gateway exit=$?" >&2; fi
+  if [ -n "${API_PID:-}" ] && kill -0 "$API_PID" 2>/dev/null; then kill -USR1 "$API_PID" || echo "runtime.signal_failed component=api exit=$?" >&2; fi
   exit 0
 }
 
@@ -53,12 +68,18 @@ if [ -z "${SESSION_SECRET:-}" ]; then
   export SESSION_SECRET
 fi
 
+STARTUP_STAGE="prestart"
 (
   cd "$PYTHON_API_DIR"
   exec "$BUSINESS_PYTHON" -m app.bootstrap.prestart
 ) &
 PRESTART_PID="$!"
-wait "$PRESTART_PID"
+prestart_exit=0
+wait "$PRESTART_PID" || prestart_exit=$?
+if [ "$prestart_exit" -ne 0 ]; then
+  echo "runtime.component_exited stage=prestart component=prestart exit=$prestart_exit" >&2
+  exit "$prestart_exit"
+fi
 PRESTART_PID=""
 
 (
@@ -67,12 +88,20 @@ PRESTART_PID=""
 ) &
 API_PID="$!"
 
+STARTUP_STAGE="api_health"
 while :; do
   if ! kill -0 "$API_PID" 2>/dev/null; then
-    wait "$API_PID" || exit $?
-    exit 1
+    wait_component api "$API_PID"
   fi
-  if "$BUSINESS_PYTHON" -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${PYTHON_API_PORT}/api/health', timeout=1).read()" >/dev/null 2>&1; then
+  if (cd "$PYTHON_API_DIR" && "$BUSINESS_PYTHON" -c "
+import logging, sys, urllib.request
+from app.core.exception_diagnostics import record_exception
+try:
+    urllib.request.urlopen('http://127.0.0.1:${PYTHON_API_PORT}/api/health', timeout=1).read()
+except Exception as error:
+    record_exception(logging.getLogger('ermao.startup'), 'runtime.health_probe_failed', error, context={'stage': 'api_health'})
+    sys.exit(1)
+") >/dev/null; then
     break
   fi
   sleep 1
@@ -87,6 +116,7 @@ start_worker() {
   WORKER_PID="$!"
 }
 start_worker
+STARTUP_STAGE="start_frontend"
 WORKER_RESTARTS=0
 WORKER_RESTART_AT=0
 WORKER_RETIRED_GROUP=""
@@ -100,12 +130,15 @@ GATEWAY_HOST="${HOSTNAME:-0.0.0.0}" \
   WEB_UPSTREAM_PORT="$NEXT_INTERNAL_PORT" \
   node "$GATEWAY_SERVER" &
 GATEWAY_PID="$!"
+STARTUP_STAGE="running"
 
 while :; do
   for pid in "$API_PID" "$WEB_PID" "$GATEWAY_PID"; do
     if ! kill -0 "$pid" 2>/dev/null; then
-      wait "$pid" || exit $?
-      exit 1
+      component="gateway"
+      if [ "$pid" = "$API_PID" ]; then component="api"; fi
+      if [ "$pid" = "$WEB_PID" ]; then component="web"; fi
+      wait_component "$component" "$pid"
     fi
   done
   if [ -n "$WORKER_PID" ] && ! kill -0 "$WORKER_PID" 2>/dev/null; then

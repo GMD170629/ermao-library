@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from pathlib import Path
+
+from app.core.exception_diagnostics import record_exception
 
 from ..application.models import Environment
 
 FIXED_ENVIRONMENT = Path("/opt/shuku-launcher/environment.json")
+LOGGER = logging.getLogger(__name__)
 
 
 def fixed_environment(storage: Path) -> Environment | None:
@@ -31,10 +35,18 @@ def fixed_environment(storage: Path) -> Environment | None:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
+                # diagnostics-control-flow: a held lock proves this is the fixed live launcher.
                 return Environment.model_validate(
                     json.loads(fixed.read_bytes())["environment"]
                 )
-    except (OSError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError) as error:
+        record_exception(
+            LOGGER,
+            "application_update.environment_read_failed",
+            error,
+            context={"stage": "read_environment"},
+            source="updates",
+        )
         return None
     return None
 
@@ -45,7 +57,17 @@ def fixed_protocol() -> int:
             "launcher_protocol"
         ]
         return 2 if value == 2 else 1
-    except (OSError, ValueError, KeyError):
+    except FileNotFoundError:
+        # diagnostics-control-flow: ordinary development/nonfixed deployments have no launcher metadata.
+        return 1
+    except (OSError, ValueError, KeyError) as error:
+        record_exception(
+            LOGGER,
+            "application_update.protocol_read_failed",
+            error,
+            context={"stage": "read_protocol"},
+            source="updates",
+        )
         return 1
 
 
