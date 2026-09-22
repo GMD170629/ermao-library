@@ -2285,5 +2285,21 @@
   "请联系管理员开启 MCP 服务后创建授权。": "Ask an administrator to enable MCP before creating a grant.",
   "请联系管理员管理 MCP 服务设置。": "Ask an administrator to manage MCP service settings.",
   "配置包含此授权的完整令牌，请勿分享或提交到仓库。": "This configuration contains the grant’s complete token. Do not share it or commit it to a repository.",
-  "配置读取失败，请关闭后重试。": "Could not load the configuration. Close it and try again."
+  "配置读取失败，请关闭后重试。": "Could not load the configuration. Close it and try again.",
+  "MCP 服务设置已保存": "MCP service settings saved",
+  "保存服务设置失败": "Could not save service settings",
+  "授权已创建": "Access grant created",
+  "创建授权失败": "Could not create access grant",
+  "授权已撤销": "Access grant revoked",
+  "撤销授权失败": "Could not revoke access grant",
+  "任务列表已刷新": "Task list refreshed",
+  "刷新任务失败": "Could not refresh tasks",
+  "已请求取消任务": "Task cancellation requested",
+  "取消任务失败": "Could not cancel task",
+  "配置读取失败": "Could not load configuration",
+  "请关闭配置后重试": "Close the configuration and try again",
+  "配置下载已开始": "Configuration download started",
+  "配置下载失败": "Could not download configuration",
+  "自动化配置已重新读取": "Automation configuration reloaded",
+  "重新读取自动化配置失败": "Could not reload automation configuration"
 }

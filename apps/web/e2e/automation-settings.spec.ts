@@ -94,6 +94,7 @@ test('row configuration stays bound, survives reload and clears on close or navi
   await page.getByRole('button', { name: '下载配置', exact: true }).click();
   const downloaded = await downloading;
   expect(downloaded.suggestedFilename()).toBe('ermao-mcp.json');
+  await expect(page.locator('.shuku-toast-region')).toContainText('配置下载已开始');
   const content = await readFile((await downloaded.path())!, 'utf8');
   expect(JSON.parse(content).mcpServers['ermao-library'].headers.Authorization).toBe('Bearer secret-Client B');
 
@@ -172,4 +173,50 @@ test('late token response cannot replace another grant configuration', async ({ 
   release();
   await expect(page.locator('pre')).not.toContainText('late-secret-A');
   await expect(row(page, 'Client A').locator('pre')).toHaveCount(0);
+});
+
+
+test('automation actions report success and failure through shared feedback', async ({ page }) => {
+  await mockApi(page);
+  const feedback = page.locator('.shuku-toast-region');
+  await page.goto('/settings/automation?tab=service');
+  await page.getByRole('button', { name: '保存服务设置', exact: true }).click();
+  await expect(feedback).toContainText('MCP 服务设置已保存');
+  await page.getByRole('link', { name: '授权服务', exact: true }).click();
+  await page.getByRole('button', { name: '创建授权', exact: true }).click();
+  await page.getByLabel('授权名称', { exact: true }).fill('Feedback client');
+  await page.getByRole('button', { name: '创建授权', exact: true }).last().click();
+  await expect(feedback).toContainText('授权已创建');
+  await row(page, 'Feedback client').getByRole('button', { name: '撤销授权' }).click();
+  await expect(feedback).toContainText('授权已撤销');
+  await page.getByRole('link', { name: '操作列表', exact: true }).click();
+  await page.getByRole('button', { name: '刷新任务', exact: true }).click();
+  await expect(feedback).toContainText('任务列表已刷新');
+  await page.getByRole('button', { name: '取消任务', exact: true }).click();
+  await expect(feedback).toContainText('已请求取消任务');
+  while (await feedback.getByRole('button').count()) await feedback.getByRole('button').first().click();
+  await page.route('**/api/automation/settings', async (route) => {
+    if (route.request().method() !== 'PUT') return route.fallback();
+    await route.fulfill({ status: 400, json: { ok: false, error: { code: 'INVALID_PUBLIC_URL' } } });
+  });
+  await page.getByRole('link', { name: 'MCP 服务', exact: true }).click();
+  await page.getByRole('button', { name: '保存服务设置', exact: true }).click();
+  await expect(feedback).toContainText('保存服务设置失败');
+  await expect(feedback).not.toContainText('MCP 服务设置已保存');
+  await page.getByRole('button', { name: '重新读取', exact: true }).click();
+  await expect(feedback).toContainText('自动化配置已重新读取');
+  await page.route('**/api/automation/grants/*/reveal', async (route) => {
+    await route.fulfill({ status: 400, json: { ok: false, error: { code: 'TOKEN_KEY_UNAVAILABLE' } } });
+  });
+  await page.getByRole('link', { name: '授权服务', exact: true }).click();
+  await row(page, 'Client A').getByRole('button', { name: '复制配置', exact: true }).click();
+  await expect(feedback).toContainText('配置读取失败');
+  await expect(page.getByRole('region', { name: '授权配置' })).toContainText('令牌密钥不可用或解密失败');
+});
+
+test('service save feedback uses the current English locale', async ({ page }) => {
+  await mockApi(page, { locale: 'en-US' });
+  await page.goto('/settings/automation?tab=service');
+  await page.getByRole('button', { name: 'Save service settings', exact: true }).click();
+  await expect(page.locator('.shuku-toast-region')).toContainText('MCP service settings saved');
 });

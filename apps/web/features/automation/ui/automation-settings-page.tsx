@@ -112,9 +112,9 @@ function ConfigurationPanel({ grant, endpoint, close }: { grant: GrantView; endp
       const value = await revealGrant(grant.id, controller.signal);
       if (!controller.signal.aborted) setToken(value);
     })
-      .catch((error: unknown) => { if (!controller.signal.aborted) setError(error instanceof Error ? error.message : 'AUTOMATION_REQUEST_FAILED'); });
+      .catch((error: unknown) => { if (!controller.signal.aborted) { setError(error instanceof Error ? error.message : 'AUTOMATION_REQUEST_FAILED'); toast.error('配置读取失败', '请关闭配置后重试'); } });
     return () => { controller.abort(); window.clearTimeout(expiry); };
-  }, [grant.id, grant.expiresAtMs]);
+  }, [grant.id, grant.expiresAtMs, toast]);
   const template = token ? clientTemplate(endpoint, token, client) : '';
   async function copy() {
     try {
@@ -130,9 +130,13 @@ function ConfigurationPanel({ grant, endpoint, close }: { grant: GrantView; endp
     } catch { toast.error(t('复制失败，请手动复制')); }
   }
   function download() {
-    const url = URL.createObjectURL(new Blob([template], { type: client === 'codex' ? 'text/plain' : 'application/json' }));
-    const link = document.createElement('a'); link.href = url; link.download = client === 'codex' ? 'ermao-mcp.toml' : 'ermao-mcp.json'; link.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    let url: string | undefined;
+    try {
+      url = URL.createObjectURL(new Blob([template], { type: client === 'codex' ? 'text/plain' : 'application/json' }));
+      const link = document.createElement('a'); link.href = url; link.download = client === 'codex' ? 'ermao-mcp.toml' : 'ermao-mcp.json'; link.click();
+      toast.info('配置下载已开始');
+    } catch { toast.error('配置下载失败', '请稍后重试'); }
+    finally { if (url) { const downloadUrl = url; window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0); } }
   }
   const message = error === 'TOKEN_NOT_RECOVERABLE' ? '历史令牌无法取回，请重新创建授权' : error === 'GRANT_INACTIVE' ? '授权已过期或撤销，请重新创建授权。' : ['TOKEN_KEY_UNAVAILABLE', 'TOKEN_KEY_INVALID', 'TOKEN_DECRYPTION_FAILED'].includes(error ?? '') ? '令牌密钥不可用或解密失败，请联系管理员恢复密钥。' : '配置读取失败，请关闭后重试。';
   return <section className="mt-4 rounded-xl border border-[#E2DED8] p-4" aria-label={t('授权配置')}>
@@ -186,14 +190,30 @@ export function AutomationSettingsPage() {
   const search = useSearchParams();
   const requestedTab = search.get('tab');
   const tab = requestedTab === 'service' || requestedTab === 'operations' ? requestedTab : 'grants';
-  const automation = useAutomation(session?.user?.id);
+  const state = useAutomation(session?.user?.id);
+  const toast = useToast();
+  async function feedback(result: Promise<boolean | undefined>, success: string, failure: string) {
+    const completed = await result;
+    if (completed === true) toast.success(success);
+    else if (completed === false) toast.error(failure, '自动化请求未完成，请检查权限和配置后重试。');
+    return completed;
+  }
+  const automation = {
+    ...state,
+    retry: () => feedback(state.retry(), '自动化配置已重新读取', '重新读取自动化配置失败'),
+    save: (settings: ServiceSettings) => feedback(state.save(settings), 'MCP 服务设置已保存', '保存服务设置失败'),
+    create: (input: CreateGrantRequest) => feedback(state.create(input), '授权已创建', '创建授权失败'),
+    revoke: (id: string) => feedback(state.revoke(id), '授权已撤销', '撤销授权失败'),
+    refreshOperations: () => feedback(state.refreshOperations(), '任务列表已刷新', '刷新任务失败'),
+    cancel: (id: string) => feedback(state.cancel(id), '已请求取消任务', '取消任务失败')
+  };
   const { data, busy } = automation;
   const formatTime = (value: number | null) => value === null ? t('尚未使用') : new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(value);
   const tabs = [{ key: 'service', label: 'MCP 服务' }, { key: 'grants', label: '授权服务' }, { key: 'operations', label: '操作列表' }].map((item) => ({ ...item, href: `/settings/automation?tab=${item.key}` }));
   return <SettingsCenterShell title="自动化授权" description="连接你自己的 AI 客户端，分别授权书库查询、元数据整理和文件操作。">
     <div className="max-w-[960px] space-y-5">
       <SettingsTabs tabs={tabs} active={tab} />
-      {automation.error ? <div role="alert" className={`${panel} text-red-700`}><p>{t('自动化请求未完成，请检查权限和配置后重试。')}</p><Button variant="secondary" className="mt-3" onClick={automation.retry}>{t('重新读取')}</Button></div> : null}
+      {automation.error ? <div role="alert" className={`${panel} text-red-700`}><p>{t('自动化请求未完成，请检查权限和配置后重试。')}</p><Button variant="secondary" className="mt-3" loading={busy} onClick={() => void automation.retry()}>{t('重新读取')}</Button></div> : null}
       {!data && !automation.error ? <p role="status">{t('正在读取自动化配置…')}</p> : null}
       {data ? <>
         <div role="status" className="flex flex-wrap items-center justify-between gap-3 text-sm"><span>{t(data.settings.enabled ? 'MCP 服务已开启' : 'MCP 服务已关闭')}</span><span className="text-[#77716A]">{t('仅支持手动 Bearer Token，不提供 OAuth 登录。')}</span></div>

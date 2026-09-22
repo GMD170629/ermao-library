@@ -10,7 +10,6 @@ export function useAutomation(userId: string | undefined) {
   const [data, setData] = useState<Data>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
-  const [revision, setRevision] = useState(0);
   const lifetime = useRef<AbortController | null>(null);
   const inFlight = useRef(false);
   useEffect(() => {
@@ -21,17 +20,21 @@ export function useAutomation(userId: string | undefined) {
       if (!controller.signal.aborted) setData(next);
     }).catch(() => { if (!controller.signal.aborted) setError(true); });
     return () => controller.abort();
-  }, [userId, revision]);
+  }, [userId]);
 
   async function mutate(operation: (signal: AbortSignal) => Promise<void>) {
     const controller = lifetime.current;
-    if (inFlight.current || !controller || controller.signal.aborted) return false;
+    if (inFlight.current || !controller || controller.signal.aborted) return;
     inFlight.current = true; setBusy(true); setError(false);
-    try { await operation(controller.signal); return !controller.signal.aborted; }
-    catch { if (!controller.signal.aborted) setError(true); return false; }
+    try { await operation(controller.signal); return controller.signal.aborted ? undefined : true; }
+    catch { if (controller.signal.aborted) return; setError(true); return false; }
     finally { if (!controller.signal.aborted) { inFlight.current = false; setBusy(false); } }
   }
-  return { data, busy, error, retry: () => setRevision((value) => value + 1),
+  return { data, busy, error,
+    retry: () => mutate(async (signal) => {
+      const next = await loadAutomation(signal);
+      if (!signal.aborted) setData(next);
+    }),
     create: (input: CreateGrantRequest) => mutate(async (signal) => {
       const result = await createGrant(input, signal);
       if (signal.aborted) return;
