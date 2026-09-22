@@ -224,6 +224,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     try {
       await reorderLibraries(next.map((item) => item.id));
       await loadPaths();
+      notifyLibrarySourcesChanged();
       toast.success('书库顺序已更新');
     } catch (reason: unknown) {
       setFolders(previous);

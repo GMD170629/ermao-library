@@ -1,7 +1,6 @@
 """Official SDK transport, with isolated tool discovery for each authenticated request."""
 
 from typing import Annotated, Literal
-from urllib.parse import urlsplit
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -452,14 +451,12 @@ class AutomationMcpEndpoint:
         allowed = frozenset(visible_tools(snapshot.access, registered))
         for name in registered - allowed:
             server.remove_tool(name)
-        public = urlsplit(snapshot.settings.public_base_url)
         transport = server.streamable_http_app(
             streamable_http_path="/api/mcp",
             json_response=True,
             stateless_http=True,
             transport_security=TransportSecuritySettings(
-                allowed_hosts=[public.netloc],
-                allowed_origins=[f"{public.scheme}://{public.netloc}"],
+                enable_dns_rebinding_protection=False,
             ),
         )
 

@@ -274,16 +274,34 @@ def test_official_sdk_real_catalog_and_revocation(
                     )
                 ).status_code == 401
                 auth = {**headers, "Authorization": "Bearer " + fresh.token}
-                assert (
-                    await http.post(
-                        url, headers={**auth, "Host": "evil.invalid"}, json={}
-                    )
-                ).status_code == 421
-                assert (
-                    await http.post(
-                        url, headers={**auth, "Origin": "https://evil.invalid"}, json={}
-                    )
-                ).status_code == 403
+            # Proxies may rewrite the authority; the public URL is not an ACL.
+            for forwarded in (
+                {"Host": "shuku.gamersgu.cn:12443"},
+                {
+                    "Host": "127.0.0.1:3000",
+                    "Origin": "https://shuku.gamersgu.cn:12443",
+                },
+            ):
+                async with httpx2.AsyncClient(headers={**auth, **forwarded}) as http:
+                    async with Client(
+                        streamable_http_client(url, http_client=http),
+                        read_timeout_seconds=5,
+                    ) as client:
+                        result = await client.call_tool(
+                            "get_books", {"book_ids": ["allowed"]}
+                        )
+                        assert not result.is_error
+                        assert result.structured_content["books"][0]["id"] == "allowed"
+                        assert (
+                            await client.call_tool("get_books", {"book_ids": ["secret"]})
+                        ).is_error
+                    assert (
+                        await http.post(
+                            url,
+                            headers={"Authorization": "Bearer invalid"},
+                            json={},
+                        )
+                    ).status_code == 401
             scopes = frozenset(
                 {
                     Scope.SYSTEM_READ,

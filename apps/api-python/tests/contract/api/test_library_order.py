@@ -59,6 +59,15 @@ def test_reorder_libraries_persists_the_requested_order(
     assert [library["id"] for library in response.json()["data"]["libraries"]] == reordered
     assert _library_ids(client) == reordered
 
+    schema_response = client.get("/api/library/filter-schema")
+    assert schema_response.status_code == 200
+    library_field = next(
+        field
+        for field in schema_response.json()["data"]["fields"]
+        if field["key"] == "library"
+    )
+    assert [option["value"] for option in library_field["options"]] == reordered
+
     sort_orders = dict(
         db_session.execute(select(Library.id, Library.sort_order)).all()
     )

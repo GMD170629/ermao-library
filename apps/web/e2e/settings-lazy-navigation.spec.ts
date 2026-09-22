@@ -410,12 +410,20 @@ for (const locale of ['zh-CN', 'en-US'] as const) {
 for (const locale of ['zh-CN', 'en-US'] as const) {
   test(`library rows reorder through the manual order endpoint ${locale}`, async ({ page }) => {
     await mockSettingsApi(page, locale);
+    await page.setViewportSize({ width: 1440, height: 1000 });
     const chinese = locale === 'zh-CN';
     let libraries = [
       { id: 'library-1', name: 'First', rootPath: '/first', enabled: true, organizationMode: 'FLAT', ignoreHidden: true },
       { id: 'library-2', name: 'Second', rootPath: '/second', enabled: true, organizationMode: 'FLAT', ignoreHidden: true }
     ];
     const orderRequests: unknown[] = [];
+    await page.route('**/api/library/filter-schema', (route) => route.fulfill({ json: {
+      ok: true,
+      data: { maxConditions: 20, fields: [{
+        key: 'library', label: 'Library', group: 'basic', type: 'select', operators: ['equals'],
+        options: libraries.map((library) => ({ value: library.id, label: library.name }))
+      }] }
+    } }));
     await page.route('**/api/libraries/order', async (route) => {
       const body = route.request().postDataJSON() as { libraryIds: string[] };
       orderRequests.push(body);
@@ -431,6 +439,12 @@ for (const locale of ['zh-CN', 'en-US'] as const) {
     const moveUpSecond = page.getByRole('button', { name: chinese ? '上移Second' : 'Move Up Second', exact: true });
     await expect(moveDownFirst).toBeVisible();
     await expect(moveUpSecond).toBeEnabled();
+    const sidebarLibraries = page.locator('aside:visible a[data-library-id]');
+    const returnToReading = page.locator('aside:visible a[href="/"]').last();
+    await returnToReading.click();
+    await expect(sidebarLibraries).toHaveText(['First', 'Second']);
+    await page.goBack();
+    await page.getByRole('tab', { name: chinese ? '书库' : 'Library', exact: true }).click();
 
     await moveDownFirst.click();
     await expect.poll(() => orderRequests.length).toBe(1);
@@ -441,6 +455,19 @@ for (const locale of ['zh-CN', 'en-US'] as const) {
     expect(firstRow).not.toBeNull();
     expect(secondRow).not.toBeNull();
     expect(firstRow!.y).toBeGreaterThan(secondRow!.y);
+    await returnToReading.click();
+    await expect(sidebarLibraries).toHaveText(['Second', 'First']);
+    await page.goBack();
+    await page.getByRole('tab', { name: chinese ? '书库' : 'Library', exact: true }).click();
+
+    await page.route('**/api/libraries/order', (route) => route.fulfill({
+      status: 503, json: { ok: false, error: { message: 'Unavailable' } }
+    }));
+    await page.getByRole('button', { name: chinese ? '上移First' : 'Move Up First', exact: true }).click();
+    await expect(page.getByText(chinese ? '保存书库顺序失败' : 'Failed to save library order', { exact: true })).toBeVisible();
+    await expect(moveUpSecond).toBeDisabled();
+    await returnToReading.click();
+    await expect(sidebarLibraries).toHaveText(['Second', 'First']);
   });
 }
 

@@ -92,7 +92,9 @@ class SqlAlchemyLibraryFilterQueries:
                 return ()
             statement = statement.where(Library.id.in_(context.library_ids))
         rows = self._db.execute(
-            statement.order_by(func.lower(Library.name).asc(), Library.id.asc())
+            statement.order_by(
+                Library.sort_order.asc(), Library.created_at.desc(), Library.id.desc()
+            )
         ).all()
         return tuple(
             LibraryFilterOption(
