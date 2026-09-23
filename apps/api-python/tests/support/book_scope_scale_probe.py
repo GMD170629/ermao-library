@@ -14,6 +14,8 @@ import os
 import shutil
 import sqlite3
 import statistics
+import subprocess
+import sys
 import tempfile
 import time
 import tracemalloc
@@ -69,6 +71,30 @@ def _timed(stage: dict[str, float], label: str, operation):
             ) * 1000
 
     return measure
+
+
+def _cold_process_trial(database: Path, size: int, storage: Path) -> None:
+    engine = create_sqlite_engine(database)
+    try:
+        with Session(engine) as db:
+            pipeline = build_readable_resource_pipeline(
+                db, Settings(storage_root=str(storage))
+            )
+            worker = build_readable_resource_worker(pipeline)
+            started = time.perf_counter()
+            assert worker.process_once() == "book"
+            worker_ms = (time.perf_counter() - started) * 1000
+            assert (
+                db.query(LibraryResourceAsset)
+                .filter(
+                    LibraryResourceAsset.resource_id == f"res-{size - 1:06d}"
+                )
+                .count()
+                == 1
+            )
+        print(json.dumps({"worker_ms": worker_ms}), flush=True)
+    finally:
+        engine.dispose()
 
 
 def probe(size: int) -> None:
@@ -303,6 +329,28 @@ def probe(size: int) -> None:
                 sqlite3.connect(snapshot) as saved,
             ):
                 original.backup(saved)
+            cold_path = Path(directory) / "cold-trial.sqlite3"
+            shutil.copy2(snapshot, cold_path)
+            started = time.perf_counter()
+            cold_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "tests.support.book_scope_scale_probe",
+                    "--cold-trial",
+                    str(cold_path),
+                    str(size),
+                    str(Path(directory) / "storage-cold"),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            cold_process_wall_ms = (time.perf_counter() - started) * 1000
+            cold_worker_ms = json.loads(cold_result.stdout.splitlines()[-1])[
+                "worker_ms"
+            ]
             full_times = []
             local_scan_times = []
             stage_times: list[dict[str, float]] = []
@@ -489,6 +537,8 @@ def probe(size: int) -> None:
                         "finish_ms": finish,
                         "finish_warm_median_ms": statistics.median(finish[1:]),
                         "worker_warm_median_ms": statistics.median(full_times[1:]),
+                        "fresh_process_worker_ms": cold_worker_ms,
+                        "fresh_process_wall_ms": cold_process_wall_ms,
                         "unchanged_local_scan_ms": local_scan_times,
                         "unchanged_local_scan_warm_median_ms": statistics.median(
                             local_scan_times[1:]
@@ -522,5 +572,8 @@ def probe(size: int) -> None:
 
 
 if __name__ == "__main__":
-    for count in (1000, 10000, 100000):
-        probe(count)
+    if len(sys.argv) == 5 and sys.argv[1] == "--cold-trial":
+        _cold_process_trial(Path(sys.argv[2]), int(sys.argv[3]), Path(sys.argv[4]))
+    else:
+        for count in (1000, 10000, 100000):
+            probe(count)
