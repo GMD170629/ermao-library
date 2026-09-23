@@ -1363,7 +1363,12 @@ def test_directory_legacy_tasks_upgrade_keeps_asset_ids_and_progress(
         build_readable_resource_worker,
     )
     from app.db.runner import alembic_config_for_engine
-    from app.models import LibraryImportTask, ReaderResourceProgress, User
+    from app.models import (
+        LibraryImportTask,
+        ReaderBookmarkV5,
+        ReaderResourceProgress,
+        User,
+    )
     from app.modules.library.public import SourceNodeRelativePath
 
     engine = create_sqlite_engine(tmp_path / "images.sqlite3")
@@ -1458,6 +1463,18 @@ def test_directory_legacy_tasks_upgrade_keeps_asset_ids_and_progress(
                     reader_type="comic" if media == "image" else "audio",
                     position="2",
                     extra='{"assetId":"asset-2"}',
+                )
+            )
+            db.add(
+                ReaderBookmarkV5(
+                    id="bookmark",
+                    user_id="user",
+                    resource_id="resource",
+                    bookmark_id="reader-location",
+                    locator_json='{"assetId":"asset-2"}',
+                    presentation_json="{}",
+                    label="Saved place",
+                    bookmark_created_at=datetime.now(UTC),
                 )
             )
             for index, state in enumerate(
@@ -1576,6 +1593,10 @@ def test_directory_legacy_tasks_upgrade_keeps_asset_ids_and_progress(
                 == '{"assetId":"asset-2"}'
             )
             assert db.get(ReaderResourceProgress, "progress").resource_id == "resource"
+            bookmark = db.get(ReaderBookmarkV5, "bookmark")
+            assert bookmark is not None
+            assert bookmark.resource_id == "resource"
+            assert bookmark.locator_json == '{"assetId":"asset-2"}'
     finally:
         engine.dispose()
 
