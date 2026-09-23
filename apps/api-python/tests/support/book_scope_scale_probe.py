@@ -341,6 +341,29 @@ def probe(size: int) -> None:
                             ),
                         ),
                         patch.object(
+                            pipeline.adapters,
+                            "parse_file",
+                            _timed(stage, "parse_media", pipeline.adapters.parse_file),
+                        ),
+                        patch.object(
+                            pipeline.process_import_task,
+                            "save_asset_result",
+                            _timed(
+                                stage,
+                                "save_asset",
+                                pipeline.process_import_task.save_asset_result,
+                            ),
+                        ),
+                        patch.object(
+                            pipeline.process_import_task,
+                            "finalize_resource",
+                            _timed(
+                                stage,
+                                "finalize_resource",
+                                pipeline.process_import_task.finalize_resource,
+                            ),
+                        ),
+                        patch.object(
                             pipeline.identify_book,
                             "execute",
                             _timed(stage, "identify", pipeline.identify_book.execute),
@@ -478,6 +501,9 @@ def probe(size: int) -> None:
                                 "claim",
                                 "resources",
                                 "parse_and_save",
+                                "parse_media",
+                                "save_asset",
+                                "finalize_resource",
                                 "identify",
                                 "finish",
                             )
