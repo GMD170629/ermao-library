@@ -89,7 +89,7 @@ def test_new_requests_keep_running_book_and_old_scan_unchanged(tmp_path: Path) -
             )).all()) == 2
             failed = queue.fail_book_run(
                 first.id, execution_version=claimed.execution_version,
-                error_summary="PARSE_FAILED", retryable=False, failed_at=now,
+                error_summary="PARSE_FAILED", failed_at=now,
             )
             assert failed is not None and failed.state == "FAILED"
             again = queue.continue_book_task(first.id, continued_at=now)

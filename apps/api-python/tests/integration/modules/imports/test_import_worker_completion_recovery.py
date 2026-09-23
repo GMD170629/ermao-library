@@ -885,3 +885,83 @@ os._exit(23)
         assert worker.process_once() == "book"
     with Session(db_session.get_bind()) as observer:
         assert observer.get(LibraryImportTask, task_id).state == "SUCCEEDED"
+
+
+def test_terminal_write_failure_marks_this_execution_failed_and_allows_next(
+    db_session: Session,
+    scanning_pipeline: tuple[ReadableResourcePipeline, str, str],
+) -> None:
+    pipeline, first_id, second_id = scanning_pipeline
+    worker = build_readable_resource_worker(pipeline)
+    terminal_attempts = 0
+
+    def fail_success_write(_connection, _cursor, statement, parameters, context, _many):
+        nonlocal terminal_attempts
+        if (
+            context.isupdate
+            and context.compiled.statement.table.name == LibraryImportTask.__tablename__
+            and first_id in parameters
+            and "SUCCEEDED" in parameters
+        ):
+            terminal_attempts += 1
+            raise OperationalError(statement, parameters, sqlite3.OperationalError("disk I/O error"))
+
+    engine = db_session.get_bind()
+    event.listen(engine, "before_cursor_execute", fail_success_write)
+    try:
+        assert worker.process_once() == "failed"
+    finally:
+        event.remove(engine, "before_cursor_execute", fail_success_write)
+    db_session.expire_all()
+    first = db_session.get(LibraryImportTask, first_id)
+    assert first is not None and first.state == "FAILED"
+    assert first.completion_outcome is None
+    assert terminal_attempts == 1
+    assert worker.process_once() == "scan"
+    assert db_session.get(LibraryImportTask, second_id).state == "SUCCEEDED"
+
+
+def test_unwritable_terminal_and_failure_close_do_not_reexecute_after_restart(
+    db_session: Session,
+    scanning_pipeline: tuple[ReadableResourcePipeline, str, str],
+) -> None:
+    pipeline, first_id, second_id = scanning_pipeline
+    worker = build_readable_resource_worker(pipeline)
+    scanned: list[str] = []
+    original_scan = pipeline.scan_library_source_tree.execute_library
+
+    def recorded_scan(library_id: str, **kwargs: object):
+        scanned.append(library_id)
+        return original_scan(library_id, **kwargs)
+
+    pipeline.scan_library_source_tree.execute_library = recorded_scan
+
+    def fail_terminal(_connection, _cursor, statement, parameters, context, _many):
+        if (
+            context.isupdate
+            and context.compiled.statement.table.name == LibraryImportTask.__tablename__
+            and first_id in parameters
+            and ("SUCCEEDED" in parameters or "FAILED" in parameters)
+        ):
+            raise OperationalError(
+                statement, parameters, sqlite3.OperationalError("disk I/O error")
+            )
+
+    engine = db_session.get_bind()
+    event.listen(engine, "before_cursor_execute", fail_terminal)
+    try:
+        with pytest.raises(RuntimeError, match="IMPORT_TERMINAL_PERSISTENCE_FAILED"):
+            worker.process_once()
+    finally:
+        event.remove(engine, "before_cursor_execute", fail_terminal)
+
+    assert scanned == ["test-library"]
+    db_session.expire_all()
+    assert db_session.get(LibraryImportTask, first_id).state == "RUNNING"
+    assert db_session.get(LibraryImportTask, second_id).state == "QUEUED"
+    assert worker.startup() == 1
+    db_session.expire_all()
+    assert db_session.get(LibraryImportTask, first_id).state == "FAILED"
+    assert db_session.get(LibraryImportTask, first_id).error_summary == "WORKER_INTERRUPTED"
+    assert worker.process_once() == "scan"
+    assert scanned == ["test-library", "second-library"]

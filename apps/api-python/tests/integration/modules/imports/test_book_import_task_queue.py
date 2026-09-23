@@ -107,7 +107,7 @@ def db(tmp_path: Path):
         engine.dispose()
 
 
-def test_book_requests_survive_running_and_use_one_task(db: Session) -> None:
+def test_book_requests_keep_independent_tasks_and_running_scope(db: Session) -> None:
     queue = SqlAlchemyLibraryImportTaskQueue(db)
     first = queue.request_book_work(
         book_id="book-one", work=BookWork(resource_ids=("resource-one",)), requested_at=_NOW
@@ -115,15 +115,15 @@ def test_book_requests_survive_running_and_use_one_task(db: Session) -> None:
     duplicate = queue.request_book_work(
         book_id="book-one", work=BookWork(resource_ids=("resource-one",)), requested_at=_NOW
     )
-    assert duplicate.id == first.id
-    assert duplicate.request_version == 2
+    assert duplicate.id != first.id
+    assert duplicate.request_version == 1
     db.commit()
     db.expire_all()
 
     claimed = queue.claim_next_book(started_at=_NOW)
     assert claimed is not None
     assert claimed.id == first.id
-    assert claimed.execution_version == 2
+    assert claimed.execution_version == 1
     assert claimed.work.active.resource_ids == ("resource-one",)
     assert claimed.work.pending.is_empty
     db.commit()
@@ -131,32 +131,36 @@ def test_book_requests_survive_running_and_use_one_task(db: Session) -> None:
     follow_up = queue.request_book_work(
         book_id="book-one", work=BookWork(identify=True), requested_at=_NOW
     )
-    assert follow_up.state == "RUNNING"
-    assert follow_up.request_version == 3
-    assert follow_up.work.active.resource_ids == ("resource-one",)
+    assert follow_up.id not in {first.id, duplicate.id}
+    assert follow_up.state == "QUEUED"
+    assert follow_up.request_version == 1
+    assert claimed.work.active.resource_ids == ("resource-one",)
     assert follow_up.work.pending.identify
     db.commit()
     db.expire_all()
 
     finished = queue.finish_book_run(
-        first.id, execution_version=2, finished_at=_NOW + timedelta(seconds=1)
+        first.id, execution_version=1, finished_at=_NOW + timedelta(seconds=1)
     )
     assert finished is not None
-    assert finished.state == "QUEUED"
-    assert finished.work.active.is_empty
-    assert finished.work.pending.identify
+    assert finished.state == "SUCCEEDED"
+    assert finished.work.active.resource_ids == ("resource-one",)
+    assert finished.work.pending.is_empty
     assert queue.finish_book_run(
-        first.id, execution_version=2, finished_at=_NOW + timedelta(seconds=2)
+        first.id, execution_version=1, finished_at=_NOW + timedelta(seconds=2)
     ) is None
     db.commit()
 
     next_run = queue.claim_next_book(started_at=_NOW + timedelta(seconds=2))
-    assert next_run is not None and next_run.id == first.id
-    assert next_run.execution_version == 3
-    assert next_run.work.active.identify
+    assert next_run is not None and next_run.id in {duplicate.id, follow_up.id}
+    assert next_run.execution_version == 1
+    assert next_run.work.active == (
+        BookWork(resource_ids=("resource-one",))
+        if next_run.id == duplicate.id else BookWork(identify=True)
+    )
     assert next_run.work.pending.is_empty
     done = queue.finish_book_run(
-        first.id, execution_version=3, finished_at=_NOW + timedelta(seconds=3)
+        next_run.id, execution_version=1, finished_at=_NOW + timedelta(seconds=3)
     )
     assert done is not None and done.state == "SUCCEEDED"
     db.commit()
@@ -164,10 +168,10 @@ def test_book_requests_survive_running_and_use_one_task(db: Session) -> None:
         select(func.count()).select_from(LibraryImportTask).where(
             LibraryImportTask.kind == "IMPORT_BOOK"
         )
-    ) == 1
+    ) == 3
 
 
-def test_new_request_does_not_repeat_completed_scan_phase_after_yield(db: Session) -> None:
+def test_new_request_does_not_change_running_scan_phase(db: Session) -> None:
     queue = SqlAlchemyLibraryImportTaskQueue(db)
     requested = queue.request_book_work(
         book_id="book-one",
@@ -182,18 +186,15 @@ def test_new_request_does_not_repeat_completed_scan_phase_after_yield(db: Sessio
     assert queue.advance_book_phase(
         requested.id, execution_version=1, phase="RESOURCES"
     )
-    yielded = queue.yield_book_run(
-        requested.id, execution_version=1, yielded_at=_NOW
-    )
-    assert yielded is not None and yielded.phase == "RESOURCES"
-
     updated = queue.request_book_work(
         book_id="book-one", work=BookWork(identify=True), requested_at=_NOW
     )
-    assert updated.phase == "RESOURCES"
+    assert updated.id != requested.id and updated.phase == "IDENTIFY"
     db.commit()
-    resumed = queue.claim_next_book(started_at=_NOW)
-    assert resumed is not None and resumed.phase == "RESOURCES"
+    running = queue.get_book_task(requested.id)
+    assert running is not None and running.phase == "RESOURCES"
+    assert running.state == "RUNNING"
+    assert queue.claim_book_task(updated.id, started_at=_NOW).phase == "IDENTIFY"
 
 
 def test_book_claim_survives_process_termination(db: Session) -> None:
@@ -246,10 +247,10 @@ os._exit(23)
         finished_at=_NOW + timedelta(seconds=1)
     ) == 1
     db.commit()
-    resumed = queue.claim_next_book(started_at=_NOW + timedelta(seconds=1))
-    assert resumed is not None and resumed.id == requested.id
-    assert resumed.execution_version == 1
-    assert resumed.work.active.resource_ids == ("resource-one",)
+    assert queue.claim_next_book(started_at=_NOW + timedelta(seconds=1)) is None
+    interrupted = db.get(LibraryImportTask, requested.id)
+    assert interrupted is not None and interrupted.state == "FAILED"
+    assert interrupted.error_summary == "WORKER_INTERRUPTED"
 
 
 def test_book_request_marks_only_its_metadata_revision_pending(db: Session) -> None:
@@ -283,9 +284,7 @@ def test_book_request_marks_only_its_metadata_revision_pending(db: Session) -> N
     two = db.get(LibraryBookMetadata, "book-two")
     assert one is not None and two is not None
     assert (one.import_revision, one.metadata_pending, one.metadata_state) == (
-        5,
-        True,
-        "WAITING_IMPORT",
+        4, False, "COMPLETED",
     )
     assert (two.import_revision, two.metadata_pending, two.metadata_state) == (
         7,
@@ -294,6 +293,8 @@ def test_book_request_marks_only_its_metadata_revision_pending(db: Session) -> N
     )
     claimed = queue.claim_next_book(started_at=_NOW)
     assert claimed is not None and claimed.execution_version is not None
+    db.expire_all()
+    assert db.get(LibraryBookMetadata, "book-one").metadata_pending is True
     with pytest.raises(ValueError, match="BOOK_IDENTIFICATION_PENDING"):
         queue.finish_book_run(
             requested.id,
@@ -304,7 +305,6 @@ def test_book_request_marks_only_its_metadata_revision_pending(db: Session) -> N
         requested.id,
         execution_version=claimed.execution_version,
         error_summary="IDENTIFICATION_FAILED",
-        retryable=False,
         failed_at=_NOW,
     )
     assert failed is not None and failed.state == "FAILED"
@@ -314,11 +314,11 @@ def test_book_request_marks_only_its_metadata_revision_pending(db: Session) -> N
     continued = queue.continue_book_task(requested.id, continued_at=_NOW)
     assert continued is not None and continued[1]
     db.expire_all()
-    assert db.get(LibraryBookMetadata, "book-one").metadata_pending is True
-    assert db.get(LibraryBookMetadata, "book-one").metadata_state == "WAITING_IMPORT"
+    assert db.get(LibraryBookMetadata, "book-one").metadata_pending is False
+    assert db.get(LibraryBookMetadata, "book-one").metadata_state == "FAILED"
 
 
-def test_failed_book_run_keeps_request_arriving_during_execution(db: Session) -> None:
+def test_failed_book_run_does_not_consume_request_arriving_during_execution(db: Session) -> None:
     queue = SqlAlchemyLibraryImportTaskQueue(db)
     requested = queue.request_book_work(
         book_id="book-one",
@@ -327,29 +327,27 @@ def test_failed_book_run_keeps_request_arriving_during_execution(db: Session) ->
     )
     claimed = queue.claim_next_book(started_at=_NOW)
     assert claimed is not None and claimed.execution_version is not None
-    queue.request_book_work(
+    later = queue.request_book_work(
         book_id="book-one", work=BookWork(identify=True), requested_at=_NOW
     )
     assert queue.book_run_is_current(requested.id, execution_version=1)
-    assert not queue.book_run_is_current(
+    assert queue.book_run_is_current(
         requested.id, execution_version=1, require_latest_request=True
     )
     failed = queue.fail_book_run(
         requested.id,
         execution_version=claimed.execution_version,
         error_summary="RESOURCE_FAILED",
-        retryable=False,
         failed_at=_NOW,
     )
-    assert failed is not None and failed.state == "QUEUED"
-    assert failed.work.active.is_empty
-    assert failed.work.pending.resource_ids == ("resource-one",)
-    assert failed.work.pending.identify
+    assert failed is not None and failed.state == "FAILED"
+    assert failed.work.active.resource_ids == ("resource-one",)
+    assert failed.work.pending.is_empty
     db.commit()
     db.expire_all()
     next_run = queue.claim_next_book(started_at=_NOW)
-    assert next_run is not None and next_run.execution_version == 2
-    assert next_run.work.active.resource_ids == ("resource-one",)
+    assert next_run is not None and next_run.id == later.id
+    assert next_run.execution_version == 1
     assert next_run.work.active.identify
 
 
@@ -398,52 +396,83 @@ def test_book_resource_cursor_is_ordered_and_rejects_stale_run(db: Session) -> N
     finished = queue.finish_book_run(
         requested.id, execution_version=1, finished_at=_NOW
     )
-    assert finished is not None and finished.resource_cursor is None
+    assert finished is not None and finished.resource_cursor == "resource-one"
     assert not queue.book_run_is_current(requested.id, execution_version=1)
 
 
-def test_book_failure_retries_later_then_remains_visible_for_continue(db: Session) -> None:
+def test_book_failure_is_terminal_and_continue_creates_new_execution(db: Session) -> None:
     queue = SqlAlchemyLibraryImportTaskQueue(db)
     requested = queue.request_book_work(
         book_id="book-one", work=BookWork(identify=True), requested_at=_NOW
     )
     db.commit()
 
-    now = _NOW
-    for attempt in range(1, 5):
-        claimed = queue.claim_next_book(started_at=now)
-        assert claimed is not None and claimed.id == requested.id
-        assert claimed.execution_version == 1
-        failed = queue.fail_book_run(
-            requested.id,
-            execution_version=1,
-            error_summary="IDENTIFICATION_FAILED",
-            retryable=True,
-            failed_at=now,
-        )
-        assert failed is not None and failed.retry_count == attempt
-        db.commit()
-        if attempt <= 3:
-            assert failed.state == "QUEUED"
-            assert queue.claim_next_book(started_at=now) is None
-            assert failed.next_attempt_at is not None
-            now = failed.next_attempt_at
-        else:
-            assert failed.state == "FAILED"
-            assert failed.error_summary == "IDENTIFICATION_FAILED"
-            assert queue.claim_next_book(started_at=now + timedelta(days=1)) is None
-
-    continued = queue.request_book_work(
-        book_id="book-one", work=BookWork(identify=True), requested_at=now
+    claimed = queue.claim_next_book(started_at=_NOW)
+    assert claimed is not None and claimed.id == requested.id
+    failed = queue.fail_book_run(
+        requested.id,
+        execution_version=claimed.execution_version,
+        error_summary="IDENTIFICATION_FAILED",
+        failed_at=_NOW,
     )
-    assert continued.id == requested.id
-    assert continued.state == "QUEUED"
-    assert continued.retry_count == 0
-    assert continued.work.active.identify
-    assert continued.work.pending.identify
+    assert failed is not None and failed.state == "FAILED"
+    db.commit()
+    assert queue.claim_next_book(started_at=_NOW + timedelta(days=1)) is None
+    continued = queue.continue_book_task(requested.id, continued_at=_NOW)
+    assert continued is not None
+    new_task, created = continued
+    assert created and new_task.id != requested.id
+    assert new_task.state == "QUEUED"
+    assert db.get(LibraryImportTask, requested.id).state == "FAILED"
 
 
-def test_interrupted_book_resumes_claimed_work_after_restart(db: Session) -> None:
+def test_failed_book_is_terminal_and_new_request_has_fresh_work(db: Session) -> None:
+    queue = SqlAlchemyLibraryImportTaskQueue(db)
+    first = queue.request_book_work(
+        book_id="book-one", work=BookWork(identify=True), requested_at=_NOW,
+    )
+    running = queue.claim_next_book(started_at=_NOW)
+    assert running is not None and running.id == first.id
+    failed = queue.fail_book_run(
+        first.id, execution_version=running.execution_version,
+        error_summary="IDENTIFICATION_FAILED", failed_at=_NOW,
+    )
+    assert failed is not None and failed.state == "FAILED"
+    db.commit()
+    assert queue.claim_next_book(started_at=_NOW + timedelta(days=1)) is None
+    again = queue.request_book_work(
+        book_id="book-one", work=BookWork(identify=True), requested_at=_NOW,
+    )
+    assert again.id != first.id
+    claimed = queue.claim_next_book(started_at=_NOW)
+    assert claimed is not None and claimed.id == again.id
+    assert claimed.work.active.identify
+    assert claimed.resource_cursor is None
+    assert db.get(LibraryImportTask, first.id).state == "FAILED"
+
+
+def test_startup_fails_only_started_book_and_keeps_fresh_queued(db: Session) -> None:
+    queue = SqlAlchemyLibraryImportTaskQueue(db)
+    started = queue.request_book_work(
+        book_id="book-one", work=BookWork(identify=True), requested_at=_NOW,
+    )
+    running = queue.claim_next_book(started_at=_NOW)
+    assert running is not None and running.id == started.id
+    fresh = queue.request_book_work(
+        book_id="book-one", work=BookWork(identify=True), requested_at=_NOW,
+    )
+    db.commit()
+    assert queue.fail_interrupted_tasks_on_startup(finished_at=_NOW) == 1
+    db.commit()
+    db.expire_all()
+    assert db.get(LibraryImportTask, started.id).state == "FAILED"
+    assert db.get(LibraryImportTask, started.id).error_summary == "WORKER_INTERRUPTED"
+    assert db.get(LibraryImportTask, fresh.id).state == "QUEUED"
+    next_run = queue.claim_next_book(started_at=_NOW)
+    assert next_run is not None and next_run.id == fresh.id
+
+
+def test_interrupted_book_stays_failed_after_restart(db: Session) -> None:
     queue = SqlAlchemyLibraryImportTaskQueue(db)
     requested = queue.request_book_work(
         book_id="book-one", work=BookWork(resource_ids=("resource-one",)), requested_at=_NOW
@@ -458,8 +487,8 @@ def test_interrupted_book_resumes_claimed_work_after_restart(db: Session) -> Non
     db.commit()
     db.expire_all()
 
-    resumed = queue.claim_next_book(started_at=restart_time)
-    assert resumed is not None and resumed.id == requested.id
-    assert resumed.execution_version == 1
-    assert resumed.work.active.resource_ids == ("resource-one",)
-    assert resumed.work.pending.is_empty
+    assert queue.claim_next_book(started_at=restart_time) is None
+    interrupted = db.get(LibraryImportTask, requested.id)
+    assert interrupted is not None
+    assert interrupted.state == "FAILED"
+    assert interrupted.error_summary == "WORKER_INTERRUPTED"

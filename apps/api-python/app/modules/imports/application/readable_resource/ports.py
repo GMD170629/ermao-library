@@ -119,8 +119,6 @@ class LibraryImportTaskRecord:
     error_summary: str | None
     missing_entry_policy: MissingEntryPolicy = MissingEntryPolicy.PRESERVE
     scan_scopes: tuple[ScanScope, ...] | None = None
-    completion_outcome: str | None = None
-    completion_retry_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,11 +133,7 @@ class BookImportTaskRecord:
     execution_version: int | None
     work: BookWorkState
     resource_cursor: str | None
-    retry_count: int
-    next_attempt_at: datetime | None
     error_summary: str | None
-    completion_outcome: str | None = None
-    completion_retry_count: int = 0
     directory_resource_id: str | None = None
     directory_member_cursor: str | None = None
     directory_cover_cursor: str | None = None
@@ -154,17 +148,11 @@ class BookImportTaskQueuePort(Protocol):
 
     def claim_next_book(self, *, started_at: datetime) -> BookImportTaskRecord | None: ...
 
+    def claim_book_task(
+        self, task_id: str, *, started_at: datetime
+    ) -> BookImportTaskRecord | None: ...
+
     def get_book_task(self, task_id: str) -> BookImportTaskRecord | None: ...
-
-    def record_book_completion_intent(
-        self, task_id: str, *, execution_version: int, outcome: str,
-        error_summary: str | None,
-    ) -> bool: ...
-
-    def defer_book_completion(
-        self, task_id: str, *, execution_version: int, attempted_at: datetime,
-        retryable: bool,
-    ) -> str: ...
 
     def book_identification_complete(self, book_id: str) -> bool: ...
 
@@ -194,10 +182,6 @@ class BookImportTaskQueuePort(Protocol):
         self, task_id: str, *, execution_version: int, phase: str
     ) -> bool: ...
 
-    def yield_book_run(
-        self, task_id: str, *, execution_version: int, yielded_at: datetime
-    ) -> BookImportTaskRecord | None: ...
-
     def finish_book_run(
         self, task_id: str, *, execution_version: int, finished_at: datetime
     ) -> BookImportTaskRecord | None: ...
@@ -208,7 +192,6 @@ class BookImportTaskQueuePort(Protocol):
         *,
         execution_version: int,
         error_summary: str,
-        retryable: bool,
         failed_at: datetime,
         partial_failure: bool = False,
     ) -> BookImportTaskRecord | None: ...
@@ -364,14 +347,6 @@ class LibraryImportTaskQueuePort(Protocol):
 
     def get_task(self, task_id: str) -> LibraryImportTaskRecord | None: ...
 
-    def record_task_completion_intent(
-        self, task_id: str, *, outcome: str, error_summary: str | None,
-    ) -> bool: ...
-
-    def defer_task_completion(
-        self, task_id: str, *, attempted_at: datetime, retryable: bool,
-    ) -> str: ...
-
     def mark_running(self, task_id: str, *, started_at: datetime) -> None: ...
 
     def mark_succeeded(self, task_id: str, *, finished_at: datetime) -> None: ...
@@ -403,10 +378,6 @@ class LibraryImportTaskQueuePort(Protocol):
         ``incomplete`` adds the exact failed and unvisited ranges. Both happen
         in one transaction so an incomplete input is never momentarily released.
         """
-
-    def requeue_failed_task(
-        self, task_id: str
-    ) -> tuple[LibraryImportTaskRecord, bool]: ...
 
 
 class ResourceAdapterExecutorPort(Protocol):
