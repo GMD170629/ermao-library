@@ -304,6 +304,7 @@ def probe(size: int) -> None:
             ):
                 original.backup(saved)
             full_times = []
+            local_scan_times = []
             stage_times: list[dict[str, float]] = []
             for trial in range(6):
                 trial_path = Path(directory) / f"trial-{trial}.sqlite3"
@@ -363,6 +364,13 @@ def probe(size: int) -> None:
                         .count()
                         == 1
                     )
+                    started = time.perf_counter()
+                    scan = pipeline.scan_library_source_tree.execute_source(
+                        f"src-{size - 1:06d}"
+                    )
+                    local_scan_times.append((time.perf_counter() - started) * 1000)
+                    assert scan.resources_created == 0
+                    assert scan.tasks_enqueued == 0
                 trial_engine.dispose()
             memory_path = Path(directory) / "memory-trial.sqlite3"
             shutil.copy2(snapshot, memory_path)
@@ -419,6 +427,31 @@ def probe(size: int) -> None:
                     _, peak_bytes = tracemalloc.get_traced_memory()
                 finally:
                     tracemalloc.stop()
+                worker_sql = dict(sql)
+                worker_epub_opens = file_opens
+                with (
+                    patch(
+                        "builtins.open",
+                        lambda file, *args, **kwargs: guard_open(
+                            builtin_open, file, *args, **kwargs
+                        ),
+                    ),
+                    patch(
+                        "io.open",
+                        lambda file, *args, **kwargs: guard_open(
+                            io_open, file, *args, **kwargs
+                        ),
+                    ),
+                ):
+                    scan = pipeline.scan_library_source_tree.execute_source(
+                        f"src-{size - 1:06d}"
+                    )
+                assert scan.resources_created == 0
+                assert scan.tasks_enqueued == 0
+                local_scan_sql = {
+                    key: sql[key] - worker_sql[key] for key in worker_sql
+                }
+                local_scan_epub_opens = file_opens - worker_epub_opens
             memory_engine.dispose()
             print(
                 "FULL", size, full_times, statistics.median(full_times[1:]), flush=True
@@ -433,6 +466,10 @@ def probe(size: int) -> None:
                         "finish_ms": finish,
                         "finish_warm_median_ms": statistics.median(finish[1:]),
                         "worker_warm_median_ms": statistics.median(full_times[1:]),
+                        "unchanged_local_scan_ms": local_scan_times,
+                        "unchanged_local_scan_warm_median_ms": statistics.median(
+                            local_scan_times[1:]
+                        ),
                         "stage_warm_median_ms": {
                             stage: statistics.median(
                                 sample.get(stage, 0.0) for sample in stage_times[1:]
@@ -445,9 +482,11 @@ def probe(size: int) -> None:
                                 "finish",
                             )
                         },
-                        "worker_sql": sql,
+                        "worker_sql": worker_sql,
+                        "unchanged_local_scan_sql": local_scan_sql,
+                        "unchanged_local_scan_epub_opens": local_scan_epub_opens,
                         "worker_peak_traced_bytes": peak_bytes,
-                        "epub_opens": file_opens,
+                        "epub_opens": worker_epub_opens,
                         "plan": [(r[0], r[3]) for r in plan],
                     }
                 ),
