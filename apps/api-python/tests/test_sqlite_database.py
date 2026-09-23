@@ -314,6 +314,15 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
             "createdAt",
             "startedAt",
             "finishedAt",
+            "bookId",
+            "phase",
+            "requestVersion",
+            "executionVersion",
+            "bookWork",
+            "resourceCursor",
+            "retryCount",
+            "nextAttemptAt",
+            "supersededByTaskId",
         }
         assert {
             "attempts",
@@ -398,10 +407,13 @@ def test_alembic_script_directory_has_one_linear_head() -> None:
     config = alembic_config_for_engine(create_engine("sqlite+pysqlite:///:memory:"))
     script = ScriptDirectory.from_config(config)
     revisions = list(script.walk_revisions())
-    assert len(revisions) == 29
-    assert script.get_heads() == ["0029_file_deletions"]
-    assert head_revision() == "0029_file_deletions"
+    assert len(revisions) == 32
+    assert script.get_heads() == ["0032_source_node_scan_seen_generation"]
+    assert head_revision() == "0032_source_node_scan_seen_generation"
     assert [revision.revision for revision in revisions] == [
+        "0032_source_node_scan_seen_generation",
+        "0031_book_import_task_backfill",
+        "0030_book_import_task_shape",
         "0029_file_deletions",
         "0028_automation_capabilities",
         "0027_automation_uploads",
@@ -443,7 +455,7 @@ def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
     engine = create_sqlite_engine(settings.database_path)
     try:
         runner_module.apply_schema(engine, settings)
-        assert _current_revision(engine) == "0029_file_deletions"
+        assert _current_revision(engine) == "0032_source_node_scan_seen_generation"
         operation_columns = {
             column["name"]: column
             for column in inspect(engine).get_columns("MetadataWritebackOperation")
@@ -484,7 +496,7 @@ def test_source_node_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None
         }
 
         runner_module.apply_schema(engine)
-        assert _current_revision(engine) == "0029_file_deletions"
+        assert _current_revision(engine) == "0032_source_node_scan_seen_generation"
         source_node_indexes = {
             index["name"]: tuple(index["column_names"])
             for index in inspect(engine).get_indexes("LibrarySourceNode")
@@ -535,7 +547,7 @@ def test_foreign_key_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None
             }
 
         runner_module.apply_schema(engine)
-        assert _current_revision(engine) == "0029_file_deletions"
+        assert _current_revision(engine) == "0032_source_node_scan_seen_generation"
         for table_name, index_name in expected_indexes.items():
             assert index_name in {
                 index["name"] for index in inspect(engine).get_indexes(table_name)
@@ -1276,15 +1288,23 @@ def test_resource_tasks_upgrade_preserves_assets_and_pending_work(
             tasks = db.scalars(
                 select(LibraryImportTask).order_by(LibraryImportTask.id)
             ).all()
-            assert [task.kind for task in tasks] == ["IMPORT_RESOURCE"] * 3 + [
-                "IMPORT_ASSET"
-            ]
-            assert [task.state for task in tasks] == [
+            legacy_tasks = {task.id: task for task in tasks if task.id.startswith("task-")}
+            book_tasks = [task for task in tasks if task.kind == "IMPORT_BOOK"]
+            assert len(legacy_tasks) == 4
+            assert {task.state for task in legacy_tasks.values()} == {
                 "QUEUED",
                 "RUNNING",
                 "FAILED",
                 "SUCCEEDED",
-            ]
+            }
+            assert legacy_tasks["task-0"].superseded_by_task_id is not None
+            assert legacy_tasks["task-1"].superseded_by_task_id is not None
+            assert legacy_tasks["task-2"].superseded_by_task_id is not None
+            assert legacy_tasks["task-3"].superseded_by_task_id is None
+            assert len(book_tasks) == 4
+            assert {
+                task.book_id for task in book_tasks
+            } == {f"book-{index}" for index in range(4)}
             assert all(
                 asset.processed_source_version is None
                 for asset in db.scalars(select(LibraryResourceAsset))
@@ -1296,15 +1316,23 @@ def test_resource_tasks_upgrade_preserves_assets_and_pending_work(
             pipeline = build_readable_resource_pipeline(db)
             worker = build_readable_resource_worker(pipeline)
             assert worker.startup() == 1
-            for task_id in ("task-1", "task-2"):
-                pipeline.continue_import.execute(ContinueImportTask(task_id))
+            running_result = pipeline.continue_import.execute(
+                ContinueImportTask("task-1")
+            )
+            failed_result = pipeline.continue_import.execute(
+                ContinueImportTask("task-2")
+            )
+            assert running_result.task_id is None
+            assert failed_result.task_id == legacy_tasks[
+                "task-2"
+            ].superseded_by_task_id
             for _ in range(20):
                 if worker.process_once() == "idle":
                     break
             db.expire_all()
             assert all(
-                db.get(LibraryImportTask, f"task-{index}").state == "SUCCEEDED"
-                for index in range(4)
+                db.get(LibraryImportTask, task.id).state == "SUCCEEDED"
+                for task in book_tasks
             )
             assert set(db.scalars(select(LibraryResourceAsset.id))) == {
                 f"asset-{index}" for index in range(4)
@@ -1353,6 +1381,7 @@ def test_directory_legacy_tasks_upgrade_keeps_asset_ids_and_progress(
                 "0011_incremental_library_scan",
             )
         old_tasks = Table("LibraryImportTask", MetaData(), autoload_with=engine)
+        old_source_nodes = Table("LibrarySourceNode", MetaData(), autoload_with=engine)
         old_library = Table("Library", MetaData(), autoload_with=engine)
         with Session(engine) as db:
             db.execute(
@@ -1374,16 +1403,18 @@ def test_directory_legacy_tasks_upgrade_keeps_asset_ids_and_progress(
                 )
             )
             db.commit()
-            db.add(
-                LibrarySourceNode(
+            db.execute(
+                old_source_nodes.insert().values(
                     id="anchor",
-                    library_id="lib",
-                    relative_path="Images",
-                    path_key=SourceNodeRelativePath("Images").path_key,
+                    libraryId="lib",
+                    relativePath="Images",
+                    pathKey=SourceNodeRelativePath("Images").path_key,
                     name="Images",
-                    physical_kind="DIRECTORY",
-                    observed_mtime_ns=0,
-                    observed_at=datetime.now(UTC),
+                    physicalKind="DIRECTORY",
+                    observedMtimeNs=0,
+                    observedAt=int(datetime.now(UTC).timestamp() * 1000),
+                    createdAt=int(datetime.now(UTC).timestamp() * 1000),
+                    updatedAt=int(datetime.now(UTC).timestamp() * 1000),
                 )
             )
             db.commit()
@@ -1437,19 +1468,21 @@ def test_directory_legacy_tasks_upgrade_keeps_asset_ids_and_progress(
                     b"readable image file; optional artwork unavailable"
                 )
                 stat = (folder / name).stat()
-                db.add(
-                    LibrarySourceNode(
+                db.execute(
+                    old_source_nodes.insert().values(
                         id=f"node-{index}",
-                        library_id="lib",
-                        parent_id="anchor",
-                        parent_physical_kind="DIRECTORY",
-                        relative_path=f"Images/{name}",
-                        path_key=SourceNodeRelativePath(f"Images/{name}").path_key,
+                        libraryId="lib",
+                        parentId="anchor",
+                        parentPhysicalKind="DIRECTORY",
+                        relativePath=f"Images/{name}",
+                        pathKey=SourceNodeRelativePath(f"Images/{name}").path_key,
                         name=name,
-                        physical_kind="REGULAR_FILE",
-                        observed_size_bytes=stat.st_size,
-                        observed_mtime_ns=stat.st_mtime_ns,
-                        observed_at=datetime.now(UTC),
+                        physicalKind="REGULAR_FILE",
+                        observedSizeBytes=stat.st_size,
+                        observedMtimeNs=stat.st_mtime_ns,
+                        observedAt=int(datetime.now(UTC).timestamp() * 1000),
+                        createdAt=int(datetime.now(UTC).timestamp() * 1000),
+                        updatedAt=int(datetime.now(UTC).timestamp() * 1000),
                     )
                 )
             db.commit()
@@ -1484,9 +1517,14 @@ def test_directory_legacy_tasks_upgrade_keeps_asset_ids_and_progress(
             tasks = db.scalars(
                 select(LibraryImportTask).where(LibraryImportTask.state != "SUCCEEDED")
             ).all()
-            assert len(tasks) == 1
-            assert tasks[0].kind == "IMPORT_RESOURCE"
-            assert tasks[0].source_node_id == "anchor" and tasks[0].role is None
+            resource_tasks = [task for task in tasks if task.kind == "IMPORT_RESOURCE"]
+            book_tasks = [task for task in tasks if task.kind == "IMPORT_BOOK"]
+            assert len(resource_tasks) == 1
+            assert len(book_tasks) == 1
+            assert resource_tasks[0].source_node_id == "anchor"
+            assert resource_tasks[0].role is None
+            assert book_tasks[0].book_id == "book"
+            assert book_tasks[0].source_node_id == "anchor"
             assert all(
                 a.processed_source_version is None
                 for a in db.scalars(select(LibraryResourceAsset))
@@ -1519,7 +1557,7 @@ def test_directory_legacy_tasks_upgrade_keeps_asset_ids_and_progress(
                     BoundedAudioMetadataInspector, "inspect", inspect_audio
                 )
             pipeline = build_readable_resource_pipeline(db, settings)
-            assert build_readable_resource_worker(pipeline).process_once() == "ok"
+            assert build_readable_resource_worker(pipeline).process_once() == "book"
             assert {a.id for a in db.scalars(select(LibraryResourceAsset))} == {
                 "asset-1",
                 "asset-2",

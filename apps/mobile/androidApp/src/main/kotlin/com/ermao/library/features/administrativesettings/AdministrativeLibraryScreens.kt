@@ -205,6 +205,9 @@ fun LibrarySourceEditScreen(
     }
 }
 
+private fun importTaskKindLabel(kind: String, locale: AdministrativeLocale): String =
+    if (kind == "IMPORT_BOOK") AdministrativeCopy.ImportBookTask.text(locale) else kind
+
 @Composable
 fun ImportTasksScreen(
     state: AdministrativePageState<ImportTasksSnapshot>,
@@ -237,7 +240,7 @@ fun ImportTasksScreen(
                     }.padding(16.dp),
                 ) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(task.fileName, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                        Text(importTaskKindLabel(task.fileName, locale), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                         Text(task.status.copy().text(locale), color = if (task.status == QueueStatus.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Text(task.sourcePath)
@@ -291,7 +294,7 @@ fun ImportTaskDetailScreen(
 ) {
     AdministrativePage(AdministrativeCopy.ImportTaskDetail, locale, onBack, modifier) {
         PageStateContent(state, locale, onRetry) { snapshot ->
-            AdministrativeValueRow(AdministrativeCopy.DisplayName.text(locale), snapshot.task.fileName)
+            AdministrativeValueRow(AdministrativeCopy.DisplayName.text(locale), importTaskKindLabel(snapshot.task.fileName, locale))
             snapshot.libraryName?.let { AdministrativeValueRow(AdministrativeCopy.ImportTaskLibrary.text(locale), it) }
             snapshot.bookTitle?.let { AdministrativeValueRow(AdministrativeCopy.ImportTaskBook.text(locale), it) }
             snapshot.resourceTitle?.let { AdministrativeValueRow(AdministrativeCopy.ImportTaskResource.text(locale), it) }

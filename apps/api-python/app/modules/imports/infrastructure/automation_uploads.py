@@ -269,6 +269,15 @@ class ImportAttachmentUploads:
             return UploadOutcome(
                 "FAILED", task_id=outcome.task_id, error_code="UPLOAD_IMPORT_FAILED"
             )
+        book_ids = tuple({resource.book_id for resource, _ in rows})
+        book_states = set(
+            self.db.scalars(
+                select(LibraryImportTask.state).where(
+                    LibraryImportTask.book_id.in_(book_ids),
+                    LibraryImportTask.kind == "IMPORT_BOOK",
+                )
+            ).all()
+        )
         active = self.db.scalar(
             select(LibraryImportTask.id)
             .where(
@@ -276,13 +285,14 @@ class ImportAttachmentUploads:
                     tuple(resource.id for resource, _ in rows)
                 ),
                 LibraryImportTask.state.in_(("QUEUED", "RUNNING")),
+                LibraryImportTask.superseded_by_task_id.is_(None),
             )
             .limit(1)
         )
         pending = self.db.scalar(
             select(LibraryBookMetadata.book_id)
             .where(
-                LibraryBookMetadata.book_id.in_(tuple(r.book_id for r, _ in rows)),
+                LibraryBookMetadata.book_id.in_(book_ids),
                 LibraryBookMetadata.metadata_pending.is_(True),
             )
             .limit(1)
@@ -294,19 +304,21 @@ class ImportAttachmentUploads:
                 LibraryBook.source_node_id == LibraryImportTask.source_node_id,
             )
             .where(
-                LibraryBook.id.in_(tuple(r.book_id for r, _ in rows)),
+                LibraryBook.id.in_(book_ids),
                 LibraryImportTask.kind == "IDENTIFY_BOOK",
                 LibraryImportTask.state == "FAILED",
+                LibraryImportTask.superseded_by_task_id.is_(None),
             )
             .limit(1)
         )
-        if failed_identification:
+        if "FAILED" in book_states or failed_identification:
             return UploadOutcome(
                 "FAILED", task_id=outcome.task_id, error_code="UPLOAD_IMPORT_FAILED"
             )
         complete = (
             pending is None
             and active is None
+            and not book_states.intersection(("QUEUED", "RUNNING"))
             and all(
                 resource.import_state == "READY" and asset.import_state == "READY"
                 for resource, asset in rows

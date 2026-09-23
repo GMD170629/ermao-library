@@ -240,6 +240,23 @@ def test_published_book_reaches_actual_import_completion(
     for _ in range(20):
         if worker.process_once() == "idle":
             break
+    book_task = db_session.scalar(
+        select(LibraryImportTask).where(LibraryImportTask.kind == "IMPORT_BOOK")
+    )
+    assert book_task is not None and book_task.state == "SUCCEEDED"
+    book_task.state = "QUEUED"
+    db_session.commit()
+    assert commands.progress(access, upload_id)["status"] == "IMPORTING"
+    book_task.state = "FAILED"
+    db_session.commit()
+    record = commands.store.get(upload_id, access.user_id, access.grant_id)
+    assert record.outcome is not None
+    assert (
+        commands.books.progress(record.spec, record.target, record.outcome).status
+        == "FAILED"
+    )
+    book_task.state = "SUCCEEDED"
+    db_session.commit()
     result = commands.progress(access, upload_id)
     assert result["status"] == "COMPLETED", result
     assert result["result"]["book_ids"] and result["result"]["resource_ids"]

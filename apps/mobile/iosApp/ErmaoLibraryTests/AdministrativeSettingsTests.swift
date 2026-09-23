@@ -35,6 +35,8 @@ final class AdministrativeSettingsTests: XCTestCase {
         }
         XCTAssertEqual(zh[.managementTitle], "管理")
         XCTAssertEqual(en[.managementTitle], "Management")
+        XCTAssertEqual(zh.importTaskKind("IMPORT_BOOK"), "导入图书")
+        XCTAssertEqual(en.importTaskKind("IMPORT_BOOK"), "Import book")
     }
 
     func testHealthCodesAreLocalizedInsteadOfDisplayedAsServerKeys() {

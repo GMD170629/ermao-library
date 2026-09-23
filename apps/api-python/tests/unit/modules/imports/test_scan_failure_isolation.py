@@ -20,18 +20,15 @@ from app.db.sqlite import create_sqlite_engine
 from app.models import (
     Library,
     LibraryBook,
-    LibraryBookMetadata,
     LibraryImportScanGap,
     LibrarySourceNode,
 )
+from app.modules.imports.application.readable_resource.book_work import BookWork
 from app.modules.imports.domain.scan_policy import (
     MissingEntryPolicy,
     ScanScope,
     completed_scope_resolves,
     decode_scan_scopes,
-)
-from app.modules.imports.infrastructure.readable_resource.book_completion import (
-    BookImportCompletion,
 )
 from app.modules.imports.infrastructure.readable_resource.task_queue import (
     SqlAlchemyLibraryImportTaskQueue,
@@ -162,16 +159,15 @@ def test_failed_scan_record_does_not_block_single_file_resource(db: Session) -> 
     queue.apply_scan_round(
         None, "library", resolved=(), incomplete=(ScanScope("", True),)
     )
-    task = queue.enqueue(
-        kind="IMPORT_RESOURCE",
-        library_id="library",
-        resource_id="file-resource",
-        source_node_id="file-node",
+    task = queue.request_book_work(
+        book_id="file-book",
+        work=BookWork(resource_ids=("file-resource",)),
+        requested_at=datetime(2026, 9, 13, tzinfo=UTC),
     )
     _created(db, task.id, 10)
     db.flush()
 
-    selected = queue.next_queued()
+    selected = queue.claim_next_book(started_at=datetime(2026, 9, 13, tzinfo=UTC))
 
     assert selected is not None and selected.id == task.id
 
@@ -194,23 +190,21 @@ def test_unrelated_incomplete_range_does_not_block_directory_resource(
     queue.apply_scan_round(
         None, "library", resolved=(), incomplete=(ScanScope("bad", True),)
     )
-    good = queue.enqueue(
-        kind="IMPORT_RESOURCE",
-        library_id="library",
-        resource_id="good-node-resource",
-        source_node_id="good-node",
+    good = queue.request_book_work(
+        book_id="good-node-book",
+        work=BookWork(resource_ids=("good-node-resource",)),
+        requested_at=datetime(2026, 9, 13, tzinfo=UTC),
     )
-    blocked = queue.enqueue(
-        kind="IMPORT_RESOURCE",
-        library_id="library",
-        resource_id="bad-node-resource",
-        source_node_id="bad-node",
+    blocked = queue.request_book_work(
+        book_id="bad-node-book",
+        work=BookWork(resource_ids=("bad-node-resource",)),
+        requested_at=datetime(2026, 9, 13, tzinfo=UTC),
     )
     _created(db, blocked.id, 10)
     _created(db, good.id, 20)
     db.flush()
 
-    selected = queue.next_queued()
+    selected = queue.claim_next_book(started_at=datetime(2026, 9, 13, tzinfo=UTC))
 
     assert selected is not None and selected.id == good.id
 
@@ -232,14 +226,13 @@ def test_completed_scan_range_releases_dependent_directory_resource(
     queue.apply_scan_round(
         None, "library", resolved=(), incomplete=(ScanScope("bad", True),)
     )
-    task = queue.enqueue(
-        kind="IMPORT_RESOURCE",
-        library_id="library",
-        resource_id="bad-resource",
-        source_node_id="bad-node",
+    task = queue.request_book_work(
+        book_id="bad-book",
+        work=BookWork(resource_ids=("bad-resource",)),
+        requested_at=datetime(2026, 9, 13, tzinfo=UTC),
     )
     db.flush()
-    assert queue.next_queued() is None
+    assert queue.claim_next_book(started_at=datetime(2026, 9, 13, tzinfo=UTC)) is None
 
     # A completed scan is the only operation that clears the range.
     queue.apply_scan_round(
@@ -247,7 +240,7 @@ def test_completed_scan_range_releases_dependent_directory_resource(
     )
     db.flush()
 
-    selected = queue.next_queued()
+    selected = queue.claim_next_book(started_at=datetime(2026, 9, 13, tzinfo=UTC))
     assert selected is not None and selected.id == task.id
 
 
@@ -267,14 +260,13 @@ def test_cleaning_failed_task_record_does_not_release_gap(db: Session) -> None:
     queue.apply_scan_round(
         failed_id, "library", resolved=(), incomplete=(ScanScope("bad", True),)
     )
-    task = queue.enqueue(
-        kind="IMPORT_RESOURCE",
-        library_id="library",
-        resource_id="bad-resource",
-        source_node_id="bad-node",
+    task = queue.request_book_work(
+        book_id="bad-book",
+        work=BookWork(resource_ids=("bad-resource",)),
+        requested_at=datetime(2026, 9, 13, tzinfo=UTC),
     )
     db.flush()
-    assert queue.next_queued() is None
+    assert queue.claim_next_book(started_at=datetime(2026, 9, 13, tzinfo=UTC)) is None
 
     # Remove all historical task records without completing the input.
     db.delete(db.get(LibraryImportTask, failed_id))
@@ -289,7 +281,7 @@ def test_cleaning_failed_task_record_does_not_release_gap(db: Session) -> None:
         is None
     )
 
-    assert queue.next_queued() is None
+    assert queue.claim_next_book(started_at=datetime(2026, 9, 13, tzinfo=UTC)) is None
     assert db.get(LibraryImportTask, task.id).state == "QUEUED"  # type: ignore[union-attr]
 
 
@@ -320,64 +312,59 @@ def test_unrelated_library_gap_does_not_block_other_library_task(
     queue.apply_scan_round(
         None, "library", resolved=(), incomplete=(ScanScope("bad", True),)
     )
-    task = queue.enqueue(
-        kind="IMPORT_RESOURCE",
-        library_id="other-library",
-        resource_id="other-resource",
-        source_node_id="other-file-node",
+    task = queue.request_book_work(
+        book_id="other-book",
+        work=BookWork(resource_ids=("other-resource",)),
+        requested_at=datetime(2026, 9, 13, tzinfo=UTC),
     )
     db.flush()
 
-    selected = queue.next_queued()
+    selected = queue.claim_next_book(started_at=datetime(2026, 9, 13, tzinfo=UTC))
 
     assert selected is not None and selected.id == task.id
 
 
-def test_scoped_scan_does_not_block_identification_of_other_book(db: Session) -> None:
+def test_scoped_scan_gap_does_not_block_unrelated_book_work(db: Session) -> None:
     _node(db, "other-node", "other", "DIRECTORY")
-    _node(db, "book-node", "book.epub", "REGULAR_FILE")
+    _node(db, "book-node", "book", "DIRECTORY")
     _book(db, "book", "book-node")
-    db.add(
-        LibraryBookMetadata(
-            book_id="book",
-            title="Book",
-            normalized_title="book",
-            metadata_pending=True,
-            import_revision=1,
-        )
-    )
     queue = SqlAlchemyLibraryImportTaskQueue(db)
-    queue.request_library_scan(
+    queue.apply_scan_round(
+        None,
         "library",
-        missing_entry_policy=MissingEntryPolicy.PRESERVE,
-        scan_scopes=(ScanScope("other", True),),
+        resolved=(),
+        incomplete=(ScanScope("other", True),),
+    )
+    task = queue.request_book_work(
+        book_id="book",
+        work=BookWork(identify=True),
+        requested_at=datetime(2026, 9, 13, tzinfo=UTC),
     )
     db.flush()
 
-    prepared = BookImportCompletion(db).prepare_ready()
+    selected = queue.claim_next_book(started_at=datetime(2026, 9, 13, tzinfo=UTC))
 
-    assert [item.book_id for item in prepared] == ["book"]
+    assert selected is not None and selected.id == task.id
 
 
-def test_full_scan_still_waits_for_identification(db: Session) -> None:
-    _node(db, "book-node", "book.epub", "REGULAR_FILE")
+def test_full_scan_gap_blocks_directory_book_work(db: Session) -> None:
+    _node(db, "book-node", "book", "DIRECTORY")
     _book(db, "book", "book-node")
-    db.add(
-        LibraryBookMetadata(
-            book_id="book",
-            title="Book",
-            normalized_title="book",
-            metadata_pending=True,
-            import_revision=1,
-        )
-    )
     queue = SqlAlchemyLibraryImportTaskQueue(db)
-    queue.request_library_scan(
-        "library", missing_entry_policy=MissingEntryPolicy.PRESERVE
+    queue.apply_scan_round(
+        None,
+        "library",
+        resolved=(),
+        incomplete=(ScanScope("", True),),
+    )
+    queue.request_book_work(
+        book_id="book",
+        work=BookWork(identify=True),
+        requested_at=datetime(2026, 9, 13, tzinfo=UTC),
     )
     db.flush()
 
-    assert BookImportCompletion(db).prepare_ready() == ()
+    assert queue.claim_next_book(started_at=datetime(2026, 9, 13, tzinfo=UTC)) is None
 
 
 def test_root_non_recursive_completion_does_not_clear_recursive_gap(

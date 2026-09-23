@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.contracts.library_layout import LibraryOrganizationMode
@@ -58,23 +58,6 @@ class BookSidecarReader(Protocol):
     ) -> LocalMetadataCandidate | None: ...
 
 
-class SqlAlchemyBookIdentificationRequests:
-    def __init__(self, db: Session) -> None:
-        self._db = db
-
-    def request(self, book_ids: tuple[str, ...]) -> None:
-        """Mark a new local pass in the caller's transaction."""
-        self._db.execute(
-            update(LibraryBookMetadata)
-            .where(LibraryBookMetadata.book_id.in_(book_ids))
-            .values(
-                import_revision=LibraryBookMetadata.import_revision + 1,
-                metadata_pending=True,
-                metadata_state="QUEUED",
-            )
-        )
-
-
 class SqlAlchemyImportedBookMetadata:
     def __init__(
         self,
@@ -91,7 +74,9 @@ class SqlAlchemyImportedBookMetadata:
         self._resolve_cover_path = resolve_cover_path
         self._priority = SqlAlchemyLocalMetadataPriority(db)
 
-    def load(self, source_node_id: str) -> ImportedBookSnapshot | None:
+    def load(
+        self, source_node_id: str, *, ignore_import_activity: bool = False
+    ) -> ImportedBookSnapshot | None:
         row = self._db.execute(
             select(LibraryBook, LibraryBookMetadata, LibrarySourceNode, Library)
             .join(LibraryBookMetadata)
@@ -102,7 +87,9 @@ class SqlAlchemyImportedBookMetadata:
         if row is None:
             return None
         book, metadata, node, library = row
-        if not metadata.metadata_pending or not self._idle_check(book.id):
+        if not metadata.metadata_pending or (
+            not ignore_import_activity and not self._idle_check(book.id)
+        ):
             return None
         resources = self._db.scalars(
             select(LibraryReadableResource.id).where(
@@ -234,7 +221,9 @@ class SqlAlchemyImportedBookMetadata:
                              context={"step": "_read_cover"})
             return None
 
-    def still_current(self, snapshot: ImportedBookSnapshot) -> bool:
+    def still_current(
+        self, snapshot: ImportedBookSnapshot, *, ignore_import_activity: bool = False
+    ) -> bool:
         self._db.expire_all()
         metadata = self._db.get(LibraryBookMetadata, snapshot.book_id)
         return bool(
@@ -244,7 +233,7 @@ class SqlAlchemyImportedBookMetadata:
             and metadata.protected_fields == snapshot.protected_fields
             and metadata.updated_at == snapshot.metadata_updated_at
             and self._priority.load() == snapshot.priority
-            and self._idle_check(snapshot.book_id)
+            and (ignore_import_activity or self._idle_check(snapshot.book_id))
         )
 
     def apply(

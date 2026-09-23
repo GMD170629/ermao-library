@@ -2,11 +2,8 @@
 
 from sqlalchemy import (
     and_,
-    exists,
     false,
     func,
-    insert,
-    literal,
     or_,
     select,
     true,
@@ -19,17 +16,12 @@ from app.models import (
     LibraryBook,
     LibraryBookMetadata,
     LibraryImportTask,
+    LibraryReadableResource,
     LibrarySourceNode,
-)
-from app.models.common import cuid
-from app.modules.imports.application.readable_resource.ports import (
-    PreparedBookIdentification,
 )
 from app.modules.imports.infrastructure.readable_resource.scan_gating import (
     active_imports_for_anchor,
 )
-
-IDENTIFICATION_BATCH_SIZE = 50
 
 
 def active_imports_for_book() -> ColumnElement[bool]:
@@ -42,21 +34,6 @@ def active_imports_for_book() -> ColumnElement[bool]:
     ).correlate(LibraryBook)
 
 
-def _ready_for_identification() -> ColumnElement[bool]:
-    active_identification = exists(
-        select(LibraryImportTask.id).where(
-            LibraryImportTask.source_node_id == LibraryBook.source_node_id,
-            LibraryImportTask.kind == "IDENTIFY_BOOK",
-            LibraryImportTask.state.in_(("QUEUED", "RUNNING")),
-        )
-    ).correlate(LibraryBook)
-    return and_(
-        LibraryBookMetadata.metadata_pending.is_(True),
-        ~active_imports_for_book(),
-        ~active_identification,
-    )
-
-
 class BookImportCompletion:
     def __init__(self, session: Session) -> None:
         self._db = session
@@ -65,6 +42,17 @@ class BookImportCompletion:
         query = select(LibraryBook.id).where(LibraryBook.library_id == task.library_id)
         if task.kind == "SCAN_LIBRARY":
             return query
+        if task.kind == "IMPORT_BOOK" and task.book_id:
+            return query.where(LibraryBook.id == task.book_id)
+        if task.kind in {"IMPORT_RESOURCE", "IMPORT_ASSET"} and task.resource_id:
+            return query.where(
+                LibraryBook.id.in_(
+                    select(LibraryReadableResource.book_id).where(
+                        LibraryReadableResource.id == task.resource_id,
+                        LibraryReadableResource.library_id == task.library_id,
+                    )
+                )
+            )
         root = aliased(LibrarySourceNode)
         node = self._db.get(LibrarySourceNode, task.source_node_id)
         if node is None:
@@ -112,98 +100,6 @@ class BookImportCompletion:
                 metadata_state="WAITING_IMPORT",
             )
         )
-
-    def prepare_ready(
-        self, library_id: str | None = None
-    ) -> tuple[PreparedBookIdentification, ...]:
-        """Read at most one deterministic batch before opening the write scope."""
-        query = (
-            select(
-                LibraryBook.id,
-                LibraryBook.library_id,
-                LibraryBook.source_node_id,
-                LibraryBookMetadata.import_revision,
-            )
-            .join(LibraryBookMetadata)
-            .where(_ready_for_identification())
-            .order_by(LibraryBook.id)
-            .limit(IDENTIFICATION_BATCH_SIZE)
-        )
-        if library_id is not None:
-            query = query.where(LibraryBook.library_id == library_id)
-        return tuple(
-            PreparedBookIdentification(
-                task_id=cuid(),
-                book_id=book_id,
-                library_id=book_library_id,
-                source_node_id=source_node_id,
-                import_revision=import_revision,
-            )
-            for book_id, book_library_id, source_node_id, import_revision in self._db.execute(
-                query
-            )
-        )
-
-    def persist_ready(self, prepared: tuple[PreparedBookIdentification, ...]) -> int:
-        """Persist a bounded batch, rejecting canceled, changed or deleted books."""
-        if len(prepared) > IDENTIFICATION_BATCH_SIZE:
-            raise ValueError("book identification batch exceeds its limit")
-        inserted_task_ids: list[str] = []
-        for item in prepared:
-            candidates = (
-                select(
-                    literal(item.task_id),
-                    literal("IDENTIFY_BOOK"),
-                    LibraryBook.library_id,
-                    LibraryBook.source_node_id,
-                    literal("QUEUED"),
-                    LibraryBookMetadata.import_revision,
-                )
-                .select_from(LibraryBook)
-                .join(LibraryBookMetadata)
-                .where(
-                    LibraryBook.id == item.book_id,
-                    LibraryBook.library_id == item.library_id,
-                    LibraryBook.source_node_id == item.source_node_id,
-                    LibraryBookMetadata.import_revision == item.import_revision,
-                    _ready_for_identification(),
-                )
-            )
-            inserted_id = self._db.scalar(
-                insert(LibraryImportTask)
-                .from_select(
-                    (
-                        LibraryImportTask.id,
-                        LibraryImportTask.kind,
-                        LibraryImportTask.library_id,
-                        LibraryImportTask.source_node_id,
-                        LibraryImportTask.state,
-                        LibraryImportTask.book_metadata_revision,
-                    ),
-                    candidates,
-                )
-                .returning(LibraryImportTask.id)
-            )
-            if inserted_id is not None:
-                inserted_task_ids.append(inserted_id)
-        if inserted_task_ids:
-            self._db.execute(
-                update(LibraryBookMetadata)
-                .where(
-                    LibraryBookMetadata.book_id.in_(
-                        select(LibraryBook.id)
-                        .join(
-                            LibraryImportTask,
-                            LibraryImportTask.source_node_id
-                            == LibraryBook.source_node_id,
-                        )
-                        .where(LibraryImportTask.id.in_(inserted_task_ids))
-                    )
-                )
-                .values(metadata_state="QUEUED")
-                .execution_options(synchronize_session=False)
-            )
-        return len(inserted_task_ids)
 
     def finished(self, task: LibraryImportTask) -> None:
         if task.kind == "IDENTIFY_BOOK" and task.state == "FAILED":

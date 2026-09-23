@@ -29,7 +29,7 @@ from app.bootstrap.standard_writeback import (
     process_standard_writeback,
 )
 from app.core.config import get_settings
-from app.core.database_errors import is_database_busy_error
+from app.core.database_errors import is_retryable_sqlite_operation_error
 from app.core.exception_diagnostics import (
     configure_exception_storage,
     emergency_diagnostic,
@@ -244,7 +244,7 @@ def main() -> None:
                             "import_close", import_session.close
                         )
                         import_failures += 1
-                        imports_paused = not closed or not is_database_busy_error(error)
+                        imports_paused = not closed or not is_retryable_sqlite_operation_error(error)
                         import_heartbeat.pulse(
                             status="paused" if imports_paused else "retrying",
                             error=f"recovery:{type(error).__name__}",
@@ -294,7 +294,7 @@ def main() -> None:
                         scan_coordinator.tick()
                     except Exception as error:  # noqa: BLE001 - shared UoW must be recovered.
                         diagnostic_id = _report_failure("scan_tick", error)
-                        scan_paused = not is_database_busy_error(error)
+                        scan_paused = not is_retryable_sqlite_operation_error(error)
                         next_scan_attempt = monotonic() + 60
                         imports_paused = not _cleanup(
                             "scan_rollback", readable_worker.recover_after_loop_failure,
@@ -328,7 +328,7 @@ def main() -> None:
                     )
                     # Keep the processor (including pending completion) and never
                     # repeat startup recovery or unknown filesystem side effects.
-                    imports_paused = not recovered or not is_database_busy_error(error)
+                    imports_paused = not recovered or not is_retryable_sqlite_operation_error(error)
                     import_heartbeat.pulse(
                         status="paused" if imports_paused else "retrying",
                         error=f"iteration:{type(error).__name__}",

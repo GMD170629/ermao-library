@@ -176,6 +176,7 @@ class SourceNodeRepositoryPort(Protocol):
         library_id: str,
         parent_id: str | None,
         entries: tuple[ObservedSourceEntry, ...],
+        scan_seen_generation: str | None = None,
     ) -> tuple[tuple[SourceNodeRecord, bool, bool], ...]: ...
 
     def mark_covered_batch(
@@ -190,6 +191,16 @@ class SourceNodeRepositoryPort(Protocol):
 
     def list_direct_children(
         self, *, library_id: str, parent_id: str | None
+    ) -> tuple[SourceNodeRecord, ...]: ...
+
+    def page_unseen_direct_children(
+        self,
+        *,
+        library_id: str,
+        parent_id: str | None,
+        scan_seen_generation: str,
+        after_path_key: str | None,
+        limit: int,
     ) -> tuple[SourceNodeRecord, ...]: ...
 
     def insert_if_absent(
@@ -273,6 +284,19 @@ class BookResourceRepositoryPort(Protocol):
     ) -> ReadableResourceRecord | None: ...
 
     def get_resource(self, resource_id: str) -> ReadableResourceRecord | None: ...
+
+    def page_book_resources(
+        self, *, book_id: str, after_id: str | None, limit: int
+    ) -> tuple[ReadableResourceRecord, ...]: ...
+
+    def resource_matches_owner(
+        self,
+        *,
+        resource_id: str,
+        book_id: str,
+        library_id: str,
+        source_node_id: str,
+    ) -> bool: ...
 
     def create_pending_resource(
         self,

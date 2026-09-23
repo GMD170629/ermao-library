@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import sqlalchemy as sa
 from alembic import command
 from PIL import Image
 from sqlalchemy import select
@@ -23,15 +24,11 @@ from app.models import (
     LibraryBookMetadata,
     LibraryImportScanGap,
     LibraryReadableResource,
-    LibrarySourceNode,
 )
 from app.modules.imports.application.readable_resource.request_library_scan import (
     RequestLibraryScanCommand,
 )
 from app.modules.imports.domain.scan_policy import ScanScope, decode_scan_scopes
-from app.modules.imports.infrastructure.readable_resource.task_queue import (
-    SqlAlchemyLibraryImportTaskQueue,
-)
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
 )
@@ -45,6 +42,57 @@ def _upgrade_to(engine, revision: str) -> None:
     with engine.connect() as connection:
         config.attributes["connection"] = connection
         command.upgrade(config, revision)
+
+
+def _add_legacy_tasks(db: Session, rows: list[LibraryImportTask]) -> None:
+    """Write the columns that exist in the database under upgrade."""
+    db.flush()
+    table = sa.Table("LibraryImportTask", sa.MetaData(), autoload_with=db.get_bind())
+    fields = {
+        "id": "id",
+        "kind": "kind",
+        "library_id": "libraryId",
+        "resource_id": "resourceId",
+        "source_node_id": "sourceNodeId",
+        "resource_anchor_node_id": "resourceAnchorNodeId",
+        "role": "role",
+        "state": "state",
+        "scan_scopes": "scanScopes",
+        "error_summary": "errorSummary",
+        "created_at": "createdAt",
+        "finished_at": "finishedAt",
+    }
+    for row in rows:
+        data = {}
+        for attribute, column in fields.items():
+            value = getattr(row, attribute)
+            if value is None or column not in table.c:
+                continue
+            data[column] = (
+                int(value.timestamp() * 1000) if isinstance(value, datetime) else value
+            )
+        db.execute(table.insert().values(**data))
+
+
+def _add_legacy_source_node(db: Session, *, node_id: str, library_id: str, path: str) -> None:
+    """Insert only columns present before the scan witness migration."""
+    db.flush()
+    table = sa.Table("LibrarySourceNode", sa.MetaData(), autoload_with=db.get_bind())
+    timestamp = int(datetime(2026, 9, 1, tzinfo=UTC).timestamp() * 1000)
+    db.execute(
+        table.insert().values(
+            id=node_id,
+            libraryId=library_id,
+            relativePath=path,
+            pathKey=SourceNodeRelativePath(path).path_key,
+            name=path,
+            physicalKind="DIRECTORY",
+            observedMtimeNs=0,
+            observedAt=timestamp,
+            createdAt=timestamp,
+            updatedAt=timestamp,
+        )
+    )
 
 
 def _png(path: Path) -> None:
@@ -76,20 +124,11 @@ def test_legacy_failed_scan_variants_backfill_scopes(tmp_path: Path) -> None:
                     )
                 )
             db.flush()
-            db.add(
-                LibrarySourceNode(
-                    id="source-node",
-                    library_id="source",
-                    relative_path="source",
-                    path_key=SourceNodeRelativePath("source").path_key,
-                    name="source",
-                    physical_kind="DIRECTORY",
-                    observed_size_bytes=None,
-                    observed_mtime_ns=0,
-                    observed_at=datetime(2026, 9, 1, tzinfo=UTC),
-                )
+            _add_legacy_source_node(
+                db, node_id="source-node", library_id="source", path="source"
             )
-            db.add_all(
+            _add_legacy_tasks(
+                db,
                 [
                     LibraryImportTask(
                         id="full-scan",
@@ -132,7 +171,7 @@ def test_legacy_failed_scan_variants_backfill_scopes(tmp_path: Path) -> None:
                         created_at=datetime(2026, 9, 1, tzinfo=UTC),
                         finished_at=datetime(2026, 9, 2, tzinfo=UTC),
                     ),
-                ]
+                ],
             )
             db.commit()
 
@@ -177,18 +216,8 @@ def test_legacy_failed_scan_backfilled_and_recovered_without_revival(
                 )
             )
             db.flush()
-            db.add(
-                LibrarySourceNode(
-                    id="legacy-node",
-                    library_id="legacy",
-                    relative_path="book",
-                    path_key=SourceNodeRelativePath("book").path_key,
-                    name="book",
-                    physical_kind="DIRECTORY",
-                    observed_size_bytes=None,
-                    observed_mtime_ns=0,
-                    observed_at=datetime(2026, 9, 1, tzinfo=UTC),
-                )
+            _add_legacy_source_node(
+                db, node_id="legacy-node", library_id="legacy", path="book"
             )
             db.add(
                 LibraryBook(
@@ -218,28 +247,34 @@ def test_legacy_failed_scan_backfilled_and_recovered_without_revival(
                     format="IMAGE_DIR",
                 )
             )
-            db.add(
-                LibraryImportTask(
-                    id="legacy-scan",
-                    library_id="legacy",
-                    kind="SCAN_LIBRARY",
-                    state="FAILED",
-                    error_summary="SOURCE_SCAN_INCOMPLETE",
-                    created_at=datetime(2026, 9, 1, tzinfo=UTC),
-                    finished_at=datetime(2026, 9, 1, tzinfo=UTC),
-                )
+            _add_legacy_tasks(
+                db,
+                [
+                    LibraryImportTask(
+                        id="legacy-scan",
+                        library_id="legacy",
+                        kind="SCAN_LIBRARY",
+                        state="FAILED",
+                        error_summary="SOURCE_SCAN_INCOMPLETE",
+                        created_at=datetime(2026, 9, 1, tzinfo=UTC),
+                        finished_at=datetime(2026, 9, 1, tzinfo=UTC),
+                    )
+                ],
             )
-            db.add(
-                LibraryImportTask(
-                    id="legacy-import",
-                    library_id="legacy",
-                    kind="IMPORT_RESOURCE",
-                    state="QUEUED",
-                    resource_id="legacy-resource",
-                    source_node_id="legacy-node",
-                    resource_anchor_node_id="legacy-node",
-                    created_at=datetime(2026, 9, 1, tzinfo=UTC),
-                )
+            _add_legacy_tasks(
+                db,
+                [
+                    LibraryImportTask(
+                        id="legacy-import",
+                        library_id="legacy",
+                        kind="IMPORT_RESOURCE",
+                        state="QUEUED",
+                        resource_id="legacy-resource",
+                        source_node_id="legacy-node",
+                        resource_anchor_node_id="legacy-node",
+                        created_at=datetime(2026, 9, 1, tzinfo=UTC),
+                    )
+                ],
             )
             db.commit()
 
@@ -345,7 +380,8 @@ def test_upgrade_from_0018_handles_existing_gap_rows(tmp_path: Path) -> None:
                     scopes=json.dumps([{"relativePath": "keep", "recursive": True}]),
                 )
             )
-            db.add_all(
+            _add_legacy_tasks(
+                db,
                 [
                     LibraryImportTask(
                         id="v-none-scan",
@@ -371,7 +407,7 @@ def test_upgrade_from_0018_handles_existing_gap_rows(tmp_path: Path) -> None:
                         ),
                         finished_at=datetime(2026, 9, 1, tzinfo=UTC),
                     ),
-                ]
+                ],
             )
             db.commit()
 
@@ -416,106 +452,75 @@ def test_backfill_uses_execution_time_not_creation_order(tmp_path: Path) -> None
             for library_id in ("r1", "r2", "r3", "r4"):
                 _add_library(db, library_id, root)
             db.commit()
-            queue = SqlAlchemyLibraryImportTaskQueue(db)
-
-            def mark_historical_running(task_id: str, *, started_at: datetime) -> None:
-                # Seed the 0018 state directly: current task claiming requires later tables.
-                row = db.get(LibraryImportTask, task_id)
-                assert row is not None and row.state == "QUEUED"
-                row.state = "RUNNING"
-                row.started_at = started_at
-                row.error_summary = None
-                db.flush()
-
-            # r1: early-created A is retried and fails last; the later-created
-            # B succeeded earlier, so it cannot release A's range.
-            a = queue.enqueue(kind="SCAN_LIBRARY", library_id="r1")
-            a_row = db.get(LibraryImportTask, a.id)
-            assert a_row is not None
-            a_row.created_at = base
-            db.flush()
-            mark_historical_running(a.id, started_at=base)
-            queue.mark_failed(
-                a.id,
-                error_summary="SOURCE_SCAN_INCOMPLETE",
-                finished_at=base + timedelta(seconds=100),
+            # Historical rows are written with the 0018 schema. Their final
+            # execution times, not the retained creation times, decide recovery.
+            _add_legacy_tasks(
+                db,
+                [
+                    LibraryImportTask(
+                        id="r1-failed",
+                        library_id="r1",
+                        kind="SCAN_LIBRARY",
+                        state="FAILED",
+                        created_at=base,
+                        finished_at=base + timedelta(seconds=200),
+                    ),
+                    LibraryImportTask(
+                        id="r1-success",
+                        library_id="r1",
+                        kind="SCAN_LIBRARY",
+                        state="SUCCEEDED",
+                        created_at=base + timedelta(seconds=1),
+                        finished_at=base + timedelta(seconds=100),
+                    ),
+                    LibraryImportTask(
+                        id="r2-success",
+                        library_id="r2",
+                        kind="SCAN_LIBRARY",
+                        state="SUCCEEDED",
+                        created_at=base,
+                        finished_at=base + timedelta(seconds=200),
+                    ),
+                    LibraryImportTask(
+                        id="r2-failed",
+                        library_id="r2",
+                        kind="SCAN_LIBRARY",
+                        state="FAILED",
+                        created_at=base + timedelta(seconds=1),
+                        finished_at=base + timedelta(seconds=150),
+                    ),
+                    LibraryImportTask(
+                        id="r3-failed",
+                        library_id="r3",
+                        kind="SCAN_LIBRARY",
+                        state="FAILED",
+                        created_at=base,
+                    ),
+                    LibraryImportTask(
+                        id="r3-success",
+                        library_id="r3",
+                        kind="SCAN_LIBRARY",
+                        state="SUCCEEDED",
+                        created_at=base + timedelta(seconds=1),
+                        finished_at=base + timedelta(seconds=200),
+                    ),
+                    LibraryImportTask(
+                        id="r4-failed",
+                        library_id="r4",
+                        kind="SCAN_LIBRARY",
+                        state="FAILED",
+                        created_at=base,
+                        finished_at=base + timedelta(seconds=100),
+                    ),
+                    LibraryImportTask(
+                        id="r4-success",
+                        library_id="r4",
+                        kind="SCAN_LIBRARY",
+                        state="SUCCEEDED",
+                        created_at=base + timedelta(seconds=1),
+                    ),
+                ],
             )
-            queue.requeue_failed_task(a.id)
-            mark_historical_running(a.id, started_at=base + timedelta(seconds=150))
-            queue.mark_failed(
-                a.id,
-                error_summary="SOURCE_SCAN_INCOMPLETE",
-                finished_at=base + timedelta(seconds=200),
-            )
-            b = queue.enqueue(kind="SCAN_LIBRARY", library_id="r1")
-            b_row = db.get(LibraryImportTask, b.id)
-            assert b_row is not None
-            b_row.created_at = base + timedelta(seconds=1)
-            db.flush()
-            mark_historical_running(b.id, started_at=base)
-            queue.mark_succeeded(b.id, finished_at=base + timedelta(seconds=100))
-
-            # r2: early-created A is retried and succeeds last; the later-created
-            # B failed earlier, so A's success releases B's range.
-            a2 = queue.enqueue(kind="SCAN_LIBRARY", library_id="r2")
-            a2_row = db.get(LibraryImportTask, a2.id)
-            assert a2_row is not None
-            a2_row.created_at = base
-            db.flush()
-            mark_historical_running(a2.id, started_at=base)
-            queue.mark_failed(
-                a2.id,
-                error_summary="SOURCE_SCAN_INCOMPLETE",
-                finished_at=base + timedelta(seconds=100),
-            )
-            queue.requeue_failed_task(a2.id)
-            mark_historical_running(a2.id, started_at=base + timedelta(seconds=150))
-            queue.mark_succeeded(a2.id, finished_at=base + timedelta(seconds=200))
-            b2 = queue.enqueue(kind="SCAN_LIBRARY", library_id="r2")
-            b2_row = db.get(LibraryImportTask, b2.id)
-            assert b2_row is not None
-            b2_row.created_at = base + timedelta(seconds=1)
-            db.flush()
-            mark_historical_running(b2.id, started_at=base)
-            queue.mark_failed(
-                b2.id,
-                error_summary="SOURCE_SCAN_INCOMPLETE",
-                finished_at=base + timedelta(seconds=150),
-            )
-
-            # r3: failure finish time missing; a later success cannot prove order.
-            f3 = queue.enqueue(kind="SCAN_LIBRARY", library_id="r3")
-            db.flush()
-            mark_historical_running(f3.id, started_at=base)
-            queue.mark_failed(
-                f3.id,
-                error_summary="SOURCE_SCAN_INCOMPLETE",
-                finished_at=base + timedelta(seconds=100),
-            )
-            s3 = queue.enqueue(kind="SCAN_LIBRARY", library_id="r3")
-            db.flush()
-            mark_historical_running(s3.id, started_at=base)
-            queue.mark_succeeded(s3.id, finished_at=base + timedelta(seconds=200))
-            f3_row = db.get(LibraryImportTask, f3.id)
-            assert f3_row is not None
-            f3_row.finished_at = None
-
-            # r4: success finish time missing; it cannot prove recovery.
-            f4 = queue.enqueue(kind="SCAN_LIBRARY", library_id="r4")
-            db.flush()
-            mark_historical_running(f4.id, started_at=base)
-            queue.mark_failed(
-                f4.id,
-                error_summary="SOURCE_SCAN_INCOMPLETE",
-                finished_at=base + timedelta(seconds=100),
-            )
-            s4 = queue.enqueue(kind="SCAN_LIBRARY", library_id="r4")
-            db.flush()
-            mark_historical_running(s4.id, started_at=base)
-            queue.mark_succeeded(s4.id, finished_at=base + timedelta(seconds=200))
-            s4_row = db.get(LibraryImportTask, s4.id)
-            assert s4_row is not None
-            s4_row.finished_at = None
             db.commit()
 
         apply_schema(engine, settings)
@@ -548,14 +553,17 @@ def test_0020_compensates_an_instance_already_at_0019(tmp_path: Path) -> None:
             _add_library(db, "late", root)
             # The already-run 0019 left an empty row and missed the failure.
             db.add(LibraryImportScanGap(library_id="late", scopes=None))
-            db.add(
-                LibraryImportTask(
-                    id="late-scan",
-                    library_id="late",
-                    kind="SCAN_LIBRARY",
-                    state="FAILED",
-                    finished_at=datetime(2026, 9, 1, tzinfo=UTC),
-                )
+            _add_legacy_tasks(
+                db,
+                [
+                    LibraryImportTask(
+                        id="late-scan",
+                        library_id="late",
+                        kind="SCAN_LIBRARY",
+                        state="FAILED",
+                        finished_at=datetime(2026, 9, 1, tzinfo=UTC),
+                    )
+                ],
             )
             db.commit()
 
@@ -583,20 +591,7 @@ def _add_import_graph(db: Session, library_id: str) -> None:
     node_id = f"{library_id}-node"
     book_id = f"{library_id}-book"
     resource_id = f"{library_id}-resource"
-    db.add(
-        LibrarySourceNode(
-            id=node_id,
-            library_id=library_id,
-            relative_path="book",
-            path_key=SourceNodeRelativePath("book").path_key,
-            name="book",
-            physical_kind="DIRECTORY",
-            observed_size_bytes=None,
-            observed_mtime_ns=0,
-            observed_at=datetime(2026, 9, 1, tzinfo=UTC),
-        )
-    )
-    db.flush()
+    _add_legacy_source_node(db, node_id=node_id, library_id=library_id, path="book")
     db.add(LibraryBook(id=book_id, library_id=library_id, source_node_id=node_id))
     db.flush()
     db.add(
@@ -638,7 +633,8 @@ def test_backfill_ignores_and_is_not_cleared_by_ordinary_tasks(tmp_path: Path) -
             ):
                 _add_library(db, library_id, root)
                 _add_import_graph(db, library_id)
-            db.add_all(
+            _add_legacy_tasks(
+                db,
                 [
                     # Ordinary failures never create a scan gap.
                     LibraryImportTask(
@@ -739,7 +735,7 @@ def test_backfill_ignores_and_is_not_cleared_by_ordinary_tasks(tmp_path: Path) -
                         state="SUCCEEDED",
                         finished_at=later,
                     ),
-                ]
+                ],
             )
             db.commit()
 

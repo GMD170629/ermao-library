@@ -27,6 +27,7 @@ from app.models import (
     LibraryReadableResource,
     LibrarySourceNode,
 )
+from app.modules.imports.application.readable_resource.book_work import BookWork
 from app.modules.imports.application.readable_resource.continue_import import (
     ContinueSourceImport,
 )
@@ -83,11 +84,18 @@ def _png(path: Path, color: str = "red") -> None:
 
 
 def _resource_task(db: Session, library_id: str, resource_id: str) -> LibraryImportTask:
+    book_id = db.scalar(
+        select(LibraryReadableResource.book_id).where(
+            LibraryReadableResource.id == resource_id,
+            LibraryReadableResource.library_id == library_id,
+        )
+    )
+    assert book_id is not None
     task = db.scalar(
         select(LibraryImportTask).where(
             LibraryImportTask.library_id == library_id,
-            LibraryImportTask.kind == "IMPORT_RESOURCE",
-            LibraryImportTask.resource_id == resource_id,
+            LibraryImportTask.kind == "IMPORT_BOOK",
+            LibraryImportTask.book_id == book_id,
         )
     )
     assert task is not None
@@ -125,11 +133,11 @@ def _queue_force(
     pipeline: ReadableResourcePipeline, db: Session, resource_id: str
 ) -> None:
     task = _resource_task(db, "lib", resource_id)
-    pipeline.queue.request_import_resource(
-        library_id="lib",
-        resource_id=resource_id,
-        source_node_id=task.source_node_id,
-        force=True,
+    assert task.book_id is not None
+    pipeline.queue.request_book_work(
+        book_id=task.book_id,
+        work=BookWork(resource_ids=(resource_id,), identify=True),
+        requested_at=pipeline.clock.now(),
     )
     db.commit()
 
@@ -177,7 +185,7 @@ def test_recursive_parent_scope_keeps_good_and_gates_only_bad(tmp_path: Path) ->
 
         assert _resource_task(db, "lib", good_id).state == "SUCCEEDED"
         assert _resource_task(db, "lib", bad_id).state == "QUEUED"
-        assert "identified" in outcomes
+        assert "book" in outcomes
 
         # A real continue-source scan of the failed anchor releases it.
         pipeline.filesystem.iter_directory_entries = original_iter  # type: ignore[method-assign]
@@ -185,7 +193,7 @@ def test_recursive_parent_scope_keeps_good_and_gates_only_bad(tmp_path: Path) ->
         outcomes = _drain(pipeline)
         db.expire_all()
         assert _resource_task(db, "lib", bad_id).state == "SUCCEEDED"
-        assert "identified" in outcomes
+        assert "book" in outcomes
     finally:
         db.close()
 
@@ -277,7 +285,7 @@ def test_cleaning_scan_records_does_not_release_unfinished_directory(
         outcomes = _drain(pipeline)
         db.expire_all()
         assert _resource_task(db, "lib", resource_id).state == "QUEUED"
-        assert "ok" not in outcomes
+        assert "book" not in outcomes
 
         pipeline.filesystem.iter_directory_entries = original_iter  # type: ignore[method-assign]
         pipeline.request_library_scan.execute(
@@ -502,7 +510,7 @@ def test_recursive_gap_narrows_to_failed_child(tmp_path: Path) -> None:
         assert {scope.relative_path for scope in remaining} <= {"Shelf/bad"}
         assert _resource_task(db, "lib", good_id).state == "SUCCEEDED"
         assert _resource_task(db, "lib", bad_id).state == "QUEUED"
-        assert "identified" in outcomes
+        assert "book" in outcomes
     finally:
         db.close()
 
@@ -607,8 +615,10 @@ def test_directory_waiting_matches_scheduler_with_active_scan(tmp_path: Path) ->
         )
         view = get_import_task(db, task.id, context)
         assert view is not None and view["waitingFor"] is None
-        selected = pipeline.queue.next_queued()
-        assert selected is not None and selected.id == task.id
+        worker = build_readable_resource_worker(pipeline)
+        assert worker.process_once() == "book"
+        db.expire_all()
+        assert db.get(LibraryImportTask, task.id).state == "SUCCEEDED"
     finally:
         db.close()
 

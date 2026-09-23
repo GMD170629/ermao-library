@@ -20,5 +20,7 @@ class AdministrativeSettingsCopyTest {
 
         assertEquals(chineseKeys, englishKeys)
         assertEquals(AdministrativeCopy.entries.toSet(), chineseKeys)
+        assertEquals("导入图书", AdministrativeCopy.ImportBookTask.text(AdministrativeLocale.ZhCn))
+        assertEquals("Import book", AdministrativeCopy.ImportBookTask.text(AdministrativeLocale.EnUs))
     }
 }

@@ -128,7 +128,7 @@ def test_cross_library_move_with_source_and_target_scan_failures(
                     )
                 outcomes = _drain(failing_worker)
 
-            assert "identified" in outcomes
+            assert "book" in outcomes
             db.expire_all()
             scans = {
                 row.library_id: row
@@ -145,7 +145,7 @@ def test_cross_library_move_with_source_and_target_scan_failures(
             c_tasks = db.scalars(
                 select(LibraryImportTask).where(
                     LibraryImportTask.library_id == "lib-c",
-                    LibraryImportTask.kind == "IMPORT_RESOURCE",
+                    LibraryImportTask.kind == "IMPORT_BOOK",
                 )
             ).all()
             assert c_tasks and all(task.state == "SUCCEEDED" for task in c_tasks)
@@ -220,7 +220,7 @@ def test_cross_library_move_with_source_and_target_scan_failures(
             b_task = db.scalar(
                 select(LibraryImportTask).where(
                     LibraryImportTask.library_id == "lib-b",
-                    LibraryImportTask.kind == "IMPORT_RESOURCE",
+                    LibraryImportTask.kind == "IMPORT_BOOK",
                 )
             )
             assert b_task is not None and b_task.state == "SUCCEEDED"

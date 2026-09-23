@@ -1,5 +1,6 @@
 """Identify a completed Book without re-running its asset imports."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -10,6 +11,7 @@ from app.contracts.local_metadata_snapshot import LocalMetadataObservation
 from app.contracts.publication_metadata import PublicationMetadata
 from app.modules.library.application.resource_cover import ResourceCoverUnitOfWork
 from app.modules.library.application.source_node_commands import (
+    PreparedSourceNodeCover,
     SourceNodeCoverPublicationPort,
 )
 
@@ -39,9 +41,13 @@ class IdentifiedBookMetadata:
 
 
 class ImportedBookMetadataPort(Protocol):
-    def load(self, source_node_id: str) -> ImportedBookSnapshot | None: ...
+    def load(
+        self, source_node_id: str, *, ignore_import_activity: bool = False
+    ) -> ImportedBookSnapshot | None: ...
     def inspect(self, snapshot: ImportedBookSnapshot) -> IdentifiedBookMetadata: ...
-    def still_current(self, snapshot: ImportedBookSnapshot) -> bool: ...
+    def still_current(
+        self, snapshot: ImportedBookSnapshot, *, ignore_import_activity: bool = False
+    ) -> bool: ...
     def apply(
         self,
         snapshot: ImportedBookSnapshot,
@@ -61,9 +67,17 @@ class IdentifyImportedBook:
         self._covers = covers
         self._uow = unit_of_work
 
-    def execute(self, source_node_id: str) -> str:
-        snapshot = self._repository.load(source_node_id)
-        self._uow.commit()
+    def execute(
+        self,
+        source_node_id: str,
+        *,
+        book_run_current: Callable[[], bool] | None = None,
+    ) -> str:
+        if book_run_current is not None and not book_run_current():
+            return "stale"
+        snapshot = self._load_snapshot(
+            source_node_id, ignore_import_activity=book_run_current is not None
+        )
         if snapshot is None:
             return "stale"
         result = self._repository.inspect(snapshot)
@@ -72,11 +86,48 @@ class IdentifyImportedBook:
             if result.cover and not snapshot.cover_protected
             else None
         )
+        try:
+            current = (book_run_current is None or book_run_current()) and (
+                self._repository.still_current(
+                    snapshot, ignore_import_activity=True
+                )
+                if book_run_current is not None
+                else self._repository.still_current(snapshot)
+            )
+        except Exception:
+            self._discard_stale(prepared)
+            raise
+        if not current:
+            self._discard_stale(prepared)
+            return "stale"
+        return self._persist_identification(snapshot, result, prepared)
+
+    def _load_snapshot(
+        self, source_node_id: str, *, ignore_import_activity: bool
+    ) -> ImportedBookSnapshot | None:
+        snapshot = (
+            self._repository.load(source_node_id, ignore_import_activity=True)
+            if ignore_import_activity
+            else self._repository.load(source_node_id)
+        )
+        self._uow.commit()
+        return snapshot
+
+    def _discard_stale(self, prepared: PreparedSourceNodeCover | None) -> None:
+        try:
+            self._uow.rollback()
+        finally:
+            if prepared is not None:
+                self._covers.discard(prepared)
+
+    def _persist_identification(
+        self,
+        snapshot: ImportedBookSnapshot,
+        result: IdentifiedBookMetadata,
+        prepared: PreparedSourceNodeCover | None,
+    ) -> str:
         published = None
         try:
-            if not self._repository.still_current(snapshot):
-                self._uow.rollback()
-                return "stale"
             if prepared is not None:
                 published = self._covers.publish(
                     prepared, previous_stored_path=snapshot.previous_cover_path
@@ -98,9 +149,3 @@ class IdentifyImportedBook:
                 published, previous_stored_path=snapshot.previous_cover_path
             )
         return "identified"
-
-
-class BookIdentificationRequests(Protocol):
-    def request(self, book_ids: tuple[str, ...]) -> None:
-        """Request local identification within the caller-owned transaction."""
-        ...

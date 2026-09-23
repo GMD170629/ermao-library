@@ -60,6 +60,7 @@ class LibraryImportTask(Base):
                     "IMPORT_ASSET",
                     "IMPORT_RESOURCE",
                     "IDENTIFY_BOOK",
+                    "IMPORT_BOOK",
                 )
             ),
             name="LibraryImportTask_kind_check",
@@ -107,8 +108,38 @@ class LibraryImportTask(Base):
                     column("resourceId").is_not(None),
                     column("role").is_not(None),
                 ),
+                and_(
+                    column("kind") == "IMPORT_BOOK",
+                    column("sourceNodeId").is_not(None),
+                    column("resourceId").is_(None),
+                    column("role").is_(None),
+                    column("bookId").is_not(None),
+                    column("bookWork").is_not(None),
+                ),
             ),
             name="LibraryImportTask_kind_shape_check",
+        ),
+        CheckConstraint(
+            or_(
+                and_(
+                    column("kind") == "IMPORT_BOOK",
+                    column("phase").is_not(None),
+                    column("phase").in_(("SCAN", "RESOURCES", "IDENTIFY", "FINALIZE")),
+                ),
+                and_(
+                    column("kind") != "IMPORT_BOOK",
+                    column("bookId").is_(None),
+                    column("phase").is_(None),
+                ),
+            ),
+            name="LibraryImportTask_book_scope_check",
+        ),
+        CheckConstraint(
+            and_(
+                column("requestVersion") >= 0,
+                column("retryCount") >= 0,
+            ),
+            name="LibraryImportTask_book_counters_check",
         ),
         CheckConstraint(
             or_(
@@ -155,6 +186,28 @@ class LibraryImportTask(Base):
             ondelete="CASCADE",
             onupdate="CASCADE",
             name="fk_LibraryImportTask_sourceNode_library",
+        ),
+        ForeignKeyConstraint(
+            ["bookId", "libraryId"],
+            ["LibraryBook.id", "LibraryBook.libraryId"],
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+            name="fk_LibraryImportTask_book_library",
+        ),
+        Index(
+            "LibraryImportTask_book_key",
+            "bookId",
+            unique=True,
+            sqlite_where=column("kind") == "IMPORT_BOOK",
+        ),
+        Index("LibraryImportTask_bookId_libraryId_idx", "bookId", "libraryId"),
+        Index(
+            "LibraryImportTask_book_runnable_idx",
+            "state",
+            "nextAttemptAt",
+            "createdAt",
+            "id",
+            sqlite_where=column("kind") == "IMPORT_BOOK",
         ),
         Index(
             "LibraryImportTask_import_asset_key",
@@ -216,6 +269,27 @@ class LibraryImportTask(Base):
     scan_scopes: Mapped[str | None] = mapped_column("scanScopes", Text, nullable=True)
     book_metadata_revision: Mapped[int | None] = mapped_column(
         "bookMetadataRevision", Integer, nullable=True
+    )
+    book_id: Mapped[str | None] = mapped_column("bookId", String(191), nullable=True)
+    phase: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    request_version: Mapped[int] = mapped_column(
+        "requestVersion", Integer, nullable=False, default=0, server_default="0"
+    )
+    execution_version: Mapped[int | None] = mapped_column(
+        "executionVersion", Integer, nullable=True
+    )
+    book_work: Mapped[str | None] = mapped_column("bookWork", Text, nullable=True)
+    resource_cursor: Mapped[str | None] = mapped_column(
+        "resourceCursor", String(191), nullable=True
+    )
+    retry_count: Mapped[int] = mapped_column(
+        "retryCount", Integer, nullable=False, default=0, server_default="0"
+    )
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
+        "nextAttemptAt", TimestampMilliseconds(), nullable=True
+    )
+    superseded_by_task_id: Mapped[str | None] = mapped_column(
+        "supersededByTaskId", String(191), nullable=True
     )
     library_id: Mapped[str] = mapped_column(
         "libraryId",

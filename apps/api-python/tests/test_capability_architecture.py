@@ -515,6 +515,9 @@ def test_readable_resource_migrations_are_linear_and_baseline_is_self_contained(
         "0027_automation_uploads.py",
         "0028_automation_capabilities.py",
         "0029_file_deletions.py",
+        "0030_book_import_task_shape.py",
+        "0031_book_import_task_backfill.py",
+        "0032_source_node_scan_seen_generation.py",
     ]
     path = versions_dir / "0001_library_topology_baseline.py"
     source = path.read_text(encoding="utf-8")
@@ -602,7 +605,7 @@ def test_readable_resource_orm_check_constraints_use_typed_expressions() -> None
                 f"{path.name}: CheckConstraint must use typed SQLAlchemy "
                 f"expressions, not string SQL (line {node.lineno})"
             )
-    assert check_count == 19
+    assert check_count == 21
 
 
 def test_readable_resource_baseline_overlay_check_constraints_use_typed_expressions() -> (

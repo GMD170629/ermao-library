@@ -136,6 +136,10 @@ def active_imports_for_anchor(
                 ),
                 and_(task.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE")), under_root),
                 and_(task.kind == "CONTINUE_SOURCE", or_(under_root, ancestor_scan)),
+                and_(
+                    task.kind == "IMPORT_BOOK",
+                    task.source_node_id == anchor_id,
+                ),
             ),
         )
     )

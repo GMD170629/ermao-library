@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
+from typing import Protocol
 
 from app.contracts.local_metadata import (
     DEFAULT_LOCAL_METADATA_PRIORITY,
@@ -61,6 +63,65 @@ class ImportTaskRuleError(Exception):
 class ProcessTaskResult:
     task_id: str
     outcome: str
+
+
+class ResourceImportRunPort(Protocol):
+    """The caller owns the run's currency, follow-up request, and task state.
+
+    ``is_current`` is called inside each result transaction. A Book owner must
+    compare its claimed execution version there, not only task existence.
+    """
+
+    @property
+    def operation_id(self) -> str: ...
+
+    def is_current(self) -> bool: ...
+
+    def start(self, *, started_at: datetime) -> None: ...
+
+    def request_changed(
+        self, *, library_id: str, resource_id: str, source_node_id: str
+    ) -> None: ...
+
+    def succeed(self, *, finished_at: datetime) -> None: ...
+
+    def fail(self, *, error_summary: str, finished_at: datetime) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class _QueuedResourceImportRun:
+    """Translate the old resource task into the resource step's run boundary."""
+
+    queue: LibraryImportTaskQueuePort
+    operation_id: str
+
+    def is_current(self) -> bool:
+        return self.queue.get_task(self.operation_id) is not None
+
+    def start(self, *, started_at: datetime) -> None:
+        task = self.queue.get_task(self.operation_id)
+        if task is None:
+            raise LookupError(self.operation_id)
+        if task.state != "RUNNING":
+            self.queue.mark_running(self.operation_id, started_at=started_at)
+
+    def request_changed(
+        self, *, library_id: str, resource_id: str, source_node_id: str
+    ) -> None:
+        self.queue.request_import_resource(
+            library_id=library_id,
+            resource_id=resource_id,
+            source_node_id=source_node_id,
+            changed=True,
+        )
+
+    def succeed(self, *, finished_at: datetime) -> None:
+        self.queue.mark_succeeded(self.operation_id, finished_at=finished_at)
+
+    def fail(self, *, error_summary: str, finished_at: datetime) -> None:
+        self.queue.mark_failed(
+            self.operation_id, error_summary=error_summary, finished_at=finished_at
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,91 +198,144 @@ class ProcessReadableResourceImportTask:
                     finished_at=self._clock.now(),
                 )
                 return ProcessTaskResult(task_id=task_id, outcome="invalid_task")
-            context = self.load_resource_context(
-                resource_id=task.resource_id, source_node_id=task.source_node_id
-            )
-            if context is None:
-                self._log.emit(
-                    "readable_resource.task.rejected",
-                    error=ImportTaskRuleError(
-                        "Task resource or source node could not be loaded"
-                    ),
-                    task_id=task_id,
-                    stage="import",
-                    step="load_task_targets",
-                    outcome="failed",
-                )
-                self._queue.mark_failed(
-                    task_id,
-                    error_summary="MISSING_TARGETS",
-                    finished_at=self._clock.now(),
-                )
-                return ProcessTaskResult(task_id=task_id, outcome="missing_targets")
-            adapter = context.adapter
-            if adapter is None:
-                self._log.emit(
-                    "readable_resource.task.rejected",
-                    error=ImportTaskRuleError(
-                        "No registered adapter matches the resource adapter identity"
-                    ),
-                    task_id=task_id,
-                    stage="import",
-                    step="select_resource_adapter",
-                    outcome="failed",
-                )
-                self._queue.mark_failed(
-                    task_id,
-                    error_summary="UNKNOWN_ADAPTER",
-                    finished_at=self._clock.now(),
-                )
-                return ProcessTaskResult(task_id=task_id, outcome="unknown_adapter")
-            resource_is_directory = context.resource.format in {
-                "IMAGE_DIR",
-                "AUDIOBOOK_DIR",
-            }
-            if (
-                (adapter.is_directory_adapter and not resource_is_directory)
-                or context.node.id != context.resource.source_node_id
-                or context.node.physical_kind
-                is not (
-                    SourceNodePhysicalKind.DIRECTORY
-                    if resource_is_directory
-                    else SourceNodePhysicalKind.REGULAR_FILE
-                )
-                or context.resource.library_id != task.library_id
-            ):
-                self._log.emit(
-                    "readable_resource.task.rejected",
-                    error=ImportTaskRuleError(
-                        "Resource task adapter kind, physical node kind, resource ownership or library does not match the queued target"
-                    ),
-                    task_id=task_id,
-                    stage="import",
-                    step="validate_task_target",
-                    outcome="failed",
-                )
-                self._queue.mark_failed(
-                    task_id,
-                    error_summary="INVALID_RESOURCE_TASK_TARGET",
-                    finished_at=self._clock.now(),
-                )
-                return ProcessTaskResult(task_id=task_id, outcome="invalid_task")
-            if task.state != "RUNNING":
-                self._queue.mark_running(task_id, started_at=self._clock.now())
-            resource = context.resource
-            node = context.node
-            relative_path = node.relative_path
-            resource_relative_path = context.resource_node.relative_path
-            root_path = context.root_path
-            role = adapter.asset_role
-            assert role is not None
-            resource_id = resource.id
-            library_id = resource.library_id
+            library_id = task.library_id
+            resource_id = task.resource_id
             source_node_id = task.source_node_id
-            local_metadata_priority = context.local_metadata_priority
+            run = _QueuedResourceImportRun(self._queue, task_id)
+            prepared = self._prepare_resource(
+                library_id=library_id,
+                resource_id=resource_id,
+                source_node_id=source_node_id,
+                run=run,
+            )
+        return (
+            prepared
+            if isinstance(prepared, ProcessTaskResult)
+            else self._process_prepared_resource(prepared, run=run)
+        )
 
+    def process_resource(
+        self,
+        *,
+        library_id: str,
+        resource_id: str,
+        source_node_id: str,
+        run: ResourceImportRunPort,
+    ) -> ProcessTaskResult:
+        """Process one resource without requiring an IMPORT_RESOURCE task row.
+
+        The run owner checks cancellation/version and records follow-up or final
+        state in the same transactions as the corresponding resource results.
+        """
+        with self._uow.transaction():
+            prepared = self._prepare_resource(
+                library_id=library_id,
+                resource_id=resource_id,
+                source_node_id=source_node_id,
+                run=run,
+            )
+        return (
+            prepared
+            if isinstance(prepared, ProcessTaskResult)
+            else self._process_prepared_resource(prepared, run=run)
+        )
+
+    def _prepare_resource(
+        self,
+        *,
+        library_id: str,
+        resource_id: str,
+        source_node_id: str,
+        run: ResourceImportRunPort,
+    ) -> ResourceImportContext | ProcessTaskResult:
+        task_id = run.operation_id
+        if not run.is_current():
+            return ProcessTaskResult(task_id=task_id, outcome="cancelled")
+        context = self.load_resource_context(
+            resource_id=resource_id, source_node_id=source_node_id
+        )
+        if context is None:
+            self._log.emit(
+                "readable_resource.task.rejected",
+                error=ImportTaskRuleError(
+                    "Task resource or source node could not be loaded"
+                ),
+                task_id=task_id,
+                stage="import",
+                step="load_task_targets",
+                outcome="failed",
+            )
+            run.fail(error_summary="MISSING_TARGETS", finished_at=self._clock.now())
+            return ProcessTaskResult(task_id=task_id, outcome="missing_targets")
+        adapter = context.adapter
+        if adapter is None:
+            self._log.emit(
+                "readable_resource.task.rejected",
+                error=ImportTaskRuleError(
+                    "No registered adapter matches the resource adapter identity"
+                ),
+                task_id=task_id,
+                stage="import",
+                step="select_resource_adapter",
+                outcome="failed",
+            )
+            run.fail(error_summary="UNKNOWN_ADAPTER", finished_at=self._clock.now())
+            return ProcessTaskResult(task_id=task_id, outcome="unknown_adapter")
+        resource_is_directory = context.resource.format in {
+            "IMAGE_DIR",
+            "AUDIOBOOK_DIR",
+        }
+        if (
+            (adapter.is_directory_adapter and not resource_is_directory)
+            or context.node.id != context.resource.source_node_id
+            or context.node.physical_kind
+            is not (
+                SourceNodePhysicalKind.DIRECTORY
+                if resource_is_directory
+                else SourceNodePhysicalKind.REGULAR_FILE
+            )
+            or context.resource.library_id != library_id
+        ):
+            self._log.emit(
+                "readable_resource.task.rejected",
+                error=ImportTaskRuleError(
+                    "Resource task adapter kind, physical node kind, resource ownership or library does not match the queued target"
+                ),
+                task_id=task_id,
+                stage="import",
+                step="validate_task_target",
+                outcome="failed",
+            )
+            run.fail(
+                error_summary="INVALID_RESOURCE_TASK_TARGET",
+                finished_at=self._clock.now(),
+            )
+            return ProcessTaskResult(task_id=task_id, outcome="invalid_task")
+        run.start(started_at=self._clock.now())
+        return context
+
+    def _process_prepared_resource(
+        self, context: ResourceImportContext, *, run: ResourceImportRunPort
+    ) -> ProcessTaskResult:
+        task_id = run.operation_id
+        resource_id = context.resource.id
+        library_id = context.resource.library_id
+        source_node_id = context.node.id
+        node = context.node
+        relative_path = node.relative_path
+        resource_relative_path = context.resource_node.relative_path
+        root_path = context.root_path
+        adapter = context.adapter
+        assert adapter is not None
+        role = adapter.asset_role
+        assert role is not None
+        local_metadata_priority = context.local_metadata_priority
+        resource_is_directory = context.resource.format in {
+            "IMAGE_DIR",
+            "AUDIOBOOK_DIR",
+        }
         if resource_is_directory:
-            return self._execute_directory(task_id, context)
+            return self._execute_directory(task_id, context, run=run)
         self._uow.release_before_io()
         absolute = self._filesystem.resolve_under_root(root_path, relative_path)
         resource_absolute = self._filesystem.resolve_under_root(
@@ -238,7 +352,7 @@ class ProcessReadableResourceImportTask:
             self._uow.release_before_io()
             if already_processed:
                 return self._refresh_single_file_metadata(
-                    task_id, context, resource_absolute
+                    task_id, context, resource_absolute, run=run
                 )
         parsed = self._adapters.parse_file(
             absolute_path=absolute,
@@ -295,10 +409,9 @@ class ProcessReadableResourceImportTask:
                 for prepared in publications:
                     self._covers.discard(prepared)
                 with self._uow.transaction():
-                    if self._queue.get_task(task_id) is None:
+                    if not run.is_current():
                         return ProcessTaskResult(task_id=task_id, outcome="cancelled")
-                    self._queue.mark_failed(
-                        task_id,
+                    run.fail(
                         error_summary="COVER_PUBLISH_FAILED",
                         finished_at=self._clock.now(),
                     )
@@ -309,8 +422,7 @@ class ProcessReadableResourceImportTask:
         outcome = "cancelled"
         try:
             with self._uow.transaction():
-                current_task = self._queue.get_task(task_id)
-                task_was_cancelled = current_task is None
+                task_was_cancelled = not run.is_current()
                 input_changed = False
                 if not task_was_cancelled:
                     current_context = self.load_resource_context(
@@ -327,15 +439,12 @@ class ProcessReadableResourceImportTask:
                         != context.resource.adapter_version
                     )
                     if input_changed:
-                        self._queue.request_import_resource(
+                        run.request_changed(
                             library_id=library_id,
                             resource_id=resource_id,
                             source_node_id=source_node_id,
-                            changed=True,
                         )
-                        self._queue.mark_succeeded(
-                            task_id, finished_at=self._clock.now()
-                        )
+                        run.succeed(finished_at=self._clock.now())
                         outcome = "changed"
                 if not task_was_cancelled and not input_changed:
                     self.save_asset_result(
@@ -384,8 +493,7 @@ class ProcessReadableResourceImportTask:
                             step="read_parse_result",
                             outcome="failed",
                         )
-                        self._queue.mark_failed(
-                            task_id,
+                        run.fail(
                             error_summary=parsed.error_summary
                             or parsed.error_code
                             or "PARSE_FAILED",
@@ -418,7 +526,7 @@ class ProcessReadableResourceImportTask:
 
         if import_succeeded:
             with self._uow.transaction():
-                self._queue.mark_succeeded(task_id, finished_at=self._clock.now())
+                run.succeed(finished_at=self._clock.now())
             self._sidecar.schedule_after_commit(resource_id)
         self._log.emit(
             "readable_resource.task.finished",
@@ -431,7 +539,12 @@ class ProcessReadableResourceImportTask:
         return ProcessTaskResult(task_id=task_id, outcome=outcome)
 
     def _refresh_single_file_metadata(
-        self, task_id: str, context: ResourceImportContext, absolute: Path
+        self,
+        task_id: str,
+        context: ResourceImportContext,
+        absolute: Path,
+        *,
+        run: ResourceImportRunPort,
     ) -> ProcessTaskResult:
         resource_id = context.resource.id
         observations = self._books_resources.resource_local_observations(resource_id)
@@ -501,7 +614,7 @@ class ProcessReadableResourceImportTask:
                 cover_path = prepared.stored_path
             with self._uow.transaction():
                 if (
-                    self._queue.get_task(task_id) is None
+                    not run.is_current()
                     or self._books_resources.get_resource(resource_id) is None
                 ):
                     return ProcessTaskResult(task_id, "cancelled")
@@ -510,7 +623,7 @@ class ProcessReadableResourceImportTask:
                     metadata=resolved.metadata,
                     cover_path=cover_path,
                 )
-                self._queue.mark_succeeded(task_id, finished_at=self._clock.now())
+                run.succeed(finished_at=self._clock.now())
             committed = True
         finally:
             if prepared is not None and not committed and self._covers is not None:
@@ -518,7 +631,11 @@ class ProcessReadableResourceImportTask:
         return ProcessTaskResult(task_id, "ok")
 
     def _execute_directory(
-        self, task_id: str, context: ResourceImportContext
+        self,
+        task_id: str,
+        context: ResourceImportContext,
+        *,
+        run: ResourceImportRunPort,
     ) -> ProcessTaskResult:
         adapter = context.adapter
         assert adapter is not None
@@ -667,15 +784,17 @@ class ProcessReadableResourceImportTask:
                 )
             )
             if len(batch) == 200:
-                if not self._save_directory_batch(task_id, context, tuple(batch)):
+                if not self._save_directory_batch(task_id, context, tuple(batch), run):
                     return ProcessTaskResult(task_id, "cancelled")
                 batch.clear()
-        if batch and not self._save_directory_batch(task_id, context, tuple(batch)):
+        if batch and not self._save_directory_batch(
+            task_id, context, tuple(batch), run
+        ):
             return ProcessTaskResult(task_id, "cancelled")
 
         # Directory candidates are inspected once; file observations remain file-owned.
         with self._uow.transaction():
-            if self._queue.get_task(task_id) is None:
+            if not run.is_current():
                 return ProcessTaskResult(task_id, "cancelled")
             cover_state = self._books_resources.resource_cover_state(resource_id)
         self._uow.release_before_io()
@@ -782,7 +901,7 @@ class ProcessReadableResourceImportTask:
                 self._covers.publish(prepared)
                 cover_path = prepared.stored_path
             with self._uow.transaction():
-                if self._queue.get_task(task_id) is None:
+                if not run.is_current():
                     return ProcessTaskResult(task_id, "cancelled")
                 count = self._books_resources.count_ready_assets(resource_id)
                 if count:
@@ -799,22 +918,20 @@ class ProcessReadableResourceImportTask:
                 else:
                     self._books_resources.set_resource_page_count(resource_id, count)
                 if changed:
-                    self._queue.request_import_resource(
+                    run.request_changed(
                         library_id=library_id,
                         resource_id=resource_id,
                         source_node_id=context.node.id,
-                        changed=True,
                     )
                 if errors:
-                    self._queue.mark_failed(
-                        task_id,
+                    run.fail(
                         error_summary="IMAGE_ASSETS_FAILED"
                         if adapter.asset_role is AssetRole.PAGE
                         else "AUDIO_ASSETS_FAILED",
                         finished_at=self._clock.now(),
                     )
                 else:
-                    self._queue.mark_succeeded(task_id, finished_at=self._clock.now())
+                    run.succeed(finished_at=self._clock.now())
             committed = True
         finally:
             if prepared is not None and not committed and self._covers is not None:
@@ -828,9 +945,10 @@ class ProcessReadableResourceImportTask:
         task_id: str,
         context: ResourceImportContext,
         results: tuple[DirectoryAssetResult, ...],
+        run: ResourceImportRunPort,
     ) -> bool:
         with self._uow.transaction():
-            if self._queue.get_task(task_id) is None:
+            if not run.is_current():
                 return False
             self._books_resources.save_directory_assets(
                 library_id=context.resource.library_id,
@@ -1111,4 +1229,8 @@ class ProcessReadableResourceImportTask:
         )
 
 
-__all__ = ["ProcessReadableResourceImportTask", "ProcessTaskResult"]
+__all__ = [
+    "ProcessReadableResourceImportTask",
+    "ProcessTaskResult",
+    "ResourceImportRunPort",
+]

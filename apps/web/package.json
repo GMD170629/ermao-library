@@ -1,6 +1,6 @@
 {
   "name": "@shuku/web",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "private": true,
   "scripts": {
     "predev": "node scripts/prepare-pdfjs-worker.mjs",

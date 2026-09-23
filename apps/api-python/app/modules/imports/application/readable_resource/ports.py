@@ -11,6 +11,10 @@ from typing import Literal, Protocol
 
 from app.contracts.local_metadata import LocalMetadataSource
 from app.modules.imports.application.audio_types import AudioFileMetadata
+from app.modules.imports.application.readable_resource.book_work import (
+    BookWork,
+    BookWorkState,
+)
 from app.modules.imports.domain.directory_probe import (
     DirectoryProbeDecision,
 )
@@ -40,6 +44,8 @@ __all__ = [
     "AdapterIdentity",
     "AssetTechnicalMetadata",
     "AudioMetadataInspectorPort",
+    "BookImportTaskQueuePort",
+    "BookImportTaskRecord",
     "BookResourceRepositoryPort",
     "ClockPort",
     "DirectoryEntry",
@@ -57,7 +63,6 @@ __all__ = [
     "ObservedSourceEntry",
     "ParsedAssetPayload",
     "PipelineLogPort",
-    "PreparedBookIdentification",
     "PreparedLocalCover",
     "ReadableResourceRecord",
     "RegularFileObservation",
@@ -80,6 +85,7 @@ ImportTaskKind = Literal[
     "IMPORT_ASSET",
     "IMPORT_RESOURCE",
     "IDENTIFY_BOOK",
+    "IMPORT_BOOK",
 ]
 ImportTaskState = Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED"]
 
@@ -116,12 +122,70 @@ class LibraryImportTaskRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class PreparedBookIdentification:
-    task_id: str
+class BookImportTaskRecord:
+    id: str
     book_id: str
     library_id: str
     source_node_id: str
-    import_revision: int
+    state: ImportTaskState
+    phase: str
+    request_version: int
+    execution_version: int | None
+    work: BookWorkState
+    resource_cursor: str | None
+    retry_count: int
+    next_attempt_at: datetime | None
+    error_summary: str | None
+
+
+class BookImportTaskQueuePort(Protocol):
+    def request_book_work(
+        self, *, book_id: str, work: BookWork, requested_at: datetime
+    ) -> BookImportTaskRecord: ...
+
+    def claim_next_book(self, *, started_at: datetime) -> BookImportTaskRecord | None: ...
+
+    def get_book_task(self, task_id: str) -> BookImportTaskRecord | None: ...
+
+    def book_identification_complete(self, book_id: str) -> bool: ...
+
+    def book_run_is_current(
+        self,
+        task_id: str,
+        *,
+        execution_version: int,
+        require_latest_request: bool = False,
+    ) -> bool: ...
+
+    def advance_book_resource_cursor(
+        self, task_id: str, *, execution_version: int, resource_id: str
+    ) -> bool: ...
+
+    def advance_book_phase(
+        self, task_id: str, *, execution_version: int, phase: str
+    ) -> bool: ...
+
+    def yield_book_run(
+        self, task_id: str, *, execution_version: int, yielded_at: datetime
+    ) -> BookImportTaskRecord | None: ...
+
+    def finish_book_run(
+        self, task_id: str, *, execution_version: int, finished_at: datetime
+    ) -> BookImportTaskRecord | None: ...
+
+    def fail_book_run(
+        self,
+        task_id: str,
+        *,
+        execution_version: int,
+        error_summary: str,
+        retryable: bool,
+        failed_at: datetime,
+    ) -> BookImportTaskRecord | None: ...
+
+    def continue_book_task(
+        self, task_id: str, *, continued_at: datetime, force: bool = False
+    ) -> tuple[BookImportTaskRecord, bool] | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,14 +329,6 @@ class LibraryImportTaskQueuePort(Protocol):
         """Coalesce resource work; changes during execution survive completion."""
 
     def next_queued(self) -> LibraryImportTaskRecord | None: ...
-
-    def prepare_book_identifications(self) -> tuple[PreparedBookIdentification, ...]:
-        """Read a bounded batch and prepare identification intent before writes."""
-
-    def enqueue_book_identifications(
-        self, prepared: tuple[PreparedBookIdentification, ...]
-    ) -> int:
-        """Persist prepared intent conditionally; the caller owns the transaction."""
 
     def get_task(self, task_id: str) -> LibraryImportTaskRecord | None: ...
 

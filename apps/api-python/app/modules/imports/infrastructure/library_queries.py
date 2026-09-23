@@ -39,7 +39,7 @@ from app.modules.imports.domain.scan_policy import (
 )
 
 _DIRECTORY_FORMATS = ("IMAGE_DIR", "AUDIOBOOK_DIR")
-_WAITING_KINDS = ("IMPORT_RESOURCE", "IDENTIFY_BOOK")
+_WAITING_KINDS = ("IMPORT_BOOK", "IMPORT_RESOURCE", "IDENTIFY_BOOK")
 
 
 def _library_view(row: Library) -> dict[str, object]:
@@ -196,6 +196,24 @@ def _attach_waiting_reasons(db: Session, views: list[dict[str, object]]) -> None
     if not queued:
         return
     library_ids = {str(view.get("libraryId")) for view in queued}
+    book_ids = {
+        str(view["id"]) for view in queued if view.get("kind") == "IMPORT_BOOK"
+    }
+    book_claims = {
+        str(task_id): (str(phase), str(physical_kind))
+        for task_id, phase, physical_kind in db.execute(
+            select(
+                LibraryImportTask.id,
+                LibraryImportTask.phase,
+                LibrarySourceNode.physical_kind,
+            )
+            .join(
+                LibrarySourceNode,
+                LibrarySourceNode.id == LibraryImportTask.source_node_id,
+            )
+            .where(LibraryImportTask.id.in_(book_ids))
+        ).all()
+    } if book_ids else {}
     resource_ids = {
         str(view.get("resourceId"))
         for view in queued
@@ -263,6 +281,12 @@ def _attach_waiting_reasons(db: Session, views: list[dict[str, object]]) -> None
             str(path) if path is not None else ""
         )
     for view in queued:
+        if view.get("kind") == "IMPORT_BOOK" and (
+            book_claims.get(str(view["id"]), (None, None))[0] == "SCAN"
+            or book_claims.get(str(view["id"]), (None, None))[1]
+            == "REGULAR_FILE"
+        ):
+            continue
         if view.get("kind") == "IMPORT_RESOURCE" and str(
             view.get("resourceId") or ""
         ) not in directory_resource_ids:
@@ -344,7 +368,10 @@ def _task_projection_statement():
         )
         .outerjoin(
             LibraryBookMetadata,
-            LibraryBookMetadata.book_id == LibraryReadableResource.book_id,
+            LibraryBookMetadata.book_id
+            == func.coalesce(
+                LibraryImportTask.book_id, LibraryReadableResource.book_id
+            ),
         )
     )
 
@@ -395,6 +422,24 @@ def get_import_task(
     row = db.execute(_task_projection_statement().where(*filters)).one_or_none()
     if row is None:
         return None
+    current_id = row[0].superseded_by_task_id
+    if current_id is not None:
+        current_filters = [
+            LibraryImportTask.id == current_id,
+            LibraryImportTask.library_id == row[0].library_id,
+        ]
+        if context is not None:
+            current_filters.append(
+                library_visibility_predicate(
+                    context,
+                    cast(ColumnElement[str], LibraryImportTask.library_id),
+                )
+            )
+        row = db.execute(
+            _task_projection_statement().where(*current_filters)
+        ).one_or_none()
+        if row is None:
+            return None
     view = _project_task_row(row)
     _attach_waiting_reasons(db, [view])
     return view
@@ -414,7 +459,7 @@ def list_import_tasks_page(
         context,
         cast(ColumnElement[str], LibraryImportTask.library_id),
     )
-    scope_filters = [scope]
+    scope_filters = [scope, LibraryImportTask.superseded_by_task_id.is_(None)]
     if library_id is not None:
         scope_filters.append(LibraryImportTask.library_id == library_id)
     filters = list(scope_filters)

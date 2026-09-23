@@ -1,10 +1,12 @@
 import signal
+import sqlite3
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 
 import pytest
 from sqlalchemy.exc import OperationalError
 
+from app.core.database_errors import is_retryable_sqlite_operation_error
 from app.services import metadata_lookup_queue, organize_scheduler
 from app.worker import main as worker_main
 
@@ -116,14 +118,42 @@ def test_failed_import_recovery_leaves_independent_workers_running(runtime):
 
 def test_transient_recovery_uses_new_context_before_claim(runtime):
     runtime.processor.startup.side_effect = [
-        OperationalError("", {}, RuntimeError("database is locked")),
-        OperationalError("", {}, RuntimeError("database is locked")),
+        OperationalError("", {}, sqlite3.OperationalError("database is locked")),
+        OperationalError("", {}, sqlite3.OperationalError("database is locked")),
         0,
     ]
     worker_main.main()
     assert runtime.processor.startup.call_count == 3
     assert len(runtime.sessions) == 5  # cleanup, moves and three import recovery attempts
     assert runtime.processor.process_once.called
+
+
+def test_import_retry_classifies_only_sqlite_locks_and_marked_budget_timeouts():
+    busy = sqlite3.OperationalError("database is locked")
+    assert is_retryable_sqlite_operation_error(OperationalError("", {}, busy))
+    timeout = sqlite3.OperationalError("interrupted")
+    timeout.time_budget_exceeded = True
+    assert is_retryable_sqlite_operation_error(
+        OperationalError("", {}, timeout)
+    )
+    assert not is_retryable_sqlite_operation_error(
+        OperationalError("", {}, sqlite3.OperationalError("interrupted"))
+    )
+    assert not is_retryable_sqlite_operation_error(
+        OperationalError("", {}, RuntimeError("database is locked"))
+    )
+
+
+def test_import_loop_recovers_after_marked_sql_budget_timeout(runtime):
+    original = sqlite3.OperationalError("interrupted")
+    original.time_budget_exceeded = True
+    runtime.processor.process_once.side_effect = [
+        OperationalError("claim", (), original),
+        "idle",
+    ]
+    worker_main.main()
+    assert runtime.processor.process_once.call_count >= 2
+    assert runtime.processor.recover_after_loop_failure.call_count >= 1
 
 
 def test_loop_and_rollback_and_diagnostics_failure_do_not_escape(runtime, monkeypatch):

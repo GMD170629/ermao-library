@@ -57,7 +57,8 @@ function kindLabel(kind: LibraryImportTask['kind']): string {
     CONTINUE_SOURCE: '扫描来源',
     IMPORT_ASSET: '导入资源资产',
     IMPORT_RESOURCE: '导入阅读资源',
-    IDENTIFY_BOOK: '图书信息识别中'
+    IDENTIFY_BOOK: '图书信息识别中',
+    IMPORT_BOOK: '导入图书'
   }[kind];
 }
 
@@ -101,6 +102,7 @@ function completionLabel(kind: LibraryImportTask['kind']): string {
   if (kind === 'SCAN_LIBRARY') return '书库扫描完成';
   if (kind === 'CONTINUE_SOURCE') return '来源扫描完成';
   if (kind === 'IDENTIFY_BOOK') return '图书信息更新完成';
+  if (kind === 'IMPORT_BOOK') return '图书导入完成';
   return '本项导入完成';
 }
 
