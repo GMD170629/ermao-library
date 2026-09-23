@@ -27,6 +27,7 @@ from app.infrastructure.bounded_inspection import (
 )
 from app.infrastructure.comic_archives import parse_comic_info
 from app.infrastructure.epub_metadata import read_epub_package, read_zip_metadata
+from app.infrastructure.pdf_embedded_metadata import read_pdf_embedded_metadata
 from app.infrastructure.pdf_metadata_reader import StrictMetadataPdfReader
 from app.infrastructure.sidecar_paths import sidecar_opf_paths
 from app.modules.metadata.application.opf import MAX_OPF_BYTES, parse_opf_metadata
@@ -271,14 +272,7 @@ class AnchoredStandardMetadataReader:
                         )
                         if pdf.is_encrypted:
                             raise StandardMetadataError("ENCRYPTED_FILE")
-                        info = pdf.metadata
-                        metadata = PublicationMetadata(
-                            title=str(info.title) if info and info.title else None,
-                            authors=(str(info.author),) if info and info.author else (),
-                            description=str(info.subject)
-                            if info and info.subject
-                            else None,
-                        )
+                        metadata = read_pdf_embedded_metadata(pdf)
                         format_name = "PDF"
                         try:
                             inspect_pdf_write(stream, metadata, frozenset({"title"}))
@@ -287,6 +281,7 @@ class AnchoredStandardMetadataReader:
                             StandardMetadataError,
                             InspectionLimitReached,
                             PdfReadError,
+                            etree.XMLSyntaxError,
                         ) as error:
                             record_exception(
                                 logging.getLogger(__name__),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -10,7 +11,8 @@ from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
-from sqlalchemy import func, select
+from pypdf import PdfWriter
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.bootstrap.readable_resource_pipeline import (
@@ -22,7 +24,12 @@ from app.contracts.local_metadata_snapshot import decode_observations
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
-from app.models.library import Library, ReadableResourceNavigationUnit
+from app.models.library import (
+    Library,
+    LibraryBookFacet,
+    LibraryFacet,
+    ReadableResourceNavigationUnit,
+)
 from app.modules.imports.application.audio_types import (
     AudioChapterMetadata,
     AudioFileMetadata,
@@ -312,6 +319,79 @@ def test_pdf_import_persists_inspected_page_count(tmp_path: Path) -> None:
             metadata = db.scalar(select(LibraryReadableResourceMetadata))
             assert metadata is not None
             assert metadata.page_count == 7
+    finally:
+        engine.dispose()
+
+
+def test_pdf_adapter_upgrade_replaces_persisted_unsplit_tags(tmp_path: Path) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            path = root / "book.pdf"
+            writer = PdfWriter()
+            writer.add_blank_page(width=100, height=100)
+            writer.xmp_metadata = (
+                '<x:xmpmeta xmlns:x="adobe:ns:meta/" '
+                'xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" '
+                'xmlns:dc="http://purl.org/dc/elements/1.1/">'
+                '<rdf:RDF><rdf:Description rdf:about="">'
+                '<dc:subject><rdf:Bag><rdf:li>儿童文学/奇幻/冒险'
+                '</rdf:li></rdf:Bag></dc:subject>'
+                '</rdf:Description></rdf:RDF></x:xmpmeta>'
+            ).encode()
+            writer.write(path)
+            pipeline, _ = _pipeline(db, adapters=RegistryResourceAdapterExecutor())
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            _drain(pipeline)
+
+            resource = db.scalar(select(LibraryReadableResource))
+            asset = db.scalar(select(LibraryResourceAsset))
+            book = db.scalar(select(LibraryBook))
+            assert resource is not None and asset is not None and book is not None
+            assert resource.adapter_version == "2"
+            assert asset.processed_source_version is not None
+            old_candidates = json.loads(asset.local_metadata_candidates)
+            for candidate in old_candidates:
+                if candidate["source"] == "EMBEDDED":
+                    candidate["metadata"]["subjects"] = ["儿童文学/奇幻/冒险"]
+            asset.local_metadata_candidates = json.dumps(old_candidates, ensure_ascii=False)
+            old_version = json.loads(asset.processed_source_version)
+            old_version[3] = "1"
+            asset.processed_source_version = json.dumps(old_version, separators=(",", ":"))
+            resource.adapter_version = "1"
+            db.execute(
+                delete(LibraryBookFacet).where(LibraryBookFacet.book_id == book.id)
+            )
+            old_tag = LibraryFacet(
+                kind="TAG", name="儿童文学/奇幻/冒险",
+                normalized_name="儿童文学/奇幻/冒险",
+            )
+            db.add(old_tag)
+            db.flush()
+            db.add(LibraryBookFacet(book_id=book.id, facet_id=old_tag.id))
+            db.commit()
+
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            _drain(pipeline)
+            db.expire_all()
+            assert db.get(LibraryReadableResource, resource.id).adapter_version == "2"
+            current_asset = db.get(LibraryResourceAsset, asset.id)
+            assert current_asset is not None
+            embedded = next(
+                candidate for candidate in decode_observations(current_asset.local_metadata_candidates)
+                if candidate.source == "EMBEDDED"
+            )
+            assert embedded.metadata.subjects == ("儿童文学", "奇幻", "冒险")
+            tags = db.scalars(
+                select(LibraryFacet.name)
+                .join(LibraryBookFacet, LibraryBookFacet.facet_id == LibraryFacet.id)
+                .where(LibraryBookFacet.book_id == book.id, LibraryFacet.kind == "TAG")
+                .order_by(LibraryBookFacet.sort_order)
+            ).all()
+            assert tags == ["儿童文学", "奇幻", "冒险"]
     finally:
         engine.dispose()
 

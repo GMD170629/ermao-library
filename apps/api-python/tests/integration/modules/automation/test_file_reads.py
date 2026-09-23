@@ -161,6 +161,17 @@ def test_embedded_epub_comic_pdf_read_without_extracting(db_session, tmp_path):
     writer = PdfWriter()
     writer.add_blank_page(width=100, height=100)
     writer.add_metadata({"/Title": "PDF 标题", "/Author": "作者"})
+    writer.xmp_metadata = (
+        '<x:xmpmeta xmlns:x="adobe:ns:meta/" '
+        'xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" '
+        'xmlns:dc="http://purl.org/dc/elements/1.1/">'
+        '<rdf:RDF><rdf:Description rdf:about="">'
+        '<dc:description><rdf:Alt><rdf:li xml:lang="x-default">XMP 简介'
+        '</rdf:li></rdf:Alt></dc:description>'
+        '<dc:subject><rdf:Bag><rdf:li>幻想\\冒险-成长</rdf:li></rdf:Bag></dc:subject>'
+        '<dc:language><rdf:Bag><rdf:li>zh-CN</rdf:li></rdf:Bag></dc:language>'
+        '</rdf:Description></rdf:RDF></x:xmpmeta>'
+    ).encode()
     output = BytesIO()
     writer.write(output)
     pdf.write_bytes(output.getvalue())
@@ -173,8 +184,33 @@ def test_embedded_epub_comic_pdf_read_without_extracting(db_session, tmp_path):
         add_file(db_session, node_id, str(path.relative_to(root)))
         result = catalog.read_file_metadata(access, node_id, "embedded", None)
         assert result["metadata"]["title"] == title
+        if path == pdf:
+            assert result["metadata"]["description"] == "XMP 简介"
+            assert result["metadata"]["subjects"] == ("幻想", "冒险", "成长")
+            assert result["metadata"]["language"] == "zh-CN"
         assert path.read_bytes() == initial[str(path)]
     assert len(list((root / "allowed").iterdir())) == 3
+
+
+def test_pdf_file_read_keeps_info_when_xmp_is_invalid(db_session, tmp_path):
+    access, root = file_access(db_session, tmp_path)
+    path = root / "allowed/bad-xmp.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    writer.add_metadata({"/Title": "Info 标题", "/Author": "Info 作者"})
+    writer.xmp_metadata = b"<rdf:RDF>"
+    writer.write(path)
+    original = path.read_bytes()
+    add_file(db_session, "bad-xmp", "allowed/bad-xmp.pdf")
+
+    result = build_automation_catalog(db_session).read_file_metadata(
+        access, "bad-xmp", "embedded", None
+    )
+
+    assert result["metadata"]["title"] == "Info 标题"
+    assert result["metadata"]["authors"] == ("Info 作者",)
+    assert result["writable_fields"] == ()
+    assert path.read_bytes() == original
 
 
 def test_file_and_parent_symlinks_never_read_outside_the_root(db_session, tmp_path):

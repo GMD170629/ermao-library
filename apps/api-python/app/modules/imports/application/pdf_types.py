@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 
+from app.contracts.publication_metadata import PublicationMetadata
 from app.modules.imports.domain.pdf_content import PdfContentKind, PdfTextEvidence
 
 
@@ -24,14 +24,17 @@ class PdfChapter:
 
 @dataclass(frozen=True, slots=True)
 class PdfInspection:
-    title: str
-    author: str
-    embedded_title: str | None
-    embedded_author: str | None
-    description: str | None
-    tags: tuple[str, ...]
+    embedded_metadata: PublicationMetadata
+    fallback_title: str
     page_count: int | None
     chapters: tuple[PdfChapter, ...]
-    raw_metadata: Mapping[str, object]
     content_kind: PdfContentKind
     text_evidence: PdfTextEvidence
+
+    @property
+    def title(self) -> str:
+        return self.embedded_metadata.title or self.fallback_title
+
+    @property
+    def author(self) -> str:
+        return self.embedded_metadata.author or "未知作者"

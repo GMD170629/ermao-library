@@ -12,7 +12,10 @@ from pypdf.generic import (
 
 from app.contracts.publication_metadata import PublicationMetadata
 from app.modules.metadata.application.standard_files import StandardMetadataError
-from app.modules.metadata.infrastructure.pdf_writeback import write_pdf_metadata
+from app.modules.metadata.infrastructure.pdf_writeback import (
+    inspect_pdf_write,
+    write_pdf_metadata,
+)
 
 
 def source_pdf():
@@ -66,6 +69,34 @@ def test_pdf_increment_preserves_objects_and_syncs_info_xmp():
     assert after.outline[0].title == before.outline[0].title
     assert after.pages[0].mediabox == before.pages[0].mediabox
     assert b"preserve" in after.xmp_metadata.stream.get_data()
+
+
+def test_pdf_write_preview_uses_merged_xmp_value():
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=300)
+    writer.add_metadata({"/Title": "Info 标题", "/Subject": "Info 简介"})
+    writer.xmp_metadata = (
+        '<x:xmpmeta xmlns:x="adobe:ns:meta/" '
+        'xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" '
+        'xmlns:dc="http://purl.org/dc/elements/1.1/">'
+        '<rdf:RDF><rdf:Description rdf:about="">'
+        '<dc:title><rdf:Alt><rdf:li xml:lang="x-default">XMP 标题'
+        '</rdf:li></rdf:Alt></dc:title>'
+        '<dc:description><rdf:Alt><rdf:li xml:lang="x-default">XMP 简介'
+        '</rdf:li></rdf:Alt></dc:description>'
+        '</rdf:Description></rdf:RDF></x:xmpmeta>'
+    ).encode()
+    original = BytesIO()
+    writer.write(original)
+    source = BytesIO(original.getvalue())
+
+    before = inspect_pdf_write(
+        source, PublicationMetadata(title="之后"), frozenset({"title"})
+    )
+
+    assert before.title == "XMP 标题"
+    assert before.description == "XMP 简介"
+    assert source.getvalue() == original.getvalue()
 
 
 @pytest.mark.parametrize("encrypted", [False, True])

@@ -589,14 +589,7 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
         return (
             LocalMetadataCandidate(
                 source="EMBEDDED",
-                metadata=PublicationMetadata(
-                    title=inspection.embedded_title,
-                    authors=(inspection.embedded_author,)
-                    if inspection.embedded_author
-                    else (),
-                    description=inspection.description,
-                    subjects=inspection.tags,
-                ),
+                metadata=inspection.embedded_metadata,
             ),
             inspection.page_count,
             tuple(

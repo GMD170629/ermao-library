@@ -1,6 +1,5 @@
 """Incremental PDF Info/XMP updates with an explicit unchanged-object boundary."""
 
-import zlib
 from io import BytesIO
 from typing import IO, Any, BinaryIO
 
@@ -8,19 +7,23 @@ from lxml import etree  # type: ignore[import-untyped]
 from pypdf import PdfWriter
 from pypdf.generic import (
     DictionaryObject,
-    IndirectObject,
     NameObject,
     StreamObject,
     TextStringObject,
 )
 
 from app.contracts.publication_metadata import PublicationMetadata
+from app.infrastructure.pdf_embedded_metadata import (
+    XMP_BYTES_LIMIT,
+    PdfXmpDecodeError,
+    decode_pdf_xmp_stream,
+    read_pdf_embedded_metadata,
+)
 from app.infrastructure.pdf_metadata_reader import StrictMetadataPdfReader
 from app.modules.metadata.application.standard_files import StandardMetadataError
 
 PDF_WRITABLE_FIELDS = frozenset({"title", "authors", "description"})
 PDF_WRITE_BYTES_LIMIT = 64 * 1024**2
-XMP_BYTES_LIMIT = 2 * 1024**2
 _RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
 _DC = "http://purl.org/dc/elements/1.1/"
 _XML = "http://www.w3.org/XML/1998/namespace"
@@ -28,25 +31,10 @@ _FIELDS = {"title": "/Title", "authors": "/Author", "description": "/Subject"}
 
 
 def _xmp_bytes(value: object) -> bytes | None:
-    if value is None:
-        return None
-    if isinstance(value, IndirectObject):
-        value = value.get_object()
-    if not isinstance(value, StreamObject):
-        raise StandardMetadataError("INVALID_XMP")
-    data = value._data
-    if len(data) > XMP_BYTES_LIMIT:
-        raise StandardMetadataError("XMP_TOO_LARGE")
-    filter = value.get("/Filter")
-    if filter is None:
-        return data
-    if filter not in ("/FlateDecode", ["/FlateDecode"]) or value.get("/DecodeParms"):
-        raise StandardMetadataError("UNSUPPORTED_XMP_ENCODING")
-    decoder = zlib.decompressobj()
-    content = decoder.decompress(data, XMP_BYTES_LIMIT + 1)
-    if len(content) > XMP_BYTES_LIMIT or not decoder.eof or decoder.unused_data:
-        raise StandardMetadataError("INVALID_XMP")
-    return content
+    try:
+        return decode_pdf_xmp_stream(value)
+    except PdfXmpDecodeError as error:
+        raise StandardMetadataError(error.code) from error
 
 
 def patch_xmp(
@@ -156,12 +144,7 @@ def inspect_pdf_write(
         raise StandardMetadataError("UNSUPPORTED_METADATA_FIELD")
     reader, writer = _load(source)
     patch_xmp(_xmp_bytes(writer.root_object.get("/Metadata")), values, fields)
-    info = reader.metadata
-    return PublicationMetadata(
-        title=str(info.title) if info and info.title else None,
-        authors=(str(info.author),) if info and info.author else (),
-        description=str(info.subject) if info and info.subject else None,
-    )
+    return read_pdf_embedded_metadata(reader)
 
 
 def write_pdf_metadata(

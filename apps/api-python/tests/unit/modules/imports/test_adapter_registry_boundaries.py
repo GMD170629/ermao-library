@@ -7,6 +7,7 @@ from zipfile import ZipFile
 
 import pytest
 
+from app.contracts.publication_metadata import PublicationMetadata
 from app.modules.imports.application.audio_types import (
     AudioChapterMetadata,
     AudioFileMetadata,
@@ -166,15 +167,10 @@ def test_registry_preserves_inspected_pdf_page_count(
     adapter = unique_adapter_or_none(match_file_adapters(path.name))
     assert adapter is not None
     inspection = PdfInspection(
-        title="book",
-        author="author",
-        embedded_title=None,
-        embedded_author=None,
-        description=None,
-        tags=(),
+        embedded_metadata=PublicationMetadata(),
+        fallback_title="book",
         page_count=7,
         chapters=(),
-        raw_metadata={},
         content_kind=PdfContentKind.TEXTUAL,
         text_evidence=PdfTextEvidence(
             inspected_pages=1,

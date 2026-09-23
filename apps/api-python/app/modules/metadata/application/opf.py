@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime
 from xml.sax.saxutils import escape, quoteattr
 
 # lxml does not publish PEP 561 metadata. Inputs are constrained at this boundary.
@@ -11,6 +10,7 @@ from lxml import etree  # type: ignore[import-untyped]
 
 from app.contracts.publication_metadata import PublicationMetadata
 from app.contracts.publication_titles import titles_from_local_source
+from app.core.publication_date import validated_publication_date
 
 MAX_OPF_BYTES = 2 * 1024 * 1024
 DC_NAMESPACE = "http://purl.org/dc/elements/1.1/"
@@ -72,23 +72,6 @@ def _float(value: str | None) -> float | None:
         # diagnostics-control-flow: optional OPF numeric/date values remain in unparsed_values when unsupported.
         return None
     return parsed if parsed >= 0 else None
-
-
-def _date(value: str | None) -> str | None:
-    cleaned = _clean(value, limit=191)
-    if not cleaned:
-        return None
-    try:
-        if re.fullmatch(r"\d{4}", cleaned):
-            date.fromisoformat(f"{cleaned}-01-01")
-        elif re.fullmatch(r"\d{4}-\d{2}", cleaned):
-            date.fromisoformat(f"{cleaned}-01")
-        else:
-            datetime.fromisoformat(cleaned)
-    except ValueError:
-        # diagnostics-control-flow: optional OPF numeric/date values remain in unparsed_values when unsupported.
-        return None
-    return cleaned
 
 
 def _isbn(root: etree._Element, identifiers: tuple[str, ...]) -> str | None:
@@ -207,7 +190,7 @@ def parse_opf_metadata(content: bytes) -> PublicationMetadata:
 
     dates = _text_nodes(root, "date")
     date_raw = dates[0] if dates else None
-    published_at = _date(date_raw)
+    published_at = validated_publication_date(_clean(date_raw, limit=191))
     unparsed: list[tuple[str, str]] = []
     if date_raw and published_at is None:
         unparsed.append(("publishedAt", date_raw))

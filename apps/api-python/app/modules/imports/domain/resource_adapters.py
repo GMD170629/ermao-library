@@ -90,7 +90,7 @@ ADAPTER_SPECS: tuple[ResourceAdapterSpec, ...] = (
     ),
     ResourceAdapterSpec(
         adapter_id=ResourceAdapterId.PDF,
-        adapter_version="1",
+        adapter_version="2",
         format_label=ReaderSafetyFormat.PDF.value,
         file_extensions=_format_extensions(_PDF_FORMATS),
         is_directory_adapter=False,
