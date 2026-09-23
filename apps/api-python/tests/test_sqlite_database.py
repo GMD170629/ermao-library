@@ -1288,7 +1288,9 @@ def test_resource_tasks_upgrade_preserves_assets_and_pending_work(
             tasks = db.scalars(
                 select(LibraryImportTask).order_by(LibraryImportTask.id)
             ).all()
-            legacy_tasks = {task.id: task for task in tasks if task.id.startswith("task-")}
+            legacy_tasks = {
+                task.id: task for task in tasks if task.id.startswith("task-")
+            }
             book_tasks = [task for task in tasks if task.kind == "IMPORT_BOOK"]
             assert len(legacy_tasks) == 4
             assert {task.state for task in legacy_tasks.values()} == {
@@ -1302,9 +1304,9 @@ def test_resource_tasks_upgrade_preserves_assets_and_pending_work(
             assert legacy_tasks["task-2"].superseded_by_task_id is not None
             assert legacy_tasks["task-3"].superseded_by_task_id is None
             assert len(book_tasks) == 4
-            assert {
-                task.book_id for task in book_tasks
-            } == {f"book-{index}" for index in range(4)}
+            assert {task.book_id for task in book_tasks} == {
+                f"book-{index}" for index in range(4)
+            }
             assert all(
                 asset.processed_source_version is None
                 for asset in db.scalars(select(LibraryResourceAsset))
@@ -1323,9 +1325,7 @@ def test_resource_tasks_upgrade_preserves_assets_and_pending_work(
                 ContinueImportTask("task-2")
             )
             assert running_result.task_id is None
-            assert failed_result.task_id == legacy_tasks[
-                "task-2"
-            ].superseded_by_task_id
+            assert failed_result.task_id == legacy_tasks["task-2"].superseded_by_task_id
             for _ in range(20):
                 if worker.process_once() == "idle":
                     break
