@@ -147,6 +147,7 @@ class LibraryImportTaskView(HttpContractModel):
         "IMPORT_ASSET",
         "IMPORT_RESOURCE",
         "IDENTIFY_BOOK",
+        "IMPORT_BOOK",
     ]
     library_id: str = Field(alias="libraryId")
     library_name: str | None = Field(default=None, alias="libraryName")

@@ -155,8 +155,10 @@ class FakeLibraries:
 
 
 class FakeSourceNodes:
-    def reconcile_batch(self, *, library_id, parent_id, entries):
-        return tuple(
+    def reconcile_batch(
+        self, *, library_id, parent_id, entries, scan_seen_generation=None
+    ):
+        results = tuple(
             (node, created, created)
             for node, created in (
                 self.insert_if_absent(
@@ -165,6 +167,10 @@ class FakeSourceNodes:
                 for entry in entries
             )
         )
+        if scan_seen_generation is not None:
+            for node, _created, _changed in results:
+                self._seen[node.id] = scan_seen_generation
+        return results
 
     def mark_covered_batch(self, node_ids, *, recognized_at):
         pass
@@ -172,6 +178,7 @@ class FakeSourceNodes:
     def __init__(self) -> None:
         self._by_id: dict[str, SourceNodeRecord] = {}
         self._by_key: dict[tuple[str, str], SourceNodeRecord] = {}
+        self._seen: dict[str, str] = {}
         self._seq = 0
         self.inserts = 0
 
@@ -191,6 +198,25 @@ class FakeSourceNodes:
             for node in self._by_id.values()
             if node.library_id == library_id and node.parent_id == parent_id
         )
+
+    def page_unseen_direct_children(
+        self,
+        *,
+        library_id,
+        parent_id,
+        scan_seen_generation,
+        after_path_key,
+        limit,
+    ):
+        return tuple(
+            node
+            for node in sorted(
+                self.list_direct_children(library_id=library_id, parent_id=parent_id),
+                key=lambda item: item.path_key,
+            )
+            if self._seen.get(node.id) != scan_seen_generation
+            and (after_path_key is None or node.path_key > after_path_key)
+        )[:limit]
 
     def insert_if_absent(
         self,

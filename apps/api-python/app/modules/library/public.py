@@ -19,7 +19,6 @@ from app.modules.library.application.file_move_plans import (
     PrepareFileMovePlan,
 )
 from app.modules.library.application.imported_book_metadata import (
-    BookIdentificationRequests,
     IdentifyImportedBook,
 )
 from app.modules.library.application.metadata_effects import MetadataSideEffectPolicy
@@ -209,7 +208,6 @@ __all__ = [
     "BookCoverSource",
     "BookFacetProjection",
     "BookFacetReferences",
-    "BookIdentificationRequests",
     "BookListProjection",
     "BookListQuery",
     "BookListResult",

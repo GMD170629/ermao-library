@@ -132,3 +132,17 @@ test('parses resource import tasks anchored at a resource with no file role', ()
   assert.equal(parsed.role, null);
   assert.equal(parsed.resourceId, 'resource-1');
 });
+
+test('parses a Book scoped task without a resource role', () => {
+  const parsed = parseLibraryImportTask({
+    ...task,
+    kind: 'IMPORT_BOOK',
+    resourceId: null,
+    resourceTitle: null,
+    role: null,
+    bookTitle: 'Book'
+  });
+  assert.equal(parsed.kind, 'IMPORT_BOOK');
+  assert.equal(parsed.bookTitle, 'Book');
+  assert.equal(parsed.role, null);
+});

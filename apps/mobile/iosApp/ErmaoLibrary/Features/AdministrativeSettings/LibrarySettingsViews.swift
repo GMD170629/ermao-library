@@ -195,7 +195,7 @@ struct ImportTasksView: View {
                     ForEach(filtered(tasks)) { task in
                     VStack(alignment: .leading, spacing: .space1) {
                         Button { navigate(.importTaskDetail(taskID: task.id)) } label: {
-                        HStack { Label(task.filename, systemImage: "doc"); Spacer(); Text(status(task.status)).foregroundStyle(task.status == .failed ? .red : theme.textSecondary) }
+                        HStack { Label(copy.importTaskKind(task.filename), systemImage: "doc"); Spacer(); Text(status(task.status)).foregroundStyle(task.status == .failed ? .red : theme.textSecondary) }
                         }.buttonStyle(.plain)
                         Text("\(copy[.taskSource]): \(task.sourcePath)").font(.caption).foregroundStyle(theme.textSecondary)
                         Text("\(copy[.taskCreated]): \(task.createdAt.administrativeFormatted(locale: copy.locale))").font(.caption).foregroundStyle(theme.textSecondary)

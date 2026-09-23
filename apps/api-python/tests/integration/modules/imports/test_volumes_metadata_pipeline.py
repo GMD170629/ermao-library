@@ -84,9 +84,9 @@ def _write_epub(
 def test_epub_book_title_respects_organization_mode(
     tmp_path: Path, mode: str, title: str
 ) -> None:
-    from app.modules.library.infrastructure.imported_book_metadata import (
-        SqlAlchemyBookIdentificationRequests,
-    )
+    from datetime import UTC, datetime
+
+    from app.modules.imports.application.readable_resource.book_work import BookWork
 
     settings = Settings(storage_root=str(tmp_path / "storage"))
     root = tmp_path / "library"
@@ -128,9 +128,13 @@ def test_epub_book_title_respects_organization_mode(
 
             # Re-identification uses persisted observations, without reimporting.
             metadata.title = "Previous title"
-            SqlAlchemyBookIdentificationRequests(db).request((metadata.book_id,))
+            pipeline.queue.request_book_work(
+                book_id=metadata.book_id,
+                work=BookWork(identify=True),
+                requested_at=datetime.now(UTC),
+            )
             db.commit()
-            assert worker.process_once() == "identified"
+            assert worker.process_once() == "book"
             db.refresh(metadata)
             assert metadata.title == expected_title
             assert metadata.series_name == "春之歌"
@@ -148,6 +152,12 @@ def test_real_volumes_import_keeps_book_stable_and_resource_covers_distinct(
     import_order: tuple[str, str],
     first_cover: str,
 ) -> None:
+    from datetime import UTC, datetime
+
+    from sqlalchemy import delete
+
+    from app.modules.imports.application.readable_resource.book_work import BookWork
+
     settings = Settings(storage_root=str(tmp_path / "storage"))
     engine = create_sqlite_engine(settings.database_path)
     root = tmp_path / "library"
@@ -186,25 +196,44 @@ def test_real_volumes_import_keeps_book_stable_and_resource_covers_distinct(
             pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
             worker = build_readable_resource_worker(pipeline)
             assert worker.process_once() == "scan"
-
-            tasks = db.execute(
-                select(LibraryImportTask, LibrarySourceNode.name)
-                .join(
-                    LibrarySourceNode,
-                    LibrarySourceNode.id == LibraryImportTask.source_node_id,
-                )
-                .where(LibraryImportTask.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE")))
-            ).all()
-            tasks_by_name = {name: task for task, name in tasks}
-            assert set(tasks_by_name) == {"01.epub", "02.epub"}
-            for name in import_order:
-                task = tasks_by_name[name]
-                task.state = "RUNNING"
-                db.commit()
-                assert pipeline.process_import_task.execute(task.id).outcome == "ok"
-
             book = db.scalar(select(LibraryBook))
             assert book is not None
+            resources = db.execute(
+                select(LibraryReadableResource, LibrarySourceNode.name)
+                .join(
+                    LibrarySourceNode,
+                    LibrarySourceNode.id == LibraryReadableResource.source_node_id,
+                )
+                .order_by(LibrarySourceNode.name)
+            ).all()
+            resource_ids = {name: resource.id for resource, name in resources}
+            assert set(resource_ids) == {"01.epub", "02.epub"}
+
+            # Replace the scan's aggregate request with sequential Book work so both
+            # resource orders exercise the single worker path.
+            db.execute(
+                delete(LibraryImportTask).where(
+                    LibraryImportTask.kind == "IMPORT_BOOK",
+                    LibraryImportTask.book_id == book.id,
+                )
+            )
+            db.commit()
+            for name in import_order:
+                pipeline.queue.request_book_work(
+                    book_id=book.id,
+                    work=BookWork(resource_ids=(resource_ids[name],)),
+                    requested_at=datetime.now(UTC),
+                )
+                db.commit()
+                assert worker.process_once() == "book"
+            book_task = db.scalar(
+                select(LibraryImportTask).where(
+                    LibraryImportTask.kind == "IMPORT_BOOK",
+                    LibraryImportTask.book_id == book.id,
+                )
+            )
+            assert book_task is not None and book_task.state == "SUCCEEDED"
+
             book_anchor = db.get(LibrarySourceNode, book.source_node_id)
             assert book_anchor is not None
             assert book_anchor.relative_path == "Series"
@@ -214,7 +243,6 @@ def test_real_volumes_import_keeps_book_stable_and_resource_covers_distinct(
             assert book_metadata.author is None
             assert book_metadata.series_name is None
             assert book_metadata.metadata_quality == 0
-            assert book_metadata.cover_path is None
 
             resources = db.execute(
                 select(
@@ -250,7 +278,6 @@ def test_real_volumes_import_keeps_book_stable_and_resource_covers_distinct(
                 assert (
                     settings.resolved_storage_root / stored_path
                 ).read_bytes() == covers[name]
-            assert all(task.state == "SUCCEEDED" for task in tasks_by_name.values())
             first_metadata = by_name["01.epub"][1]
             if first_cover == "empty":
                 first_metadata.cover_path = None
@@ -261,7 +288,13 @@ def test_real_volumes_import_keeps_book_stable_and_resource_covers_distinct(
                     settings.resolved_storage_root / first_metadata.cover_path
                 ).write_bytes(b"not an image")
             db.commit()
-            assert worker.process_once() == "identified"
+            pipeline.queue.request_book_work(
+                book_id=book.id,
+                work=BookWork(identify=True),
+                requested_at=datetime.now(UTC),
+            )
+            db.commit()
+            assert worker.process_once() == "book"
             db.expire_all()
             assert book_metadata.metadata_state == "COMPLETED"
             assert book_metadata.title == "Series"
@@ -325,26 +358,35 @@ def test_completed_book_uses_configured_priority_and_counts_failed_volumes(
             assert worker.process_once() == "scan"
             if count == 2:
                 (folder / "two.epub").unlink()
+            outcomes = []
             for _ in range(10):
-                if worker.process_once() == "idle":
+                outcome = worker.process_once()
+                if outcome == "idle":
                     break
+                outcomes.append(outcome)
             metadata = db.scalar(select(LibraryBookMetadata))
-            assert metadata is not None and metadata.metadata_state == "COMPLETED"
-            expected = "Path" if path_first or count == 2 else "Embedded"
-            assert metadata.title == expected + " Title"
-            assert metadata.author == expected + " Author"
+            assert metadata is not None
             if count == 2:
-                assert (
-                    db.scalar(
-                        select(LibraryImportTask.id).where(
-                            LibraryImportTask.kind.in_(
-                                ("IMPORT_ASSET", "IMPORT_RESOURCE")
-                            ),
-                            LibraryImportTask.state == "FAILED",
-                        )
+                # The source disappeared after scan committed. The Book task
+                # must retain the incomplete import instead of identifying the
+                # book as successfully completed.
+                assert "failed" in outcomes
+                assert metadata.metadata_state == "WAITING_IMPORT"
+                assert metadata.metadata_pending
+                task = db.scalar(
+                    select(LibraryImportTask).where(
+                        LibraryImportTask.kind == "IMPORT_BOOK",
+                        LibraryImportTask.book_id == metadata.book_id,
                     )
-                    is not None
                 )
+                assert task is not None
+                assert task.state != "SUCCEEDED"
+                assert task.error_summary == "source file is not a regular file"
+            else:
+                assert metadata.metadata_state == "COMPLETED"
+                expected = "Path" if path_first else "Embedded"
+                assert metadata.title == expected + " Title"
+                assert metadata.author == expected + " Author"
 
             metadata.metadata_pending = True
             metadata.protected_fields = '["author"]'
@@ -414,8 +456,7 @@ def test_multi_volume_comic_identifies_bracketed_directory_title_and_author(
                 if outcome == "idle":
                     break
                 outcomes.append(outcome)
-            assert outcomes.count("ok") == 2
-            assert outcomes.count("identified") == 1
+            assert outcomes.count("book") == 1
             metadata = db.scalar(select(LibraryBookMetadata))
             assert metadata is not None
             assert metadata.metadata_state == "COMPLETED"
@@ -508,7 +549,7 @@ def test_manual_identification_reuses_candidates_before_remote_lookup(
             )
             write_opf("Updated OPF Title")
             db.commit()
-            assert worker.process_once() == "identified"
+            assert worker.process_once() == "book"
             db.expire_all()
             metadata = db.get(LibraryBookMetadata, book_id)
             assert metadata.title == "Updated OPF Title"

@@ -8,7 +8,7 @@ from dataclasses import asdict, replace
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
@@ -210,6 +210,27 @@ class SqlAlchemySourceNodeRepository(SourceNodeRepositoryPort):
         rows = self._session.scalars(self._children_query(library_id, parent_id)).all()
         return tuple(self._to_record(row) for row in rows)
 
+    def page_unseen_direct_children(
+        self,
+        *,
+        library_id: str,
+        parent_id: str | None,
+        scan_seen_generation: str,
+        after_path_key: str | None,
+        limit: int,
+    ) -> tuple[SourceNodeRecord, ...]:
+        if not 1 <= limit <= 200:
+            raise ValueError("INVALID_NODE_BATCH_SIZE")
+        query = self._children_query(library_id, parent_id).where(
+            LibrarySourceNode.scan_seen_generation.is_distinct_from(
+                scan_seen_generation
+            )
+        )
+        if after_path_key is not None:
+            query = query.where(LibrarySourceNode.path_key > after_path_key)
+        rows = self._session.scalars(query.limit(limit)).all()
+        return tuple(self._to_record(row) for row in rows)
+
     def page_children(
         self, library_id: str, parent_id: str | None, page: int, page_size: int
     ) -> SourceNodePage:
@@ -247,6 +268,7 @@ class SqlAlchemySourceNodeRepository(SourceNodeRepositoryPort):
         library_id: str,
         parent_id: str | None,
         entries: tuple[ObservedSourceEntry, ...],
+        scan_seen_generation: str | None = None,
     ) -> tuple[tuple[SourceNodeRecord, bool, bool], ...]:
         if not entries or len(entries) > 200:
             raise ValueError("INVALID_NODE_BATCH_SIZE")
@@ -291,6 +313,10 @@ class SqlAlchemySourceNodeRepository(SourceNodeRepositoryPort):
                 )
             row = existing.get(entry.relative_path.path_key)
             if row is not None and row.relative_path != entry.relative_path.value:
+                if scan_seen_generation is not None:
+                    changes.append(
+                        {"id": row.id, "scan_seen_generation": scan_seen_generation}
+                    )
                 result.append((self._to_record(row), False, False))
                 continue
             if row is not None and row.physical_kind != entry.physical_kind.value:
@@ -317,6 +343,7 @@ class SqlAlchemySourceNodeRepository(SourceNodeRepositoryPort):
                     observed_size_bytes=entry.observed_size_bytes,
                     observed_mtime_ns=entry.observed_mtime_ns,
                     observed_at=entry.observed_at,
+                    scan_seen_generation=scan_seen_generation,
                 )
                 additions.append(
                     {
@@ -333,18 +360,24 @@ class SqlAlchemySourceNodeRepository(SourceNodeRepositoryPort):
                             "observed_size_bytes",
                             "observed_mtime_ns",
                             "observed_at",
+                            "scan_seen_generation",
                         )
                     }
                 )
                 existing[row.path_key] = row
             elif changed:
+                values = {
+                    "id": row.id,
+                    "observed_size_bytes": entry.observed_size_bytes,
+                    "observed_mtime_ns": entry.observed_mtime_ns,
+                    "observed_at": entry.observed_at,
+                }
+                if scan_seen_generation is not None:
+                    values["scan_seen_generation"] = scan_seen_generation
+                changes.append(values)
+            elif scan_seen_generation is not None:
                 changes.append(
-                    {
-                        "id": row.id,
-                        "observed_size_bytes": entry.observed_size_bytes,
-                        "observed_mtime_ns": entry.observed_mtime_ns,
-                        "observed_at": entry.observed_at,
-                    }
+                    {"id": row.id, "scan_seen_generation": scan_seen_generation}
                 )
             record = self._to_record(row)
             if changed and not created:
@@ -614,6 +647,8 @@ class SqlAlchemySourceNodeRepository(SourceNodeRepositoryPort):
 
 
 class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
+    _NAVIGATION_INSERT_BATCH_SIZE = 50
+
     def source_targets_for_books(
         self, book_ids: Sequence[str]
     ) -> tuple[ManagedBookSourceTarget, ...]:
@@ -705,6 +740,38 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
     def get_resource(self, resource_id: str) -> ReadableResourceRecord | None:
         row = self._session.get(LibraryReadableResource, resource_id)
         return None if row is None else self._to_resource(row)
+
+    def page_book_resources(
+        self, *, book_id: str, after_id: str | None, limit: int
+    ) -> tuple[ReadableResourceRecord, ...]:
+        if not 1 <= limit <= 128:
+            raise ValueError("INVALID_RESOURCE_BATCH_SIZE")
+        query = select(LibraryReadableResource).where(
+            LibraryReadableResource.book_id == book_id
+        )
+        if after_id is not None:
+            query = query.where(LibraryReadableResource.id > after_id)
+        rows = self._session.scalars(
+            query.order_by(LibraryReadableResource.id).limit(limit)
+        ).all()
+        return tuple(self._to_resource(row) for row in rows)
+
+    def resource_matches_owner(
+        self,
+        *,
+        resource_id: str,
+        book_id: str,
+        library_id: str,
+        source_node_id: str,
+    ) -> bool:
+        return self._session.scalar(
+            select(LibraryReadableResource.id).where(
+                LibraryReadableResource.id == resource_id,
+                LibraryReadableResource.book_id == book_id,
+                LibraryReadableResource.library_id == library_id,
+                LibraryReadableResource.source_node_id == source_node_id,
+            )
+        ) is not None
 
     def create_pending_resource(
         self,
@@ -1590,29 +1657,33 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             )
         )
         base_sort_order = 0 if current_max is None else int(current_max) + 1
-        self._session.add_all(
-            [
-                ReadableResourceNavigationUnit(
-                    id=cuid(),
-                    resource_id=resource_id,
-                    asset_id=asset_id,
-                    unit_type=unit.unit_type,
-                    title=unit.title,
-                    href=unit.href,
-                    media_type=unit.media_type,
-                    sort_order=base_sort_order + unit.sort_order,
-                    width=unit.width,
-                    height=unit.height,
-                    size=unit.size,
-                    start_ms=unit.start_ms,
-                    end_ms=unit.end_ms,
-                    duration_ms=unit.duration_ms,
-                    metadata_json="{}",
+        for offset in range(0, len(units), self._NAVIGATION_INSERT_BATCH_SIZE):
+            batch = units[offset : offset + self._NAVIGATION_INSERT_BATCH_SIZE]
+            self._session.execute(
+                insert(ReadableResourceNavigationUnit).values(
+                    [
+                        {
+                            "id": cuid(),
+                            "resource_id": resource_id,
+                            "asset_id": asset_id,
+                            "unit_type": unit.unit_type,
+                            "title": unit.title,
+                            "href": unit.href,
+                            "media_type": unit.media_type,
+                            "sort_order": base_sort_order + unit.sort_order,
+                            "width": unit.width,
+                            "height": unit.height,
+                            "size": unit.size,
+                            "start_ms": unit.start_ms,
+                            "end_ms": unit.end_ms,
+                            "duration_ms": unit.duration_ms,
+                            "metadata_json": "{}",
+                        }
+                        for unit in batch
+                    ]
                 )
-                for unit in units
-            ]
-        )
-        self._session.flush()
+            )
+            # Fifteen values per row keep each statement below 900 parameters.
 
     def find_outermost_directory_resource(
         self,

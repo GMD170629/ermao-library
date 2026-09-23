@@ -30,6 +30,7 @@ from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryReadableResource,
     LibraryResourceAsset,
 )
+from tests.support.import_fixtures import write_epub_metadata_fixture
 
 _ONE_PIXEL_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
@@ -110,7 +111,7 @@ def test_scan_import_comic_archive_is_readable_end_to_end(
     assert asset.import_state == "READY"
     task = db_session.scalar(
         select(LibraryImportTask).where(
-            LibraryImportTask.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE"))
+            LibraryImportTask.kind == "IMPORT_BOOK"
         )
     )
     assert task is not None
@@ -262,6 +263,7 @@ def test_mixed_book_resources_scan_worker_and_reader_bootstrap(
     with Image.new("RGB", (32, 32), "red") as page:
         page.save(work / "single.pdf", format="PDF")
     (work / "story.txt").write_text("第一章\n\n这是一个真实的文本阅读样例。\n" * 20)
+    write_epub_metadata_fixture(work / "story.epub", "Story", "Author")
     library.root_path = str(root)
     library.organization_mode = "VOLUMES"
     db_session.commit()
@@ -271,27 +273,26 @@ def test_mixed_book_resources_scan_worker_and_reader_bootstrap(
     assert worker.process_once() == "scan"
     book = db_session.scalar(select(LibraryBook))
     resources = db_session.scalars(select(LibraryReadableResource)).all()
-    assert len(resources) == 4 and {r.book_id for r in resources} == {book.id}
+    assert len(resources) == 5 and {r.book_id for r in resources} == {book.id}
     assert not db_session.scalars(
         select(LibraryImportTask).where(LibraryImportTask.kind == "IDENTIFY_BOOK")
     ).all()
-    for _ in resources:
-        assert worker.process_once() == "ok"
-    assert worker.process_once() == "identified"
+    assert worker.process_once() == "book"
     assert worker.process_once() == "idle"
     db_session.expire_all()
     assert db_session.get(LibraryBookMetadata, book.id).metadata_state == "COMPLETED"
     assert all(r.import_state == "READY" for r in resources)
-    assert len(db_session.scalars(select(LibraryResourceAsset)).all()) == 6
+    assert len(db_session.scalars(select(LibraryResourceAsset)).all()) == 7
     _login(client, db_session)
     response = client.get(f"/api/books/{book.id}")
     assert response.status_code == 200, response.text
-    assert len(response.json()["data"]["book"]["resources"]) == 4
+    assert len(response.json()["data"]["book"]["resources"]) == 5
     expected = {
         "IMAGE_DIR": "comic",
         "AUDIOBOOK_DIR": "audio",
         "PDF": "pdf",
         "TXT": "reflowable",
+        "EPUB": "reflowable",
     }
     for resource in resources:
         response = client.get(f"/api/reader/v5/resources/{resource.id}/bootstrap")
@@ -299,7 +300,7 @@ def test_mixed_book_resources_scan_worker_and_reader_bootstrap(
         data = response.json()["data"]
         assert data["readerType"] == expected[resource.format]
         assert data["assets"]
-        assert len(data["availableResources"]) == 4
+        assert len(data["availableResources"]) == 5
         for asset in data["assets"]:
             content = client.get(asset["url"])
             assert content.status_code == 200, content.text

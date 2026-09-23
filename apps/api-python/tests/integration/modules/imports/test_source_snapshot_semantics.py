@@ -56,6 +56,9 @@ from app.modules.imports.domain.scan_policy import (
     ScanScope,
     decode_scan_scopes,
 )
+from app.modules.imports.infrastructure.readable_resource.adapter_registry import (
+    RegistryResourceAdapterExecutor,
+)
 from app.modules.imports.infrastructure.readable_resource.support import (
     InMemorySidecarWriteback,
     StructuredPipelineLog,
@@ -108,6 +111,9 @@ def _add_library(
 
 
 class StubOkAdapter(ResourceAdapterExecutorPort):
+    def inspect_resource_metadata(self, **kwargs):
+        return RegistryResourceAdapterExecutor().inspect_resource_metadata(**kwargs)
+
     def parse_file(
         self,
         *,
@@ -330,7 +336,7 @@ def test_failed_directory_preserves_data_while_other_scope_updates(
                     LibraryImportTask.source_node_id == LibrarySourceNode.id,
                 )
                 .where(
-                    LibraryImportTask.kind == "IMPORT_RESOURCE",
+                    LibraryImportTask.kind == "IMPORT_BOOK",
                     LibrarySourceNode.relative_path == "good/new.epub",
                 )
             ).all()
@@ -493,7 +499,7 @@ def test_observed_snapshot_refreshes_on_content_change(tmp_path: Path) -> None:
             asset = db.scalar(select(LibraryResourceAsset))
             task = db.scalar(
                 select(LibraryImportTask).where(
-                    LibraryImportTask.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE")),
+                    LibraryImportTask.kind == "IMPORT_BOOK",
                     LibraryImportTask.state == "SUCCEEDED",
                 )
             )
@@ -551,7 +557,7 @@ def test_direct_file_rescan_refreshes_observation_and_reimports_asset(
             asset = db.scalar(select(LibraryResourceAsset))
             asset_task = db.scalar(
                 select(LibraryImportTask).where(
-                    LibraryImportTask.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE"))
+                    LibraryImportTask.kind == "IMPORT_BOOK"
                 )
             )
             assert node is not None and asset is not None and asset_task is not None
@@ -579,7 +585,7 @@ def test_direct_file_rescan_refreshes_observation_and_reimports_asset(
             db.refresh(node)
             db.refresh(asset_task)
 
-            assert outcomes == ["continue_source", "ok", "identified"]
+            assert outcomes == ["continue_source", "book"]
             assert (node.id, asset.id, asset_task.id) == original_ids
             assert node.observed_size_bytes == len(b"v2-longer")
             assert node.observed_mtime_ns == 2_000_000_000
@@ -605,7 +611,7 @@ def test_automatic_scan_preserves_missing_disk_file(tmp_path: Path) -> None:
             asset = db.scalar(select(LibraryResourceAsset))
             task = db.scalar(
                 select(LibraryImportTask).where(
-                    LibraryImportTask.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE"))
+                    LibraryImportTask.kind == "IMPORT_BOOK"
                 )
             )
             assert node and resource and asset and task

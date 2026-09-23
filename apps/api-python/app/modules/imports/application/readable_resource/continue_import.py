@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.modules.imports.application.readable_resource.ports import (
+    BookImportTaskQueuePort,
+    ClockPort,
     LibraryImportTaskQueuePort,
     PipelineLogPort,
     SourceNodeRepositoryPort,
@@ -54,12 +56,16 @@ class ContinueImport:
         uow: UnitOfWorkPort,
         log: PipelineLogPort,
         request_library_scan: RequestLibraryScan | None = None,
+        book_queue: BookImportTaskQueuePort | None = None,
+        clock: ClockPort | None = None,
     ) -> None:
         self._source_nodes = source_nodes
         self._queue = queue
         self._uow = uow
         self._log = log
         self._request_library_scan = request_library_scan
+        self._book_queue = book_queue
+        self._clock = clock
 
     def execute(
         self,
@@ -115,23 +121,47 @@ class ContinueImport:
     def _continue_task(
         self, task_id: str, *, force: bool = False
     ) -> ContinueImportResult:
+        book_result = None
         with self._uow.transaction():
-            existing = self._queue.get_task(task_id)
-            if existing is None or existing.source_node_id is None:
-                raise LookupError(task_id)
-            if force:
-                if existing.kind != "IMPORT_RESOURCE" or existing.resource_id is None:
-                    raise ValueError("FORCE_REQUIRES_RESOURCE_TASK")
-                requested = self._queue.request_import_resource(
-                    library_id=existing.library_id,
-                    resource_id=existing.resource_id,
-                    source_node_id=existing.source_node_id,
-                    force=True,
+            if self._book_queue is not None:
+                if self._clock is None:
+                    raise RuntimeError("Book task clock is not configured")
+                book_result = self._book_queue.continue_book_task(
+                    task_id, continued_at=self._clock.now(), force=force
                 )
-                assert requested is not None
-                task, requeued = requested, True
-            else:
-                task, requeued = self._queue.requeue_failed_task(task_id)
+            if book_result is None:
+                existing = self._queue.get_task(task_id)
+                if existing is None or existing.source_node_id is None:
+                    raise LookupError(task_id)
+                if force:
+                    if existing.kind != "IMPORT_RESOURCE" or existing.resource_id is None:
+                        raise ValueError("FORCE_REQUIRES_RESOURCE_TASK")
+                    requested = self._queue.request_import_resource(
+                        library_id=existing.library_id,
+                        resource_id=existing.resource_id,
+                        source_node_id=existing.source_node_id,
+                        force=True,
+                    )
+                    assert requested is not None
+                    task, requeued = requested, True
+                else:
+                    task, requeued = self._queue.requeue_failed_task(task_id)
+        if book_result is not None:
+            book_task, requeued = book_result
+            self._log.emit(
+                "continue_import.task",
+                library_id=book_task.library_id,
+                task_id=book_task.id,
+                stage="continue",
+                outcome="requeued" if requeued else "not_failed",
+            )
+            return ContinueImportResult(
+                library_id=book_task.library_id,
+                source_node_id=book_task.source_node_id,
+                requeued_failed=1 if requeued else 0,
+                enqueued_scan=False,
+                task_id=book_task.id if requeued else None,
+            )
         self._log.emit(
             "continue_import.task",
             library_id=task.library_id,

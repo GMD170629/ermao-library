@@ -8,10 +8,10 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.modules.library.infrastructure.imported_book_metadata import (
-    SqlAlchemyBookIdentificationRequests,
+from app.modules.imports.application.readable_resource.book_work import BookWork
+from app.modules.imports.infrastructure.readable_resource.task_queue import (
+    SqlAlchemyLibraryImportTaskQueue,
 )
-from app.modules.library.public import BookIdentificationRequests
 from app.modules.organize.application.dto import (
     PreparedOrganizeJobEnqueue,
     PreparedOrganizePolicyUpdate,
@@ -46,6 +46,17 @@ from app.modules.organize.infrastructure.runs import (
 from app.modules.organize.public import OrganizeWriteTransaction
 
 
+def _request_local_identification(db: Session, book_ids: tuple[str, ...]) -> None:
+    queue = SqlAlchemyLibraryImportTaskQueue(db)
+    requested_at = datetime.now(UTC)
+    for book_id in book_ids:
+        queue.request_book_work(
+            book_id=book_id,
+            work=BookWork(identify=True),
+            requested_at=requested_at,
+        )
+
+
 def update_organize_policy_command(
     db: Session, prepared: PreparedOrganizePolicyUpdate
 ) -> dict[str, Any]:
@@ -75,13 +86,12 @@ def create_organize_run_command(
         timestamp=timestamp,
         job_plans=job_plans,
     )
-    identification: BookIdentificationRequests = SqlAlchemyBookIdentificationRequests(
-        db
-    )
     with OrganizeWriteTransaction(db):
         queued_count = organize_jobs.execute_organize_run_write(db, prepared_write)
         if trigger == "MANUAL" and queued_count:
-            identification.request(organize_jobs.book_ids_for_run(db, run_id))
+            _request_local_identification(
+                db, organize_jobs.book_ids_for_run(db, run_id)
+            )
     return queued_count
 
 
@@ -114,9 +124,6 @@ def recognize_organize_job_command(
     run_id: str | None,
     timestamp: datetime,
 ) -> None:
-    identification: BookIdentificationRequests = SqlAlchemyBookIdentificationRequests(
-        db
-    )
     prepared_task_ids = list(task_ids)
     prepared_task = organize_jobs.prepare_lookup_task_row(
         task_id=task_id,
@@ -130,7 +137,7 @@ def recognize_organize_job_command(
         organize_jobs.clear_job_recognition_artifacts(
             db, job_id=job_id, task_ids=prepared_task_ids
         )
-        identification.request((book_id,))
+        _request_local_identification(db, (book_id,))
         organize_jobs.insert_prepared_lookup_task(db, prepared_task)
         organize_jobs.reset_job_for_recognition(db, job_id=job_id, now=timestamp)
         organize_jobs.mark_book_curation_state(

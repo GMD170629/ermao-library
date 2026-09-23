@@ -155,6 +155,9 @@ class LibrarySourceNode(Base):
     observed_at: Mapped[datetime] = mapped_column(
         "observedAt", TimestampMilliseconds(), nullable=False
     )
+    scan_seen_generation: Mapped[str | None] = mapped_column(
+        "scanSeenGeneration", String(64), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         "createdAt",
         TimestampMilliseconds(),

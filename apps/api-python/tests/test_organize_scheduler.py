@@ -279,9 +279,6 @@ def test_manual_wait_does_not_block_other_books_and_local_failure_stops_remote(
     db_session, test_settings, monkeypatch
 ):
     from app.models import LibraryImportTask
-    from app.modules.imports.infrastructure.readable_resource.book_completion import (
-        BookImportCompletion,
-    )
     from app.services import metadata_lookup_queue as lookup
 
     waiting, _ = _seed_book(db_session, "waiting")
@@ -289,21 +286,21 @@ def test_manual_wait_does_not_block_other_books_and_local_failure_stops_remote(
     create_organize_run(db_session, book_ids=[waiting.id])
     create_organize_run(db_session, book_ids=[ready.id])
     waiting_id, ready_id = waiting.id, ready.id
-    completion = BookImportCompletion(db_session)
-    completion.persist_ready(completion.prepare_ready())
-    db_session.commit()
-    completion.persist_ready(completion.prepare_ready())
-    db_session.commit()
     assert (
         len(
             db_session.scalars(
                 select(LibraryImportTask).where(
-                    LibraryImportTask.kind == "IDENTIFY_BOOK"
+                    LibraryImportTask.kind == "IMPORT_BOOK"
                 )
             ).all()
         )
         == 2
     )
+    assert db_session.scalar(
+        select(LibraryImportTask.id).where(
+            LibraryImportTask.kind == "IDENTIFY_BOOK"
+        )
+    ) is None
     metadata = db_session.get(LibraryBookMetadata, ready_id)
     metadata.metadata_pending = False
     metadata.metadata_state = "FAILED"

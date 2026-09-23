@@ -26,7 +26,7 @@ enum AdministrativeCopyKey: String, CaseIterable, Sendable {
     case includeSubdirectories, autoImportNewFiles, deleteSource, deleteSourceTitle
     case deleteSourceMessage, selectServerDirectory, parentDirectory, chooseDirectory
     case scanning, cancelScan, lastScan, scanFileCount
-    case importTasksTitle, queueNormal, taskSource, taskCreated, importLibrary, importResource, importSourcePath, importBook, parsing, pending, cancelled
+    case importTasksTitle, queueNormal, taskSource, taskCreated, importLibrary, importResource, importSourcePath, importBook, importBookTask, parsing, pending, cancelled
     case importTaskDetail, importTaskLogs, scanJobs, directoriesScanned, filesScanned
     case candidatesFound, queuedCount, errorCount
     case deleteImportTitle, deleteImportMessage, rescanAll
@@ -96,6 +96,10 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
 
     subscript(_ key: AdministrativeCopyKey) -> String {
         values[key] ?? key.rawValue
+    }
+
+    func importTaskKind(_ kind: String) -> String {
+        kind == "IMPORT_BOOK" ? self[.importBookTask] : kind
     }
 
     static func hasCompleteParity() -> Bool {
@@ -172,7 +176,7 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .importTaskDetail: "Import Task Detail", .importTaskLogs: "Task Logs", .scanJobs: "Directory Scans",
         .directoriesScanned: "Directories Scanned", .filesScanned: "Files Scanned",
         .candidatesFound: "Candidates Found", .queuedCount: "Queued", .errorCount: "Errors",
-        .queueNormal: "Queue operating normally", .taskSource: "Source", .taskCreated: "Created", .importLibrary: "Library", .importResource: "Resource", .importSourcePath: "Source relative path", .importBook: "Book",
+        .queueNormal: "Queue operating normally", .taskSource: "Source", .taskCreated: "Created", .importLibrary: "Library", .importResource: "Resource", .importSourcePath: "Source relative path", .importBook: "Book", .importBookTask: "Import book",
         .parsing: "Parsing", .pending: "Pending", .cancelled: "Cancelled",
         .deleteImportTitle: "Delete this import task?", .deleteImportMessage: "The task record will be removed.",
         .rescanAll: "Rescan All Sources", .importPreferencesTitle: "Import Preferences",
@@ -316,7 +320,7 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .importTaskDetail: "导入任务详情", .importTaskLogs: "任务日志", .scanJobs: "目录扫描任务",
         .directoriesScanned: "已扫描目录", .filesScanned: "已扫描文件", .candidatesFound: "发现候选",
         .queuedCount: "已入队", .errorCount: "错误数",
-        .importTasksTitle: "导入任务", .queueNormal: "队列正常", .taskSource: "来源", .taskCreated: "创建于", .importLibrary: "书库", .importResource: "资源", .importSourcePath: "来源相对路径", .importBook: "作品",
+        .importTasksTitle: "导入任务", .queueNormal: "队列正常", .taskSource: "来源", .taskCreated: "创建于", .importLibrary: "书库", .importResource: "资源", .importSourcePath: "来源相对路径", .importBook: "作品", .importBookTask: "导入图书",
         .parsing: "解析中", .pending: "待处理", .cancelled: "已取消", .deleteImportTitle: "删除此导入任务？",
         .deleteImportMessage: "任务记录将被移除。", .rescanAll: "重新扫描全部来源", .importPreferencesTitle: "导入偏好",
         .ignoreHiddenFiles: "忽略隐藏文件", .ignorePatterns: "忽略规则", .minimumFileSize: "最小文件大小",

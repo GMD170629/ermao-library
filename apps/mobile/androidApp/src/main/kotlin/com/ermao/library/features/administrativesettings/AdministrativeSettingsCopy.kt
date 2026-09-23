@@ -18,6 +18,7 @@ enum class AdministrativeCopy(
     ImportTaskSource("来源", "Source"),
     ImportTaskSourcePath("来源相对路径", "Source relative path"),
     ImportTaskBook("作品", "Book"),
+    ImportBookTask("导入图书", "Import book"),
     ScanJobs("扫描任务", "Scan jobs"),
     ImportPreferences("导入偏好", "Import preferences"),
     SmartOrganization("智能整理", "Smart organization"),

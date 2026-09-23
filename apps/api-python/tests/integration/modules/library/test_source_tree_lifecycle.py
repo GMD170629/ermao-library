@@ -6,7 +6,8 @@ import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import func, select
+import pytest
+from sqlalchemy import event, func, select
 from sqlalchemy.orm import Session
 
 from app.bootstrap.readable_resource_pipeline import (
@@ -16,7 +17,7 @@ from app.bootstrap.readable_resource_pipeline import (
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
-from app.models.library import Library
+from app.models.library import Library, ReadableResourceNavigationUnit
 from app.modules.imports.application.readable_resource.continue_import import (
     ContinueLibraryImport,
 )
@@ -30,7 +31,13 @@ from app.modules.imports.domain.resource_adapters import ResourceAdapterSpec
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
 )
+from app.modules.library.application.source_tree_ports import (
+    ResourceNavigationUnitInput,
+)
 from app.modules.library.domain.readable_resource_states import AssetRole
+from app.modules.library.infrastructure.persistence.source_tree_repository import (
+    SqlAlchemyBookResourceRepository,
+)
 from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryBook,
     LibraryBookMetadata,
@@ -385,6 +392,105 @@ def test_organization_mode_switch_clears_target_topology_and_queues_fresh_scan(
             library2 = db.get(Library, "lib-1")
             assert library2 is not None
             assert library2.organization_mode == "FLAT"
+    finally:
+        engine.dispose()
+
+
+def test_navigation_replacement_batches_large_input_and_rolls_back_on_failure(
+    tmp_path: Path,
+) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            _seed_full_target_topology(db, root)
+            db.commit()
+            repository = SqlAlchemyBookResourceRepository(db)
+
+            units = tuple(
+                ResourceNavigationUnitInput(
+                    unit_type="CHAPTER",
+                    title=f"Chapter {index}",
+                    href=f"chapter-{index}.xhtml",
+                    media_type="application/xhtml+xml",
+                    sort_order=index,
+                )
+                for index in range(125)
+            )
+            statement_parameters: list[int] = []
+
+            def count_navigation_inserts(
+                _connection: object,
+                _cursor: object,
+                statement: str,
+                parameters: tuple[object, ...],
+                _context: object,
+                _executemany: bool,
+            ) -> None:
+                if statement.startswith('INSERT INTO "ReadableResourceNavigationUnit"'):
+                    statement_parameters.append(len(parameters))
+
+            event.listen(engine, "before_cursor_execute", count_navigation_inserts)
+            try:
+                repository.replace_navigation_units(
+                    resource_id="res-album", asset_id="asset-track", units=units
+                )
+                db.commit()
+            finally:
+                event.remove(engine, "before_cursor_execute", count_navigation_inserts)
+
+            assert len(statement_parameters) == 3
+            assert max(statement_parameters) <= 900
+
+            rows = db.scalars(
+                select(ReadableResourceNavigationUnit).where(
+                    ReadableResourceNavigationUnit.asset_id == "asset-track"
+                ).order_by(ReadableResourceNavigationUnit.sort_order)
+            ).all()
+            assert len(rows) == 125
+            assert [row.title for row in rows] == [unit.title for unit in units]
+            original_ids = {row.id for row in rows}
+
+            insert_count = 0
+
+            def fail_second_batch_insert(
+                _connection: object,
+                _cursor: object,
+                statement: str,
+                _parameters: object,
+                _context: object,
+                _executemany: bool,
+            ) -> None:
+                nonlocal insert_count
+                if not statement.startswith('INSERT INTO "ReadableResourceNavigationUnit"'):
+                    return
+                insert_count += 1
+                if insert_count == 2:
+                    raise RuntimeError("injected navigation batch failure")
+
+            event.listen(engine, "before_cursor_execute", fail_second_batch_insert)
+            try:
+                with pytest.raises(
+                    RuntimeError, match="injected navigation batch failure"
+                ):
+                    repository.replace_navigation_units(
+                        resource_id="res-album",
+                        asset_id="asset-track",
+                        units=units[:100],
+                    )
+            finally:
+                event.remove(engine, "before_cursor_execute", fail_second_batch_insert)
+            db.rollback()
+
+            restored_ids = set(
+                db.scalars(
+                    select(ReadableResourceNavigationUnit.id).where(
+                        ReadableResourceNavigationUnit.asset_id == "asset-track"
+                    )
+                ).all()
+            )
+            assert restored_ids == original_ids
     finally:
         engine.dispose()
 

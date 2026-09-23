@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,13 +11,22 @@ from typing import cast
 
 import pytest
 
+from app.modules.imports.application.readable_resource.book_work import (
+    BookWork,
+    BookWorkState,
+)
 from app.modules.imports.application.readable_resource.continue_import import (
     ContinueImport,
     ContinueImportTask,
 )
 from app.modules.imports.application.readable_resource.ports import (
+    BookImportTaskRecord,
     FileParseResult,
     LibraryImportTaskRecord,
+)
+from app.modules.imports.application.readable_resource.process_book_resources import (
+    BookResourceBatchResult,
+    ProcessBookResources,
 )
 from app.modules.imports.application.readable_resource.process_import_task import (
     ProcessReadableResourceImportTask,
@@ -142,6 +151,114 @@ class FakeQueue:
         self._state = "QUEUED"
         self._error_summary = None
         return self._snapshot(), True
+
+
+class FakeBookQueue:
+    def __init__(self, legacy_queue: FakeQueue) -> None:
+        self._legacy_queue = legacy_queue
+        self.cancelled = False
+        self.failures: list[tuple[str, str]] = []
+        self.finished = 0
+        self._task = BookImportTaskRecord(
+            id="task-1",
+            book_id="book-1",
+            library_id="lib-1",
+            source_node_id="node-1",
+            state="RUNNING",
+            phase="RESOURCES",
+            request_version=1,
+            execution_version=1,
+            work=BookWorkState(active=BookWork(resource_ids=("res-1",))),
+            resource_cursor=None,
+            retry_count=0,
+            next_attempt_at=FixedClock().now(),
+            error_summary=None,
+        )
+
+    def claim_next_book(self, *, started_at: datetime) -> BookImportTaskRecord | None:
+        del started_at
+        return None if self.cancelled else self._task
+
+    def get_book_task(self, task_id: str) -> BookImportTaskRecord | None:
+        return self._task if task_id == self._task.id and not self.cancelled else None
+
+    def book_run_is_current(
+        self, task_id: str, *, execution_version: int, **kwargs: object
+    ) -> bool:
+        del kwargs
+        return (
+            not self.cancelled
+            and task_id == self._task.id
+            and execution_version == self._task.execution_version
+        )
+
+    def advance_book_resource_cursor(self, **kwargs: object) -> bool:
+        del kwargs
+        return True
+
+    def advance_book_phase(self, **kwargs: object) -> bool:
+        del kwargs
+        return True
+
+    def yield_book_run(self, *args: object, **kwargs: object) -> None:
+        del args, kwargs
+
+    def finish_book_run(
+        self, *args: object, **kwargs: object
+    ) -> BookImportTaskRecord | None:
+        del args, kwargs
+        if self.cancelled:
+            return None
+        self.finished += 1
+        self._legacy_queue._state = "SUCCEEDED"
+        return self._task
+
+    def fail_book_run(
+        self,
+        task_id: str,
+        *,
+        execution_version: int,
+        error_summary: str,
+        retryable: bool,
+        failed_at: datetime,
+    ) -> BookImportTaskRecord | None:
+        del execution_version, retryable, failed_at
+        self.failures.append((task_id, error_summary))
+        self._legacy_queue._state = "FAILED"
+        self._legacy_queue._error_summary = error_summary
+        return self._task
+
+    def cancel(self) -> None:
+        self.cancelled = True
+        self._legacy_queue.cancel()
+
+
+class FakeBookResources:
+    def __init__(
+        self,
+        *,
+        outcome: str | None = None,
+        error: Exception | None = None,
+        on_execute: Callable[[], None] | None = None,
+    ) -> None:
+        self._outcome = outcome
+        self._error = error
+        self._on_execute = on_execute
+
+    def execute(
+        self, task: BookImportTaskRecord, *, max_resources: int
+    ) -> BookResourceBatchResult:
+        assert task.id == "task-1"
+        assert max_resources == 128
+        if self._on_execute is not None:
+            self._on_execute()
+        if self._error is not None:
+            raise self._error
+        assert self._outcome is not None
+        return BookResourceBatchResult(
+            self._outcome,
+            "PARSE_FAILED" if self._outcome == "failed" else None,
+        )
 
 
 class BoomAdapters:
@@ -428,6 +545,19 @@ def _scan_task(
     )
 
 
+def _book_task() -> LibraryImportTaskRecord:
+    return LibraryImportTaskRecord(
+        id="task-1",
+        kind="IMPORT_BOOK",
+        library_id="lib-1",
+        state="RUNNING",
+        resource_id=None,
+        source_node_id="node-1",
+        role=None,
+        error_summary=None,
+    )
+
+
 def _process(
     *,
     adapters: BoomAdapters | ParseFailAdapters,
@@ -456,6 +586,23 @@ def _worker(
         queue=queue,
         scan=cast(ScanLibrarySourceTree, UnusedScan()),
         process_import=_process(adapters=adapters, queue=queue),
+        uow=RecordingUoW(),
+        clock=FixedClock(),
+    )
+
+
+def _book_worker(
+    *,
+    queue: FakeQueue,
+    book_queue: FakeBookQueue,
+    resources: FakeBookResources,
+) -> ReadableResourceWorkerProcessor:
+    return ReadableResourceWorkerProcessor(
+        queue=queue,
+        scan=cast(ScanLibrarySourceTree, UnusedScan()),
+        process_import=_process(adapters=ParseFailAdapters(), queue=queue),
+        process_book_resources=cast(ProcessBookResources, resources),
+        book_queue=book_queue,
         uow=RecordingUoW(),
         clock=FixedClock(),
     )
@@ -505,15 +652,20 @@ def test_worker_exposes_explicit_process_loop_recovery() -> None:
     assert unit_of_work.rollback_count == 1
 
 
-def test_worker_containment_logs_without_worker_id(
+def test_book_worker_containment_logs_without_worker_id(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    queue = FakeQueue(_import_task())
-    worker = _worker(adapters=BoomAdapters(), queue=queue)
+    queue = FakeQueue(_book_task())
+    book_queue = FakeBookQueue(queue)
+    worker = _book_worker(
+        queue=queue,
+        book_queue=book_queue,
+        resources=FakeBookResources(error=RuntimeError("boom")),
+    )
     with caplog.at_level(logging.ERROR, logger="ermao.readable_resource_pipeline"):
         assert worker.process_once() == "error"
-    assert queue.failed == [("task-1", "WORKER_ERROR")]
-    assert all(summary != "UNHANDLED_ERROR" for _, summary in queue.failed)
+    assert book_queue.failures == [("task-1", "WORKER_ERROR")]
+    assert all(summary != "UNHANDLED_ERROR" for _, summary in book_queue.failures)
     records = [
         record
         for record in caplog.records
@@ -523,24 +675,39 @@ def test_worker_containment_logs_without_worker_id(
     ]
     assert len(records) == 1
     assert getattr(records[0], "task_id", None) == "task-1"
+    assert getattr(records[0], "task_kind", None) == "IMPORT_BOOK"
+    assert getattr(records[0], "book_id", None) == "book-1"
     assert getattr(records[0], "stage", None) == "worker"
     assert getattr(records[0], "outcome", None) == "error"
     assert not hasattr(records[0], "worker_id")
 
 
-def test_modeled_parse_failure_is_not_rewritten_as_worker_error() -> None:
-    queue = FakeQueue(_import_task())
-    worker = _worker(adapters=ParseFailAdapters(), queue=queue)
+def test_modeled_book_resource_failure_is_not_rewritten_as_worker_error() -> None:
+    queue = FakeQueue(_book_task())
+    book_queue = FakeBookQueue(queue)
+    worker = _book_worker(
+        queue=queue,
+        book_queue=book_queue,
+        resources=FakeBookResources(outcome="failed"),
+    )
     assert worker.process_once() == "failed"
-    assert queue.failed == [("task-1", "PARSE_FAILED")]
+    assert book_queue.failures == [("task-1", "PARSE_FAILED")]
 
 
-def test_import_task_cancelled_during_parse_does_not_commit_failure() -> None:
-    queue = FakeQueue(_import_task())
-    worker = _worker(adapters=CancelDuringParseAdapters(queue), queue=queue)
+def test_book_work_cancelled_during_resource_processing_does_not_commit_failure() -> None:
+    queue = FakeQueue(_book_task())
+    book_queue = FakeBookQueue(queue)
+    worker = _book_worker(
+        queue=queue,
+        book_queue=book_queue,
+        resources=FakeBookResources(
+            outcome="cancelled", on_execute=book_queue.cancel
+        ),
+    )
 
     assert worker.process_once() == "cancelled"
-    assert queue.failed == []
+    assert book_queue.failures == []
+    assert book_queue.finished == 0
 
 
 def test_scan_task_deleted_while_running_is_not_acknowledged() -> None:

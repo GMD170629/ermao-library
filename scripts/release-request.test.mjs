@@ -152,8 +152,13 @@ test('tag selection validates admitted request identity, source contents, versio
   for (const file of files) put(file, readFileSync(file));
   const request = sample('android');
   const version = JSON.parse(readFileSync('package.json')).version;
+  const androidBuild = readFileSync('apps/mobile/androidApp/build.gradle.kts', 'utf8');
+  put(
+    'apps/mobile/androidApp/build.gradle.kts',
+    androidBuild.replace(/versionName = "[^"]+"/, `versionName = "${version}"`)
+  );
   request.versions.android = version;
-  request.android.buildNumber = Number(readFileSync('apps/mobile/androidApp/build.gradle.kts', 'utf8').match(/versionCode = (\d+)/)[1]);
+  request.android.buildNumber = Number(androidBuild.match(/versionCode = (\d+)/)[1]);
   request.id = `stable-${version.replaceAll('.', '-')}`;
   request.sourceCommit = commit();
   await assert.rejects(validateRequestVersions({ ...request, android: { ...request.android, buildNumber: request.android.buildNumber + 1 } }, { root }), /buildNumber differs/);

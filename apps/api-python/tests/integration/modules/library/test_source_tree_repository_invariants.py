@@ -131,6 +131,141 @@ def test_insert_root_and_direct_child_succeed(tmp_path: Path) -> None:
         engine.dispose()
 
 
+def test_reconcile_batch_stamps_scan_generation_without_refreshing_unchanged_time(
+    tmp_path: Path,
+) -> None:
+    engine = _bootstrap(tmp_path)
+    try:
+        with Session(engine) as db:
+            _add_library(db, tmp_path)
+            db.commit()
+            nodes = SqlAlchemySourceNodeRepository(db)
+            initial = _entry("seen.epub", SourceNodePhysicalKind.REGULAR_FILE)
+            created, was_created, was_changed = nodes.reconcile_batch(
+                library_id="lib-1",
+                parent_id=None,
+                entries=(initial,),
+                scan_seen_generation="generation-1",
+            )[0]
+            assert was_created is True
+            assert was_changed is True
+            db.flush()
+            assert db.get(LibrarySourceNode, created.id).scan_seen_generation == "generation-1"
+
+            unchanged_entry = ObservedSourceEntry(
+                relative_path=initial.relative_path,
+                physical_kind=initial.physical_kind,
+                observed_size_bytes=initial.observed_size_bytes,
+                observed_mtime_ns=initial.observed_mtime_ns,
+                observed_at=datetime(2024, 7, 2, tzinfo=UTC),
+            )
+            unchanged, was_created, was_changed = nodes.reconcile_batch(
+                library_id="lib-1",
+                parent_id=None,
+                entries=(unchanged_entry,),
+                scan_seen_generation="generation-2",
+            )[0]
+            assert was_created is False
+            assert was_changed is False
+            assert unchanged.observed_at == initial.observed_at
+            db.flush()
+            persisted = db.get(LibrarySourceNode, created.id)
+            assert persisted.scan_seen_generation == "generation-2"
+            assert persisted.observed_at == initial.observed_at
+
+            changed_entry = ObservedSourceEntry(
+                relative_path=initial.relative_path,
+                physical_kind=initial.physical_kind,
+                observed_size_bytes=initial.observed_size_bytes + 1,
+                observed_mtime_ns=initial.observed_mtime_ns + 1,
+                observed_at=datetime(2024, 7, 3, tzinfo=UTC),
+            )
+            changed, was_created, was_changed = nodes.reconcile_batch(
+                library_id="lib-1",
+                parent_id=None,
+                entries=(changed_entry,),
+                scan_seen_generation="generation-3",
+            )[0]
+            assert was_created is False
+            assert was_changed is True
+            assert changed.observed_at == changed_entry.observed_at
+            db.flush()
+            persisted = db.get(LibrarySourceNode, created.id)
+            assert persisted.scan_seen_generation == "generation-3"
+            assert persisted.observed_at == changed_entry.observed_at
+            db.commit()
+    finally:
+        engine.dispose()
+
+
+def test_unseen_children_are_paged_and_collision_occupant_is_seen(
+    tmp_path: Path,
+) -> None:
+    engine = _bootstrap(tmp_path)
+    try:
+        with Session(engine) as db:
+            _add_library(db, tmp_path)
+            db.commit()
+            nodes = SqlAlchemySourceNodeRepository(db)
+            for offset in range(0, 205, 200):
+                entries = tuple(
+                    _entry(f"old-{index:03}.epub", SourceNodePhysicalKind.REGULAR_FILE)
+                    for index in range(offset, min(offset + 200, 205))
+                )
+                nodes.reconcile_batch(
+                    library_id="lib-1",
+                    parent_id=None,
+                    entries=entries,
+                    scan_seen_generation="previous",
+                )
+            forged = LibrarySourceNode(
+                id="forged",
+                library_id="lib-1",
+                parent_id=None,
+                parent_physical_kind=None,
+                relative_path="forged-visible.epub",
+                path_key=_path_key("collision-target.epub"),
+                name="forged-visible.epub",
+                physical_kind="REGULAR_FILE",
+                observed_size_bytes=1,
+                observed_mtime_ns=1,
+                observed_at=_now(),
+            )
+            db.add(forged)
+            db.flush()
+            collision, created, changed = nodes.reconcile_batch(
+                library_id="lib-1",
+                parent_id=None,
+                entries=(
+                    _entry("collision-target.epub", SourceNodePhysicalKind.REGULAR_FILE),
+                ),
+                scan_seen_generation="current",
+            )[0]
+            assert (collision.id, created, changed) == ("forged", False, False)
+            db.flush()
+            assert db.get(LibrarySourceNode, "forged").scan_seen_generation == "current"
+
+            first = nodes.page_unseen_direct_children(
+                library_id="lib-1",
+                parent_id=None,
+                scan_seen_generation="current",
+                after_path_key=None,
+                limit=200,
+            )
+            second = nodes.page_unseen_direct_children(
+                library_id="lib-1",
+                parent_id=None,
+                scan_seen_generation="current",
+                after_path_key=first[-1].path_key,
+                limit=200,
+            )
+            assert len(first) == 200
+            assert len(second) == 5
+            assert "forged" not in {node.id for node in (*first, *second)}
+    finally:
+        engine.dispose()
+
+
 def test_insert_rejects_missing_parent_and_rolls_back(tmp_path: Path) -> None:
     engine = _bootstrap(tmp_path)
     try:

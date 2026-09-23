@@ -18,6 +18,7 @@ from app.bootstrap.readable_resource_pipeline import (
 )
 from app.core.config import Settings
 from app.models import Library, LibraryBook, LibraryBookMetadata, LibrarySourceNode
+from app.modules.imports.application.readable_resource.book_work import BookWork
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
 )
@@ -205,7 +206,7 @@ def test_deleted_task_is_not_recreated_by_pending_terminal_retry(
     assert scanned_libraries == ["test-library", "second-library"]
 
 
-def test_identification_failure_preserves_scans_and_retries_after_worker_restart(
+def test_book_completion_failure_preserves_scans_and_retries_after_worker_restart(
     db_session: Session,
     scanning_pipeline: tuple[ReadableResourcePipeline, str, str],
     test_settings: Settings,
@@ -247,41 +248,48 @@ def test_identification_failure_preserves_scans_and_retries_after_worker_restart
         )
     )
     db_session.commit()
+    book_task = pipeline.queue.request_book_work(
+        book_id="pending-book",
+        work=BookWork(identify=True),
+        requested_at=datetime.now(UTC),
+    )
+    db_session.commit()
 
-    insertion_attempts = 0
-    interrupt_identification = True
+    completion_attempts = 0
+    interrupt_completion = True
 
-    def interrupt_identification_insert(
+    def interrupt_book_completion(
         _connection, _cursor, statement, parameters, context, _executemany
     ) -> None:
-        nonlocal insertion_attempts
+        nonlocal completion_attempts
         if (
-            context.isinsert
+            context.isupdate
             and context.compiled.statement.table.name == LibraryImportTask.__tablename__
-            and "IDENTIFY_BOOK" in parameters
+            and "SUCCEEDED" in parameters
+            and book_task.id in parameters
         ):
-            insertion_attempts += 1
-            if interrupt_identification:
+            completion_attempts += 1
+            if interrupt_completion:
                 raise OperationalError(
                     statement, parameters, sqlite3.OperationalError("interrupted")
                 )
 
     engine = db_session.get_bind()
-    event.listen(engine, "before_cursor_execute", interrupt_identification_insert)
+    event.listen(engine, "before_cursor_execute", interrupt_book_completion)
     try:
-        # Failed compensation must neither undo a finished scan nor prevent the
-        # next already-queued scan from making progress.
-        assert worker.process_once() == "scan"
-        assert insertion_attempts == 1
+        # A failed terminal write keeps the completed metadata and the earlier
+        # scan, while leaving the next scan queued for later work.
         assert worker.process_once() == "deferred"
-        assert insertion_attempts == 2
+        assert completion_attempts == 1
+        assert worker.process_once() == "deferred"
+        assert completion_attempts == 2
         with Session(engine) as observer:
-            assert set(observer.scalars(select(LibraryImportTask.state))) == {
-                "SUCCEEDED"
-            }
+            assert observer.get(LibraryImportTask, first_id).state == "SUCCEEDED"
+            assert observer.get(LibraryImportTask, second_id).state == "QUEUED"
+            assert observer.get(LibraryImportTask, book_task.id).state == "RUNNING"
             metadata = observer.get(LibraryBookMetadata, "pending-book")
-            assert metadata is not None and metadata.metadata_pending
-            assert metadata.metadata_state == "WAITING_IMPORT"
+            assert metadata is not None and not metadata.metadata_pending
+            assert metadata.metadata_state == "COMPLETED"
 
         db_session.add(
             LibraryImportTask(
@@ -294,39 +302,39 @@ def test_identification_failure_preserves_scans_and_retries_after_worker_restart
         )
         db_session.commit()
 
-        # Reconstruct the complete worker graph from persisted state, as a
-        # restarted process does; startup recovery never attempts identification.
+        # A fresh worker recovers the Book and the unrelated interrupted scan.
         with Session(engine) as restarted_session:
             restarted_pipeline = build_readable_resource_pipeline(
                 restarted_session, test_settings
             )
             restarted = build_readable_resource_worker(restarted_pipeline)
-            assert restarted.startup() == 1
-            assert insertion_attempts == 2
+            assert restarted.startup() == 2
+            assert completion_attempts == 2
             assert restarted.process_once() == "deferred"
-            assert insertion_attempts == 3
+            assert completion_attempts == 3
             with Session(engine) as observer:
                 interrupted = observer.get(LibraryImportTask, "interrupted-scan")
                 assert interrupted is not None and interrupted.state == "FAILED"
                 assert interrupted.finished_at is not None
                 assert interrupted.error_summary == "WORKER_INTERRUPTED"
                 metadata = observer.get(LibraryBookMetadata, "pending-book")
-                assert metadata is not None and metadata.metadata_pending
+                assert metadata is not None and not metadata.metadata_pending
 
-            interrupt_identification = False
-            assert restarted.process_once() == "identified"
-            assert insertion_attempts == 4
+            interrupt_completion = False
+            assert restarted.process_once() == "book"
+            assert completion_attempts == 4
+            assert restarted.process_once() == "scan"
             assert restarted.process_once() == "idle"
-            assert insertion_attempts == 4
+            assert completion_attempts == 4
 
         with Session(engine) as observer:
             metadata = observer.get(LibraryBookMetadata, "pending-book")
             assert metadata is not None and not metadata.metadata_pending
             assert metadata.metadata_state == "COMPLETED"
-            assert metadata.processed_revision == 3
+            assert metadata.processed_revision == 4
             identification = observer.scalar(
                 select(LibraryImportTask).where(
-                    LibraryImportTask.kind == "IDENTIFY_BOOK"
+                    LibraryImportTask.kind == "IMPORT_BOOK"
                 )
             )
             assert identification is not None and identification.state == "SUCCEEDED"
@@ -343,4 +351,4 @@ def test_identification_failure_preserves_scans_and_retries_after_worker_restart
                 "interrupted-scan": "FAILED",
             }
     finally:
-        event.remove(engine, "before_cursor_execute", interrupt_identification_insert)
+        event.remove(engine, "before_cursor_execute", interrupt_book_completion)

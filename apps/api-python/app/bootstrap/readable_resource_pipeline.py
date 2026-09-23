@@ -22,6 +22,9 @@ from app.modules.imports.application.readable_resource.continue_import import (
     ContinueImportTask,
     ContinueSourceImport,
 )
+from app.modules.imports.application.readable_resource.process_book_resources import (
+    ProcessBookResources,
+)
 from app.modules.imports.application.readable_resource.process_import_task import (
     ProcessReadableResourceImportTask,
 )
@@ -118,6 +121,7 @@ class ReadableResourcePipeline:
     disable_readable_resource: DisableReadableResource
     request_library_scan: RequestLibraryScan
     queue: SqlAlchemyLibraryImportTaskQueue
+    books_resources: SqlAlchemyBookResourceRepository
     filesystem: OsSourceTreeFilesystem
     adapters: RegistryResourceAdapterExecutor
     uow: SqlAlchemyUnitOfWork
@@ -188,6 +192,8 @@ def build_readable_resource_pipeline(
     continue_import = ContinueImport(
         source_nodes=source_nodes,
         queue=queue,
+        book_queue=queue,
+        clock=clock,
         uow=uow,
         log=log,
         request_library_scan=request_scan,
@@ -251,6 +257,7 @@ def build_readable_resource_pipeline(
             log=log,
         ),
         queue=queue,
+        books_resources=books_resources,
         filesystem=filesystem,
         adapters=adapters,
         uow=uow,
@@ -320,8 +327,16 @@ def build_readable_resource_worker(
 ) -> ReadableResourceWorkerProcessor:
     return ReadableResourceWorkerProcessor(
         queue=pipeline.queue,
+        book_queue=pipeline.queue,
         scan=pipeline.scan_library_source_tree,
         process_import=pipeline.process_import_task,
+        process_book_resources=ProcessBookResources(
+            queue=pipeline.queue,
+            resources=pipeline.books_resources,
+            process_resource=pipeline.process_import_task,
+            uow=pipeline.uow,
+            clock=pipeline.clock,
+        ),
         identify_book=pipeline.identify_book,
         uow=pipeline.uow,
         clock=pipeline.clock,

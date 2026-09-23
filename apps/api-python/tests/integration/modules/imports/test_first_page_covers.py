@@ -87,18 +87,23 @@ def scan(db: Session, pipeline: ReadableResourcePipeline) -> dict[str, str]:
     return dict(
         db.execute(
             select(LibrarySourceNode.name, LibraryImportTask.id)
+            .select_from(LibraryReadableResource)
+            .join(
+                LibrarySourceNode,
+                LibrarySourceNode.id == LibraryReadableResource.source_node_id,
+            )
             .join(
                 LibraryImportTask,
-                LibraryImportTask.source_node_id == LibrarySourceNode.id,
+                LibraryImportTask.book_id == LibraryReadableResource.book_id,
             )
-            .where(LibraryImportTask.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE")))
+            .where(LibraryImportTask.kind == "IMPORT_BOOK")
         ).all()
     )
 
 
 def import_task(db: Session, pipeline: ReadableResourcePipeline, task_id: str) -> None:
     db.commit()
-    assert pipeline.process_import_task.execute(task_id).outcome == "ok"
+    assert build_readable_resource_worker(pipeline).process_once() == "book"
     db.expire_all()
 
 
@@ -276,6 +281,7 @@ def test_image_natural_first_page_and_missing_first_regeneration(library) -> Non
 def test_fallback_publication_preserves_previous_cover_on_cancel_failure_or_protection(
     library, monkeypatch, outcome
 ) -> None:
+
     from app.modules.imports.infrastructure.local_cover_publication import (
         FilesystemLocalCoverPublication,
     )
@@ -293,8 +299,8 @@ def test_fallback_publication_preserves_previous_cover_on_cancel_failure_or_prot
     previous_files = set(
         (settings.resolved_storage_root / "covers" / "resources").iterdir()
     )
-    # Reprocess a genuinely changed input; unchanged successful resource tasks
-    # now reuse their committed results without entering cover publication.
+    # Reprocess a genuinely changed input; unchanged Book resources reuse their
+    # committed results without entering cover publication.
     pdf = root / "Book" / "book.pdf"
     pdf.write_bytes(pdf.read_bytes() + b"\n% changed source\n")
     if outcome == "protected":
@@ -320,17 +326,13 @@ def test_fallback_publication_preserves_previous_cover_on_cancel_failure_or_prot
         monkeypatch.setattr(FilesystemLocalCoverPublication, "publish", publish)
     task = pipeline.queue.get_task(task_id)
     assert task is not None
-    requested = pipeline.queue.request_import_resource(
-        library_id=task.library_id,
-        resource_id=task.resource_id,
-        source_node_id=task.source_node_id,
-        changed=True,
-    )
-    assert requested is not None and requested.id == task_id
-    assert requested.state == "QUEUED"
-    db.commit()
-    result = pipeline.process_import_task.execute(task_id)
-    assert result.outcome == ("ok" if outcome == "protected" else outcome)
+    assert scan(db, pipeline)["book.pdf"] == task_id
+    result = build_readable_resource_worker(pipeline).process_once()
+    assert result == {
+        "cancelled": "cancelled",
+        "failed": "failed",
+        "protected": "book",
+    }[outcome]
     db.expire_all()
     assert db.get(LibraryReadableResourceMetadata, resource_id).cover_path == previous
     assert (settings.resolved_storage_root / previous).read_bytes() == previous_content
@@ -460,20 +462,25 @@ def test_import_phase_counts_and_finalization_rollback(
             db.commit()
             assert worker.process_once() == "error"
             db.expire_all()
-            assert db.get(LibraryImportTask, task_id).state == "FAILED"
+            failed_task = db.get(LibraryImportTask, task_id)
+            assert failed_task.state == "QUEUED"
+            assert failed_task.retry_count == 1
+            assert failed_task.next_attempt_at is not None
             assert db.scalar(select(LibraryResourceAsset.id)) is None
             assert db.scalar(select(LibraryReadableResourceMetadata)) is None
             assert not list(
                 (settings.resolved_storage_root / "covers" / "resources").iterdir()
             )
-            pipeline.queue.requeue_failed_task(task_id)
+            db.get(LibraryImportTask, task_id).next_attempt_at = datetime(
+                2000, 1, 1, tzinfo=UTC
+            )
             db.commit()
         for name in filenames:
             import_task(db, pipeline, tasks[name])
         assert set(
             db.scalars(
                 select(LibraryImportTask.state).where(
-                    LibraryImportTask.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE"))
+                    LibraryImportTask.kind == "IMPORT_BOOK"
                 )
             )
         ) == {"SUCCEEDED"}
@@ -497,8 +504,7 @@ def test_import_phase_counts_and_finalization_rollback(
         print(
             {
                 "mode": "rollback_retry" if retry_after_rollback else "normal",
-                "import_asset_tasks": len(tasks) if kind == "IMAGE_DIR" else 0,
-                "import_resource_tasks": len(tasks) if kind == "PDF" else 0,
+                "import_book_tasks": len(tasks),
                 "format": kind,
                 "aggregate_chapters": 0,
                 "audio_aggregations": 0,
@@ -542,15 +548,19 @@ def test_unchanged_resource_reuses_committed_result_without_cover_publication(
     assert db.get(LibraryImportTask, task_id).state == "SUCCEEDED"
     # A duplicate change notification requeues work without discarding the
     # committed source version; the processor must still reuse that result.
+    from datetime import UTC, datetime
+
+    from app.modules.imports.application.readable_resource.book_work import BookWork
+
+    resource_id = db.scalar(select(LibraryReadableResource.id))
     task = pipeline.queue.get_task(task_id)
     assert task is not None
-    requested = pipeline.queue.request_import_resource(
-        library_id=task.library_id,
-        resource_id=task.resource_id,
-        source_node_id=task.source_node_id,
-        changed=True,
+    requested = pipeline.queue.request_book_work(
+        book_id=db.scalar(select(LibraryReadableResource.book_id)),
+        work=BookWork(resource_ids=(resource_id,)),
+        requested_at=datetime.now(UTC),
     )
-    assert requested is not None and requested.id == task_id
+    assert requested.id == task_id
     assert requested.state == "QUEUED"
     import_task(db, pipeline, task_id)
     assert db.scalar(select(LibraryResourceAsset.id)) == asset_id
@@ -566,6 +576,7 @@ def test_thousand_images_batch_import_and_incremental_reuse(
     library, monkeypatch, image_count, interrupt_after_three
 ):
     from collections import Counter
+    from datetime import UTC, datetime
     from time import perf_counter
 
     from sqlalchemy import event
@@ -672,7 +683,9 @@ def test_thousand_images_batch_import_and_incremental_reuse(
         assert (
             db.scalars(
                 select(LibraryImportTask).where(
-                    LibraryImportTask.kind == "IMPORT_ASSET"
+                    LibraryImportTask.kind.in_(
+                        ("IMPORT_ASSET", "IMPORT_RESOURCE")
+                    )
                 )
             ).all()
             == []
@@ -694,10 +707,10 @@ def test_thousand_images_batch_import_and_incremental_reuse(
                 restarted = build_readable_resource_worker(restored)
                 assert restarted.startup() == 1
                 restored.continue_import.execute(ContinueImportTask(task_id))
-                assert restarted.process_once() == "ok"
+                assert restarted.process_once() == "book"
             db.expire_all()
         else:
-            assert worker.process_once() == "ok"
+            assert worker.process_once() == "book"
             assert sizes == (
                 [200] * (image_count // 200)
                 + ([image_count % 200] if image_count % 200 else [])
@@ -764,7 +777,7 @@ def test_thousand_images_batch_import_and_incremental_reuse(
         incremental_scan_seconds = perf_counter() - started
         phase = "finish"
         started = perf_counter()
-        assert worker.process_once() == "ok"
+        assert worker.process_once() == "book"
         incremental_import_seconds = perf_counter() - started
         print(
             {
@@ -805,7 +818,7 @@ def test_thousand_images_batch_import_and_incremental_reuse(
         metadata_scan_seconds = perf_counter() - started
         phase = "finish"
         started = perf_counter()
-        assert worker.process_once() == "ok"
+        assert worker.process_once() == "book"
         metadata_import_seconds = perf_counter() - started
         print(
             {
@@ -827,7 +840,7 @@ def test_thousand_images_batch_import_and_incremental_reuse(
         cover = db.get(LibraryReadableResourceMetadata, resource.id).cover_path
         (settings.resolved_storage_root / cover).unlink()
         scan(db, pipeline)
-        assert worker.process_once() == "ok"
+        assert worker.process_once() == "book"
         assert not parsed_names
         assert counts["cover_publications"] == 2
         metadata_row = db.get(LibraryReadableResourceMetadata, resource.id)
@@ -838,7 +851,7 @@ def test_thousand_images_batch_import_and_incremental_reuse(
             "<package><metadata><title>Protected change</title><meta name='cover' content='cover'/></metadata><manifest><item id='cover' href='1.png' media-type='image/png'/></manifest></package>"
         )
         scan(db, pipeline)
-        assert worker.process_once() == "ok"
+        assert worker.process_once() == "book"
         assert db.get(LibraryReadableResourceMetadata, resource.id).title == "Changed"
         assert (
             db.get(LibraryReadableResourceMetadata, resource.id).cover_path == old_cover
@@ -868,7 +881,11 @@ def test_thousand_images_batch_import_and_incremental_reuse(
         monkeypatch.setattr(RegistryResourceAdapterExecutor, "parse_file", parse_count)
         parsed_names.clear()
         pipeline.continue_import.execute(ContinueImportTask(task_id))
-        assert worker.process_once() == "ok"
+        db.get(LibraryImportTask, task_id).next_attempt_at = datetime(
+            2000, 1, 1, tzinfo=UTC
+        )
+        db.commit()
+        assert worker.process_once() == "book"
         assert parsed_names == {f"{image_count + 11}.png": 1}
         # A changed existing image keeps its identity and updates the selected cover.
         metadata_row = db.get(LibraryReadableResourceMetadata, resource.id)
@@ -888,7 +905,7 @@ def test_thousand_images_batch_import_and_incremental_reuse(
         Image.new("RGB", (40, 40), "blue").save(folder / "1.png")
         parsed_names.clear()
         scan(db, pipeline)
-        assert worker.process_once() == "ok"
+        assert worker.process_once() == "book"
         assert parsed_names == {"1.png": 1}
         assert (
             db.get(LibraryResourceAsset, changed_id).processed_source_version
@@ -901,6 +918,8 @@ def test_thousand_images_batch_import_and_incremental_reuse(
 
 
 def test_image_finalization_rollback_reuses_committed_pages(library, monkeypatch):
+    from datetime import UTC, datetime
+
     from app.models import LibraryResourceAsset
     from app.modules.imports.application.readable_resource.continue_import import (
         ContinueImportTask,
@@ -940,7 +959,11 @@ def test_image_finalization_rollback_reuses_committed_pages(library, monkeypatch
 
     monkeypatch.setattr(RegistryResourceAdapterExecutor, "parse_file", forbidden)
     pipeline.continue_import.execute(ContinueImportTask(task_id))
-    assert worker.process_once() == "ok"
+    db.get(LibraryImportTask, task_id).next_attempt_at = datetime(
+        2000, 1, 1, tzinfo=UTC
+    )
+    db.commit()
+    assert worker.process_once() == "book"
     assert {a.id for a in db.scalars(select(LibraryResourceAsset))} == ids
     assert db.scalar(select(LibraryReadableResourceMetadata)).page_count == 3
 
@@ -949,6 +972,8 @@ def test_image_finalization_rollback_reuses_committed_pages(library, monkeypatch
 def test_image_cancellation_prevents_batch_writeback(
     library, monkeypatch, delete_resource
 ):
+    from datetime import UTC, datetime
+
     from sqlalchemy import delete
 
     from app.models import LibraryResourceAsset
@@ -982,9 +1007,17 @@ def test_image_cancellation_prevents_batch_writeback(
     db.commit()
     assert build_readable_resource_worker(pipeline).process_once() == "cancelled"
     assert db.scalars(select(LibraryResourceAsset)).all() == []
-    assert db.get(LibraryImportTask, task_id) is None
     if delete_resource:
         assert db.get(LibraryReadableResource, resource_id) is None
+        task = db.get(LibraryImportTask, task_id)
+        assert task is not None and task.state == "QUEUED"
+        task.next_attempt_at = datetime(2000, 1, 1, tzinfo=UTC)
+        db.commit()
+        assert build_readable_resource_worker(pipeline).process_once() == "book"
+        db.refresh(task)
+        assert task.state == "SUCCEEDED"
+    else:
+        assert db.get(LibraryImportTask, task_id) is None
 
 
 @pytest.mark.parametrize("invalid", ["library", "directory", "outside", "suffix"])
@@ -998,7 +1031,8 @@ def test_image_batch_keeps_topology_and_file_type_validation(library, invalid):
     db, _settings, root, pipeline = library
     write_pages(root, "IMAGE_DIR")
     task_id = scan(db, pipeline)["Book"]
-    resource_id = db.get(LibraryImportTask, task_id).resource_id
+    resource = db.scalar(select(LibraryReadableResource))
+    resource_id = resource.id
     from app.modules.library.infrastructure.persistence.source_tree_repository import (
         SqlAlchemyBookResourceRepository,
     )
@@ -1058,17 +1092,16 @@ def test_image_failed_file_summary_counts_assets_not_tasks(library, monkeypatch)
     resource = db.scalar(select(LibraryReadableResource))
     summary = resource_import_summaries(db, [resource.book_id])[resource.book_id]
     assert summary.ready == 1 and summary.failed_files == 2
-    assert (
-        len(
-            db.scalars(
-                select(LibraryImportTask).where(
-                    LibraryImportTask.kind == "IMPORT_RESOURCE",
-                    LibraryImportTask.state == "FAILED",
-                )
-            ).all()
+    failed_task = db.scalar(
+        select(LibraryImportTask).where(
+            LibraryImportTask.kind == "IMPORT_BOOK",
+            LibraryImportTask.book_id == resource.book_id,
         )
-        == 1
     )
+    assert failed_task is not None
+    assert failed_task.state == "QUEUED"
+    assert failed_task.error_summary == "IMAGE_ASSETS_FAILED"
+    assert failed_task.retry_count == 1
 
 
 @pytest.mark.parametrize("tracks", [10, 20, 100])
@@ -1234,7 +1267,11 @@ def test_audio_resource_batches_reuse_tracks_and_finalize_once(
     scan_seconds = perf_counter() - scan_started
     import_started = perf_counter()
     assert not db.scalars(
-        select(LibraryImportTask).where(LibraryImportTask.kind == "IMPORT_ASSET")
+        select(LibraryImportTask).where(
+            LibraryImportTask.kind.in_(
+                ("IMPORT_ASSET", "IMPORT_RESOURCE", "IDENTIFY_BOOK")
+            )
+        )
     ).all()
     phase = "finish"
     worker = build_readable_resource_worker(pipeline)
@@ -1262,9 +1299,9 @@ def test_audio_resource_batches_reuse_tracks_and_finalize_once(
             restarted = build_readable_resource_worker(restored)
             assert restarted.startup() == 1
             restored.continue_import.execute(ContinueImportTask(task_id))
-            assert restarted.process_once() == "ok"
+            assert restarted.process_once() == "book"
     else:
-        assert worker.process_once() == "ok"
+        assert worker.process_once() == "book"
     import_seconds = perf_counter() - import_started
     assert parsed == {i: 1 for i in range(1, tracks + 1)}
     assert counts == {
@@ -1360,7 +1397,7 @@ def test_audio_resource_batches_reuse_tracks_and_finalize_once(
     (folder / f"{tracks}.mp3").write_bytes(b"changed audio version")
     parsed.clear()
     scan(db, pipeline)
-    assert worker.process_once() == "ok"
+    assert worker.process_once() == "book"
     assert parsed == {tracks: 1}
     assert counts["global_audio_ordering"] == 2 and counts["cover_publications"] == 1
     assert all(
@@ -1384,7 +1421,7 @@ def test_audio_resource_batches_reuse_tracks_and_finalize_once(
         "<package><metadata><title>OPF title</title></metadata></package>"
     )
     scan(db, pipeline)
-    assert worker.process_once() == "ok"
+    assert worker.process_once() == "book"
     assert not parsed
     assert db.get(LibraryReadableResourceMetadata, resource.id).title == "OPF title"
     Image.new("RGB", (40, 40), "blue").save(folder / "metadata.cover.png")
@@ -1392,7 +1429,7 @@ def test_audio_resource_batches_reuse_tracks_and_finalize_once(
         '<package><metadata><title>OPF title</title><meta name="cover" content="cover"/></metadata><manifest><item id="cover" href="metadata.cover.png" media-type="image/png"/></manifest></package>'
     )
     scan(db, pipeline)
-    assert worker.process_once() == "ok"
+    assert worker.process_once() == "book"
     assert not parsed
     assert counts["cover_publications"] == 2
     # A damaged changed track loses its own chapters, never the other tracks'.
@@ -1414,8 +1451,12 @@ def test_audio_resource_batches_reuse_tracks_and_finalize_once(
     broken.clear()
     unknown.add(tracks)
     parsed.clear()
+    import_task_row = db.get(LibraryImportTask, task_id)
+    assert import_task_row is not None
+    import_task_row.next_attempt_at = pipeline.clock.now()
+    db.commit()
     pipeline.continue_import.execute(ContinueImportTask(task_id))
-    assert worker.process_once() == "ok"
+    assert worker.process_once() == "book"
     assert parsed == {tracks: 1}
     metadata = db.get(LibraryReadableResourceMetadata, resource.id)
     assert metadata.track_count == tracks and metadata.chapter_count == tracks * 3
@@ -1426,7 +1467,7 @@ def test_audio_resource_batches_reuse_tracks_and_finalize_once(
     (folder / f"{tracks}.mp3").unlink()
     (folder / "metadata.cover.png").unlink()
     scan(db, pipeline)
-    assert worker.process_once() == "ok"
+    assert worker.process_once() == "book"
     assert not parsed
     db.expire_all()
     metadata = db.get(LibraryReadableResourceMetadata, resource.id)
@@ -1488,7 +1529,7 @@ def test_scan_node_batches_and_unchanged_scan(library, monkeypatch, file_count):
         if statement.startswith('UPDATE "LibrarySourceNode"'):
             stats["node_update_calls"] += 1
             stats["node_update_rows"] += max(0, cursor.rowcount)
-            assert executemany
+            stats["node_single_row_calls"] += int(not executemany)
         stats["driver_calls"] += 1
         stats["executemany_calls"] += int(executemany)
         stats["selects"] += int(statement.lstrip().startswith("SELECT"))
@@ -1504,12 +1545,22 @@ def test_scan_node_batches_and_unchanged_scan(library, monkeypatch, file_count):
         scan(db, pipeline)
         initial = dict(stats)
         assert batch_sizes == [1] + [200] * (file_count // 200)
-        assert enumeration["Book"] == 1
+        # Bounded discovery probes, fingerprints sidecars, then reconciles
+        # member batches. Unchanged imports below still must not parse media.
+        assert enumeration["Book"] == 3, dict(enumeration)
         # Calls grow per business batch, not per member. Multirow DML rows
         # and actual commits are counted independently from driver invocations.
-        assert stats["driver_calls"] < 80 + 16 * (file_count // 200)
+        assert stats["driver_calls"] < 80 + 16 * (file_count // 200), (
+            stats["driver_calls"],
+            stats["selects"],
+            stats["executemany_calls"],
+            stats["node_update_calls"],
+            stats["node_update_rows"],
+            stats["commits"],
+            stats["affected_rows"],
+        )
         worker = build_readable_resource_worker(pipeline)
-        assert worker.process_once() == "ok"
+        assert worker.process_once() == "book"
         while worker.process_once() != "idle":
             pass
         db.expire_all()
@@ -1521,7 +1572,7 @@ def test_scan_node_batches_and_unchanged_scan(library, monkeypatch, file_count):
             t.id: t.finished_at
             for t in db.scalars(
                 select(LibraryImportTask).where(
-                    LibraryImportTask.kind == "IMPORT_RESOURCE"
+                    LibraryImportTask.kind == "IMPORT_BOOK"
                 )
             )
         }
@@ -1549,7 +1600,7 @@ def test_scan_node_batches_and_unchanged_scan(library, monkeypatch, file_count):
             t.id: t.finished_at
             for t in db.scalars(
                 select(LibraryImportTask).where(
-                    LibraryImportTask.kind == "IMPORT_RESOURCE"
+                    LibraryImportTask.kind == "IMPORT_BOOK"
                 )
             )
         }
@@ -1559,19 +1610,21 @@ def test_scan_node_batches_and_unchanged_scan(library, monkeypatch, file_count):
         stats.clear()
         scan(db, pipeline)
         changed = dict(stats)
-        assert stats["node_update_calls"] == file_count // 200
-        assert stats["node_update_rows"] == file_count
-        assert (
-            len(
-                db.scalars(
-                    select(LibraryImportTask).where(
-                        LibraryImportTask.kind == "IMPORT_RESOURCE",
-                        LibraryImportTask.state == "QUEUED",
-                    )
-                ).all()
+        assert stats["node_update_calls"] == file_count // 200 + 1
+        assert stats["node_update_rows"] == file_count + 1
+        queued_books = db.scalars(
+            select(LibraryImportTask).where(
+                LibraryImportTask.kind == "IMPORT_BOOK",
+                LibraryImportTask.state == "QUEUED",
             )
-            == 1
-        )
+        ).all()
+        assert len(queued_books) == 1, [
+            (
+                db.get(LibrarySourceNode, task.source_node_id).relative_path,
+                task.book_id,
+            )
+            for task in queued_books
+        ]
         print(
             {
                 "files": file_count,
@@ -1603,12 +1656,12 @@ def test_scan_committed_batch_keeps_intent_and_blocks_incomplete_resource(
     folder = write_pages(root, "IMAGE_DIR")
     scan(db, pipeline)
     worker = build_readable_resource_worker(pipeline)
-    assert worker.process_once() == "ok"
+    assert worker.process_once() == "book"
     while worker.process_once() != "idle":
         pass
     resource_id = db.scalar(select(LibraryReadableResource.id))
     previous = db.scalar(
-        select(LibraryImportTask).where(LibraryImportTask.kind == "IMPORT_RESOURCE")
+        select(LibraryImportTask).where(LibraryImportTask.kind == "IMPORT_BOOK")
     )
     phase = "interrupted_scan"
     sql = {"interrupted_scan": Counter(), "recovery": Counter()}
@@ -1665,7 +1718,7 @@ def test_scan_committed_batch_keeps_intent_and_blocks_incomplete_resource(
         pipeline.queue.enqueue(kind="SCAN_LIBRARY", library_id="lib")
         db.commit()
         scan(db, pipeline)
-        assert worker.process_once() == "ok"
+        assert worker.process_once() == "book"
         assert db.scalar(select(LibraryReadableResource.id)) == resource_id
         assert len(db.scalars(select(LibraryResourceAsset)).all()) == 403
         print(
@@ -1699,7 +1752,7 @@ def test_scan_sidecar_config_deletion_and_equal_count_member_change(
     )
     scan(db, pipeline)
     worker = build_readable_resource_worker(pipeline)
-    assert worker.process_once() == "ok"
+    assert worker.process_once() == "book"
     while worker.process_once() != "idle":
         pass
     resource = db.scalar(select(LibraryReadableResource))
@@ -1723,13 +1776,13 @@ def test_scan_sidecar_config_deletion_and_equal_count_member_change(
     )
     db.commit()
     scan(db, pipeline)
-    assert worker.process_once() == "ok"
+    assert worker.process_once() == "book"
     assert parsed == []
     db.expire_all()
     assert db.get(LibraryReadableResourceMetadata, resource.id).title == "Book"
     opf.unlink()
     scan(db, pipeline)
-    assert worker.process_once() == "ok"
+    assert worker.process_once() == "book"
     assert parsed == []
     db.expire_all()
     assert db.get(LibraryReadableResourceMetadata, resource.id).description is None
@@ -1738,7 +1791,7 @@ def test_scan_sidecar_config_deletion_and_equal_count_member_change(
     (folder / "1.png").unlink()
     (folder / "20.png").write_bytes((folder / "2.png").read_bytes())
     scan(db, pipeline)
-    assert worker.process_once() == "ok"
+    assert worker.process_once() == "book"
     assert parsed == ["20.png"]
     db.expire_all()
     metadata = db.get(LibraryReadableResourceMetadata, resource.id)
@@ -1764,7 +1817,7 @@ def test_single_file_sidecar_refresh_does_not_parse_media(library, monkeypatch):
     source = write_pages(root, "PDF")
     scan(db, pipeline)
     worker = build_readable_resource_worker(pipeline)
-    assert worker.process_once() == "ok"
+    assert worker.process_once() == "book"
     while worker.process_once() != "idle":
         pass
 
@@ -1776,7 +1829,7 @@ def test_single_file_sidecar_refresh_does_not_parse_media(library, monkeypatch):
         "<package><metadata><title>New PDF title</title></metadata></package>"
     )
     scan(db, pipeline)
-    assert worker.process_once() == "ok"
+    assert worker.process_once() == "book"
     db.expire_all()
     assert db.scalar(select(LibraryReadableResourceMetadata)).title == "New PDF title"
     fallback = db.scalar(select(LibraryReadableResourceMetadata)).cover_path
@@ -1786,21 +1839,18 @@ def test_single_file_sidecar_refresh_does_not_parse_media(library, monkeypatch):
         "<package><metadata><title>New PDF title</title><meta name='cover' content='c'/></metadata><manifest><item id='c' href='metadata.cover.png' media-type='image/png'/></manifest></package>"
     )
     scan(db, pipeline)
-    assert worker.process_once() == "ok"
+    assert worker.process_once() == "book"
     db.expire_all()
     assert db.scalar(select(LibraryReadableResourceMetadata)).cover_path != fallback
     cover.unlink()
     scan(db, pipeline)
-    assert worker.process_once() == "ok"
+    assert worker.process_once() == "book"
     db.expire_all()
     assert db.scalar(select(LibraryReadableResourceMetadata)).cover_path == fallback
 
 
 def test_explicit_resource_force_preserves_ids_and_reprocesses(library, monkeypatch):
     from app.models import LibraryResourceAsset
-    from app.modules.imports.application.readable_resource.continue_import import (
-        ContinueImportTask,
-    )
     from app.modules.imports.infrastructure.readable_resource.adapter_registry import (
         RegistryResourceAdapterExecutor,
     )
@@ -1809,13 +1859,16 @@ def test_explicit_resource_force_preserves_ids_and_reprocesses(library, monkeypa
     write_pages(root, "IMAGE_DIR")
     scan(db, pipeline)
     worker = build_readable_resource_worker(pipeline)
-    assert worker.process_once() == "ok"
+    assert worker.process_once() == "book"
     while worker.process_once() != "idle":
         pass
     original_ids = set(db.scalars(select(LibraryResourceAsset.id)))
     task = db.scalar(
-        select(LibraryImportTask).where(LibraryImportTask.kind == "IMPORT_RESOURCE")
+        select(LibraryImportTask).where(LibraryImportTask.kind == "IMPORT_BOOK")
     )
+    assert task is not None and task.book_id is not None
+    resource = db.scalar(select(LibraryReadableResource))
+    assert resource is not None
     parsed = []
     original_parse = RegistryResourceAdapterExecutor.parse_file
 
@@ -1824,8 +1877,14 @@ def test_explicit_resource_force_preserves_ids_and_reprocesses(library, monkeypa
         return original_parse(self, **kwargs)
 
     monkeypatch.setattr(RegistryResourceAdapterExecutor, "parse_file", parse)
-    pipeline.continue_import.execute(ContinueImportTask(task.id, force=True))
-    assert worker.process_once() == "ok"
+    pipeline.queue.request_import_resource(
+        library_id="lib",
+        resource_id=resource.id,
+        source_node_id=resource.source_node_id,
+        force=True,
+    )
+    db.commit()
+    assert worker.process_once() == "book"
     assert sorted(parsed) == ["1.png", "10.png", "2.png"]
     assert set(db.scalars(select(LibraryResourceAsset.id))) == original_ids
 
@@ -1846,7 +1905,7 @@ def test_external_sidecar_cover_changes_without_media_parse(library, monkeypatch
     cover.write_bytes((folder / "1.png").read_bytes())
     scan(db, pipeline)
     worker = build_readable_resource_worker(pipeline)
-    assert worker.process_once() == "ok"
+    assert worker.process_once() == "book"
     while worker.process_once() != "idle":
         pass
     old_cover = db.scalar(select(LibraryReadableResourceMetadata)).cover_path
@@ -1857,12 +1916,12 @@ def test_external_sidecar_cover_changes_without_media_parse(library, monkeypatch
     monkeypatch.setattr(RegistryResourceAdapterExecutor, "parse_file", forbidden)
     cover.write_bytes((folder / "2.png").read_bytes())
     scan(db, pipeline)
-    assert worker.process_once() == "ok"
+    assert worker.process_once() == "book"
     db.expire_all()
     assert db.scalar(select(LibraryReadableResourceMetadata)).cover_path != old_cover
     opf.unlink()
     scan(db, pipeline)
-    assert worker.process_once() == "ok"
+    assert worker.process_once() == "book"
     db.expire_all()
     assert db.scalar(select(LibraryReadableResourceMetadata)).title == "Book"
 
@@ -1900,7 +1959,7 @@ def test_image_first_batch_interruption_rolls_back_results(library, monkeypatch)
         monkeypatch.setattr(
             SqlAlchemyBookResourceRepository, "save_directory_assets", save
         )
-        assert worker.process_once() == "ok"
+        assert worker.process_once() == "book"
         assets = resumed.scalars(select(LibraryResourceAsset)).all()
         assert len(assets) == 3
         assert all(asset.processed_source_version for asset in assets)
@@ -2005,8 +2064,15 @@ def test_unchanged_directory_continue_recovers_failed_resource(
     else:
         assert worker.process_once() == "failed"
     task = db.get(LibraryImportTask, task_id)
-    assert task.state == "FAILED"
-    resource_id, anchor_id = task.resource_id, task.source_node_id
+    assert task.state == "QUEUED"
+    assert task.error_summary
+    resource = db.scalar(
+        select(LibraryReadableResource).where(
+            LibraryReadableResource.book_id == task.book_id
+        )
+    )
+    assert resource is not None
+    resource_id, anchor_id = resource.id, task.source_node_id
     assets = db.scalars(select(LibraryResourceAsset)).all()
     assert len(assets) == 3
     assert sum(a.import_state == "READY" for a in assets) == (
@@ -2045,6 +2111,11 @@ def test_unchanged_directory_continue_recovers_failed_resource(
     }
     broken = scenario == "permanent"
     parsed.clear()
+    if scenario == "interrupted":
+        # Startup recovery resumes the persisted Book run directly. Its committed
+        # assets already have source versions, so finalization should not parse.
+        assert worker.process_once() == "book"
+        assert db.get(LibraryImportTask, task_id).state == "SUCCEEDED"
     target = (
         ContinueLibraryImport("lib")
         if entry == "library"
@@ -2069,7 +2140,7 @@ def test_unchanged_directory_continue_recovers_failed_resource(
             assert worker.process_once() == "error"
             assert db.get(LibraryImportTask, scan_request.task_id).state == "FAILED"
             assert worker.process_once() == "idle"
-            assert db.get(LibraryImportTask, task_id).state == "FAILED"
+            assert db.get(LibraryImportTask, task_id).state == "QUEUED"
             assert not parsed
             assert {a.id for a in db.scalars(select(LibraryResourceAsset))} == asset_ids
     pipeline.continue_import.execute(target)
@@ -2077,15 +2148,23 @@ def test_unchanged_directory_continue_recovers_failed_resource(
         "scan" if entry == "library" else "continue_source"
     )
     db.expire_all()
-    assert db.get(LibraryImportTask, task_id).state == "QUEUED"
-    assert worker.process_once() == ("failed" if scenario == "permanent" else "ok")
+    if scenario == "interrupted":
+        assert db.get(LibraryImportTask, task_id).state == "SUCCEEDED"
+    else:
+        assert db.get(LibraryImportTask, task_id).state == "QUEUED"
+        db.get(LibraryImportTask, task_id).next_attempt_at = pipeline.clock.now()
+        db.commit()
+        retry_outcome = worker.process_once()
+        if retry_outcome == "book_follow_up":
+            retry_outcome = worker.process_once()
+        assert retry_outcome == ("failed" if scenario == "permanent" else "book")
     assert parsed == (
         {}
         if scenario == "interrupted"
         else {"10.png" if media == "image" else "10.mp3": 1}
     )
     assert db.get(LibraryImportTask, task_id).state == (
-        "FAILED" if scenario == "permanent" else "SUCCEEDED"
+        "QUEUED" if scenario == "permanent" else "SUCCEEDED"
     )
     if scenario == "permanent":
         failed = db.scalar(
@@ -2102,11 +2181,11 @@ def test_unchanged_directory_continue_recovers_failed_resource(
         outcome = worker.process_once()
         if outcome == "idle":
             break
-        assert outcome == "identified"
+        assert outcome == "book"
     else:
         pytest.fail("resource retry did not terminate")
     assert db.scalars(
-        select(LibraryImportTask.id).where(LibraryImportTask.kind == "IMPORT_RESOURCE")
+        select(LibraryImportTask.id).where(LibraryImportTask.kind == "IMPORT_BOOK")
     ).all() == [task_id]
     assert db.get(LibraryReadableResource, resource_id).import_state == "READY"
     assert {a.id for a in db.scalars(select(LibraryResourceAsset))} == asset_ids
