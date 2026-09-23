@@ -289,6 +289,8 @@ class BookResourceRepositoryPort(Protocol):
         self, *, book_id: str, after_id: str | None, limit: int
     ) -> tuple[ReadableResourceRecord, ...]: ...
 
+    def book_failure_summary(self, book_id: str) -> str | None: ...
+
     def resource_matches_owner(
         self,
         *,

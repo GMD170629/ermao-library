@@ -221,8 +221,9 @@ class FakeBookQueue:
         error_summary: str,
         retryable: bool,
         failed_at: datetime,
+        partial_failure: bool = False,
     ) -> BookImportTaskRecord | None:
-        del execution_version, retryable, failed_at
+        del execution_version, retryable, failed_at, partial_failure
         self.failures.append((task_id, error_summary))
         self._legacy_queue._state = "FAILED"
         self._legacy_queue._error_summary = error_summary

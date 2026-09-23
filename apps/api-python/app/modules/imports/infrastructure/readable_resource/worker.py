@@ -48,6 +48,7 @@ class _PendingCompletion:
     outcome: str
     error_summary: str | None = None
     execution_version: int | None = None
+    partial_failure: bool = False
 
 
 class ReadableResourceWorkerProcessor:
@@ -210,6 +211,9 @@ class ReadableResourceWorkerProcessor:
     def _process_book(self, book: BookImportTaskRecord) -> str:
         try:
             outcome, error_summary = self._execute_book(book)
+            partial_failure = outcome == "book_partial_failure"
+            if partial_failure:
+                outcome = "failed"
         except Exception as error:  # noqa: BLE001 - task containment boundary
             scan_error = error if isinstance(error, SourceScanStartUnavailableError) else None
             snapshot = prepare_exception_diagnostic(
@@ -239,6 +243,7 @@ class ReadableResourceWorkerProcessor:
                 persist_exception_diagnostic(logger, snapshot)
             outcome = "error"
             error_summary = scan_error.code if scan_error is not None else "WORKER_ERROR"
+            partial_failure = False
         self._pending_completion = _PendingCompletion(
             book.id,
             book.library_id,
@@ -246,6 +251,7 @@ class ReadableResourceWorkerProcessor:
             outcome,
             error_summary,
             book.execution_version,
+            partial_failure,
         )
         return self._finish_pending_completion()
 
@@ -265,6 +271,7 @@ class ReadableResourceWorkerProcessor:
         ):
             work = book.work.active
             phase = book.phase
+            partial_error: str | None = None
             if phase == "SCAN":
                 self._process_import.reset_inspection_cache()
                 if work.scan_scopes is None:
@@ -299,6 +306,8 @@ class ReadableResourceWorkerProcessor:
                     )
                 if result.outcome == "cancelled":
                     return "cancelled", "BOOK_RESOURCE_STALE"
+                if result.outcome == "partial":
+                    partial_error = result.error_summary
                 with self._uow.transaction():
                     if not book_queue.advance_book_phase(
                         book.id,
@@ -310,6 +319,8 @@ class ReadableResourceWorkerProcessor:
             if current is None:
                 return "cancelled", None
             if not current.work.pending.is_empty:
+                if partial_error is not None:
+                    return "book_partial_failure", partial_error
                 return "book_follow_up", None
             if self._identify_book is None:
                 raise RuntimeError("Book metadata processor is not configured")
@@ -327,8 +338,14 @@ class ReadableResourceWorkerProcessor:
                 if current is not None and not current.work.pending.is_empty:
                     return "book_follow_up", None
                 if book_queue.book_identification_complete(book.book_id):
+                    failure = partial_error or self._process_book_resources.failure_summary(book.book_id)
+                    if failure is not None:
+                        return "book_partial_failure", failure
                     return "book", None
                 return "error", "IDENTIFICATION_STALE"
+            failure = partial_error or self._process_book_resources.failure_summary(book.book_id)
+            if failure is not None:
+                return "book_partial_failure", failure
             return "book", None
 
     def _execute_task(self, task: LibraryImportTaskRecord) -> str:
@@ -391,6 +408,7 @@ class ReadableResourceWorkerProcessor:
                                 error_summary=pending.error_summary,
                                 retryable=True,
                                 failed_at=pending.finished_at,
+                                partial_failure=pending.partial_failure,
                             )
                     elif pending.error_summary is None:
                         self._queue.mark_succeeded(

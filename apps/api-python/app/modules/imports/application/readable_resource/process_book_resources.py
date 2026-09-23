@@ -36,8 +36,8 @@ class _BookResourceRun:
     execution_version: int
     resource_id: str
     source_node_id: str
-    advance_cursor: bool
     error_summary: str | None = None
+    position_complete: bool = False
 
     def is_current(self) -> bool:
         if not self.queue.book_run_is_current(
@@ -67,15 +67,21 @@ class _BookResourceRun:
         )
 
     def succeed(self, *, finished_at: datetime) -> None:
-        if self.advance_cursor and not self.queue.advance_book_resource_cursor(
+        if not self.queue.advance_book_resource_cursor(
             self.operation_id,
             execution_version=self.execution_version,
             resource_id=self.resource_id,
         ):
             raise RuntimeError("BOOK_RUN_STALE")
+        self.position_complete = True
 
-    def fail(self, *, error_summary: str, finished_at: datetime) -> None:
+    def fail(
+        self, *, error_summary: str, finished_at: datetime,
+        result_persisted: bool = False,
+    ) -> None:
         self.error_summary = error_summary
+        if result_persisted:
+            self.succeed(finished_at=finished_at)
 
 
 class ProcessBookResources:
@@ -94,6 +100,9 @@ class ProcessBookResources:
         self._uow = uow
         self._clock = clock
 
+    def failure_summary(self, book_id: str) -> str | None:
+        return self._resources.book_failure_summary(book_id)
+
     def execute(
         self, task: BookImportTaskRecord, *, max_resources: int | None = None
     ) -> BookResourceBatchResult:
@@ -101,15 +110,12 @@ class ProcessBookResources:
             raise ValueError("BOOK_RUN_NOT_CLAIMED")
         if max_resources is not None and max_resources < 1:
             raise ValueError("INVALID_BOOK_RESOURCE_BATCH_SIZE")
-        first_error: str | None = None
         processed = 0
         for resource_id in self._resource_ids(task):
             if task.resource_cursor is not None and resource_id <= task.resource_cursor:
                 continue
             if max_resources is not None and processed >= max_resources:
-                return BookResourceBatchResult(
-                    "failed" if first_error is not None else "yielded", first_error
-                )
+                return BookResourceBatchResult("yielded")
             processed += 1
             with self._uow.transaction():
                 if not self._queue.book_run_is_current(
@@ -119,8 +125,7 @@ class ProcessBookResources:
                 resource = self._resources.get_resource(resource_id)
                 if resource is None:
                     if (
-                        first_error is None
-                        and task.work.active.resource_ids is not None
+                        task.work.active.resource_ids is not None
                         and not self._queue.advance_book_resource_cursor(
                             task.id,
                             execution_version=task.execution_version,
@@ -145,7 +150,6 @@ class ProcessBookResources:
                 execution_version=task.execution_version,
                 resource_id=resource_id,
                 source_node_id=source_node_id,
-                advance_cursor=first_error is None,
             )
             result = self._process_resource.process_resource(
                 library_id=task.library_id,
@@ -155,11 +159,14 @@ class ProcessBookResources:
             )
             if result.outcome == "cancelled":
                 return BookResourceBatchResult("cancelled")
-            if result.outcome not in {"ok", "changed"} and first_error is None:
-                first_error = run.error_summary or result.outcome.upper()
-        return BookResourceBatchResult(
-            "failed" if first_error is not None else "ok", first_error
-        )
+            if not run.position_complete:
+                return BookResourceBatchResult(
+                    "failed", run.error_summary or result.outcome.upper()
+                )
+        failure_summary = self._resources.book_failure_summary(task.book_id)
+        if failure_summary is not None:
+            return BookResourceBatchResult("partial", failure_summary)
+        return BookResourceBatchResult("ok")
 
     def _resource_ids(self, task: BookImportTaskRecord) -> Iterator[str]:
         explicit = task.work.active.resource_ids

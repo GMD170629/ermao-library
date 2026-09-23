@@ -85,7 +85,10 @@ class ResourceImportRunPort(Protocol):
 
     def succeed(self, *, finished_at: datetime) -> None: ...
 
-    def fail(self, *, error_summary: str, finished_at: datetime) -> None: ...
+    def fail(
+        self, *, error_summary: str, finished_at: datetime,
+        result_persisted: bool = False,
+    ) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,7 +121,10 @@ class _QueuedResourceImportRun:
     def succeed(self, *, finished_at: datetime) -> None:
         self.queue.mark_succeeded(self.operation_id, finished_at=finished_at)
 
-    def fail(self, *, error_summary: str, finished_at: datetime) -> None:
+    def fail(
+        self, *, error_summary: str, finished_at: datetime,
+        result_persisted: bool = False,
+    ) -> None:
         self.queue.mark_failed(
             self.operation_id, error_summary=error_summary, finished_at=finished_at
         )
@@ -498,6 +504,7 @@ class ProcessReadableResourceImportTask:
                             or parsed.error_code
                             or "PARSE_FAILED",
                             finished_at=self._clock.now(),
+                            result_persisted=True,
                         )
         except Exception:
             if self._covers is not None:
@@ -929,6 +936,7 @@ class ProcessReadableResourceImportTask:
                         if adapter.asset_role is AssetRole.PAGE
                         else "AUDIO_ASSETS_FAILED",
                         finished_at=self._clock.now(),
+                        result_persisted=True,
                     )
                 else:
                     run.succeed(finished_at=self._clock.now())

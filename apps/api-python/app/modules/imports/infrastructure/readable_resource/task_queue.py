@@ -461,6 +461,7 @@ class SqlAlchemyLibraryImportTaskQueue(
         error_summary: str,
         retryable: bool,
         failed_at: datetime,
+        partial_failure: bool = False,
     ) -> BookImportTaskRecord | None:
         if not error_summary:
             raise ValueError("EMPTY_BOOK_FAILURE")
@@ -477,6 +478,8 @@ class SqlAlchemyLibraryImportTaskQueue(
         work = decode_book_work(row.book_work or "")
         has_new_request = not work.pending.is_empty
         roll_forward = has_new_request and not will_retry
+        if partial_failure and row.phase != "IDENTIFY":
+            raise ValueError("BOOK_PARTIAL_FAILURE_PHASE_MISMATCH")
         next_work = (
             BookWorkState(pending=work.active.merge(work.pending))
             if roll_forward
@@ -494,11 +497,15 @@ class SqlAlchemyLibraryImportTaskQueue(
             .values(
                 state="FAILED" if terminal_failure else "QUEUED",
                 book_work=encode_book_work(next_work),
-                phase=self._book_phase(next_work.pending)
-                if roll_forward
-                else row.phase,
+                phase=(
+                    self._book_phase(next_work.pending)
+                    if roll_forward
+                    else "RESOURCES" if partial_failure else row.phase
+                ),
                 execution_version=None if roll_forward else row.execution_version,
-                resource_cursor=None if roll_forward else row.resource_cursor,
+                resource_cursor=None
+                if roll_forward or partial_failure
+                else row.resource_cursor,
                 retry_count=0 if roll_forward else attempts,
                 next_attempt_at=(
                     failed_at
@@ -514,7 +521,7 @@ class SqlAlchemyLibraryImportTaskQueue(
         )
         if failed is None:
             return None
-        if terminal_failure:
+        if terminal_failure and not partial_failure:
             self._session.execute(
                 update(LibraryBookMetadata)
                 .where(LibraryBookMetadata.book_id == row.book_id)

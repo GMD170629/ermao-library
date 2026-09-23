@@ -8,7 +8,7 @@ from dataclasses import asdict, replace
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy import and_, delete, func, insert, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
@@ -755,6 +755,28 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             query.order_by(LibraryReadableResource.id).limit(limit)
         ).all()
         return tuple(self._to_resource(row) for row in rows)
+
+    def book_failure_summary(self, book_id: str) -> str | None:
+        failed = self._session.execute(
+            select(LibraryResourceAsset.failure_reason)
+            .select_from(LibraryReadableResource)
+            .outerjoin(
+                LibraryResourceAsset,
+                and_(
+                    LibraryResourceAsset.resource_id == LibraryReadableResource.id,
+                    LibraryResourceAsset.import_state == "FAILED",
+                ),
+            )
+            .where(
+                LibraryReadableResource.book_id == book_id,
+                or_(
+                    LibraryReadableResource.import_state == "FAILED",
+                    LibraryResourceAsset.id.is_not(None),
+                ),
+            )
+            .limit(1)
+        ).first()
+        return None if failed is None else failed[0] or "RESOURCE_FAILED"
 
     def resource_matches_owner(
         self,

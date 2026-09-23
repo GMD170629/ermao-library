@@ -181,6 +181,7 @@ class BookImportTaskQueuePort(Protocol):
         error_summary: str,
         retryable: bool,
         failed_at: datetime,
+        partial_failure: bool = False,
     ) -> BookImportTaskRecord | None: ...
 
     def continue_book_task(
