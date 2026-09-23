@@ -46,7 +46,7 @@ class ContinueImportResult:
 
 
 class ContinueImport:
-    """Enqueue SCAN_LIBRARY / CONTINUE_SOURCE and requeue FAILED tasks."""
+    """Create a fresh task for the requested library, source, or historical target."""
 
     def __init__(
         self,
@@ -131,50 +131,50 @@ class ContinueImport:
                 )
             if book_result is None:
                 existing = self._queue.get_task(task_id)
-                if existing is None or existing.source_node_id is None:
+                if existing is None:
                     raise LookupError(task_id)
-                if force:
-                    if existing.kind != "IMPORT_RESOURCE" or existing.resource_id is None:
-                        raise ValueError("FORCE_REQUIRES_RESOURCE_TASK")
-                    requested = self._queue.request_import_resource(
-                        library_id=existing.library_id,
-                        resource_id=existing.resource_id,
-                        source_node_id=existing.source_node_id,
-                        force=True,
+                if existing.kind == "SCAN_LIBRARY":
+                    task, _ = self._queue.request_library_scan(
+                        existing.library_id,
+                        missing_entry_policy=existing.missing_entry_policy,
                     )
-                    assert requested is not None
-                    task, requeued = requested, True
+                elif existing.kind == "CONTINUE_SOURCE" and existing.source_node_id:
+                    task, _ = self._queue.request_source_scan(
+                        library_id=existing.library_id,
+                        source_node_id=existing.source_node_id,
+                        missing_entry_policy=existing.missing_entry_policy,
+                    )
                 else:
-                    task, requeued = self._queue.requeue_failed_task(task_id)
+                    raise LookupError(task_id)
         if book_result is not None:
-            book_task, requeued = book_result
+            book_task, _ = book_result
             self._log.emit(
                 "continue_import.task",
                 library_id=book_task.library_id,
                 task_id=book_task.id,
                 stage="continue",
-                outcome="requeued" if requeued else "not_failed",
+                outcome="enqueued",
             )
             return ContinueImportResult(
                 library_id=book_task.library_id,
                 source_node_id=book_task.source_node_id,
-                requeued_failed=1 if requeued else 0,
+                requeued_failed=0,
                 enqueued_scan=False,
-                task_id=book_task.id if requeued else None,
+                task_id=book_task.id,
             )
         self._log.emit(
             "continue_import.task",
             library_id=task.library_id,
             task_id=task.id,
             stage="continue",
-            outcome="requeued" if requeued else "not_failed",
+            outcome="enqueued",
         )
         return ContinueImportResult(
             library_id=task.library_id,
             source_node_id=task.source_node_id,
-            requeued_failed=1 if requeued else 0,
-            enqueued_scan=requeued,
-            task_id=task.id if requeued else None,
+            requeued_failed=0,
+            enqueued_scan=True,
+            task_id=task.id,
         )
 
 

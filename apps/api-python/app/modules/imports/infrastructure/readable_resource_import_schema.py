@@ -194,30 +194,13 @@ class LibraryImportTask(Base):
             onupdate="CASCADE",
             name="fk_LibraryImportTask_book_library",
         ),
-        Index(
-            "LibraryImportTask_book_key",
-            "bookId",
-            unique=True,
-            sqlite_where=column("kind") == "IMPORT_BOOK",
-        ),
         Index("LibraryImportTask_bookId_libraryId_idx", "bookId", "libraryId"),
         Index(
             "LibraryImportTask_book_runnable_idx",
             "state",
-            "scanGateBlocked",
-            "nextAttemptAt",
             "createdAt",
             "id",
             sqlite_where=column("kind") == "IMPORT_BOOK",
-        ),
-        Index(
-            "LibraryImportTask_book_gate_pending_idx",
-            "id",
-            sqlite_where=and_(
-                column("kind") == "IMPORT_BOOK",
-                column("state") == "QUEUED",
-                column("scanGateBlocked").is_(None),
-            ),
         ),
         Index(
             "LibraryImportTask_import_asset_key",
@@ -248,24 +231,6 @@ class LibraryImportTask(Base):
             "libraryId",
         ),
         Index("LibraryImportTask_libraryId_kind_idx", "libraryId", "kind", "state"),
-        Index(
-            "LibraryImportTask_scan_queued_key",
-            "libraryId",
-            unique=True,
-            sqlite_where=and_(
-                column("kind") == "SCAN_LIBRARY",
-                column("state") == "QUEUED",
-            ),
-        ),
-        Index(
-            "LibraryImportTask_scan_running_key",
-            "libraryId",
-            unique=True,
-            sqlite_where=and_(
-                column("kind") == "SCAN_LIBRARY",
-                column("state") == "RUNNING",
-            ),
-        ),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)

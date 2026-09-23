@@ -8,7 +8,6 @@ from datetime import UTC, datetime, timedelta
 from typing import cast
 
 from sqlalchemy import delete, exists, or_, select, update
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from app.contracts.library_file_activity import LibraryFileActivityBusy
@@ -147,158 +146,22 @@ class SqlAlchemyLibraryImportTaskQueue(
             if owned != set(work.resource_ids):
                 raise ValueError("RESOURCE_OUTSIDE_BOOK")
 
-        row = self._session.scalar(
-            select(LibraryImportTask).where(
-                LibraryImportTask.kind == "IMPORT_BOOK",
-                LibraryImportTask.book_id == book_id,
-            )
+        row = LibraryImportTask(
+            id=cuid(),
+            kind="IMPORT_BOOK",
+            book_id=book_id,
+            library_id=book.library_id,
+            source_node_id=book.source_node_id,
+            state="QUEUED",
+            phase=self._book_phase(work),
+            book_work=encode_book_work(BookWorkState(pending=work)),
+            scan_gate_blocked=False,
+            request_version=1,
+            retry_count=0,
+            created_at=requested_at,
         )
-        if row is None:
-            task_id = cuid()
-            self._session.execute(
-                sqlite_insert(LibraryImportTask)
-                .values(
-                    id=task_id,
-                    kind="IMPORT_BOOK",
-                    book_id=book_id,
-                    library_id=book.library_id,
-                    source_node_id=book.source_node_id,
-                    state="QUEUED",
-                    phase=self._book_phase(work),
-                    book_work=encode_book_work(BookWorkState(pending=work)),
-                    scan_gate_blocked=book_gate_blocked(
-                        self._session,
-                        library_id=book.library_id,
-                        relative_path=anchor.relative_path,
-                        physical_kind=anchor.physical_kind,
-                        has_scan_work=self._book_phase(work) == "SCAN",
-                    ),
-                    request_version=1,
-                    retry_count=0,
-                    next_attempt_at=requested_at,
-                    created_at=requested_at,
-                )
-                .on_conflict_do_nothing(
-                    index_elements=[LibraryImportTask.book_id],
-                    index_where=LibraryImportTask.kind == "IMPORT_BOOK",
-                )
-            )
-            row = self._session.scalar(
-                select(LibraryImportTask).where(
-                    LibraryImportTask.kind == "IMPORT_BOOK",
-                    LibraryImportTask.book_id == book_id,
-                )
-            )
-            if row is None:
-                raise RuntimeError("BOOK_TASK_DISAPPEARED")
-            if row.id == task_id:
-                self._completion.dirty(row)
-                return self._book_record(row)
-
-        if row.source_node_id != book.source_node_id or row.library_id != book.library_id:
-            raise ValueError("BOOK_TASK_ANCHOR_MISMATCH")
-        current = decode_book_work(row.book_work or "")
-        merged = current.request(work)
-        if row.completion_outcome is not None:
-            # The committed result owns this run until its terminal write lands.
-            # New requests remain pending and cannot replace that result.
-            completion_values: dict[str, object] = {
-                "book_work": encode_book_work(merged),
-                "request_version": row.request_version + 1,
-            }
-            if row.state == "FAILED":
-                # A fresh explicit request also retries an isolated terminal
-                # write before the newly requested business work can run.
-                completion_values.update(
-                    state="QUEUED", next_attempt_at=requested_at,
-                    completion_retry_count=0, finished_at=None,
-                    scan_gate_blocked=False,
-                    error_summary=(
-                        None if row.completion_outcome in {"book", "book_follow_up", "book_yield"}
-                        else row.error_summary
-                    ),
-                )
-            changed = self._session.scalar(
-                update(LibraryImportTask)
-                .where(
-                    LibraryImportTask.id == row.id,
-                    LibraryImportTask.request_version == row.request_version,
-                )
-                .values(**completion_values)
-                .returning(LibraryImportTask.id)
-            )
-            if changed is None:
-                raise RuntimeError("BOOK_REQUEST_VERSION_CONFLICT")
-            self._session.refresh(row)
-            self._completion.dirty(row)
-            return self._book_record(row)
-        incoming_scan = work.scan_scopes != ()
-        if incoming_scan and row.state in {"QUEUED", "FAILED"} and not merged.active.is_empty:
-            # A queued interrupted run cannot pass an incomplete-range gate
-            # before its newly requested scan. Restart that same Book work at
-            # SCAN; committed Resource results remain reusable.
-            merged = BookWorkState(active=merged.active.merge(merged.pending))
-        values: dict[str, object] = {
-            "book_work": encode_book_work(merged),
-            "request_version": row.request_version + 1,
-        }
-        if row.state == "QUEUED":
-            queued_phase = (
-                "SCAN" if incoming_scan
-                else row.phase if not merged.active.is_empty
-                else self._book_phase(merged.pending)
-            )
-            values["phase"] = queued_phase
-            values["scan_gate_blocked"] = book_gate_blocked(
-                self._session, library_id=book.library_id,
-                relative_path=anchor.relative_path,
-                physical_kind=anchor.physical_kind,
-                has_scan_work=queued_phase == "SCAN",
-            )
-            if incoming_scan and not merged.active.is_empty:
-                values["execution_version"] = row.request_version + 1
-                values["resource_cursor"] = None
-                values["directory_resource_id"] = None
-                values["directory_member_cursor"] = None
-                values["directory_cover_cursor"] = None
-        if row.state in {"SUCCEEDED", "FAILED"}:
-            next_phase = (
-                "SCAN" if incoming_scan
-                else row.phase if not merged.active.is_empty
-                else self._book_phase(merged.pending)
-            )
-            values.update(
-                state="QUEUED",
-                phase=next_phase,
-                scan_gate_blocked=book_gate_blocked(
-                    self._session,
-                    library_id=book.library_id,
-                    relative_path=anchor.relative_path,
-                    physical_kind=anchor.physical_kind,
-                    has_scan_work=next_phase == "SCAN",
-                ),
-                started_at=None,
-                finished_at=None,
-                error_summary=None,
-                retry_count=0,
-                next_attempt_at=requested_at,
-            )
-            if incoming_scan and not merged.active.is_empty:
-                values["execution_version"] = row.request_version + 1
-                values["resource_cursor"] = None
-        changed = self._session.scalar(
-            update(LibraryImportTask)
-            .where(
-                LibraryImportTask.id == row.id,
-                LibraryImportTask.request_version == row.request_version,
-            )
-            .values(**values)
-            .returning(LibraryImportTask.id)
-        )
-        if changed is None:
-            raise RuntimeError("BOOK_REQUEST_VERSION_CONFLICT")
-        self._session.refresh(row)
-        self._completion.dirty(row)
+        self._session.add(row)
+        self._session.flush()
         return self._book_record(row)
 
     def claim_next_book(self, *, started_at: datetime) -> BookImportTaskRecord | None:
@@ -307,12 +170,9 @@ class SqlAlchemyLibraryImportTaskQueue(
             .where(
                 LibraryImportTask.kind == "IMPORT_BOOK",
                 LibraryImportTask.state == "QUEUED",
-                LibraryImportTask.scan_gate_blocked.is_(False),
-                LibraryImportTask.next_attempt_at <= started_at,
                 ~file_operation_blocks_library(LibraryImportTask.library_id),
             )
             .order_by(
-                LibraryImportTask.next_attempt_at.asc(),
                 LibraryImportTask.created_at.asc(),
                 LibraryImportTask.id.asc(),
             )
@@ -321,44 +181,27 @@ class SqlAlchemyLibraryImportTaskQueue(
         if row is None:
             return None
         work = decode_book_work(row.book_work or "")
-        new_work = work.active.is_empty and row.completion_outcome is None
-        if row.completion_outcome is not None:
-            if row.execution_version is None:
-                raise ValueError("BOOK_RUN_VERSION_MISSING")
-            execution_version = row.execution_version
-            phase = row.phase
-        elif work.active.is_empty:
-            work = work.claim_new()
-            execution_version = row.request_version
-            phase = self._book_phase(work.active)
-        else:
-            if row.execution_version is None or row.phase is None:
-                raise ValueError("BOOK_RUN_VERSION_MISSING")
-            execution_version = row.execution_version
-            phase = row.phase
+        if not work.active.is_empty:
+            raise ValueError("BOOK_TASK_ALREADY_ATTEMPTED")
+        work = work.claim_new()
         claimed = self._session.scalar(
             update(LibraryImportTask)
             .where(
                 LibraryImportTask.id == row.id,
                 LibraryImportTask.state == "QUEUED",
-                LibraryImportTask.request_version == row.request_version,
             )
             .values(
                 state="RUNNING",
-                phase=phase,
+                phase=self._book_phase(work.active),
                 book_work=encode_book_work(work),
-                execution_version=execution_version,
+                execution_version=row.request_version,
                 started_at=started_at,
-                finished_at=None,
-                error_summary=row.error_summary if row.completion_outcome else None,
-                directory_resource_id=None if new_work else row.directory_resource_id,
-                directory_member_cursor=None if new_work else row.directory_member_cursor,
-                directory_cover_cursor=None if new_work else row.directory_cover_cursor,
             )
             .returning(LibraryImportTask.id)
         )
         if claimed is None:
             return None
+        self._completion.dirty(row)
         self._session.refresh(row)
         return self._book_record(row)
 
@@ -817,113 +660,42 @@ class SqlAlchemyLibraryImportTaskQueue(
     def continue_book_task(
         self, task_id: str, *, continued_at: datetime, force: bool = False
     ) -> tuple[BookImportTaskRecord, bool] | None:
-        requested = self._session.get(LibraryImportTask, task_id)
-        if requested is None:
+        previous = self._session.get(LibraryImportTask, task_id)
+        if previous is None:
             raise LookupError(task_id)
-        current_id = (
-            requested.id
-            if requested.kind == "IMPORT_BOOK"
-            else requested.superseded_by_task_id
-        )
-        if current_id is None:
+        book_id = previous.book_id
+        if book_id is None and previous.resource_id is not None:
+            resource = self._session.get(LibraryReadableResource, previous.resource_id)
+            if resource is None or resource.library_id != previous.library_id:
+                raise LookupError(task_id)
+            book_id = resource.book_id
+        if book_id is None and previous.superseded_by_task_id is not None:
+            historical = self._session.get(LibraryImportTask, previous.superseded_by_task_id)
+            book_id = None if historical is None else historical.book_id
+        if book_id is None:
             return None
-        current = self._session.get(LibraryImportTask, current_id)
-        if (
-            current is None
-            or current.kind != "IMPORT_BOOK"
-            or current.book_id is None
-            or current.library_id != requested.library_id
-        ):
+        book = self._session.get(LibraryBook, book_id)
+        if book is None or book.library_id != previous.library_id:
             raise LookupError(task_id)
         if force:
-            if requested.kind != "IMPORT_RESOURCE" or requested.resource_id is None:
+            if previous.resource_id is None:
                 raise ValueError("FORCE_REQUIRES_RESOURCE_TASK")
-            resource = self._session.get(
-                LibraryReadableResource, requested.resource_id
+            work = BookWork(
+                resource_ids=(previous.resource_id,), reasons=("FORCE_REIMPORT",),
             )
-            if (
-                resource is None
-                or resource.book_id != current.book_id
-                or resource.library_id != current.library_id
-            ):
-                raise ValueError("RESOURCE_OUTSIDE_BOOK")
-            self._session.execute(
-                update(LibraryResourceAsset)
-                .where(
-                    LibraryResourceAsset.resource_id == resource.id,
-                    LibraryResourceAsset.library_id == current.library_id,
-                )
-                .values(processed_source_version=None)
-            )
-            book_task = self.request_book_work(
-                book_id=current.book_id,
-                work=BookWork(resource_ids=(resource.id,)),
-                requested_at=continued_at,
-            )
-            return book_task, True
-        if current.state != "FAILED":
-            return self._book_record(current), False
-        if current.completion_outcome is not None:
-            changed = self._session.scalar(
-                update(LibraryImportTask)
-                .where(
-                    LibraryImportTask.id == current.id,
-                    LibraryImportTask.state == "FAILED",
-                    LibraryImportTask.request_version == current.request_version,
-                )
-                .values(
-                    state="QUEUED", next_attempt_at=continued_at,
-                    completion_retry_count=0, started_at=None, finished_at=None,
-                    scan_gate_blocked=False,
-                    error_summary=(
-                        None if current.completion_outcome in {"book", "book_follow_up", "book_yield"}
-                        else current.error_summary
-                    ),
-                )
-                .returning(LibraryImportTask.id)
-            )
-            if changed is None:
-                raise RuntimeError("BOOK_CONTINUE_VERSION_CONFLICT")
-            self._session.refresh(current)
-            return self._book_record(current), True
-        work = decode_book_work(current.book_work or "")
-        if work.active.is_empty and work.pending.is_empty:
-            raise ValueError("BOOK_WORK_NOT_PENDING")
-        phase = self._book_phase(
-            work.active if not work.active.is_empty else work.pending
+        elif previous.kind == "IMPORT_BOOK":
+            previous_work = decode_book_work(previous.book_work or "")
+            work = previous_work.active if not previous_work.active.is_empty else previous_work.pending
+            if work.is_empty:
+                work = BookWork(scan_scopes=None, resource_ids=None, identify=True)
+        elif previous.resource_id is not None:
+            work = BookWork(resource_ids=(previous.resource_id,), identify=True)
+        else:
+            work = BookWork(identify=True)
+        task = self.request_book_work(
+            book_id=book_id, work=work, requested_at=continued_at,
         )
-        node = self._session.get(LibrarySourceNode, current.source_node_id)
-        if node is None:
-            raise ValueError("INVALID_BOOK_ANCHOR")
-        changed = self._session.scalar(
-            update(LibraryImportTask)
-            .where(
-                LibraryImportTask.id == current.id,
-                LibraryImportTask.state == "FAILED",
-                LibraryImportTask.request_version == current.request_version,
-            )
-            .values(
-                state="QUEUED",
-                phase=phase,
-                scan_gate_blocked=book_gate_blocked(
-                    self._session, library_id=current.library_id,
-                    relative_path=node.relative_path,
-                    physical_kind=node.physical_kind,
-                    has_scan_work=phase == "SCAN",
-                ),
-                next_attempt_at=continued_at,
-                retry_count=0,
-                started_at=None,
-                finished_at=None,
-                error_summary=None,
-            )
-            .returning(LibraryImportTask.id)
-        )
-        if changed is None:
-            raise RuntimeError("BOOK_CONTINUE_VERSION_CONFLICT")
-        self._session.refresh(current)
-        self._completion.dirty(current)
-        return self._book_record(current), True
+        return task, True
 
     def replace_with_fresh_library_scan(self, library_id: str) -> None:
         """Drop every target task for the library and enqueue one SCAN_LIBRARY."""
@@ -988,120 +760,18 @@ class SqlAlchemyLibraryImportTaskQueue(
         missing_entry_policy: MissingEntryPolicy,
         scan_scopes: tuple[ScanScope, ...] | None = None,
     ) -> tuple[LibraryImportTaskRecord, bool]:
-        """Merge an equivalent active scan and retain at most one follow-up."""
-
-        queued = self._session.scalar(
-            select(LibraryImportTask).where(
-                LibraryImportTask.library_id == library_id,
-                LibraryImportTask.kind == "SCAN_LIBRARY",
-                LibraryImportTask.state == "QUEUED",
-            )
+        # A scan request owns its scope; historical and running scans are immutable.
+        row = LibraryImportTask(
+            id=cuid(),
+            kind="SCAN_LIBRARY",
+            library_id=library_id,
+            state="QUEUED",
+            missing_entry_policy=missing_entry_policy.value,
+            scan_scopes=encode_scan_scopes(scan_scopes),
         )
-        failed = self._session.scalars(
-            select(LibraryImportTask)
-            .where(
-                LibraryImportTask.library_id == library_id,
-                LibraryImportTask.kind.in_(("SCAN_LIBRARY", "CONTINUE_SOURCE")),
-                LibraryImportTask.state == "FAILED",
-            )
-            .order_by(LibraryImportTask.created_at)
-        ).all()
-        if failed:
-            # A fresh scan request explicitly resumes unfinished scopes. Coalesce
-            # their intent before removing superseded failed queue rows.
-            for previous in failed:
-                if previous.kind == "SCAN_LIBRARY":
-                    scopes = decode_scan_scopes(previous.scan_scopes)
-                else:
-                    node = self._session.get(LibrarySourceNode, previous.source_node_id)
-                    scopes = (
-                        (
-                            ScanScope(
-                                node.relative_path
-                                if node.physical_kind == "DIRECTORY"
-                                else node.relative_path.rpartition("/")[0],
-                                True,
-                            ),
-                        )
-                        if node
-                        else None
-                    )
-                scan_scopes = merge_scan_scopes(scan_scopes, scopes)
-            survivor = queued if queued is not None else failed[0]
-            for offset in range(0, len(failed), 200):
-                self._session.execute(
-                    delete(LibraryImportTask).where(
-                        LibraryImportTask.id.in_(
-                            [
-                                row.id
-                                for row in failed[offset : offset + 200]
-                                if row.id != survivor.id
-                            ]
-                        )
-                    )
-                )
-            if queued is not None:
-                scan_scopes = merge_scan_scopes(
-                    decode_scan_scopes(queued.scan_scopes), scan_scopes
-                )
-            survivor.kind = "SCAN_LIBRARY"
-            survivor.source_node_id = None
-            survivor.scan_scopes = encode_scan_scopes(scan_scopes)
-            survivor.state = "QUEUED"
-            survivor.finished_at = None
-            survivor.started_at = None
-            survivor.error_summary = None
-            self._promote_missing_entry_policy(survivor, missing_entry_policy)
-            self._session.flush()
-            return self._to_record(survivor), queued is None
-        if queued is not None:
-            queued.scan_scopes = encode_scan_scopes(
-                merge_scan_scopes(decode_scan_scopes(queued.scan_scopes), scan_scopes)
-            )
-            self._promote_missing_entry_policy(queued, missing_entry_policy)
-            self._session.flush()
-            return self._to_record(queued), False
-
-        task_id = cuid()
-        statement = (
-            sqlite_insert(LibraryImportTask)
-            .values(
-                id=task_id,
-                kind="SCAN_LIBRARY",
-                library_id=library_id,
-                state="QUEUED",
-                missing_entry_policy=missing_entry_policy.value,
-                scan_scopes=encode_scan_scopes(scan_scopes),
-            )
-            .on_conflict_do_nothing(
-                index_elements=[LibraryImportTask.library_id],
-                index_where=(
-                    (LibraryImportTask.kind == "SCAN_LIBRARY")
-                    & (LibraryImportTask.state == "QUEUED")
-                ),
-            )
-        )
-        result = self._session.execute(statement)
+        self._session.add(row)
         self._session.flush()
-        inserted = bool(getattr(result, "rowcount", 0))
-        row = self._session.scalar(
-            select(LibraryImportTask).where(
-                LibraryImportTask.library_id == library_id,
-                LibraryImportTask.kind == "SCAN_LIBRARY",
-                LibraryImportTask.state == "QUEUED",
-            )
-        )
-        if row is None:
-            raise RuntimeError("queued library scan disappeared after request")
-        self._promote_missing_entry_policy(row, missing_entry_policy)
-        if not inserted:
-            row.scan_scopes = encode_scan_scopes(
-                merge_scan_scopes(decode_scan_scopes(row.scan_scopes), scan_scopes)
-            )
-            self._session.flush()
-        if inserted:
-            self._completion.dirty(row)
-        return self._to_record(row), inserted
+        return self._to_record(row), True
 
     def request_source_scan(
         self,
@@ -1110,49 +780,9 @@ class SqlAlchemyLibraryImportTaskQueue(
         source_node_id: str,
         missing_entry_policy: MissingEntryPolicy,
     ) -> tuple[LibraryImportTaskRecord, bool]:
-        queued = self._session.scalar(
-            select(LibraryImportTask).where(
-                LibraryImportTask.kind == "CONTINUE_SOURCE",
-                LibraryImportTask.library_id == library_id,
-                LibraryImportTask.source_node_id == source_node_id,
-                LibraryImportTask.state == "QUEUED",
-            )
-        )
-        if queued is not None:
-            self._promote_missing_entry_policy(queued, missing_entry_policy)
-            return self._to_record(queued), False
-
-        failed_source = self._session.scalar(
-            select(LibraryImportTask)
-            .where(
-                LibraryImportTask.kind == "CONTINUE_SOURCE",
-                LibraryImportTask.library_id == library_id,
-                LibraryImportTask.source_node_id == source_node_id,
-                LibraryImportTask.state == "FAILED",
-            )
-            .order_by(LibraryImportTask.created_at)
-            .limit(1)
-        )
-        if failed_source is not None:
-            self._promote_missing_entry_policy(failed_source, missing_entry_policy)
-            return self.requeue_failed_task(failed_source.id)
-
-        running = self._session.scalar(
-            select(LibraryImportTask).where(
-                LibraryImportTask.kind == "CONTINUE_SOURCE",
-                LibraryImportTask.library_id == library_id,
-                LibraryImportTask.source_node_id == source_node_id,
-                LibraryImportTask.state == "RUNNING",
-            )
-        )
-        needs_follow_up = (
-            running is not None
-            and missing_entry_policy is MissingEntryPolicy.PRUNE_MISSING
-            and running.missing_entry_policy != MissingEntryPolicy.PRUNE_MISSING.value
-        )
-        if running is not None and not needs_follow_up:
-            return self._to_record(running), False
-
+        node = self._session.get(LibrarySourceNode, source_node_id)
+        if node is None or node.library_id != library_id:
+            raise LookupError(source_node_id)
         task = self.enqueue(
             kind="CONTINUE_SOURCE",
             library_id=library_id,
