@@ -39,6 +39,10 @@ class _BookResourceRun:
     error_summary: str | None = None
     position_complete: bool = False
 
+    @property
+    def can_yield_directory(self) -> bool:
+        return True
+
     def is_current(self) -> bool:
         if not self.queue.book_run_is_current(
             self.operation_id, execution_version=self.execution_version
@@ -53,6 +57,36 @@ class _BookResourceRun:
 
     def start(self, *, started_at: datetime) -> None:
         if not self.is_current():
+            raise RuntimeError("BOOK_RUN_STALE")
+
+    def directory_cursor(self, resource_id: str) -> str | None:
+        task = self.queue.get_book_task(self.operation_id)
+        if task is None or task.directory_resource_id != resource_id:
+            return None
+        return task.directory_member_cursor
+
+    def advance_directory_cursor(self, resource_id: str, member_id: str) -> None:
+        if not self.queue.advance_directory_member_cursor(
+            self.operation_id,
+            execution_version=self.execution_version,
+            resource_id=resource_id,
+            member_id=member_id,
+        ):
+            raise RuntimeError("BOOK_RUN_STALE")
+
+    def directory_cover_cursor(self, resource_id: str) -> str | None:
+        task = self.queue.get_book_task(self.operation_id)
+        if task is None or task.directory_resource_id != resource_id:
+            return None
+        return task.directory_cover_cursor
+
+    def advance_directory_cover_cursor(self, resource_id: str, asset_id: str) -> None:
+        if not self.queue.advance_directory_cover_cursor(
+            self.operation_id,
+            execution_version=self.execution_version,
+            resource_id=resource_id,
+            asset_id=asset_id,
+        ):
             raise RuntimeError("BOOK_RUN_STALE")
 
     def request_changed(
@@ -111,6 +145,7 @@ class ProcessBookResources:
         if max_resources is not None and max_resources < 1:
             raise ValueError("INVALID_BOOK_RESOURCE_BATCH_SIZE")
         processed = 0
+        first_error: str | None = None
         for resource_id in self._resource_ids(task):
             if task.resource_cursor is not None and resource_id <= task.resource_cursor:
                 continue
@@ -159,13 +194,25 @@ class ProcessBookResources:
             )
             if result.outcome == "cancelled":
                 return BookResourceBatchResult("cancelled")
+            if result.outcome == "yielded":
+                return BookResourceBatchResult("yielded")
             if not run.position_complete:
                 return BookResourceBatchResult(
                     "failed", run.error_summary or result.outcome.upper()
                 )
+            if run.error_summary is not None and first_error is None:
+                first_error = run.error_summary
         failure_summary = self._resources.book_failure_summary(task.book_id)
         if failure_summary is not None:
-            return BookResourceBatchResult("partial", failure_summary)
+            # Unreadable-file diagnostics stay on the Asset; the Book reports
+            # the directory-stage failure while parser result codes stay exact.
+            summary = (
+                first_error
+                if first_error is not None
+                and failure_summary in {"IMAGE_FILE_UNREADABLE", "AUDIO_FILE_UNREADABLE"}
+                else failure_summary
+            )
+            return BookResourceBatchResult("partial", summary)
         return BookResourceBatchResult("ok")
 
     def _resource_ids(self, task: BookImportTaskRecord) -> Iterator[str]:

@@ -285,7 +285,7 @@ os._exit(99)
         assert mapped == book_count // 100 - book_count // 400
         assert book_tasks == mapped
         assert gap == '[{"relativePath":"missing","recursive":true}]'
-        assert version == "0032_source_node_scan_seen_generation"
+        assert version == "0033_book_scan_gate"
         print(
             json.dumps(
                 {

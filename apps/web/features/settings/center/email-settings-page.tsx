@@ -28,6 +28,10 @@ type EmailSettings = {
 };
 
 type EmailSettingsPayload = { ok: boolean; data?: EmailSettings; error?: { message: string } };
+type SmtpSettingsRequest = {
+  smtp: Omit<EmailSettings['smtp'], 'passwordConfigured'> & { password?: string };
+  clearSmtpPassword: boolean;
+};
 type KindleSettingsPayload = {
   ok: boolean;
   data?: {
@@ -127,6 +131,22 @@ export function EmailSettingsPage() {
     }
   }, [active, canManageSystem, loadKindleSettings, loadSmtpSettings, sessionReady]);
 
+  function buildSmtpRequest(): SmtpSettingsRequest {
+    return {
+      smtp: {
+        host: smtp.host,
+        port: smtp.port,
+        security: smtp.security,
+        username: smtp.username,
+        fromEmail: smtp.fromEmail,
+        fromName: smtp.fromName,
+        maxAttachmentMb: smtp.maxAttachmentMb,
+        ...(smtp.password.trim() ? { password: smtp.password } : {})
+      },
+      clearSmtpPassword: clearPassword
+    };
+  }
+
   async function saveSmtp() {
     if (smtp.maxAttachmentMb !== null && (!Number.isFinite(smtp.maxAttachmentMb) || smtp.maxAttachmentMb < 1 || smtp.maxAttachmentMb > 50)) {
       toast.error('附件大小上限必须在 1 MB 到 50 MB 之间');
@@ -134,20 +154,7 @@ export function EmailSettingsPage() {
     }
     setBusy('save-smtp');
     try {
-      const body: Record<string, unknown> = {
-        smtp: {
-          host: smtp.host,
-          port: smtp.port,
-          security: smtp.security,
-          username: smtp.username,
-          fromEmail: smtp.fromEmail,
-          fromName: smtp.fromName,
-          maxAttachmentMb: smtp.maxAttachmentMb
-        },
-        clearSmtpPassword: clearPassword
-      };
-      if (smtp.password.trim()) (body.smtp as Record<string, unknown>).password = smtp.password;
-      const response = await fetch('/api/email-settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const response = await fetch('/api/email-settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(buildSmtpRequest()) });
       const payload = (await response.json()) as EmailSettingsPayload;
       if (!payload.ok || !payload.data) throw new Error(payload.error?.message ?? '保存 SMTP 设置失败');
       toast.success('SMTP 设置已保存');
@@ -165,7 +172,7 @@ export function EmailSettingsPage() {
       const response = await fetch('/api/email-settings/smtp-test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ smtp: { ...smtp, password: smtp.password || undefined }, clearSmtpPassword: clearPassword })
+        body: JSON.stringify(buildSmtpRequest())
       });
       const payload = (await response.json()) as { ok: boolean; data?: { message: string }; error?: { message: string } };
       if (!payload.ok) throw new Error(payload.error?.message ?? 'SMTP 连接失败');

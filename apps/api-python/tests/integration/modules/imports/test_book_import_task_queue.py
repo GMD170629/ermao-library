@@ -167,6 +167,35 @@ def test_book_requests_survive_running_and_use_one_task(db: Session) -> None:
     ) == 1
 
 
+def test_new_request_does_not_repeat_completed_scan_phase_after_yield(db: Session) -> None:
+    queue = SqlAlchemyLibraryImportTaskQueue(db)
+    requested = queue.request_book_work(
+        book_id="book-one",
+        work=BookWork(
+            scan_scopes=(ScanScope("one.epub", False),),
+            resource_ids=("resource-one",),
+        ),
+        requested_at=_NOW,
+    )
+    claimed = queue.claim_next_book(started_at=_NOW)
+    assert claimed is not None and claimed.execution_version == 1
+    assert queue.advance_book_phase(
+        requested.id, execution_version=1, phase="RESOURCES"
+    )
+    yielded = queue.yield_book_run(
+        requested.id, execution_version=1, yielded_at=_NOW
+    )
+    assert yielded is not None and yielded.phase == "RESOURCES"
+
+    updated = queue.request_book_work(
+        book_id="book-one", work=BookWork(identify=True), requested_at=_NOW
+    )
+    assert updated.phase == "RESOURCES"
+    db.commit()
+    resumed = queue.claim_next_book(started_at=_NOW)
+    assert resumed is not None and resumed.phase == "RESOURCES"
+
+
 def test_book_claim_survives_process_termination(db: Session) -> None:
     queue = SqlAlchemyLibraryImportTaskQueue(db)
     requested = queue.request_book_work(

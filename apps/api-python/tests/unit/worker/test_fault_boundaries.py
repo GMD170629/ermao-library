@@ -7,6 +7,9 @@ import pytest
 from sqlalchemy.exc import OperationalError
 
 from app.core.database_errors import is_retryable_sqlite_operation_error
+from app.modules.imports.infrastructure.readable_resource.support import (
+    SqlAlchemyUnitOfWork,
+)
 from app.services import metadata_lookup_queue, organize_scheduler
 from app.worker import main as worker_main
 
@@ -142,6 +145,15 @@ def test_import_retry_classifies_only_sqlite_locks_and_marked_budget_timeouts():
     assert not is_retryable_sqlite_operation_error(
         OperationalError("", {}, RuntimeError("database is locked"))
     )
+    fake_budget = RuntimeError("interrupted")
+    fake_budget.time_budget_exceeded = True
+    assert not is_retryable_sqlite_operation_error(OperationalError("", {}, fake_budget))
+    assert not is_retryable_sqlite_operation_error(
+        OperationalError("", {}, sqlite3.OperationalError("database is locked by corrupt schema"))
+    )
+    assert not is_retryable_sqlite_operation_error(
+        OperationalError("", {}, sqlite3.OperationalError("database disk image is malformed"))
+    )
 
 
 def test_import_loop_recovers_after_marked_sql_budget_timeout(runtime):
@@ -154,6 +166,64 @@ def test_import_loop_recovers_after_marked_sql_budget_timeout(runtime):
     worker_main.main()
     assert runtime.processor.process_once.call_count >= 2
     assert runtime.processor.recover_after_loop_failure.call_count >= 1
+
+
+def test_persistently_unwritable_import_component_pauses_after_bounded_attempts(
+    runtime, monkeypatch,
+):
+    original = sqlite3.OperationalError("interrupted")
+    original.time_budget_exceeded = True
+    runtime.processor.process_once.side_effect = OperationalError("completion", (), original)
+    heartbeat = Mock()
+    monkeypatch.setattr(worker_main, "QueueHeartbeatPump", lambda *a, **kw: heartbeat)
+    worker_main.main()
+    assert runtime.processor.process_once.call_count == 3
+    assert runtime.processor.recover_after_loop_failure.call_count == 3
+    assert any(
+        call.kwargs.get("status") == "paused"
+        and call.kwargs.get("error") == "database-unwritable:OperationalError"
+        for call in heartbeat.pulse.call_args_list
+    )
+
+
+def test_isolated_task_reports_degraded_but_keeps_component_running(
+    runtime, monkeypatch,
+):
+    runtime.processor.process_once.side_effect = (
+        lambda: "isolated" if runtime.processor.process_once.call_count == 1 else "idle"
+    )
+    heartbeat = Mock()
+    monkeypatch.setattr(worker_main, "QueueHeartbeatPump", lambda *a, **kw: heartbeat)
+    worker_main.main()
+    assert runtime.processor.process_once.call_count >= 2
+    assert any(
+        call.kwargs.get("status") == "degraded"
+        and call.kwargs.get("error") == "completion-isolated"
+        for call in heartbeat.pulse.call_args_list
+    )
+
+
+def test_completion_diagnostic_precedes_failed_rollback(caplog):
+    session = Mock()
+    sequence: list[str] = []
+    session.commit.side_effect = RuntimeError("commit failed")
+
+    def failed_rollback() -> None:
+        sequence.append("rollback")
+        raise RuntimeError("rollback failed")
+
+    session.rollback.side_effect = failed_rollback
+    uow = SqlAlchemyUnitOfWork(session)
+    with (
+        pytest.raises(RuntimeError, match="rollback failed"),
+        uow.transaction(before_rollback=lambda _error: sequence.append("diagnostic")),
+    ):
+        pass
+    assert sequence == ["diagnostic", "rollback"]
+    assert any(
+        "readable_resource.transaction_rollback_failed" in record.getMessage()
+        for record in caplog.records
+    )
 
 
 def test_loop_and_rollback_and_diagnostics_failure_do_not_escape(runtime, monkeypatch):

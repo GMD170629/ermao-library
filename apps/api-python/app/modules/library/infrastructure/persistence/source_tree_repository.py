@@ -8,10 +8,11 @@ from dataclasses import asdict, replace
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import and_, delete, func, insert, or_, select, update
+from sqlalchemy import and_, collate, delete, func, insert, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
+from app.contracts.local_metadata import LocalMetadataSource
 from app.contracts.local_metadata_snapshot import (
     LocalMetadataObservation,
     decode_observations,
@@ -40,7 +41,9 @@ from app.modules.library.application.source_tree_ports import (
     AdapterIdentity,
     BookResourceRepositoryPort,
     DirectoryAssetResult,
+    DirectoryCoverCandidate,
     DirectoryImportMember,
+    DirectoryMemberPage,
     InterpretationRecord,
     LibraryConfigPort,
     LibrarySourceTreeConfig,
@@ -1224,9 +1227,11 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         self._session.flush()
         return True
 
-    def load_directory_members(
-        self, resource_id: str
-    ) -> tuple[DirectoryImportMember, ...]:
+    def page_directory_members(
+        self, resource_id: str, *, after_id: str | None, limit: int
+    ) -> DirectoryMemberPage:
+        if limit < 1 or limit > 128:
+            raise ValueError("INVALID_DIRECTORY_PAGE_SIZE")
         resource = self._session.get(LibraryReadableResource, resource_id)
         if resource is None or resource.format not in {"IMAGE_DIR", "AUDIOBOOK_DIR"}:
             raise LookupError(resource_id)
@@ -1247,12 +1252,15 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             .where(
                 LibrarySourceNode.library_id == resource.library_id,
                 LibrarySourceNode.physical_kind == "REGULAR_FILE",
+                LibrarySourceNode.id > (after_id or ""),
                 LibrarySourceNode.relative_path.startswith(
                     anchor.relative_path + "/", autoescape=True
                 ),
             )
+            .order_by(LibrarySourceNode.id)
+            .limit(limit)
         ).all()
-        return tuple(
+        members = tuple(
             DirectoryImportMember(
                 node=SourceNodeRecord(
                     id=n.id,
@@ -1276,6 +1284,85 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
                 asset_path=SourceNodeRelativePath(n.relative_path),
                 adapter_id=resource.adapter_id,
             )
+        )
+        return DirectoryMemberPage(members, rows[-1][0].id if rows else None, len(rows) == limit)
+
+    def has_failed_directory_assets(self, resource_id: str) -> bool:
+        return self._session.scalar(
+            select(LibraryResourceAsset.id)
+            .where(
+                LibraryResourceAsset.resource_id == resource_id,
+                LibraryResourceAsset.import_state == AssetImportState.FAILED.value,
+            )
+            .limit(1)
+        ) is not None
+
+    def page_ready_directory_cover_candidates(
+        self, resource_id: str, *, after_asset_id: str | None, limit: int,
+    ) -> tuple[DirectoryCoverCandidate, ...]:
+        if limit < 1 or limit > 16:
+            raise ValueError("INVALID_DIRECTORY_COVER_PAGE_SIZE")
+        resource = self._session.get(LibraryReadableResource, resource_id)
+        if resource is None or resource.format != "IMAGE_DIR":
+            raise LookupError(resource_id)
+        anchor = self._session.get(LibrarySourceNode, resource.source_node_id)
+        if anchor is None:
+            raise LookupError(resource.source_node_id)
+        order_key = collate(
+            func.coalesce(LibraryResourceAsset.sort_key, ""), "ERMAO_NATURAL"
+        )
+        query = (
+            select(LibraryResourceAsset.id, LibrarySourceNode)
+            .join(
+                LibrarySourceNode,
+                LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
+            )
+            .where(
+                LibraryResourceAsset.resource_id == resource_id,
+                LibraryResourceAsset.import_state == AssetImportState.READY.value,
+                LibraryResourceAsset.role == AssetRole.PAGE.value,
+                LibrarySourceNode.library_id == resource.library_id,
+                LibrarySourceNode.physical_kind == "REGULAR_FILE",
+                LibrarySourceNode.relative_path.startswith(
+                    anchor.relative_path + "/", autoescape=True
+                ),
+            )
+        )
+        cursor_sort_key: str | None = None
+        if after_asset_id is not None:
+            cursor = self._session.get(LibraryResourceAsset, after_asset_id)
+            if cursor is None or cursor.resource_id != resource_id:
+                after_asset_id = None
+            else:
+                cursor_sort_key = cursor.sort_key or ""
+        if after_asset_id is not None and cursor_sort_key is not None:
+            query = query.where(or_(
+                order_key > cursor_sort_key,
+                and_(
+                    order_key == cursor_sort_key,
+                    LibraryResourceAsset.id > after_asset_id,
+                ),
+            ))
+        rows = self._session.execute(
+            query.order_by(order_key, LibraryResourceAsset.id).limit(limit)
+        ).all()
+        return tuple(
+            DirectoryCoverCandidate(
+                node=SourceNodeRecord(
+                    id=node.id,
+                    library_id=node.library_id,
+                    parent_id=node.parent_id,
+                    relative_path=node.relative_path,
+                    path_key=node.path_key,
+                    name=node.name,
+                    physical_kind=SourceNodePhysicalKind(node.physical_kind),
+                    observed_size_bytes=node.observed_size_bytes,
+                    observed_mtime_ns=node.observed_mtime_ns,
+                    observed_at=node.observed_at,
+                ),
+                asset_id=asset_id,
+            )
+            for asset_id, node in rows
         )
 
     def single_file_fallback_cover(self, resource_id: str) -> str | None:
@@ -1516,7 +1603,7 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         self, resource_id: str
     ) -> tuple[LocalMetadataObservation, ...]:
         rows = self._session.execute(
-            select(LibraryResourceAsset, LibraryResourceAssetMetadata)
+            select(LibraryResourceAsset.local_metadata_candidates)
             .outerjoin(
                 LibraryResourceAssetMetadata,
                 LibraryResourceAssetMetadata.asset_id == LibraryResourceAsset.id,
@@ -1525,23 +1612,27 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
                 LibraryResourceAsset.resource_id == resource_id,
                 LibraryResourceAsset.import_state == "READY",
             )
-        ).all()
-        ordered = sorted(
-            rows,
-            key=lambda row: (
-                row[1].disc_number if row[1] and row[1].disc_number else 1,
-                row[1].track_number
-                if row[1] and row[1].track_number is not None
-                else 10**9,
-                natural_sort_key(row[0].sort_key or ""),
-                row[0].id,
-            ),
+            .order_by(
+                func.coalesce(func.nullif(LibraryResourceAssetMetadata.disc_number, 0), 1),
+                func.coalesce(LibraryResourceAssetMetadata.track_number, 10**9),
+                collate(func.coalesce(LibraryResourceAsset.sort_key, ""), "ERMAO_NATURAL"),
+                LibraryResourceAsset.id,
+            )
+            .execution_options(yield_per=128)
         )
-        return tuple(
-            candidate
-            for asset, _ in ordered
-            for candidate in decode_observations(asset.local_metadata_candidates)
-        )
+        merged: dict[LocalMetadataSource, LocalMetadataObservation] = {}
+        for (encoded,) in rows:
+            for candidate in decode_observations(encoded):
+                previous = merged.get(candidate.source)
+                if previous is None:
+                    merged[candidate.source] = candidate
+                else:
+                    metadata = merge_observations((previous, candidate))[candidate.source]
+                    merged[candidate.source] = LocalMetadataObservation(
+                        candidate.source, metadata,
+                        previous.cover_path or candidate.cover_path,
+                    )
+        return tuple(merged.values())
 
     def asset_has_processed_version(
         self,
@@ -1576,6 +1667,12 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         )
 
     def refresh_audio_resource_aggregates(self, resource_id: str) -> None:
+        order = (
+            func.coalesce(func.nullif(LibraryResourceAssetMetadata.disc_number, 0), 1),
+            func.coalesce(LibraryResourceAssetMetadata.track_number, 10**9),
+            collate(LibrarySourceNode.relative_path, "ERMAO_NATURAL"),
+            LibraryResourceAsset.id,
+        )
         rows = self._session.execute(
             select(
                 LibraryResourceAsset,
@@ -1595,67 +1692,84 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
                 LibraryResourceAsset.import_state == AssetImportState.READY.value,
                 LibraryResourceAsset.role == AssetRole.TRACK.value,
             )
-        ).all()
-        ordered_rows = sorted(
-            rows,
-            key=lambda item: (
-                item[1].disc_number if item[1] and item[1].disc_number else 1,
-                item[1].track_number
-                if item[1] and item[1].track_number is not None
-                else 10**9,
-                natural_sort_key(item[2].relative_path),
-                item[0].id,
-            ),
+            .order_by(*order)
+            .execution_options(yield_per=128)
         )
-        asset_order: dict[str, int] = {}
-        for index, (asset, _asset_metadata, _source) in enumerate(ordered_rows):
+        track_count = 0
+        total_duration = 0
+        durations_complete = True
+        for index, (asset, asset_metadata, _source) in enumerate(rows):
             asset.sequence_index = index
-            asset_order[asset.id] = index
-
-        asset_ids = tuple(asset_order)
-        units = (
-            self._session.scalars(
-                select(ReadableResourceNavigationUnit).where(
-                    ReadableResourceNavigationUnit.resource_id == resource_id,
-                    ReadableResourceNavigationUnit.asset_id.in_(asset_ids),
-                )
-            ).all()
-            if asset_ids
-            else []
-        )
-        ordered_units = sorted(
-            units,
-            key=lambda unit: (
-                asset_order.get(unit.asset_id or "", 10**9),
-                unit.start_ms if unit.start_ms is not None else unit.sort_order,
-                unit.id,
-            ),
-        )
-        # Removed tracks can leave gaps, so the remaining count is not a safe
-        # offset. Move every unit beyond the current maximum before compacting.
-        temporary_start = max((unit.sort_order for unit in units), default=-1) + 1
-        for index, unit in enumerate(ordered_units):
-            unit.sort_order = temporary_start + index
+            track_count += 1
+            if asset_metadata is None or asset_metadata.duration_ms is None:
+                durations_complete = False
+            else:
+                total_duration += asset_metadata.duration_ms
+            if track_count % 128 == 0:
+                self._session.flush()
         self._session.flush()
-        for index, unit in enumerate(ordered_units):
-            unit.sort_order = index
+
+        ready_units = (
+            select(ReadableResourceNavigationUnit.id)
+            .join(
+                LibraryResourceAsset,
+                LibraryResourceAsset.id == ReadableResourceNavigationUnit.asset_id,
+            )
+            .where(
+                ReadableResourceNavigationUnit.resource_id == resource_id,
+                LibraryResourceAsset.import_state == AssetImportState.READY.value,
+                LibraryResourceAsset.role == AssetRole.TRACK.value,
+            )
+        )
+        chapter_count = int(self._session.scalar(
+            select(func.count()).select_from(ReadableResourceNavigationUnit)
+            .where(ReadableResourceNavigationUnit.id.in_(ready_units))
+        ) or 0)
+        if chapter_count:
+            ranked = (
+                select(
+                    ReadableResourceNavigationUnit.id.label("unit_id"),
+                    func.row_number().over(order_by=(
+                        LibraryResourceAsset.sequence_index,
+                        func.coalesce(
+                            ReadableResourceNavigationUnit.start_ms,
+                            ReadableResourceNavigationUnit.sort_order,
+                        ),
+                        ReadableResourceNavigationUnit.id,
+                    )).label("position"),
+                )
+                .join(
+                    LibraryResourceAsset,
+                    LibraryResourceAsset.id == ReadableResourceNavigationUnit.asset_id,
+                )
+                .where(ReadableResourceNavigationUnit.id.in_(ready_units))
+                .cte("ranked_audio_units")
+            )
+            self._session.execute(
+                update(ReadableResourceNavigationUnit)
+                .where(ReadableResourceNavigationUnit.id == ranked.c.unit_id)
+                .values(sort_order=-ranked.c.position)
+                .execution_options(synchronize_session=False)
+            )
+            self._session.execute(
+                update(ReadableResourceNavigationUnit)
+                .where(ReadableResourceNavigationUnit.id.in_(ready_units))
+                .values(sort_order=-ReadableResourceNavigationUnit.sort_order - 1)
+                .execution_options(synchronize_session=False)
+            )
 
         resource_metadata = self._session.get(
             LibraryReadableResourceMetadata, resource_id
         )
         if resource_metadata is None:
             raise LookupError(resource_id)
-        resource_metadata.track_count = len(ordered_rows)
-        durations = [
-            asset_metadata.duration_ms if asset_metadata is not None else None
-            for _asset, asset_metadata, _source in ordered_rows
-        ]
+        resource_metadata.track_count = track_count
         resource_metadata.duration_ms = (
-            sum(value for value in durations if value is not None)
-            if durations and all(value is not None for value in durations)
+            total_duration
+            if track_count and durations_complete
             else None
         )
-        resource_metadata.chapter_count = len(ordered_units)
+        resource_metadata.chapter_count = chapter_count
         self._session.flush()
 
     def replace_navigation_units(

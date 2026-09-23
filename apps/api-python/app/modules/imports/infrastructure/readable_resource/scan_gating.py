@@ -11,10 +11,12 @@ enumerates it, so deleting a failed task row never releases the wait.
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from collections.abc import Iterable
 
-from sqlalchemy import and_, exists, func, literal, or_, select
+from sqlalchemy import and_, exists, func, literal, or_, select, update
 from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm.attributes import InstrumentedAttribute
 from sqlalchemy.orm.util import AliasedClass
 from sqlalchemy.sql import ColumnElement
 
@@ -49,7 +51,7 @@ def paths_intersect(
 
 
 def scopes_column_covers_anchor(
-    scopes: ColumnElement[str | None],
+    scopes: ColumnElement[str | None] | InstrumentedAttribute[str | None],
     candidate: AliasedClass[LibrarySourceNode],
 ) -> ColumnElement[bool]:
     """True when any scope in a JSON column covers the candidate path.
@@ -153,6 +155,123 @@ def load_gap_scopes(session: Session, library_id: str) -> tuple[ScanScope, ...]:
     return decode_scan_scopes(row.scopes) or ()
 
 
+class _GapLookup:
+    """In-memory index used only when a Book gate is created or refreshed."""
+
+    def __init__(self, scopes: tuple[ScanScope, ...]) -> None:
+        self.paths = sorted(scope.relative_path for scope in scopes)
+        self.recursive = {
+            scope.relative_path for scope in scopes if scope.recursive
+        }
+
+    def covers(self, path: str) -> bool:
+        if not self.paths:
+            return False
+        if path == "":
+            return True
+        position = bisect_left(self.paths, path)
+        if position < len(self.paths) and self.paths[position] == path:
+            return True
+        position = bisect_left(self.paths, path + "/")
+        if position < len(self.paths) and self.paths[position].startswith(path + "/"):
+            return True
+        ancestor = path
+        while True:
+            if ancestor in self.recursive:
+                return True
+            if not ancestor:
+                return False
+            ancestor = ancestor.rpartition("/")[0]
+
+
+def book_gate_blocked(
+    session: Session, *, library_id: str, relative_path: str, physical_kind: str,
+    has_scan_work: bool,
+) -> bool:
+    """Compute one new Book task projection from the durable gap row."""
+    if physical_kind != "DIRECTORY" or has_scan_work:
+        return False
+    return _GapLookup(load_gap_scopes(session, library_id)).covers(relative_path)
+
+
+def refresh_book_gates(session: Session, *, limit: int = 200) -> int:
+    """Resolve a durable page of unknown Book gates after upgrade or gap change.
+
+    NULL rows form the recovery worklist. Updating a page removes it from that
+    list in the same transaction, so a restart continues after committed rows.
+    """
+    rows = session.execute(
+        select(LibraryImportTask, LibrarySourceNode)
+        .join(LibrarySourceNode, LibrarySourceNode.id == LibraryImportTask.source_node_id)
+        .where(
+            LibraryImportTask.kind == "IMPORT_BOOK",
+            LibraryImportTask.state == "QUEUED",
+            LibraryImportTask.scan_gate_blocked.is_(None),
+        )
+        .order_by(LibraryImportTask.id)
+        .limit(limit)
+    ).all()
+    lookups: dict[str, _GapLookup] = {}
+    for task, node in rows:
+        if task.phase == "SCAN" or node.physical_kind != "DIRECTORY":
+            task.scan_gate_blocked = False
+            continue
+        lookup = lookups.get(task.library_id)
+        if lookup is None:
+            lookup = _GapLookup(load_gap_scopes(session, task.library_id))
+            lookups[task.library_id] = lookup
+        task.scan_gate_blocked = lookup.covers(node.relative_path)
+    session.flush()
+    return len(rows)
+
+
+def _invalidate_changed_scopes(
+    session: Session, library_id: str,
+    before: tuple[ScanScope, ...], after: tuple[ScanScope, ...],
+) -> None:
+    """Invalidate only Book anchors covered by a changed range.
+
+    A path range uses ordinary ordered comparisons, so `%` and `_` remain
+    literal path characters. Unknown gates block claim until refreshed.
+    """
+    for scope in sorted(set(before).symmetric_difference(after), key=lambda s: s.relative_path):
+        path = scope.relative_path
+        ancestors = [""]
+        if path:
+            pieces = path.split("/")
+            ancestors.extend("/".join(pieces[:end]) for end in range(1, len(pieces) + 1))
+        affected: ColumnElement[bool] = LibrarySourceNode.relative_path.in_(ancestors)
+        if scope.recursive:
+            affected = (
+                literal(True)
+                if not path
+                else or_(
+                    affected,
+                    and_(
+                        LibrarySourceNode.relative_path >= path + "/",
+                        LibrarySourceNode.relative_path < path + "0",
+                    ),
+                )
+            )
+        source_ids = select(LibrarySourceNode.id).where(
+            LibrarySourceNode.library_id == library_id,
+            LibrarySourceNode.physical_kind == "DIRECTORY",
+            affected,
+        )
+        session.execute(
+            update(LibraryImportTask)
+            .where(
+                LibraryImportTask.library_id == library_id,
+                LibraryImportTask.kind == "IMPORT_BOOK",
+                LibraryImportTask.state.in_(("QUEUED", "RUNNING")),
+                LibraryImportTask.phase != "SCAN",
+                LibraryImportTask.scan_gate_blocked.is_not(None),
+                LibraryImportTask.source_node_id.in_(source_ids),
+            )
+            .values(scan_gate_blocked=None)
+        )
+
+
 def record_scan_gaps(
     session: Session,
     library_id: str,
@@ -171,6 +290,8 @@ def record_scan_gaps(
     else:
         row.scopes = stored
     session.flush()
+    if merged != existing:
+        _invalidate_changed_scopes(session, library_id, existing, merged)
 
 
 def clear_scan_gaps(
@@ -182,11 +303,12 @@ def clear_scan_gaps(
     row = session.get(LibraryImportScanGap, library_id)
     if row is None:
         return
-    remaining = remove_scan_scopes(
-        decode_scan_scopes(row.scopes) or (), tuple(completed)
-    )
+    existing = decode_scan_scopes(row.scopes) or ()
+    remaining = remove_scan_scopes(existing, tuple(completed))
     row.scopes = encode_scan_scopes(remaining) if remaining else None
     session.flush()
+    if remaining != existing:
+        _invalidate_changed_scopes(session, library_id, existing, remaining)
 
 
 __all__ = [

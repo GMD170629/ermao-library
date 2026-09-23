@@ -122,6 +122,11 @@ class LibrarySourceNode(Base):
             "parentPhysicalKind",
         ),
         Index("LibrarySourceNode_libraryId_name_idx", "libraryId", "name"),
+        Index(
+            "LibrarySourceNode_libraryId_relativePath_idx",
+            "libraryId",
+            "relativePath",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)

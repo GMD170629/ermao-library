@@ -204,10 +204,20 @@ class LibraryImportTask(Base):
         Index(
             "LibraryImportTask_book_runnable_idx",
             "state",
+            "scanGateBlocked",
             "nextAttemptAt",
             "createdAt",
             "id",
             sqlite_where=column("kind") == "IMPORT_BOOK",
+        ),
+        Index(
+            "LibraryImportTask_book_gate_pending_idx",
+            "id",
+            sqlite_where=and_(
+                column("kind") == "IMPORT_BOOK",
+                column("state") == "QUEUED",
+                column("scanGateBlocked").is_(None),
+            ),
         ),
         Index(
             "LibraryImportTask_import_asset_key",
@@ -279,11 +289,32 @@ class LibraryImportTask(Base):
         "executionVersion", Integer, nullable=True
     )
     book_work: Mapped[str | None] = mapped_column("bookWork", Text, nullable=True)
+    # NULL means the durable scan gap changed and this projection needs refresh.
+    scan_gate_blocked: Mapped[bool | None] = mapped_column(
+        "scanGateBlocked", Boolean, nullable=True
+    )
     resource_cursor: Mapped[str | None] = mapped_column(
         "resourceCursor", String(191), nullable=True
     )
+    # One active directory resource's visited member position within a Book run.
+    directory_resource_id: Mapped[str | None] = mapped_column(
+        "directoryResourceId", String(191), nullable=True
+    )
+    directory_member_cursor: Mapped[str | None] = mapped_column(
+        "directoryMemberCursor", String(191), nullable=True
+    )
+    directory_cover_cursor: Mapped[str | None] = mapped_column(
+        "directoryCoverCursor", String(191), nullable=True
+    )
     retry_count: Mapped[int] = mapped_column(
         "retryCount", Integer, nullable=False, default=0, server_default="0"
+    )
+    # A committed Book business result awaiting only its terminal task write.
+    completion_outcome: Mapped[str | None] = mapped_column(
+        "completionOutcome", String(32), nullable=True
+    )
+    completion_retry_count: Mapped[int] = mapped_column(
+        "completionRetryCount", Integer, nullable=False, default=0, server_default="0"
     )
     next_attempt_at: Mapped[datetime | None] = mapped_column(
         "nextAttemptAt", TimestampMilliseconds(), nullable=True

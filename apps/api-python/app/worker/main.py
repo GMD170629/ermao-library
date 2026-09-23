@@ -316,9 +316,11 @@ def main() -> None:
             ):
                 try:
                     outcome = readable_worker.process_once()
+                    import_failures = 0
                     import_heartbeat.pulse(
-                        status="degraded" if scan_paused else "running",
+                        status="degraded" if scan_paused or outcome == "isolated" else "running",
                         processed=outcome not in {"idle", "deferred"},
+                        **({"error": "completion-isolated"} if outcome == "isolated" else {}),
                     )
                 except Exception as error:  # noqa: BLE001 - process containment boundary
                     diagnostic_id = _report_failure("import_loop", error)
@@ -328,13 +330,18 @@ def main() -> None:
                     )
                     # Keep the processor (including pending completion) and never
                     # repeat startup recovery or unknown filesystem side effects.
-                    imports_paused = not recovered or not is_retryable_sqlite_operation_error(error)
+                    import_failures += 1
+                    retryable = is_retryable_sqlite_operation_error(error)
+                    imports_paused = not recovered or not retryable or import_failures >= 3
                     import_heartbeat.pulse(
                         status="paused" if imports_paused else "retrying",
-                        error=f"iteration:{type(error).__name__}",
+                        error=(
+                            f"database-unwritable:{type(error).__name__}"
+                            if retryable and import_failures >= 3
+                            else f"iteration:{type(error).__name__}"
+                        ),
                     )
                     if not imports_paused:
-                        import_failures += 1
                         next_import_attempt = monotonic() + min(
                             300, 5 * 2 ** min(import_failures - 1, 6)
                         )

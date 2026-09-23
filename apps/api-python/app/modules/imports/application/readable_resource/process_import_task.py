@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -16,7 +17,6 @@ from app.contracts.local_metadata_snapshot import (
     LocalMetadataObservation,
     merge_observations,
 )
-from app.core.natural_sort import natural_sort_key
 from app.modules.imports.application.readable_resource.ports import (
     BookResourceRepositoryPort,
     ClockPort,
@@ -44,6 +44,8 @@ from app.modules.library.public import (
     AssetImportState,
     AssetRole,
     DirectoryAssetResult,
+    DirectoryImportMember,
+    DirectoryMemberPage,
     ResourceAssetMetadataInput,
     SourceNodePhysicalKind,
 )
@@ -77,6 +79,17 @@ class ResourceImportRunPort(Protocol):
 
     def is_current(self) -> bool: ...
 
+    def directory_cursor(self, resource_id: str) -> str | None: ...
+
+    def advance_directory_cursor(self, resource_id: str, member_id: str) -> None: ...
+
+    def directory_cover_cursor(self, resource_id: str) -> str | None: ...
+
+    def advance_directory_cover_cursor(self, resource_id: str, asset_id: str) -> None: ...
+
+    @property
+    def can_yield_directory(self) -> bool: ...
+
     def start(self, *, started_at: datetime) -> None: ...
 
     def request_changed(
@@ -97,6 +110,22 @@ class _QueuedResourceImportRun:
 
     queue: LibraryImportTaskQueuePort
     operation_id: str
+
+    @property
+    def can_yield_directory(self) -> bool:
+        return False
+
+    def directory_cursor(self, resource_id: str) -> str | None:
+        return None
+
+    def advance_directory_cursor(self, resource_id: str, member_id: str) -> None:
+        return None
+
+    def directory_cover_cursor(self, resource_id: str) -> str | None:
+        return None
+
+    def advance_directory_cover_cursor(self, resource_id: str, asset_id: str) -> None:
+        return None
 
     def is_current(self) -> bool:
         return self.queue.get_task(self.operation_id) is not None
@@ -648,23 +677,36 @@ class ProcessReadableResourceImportTask:
         assert adapter is not None
         resource_id = context.resource.id
         library_id = context.resource.library_id
-        members = sorted(
-            (
-                m
-                for m in self._books_resources.load_directory_members(resource_id)
-                if Path(m.node.name).suffix.lower() in adapter.file_extensions
-            ),
-            key=lambda m: natural_sort_key(m.node.relative_path),
-        )
-        self._uow.release_before_io()
         absolute = self._filesystem.resolve_under_root(
             context.root_path, context.node.relative_path
         )
-        ready = {m.node.id for m in members if m.ready}
-        errors = False
         changed = False
         batch: list[DirectoryAssetResult] = []
-        for member in members:
+        for item in self._directory_items(resource_id, run):
+            if isinstance(item, DirectoryMemberPage):
+                if batch and not self._save_directory_batch(
+                    task_id, context, tuple(batch), run
+                ):
+                    return ProcessTaskResult(task_id, "cancelled")
+                batch.clear()
+                with self._uow.transaction():
+                    if not run.is_current():
+                        return ProcessTaskResult(task_id, "cancelled")
+                    if changed:
+                        run.request_changed(
+                            library_id=library_id,
+                            resource_id=resource_id,
+                            source_node_id=context.node.id,
+                        )
+                    if item.last_visited_id is not None:
+                        run.advance_directory_cursor(resource_id, item.last_visited_id)
+                changed = False
+                if item.full and run.can_yield_directory:
+                    return ProcessTaskResult(task_id, "yielded")
+                continue
+            member = item
+            if Path(member.node.name).suffix.lower() not in adapter.file_extensions:
+                continue
             path = self._filesystem.resolve_under_root(
                 context.root_path, member.node.relative_path
             )
@@ -773,11 +815,6 @@ class ProcessReadableResourceImportTask:
             if before != after:
                 changed = True
                 continue
-            errors |= error is not None
-            if error is None:
-                ready.add(member.node.id)
-            else:
-                ready.discard(member.node.id)
             batch.append(
                 DirectoryAssetResult(
                     member.node,
@@ -794,10 +831,7 @@ class ProcessReadableResourceImportTask:
                 if not self._save_directory_batch(task_id, context, tuple(batch), run):
                     return ProcessTaskResult(task_id, "cancelled")
                 batch.clear()
-        if batch and not self._save_directory_batch(
-            task_id, context, tuple(batch), run
-        ):
-            return ProcessTaskResult(task_id, "cancelled")
+        errors = self._books_resources.has_failed_directory_assets(resource_id)
 
         # Directory candidates are inspected once; file observations remain file-owned.
         with self._uow.transaction():
@@ -872,36 +906,56 @@ class ProcessReadableResourceImportTask:
                     self._first_page_covers is not None
                     and adapter.asset_role is AssetRole.PAGE
                 ):
-                    for member in members:
-                        if member.node.id not in ready:
-                            continue
-                        content = self._first_page_covers.extract(
-                            path=self._filesystem.resolve_under_root(
-                                context.root_path, member.node.relative_path
-                            ),
-                            source_format="IMAGE_DIR",
+                    cover_cursor = run.directory_cover_cursor(resource_id)
+                    while True:
+                        candidates = self._books_resources.page_ready_directory_cover_candidates(
+                            resource_id, after_asset_id=cover_cursor, limit=16
                         )
-                        if content is None:
-                            continue
-                        if self._covers.matches(previous_cover, content):
-                            cover_path = previous_cover
-                            break
-                        try:
-                            prepared = self._covers.prepare(
-                                resource_id=resource_id, content=content
+                        self._uow.release_before_io()
+                        selected = False
+                        for cover_candidate in candidates:
+                            if (
+                                Path(cover_candidate.node.name).suffix.lower()
+                                not in adapter.file_extensions
+                            ):
+                                continue
+                            cover_content = self._first_page_covers.extract(
+                                path=self._filesystem.resolve_under_root(
+                                    context.root_path, cover_candidate.node.relative_path
+                                ),
+                                source_format="IMAGE_DIR",
                             )
+                            if cover_content is None:
+                                continue
+                            if self._covers.matches(previous_cover, cover_content):
+                                cover_path = previous_cover
+                                selected = True
+                                break
+                            try:
+                                prepared = self._covers.prepare(
+                                    resource_id=resource_id, content=cover_content
+                                )
+                                selected = True
+                                break
+                            except ValueError as cover_error:
+                                self._log.emit(
+                                    "readable_resource.first_page_cover.rejected",
+                                    error=cover_error,
+                                    library_id=library_id,
+                                    resource_id=resource_id,
+                                    task_id=task_id,
+                                    stage="cover_prepare",
+                                    outcome="invalid",
+                                )
+                        if selected or len(candidates) < 16:
                             break
-                        except ValueError as cover_error:
-                            self._log.emit(
-                                "readable_resource.first_page_cover.rejected",
-                                error=cover_error,
-                                library_id=library_id,
-                                resource_id=resource_id,
-                                task_id=task_id,
-                                stage="cover_prepare",
-                                outcome="invalid",
-                            )
-                            continue
+                        cover_cursor = candidates[-1].asset_id
+                        if run.can_yield_directory:
+                            with self._uow.transaction():
+                                if not run.is_current():
+                                    return ProcessTaskResult(task_id, "cancelled")
+                                run.advance_directory_cover_cursor(resource_id, cover_cursor)
+                            return ProcessTaskResult(task_id, "yielded")
         committed = False
         try:
             if prepared is not None and self._covers is not None:
@@ -924,12 +978,6 @@ class ProcessReadableResourceImportTask:
                     self._books_resources.refresh_audio_resource_aggregates(resource_id)
                 else:
                     self._books_resources.set_resource_page_count(resource_id, count)
-                if changed:
-                    run.request_changed(
-                        library_id=library_id,
-                        resource_id=resource_id,
-                        source_node_id=context.node.id,
-                    )
                 if errors:
                     run.fail(
                         error_summary="IMAGE_ASSETS_FAILED"
@@ -965,6 +1013,22 @@ class ProcessReadableResourceImportTask:
             )
         self._uow.release_before_io()
         return True
+
+    def _directory_items(
+        self, resource_id: str, run: ResourceImportRunPort
+    ) -> Iterator[DirectoryImportMember | DirectoryMemberPage]:
+        cursor = run.directory_cursor(resource_id)
+        while True:
+            page = self._books_resources.page_directory_members(
+                resource_id, after_id=cursor, limit=128
+            )
+            self._uow.release_before_io()
+            yield from page.members
+            yield page
+            if not page.full:
+                return
+            cursor = page.last_visited_id
+
 
     @staticmethod
     def _processed_version(

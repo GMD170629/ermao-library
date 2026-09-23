@@ -20,12 +20,14 @@ import tempfile
 import time
 import tracemalloc
 import zipfile
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from sqlalchemy import event, insert, update
-from sqlalchemy.orm import Session
+from sqlalchemy import event, func, insert, or_, select, update
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session, aliased
 
 from app.bootstrap.readable_resource_pipeline import (
     build_readable_resource_pipeline,
@@ -33,7 +35,12 @@ from app.bootstrap.readable_resource_pipeline import (
 )
 from app.core.config import Settings
 from app.db.base import Base
-from app.db.sqlite import create_sqlite_engine
+from app.db.sqlite import (
+    SHORT_WRITE_LOCK_TIMEOUT_SECONDS,
+    SQLITE_STATEMENT_TIMEOUT_SECONDS,
+    create_sqlite_engine,
+)
+from app.infrastructure.file_operation_conflicts import file_operation_blocks_library
 from app.models import (
     Library,
     LibraryBook,
@@ -47,6 +54,10 @@ from app.modules.imports.application.readable_resource.book_work import (
     BookWorkState,
     encode_book_work,
 )
+from app.modules.imports.domain.scan_policy import ScanScope, encode_scan_scopes
+from app.modules.imports.infrastructure.readable_resource.scan_gating import (
+    gap_covers_anchor,
+)
 from app.modules.imports.infrastructure.readable_resource.task_queue import (
     SqlAlchemyLibraryImportTaskQueue,
 )
@@ -58,6 +69,14 @@ from app.modules.library.public import SourceNodeRelativePath
 
 NOW = datetime(2026, 9, 23, tzinfo=UTC)
 LATER = NOW + timedelta(days=7)
+
+
+def _engine(path: Path):
+    return create_sqlite_engine(
+        path,
+        timeout_seconds=SHORT_WRITE_LOCK_TIMEOUT_SECONDS,
+        statement_time_budget_seconds=SQLITE_STATEMENT_TIMEOUT_SECONDS,
+    )
 
 
 def _timed(stage: dict[str, float], label: str, operation):
@@ -73,8 +92,64 @@ def _timed(stage: dict[str, float], label: str, operation):
     return measure
 
 
+def _legacy_claim_trial(db: Session, engine) -> dict[str, object]:
+    """Reproduce the pre-R2 query with the production SQLite time budget."""
+    anchor = aliased(LibrarySourceNode)
+    query = (
+        select(LibraryImportTask)
+        .join(anchor, anchor.id == LibraryImportTask.source_node_id)
+        .where(
+            LibraryImportTask.kind == "IMPORT_BOOK",
+            LibraryImportTask.state == "QUEUED",
+            LibraryImportTask.next_attempt_at <= NOW,
+            ~file_operation_blocks_library(LibraryImportTask.library_id),
+            or_(
+                anchor.physical_kind == "REGULAR_FILE",
+                LibraryImportTask.phase == "SCAN",
+                ~gap_covers_anchor(LibraryImportTask.library_id, anchor),
+            ),
+        )
+        .order_by(
+            LibraryImportTask.next_attempt_at,
+            LibraryImportTask.created_at,
+            LibraryImportTask.id,
+        )
+        .limit(1)
+    )
+    captured: list[tuple[str, object]] = []
+    def capture(_conn, _cursor, statement, parameters, _context, _many):
+        if "LibraryImportScanGap" in statement:
+            captured.append((statement, parameters))
+    event.listen(engine, "before_cursor_execute", capture)
+    started = time.perf_counter()
+    interrupted = False
+    try:
+        db.scalar(query)
+    except SQLAlchemyError as error:
+        interrupted = "interrupted" in str(error).lower()
+        if not interrupted:
+            raise
+    finally:
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        event.remove(engine, "before_cursor_execute", capture)
+        db.rollback()
+    plan = []
+    if captured:
+        statement, parameters = captured[-1]
+        with engine.connect() as conn:
+            plan = conn.exec_driver_sql(
+                "EXPLAIN QUERY PLAN " + statement, parameters
+            ).all()
+    return {
+        "elapsed_ms": elapsed_ms,
+        "budget_interrupted": interrupted,
+        "sql_expands_gap_json": any("json_each" in sql for sql, _ in captured),
+        "plan_gap": [row[3] for row in plan if "LibraryImportScanGap" in row[3] or "VIRTUAL TABLE" in row[3]],
+    }
+
+
 def _cold_process_trial(database: Path, size: int, storage: Path) -> None:
-    engine = create_sqlite_engine(database)
+    engine = _engine(database)
     try:
         with Session(engine) as db:
             pipeline = build_readable_resource_pipeline(
@@ -97,9 +172,12 @@ def _cold_process_trial(database: Path, size: int, storage: Path) -> None:
         engine.dispose()
 
 
-def probe(size: int) -> None:
+def probe(
+    size: int, *, independent_gaps: bool = False, mixed_gaps: bool = False
+) -> None:
+    assert not mixed_gaps or independent_gaps
     with tempfile.TemporaryDirectory(prefix=f"ermao-scale-{size}-") as directory:
-        engine = create_sqlite_engine(Path(directory) / "scale.sqlite3")
+        engine = _engine(Path(directory) / "scale.sqlite3")
         Base.metadata.create_all(engine)
         target_file = Path(directory) / f"book-{size - 1:06d}.epub"
         with zipfile.ZipFile(target_file, "w") as archive:
@@ -124,6 +202,17 @@ def probe(size: int) -> None:
                 )
             )
             db.commit()
+            parent_name = "shared" if mixed_gaps else "blocked" if not independent_gaps else None
+            if parent_name is not None:
+                db.add(LibrarySourceNode(
+                    id=f"parent-{parent_name}", library_id="scale-library",
+                    relative_path=parent_name,
+                    path_key=SourceNodeRelativePath(parent_name).path_key,
+                    name=parent_name, physical_kind="DIRECTORY",
+                    observed_size_bytes=None, observed_mtime_ns=0,
+                    observed_at=NOW,
+                ))
+                db.commit()
             for start in range(0, size, 1000):
                 nodes = []
                 books = []
@@ -132,24 +221,40 @@ def probe(size: int) -> None:
                 tasks = []
                 for i in range(start, min(start + 1000, size)):
                     ident = f"{i:06d}"
-                    name = (
-                        f"blocked/book-{ident}" if i % 20 == 0 else f"book-{ident}.epub"
-                    )
+                    blocked = i < size - 1 if independent_gaps else i % 20 == 0
+                    if not blocked:
+                        name = f"book-{ident}.epub"
+                    elif mixed_gaps and i < (size - 1) // 2:
+                        name = f"shared/book-{ident}"
+                    elif independent_gaps:
+                        name = f"blocked-{ident}"
+                    else:
+                        name = f"blocked/book-{ident}"
                     node = f"src-{ident}"
                     book = f"book-{ident}"
                     nodes.append(
                         {
                             "id": node,
                             "library_id": "scale-library",
+                            "parent_id": (
+                                f"parent-{parent_name}"
+                                if parent_name is not None and name.startswith(parent_name + "/")
+                                else None
+                            ),
+                            "parent_physical_kind": (
+                                "DIRECTORY"
+                                if parent_name is not None and name.startswith(parent_name + "/")
+                                else None
+                            ),
                             "relative_path": name,
                             "path_key": SourceNodeRelativePath(name).path_key,
                             "name": name,
                             "physical_kind": (
-                                "DIRECTORY" if i % 20 == 0 else "REGULAR_FILE"
+                                "DIRECTORY" if blocked else "REGULAR_FILE"
                             ),
                             "observed_size_bytes": (
                                 None
-                                if i % 20 == 0
+                                if blocked
                                 else (file_stat.st_size if i == size - 1 else 1)
                             ),
                             "observed_mtime_ns": (
@@ -182,15 +287,15 @@ def probe(size: int) -> None:
                             "library_id": "scale-library",
                             "book_id": book,
                             "source_node_id": node,
-                            "adapter_id": "epub",
+                            "adapter_id": "image_dir" if blocked else "epub",
                             "adapter_version": "1",
-                            "format": "EPUB",
+                            "format": "IMAGE_DIR" if blocked else "EPUB",
                         }
                     )
-                    if i % 2 == 0:
+                    if independent_gaps and blocked or not independent_gaps and i % 2 == 0:
                         state = (
                             "QUEUED"
-                            if i % 20 == 0
+                            if blocked
                             else ("SUCCEEDED" if i % 4 == 0 else "FAILED")
                         )
                         tasks.append(
@@ -202,7 +307,8 @@ def probe(size: int) -> None:
                                 "book_id": book,
                                 "state": state,
                                 "phase": "IDENTIFY",
-                                "book_work": '{"active":{"scanScopes":[],"resourceIds":[],"identify":false,"reasons":[]},"pending":{"scanScopes":[],"resourceIds":[],"identify":false,"reasons":[]}}',
+                                "book_work": encode_book_work(BookWorkState(pending=BookWork(identify=True))),
+                                "scan_gate_blocked": blocked,
                                 "request_version": 1,
                                 "next_attempt_at": NOW,
                                 "created_at": NOW - timedelta(days=1),
@@ -219,6 +325,7 @@ def probe(size: int) -> None:
                                 "state": "QUEUED",
                                 "phase": "IDENTIFY",
                                 "book_work": '{"active":{"scanScopes":[],"resourceIds":[],"identify":false,"reasons":[]},"pending":{"scanScopes":[],"resourceIds":[],"identify":true,"reasons":[]}}',
+                                "scan_gate_blocked": False,
                                 "request_version": 1,
                                 "next_attempt_at": LATER,
                                 "created_at": NOW,
@@ -234,7 +341,13 @@ def probe(size: int) -> None:
             db.add(
                 LibraryImportScanGap(
                     library_id="scale-library",
-                    scopes='[{"relativePath":"blocked","recursive":true}]',
+                    scopes=encode_scan_scopes(
+                        ((ScanScope("shared", True),) if mixed_gaps else ())
+                        + tuple(
+                            ScanScope(f"blocked-{i:06d}", True)
+                            for i in range((size - 1) // 2 if mixed_gaps else 0, size - 1)
+                        )
+                    ) if independent_gaps else '[{"relativePath":"blocked","recursive":true}]',
                 )
             )
             db.commit()
@@ -244,6 +357,22 @@ def probe(size: int) -> None:
                 book_id=target, work=BookWork(identify=True), requested_at=NOW
             )
             db.commit()
+            legacy = _legacy_claim_trial(db, engine) if independent_gaps else None
+            no_runnable_times: list[float] = []
+            if independent_gaps:
+                db.execute(update(LibraryImportTask).where(
+                    LibraryImportTask.id == request.id
+                ).values(next_attempt_at=LATER))
+                db.commit()
+                for _ in range(6):
+                    started = time.perf_counter()
+                    assert queue.claim_next_book(started_at=NOW) is None
+                    no_runnable_times.append((time.perf_counter() - started) * 1000)
+                    db.rollback()
+                db.execute(update(LibraryImportTask).where(
+                    LibraryImportTask.id == request.id
+                ).values(next_attempt_at=NOW))
+                db.commit()
             captured = []
 
             def capture(_conn, _cursor, statement, parameters, _context, _many):
@@ -325,8 +454,8 @@ def probe(size: int) -> None:
             db.commit()
             snapshot = Path(directory) / "snapshot.sqlite3"
             with (
-                sqlite3.connect(engine.url.database) as original,
-                sqlite3.connect(snapshot) as saved,
+                closing(sqlite3.connect(engine.url.database)) as original,
+                closing(sqlite3.connect(snapshot)) as saved,
             ):
                 original.backup(saved)
             cold_path = Path(directory) / "cold-trial.sqlite3"
@@ -357,7 +486,7 @@ def probe(size: int) -> None:
             for trial in range(6):
                 trial_path = Path(directory) / f"trial-{trial}.sqlite3"
                 shutil.copy2(snapshot, trial_path)
-                trial_engine = create_sqlite_engine(trial_path)
+                trial_engine = _engine(trial_path)
                 with Session(trial_engine) as trial_db:
                     pipeline = build_readable_resource_pipeline(
                         trial_db,
@@ -445,7 +574,7 @@ def probe(size: int) -> None:
                 trial_engine.dispose()
             memory_path = Path(directory) / "memory-trial.sqlite3"
             shutil.copy2(snapshot, memory_path)
-            memory_engine = create_sqlite_engine(memory_path)
+            memory_engine = _engine(memory_path)
             sql = {"driver_calls": 0, "selects": 0, "commits": 0}
 
             def count_sql(
@@ -531,7 +660,20 @@ def probe(size: int) -> None:
                 json.dumps(
                     {
                         "books": size,
-                        "tasks": size * 3 // 4 + 1,
+                        "gap_mode": (
+                            "mixed" if mixed_gaps else
+                            "independent" if independent_gaps else "shared"
+                        ),
+                        "tasks": size if independent_gaps else size * 3 // 4 + 1,
+                        "independent_gaps": (
+                            size - 1 - ((size - 1) // 2 if mixed_gaps else 0)
+                            if independent_gaps else 0
+                        ),
+                        "no_runnable_warm_median_ms": (
+                            statistics.median(no_runnable_times[1:])
+                            if no_runnable_times else None
+                        ),
+                        "legacy_claim": legacy,
                         "claim_ms": times,
                         "claim_warm_median_ms": statistics.median(times[1:]),
                         "finish_ms": finish,
@@ -571,9 +713,106 @@ def probe(size: int) -> None:
         engine.dispose()
 
 
+def probe_large_gate_transition(size: int = 100000) -> None:
+    """Exercise one broad scan change against real queued directory Books."""
+    with tempfile.TemporaryDirectory(prefix="ermao-gate-transition-") as directory:
+        engine = _engine(Path(directory) / "gate.sqlite3")
+        try:
+            Base.metadata.create_all(engine)
+            with Session(engine) as db:
+                db.add(Library(
+                    id="gate-library", name="Gate", root_path=directory,
+                    organization_mode="FLAT",
+                ))
+                db.add(LibrarySourceNode(
+                    id="parent-blocked", library_id="gate-library",
+                    relative_path="blocked",
+                    path_key=SourceNodeRelativePath("blocked").path_key,
+                    name="blocked", physical_kind="DIRECTORY",
+                    observed_size_bytes=None, observed_mtime_ns=0, observed_at=NOW,
+                ))
+                db.commit()
+                pending_work = encode_book_work(BookWorkState(
+                    pending=BookWork(resource_ids=None, identify=True)
+                ))
+                for start in range(0, size, 1000):
+                    nodes = []
+                    books = []
+                    metadata = []
+                    resources = []
+                    tasks = []
+                    for index in range(start, min(start + 1000, size)):
+                        ident = f"{index:06d}"
+                        path = f"blocked/book-{ident}"
+                        node_id = f"node-{ident}"
+                        book_id = f"book-{ident}"
+                        nodes.append({
+                            "id": node_id, "library_id": "gate-library",
+                            "parent_id": "parent-blocked",
+                            "parent_physical_kind": "DIRECTORY",
+                            "relative_path": path,
+                            "path_key": SourceNodeRelativePath(path).path_key,
+                            "name": f"book-{ident}", "physical_kind": "DIRECTORY",
+                            "observed_size_bytes": None, "observed_mtime_ns": 0,
+                            "observed_at": NOW,
+                        })
+                        books.append({
+                            "id": book_id, "library_id": "gate-library",
+                            "source_node_id": node_id,
+                        })
+                        metadata.append({
+                            "book_id": book_id, "title": path, "normalized_title": path,
+                            "metadata_pending": True, "metadata_state": "WAITING_IMPORT",
+                        })
+                        resources.append({
+                            "id": f"resource-{ident}", "library_id": "gate-library",
+                            "book_id": book_id, "source_node_id": node_id,
+                            "adapter_id": "image_dir", "adapter_version": "1",
+                            "format": "IMAGE_DIR",
+                        })
+                        tasks.append({
+                            "id": f"task-{ident}", "kind": "IMPORT_BOOK",
+                            "library_id": "gate-library", "source_node_id": node_id,
+                            "book_id": book_id, "state": "QUEUED", "phase": "RESOURCES",
+                            "book_work": pending_work, "scan_gate_blocked": False,
+                            "request_version": 1, "next_attempt_at": NOW,
+                            "created_at": NOW,
+                        })
+                    db.execute(insert(LibrarySourceNode), nodes)
+                    db.execute(insert(LibraryBook), books)
+                    db.execute(insert(LibraryBookMetadata), metadata)
+                    db.execute(insert(LibraryReadableResource), resources)
+                    db.execute(insert(LibraryImportTask), tasks)
+                    db.commit()
+                queue = SqlAlchemyLibraryImportTaskQueue(db)
+                started = time.perf_counter()
+                queue.apply_scan_round(
+                    None, "gate-library", resolved=(),
+                    incomplete=(ScanScope("", True),),
+                )
+                elapsed_ms = (time.perf_counter() - started) * 1000
+                db.commit()
+                unknown = db.scalar(select(func.count()).select_from(LibraryImportTask).where(
+                    LibraryImportTask.kind == "IMPORT_BOOK",
+                    LibraryImportTask.scan_gate_blocked.is_(None),
+                ))
+                assert queue.claim_next_book(started_at=NOW) is None
+                print(json.dumps({
+                    "gate_transition_books": size,
+                    "record_gap_ms": elapsed_ms,
+                    "durable_unknown_gates": unknown,
+                }), flush=True)
+        finally:
+            engine.dispose()
+
+
 if __name__ == "__main__":
     if len(sys.argv) == 5 and sys.argv[1] == "--cold-trial":
         _cold_process_trial(Path(sys.argv[2]), int(sys.argv[3]), Path(sys.argv[4]))
     else:
         for count in (1000, 10000, 100000):
             probe(count)
+        for count in (1001, 5001):
+            probe(count, independent_gaps=True)
+        probe(1001, independent_gaps=True, mixed_gaps=True)
+        probe_large_gate_transition()

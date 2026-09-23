@@ -54,7 +54,10 @@ class RecordingUoW:
         self.rollback_count = 0
 
     @contextmanager
-    def transaction(self) -> Iterator[None]:
+    def transaction(
+        self, *, before_rollback: Callable[[Exception], None] | None = None,
+    ) -> Iterator[None]:
+        del before_rollback
         self.in_transaction = True
         try:
             yield
@@ -105,8 +108,17 @@ class FakeQueue:
             missing_entry_policy=self._base.missing_entry_policy,
         )
 
-    def next_queued(self) -> LibraryImportTaskRecord | None:
+    def next_queued(self, *, started_at: datetime | None = None) -> LibraryImportTaskRecord | None:
+        del started_at
         return self._snapshot()
+
+    def record_task_completion_intent(self, task_id: str, **kwargs: object) -> bool:
+        del kwargs
+        return task_id == self._base.id and not self.cancelled
+
+    def defer_task_completion(self, task_id: str, **kwargs: object) -> str:
+        del task_id, kwargs
+        return "deferred"
 
     def prepare_book_identifications(self) -> tuple[()]:
         return ()
@@ -154,6 +166,9 @@ class FakeQueue:
 
 
 class FakeBookQueue:
+    def refresh_scan_gate_page(self) -> int:
+        return 0
+
     def __init__(self, legacy_queue: FakeQueue) -> None:
         self._legacy_queue = legacy_queue
         self.cancelled = False
@@ -182,6 +197,14 @@ class FakeBookQueue:
     def get_book_task(self, task_id: str) -> BookImportTaskRecord | None:
         return self._task if task_id == self._task.id and not self.cancelled else None
 
+    def record_book_completion_intent(self, task_id: str, **kwargs: object) -> bool:
+        del kwargs
+        return task_id == self._task.id and not self.cancelled
+
+    def defer_book_completion(self, task_id: str, **kwargs: object) -> str:
+        del task_id, kwargs
+        return "deferred"
+
     def book_run_is_current(
         self, task_id: str, *, execution_version: int, **kwargs: object
     ) -> bool:
@@ -200,8 +223,9 @@ class FakeBookQueue:
         del kwargs
         return True
 
-    def yield_book_run(self, *args: object, **kwargs: object) -> None:
+    def yield_book_run(self, *args: object, **kwargs: object) -> BookImportTaskRecord | None:
         del args, kwargs
+        return None if self.cancelled else self._task
 
     def finish_book_run(
         self, *args: object, **kwargs: object

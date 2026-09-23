@@ -9,7 +9,12 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
-from app.core.exception_diagnostics import SessionFactory, record_exception
+from app.core.exception_diagnostics import (
+    SessionFactory,
+    persist_exception_diagnostic,
+    prepare_exception_diagnostic,
+    record_exception,
+)
 from app.modules.imports.application.readable_resource.ports import (
     ClockPort,
     PipelineLogPort,
@@ -86,12 +91,33 @@ class SqlAlchemyUnitOfWork(UnitOfWorkPort):
             session.rollback()
 
     @contextmanager
-    def transaction(self) -> Iterator[None]:
+    def transaction(
+        self, *, before_rollback: Callable[[Exception], None] | None = None,
+    ) -> Iterator[None]:
         try:
             yield
             self._session.commit()
-        except Exception:
-            self._session.rollback()
+        except Exception as error:
+            if before_rollback is not None:
+                try:
+                    before_rollback(error)
+                except Exception as diagnostic_error:  # noqa: BLE001 - retain the original transaction failure
+                    secondary = prepare_exception_diagnostic(
+                        logger, "readable_resource.before_rollback_diagnostic_failed",
+                        diagnostic_error, context={"stage": "before_rollback"},
+                        source="import", action="readable_resource.diagnostic_failed",
+                    )
+                    persist_exception_diagnostic(logger, secondary)
+            try:
+                self._session.rollback()
+            except Exception as rollback_error:
+                secondary = prepare_exception_diagnostic(
+                    logger, "readable_resource.transaction_rollback_failed",
+                    rollback_error, context={"stage": "rollback"},
+                    source="import", action="readable_resource.rollback_failed",
+                )
+                persist_exception_diagnostic(logger, secondary)
+                raise rollback_error from error
             raise
 
     def rollback(self) -> None:

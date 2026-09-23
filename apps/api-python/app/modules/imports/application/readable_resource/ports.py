@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -119,6 +119,8 @@ class LibraryImportTaskRecord:
     error_summary: str | None
     missing_entry_policy: MissingEntryPolicy = MissingEntryPolicy.PRESERVE
     scan_scopes: tuple[ScanScope, ...] | None = None
+    completion_outcome: str | None = None
+    completion_retry_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,9 +138,16 @@ class BookImportTaskRecord:
     retry_count: int
     next_attempt_at: datetime | None
     error_summary: str | None
+    completion_outcome: str | None = None
+    completion_retry_count: int = 0
+    directory_resource_id: str | None = None
+    directory_member_cursor: str | None = None
+    directory_cover_cursor: str | None = None
 
 
 class BookImportTaskQueuePort(Protocol):
+    def refresh_scan_gate_page(self) -> int: ...
+
     def request_book_work(
         self, *, book_id: str, work: BookWork, requested_at: datetime
     ) -> BookImportTaskRecord: ...
@@ -146,6 +155,16 @@ class BookImportTaskQueuePort(Protocol):
     def claim_next_book(self, *, started_at: datetime) -> BookImportTaskRecord | None: ...
 
     def get_book_task(self, task_id: str) -> BookImportTaskRecord | None: ...
+
+    def record_book_completion_intent(
+        self, task_id: str, *, execution_version: int, outcome: str,
+        error_summary: str | None,
+    ) -> bool: ...
+
+    def defer_book_completion(
+        self, task_id: str, *, execution_version: int, attempted_at: datetime,
+        retryable: bool,
+    ) -> str: ...
 
     def book_identification_complete(self, book_id: str) -> bool: ...
 
@@ -159,6 +178,16 @@ class BookImportTaskQueuePort(Protocol):
 
     def advance_book_resource_cursor(
         self, task_id: str, *, execution_version: int, resource_id: str
+    ) -> bool: ...
+
+    def advance_directory_member_cursor(
+        self, task_id: str, *, execution_version: int,
+        resource_id: str, member_id: str,
+    ) -> bool: ...
+
+    def advance_directory_cover_cursor(
+        self, task_id: str, *, execution_version: int,
+        resource_id: str, asset_id: str,
     ) -> bool: ...
 
     def advance_book_phase(
@@ -255,7 +284,9 @@ class ClockPort(Protocol):
 class UnitOfWorkPort(Protocol):
     def release_before_io(self) -> None: ...
 
-    def transaction(self) -> AbstractContextManager[None]: ...
+    def transaction(
+        self, *, before_rollback: Callable[[Exception], None] | None = None,
+    ) -> AbstractContextManager[None]: ...
 
     def rollback(self) -> None: ...
 
@@ -329,9 +360,17 @@ class LibraryImportTaskQueuePort(Protocol):
     ) -> LibraryImportTaskRecord | None:
         """Coalesce resource work; changes during execution survive completion."""
 
-    def next_queued(self) -> LibraryImportTaskRecord | None: ...
+    def next_queued(self, *, started_at: datetime | None = None) -> LibraryImportTaskRecord | None: ...
 
     def get_task(self, task_id: str) -> LibraryImportTaskRecord | None: ...
+
+    def record_task_completion_intent(
+        self, task_id: str, *, outcome: str, error_summary: str | None,
+    ) -> bool: ...
+
+    def defer_task_completion(
+        self, task_id: str, *, attempted_at: datetime, retryable: bool,
+    ) -> str: ...
 
     def mark_running(self, task_id: str, *, started_at: datetime) -> None: ...
 

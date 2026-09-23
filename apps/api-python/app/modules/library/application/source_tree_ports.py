@@ -134,6 +134,19 @@ class DirectoryImportMember:
 
 
 @dataclass(frozen=True, slots=True)
+class DirectoryMemberPage:
+    members: tuple[DirectoryImportMember, ...]
+    last_visited_id: str | None
+    full: bool
+
+
+@dataclass(frozen=True, slots=True)
+class DirectoryCoverCandidate:
+    node: SourceNodeRecord
+    asset_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class DirectoryAssetResult:
     node: SourceNodeRecord
     processed_version: str | None
@@ -249,9 +262,15 @@ class SourceNodeRepositoryPort(Protocol):
 class BookResourceRepositoryPort(Protocol):
     def refresh_scan_context(self, resource_id: str, version: str) -> bool: ...
 
-    def load_directory_members(
-        self, resource_id: str
-    ) -> tuple[DirectoryImportMember, ...]: ...
+    def page_directory_members(
+        self, resource_id: str, *, after_id: str | None, limit: int
+    ) -> DirectoryMemberPage: ...
+
+    def has_failed_directory_assets(self, resource_id: str) -> bool: ...
+
+    def page_ready_directory_cover_candidates(
+        self, resource_id: str, *, after_asset_id: str | None, limit: int,
+    ) -> tuple[DirectoryCoverCandidate, ...]: ...
 
     def save_directory_assets(
         self,

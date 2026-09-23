@@ -25,6 +25,7 @@ from app.models import (
     Library,
     LibraryImportScanGap,
     LibraryReadableResource,
+    LibraryResourceAsset,
     LibrarySourceNode,
 )
 from app.modules.imports.application.readable_resource.book_work import BookWork
@@ -331,6 +332,7 @@ def test_failed_scan_recovered_by_real_continue_source(tmp_path: Path) -> None:
         _drain(pipeline)
         db.expire_all()
         assert _resource_task(db, "lib", resource_id).state == "QUEUED"
+        assert _resource_task(db, "lib", resource_id).scan_gate_blocked is True
 
         # Real ContinueSourceImport fills the input; the old task stays FAILED.
         pipeline.filesystem.iter_directory_entries = original_iter  # type: ignore[method-assign]
@@ -340,6 +342,12 @@ def test_failed_scan_recovered_by_real_continue_source(tmp_path: Path) -> None:
         _drain(pipeline)
         db.expire_all()
         assert _resource_task(db, "lib", resource_id).state == "SUCCEEDED"
+        assert _resource_task(db, "lib", resource_id).scan_gate_blocked is False
+        assert db.scalar(
+            select(LibraryResourceAsset.import_state).where(
+                LibraryResourceAsset.resource_id == resource_id
+            )
+        ) == "READY"
         assert db.get(LibraryImportTask, failed_scan.id).state == "FAILED"
     finally:
         db.close()

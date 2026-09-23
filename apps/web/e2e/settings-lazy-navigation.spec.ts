@@ -168,6 +168,69 @@ test.beforeEach(async ({ context, page }) => {
   await mockSettingsApi(page);
 });
 
+for (const scenario of [
+  { name: 'retains stored password', password: '', clear: false },
+  { name: 'omits whitespace password', password: '   ', clear: false },
+  { name: 'preserves replacement password', password: '  replacement-secret  ', clear: false },
+  { name: 'clears stored password explicitly', password: '', clear: true }
+]) {
+  test(`SMTP test and save submit writable fields only: ${scenario.name}`, async ({ page }) => {
+    const writable = {
+      host: 'smtp.example.com', port: 587, security: 'starttls', username: 'sender',
+      fromEmail: 'sender@example.com', fromName: 'Sender', maxAttachmentMb: 25
+    };
+    const settings = { smtp: { ...writable, passwordConfigured: true }, kindle: { email: '' } };
+    const tested: unknown[] = [];
+    const saved: unknown[] = [];
+    await page.route('**/api/email-settings', async (route) => {
+      if (route.request().method() === 'PUT') saved.push(route.request().postDataJSON());
+      await route.fulfill({ json: { ok: true, data: settings } });
+    });
+    await page.route('**/api/email-settings/smtp-test', async (route) => {
+      expect(route.request().method()).toBe('POST');
+      tested.push(route.request().postDataJSON());
+      await route.fulfill({ json: { ok: true, data: { connected: true, message: 'SMTP connection verified' } } });
+    });
+    await page.goto('/settings/email?tab=smtp');
+    await expect(page.getByLabel('SMTP 主机', { exact: true })).toHaveValue(writable.host);
+    await page.getByLabel('SMTP 密码', { exact: true }).fill(scenario.password);
+    if (scenario.clear) await page.getByRole('button', { name: '保存时清除 SMTP 密码', exact: true }).click();
+    // Test the current unsaved form, rather than the values returned by GET.
+    await page.getByLabel('SMTP 主机', { exact: true }).fill('edited.example.com');
+    const expected = {
+      smtp: {
+        ...writable, host: 'edited.example.com',
+        ...(scenario.password.trim() ? { password: scenario.password } : {})
+      },
+      clearSmtpPassword: scenario.clear
+    };
+    await page.getByRole('button', { name: '测试连接', exact: true }).click();
+    await expect(page.getByText('SMTP 测试成功', { exact: true })).toBeVisible();
+    expect(tested).toEqual([expected]);
+    expect(saved).toEqual([]);
+    await page.getByRole('button', { name: '保存 SMTP', exact: true }).click();
+    await expect(page.getByText('SMTP 设置已保存', { exact: true })).toBeVisible();
+    expect(saved).toEqual([expected]);
+  });
+}
+
+test('SMTP test displays connection failure and allows retry', async ({ page }) => {
+  let attempts = 0;
+  await page.route('**/api/email-settings/smtp-test', async (route) => {
+    attempts += 1;
+    await route.fulfill({ status: 400, json: { ok: false, error: { message: 'SMTP authentication failed' } } });
+  });
+  await page.goto('/settings/email?tab=smtp');
+  await expect(page.getByLabel('SMTP 主机', { exact: true })).toBeEnabled();
+  const testButton = page.getByRole('button', { name: '测试连接', exact: true });
+  await testButton.click();
+  await expect(page.getByText('SMTP 测试失败', { exact: true })).toBeVisible();
+  await expect(page.getByText('SMTP authentication failed', { exact: true })).toBeVisible();
+  await expect(testButton).toBeEnabled();
+  await testButton.click();
+  await expect.poll(() => attempts).toBe(2);
+});
+
 test('settings tab starts its selected animation before the route is confirmed', async ({ page }) => {
   await page.goto('/settings/organize?tab=queue');
   const providersTab = page.locator('a[href="/settings/organize?tab=providers"]');

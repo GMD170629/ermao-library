@@ -138,6 +138,9 @@ class ScanLibrarySourceTree:
             )
         else:
             full_scope = ScanScope("", True)
+            self._apply_scan_round(
+                task_id, library_id, resolved=(), incomplete=(full_scope,)
+            )
             incomplete_paths: set[str] = set()
             try:
                 result = self._walk(
@@ -241,6 +244,9 @@ class ScanLibrarySourceTree:
             )
         if node.physical_kind is SourceNodePhysicalKind.DIRECTORY:
             anchor_scope = ScanScope(relative.value, True)
+            self._apply_scan_round(
+                task_id, config.library_id, resolved=(), incomplete=(anchor_scope,)
+            )
             incomplete_paths: set[str] = set()
             try:
                 result = self._walk(
@@ -315,6 +321,9 @@ class ScanLibrarySourceTree:
                         scope = ScanScope(node.relative_path, True)
             expanded += (scope,)
         normalized = merge_scan_scopes((), expanded) or ()
+        self._apply_scan_round(
+            task_id, config.library_id, resolved=(), incomplete=normalized
+        )
         pending = list(normalized)
         visited: set[str] = set()
         totals = [0, 0, 0, 0]

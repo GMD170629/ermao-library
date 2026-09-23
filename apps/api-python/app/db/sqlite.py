@@ -8,6 +8,7 @@ from typing import Protocol, Self, TypeVar, cast, overload
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import URL, Engine
 
+from app.core.natural_sort import natural_sort_key
 from app.db.maintenance import (
     acquire_database_writer_lease,
     release_database_maintenance_lock,
@@ -164,6 +165,11 @@ def create_sqlite_engine(
 
     @event.listens_for(engine, "connect")
     def configure_sqlite(dbapi_connection, connection_record) -> None:
+        def natural_compare(left: str, right: str) -> int:
+            left_key, right_key = natural_sort_key(left), natural_sort_key(right)
+            return (left_key > right_key) - (left_key < right_key)
+
+        dbapi_connection.create_collation("ERMAO_NATURAL", natural_compare)
         cursor = dbapi_connection.cursor()
         try:
             cursor.execute("PRAGMA foreign_keys = ON")

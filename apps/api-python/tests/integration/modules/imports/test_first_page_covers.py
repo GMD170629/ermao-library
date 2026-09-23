@@ -81,6 +81,37 @@ def write_pages(root: Path, kind: str) -> Path:
     return target
 
 
+def test_directory_cover_candidates_yield_after_bounded_page(library, monkeypatch):
+    db, _settings, root, pipeline = library
+    folder = root / "Book"
+    folder.mkdir()
+    for index in range(17):
+        with Image.new("RGB", (16, 16), "red") as image:
+            image.save(folder / f"{index:02}.png")
+    scan(db, pipeline)
+    extractor = pipeline.process_import_task._first_page_covers
+    original = extractor.extract
+    visited = []
+
+    def extract(**kwargs):
+        visited.append(kwargs["path"].name)
+        if len(visited) <= 16:
+            return None
+        return original(**kwargs)
+
+    monkeypatch.setattr(extractor, "extract", extract)
+    worker = build_readable_resource_worker(pipeline)
+    assert worker.process_once() == "book_yield"
+    task = db.scalar(select(LibraryImportTask).where(LibraryImportTask.kind == "IMPORT_BOOK"))
+    assert task is not None and task.directory_cover_cursor is not None
+    resource = db.scalar(select(LibraryReadableResource))
+    assert db.get(LibraryReadableResourceMetadata, resource.id) is None
+    assert len(visited) == 16
+    assert build_readable_resource_worker(pipeline).process_once() == "book"
+    assert len(visited) == 17
+    assert db.get(LibraryReadableResourceMetadata, resource.id).cover_path is not None
+
+
 def scan(db: Session, pipeline: ReadableResourcePipeline) -> dict[str, str]:
     pipeline.continue_import.execute(ContinueLibraryImport("lib"))
     assert build_readable_resource_worker(pipeline).process_once() == "scan"
@@ -673,6 +704,21 @@ def test_thousand_images_batch_import_and_incremental_reuse(
     monkeypatch.setattr(
         pipeline.process_import_task, "_save_directory_batch", save_batch
     )
+    expected_batches = [128] * (image_count // 128) + (
+        [image_count % 128] if image_count % 128 else []
+    )
+
+    def finish_book(worker):
+        outcomes = []
+        for _ in range((image_count + 127) // 128 + 2):
+            outcome = worker.process_once()
+            outcomes.append(outcome)
+            if outcome == "book":
+                break
+        assert outcomes[-1] == "book"
+        assert all(outcome == "book_yield" for outcome in outcomes[:-1])
+        return outcomes
+
     try:
         scan_started = perf_counter()
         tasks = scan(db, pipeline)
@@ -693,9 +739,11 @@ def test_thousand_images_batch_import_and_incremental_reuse(
         phase = "finish"
         worker = build_readable_resource_worker(pipeline)
         if interrupt_after_three:
+            assert worker.process_once() == "book_yield"
+            assert worker.process_once() == "book_yield"
             with pytest.raises(KeyboardInterrupt):
                 worker.process_once()
-            assert len(db.scalars(select(LibraryResourceAsset)).all()) == 600
+            assert len(db.scalars(select(LibraryResourceAsset)).all()) == 384
             # Discard the worker and its Session, as on application restart.
             db.close()
             with Session(engine) as resumed:
@@ -707,16 +755,13 @@ def test_thousand_images_batch_import_and_incremental_reuse(
                 restarted = build_readable_resource_worker(restored)
                 assert restarted.startup() == 1
                 restored.continue_import.execute(ContinueImportTask(task_id))
-                assert restarted.process_once() == "book"
+                finish_book(restarted)
             db.expire_all()
         else:
-            assert worker.process_once() == "book"
-            assert sizes == (
-                [200] * (image_count // 200)
-                + ([image_count % 200] if image_count % 200 else [])
-            )
-            assert sql["asset"]["actual_commits"] == (image_count + 199) // 200
-            assert sql["asset"]["selects"] <= 7 * ((image_count + 199) // 200)
+            assert len(finish_book(worker)) == (image_count + 127) // 128
+            assert sizes == expected_batches
+            assert sql["asset"]["actual_commits"] == len(expected_batches)
+            assert sql["asset"]["selects"] <= 7 * len(expected_batches)
             assert counts == {
                 "directory_metadata": 1,
                 "resource_merges": 1,
@@ -746,11 +791,8 @@ def test_thousand_images_batch_import_and_incremental_reuse(
 
         ordered = SqlAlchemyReaderResourceCatalogRepository(db).list_assets(resource.id)
         assert [a.title for a in ordered] == [str(i) for i in range(1, image_count + 1)]
-        assert sizes == (
-            [200] * (image_count // 200)
-            + ([image_count % 200] if image_count % 200 else [])
-        )
-        assert sql["asset"]["actual_commits"] == (image_count + 199) // 200
+        assert sizes == expected_batches
+        assert sql["asset"]["actual_commits"] == len(expected_batches)
         print(
             {
                 "mode": "interrupted_after_600" if interrupt_after_three else "normal",
@@ -777,7 +819,7 @@ def test_thousand_images_batch_import_and_incremental_reuse(
         incremental_scan_seconds = perf_counter() - started
         phase = "finish"
         started = perf_counter()
-        assert worker.process_once() == "book"
+        finish_book(worker)
         incremental_import_seconds = perf_counter() - started
         print(
             {
@@ -793,10 +835,9 @@ def test_thousand_images_batch_import_and_incremental_reuse(
             }
         )
         assert len(parsed_names) == 10
-        assert sizes == (
-            [200] * (image_count // 200)
-            + ([image_count % 200] if image_count % 200 else [])
-        ) + [10]
+        assert sizes[: len(expected_batches)] == expected_batches
+        assert sum(sizes[len(expected_batches) :]) == 10
+        assert all(size <= 128 for size in sizes[len(expected_batches) :])
         assert counts["cover_publications"] == 1
         assert all(
             db.get(LibraryResourceAsset, asset_id).updated_at == timestamp
@@ -818,7 +859,7 @@ def test_thousand_images_batch_import_and_incremental_reuse(
         metadata_scan_seconds = perf_counter() - started
         phase = "finish"
         started = perf_counter()
-        assert worker.process_once() == "book"
+        finish_book(worker)
         metadata_import_seconds = perf_counter() - started
         print(
             {
@@ -840,7 +881,7 @@ def test_thousand_images_batch_import_and_incremental_reuse(
         cover = db.get(LibraryReadableResourceMetadata, resource.id).cover_path
         (settings.resolved_storage_root / cover).unlink()
         scan(db, pipeline)
-        assert worker.process_once() == "book"
+        finish_book(worker)
         assert not parsed_names
         assert counts["cover_publications"] == 2
         metadata_row = db.get(LibraryReadableResourceMetadata, resource.id)
@@ -851,7 +892,7 @@ def test_thousand_images_batch_import_and_incremental_reuse(
             "<package><metadata><title>Protected change</title><meta name='cover' content='cover'/></metadata><manifest><item id='cover' href='1.png' media-type='image/png'/></manifest></package>"
         )
         scan(db, pipeline)
-        assert worker.process_once() == "book"
+        finish_book(worker)
         assert db.get(LibraryReadableResourceMetadata, resource.id).title == "Changed"
         assert (
             db.get(LibraryReadableResourceMetadata, resource.id).cover_path == old_cover
@@ -868,7 +909,11 @@ def test_thousand_images_batch_import_and_incremental_reuse(
 
         monkeypatch.setattr(RegistryResourceAdapterExecutor, "parse_file", failed_parse)
         scan(db, pipeline)
-        assert worker.process_once() == "failed"
+        failure_outcomes = [worker.process_once()]
+        while failure_outcomes[-1] == "book_yield":
+            failure_outcomes.append(worker.process_once())
+        assert failure_outcomes[-1] == "failed"
+        assert all(outcome == "book_yield" for outcome in failure_outcomes[:-1])
         assert parsed_names == {f"{image_count + 11}.png": 1}
         assert db.scalar(select(LibraryReadableResource)).import_state == "READY"
         failed = db.scalar(
@@ -885,7 +930,7 @@ def test_thousand_images_batch_import_and_incremental_reuse(
             2000, 1, 1, tzinfo=UTC
         )
         db.commit()
-        assert worker.process_once() == "book"
+        finish_book(worker)
         assert parsed_names == {f"{image_count + 11}.png": 1}
         # A changed existing image keeps its identity and updates the selected cover.
         metadata_row = db.get(LibraryReadableResourceMetadata, resource.id)
@@ -905,7 +950,7 @@ def test_thousand_images_batch_import_and_incremental_reuse(
         Image.new("RGB", (40, 40), "blue").save(folder / "1.png")
         parsed_names.clear()
         scan(db, pipeline)
-        assert worker.process_once() == "book"
+        finish_book(worker)
         assert parsed_names == {"1.png": 1}
         assert (
             db.get(LibraryResourceAsset, changed_id).processed_source_version
@@ -1038,7 +1083,7 @@ def test_image_batch_keeps_topology_and_file_type_validation(library, invalid):
     )
 
     repository = SqlAlchemyBookResourceRepository(db)
-    member = repository.load_directory_members(resource_id)[0]
+    member = repository.page_directory_members(resource_id, after_id=None, limit=128).members[0]
     node_id = member.node.id
     if invalid == "directory":
         node_id = db.get(LibraryImportTask, task_id).source_node_id
@@ -1151,7 +1196,7 @@ def test_audio_resource_batches_reuse_tracks_and_finalize_once(
         sql[phase]["selects"] += int(statement.lstrip().upper().startswith("SELECT"))
         if cursor.rowcount >= 0:
             sql[phase]["affected_rows"] += cursor.rowcount
-        if statement.startswith('UPDATE "ReadableResourceNavigationUnit"'):
+        if 'UPDATE "ReadableResourceNavigationUnit"' in statement:
             counts["chapter_order_update_calls"] += 1
             assert phase == "aggregate"
 
@@ -1560,7 +1605,10 @@ def test_scan_node_batches_and_unchanged_scan(library, monkeypatch, file_count):
             stats["affected_rows"],
         )
         worker = build_readable_resource_worker(pipeline)
-        assert worker.process_once() == "book"
+        outcomes = [worker.process_once()]
+        while outcomes[-1] == "book_yield":
+            outcomes.append(worker.process_once())
+        assert outcomes == ["book_yield"] * (file_count // 128) + ["book"]
         while worker.process_once() != "idle":
             pass
         db.expire_all()
@@ -1718,7 +1766,9 @@ def test_scan_committed_batch_keeps_intent_and_blocks_incomplete_resource(
         pipeline.queue.enqueue(kind="SCAN_LIBRARY", library_id="lib")
         db.commit()
         scan(db, pipeline)
-        assert worker.process_once() == "book"
+        assert [worker.process_once() for _ in range(4)] == [
+            "book_yield", "book_yield", "book_yield", "book"
+        ]
         assert db.scalar(select(LibraryReadableResource.id)) == resource_id
         assert len(db.scalars(select(LibraryResourceAsset)).all()) == 403
         print(

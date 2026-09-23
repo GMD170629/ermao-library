@@ -30,10 +30,12 @@ def is_retryable_sqlite_operation_error(error: BaseException) -> bool:
     """Accept only SQLite lock contention or an explicitly marked budget expiry."""
     original = getattr(error, "orig", error)
     if is_database_operation_timeout(error):
-        return True
+        return isinstance(original, sqlite3.OperationalError)
     if not isinstance(original, sqlite3.OperationalError):
         return False
     code = getattr(original, "sqlite_errorcode", None)
     if code is not None:
         return code & 0xFF in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
-    return is_database_busy_error(error)
+    # Synthetic DB-API failures may lack sqlite_errorcode. Only SQLite's exact
+    # lock messages qualify; an arbitrary message containing those words does not.
+    return str(original).strip().lower() in DATABASE_BUSY_MESSAGES
