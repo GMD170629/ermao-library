@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.bootstrap.media import build_cover_url_resolver, first_page_covers
@@ -46,9 +45,6 @@ from app.modules.imports.infrastructure.local_cover_publication import (
 )
 from app.modules.imports.infrastructure.readable_resource.adapter_registry import (
     RegistryResourceAdapterExecutor,
-)
-from app.modules.imports.infrastructure.readable_resource.book_completion import (
-    active_imports_for_book,
 )
 from app.modules.imports.infrastructure.readable_resource.filesystem import (
     OsSourceTreeFilesystem,
@@ -208,14 +204,7 @@ def build_readable_resource_pipeline(
             SqlAlchemyImportedBookMetadata(
                 session,
                 adapters.inspect_sidecar_local_metadata,
-                lambda book_id: (
-                    session.scalar(
-                        select(LibraryBook.id).where(
-                            LibraryBook.id == book_id, ~active_imports_for_book()
-                        )
-                    )
-                    is not None
-                ),
+                lambda book_id: session.get(LibraryBook, book_id) is not None,
                 lambda value: stored_path(value, runtime_settings),
                 build_cover_url_resolver(runtime_settings),
             ),

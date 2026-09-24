@@ -13,7 +13,6 @@ from app.contracts.local_metadata import LocalMetadataSource
 from app.modules.imports.application.audio_types import AudioFileMetadata
 from app.modules.imports.application.readable_resource.book_work import (
     BookWork,
-    BookWorkState,
 )
 from app.modules.imports.domain.directory_probe import (
     DirectoryProbeDecision,
@@ -131,7 +130,7 @@ class BookImportTaskRecord:
     phase: str
     request_version: int
     execution_version: int | None
-    work: BookWorkState
+    work: BookWork
     resource_cursor: str | None
     error_summary: str | None
     directory_resource_id: str | None = None
@@ -140,8 +139,6 @@ class BookImportTaskRecord:
 
 
 class BookImportTaskQueuePort(Protocol):
-    def refresh_scan_gate_page(self) -> int: ...
-
     def request_book_work(
         self, *, book_id: str, work: BookWork, requested_at: datetime
     ) -> BookImportTaskRecord: ...
@@ -153,6 +150,8 @@ class BookImportTaskQueuePort(Protocol):
     ) -> BookImportTaskRecord | None: ...
 
     def get_book_task(self, task_id: str) -> BookImportTaskRecord | None: ...
+
+    def book_requires_scan(self, book_id: str) -> bool: ...
 
     def book_identification_complete(self, book_id: str) -> bool: ...
 
@@ -314,6 +313,10 @@ class SourceNodeDeletionPort(Protocol):
 
 
 class LibraryImportTaskQueuePort(Protocol):
+    def begin_discovery(self, task_id: str, *, book_id: str | None = None) -> None: ...
+
+    def end_discovery(self) -> None: ...
+
     def request_library_scan(
         self,
         library_id: str,

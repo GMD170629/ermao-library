@@ -1,17 +1,16 @@
-"""Bounded pending and claimed work for one already identified Book."""
+"""Immutable work scope for one accepted Book import execution."""
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
 
-from app.modules.imports.domain.scan_policy import ScanScope, merge_scan_scopes
+from app.modules.imports.domain.scan_policy import ScanScope
 
 _MAX_SCOPES = 64
 _MAX_RESOURCES = 128
 _MAX_REASONS = 16
 _MAX_ENCODED_BYTES = 128 * 1024
-_MANY_REASONS = "MULTIPLE_REQUESTS"
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,48 +62,9 @@ class BookWork:
             and not self.identify
         )
 
-    def merge(self, other: BookWork) -> BookWork:
-        scopes = merge_scan_scopes(self.scan_scopes, other.scan_scopes)
-        resources = (
-            None
-            if self.resource_ids is None or other.resource_ids is None
-            else tuple(sorted(set(self.resource_ids + other.resource_ids)))
-        )
-        if scopes is not None and len(scopes) > _MAX_SCOPES:
-            scopes = None
-        if resources is not None and len(resources) > _MAX_RESOURCES:
-            resources = None
-        reasons = tuple(sorted(set(self.reasons + other.reasons)))
-        if len(reasons) > _MAX_REASONS:
-            reasons = (_MANY_REASONS,)
-        return BookWork(scopes, resources, self.identify or other.identify, reasons)
-
-
-@dataclass(frozen=True, slots=True)
-class BookWorkState:
-    active: BookWork = BookWork()
-    pending: BookWork = BookWork()
-
-    def request(self, work: BookWork) -> BookWorkState:
-        return BookWorkState(self.active, self.pending.merge(work))
-
-    def claim_new(self) -> BookWorkState:
-        if not self.active.is_empty:
-            raise ValueError("BOOK_WORK_ALREADY_ACTIVE")
-        if self.pending.is_empty:
-            raise ValueError("BOOK_WORK_NOT_PENDING")
-        return BookWorkState(self.pending, BookWork())
-
-    def finish_active(self) -> BookWorkState:
-        return BookWorkState(BookWork(), self.pending)
-
-
-def encode_book_work(value: BookWorkState) -> str:
+def encode_book_work(value: BookWork) -> str:
     encoded = json.dumps(
-        {
-            "active": _work_to_data(value.active),
-            "pending": _work_to_data(value.pending),
-        },
+        _work_to_data(value),
         separators=(",", ":"),
     )
     if len(encoded.encode("utf-8")) > _MAX_ENCODED_BYTES:
@@ -112,15 +72,18 @@ def encode_book_work(value: BookWorkState) -> str:
     return encoded
 
 
-def decode_book_work(value: str) -> BookWorkState:
+def decode_book_work(value: str) -> BookWork:
     if len(value.encode("utf-8")) > _MAX_ENCODED_BYTES:
         raise ValueError("BOOK_WORK_TOO_LARGE")
     data = json.loads(value)
-    if not isinstance(data, dict) or set(data) != {"active", "pending"}:
-        raise ValueError("INVALID_BOOK_WORK")
-    return BookWorkState(
-        _work_from_data(data["active"]), _work_from_data(data["pending"])
-    )
+    if not isinstance(data, dict):
+        raise TypeError("INVALID_BOOK_WORK")
+    if set(data) == {"active", "pending"}:
+        # Historical rows only. Migration 0037 converts accepted pending work.
+        active = _work_from_data(data["active"])
+        pending = _work_from_data(data["pending"])
+        return active if not active.is_empty else pending
+    return _work_from_data(data)
 
 
 def _work_to_data(value: BookWork) -> dict[str, object]:
@@ -179,4 +142,4 @@ def _work_from_data(data: object) -> BookWork:
     )
 
 
-__all__ = ["BookWork", "BookWorkState", "decode_book_work", "encode_book_work"]
+__all__ = ["BookWork", "decode_book_work", "encode_book_work"]

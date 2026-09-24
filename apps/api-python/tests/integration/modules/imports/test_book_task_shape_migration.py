@@ -17,7 +17,6 @@ from app.db.sqlite import create_sqlite_engine
 from app.models import Library, LibraryBook, LibrarySourceNode
 from app.modules.imports.application.readable_resource.book_work import (
     BookWork,
-    BookWorkState,
     encode_book_work,
 )
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
@@ -123,7 +122,7 @@ def test_book_task_shape_migration_preserves_legacy_and_enforces_book_shape(
         "libraryId": "library",
         "sourceNodeId": "source-node",
         "bookId": "book",
-        "bookWork": encode_book_work(BookWorkState(pending=BookWork(identify=True))),
+        "bookWork": encode_book_work(BookWork(identify=True)),
         "phase": "SCAN",
         "state": "QUEUED",
         "createdAt": created_at,
@@ -140,7 +139,7 @@ def test_book_task_shape_migration_preserves_legacy_and_enforces_book_shape(
         with pytest.raises(IntegrityError), engine.begin() as connection:
             connection.execute(sa.insert(task_table).values(values))
 
-    with pytest.raises(IntegrityError), engine.begin() as connection:
+    with engine.begin() as connection:
         connection.execute(
             sa.insert(task_table).values(
                 {**valid_task, "id": "duplicate-book-task"}

@@ -128,6 +128,22 @@ class ScanLibrarySourceTree:
         scan_scopes: tuple[ScanScope, ...] | None = None,
         after_batch: Callable[[], None] | None = None,
     ) -> ScanLibrarySourceTreeResult:
+        self._queue.begin_discovery(task_id or uuid4().hex)
+        try:
+            return self._execute_library(
+                library_id, task_id=task_id,
+                missing_entry_policy=missing_entry_policy,
+                scan_scopes=scan_scopes, after_batch=after_batch,
+            )
+        finally:
+            self._queue.end_discovery()
+
+    def _execute_library(
+        self, library_id: str, *, task_id: str | None,
+        missing_entry_policy: MissingEntryPolicy,
+        scan_scopes: tuple[ScanScope, ...] | None,
+        after_batch: Callable[[], None] | None,
+    ) -> ScanLibrarySourceTreeResult:
         with self._uow.transaction():
             config = self._libraries.get_library(library_id)
         self._require_readable_directory(config.root_path)
@@ -180,6 +196,20 @@ class ScanLibrarySourceTree:
         task_id: str | None = None,
         missing_entry_policy: MissingEntryPolicy = MissingEntryPolicy.PRESERVE,
         after_batch: Callable[[], None] | None = None,
+    ) -> ScanLibrarySourceTreeResult:
+        self._queue.begin_discovery(task_id or uuid4().hex)
+        try:
+            return self._execute_source(
+                source_node_id, task_id=task_id,
+                missing_entry_policy=missing_entry_policy, after_batch=after_batch,
+            )
+        finally:
+            self._queue.end_discovery()
+
+    def _execute_source(
+        self, source_node_id: str, *, task_id: str | None,
+        missing_entry_policy: MissingEntryPolicy,
+        after_batch: Callable[[], None] | None,
     ) -> ScanLibrarySourceTreeResult:
         with self._uow.transaction():
             node = self._source_nodes.get(source_node_id)

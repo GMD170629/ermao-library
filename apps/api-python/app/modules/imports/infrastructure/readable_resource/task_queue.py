@@ -24,7 +24,6 @@ from app.models import (
 from app.models.common import cuid
 from app.modules.imports.application.readable_resource.book_work import (
     BookWork,
-    BookWorkState,
     decode_book_work,
     encode_book_work,
 )
@@ -44,16 +43,14 @@ from app.modules.imports.domain.scan_policy import (
     encode_scan_scopes,
     merge_scan_scopes,
     path_contains,
-    remove_scan_scopes,
+    scope_covers_path,
 )
 from app.modules.imports.infrastructure.readable_resource.book_completion import (
     BookImportCompletion,
 )
 from app.modules.imports.infrastructure.readable_resource.scan_gating import (
-    book_gate_blocked,
     clear_scan_gaps,
     record_scan_gaps,
-    refresh_book_gates,
 )
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportScanGap,
@@ -73,6 +70,28 @@ class SqlAlchemyLibraryImportTaskQueue(
     def __init__(self, session: Session) -> None:
         self._session = session
         self._completion = BookImportCompletion(session)
+        self._discovery_owner: str | None = None
+        self._discovery_book: str | None = None
+        self._discovered_books: set[str] = set()
+        self._discovery_depth = 0
+
+    def begin_discovery(self, task_id: str, *, book_id: str | None = None) -> None:
+        if self._discovery_owner is not None:
+            self._discovery_depth += 1
+            return
+        self._discovery_owner = task_id
+        owner = self._session.get(LibraryImportTask, task_id)
+        self._discovery_book = book_id or (owner.book_id if owner else None)
+        self._discovered_books.clear()
+        self._discovery_depth = 1
+
+    def end_discovery(self) -> None:
+        self._discovery_depth -= 1
+        if self._discovery_depth > 0:
+            return
+        self._discovery_owner = None
+        self._discovery_book = None
+        self._discovered_books.clear()
 
     @staticmethod
     def _book_phase(work: BookWork) -> str:
@@ -149,8 +168,7 @@ class SqlAlchemyLibraryImportTaskQueue(
             source_node_id=book.source_node_id,
             state="QUEUED",
             phase=self._book_phase(work),
-            book_work=encode_book_work(BookWorkState(pending=work)),
-            scan_gate_blocked=False,
+            book_work=encode_book_work(work),
             request_version=1,
             retry_count=0,
             created_at=requested_at,
@@ -175,9 +193,8 @@ class SqlAlchemyLibraryImportTaskQueue(
         if row is None or row.kind != "IMPORT_BOOK" or row.state != "QUEUED":
             return None
         work = decode_book_work(row.book_work or "")
-        if not work.active.is_empty:
+        if work.is_empty or row.started_at is not None or row.execution_version is not None:
             raise ValueError("BOOK_TASK_ALREADY_ATTEMPTED")
-        work = work.claim_new()
         claimed = self._session.scalar(
             update(LibraryImportTask)
             .where(
@@ -187,8 +204,7 @@ class SqlAlchemyLibraryImportTaskQueue(
             )
             .values(
                 state="RUNNING",
-                phase=self._book_phase(work.active),
-                book_work=encode_book_work(work),
+                phase=self._book_phase(work),
                 execution_version=row.request_version,
                 started_at=started_at,
             )
@@ -200,13 +216,22 @@ class SqlAlchemyLibraryImportTaskQueue(
         self._session.refresh(row)
         return self._book_record(row)
 
-    def refresh_scan_gate_page(self) -> int:
-        """Recover unknown gate projections before ordinary Book claiming."""
-        return refresh_book_gates(self._session)
-
     def get_book_task(self, task_id: str) -> BookImportTaskRecord | None:
         row = self._session.get(LibraryImportTask, task_id, populate_existing=True)
         return self._book_record(row) if row is not None and row.kind == "IMPORT_BOOK" else None
+
+    def book_requires_scan(self, book_id: str) -> bool:
+        book = self._session.get(LibraryBook, book_id)
+        if book is None:
+            return True
+        node = self._session.get(LibrarySourceNode, book.source_node_id)
+        gap = self._session.get(LibraryImportScanGap, book.library_id)
+        if node is None:
+            return True
+        return any(
+            scope_covers_path(scope, node.relative_path)
+            for scope in (decode_scan_scopes(gap.scopes) or () if gap else ())
+        )
 
     def book_identification_complete(self, book_id: str) -> bool:
         return self._session.scalar(
@@ -248,7 +273,7 @@ class SqlAlchemyLibraryImportTaskQueue(
             or row.execution_version != execution_version
         ):
             return False
-        work = decode_book_work(row.book_work or "").active
+        work = decode_book_work(row.book_work or "")
         if work.resource_ids is None:
             next_resource_id = self._session.scalar(
                 select(LibraryReadableResource.id)
@@ -344,19 +369,6 @@ class SqlAlchemyLibraryImportTaskQueue(
     ) -> bool:
         if phase not in {"RESOURCES", "IDENTIFY"}:
             raise ValueError("INVALID_BOOK_PHASE")
-        row = self._session.get(LibraryImportTask, task_id)
-        gate: bool | None = None
-        if row is not None and row.phase == "SCAN":
-            node = self._session.get(LibrarySourceNode, row.source_node_id)
-            if node is None:
-                return False
-            gate = book_gate_blocked(
-                self._session,
-                library_id=row.library_id,
-                relative_path=node.relative_path,
-                physical_kind=node.physical_kind,
-                has_scan_work=False,
-            )
         advanced = self._session.scalar(
             update(LibraryImportTask)
             .where(
@@ -370,7 +382,7 @@ class SqlAlchemyLibraryImportTaskQueue(
                     else ("SCAN", "RESOURCES", "IDENTIFY")
                 ),
             )
-            .values(**({"phase": phase, "scan_gate_blocked": gate} if gate is not None else {"phase": phase}))
+            .values(phase=phase)
             .returning(LibraryImportTask.id)
         )
         return advanced is not None
@@ -425,7 +437,7 @@ class SqlAlchemyLibraryImportTaskQueue(
         ):
             return None
         if row.phase == "SCAN":
-            work = decode_book_work(row.book_work or "").active
+            work = decode_book_work(row.book_work or "")
             scan_scopes = work.scan_scopes
             if scan_scopes is None:
                 node = self._session.get(LibrarySourceNode, row.source_node_id)
@@ -482,8 +494,7 @@ class SqlAlchemyLibraryImportTaskQueue(
                 resource_ids=(previous.resource_id,), reasons=("FORCE_REIMPORT",),
             )
         elif previous.kind == "IMPORT_BOOK":
-            previous_work = decode_book_work(previous.book_work or "")
-            work = previous_work.active if not previous_work.active.is_empty else previous_work.pending
+            work = decode_book_work(previous.book_work or "")
             if work.is_empty:
                 work = BookWork(scan_scopes=None, resource_ids=None, identify=True)
         elif previous.resource_id is not None:
@@ -605,17 +616,13 @@ class SqlAlchemyLibraryImportTaskQueue(
             or resource.source_node_id != source_node_id
         ):
             raise ValueError("INVALID_RESOURCE_TASK_TARGET")
+        if self._discovery_owner is not None:
+            if resource.book_id == self._discovery_book:
+                # This Book execution already owns the newly enumerated input.
+                return None
+            if resource.book_id in self._discovered_books:
+                return None
         if force:
-            # Keep IDs, READY results and navigation readable until replacement.
-            # Clearing only the successful version forces extraction on the next run.
-            self._session.execute(
-                update(LibraryResourceAsset)
-                .where(
-                    LibraryResourceAsset.resource_id == resource_id,
-                    LibraryResourceAsset.library_id == library_id,
-                )
-                .values(processed_source_version=None)
-            )
             changed = True
         if not changed and resource.import_state == "READY":
             any_asset = exists(
@@ -639,9 +646,15 @@ class SqlAlchemyLibraryImportTaskQueue(
                 return None
         book_task = self.request_book_work(
             book_id=resource.book_id,
-            work=BookWork(resource_ids=(resource_id,)),
+            work=BookWork(
+                resource_ids=None if self._discovery_owner is not None else (resource_id,),
+                identify=self._discovery_owner is not None,
+                reasons=("FORCE_REIMPORT",) if force else (),
+            ),
             requested_at=datetime.now(UTC),
         )
+        if self._discovery_owner is not None:
+            self._discovered_books.add(resource.book_id)
         row = self._session.get(LibraryImportTask, book_task.id)
         if row is None:
             raise RuntimeError("BOOK_TASK_DISAPPEARED")
@@ -797,20 +810,10 @@ class SqlAlchemyLibraryImportTaskQueue(
     ) -> None:
         resolved_scopes = merge_scan_scopes((), resolved) or ()
         incomplete_scopes = merge_scan_scopes((), incomplete) or ()
-        if task_id is not None:
-            row = self._session.get(LibraryImportTask, task_id)
-            if row is not None and row.kind == "SCAN_LIBRARY":
-                remaining = remove_scan_scopes(
-                    decode_scan_scopes(row.scan_scopes) or (), resolved_scopes
-                )
-                combined = merge_scan_scopes(remaining, incomplete_scopes) or ()
-                row.scan_scopes = encode_scan_scopes(combined) if combined else None
         if resolved_scopes:
             clear_scan_gaps(self._session, library_id, resolved_scopes)
         if incomplete_scopes:
             record_scan_gaps(self._session, library_id, incomplete_scopes)
-        if resolved_scopes or incomplete_scopes:
-            refresh_book_gates(self._session)
 
     def _record_gaps_for_task(self, task: LibraryImportTask) -> None:
         if task.kind == "SCAN_LIBRARY":

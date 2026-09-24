@@ -1,4 +1,4 @@
-"""Historical incomplete ranges remain authoritative across the R2 upgrade."""
+"""Historical incomplete ranges remain visible without gating new imports."""
 
 from __future__ import annotations
 
@@ -17,10 +17,8 @@ from app.db.sqlite import create_sqlite_engine
 from app.models import Library, LibraryBook, LibrarySourceNode
 from app.modules.imports.application.readable_resource.book_work import (
     BookWork,
-    BookWorkState,
     encode_book_work,
 )
-from app.modules.imports.domain.scan_policy import ScanScope
 from app.modules.imports.infrastructure.readable_resource.task_queue import (
     SqlAlchemyLibraryImportTaskQueue,
 )
@@ -98,9 +96,7 @@ def test_upgrade_keeps_directory_book_unknown_until_gap_reconciled(
                     bookId="book",
                     state="QUEUED",
                     phase="IDENTIFY",
-                    bookWork=encode_book_work(
-                        BookWorkState(pending=BookWork(identify=True))
-                    ),
+                    bookWork=encode_book_work(BookWork(identify=True)),
                     requestVersion=1,
                     nextAttemptAt=int(now.timestamp() * 1000),
                 )
@@ -127,16 +123,11 @@ def test_upgrade_keeps_directory_book_unknown_until_gap_reconciled(
         with Session(engine) as db:
             queue = SqlAlchemyLibraryImportTaskQueue(db)
             task = db.get(LibraryImportTask, "task")
-            assert task is not None and task.scan_gate_blocked is None
-            assert queue.claim_next_book(started_at=now) is None
-            assert queue.refresh_scan_gate_page() == 1
-            db.commit()
-            assert db.get(LibraryImportTask, "task").scan_gate_blocked is True
-            queue.apply_scan_round(
-                None, "library", resolved=(ScanScope("missing", True),), incomplete=()
-            )
-            db.commit()
+            assert task is not None
+            assert queue.has_incomplete_ranges("library")
+            assert queue.book_requires_scan("book")
             selected = queue.claim_next_book(started_at=now)
             assert selected is not None and selected.id == "task"
+            assert queue.has_incomplete_ranges("library")
     finally:
         engine.dispose()

@@ -120,12 +120,11 @@ def test_book_requests_keep_independent_tasks_and_running_scope(db: Session) -> 
     db.commit()
     db.expire_all()
 
-    claimed = queue.claim_next_book(started_at=_NOW)
+    claimed = queue.claim_book_task(first.id, started_at=_NOW)
     assert claimed is not None
     assert claimed.id == first.id
     assert claimed.execution_version == 1
-    assert claimed.work.active.resource_ids == ("resource-one",)
-    assert claimed.work.pending.is_empty
+    assert claimed.work.resource_ids == ("resource-one",)
     db.commit()
 
     follow_up = queue.request_book_work(
@@ -134,8 +133,8 @@ def test_book_requests_keep_independent_tasks_and_running_scope(db: Session) -> 
     assert follow_up.id not in {first.id, duplicate.id}
     assert follow_up.state == "QUEUED"
     assert follow_up.request_version == 1
-    assert claimed.work.active.resource_ids == ("resource-one",)
-    assert follow_up.work.pending.identify
+    assert claimed.work.resource_ids == ("resource-one",)
+    assert follow_up.work.identify
     db.commit()
     db.expire_all()
 
@@ -144,8 +143,7 @@ def test_book_requests_keep_independent_tasks_and_running_scope(db: Session) -> 
     )
     assert finished is not None
     assert finished.state == "SUCCEEDED"
-    assert finished.work.active.resource_ids == ("resource-one",)
-    assert finished.work.pending.is_empty
+    assert finished.work.resource_ids == ("resource-one",)
     assert queue.finish_book_run(
         first.id, execution_version=1, finished_at=_NOW + timedelta(seconds=2)
     ) is None
@@ -154,11 +152,10 @@ def test_book_requests_keep_independent_tasks_and_running_scope(db: Session) -> 
     next_run = queue.claim_next_book(started_at=_NOW + timedelta(seconds=2))
     assert next_run is not None and next_run.id in {duplicate.id, follow_up.id}
     assert next_run.execution_version == 1
-    assert next_run.work.active == (
+    assert next_run.work == (
         BookWork(resource_ids=("resource-one",))
         if next_run.id == duplicate.id else BookWork(identify=True)
     )
-    assert next_run.work.pending.is_empty
     done = queue.finish_book_run(
         next_run.id, execution_version=1, finished_at=_NOW + timedelta(seconds=3)
     )
@@ -341,14 +338,13 @@ def test_failed_book_run_does_not_consume_request_arriving_during_execution(db: 
         failed_at=_NOW,
     )
     assert failed is not None and failed.state == "FAILED"
-    assert failed.work.active.resource_ids == ("resource-one",)
-    assert failed.work.pending.is_empty
+    assert failed.work.resource_ids == ("resource-one",)
     db.commit()
     db.expire_all()
     next_run = queue.claim_next_book(started_at=_NOW)
     assert next_run is not None and next_run.id == later.id
     assert next_run.execution_version == 1
-    assert next_run.work.active.identify
+    assert next_run.work.identify
 
 
 def test_book_request_rejects_other_book_and_outside_scope(db: Session) -> None:
@@ -446,7 +442,7 @@ def test_failed_book_is_terminal_and_new_request_has_fresh_work(db: Session) -> 
     assert again.id != first.id
     claimed = queue.claim_next_book(started_at=_NOW)
     assert claimed is not None and claimed.id == again.id
-    assert claimed.work.active.identify
+    assert claimed.work.identify
     assert claimed.resource_cursor is None
     assert db.get(LibraryImportTask, first.id).state == "FAILED"
 

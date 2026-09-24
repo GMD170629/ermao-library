@@ -1,54 +1,26 @@
-"""One Book's bounded work stays separate across a claimed execution."""
+"""One Book task has an immutable validated work scope."""
 
 import pytest
 
 from app.modules.imports.application.readable_resource.book_work import (
     BookWork,
-    BookWorkState,
     decode_book_work,
     encode_book_work,
 )
-from app.modules.imports.domain.scan_policy import ScanScope
 
 
-def test_request_during_active_run_stays_pending_after_completion() -> None:
-    initial = BookWork(resource_ids=("resource-a",), reasons=("RESOURCE_CHANGED",))
-    claimed = BookWorkState().request(initial).claim_new()
-    changed = claimed.request(
-        BookWork(resource_ids=("resource-b",), reasons=("RESOURCE_CHANGED",))
-    )
-
-    assert changed.active.resource_ids == ("resource-a",)
-    assert changed.pending.resource_ids == ("resource-b",)
-    restored = decode_book_work(encode_book_work(changed))
-    assert restored == changed
-    assert restored.finish_active().pending.resource_ids == ("resource-b",)
+def test_work_round_trip_has_no_active_or_pending_state() -> None:
+    work = BookWork(resource_ids=("resource-a",), reasons=("RESOURCE_CHANGED",))
+    assert decode_book_work(encode_book_work(work)) == work
+    assert "active" not in encode_book_work(work)
+    assert "pending" not in encode_book_work(work)
 
 
-def test_work_merge_removes_covered_scopes_and_duplicate_resources() -> None:
-    first = BookWork(
-        scan_scopes=(ScanScope("book/part", False),),
-        resource_ids=("resource-a",),
-    )
-    second = BookWork(
-        scan_scopes=(ScanScope("book", True),),
-        resource_ids=("resource-a", "resource-b"),
-        identify=True,
-    )
-
-    merged = first.merge(second)
-    assert merged.scan_scopes == (ScanScope("book", True),)
-    assert merged.resource_ids == ("resource-a", "resource-b")
-    assert merged.identify
-
-
-def test_too_many_resource_requests_promote_to_paged_book_resources() -> None:
-    work = BookWork()
-    for index in range(129):
-        work = work.merge(BookWork(resource_ids=(f"resource-{index:03d}",)))
-    assert work.scan_scopes == ()
-    assert work.resource_ids is None
-    assert decode_book_work(encode_book_work(BookWorkState(pending=work))).pending == work
+def test_explicit_scope_is_bounded_and_full_book_has_own_marker() -> None:
+    with pytest.raises(ValueError, match="BOOK_WORK_TOO_MANY_RESOURCES"):
+        BookWork(resource_ids=tuple(f"resource-{index:03d}" for index in range(129)))
+    work = BookWork(resource_ids=None, identify=True)
+    assert decode_book_work(encode_book_work(work)) == work
 
 
 @pytest.mark.parametrize(

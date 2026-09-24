@@ -272,29 +272,39 @@ class ReadableResourceWorkerProcessor:
                 "task_kind": "IMPORT_BOOK", "book_id": book.book_id,
             }
         ):
-            work = book.work.active
+            work = book.work
             phase = book.phase
             partial_error: str | None = None
-            if phase == "SCAN":
+            needs_own_scan = (
+                phase == "RESOURCES"
+                and work.resource_ids is None
+                and queue.book_requires_scan(book.book_id)
+            )
+            if phase == "SCAN" or needs_own_scan:
                 self._process_import.reset_inspection_cache()
-                if work.scan_scopes is None:
-                    self._scan.execute_source(
-                        book.source_node_id, task_id=book.id,
-                        missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
-                    )
-                else:
-                    self._scan.execute_library(
-                        book.library_id, task_id=book.id,
-                        scan_scopes=work.scan_scopes,
-                        missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
-                    )
-                phase = "RESOURCES" if work.resource_ids != () else "IDENTIFY"
-                with self._uow.transaction():
-                    if not queue.advance_book_phase(
-                        book.id, execution_version=book.execution_version,
-                        phase=phase,
-                    ):
-                        return "cancelled", "BOOK_RUN_STALE"
+                self._queue.begin_discovery(book.id, book_id=book.book_id)
+                try:
+                    if work.scan_scopes is None or needs_own_scan:
+                        self._scan.execute_source(
+                            book.source_node_id, task_id=book.id,
+                            missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
+                        )
+                    else:
+                        self._scan.execute_library(
+                            book.library_id, task_id=book.id,
+                            scan_scopes=work.scan_scopes,
+                            missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
+                        )
+                finally:
+                    self._queue.end_discovery()
+                if phase == "SCAN":
+                    phase = "RESOURCES" if work.resource_ids != () else "IDENTIFY"
+                    with self._uow.transaction():
+                        if not queue.advance_book_phase(
+                            book.id, execution_version=book.execution_version,
+                            phase=phase,
+                        ):
+                            return "cancelled", "BOOK_RUN_STALE"
             if phase == "RESOURCES":
                 while True:
                     current = queue.get_book_task(book.id)
@@ -303,14 +313,14 @@ class ReadableResourceWorkerProcessor:
                     result = self._process_book_resources.execute(
                         current, max_resources=128
                     )
+                    if result.error_summary is not None and partial_error is None:
+                        partial_error = result.error_summary
                     if result.outcome != "yielded":
                         break
                 if result.outcome == "failed":
                     return "failed", result.error_summary or "BOOK_RESOURCE_STALE"
                 if result.outcome == "cancelled":
                     return "cancelled", "BOOK_RESOURCE_STALE"
-                if result.outcome == "partial":
-                    partial_error = result.error_summary
                 with self._uow.transaction():
                     if not queue.advance_book_phase(
                         book.id, execution_version=book.execution_version,
@@ -344,19 +354,27 @@ class ReadableResourceWorkerProcessor:
             if task.kind in {"SCAN_LIBRARY", "CONTINUE_SOURCE"}:
                 self._process_import.reset_inspection_cache()
             if task.kind == "SCAN_LIBRARY":
-                self._scan.execute_library(
-                    task.library_id, task_id=task.id,
-                    missing_entry_policy=task.missing_entry_policy,
-                    scan_scopes=task.scan_scopes,
-                )
+                self._queue.begin_discovery(task.id)
+                try:
+                    self._scan.execute_library(
+                        task.library_id, task_id=task.id,
+                        missing_entry_policy=task.missing_entry_policy,
+                        scan_scopes=task.scan_scopes,
+                    )
+                finally:
+                    self._queue.end_discovery()
                 return "scan"
             if task.kind == "CONTINUE_SOURCE":
                 if task.source_node_id is None:
                     raise RuntimeError("CONTINUE_SOURCE missing source_node_id")
-                self._scan.execute_source(
-                    task.source_node_id, task_id=task.id,
-                    missing_entry_policy=task.missing_entry_policy,
-                )
+                self._queue.begin_discovery(task.id)
+                try:
+                    self._scan.execute_source(
+                        task.source_node_id, task_id=task.id,
+                        missing_entry_policy=task.missing_entry_policy,
+                    )
+                finally:
+                    self._queue.end_discovery()
                 return "continue_source"
             return "unknown_kind"
 

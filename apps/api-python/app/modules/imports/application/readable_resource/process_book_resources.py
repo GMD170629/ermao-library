@@ -6,7 +6,6 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
 
-from app.modules.imports.application.readable_resource.book_work import BookWork
 from app.modules.imports.application.readable_resource.ports import (
     BookImportTaskQueuePort,
     BookImportTaskRecord,
@@ -36,6 +35,7 @@ class _BookResourceRun:
     execution_version: int
     resource_id: str
     source_node_id: str
+    force_reimport: bool = False
     error_summary: str | None = None
     position_complete: bool = False
 
@@ -94,11 +94,7 @@ class _BookResourceRun:
     ) -> None:
         if resource_id != self.resource_id:
             raise ValueError("BOOK_RESOURCE_RUN_MISMATCH")
-        self.queue.request_book_work(
-            book_id=self.book_id,
-            work=BookWork(resource_ids=(resource_id,)),
-            requested_at=self.clock.now(),
-        )
+        self.error_summary = "RESOURCE_INPUT_CHANGED"
 
     def succeed(self, *, finished_at: datetime) -> None:
         if not self.queue.advance_book_resource_cursor(
@@ -134,9 +130,6 @@ class ProcessBookResources:
         self._uow = uow
         self._clock = clock
 
-    def failure_summary(self, book_id: str) -> str | None:
-        return self._resources.book_failure_summary(book_id)
-
     def execute(
         self, task: BookImportTaskRecord, *, max_resources: int | None = None
     ) -> BookResourceBatchResult:
@@ -150,7 +143,7 @@ class ProcessBookResources:
             if task.resource_cursor is not None and resource_id <= task.resource_cursor:
                 continue
             if max_resources is not None and processed >= max_resources:
-                return BookResourceBatchResult("yielded")
+                return BookResourceBatchResult("yielded", first_error)
             processed += 1
             with self._uow.transaction():
                 if not self._queue.book_run_is_current(
@@ -160,7 +153,7 @@ class ProcessBookResources:
                 resource = self._resources.get_resource(resource_id)
                 if resource is None:
                     if (
-                        task.work.active.resource_ids is not None
+                        task.work.resource_ids is not None
                         and not self._queue.advance_book_resource_cursor(
                             task.id,
                             execution_version=task.execution_version,
@@ -185,6 +178,7 @@ class ProcessBookResources:
                 execution_version=task.execution_version,
                 resource_id=resource_id,
                 source_node_id=source_node_id,
+                force_reimport="FORCE_REIMPORT" in task.work.reasons,
             )
             result = self._process_resource.process_resource(
                 library_id=task.library_id,
@@ -202,21 +196,12 @@ class ProcessBookResources:
                 )
             if run.error_summary is not None and first_error is None:
                 first_error = run.error_summary
-        failure_summary = self._resources.book_failure_summary(task.book_id)
-        if failure_summary is not None:
-            # Unreadable-file diagnostics stay on the Asset; the Book reports
-            # the directory-stage failure while parser result codes stay exact.
-            summary = (
-                first_error
-                if first_error is not None
-                and failure_summary in {"IMAGE_FILE_UNREADABLE", "AUDIO_FILE_UNREADABLE"}
-                else failure_summary
-            )
-            return BookResourceBatchResult("partial", summary)
+        if first_error is not None:
+            return BookResourceBatchResult("partial", first_error)
         return BookResourceBatchResult("ok")
 
     def _resource_ids(self, task: BookImportTaskRecord) -> Iterator[str]:
-        explicit = task.work.active.resource_ids
+        explicit = task.work.resource_ids
         if explicit is not None:
             yield from sorted(explicit)
             return

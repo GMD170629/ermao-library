@@ -10,7 +10,7 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.orm import Session, aliased
-from sqlalchemy.sql import ColumnElement, Select
+from sqlalchemy.sql import Select
 
 from app.models import (
     LibraryBook,
@@ -19,19 +19,6 @@ from app.models import (
     LibraryReadableResource,
     LibrarySourceNode,
 )
-from app.modules.imports.infrastructure.readable_resource.scan_gating import (
-    active_imports_for_anchor,
-)
-
-
-def active_imports_for_book() -> ColumnElement[bool]:
-    """Correlated to LibraryBook: scanners count until they stop producing tasks."""
-    root = aliased(LibrarySourceNode)
-    return active_imports_for_anchor(
-        root,
-        library_id=LibraryBook.library_id,
-        anchor_id=LibraryBook.source_node_id,
-    ).correlate(LibraryBook)
 
 
 class BookImportCompletion:

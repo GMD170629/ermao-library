@@ -74,10 +74,9 @@ def test_new_requests_keep_running_book_and_old_scan_unchanged(tmp_path: Path) -
 
             assert second.id != first.id
             assert queue.get_book_task(first.id).state == "RUNNING"
-            assert queue.get_book_task(first.id).work.active == BookWork(identify=True)
-            assert queue.get_book_task(first.id).work.pending.is_empty
+            assert queue.get_book_task(first.id).work == BookWork(identify=True)
             assert queue.get_book_task(second.id).state == "QUEUED"
-            assert queue.get_book_task(second.id).work.pending.scan_scopes is None
+            assert queue.get_book_task(second.id).work.scan_scopes is None
             assert db.get(LibraryBookMetadata, "book").import_revision == revision
             assert created_one and created_two and scan_one.id != scan_two.id
             assert db.get(LibraryImportTask, scan_one.id).scan_scopes != db.get(

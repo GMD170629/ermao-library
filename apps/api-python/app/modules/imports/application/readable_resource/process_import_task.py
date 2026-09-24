@@ -90,6 +90,9 @@ class ResourceImportRunPort(Protocol):
     @property
     def can_yield_directory(self) -> bool: ...
 
+    @property
+    def force_reimport(self) -> bool: ...
+
     def start(self, *, started_at: datetime) -> None: ...
 
     def request_changed(
@@ -113,6 +116,10 @@ class _QueuedResourceImportRun:
 
     @property
     def can_yield_directory(self) -> bool:
+        return False
+
+    @property
+    def force_reimport(self) -> bool:
         return False
 
     def directory_cursor(self, resource_id: str) -> str | None:
@@ -385,7 +392,7 @@ class ProcessReadableResourceImportTask:
                 version=processed_version,
             )
             self._uow.release_before_io()
-            if already_processed:
+            if already_processed and not run.force_reimport:
                 return self._refresh_single_file_metadata(
                     task_id, context, resource_absolute, run=run
                 )
@@ -474,13 +481,11 @@ class ProcessReadableResourceImportTask:
                         != context.resource.adapter_version
                     )
                     if input_changed:
-                        run.request_changed(
-                            library_id=library_id,
-                            resource_id=resource_id,
-                            source_node_id=source_node_id,
+                        run.fail(
+                            error_summary="RESOURCE_INPUT_CHANGED",
+                            finished_at=self._clock.now(),
                         )
-                        run.succeed(finished_at=self._clock.now())
-                        outcome = "changed"
+                        outcome = "failed"
                 if not task_was_cancelled and not input_changed:
                     self.save_asset_result(
                         parsed=parsed,
@@ -693,11 +698,11 @@ class ProcessReadableResourceImportTask:
                     if not run.is_current():
                         return ProcessTaskResult(task_id, "cancelled")
                     if changed:
-                        run.request_changed(
-                            library_id=library_id,
-                            resource_id=resource_id,
-                            source_node_id=context.node.id,
+                        run.fail(
+                            error_summary="RESOURCE_INPUT_CHANGED",
+                            finished_at=self._clock.now(),
                         )
+                        return ProcessTaskResult(task_id, "failed")
                     if item.last_visited_id is not None:
                         run.advance_directory_cursor(resource_id, item.last_visited_id)
                 changed = False
@@ -713,7 +718,8 @@ class ProcessReadableResourceImportTask:
             before = self._filesystem.observe_readable_file(path)
             version = self._processed_version(context, before)
             if (
-                member.ready
+                not run.force_reimport
+                and member.ready
                 and version is not None
                 and member.processed_version == version
             ):

@@ -200,7 +200,10 @@ class LibraryImportTask(Base):
             "state",
             "createdAt",
             "id",
-            sqlite_where=column("kind") == "IMPORT_BOOK",
+            sqlite_where=and_(
+                column("kind") == "IMPORT_BOOK",
+                column("state") == "QUEUED",
+            ),
         ),
         Index(
             "LibraryImportTask_import_asset_key",
