@@ -22,6 +22,7 @@ from app.bootstrap.readable_resource_pipeline import (
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
+from app.models import LibraryImportScanGap
 from app.models.library import Library
 from app.modules.imports.application.readable_resource.continue_import import (
     ContinueLibraryImport,
@@ -321,9 +322,12 @@ def test_failed_directory_preserves_data_while_other_scope_updates(
             task = db.get(LibraryImportTask, result.task_id)
             assert task is not None and task.state == "FAILED"
             assert task.error_summary == "SOURCE_SCAN_INCOMPLETE"
-            # Only the unfinished scope stays recorded, so an independent
-            # completed scope is never gated by the failed scan.
-            recorded = decode_scan_scopes(task.scan_scopes)
+            # The request scope is immutable; only the unfinished scope stays
+            # in the diagnostic gap record after the good sibling completes.
+            assert {scope.relative_path for scope in decode_scan_scopes(task.scan_scopes) or ()} == {"bad", "good"}
+            gap = db.get(LibraryImportScanGap, "lib-1")
+            assert gap is not None
+            recorded = decode_scan_scopes(gap.scopes)
             assert recorded is not None
             assert {scope.relative_path for scope in recorded} == {"bad"}
             paths = set(db.scalars(select(LibrarySourceNode.relative_path)).all())
@@ -571,21 +575,21 @@ def test_direct_file_rescan_refreshes_observation_and_reimports_asset(
                     missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
                 )
             )
-            assert result.enqueued_scan is True
+            assert result.enqueued is True
             coalesced = pipeline.continue_import.execute(
                 ContinueSourceImport(
                     node.id,
                     missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
                 )
             )
-            assert coalesced.enqueued_scan is False
-            assert coalesced.task_id == result.task_id
+            assert coalesced.enqueued is True
+            assert coalesced.task_id != result.task_id
             outcomes = _drain(pipeline)
             db.commit()
             db.refresh(node)
             db.refresh(asset_task)
 
-            assert outcomes == ["continue_source", "book"]
+            assert outcomes == ["continue_source", "continue_source", "book", "book"]
             assert (node.id, asset.id, asset_task.id) == original_ids
             assert node.observed_size_bytes == len(b"v2-longer")
             assert node.observed_mtime_ns == 2_000_000_000
@@ -632,7 +636,7 @@ def test_automatic_scan_preserves_missing_disk_file(tmp_path: Path) -> None:
             refreshed_task = db.get(LibraryImportTask, task.id)
             assert refreshed_task is not None
             assert refreshed_task.state == "SUCCEEDED"
-            assert "failed" not in outcomes
+            assert outcomes == ["failed"]
             assert db.scalar(select(func.count()).select_from(LibrarySourceNode)) == 1
     finally:
         engine.dispose()
@@ -757,8 +761,8 @@ def test_direct_rescan_of_missing_file_fails_without_deleting_data(
                     missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
                 )
             )
-            assert result.enqueued_scan is True
-            assert _drain(pipeline) == ["error"]
+            assert result.enqueued is True
+            assert _drain(pipeline) == ["failed"]
             db.commit()
 
             assert db.get(LibrarySourceNode, node.id) is not None
@@ -807,8 +811,8 @@ def test_direct_rescan_of_missing_directory_fails_without_deleting_subtree(
                     missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
                 )
             )
-            assert result.enqueued_scan is True
-            assert _drain(pipeline) == ["error"]
+            assert result.enqueued is True
+            assert _drain(pipeline) == ["failed"]
             db.commit()
 
             assert db.get(LibrarySourceNode, directory_node.id) is not None
@@ -841,8 +845,8 @@ def test_manual_scan_of_missing_library_root_fails_without_deleting_data(
             root.rmdir()
 
             result = pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
-            assert result.enqueued_scan is True
-            assert _drain(pipeline) == ["error"]
+            assert result.enqueued is True
+            assert _drain(pipeline) == ["failed"]
             db.commit()
 
             assert db.get(LibrarySourceNode, node.id) is not None

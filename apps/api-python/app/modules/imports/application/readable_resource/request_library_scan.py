@@ -1,4 +1,4 @@
-"""Request one deduplicated library scan from any supported trigger."""
+"""Request one independent library scan from any supported trigger."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ class RequestLibraryScanResult:
 
 
 class RequestLibraryScan:
-    """Queue at most one follow-up scan while preserving a running scan."""
+    """Queue a new scan without changing any already accepted task."""
 
     def __init__(
         self,

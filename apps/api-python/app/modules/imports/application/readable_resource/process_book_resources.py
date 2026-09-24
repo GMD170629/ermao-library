@@ -161,6 +161,8 @@ class ProcessBookResources:
                         )
                     ):
                         return BookResourceBatchResult("cancelled")
+                    if task.work.resource_ids is not None and first_error is None:
+                        first_error = "RESOURCE_DELETED"
                     continue
                 if (
                     resource.book_id != task.book_id

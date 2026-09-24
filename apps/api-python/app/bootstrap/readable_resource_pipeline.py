@@ -269,8 +269,7 @@ def continue_library_import(
     return ContinueImportResult(
         library_id=result.library_id,
         source_node_id=None,
-        requeued_failed=0,
-        enqueued_scan=result.enqueued,
+        enqueued=result.enqueued,
         task_id=result.task_id,
     )
 

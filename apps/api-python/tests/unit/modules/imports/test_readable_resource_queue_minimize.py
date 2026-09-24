@@ -13,11 +13,6 @@ import pytest
 
 from app.modules.imports.application.readable_resource.book_work import (
     BookWork,
-    BookWorkState,
-)
-from app.modules.imports.application.readable_resource.continue_import import (
-    ContinueImport,
-    ContinueImportTask,
 )
 from app.modules.imports.application.readable_resource.ports import (
     BookImportTaskRecord,
@@ -71,6 +66,9 @@ class RecordingUoW:
         self.rollback_count += 1
         self.in_transaction = False
 
+    def recover_after_failure(self) -> None:
+        self.rollback()
+
 
 class FixedClock:
     def now(self) -> datetime:
@@ -108,17 +106,15 @@ class FakeQueue:
             missing_entry_policy=self._base.missing_entry_policy,
         )
 
+    def begin_discovery(self, task_id: str, *, book_id: str | None = None) -> None:
+        del task_id, book_id
+
+    def end_discovery(self) -> None:
+        pass
+
     def next_queued(self, *, started_at: datetime | None = None) -> LibraryImportTaskRecord | None:
         del started_at
         return self._snapshot()
-
-    def record_task_completion_intent(self, task_id: str, **kwargs: object) -> bool:
-        del kwargs
-        return task_id == self._base.id and not self.cancelled
-
-    def defer_task_completion(self, task_id: str, **kwargs: object) -> str:
-        del task_id, kwargs
-        return "deferred"
 
     def prepare_book_identifications(self) -> tuple[()]:
         return ()
@@ -155,20 +151,7 @@ class FakeQueue:
         del finished_at
         return 0
 
-    def requeue_failed_task(self, task_id: str) -> tuple[LibraryImportTaskRecord, bool]:
-        if task_id != self._base.id:
-            raise LookupError(task_id)
-        if self._state != "FAILED":
-            return self._snapshot(), False
-        self._state = "QUEUED"
-        self._error_summary = None
-        return self._snapshot(), True
-
-
 class FakeBookQueue:
-    def refresh_scan_gate_page(self) -> int:
-        return 0
-
     def __init__(self, legacy_queue: FakeQueue) -> None:
         self._legacy_queue = legacy_queue
         self.cancelled = False
@@ -183,10 +166,8 @@ class FakeBookQueue:
             phase="RESOURCES",
             request_version=1,
             execution_version=1,
-            work=BookWorkState(active=BookWork(resource_ids=("res-1",))),
+            work=BookWork(resource_ids=("res-1",)),
             resource_cursor=None,
-            retry_count=0,
-            next_attempt_at=FixedClock().now(),
             error_summary=None,
         )
 
@@ -194,16 +175,12 @@ class FakeBookQueue:
         del started_at
         return None if self.cancelled else self._task
 
-    def get_book_task(self, task_id: str) -> BookImportTaskRecord | None:
+    def claim_book_task(self, task_id: str, *, started_at: datetime) -> BookImportTaskRecord | None:
+        del started_at
         return self._task if task_id == self._task.id and not self.cancelled else None
 
-    def record_book_completion_intent(self, task_id: str, **kwargs: object) -> bool:
-        del kwargs
-        return task_id == self._task.id and not self.cancelled
-
-    def defer_book_completion(self, task_id: str, **kwargs: object) -> str:
-        del task_id, kwargs
-        return "deferred"
+    def get_book_task(self, task_id: str) -> BookImportTaskRecord | None:
+        return self._task if task_id == self._task.id and not self.cancelled else None
 
     def book_run_is_current(
         self, task_id: str, *, execution_version: int, **kwargs: object
@@ -223,10 +200,6 @@ class FakeBookQueue:
         del kwargs
         return True
 
-    def yield_book_run(self, *args: object, **kwargs: object) -> BookImportTaskRecord | None:
-        del args, kwargs
-        return None if self.cancelled else self._task
-
     def finish_book_run(
         self, *args: object, **kwargs: object
     ) -> BookImportTaskRecord | None:
@@ -243,11 +216,10 @@ class FakeBookQueue:
         *,
         execution_version: int,
         error_summary: str,
-        retryable: bool,
         failed_at: datetime,
         partial_failure: bool = False,
     ) -> BookImportTaskRecord | None:
-        del execution_version, retryable, failed_at, partial_failure
+        del execution_version, failed_at, partial_failure
         self.failures.append((task_id, error_summary))
         self._legacy_queue._state = "FAILED"
         self._legacy_queue._error_summary = error_summary
@@ -633,34 +605,6 @@ def _book_worker(
     )
 
 
-def test_continue_exact_failed_task_preserves_missing_entry_policy() -> None:
-    task = LibraryImportTaskRecord(
-        id="task-1",
-        kind="CONTINUE_SOURCE",
-        library_id="lib-1",
-        state="FAILED",
-        resource_id=None,
-        source_node_id="node-1",
-        role=None,
-        error_summary="SOURCE_SCAN_START_UNAVAILABLE",
-        missing_entry_policy=MissingEntryPolicy.PRESERVE,
-    )
-    queue = FakeQueue(task)
-    result = ContinueImport(
-        source_nodes=FakeSourceNodes(),
-        queue=queue,
-        uow=RecordingUoW(),
-        log=FakeLog(),
-    ).execute(ContinueImportTask(task.id))
-
-    assert result.requeued_failed == 1
-    assert result.enqueued_scan is True
-    assert result.task_id == task.id
-    retried = queue.get_task(task.id)
-    assert retried is not None
-    assert retried.missing_entry_policy is MissingEntryPolicy.PRESERVE
-
-
 def test_worker_exposes_explicit_process_loop_recovery() -> None:
     queue = FakeQueue(_import_task())
     unit_of_work = RecordingUoW()
@@ -688,7 +632,7 @@ def test_book_worker_containment_logs_without_worker_id(
         resources=FakeBookResources(error=RuntimeError("boom")),
     )
     with caplog.at_level(logging.ERROR, logger="ermao.readable_resource_pipeline"):
-        assert worker.process_once() == "error"
+        assert worker.process_once() == "failed"
     assert book_queue.failures == [("task-1", "WORKER_ERROR")]
     assert all(summary != "UNHANDLED_ERROR" for _, summary in book_queue.failures)
     records = [

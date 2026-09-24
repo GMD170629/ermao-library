@@ -155,7 +155,7 @@ def _fail_enumeration(pipeline: ReadableResourcePipeline, path: Path):
     return original
 
 
-def test_recursive_parent_scope_keeps_good_and_gates_only_bad(tmp_path: Path) -> None:
+def test_recursive_parent_scope_keeps_good_and_independent_bad_book(tmp_path: Path) -> None:
     root = tmp_path / "library"
     db, _settings, pipeline = _pipeline(tmp_path, {"lib": root})
     try:
@@ -178,28 +178,28 @@ def test_recursive_parent_scope_keeps_good_and_gates_only_bad(tmp_path: Path) ->
         _drain(pipeline)
         db.expire_all()
 
-        # Queue both after the gap exists: good is independent, bad is gated.
+        # The diagnostic gap does not gate a new Book execution.
         _queue_force(pipeline, db, good_id)
         _queue_force(pipeline, db, bad_id)
         outcomes = _drain(pipeline)
         db.expire_all()
 
         assert _resource_task(db, "lib", good_id).state == "SUCCEEDED"
-        assert _resource_task(db, "lib", bad_id).state == "QUEUED"
+        assert _resource_task(db, "lib", bad_id).state == "SUCCEEDED"
         assert "book" in outcomes
 
-        # A real continue-source scan of the failed anchor releases it.
+        # A later explicit source request is a separate execution.
         pipeline.filesystem.iter_directory_entries = original_iter  # type: ignore[method-assign]
         pipeline.continue_import.execute(ContinueSourceImport(_node_for(db, "lib", "bad").id))
         outcomes = _drain(pipeline)
         db.expire_all()
         assert _resource_task(db, "lib", bad_id).state == "SUCCEEDED"
-        assert "book" in outcomes
+        assert "continue_source" in outcomes
     finally:
         db.close()
 
 
-def test_full_scan_unexpected_exception_keeps_unknown_ranges_gated(
+def test_full_scan_unexpected_exception_does_not_gate_known_books(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "library"
@@ -241,7 +241,7 @@ def test_full_scan_unexpected_exception_keeps_unknown_ranges_gated(
         _drain(pipeline)
         db.expire_all()
         assert _resource_task(db, "lib", independent_id).state == "SUCCEEDED"
-        assert _resource_task(db, "lib", local_id).state == "QUEUED"
+        assert _resource_task(db, "lib", local_id).state == "SUCCEEDED"
 
         pipeline.filesystem.iter_directory_entries = original  # type: ignore[method-assign]
         pipeline.request_library_scan.execute(
@@ -254,7 +254,7 @@ def test_full_scan_unexpected_exception_keeps_unknown_ranges_gated(
         db.close()
 
 
-def test_cleaning_scan_records_does_not_release_unfinished_directory(
+def test_cleaning_scan_records_does_not_block_independent_directory(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "library"
@@ -285,8 +285,8 @@ def test_cleaning_scan_records_does_not_release_unfinished_directory(
         _queue_force(pipeline, db, resource_id)
         outcomes = _drain(pipeline)
         db.expire_all()
-        assert _resource_task(db, "lib", resource_id).state == "QUEUED"
-        assert "book" not in outcomes
+        assert _resource_task(db, "lib", resource_id).state == "SUCCEEDED"
+        assert "book" in outcomes
 
         pipeline.filesystem.iter_directory_entries = original_iter  # type: ignore[method-assign]
         pipeline.request_library_scan.execute(
@@ -331,8 +331,7 @@ def test_failed_scan_recovered_by_real_continue_source(tmp_path: Path) -> None:
         _queue_force(pipeline, db, resource_id)
         _drain(pipeline)
         db.expire_all()
-        assert _resource_task(db, "lib", resource_id).state == "QUEUED"
-        assert _resource_task(db, "lib", resource_id).scan_gate_blocked is True
+        assert _resource_task(db, "lib", resource_id).state == "SUCCEEDED"
 
         # Real ContinueSourceImport fills the input; the old task stays FAILED.
         pipeline.filesystem.iter_directory_entries = original_iter  # type: ignore[method-assign]
@@ -342,7 +341,6 @@ def test_failed_scan_recovered_by_real_continue_source(tmp_path: Path) -> None:
         _drain(pipeline)
         db.expire_all()
         assert _resource_task(db, "lib", resource_id).state == "SUCCEEDED"
-        assert _resource_task(db, "lib", resource_id).scan_gate_blocked is False
         assert db.scalar(
             select(LibraryResourceAsset.import_state).where(
                 LibraryResourceAsset.resource_id == resource_id
@@ -353,7 +351,7 @@ def test_failed_scan_recovered_by_real_continue_source(tmp_path: Path) -> None:
         db.close()
 
 
-def test_waiting_reason_is_visible_in_task_projection(tmp_path: Path) -> None:
+def test_old_scan_gap_is_not_a_waiting_reason_in_task_projection(tmp_path: Path) -> None:
     from app.core.authorization import AuthorizationContext
     from app.modules.imports.infrastructure.library_queries import get_import_task
 
@@ -380,7 +378,7 @@ def test_waiting_reason_is_visible_in_task_projection(tmp_path: Path) -> None:
         db.expire_all()
 
         task = _resource_task(db, "lib", resource_id)
-        assert task.state == "QUEUED"
+        assert task.state == "SUCCEEDED"
         context = AuthorizationContext(
             user_id="admin",
             is_admin=True,
@@ -391,12 +389,8 @@ def test_waiting_reason_is_visible_in_task_projection(tmp_path: Path) -> None:
         )
         view = get_import_task(db, task.id, context)
         assert view is not None
-        assert view["state"] == "QUEUED"
-        assert view["waitingFor"] == {
-            "reason": "SCAN_INCOMPLETE",
-            "scope": "book",
-            "recovery": "RETRY_SCAN",
-        }
+        assert view["state"] == "SUCCEEDED"
+        assert view["waitingFor"] is None
     finally:
         db.close()
 
@@ -438,14 +432,14 @@ def test_recovery_survives_worker_restart(tmp_path: Path) -> None:
             _queue_force(pipeline, db, resource_id)
             db.commit()
 
-        # Restart: a fresh session and pipeline must see the durable gap.
+        # Restart: the queued Book is its first execution, independent of the gap.
         with Session(engine) as db:
             pipeline = build_readable_resource_pipeline(db, settings)
             worker = build_readable_resource_worker(pipeline)
             assert worker.startup() == 0
-            assert worker.process_once() == "idle"
+            assert worker.process_once() == "book"
             db.expire_all()
-            assert _resource_task(db, "lib", resource_id).state == "QUEUED"
+            assert _resource_task(db, "lib", resource_id).state == "SUCCEEDED"
 
             pipeline.continue_import.execute(
                 ContinueSourceImport(_node_for(db, "lib", "book").id)
@@ -517,7 +511,7 @@ def test_recursive_gap_narrows_to_failed_child(tmp_path: Path) -> None:
         assert remaining is not None
         assert {scope.relative_path for scope in remaining} <= {"Shelf/bad"}
         assert _resource_task(db, "lib", good_id).state == "SUCCEEDED"
-        assert _resource_task(db, "lib", bad_id).state == "QUEUED"
+        assert _resource_task(db, "lib", bad_id).state == "SUCCEEDED"
         assert "book" in outcomes
     finally:
         db.close()
@@ -578,8 +572,8 @@ def test_round_resolves_completed_and_keeps_failed_and_unvisited(
         assert "a" not in paths
         assert "b" in paths and "c" in paths
         assert _resource_task(db, "lib", resource_ids["a"]).state == "SUCCEEDED"
-        assert _resource_task(db, "lib", resource_ids["b"]).state == "QUEUED"
-        assert _resource_task(db, "lib", resource_ids["c"]).state == "QUEUED"
+        assert _resource_task(db, "lib", resource_ids["b"]).state == "SUCCEEDED"
+        assert _resource_task(db, "lib", resource_ids["c"]).state == "SUCCEEDED"
     finally:
         db.close()
 
@@ -653,7 +647,7 @@ def test_page_recovery_entry_runs_real_scan_and_clears_gap(tmp_path: Path) -> No
         _queue_force(pipeline, db, resource_id)
         _drain(pipeline)
         db.expire_all()
-        assert _resource_task(db, "lib", resource_id).state == "QUEUED"
+        assert _resource_task(db, "lib", resource_id).state == "SUCCEEDED"
         assert db.get(LibraryImportScanGap, "lib") is not None
 
         # The page's recovery button targets POST /libraries/{id}/scan, whose

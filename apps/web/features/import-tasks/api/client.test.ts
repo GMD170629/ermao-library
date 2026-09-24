@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fetchImportTasks, continueImportTask, parseContinueImportResult, parseImportLibraries, parseImportTaskDetail, parseImportTasksPage, parseLibraryImportTask } from './client';
+import { fetchImportTasks, reimportTask, parseContinueImportResult, parseImportLibraries, parseImportTaskDetail, parseImportTasksPage, parseLibraryImportTask } from './client';
 
 const task = {
   id: 'task-1',
@@ -47,16 +47,14 @@ test('parses canonical library selection and task detail envelopes', () => {
   assert.equal(parseImportTaskDetail({ task }).id, 'task-1');
 });
 
-test('parses ContinueImport result without queue-control fields', () => {
+test('parses a new import task identity without retry fields', () => {
   const result = parseContinueImportResult({
     taskId: 'task-2',
     libraryId: 'library-1',
     sourceNodeId: 'source-node-1',
-    requeuedFailed: 1,
     enqueued: true
   });
   assert.equal(result.taskId, 'task-2');
-  assert.equal(result.requeuedFailed, 1);
   assert.equal(result.enqueued, true);
 });
 
@@ -79,26 +77,25 @@ test('rejects retired import task states', () => {
   assert.throws(() => parseLibraryImportTask({ ...task, state: 'COMPLETED' }), /无效状态/);
 });
 
-test('continues the exact failed task through the task-scoped endpoint', async () => {
+test('uses a historical task to request an independent import', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
-    assert.equal(input, '/api/library-import-tasks/task-1/continue');
+    assert.equal(input, '/api/library-import-tasks/task-1/reimport');
     assert.equal(init?.method, 'POST');
     return new Response(JSON.stringify({
       ok: true,
       data: {
-        taskId: 'task-1',
+        taskId: 'task-2',
         libraryId: 'library-1',
         sourceNodeId: 'source-node-1',
-        requeuedFailed: 1,
         enqueued: true
       }
     }), { status: 202, headers: { 'content-type': 'application/json' } });
   };
   try {
-    const result = await continueImportTask('task-1');
-    assert.equal(result.taskId, 'task-1');
-    assert.equal(result.requeuedFailed, 1);
+    const result = await reimportTask('task-1');
+    assert.equal(result.taskId, 'task-2');
+    assert.equal(result.enqueued, true);
   } finally {
     globalThis.fetch = originalFetch;
   }

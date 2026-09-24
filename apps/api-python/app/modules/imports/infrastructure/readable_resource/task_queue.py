@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.contracts.library_file_activity import LibraryFileActivityBusy
 from app.contracts.source_relocation import SourceRelocation
-from app.core.exception_diagnostics import prepare_exception_diagnostic
+from app.core.exception_diagnostics import record_exception
 from app.infrastructure.file_operation_conflicts import file_operation_blocks_library
 from app.models import (
     LibraryBook,
@@ -170,7 +170,6 @@ class SqlAlchemyLibraryImportTaskQueue(
             phase=self._book_phase(work),
             book_work=encode_book_work(work),
             request_version=1,
-            retry_count=0,
             created_at=requested_at,
         )
         self._session.add(row)
@@ -507,9 +506,12 @@ class SqlAlchemyLibraryImportTaskQueue(
         return task, True
 
     def replace_with_fresh_library_scan(self, library_id: str) -> None:
-        """Drop every target task for the library and enqueue one SCAN_LIBRARY."""
+        """Discard work invalidated by the mode change, retaining task history."""
         self._session.execute(
-            delete(LibraryImportTask).where(LibraryImportTask.library_id == library_id)
+            delete(LibraryImportTask).where(
+                LibraryImportTask.library_id == library_id,
+                LibraryImportTask.state.in_(("QUEUED", "RUNNING")),
+            )
         )
         self._session.flush()
         self.enqueue(
@@ -732,7 +734,7 @@ class SqlAlchemyLibraryImportTaskQueue(
         row = self._session.get(LibraryImportTask, task_id)
         if row is None or row.state != "RUNNING":
             raise ValueError("IMPORT_TASK_NOT_RUNNING")
-        if row.kind in {"SCAN_LIBRARY", "CONTINUE_SOURCE"}:
+        if row.kind in {"SCAN_LIBRARY", "CONTINUE_SOURCE"} and not row.scan_round_started:
             self._record_gaps_for_task(row)
         changed = self._session.scalar(
             update(LibraryImportTask)
@@ -750,19 +752,20 @@ class SqlAlchemyLibraryImportTaskQueue(
             select(LibraryImportTask).where(LibraryImportTask.state == "RUNNING")
         ).all()
         for task in running:
-            prepare_exception_diagnostic(
+            record_exception(
                 logging.getLogger(__name__), "import.task_interrupted",
                 ImportTaskInterrupted(
                     "Startup observed a persisted RUNNING task without its executor"
                 ),
                 context={
                     "task_id": task.id, "task_kind": task.kind,
-                    "library_id": task.library_id, "resource_id": task.resource_id,
+                    "library_id": task.library_id, "book_id": task.book_id,
+                    "resource_id": task.resource_id,
                     "source_node_id": task.source_node_id, "step": "startup_finalization",
                     "outcome": "FAILED", "code": WORKER_INTERRUPTED,
                 },
             )
-            if task.kind in {"SCAN_LIBRARY", "CONTINUE_SOURCE"}:
+            if task.kind in {"SCAN_LIBRARY", "CONTINUE_SOURCE"} and not task.scan_round_started:
                 self._record_gaps_for_task(task)
         result = self._session.execute(
             update(LibraryImportTask)
@@ -810,6 +813,10 @@ class SqlAlchemyLibraryImportTaskQueue(
     ) -> None:
         resolved_scopes = merge_scan_scopes((), resolved) or ()
         incomplete_scopes = merge_scan_scopes((), incomplete) or ()
+        if task_id is not None:
+            task = self._session.get(LibraryImportTask, task_id)
+            if task is not None and task.kind in {"SCAN_LIBRARY", "CONTINUE_SOURCE"} and task.state == "RUNNING":
+                task.scan_round_started = True
         if resolved_scopes:
             clear_scan_gaps(self._session, library_id, resolved_scopes)
         if incomplete_scopes:

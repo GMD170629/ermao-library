@@ -1289,7 +1289,7 @@ class ScanLibrarySourceTree:
                 )
                 return (0, 1)
             if adapter_changed or observation_changed:
-                self._requeue_resource_import(
+                self._request_changed_resource_import(
                     config=config,
                     resource_id=existing.id,
                     source_node_id=node_id,
@@ -1345,7 +1345,7 @@ class ScanLibrarySourceTree:
             recognized_at=self._clock.now(),
         )
 
-    def _requeue_resource_import(
+    def _request_changed_resource_import(
         self,
         *,
         config: LibrarySourceTreeConfig,

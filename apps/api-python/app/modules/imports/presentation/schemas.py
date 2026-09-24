@@ -122,7 +122,6 @@ class ContinueImportPayload(HttpContractModel):
     task_id: str | None = Field(default=None, alias="taskId")
     library_id: str = Field(alias="libraryId")
     source_node_id: str | None = Field(default=None, alias="sourceNodeId")
-    requeued_failed: int = Field(alias="requeuedFailed")
     enqueued: bool
 
 

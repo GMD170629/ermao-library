@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from alembic import command
-from sqlalchemy import inspect
+from sqlalchemy import MetaData, Table, insert, inspect
 from sqlalchemy.orm import Session
 
 from app.db.runner import alembic_config_for_engine
@@ -44,13 +44,19 @@ def test_upgrade_removes_single_book_and_queued_scan_keys(tmp_path: Path) -> Non
             db.flush()
             db.add(LibraryBook(id="book", library_id="library", source_node_id="node"))
             db.commit()
-            queue = SqlAlchemyLibraryImportTaskQueue(db)
-            first = queue.request_book_work(
-                book_id="book", work=BookWork(identify=True), requested_at=now,
-            )
-            scan, _ = queue.request_library_scan(
-                "library", missing_entry_policy=MissingEntryPolicy.PRESERVE,
-            )
+            historical = Table("LibraryImportTask", MetaData(), autoload_with=engine)
+            db.execute(insert(historical).values(
+                {"id": "first", "kind": "IMPORT_BOOK", "libraryId": "library",
+                 "bookId": "book", "sourceNodeId": "node", "state": "QUEUED",
+                 "phase": "IDENTIFY", "bookWork": json.dumps({"active": {
+                     "scanScopes": [], "resourceIds": [], "identify": True, "reasons": []
+                 }, "pending": {"scanScopes": [], "resourceIds": [], "identify": False,
+                                "reasons": []}}), "missingEntryPolicy": "PRESERVE",
+                 "createdAt": int(now.timestamp() * 1000)}))
+            db.execute(insert(historical).values(
+                {"id": "scan", "kind": "SCAN_LIBRARY", "libraryId": "library",
+                 "state": "QUEUED", "missingEntryPolicy": "PRESERVE",
+                 "createdAt": int(now.timestamp() * 1000)}))
             db.commit()
         command.upgrade(config, "head")
         indexes = {item["name"] for item in inspect(engine).get_indexes("LibraryImportTask")}
@@ -66,9 +72,9 @@ def test_upgrade_removes_single_book_and_queued_scan_keys(tmp_path: Path) -> Non
                 "library", missing_entry_policy=MissingEntryPolicy.PRESERVE,
             )
             db.commit()
-            assert second.id != first.id and another_scan.id != scan.id
-            assert queue.get_book_task(first.id) is not None
-            assert queue.get_task(scan.id) is not None
+            assert second.id != "first" and another_scan.id != "scan"
+            assert queue.get_book_task("first") is not None
+            assert queue.get_task("scan") is not None
     finally:
         engine.dispose()
 
@@ -96,32 +102,43 @@ def test_upgrade_preserves_only_unstarted_pending_scope(tmp_path: Path) -> None:
             db.flush()
             db.add(LibraryBook(id="book", library_id="library", source_node_id="node"))
             db.flush()
-            queue = SqlAlchemyLibraryImportTaskQueue(db)
-            attempted = queue.request_book_work(
-                book_id="book", work=BookWork(identify=True), requested_at=now,
-            )
-            queued = queue.request_book_work(
-                book_id="book", work=BookWork(identify=True), requested_at=now,
-            )
-            old = db.get(LibraryImportTask, attempted.id)
-            old.state = "RUNNING"
-            old.started_at = now
-            old.execution_version = 1
-            old.book_work = json.dumps({"active": active, "pending": pending})
-            waiting = db.get(LibraryImportTask, queued.id)
-            waiting.book_work = json.dumps({"active": empty, "pending": active})
+            historical = Table("LibraryImportTask", MetaData(), autoload_with=engine)
+            db.execute(insert(historical).values(
+                {"id": "attempted", "kind": "IMPORT_BOOK", "libraryId": "library",
+                 "bookId": "book", "sourceNodeId": "node", "state": "RUNNING",
+                 "startedAt": int(now.timestamp() * 1000), "executionVersion": 1,
+                 "phase": "IDENTIFY", "bookWork": json.dumps({"active": active,
+                                                               "pending": pending}),
+                 "missingEntryPolicy": "PRESERVE",
+                 "createdAt": int(now.timestamp() * 1000)}))
+            db.execute(insert(historical).values(
+                {"id": "queued", "kind": "IMPORT_BOOK", "libraryId": "library",
+                 "bookId": "book", "sourceNodeId": "node", "state": "QUEUED",
+                 "phase": "IDENTIFY", "bookWork": json.dumps({"active": empty,
+                                                               "pending": active}),
+                 "missingEntryPolicy": "PRESERVE",
+                 "createdAt": int(now.timestamp() * 1000) + 1}))
+            db.execute(insert(historical).values(
+                {"id": "both", "kind": "IMPORT_BOOK", "libraryId": "library",
+                 "bookId": "book", "sourceNodeId": "node", "state": "QUEUED",
+                 "phase": "RESOURCES", "bookWork": json.dumps({"active": active,
+                                                               "pending": pending}),
+                 "missingEntryPolicy": "PRESERVE",
+                 "createdAt": int(now.timestamp() * 1000) + 2}))
             db.commit()
         command.upgrade(config, "head")
         with Session(engine) as db:
             rows = db.query(LibraryImportTask).filter_by(kind="IMPORT_BOOK").all()
-            old = db.get(LibraryImportTask, attempted.id)
-            waiting = db.get(LibraryImportTask, queued.id)
+            old = db.get(LibraryImportTask, "attempted")
+            waiting = db.get(LibraryImportTask, "queued")
             assert old.state == "FAILED" and old.error_summary == "WORKER_INTERRUPTED"
             assert waiting.state == "QUEUED"
             queue = SqlAlchemyLibraryImportTaskQueue(db)
-            assert queue.get_book_task(queued.id).work.resource_ids is None
-            fresh = [row for row in rows if row.id not in {attempted.id, queued.id}]
-            assert len(fresh) == 1 and fresh[0].state == "QUEUED"
-            assert queue.get_book_task(fresh[0].id).work == BookWork(identify=True)
+            assert queue.get_book_task("queued").work.resource_ids is None
+            assert queue.get_book_task("both").work.resource_ids is None
+            fresh = [row for row in rows if row.id not in {"attempted", "queued", "both"}]
+            assert len(fresh) == 2 and all(row.state == "QUEUED" for row in fresh)
+            assert all(queue.get_book_task(row.id).work == BookWork(identify=True)
+                       for row in fresh)
     finally:
         engine.dispose()

@@ -104,8 +104,7 @@ def _continue_payload(result: ContinueImportResult) -> dict[str, object]:
         "taskId": result.task_id,
         "libraryId": result.library_id,
         "sourceNodeId": result.source_node_id,
-        "requeuedFailed": result.requeued_failed,
-        "enqueued": result.enqueued_scan,
+        "enqueued": result.enqueued,
     }
 
 
@@ -326,6 +325,12 @@ def continue_library(
 
 @router.post(
     "/library-import-tasks/{task_id}/continue",
+    status_code=202,
+    response_model=ContinueImportResponse,
+    include_in_schema=False,
+)
+@router.post(
+    "/library-import-tasks/{task_id}/reimport",
     status_code=202,
     response_model=ContinueImportResponse,
 )

@@ -458,7 +458,7 @@ for (const locale of ['zh-CN', 'en-US'] as const) {
     await expect.poll(() => requests.length).toBe(1);
     await expect(buttons.first()).toBeDisabled();
     expect(requests[0].request().method()).toBe('POST');
-    await requests[0].fulfill({ status: 202, json: { ok: true, data: { taskId: 'scan-1', libraryId: 'library-1', sourceNodeId: null, requeuedFailed: 0, enqueued: true } } });
+    await requests[0].fulfill({ status: 202, json: { ok: true, data: { taskId: 'scan-1', libraryId: 'library-1', sourceNodeId: null, enqueued: true } } });
     await expect(page.getByText(chinese ? '已加入扫描队列' : 'Scan queued', { exact: true })).toBeVisible();
     await expect(buttons.first()).toBeEnabled();
     await page.screenshot({ path: test.info().outputPath('library-scan.png'), fullPage: true });

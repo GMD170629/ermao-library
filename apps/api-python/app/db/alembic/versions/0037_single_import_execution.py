@@ -53,7 +53,7 @@ def upgrade() -> None:
             'SELECT "id", "kind", "libraryId", "bookId", "sourceNodeId", '
             '"resourceId", "state", "bookWork", "startedAt", "executionVersion", '
             '"retryCount", "completionOutcome", "rerunRequested", "scanScopes", '
-            '"missingEntryPolicy" FROM "LibraryImportTask"'
+            '"missingEntryPolicy", "supersededByTaskId" FROM "LibraryImportTask"'
         )
     ).mappings().all()
     for row in rows:
@@ -66,6 +66,7 @@ def upgrade() -> None:
             or (old["retryCount"] or 0) > 0
             or old["completionOutcome"] is not None
         )
+        already_migrated = old["supersededByTaskId"] is not None
         if old["kind"] == "IMPORT_BOOK" and old["bookWork"]:
             try:
                 work = json.loads(old["bookWork"])
@@ -82,9 +83,14 @@ def upgrade() -> None:
                             {"id": old["id"], "work": json.dumps(pending, separators=(",", ":"))},
                         )
                     else:
-                        # An active payload with no execution markers has no
-                        # provably fresh scope. Preserve it as history.
-                        attempted = True
+                        # The first scope has never run. Keep its task ID and
+                        # turn the independently accepted pending scope into
+                        # its own task.
+                        connection.execute(
+                            sa.text('UPDATE "LibraryImportTask" SET "bookWork"=:work WHERE "id"=:id'),
+                            {"id": old["id"], "work": json.dumps(active, separators=(",", ":"))},
+                        )
+                        _insert_book_work(connection, old, pending)
                 else:
                     attempted = True
             elif not isinstance(work, dict):
@@ -93,7 +99,7 @@ def upgrade() -> None:
         if old["kind"] in {"IMPORT_RESOURCE", "IMPORT_ASSET", "IDENTIFY_BOOK"}:
             # Legacy task kinds have no consumer in the new Book-only path.
             # Convert an untouched request, or a genuine rerun request, once.
-            if (state == "QUEUED" and not attempted) or old["rerunRequested"]:
+            if not already_migrated and ((state == "QUEUED" and not attempted) or old["rerunRequested"]):
                 resource_id = old["resourceId"]
                 if resource_id is not None:
                     target = connection.execute(
@@ -145,7 +151,11 @@ def upgrade() -> None:
                 ),
                 {
                     "id": old["id"],
-                    "error": "WORKER_INTERRUPTED" if state == "RUNNING" else "REIMPORT_REQUIRED",
+                    "error": (
+                        "WORKER_INTERRUPTED" if state == "RUNNING"
+                        else "MIGRATED_TO_BOOK_TASK" if already_migrated
+                        else "REIMPORT_REQUIRED"
+                    ),
                     "now": int(datetime.now(UTC).timestamp() * 1000),
                 },
             )

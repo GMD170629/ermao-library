@@ -22,7 +22,6 @@ from app.core.config import Settings
 from app.infrastructure.file_identity import file_identity
 from app.models import (
     Library,
-    LibraryBook,
     LibraryBookMetadata,
     LibraryImportTask,
     LibraryReadableResource,
@@ -270,25 +269,16 @@ class ImportAttachmentUploads:
                 "FAILED", task_id=outcome.task_id, error_code="UPLOAD_IMPORT_FAILED"
             )
         book_ids = tuple({resource.book_id for resource, _ in rows})
-        book_states = set(
-            self.db.scalars(
-                select(LibraryImportTask.state).where(
-                    LibraryImportTask.book_id.in_(book_ids),
-                    LibraryImportTask.kind == "IMPORT_BOOK",
-                )
-            ).all()
-        )
         active = self.db.scalar(
             select(LibraryImportTask.id)
             .where(
-                LibraryImportTask.resource_id.in_(
-                    tuple(resource.id for resource, _ in rows)
-                ),
+                LibraryImportTask.book_id.in_(book_ids),
+                LibraryImportTask.kind == "IMPORT_BOOK",
                 LibraryImportTask.state.in_(("QUEUED", "RUNNING")),
-                LibraryImportTask.superseded_by_task_id.is_(None),
+                LibraryImportTask.created_at >= task.created_at,
             )
             .limit(1)
-        )
+        ) if task is not None else None
         pending = self.db.scalar(
             select(LibraryBookMetadata.book_id)
             .where(
@@ -297,28 +287,21 @@ class ImportAttachmentUploads:
             )
             .limit(1)
         )
-        failed_identification = self.db.scalar(
-            select(LibraryImportTask.id)
-            .join(
-                LibraryBook,
-                LibraryBook.source_node_id == LibraryImportTask.source_node_id,
-            )
+        failed_metadata = self.db.scalar(
+            select(LibraryBookMetadata.book_id)
             .where(
-                LibraryBook.id.in_(book_ids),
-                LibraryImportTask.kind == "IDENTIFY_BOOK",
-                LibraryImportTask.state == "FAILED",
-                LibraryImportTask.superseded_by_task_id.is_(None),
+                LibraryBookMetadata.book_id.in_(book_ids),
+                LibraryBookMetadata.metadata_state == "FAILED",
             )
             .limit(1)
         )
-        if "FAILED" in book_states or failed_identification:
+        if failed_metadata is not None and active is None:
             return UploadOutcome(
                 "FAILED", task_id=outcome.task_id, error_code="UPLOAD_IMPORT_FAILED"
             )
         complete = (
             pending is None
             and active is None
-            and not book_states.intersection(("QUEUED", "RUNNING"))
             and all(
                 resource.import_state == "READY" and asset.import_state == "READY"
                 for resource, asset in rows

@@ -1,6 +1,6 @@
 export {
   scanLibrary,
-  continueImportTask,
+  reimportTask,
   continueSourceImport,
   fetchImportLibraries,
   fetchImportTask,

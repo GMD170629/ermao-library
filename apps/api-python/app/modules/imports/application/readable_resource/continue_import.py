@@ -40,8 +40,7 @@ class ContinueImportTask:
 class ContinueImportResult:
     library_id: str
     source_node_id: str | None
-    requeued_failed: int
-    enqueued_scan: bool
+    enqueued: bool
     task_id: str | None
 
 
@@ -86,8 +85,7 @@ class ContinueImport:
         return ContinueImportResult(
             library_id=result.library_id,
             source_node_id=None,
-            requeued_failed=0,
-            enqueued_scan=result.enqueued,
+            enqueued=result.enqueued,
             task_id=result.task_id,
         )
 
@@ -113,8 +111,7 @@ class ContinueImport:
         return ContinueImportResult(
             library_id=library_id,
             source_node_id=source_node_id,
-            requeued_failed=0,
-            enqueued_scan=enqueued,
+            enqueued=enqueued,
             task_id=task.id,
         )
 
@@ -137,6 +134,7 @@ class ContinueImport:
                     task, _ = self._queue.request_library_scan(
                         existing.library_id,
                         missing_entry_policy=existing.missing_entry_policy,
+                        scan_scopes=existing.scan_scopes,
                     )
                 elif existing.kind == "CONTINUE_SOURCE" and existing.source_node_id:
                     task, _ = self._queue.request_source_scan(
@@ -158,8 +156,7 @@ class ContinueImport:
             return ContinueImportResult(
                 library_id=book_task.library_id,
                 source_node_id=book_task.source_node_id,
-                requeued_failed=0,
-                enqueued_scan=False,
+                enqueued=True,
                 task_id=book_task.id,
             )
         self._log.emit(
@@ -172,8 +169,7 @@ class ContinueImport:
         return ContinueImportResult(
             library_id=task.library_id,
             source_node_id=task.source_node_id,
-            requeued_failed=0,
-            enqueued_scan=True,
+            enqueued=True,
             task_id=task.id,
         )
 

@@ -238,6 +238,7 @@ class LibraryImportTask(Base):
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
     kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    # The following compatibility columns retain pre-0037 history only.
     resource_anchor_node_id: Mapped[str | None] = mapped_column(
         "resourceAnchorNodeId", String(191), nullable=True
     )
@@ -245,6 +246,11 @@ class LibraryImportTask(Base):
         "rerunRequested", Boolean, nullable=False, default=False, server_default="0"
     )
     scan_scopes: Mapped[str | None] = mapped_column("scanScopes", Text, nullable=True)
+    # The scan has persisted a round's exact incomplete ranges.
+    scan_round_started: Mapped[bool] = mapped_column(
+        "scanRoundStarted", Boolean, nullable=False, default=False,
+        server_default="0",
+    )
     book_metadata_revision: Mapped[int | None] = mapped_column(
         "bookMetadataRevision", Integer, nullable=True
     )
@@ -257,7 +263,7 @@ class LibraryImportTask(Base):
         "executionVersion", Integer, nullable=True
     )
     book_work: Mapped[str | None] = mapped_column("bookWork", Text, nullable=True)
-    # NULL means the durable scan gap changed and this projection needs refresh.
+    # Historical scan-gate projection; ordinary claims never read it.
     scan_gate_blocked: Mapped[bool | None] = mapped_column(
         "scanGateBlocked", Boolean, nullable=True
     )
@@ -274,10 +280,10 @@ class LibraryImportTask(Base):
     directory_cover_cursor: Mapped[str | None] = mapped_column(
         "directoryCoverCursor", String(191), nullable=True
     )
+    # Historical retry/completion columns are never used to schedule execution.
     retry_count: Mapped[int] = mapped_column(
         "retryCount", Integer, nullable=False, default=0, server_default="0"
     )
-    # A committed Book business result awaiting only its terminal task write.
     completion_outcome: Mapped[str | None] = mapped_column(
         "completionOutcome", String(32), nullable=True
     )

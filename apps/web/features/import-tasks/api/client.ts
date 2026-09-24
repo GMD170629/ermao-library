@@ -48,7 +48,6 @@ export type ContinueImportResult = Readonly<{
   taskId: string | null;
   libraryId: string;
   sourceNodeId: string | null;
-  requeuedFailed: number;
   enqueued: boolean;
 }>;
 
@@ -176,12 +175,11 @@ export function parseImportTaskDetail(value: unknown): LibraryImportTask {
 }
 
 export function parseContinueImportResult(value: unknown): ContinueImportResult {
-  if (!isObject(value)) throw new Error('继续导入响应无效');
+  if (!isObject(value)) throw new Error('重新导入响应无效');
   return {
     taskId: nullableString(value.taskId, 'taskId'),
     libraryId: requiredString(value.libraryId, 'libraryId'),
     sourceNodeId: nullableString(value.sourceNodeId, 'sourceNodeId'),
-    requeuedFailed: nonNegativeInteger(value.requeuedFailed),
     enqueued: value.enqueued === true
   };
 }
@@ -232,6 +230,6 @@ export function scanLibrary(libraryId: string, signal?: AbortSignal): Promise<Co
   return continueImport(`/api/libraries/${encodeURIComponent(libraryId)}/scan`, signal);
 }
 
-export function continueImportTask(taskId: string, signal?: AbortSignal): Promise<ContinueImportResult> {
-  return continueImport(`/api/library-import-tasks/${encodeURIComponent(taskId)}/continue`, signal);
+export function reimportTask(taskId: string, signal?: AbortSignal): Promise<ContinueImportResult> {
+  return continueImport(`/api/library-import-tasks/${encodeURIComponent(taskId)}/reimport`, signal);
 }

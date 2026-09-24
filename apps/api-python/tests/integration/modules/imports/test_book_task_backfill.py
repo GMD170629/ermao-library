@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from importlib import import_module
 from pathlib import Path
 
 import sqlalchemy as sa
@@ -165,67 +164,17 @@ def test_upgrade_merges_old_resource_and_identification_tasks_and_is_reentrant(
                 )
             )
             db.flush()
-            db.add_all(
-                (
-                    LibraryImportTask(
-                        id="old-resource",
-                        kind="IMPORT_RESOURCE",
-                        library_id="library",
-                        source_node_id="one",
-                        resource_id="resource-one",
-                        resource_anchor_node_id="one",
-                        state="QUEUED",
-                        created_at=_NOW,
-                    ),
-                    LibraryImportTask(
-                        id="old-asset",
-                        kind="IMPORT_ASSET",
-                        library_id="library",
-                        source_node_id="one",
-                        resource_id="resource-one",
-                        role="PAGE",
-                        state="FAILED",
-                        error_summary="OLD_ASSET_FAILED",
-                        created_at=_NOW,
-                    ),
-                    LibraryImportTask(
-                        id="old-identify",
-                        kind="IDENTIFY_BOOK",
-                        library_id="library",
-                        source_node_id="one",
-                        state="FAILED",
-                        error_summary="OLD_IDENTIFY_FAILED",
-                        created_at=_NOW,
-                    ),
-                    LibraryImportTask(
-                        id="old-orphan",
-                        kind="IDENTIFY_BOOK",
-                        library_id="library",
-                        source_node_id="orphan",
-                        state="QUEUED",
-                        created_at=_NOW,
-                    ),
-                    LibraryImportTask(
-                        id="old-failed-only",
-                        kind="IMPORT_RESOURCE",
-                        library_id="library",
-                        source_node_id="three",
-                        resource_id="resource-three",
-                        resource_anchor_node_id="three",
-                        state="FAILED",
-                        error_summary="OLD_RESOURCE_FAILED",
-                        created_at=_NOW,
-                    ),
-                    LibraryImportTask(
-                        id="old-scan",
-                        kind="SCAN_LIBRARY",
-                        library_id="library",
-                        state="FAILED",
-                        error_summary="OLD_SCAN_FAILED",
-                        created_at=_NOW,
-                    ),
-                )
-            )
+            legacy_tasks = sa.Table("LibraryImportTask", sa.MetaData(), autoload_with=db.get_bind())
+            timestamp = int(_NOW.timestamp() * 1000)
+            for values in [
+                {"id": "old-resource", "kind": "IMPORT_RESOURCE", "libraryId": "library", "sourceNodeId": "one", "resourceId": "resource-one", "resourceAnchorNodeId": "one", "state": "QUEUED", "createdAt": timestamp},
+                {"id": "old-asset", "kind": "IMPORT_ASSET", "libraryId": "library", "sourceNodeId": "one", "resourceId": "resource-one", "role": "PAGE", "state": "FAILED", "errorSummary": "OLD_ASSET_FAILED", "createdAt": timestamp},
+                {"id": "old-identify", "kind": "IDENTIFY_BOOK", "libraryId": "library", "sourceNodeId": "one", "state": "FAILED", "errorSummary": "OLD_IDENTIFY_FAILED", "createdAt": timestamp},
+                {"id": "old-orphan", "kind": "IDENTIFY_BOOK", "libraryId": "library", "sourceNodeId": "orphan", "state": "QUEUED", "createdAt": timestamp},
+                {"id": "old-failed-only", "kind": "IMPORT_RESOURCE", "libraryId": "library", "sourceNodeId": "three", "resourceId": "resource-three", "resourceAnchorNodeId": "three", "state": "FAILED", "errorSummary": "OLD_RESOURCE_FAILED", "createdAt": timestamp},
+                {"id": "old-scan", "kind": "SCAN_LIBRARY", "libraryId": "library", "state": "FAILED", "errorSummary": "OLD_SCAN_FAILED", "createdAt": timestamp},
+            ]:
+                db.execute(legacy_tasks.insert().values(values))
             db.add(
                 LibraryImportScanGap(
                     library_id="library",
@@ -253,9 +202,9 @@ def test_upgrade_merges_old_resource_and_identification_tasks_and_is_reentrant(
             assert third.state == "FAILED"
             assert third.error_summary == "LEGACY_IMPORT_FAILED"
             first_work = decode_book_work(first.book_work or "")
-            assert first_work.pending.resource_ids == ("resource-one",)
-            assert first_work.pending.identify
-            assert decode_book_work(second.book_work or "").pending.identify
+            assert first_work.resource_ids == ("resource-one",)
+            assert first_work.identify
+            assert decode_book_work(second.book_work or "").identify
             for old_id in ("old-resource", "old-asset", "old-identify"):
                 old = db.get(LibraryImportTask, old_id)
                 assert old is not None and old.superseded_by_task_id == first.id
@@ -270,8 +219,8 @@ def test_upgrade_merges_old_resource_and_identification_tasks_and_is_reentrant(
             scan = db.get(LibraryImportTask, "old-scan")
             assert scan is not None and scan.state == "FAILED"
             assert db.get(LibraryImportScanGap, "library") is not None
-            # The old consumer cannot claim migrated queue rows.
-            assert SqlAlchemyLibraryImportTaskQueue(db).next_queued() is None
+            # Migrated Book work is a first execution; old task links do not run.
+            assert SqlAlchemyLibraryImportTaskQueue(db).next_queued() is not None
             context = AuthorizationContext(
                 user_id="reader",
                 is_admin=True,
@@ -282,8 +231,8 @@ def test_upgrade_merges_old_resource_and_identification_tasks_and_is_reentrant(
             )
             old_link = get_import_task(db, "old-resource", context)
             assert old_link is not None
-            assert old_link["id"] == first.id
-            assert old_link["kind"] == "IMPORT_BOOK"
+            assert old_link["id"] == "old-resource"
+            assert old_link["kind"] == "IMPORT_RESOURCE"
             assert old_link["bookTitle"] == "One"
             hidden = AuthorizationContext(
                 user_id="outsider",
@@ -298,26 +247,26 @@ def test_upgrade_merges_old_resource_and_identification_tasks_and_is_reentrant(
             views, total, summary = list_import_tasks_page(
                 db, context, page=1, page_size=20
             )
-            assert total == 5
-            assert "old-resource" not in {view["id"] for view in views}
-            assert summary == {"queued": 2, "running": 0, "completed": 0, "failed": 3}
+            assert total == 9
+            assert "old-resource" in {view["id"] for view in views}
+            assert summary == {"queued": 2, "running": 0, "completed": 0, "failed": 7}
             pipeline = build_readable_resource_pipeline(
                 db, Settings(storage_root=str(tmp_path / "storage"))
             )
             continued = pipeline.continue_import.execute(
                 ContinueImportTask("old-failed-only")
             )
-            assert continued.task_id == third.id
-            assert continued.requeued_failed == 1
-            assert continued.enqueued_scan is False
-            assert db.get(LibraryImportTask, third.id).state == "QUEUED"  # type: ignore[union-attr]
+            assert continued.task_id != third.id
+            assert continued.enqueued is True
+            assert db.get(LibraryImportTask, third.id).state == "FAILED"  # type: ignore[union-attr]
+            original_version = db.get(LibraryResourceAsset, "asset-one").processed_source_version
             forced = pipeline.continue_import.execute(
                 ContinueImportTask("old-resource", force=True)
             )
-            assert forced.task_id == first.id
+            assert forced.task_id != first.id
             assert (
                 db.get(LibraryResourceAsset, "asset-one").processed_source_version
-                is None
+                == original_version
             )  # type: ignore[union-attr]
             assert (
                 db.get(LibraryImportTask, "old-resource").superseded_by_task_id
@@ -328,11 +277,7 @@ def test_upgrade_merges_old_resource_and_identification_tasks_and_is_reentrant(
             first_version = first.request_version
             db.rollback()
 
-        migration = import_module(
-            "app.db.alembic.versions.0031_book_import_task_backfill"
-        )
-        with engine.begin() as connection:
-            migration.backfill_book_tasks(connection)
+        command.upgrade(config, "head")
         with Session(engine) as db:
             assert (
                 db.scalar(
@@ -340,7 +285,7 @@ def test_upgrade_merges_old_resource_and_identification_tasks_and_is_reentrant(
                     .select_from(LibraryImportTask)
                     .where(LibraryImportTask.kind == "IMPORT_BOOK")
                 )
-                == 3
+                == 5
             )
             assert db.get(LibraryImportTask, first_id).request_version == first_version  # type: ignore[union-attr]
     finally:
@@ -374,17 +319,11 @@ def test_upgrade_pages_more_than_one_batch_of_pending_books(tmp_path: Path) -> N
                 for index in range(205)
             )
             db.flush()
-            db.add_all(
-                LibraryImportTask(
-                    id=f"old-{index:03d}",
-                    kind="IDENTIFY_BOOK",
-                    library_id="library",
-                    source_node_id=f"node-{index:03d}",
-                    state="QUEUED",
-                    created_at=_NOW,
-                )
+            legacy_tasks = sa.Table("LibraryImportTask", sa.MetaData(), autoload_with=db.get_bind())
+            db.execute(legacy_tasks.insert(), [
+                {"id": f"old-{index:03d}", "kind": "IDENTIFY_BOOK", "libraryId": "library", "sourceNodeId": f"node-{index:03d}", "state": "QUEUED", "createdAt": int(_NOW.timestamp() * 1000)}
                 for index in range(205)
-            )
+            ])
             db.commit()
         command.upgrade(config, "head")
         with Session(engine) as db:

@@ -10,10 +10,9 @@ import { I18nText, useI18n } from '../../i18n/provider';
 import { PageTitle } from '../../components/ui/page-title';
 import { Select } from '../../components/ui/select';
 import {
-  continueImportTask,
+  reimportTask,
   fetchImportLibraries,
   fetchImportTasks,
-  scanLibrary,
   type ImportLibrary,
   type ImportTaskState,
   type LibraryImportTask
@@ -32,23 +31,12 @@ function statusTone(state: ImportTaskState): BadgeTone {
 }
 
 function statusLabel(task: LibraryImportTask): string {
-  if (task.state === 'QUEUED' && task.waitingFor) {
-    if (task.waitingFor.reason === 'SCAN_INCOMPLETE') return '前置扫描失败';
-    if (task.waitingFor.reason === 'SCAN_ACTIVE') return '等待扫描';
-    return '等待资源导入';
-  }
   return {
     QUEUED: '等待中',
     RUNNING: '导入中',
     SUCCEEDED: '已完成',
     FAILED: '失败'
   }[task.state];
-}
-
-function waitingScope(task: LibraryImportTask): string {
-  const waiting = task.waitingFor;
-  if (!waiting) return '';
-  return waiting.scope || task.libraryName || task.libraryId;
 }
 
 function kindLabel(kind: LibraryImportTask['kind']): string {
@@ -129,7 +117,6 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [continuingTaskId, setContinuingTaskId] = useState('');
-  const [recoveringLibraryId, setRecoveringLibraryId] = useState('');
   const [error, setError] = useState('');
   const requestIdRef = useRef(0);
 
@@ -218,39 +205,23 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   }, [activeImportCount, loadTasks, page]);
 
   async function continueTask(task: LibraryImportTask) {
-    if (task.state !== 'FAILED' || !task.sourceNodeId) return;
+    if (task.state !== 'FAILED') return;
     setContinuingTaskId(task.id);
     try {
-      const result = await continueImportTask(task.id);
-      if (result.requeuedFailed > 0 || result.enqueued) {
-        toast.success(t('已重新加入导入队列'));
+      const result = await reimportTask(task.id);
+      if (result.enqueued && result.taskId) {
+        toast.success(t('已创建新的导入任务'));
       } else {
-        toast.success(t('没有新的导入任务'));
+        throw new Error(t('没有创建新的导入任务'));
       }
       setError('');
       await loadTasks(page);
     } catch (reason) {
-      const message = reason instanceof Error ? reason.message : t('继续导入失败');
+      const message = reason instanceof Error ? reason.message : t('重新导入失败');
       setError(message);
-      toast.error(t('继续导入失败'), message);
+      toast.error(t('重新导入失败'), message);
     } finally {
       setContinuingTaskId('');
-    }
-  }
-
-  async function retryScan(task: LibraryImportTask) {
-    setRecoveringLibraryId(task.libraryId);
-    try {
-      const result = await scanLibrary(task.libraryId);
-      toast.success(result.enqueued ? t('已重新加入扫描队列') : t('没有新的扫描任务'));
-      setError('');
-      await loadTasks(page);
-    } catch (reason) {
-      const message = reason instanceof Error ? reason.message : t('重试扫描失败');
-      setError(message);
-      toast.error(t('重试扫描失败'), message);
-    } finally {
-      setRecoveringLibraryId('');
     }
   }
 
@@ -264,7 +235,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
       {!embedded ? (
         <PageTitle
           title={t('导入任务')}
-          desc={t('查看书库扫描、资源继续导入和资源资产导入状态。')}
+          desc={t('查看书库扫描和图书导入任务。')}
         />
       ) : null}
 
@@ -365,15 +336,6 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
                   </div>
                   <div data-i18n-skip className="mt-2 break-all text-sm font-medium text-slate-700">{taskTitle(task)}</div>
                   {taskContext(task).length > 0 ? <div data-i18n-skip className="mt-1 break-all text-xs text-slate-500">{taskContext(task).join(' · ')}</div> : null}
-                  {task.state === 'QUEUED' && task.waitingFor ? (
-                    <div className="mt-2 rounded-2xl bg-amber-50 px-4 py-2 text-xs text-amber-800">
-                      {task.waitingFor.reason === 'SCAN_INCOMPLETE'
-                        ? t('前置扫描失败，等待范围 {value0} 的完整扫描', { value0: waitingScope(task) })
-                        : task.waitingFor.reason === 'SCAN_ACTIVE'
-                          ? t('等待扫描，范围 {value0}', { value0: waitingScope(task) })
-                          : t('等待资源导入')}
-                    </div>
-                  ) : null}
                   <details className="mt-2 text-xs text-slate-400">
                     <summary className="cursor-pointer select-none text-slate-500"><I18nText>技术信息</I18nText></summary>
                     <div data-i18n-skip className="mt-2 break-all font-mono leading-5">
@@ -387,14 +349,9 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
               </div>
               <div className="flex shrink-0 flex-col items-end gap-2 text-sm text-slate-500">
                 <span>{taskDate(task.createdAt, locale)}</span>
-                {task.state === 'FAILED' && task.sourceNodeId ? (
-                  <Button className="min-h-9 px-3 py-1.5" variant="secondary" loading={continuingTaskId === task.id} loadingText={t('继续中')} onClick={() => void continueTask(task)}>
-                    <I18nText>继续导入</I18nText>
-                  </Button>
-                ) : null}
-                {task.state === 'QUEUED' && task.waitingFor?.recovery === 'RETRY_SCAN' ? (
-                  <Button className="min-h-9 px-3 py-1.5" variant="secondary" loading={recoveringLibraryId === task.libraryId} loadingText={t('扫描中')} onClick={() => void retryScan(task)}>
-                    <I18nText>重试扫描</I18nText>
+                {task.state === 'FAILED' ? (
+                  <Button className="min-h-9 px-3 py-1.5" variant="secondary" loading={continuingTaskId === task.id} loadingText={t('创建中')} onClick={() => void continueTask(task)}>
+                    <I18nText>重新导入</I18nText>
                   </Button>
                 ) : null}
               </div>
