@@ -15,7 +15,7 @@ from zipfile import ZipFile
 
 import pytest
 from pypdf import PdfWriter
-from sqlalchemy import delete, event, func, select
+from sqlalchemy import delete, event, func, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -944,6 +944,61 @@ def test_large_image_directory_finishes_before_next_book(tmp_path: Path) -> None
                 LibraryResourceAsset.source_node_id == earlier_node_id,
                 LibraryResourceAsset.import_state == "READY",
             )) is not None
+    finally:
+        engine.dispose()
+
+
+def test_earlier_resource_failure_survives_later_directory_pagination(
+    tmp_path: Path,
+) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "library"
+    try:
+        with Session(engine) as db:
+            _add_volumes_library(db, root)
+            book_path = root / "Series"
+            pages = book_path / "z-pages"
+            pages.mkdir(parents=True)
+            (book_path / "a-bad.epub").write_bytes(b"bad")
+            for index in range(205):
+                (pages / f"page-{index:03}.png").write_bytes(b"image")
+            db.commit()
+
+            adapter = StubFailOnceAdapter({"a-bad.epub"})
+            pipeline, _ = _pipeline(db, adapters=adapter)
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            assert build_readable_resource_worker(pipeline).process_once() == "scan"
+            resources_by_format = dict(db.execute(
+                select(LibraryReadableResource.format, LibraryReadableResource.id)
+            ).all())
+            assert set(resources_by_format) == {"EPUB", "IMAGE_DIR"}
+            db.execute(update(LibraryReadableResource).where(
+                LibraryReadableResource.id == resources_by_format["EPUB"]
+            ).values(id="a-failing-resource"))
+            db.execute(update(LibraryReadableResource).where(
+                LibraryReadableResource.id == resources_by_format["IMAGE_DIR"]
+            ).values(id="z-paged-resource"))
+            db.commit()
+            resources = db.execute(
+                select(LibraryReadableResource.id, LibraryReadableResource.format)
+                .order_by(LibraryReadableResource.id)
+            ).all()
+            assert resources[0].format == "EPUB"
+            assert resources[1].format == "IMAGE_DIR"
+
+            assert build_readable_resource_worker(pipeline).process_once() == "failed"
+            task = db.scalar(select(LibraryImportTask).where(
+                LibraryImportTask.kind == "IMPORT_BOOK"
+            ))
+            assert task is not None and task.state == "FAILED"
+            assert task.error_summary == "PARSE_FAILED"
+            assert db.scalar(select(func.count()).select_from(LibraryResourceAsset).where(
+                LibraryResourceAsset.resource_id == resources[1].id,
+                LibraryResourceAsset.import_state == "READY",
+            )) == 205
+            metadata = db.get(LibraryBookMetadata, task.book_id)
+            assert metadata is not None and metadata.metadata_state == "COMPLETED"
+            assert metadata.processed_revision == metadata.import_revision
     finally:
         engine.dispose()
 
@@ -1881,6 +1936,89 @@ def test_failed_book_stays_terminal_and_later_scan_creates_new_task(
             assert len(new_tasks) == 1 and new_tasks[0].state == "QUEUED"
             assert worker.process_once() == "book"
             assert db.get(LibraryImportTask, book_task.id).state == "FAILED"
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("scan_target", ("library", "source"))
+def test_unchanged_scan_completes_failed_identification_without_reparsing(
+    tmp_path: Path, scan_target: str,
+) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "library"
+    try:
+        with Session(engine) as db:
+            _add_volumes_library(db, root)
+            book_path = root / "Series"
+            book_path.mkdir()
+            (book_path / "one.epub").write_bytes(b"book")
+            db.commit()
+
+            class CountingAdapter(StubAlwaysOkAdapter):
+                parse_count = 0
+
+                def parse_file(self, **kwargs):
+                    self.parse_count += 1
+                    return super().parse_file(**kwargs)
+
+            adapter = CountingAdapter()
+            pipeline, _ = _pipeline(db, adapters=adapter)
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            worker = build_readable_resource_worker(pipeline)
+            assert worker.process_once() == "scan"
+            original_identify = pipeline.identify_book.execute
+
+            def fail_identification(*_args, **_kwargs):
+                raise RuntimeError("recognition failed")
+
+            pipeline.identify_book.execute = fail_identification
+            try:
+                assert worker.process_once() == "failed"
+            finally:
+                pipeline.identify_book.execute = original_identify
+
+            old_task = db.scalar(select(LibraryImportTask).where(
+                LibraryImportTask.kind == "IMPORT_BOOK"
+            ))
+            assert old_task is not None and old_task.state == "FAILED"
+            assert adapter.parse_count == 1
+            asset = db.scalar(select(LibraryResourceAsset))
+            assert asset is not None and asset.import_state == "READY"
+            metadata = db.get(LibraryBookMetadata, old_task.book_id)
+            assert metadata is not None and metadata.metadata_state == "FAILED"
+
+            if scan_target == "library":
+                pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            else:
+                book = db.get(LibraryBook, old_task.book_id)
+                assert book is not None
+                pipeline.continue_import.execute(
+                    ContinueSourceImport(book.source_node_id)
+                )
+            assert worker.process_once() == (
+                "scan" if scan_target == "library" else "continue_source"
+            )
+            new_tasks = db.scalars(select(LibraryImportTask).where(
+                LibraryImportTask.kind == "IMPORT_BOOK",
+                LibraryImportTask.id != old_task.id,
+            )).all()
+            assert len(new_tasks) == 1
+            assert new_tasks[0].state == "QUEUED"
+            assert worker.process_once() == "book"
+            db.expire_all()
+            assert old_task.state == "FAILED"
+            assert new_tasks[0].state == "SUCCEEDED"
+            assert adapter.parse_count == 1
+            metadata = db.get(LibraryBookMetadata, old_task.book_id)
+            assert metadata is not None and metadata.metadata_state == "COMPLETED"
+            assert metadata.processed_revision == metadata.import_revision
+
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            assert worker.process_once() == "scan"
+            assert worker.process_once() == "idle"
+            assert db.scalar(select(func.count()).select_from(LibraryImportTask).where(
+                LibraryImportTask.kind == "IMPORT_BOOK"
+            )) == 2
     finally:
         engine.dispose()
 

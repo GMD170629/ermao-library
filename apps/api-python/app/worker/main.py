@@ -328,8 +328,8 @@ def main() -> None:
                         "import_rollback", readable_worker.recover_after_loop_failure,
                         parent_diagnostic_id=diagnostic_id,
                     )
-                    # Keep the processor (including pending completion) and never
-                    # repeat startup recovery or unknown filesystem side effects.
+                    # Keep the processor; never repeat startup recovery or
+                    # unknown filesystem side effects after a failed iteration.
                     import_failures += 1
                     retryable = is_retryable_sqlite_operation_error(error)
                     imports_paused = not recovered or not retryable or import_failures >= 3

@@ -248,7 +248,7 @@ class ReadableResourceWorkerProcessor:
                             finished_at=self._clock.now(),
                         )
                 return "failed"
-            except Exception as close_error:
+            except Exception as close_error:  # noqa: BLE001 - one failure-close boundary
                 secondary = prepare_exception_diagnostic(
                     logger, "readable_resource.worker.failure_close_failed",
                     close_error,
@@ -268,7 +268,7 @@ class ReadableResourceWorkerProcessor:
                     self._uow.recover_after_failure()
                 finally:
                     persist_exception_diagnostic(logger, secondary)
-                raise RuntimeError("IMPORT_TERMINAL_PERSISTENCE_FAILED") from close_error
+                return "isolated"
 
     def _execute_book(self, book: BookImportTaskRecord) -> tuple[str, str | None]:
         queue = self._book_queue

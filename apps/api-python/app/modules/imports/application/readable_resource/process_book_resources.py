@@ -191,7 +191,7 @@ class ProcessBookResources:
             if result.outcome == "cancelled":
                 return BookResourceBatchResult("cancelled")
             if result.outcome == "yielded":
-                return BookResourceBatchResult("yielded")
+                return BookResourceBatchResult("yielded", first_error)
             if not run.position_complete:
                 return BookResourceBatchResult(
                     "failed", run.error_summary or result.outcome.upper()

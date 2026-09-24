@@ -237,6 +237,7 @@ class SqlAlchemyLibraryImportTaskQueue(
             select(LibraryBookMetadata.book_id).where(
                 LibraryBookMetadata.book_id == book_id,
                 LibraryBookMetadata.metadata_pending.is_(False),
+                LibraryBookMetadata.metadata_state == "COMPLETED",
                 LibraryBookMetadata.processed_revision
                 == LibraryBookMetadata.import_revision,
             )
@@ -644,7 +645,11 @@ class SqlAlchemyLibraryImportTaskQueue(
             has_asset, has_incomplete = self._session.execute(
                 select(any_asset, incomplete_asset)
             ).one()
-            if has_asset and not has_incomplete:
+            if (
+                has_asset
+                and not has_incomplete
+                and self.book_identification_complete(resource.book_id)
+            ):
                 return None
         book_task = self.request_book_work(
             book_id=resource.book_id,
