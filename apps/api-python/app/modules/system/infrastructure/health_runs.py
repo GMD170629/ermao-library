@@ -195,17 +195,13 @@ def _initial_items(db: Session, settings: Settings) -> list[dict[str, Any]]:
                 },
             )
         )
+    # Book roots are the configured Library.root_path entries above.
     directories = [
         ("storage-root", "health.item.storageRoot", settings.resolved_storage_root),
         (
             "database-directory",
             "health.item.databaseDirectory",
             settings.database_path.parent,
-        ),
-        (
-            "library-directory",
-            "health.item.libraryDirectory",
-            settings.resolved_storage_root / "library",
         ),
         (
             "covers-directory",
@@ -535,8 +531,6 @@ def _queue_result(
                 )
             )
         )
-        if details["failed"]:
-            return "warning", "health.queue.failed", details
         runtime = queue_runtime_view(db, queue)
         if (
             runtime is None

@@ -77,7 +77,6 @@ def test_manual_health_run_exposes_initial_items_and_reaches_terminal_state(
     for path in (
         test_settings.resolved_storage_root,
         test_settings.database_path.parent,
-        test_settings.resolved_storage_root / "library",
         test_settings.resolved_storage_root / "covers",
         test_settings.resolved_storage_root / "indexes",
         test_settings.resolved_storage_root / "backups",
@@ -93,16 +92,37 @@ def test_manual_health_run_exposes_initial_items_and_reaches_terminal_state(
         root_path=str(test_settings.resolved_library_root),
         organization_mode="FLAT",
     )
-    db_session.add(health_library)
+    db_session.add_all(
+        [
+            health_library,
+            Library(
+                id="health-missing-library",
+                name="Missing library",
+                root_path=str(
+                    test_settings.resolved_library_root.parent / "missing-library"
+                ),
+                organization_mode="FLAT",
+            ),
+        ]
+    )
     db_session.flush()
-    db_session.add(
-        LibraryImportTask(
-            id="health-pending-import",
-            kind="SCAN_LIBRARY",
-            library_id=health_library.id,
-            state="QUEUED",
-            created_at=pending_created_at,
-        )
+    db_session.add_all(
+        [
+            LibraryImportTask(
+                id="health-pending-import",
+                kind="SCAN_LIBRARY",
+                library_id=health_library.id,
+                state="QUEUED",
+                created_at=pending_created_at,
+            ),
+            LibraryImportTask(
+                id="health-failed-import",
+                kind="SCAN_LIBRARY",
+                library_id=health_library.id,
+                state="FAILED",
+                created_at=pending_created_at,
+            ),
+        ]
     )
     db_session.flush()
     record_queue_heartbeat(db_session, "import", "health-test-worker", 2)
@@ -133,11 +153,25 @@ def test_manual_health_run_exposes_initial_items_and_reaches_terminal_state(
         item["status"] in {"ok", "warning", "error", "skipped"}
         for item in final["items"]
     )
+    assert not any(item["id"] == "library-directory" for item in final["items"])
+    library_root = next(
+        item for item in final["items"] if item["id"] == "library:health-library"
+    )
+    assert library_root["status"] == "ok"
+    assert library_root["messageCode"] == "health.directory.ok"
+    missing_root = next(
+        item
+        for item in final["items"]
+        if item["id"] == "library:health-missing-library"
+    )
+    assert missing_root["status"] == "error"
+    assert missing_root["messageCode"] == "health.directory.missing"
     import_queue = next(item for item in final["items"] if item["id"] == "queue:import")
     assert import_queue["status"] == "ok"
     assert import_queue["messageCode"] == "health.queue.ok"
     assert import_queue["details"]["oldestPendingAt"] == "2026-07-31T08:30:00Z"
     assert import_queue["details"]["pending"] == 1
+    assert import_queue["details"]["failed"] == 1
     assert "runtime" not in import_queue["details"]
 
     with client.stream(
@@ -210,6 +244,25 @@ def test_queue_heartbeat_reports_staleness(db_session):
     assert runtime["status"] == "running"
     assert runtime["stale"] is False
     assert runtime["staleAfterMs"] == 30_000
+
+
+def test_failed_import_history_does_not_hide_missing_worker(db_session):
+    db_session.add(
+        LibraryImportTask(
+            id="failed-import-without-worker",
+            kind="SCAN_LIBRARY",
+            library_id="test-library",
+            state="FAILED",
+        )
+    )
+    db_session.flush()
+
+    status, message_code, details = health_runs._queue_result(
+        db_session, {"queue": "import", "enabled": True}
+    )
+
+    assert (status, message_code) == ("error", "health.queue.stale")
+    assert details["failed"] == 1
 
 
 def test_retired_import_queue_clear_route_is_not_available(client):
