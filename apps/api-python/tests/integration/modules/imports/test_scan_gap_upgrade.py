@@ -285,8 +285,10 @@ def test_legacy_failed_scan_backfilled_and_recovered_without_revival(
             assert gap is not None and gap.scopes
             assert decode_scan_scopes(gap.scopes) == (ScanScope("", True),)
             pipeline = build_readable_resource_pipeline(db, settings)
-            # The unfinished directory is not executable after the upgrade.
-            assert pipeline.queue.next_queued() is None
+            # The Book owns its remaining work; a parent scan gap does not block it.
+            next_task = pipeline.queue.next_queued()
+            assert next_task is not None and next_task.kind == "IMPORT_BOOK"
+            assert db.get(LibraryImportTask, next_task.id).book_id == "legacy-book"
 
         _png(root / "book" / "1.png")
 

@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { serverUpdate, releaseMode, validateQuickSource, validatePublishedBase } from './release-mode.mjs';
 import { validateMode } from './release-request.mjs';
 
@@ -40,19 +41,19 @@ test('published baseline and immutable ancestry are mandatory; continuous quick 
   put('package.json', { version: '1.2.1' });
   put('release-notes/index.json', { releases: [{ version: '1.2.1', serverUpdate: update }] });
   commit();
-  assert.equal(validateQuickSource(update, { root }), '1.2.0');
+  assert.deepEqual(validateQuickSource(update, { root }), { seedVersion: '1.2.0', migrationPaths: [], unshippedNativePaths: [] });
   git('tag', 'v1.2.1');
   const next = { ...update, baseVersion: '1.2.1' };
   put('package.json', { version: '1.2.2' });
   put('release-notes/index.json', { releases: [{ version: '1.2.2', serverUpdate: next }] });
   commit();
-  assert.equal(validateQuickSource(next, { root }), '1.2.0');
+  assert.deepEqual(validateQuickSource(next, { root }), { seedVersion: '1.2.0', migrationPaths: [], unshippedNativePaths: [] });
   assert.throws(() => validateQuickSource({ ...next, runtimeImage: runtimeImage.replaceAll('a', 'b') }, { root }), /inherit/);
   for (const release of [{}, { tagName: 'v1.2.0', isDraft: true, isPrerelease: false }, { tagName: 'v1.2.0', isDraft: false, isPrerelease: true }]) assert.throws(() => validatePublishedBase(update, release));
   validatePublishedBase(update, { tagName: 'v1.2.0', isDraft: false, isPrerelease: false });
 });
 
-test('eligibility rejects unshipped inputs, patches, native clients and migration changes', t => {
+test('eligibility rejects unshipped build inputs, shared clients and unknown migration layouts', t => {
   const { root, put, commit, git } = repository(t);
   put('apps/web/features/example.ts', 'export const fixed = true;');
   put('apps/mobile/androidApp/build.gradle.kts', 'versionCode = 11\nversionName = "1.2.1"\n');
@@ -65,12 +66,29 @@ test('eligibility rejects unshipped inputs, patches, native clients and migratio
   }
 });
 
+test('quick update admits new Alembic migrations and unshipped platform UI source', t => {
+  const { root, put, commit, git } = repository(t);
+  const migration = 'apps/api-python/app/db/alembic/versions/0030_new.py';
+  const native = 'apps/mobile/androidApp/src/main/kotlin/example/ImportTaskCopy.kt';
+  put(migration, 'revision = "0030_new"\n');
+  put(native, 'val importBook = "Import book"\n');
+  const sourceCommit = commit();
+  assert.deepEqual(validateMode({ server: update, sourceCommit }, { root }), {
+    migrationPaths: [migration], unshippedNativePaths: [native]
+  });
+
+  git('tag', '-f', 'v1.2.0', 'HEAD');
+  put(migration, 'revision = "changed"\n');
+  const edited = commit();
+  assert.throws(() => validateMode({ server: update, sourceCommit: edited }, { root }), /cannot edit or delete existing migration files/u);
+});
+
 test('a quick release commit suppresses builds, but subsequent ordinary development does not', t => {
   const { root, put, commit, git } = repository(t);
   put('package.json', { version: '1.2.1' });
   put('release-notes/index.json', { releases: [{ version: '1.2.1', serverUpdate: update }] });
   commit(); git('tag', 'v1.2.1');
-  const run = () => JSON.parse(execFileSync(process.execPath, [new URL('./release-mode.mjs', import.meta.url).pathname], {
+  const run = () => JSON.parse(execFileSync(process.execPath, [fileURLToPath(new URL('./release-mode.mjs', import.meta.url))], {
     cwd: root, encoding: 'utf8', env: { ...process.env, GITHUB_REF_TYPE: 'branch', GITHUB_EVENT_NAME: 'push', GITHUB_OUTPUT: '' }
   }));
   assert.equal(run().mode, 'code-only');

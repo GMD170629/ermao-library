@@ -64,6 +64,34 @@ function substantiveText(markdown) {
     .trim();
 }
 
+function validateStructuredReleaseNote(markdown, locale, notesPath) {
+  const names = locale === 'zh-CN' ? ['新增：', '修复：', '注意事项：'] : ['Added:', 'Fixed:', 'Notes:'];
+  const lines = markdown.split(/\r?\n/u).map(line => line.trim()).filter(Boolean);
+  const localeHeading = locale === 'zh-CN' ? '## 简体中文' : '## English';
+  if (lines[0] === localeHeading) lines.shift();
+  let section = -1;
+  let item = 0;
+  let found = false;
+  for (const line of lines) {
+    const nextSection = names.indexOf(line);
+    if (nextSection >= 0) {
+      if (nextSection <= section || (section >= 0 && item === 0)) {
+        throw new Error(`${notesPath}: ${locale} release sections must be nonempty and ordered`);
+      }
+      section = nextSection;
+      item = 0;
+      continue;
+    }
+    const match = /^(\d+)\.\s+(.+)$/u.exec(line);
+    if (section < 0 || !match || Number(match[1]) !== item + 1 || /^(?:无|暂无|none|n\/a)[。.!]?$/iu.test(match[2])) {
+      throw new Error(`${notesPath}: ${locale} release note requires numbered, substantive items under Added/Fixed/Notes`);
+    }
+    item += 1;
+    found = true;
+  }
+  if (!found || item === 0) throw new Error(`${notesPath}: ${locale} release note requires a nonempty section`);
+}
+
 export function validateReleaseMarkdown(markdown, version, notesPath) {
   if (!markdown.startsWith(`# v${version}\n`)) {
     throw new Error(`${notesPath}: first heading must be "# v${version}"`);
@@ -82,6 +110,7 @@ export function validateReleaseMarkdown(markdown, version, notesPath) {
 
   const localized = Object.fromEntries(LOCALES.map((locale) => [locale, extractLocalizedReleaseNote(markdown, locale)]));
   for (const locale of LOCALES) {
+    if (compareStableVersions(version, '1.4.2') >= 0) validateStructuredReleaseNote(localized[locale], locale, notesPath);
     const text = substantiveText(localized[locale]);
     if (text.length < 40) throw new Error(`${notesPath}: ${locale} release note is not substantive`);
     if (PLACEHOLDER.test(text)) throw new Error(`${notesPath}: ${locale} release note contains placeholder content`);

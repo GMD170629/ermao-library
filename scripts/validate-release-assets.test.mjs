@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import test from 'node:test';
 import { validateReleaseAssets } from './validate-release-assets.mjs';
 
@@ -113,7 +113,7 @@ test('architecture merge shares identical assets and retains complete references
   inputs.forEach(path=>mkdirSync(path));
   const f=dependencyFixture();
   for (const [name,bytes] of f.manifests) for (const path of inputs) {
-    if (name.endsWith('.whl') || name.includes(path.split('/').at(-1))) writeFileSync(join(path,name),bytes);
+    if (name.endsWith('.whl') || name.includes(basename(path))) writeFileSync(join(path,name),bytes);
   }
   const output=join(root,'out');
   mergeApplicationAssets(output,inputs);

@@ -181,7 +181,8 @@ test('server build and backend tests run independently, then require every selec
     assert.match(job(name), /needs: validate/);
     assert.doesNotMatch(job(name), /needs: \[|mobile-release|android-package/);
   }
-  assert.equal((releaseWorkflow.match(/uv run --extra dev --locked pytest -q/g) ?? []).length, 1);
+  assert.equal((job('backend-tests').match(/uv run --extra dev --locked pytest -q/g) ?? []).length, 1);
+  assert.match(job('validate'), /Verify quick-update database upgrade[\s\S]*?has_migrations == 'true'[\s\S]*?test_book_task_shape_migration\.py/u);
   assert.match(job('package'), /artifact-ids: \$\{\{ needs.server-package.outputs.artifact_id \}\}/);
   assert.match(job('package'), /artifact-ids: \$\{\{ needs.android-package.outputs.artifact_id \}\}/);
   assert.match(job('android-package'), /artifact-ids: \$\{\{ needs.mobile-release.outputs.stable_artifact_id \}\}/);

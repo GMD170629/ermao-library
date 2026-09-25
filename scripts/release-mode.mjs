@@ -18,8 +18,8 @@ export function releaseMode({ root = process.cwd(), version } = {}) {
 }
 
 export function validateQuickSource(mode, { root = process.cwd(), sourceCommit = 'HEAD' } = {}) {
-  if (mode.mode !== 'code-only') return;
-  validateMode({ server: mode, sourceCommit }, { root });
+  if (mode.mode !== 'code-only') return null;
+  const changes = validateMode({ server: mode, sourceCommit }, { root });
   let base = mode.baseVersion;
   const seen = new Set();
   while (true) {
@@ -30,7 +30,7 @@ export function validateQuickSource(mode, { root = process.cwd(), sourceCommit =
     const entry = index.releases.find(item => item.version === base);
     if (!entry) throw Error('Missing immutable baseline release metadata');
     const inherited = serverUpdate(entry);
-    if (!inherited) return base;
+    if (!inherited) return { seedVersion: base, ...changes };
     if (inherited.runtimeImage !== mode.runtimeImage) throw Error('Quick releases must inherit the same runtime image digest');
     gitRead(root, ['merge-base', '--is-ancestor', `refs/tags/v${inherited.baseVersion}`, ref]);
     base = inherited.baseVersion;
@@ -54,14 +54,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       if (tagged && tagged !== gitRead(process.cwd(), ['rev-parse', 'HEAD'])) mode.mode = 'full';
     }
     if (mode.mode === 'code-only') {
-      mode.seedVersion = validateQuickSource(mode);
+      Object.assign(mode, validateQuickSource(mode));
       if (process.argv.includes('--published-base')) {
         const release = JSON.parse(execFileSync('gh', ['release', 'view', `v${mode.baseVersion}`, '--repo', 'GMD170629/ermao-library', '--json', 'tagName,isDraft,isPrerelease'], { encoding: 'utf8' }));
         validatePublishedBase(mode, release);
       }
     }
     if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT,
-      `release_mode=${mode.mode}\nruntime_image=${mode.runtimeImage ?? ''}\nseed_version=${mode.seedVersion ?? ''}\nbase_version=${mode.baseVersion ?? ''}\n`);
+      `release_mode=${mode.mode}\nruntime_image=${mode.runtimeImage ?? ''}\nseed_version=${mode.seedVersion ?? ''}\nbase_version=${mode.baseVersion ?? ''}\nhas_migrations=${Boolean(mode.migrationPaths?.length)}\nunshipped_native_count=${mode.unshippedNativePaths?.length ?? 0}\n`);
     console.log(canonical(mode));
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

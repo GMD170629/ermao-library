@@ -96,6 +96,7 @@ jobs:
       runtime_image: ${{ steps.mode.outputs.runtime_image }}
       seed_version: ${{ steps.mode.outputs.seed_version }}
       base_version: ${{ steps.mode.outputs.base_version }}
+      has_migrations: ${{ steps.mode.outputs.has_migrations }}
 
     steps:
       - name: Check out repository
@@ -176,14 +177,29 @@ jobs:
           pnpm exec tsx --test features/updates/application/confirm-update.test.ts features/updates/model/release-notes.test.ts
 
       - name: Set up Python for backend Reader conformance
-        if: steps.mode.outputs.release_mode != 'code-only'
+        if: steps.mode.outputs.release_mode != 'code-only' || steps.mode.outputs.has_migrations == 'true'
         uses: actions/setup-python@v5
         with:
           python-version-file: apps/api-python/.python-version
 
       - name: Set up uv
-        if: steps.mode.outputs.release_mode != 'code-only'
+        if: steps.mode.outputs.release_mode != 'code-only' || steps.mode.outputs.has_migrations == 'true'
         uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.29"
+
+      - name: Verify quick-update database upgrade
+        if: steps.mode.outputs.release_mode == 'code-only' && steps.mode.outputs.has_migrations == 'true'
+        run: |
+          cd apps/api-python
+          uv run --extra dev --locked pytest -q \
+            tests/integration/modules/imports/test_book_task_shape_migration.py \
+            tests/integration/modules/imports/test_book_task_backfill.py \
+            tests/integration/modules/imports/test_book_scan_gate_migration.py \
+            tests/integration/modules/imports/test_book_completion_migration.py \
+            tests/integration/modules/imports/test_directory_member_cursor_migration.py \
+            tests/integration/modules/imports/test_single_execution_task_migration.py \
+            tests/integration/modules/imports/test_scan_gap_upgrade.py
 
       - name: Compare executable Reader safety reports
         id: reader_conformance
