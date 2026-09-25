@@ -991,13 +991,16 @@ def test_image_finalization_rollback_reuses_committed_pages(library, monkeypatch
 
     monkeypatch.setattr(SqlAlchemyBookResourceRepository, "apply_local_metadata", fail)
     worker = build_readable_resource_worker(pipeline)
-    assert worker.process_once() == "error"
+    assert worker.process_once() == "failed"
     assets = db.scalars(select(LibraryResourceAsset)).all()
     ids = {a.id for a in assets}
     assert len(ids) == 3
     assert all(a.processed_source_version is not None for a in assets)
     assert db.scalar(select(LibraryReadableResourceMetadata)) is None
-    assert not list((settings.resolved_storage_root / "covers" / "resources").iterdir())
+    published_covers = list(
+        (settings.resolved_storage_root / "covers" / "resources").iterdir()
+    )
+    assert len(published_covers) == 1
 
     def forbidden(*args, **kwargs):
         raise AssertionError("committed pages must be reused")
@@ -1011,6 +1014,7 @@ def test_image_finalization_rollback_reuses_committed_pages(library, monkeypatch
     assert worker.process_once() == "book"
     assert {a.id for a in db.scalars(select(LibraryResourceAsset))} == ids
     assert db.scalar(select(LibraryReadableResourceMetadata)).page_count == 3
+    assert len(list((settings.resolved_storage_root / "covers" / "resources").iterdir())) == 1
 
 
 @pytest.mark.parametrize("delete_resource", [False, True])

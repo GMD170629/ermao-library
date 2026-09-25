@@ -978,9 +978,11 @@ def get_comic_manifest_v5(
                 code="READER_LOCATION_FORMAT_MISMATCH",
             )
         )
-    index = media_page_index.resolve_read_only(
-        media_page_index.load_read_only(db, resource_id)
-    )
+    projection = media_page_index.load_read_only(db, resource_id)
+    db.expunge_all()
+    db.rollback()
+    db.close()
+    index = media_page_index.resolve_read_only(projection)
     policy_failure = comic_manifest_policy_failure(page_count=len(index.pages))
     if policy_failure is not None:
         raise ReaderV5ValidationError(
@@ -1064,9 +1066,12 @@ def get_comic_page_v5(
                 code="READER_LOCATION_FORMAT_MISMATCH",
             )
         )
-    index = media_page_index.resolve_read_only(
-        media_page_index.load_read_only(db, resource_id)
-    )
+    actor_id = user.id
+    projection = media_page_index.load_read_only(db, resource_id)
+    db.expunge_all()
+    db.rollback()
+    db.close()
+    index = media_page_index.resolve_read_only(projection)
     if revision != index.revision:
         rule = reader_safety_rule(ReaderSafetyRuleId.COMIC_MANIFEST_REVISION)
         return fail(
@@ -1091,7 +1096,7 @@ def get_comic_page_v5(
             ),
             page.href,
             request,
-            user.id,
+            actor_id,
             settings,
             page.media_type,
             route="reader-v5-comic-page",
@@ -1103,7 +1108,7 @@ def get_comic_page_v5(
                 page.href, settings, (Path(source.source_root),)
             ),
             request,
-            user.id,
+            actor_id,
             settings,
             media_type=page.media_type,
             route="reader-v5-comic-page",

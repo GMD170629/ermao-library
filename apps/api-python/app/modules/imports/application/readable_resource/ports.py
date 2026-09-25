@@ -240,6 +240,7 @@ class PreparedLocalCover:
     temporary_path: Path
     final_path: Path
     stored_path: str
+    reused: bool = False
 
 
 DirectoryEntry = tuple[str, SourceNodePhysicalKind, int | None, int]
@@ -417,6 +418,8 @@ class LocalMetadataPriorityPort(Protocol):
 
 class LocalCoverPublicationPort(Protocol):
     def exists(self, stored_path: str) -> bool: ...
+
+    def validates(self, content: bytes) -> bool: ...
 
     def retain_audio_candidate(self, *, resource_id: str, content: bytes) -> str: ...
 

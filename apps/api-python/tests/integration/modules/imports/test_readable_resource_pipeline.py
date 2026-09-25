@@ -3827,10 +3827,9 @@ def test_comic_import_finalizes_page_count_after_navigation(
                     ReadableResourceNavigationUnit.resource_id == resource.id
                 )
             ).all()
-            assert len(units) == 2
-            assert all(unit.unit_type == "page" for unit in units)
+            assert units == []
 
-            # A changed archive replaces navigation rather than duplicating pages.
+            # A changed archive updates the count without writing page rows.
             with ZipFile(archive, "w") as comic:
                 comic.writestr("01.png", b"changed archive with one page")
             pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
@@ -3845,7 +3844,7 @@ def test_comic_import_finalizes_page_count_after_navigation(
                     .select_from(ReadableResourceNavigationUnit)
                     .where(ReadableResourceNavigationUnit.resource_id == resource.id)
                 )
-                == 1
+                == 0
             )
     finally:
         engine.dispose()

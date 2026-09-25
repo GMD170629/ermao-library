@@ -161,7 +161,7 @@ def _seed_comic(engine: Engine, settings: Settings) -> tuple[datetime, str]:
     return preserved_updated_at, resource_id
 
 
-def test_missing_comic_page_index_does_not_fallback_while_writer_is_held(
+def test_missing_comic_page_index_reads_archive_without_writing_while_writer_is_held(
     tmp_path: Path, caplog, capsys,
 ) -> None:
     settings = Settings(
@@ -219,13 +219,15 @@ def test_missing_comic_page_index_does_not_fallback_while_writer_is_held(
                 page_elapsed = monotonic() - started_at
 
             assert listed.status_code == 200
-            assert listed.json()["data"]["pages"] == []
+            assert [page["href"] for page in listed.json()["data"]["pages"]] == [
+                "001.jpg", "002.jpg"
+            ]
             assert revision.startswith("sha256:")
             assert page.status_code == 404
             assert list_elapsed < 0.75
             assert page_elapsed < 0.75
-            # A real 404 has a diagnostic write; no resource/navigation mutation
-            # or fallback indexing may run while the writer owns SQLite.
+            # A real 404 has a diagnostic write; archive indexing itself never
+            # mutates resource/navigation rows while the writer owns SQLite.
             assert recorder.dml_count == len(writes) == 1
             assert all(statement.startswith('INSERT INTO "SystemEvent"') for statement in writes)
             diagnostic_id = page.headers["X-Error-Id"]

@@ -19,6 +19,7 @@ from app.modules.media.infrastructure.cover_identity import versioned_cover_url
 from app.modules.media.infrastructure.first_page_cover import FilesystemFirstPageCover
 from app.modules.media.infrastructure.page_image import PageImageRenderer
 from app.modules.media.infrastructure.page_index import (
+    FilesystemComicArchivePageReader,
     get_page_unit,
     get_resource_asset,
     list_page_units_for_resource,
@@ -41,10 +42,13 @@ def load_read_only_resource_page_index(
     return load_read_only_page_index_projection(db, resource_id)
 
 
+_read_only_page_index = ReadOnlyResourcePageIndex(FilesystemComicArchivePageReader())
+
+
 def resolve_read_only_resource_page_index(
     projection: ResourcePageIndexProjection,
 ) -> ResolvedResourcePageIndex:
-    return ReadOnlyResourcePageIndex().execute(projection)
+    return _read_only_page_index.execute(projection)
 
 
 class MediaPageIndex:

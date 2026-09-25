@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import os
 from dataclasses import replace
+from zipfile import ZipFile
 
 from app.contracts.reader_safety_policy_generated import (
+    READER_SAFETY_POLICY_VERSION,
     ReaderSafetyBudgetName,
     ReaderSafetyRuleId,
     reader_safety_budget,
@@ -13,6 +16,7 @@ from app.modules.media.application.page_index import (
     ResourcePageSource,
     comic_manifest_policy_failure,
 )
+from app.modules.media.infrastructure.page_index import FilesystemComicArchivePageReader
 
 
 def _page_source(
@@ -79,7 +83,43 @@ def test_page_index_revision_is_stable_and_changes_with_asset_version() -> None:
     assert changed.revision != first.revision
 
 
+def test_archive_pages_are_resolved_on_demand_and_invalidated_by_source_change(
+    tmp_path,
+) -> None:
+    archive = tmp_path / "comic.cbz"
+    with ZipFile(archive, "w") as output:
+        output.writestr("page10.jpg", b"ten")
+        output.writestr("page2.jpg", b"two")
+    source = replace(
+        _page_source("asset-1", archive.name, legacy_sort_order=0),
+        role="PRIMARY",
+        source_root=str(tmp_path),
+    )
+    projection = ResourcePageIndexProjection(
+        resource_id="comic-1",
+        resource_index=None,
+        persisted_pages=(),
+        sources=(source,),
+        resource_format="CBZ",
+    )
+    resolver = ReadOnlyResourcePageIndex(FilesystemComicArchivePageReader())
+    first = resolver.execute(projection)
+    repeated = resolver.execute(projection)
+    assert [page.href for page in first.pages] == ["page2.jpg", "page10.jpg"]
+    assert first.revision == repeated.revision
+    assert [page.id for page in first.pages] == [page.id for page in repeated.pages]
+
+    original_mtime = archive.stat().st_mtime_ns
+    with ZipFile(archive, "w") as output:
+        output.writestr("new.jpg", b"new page")
+    os.utime(archive, ns=(original_mtime, original_mtime))
+    changed = resolver.execute(projection)
+    assert [page.href for page in changed.pages] == ["new.jpg"]
+    assert changed.revision != first.revision
+
+
 def test_manifest_policy_uses_generated_page_and_size_budgets() -> None:
+    assert READER_SAFETY_POLICY_VERSION == 4
     page_failure = comic_manifest_policy_failure(
         page_count=reader_safety_budget(ReaderSafetyBudgetName.COMIC_PAGE_MAX_COUNT) + 1
     )

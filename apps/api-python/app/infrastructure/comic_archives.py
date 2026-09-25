@@ -497,7 +497,7 @@ def open_comic_archive(path: Path) -> ComicArchive:
 
 
 def inspect_comic_archive(
-    path: Path, original_name: str | None = None
+    path: Path, original_name: str | None = None, *, include_cover: bool = True
 ) -> ComicArchiveInspection:
     fmt = path.suffix.lower().removeprefix(".")
     with (
@@ -618,7 +618,7 @@ def inspect_comic_archive(
             raw_metadata["comicInfo"] = comic_info.get("raw") or {}
         cover_content = None
         # RAR backends may unpack preceding solid blocks even for one member.
-        if not isinstance(archive._archive, rarfile.RarFile):
+        if include_cover and not isinstance(archive._archive, rarfile.RarFile):
             cover_entry = next(
                 info for info in images if info.filename == cover["entryPath"]
             )

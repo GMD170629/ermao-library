@@ -48,6 +48,9 @@ from app.modules.imports.domain.resource_adapters import (
     ResourceAdapterSpec,
     source_format_for_filename,
 )
+from app.modules.imports.infrastructure.local_cover_publication import (
+    validated_cover_suffix,
+)
 from app.modules.imports.infrastructure.sidecar_opf import (
     discover_directory_sidecar_opf,
     discover_sidecar_opf,
@@ -232,7 +235,7 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
         with absolute_path.open("rb"):
             pass  # Verify access without consuming source contents.
         navigation_units: tuple[ResourceNavigationUnitInput, ...] = ()
-        pdf_page_count: int | None = None
+        page_count: int | None = None
         # OS exceptions quote/escape filenames; parser errors may use the plain path.
         private_path_forms = [str(absolute_path), repr(str(absolute_path))[1:-1]]
         audio_metadata: AudioFileMetadata | None = None
@@ -241,7 +244,7 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
         if adapter.adapter_id is ResourceAdapterId.PDF:
             pdf_inspection = self._inspect_pdf(absolute_path)
             embedded = pdf_inspection[0] if pdf_inspection is not None else None
-            pdf_page_count = pdf_inspection[1] if pdf_inspection is not None else None
+            page_count = pdf_inspection[1] if pdf_inspection is not None else None
             navigation_units = pdf_inspection[2] if pdf_inspection is not None else ()
         elif adapter.adapter_id is ResourceAdapterId.EPUB:
             embedded, navigation_units = self._inspect_epub_details(absolute_path)
@@ -315,10 +318,28 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
         disc_number: int | None = None
         track_number: int | None = None
         if adapter.adapter_id is ResourceAdapterId.COMIC_ARCHIVE:
+            sidecar = next(
+                (candidate for candidate in resolved.candidates if candidate.source == "SIDECAR_OPF"),
+                None,
+            )
+            prefer_sidecar_cover = False
+            if (
+                sidecar is not None
+                and sidecar.cover is not None
+                and local_metadata_priority.index("SIDECAR_OPF")
+                < local_metadata_priority.index("EMBEDDED")
+            ):
+                try:
+                    validated_cover_suffix(sidecar.cover)
+                    prefer_sidecar_cover = True
+                except ValueError:
+                    # Cover preparation records the rejected optional candidate.
+                    pass
             try:
                 inspection = inspect_comic_archive(
                     absolute_path,
                     original_name=absolute_path.name,
+                    include_cover=not prefer_sidecar_cover,
                 )
             except InspectionLimitReached as error:
                 record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.readable_resource.adapter_registry.parse_file.failed", error,
@@ -337,15 +358,10 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
                     local_metadata=resolved,
                 )
             if inspection is not None:
+                page_count = inspection["pageCount"]
                 comic_info = inspection["comicInfo"] or {}
-                resolved = self._local_metadata_inspector.inspect(
-                    absolute_path,
-                    source_format=source_format_for_filename(
-                        adapter, absolute_path.name
-                    ),
-                    resource_path=effective_resource_path,
-                    source_order=local_metadata_priority,
-                    embedded=LocalMetadataCandidate(
+                resolved = resolve_local_metadata(
+                    resolved.candidates + (LocalMetadataCandidate(
                         source="EMBEDDED",
                         metadata=PublicationMetadata(
                             title=comic_info.get("title"),
@@ -363,21 +379,11 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
                             subjects=tuple(comic_info.get("tags", [])),
                         ),
                         cover=inspection.get("coverContent"),
-                    ),
+                    ),),
+                    local_metadata_priority,
                 )
                 title = (
                     resolved.metadata.volume_title or resolved.metadata.title or title
-                )
-                navigation_units = tuple(
-                    ResourceNavigationUnitInput(
-                        unit_type="page",
-                        title=str(page["title"]),
-                        href=str(page["entryPath"]),
-                        media_type=str(page["mediaType"]),
-                        sort_order=int(page["index"]) - 1,
-                        size=int(page["size"]),
-                    )
-                    for page in inspection["pages"]
                 )
         elif audio_metadata is not None:
             asset_title = _clean_track_title(audio_metadata.title)
@@ -426,7 +432,7 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
                 else None,
                 disc_number=disc_number,
                 track_number=track_number,
-                page_count=pdf_page_count,
+                page_count=page_count,
             ),
             navigation_units=navigation_units,
         )

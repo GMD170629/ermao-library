@@ -18,6 +18,21 @@ _MAX_COVER_BYTES = 20 * 1024 * 1024
 _SUFFIXES = {"GIF": ".gif", "JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
 
 
+def validated_cover_suffix(content: bytes) -> str:
+    if not 0 < len(content) <= _MAX_COVER_BYTES:
+        raise ValueError("local cover exceeds the supported size")
+    try:
+        with Image.open(BytesIO(content)) as image:
+            image_format = str(image.format or "").upper()
+            image.verify()
+    except (OSError, UnidentifiedImageError, Image.DecompressionBombError) as error:
+        raise ValueError("local cover could not be validated") from error
+    suffix = _SUFFIXES.get(image_format)
+    if suffix is None:
+        raise ValueError("local cover is not a supported image")
+    return suffix
+
+
 class FilesystemLocalCoverPublication:
     def __init__(self, storage_root: Path) -> None:
         self._storage_root = storage_root.resolve()
@@ -26,30 +41,38 @@ class FilesystemLocalCoverPublication:
         target = (self._storage_root / stored_path).resolve()
         return target.is_relative_to(self._storage_root) and target.is_file()
 
+    def validates(self, content: bytes) -> bool:
+        try:
+            validated_cover_suffix(content)
+        except ValueError:
+            return False
+        return True
+
     def prepare(self, *, resource_id: str, content: bytes) -> PreparedLocalCover:
         if not resource_id or Path(resource_id).name != resource_id:
             raise ValueError("invalid resource identifier")
-        if not 0 < len(content) <= _MAX_COVER_BYTES:
-            raise ValueError("local cover exceeds the supported size")
-        try:
-            with Image.open(BytesIO(content)) as image:
-                image_format = str(image.format or "").upper()
-                image.verify()
-        except (OSError, UnidentifiedImageError, Image.DecompressionBombError) as error:
-            raise ValueError("local cover could not be validated") from error
-        suffix = _SUFFIXES.get(image_format)
-        if suffix is None:
-            raise ValueError("local cover is not a supported image")
+        suffix = validated_cover_suffix(content)
         target_dir = self._storage_root / "covers" / "resources"
         target_dir.mkdir(parents=True, exist_ok=True)
+        digest = hashlib.sha256(content).hexdigest()
+        final_path = target_dir / f"{resource_id}-{digest}{suffix}"
+        stored_path = final_path.relative_to(self._storage_root).as_posix()
+        if final_path.is_symlink():
+            raise ValueError("local cover digest path is a symbolic link")
+        if final_path.is_file():
+            if (
+                final_path.stat().st_size != len(content)
+                or hashlib.sha256(final_path.read_bytes()).hexdigest() != digest
+            ):
+                raise ValueError("local cover digest path has unexpected content")
+            return PreparedLocalCover(final_path, final_path, stored_path, reused=True)
         publication_id = uuid4().hex
         temporary_path = target_dir / f".{resource_id}.{publication_id}.part"
         temporary_path.write_bytes(content)
-        final_path = target_dir / f"{resource_id}.{publication_id}{suffix}"
         return PreparedLocalCover(
             temporary_path=temporary_path,
             final_path=final_path,
-            stored_path=final_path.relative_to(self._storage_root).as_posix(),
+            stored_path=stored_path,
         )
 
     def retain_audio_candidate(self, *, resource_id: str, content: bytes) -> str:
@@ -59,18 +82,9 @@ class FilesystemLocalCoverPublication:
             raise ValueError("invalid resource identifier")
         if not 0 < len(content) <= _MAX_COVER_BYTES:
             raise ValueError("local cover exceeds the supported size")
-        digest = hashlib.sha256(content).hexdigest()
-        target = (
-            self._storage_root
-            / "covers"
-            / "resources"
-            / f"{resource_id}-candidate-{digest}"
-        )
-        if target.is_file():
-            return target.relative_to(self._storage_root).as_posix()
         prepared = self.prepare(resource_id=resource_id, content=content)
-        os.replace(prepared.temporary_path, target)
-        return target.relative_to(self._storage_root).as_posix()
+        self.publish(prepared)
+        return prepared.stored_path
 
     def read_candidate(self, stored_path: str) -> bytes | None:
         target = (self._storage_root / stored_path).resolve()
@@ -101,11 +115,27 @@ class FilesystemLocalCoverPublication:
             return False
 
     def publish(self, prepared: PreparedLocalCover) -> None:
-        os.replace(prepared.temporary_path, prepared.final_path)
+        if prepared.reused:
+            return
+        try:
+            # A shared content path must never replace a file another task uses.
+            os.link(prepared.temporary_path, prepared.final_path)
+        except FileExistsError:
+            if (
+                prepared.final_path.is_symlink()
+                or prepared.final_path.stat().st_size
+                != prepared.temporary_path.stat().st_size
+                or hashlib.sha256(prepared.final_path.read_bytes()).digest()
+                != hashlib.sha256(prepared.temporary_path.read_bytes()).digest()
+            ):
+                raise ValueError("local cover digest path has unexpected content")
+        finally:
+            prepared.temporary_path.unlink(missing_ok=True)
 
     def discard(self, prepared: PreparedLocalCover) -> None:
-        prepared.temporary_path.unlink(missing_ok=True)
-        prepared.final_path.unlink(missing_ok=True)
+        if not prepared.reused:
+            prepared.temporary_path.unlink(missing_ok=True)
+        # Published content-addressed files can be shared by committed records.
 
 
 __all__ = ["FilesystemLocalCoverPublication"]

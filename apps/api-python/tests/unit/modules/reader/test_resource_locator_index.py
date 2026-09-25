@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 from app.modules.reader.application.dto import (
     ReaderAccessScope,
     ReaderAssetDto,
     ReaderBookDto,
+    ReaderComicExactLocationDto,
     ReaderEngineLocatorDto,
     ReaderReflowableExactLocationDto,
     ReaderResourceContextDto,
@@ -16,14 +18,8 @@ from app.modules.reader.infrastructure.resource_locator_index import (
 )
 
 
-class _ComicPageIndex:
-    def canonical_href(self, resource_id: str, page_index: int) -> str | None:
-        del resource_id, page_index
-        return None
-
-
 class _ReaderRepository:
-    def __init__(self, source_format: str = "MOBI") -> None:
+    def __init__(self, source_format: str = "MOBI", page_count: int | None = None) -> None:
         resource = ReaderResourceDto(
             id="resource-1",
             book_id="book-1",
@@ -33,7 +29,7 @@ class _ReaderRepository:
             source_format=source_format,
             resource_index=1,
             sort_order=0,
-            page_count=None,
+            page_count=page_count,
             chapter_count=None,
             duration_ms=None,
             track_count=None,
@@ -68,7 +64,7 @@ class _ReaderRepository:
 
     def list_navigation_units(self, resource_id: str) -> list[object]:
         del resource_id
-        return []
+        return [SimpleNamespace(unit_type="page", sort_order=1)]
 
 
 def _location(
@@ -99,7 +95,6 @@ def test_reflowable_validation_uses_local_parser_contract_without_server_open() 
     for source_format in ("EPUB", "FB2", "TXT", "MOBI", "AZW", "AZW3", "PRC"):
         index = ResourceLocatorIndex(
             _ReaderRepository(source_format),
-            _ComicPageIndex(),
         )
         assert index.validate(
             resource_id="resource-1",
@@ -111,11 +106,9 @@ def test_reflowable_validation_uses_local_parser_contract_without_server_open() 
 def test_reflowable_validation_rejects_non_reflowable_resource_or_media_type() -> None:
     pdf_index = ResourceLocatorIndex(
         _ReaderRepository("PDF"),
-        _ComicPageIndex(),
     )
     mobi_index = ResourceLocatorIndex(
         _ReaderRepository("MOBI"),
-        _ComicPageIndex(),
     )
     assert not pdf_index.validate(
         resource_id="resource-1",
@@ -126,4 +119,33 @@ def test_reflowable_validation_rejects_non_reflowable_resource_or_media_type() -
         resource_id="resource-1",
         access_scope=_scope(),
         location=_location("application/pdf"),
+    )
+
+
+def test_comic_locator_uses_imported_count_without_loading_page_list() -> None:
+    index = ResourceLocatorIndex(_ReaderRepository("CBZ", page_count=2))
+    for page_index in (0, 1):
+        assert index.validate(
+            resource_id="resource-1",
+            access_scope=_scope(),
+            location=ReaderComicExactLocationDto(page_index, f"pages/{page_index}"),
+        )
+    assert not index.validate(
+        resource_id="resource-1",
+        access_scope=_scope(),
+        location=ReaderComicExactLocationDto(2, "pages/2"),
+    )
+
+
+def test_legacy_comic_locator_uses_existing_page_rows_when_count_is_missing() -> None:
+    index = ResourceLocatorIndex(_ReaderRepository("CBZ"))
+    assert index.validate(
+        resource_id="resource-1",
+        access_scope=_scope(),
+        location=ReaderComicExactLocationDto(1, "pages/1"),
+    )
+    assert not index.validate(
+        resource_id="resource-1",
+        access_scope=_scope(),
+        location=ReaderComicExactLocationDto(0, "pages/0"),
     )

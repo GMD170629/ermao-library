@@ -8,10 +8,7 @@ from app.modules.reader.application.dto import (
     ReaderPdfExactLocationDto,
     ReaderReflowableExactLocationDto,
 )
-from app.modules.reader.application.ports import (
-    ReaderComicPageIndex,
-    ReaderResourceRepository,
-)
+from app.modules.reader.application.ports import ReaderResourceRepository
 
 
 class ResourceLocatorIndex:
@@ -25,10 +22,8 @@ class ResourceLocatorIndex:
     def __init__(
         self,
         reader_repository: ReaderResourceRepository,
-        comic_page_index: ReaderComicPageIndex,
     ) -> None:
         self._reader_repository = reader_repository
-        self._comic_page_index = comic_page_index
 
     def validate(
         self,
@@ -55,11 +50,15 @@ class ResourceLocatorIndex:
         if isinstance(location, ReaderComicExactLocationDto):
             if context.resource.source_format.lower() not in _COMIC_FORMATS:
                 return False
-            canonical_href = self._comic_page_index.canonical_href(
-                resource_id, location.page_index
-            )
-            return (
-                canonical_href is not None and location.resource_href == canonical_href
+            if location.resource_href != f"pages/{location.page_index}":
+                return False
+            if context.resource.page_count is not None:
+                return 0 <= location.page_index < context.resource.page_count
+            # Older imports may have page rows but no resource-level page count.
+            return any(
+                unit.unit_type.lower() == "page"
+                and unit.sort_order == location.page_index
+                for unit in self._reader_repository.list_navigation_units(resource_id)
             )
         if isinstance(location, ReaderAudioExactLocationDto):
             if context.resource.source_format.lower() not in _AUDIO_FORMATS:

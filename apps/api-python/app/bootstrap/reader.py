@@ -31,9 +31,7 @@ def reader_resource_service(
 ) -> "ResourceReaderService":
     # Keep the retired v4 implementation out of the v5 import graph.  OPDS and
     # other legacy adapters still opt into this composition function explicitly.
-    from app.bootstrap.media import load_read_only_resource_page_index
     from app.modules.reader.application.resource_reader import ResourceReaderService
-    from app.modules.reader.infrastructure.comic_page_index import MediaComicPageIndex
     from app.modules.reader.infrastructure.resource_locator_index import (
         ResourceLocatorIndex,
     )
@@ -46,14 +44,7 @@ def reader_resource_service(
         repository,
         session,
         SystemReaderClock(),
-        ResourceLocatorIndex(
-            repository,
-            MediaComicPageIndex(
-                lambda resource_id: load_read_only_resource_page_index(
-                    session, resource_id
-                )
-            ),
-        ),
+        ResourceLocatorIndex(repository),
     )
 
 

@@ -6,6 +6,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Protocol
 
 from app.contracts.reader_safety_policy_generated import (
     ReaderSafetyBudgetName,
@@ -47,6 +48,8 @@ class ResourcePageSource:
     sort_order: int
     mtime_ms: int
     sort_key: str | None
+    mtime_ns: int = 0
+    ctime_ns: int = 0
 
 
 @dataclass(frozen=True)
@@ -57,6 +60,7 @@ class ResourcePageIndexProjection:
     resource_index: float | None
     persisted_pages: tuple[ResourcePageUnit, ...]
     sources: tuple[ResourcePageSource, ...]
+    resource_format: str | None = None
 
     def comic_source(self) -> ResourcePageSource | None:
         return next(
@@ -90,6 +94,12 @@ class ComicManifestPolicyFailure:
     error_code: str
 
 
+class ComicArchivePageReader(Protocol):
+    def read(
+        self, resource_id: str, source: ResourcePageSource
+    ) -> tuple[tuple[ResourcePageUnit, ...], ResourcePageSource]: ...
+
+
 def comic_manifest_policy_failure(
     *,
     page_count: int,
@@ -117,14 +127,30 @@ def comic_manifest_policy_failure(
 
 
 class ReadOnlyResourcePageIndex:
-    """Resolve only the persisted page index prepared before API startup."""
+    """Resolve a persisted index or read an archive directory without DB writes."""
+
+    def __init__(self, archive_pages: ComicArchivePageReader | None = None) -> None:
+        self._archive_pages = archive_pages
 
     def execute(
         self,
         projection: ResourcePageIndexProjection,
     ) -> ResolvedResourcePageIndex:
+        sources = projection.sources
         if projection.persisted_pages:
             pages = projection.persisted_pages
+        elif (
+            projection.resource_format in {"CBZ", "ZIP", "CBR", "RAR"}
+            and (archive_source := projection.comic_source()) is not None
+            and self._archive_pages is not None
+        ):
+            pages, current_source = self._archive_pages.read(
+                projection.resource_id, archive_source
+            )
+            sources = tuple(
+                current_source if source.id == current_source.id else source
+                for source in sources
+            )
         else:
             page_sources = sorted(
                 (source for source in projection.sources if source.role == "PAGE"),
@@ -154,11 +180,11 @@ class ReadOnlyResourcePageIndex:
             )
         return ResolvedResourcePageIndex(
             pages=pages,
-            sources=projection.sources,
+            sources=sources,
             revision=_page_index_revision(
                 resource_id=projection.resource_id,
                 pages=pages,
-                sources=projection.sources,
+                sources=sources,
             ),
         )
 
@@ -180,6 +206,8 @@ def _page_index_revision(
                 "role": source.role,
                 "sizeBytes": source.size_bytes,
                 "mtimeMs": source.mtime_ms,
+                "mtimeNs": source.mtime_ns,
+                "ctimeNs": source.ctime_ns,
             }
             for source in sources
         ],

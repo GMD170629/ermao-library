@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import base64
+from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from PIL import Image
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.bootstrap.readable_resource_pipeline import (
@@ -18,16 +20,19 @@ from app.bootstrap.readable_resource_pipeline import (
 from app.core.auth import hash_password
 from app.core.config import Settings
 from app.models.auth import User
-from app.models.library import Library
+from app.models.library import Library, ReadableResourceNavigationUnit
+from app.models.organize import OrganizePolicy
 from app.modules.imports.application.readable_resource.continue_import import (
     ContinueLibraryImport,
 )
+from app.modules.imports.infrastructure.readable_resource import adapter_registry
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
 )
 from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryBook,
     LibraryReadableResource,
+    LibraryReadableResourceMetadata,
     LibraryResourceAsset,
 )
 from tests.support.import_fixtures import write_epub_metadata_fixture
@@ -41,6 +46,12 @@ def _write_cbz(path: Path) -> None:
     with ZipFile(path, "w") as archive:
         archive.writestr("001.png", _ONE_PIXEL_PNG)
         archive.writestr("002.png", _ONE_PIXEL_PNG)
+
+
+def _other_png() -> bytes:
+    output = BytesIO()
+    Image.new("RGB", (1, 1), color="red").save(output, format="PNG")
+    return output.getvalue()
 
 
 def _write_image_directory(path: Path) -> None:
@@ -105,6 +116,8 @@ def test_scan_import_comic_archive_is_readable_end_to_end(
     assert resource.adapter_id == "comic-archive"
     assert resource.format == source_format.upper()
     assert resource.import_state == "READY"
+    resource_metadata = db_session.get(LibraryReadableResourceMetadata, resource.id)
+    assert resource_metadata is not None and resource_metadata.page_count == 2
     assert db_session.scalar(select(LibraryBook)) is not None
     asset = db_session.scalar(select(LibraryResourceAsset))
     assert asset is not None
@@ -116,6 +129,11 @@ def test_scan_import_comic_archive_is_readable_end_to_end(
     )
     assert task is not None
     assert task.state == "SUCCEEDED"
+    assert db_session.scalar(
+        select(func.count()).select_from(ReadableResourceNavigationUnit).where(
+            ReadableResourceNavigationUnit.resource_id == resource.id
+        )
+    ) == 0
 
     _login(client, db_session)
     book = db_session.scalar(select(LibraryBook))
@@ -158,6 +176,123 @@ def test_scan_import_comic_archive_is_readable_end_to_end(
     assert page_response.headers["content-type"].startswith("image/")
     assert page_response.content
     assert source.read_bytes() == original
+
+    for index in range(2):
+        db_session.add(ReadableResourceNavigationUnit(
+            id=f"legacy-page-{index}",
+            resource_id=resource.id,
+            asset_id=asset.id,
+            unit_type="page",
+            title=f"Page {index + 1}",
+            href=f"00{index + 1}.png",
+            media_type="image/png",
+            sort_order=index,
+            metadata_json="{}",
+        ))
+    db_session.commit()
+    legacy_manifest = client.get(
+        f"/api/reader/v5/resources/{resource.id}/comic/manifest"
+    )
+    assert legacy_manifest.status_code == 200
+    assert len(legacy_manifest.json()["data"]["readingOrder"]) == 2
+
+    with ZipFile(source, "a") as archive:
+        archive.writestr("updated.txt", "source changed")
+    pipeline.continue_import.execute(ContinueLibraryImport("test-library"))
+    _drain_worker(pipeline)
+    db_session.expire_all()
+    assert db_session.scalar(
+        select(func.count()).select_from(ReadableResourceNavigationUnit).where(
+            ReadableResourceNavigationUnit.resource_id == resource.id
+        )
+    ) == 0
+    changed_manifest = client.get(
+        f"/api/reader/v5/resources/{resource.id}/comic/manifest"
+    )
+    assert changed_manifest.status_code == 200
+    assert changed_manifest.json()["data"]["revision"] != manifest["revision"]
+
+
+def test_comic_sidecar_cover_skips_archive_image_then_recovers_when_removed(
+    db_session: Session,
+    test_settings: Settings,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    library = db_session.get(Library, "test-library")
+    assert library is not None
+    root = tmp_path / "sidecar-comic-library"
+    root.mkdir()
+    library.root_path = str(root)
+    db_session.commit()
+    source = root / "sample.cbz"
+    _write_cbz(source)
+    sidecar_cover = _other_png()
+    (root / "cover.png").write_bytes(sidecar_cover)
+    sidecar = source.with_suffix(".opf")
+    sidecar_text = (
+        '<package xmlns:dc="http://purl.org/dc/elements/1.1/">'
+        '<metadata><dc:title>Comic</dc:title><meta name="cover" content="cover"/>'
+        '</metadata><manifest><item id="cover" href="cover.png" '
+        'media-type="image/png"/></manifest></package>'
+    )
+    sidecar.write_text(sidecar_text)
+    inspected_cover_modes: list[bool] = []
+    original_inspect = adapter_registry.inspect_comic_archive
+
+    def inspect(*args, **kwargs):
+        inspected_cover_modes.append(kwargs.get("include_cover", True))
+        return original_inspect(*args, **kwargs)
+
+    monkeypatch.setattr(adapter_registry, "inspect_comic_archive", inspect)
+    pipeline = build_readable_resource_pipeline(db_session, test_settings)
+    pipeline.continue_import.execute(ContinueLibraryImport("test-library"))
+    _drain_worker(pipeline)
+    resource = db_session.scalar(select(LibraryReadableResource))
+    assert resource is not None
+    metadata = db_session.get(LibraryReadableResourceMetadata, resource.id)
+    assert metadata is not None and metadata.cover_path is not None
+    first_path = metadata.cover_path
+    assert inspected_cover_modes == [False]
+    assert (test_settings.resolved_storage_root / first_path).read_bytes() == sidecar_cover
+
+    sidecar.unlink()
+    pipeline.continue_import.execute(ContinueLibraryImport("test-library"))
+    _drain_worker(pipeline)
+    db_session.expire_all()
+    metadata = db_session.get(LibraryReadableResourceMetadata, resource.id)
+    assert metadata is not None and metadata.cover_path is not None
+    assert metadata.cover_path != first_path
+    assert (test_settings.resolved_storage_root / metadata.cover_path).read_bytes() == _ONE_PIXEL_PNG
+    assert (test_settings.resolved_storage_root / first_path).read_bytes() == sidecar_cover
+    assert True in inspected_cover_modes
+    assert len(list((test_settings.resolved_storage_root / "covers" / "resources").glob(
+        f"{resource.book_id}-*"
+    ))) == 2
+
+    policy = db_session.get(OrganizePolicy, "default")
+    if policy is None:
+        policy = OrganizePolicy(id="default")
+        db_session.add(policy)
+    policy.local_metadata_priority_json = '["EMBEDDED","SIDECAR_OPF","PATH"]'
+    db_session.commit()
+    sidecar.write_text(sidecar_text)
+    pipeline.continue_import.execute(ContinueLibraryImport("test-library"))
+    _drain_worker(pipeline)
+    db_session.expire_all()
+    metadata = db_session.get(LibraryReadableResourceMetadata, resource.id)
+    assert metadata is not None and metadata.cover_path != first_path
+
+    policy = db_session.get(OrganizePolicy, "default")
+    assert policy is not None
+    policy.local_metadata_priority_json = '["SIDECAR_OPF","EMBEDDED","PATH"]'
+    db_session.commit()
+    sidecar.write_text(sidecar_text + " ")
+    pipeline.continue_import.execute(ContinueLibraryImport("test-library"))
+    _drain_worker(pipeline)
+    db_session.expire_all()
+    metadata = db_session.get(LibraryReadableResourceMetadata, resource.id)
+    assert metadata is not None and metadata.cover_path == first_path
 
 
 @pytest.mark.parametrize("organization_mode", ["FLAT", "VOLUMES"])

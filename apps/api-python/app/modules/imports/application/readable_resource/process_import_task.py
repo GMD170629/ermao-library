@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -47,6 +48,7 @@ from app.modules.library.public import (
     DirectoryImportMember,
     DirectoryMemberPage,
     ResourceAssetMetadataInput,
+    ResourceNavigationUnitInput,
     SourceNodePhysicalKind,
 )
 from app.modules.media.public import FirstPageCoverPort
@@ -612,6 +614,36 @@ class ProcessReadableResourceImportTask:
             for o in observations
             if o.source == "EMBEDDED"
         )
+        if (
+            context.resource.format in {"CBZ", "ZIP", "CBR", "RAR"}
+            and self._covers is not None
+            and not cover_state.protected
+            and not any(candidate.cover is not None for candidate in embedded)
+        ):
+            sidecar = next(
+                (candidate for candidate in metadata.candidates if candidate.source == "SIDECAR_OPF"),
+                None,
+            )
+            sidecar_wins = (
+                sidecar is not None
+                and sidecar.cover is not None
+                and context.local_metadata_priority.index("SIDECAR_OPF")
+                < context.local_metadata_priority.index("EMBEDDED")
+                and self._covers.validates(sidecar.cover)
+            )
+            if not sidecar_wins:
+                reparsed = self._adapters.parse_file(
+                    absolute_path=absolute,
+                    resource_absolute_path=absolute,
+                    adapter=context.adapter,
+                    role=AssetRole.PRIMARY,
+                    local_metadata_priority=context.local_metadata_priority,
+                )
+                if reparsed.ok and reparsed.local_metadata is not None:
+                    embedded = tuple(
+                        candidate for candidate in reparsed.local_metadata.candidates
+                        if candidate.source == "EMBEDDED"
+                    )
         resolved = resolve_local_metadata(
             metadata.candidates + embedded, context.local_metadata_priority
         )
@@ -623,10 +655,10 @@ class ProcessReadableResourceImportTask:
                     (c for c in resolved.candidates if c.source == source and c.cover),
                     None,
                 )
-                if candidate is not None:
+                if candidate is not None and candidate.cover is not None:
                     if not self._covers.matches(cover_path, candidate.cover):
                         prepared = self._covers.prepare(
-                            resource_id=resource_id, content=candidate.cover
+                            resource_id=context.resource.book_id, content=candidate.cover
                         )
                     break
             else:
@@ -646,7 +678,7 @@ class ProcessReadableResourceImportTask:
                             cover_path = previous_cover
                         else:
                             prepared = self._covers.prepare(
-                                resource_id=resource_id, content=content
+                                resource_id=context.resource.book_id, content=content
                             )
         committed = False
         try:
@@ -727,8 +759,8 @@ class ProcessReadableResourceImportTask:
             error = None
             title = mime_type = None
             asset_metadata = None
-            units = ()
-            observations = ()
+            units: tuple[ResourceNavigationUnitInput, ...] = ()
+            observations: tuple[LocalMetadataObservation, ...] = ()
             candidate_path = None
             try:
                 parsed = self._adapters.parse_file(
@@ -764,7 +796,7 @@ class ProcessReadableResourceImportTask:
                                 try:
                                     candidate_path = (
                                         self._covers.retain_audio_candidate(
-                                            resource_id=resource_id,
+                                            resource_id=context.resource.book_id,
                                             content=candidate.cover,
                                         )
                                     )
@@ -858,7 +890,7 @@ class ProcessReadableResourceImportTask:
             )
             self._uow.release_before_io()
             grouped = merge_observations(observations)
-            embedded_candidates = []
+            embedded_candidates: list[LocalMetadataCandidate] = []
             for source, values in grouped.items():
                 cover = None
                 if self._covers is not None and not cover_state.protected:
@@ -891,7 +923,7 @@ class ProcessReadableResourceImportTask:
                     break
                 try:
                     prepared = self._covers.prepare(
-                        resource_id=resource_id, content=content
+                        resource_id=context.resource.book_id, content=content
                     )
                     break
                 except ValueError as cover_error:
@@ -939,7 +971,7 @@ class ProcessReadableResourceImportTask:
                                 break
                             try:
                                 prepared = self._covers.prepare(
-                                    resource_id=resource_id, content=cover_content
+                                    resource_id=context.resource.book_id, content=cover_content
                                 )
                                 selected = True
                                 break
@@ -1096,16 +1128,22 @@ class ProcessReadableResourceImportTask:
         source_node_id = context.node.id
         local_metadata_priority = context.local_metadata_priority
         prepared_covers: dict[LocalMetadataSource, PreparedLocalCover] = {}
+        prepared_by_digest: dict[bytes, PreparedLocalCover] = {}
         if local_metadata is not None and self._covers is not None:
             try:
                 for candidate in local_metadata.candidates:
                     if candidate.cover is None:
                         continue
                     try:
-                        prepared_covers[candidate.source] = self._covers.prepare(
-                            resource_id=f"{resource.id}-{source_node_id}-{candidate.source}",
-                            content=candidate.cover,
-                        )
+                        digest = hashlib.sha256(candidate.cover).digest()
+                        prepared = prepared_by_digest.get(digest)
+                        if prepared is None:
+                            prepared = self._covers.prepare(
+                                resource_id=context.resource.book_id,
+                                content=candidate.cover,
+                            )
+                            prepared_by_digest[digest] = prepared
+                        prepared_covers[candidate.source] = prepared
                     except ValueError as error:
                         self._log.emit(
                             "readable_resource.local_cover.rejected",
@@ -1117,7 +1155,7 @@ class ProcessReadableResourceImportTask:
                             outcome="invalid",
                         )
             except Exception:
-                for prepared in prepared_covers.values():
+                for prepared in prepared_by_digest.values():
                     self._covers.discard(prepared)
                 raise
         prepared_cover = next(
@@ -1129,7 +1167,7 @@ class ProcessReadableResourceImportTask:
             None,
         )
 
-        publications = list(prepared_covers.values())
+        publications = list(prepared_by_digest.values())
         if (
             parsed.ok
             and parsed.asset is not None
@@ -1149,7 +1187,7 @@ class ProcessReadableResourceImportTask:
                 if content is not None:
                     try:
                         prepared_cover = self._covers.prepare(
-                            resource_id=f"{resource_id}-{source_node_id}-first-page",
+                            resource_id=context.resource.book_id,
                             content=content,
                         )
                     except ValueError as error:
