@@ -25,29 +25,29 @@ with no actual item, including Notes when no user action is required:
 
 ```markdown
 <!-- shuku:locale=zh-CN:start -->
-新增：
+## 新增：
 
 1. 具体新增内容。
 
-修复：
+## 修复：
 
 1. 具体修复内容。
 
-注意事项：
+## 注意事项：
 
 1. 仅填写用户必须采取的具体操作或直接影响使用的事项。
 <!-- shuku:locale=zh-CN:end -->
 
 <!-- shuku:locale=en-US:start -->
-Added:
+## Added:
 
 1. A specific user-visible addition.
 
-Fixed:
+## Fixed:
 
 1. A specific user-visible fix.
 
-Notes:
+## Notes:
 
 1. A concrete action required of users or a direct impact on use.
 <!-- shuku:locale=en-US:end -->

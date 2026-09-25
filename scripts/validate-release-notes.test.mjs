@@ -111,33 +111,34 @@ test('new release notes use ordered numbered sections and omit empty sections', 
     '# v1.4.3',
     '',
     '<!-- shuku:locale=zh-CN:start -->',
-    '新增：',
+    '## 新增：',
     '',
     '1. 在书库中增加可见的筛选入口，读者可以按书名快速找到需要的图书。',
     '',
-    '修复：',
+    '## 修复：',
     '',
     '1. 修复重新打开书籍后阅读位置偶尔丢失的问题，并保留此前保存的进度。',
     '<!-- shuku:locale=zh-CN:end -->',
     '',
     '<!-- shuku:locale=en-US:start -->',
-    'Added:',
+    '## Added:',
     '',
     '1. Added a visible library filter so readers can quickly find books by title.',
     '',
-    'Fixed:',
+    '## Fixed:',
     '',
     '1. Fixed occasional lost reading position when reopening a book while keeping saved progress.',
     '<!-- shuku:locale=en-US:end -->'
   ].join('\n');
   assert.doesNotThrow(() => validateReleaseMarkdown(note, '1.4.3', 'v1.4.3.md'));
-  const onlyFixes = note.replace(/新增：\n\n1\. 在书库中增加可见的筛选入口，读者可以按书名快速找到需要的图书。\n\n/u, '')
-    .replace(/Added:\n\n1\. Added a visible library filter so readers can quickly find books by title\.\n\n/u, '')
+  const onlyFixes = note.replace(/## 新增：\n\n1\. 在书库中增加可见的筛选入口，读者可以按书名快速找到需要的图书。\n\n/u, '')
+    .replace(/## Added:\n\n1\. Added a visible library filter so readers can quickly find books by title\.\n\n/u, '')
     .replace('保留此前保存的进度。', '保留此前保存的进度，避免再次打开后需要从头查找上次阅读的章节。');
   assert.doesNotThrow(() => validateReleaseMarkdown(onlyFixes, '1.4.3', 'v1.4.3.md'));
-  assert.throws(() => validateReleaseMarkdown(note.replace('修复：\n\n1.', '修复：\n\n2.'), '1.4.3', 'v1.4.3.md'), /numbered/u);
-  assert.throws(() => validateReleaseMarkdown(note.replace('修复：\n\n1. 修复重新打开书籍后阅读位置偶尔丢失的问题，并保留此前保存的进度。', '修复：'), '1.4.3', 'v1.4.3.md'), /nonempty/u);
-  assert.throws(() => validateReleaseMarkdown(note.replace('新增：\n\n1.', '修复：\n\n1.'), '1.4.3', 'v1.4.3.md'), /ordered/u);
+  assert.throws(() => validateReleaseMarkdown(note.replace('## 修复：\n\n1.', '## 修复：\n\n2.'), '1.4.3', 'v1.4.3.md'), /numbered/u);
+  assert.throws(() => validateReleaseMarkdown(note.replace('## 修复：\n\n1. 修复重新打开书籍后阅读位置偶尔丢失的问题，并保留此前保存的进度。', '## 修复：'), '1.4.3', 'v1.4.3.md'), /nonempty/u);
+  assert.throws(() => validateReleaseMarkdown(note.replace('## 新增：\n\n1.', '## 修复：\n\n1.'), '1.4.3', 'v1.4.3.md'), /ordered/u);
+  assert.throws(() => validateReleaseMarkdown(note.replace('## 新增：', '新增：'), '1.4.3', 'v1.4.3.md'), /numbered/u);
 });
 
 test('application version sources and release tags must exactly match', () => {

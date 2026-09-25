@@ -65,7 +65,7 @@ function substantiveText(markdown) {
 }
 
 function validateStructuredReleaseNote(markdown, locale, notesPath) {
-  const names = locale === 'zh-CN' ? ['新增：', '修复：', '注意事项：'] : ['Added:', 'Fixed:', 'Notes:'];
+  const names = locale === 'zh-CN' ? ['## 新增：', '## 修复：', '## 注意事项：'] : ['## Added:', '## Fixed:', '## Notes:'];
   const lines = markdown.split(/\r?\n/u).map(line => line.trim()).filter(Boolean);
   const localeHeading = locale === 'zh-CN' ? '## 简体中文' : '## English';
   if (lines[0] === localeHeading) lines.shift();
