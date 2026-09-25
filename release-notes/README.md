@@ -21,7 +21,7 @@ The locale markers are part of the public contract and must not be renamed:
 ```
 
 From v1.4.2 onward, write each locale in this order. Omit any section
-with no actual item, including Notes when there is no upgrade action:
+with no actual item, including Notes when no user action is required:
 
 ```markdown
 <!-- shuku:locale=zh-CN:start -->
@@ -35,7 +35,7 @@ with no actual item, including Notes when there is no upgrade action:
 
 注意事项：
 
-1. 仅填写必要的升级操作或影响。
+1. 仅填写用户必须采取的具体操作或直接影响使用的事项。
 <!-- shuku:locale=zh-CN:end -->
 
 <!-- shuku:locale=en-US:start -->
@@ -49,16 +49,16 @@ Fixed:
 
 Notes:
 
-1. A necessary upgrade action or impact.
+1. A concrete action required of users or a direct impact on use.
 <!-- shuku:locale=en-US:end -->
 ```
 
-Application updates, including dependency and database changes, normally use
-the in-app online upgrade. Only changes to the container image itself that the
-online package cannot replace require a new Docker image or fnOS package.
-The full publishing mode also produces online update packages; it does not by
-itself imply a manual image upgrade. Explain any required image upgrade under
-Notes. Published historical notes are left intact.
+Release notes describe user-visible changes. Do not explain routine database
+migrations, online-update support, container/image implementation, dependency
+packaging, or backup and rollback mechanics. Keep those details in internal
+release documentation. If an exceptional release requires users to take an
+upgrade action, state only that action in plain language under Notes; otherwise
+omit Notes. Published historical notes are left intact.
 
 Run `pnpm release:validate` before creating the matching `vMAJOR.MINOR.PATCH`
 tag. GitHub Actions publishes the exact Markdown file as the Release body and
