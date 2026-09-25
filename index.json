@@ -1,0 +1,530 @@
+{
+  "schemaVersion": 1,
+  "repository": "GMD170629/ermao-library",
+  "releases": [
+    {
+      "version": "1.4.3",
+      "tag": "v1.4.3",
+      "publishedAt": "2026-09-25T23:32:15+08:00",
+      "notesPath": "v1.4.3.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v1.4.3",
+      "serverUpdate": {
+        "mode": "code-only",
+        "baseVersion": "1.4.2",
+        "runtimeImage": "gamersgu/shuku-starship-web@sha256:e2e051aefb542c693090aee11515bd623faa198a8dddc59831688087da975a12"
+      },
+      "ghcrDependencyReleases": [
+        {
+          "version": "1.4.3",
+          "format": 2,
+          "environment": {
+            "format": 1,
+            "platform": "linux-x86_64",
+            "compatibility": "189768c17056c04ff3a40187d829583eee240aaa950cf98e2ca9571933074f33"
+          },
+          "filename": "shuku-1.4.3-linux-x86_64-v2.json",
+          "size": 314976,
+          "sha256": "a93f00e6da8b1717ae067865b5d8d8661b30edef67c420eb464219e63d7313fc",
+          "oci_digest": "sha256:2e57ec63dce2e6a6f1df31e577951e8d17e6a5f9c54002e45855dce7b3f728f0"
+        },
+        {
+          "version": "1.4.3",
+          "format": 2,
+          "environment": {
+            "format": 1,
+            "platform": "linux-aarch64",
+            "compatibility": "16a2cf252104304f7812d2364490ba4532b5975a770a0850e3dc9fa106707cfc"
+          },
+          "filename": "shuku-1.4.3-linux-aarch64-v2.json",
+          "size": 315344,
+          "sha256": "a38008327d7b14d1a142e60a1df1cfb4dcfcc77d7c8143d40794a6df8fa18326",
+          "oci_digest": "sha256:9392b8fd383dd2dfb48b29e240210630b346eda6885cee4b70ad8fed8a88c89c"
+        }
+      ]
+    },
+    {
+      "version": "1.4.2",
+      "tag": "v1.4.2",
+      "publishedAt": "2026-09-25T17:48:00+08:00",
+      "notesPath": "v1.4.2.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v1.4.2",
+      "serverUpdate": {
+        "mode": "code-only",
+        "baseVersion": "1.4.1",
+        "runtimeImage": "gamersgu/shuku-starship-web@sha256:e2e051aefb542c693090aee11515bd623faa198a8dddc59831688087da975a12"
+      },
+      "ghcrDependencyReleases": [
+        {
+          "version": "1.4.2",
+          "format": 2,
+          "environment": {
+            "format": 1,
+            "platform": "linux-x86_64",
+            "compatibility": "189768c17056c04ff3a40187d829583eee240aaa950cf98e2ca9571933074f33"
+          },
+          "filename": "shuku-1.4.2-linux-x86_64-v2.json",
+          "size": 314976,
+          "sha256": "49938be53e38bcaa8096d6a6905db49a44f3017654779eedcf062eda176c1334",
+          "oci_digest": "sha256:36f491375fbbd3814d351f22d07d895598cc5154482cc8045bfce960757a88ca"
+        },
+        {
+          "version": "1.4.2",
+          "format": 2,
+          "environment": {
+            "format": 1,
+            "platform": "linux-aarch64",
+            "compatibility": "16a2cf252104304f7812d2364490ba4532b5975a770a0850e3dc9fa106707cfc"
+          },
+          "filename": "shuku-1.4.2-linux-aarch64-v2.json",
+          "size": 315344,
+          "sha256": "c176a738b09e2f9bedaceb430cf1181cc208c18b1da46ea2e3e90ad0f8eb6a8d",
+          "oci_digest": "sha256:76503bf9e8344af11386cd64f786d09d8f86799147aa4d1d9b9516d1f36b3684"
+        }
+      ]
+    },
+    {
+      "version": "1.4.1",
+      "tag": "v1.4.1",
+      "publishedAt": "2026-09-23T13:15:00+08:00",
+      "notesPath": "v1.4.1.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v1.4.1",
+      "serverUpdate": {
+        "mode": "code-only",
+        "baseVersion": "1.4.0",
+        "runtimeImage": "gamersgu/shuku-starship-web@sha256:e2e051aefb542c693090aee11515bd623faa198a8dddc59831688087da975a12"
+      },
+      "ghcrDependencyReleases": [
+        {
+          "version": "1.4.1",
+          "format": 2,
+          "environment": {
+            "format": 1,
+            "platform": "linux-x86_64",
+            "compatibility": "189768c17056c04ff3a40187d829583eee240aaa950cf98e2ca9571933074f33"
+          },
+          "filename": "shuku-1.4.1-linux-x86_64-v2.json",
+          "size": 314976,
+          "sha256": "b4afa9782078196ac0ee0a8d9796c06b66dfb3dddc7fc93e3e9ca4b898700834",
+          "oci_digest": "sha256:88405d6f194967842128e8620451807e15a893452dc06adbcf3aee363aed9029"
+        },
+        {
+          "version": "1.4.1",
+          "format": 2,
+          "environment": {
+            "format": 1,
+            "platform": "linux-aarch64",
+            "compatibility": "16a2cf252104304f7812d2364490ba4532b5975a770a0850e3dc9fa106707cfc"
+          },
+          "filename": "shuku-1.4.1-linux-aarch64-v2.json",
+          "size": 315344,
+          "sha256": "918c3025ed3fd896205ca1cbe602f30eb8006c63105883f9934fb90efd5a3e31",
+          "oci_digest": "sha256:18f0197f106e898f3915b5b558f81ec19370615bb54c82800960c3a7e04349ba"
+        }
+      ]
+    },
+    {
+      "version": "1.4.0",
+      "tag": "v1.4.0",
+      "publishedAt": "2026-09-23T00:02:00+08:00",
+      "notesPath": "v1.4.0.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v1.4.0",
+      "ghcrDependencyReleases": [
+        {
+          "version": "1.4.0",
+          "format": 2,
+          "environment": {
+            "format": 1,
+            "platform": "linux-x86_64",
+            "compatibility": "189768c17056c04ff3a40187d829583eee240aaa950cf98e2ca9571933074f33"
+          },
+          "filename": "shuku-1.4.0-linux-x86_64-v2.json",
+          "size": 314976,
+          "sha256": "86c225dbb49ea7d6ebda4d84682f7500a9427b6b47849bf21194b225f299e1c4",
+          "oci_digest": "sha256:5133133430891837c4f4b3e9dfe9ade978787dcd008ba75d536e004008e459ae"
+        },
+        {
+          "version": "1.4.0",
+          "format": 2,
+          "environment": {
+            "format": 1,
+            "platform": "linux-aarch64",
+            "compatibility": "16a2cf252104304f7812d2364490ba4532b5975a770a0850e3dc9fa106707cfc"
+          },
+          "filename": "shuku-1.4.0-linux-aarch64-v2.json",
+          "size": 315344,
+          "sha256": "cc7f03c5b5745b15d1ef86c6adbe666ac3dd90a46854f081010681db69972576",
+          "oci_digest": "sha256:c4b006873a9d49d18f0516cf2c592a76172f5ba661061503e545a2114849e11b"
+        }
+      ]
+    },
+    {
+      "version": "1.3.1",
+      "tag": "v1.3.1",
+      "publishedAt": "2026-09-21T09:51:57+08:00",
+      "notesPath": "v1.3.1.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v1.3.1",
+      "ghcrDependencyReleases": [
+        {
+          "version": "1.3.1",
+          "format": 2,
+          "environment": {
+            "format": 1,
+            "platform": "linux-x86_64",
+            "compatibility": "189768c17056c04ff3a40187d829583eee240aaa950cf98e2ca9571933074f33"
+          },
+          "filename": "shuku-1.3.1-linux-x86_64-v2.json",
+          "size": 288820,
+          "sha256": "41eb5f91e06129f22a0e0c8c8f56fa5b75f59e066786fb107a9c43b4cc94a209",
+          "oci_digest": "sha256:0b1bd1773e8bffa4abe6263aea2cc5e32b2de9913376517d8b41b8dea58816d7"
+        },
+        {
+          "version": "1.3.1",
+          "format": 2,
+          "environment": {
+            "format": 1,
+            "platform": "linux-aarch64",
+            "compatibility": "16a2cf252104304f7812d2364490ba4532b5975a770a0850e3dc9fa106707cfc"
+          },
+          "filename": "shuku-1.3.1-linux-aarch64-v2.json",
+          "size": 289176,
+          "sha256": "1658ed1bbe25ec944c6bcf0ee85ddf1f52a8068e4c938a9563173902fac81cbf",
+          "oci_digest": "sha256:c734578ea9e3d8cfa48b1232c0165b1183c635462242b5937eb1108bfcb671f1"
+        }
+      ]
+    },
+    {
+      "version": "1.3.0",
+      "tag": "v1.3.0",
+      "publishedAt": "2026-09-20T16:12:55+08:00",
+      "notesPath": "v1.3.0.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v1.3.0",
+      "ghcrDependencyReleases": [
+        {
+          "version": "1.3.0",
+          "format": 2,
+          "environment": {
+            "format": 1,
+            "platform": "linux-x86_64",
+            "compatibility": "189768c17056c04ff3a40187d829583eee240aaa950cf98e2ca9571933074f33"
+          },
+          "filename": "shuku-1.3.0-linux-x86_64-v2.json",
+          "size": 288820,
+          "sha256": "99c20b39d911d6d01e0098c9af810dbf5dadcf52e8fb0dcf16e4600a81b14a63",
+          "oci_digest": "sha256:cbf8ade4bc6d43369ddf3f579717a5a834bce7cff22c5f55ae9dda4be5b02c94"
+        },
+        {
+          "version": "1.3.0",
+          "format": 2,
+          "environment": {
+            "format": 1,
+            "platform": "linux-aarch64",
+            "compatibility": "16a2cf252104304f7812d2364490ba4532b5975a770a0850e3dc9fa106707cfc"
+          },
+          "filename": "shuku-1.3.0-linux-aarch64-v2.json",
+          "size": 289176,
+          "sha256": "7836b83b9c0ca8b2b9e9a0b716fd908a70d82e17279c0203bc90f84841f9d288",
+          "oci_digest": "sha256:aeb31a4c483eb37545aa318edf1197e6ea76d77812a18f3aff58ee03d6615142"
+        }
+      ]
+    },
+    {
+      "version": "1.2.1",
+      "tag": "v1.2.1",
+      "publishedAt": "2026-09-20T14:58:52+08:00",
+      "notesPath": "v1.2.1.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v1.2.1",
+      "serverUpdate": {
+        "mode": "code-only",
+        "baseVersion": "1.2.0",
+        "runtimeImage": "gamersgu/shuku-starship-web@sha256:3d7c9078dbc967527506492b19563360c237b370f2d4c8773ef84f97872a0aed"
+      },
+      "ghcrDependencyReleases": [
+        {
+          "version": "1.2.1",
+          "format": 2,
+          "environment": {
+            "format": 1,
+            "platform": "linux-x86_64",
+            "compatibility": "189768c17056c04ff3a40187d829583eee240aaa950cf98e2ca9571933074f33"
+          },
+          "filename": "shuku-1.2.1-linux-x86_64-v2.json",
+          "size": 288820,
+          "sha256": "f38012964ad9127db6e2abd4ffd224b7c20eaf6489e594f40db835a43d6ea1e3",
+          "oci_digest": "sha256:55d6a0e952815a37c92abbf863fecb88bba0c70d636a22a7e33c0a2130b69d48"
+        },
+        {
+          "version": "1.2.1",
+          "format": 2,
+          "environment": {
+            "format": 1,
+            "platform": "linux-aarch64",
+            "compatibility": "16a2cf252104304f7812d2364490ba4532b5975a770a0850e3dc9fa106707cfc"
+          },
+          "filename": "shuku-1.2.1-linux-aarch64-v2.json",
+          "size": 289176,
+          "sha256": "4474305cdc6b6f3b6b6c04059515cb35d67433fa485eda323d62afbb3592ac8e",
+          "oci_digest": "sha256:914b75be47c36c92f3023d50c73351f93e88e265c461a9b22634505fc1518e17"
+        }
+      ]
+    },
+    {
+      "version": "1.2.0",
+      "tag": "v1.2.0",
+      "publishedAt": "2026-09-20T09:37:15+08:00",
+      "notesPath": "v1.2.0.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v1.2.0",
+      "ghcrDependencyReleases": [
+        {
+          "version": "1.2.0",
+          "format": 2,
+          "environment": {
+            "format": 1,
+            "platform": "linux-x86_64",
+            "compatibility": "189768c17056c04ff3a40187d829583eee240aaa950cf98e2ca9571933074f33"
+          },
+          "filename": "shuku-1.2.0-linux-x86_64-v2.json",
+          "size": 288820,
+          "sha256": "7cf8559862bf1fdbcef3a4b0c0cd8a288b38a98f383cffac59002855b40d49e2",
+          "oci_digest": "sha256:54cf213f095dafc02824ab801a3d4106977911c88974d14b4711072989c18f46"
+        },
+        {
+          "version": "1.2.0",
+          "format": 2,
+          "environment": {
+            "format": 1,
+            "platform": "linux-aarch64",
+            "compatibility": "16a2cf252104304f7812d2364490ba4532b5975a770a0850e3dc9fa106707cfc"
+          },
+          "filename": "shuku-1.2.0-linux-aarch64-v2.json",
+          "size": 289176,
+          "sha256": "71e67e5f110b21a942ae24c186da79d4b5518a6fa75fd5ece729a5cffc6e59c3",
+          "oci_digest": "sha256:d95061b9024404812185a763fb0a23f3d017098ed67af14405abfcf5ae989468"
+        }
+      ]
+    },
+    {
+      "version": "1.1.0",
+      "tag": "v1.1.0",
+      "publishedAt": "2026-09-16T16:14:39+08:00",
+      "notesPath": "v1.1.0.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v1.1.0",
+      "ghcrDependencyReleases": [
+        {
+          "version": "1.1.0",
+          "format": 2,
+          "environment": {
+            "format": 1,
+            "platform": "linux-x86_64",
+            "compatibility": "4e08236a3b6d4e0cb25151aa965c6250f9ad69f68e480d465619b42101323f9e"
+          },
+          "filename": "shuku-1.1.0-linux-x86_64-v2.json",
+          "size": 288820,
+          "sha256": "a78ab0ebf6a0d8812636cd6a144babe91876c203749593bcfafb055bc751bcd0",
+          "oci_digest": "sha256:96df1e151615d8d59d93fc5664b44aaf1c679d459e1dc50d7c16b8462f2abe49"
+        },
+        {
+          "version": "1.1.0",
+          "format": 2,
+          "environment": {
+            "format": 1,
+            "platform": "linux-aarch64",
+            "compatibility": "7aae6d78e870d8df20ec0803fa72d3e0b0ea3dc95f131ad231db0104381155f7"
+          },
+          "filename": "shuku-1.1.0-linux-aarch64-v2.json",
+          "size": 289176,
+          "sha256": "94680e6ba42299bf23137aa648809b54e19644f354c051e65f1a5682528d5f28",
+          "oci_digest": "sha256:77e9caaa51cca33537a80dc784558420f876d9a55c286f2cac24a1a09f6cfb2a"
+        }
+      ]
+    },
+    {
+      "version": "1.0.4",
+      "tag": "v1.0.4",
+      "publishedAt": "2026-09-15T00:00:00+08:00",
+      "notesPath": "v1.0.4.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v1.0.4"
+    },
+    {
+      "version": "1.0.3",
+      "tag": "v1.0.3",
+      "publishedAt": "2026-09-14T00:00:00+08:00",
+      "notesPath": "v1.0.3.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v1.0.3"
+    },
+    {
+      "version": "1.0.2",
+      "tag": "v1.0.2",
+      "publishedAt": "2026-09-13T00:00:00+08:00",
+      "notesPath": "v1.0.2.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v1.0.2"
+    },
+    {
+      "version": "1.0.1",
+      "tag": "v1.0.1",
+      "publishedAt": "2026-09-13T00:00:00+08:00",
+      "notesPath": "v1.0.1.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v1.0.1"
+    },
+    {
+      "version": "1.0.0",
+      "tag": "v1.0.0",
+      "publishedAt": "2026-09-13T00:00:00+08:00",
+      "notesPath": "v1.0.0.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v1.0.0"
+    },
+    {
+      "version": "0.5.5",
+      "tag": "v0.5.5",
+      "publishedAt": "2026-08-11T05:25:22Z",
+      "notesPath": "v0.5.5.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.5.5"
+    },
+    {
+      "version": "0.5.4",
+      "tag": "v0.5.4",
+      "publishedAt": "2026-08-10T10:21:12Z",
+      "notesPath": "v0.5.4.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.5.4"
+    },
+    {
+      "version": "0.5.3",
+      "tag": "v0.5.3",
+      "publishedAt": "2026-08-10T09:32:40Z",
+      "notesPath": "v0.5.3.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.5.3"
+    },
+    {
+      "version": "0.5.2",
+      "tag": "v0.5.2",
+      "publishedAt": "2026-08-07T12:45:14Z",
+      "notesPath": "v0.5.2.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.5.2"
+    },
+    {
+      "version": "0.5.1",
+      "tag": "v0.5.1",
+      "publishedAt": "2026-08-06T14:38:43Z",
+      "notesPath": "v0.5.1.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.5.1"
+    },
+    {
+      "version": "0.5.0",
+      "tag": "v0.5.0",
+      "publishedAt": "2026-08-04T12:33:15Z",
+      "notesPath": "v0.5.0.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.5.0"
+    },
+    {
+      "version": "0.4.7",
+      "tag": "v0.4.7",
+      "publishedAt": "2026-08-02T15:16:48Z",
+      "notesPath": "v0.4.7.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.4.7"
+    },
+    {
+      "version": "0.4.6",
+      "tag": "v0.4.6",
+      "publishedAt": "2026-08-02T03:48:53Z",
+      "notesPath": "v0.4.6.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.4.6"
+    },
+    {
+      "version": "0.4.5",
+      "tag": "v0.4.5",
+      "publishedAt": "2026-07-31T09:11:16Z",
+      "notesPath": "v0.4.5.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.4.5"
+    },
+    {
+      "version": "0.4.4",
+      "tag": "v0.4.4",
+      "publishedAt": "2026-07-30T09:48:55Z",
+      "notesPath": "v0.4.4.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.4.4"
+    },
+    {
+      "version": "0.4.3",
+      "tag": "v0.4.3",
+      "publishedAt": "2026-07-29T11:58:56Z",
+      "notesPath": "v0.4.3.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.4.3"
+    },
+    {
+      "version": "0.4.2",
+      "tag": "v0.4.2",
+      "publishedAt": "2026-07-29T09:53:00Z",
+      "notesPath": "v0.4.2.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.4.2"
+    },
+    {
+      "version": "0.4.1",
+      "tag": "v0.4.1",
+      "publishedAt": "2026-07-29T02:58:00Z",
+      "notesPath": "v0.4.1.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.4.1"
+    },
+    {
+      "version": "0.4.0",
+      "tag": "v0.4.0",
+      "publishedAt": "2026-07-28T13:34:00Z",
+      "notesPath": "v0.4.0.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.4.0"
+    },
+    {
+      "version": "0.3.3",
+      "tag": "v0.3.3",
+      "publishedAt": "2026-07-25T04:59:00Z",
+      "notesPath": "v0.3.3.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.3.3"
+    },
+    {
+      "version": "0.3.2",
+      "tag": "v0.3.2",
+      "publishedAt": "2026-07-24T13:20:00Z",
+      "notesPath": "v0.3.2.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.3.2"
+    },
+    {
+      "version": "0.3.1",
+      "tag": "v0.3.1",
+      "publishedAt": "2026-07-24T09:06:00Z",
+      "notesPath": "v0.3.1.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.3.1"
+    },
+    {
+      "version": "0.3.0",
+      "tag": "v0.3.0",
+      "publishedAt": "2026-07-23T08:22:00Z",
+      "notesPath": "v0.3.0.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.3.0"
+    },
+    {
+      "version": "0.2.3",
+      "tag": "v0.2.3",
+      "publishedAt": "2026-07-23T03:25:00Z",
+      "notesPath": "v0.2.3.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.2.3"
+    },
+    {
+      "version": "0.2.2",
+      "tag": "v0.2.2",
+      "publishedAt": "2026-07-22T17:16:00Z",
+      "notesPath": "v0.2.2.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.2.2"
+    },
+    {
+      "version": "0.2.0",
+      "tag": "v0.2.0",
+      "publishedAt": "2026-07-22T09:53:00Z",
+      "notesPath": "v0.2.0.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.2.0"
+    },
+    {
+      "version": "0.1.25",
+      "tag": "v0.1.25",
+      "publishedAt": "2026-07-22T09:28:00Z",
+      "notesPath": "v0.1.25.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v0.1.25"
+    }
+  ]
+}
