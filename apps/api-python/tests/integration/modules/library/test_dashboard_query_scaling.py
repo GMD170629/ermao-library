@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TypeVar
 
 from sqlalchemy import event, insert
@@ -385,17 +385,88 @@ def test_continue_reading_does_not_scan_every_visible_resource(
         authz_version=1,
     )
 
-    progress, vm_steps = _sqlite_vm_steps(
-        db_session,
-        lambda: continue_reading_progress(
+    select_parameter_counts: list[int] = []
+
+    def record_select(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        parameters: tuple[object, ...],
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        if statement.lstrip().upper().startswith("SELECT"):
+            select_parameter_counts.append(len(parameters))
+
+    engine = db_session.get_bind()
+    event.listen(engine, "before_cursor_execute", record_select)
+    try:
+        progress, vm_steps = _sqlite_vm_steps(
             db_session,
-            context,
-            user.id,
-            reader_queries=reader_queries,
-        ),
-    )
+            lambda: continue_reading_progress(
+                db_session,
+                context,
+                user.id,
+                reader_queries=reader_queries,
+            ),
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", record_select)
 
     assert progress is not None
     assert progress["bookId"] == "scale-book-001999"
     assert progress["resourceId"] == "scale-resource-001999"
-    assert vm_steps < 100_000
+    assert vm_steps < 10_000
+    assert select_parameter_counts
+    assert max(select_parameter_counts) < 10
+
+    db_session.add_all(
+        ReaderResourceProgressV5(
+            id=f"scale-reader-progress-{index}",
+            user_id=user.id,
+            resource_id=f"scale-resource-{index:06d}",
+            client_id="scale-reader-client",
+            mutation_id=f"00000000-0000-4000-8000-{index:012d}",
+            locator_json="{}",
+            presentation_json=(
+                '{"chapter":null,"currentHref":null,"displayPercent":40,'
+                '"page":null,"playback":null,"totalProgression":0.4}'
+            ),
+            display_percent=percent,
+            total_progression=0.4,
+            captured_at=now + timedelta(minutes=minutes),
+            revision=1,
+            updated_at=now + timedelta(minutes=minutes),
+        )
+        for index, percent, minutes in ((1998, 100, 1), (1997, 20, 2))
+    )
+    hidden_book = db_session.get(LibraryBook, "scale-book-001997")
+    assert hidden_book is not None
+    hidden_book.visibility_state = "HIDDEN"
+    db_session.commit()
+
+    assert continue_reading_progress(
+        db_session, context, user.id, reader_queries=reader_queries
+    )["resourceId"] == "scale-resource-001999"
+    no_access = AuthorizationContext(
+        user_id=user.id,
+        is_admin=False,
+        can_manage_system=False,
+        can_view_manual_imports=False,
+        library_ids=(),
+        authz_version=1,
+    )
+    assert (
+        continue_reading_progress(
+            db_session, no_access, user.id, reader_queries=reader_queries
+        )
+        is None
+    )
+
+    original_progress = db_session.get(ReaderResourceProgressV5, "scale-reader-progress")
+    assert original_progress is not None
+    original_progress.display_percent = 100
+    db_session.commit()
+    assert continue_reading_progress(
+        db_session, context, user.id, reader_queries=reader_queries
+    )["resourceId"] == "scale-resource-001998"

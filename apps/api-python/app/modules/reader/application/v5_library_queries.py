@@ -77,6 +77,10 @@ class ReaderReadingStateQueryPort(Protocol):
 class ReaderV5LibraryPresentationQueryPort(ReaderReadingStateQueryPort, Protocol):
     """Reader-owned query API for Library's display and filter projections."""
 
+    def latest_continue_reading_presentation(
+        self, *, context: AuthorizationContext, user_id: str
+    ) -> ReaderV5PresentationView | None: ...
+
     def list_presentations(
         self, *, user_id: str, resource_ids: Sequence[str]
     ) -> Mapping[str, ReaderV5PresentationView]: ...

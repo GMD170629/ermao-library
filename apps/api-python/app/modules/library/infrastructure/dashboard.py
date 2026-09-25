@@ -188,7 +188,12 @@ def continue_reading_progress(
     *,
     reader_queries: ReaderV5LibraryPresentationQueryPort,
 ) -> dict[str, Any] | None:
-    rows = db.execute(
+    selected_progress = reader_queries.latest_continue_reading_presentation(
+        context=context, user_id=user_id
+    )
+    if selected_progress is None:
+        return None
+    selected = db.execute(
         select(
             LibraryReadableResource.id.label("resource_id"),
             LibraryReadableResourceMetadata.title.label("resource_title"),
@@ -208,26 +213,14 @@ def continue_reading_progress(
         )
         .join(LibraryBook, LibraryBook.id == LibraryReadableResource.book_id)
         .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
-        .where(*_visible_book_filter(context), resource_visibility_predicate(context))
-    ).all()
-    presentations = reader_queries.list_presentations(
-        user_id=user_id,
-        resource_ids=[str(row.resource_id) for row in rows],
-    )
-    candidates = [
-        (row, presentations[str(row.resource_id)])
-        for row in rows
-        if str(row.resource_id) in presentations
-    ]
-    if not candidates:
+        .where(
+            LibraryReadableResource.id == selected_progress.resource_id,
+            *_visible_book_filter(context),
+            resource_visibility_predicate(context),
+        )
+    ).one_or_none()
+    if selected is None:
         return None
-    unfinished = [
-        candidate for candidate in candidates if candidate[1].display_percent < 100
-    ]
-    selected, selected_progress = max(
-        unfinished or candidates,
-        key=lambda candidate: (candidate[1].updated_at, str(candidate[0].resource_id)),
-    )
     cover_path = (
         SqlAlchemyBookCoverQueries(db)
         .preferred_paths((str(selected.book_id),))

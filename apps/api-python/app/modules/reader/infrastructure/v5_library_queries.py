@@ -9,8 +9,17 @@ from typing import Literal, cast
 from sqlalchemy import and_, exists, func, literal, select
 from sqlalchemy.orm import Session, aliased
 
-from app.core.authorization import AuthorizationContext, resource_visibility_predicate
-from app.models import LibraryReadableResource
+from app.core.authorization import (
+    AuthorizationContext,
+    book_visibility_predicate,
+    resource_visibility_predicate,
+)
+from app.models import (
+    LibraryBook,
+    LibraryBookMetadata,
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
+)
 from app.modules.reader.application.v5_library_queries import (
     ReaderV5LibraryPresentationQueryPort,
     ReaderV5PresentationView,
@@ -238,6 +247,39 @@ class SqlAlchemyReaderV5LibraryPresentationQueries(
 
     def __init__(self, db: Session) -> None:
         self._db = db
+
+    def latest_continue_reading_presentation(
+        self, *, context: AuthorizationContext, user_id: str
+    ) -> ReaderV5PresentationView | None:
+        statement = (
+            select(ReaderResourceProgressV5)
+            .join(
+                LibraryReadableResource,
+                LibraryReadableResource.id == ReaderResourceProgressV5.resource_id,
+            )
+            .join(
+                LibraryReadableResourceMetadata,
+                LibraryReadableResourceMetadata.resource_id == LibraryReadableResource.id,
+            )
+            .join(LibraryBook, LibraryBook.id == LibraryReadableResource.book_id)
+            .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
+            .where(
+                ReaderResourceProgressV5.user_id == user_id,
+                LibraryBook.visibility_state == "VISIBLE",
+                book_visibility_predicate(context),
+                resource_visibility_predicate(context),
+            )
+            .order_by(
+                ReaderResourceProgressV5.updated_at.desc(),
+                ReaderResourceProgressV5.resource_id.desc(),
+            )
+            .limit(1)
+        )
+        unfinished = self._db.scalar(
+            statement.where(ReaderResourceProgressV5.display_percent < 100)
+        )
+        selected = unfinished if unfinished is not None else self._db.scalar(statement)
+        return _presentation_view(selected) if selected is not None else None
 
     def list_reading_states(
         self, *, user_id: str, resource_ids: Sequence[str]
