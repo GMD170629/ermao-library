@@ -208,6 +208,7 @@
   "查看全部整理记录；任务由定时策略或新增后自动执行产生。": "View all the records; tasks are created by time-based strategies or by adding new ones.",
   "查看书库扫描和图书导入任务。": "View library scans and book import tasks.",
   "查看图书": "View Books",
+  "查看作者“{value0}”的图书": "View books by “{value0}”",
   "查看系列“{value0}”中的图书": "View books in the “{value0}” series",
   "查看详情": "View Details",
   "查看运行明细": "View run details",

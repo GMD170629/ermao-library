@@ -35,12 +35,20 @@ export function librarySeriesHref(seriesName: string): string {
   return `/library?${query}`;
 }
 
-export function libraryTagHref(tag: string): string {
+function libraryMetadataFilterHref(field: 'author' | 'tag', value: string): string {
   const filters = JSON.stringify({
     combinator: 'ALL',
-    conditions: [{ field: 'tag', operator: 'equals', value: tag.trim() }]
+    conditions: [{ field, operator: 'equals', value: value.trim() }]
   });
   return `/library?${new URLSearchParams({ filters })}`;
+}
+
+export function libraryAuthorHref(authorName: string): string {
+  return libraryMetadataFilterHref('author', authorName);
+}
+
+export function libraryTagHref(tag: string): string {
+  return libraryMetadataFilterHref('tag', tag);
 }
 
 export function resourcePageFromQuery(value: unknown): number {

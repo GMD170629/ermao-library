@@ -4,6 +4,7 @@ import type { BookView, ReadableResourceView } from '../../types/book';
 import {
   allVisibleResources,
   bookDetailHref,
+  libraryAuthorHref,
   librarySeriesHref,
   libraryTagHref,
   resourcePageFromQuery,
@@ -85,6 +86,13 @@ test('deep links use only bookId and resourceId', () => {
 
 test('book metadata links open exact library filters', () => {
   assert.equal(librarySeriesHref(' 龙族 '), '/library?seriesName=%E9%BE%99%E6%97%8F');
+
+  const authorUrl = new URL(libraryAuthorHref(' Ursula K. Le Guin & Co. '), 'https://example.test');
+  assert.equal(authorUrl.pathname, '/library');
+  assert.deepEqual(JSON.parse(authorUrl.searchParams.get('filters') ?? ''), {
+    combinator: 'ALL',
+    conditions: [{ field: 'author', operator: 'equals', value: 'Ursula K. Le Guin & Co.' }]
+  });
 
   const tagUrl = new URL(libraryTagHref(' 奇幻 '), 'https://example.test');
   assert.equal(tagUrl.pathname, '/library');

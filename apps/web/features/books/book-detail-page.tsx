@@ -38,6 +38,7 @@ import {
   allVisibleResources,
   bookDetailHref,
   bookDetailReturnHref,
+  libraryAuthorHref,
   librarySeriesHref,
   libraryTagHref,
   resourcePageFromQuery,
@@ -614,6 +615,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   if (loading && !book) return <div className="flex min-h-[60vh] items-center justify-center"><LoaderCircle className="animate-spin text-[var(--visual-color-app-brand-accent)]" /></div>;
   if (!book) return <div className="mx-auto max-w-lg p-8 text-center"><p className="text-[var(--visual-color-app-text-secondary)]">{error || t('图书不存在')}</p><Button className="mt-4" onClick={() => router.push(returnHref)}><I18nText>返回书库</I18nText></Button></div>;
 
+  const authorName = authorDisplayLabel(book.author);
   const seriesName = book.seriesName?.trim() ?? '';
   const tags = [...new Set(book.tags.map((tag) => tag.trim()).filter(Boolean))];
   const hasBookMetadata = Boolean(seriesName || tags.length > 0);
@@ -637,7 +639,14 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
           {metadataStatus ? <p role="status" className="mt-2 text-sm text-[var(--visual-color-app-text-secondary)]">{metadataStatus}</p> : null}
           {book.resourceImportSummary.failed > 0 ? <p role="status" className="text-sm">{t('部分文件导入失败，已保留可用内容')}</p> : null}
 
-          <p data-i18n-skip className="mt-3 text-base text-[var(--visual-color-app-text-secondary)]">{authorDisplayLabel(book.author)}</p>
+          {authorName ? <p data-i18n-skip className="mt-3 text-base text-[var(--visual-color-app-text-secondary)]">
+            <Link
+              href={libraryAuthorHref(authorName)}
+              prefetch={false}
+              aria-label={t('查看作者“{value0}”的图书', { value0: authorName })}
+              className="rounded-md outline-none transition hover:text-[var(--visual-color-app-brand-accent)] hover:underline focus-visible:ring-2 focus-visible:ring-[var(--visual-color-app-focus-ring)]"
+            >{authorName}</Link>
+          </p> : null}
           {hasBookMetadata ? <div className="mt-4 flex min-w-0 flex-col items-start gap-2 text-sm sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-2">
             {seriesName ? <span className="flex min-w-0 max-w-full items-center gap-2">
               <span className="shrink-0 text-[var(--visual-color-app-text-tertiary)]"><I18nText>系列</I18nText></span>

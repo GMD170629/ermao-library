@@ -317,6 +317,12 @@ test('book detail resource covers support selection, keyboard-accessible context
   await page.goto('/books/context-book?resourceId=context-resource-1&returnTo=%2Flibrary%3Fstatus%3DREADING%26sort%3Dtitle');
   const seriesLink = page.getByRole('link', { name: '查看系列“龙族”中的图书' });
   await expect(seriesLink).toHaveAttribute('href', '/library?seriesName=%E9%BE%99%E6%97%8F');
+  const authorLink = page.getByRole('link', { name: '查看作者“测试作者”的图书' });
+  const authorHref = await authorLink.getAttribute('href');
+  expect(JSON.parse(new URL(authorHref ?? '', 'https://example.test').searchParams.get('filters') ?? '')).toEqual({
+    combinator: 'ALL',
+    conditions: [{ field: 'author', operator: 'equals', value: '测试作者' }]
+  });
   const tagLink = page.getByRole('link', { name: '查看标签“奇幻”下的图书' });
   const tagHref = await tagLink.getAttribute('href');
   expect(JSON.parse(new URL(tagHref ?? '', 'https://example.test').searchParams.get('filters') ?? '')).toEqual({
