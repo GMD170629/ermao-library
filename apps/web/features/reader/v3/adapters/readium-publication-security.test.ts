@@ -464,3 +464,65 @@ test('openMobi sanitizes extra CSS resources on their first read', async () => {
     restoreDom();
   }
 });
+
+test('openEpub drops escaping optional font URLs without rejecting the book', async () => {
+  const restoreDom = installDomStubs();
+  try {
+    const container = '<container><rootfiles><rootfile full-path="OPS/content.opf"/></rootfiles></container>';
+    const opf = '<package><manifest><item id="chapter" href="Text/chapter.xhtml" media-type="application/xhtml+xml"/><item id="style" href="Styles/book.css" media-type="text/css"/><item id="font" href="Fonts/safe.ttf" media-type="font/ttf"/><item id="outside" href="../../outside.css" media-type="text/css"/></manifest><spine><itemref idref="chapter"/></spine></package>';
+    const chapter = '<html><body>Chapter text</body></html>';
+    const style = '@font-face { src: url("../../../../../outside.ttf"), url("../Fonts/safe.ttf"); }';
+    const publication = await openReadiumPublication(
+      await epubBlob([
+        { path: 'META-INF/container.xml', bytes: container },
+        { path: 'OPS/content.opf', bytes: opf },
+        { path: 'OPS/Text/chapter.xhtml', bytes: chapter },
+        { path: 'OPS/Styles/book.css', bytes: style },
+        { path: 'OPS/Fonts/safe.ttf', bytes: 'safe-font' }
+      ]),
+      'epub',
+      'Fallback',
+      'ltr',
+      'horizontal'
+    );
+    try {
+      const chapterLink = publication.publication.readingOrder.items[0];
+      assert.ok(chapterLink);
+      assert.match(new TextDecoder().decode(await publication.publication.get(chapterLink).read()), /Chapter text/u);
+      const cssLink = publication.publication.resources?.items.find((link) => link.href === 'OPS/Styles/book.css');
+      assert.ok(cssLink);
+      const sanitizedCss = new TextDecoder().decode(await publication.publication.get(cssLink).read());
+      assert.doesNotMatch(sanitizedCss, /outside\.ttf/u);
+      assert.match(sanitizedCss, /blob:/u);
+    } finally {
+      publication.close();
+    }
+  } finally {
+    restoreDom();
+  }
+});
+
+test('openEpub rejects an escaping reading-order path', async () => {
+  const restoreDom = installDomStubs();
+  try {
+    const container = '<container><rootfiles><rootfile full-path="OPS/content.opf"/></rootfiles></container>';
+    const opf = '<package><manifest><item id="chapter" href="../../outside.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="chapter"/></spine></package>';
+    await assert.rejects(
+      openReadiumPublication(
+        await epubBlob([
+          { path: 'META-INF/container.xml', bytes: container },
+          { path: 'OPS/content.opf', bytes: opf }
+        ]),
+        'epub',
+        'Fallback',
+        'ltr',
+        'horizontal'
+      ),
+      (reason: unknown) => reason instanceof ReaderSafetyPolicyError
+        && reason.ruleId === READER_SAFETY_RULE_IDS.EPUB_ARCHIVE_STRUCTURE
+        && reason.code === 'PUBLICATION_SECURITY_REJECTED'
+    );
+  } finally {
+    restoreDom();
+  }
+});

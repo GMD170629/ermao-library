@@ -65,7 +65,7 @@ function navigationHref(
   knownManifestPaths: ReadonlySet<string>
 ): string | null {
   const trimmed = rawHref.trim();
-  const path = trimmed.startsWith('#') ? sourcePath : resolveArchivePath(sourcePath, trimmed);
+  const path = trimmed.startsWith('#') ? sourcePath : resolveArchivePath(sourcePath, trimmed, true);
   if (!path || !knownManifestPaths.has(path)) return null;
   return `${path}${fragmentOf(trimmed)}`;
 }
@@ -258,7 +258,7 @@ function publicationTextLength(bytes: Uint8Array): number {
   return Math.max(1, (document.body?.textContent ?? document.documentElement.textContent ?? '').length);
 }
 
-function resolveArchivePath(base: string, relative: string): string | null {
+function resolveArchivePath(base: string, relative: string, canIsolate = false): string | null {
   const trimmed = relative.trim();
   if (!trimmed || trimmed.startsWith('#')) return null;
   if (authoredUriDisposition(trimmed, 'subresource') === 'remove') return null;
@@ -267,13 +267,22 @@ function resolveArchivePath(base: string, relative: string): string | null {
   for (const segment of path.split('/')) {
     if (!segment || segment === '.') continue;
     if (segment === '..') {
-      if (baseSegments.length === 0) rejectReaderSafety(READER_SAFETY_RULE_IDS.EPUB_ARCHIVE_STRUCTURE);
+      if (baseSegments.length === 0) {
+        if (canIsolate) return null;
+        rejectReaderSafety(READER_SAFETY_RULE_IDS.EPUB_ARCHIVE_STRUCTURE);
+      }
       baseSegments.pop();
     } else {
       baseSegments.push(segment);
     }
   }
-  return normalizeEpubArchivePath(baseSegments.join('/'));
+  try {
+    return normalizeEpubArchivePath(baseSegments.join('/'));
+  } catch (cause) {
+    if (canIsolate && cause instanceof ReaderSafetyPolicyError
+      && cause.ruleId === READER_SAFETY_RULE_IDS.EPUB_ARCHIVE_STRUCTURE) return null;
+    throw cause;
+  }
 }
 
 async function readZipEntry(
@@ -291,7 +300,7 @@ async function rewriteCssUrls(
   ancestors: ReadonlySet<string>
 ): Promise<string> {
   return sanitizeAuthoredCss(source, async (raw) => {
-    const resolved = resolveArchivePath(href, raw);
+    const resolved = resolveArchivePath(href, raw, true);
     return resolved ? assetUrl(resolved, ancestors) : null;
   });
 }
@@ -308,7 +317,7 @@ async function sanitizeEpubDocument(
   const document = parseXml(source, 'PUBLICATION_MARKUP_INVALID');
   sanitizeAuthoredMarkup(document);
   await rewriteAuthoredDocumentReferences(document, async (raw) => {
-    const resolved = resolveArchivePath(href, raw);
+    const resolved = resolveArchivePath(href, raw, true);
     return resolved ? assetUrl(resolved) : null;
   });
   return utf8(new XMLSerializer().serializeToString(document));
@@ -373,12 +382,15 @@ async function openEpub(
       READER_SAFETY_RULE_IDS.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES
     );
     const manifestItems = new Map<string, EpubManifestItem>();
+    const spineIds = new Set([...opf.querySelectorAll('spine > itemref')]
+      .map((itemref) => itemref.getAttribute('idref'))
+      .filter((id): id is string => id !== null));
     for (const item of opf.querySelectorAll('manifest > item')) {
       const id = item.getAttribute('id');
       const href = item.getAttribute('href');
       const type = item.getAttribute('media-type')?.split(';', 1)[0]?.trim().toLowerCase() ?? '';
       if (!id || !href) continue;
-      const path = resolveArchivePath(opfPath, href);
+      const path = resolveArchivePath(opfPath, href, !spineIds.has(id));
       if (!path || !byPath.has(path)) continue;
       manifestItems.set(id, {
         path,
@@ -533,7 +545,7 @@ async function openEpub(
           );
           sanitizeAuthoredMarkup(svg);
           await rewriteAuthoredDocumentReferences(svg, async (raw) => {
-            const resolved = resolveArchivePath(path, raw);
+            const resolved = resolveArchivePath(path, raw, true);
             return resolved ? assetUrl(resolved, nextAncestors) : null;
           });
           return utf8(new XMLSerializer().serializeToString(svg));
