@@ -68,6 +68,7 @@ def prepare_organize_policy_update(
     if not isinstance(rules_payload, dict):
         raise InvalidOrganizeRequestError("识别范围配置格式不正确")
     rules = {
+        "allowRepairPathMetadata": bool(payload.get("allowRepairPathMetadata", current.get("allowRepairPathMetadata", False))),
         "unrecognized": bool(
             rules_payload.get("unrecognized", current["rules"]["unrecognized"])
         ),

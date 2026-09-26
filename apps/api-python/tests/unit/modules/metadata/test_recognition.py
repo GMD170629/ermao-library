@@ -431,3 +431,24 @@ def test_candidate_resource_index_does_not_override_explicit_volume() -> None:
     assert f"{remote.key}:volume" in result.evidence_ids
     assert f"{remote.key}:resource_index" in result.evidence_ids
     assert not result.allowed_fields
+
+
+@pytest.mark.parametrize("date", ["2020", "2020-02", "2020-02-03"])
+def test_field_proposal_keeps_date_precision(date):
+    from app.modules.metadata.application.field_proposals import propose_fields
+    target = RecognitionContext("resource", "r", "b", "l", IdentityEvidence("Book"),
+        allowed_fields=frozenset({"resource.published_at"}))
+    from app.modules.metadata.domain.recognition import MatchDecision
+    decision = MatchDecision("MATCHED", "key", "EDITION", (), (), target.allowed_fields)
+    proposals = propose_fields(target, "provider", {"publishedAt": date}, decision)
+    assert bool(proposals) == (date == "2020-02-03")
+
+
+def test_supplement_does_not_mix_conflicting_publishers():
+    from app.modules.metadata.application.field_proposals import supplement_fields
+    target = context()
+    first = {"id": "a", "title": "三体", "author": "刘慈欣", "matchLevel": "WORK", "publisher": "A"}
+    second = {**first, "id": "b", "publisher": "B", "description": "Other"}
+    assert supplement_fields(target, "first", first, "second", second) == ()
+    second["publisher"] = "A"
+    assert {item.field for item in supplement_fields(target, "first", first, "second", second)} >= {"book.description"}

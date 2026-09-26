@@ -234,6 +234,7 @@ def test_resource_apply_updates_selected_book_resource_and_tag_fields(
         ],
         "skippedFields": [],
         "coverStatus": "notSelected",
+        "writebackStatus": "notRequested",
     }
     db_session.expire_all()
     book_metadata = db_session.get(LibraryBookMetadata, "recognized-book")
@@ -303,3 +304,24 @@ def test_metadata_apply_rejects_repeated_or_unavailable_fields(
     assert repeated.json()["error"]["code"] == "INVALID_METADATA_APPLY"
     assert unavailable.status_code == 422
     assert unavailable.json()["error"]["code"] == "INVALID_METADATA_APPLY"
+
+
+
+def test_apply_rejects_stale_search_revision(client, db_session):
+    _login(client, db_session, role="admin")
+    resource_id = _add_book(db_session, book_id="stale-book")
+    from sqlalchemy.orm import Session
+
+    from app.modules.library.infrastructure.metadata_patches import (
+        SqlAlchemyMetadataPatches,
+    )
+    revision = SqlAlchemyMetadataPatches(db_session).snapshot("resource", resource_id, frozenset({"test-library"})).revision
+    db_session.close()
+    with Session(db_session.get_bind()) as other:
+        other.get(LibraryBookMetadata, "stale-book").author = "Changed in another session"
+        other.commit()
+    response = client.post("/api/books/stale-book/metadata/apply", json={
+        "scope": "resource", "resourceId": resource_id, "expectedRevision": revision,
+        "candidate": _candidate(), "fields": ["resource.publisher"]})
+    assert response.status_code == 409, response.text
+    assert db_session.get(LibraryReadableResourceMetadata, resource_id).publisher is None

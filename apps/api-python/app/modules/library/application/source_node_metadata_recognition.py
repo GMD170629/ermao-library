@@ -42,6 +42,8 @@ class SourceNodeMetadataRecognitionResult:
     query: str
     message: str | None
     candidates: tuple[SourceNodeMetadataCandidate, ...]
+    target_revision: str | None = None
+    book_revision: str | None = None
 
 
 class SourceNodeMetadataRecognitionPort(Protocol):

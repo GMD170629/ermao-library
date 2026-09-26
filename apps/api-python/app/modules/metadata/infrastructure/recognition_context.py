@@ -8,6 +8,8 @@ from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.contracts.local_metadata_snapshot import decode_observations
+from app.infrastructure.local_metadata_policy import SqlAlchemyLocalMetadataPriority
 from app.models import (
     LibraryBook,
     LibraryBookMetadata,
@@ -20,6 +22,10 @@ from app.models import (
 )
 from app.models.import_pipeline import Source
 from app.models.organize import MetadataLookupTask
+from app.modules.metadata.application.local_metadata import (
+    LocalMetadataCandidate,
+    resolve_local_metadata,
+)
 from app.modules.metadata.domain.recognition import (
     Contributor,
     IdentityEvidence,
@@ -46,6 +52,27 @@ def _protected(raw: str | None) -> frozenset[str]:
         if isinstance(value, list)
         else frozenset()
     )
+
+
+def _resource_provenance(db: Session, resource_id: str, current: tuple[tuple[str, object], ...]) -> tuple[tuple[str, str], ...]:
+    # A single persisted source observation can establish a field's origin.
+    # Multi-asset aggregation remains UNKNOWN; never infer PATH from a filename.
+    rows = db.scalars(select(LibraryResourceAsset.local_metadata_candidates)
+        .where(LibraryResourceAsset.resource_id == resource_id, LibraryResourceAsset.import_state == "READY")
+        .order_by(LibraryResourceAsset.id).limit(2)).all()
+    origins = dict.fromkeys(dict(current), "UNKNOWN")
+    if len(rows) != 1 or not rows[0]:
+        return tuple(origins.items())
+    observations = decode_observations(rows[0])
+    resolved = resolve_local_metadata(tuple(LocalMetadataCandidate(item.source, item.metadata) for item in observations),
+                                      SqlAlchemyLocalMetadataPriority(db).load())
+    sources = dict(resolved.field_sources)
+    for name, value in current:
+        original = (resolved.metadata.volume_title or resolved.metadata.title) if name == "title" else getattr(resolved.metadata, name, None)
+        source_name = "volumeTitle" if name == "title" and resolved.metadata.volume_title else name
+        if value is not None and value == original:
+            origins[name] = sources.get(source_name, "UNKNOWN")
+    return tuple(origins.items())
 
 
 def load_recognition_context(
@@ -186,7 +213,7 @@ def load_recognition_context(
             parent_title=metadata.title,
             values=values,
             protected=protected,
-            provenance=tuple((name, "UNKNOWN") for name in names),
+            provenance=_resource_provenance(db, resource.id, values),
             allowed_fields=frozenset(
                 "resource." + ("cover_ref" if name == "cover_path" else name)
                 for name in names

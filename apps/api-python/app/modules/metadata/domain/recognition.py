@@ -324,7 +324,9 @@ def decide_match(
     if candidate.level == level and names:
         names |= {"description", "cover_ref"}
     if context.target_type == "resource" and level == "EDITION":
-        names |= {"isbn", "publisher", "language"}
+        names |= {"isbn", "publisher", "language", "published_at"}
+    if context.target_type == "resource" and level in {"VOLUME", "EDITION"}:
+        names.add("resource_index")
     fields = frozenset(prefix + name for name in names) & context.allowed_fields
     fields = frozenset(
         field for field in fields if field.removeprefix(prefix) not in context.protected

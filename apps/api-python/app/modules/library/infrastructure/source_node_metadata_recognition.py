@@ -14,6 +14,9 @@ from app.modules.library.application.source_node_metadata_recognition import (
     SourceNodeMetadataRecognitionPort,
     SourceNodeMetadataRecognitionResult,
 )
+from app.modules.library.infrastructure.metadata_patches import (
+    SqlAlchemyMetadataPatches,
+)
 from app.modules.metadata.public import (
     assess_candidates,
     load_recognition_context,
@@ -43,6 +46,9 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
         )
         if recognition is None:
             return None
+        snapshots = SqlAlchemyMetadataPatches(self._db)
+        target_snapshot = snapshots.snapshot(recognition.target_type, recognition.target_id, frozenset({recognition.library_id}))
+        book_snapshot = snapshots.snapshot("book", book_id, frozenset({recognition.library_id}))
         context = provider_context(self._db, recognition)
         title = recognition.identity.title
         try:
@@ -72,6 +78,8 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
             if (candidate := self._candidate(value, provider_id)) is not None
         )
         return SourceNodeMetadataRecognitionResult(
+            target_revision=target_snapshot.revision if target_snapshot else None,
+            book_revision=book_snapshot.revision if book_snapshot else None,
             source_node_id=source_node_id,
             provider_id=provider_id,
             query=query or title,

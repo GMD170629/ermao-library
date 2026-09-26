@@ -2,6 +2,25 @@
 
 核对日期：2026-09-26。M0、M1 已提交；用户现已授权连续完成 M2–M7，每阶段独立提交并沿用推送和 `[skip ci]`。以下分阶段记录有效实现及验证，不把后续计划视为已经实现。
 
+## M3 实施记录
+
+起点 `bd531a3f`。Provider 字段映射收敛到 `contracts/recognized_metadata_fields.py`，FieldProposal 保留当前值、保护、候选键、层级及证据。自动和手动通过原 `ApplyMetadataPatches.stage` 复用白名单、字段校验、授权范围、修订与操作记录，删除对应直接 ORM 字段写入；原 execute 仍拥有提交，stage 由识别用例持有事务。系统身份绑定 RUNNING 的真实任务与明确目标，没有 MCP grant 或 override 权限。
+
+资源目标由任务记录明确声明；代表资源不会自动成为写入目标。资源修订包含父级字段，搜索返回 targetRevision/bookRevision，确认支持旧修订拒绝；旧客户端不强制新增字段。自动写入不误标人工保护。历史 UNKNOWN 来源仅补缺；`allowRepairPathMetadata` 默认关闭并保存在原 rulesJson，且本地优先关闭后才允许已持久化单资产本地观察、当前值和解析优先级共同证明的 PATH 值修正。多资产或缺观察保持 UNKNOWN，不凭文件名相同猜来源。旧请求遗漏新字段不会重置它。无需 schema 迁移。
+
+可靠主来源之后最多访问一个额外来源，仍经原预算；补缺候选同时通过目标匹配与对主来源的身份比较，不合并作者/卷号/出版社等强冲突。日期建议保留年/月精度，不伪造日期。结果保留有界候选摘要、提议与修订，不存 provider raw 响应。记录的重新打开/忽略、服务端候选绑定和逐字段 UI 在连续执行的 M6 收口，不把该 UI 写成已交付。
+
+手动和自动共用安全封面下载：禁凭据 URL/非 HTTP(S)/私网解析及重定向；连接固定在已检查的 DNS 地址，TLS 仍验证原主机，不跟代理或重解析。检查 MIME、大小和完整图片。封面独立失败可保留其他字段；原补偿改为共同 patch 且精准目标。OPF 通知共用装配入口、遵守原开关，无变化不排队；DB 成功但 OPF 排队失败单独记录，任务不会重放元数据。实际定向测试暴露 Windows 时钟纳秒重复导致连续操作 ID 冲突，既有 operation factory 改 UUID，未修改调度行为。
+
+有效验证（`apps/api-python`）：
+
+```powershell
+.venv-windows/Scripts/python.exe -m pytest -q tests/unit/modules/metadata/test_recognition.py tests/integration/modules/metadata/test_recognition_context.py tests/integration/modules/library/test_provider_source_node_metadata_recognition.py tests/integration/modules/automation/test_metadata_patches.py tests/unit/modules/library/application/test_recognized_metadata.py tests/unit/modules/library/infrastructure/test_recognized_metadata_cover.py tests/contract/api/test_recognized_metadata_api.py tests/test_metadata_lookup_queue.py tests/unit/modules/library/test_library_operations.py --tb=short
+# 116 passed；9 个关键生产文件 mypy 通过；全部变动 Python ruff 通过。
+```
+
+新增实际队列反例证明仅第 2 卷变化、父书/第 1 卷不变，OPF 故障保持 COMPLETED；准备后父级变更/人工保护/取消/删除拒绝；两个真实 Session 的旧搜索修订在 HTTP 返回 409。PATH 四种设置/证据组合经过真实数据库与持久化策略验证。未做外部来源或浏览器联调，继续 M4–M7；历史 ISBN 仍缺显式范围，不能单凭校验位或保护标记升级，后续确认事实需保持这一边界。
+
 ## M2 实施记录
 
 起点 `10a79a88`，工作树干净。应用层新增小型有界查询计划：明确人工 query 保留，适用来源优先校验后的资源 ISBN，再用标题/作者及已有别名；不改变用于匹配的原目标。手动资源数据库投影至实际 HTTP 请求已验证 ISBN 查询。自动 book 仍不借代表资源 ISBN；明确资源自动应用在 M3 接入。

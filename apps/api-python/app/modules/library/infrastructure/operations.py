@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from time import time_ns
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy import delete, insert, or_, select, update
 from sqlalchemy import inspect as sa_inspect
@@ -56,7 +56,7 @@ def prepare_operation_write(
     now: datetime,
     undoable: bool = True,
 ) -> PreparedOperationWrite:
-    operation_id = f"op_{time_ns()}"
+    operation_id = f"op_{uuid4().hex}"
     expires_at = now + timedelta(days=7)
     status = "COMPLETED" if undoable else "FINALIZED"
     payload_json = _json(payload)

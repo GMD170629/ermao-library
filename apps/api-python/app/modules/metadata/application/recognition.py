@@ -170,3 +170,20 @@ def assess_candidates(
         (payloads[decision.candidate_key], decision)
         for decision in rank_matches(context, evidence)
     ]
+
+
+
+def candidate_summary(value: Mapping[str, object]) -> dict[str, object]:
+    """Persist bounded recognition facts, never the provider's raw response."""
+    names = ("id", "source", "title", "author", "description", "matchLevel", "isbnScope", "isbn", "volume",
+             "publisher", "publishedAt", "language", "edition", "resourceIndex", "narrator", "abridged", "coverUrl")
+    result: dict[str, object] = {}
+    for name in names:
+        item = value.get(name)
+        if isinstance(item, str):
+            result[name] = item[:8000 if name == "description" else 2000]
+        elif isinstance(item, (int, float, bool)) or item is None:
+            result[name] = item
+    result["aliases"] = [item[:1000] for item in candidate_titles(value)[:8]]
+    result["authors"] = [{"name": item.name[:500], "role": item.role[:50]} for item in contributors(value.get("authors"), value.get("author"))[:8]]
+    return result

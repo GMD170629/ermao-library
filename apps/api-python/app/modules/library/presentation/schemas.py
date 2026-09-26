@@ -446,6 +446,8 @@ class SourceNodeMetadataSearchPayload(HttpContractModel):
     query: str
     message: str | None = None
     candidates: list[SourceNodeMetadataCandidateView]
+    target_revision: str | None = Field(default=None, alias="targetRevision")
+    book_revision: str | None = Field(default=None, alias="bookRevision")
 
 
 class RecognizedMetadataCandidateInput(HttpContractModel):
@@ -480,6 +482,8 @@ class ApplyRecognizedMetadataRequest(HttpContractModel):
     resource_id: str | None = Field(default=None, alias="resourceId", max_length=191)
     candidate: RecognizedMetadataCandidateInput
     fields: list[RecognizedMetadataField] = Field(min_length=1, max_length=18)
+    expected_revision: str | None = Field(default=None, alias="expectedRevision", max_length=64)
+    expected_book_revision: str | None = Field(default=None, alias="expectedBookRevision", max_length=64)
 
 
 class ApplyRecognizedMetadataPayload(HttpContractModel):
@@ -488,6 +492,7 @@ class ApplyRecognizedMetadataPayload(HttpContractModel):
     cover_status: Literal["notSelected", "applied", "failed"] = Field(
         alias="coverStatus"
     )
+    writeback_status: Literal["notRequested", "queued", "failed"] = Field(default="notRequested", alias="writebackStatus")
 
 
 class ResourcePayload(HttpContractModel):

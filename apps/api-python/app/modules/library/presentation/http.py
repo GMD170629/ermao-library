@@ -58,6 +58,7 @@ from app.core.authorization import (
 )
 from app.core.config import Settings, get_settings
 from app.core.exception_diagnostics import record_exception
+from app.core.i18n import configured_locale
 from app.db.session import get_db
 from app.models import LibraryReadableResource
 from app.models.auth import User
@@ -134,6 +135,7 @@ from app.modules.library.application.source_node_metadata_recognition import (
     MetadataProviderSearchError,
 )
 from app.modules.library.domain.facets import InvalidLibraryFacetRequest
+from app.modules.library.domain.metadata_patch import MetadataPatchError
 from app.modules.library.presentation.filter_mappers import (
     filter_options_payload,
     filter_schema_payload,
@@ -1442,6 +1444,8 @@ def search_book_source_node_metadata(
         )
     return SourceNodeMetadataSearchResponse(
         data=SourceNodeMetadataSearchPayload(
+            targetRevision=result.target_revision,
+            bookRevision=result.book_revision,
             sourceNodeId=result.source_node_id,
             providerId=result.provider_id,
             query=result.query,
@@ -1520,6 +1524,8 @@ def apply_book_recognized_metadata(
                 ),
                 fields=tuple(payload.fields),
                 now=datetime.now(UTC),
+                expected_revision=payload.expected_revision,
+                expected_book_revision=payload.expected_book_revision,
             )
         )
     except RecognizedMetadataAuthorizationError:
@@ -1538,7 +1544,14 @@ def apply_book_recognized_metadata(
                 code="METADATA_TARGET_NOT_FOUND",
             )
         )
-    except InvalidRecognizedMetadataError:
+    except MetadataPatchError as error:
+        conflict = str(error) in {"CONFLICT", "PROTECTED_FIELD"}
+        message = ("Metadata changed or is protected; search again" if configured_locale(db) == "en-US" else "元数据已改变或受保护，请重新识别")
+        return _recognized_metadata_response(fail(message, status_code=409 if conflict else 422, code="METADATA_CHANGED" if conflict else "INVALID_METADATA_APPLY"))
+    except InvalidRecognizedMetadataError as error:
+        if str(error) == "METADATA_CHANGED":
+            message = "Metadata changed; search again" if configured_locale(db) == "en-US" else "元数据已改变，请重新识别"
+            return _recognized_metadata_response(fail(message, status_code=409, code="METADATA_CHANGED"))
         return _recognized_metadata_response(
             fail(
                 "所选元数据字段无效",
@@ -1563,6 +1576,7 @@ def apply_book_recognized_metadata(
             appliedFields=list(result.applied_fields),
             skippedFields=list(result.skipped_fields),
             coverStatus=result.cover_status,
+            writebackStatus=result.writeback_status,
         )
     )
 
