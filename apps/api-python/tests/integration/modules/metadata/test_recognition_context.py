@@ -275,7 +275,7 @@ def test_resource_isbn_reaches_the_actual_provider_http_request(db_session, monk
     def request(req, **kwargs):
         assert not db_session.in_transaction()
         urls.append(req.full_url)
-        return BytesIO(b'<html><title>search</title></html>')
+        return BytesIO(b'<script>window.__DATA__ = {"items": []};</script>')
     monkeypatch.setattr(organize_service, "urlopen", request)
     search_with_metadata_provider(db_session, projected, "douban")
     assert "search_text=9780306406157" in urls[0]

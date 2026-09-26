@@ -62,6 +62,8 @@ def test_provider_queries_remain_readable_while_another_writer_holds_lock(
             "ai",
             "bangumi",
             "douban",
+            "google-books",
+            "open-library",
         }
         assert not any(
             statement.startswith(("INSERT", "UPDATE", "DELETE"))
@@ -134,6 +136,8 @@ def test_provider_order_update_uses_bounded_set_based_dml(tmp_path: Path) -> Non
             "douban",
             "bangumi",
             "ai",
+            "google-books",
+            "open-library",
         ]
         assert all(not provider["enabled"] for provider in providers)
     finally:

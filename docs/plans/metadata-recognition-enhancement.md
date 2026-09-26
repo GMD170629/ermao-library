@@ -2,6 +2,22 @@
 
 核对日期：2026-09-26。M0、M1 已提交；用户现已授权连续完成 M2–M7，每阶段独立提交并沿用推送和 `[skip ci]`。以下分阶段记录有效实现及验证，不把后续计划视为已经实现。
 
+## M4 实施记录
+
+起点 `11a90bb2`。新增默认关闭的 Google Books、Open Library Manifest，沿既有 Source bootstrap 幂等创建、配置/密钥脱敏、连接测试、候选缓存、请求 gate 和手动搜索入口接通。来源配置支持 OFF/MANUAL_ONLY/AUTO_AND_MANUAL，Open Library 仅支持前两者；服务端同时验证单目标、MANUAL 和明确人工查询入口，不参与后台 provider order、补缺和 AI 自动扩展。旧排序 payload 可只包含旧来源，保留遗漏来源的启用状态和全部密钥，使用单条 CASE UPDATE 保持原有有界 SQL 测试门槛。
+
+Google 支持 ISBN、标题作者查询和 `id:<volume-id>` / `google-books:<volume-id>` 详情；只使用官方固定地址和配置密钥。映射作者列表、出版信息、原日期精度、语言、封面、简介，分类与人工 tags 分开。404 是零结果，429 保留错误不缓存；缺密钥或禁用不请求。Open Library Work 查询只保存作品事实，丢弃搜索聚合 ISBN/出版社/语言；ISBN 返回的具体 Edition 与 `/books/OL…M` / `/works/OL…W` 分开，最多两次作者详情。默认 1 request/s，保守遵循官方非鉴别请求限额；实际连接测试仅校验配置，明确要求从单目标执行查询，不偷偷发送无目标请求。
+
+豆瓣详情显式提取 ISBN、出版者、原出版日期和多作者，只有绑定 subject 的出版事实才给来源 EDITION 范围，套装仍 SET，不改变本地 UNKNOWN 约束。半精度日期不再补 1 月 1 日。抓到的详情 URL 只提取 subject ID 后请求配置站点，拒绝验证码/访问受限，异常 HTML 与真正空结果分开。Bangumi 以书名/别名而非拼接作者检索，补最多两个必要详情，保留原作/作画角色；条目名不再自动成为 seriesName，作品/卷册不升级为出版版本。
+
+依据：[Google Books 查询/详情](https://developers.google.com/books/docs/v1/using)、[Volume 字段](https://developers.google.com/books/docs/v1/reference/volumes)、[Open Library 使用政策与限速](https://openlibrary.org/developers/api)、[Work/Edition 搜索语义](https://openlibrary.org/dev/docs/api/search)、[Books API](https://openlibrary.org/dev/docs/api/books)、[Bangumi 官方 API](https://bangumi.github.io/api/)。本阶段没有使用真实 Google 凭据/生产数据；UI 配置选择控件及真实 HTTP 浏览器流程继续 M6/M7，不能据 fixture 宣称真实来源联调完成。
+
+有效验证（`apps/api-python`）：新来源 fixture/真实 SQL 配置投影/请求构造/缓存/禁用/旧排序及原直接消费者组合 pytest 129 passed（命令见下）；另有 37 项精确复核通过，4 个关键文件 mypy、所有修改 Python ruff 通过。新增 12 个来源用例。旧空 HTML fixture 现在明确按解析错误拒绝，原 ISBN 请求测试改为合法空搜索响应，仍验证实际 HTTP 的 ISBN 和网络前事务释放，没有放宽断言。
+
+```powershell
+.venv-windows/Scripts/python.exe -m pytest -q tests/unit/modules/metadata/test_recognition.py tests/unit/modules/metadata/test_recognition_queries.py tests/unit/modules/metadata/test_automatic_rate_limiter.py tests/integration/modules/metadata/test_bibliographic_providers.py tests/integration/modules/metadata/test_provider_registry.py tests/integration/modules/metadata/test_provider_failure_diagnostics.py tests/integration/modules/metadata/test_search_transactions.py tests/integration/modules/library/test_provider_source_node_metadata_recognition.py tests/integration/modules/metadata/test_recognition_context.py tests/contract/api/test_recognized_metadata_api.py tests/test_metadata_lookup_queue.py --tb=short
+```
+
 ## M3 实施记录
 
 起点 `bd531a3f`。Provider 字段映射收敛到 `contracts/recognized_metadata_fields.py`，FieldProposal 保留当前值、保护、候选键、层级及证据。自动和手动通过原 `ApplyMetadataPatches.stage` 复用白名单、字段校验、授权范围、修订与操作记录，删除对应直接 ORM 字段写入；原 execute 仍拥有提交，stage 由识别用例持有事务。系统身份绑定 RUNNING 的真实任务与明确目标，没有 MCP grant 或 override 权限。

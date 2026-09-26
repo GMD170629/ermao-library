@@ -14,7 +14,7 @@ def test_isbn_query_precedes_title_author_and_override_is_preserved():
     context = {"book": {"title": "示例书 第2卷", "author": "作者"},
                "identity": {"isbn": "0306406152"}}
     assert recognition_queries(context, "douban") == ("9780306406157", "示例书 第2卷 作者")
-    assert recognition_queries(context, "bangumi") == ("示例书 第2卷 作者",)
+    assert recognition_queries(context, "bangumi") == ("示例书 第2卷",)
     assert recognition_queries(context, "douban", "查找别名") == ("查找别名",)
     assert context["book"]["title"] == "示例书 第2卷"
 

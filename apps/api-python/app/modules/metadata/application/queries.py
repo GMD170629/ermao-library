@@ -22,7 +22,7 @@ def recognition_queries(
     queries = []
     if isbn and provider in {"douban", "google-books", "open-library"}:
         queries.append(isbn)
-    queries.append(" ".join(part for part in (title, author) if part))
+    queries.append(title if provider == "bangumi" else " ".join(part for part in (title, author) if part))
     aliases = identity.get("aliases")
     if isinstance(aliases, (list, tuple)):
         queries.extend(str(alias) for alias in aliases[:2] if isinstance(alias, str))

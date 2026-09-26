@@ -51,6 +51,9 @@ class MetadataProvider(HttpContractModel):
     mode: str
     fields: list[str]
     capabilities: list[str]
+    participation_modes: list[str] = Field(default_factory=list, alias="participationModes")
+    query_types: list[str] = Field(default_factory=list, alias="queryTypes")
+    match_levels: list[str] = Field(default_factory=list, alias="matchLevels")
     automatic_rate_limit: ProviderAutomaticRateLimit | None = Field(
         alias="automaticRateLimit"
     )

@@ -50,6 +50,7 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
         target_snapshot = snapshots.snapshot(recognition.target_type, recognition.target_id, frozenset({recognition.library_id}))
         book_snapshot = snapshots.snapshot("book", book_id, frozenset({recognition.library_id}))
         context = provider_context(self._db, recognition)
+        context["explicitManualQuery"] = True
         title = recognition.identity.title
         try:
             result = search_with_metadata_provider(
