@@ -123,6 +123,10 @@ class ProviderExecution(HttpContractModel):
 
 
 class OrganizeJob(HttpContractModel):
+    recognition_id: str | None = Field(default=None, alias="recognitionId")
+    recognition_outcome: str | None = Field(default=None, alias="recognitionOutcome")
+    recognition_target_type: str | None = Field(default=None, alias="recognitionTargetType")
+    recognition_target_id: str | None = Field(default=None, alias="recognitionTargetId")
     id: str
     run_id: str | None = Field(alias="runId")
     resource_id: str | None = Field(default=None, alias="resourceId")

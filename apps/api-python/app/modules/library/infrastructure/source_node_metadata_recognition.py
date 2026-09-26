@@ -19,8 +19,15 @@ from app.modules.library.infrastructure.metadata_patches import (
 )
 from app.modules.metadata.public import (
     assess_candidates,
+    candidate_evidence,
+    confirm_candidate,
+    ignore_recognition_record,
     load_recognition_context,
+    propose_fields,
     provider_context,
+    recognition_fingerprint,
+    recognition_record,
+    save_recognition_record,
     search_with_metadata_provider,
 )
 
@@ -74,11 +81,14 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
             else [],
         )
         candidates = tuple(
-            replace(candidate, match=decision)
+            replace(candidate, match=decision, confirmable_fields=tuple(proposal.field for proposal in
+                propose_fields(recognition, provider_id, value, confirm_candidate(recognition, candidate_evidence(provider_id, value)))))
             for value, decision in assessed
             if (candidate := self._candidate(value, provider_id)) is not None
         )
+        record_id = save_recognition_record(self._db, recognition, source_node_id, provider_id, assessed, query or title) if provider_id != "ai" else None
         return SourceNodeMetadataRecognitionResult(
+            recognition_id=record_id, target_type=recognition.target_type, target_id=recognition.target_id,
             assistance=result.get("assistance"),
             target_revision=target_snapshot.revision if target_snapshot else None,
             book_revision=book_snapshot.revision if book_snapshot else None,
@@ -88,6 +98,35 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
             message=str(result["message"]) if result.get("message") else None,
             candidates=candidates,
         )
+
+    def ignore(self, book_id: str, record_id: str) -> bool:
+        return ignore_recognition_record(self._db, book_id, record_id)
+
+    def reopen(self, book_id: str, record_id: str) -> SourceNodeMetadataRecognitionResult | None:
+        raw = recognition_record(self._db, book_id, record_id)
+        if raw is None:
+            return None
+        saved = raw["recognition"]
+        context = load_recognition_context(self._db, book_id=book_id, source_node_id=saved.get("sourceNodeId"),
+            resource_id=saved.get("targetId") if saved.get("targetType") == "resource" else None)
+        if context is None or recognition_fingerprint(context) != saved.get("fingerprint") or saved.get("ignored") or saved.get("humanConfirmed"):
+            raise ValueError("METADATA_CHANGED")
+        candidates = []
+        for attempt in raw.get("attempted", [])[:8]:
+            provider = str(attempt.get("provider") or "")
+            values = attempt.get("candidates", attempt.get("exactCandidates", []))[:10]
+            for value, decision in assess_candidates(context, provider, values):
+                candidate = self._candidate(value, provider)
+                if candidate:
+                    confirmed = confirm_candidate(context, candidate_evidence(provider, value))
+                    candidates.append(replace(candidate, match=decision, confirmable_fields=tuple(item.field for item in propose_fields(context, provider, value, confirmed))))
+        port = SqlAlchemyMetadataPatches(self._db)
+        target = port.snapshot(context.target_type, context.target_id, frozenset({context.library_id}))
+        parent = port.snapshot("book", book_id, frozenset({context.library_id}))
+        return SourceNodeMetadataRecognitionResult(source_node_id=str(saved.get("sourceNodeId") or ""), provider_id=candidates[0].source if candidates else "",
+            query=str(saved.get("query") or context.identity.title), message=None, candidates=tuple(candidates[:10]),
+            target_revision=target.revision if target else None, book_revision=parent.revision if parent else None,
+            recognition_id=record_id, target_type=context.target_type, target_id=context.target_id, outcome=saved.get("outcome"), assistance=saved.get("aiAssistance"))
 
     @staticmethod
     def _candidate(

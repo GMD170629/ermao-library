@@ -69,3 +69,9 @@ test('defaults select only non-empty candidate values that differ from current s
   assert.equal(selected.includes('resource.cover'), true);
   assert.equal(hasMetadataValue(false), true);
 });
+
+
+test('server confirmation fields constrain selection and partial dates stay unselected', () => {
+  assert.deepEqual(defaultRecognizedMetadataFields(book, resource, { ...candidate, confirmableFields: ['resource.publisher', 'resource.published_at'], publishedAt: '2026-08' }, recognizedMetadataFields('resource')), ['resource.publisher']);
+  assert.deepEqual(defaultRecognizedMetadataFields(book, resource, { ...candidate, confirmableFields: [] }, recognizedMetadataFields('resource')), []);
+});

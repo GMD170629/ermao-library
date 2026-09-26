@@ -376,13 +376,31 @@ function metadataMatch(value: unknown): SourceNodeMetadataMatch | null {
   };
 }
 
-export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: string, providerId: string, query: string, signal?: AbortSignal, resourceId?: string): Promise<Readonly<{ message: string | null; candidates: SourceNodeMetadataCandidate[] }>> {
+export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: string, providerId: string, query: string, signal?: AbortSignal, resourceId?: string): Promise<MetadataRecognitionResult> {
   const data = record(await apiJson(`/api/books/${encodeURIComponent(bookId)}/source-nodes/${encodeURIComponent(sourceNodeId)}/metadata/search`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ providerId, query, ...(resourceId ? { resourceId } : {}) }),
     signal
   }));
+  return parseRecognitionResult(data, providerId);
+}
+
+export type MetadataRecognitionResult = Readonly<{
+  message: string | null; candidates: SourceNodeMetadataCandidate[]; recognitionId: string | null;
+  targetRevision: string | null; bookRevision: string | null;
+  hints: { query: string; hypothesis: boolean }[];
+}>;
+
+export async function reopenMetadataRecognition(bookId: string, recordId: string, signal?: AbortSignal): Promise<MetadataRecognitionResult> {
+  return parseRecognitionResult(record(await apiJson(`/api/books/${encodeURIComponent(bookId)}/metadata/recognitions/${encodeURIComponent(recordId)}`, { signal })), "");
+}
+
+export async function ignoreMetadataRecognition(bookId: string, recordId: string): Promise<void> {
+  await apiJson(`/api/books/${encodeURIComponent(bookId)}/metadata/recognitions/${encodeURIComponent(recordId)}/ignore`, { method: "POST" });
+}
+
+function parseRecognitionResult(data: Record<string, unknown>, providerId: string): MetadataRecognitionResult {
   const candidates = (Array.isArray(data.candidates) ? data.candidates : []).flatMap((value) => {
     const item = record(value);
     const id = stringValue(item.id).trim();
@@ -407,10 +425,17 @@ export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: str
       resourceIndex: nullableNumber(item.resourceIndex),
       coverUrl: nullableString(item.coverUrl),
       confidence: finiteNumber(item.confidence),
+      ...(Array.isArray(item.confirmableFields) ? { confirmableFields: item.confirmableFields.filter((value): value is string => typeof value === "string") } : {}),
       ...(match ? { match } : {})
     } satisfies SourceNodeMetadataCandidate];
   });
-  return { message: nullableString(data.message), candidates };
+  const assistance = record(data.assistance);
+  const hints = (Array.isArray(assistance.queryHints) ? assistance.queryHints : []).slice(0, 2).flatMap((value) => {
+    const item = record(value);
+    return typeof item.query === 'string' ? [{ query: item.query.slice(0, 200), hypothesis: item.hypothesis !== false }] : [];
+  });
+  return { message: nullableString(data.message), candidates, hints,
+    recognitionId: nullableString(data.recognitionId), targetRevision: nullableString(data.targetRevision), bookRevision: nullableString(data.bookRevision) };
 }
 
 const recognizedMetadataFieldValues = new Set<RecognizedMetadataField>([
@@ -422,6 +447,9 @@ const recognizedMetadataFieldValues = new Set<RecognizedMetadataField>([
 export async function applyRecognizedMetadata(
   bookId: string,
   input: Readonly<{
+    recognitionId?: string | null;
+    expectedRevision?: string | null;
+    expectedBookRevision?: string | null;
     scope: MetadataTargetScope;
     resourceId: string | null;
     candidate: SourceNodeMetadataCandidate;
@@ -432,11 +460,15 @@ export async function applyRecognizedMetadata(
   appliedFields: RecognizedMetadataField[];
   skippedFields: RecognizedMetadataField[];
   coverStatus: 'notSelected' | 'applied' | 'failed';
+  writebackStatus: 'notRequested' | 'queued' | 'failed';
 }>> {
+  const candidate = { ...input.candidate };
+  delete candidate.match;
+  delete candidate.confirmableFields;
   const data = record(await apiJson(`/api/books/${encodeURIComponent(bookId)}/metadata/apply`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
+    body: JSON.stringify({ ...input, candidate }),
     signal
   }));
   const fields = (value: unknown): RecognizedMetadataField[] => (Array.isArray(value) ? value : []).filter(
@@ -449,7 +481,8 @@ export async function applyRecognizedMetadata(
   return {
     appliedFields: fields(data.appliedFields),
     skippedFields: fields(data.skippedFields),
-    coverStatus
+    coverStatus,
+    writebackStatus: data.writebackStatus === "failed" ? "failed" : data.writebackStatus === "queued" ? "queued" : "notRequested"
   };
 }
 
@@ -473,7 +506,7 @@ export async function fetchMetadataProviders(
     return [{
       id,
       name,
-      enabled: item.enabled === true,
+      enabled: item.enabled === true && record(item.config).participation !== "OFF" && record(item.config).assistanceMode !== "OFF",
       priority: finiteNumber(item.priority, Number.MAX_SAFE_INTEGER),
       mode: stringValue(item.mode)
     }];
@@ -497,7 +530,7 @@ export async function updateMetadataProviderOrder(
     return [{
       id,
       name: stringValue(item.name, id),
-      enabled: item.enabled === true,
+      enabled: item.enabled === true && record(item.config).participation !== "OFF" && record(item.config).assistanceMode !== "OFF",
       priority: finiteNumber(item.priority, Number.MAX_SAFE_INTEGER),
       mode: stringValue(item.mode)
     }];

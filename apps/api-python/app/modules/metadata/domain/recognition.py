@@ -381,3 +381,12 @@ def rank_matches(
             ),
         )
     )
+
+
+
+def confirm_candidate(context: RecognitionContext, candidate: CandidateEvidence) -> MatchDecision:
+    """An explicit human selection confirms a source ID, never hides conflicts."""
+    if candidate.provider_id == "ai" or candidate.identity.isbn_scope == "SET" and context.target_type == "resource":
+        return decide_match(context, candidate)
+    identity = replace(context.identity, source_ids=(*context.identity.source_ids, (candidate.provider_id, candidate.item_id)))
+    return decide_match(replace(context, identity=identity), candidate)

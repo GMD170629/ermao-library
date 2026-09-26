@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -30,6 +31,7 @@ from app.modules.metadata.domain.recognition import (
     Contributor,
     IdentityEvidence,
     RecognitionContext,
+    normalize_isbn,
     recognition_fingerprint,
 )
 from app.modules.metadata.infrastructure.sources import METADATA_SOURCE_KIND
@@ -37,7 +39,7 @@ from app.modules.metadata.infrastructure.sources import METADATA_SOURCE_KIND
 
 def _revision(values: tuple[tuple[str, object], ...]) -> str:
     return hashlib.sha256(
-        json.dumps(values, default=str, sort_keys=True).encode()
+        json.dumps(values, default=lambda value: (value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)).isoformat(timespec="milliseconds") if isinstance(value, datetime) else str(value), sort_keys=True).encode()
     ).hexdigest()
 
 
@@ -159,7 +161,8 @@ def load_recognition_context(
             "resource_index",
             "cover_path",
         )
-        values = tuple((name, getattr(resource_metadata, name, None)) for name in names)
+        values = tuple((name, float(value) if name == "resource_index" and value is not None else value)
+                       for name in names for value in [getattr(resource_metadata, name, None)])
         protected = _protected(
             resource_metadata.protected_fields if resource_metadata else None
         )
@@ -201,6 +204,24 @@ def load_recognition_context(
                 ("node_id", resource.source_node_id),
             )
         )
+        records = db.scalars(select(MetadataLookupTask.candidate_raw_json)
+            .where(MetadataLookupTask.book_id == book.id, MetadataLookupTask.resource_id == resource.id,
+                   MetadataLookupTask.status == "COMPLETED")
+            .order_by(MetadataLookupTask.created_at.desc()).limit(8)).all()
+        for encoded in records:
+            saved = json.loads(encoded or "{}")
+            evidence = saved.get("recognition", {})
+            selected = saved.get("selected", {})
+            if (evidence.get("humanConfirmed") and evidence.get("targetType") == "resource"
+                and evidence.get("targetId") == resource.id
+                and evidence.get("confirmedRevision") == revision
+                and evidence.get("confirmedRelatedRevision") == related
+                and selected.get("source") and selected.get("id")):
+                identity = replace(identity, source_ids=((str(selected["source"]), str(selected["id"])),))
+                if (selected.get("isbnScope") == "EDITION" and normalize_isbn(identity.isbn or "")
+                    and normalize_isbn(identity.isbn or "") == normalize_isbn(str(selected.get("isbn") or ""))):
+                    identity = replace(identity, isbn_scope="EDITION")
+                break
         return RecognitionContext(
             "resource",
             resource.id,
@@ -349,9 +370,9 @@ def recognition_retry_suppressed(db: Session, book_id: str) -> bool:
         # Legacy opaque payloads have no reusable recognition decision.
         return False
     record = payload.get("recognition") if isinstance(payload, dict) else None
-    if not isinstance(record, dict) or record.get("schemaVersion") != 2:
+    if not isinstance(record, dict) or record.get("schemaVersion") not in {2, 3}:
         return False
-    context = load_recognition_context(db, book_id=book_id, execution="AUTOMATIC")
+    context = load_recognition_context(db, book_id=book_id, resource_id=record.get("targetId") if record.get("targetType") == "resource" else None, execution="AUTOMATIC")
     if context is None or record.get("fingerprint") != recognition_fingerprint(context):
         return False
     if record.get("outcome") == "AMBIGUOUS" or record.get("ignored") is True:

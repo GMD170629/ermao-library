@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import re
 import socket
 import ssl
 from datetime import datetime
 from http.client import HTTPConnection, HTTPSConnection
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import (
@@ -26,6 +27,10 @@ from PIL import Image, UnidentifiedImageError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.contracts.recognized_metadata_fields import (
+    PROVIDER_METADATA_FIELDS,
+    recognized_field_name,
+)
 from app.core.authorization import (
     AuthorizationContext,
     book_visibility_predicate,
@@ -52,6 +57,8 @@ from app.modules.library.application.recognized_metadata import (
     RecognizedCoverMetadataPort,
     RecognizedCoverPublicationPort,
     RecognizedCoverState,
+    RecognizedMetadataCandidate,
+    RecognizedMetadataField,
     RecognizedMetadataPort,
     RecognizedMetadataTargetState,
     RecognizedResourceChanges,
@@ -67,6 +74,15 @@ from app.modules.library.domain.metadata_patch import (
 )
 from app.modules.library.infrastructure.metadata_patches import (
     SqlAlchemyMetadataPatches,
+)
+from app.modules.metadata.public import (
+    candidate_evidence,
+    complete_recognition_record,
+    confirm_candidate,
+    load_recognition_context,
+    propose_fields,
+    recognition_fingerprint,
+    recognition_record,
 )
 
 _MAX_COVER_BYTES = 10 * 1024 * 1024
@@ -91,6 +107,58 @@ class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetada
         self._snapshots: dict[str, MetadataSnapshot] = {}
         self._actor: LibraryActor | None = None
         self._library_ids: frozenset[str] = frozenset()
+        self._pending_record: tuple[str, str, str | None, dict[str, Any], list[str]] | None = None
+
+    def resolve_selection(self, *, book_id: str, resource_id: str | None, record_id: str,
+                          candidate: RecognizedMetadataCandidate, fields: tuple[RecognizedMetadataField, ...]) -> tuple[RecognizedMetadataCandidate, bool]:
+        raw = recognition_record(self._db, book_id, record_id)
+        if raw is None:
+            raise MetadataPatchError("RESOURCE_NOT_FOUND")
+        saved = raw["recognition"]
+        kind, target = ("resource", resource_id) if resource_id else ("book", book_id)
+        if saved.get("targetType") != kind or saved.get("targetId") != target or saved.get("ignored"):
+            raise MetadataPatchError("CONFLICT")
+        selection = sorted(field.value for field in fields)
+        if saved.get("humanConfirmed"):
+            selected = raw.get("selected") or {}
+            if selected.get("id") == candidate.id and selected.get("source") == candidate.source and sorted(saved.get("appliedSelection", [])) == selection:
+                return candidate, True
+            raise MetadataPatchError("CONFLICT")
+        context = load_recognition_context(self._db, book_id=book_id, resource_id=resource_id, source_node_id=saved.get("sourceNodeId"))
+        if context is None or recognition_fingerprint(context) != saved.get("fingerprint"):
+            raise MetadataPatchError("CONFLICT")
+        value = next(({**item, "source": attempt["provider"]} for attempt in raw.get("attempted", [])[:8]
+            if attempt.get("provider") == candidate.source
+            for item in attempt.get("candidates", attempt.get("exactCandidates", []))[:10]
+            if str(item.get("id")) == candidate.id), None)
+        if value is None:
+            raise MetadataPatchError("INVALID_CANDIDATE")
+        decision = confirm_candidate(context, candidate_evidence(candidate.source, value))
+        proposals = propose_fields(context, candidate.source, value, decision)
+        allowed = {item.field for item in proposals}
+        if any(field.value.split(".")[0] + "." + recognized_field_name(field.value.split(".")[1]) not in allowed for field in fields):
+            raise MetadataPatchError("INVALID_FIELD")
+        values: dict[str, Any] = {"id": candidate.id, "source": candidate.source}
+        for external, name in PROVIDER_METADATA_FIELDS.items():
+            item = value.get(external)
+            if name == "cover_ref":
+                name = "cover_url"
+            if name == "published_at":
+                item = datetime.fromisoformat(item) if isinstance(item, str) and re.match(r"^\d{4}-\d{2}-\d{2}(?:$|T)", item) else None
+            if name == "tags":
+                item = tuple(item) if isinstance(item, list) else ()
+            values[name] = item
+        self._pending_record = (book_id, record_id, resource_id, value, selection)
+        return RecognizedMetadataCandidate(**values), False
+
+    def _stage_record(self, changed: bool) -> None:
+        if self._pending_record:
+            book_id, record_id, resource_id, candidate, fields = self._pending_record
+            self._db.flush()
+            context = load_recognition_context(self._db, book_id=book_id, resource_id=resource_id)
+            if context is None:
+                raise MetadataPatchError("CONFLICT")
+            complete_recognition_record(self._db, book_id, record_id, candidate, fields, context, changed=changed)
 
     def load_target(
         self,
@@ -209,9 +277,10 @@ class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetada
                 changes.append(MetadataChange(before.target_type, target, before.revision, "patch", values,
                                               provenance={key: "MANUAL_RECOGNITION" for key in values}))
         if changes:
-            ApplyMetadataPatches(self._patches, self._db).stage(
+            outcome = ApplyMetadataPatches(self._patches, self._db).stage(
                 MetadataPatchActor(self._actor.user_id, None, self._library_ids, True, True, False),
                 tuple(changes), skip_unchanged=True)
+            self._stage_record(bool(outcome["updated"]))
 
     def load_cover_state(
         self,
@@ -302,6 +371,7 @@ class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetada
             MetadataPatchActor(self._actor.user_id, None, self._library_ids, True, True, False),
             (MetadataChange(kind, state.target_id, before.revision, "patch", {"cover_ref": reference},
                             provenance={"cover_ref": "MANUAL_RECOGNITION"}),), skip_unchanged=True)
+        self._stage_record(True)
 
 
 def _public_socket(host: str, port: int) -> socket.socket:

@@ -392,12 +392,15 @@ def list_pending_job_rows(db: Session, *, limit: int) -> list[dict[str, Any]]:
 def latest_lookup_rows_by_job(
     db: Session,
     job_ids: Sequence[str],
+    *, include_recognition: bool = False,
 ) -> dict[str, dict[str, Any]]:
     if not job_ids:
         return {}
     ranked = (
         select(
             MetadataLookupTask.organize_job_id.label("job_id"),
+            MetadataLookupTask.id,
+            *([MetadataLookupTask.candidate_raw_json] if include_recognition else []),
             MetadataLookupTask.status,
             MetadataLookupTask.result_source,
             MetadataLookupTask.provider_order,
@@ -422,6 +425,8 @@ def latest_lookup_rows_by_job(
         if not job_id:
             continue
         result[job_id] = {
+            "id": row.id,
+            **({"candidateRawJson": row.candidate_raw_json} if include_recognition else {}),
             "status": row.status,
             "resultSource": row.result_source,
             "providerOrder": row.provider_order,

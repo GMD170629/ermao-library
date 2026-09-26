@@ -779,7 +779,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       onClose={() => setSourceNodeEditorTarget(null)}
       onSaved={() => setContentsRevision((value) => value + 1)}
     />
-    <SourceNodeMetadataRecognitionDialog bookId={book.id} entry={sourceNodeRecognitionTarget} onClose={() => setSourceNodeRecognitionTarget(null)} onSaved={() => setContentsRevision((value) => value + 1)} />
+    <SourceNodeMetadataRecognitionDialog book={book} bookId={book.id} entry={sourceNodeRecognitionTarget} onClose={() => setSourceNodeRecognitionTarget(null)} onSaved={async () => { setContentsRevision((value) => value + 1); await refresh(); }} />
     <MetadataLookupModal book={book} currentResourceId={metadataResourceId ?? activeResource?.id ?? null} fixedScope={metadataResourceId ? 'resource' : null} open={metadataLookupOpen} onClose={() => { setMetadataLookupOpen(false); setMetadataResourceId(null); }} onApplied={refresh} />
     <KindleSendModal book={book} open={kindleOpen} preferredResourceId={kindleResourceId ?? activeResource?.id ?? null} onClose={() => { setKindleOpen(false); setKindleResourceId(null); }} />
   </div>;

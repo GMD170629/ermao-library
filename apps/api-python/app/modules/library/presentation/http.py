@@ -133,6 +133,7 @@ from app.modules.library.application.source_node_commands import (
 )
 from app.modules.library.application.source_node_metadata_recognition import (
     MetadataProviderSearchError,
+    SourceNodeMetadataRecognitionResult,
 )
 from app.modules.library.domain.facets import InvalidLibraryFacetRequest
 from app.modules.library.domain.metadata_patch import MetadataPatchError
@@ -1442,8 +1443,13 @@ def search_book_source_node_metadata(
         return _source_node_search_response(
             fail("来源节点不存在", status_code=404, code="SOURCE_NODE_NOT_FOUND")
         )
+    return _recognition_result_response(result)
+
+
+def _recognition_result_response(result: SourceNodeMetadataRecognitionResult) -> SourceNodeMetadataSearchResponse:
     return SourceNodeMetadataSearchResponse(
         data=SourceNodeMetadataSearchPayload(
+            recognitionId=result.recognition_id, targetType=result.target_type, targetId=result.target_id, outcome=result.outcome,
             assistance=result.assistance,
             targetRevision=result.target_revision,
             bookRevision=result.book_revision,
@@ -1455,6 +1461,7 @@ def search_book_source_node_metadata(
                 SourceNodeMetadataCandidateView(
                     id=candidate.id,
                     source=candidate.source,
+                    confirmableFields=list(candidate.confirmable_fields),
                     title=candidate.title,
                     author=candidate.author,
                     description=candidate.description,
@@ -1477,6 +1484,39 @@ def search_book_source_node_metadata(
             ],
         )
     )
+
+
+@router.get("/books/{book_id}/metadata/recognitions/{record_id}", response_model=SourceNodeMetadataSearchResponse)
+def reopen_metadata_recognition(book_id: str, record_id: str, request: Request, db: DatabaseSession,
+                                settings: ApplicationSettings) -> SourceNodeMetadataSearchResponse:
+    user, auth_error = _auth(db, request, settings)
+    error = auth_error or _require_manager(user)
+    if error:
+        return _source_node_search_response(error)
+    if not can_access_book(db, user, book_id):
+        return _source_node_search_response(fail("图书不存在", status_code=404, code="BOOK_NOT_FOUND"))
+    try:
+        result = recognize_source_node_metadata(db).reopen(book_id, record_id)
+    except ValueError:
+        return _source_node_search_response(fail("识别结果已过期，请重新查询", status_code=409, code="METADATA_CHANGED"))
+    if result is None:
+        return _source_node_search_response(fail("识别记录不存在", status_code=404, code="RESOURCE_NOT_FOUND"))
+    return _recognition_result_response(result)
+
+
+@router.post("/books/{book_id}/metadata/recognitions/{record_id}/ignore", response_model=SourceNodeMetadataSearchResponse)
+def ignore_metadata_recognition(book_id: str, record_id: str, request: Request, db: DatabaseSession,
+                                settings: ApplicationSettings) -> SourceNodeMetadataSearchResponse:
+    user, auth_error = _auth(db, request, settings)
+    error = auth_error or _require_manager(user)
+    if error:
+        return _source_node_search_response(error)
+    if not can_access_book(db, user, book_id):
+        return _source_node_search_response(fail("图书不存在", status_code=404, code="BOOK_NOT_FOUND"))
+    if not recognize_source_node_metadata(db).ignore(book_id, record_id):
+        return _source_node_search_response(fail("识别记录不存在", status_code=404, code="RESOURCE_NOT_FOUND"))
+    return _recognition_result_response(SourceNodeMetadataRecognitionResult(source_node_id="", provider_id="", query="", message=None,
+        candidates=(), recognition_id=record_id, outcome="IGNORED"))
 
 
 @router.post(
@@ -1525,6 +1565,7 @@ def apply_book_recognized_metadata(
                 ),
                 fields=tuple(payload.fields),
                 now=datetime.now(UTC),
+                recognition_id=payload.recognition_id,
                 expected_revision=payload.expected_revision,
                 expected_book_revision=payload.expected_book_revision,
             )

@@ -142,7 +142,7 @@ def _organize_job_view(
         return None
     if lookup is None:
         lookup = organize_job_queries.latest_lookup_rows_by_job(
-            db, [str(job.get("id") or "")]
+            db, [str(job.get("id") or "")], include_recognition=True
         ).get(str(job.get("id") or ""))
     if executions is None:
         executions = organize_job_queries.execution_rows_by_job(
@@ -170,6 +170,9 @@ def _organize_job_view(
         normalized_source = str(source or "").strip()
         if normalized_source and normalized_source not in metadata_sources:
             metadata_sources.append(normalized_source)
+    saved = _parse_json((lookup or {}).get("candidateRawJson"), {})
+    recognition = saved.get("recognition", {}) if isinstance(saved, dict) else {}
+    outcome = "IGNORED" if recognition.get("ignored") else recognition.get("outcome")
     return {
         "id": job.get("id"),
         "runId": job.get("runId"),
@@ -181,6 +184,10 @@ def _organize_job_view(
         "reasonCodes": _parse_json(job.get("reasonCodes"), []),
         "summary": job.get("summary"),
         "errorSummary": job.get("errorSummary"),
+        "recognitionId": (lookup or {}).get("id") if recognition else None,
+        "recognitionOutcome": outcome or ("SOURCE_ERROR" if lookup_status == "FAILED" else None),
+        "recognitionTargetType": recognition.get("targetType"),
+        "recognitionTargetId": recognition.get("targetId"),
         "metadataLookupStatus": (lookup or {}).get("status"),
         "metadataLookupSource": (lookup or {}).get("resultSource"),
         "metadataLookupProviders": provider_order,

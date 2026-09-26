@@ -419,6 +419,7 @@ class MetadataMatchView(HttpContractModel):
 
 
 class SourceNodeMetadataCandidateView(HttpContractModel):
+    confirmable_fields: list[str] = Field(default_factory=list, alias="confirmableFields")
     match: MetadataMatchView | None = None
     id: str
     source: str
@@ -441,6 +442,10 @@ class SourceNodeMetadataCandidateView(HttpContractModel):
 
 
 class SourceNodeMetadataSearchPayload(HttpContractModel):
+    recognition_id: str | None = Field(default=None, alias="recognitionId")
+    target_type: str | None = Field(default=None, alias="targetType")
+    target_id: str | None = Field(default=None, alias="targetId")
+    outcome: str | None = None
     assistance: dict[str, object] | None = None
     source_node_id: str = Field(alias="sourceNodeId")
     provider_id: str = Field(alias="providerId")
@@ -479,6 +484,7 @@ class RecognizedMetadataCandidateInput(HttpContractModel):
 
 
 class ApplyRecognizedMetadataRequest(HttpContractModel):
+    recognition_id: str | None = Field(default=None, alias="recognitionId", max_length=191)
     scope: MetadataTargetScope
     resource_id: str | None = Field(default=None, alias="resourceId", max_length=191)
     candidate: RecognizedMetadataCandidateInput

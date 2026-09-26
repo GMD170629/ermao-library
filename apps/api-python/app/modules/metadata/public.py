@@ -26,6 +26,7 @@ from app.modules.metadata.infrastructure.recognition_context import (
 """Public metadata capability contracts."""
 
 from app.contracts.publication_metadata import PublicationMetadata
+from app.modules.metadata.application.field_proposals import propose_fields
 from app.modules.metadata.application.local_metadata import (
     FilesystemLocalMetadataInspector,
     LocalAudioMetadata,
@@ -42,6 +43,7 @@ from app.modules.metadata.application.opf import (
     serialize_opf_metadata,
 )
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
+from app.modules.metadata.application.recognition import candidate_evidence
 from app.modules.metadata.application.writeback import (
     MetadataWritebackAssetProjection,
     MetadataWritebackImportProjection,
@@ -56,6 +58,16 @@ from app.modules.metadata.domain.providers import (
     AutomaticRateLimit,
     ProviderConfigField,
     ProviderManifest,
+)
+from app.modules.metadata.domain.recognition import (
+    confirm_candidate,
+    recognition_fingerprint,
+)
+from app.modules.metadata.infrastructure.recognition_records import (
+    complete_recognition_record,
+    ignore_recognition_record,
+    recognition_record,
+    save_recognition_record,
 )
 from app.services.metadata_file_writeback import (
     load_metadata_writeback_projection,
@@ -113,3 +125,5 @@ __all__ = [
     "search_with_metadata_provider",
     "serialize_opf_metadata",
 ]
+
+__all__ += ["candidate_evidence", "complete_recognition_record", "confirm_candidate", "ignore_recognition_record", "propose_fields", "recognition_fingerprint", "recognition_record", "save_recognition_record"]

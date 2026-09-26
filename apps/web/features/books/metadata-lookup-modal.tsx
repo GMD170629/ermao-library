@@ -5,7 +5,6 @@ import { authorDisplayLabel } from '@/types/book';
 import { CheckCircle2, ImageOff, Maximize2, Search, Sparkles, X } from 'lucide-react';
 import Image from 'next/image';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
 import { Select } from '../../components/ui/select';
@@ -18,11 +17,14 @@ import { completeMetadataApply } from './application/metadata-apply-completion';
 import {
   applyRecognizedMetadata,
   fetchMetadataProviders,
+  reopenMetadataRecognition,
+  ignoreMetadataRecognition,
   searchSourceNodeMetadata
 } from './api/client';
 import type { SourceNodeMetadataCandidate } from './model/book-contents';
 import { MetadataMatchDetails } from './ui/metadata-match-details';
 import {
+  canConfirmMetadataField,
   candidateMetadataValue,
   currentMetadataValue,
   defaultRecognizedMetadataFields,
@@ -37,6 +39,8 @@ type MetadataCandidate = SourceNodeMetadataCandidate;
 
 type MetadataLookupModalProps = {
   book: BookView;
+  recognitionId?: string | null;
+  sourceNodeId?: string | null;
   currentResourceId?: string | null;
   fixedScope?: 'book' | 'resource' | null;
   open: boolean;
@@ -87,14 +91,18 @@ function CoverThumbnail({ url, previewLabel, className, onPreview }: {
   );
 }
 
-export function MetadataLookupModal({ book, currentResourceId, fixedScope = null, open, onClose, onApplied }: MetadataLookupModalProps) {
+export function MetadataLookupModal({ book, recognitionId, sourceNodeId: explicitSourceNodeId, currentResourceId, fixedScope = null, open, onClose, onApplied }: MetadataLookupModalProps) {
   const { formatDate, t: i18nAttribute } = useAttributeI18n();
   const feedback = useToast();
   const targetResource = useMemo(() => book.resources.find((resource) => resource.id === currentResourceId)
     ?? book.resources.find((resource) => resource.id === book.continueResourceId)
     ?? book.resources[0] ?? null, [book.continueResourceId, book.resources, currentResourceId]);
   const [source, setSource] = useState<MetadataSource>('');
-  const [query, setQuery] = useState(book.title);
+  const [query, setQuery] = useState('');
+  const [searchResult, setSearchResult] = useState<Awaited<ReturnType<typeof searchSourceNodeMetadata>> | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose);
+  useEffect(() => { closeRef.current = onClose; }, [onClose]);
   const [candidates, setCandidates] = useState<MetadataCandidate[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [selectedFields, setSelectedFields] = useState<RecognizedMetadataField[]>([]);
@@ -110,8 +118,8 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
   const searchControllerRef = useRef<AbortController | null>(null);
   const applyControllerRef = useRef<AbortController | null>(null);
 
-  const selected = useMemo(() => candidates.find((candidate) => candidate.id === selectedId) ?? candidates[0] ?? null, [candidates, selectedId]);
-  const options = useMemo(() => providers.map((provider) => ({
+  const selected = useMemo(() => candidates.find((candidate) => `${candidate.source}:${candidate.id}` === selectedId) ?? candidates[0] ?? null, [candidates, selectedId]);
+  const options = useMemo(() => providers.filter((provider) => provider.mode !== "assist").map((provider) => ({
     value: provider.id,
     label: provider.name,
     translate: false,
@@ -122,7 +130,8 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
   useEffect(() => {
     if (!open) return;
     setSource('');
-    setQuery(book.title);
+    setQuery('');
+    setSearchResult(null);
     setCandidates([]);
     setSelectedId('');
     setSelectedFields([]);
@@ -135,15 +144,19 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
         const nextEnabledProviderIds = nextProviders.filter((provider) => provider.enabled).map((provider) => provider.id);
         setProviders(nextProviders);
         setEnabledProviderIds(nextEnabledProviderIds);
-        setSource(initialSource(nextProviders));
+        setSource(initialSource(nextProviders.filter((provider) => provider.mode !== "assist")));
       })
       .catch((reason) => { if (!controller.signal.aborted) setError(i18nAttribute(reason instanceof Error ? reason.message : '读取元数据插件失败')); });
+    if (recognitionId) void reopenMetadataRecognition(book.id, recognitionId, controller.signal).then((result) => {
+      if (controller.signal.aborted) return;
+      setSearchResult(result); setCandidates(result.candidates); setSelectedId(result.candidates[0] ? `${result.candidates[0].source}:${result.candidates[0].id}` : '');
+    }).catch((reason) => { if (!controller.signal.aborted) setError(i18nAttribute(reason instanceof Error ? reason.message : '元数据查询失败')); });
     return () => {
       controller.abort();
       searchControllerRef.current?.abort();
       applyControllerRef.current?.abort();
     };
-  }, [book, currentResourceId, i18nAttribute, open]);
+  }, [book.id, currentResourceId, i18nAttribute, open, recognitionId]);
 
   useEffect(() => {
     if (!open) return;
@@ -165,7 +178,24 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [coverPreview]);
 
-  async function searchCandidates() {
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = dialogRef.current;
+    const controls = () => Array.from(dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), [tabindex="0"]') ?? []).filter((element) => element.offsetParent !== null);
+    controls()[0]?.focus();
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !coverPreview) { event.preventDefault(); closeRef.current(); }
+      if (event.key !== 'Tab') return;
+      const items = controls(); const first = items[0]; const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    window.addEventListener('keydown', keydown);
+    return () => { window.removeEventListener('keydown', keydown); previous?.focus(); };
+  }, [open, coverPreview]);
+
+  async function searchCandidates(provider = source) {
     searchControllerRef.current?.abort();
     const controller = new AbortController();
     searchControllerRef.current = controller;
@@ -173,13 +203,14 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
     setError('');
     setMessage('');
     try {
-      const sourceNodeId = fixedScope === 'resource' ? targetResource?.sourceNodeId : book.sourceNodeId;
+      const sourceNodeId = explicitSourceNodeId ?? (fixedScope === 'resource' ? targetResource?.sourceNodeId : book.sourceNodeId);
       if (!sourceNodeId) throw new Error('元数据目标缺少 sourceNodeId');
-      const result = await searchSourceNodeMetadata(book.id, sourceNodeId, source, query.trim(), controller.signal, scope === 'resource' ? targetResource?.id : undefined);
+      const result = await searchSourceNodeMetadata(book.id, sourceNodeId, provider, query.trim(), controller.signal, scope === 'resource' ? targetResource?.id : undefined);
       if (controller.signal.aborted) return;
       const nextCandidates = result.candidates;
       setCandidates(nextCandidates);
-      setSelectedId(nextCandidates[0]?.id ?? '');
+      setSelectedId(nextCandidates[0] ? `${nextCandidates[0].source}:${nextCandidates[0].id}` : '');
+      setSearchResult(result);
       setMessage(nextCandidates.length
         ? i18nAttribute('找到 {value0} 条候选', { value0: nextCandidates.length })
         : i18nAttribute('没有找到候选'));
@@ -202,9 +233,12 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
     try {
       if (scope === 'resource' && !targetResource) throw new Error('元数据目标资源不存在');
       const result = await applyRecognizedMetadata(book.id, {
+        recognitionId: searchResult?.recognitionId,
+        expectedRevision: searchResult?.targetRevision,
+        expectedBookRevision: searchResult?.bookRevision,
         scope,
         resourceId: scope === 'resource' ? targetResource?.id ?? null : null,
-        candidate: selected,
+        candidate: { ...selected, publishedAt: /^\d{4}-\d{2}-\d{2}(?:$|T)/.test(selected.publishedAt ?? '') ? selected.publishedAt : null },
         fields: selectedFields
       }, controller.signal);
       if (controller.signal.aborted) return;
@@ -212,6 +246,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
         setError(i18nAttribute('封面更新失败，请稍后重试'));
         return;
       }
+      if (result.writebackStatus === 'failed') feedback.info(i18nAttribute('元数据已保存，OPF 同步排队失败'));
       if (result.coverStatus === 'failed') feedback.info(i18nAttribute('其他字段已应用，封面更新失败'));
       else feedback.success(i18nAttribute('已应用所选字段'));
       await completeMetadataApply({ close: onClose, refresh: onApplied });
@@ -233,6 +268,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
     if (typeof value === 'boolean') return i18nAttribute(value ? '是' : '否');
     if (Array.isArray(value)) return value.join(', ');
     if (field === 'resource.publishedAt' && (typeof value === 'string' || typeof value === 'number')) {
+      if (typeof value === 'string' && /^\d{4}(?:-\d{2})?$/.test(value)) return value;
       const date = new Date(value);
       if (!Number.isNaN(date.getTime())) return formatDate(date);
     }
@@ -258,12 +294,12 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-end justify-center bg-slate-950/40 p-0 backdrop-blur-sm md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={i18nAttribute("元数据识别")}>
+    <div ref={dialogRef} className="fixed inset-0 z-[90] flex items-end justify-center bg-slate-950/40 p-0 backdrop-blur-sm md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={i18nAttribute("元数据识别")}>
       <div className="flex max-h-[92dvh] w-full max-w-6xl flex-col overflow-hidden rounded-t-[28px] border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 md:rounded-[28px]">
         <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
           <div>
             <h2 className="text-lg font-semibold text-slate-950"><I18nText>元数据识别</I18nText></h2>
-            <p className="mt-1 text-sm text-slate-500">{i18nAttribute('搜索候选，选择字段后应用到《{value0}》。', { value0: book.title })}</p>
+            <p className="mt-1 text-sm text-slate-500">{i18nAttribute('搜索候选，选择字段后应用到《{value0}》。', { value0: scope === 'resource' ? targetResource?.title ?? book.title : book.title })}</p>
           </div>
           <button type="button" onClick={onClose} className="flex h-10 w-10 items-center justify-center rounded-2xl text-slate-500 hover:bg-slate-100" aria-label={i18nAttribute("关闭")}>
             <X size={18} />
@@ -277,13 +313,16 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => { if (event.key === 'Enter') void searchCandidates(); }}
             className="h-11 w-full rounded-2xl border border-slate-200 px-4 text-sm text-slate-900 outline-none focus:border-blue-300"
-            placeholder={i18nAttribute("输入书名、系列名或关键词")}
+            placeholder={i18nAttribute("留空使用 ISBN 或标题作者，也可输入查询词")}
           />
-          <Button disabled={busy || !query.trim() || !sourceReady} icon={source === 'ai' ? Sparkles : Search} onClick={() => void searchCandidates()}>
+          <Button disabled={busy || !sourceReady} icon={source === 'ai' ? Sparkles : Search} onClick={() => void searchCandidates()}>
             {source === 'ai' ? i18nAttribute("识别") : i18nAttribute("搜索")}
           </Button>
         </div>
 
+        {explicitSourceNodeId && explicitSourceNodeId !== book.sourceNodeId && scope === 'book' ? <p className="px-5 pt-3 text-sm text-slate-500"><I18nText>当前目录未绑定资源，仅可查看候选；可手动编辑目录信息。</I18nText></p> : null}
+        {providers.some((provider) => provider.mode === 'assist' && provider.enabled) ? <div className="px-5 pt-3"><Button variant="secondary" icon={Sparkles} disabled={busy} onClick={() => void searchCandidates('ai')}><I18nText>AI 查询建议</I18nText></Button><p className="mt-1 text-xs text-slate-500"><I18nText>仅发送标题、作者、ISBN 和少量文件名。建议仍需来源验证。</I18nText></p></div> : null}
+        {searchResult?.hints.map((hint) => <button key={hint.query} type="button" className="mx-5 mt-2 rounded-xl border p-3 text-left text-sm" onClick={() => setQuery(hint.query)}>{hint.query} · {i18nAttribute(hint.hypothesis ? '待验证查询假设' : '已有证据查询建议')}</button>)}
         {(message || error) ? (
           <div className={cn('mx-5 mt-4 rounded-2xl px-4 py-3 text-sm', error ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700')}>
             {error || message}
@@ -294,8 +333,8 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
           <div className="space-y-2">
             {candidates.map((candidate) => (
               <div
-                key={candidate.id}
-                className={cn('w-full rounded-2xl border p-3 transition', selected?.id === candidate.id ? 'border-blue-200 bg-blue-50' : 'border-slate-200 hover:bg-slate-50')}
+                key={`${candidate.source}:${candidate.id}`}
+                className={cn('w-full rounded-2xl border p-3 transition', selected?.id === candidate.id && selected?.source === candidate.source ? 'border-blue-200 bg-blue-50' : 'border-slate-200 hover:bg-slate-50')}
               >
                 <div className="flex gap-3">
                   <CoverThumbnail
@@ -306,13 +345,12 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
                   />
                   <button
                     type="button"
-                    onClick={() => setSelectedId(candidate.id)}
+                    onClick={() => setSelectedId(`${candidate.source}:${candidate.id}`)}
                     className="min-w-0 flex-1 text-left"
                   >
                     <div data-i18n-skip className="min-w-0 flex-1">
                       <div className="flex items-start justify-between gap-2">
                         <div className="line-clamp-2 font-medium text-slate-900">{candidate.title || i18nAttribute("未命名候选")}</div>
-                        <Badge tone={candidate.confidence >= 0.8 ? 'green' : 'blue'}>{Math.round(candidate.confidence * 100)}%</Badge>
                       </div>
                       <div className="mt-1 line-clamp-1 text-xs text-slate-500">{[authorDisplayLabel(candidate.author), candidate.source].filter(Boolean).join(' · ')}</div>
                       <MetadataMatchDetails match={candidate.match} />
@@ -343,9 +381,9 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
                   {groupDefinitions.map(({ field, label }) => {
                     const currentValue = currentMetadataValue(book, selectedTargetResource, field);
                     const nextValue = candidateMetadataValue(selected, field);
-                    const available = hasMetadataValue(nextValue);
+                    const available = hasMetadataValue(nextValue) && canConfirmMetadataField(selected, field);
                     return (
-                      <label key={field} title={!available ? i18nAttribute('候选未提供该字段') : undefined} className={cn('grid grid-cols-[28px_minmax(0,1fr)] gap-2 px-3 py-3 text-sm md:grid-cols-[44px_90px_minmax(0,1fr)_minmax(0,1fr)]', !available && 'text-slate-400')}>
+                      <label key={field} title={!available ? i18nAttribute('证据、保护或日期精度不足，不能应用此字段') : undefined} className={cn('grid grid-cols-[28px_minmax(0,1fr)] gap-2 px-3 py-3 text-sm md:grid-cols-[44px_90px_minmax(0,1fr)_minmax(0,1fr)]', !available && 'text-slate-400')}>
                         <input
                           type="checkbox"
                           disabled={!available}
@@ -372,6 +410,9 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
         </div>
 
         <div className="flex flex-col gap-2 px-5 py-4 sm:flex-row sm:justify-end">
+          {searchResult?.recognitionId ? <Button variant="secondary" disabled={busy} onClick={() => {
+            setBusy(true); void ignoreMetadataRecognition(book.id, searchResult.recognitionId!).then(() => completeMetadataApply({ close: onClose, refresh: onApplied })).catch((reason) => setError(i18nAttribute(reason instanceof Error ? reason.message : '元数据应用失败'))).finally(() => setBusy(false));
+          }}><I18nText>忽略此结果</I18nText></Button> : null}
           <Button variant="secondary" onClick={onClose}><I18nText>取消</I18nText></Button>
           <Button disabled={busy || !selected || selectedFields.length === 0 || (scope === 'resource' && !targetResource)} icon={CheckCircle2} onClick={() => void applySelected()}><I18nText>应用所选字段</I18nText></Button>
         </div>

@@ -322,7 +322,7 @@ def update_source_node_presentation(
 
 
 def recognize_source_node_metadata(db: Session) -> RecognizeSourceNodeMetadata:
-    return RecognizeSourceNodeMetadata(ProviderSourceNodeMetadataRecognition(db))
+    return RecognizeSourceNodeMetadata(ProviderSourceNodeMetadataRecognition(db), db)
 
 
 def apply_recognized_metadata(

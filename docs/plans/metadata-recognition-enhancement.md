@@ -2,6 +2,33 @@
 
 核对日期：2026-09-26。M0、M1 已提交；用户现已授权连续完成 M2–M7，每阶段独立提交并沿用推送和 `[skip ci]`。以下分阶段记录有效实现及验证，不把后续计划视为已经实现。
 
+## M6 实施记录
+
+起点 `ee6467e2`。既有来源页增加参与方式、查询/层级说明、AI 辅助模式与认证选择；连接/模型请求/配置检查分别标注，Open Library 仍仅人工。识别策略页面接通默认关闭的路径修正和固定请求预算说明。弹窗空查询使用既有 ISBN/标题作者计划，AI 建议只填查询词，候选按共同规则展示；字段选择受服务端 confirmableFields、保护、范围和日期精度约束，不再显示误导性的来源置信百分数。
+
+复用 MetadataLookupTask 保存 schema 3 有界人工结果；现有整理详情展示业务 outcome，并可重开/忽略待确认结果。重开与提交校验原目标、书/资源归属、完整上下文指纹；提交只接受记录中的来源 ID，字段值从服务端记录取回。明确人工选择只补来源身份，不解除已知标题/作者/卷号冲突。确认后的 ISBN 范围仅在来源明确 EDITION、当前 ISBN 等价、确认修订仍一致时投影；单纯保护/校验位仍不能升级范围。重复确认无新写入和 OPF 副作用，忽略结果由既有指纹抑制。资源 sourceNodeId 保存并重新验证，不把未绑定目录变成整书写入目标。
+
+删除目录识别弹窗直接把候选写入目录的旧路径，改用同一个逐字段确认弹窗；没有明确资源绑定的目录只能查看候选，人工编辑入口保留。页面更新保留当前导航和选择。实际浏览器测试暴露并修正详情轮询清空候选、展示字段夹带到严格应用请求、Escape 失焦失效；SQLite 毫秒时间/浮点表示进入稳定修订摘要，避免无变化结果误过期。新字段和文案完成 zh-CN/en-US。没有新增表、迁移、依赖或独立审核页面。
+
+有效验证：
+
+```powershell
+# apps/api-python
+.venv-windows/Scripts/python.exe -m pytest -q tests/unit/modules/metadata/test_recognition.py tests/integration/modules/metadata/test_recognition_context.py tests/integration/modules/library/test_provider_source_node_metadata_recognition.py tests/unit/modules/library/application/test_recognized_metadata.py tests/contract/api/test_recognized_metadata_api.py tests/test_metadata_lookup_queue.py --tb=short
+# 102 passed（运行时尚未加入 M7 的 100k 用例）
+.venv-windows/Scripts/python.exe -m pytest -q tests/contract/api/test_queue_metadata_contract_regressions.py tests/integration/modules/library/test_storage_metadata_writeback_organize_review.py --tb=short
+# 10 passed
+# apps/web；Node 22，沿既有 tsx / Playwright runner
+node node_modules/tsx/dist/cli.mjs --conditions=import --test features/books/api/client.test.ts features/books/model/recognized-metadata.test.ts features/books/model/metadata-match.test.ts features/books/application/metadata-apply-completion.test.ts
+# 32 passed
+node node_modules/@playwright/test/cli.js test e2e/metadata-recognition.spec.ts --project=chrome --workers=1 --reporter=line
+# RECOGNITION_HTTP_SMOKE=1、PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100；1 passed
+```
+
+HTTP 浏览器夹具用临时 STORAGE_ROOT 启动 `tests/fixtures/recognition_http_server.py`（端口 8106），Next 的 PYTHON_API_ORIGIN 指向它。真实登录、配置保存/重载、来源 parser/gate、搜索记录、预览、共同 patch、SQLite 和详情刷新均运行；仅 Google 响应 bytes 是固定夹具，无外部网络。两个独立 browser context 中第二个旧结果返回 409，不覆盖第一个窗口写入；年精度日期保留 1980 且不可提交。夹具必须显式启用，不能指向生产库。7 个关键 Python 文件局部 mypy、变动 Python ruff、变动 Web ESLint、Web tsc 和 2375 条双语目录校验通过。默认 mypy 递归依赖检查另外暴露原 sqlite/diagnostics/books 的 6 项既有问题，未改范围外代码；使用 follow-imports=silent 的本次文件检查通过。
+
+移动窄屏、重启和最终矩阵继续 M7。真实来源/模型凭据及真实标注样本仍缺失；不将该固定 HTTP 夹具称为来源准确率或真实联网验收。
+
 ## M5 实施记录
 
 起点 `65dc2d42`。AI Manifest 改为 assist 角色，从后台事实来源顺序中移除。既有启用配置缺少新字段时解释为 SUGGEST_ONLY，旧模型/地址/密钥保留；新增 OFF、ASSIST_ON_AMBIGUITY 和 bearer/none（none 不发送 Authorization）。运行配置、自动入口及客户端都检查模式，主开关关闭不请求。模型测试走同一客户端的真实 Chat Completions 结构化请求，使用所选模型，不再 `/models` 探测。
@@ -146,11 +173,11 @@ Web 使用仓库可用 Node 22（`C:/Program Files/nodejs/node.exe`）直接运�
 - [x] 核对六项现存问题、实际入口、patch 适配边界、字段与层级、配置与历史结果、后续文件/验证范围、40 个用例设计。
 - [x] M0 只新增本文；生产逻辑、默认值、schema、接口、依赖、lockfile、测试基础设施均不改。
 - [x] M1 结构化证据与共同匹配（见上方交付记录及验证边界）。
-- [ ] M2 有界查询、缓存隔离、限速和业务 outcome。
-- [ ] M3 统一字段应用与人工确认结果。
-- [ ] M4 来源增强与新来源。
-- [ ] M5 AI 辅助。
-- [ ] M6 后台与确认闭环。
+- [x] M2 有界查询、缓存隔离、限速和业务 outcome。
+- [x] M3 统一字段应用与人工确认结果。
+- [x] M4 来源增强与新来源。
+- [x] M5 AI 辅助。
+- [x] M6 后台与确认闭环。
 - [ ] M7 最终验收。
 
 ## 当前调用链与直接证据

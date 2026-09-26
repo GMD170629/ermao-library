@@ -469,3 +469,20 @@ test('resource deletion needs no typed confirmation and preserves idempotency', 
   finally { globalThis.fetch = originalFetch; }
   assert.equal(calls, 1);
 });
+
+
+test('preserves server record binding and AI suggestions without inventing candidates', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, data: {
+    recognitionId: 'record-1', targetRevision: 'revision-1', bookRevision: 'book-revision',
+    candidates: [{ id: 'one', source: 'google-books', confirmableFields: ['resource.publisher', 42] }],
+    assistance: { queryHints: [{ query: 'a suggested query', hypothesis: true }] }
+  } }), { headers: { 'content-type': 'application/json' } });
+  try {
+    const result = await searchSourceNodeMetadata('book-1', 'node-1', 'google-books', '');
+    assert.equal(result.recognitionId, 'record-1');
+    assert.equal(result.targetRevision, 'revision-1');
+    assert.deepEqual(result.candidates[0].confirmableFields, ['resource.publisher']);
+    assert.deepEqual(result.hints, [{ query: 'a suggested query', hypothesis: true }]);
+  } finally { globalThis.fetch = originalFetch; }
+});

@@ -776,6 +776,7 @@ def process_metadata_lookup_task(
                 inspected.append(
                     {
                         "provider": provider,
+                        "candidates": [candidate_summary(item) for item, _ in assessed[:10]],
                         "exactCandidates": [
                             candidate_summary(item) for item, _ in assessed
                             if metadata_candidate_title_exact_match(recognition.identity.title, item)

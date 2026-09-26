@@ -52,6 +52,7 @@ export type SourceNodeMetadataCandidate = Readonly<{
   coverUrl: string | null;
   confidence: number;
   match?: SourceNodeMetadataMatch;
+  confirmableFields?: string[];
 }>;
 
 export type SourceNodeMetadataMatch = Readonly<{

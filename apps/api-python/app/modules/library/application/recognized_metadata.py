@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
@@ -149,6 +149,9 @@ class RecognizedResourceChanges(TypedDict, total=False):
 
 
 class RecognizedMetadataPort(Protocol):
+    def resolve_selection(self, *, book_id: str, resource_id: str | None, record_id: str,
+                          candidate: RecognizedMetadataCandidate, fields: tuple[RecognizedMetadataField, ...]) -> tuple[RecognizedMetadataCandidate, bool]: ...
+
     def load_target(
         self,
         *,
@@ -326,6 +329,7 @@ class ApplyRecognizedMetadataCommand:
     now: datetime
     expected_revision: str | None = None
     expected_book_revision: str | None = None
+    recognition_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -441,6 +445,13 @@ class ApplyRecognizedMetadata:
         ):
             self._unit_of_work.rollback()
             raise RecognizedMetadataTargetNotFoundError
+        if command.recognition_id:
+            candidate, already_applied = self._port.resolve_selection(book_id=command.book_id, resource_id=command.resource_id,
+                record_id=command.recognition_id, candidate=command.candidate, fields=command.fields)
+            if already_applied:
+                self._unit_of_work.rollback()
+                return ApplyRecognizedMetadataResult((), command.fields, "notSelected")
+            command = replace(command, candidate=candidate)
         target_revision = state.book_revision if command.scope is MetadataTargetScope.BOOK else state.resource_revision
         if (command.expected_revision is not None and command.expected_revision != target_revision) or (
             command.expected_book_revision is not None and command.expected_book_revision != state.book_revision
