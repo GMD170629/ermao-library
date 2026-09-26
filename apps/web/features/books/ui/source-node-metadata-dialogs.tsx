@@ -10,6 +10,7 @@ import { I18nText, useI18n } from '../../../i18n/provider';
 import type { BookView } from '../../../types/book';
 import { fetchMetadataProviders, searchSourceNodeMetadata, updateSourceNodeMetadata, updateSourceNodePresentation } from '../api/client';
 import type { BookContentEntry, SourceNodeMetadataCandidate } from '../model/book-contents';
+import { MetadataMatchDetails } from './metadata-match-details';
 
 type SharedProps = Readonly<{
   bookId: string;
@@ -130,7 +131,7 @@ export function SourceNodeMetadataRecognitionDialog({ bookId, entry, onClose, on
     setBusy(true);
     setMessage('');
     try {
-      const result = await searchSourceNodeMetadata(bookId, entry.sourceNodeId, providerId, query.trim());
+      const result = await searchSourceNodeMetadata(bookId, entry.sourceNodeId, providerId, query.trim(), undefined, entry.resourceId ?? undefined);
       setCandidates(result.candidates);
       setMessage(result.candidates.length ? t('找到 {value0} 条候选', { value0: result.candidates.length }) : result.message || t('没有找到候选'));
     } catch (reason) {
@@ -166,7 +167,7 @@ export function SourceNodeMetadataRecognitionDialog({ bookId, entry, onClose, on
         <Button icon={Search} loading={busy} disabled={!query.trim() || !providerId} onClick={() => void search()}><I18nText>搜索</I18nText></Button>
       </div>
       {message ? <p className="mt-4 text-sm text-stone-500">{message}</p> : null}
-      <div className="mt-4 grid gap-3">{candidates.map((candidate) => <article key={`${candidate.source}:${candidate.id}`} className="rounded-2xl border border-stone-200 p-4"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><h3 data-i18n-skip className="font-semibold text-stone-900">{candidate.title || entry.title}</h3>{candidate.description ? <p data-i18n-skip className="mt-2 line-clamp-3 text-sm leading-6 text-stone-600">{candidate.description}</p> : null}<p data-i18n-skip className="mt-2 text-xs text-stone-400">{candidate.source}</p></div><Button variant="secondary" disabled={busy} onClick={() => void apply(candidate)}><I18nText>应用</I18nText></Button></div></article>)}</div>
+      <div className="mt-4 grid gap-3">{candidates.map((candidate) => <article key={`${candidate.source}:${candidate.id}`} className="rounded-2xl border border-stone-200 p-4"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><h3 data-i18n-skip className="font-semibold text-stone-900">{candidate.title || entry.title}</h3><MetadataMatchDetails match={candidate.match} />{candidate.description ? <p data-i18n-skip className="mt-2 line-clamp-3 text-sm leading-6 text-stone-600">{candidate.description}</p> : null}<p data-i18n-skip className="mt-2 text-xs text-stone-400">{candidate.source}</p></div><Button variant="secondary" disabled={busy} onClick={() => void apply(candidate)}><I18nText>应用</I18nText></Button></div></article>)}</div>
       <div className="mt-6 flex justify-end"><Button variant="secondary" onClick={onClose}><I18nText>关闭</I18nText></Button></div>
     </div>
   </div>;

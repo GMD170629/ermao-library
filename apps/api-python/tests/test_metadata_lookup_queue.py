@@ -185,20 +185,51 @@ def test_lookup_waits_for_resource_import_and_schedules_retry(
     assert refreshed.next_attempt_at is not None
 
 
-def test_exact_candidate_selection_requires_one_title_match_and_can_use_author() -> (
-    None
+@pytest.mark.parametrize("author,expected", [("其他作者", "REJECTED"), (None, "AMBIGUOUS"), ("岛田庄司", "MATCHED")])
+def test_automatic_lookup_uses_identity_decision_without_resource_writes(
+    db_session, test_settings, monkeypatch, author, expected
 ):
-    candidates = [
-        {"title": "黑暗坡食人树", "author": "岛田庄司", "source": "douban"},
-        {"title": "黑暗坡食人树", "author": "其他作者", "source": "bangumi"},
-    ]
+    book, resource = _seed_lookup_graph(db_session)
+    task = _lookup_task(db_session, book, resource, status="RUNNING")
+    task_id, book_id, resource_id = task.id, book.id, resource.id
+    calls = []
 
-    selected, exact = queue._choose_exact_candidate(
-        candidates, "黑暗坡食人树", "岛田庄司"
-    )
+    def search(db, context, provider, query, gate):
+        assert not db.in_transaction()
+        calls.append(provider)
+        return {"enabled": True, "candidates": [{
+            "id": "one", "source": provider, "title": "黑暗坡食人树", "author": author,
+            "publisher": "Must not write", "isbn": "9780306406157",
+        }]}
 
-    assert selected == candidates[0]
-    assert exact == candidates
+    monkeypatch.setattr(queue, "_search_provider", search)
+    result = process_metadata_lookup_task(db_session, test_settings, {
+        "id": task_id, "bookId": book_id, "resourceId": resource_id,
+        "providerOrder": '["douban"]', "status": "RUNNING", "attempts": 0,
+    })
+    assert result == ("COMPLETED" if expected == "MATCHED" else "NO_MATCH")
+    assert calls == ["douban"]
+    db_session.expire_all()
+    saved = db_session.get(MetadataLookupTask, task_id)
+    payload = json.loads(saved.candidate_raw_json)
+    attempts = payload["attempted"] if expected == "MATCHED" else payload
+    assert attempts[0]["matches"][0]["outcome"] == expected
+    assert db_session.get(LibraryReadableResourceMetadata, resource_id).isbn is None
+    assert db_session.get(LibraryBookMetadata, book_id).author == "岛田庄司"
+
+
+def test_aggregate_book_does_not_borrow_representative_resource_isbn(db_session, test_settings, monkeypatch):
+    book, resource = _seed_lookup_graph(db_session)
+    node = _node("second-node", "lookup-book/volume2.txt")
+    db_session.add(node)
+    db_session.flush()
+    db_session.add(LibraryReadableResource(id="second-resource", library_id="test-library", book_id=book.id, source_node_id=node.id, adapter_id="txt", adapter_version="1", format="TXT", import_state="READY"))
+    db_session.get(LibraryReadableResourceMetadata, resource.id).isbn = "9780306406157"
+    db_session.commit()
+    task = _lookup_task(db_session, book, resource, status="RUNNING")
+    monkeypatch.setattr(queue, "_search_provider", lambda *_: {"enabled": True, "candidates": [{"id": "one", "title": "黑暗坡食人树", "author": "岛田庄司", "isbn": "9780306406157"}]})
+    monkeypatch.setattr(queue, "_prepare_candidate_application", lambda *_: pytest.fail("aggregate must not apply a single-volume result"))
+    assert process_metadata_lookup_task(db_session, test_settings, {"id": task.id, "bookId": book.id, "resourceId": resource.id, "providerOrder": '["douban"]', "attempts": 0}) == "NO_MATCH"
 
 
 def test_cancelled_lookup_cannot_be_reopened_by_a_stale_worker(db_session) -> None:

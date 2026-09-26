@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-import unicodedata
 from datetime import UTC, datetime
 from html import unescape
 from time import time_ns
@@ -20,11 +19,16 @@ from app.core.exception_diagnostics import record_exception
 from app.core.time import now_timestamp_ms
 from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
+from app.modules.metadata.application.recognition import candidate_titles, title_strings
+from app.modules.metadata.domain.recognition import normalize_text
 from app.modules.metadata.infrastructure import external_cache as metadata_cache
+from app.modules.metadata.infrastructure.recognition_context import (
+    load_recognition_context,
+    provider_context,
+)
 from app.modules.metadata.infrastructure.short_writes import (
     metadata_short_write_session,
 )
-from app.modules.organize.infrastructure import review as organize_review
 
 LOGGER = logging.getLogger(__name__)
 
@@ -107,10 +111,7 @@ def normalize_key(value: Any) -> str:
 
 
 def metadata_title_key(value: Any) -> str:
-    normalized = unicodedata.normalize("NFKC", str(value or "")).lower()
-    return re.sub(
-        r"[\s_\-.[\]()（）【】《》:：,，!！?？\"'“”‘’·・、/\\]+", "", normalized
-    ).strip()
+    return normalize_text(str(value or ""))
 
 
 def metadata_title_exact_match(expected: Any, candidate: Any) -> bool:
@@ -120,51 +121,11 @@ def metadata_title_exact_match(expected: Any, candidate: Any) -> bool:
 
 
 def _metadata_title_strings(value: Any) -> list[str]:
-    if isinstance(value, str):
-        return [value.strip()] if value.strip() else []
-    if isinstance(value, (list, tuple, set)):
-        return [title for item in value for title in _metadata_title_strings(item)]
-    if isinstance(value, dict):
-        return [
-            title
-            for key in ("v", "value", "title", "name", "name_cn", "alias")
-            for title in _metadata_title_strings(value.get(key))
-        ]
-    return []
+    return list(title_strings(value))
 
 
 def metadata_candidate_title_values(candidate: dict[str, Any]) -> list[str]:
-    """Return every provider-declared title, including cached Bangumi aliases."""
-
-    values = [
-        *_metadata_title_strings(candidate.get("title")),
-        *_metadata_title_strings(candidate.get("titleAliases")),
-    ]
-    raw_value = candidate.get("raw")
-    raw: dict[str, Any] = raw_value if isinstance(raw_value, dict) else {}
-    for key in (
-        "title",
-        "name",
-        "name_cn",
-        "originalTitle",
-        "original_title",
-        "origin_title",
-        "alt_title",
-        "aliases",
-        "aka",
-    ):
-        values.extend(_metadata_title_strings(raw.get(key)))
-    infobox_value = raw.get("infobox")
-    infobox = infobox_value if isinstance(infobox_value, list) else []
-    for entry in infobox:
-        if not isinstance(entry, dict) or not re.search(
-            r"别名|又名|中文名|简体中文|繁体中文|原名|日文名|英文名",
-            str(entry.get("key") or ""),
-            re.IGNORECASE,
-        ):
-            continue
-        values.extend(_metadata_title_strings(entry.get("value")))
-    return list(dict.fromkeys(value for value in values if metadata_title_key(value)))
+    return list(candidate_titles(candidate))
 
 
 def metadata_candidate_title_exact_match(
@@ -217,7 +178,8 @@ def first_exact_title_candidate(
 
 
 def metadata_context_for_book(db: Session, book_id: str) -> dict[str, Any] | None:
-    return organize_review.load_book_context(db, book_id)
+    context = load_recognition_context(db, book_id=book_id, execution="AUTOMATIC")
+    return provider_context(db, context) if context else None
 
 
 def local_metadata_summary(context: dict[str, Any]) -> dict[str, Any]:

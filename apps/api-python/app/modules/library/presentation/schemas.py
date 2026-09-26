@@ -406,9 +406,20 @@ class SourceNodeMetadataUpdatedPayload(HttpContractModel):
 class SourceNodeMetadataSearchRequest(HttpContractModel):
     provider_id: str = Field(alias="providerId", min_length=1, max_length=100)
     query: str | None = Field(default=None, max_length=500)
+    resource_id: str | None = Field(default=None, alias="resourceId", min_length=1, max_length=191)
+
+
+class MetadataMatchView(HttpContractModel):
+    outcome: Literal["MATCHED", "AMBIGUOUS", "REJECTED", "NO_MATCH"]
+    candidate_key: str = Field(alias="candidateKey")
+    level: Literal["SERIES", "WORK", "VOLUME", "EDITION", "UNKNOWN"]
+    evidence_ids: list[str] = Field(alias="evidenceIds")
+    reasons: list[str]
+    allowed_fields: list[str] = Field(alias="allowedFields")
 
 
 class SourceNodeMetadataCandidateView(HttpContractModel):
+    match: MetadataMatchView | None = None
     id: str
     source: str
     title: str | None = None

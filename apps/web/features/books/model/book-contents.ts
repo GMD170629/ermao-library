@@ -51,6 +51,16 @@ export type SourceNodeMetadataCandidate = Readonly<{
   resourceIndex: number | null;
   coverUrl: string | null;
   confidence: number;
+  match?: SourceNodeMetadataMatch;
+}>;
+
+export type SourceNodeMetadataMatch = Readonly<{
+  outcome: 'MATCHED' | 'AMBIGUOUS' | 'REJECTED' | 'NO_MATCH';
+  level: 'SERIES' | 'WORK' | 'VOLUME' | 'EDITION' | 'UNKNOWN';
+  candidateKey: string;
+  evidenceIds: string[];
+  reasons: string[];
+  allowedFields: string[];
 }>;
 
 export function bookContentSortQuery(sort: BookContentSort): Readonly<{ sort: 'name' | 'type' | 'updated' | 'size'; direction: 'asc' | 'desc' }> {

@@ -21,6 +21,7 @@ import {
   searchSourceNodeMetadata
 } from './api/client';
 import type { SourceNodeMetadataCandidate } from './model/book-contents';
+import { MetadataMatchDetails } from './ui/metadata-match-details';
 import {
   candidateMetadataValue,
   currentMetadataValue,
@@ -174,7 +175,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
     try {
       const sourceNodeId = fixedScope === 'resource' ? targetResource?.sourceNodeId : book.sourceNodeId;
       if (!sourceNodeId) throw new Error('元数据目标缺少 sourceNodeId');
-      const result = await searchSourceNodeMetadata(book.id, sourceNodeId, source, query.trim(), controller.signal);
+      const result = await searchSourceNodeMetadata(book.id, sourceNodeId, source, query.trim(), controller.signal, scope === 'resource' ? targetResource?.id : undefined);
       if (controller.signal.aborted) return;
       const nextCandidates = result.candidates;
       setCandidates(nextCandidates);
@@ -314,6 +315,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
                         <Badge tone={candidate.confidence >= 0.8 ? 'green' : 'blue'}>{Math.round(candidate.confidence * 100)}%</Badge>
                       </div>
                       <div className="mt-1 line-clamp-1 text-xs text-slate-500">{[authorDisplayLabel(candidate.author), candidate.source].filter(Boolean).join(' · ')}</div>
+                      <MetadataMatchDetails match={candidate.match} />
                       {candidate.description ? <div className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500">{candidate.description}</div> : null}
                     </div>
                   </button>

@@ -152,6 +152,41 @@ def test_metadata_apply_requires_authentication(client) -> None:
     assert response.status_code == 401
 
 
+def test_metadata_search_returns_shared_match_and_keeps_original_resource_context(client, db_session, monkeypatch):
+    from app.modules.library.infrastructure import source_node_metadata_recognition
+
+    _login(client, db_session, role="admin")
+    resource_id = _add_book(db_session, book_id="recognition-http")
+    db_session.get(LibraryReadableResourceMetadata, resource_id).title = "作品第一卷"
+    db_session.commit()
+    other_resource = _add_book(db_session, book_id="other-http")
+    requests = []
+
+    def search(db, context, provider, query):
+        requests.append((context["book"]["title"], query))
+        return {"candidates": [
+            {"id": "conflict", "title": "作品第二卷", "author": "旧作者"},
+            {"id": "same", "title": "作品第一卷", "author": "旧作者"},
+            {"id": "same", "title": "作品第一卷", "author": "旧作者"},
+        ]}
+
+    monkeypatch.setattr(source_node_metadata_recognition, "search_with_metadata_provider", search)
+    endpoint = f"/api/books/recognition-http/source-nodes/{resource_id}-node/metadata/search"
+    response = client.post(endpoint, json={"providerId": "douban", "query": "作品第二卷", "resourceId": resource_id})
+    assert response.status_code == 200, response.text
+    candidates = response.json()["data"]["candidates"]
+    assert [item["id"] for item in candidates] == ["same", "conflict"]
+    assert candidates[0]["match"]["outcome"] == "MATCHED"
+    assert candidates[0]["match"]["level"] == "VOLUME"
+    assert "resource.isbn" not in candidates[0]["match"]["allowedFields"]
+    assert candidates[1]["match"]["reasons"] == ["VOLUME_CONFLICT"]
+    assert requests == [("作品第一卷", "作品第二卷")]
+    response = client.post(endpoint, json={"providerId": "douban", "resourceId": other_resource})
+    assert response.status_code == 404
+    assert len(requests) == 1
+    assert db_session.get(LibraryReadableResourceMetadata, resource_id).title == "作品第一卷"
+
+
 def test_metadata_apply_requires_system_manager(client, db_session: Session) -> None:
     _login(client, db_session, role="member")
     response = client.post(

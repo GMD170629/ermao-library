@@ -1,3 +1,4 @@
+from app.modules.metadata.application.recognition import assess_candidates, match_view
 from app.modules.metadata.application.standard_files import (
     MetadataFileSource,
     StandardFileMetadataReader,
@@ -14,7 +15,12 @@ from app.modules.metadata.application.standard_writeback import (
     StandardWritePlanStore,
     StandardWriteStatus,
 )
+from app.modules.metadata.domain.recognition import MatchDecision
 from app.modules.metadata.domain.source_name import metadata_from_source_name
+from app.modules.metadata.infrastructure.recognition_context import (
+    load_recognition_context,
+    provider_context,
+)
 
 """Public metadata capability contracts."""
 
@@ -66,6 +72,7 @@ __all__ = [
     "FilesystemLocalMetadataInspector",
     "LocalAudioMetadata",
     "LocalMetadataCandidate",
+    "MatchDecision",
     "MetadataFileSource",
     "MetadataWritebackAssetProjection",
     "MetadataWritebackImportProjection",
@@ -88,14 +95,18 @@ __all__ = [
     "StandardWritePlan",
     "StandardWritePlanStore",
     "StandardWriteStatus",
+    "assess_candidates",
     "cover_media_type",
     "load_metadata_writeback_projection",
+    "load_recognition_context",
+    "match_view",
     "metadata_from_source_name",
     "metadata_writeback_enabled",
     "parse_opf_metadata",
     "persist_metadata_writeback_intents",
     "prepare_metadata_writeback_intents",
     "prepare_source_node_metadata_writeback_intent",
+    "provider_context",
     "resolve_local_metadata",
     "search_with_metadata_provider",
     "serialize_opf_metadata",

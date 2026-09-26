@@ -1,6 +1,42 @@
 # 增强元数据识别：执行计划与 M0 契约冻结
 
-核对日期：2026-09-26。当前仅完成 M0；M1–M7 未执行。本文是后续阶段唯一进度文档，文末保留用户提供的实施方案全文作为需求基准。方案中的后续执行提示不构成本次执行授权。
+核对日期：2026-09-26。当前完成 M0、M1；M2–M7 未执行。本文是后续阶段唯一进度文档，文末保留用户提供的实施方案全文作为需求基准。方案中的后续执行提示不构成继续执行授权。
+
+## M1 交付记录
+
+用户本次授权执行 M1、完成后推送并跳过 CI。起点为 `codex/metadata-recognition-enhancement@a09a37ce649dcf0f4e8f28e29183bc40c0a59d89`，开始时工作树干净；远端 develop 仍为 `33a71986`，远端尚无本开发分支。M0 以下各节保留为当时核查记录，不视为 M1 后的当前实现。M1 提交使用 `[skip ci]`，只推送当前开发分支，不创建 PR、不合并、不发布；仓库 push 工作流本来也只监听 develop/prod/版本 tag，不改 workflow。
+
+### 实际功能和调用链
+
+- 新增 `modules/metadata/domain/recognition.py`：显式 RecognitionContext、IdentityEvidence、Contributor、CandidateEvidence、MatchDecision；归一化保留原值，ISBN 校验及 10→13 等价、作者角色/UNKNOWN、中文/Vol 卷号、上下册/续作/版本冲突、层级和允许字段均由一处规则决定。同名且作者不明待确认，已知作者/卷号冲突拒绝；AI 自报候选不能进入自动匹配。模糊比较仅排序；同源同 ID 去重，重复身份内容冲突或多个可靠候选转待确认。
+- 新增 `modules/metadata/application/recognition.py`：已有 Provider 字典在此转换为候选证据；来源键绑定实际请求的 providerId，不采信返回 payload 的 source 冒充来源。alias/raw/infobox 的标题提取迁到此处，organize_service 旧标题工具仅委托；用户输入 query 不变成身份事实。
+- 新增 `modules/metadata/infrastructure/recognition_context.py`：按 book 或明确 resource 投影已有值、保护、目标/关联修订、库、执行方式和规则/策略修订；父级 title 独立保留。未证明的 provenance 一律 UNKNOWN，不把 identifier 猜成来源 ID，不读操作历史全表。聚合判断最多读 2 个资源 ID，Provider 兼容输入最多 8 个资源/8 个文件名，读取前限制，不逐图识别。多资源 book 暂保守要求聚合层级证据，不能借某子卷 ISBN。
+- 自动链：现有 task → 有界 book 上下文 → 原 Provider 查询 → assess_candidates/rank_matches → MATCHED 才进入原应用分支。删除 `_choose_exact_candidate`，用真实队列行为用例取代旧私有选择器测试；保留短事务/取消/book guard/OPF 机制。决定和证据引用写入现有 attempted 记录的 matches；任务状态仍用原 NO_MATCH/COMPLETED，完整业务 outcome/冷却属于 M2。
+- 自动整理现有任务实际写 book；其 resourceId 是调度器选出的代表资源及导入/OPF 引用，M1 不把它偷偷升级为明确版本目标。M1 只把规则允许的 title/author/description 传给现有 book writer；description 还要求 Provider 明确给出匹配范围。现有来源无法证明简介/标签/系列/封面范围时保守不自动写，自动采用覆盖率会降低，完整字段建议和 resource 应用留到 M3。此阶段没有新增自动资源写入。
+- 手动链：原 search HTTP 新增可选 resourceId → 原用例/adapter → 相同上下文与 assess_candidates → 候选返回可选 match（outcome/level/candidateKey/evidenceIds/reasons/allowedFields）。保留现有字段及 payload 兼容；其他 book 的资源返回 404，不请求来源。两个已有弹窗传明确资源 ID、保持后端排序并显示双语状态/层级/原因，未知原因有保守提示。UI 与 DTO 仍不拥有信任/写入授权；手动 patch 统一、修订提交和逐字段确认门槛留到 M3/M6。
+
+后端本段路径前缀为 `apps/api-python/app/`。其余生产改动仅涉及 metadata public、library 的 source_node_metadata_recognition 用例/适配器/HTTP/schema，以及 `services/organize_service.py`、`services/metadata_lookup_queue.py`。Web 改动限于 books API/client/model、两个现有识别弹窗、共用匹配说明组件和双语目录；API 是既有手写 client，不涉及生成 wire 文件。
+
+### 有效验证与已知缺口
+
+在 `apps/api-python` 使用现有 Windows Python 环境运行，未安装依赖、未改 lockfile：
+
+```powershell
+.venv-windows/Scripts/python.exe -m pytest -q tests/unit/modules/metadata/test_recognition.py tests/unit/modules/metadata/test_local_metadata.py tests/unit/modules/library/application/test_source_node_metadata_recognition.py tests/integration/modules/library/test_provider_source_node_metadata_recognition.py tests/test_metadata_lookup_queue.py tests/integration/modules/metadata/test_search_transactions.py tests/contract/api/test_recognized_metadata_api.py tests/contract/api/test_queue_metadata_contract_regressions.py tests/integration/modules/metadata/test_provider_registry.py tests/integration/modules/metadata/test_provider_failure_diagnostics.py
+# 76 passed；随后补强冲突证据引用及作者列表边界，以下重验直接消费者和新增 SQLite 用例：
+.venv-windows/Scripts/python.exe -m pytest -q tests/unit/modules/metadata/test_recognition.py tests/test_metadata_lookup_queue.py tests/integration/modules/library/test_provider_source_node_metadata_recognition.py tests/integration/modules/metadata/test_recognition_context.py tests/contract/api/test_recognized_metadata_api.py
+# 55 passed；与上一组复用未变覆盖，共 79 个不同用例。
+.venv-windows/Scripts/python.exe -m mypy --follow-imports=silent app/modules/metadata/domain/recognition.py app/modules/metadata/application/recognition.py app/modules/metadata/infrastructure/recognition_context.py app/modules/library/application/source_node_metadata_recognition.py app/modules/library/infrastructure/source_node_metadata_recognition.py app/modules/library/presentation/schemas.py app/services/metadata_lookup_queue.py app/services/organize_service.py
+# 8 个文件通过；全部本次变动 Python 文件 ruff check 通过。
+```
+
+新增测试包括 31 个小型领域用例、实际自动队列的冲突/未知/可靠候选/聚合保护、HTTP 查询覆盖词不改变原卷身份、重复候选去重排序、跨书资源拒绝；SQLite 两个用例证明资源 ISBN/修订隔离、8 项投影上限、增加无关书后 SELECT 次数不变。是小型合成样本，不是生产识别准确率，也不冒充 M7 的 100k 或真实来源验收。
+
+Web 使用仓库可用 Node 22（`C:/Program Files/nodejs/node.exe`）直接运行现有工具：`node_modules/tsx/dist/cli.mjs --conditions=import --test features/books/model/metadata-match.test.ts features/books/model/recognized-metadata.test.ts features/books/application/metadata-apply-completion.test.ts features/books/api/client.test.ts`，29/29；`node_modules/typescript/bin/tsc --noEmit` 通过；对本次 8 个 TS/TSX 文件执行现有 ESLint `--max-warnings=0` 通过。`scripts/generate-i18n-catalog.mjs --write` 生成目录后再检查，2344 条双语文案通过。默认 pnpm 指向不符合项目要求的 Node24/pnpm11，故使用上述固定工具链；i18n Python 调用复用临时 python3 shim，未改项目运行配置或依赖。
+
+相邻调度套件 `tests/test_organize_scheduler.py` 有一项既有失败：`test_manual_wait_does_not_block_other_books_and_local_failure_stops_remote` 在第 309 行期望领取 ready，实际 waiting。该断言发生在新识别逻辑之前；用 `git show a09a37ce:apps/api-python/app/services/metadata_lookup_queue.py` 在独立 Python 进程加载 M0 原队列模块后单独运行该测试，同处复现。未跳过/修改断言，未改本次未触及的任务领取/导入生命周期；不能声称相邻套件或全量回归全部通过。
+
+没有真实来源/模型联调、浏览器交互/双浏览器并发和移动验收；本次手动链证据为真实 HTTP 测试客户端与 Web 解析/标签单测、类型检查，不等同于 M6 浏览器闭环。未新增配置默认值、schema、迁移、依赖、原件写回或文件拓扑变化。不执行 M2–M7，不声明最终发布门禁通过。
 
 ## M0 基线与检查清单
 
@@ -10,7 +46,7 @@
 - [x] 读取 [仓库规则](../../AGENTS.md)、[工程规范](../engineering-standards.md)、[能力入口](../business-code-layering-and-refactoring.md)、[测试策略](../testing/test-execution-policy.md) 与相关现行实现；检索现有 plans，未发现等价增强识别计划。
 - [x] 核对六项现存问题、实际入口、patch 适配边界、字段与层级、配置与历史结果、后续文件/验证范围、40 个用例设计。
 - [x] M0 只新增本文；生产逻辑、默认值、schema、接口、依赖、lockfile、测试基础设施均不改。
-- [ ] M1 结构化证据与共同匹配。
+- [x] M1 结构化证据与共同匹配（见上方交付记录及验证边界）。
 - [ ] M2 有界查询、缓存隔离、限速和业务 outcome。
 - [ ] M3 统一字段应用与人工确认结果。
 - [ ] M4 来源增强与新来源。

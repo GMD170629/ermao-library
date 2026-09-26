@@ -4,24 +4,22 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
+from dataclasses import replace
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import (
-    LibraryBook,
-    LibraryBookMetadata,
-    LibraryReadableResource,
-    LibrarySourceNode,
-    LibrarySourceNodeMetadata,
-)
 from app.modules.library.application.source_node_metadata_recognition import (
     MetadataProviderSearchError,
     SourceNodeMetadataCandidate,
     SourceNodeMetadataRecognitionPort,
     SourceNodeMetadataRecognitionResult,
 )
-from app.modules.metadata.public import search_with_metadata_provider
+from app.modules.metadata.public import (
+    assess_candidates,
+    load_recognition_context,
+    provider_context,
+    search_with_metadata_provider,
+)
 
 
 class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
@@ -35,77 +33,18 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
         source_node_id: str,
         provider_id: str,
         query: str | None,
+        resource_id: str | None = None,
     ) -> SourceNodeMetadataRecognitionResult | None:
-        book_row = self._db.execute(
-            select(LibraryBook, LibraryBookMetadata)
-            .join(
-                LibraryBookMetadata,
-                LibraryBookMetadata.book_id == LibraryBook.id,
-            )
-            .where(LibraryBook.id == book_id)
-        ).one_or_none()
-        node_row = self._db.execute(
-            select(LibrarySourceNode, LibrarySourceNodeMetadata)
-            .outerjoin(
-                LibrarySourceNodeMetadata,
-                LibrarySourceNodeMetadata.source_node_id == LibrarySourceNode.id,
-            )
-            .where(LibrarySourceNode.id == source_node_id)
-        ).one_or_none()
-        if book_row is None or node_row is None:
-            return None
-        book, book_metadata = book_row
-        node, node_metadata = node_row
-        root = self._db.get(LibrarySourceNode, book.source_node_id)
-        if (
-            root is None
-            or node.library_id != root.library_id
-            or not (
-                node.id == root.id
-                or node.relative_path.startswith(f"{root.relative_path.rstrip('/')}/")
-            )
-        ):
-            return None
-        resources = [
-            {
-                "format": resource.format,
-                "hidden": resource.enablement_state != "ENABLED",
-            }
-            for resource in self._db.scalars(
-                select(LibraryReadableResource)
-                .join(
-                    LibrarySourceNode,
-                    LibrarySourceNode.id == LibraryReadableResource.source_node_id,
-                )
-                .where(
-                    LibraryReadableResource.book_id == book_id,
-                    (LibrarySourceNode.id == node.id)
-                    | LibrarySourceNode.relative_path.startswith(
-                        f"{node.relative_path.rstrip('/')}/",
-                        autoescape=True,
-                    ),
-                )
-                .order_by(
-                    LibraryReadableResource.created_at, LibraryReadableResource.id
-                )
-            )
-        ]
-        title = (
-            node_metadata.title.strip()
-            if node_metadata is not None and node_metadata.title
-            else node.name
+        recognition = load_recognition_context(
+            self._db,
+            book_id=book_id,
+            resource_id=resource_id,
+            source_node_id=source_node_id,
         )
-        context = {
-            "book": {
-                "id": book.id,
-                "title": title,
-                "author": book_metadata.author,
-                "description": node_metadata.description if node_metadata else None,
-                "seriesName": book_metadata.series_name,
-                "seriesIndex": book_metadata.series_index,
-            },
-            "resources": resources,
-        }
+        if recognition is None:
+            return None
+        context = provider_context(self._db, recognition)
+        title = recognition.identity.title
         try:
             result = search_with_metadata_provider(
                 self._db,
@@ -115,11 +54,22 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
             )
         except Exception as exc:
             raise MetadataProviderSearchError(provider_id) from exc
+        raw_candidates = result.get("candidates")
+        assessed = assess_candidates(
+            recognition,
+            provider_id,
+            [
+                {str(key): item for key, item in value.items()}
+                for value in raw_candidates
+                if isinstance(value, Mapping)
+            ]
+            if isinstance(raw_candidates, list)
+            else [],
+        )
         candidates = tuple(
-            candidate
-            for value in result.get("candidates", [])
-            if isinstance(value, Mapping)
-            and (candidate := self._candidate(value, provider_id)) is not None
+            replace(candidate, match=decision)
+            for value, decision in assessed
+            if (candidate := self._candidate(value, provider_id)) is not None
         )
         return SourceNodeMetadataRecognitionResult(
             source_node_id=source_node_id,
@@ -131,7 +81,7 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
 
     @staticmethod
     def _candidate(
-        value: Mapping[object, object], provider_id: str
+        value: Mapping[str, object], provider_id: str
     ) -> SourceNodeMetadataCandidate | None:
         identifier = str(value.get("id") or "").strip()
         if not identifier:
@@ -176,7 +126,7 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
         abridged_value = value.get("abridged")
         return SourceNodeMetadataCandidate(
             id=identifier,
-            source=str(value.get("source") or provider_id),
+            source=provider_id,
             title=optional_string("title"),
             author=optional_string("author"),
             description=optional_string("description"),

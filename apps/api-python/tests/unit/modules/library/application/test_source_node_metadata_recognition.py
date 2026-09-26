@@ -19,6 +19,7 @@ class FakeRecognitionPort:
         source_node_id: str,
         provider_id: str,
         query: str | None,
+        resource_id: str | None = None,
     ) -> SourceNodeMetadataRecognitionResult | None:
         self.call = (book_id, source_node_id, provider_id, query)
         return SourceNodeMetadataRecognitionResult(

@@ -9,7 +9,7 @@ import type {
   ResourcePageDetailUnit,
   ResourceTrackDetailUnit
 } from '../model/resource-detail';
-import type { BookContentEntry, BookContentsPage, BookContentSort, SourceNodeMetadataCandidate } from '../model/book-contents';
+import type { BookContentEntry, BookContentsPage, BookContentSort, SourceNodeMetadataCandidate, SourceNodeMetadataMatch } from '../model/book-contents';
 import { bookContentSortQuery } from '../model/book-contents';
 import type { MetadataTargetScope, RecognizedMetadataField } from '../model/recognized-metadata';
 
@@ -354,17 +354,40 @@ export async function updateSourceNodePresentation(
   });
 }
 
-export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: string, providerId: string, query: string, signal?: AbortSignal): Promise<Readonly<{ message: string | null; candidates: SourceNodeMetadataCandidate[] }>> {
+const matchOutcomes = new Set<SourceNodeMetadataMatch['outcome']>(['MATCHED', 'AMBIGUOUS', 'REJECTED', 'NO_MATCH']);
+const matchLevels = new Set<SourceNodeMetadataMatch['level']>(['SERIES', 'WORK', 'VOLUME', 'EDITION', 'UNKNOWN']);
+
+function metadataMatch(value: unknown): SourceNodeMetadataMatch | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const item = record(value);
+  if (typeof item.outcome !== 'string' || !matchOutcomes.has(item.outcome as SourceNodeMetadataMatch['outcome'])) return null;
+  if (typeof item.level !== 'string' || !matchLevels.has(item.level as SourceNodeMetadataMatch['level'])) return null;
+  if (typeof item.candidateKey !== 'string' || !item.candidateKey.trim()) return null;
+  const stringList = (input: unknown): input is string[] => Array.isArray(input)
+    && input.every((part) => typeof part === 'string' && Boolean(part.trim()));
+  if (!stringList(item.evidenceIds) || !stringList(item.reasons) || !stringList(item.allowedFields)) return null;
+  return {
+    outcome: item.outcome as SourceNodeMetadataMatch['outcome'],
+    level: item.level as SourceNodeMetadataMatch['level'],
+    candidateKey: item.candidateKey,
+    evidenceIds: item.evidenceIds,
+    reasons: item.reasons,
+    allowedFields: item.allowedFields
+  };
+}
+
+export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: string, providerId: string, query: string, signal?: AbortSignal, resourceId?: string): Promise<Readonly<{ message: string | null; candidates: SourceNodeMetadataCandidate[] }>> {
   const data = record(await apiJson(`/api/books/${encodeURIComponent(bookId)}/source-nodes/${encodeURIComponent(sourceNodeId)}/metadata/search`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ providerId, query }),
+    body: JSON.stringify({ providerId, query, ...(resourceId ? { resourceId } : {}) }),
     signal
   }));
   const candidates = (Array.isArray(data.candidates) ? data.candidates : []).flatMap((value) => {
     const item = record(value);
     const id = stringValue(item.id).trim();
     if (!id) return [];
+    const match = metadataMatch(item.match);
     return [{
       id,
       source: stringValue(item.source, providerId),
@@ -383,7 +406,8 @@ export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: str
       abridged: typeof item.abridged === 'boolean' ? item.abridged : null,
       resourceIndex: nullableNumber(item.resourceIndex),
       coverUrl: nullableString(item.coverUrl),
-      confidence: finiteNumber(item.confidence)
+      confidence: finiteNumber(item.confidence),
+      ...(match ? { match } : {})
     } satisfies SourceNodeMetadataCandidate];
   });
   return { message: nullableString(data.message), candidates };

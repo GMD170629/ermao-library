@@ -193,6 +193,7 @@ from app.modules.library.presentation.schemas import (
     LocalCoverRegenerationResponse,
     ManagementBookListSummary,
     MergeLibraryFacetsRequest,
+    MetadataMatchView,
     ReadingUnitsResponse,
     RenameLibraryFacetRequest,
     ResourceAssetView,
@@ -221,6 +222,7 @@ from app.modules.library.presentation.views import (
     management_book_list_view,
     resource_view,
 )
+from app.modules.metadata.public import match_view
 from app.modules.publications.public import (
     PublicationCorruptError,
     PublicationNotFoundError,
@@ -1414,6 +1416,7 @@ def search_book_source_node_metadata(
             source_node_id=source_node_id,
             provider_id=payload.provider_id,
             query=payload.query,
+            resource_id=payload.resource_id,
         )
     except MetadataProviderSearchError as error:
         record_exception(
@@ -1463,6 +1466,7 @@ def search_book_source_node_metadata(
                     resourceIndex=candidate.resource_index,
                     coverUrl=candidate.cover_url,
                     confidence=candidate.confidence,
+                    match=MetadataMatchView.model_validate(match_view(candidate.match)) if candidate.match else None,
                 )
                 for candidate in result.candidates
             ],

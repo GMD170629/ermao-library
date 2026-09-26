@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from app.modules.metadata.public import MatchDecision
+
 
 class MetadataProviderSearchError(Exception):
     """A configured metadata provider could not complete a search."""
@@ -30,6 +32,7 @@ class SourceNodeMetadataCandidate:
     resource_index: float | None
     cover_url: str | None
     confidence: float
+    match: MatchDecision | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +52,7 @@ class SourceNodeMetadataRecognitionPort(Protocol):
         source_node_id: str,
         provider_id: str,
         query: str | None,
+        resource_id: str | None = None,
     ) -> SourceNodeMetadataRecognitionResult | None: ...
 
 
@@ -63,6 +67,7 @@ class RecognizeSourceNodeMetadata:
         source_node_id: str,
         provider_id: str,
         query: str | None,
+        resource_id: str | None = None,
     ) -> SourceNodeMetadataRecognitionResult | None:
         normalized_provider = provider_id.strip()
         if not normalized_provider:
@@ -72,6 +77,7 @@ class RecognizeSourceNodeMetadata:
             source_node_id=source_node_id,
             provider_id=normalized_provider,
             query=(query or "").strip() or None,
+            resource_id=resource_id,
         )
 
 

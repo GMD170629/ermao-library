@@ -34,6 +34,7 @@ from app.core.exception_diagnostics import (
     exception_diagnostic_boundary,
     record_exception,
 )
+from app.core.i18n import configured_locale
 from app.models.common import db_timestamp
 from app.modules.imports.public import (
     UNKNOWN_AUTHOR,
@@ -42,11 +43,15 @@ from app.modules.imports.public import (
 from app.modules.library.public import prepare_book_facet, protected_metadata_fields
 from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
+from app.modules.metadata.application.recognition import assess_candidates, match_view
 from app.modules.metadata.application.writeback import (
     prepare_metadata_writeback_intents,
 )
 from app.modules.metadata.infrastructure import lookup_queue as lookup_persist
 from app.modules.metadata.infrastructure import writeback_queue
+from app.modules.metadata.infrastructure.recognition_context import (
+    load_recognition_context,
+)
 from app.services.metadata_file_writeback import (
     maintain_metadata_writebacks,
     process_next_metadata_writeback,
@@ -175,30 +180,6 @@ def _finish_provider_execution(
     )
     with MetadataWriteTransaction(db):
         lookup_persist.write_prepared_provider_execution(db, prepared)
-
-
-def _choose_exact_candidate(
-    candidates: list[dict[str, Any]], title: str, author: str
-) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
-    exact = [
-        candidate
-        for candidate in candidates
-        if metadata_candidate_title_exact_match(title, candidate)
-    ]
-    if len(exact) == 1:
-        return exact[0], exact
-    if len(exact) > 1 and normalize_identity_part(author) != normalize_identity_part(
-        UNKNOWN_AUTHOR
-    ):
-        author_key = normalize_identity_part(author)
-        author_matches = [
-            candidate
-            for candidate in exact
-            if normalize_identity_part(candidate.get("author")) == author_key
-        ]
-        if len(author_matches) == 1:
-            return author_matches[0], exact
-    return None, exact
 
 
 def _parse_tags(value: Any) -> list[str]:
@@ -773,6 +754,19 @@ def process_metadata_lookup_task(
                     "无法建立元数据查询上下文",
                 )
                 return "FAILED"
+            # Existing automatic tasks apply to Book. Their representative
+            # resource is an import/writeback reference, never Book identity.
+            recognition = load_recognition_context(
+                db, book_id=str(book["id"]), execution="AUTOMATIC"
+            )
+            if recognition is None:
+                _finish_without_match(db, task, "FAILED", [], "无法建立元数据查询上下文")
+                return "FAILED"
+            no_match_message = (
+                "No candidate has sufficient, conflict-free identity evidence"
+                if configured_locale(db) == "en-US"
+                else "未找到身份依据充分且无冲突的候选"
+            )
             effective_request_gate = (
                 automatic_request_gate
                 if lookup_persist.automatic_rate_limit_applies(db, task)
@@ -816,15 +810,20 @@ def process_metadata_lookup_task(
                     if isinstance(raw_candidates, list)
                     else []
                 )
-                candidate, exact = _choose_exact_candidate(
-                    candidates,
-                    str(book.get("title") or ""),
-                    str(book.get("author") or UNKNOWN_AUTHOR),
+                assessed = assess_candidates(recognition, provider, candidates)
+                selected = next(
+                    ((item, decision) for item, decision in assessed if decision.outcome == "MATCHED"),
+                    None,
                 )
+                candidate = selected[0] if selected else None
                 inspected.append(
                     {
                         "provider": provider,
-                        "exactCandidates": exact,
+                        "exactCandidates": [
+                            item for item, _ in assessed
+                            if metadata_candidate_title_exact_match(recognition.identity.title, item)
+                        ],
+                        "matches": [match_view(decision) for _, decision in assessed],
                         "cacheHit": bool(result.get("cacheHit")),
                     }
                 )
@@ -837,12 +836,19 @@ def process_metadata_lookup_task(
                     return "CANCELLED"
                 prepared_application: _PreparedCandidateApplication | None = None
                 try:
+                    # M1 does not broaden the old Book writer. Only fields
+                    # justified by the shared decision reach it; M3 owns the
+                    # full provider-to-patch conversion and resource writes.
+                    allowed = {
+                        field.removeprefix("book.")
+                        for field in (selected[1].allowed_fields if selected else frozenset())
+                    } & {"title", "author", "description"}
                     prepared_application = _prepare_candidate_application(
                         db,
                         settings,
                         task,
                         provider,
-                        candidate,
+                        {key: value for key, value in candidate.items() if key in allowed},
                     )
                     applied = list(prepared_application.applied)
                     selected_result_json = json.dumps(
@@ -961,7 +967,7 @@ def process_metadata_lookup_task(
             if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
                 return "CANCELLED"
             _finish_without_match(
-                db, task, "NO_MATCH", inspected, "未找到可唯一确定的标题精确候选"
+                db, task, "NO_MATCH", inspected, no_match_message
             )
             return "NO_MATCH"
         finally:
