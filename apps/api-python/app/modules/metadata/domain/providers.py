@@ -161,18 +161,13 @@ BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
         id="ai",
         name="AI 元数据识别",
         version="builtin",
-        description="使用 OpenAI-compatible Chat Completions 推断缺失元数据。",
-        mode="infer",
-        fields=(
-            "title",
-            "author",
-            "description",
-            "tags",
-            "seriesName",
-            "seriesIndex",
-        ),
-        capabilities=("automatic", "manual-search", "fallback"),
+        description="有证据引用的查询建议与候选消歧 / Evidence-bound query and candidate assistance",
+        mode="assist",
+        fields=(),
+        capabilities=("manual-assistance", "ambiguous-assistance"),
         config_fields=(
+            ProviderConfigField(key="assistanceMode", label="辅助模式 / Assistance mode", default="SUGGEST_ONLY"),
+            ProviderConfigField(key="authentication", label="认证方式 / Authentication", default="bearer"),
             ProviderConfigField(
                 key="baseUrl",
                 label="API 地址",
@@ -191,5 +186,6 @@ BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
             ),
         ),
         default_priority=900,
+        automatic_rate_limit=AutomaticRateLimit(1, 1.0),
     ),
 )

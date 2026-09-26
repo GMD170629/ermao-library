@@ -4,6 +4,7 @@ import hashlib
 import json
 from collections.abc import Mapping
 
+from app.modules.metadata.application.ai_assistance import PROMPT_VERSION
 from app.modules.metadata.domain.recognition import normalize_isbn
 
 
@@ -35,8 +36,8 @@ def candidate_cache_key(
 ) -> str:
     # Hash credentials only as part of the digest: rotations invalidate cached
     # authorization-specific responses without storing credentials in a key.
-    payload = {"version": 2, "provider": provider, "query": query,
+    payload = {"version": 3, "aiPrompt": PROMPT_VERSION if provider == "ai" else None, "provider": provider, "query": query,
                "config": dict(config), "context": dict(context)}
-    return "recognition:v2:" + hashlib.sha256(
+    return "recognition:v3:" + hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode()
     ).hexdigest()

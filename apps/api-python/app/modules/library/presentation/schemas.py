@@ -441,6 +441,7 @@ class SourceNodeMetadataCandidateView(HttpContractModel):
 
 
 class SourceNodeMetadataSearchPayload(HttpContractModel):
+    assistance: dict[str, object] | None = None
     source_node_id: str = Field(alias="sourceNodeId")
     provider_id: str = Field(alias="providerId")
     query: str

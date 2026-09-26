@@ -20,6 +20,7 @@ from app.modules.metadata.application.rate_limits import (
     RecognitionRequestBudget,
 )
 from app.modules.metadata.domain.providers import BUILTIN_MANIFESTS, ProviderManifest
+from app.modules.metadata.infrastructure.ai_assistance import request_assistance
 from app.modules.metadata.infrastructure.automatic_rate_limiter import (
     SharedMetadataRequestGate,
 )
@@ -166,17 +167,8 @@ class BuiltinMetadataProvider:
                 )
             request = UrlRequest(f"{base_url}/v0/subjects/1", headers=headers)
         else:
-            base_url = str(config.get("baseUrl") or "").rstrip("/")
-            api_key = str(config.get("apiKey") or "").strip()
-            if not base_url or not api_key:
-                return {"ok": False, "message": "请先填写 API 地址和 API Key"}
-            request = UrlRequest(
-                f"{base_url}/models",
-                headers={
-                    "Accept": "application/json",
-                    "Authorization": f"Bearer {api_key}",
-                },
-            )
+            request_assistance({"book": {"title": "Example"}}, config)
+            return {"ok": True, "message": "Structured model response verified / 模型结构化响应通过"}
         with urlopen(request, timeout=10) as response:
             status = int(getattr(response, "status", 200) or 200)
         return {
@@ -397,8 +389,15 @@ def _validate_config(
         errors.append(f"包含未知配置项：{', '.join(unknown)}")
     if config.get("participation") not in manifest.participation_modes:
         errors.append("Invalid participation / 无效来源参与方式")
-    if enabled and config.get("participation") != "OFF":
+    if manifest.id == "ai":
+        if config.get("assistanceMode", "SUGGEST_ONLY") not in {"OFF", "SUGGEST_ONLY", "ASSIST_ON_AMBIGUITY"}:
+            errors.append("Invalid assistance mode / 无效 AI 模式")
+        if config.get("authentication", "bearer") not in {"bearer", "none"}:
+            errors.append("Invalid authentication / 无效认证方式")
+    if enabled and config.get("participation") != "OFF" and config.get("assistanceMode") != "OFF":
         for field in manifest.config_fields:
+            if manifest.id == "ai" and field.key == "apiKey" and config.get("authentication") == "none":
+                continue
             if field.required and not str(config.get(field.key) or "").strip():
                 errors.append(f"{field.label}不能为空")
     return errors
@@ -513,6 +512,10 @@ def test_metadata_provider(
                     db.close()
             if provider_id == "open-library":
                 result = {"ok": True, "message": "Configuration valid; run a single-target query / 配置有效；请从单资源发起查询"}
+            elif provider_id == "ai":
+                gate = SharedMetadataRequestGate(db, plugin.manifest, RecognitionRequestBudget(), active)
+                request_assistance({"book": {"title": "Example"}}, config, gate)
+                result = {"ok": True, "message": "Structured model response verified / 模型结构化响应通过"}
             else:
                 SharedMetadataRequestGate(db, plugin.manifest, RecognitionRequestBudget(), active).wait(provider_id)
                 result = plugin.test(config)
@@ -544,7 +547,7 @@ def test_metadata_provider(
 def enabled_metadata_provider_ids(db: Session) -> list[str]:
     return [provider for provider in list_enabled_provider_ids(db)
             if (config := metadata_provider_runtime_config(db, provider)) is not None
-            and config.get("participation") == "AUTO_AND_MANUAL" and provider != "open-library"]
+            and config.get("participation") == "AUTO_AND_MANUAL" and provider not in {"open-library", "ai"}]
 
 
 def metadata_provider_runtime_config(
@@ -557,7 +560,7 @@ def metadata_provider_runtime_config(
     if not source:
         return None
     config = _source_config(source, plugin.manifest)
-    return config if source.get("enabled") and config.get("participation") != "OFF" else None
+    return config if source.get("enabled") and config.get("participation") != "OFF" and config.get("assistanceMode") != "OFF" else None
 
 
 def search_with_metadata_provider(
@@ -584,11 +587,14 @@ def search_with_metadata_provider(
         }
     identity = context.get("identity") or {}
     automatic = automatic_request_gate is not None or identity.get("execution") == "AUTOMATIC"
-    if (automatic and config.get("participation") != "AUTO_AND_MANUAL") or (
+    if (provider_id != "ai" and automatic and config.get("participation") != "AUTO_AND_MANUAL") or (
         provider_id == "open-library" and (automatic or not context.get("explicitManualQuery") or identity.get("execution") != "MANUAL" or not identity.get("targetId"))
     ):
         db.close()
         return {"provider": provider_id, "enabled": False, "candidates": [], "suggestions": [], "reason": "SOURCE_NOT_APPLICABLE"}
+    if provider_id == "ai" and ((automatic and config.get("assistanceMode") != "ASSIST_ON_AMBIGUITY") or (not automatic and not context.get("explicitManualQuery"))):
+        db.close()
+        return {"provider": "ai", "enabled": False, "candidates": [], "suggestions": [], "reason": "AI_NOT_APPLICABLE"}
     def active() -> bool:
         try:
             return metadata_provider_runtime_config(db, provider_id) == config
@@ -608,7 +614,7 @@ def search_with_metadata_provider(
             db.close()
             result = plugin.search(db, context, planned_query, config=config,
                                    force=force, use_cache=use_cache)
-        if result.get("candidates") or not result.get("enabled") or result.get("error"):
+        if result.get("candidates") or result.get("assistance") or not result.get("enabled") or result.get("error"):
             break
     return result
 

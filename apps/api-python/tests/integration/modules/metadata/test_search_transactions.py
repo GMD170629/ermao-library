@@ -51,13 +51,9 @@ def test_metadata_search_closes_reads_and_defers_busy_cache_write(
             "provider": "ai",
             "enabled": True,
             "cacheHit": False,
-            "suggestions": [
-                {
-                    "field": "title",
-                    "suggestedValue": "Prepared result",
-                    "confidence": 0.9,
-                }
-            ],
+            "candidates": [],
+            "suggestions": [],
+            "assistance": {"purpose": "query", "title": "Prepared result", "queryHints": []},
         }
 
     monkeypatch.setattr(
@@ -74,7 +70,8 @@ def test_metadata_search_closes_reads_and_defers_busy_cache_write(
         result = metadata_search_candidates(source, context, "ai", config={})
         elapsed = monotonic() - started
 
-        assert result["candidates"][0]["title"] == "Prepared result"
+        assert result["candidates"] == []
+        assert result["assistance"]["title"] == "Prepared result"
         assert network_observations == [False]
         assert elapsed < 1.0
         with Session(source_engine) as verify:

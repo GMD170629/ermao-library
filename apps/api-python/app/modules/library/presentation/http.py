@@ -1444,6 +1444,7 @@ def search_book_source_node_metadata(
         )
     return SourceNodeMetadataSearchResponse(
         data=SourceNodeMetadataSearchPayload(
+            assistance=result.assistance,
             targetRevision=result.target_revision,
             bookRevision=result.book_revision,
             sourceNodeId=result.source_node_id,

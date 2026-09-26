@@ -44,6 +44,7 @@ class SourceNodeMetadataRecognitionResult:
     candidates: tuple[SourceNodeMetadataCandidate, ...]
     target_revision: str | None = None
     book_revision: str | None = None
+    assistance: dict[str, object] | None = None
 
 
 class SourceNodeMetadataRecognitionPort(Protocol):

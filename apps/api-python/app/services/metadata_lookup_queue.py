@@ -133,14 +133,14 @@ def _provider_order(task: dict[str, Any]) -> list[str]:
                          context={"step": "_provider_order", "task_id": str(task.get("id") or ""), "attempt": int(task.get("attempts") or 0) + 1})
         parsed = []
     registered = metadata_provider_registry().ids()
-    return [str(item) for item in parsed if str(item) in registered]
+    return [str(item) for item in parsed if str(item) in registered and str(item) != "ai"]
 
 
 def _search_provider(
     db: Session,
     context: dict[str, Any],
     provider: str,
-    query: str,
+    query: str | None,
     automatic_request_gate: AutomaticMetadataRequestGate | None,
 ) -> dict[str, Any]:
     return search_with_metadata_provider(
@@ -692,14 +692,38 @@ def process_metadata_lookup_task(
             errors: list[str] = []
             inspected: list[dict[str, Any]] = []
             providers = _provider_order(task)
-            for provider_index, provider in enumerate(providers):
+            attempts: list[tuple[str, str | None]] = [(provider, None) for provider in providers]
+            attempts.append(("ai", None))
+            enabled_sources: list[str] = []
+            ai_candidates: list[dict[str, Any]] = []
+            for provider_index, (provider, query_override) in enumerate(attempts):
+                if provider == "ai":
+                    if not enabled_sources:
+                        continue
+                    execution_id = _start_provider_execution(db, task, provider)
+                    try:
+                        advice = search_with_metadata_provider(db, {**context, "aiCandidates": ai_candidates[:5]}, "ai", automatic_request_gate=effective_request_gate)
+                        assistance = advice.get("assistance")
+                        if isinstance(assistance, dict):
+                            task["recognition"]["aiAssistance"] = assistance
+                            if assistance.get("purpose") == "query":
+                                # Hints change the query only, never target identity or aliases.
+                                attempts.extend((enabled_sources[0], hint["query"]) for hint in assistance.get("queryHints", [])[:2])
+                        _finish_provider_execution(db, execution_id, status="COMPLETED" if assistance else "SKIPPED", result=advice)
+                    except RecognitionRequestStopped as error:
+                        _finish_provider_execution(db, execution_id, status="SKIPPED", result={"reason": str(error)})
+                    except Exception as error:  # noqa: BLE001 - optional AI failure keeps the ordinary rule result.
+                        record_exception(LOGGER, "metadata.ai_assistance_failed", error, context={"task_id": str(task["id"]), "step": "assist"})
+                        _finish_provider_execution(db, execution_id, status="FAILED", error=provider_error_code(error))
+                    task["recognition"].update(httpAttempts=effective_request_gate.attempts, aiAttempts=effective_request_gate.ai_attempts)
+                    continue
                 execution_id = _start_provider_execution(db, task, provider)
                 try:
                     result = _search_provider(
                         db,
                         context,
                         provider,
-                        next(iter(recognition_queries(context, provider)), ""),
+                        query_override,
                         effective_request_gate,
                     )
                 except RecognitionRequestStopped as exc:
@@ -730,6 +754,8 @@ def process_metadata_lookup_task(
                     )
                     continue
                 enabled_providers += 1
+                if provider not in enabled_sources:
+                    enabled_sources.append(provider)
                 raw_candidates = result.get("candidates")
                 candidates: list[dict[str, Any]] = (
                     [
@@ -741,6 +767,7 @@ def process_metadata_lookup_task(
                     else []
                 )
                 assessed = assess_candidates(recognition, provider, candidates)
+                ai_candidates.extend({**candidate_summary(item), "source": provider} for item, decision in assessed if decision.outcome == "AMBIGUOUS" and len(ai_candidates) < 5)
                 selected = next(
                     ((item, decision) for item, decision in assessed if decision.outcome == "MATCHED"),
                     None,

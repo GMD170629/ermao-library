@@ -2,6 +2,23 @@
 
 核对日期：2026-09-26。M0、M1 已提交；用户现已授权连续完成 M2–M7，每阶段独立提交并沿用推送和 `[skip ci]`。以下分阶段记录有效实现及验证，不把后续计划视为已经实现。
 
+## M5 实施记录
+
+起点 `65dc2d42`。AI Manifest 改为 assist 角色，从后台事实来源顺序中移除。既有启用配置缺少新字段时解释为 SUGGEST_ONLY，旧模型/地址/密钥保留；新增 OFF、ASSIST_ON_AMBIGUITY 和 bearer/none（none 不发送 Authorization）。运行配置、自动入口及客户端都检查模式，主开关关闭不请求。模型测试走同一客户端的真实 Chat Completions 结构化请求，使用所选模型，不再 `/models` 探测。
+
+应用层 `ai_assistance.py` 仅生成有界证据输入和严格解析查询辅助/候选消歧：最多 5 个候选，输入 <=12000 字符，输出 800 tokens；字段/类型/长度/候选键/证据引用逐一校验。文件只取 basename，移除旧的 parentPaths/raw 元数据摘要、任意元数据生成建议和 AI 虚拟候选转换。模型无工具权限，输入作为不可信数据；新词即使模型自称确定也标 hypothesis。两种用途和格式重试共享每目标 2 次尝试，外部来源仍共用 8 次预算；取消/故障降级保留规则结果。
+
+自动困难分支在常规来源结束后才询问模型，查询建议仅改变下一次查询，绝不修改用于匹配的原目标/作者/别名。新查询排除 Open Library，返回候选仍经 M1–M3。候选消歧保存推荐键供人工查看，模型偏好不会解除多版本歧义；强冲突/保护仍由共同规则约束。缓存 v3 包含提示词版本、模型、认证配置、目标授权范围和候选实际内容，只缓存通过本地校验的建议，不保存模型全文。手动搜索响应增加可选 assistance，现有弹窗的可见入口和记录重开继续在 M6 完成。
+
+有效验证（`apps/api-python`）：
+
+```powershell
+.venv-windows/Scripts/python.exe -m pytest -q tests/unit/modules/metadata/test_ai_assistance.py tests/integration/modules/metadata/test_ai_assistance_queue.py tests/integration/modules/metadata/test_search_transactions.py tests/integration/modules/metadata/test_provider_registry.py tests/integration/modules/metadata/test_provider_failure_diagnostics.py tests/integration/modules/metadata/test_bibliographic_providers.py tests/unit/modules/metadata/test_recognition_queries.py tests/contract/api/test_recognized_metadata_api.py tests/test_metadata_lookup_queue.py --tb=short
+# 78 passed；8 个关键生产文件 mypy、变动 Python ruff 通过。
+```
+
+17 个新增 AI 用例覆盖不存在 ISBN 字段/候选/证据、类型/乱码/超长输出、隐私边界、两个格式请求后停止、取消零请求、none/bearer、实际结构化模型测试。真实 SQLite 自动队列三种模式验证 OFF/SUGGEST_ONLY 零模型请求；ASSIST 模式提示查询后只有来源描述入库；两个同身份候选即使模型选中一个仍 AMBIGUOUS 且零写入。未调用真实外部模型；模型兼容性和真实样本质量保持外部联调待验，不把 fixture 成功视为模型能力证明。
+
 ## M4 实施记录
 
 起点 `11a90bb2`。新增默认关闭的 Google Books、Open Library Manifest，沿既有 Source bootstrap 幂等创建、配置/密钥脱敏、连接测试、候选缓存、请求 gate 和手动搜索入口接通。来源配置支持 OFF/MANUAL_ONLY/AUTO_AND_MANUAL，Open Library 仅支持前两者；服务端同时验证单目标、MANUAL 和明确人工查询入口，不参与后台 provider order、补缺和 AI 自动扩展。旧排序 payload 可只包含旧来源，保留遗漏来源的启用状态和全部密钥，使用单条 CASE UPDATE 保持原有有界 SQL 测试门槛。

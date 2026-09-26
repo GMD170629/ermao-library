@@ -79,6 +79,7 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
             if (candidate := self._candidate(value, provider_id)) is not None
         )
         return SourceNodeMetadataRecognitionResult(
+            assistance=result.get("assistance"),
             target_revision=target_snapshot.revision if target_snapshot else None,
             book_revision=book_snapshot.revision if book_snapshot else None,
             source_node_id=source_node_id,

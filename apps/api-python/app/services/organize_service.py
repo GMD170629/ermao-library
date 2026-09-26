@@ -26,6 +26,7 @@ from app.modules.metadata.domain.recognition import (
     title_parts,
 )
 from app.modules.metadata.infrastructure import external_cache as metadata_cache
+from app.modules.metadata.infrastructure.ai_assistance import request_assistance
 from app.modules.metadata.infrastructure.bibliographic_providers import (
     search_google,
     search_open_library,
@@ -189,68 +190,6 @@ def first_exact_title_candidate(
 def metadata_context_for_book(db: Session, book_id: str) -> dict[str, Any] | None:
     context = load_recognition_context(db, book_id=book_id, execution="AUTOMATIC")
     return provider_context(db, context) if context else None
-
-
-def local_metadata_summary(context: dict[str, Any]) -> dict[str, Any]:
-    book = context["book"]
-    files = context["files"][:8]
-    metadata = [
-        parse_json_value(item.get("rawJson")) for item in context["metadata"][:4]
-    ]
-    return {
-        "title": book.get("title"),
-        "author": book.get("author"),
-        "seriesName": book.get("seriesName"),
-        "seriesIndex": book.get("seriesIndex"),
-        "tags": parse_json_value(book.get("tags")) or [],
-        "fileNames": [
-            str(file.get("relativePath") or "").rsplit("/", 1)[-1] for file in files
-        ],
-        "parentPaths": sorted(
-            {
-                str(file.get("relativePath") or "").rsplit("/", 1)[0]
-                for file in files
-                if "/" in str(file.get("relativePath") or "")
-            }
-        ),
-        "embeddedMetadata": metadata,
-    }
-
-
-def normalize_ai_confidence(value: Any) -> float:
-    try:
-        parsed = float(value if value is not None else 0.6)
-    except (TypeError, ValueError) as error:
-        record_exception(logging.getLogger(__name__), "services.organize_service.normalize_ai_confidence.failed", error,
-                         context={"step": "normalize_ai_confidence"})
-        parsed = 0.6
-    return min(0.74, max(0.0, parsed))
-
-
-def suggestion_from_ai_item(item: dict[str, Any]) -> dict[str, Any] | None:
-    field = item.get("field")
-    if field not in {
-        "title",
-        "author",
-        "description",
-        "tags",
-        "seriesName",
-        "seriesIndex",
-    }:
-        return None
-    value = item.get("value")
-    if value is None or value == "" or value == []:
-        return None
-    return {
-        "field": field,
-        "suggestedValue": json_text(value)
-        if isinstance(value, (dict, list, int, float, bool))
-        else str(value),
-        "source": "ai",
-        "confidence": normalize_ai_confidence(item.get("confidence")),
-        "reason": f"AI 识别：{string_value(item.get('reason')) or '根据本地元数据摘要推断'}",
-        "status": "PENDING",
-    }
 
 
 def suggestion_from_external(
@@ -1001,81 +940,11 @@ def bangumi_subject_suggestions(
     )
 
 
-def ai_suggestions_from_payload(payload: Any) -> list[dict[str, Any]]:
-    raw = payload if isinstance(payload, dict) else {}
-    choices = raw.get("choices")
-    message = (
-        choices[0].get("message")
-        if isinstance(choices, list) and choices and isinstance(choices[0], dict)
-        else None
-    )
-    content = message.get("content") if isinstance(message, dict) else None
-    parsed = (
-        parse_json_value(
-            re.sub(r"^```json\s*|\s*```$", "", content.strip(), flags=re.IGNORECASE)
-        )
-        if isinstance(content, str)
-        else raw
-    )
-    suggestions_value = parsed.get("suggestions") if isinstance(parsed, dict) else []
-    suggestions = suggestions_value if isinstance(suggestions_value, list) else []
-    return [
-        suggestion
-        for item in suggestions
-        if isinstance(item, dict) and (suggestion := suggestion_from_ai_item(item))
-    ]
-
-
-def run_ai_metadata_provider(
-    context: dict[str, Any], config: dict[str, Any], force: bool = True,
-    automatic_request_gate: AutomaticMetadataRequestGate | None = None,
-) -> dict[str, Any]:
-    base_url = string_value(config.get("baseUrl")).rstrip("/")
-    api_key = string_value(config.get("apiKey"))
-    model = string_value(config.get("model"))
-    if not base_url or not api_key or not model:
-        return {
-            "provider": "ai",
-            "enabled": False,
-            "added": 0,
-            "cacheHit": False,
-            "message": "AI 服务地址、模型或 API Key 未配置",
-            "suggestions": [],
-        }
-    summary = local_metadata_summary(context)
-    body = {
-        "model": model,
-        "temperature": 0.1,
-        "response_format": {"type": "json_object"},
-        "messages": [
-            {
-                "role": "system",
-                "content": '你是图书元数据整理助手。只返回 JSON，格式为 {"suggestions":[{"field":"title|author|description|tags|seriesName|seriesIndex","value":...,"confidence":0-1,"reason":"..."}]}。不要编造不确定信息。',
-            },
-            {"role": "user", "content": json_text(summary)},
-        ],
-    }
-    request = UrlRequest(
-        f"{base_url}/chat/completions",
-        data=json.dumps(body).encode("utf-8"),
-        headers={
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        },
-        method="POST",
-    )
-    if automatic_request_gate is not None:
-        automatic_request_gate.wait("ai")
-    with urlopen(request, timeout=30) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-    return {
-        "provider": "ai",
-        "enabled": True,
-        "added": 0,
-        "cacheHit": False,
-        "suggestions": ai_suggestions_from_payload(payload),
-    }
+def run_ai_metadata_provider(context: dict[str, Any], config: dict[str, Any], force: bool = True,
+    automatic_request_gate: AutomaticMetadataRequestGate | None = None) -> dict[str, Any]:
+    del force
+    assistance = request_assistance(context, config, automatic_request_gate)
+    return {"provider": "ai", "enabled": True, "candidates": [], "suggestions": [], "assistance": assistance, "added": 0, "cacheHit": False}
 
 
 def run_bangumi_metadata_provider(
@@ -1251,6 +1120,7 @@ def external_metadata_cache_put(
     payload = json_text(
         {
             "candidates": candidates,
+            "assistance": result.get("assistance"),
             "suggestions": result.get("suggestions")
             if isinstance(result.get("suggestions"), list)
             else [],
@@ -1344,34 +1214,7 @@ def metadata_search_candidates(
         provider = search_google if source == "google-books" else search_open_library
         result = provider(context, config, search_text, automatic_request_gate)
     else:
-        ai_result = run_ai_metadata_provider(context, config, force=force,
-                                             automatic_request_gate=automatic_request_gate)
-        fields = {
-            item["field"]: parse_json_value(item.get("suggestedValue"))
-            for item in ai_result.get("suggestions") or []
-        }
-        candidate: dict[str, Any] = {
-            "id": "ai-suggestion",
-            "source": "ai",
-            "title": fields.get("title"),
-            "author": fields.get("author"),
-            "description": fields.get("description"),
-            "tags": fields.get("tags") if isinstance(fields.get("tags"), list) else [],
-            "seriesName": fields.get("seriesName"),
-            "seriesIndex": fields.get("seriesIndex"),
-            "confidence": max(
-                [
-                    float(item.get("confidence") or 0)
-                    for item in ai_result.get("suggestions") or []
-                ]
-                or [0.0]
-            ),
-            "raw": {"suggestions": ai_result.get("suggestions") or []},
-        }
-        result = {
-            **ai_result,
-            "candidates": [candidate] if ai_result.get("suggestions") else [],
-        }
+        result = run_ai_metadata_provider(context, config, force=force, automatic_request_gate=automatic_request_gate)
     if source in {"bangumi", "douban"}:
         result = {
             **result,
