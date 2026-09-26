@@ -2,6 +2,74 @@
 
 核对日期：2026-09-26。M0、M1 已提交；用户现已授权连续完成 M2–M7，每阶段独立提交并沿用推送和 `[skip ci]`。以下分阶段记录有效实现及验证，不把后续计划视为已经实现。
 
+## M7 实施与最终验收记录
+
+起点 `92faf33f`。工程实现与本地定向验收完成，外部来源/模型联调待验；这不是“所有发布门禁通过”。本阶段复用既有 pytest、tsx、Playwright 和临时 SQLite HTTP 夹具，未新增测试框架、表、迁移、依赖、CI 或发布配置。
+
+收口两项直接缺陷：旧 MetadataLookupTask 可能保存非 JSON 原文、数组或 null 对象，`recognition_context.py` / `recognition_records.py` 原先会直接解析或取字段；现在跳过不能成为确认依据的历史记录，明确确认入口拒绝它们，不升级 ISBN 范围。新路径修正开关在配置尚未加载时可点击，随后会被加载结果覆盖；`recognition-settings-panel.tsx` 沿用加载禁用状态，保存按钮也等待加载完成。新增浏览器回归在修复前出现保存重载为 false，修复后桌面/窄屏均保持 true。没有混入已记录调度问题的修复。
+
+三条纵切片均有现有生产入口证据：
+
+- ISBN：真实登录/人工搜索记录 → 明确确认 ISBN → 自动资源队列 → Google parser 与 gate → ISBN-10/13 等价版本 → 共同 patch → SQLite → 两次实际旁车队列 → OPF。Google HTTP bytes 为 fixture；原文件 bytes 和 mtime 不变。`test_confirmed_isbn_google_to_automatic_edition_and_real_opf`。
+- 多卷：无 ISBN 的第 2 卷任务经过共同匹配与实际持久化，仅第 2 卷简介变化，第 1 卷和父书不变；OPF 排队失败单独记录，已应用任务不重放。`test_explicit_volume_task_changes_only_selected_resource` 两分支。
+- 噪声：实际 SourceNode/ResourceAsset 的 `001_黑暗坡食人树_扫描版_FINAL.txt` 进入 AI 有界输入；模型建议仅用于查询，候选仍用原目标验证，只有来源简介入库。OFF/SUGGEST_ONLY 无自动模型请求，双版本模型推荐仍待确认。`test_ai_assistance_queue.py` 三模式及歧义用例。模型 transport 为 fixture，不代表真实模型质量。
+
+固定合成验收集 `test_fixed_acceptance_sample_denominators` 的 6 个目标为：唯一作品、作者冲突、卷号冲突、作者未知、双版本、空来源。真实 SQL 队列结果分别为 APPLIED、NO_MATCH、NO_MATCH、AMBIGUOUS、AMBIGUOUS、NO_MATCH。仅作为确定性规则回归统计：
+
+| 指标 | 明确分母及结果 |
+| --- | --- |
+| 自动应用正确率 | 正确自动应用 1 / 自动应用 1 = 100% |
+| 自动覆盖率 | 自动应用 1 / 可评估目标 6 = 16.7% |
+| 候选召回 | fixture 含正确候选的目标 3 / 可评估目标 6 = 50% |
+| 待人工确认占比 | AMBIGUOUS 2 / 可评估目标 6 = 33.3%（不是实际人工完成率） |
+| 错版本写入 | 0 / 6 个可评估目标 |
+| 每目标请求 | 6 次计入 gate 的 fixture 尝试 / 6 个目标 = 1；没有外部网络请求 |
+
+真实人工标注样本数为 0，真实准确率/覆盖率/召回均未测，不能用上述数值推断生产表现。
+
+100k 验证在同一 SQLite 库新增 100000 个无关 Resource 和对应 SourceNode：同一目标上下文、provider payload、SELECT 次数前后一致；每条 SELECT 的 EXPLAIN QUERY PLAN 无 Resource/SourceNode/MetadataLookupTask 全表扫描，投影仍为目标资源 1、文件最多 8。没有对外发大批请求或读取原件。既有跨两个 Python 进程的限速预约、网络前事务释放、缓存锁忙降级仍在最终组合中通过。
+
+浏览器用真实 FastAPI/Next HTTP、权限、SQLite、来源解析和共同应用，仅替换 Google 响应 bytes。桌面 Chrome、mobile-chrome 窄屏各运行两个用例：配置保存/重载、逐字段确认、年精度日期不可提交、第二浏览器旧结果 409、Escape、重开显示实值；策略保存重载、来源禁用后零请求。随后停止并重新启动 8106 fixture 进程（同一临时 STORAGE_ROOT），重新登录检查 Google disabled、configuredSecrets.apiKey=true、allowRepairPathMetadata=true，禁用查询 candidates=[] 且请求计数 0。这里的 mobile-chrome 是浏览器视口，不是 Android/iOS 原生验收。
+
+验收矩阵的证据归属（测试路径均相对 `apps/api-python/tests`）：
+
+| 矩阵 | 已运行证据 |
+| --- | --- |
+| R01–R07、R10 | `unit/modules/metadata/test_recognition.py`：作者/标题/卷号/套装、10/13 ISBN、聚合/系列限制、语言/出版社/修订冲突、去重歧义；内部卷号冲突先于 ISBN |
+| R08–R09、R11 | `integration/modules/metadata/test_bibliographic_providers.py`、共同 supplement 用例、日期精度用例与浏览器禁用部分日期字段 |
+| R12 | 纸书版本即使有等价 ISBN 且 payload 带 narrator/abridged，也不授予音频字段；目前来源未提供已确认的录音身份，C26 的正向录音版本联调没有证据，不声称已支持 |
+| R13–R15、R27 | `test_metadata_lookup_queue.py` 的 PATH/取消/删除/父级修改、多卷场景；`integration/modules/automation/test_metadata_patches.py` 和 `contract/api/test_recognized_metadata_api.py` 的权限、保护、跨会话修订、重复确认/副作用、伪造候选/字段拒绝 |
+| R16–R17、R19–R20 | queries/cache、AI assistance 单元/实际队列模式与假候选拒绝；浏览器禁用来源零请求 |
+| R18 | 实际队列分别保存 RATE_LIMITED、AUTHENTICATION、SOURCE_RESTRICTED、PARSE_ERROR、TIMEOUT，业务 outcome=SOURCE_ERROR 且保留有时间的重试；空来源另为 NO_MATCH；provider diagnostics 检查真实异常原因 |
+| R21 | AI 输入/输出白名单与恶意文本拒绝；封面私网 DNS、MIME/大小、损坏图片；来源详情只提取来源 ID 后构造固定端点 |
+| R22–R23 | 两进程限速、8 次来源/2 次 AI 预算、格式重试/取消、旧 worker 拒绝、lease 恢复与配置实际进程重启；没有模拟宿主断电或外部网络长期中断 |
+| R24–R25 | 实际 OPF 与原件不变、关闭/故障分离；旧排序保留密钥、旧 AI 默认模式、旧客户端、人工保护和历史队列 payload 不扩权 |
+| R26、R28 | 100k 索引投影；两个浏览器会话与刷新后实际保存值 |
+
+最终定向命令与结果：
+
+```powershell
+# apps/api-python
+.venv-windows/Scripts/python.exe -m pytest -q tests/unit/modules/metadata/test_recognition.py tests/unit/modules/metadata/test_recognition_queries.py tests/unit/modules/metadata/test_automatic_rate_limiter.py tests/unit/modules/metadata/test_ai_assistance.py tests/integration/modules/metadata/test_recognition_context.py tests/integration/modules/metadata/test_bibliographic_providers.py tests/integration/modules/metadata/test_provider_registry.py tests/integration/modules/metadata/test_provider_failure_diagnostics.py tests/integration/modules/metadata/test_search_transactions.py tests/integration/modules/metadata/test_ai_assistance_queue.py tests/integration/modules/library/test_provider_source_node_metadata_recognition.py tests/integration/modules/automation/test_metadata_patches.py tests/unit/modules/library/application/test_recognized_metadata.py tests/unit/modules/library/infrastructure/test_recognized_metadata_cover.py tests/contract/api/test_recognized_metadata_api.py tests/contract/api/test_queue_metadata_contract_regressions.py tests/test_metadata_lookup_queue.py tests/test_metadata_writeback_queue.py --tb=short
+# 203 passed in 76.89s
+.venv-windows/Scripts/python.exe -m ruff check app/modules/metadata/infrastructure/recognition_context.py app/modules/metadata/infrastructure/recognition_records.py tests/contract/api/test_recognized_metadata_api.py tests/integration/modules/metadata/test_ai_assistance_queue.py tests/integration/modules/metadata/test_recognition_context.py tests/test_metadata_lookup_queue.py tests/test_metadata_writeback_queue.py tests/unit/modules/metadata/test_recognition.py
+.venv-windows/Scripts/python.exe -m mypy --follow-imports=silent app/modules/metadata/infrastructure/recognition_context.py app/modules/metadata/infrastructure/recognition_records.py
+# apps/web；实际使用 C:/Program Files/nodejs/node.exe（Node 22）
+node node_modules/tsx/dist/cli.mjs --conditions=import --test features/books/api/client.test.ts features/books/model/recognized-metadata.test.ts features/books/model/metadata-match.test.ts features/books/application/metadata-apply-completion.test.ts
+# 32 passed
+node node_modules/typescript/bin/tsc --noEmit
+node node_modules/eslint/bin/eslint.js e2e/metadata-recognition.spec.ts features/organize/recognition-settings-panel.tsx
+$env:RECOGNITION_HTTP_SMOKE='1'; $env:PLAYWRIGHT_BASE_URL='http://127.0.0.1:3100'
+node node_modules/@playwright/test/cli.js test e2e/metadata-recognition.spec.ts --project=chrome --project=mobile-chrome --workers=1 --reporter=line
+# 4 passed；fixture 启动方式见 M6 与 tests/fixtures/recognition_http_server.py
+```
+
+最终后端组合 203 passed in 76.89s，Web 32 passed，浏览器 4 passed in 24.8s；上述 ruff、2 文件局部 mypy、Web tsc/ESLint 和 git diff --check 通过。静态检查按变动文件限定；未运行全量回归。M6 的 2375 条双语目录校验通过，M7 未新增用户文案。
+
+已知缺口：没有真实 Google Books/Open Library/豆瓣/Bangumi 或真实模型凭据联调，没有真实标注准确率；有声录音正向证据未提供。沿用 M0/M1/M2 已定位的 `test_manual_wait_does_not_block_other_books_and_local_failure_stops_remote` waiting/ready 调度失败，未改断言或屏蔽；M6 默认 mypy 递归依赖暴露的 6 项既有问题仍保留，局部检查通过。旧 entry-point 插件内部 HTTP 仍不能从旧接口逐次观测，内置来源受统一 gate。没有全量构建、移动真机或发布产物验收。
+
+发布范围为 Web/Python 应用与既有记录/配置 JSON 的兼容扩展，无 schema/依赖/原件拓扑变动。按当前发布 ADR，普通发布仍是默认；只有后续明确要求 code-only 才在冻结发布提交执行 `node scripts/release-mode.mjs --published-base` 判断资格，并补版本同步、双语说明、双架构产物/依赖身份和远端完整性门禁。当前未给出已具备 code-only 资格的结论。本轮只分阶段提交、推送并带 `[skip ci]`，没有合并、tag 或发布。
+
 ## M6 实施记录
 
 起点 `ee6467e2`。既有来源页增加参与方式、查询/层级说明、AI 辅助模式与认证选择；连接/模型请求/配置检查分别标注，Open Library 仍仅人工。识别策略页面接通默认关闭的路径修正和固定请求预算说明。弹窗空查询使用既有 ISBN/标题作者计划，AI 建议只填查询词，候选按共同规则展示；字段选择受服务端 confirmableFields、保护、范围和日期精度约束，不再显示误导性的来源置信百分数。
@@ -178,7 +246,7 @@ Web 使用仓库可用 Node 22（`C:/Program Files/nodejs/node.exe`）直接运�
 - [x] M4 来源增强与新来源。
 - [x] M5 AI 辅助。
 - [x] M6 后台与确认闭环。
-- [ ] M7 最终验收。
+- [x] M7 工程实现与本地定向验收；真实来源/模型与标注样本验收待补，见 M7 缺口。
 
 ## 当前调用链与直接证据
 

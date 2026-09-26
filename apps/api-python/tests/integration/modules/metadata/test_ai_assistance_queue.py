@@ -2,7 +2,12 @@ import json
 
 import pytest
 
-from app.models import LibraryBookMetadata, MetadataLookupTask
+from app.models import (
+    LibraryBookMetadata,
+    LibraryResourceAsset,
+    LibrarySourceNode,
+    MetadataLookupTask,
+)
 from app.modules.metadata.domain.providers import BUILTIN_MANIFESTS
 from app.modules.metadata.infrastructure import ai_assistance as ai_client
 from app.modules.metadata.infrastructure.sources import (
@@ -31,6 +36,11 @@ def test_automatic_hints_requery_source_and_only_apply_verified_facts(db_session
     configure(db_session, mode)
     book, resource = _seed_lookup_graph(db_session)
     book_id, resource_id = book.id, resource.id
+    node = db_session.get(LibrarySourceNode, resource.source_node_id)
+    node.name = "001_黑暗坡食人树_扫描版_FINAL.txt"
+    db_session.add(LibraryResourceAsset(id="noisy-file", library_id="test-library", resource_id=resource_id,
+        source_node_id=node.id, role="PRIMARY", import_state="READY"))
+    db_session.commit()
     task = _lookup_task(db_session, book, resource, status="RUNNING")
     task_id = task.id
     queries, model_calls = [], []
@@ -39,6 +49,8 @@ def test_automatic_hints_requery_source_and_only_apply_verified_facts(db_session
         return {"enabled": True, "candidates": [{"id": "verified", "title": "黑暗坡食人树", "author": "岛田庄司", "matchLevel": "WORK", "description": "Only the source supplies this text"}] if query else []}
     def model(req, **kwargs):
         assert not db_session.in_transaction()
+        inputs = json.loads(json.loads(req.data)["messages"][1]["content"])
+        assert any("扫描版_FINAL.txt" in item["value"] for item in inputs["evidence"])
         model_calls.append(req)
         return Response(json.dumps({"title": "黑暗坡食人树", "author": None, "volume": None,
             "evidenceIds": ["target:title"], "queryHints": [{"query": "黑暗坡食人树", "evidenceIds": ["target:title"], "hypothesis": False}], "reason": "metadata title"}))

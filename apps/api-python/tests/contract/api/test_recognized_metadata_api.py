@@ -410,3 +410,26 @@ def test_record_human_confirmation_cannot_override_volume_conflict(client, db_se
     assert response.status_code == 422, response.text
     db_session.expire_all()
     assert db_session.get(LibraryReadableResourceMetadata, resource_id).publisher is None
+
+
+def test_ignored_record_suppresses_same_context_and_legacy_records_cannot_apply(client, db_session, monkeypatch):
+    from app.models.organize import MetadataLookupTask
+    from app.modules.metadata.public import (
+        load_recognition_context,
+        recognition_retry_suppressed,
+    )
+    _login(client, db_session, role="admin")
+    resource_id, result = _record_search(client, db_session, monkeypatch)
+    record_id = result["recognitionId"]
+    assert client.post(f"/api/books/record-book/metadata/recognitions/{record_id}/ignore").status_code == 200
+    assert recognition_retry_suppressed(db_session, "record-book")
+    for number, raw in enumerate(("legacy raw html", "[]", '{"recognition": null, "selected": null}')):
+        identifier = f"legacy-{number}"
+        db_session.add(MetadataLookupTask(id=identifier, book_id="record-book", resource_id=resource_id,
+            status="COMPLETED", provider_order='["douban"]', candidate_raw_json=raw))
+    db_session.commit()
+    context = load_recognition_context(db_session, book_id="record-book", resource_id=resource_id)
+    assert context.identity.isbn_scope == "UNKNOWN" and context.identity.source_ids == ()
+    response = client.post("/api/books/record-book/metadata/apply", json={"scope": "resource", "resourceId": resource_id,
+        "recognitionId": "legacy-0", "candidate": {"id": "edition-1", "source": "douban"}, "fields": ["resource.publisher"]})
+    assert response.status_code == 422, response.text

@@ -323,3 +323,44 @@ def test_persisted_isbn_alone_does_not_confirm_an_edition(db_session):
     assert projected.identity.isbn_scope == "UNKNOWN"
     assert decision.outcome == "AMBIGUOUS"
     assert not decision.allowed_fields
+
+
+def test_projection_stays_indexed_with_100k_unrelated_resources(db_session):
+    from sqlalchemy import insert
+    _book(db_session, "bounded-target")
+    resource_id = _resource(db_session, "bounded-target", 1, isbn="9780306406157")
+    _book(db_session, "unrelated-large-book")
+    db_session.commit()
+    statements = []
+    def observe(connection, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT"):
+            statements.append((statement, parameters))
+    def project():
+        db_session.close()
+        statements.clear()
+        engine = db_session.get_bind()
+        event.listen(engine, "before_cursor_execute", observe)
+        try:
+            context = load_recognition_context(db_session, book_id="bounded-target", resource_id=resource_id)
+            data = provider_context(db_session, context)
+        finally:
+            event.remove(engine, "before_cursor_execute", observe)
+        return context, data, tuple(statements)
+    before, data_before, sql_before = project()
+    for start in range(0, 100_000, 1000):
+        ids = [f"large-{index}" for index in range(start, start + 1000)]
+        db_session.execute(insert(LibrarySourceNode), [{"id": item, "library_id": "test-library", "relative_path": f"large/{item}.epub",
+            "path_key": "v1:" + hashlib.sha256(item.encode()).hexdigest(), "name": item + ".epub", "physical_kind": "REGULAR_FILE",
+            "observed_size_bytes": 1, "observed_mtime_ns": 0, "observed_at": datetime.now(UTC)} for item in ids])
+        db_session.execute(insert(LibraryReadableResource), [{"id": item, "library_id": "test-library", "book_id": "unrelated-large-book",
+            "source_node_id": item, "adapter_id": "epub-file", "adapter_version": "1", "format": "EPUB", "import_state": "READY"} for item in ids])
+    db_session.commit()
+    after, data_after, sql_after = project()
+    assert before == after and data_before == data_after
+    assert len(sql_before) == len(sql_after)
+    assert len(data_after["resources"]) == 1
+    assert len(data_after["files"]) <= 8
+    with db_session.get_bind().connect() as connection:
+        for statement, parameters in sql_after:
+            plan = connection.exec_driver_sql("EXPLAIN QUERY PLAN " + statement, parameters).all()
+            assert not any("SCAN LibraryReadableResource" in row[3] or "SCAN LibrarySourceNode" in row[3] or "SCAN MetadataLookupTask" in row[3] for row in plan), plan

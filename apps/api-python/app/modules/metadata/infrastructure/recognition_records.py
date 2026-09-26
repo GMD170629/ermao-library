@@ -39,7 +39,10 @@ def recognition_record(db: Session, book_id: str, record_id: str) -> dict[str, A
     row = db.get(MetadataLookupTask, record_id, populate_existing=True)
     if row is None or row.book_id != book_id:
         return None
-    raw = json.loads(row.candidate_raw_json or "{}")
+    try:
+        raw = json.loads(row.candidate_raw_json or "{}")
+    except json.JSONDecodeError:
+        return None  # Legacy opaque payloads cannot authorize confirmation.
     if not isinstance(raw, dict) or not isinstance(raw.get("recognition"), dict):
         return None
     return raw

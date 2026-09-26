@@ -259,3 +259,82 @@ def test_reconcile_queue_state_counts_durable_resource_targets(db_session) -> No
     assert reconciled is not None
     assert reconciled.pending_targets == 0
     assert db_session.scalar(select(MetadataWritebackOperation)) is None
+
+
+def test_confirmed_isbn_google_to_automatic_edition_and_real_opf(client, db_session, test_settings, tmp_path, monkeypatch):
+    import io
+    import json
+
+    from app.models.organize import MetadataLookupTask
+    from app.modules.library.infrastructure import source_node_metadata_recognition
+    from app.modules.metadata.domain.providers import BUILTIN_MANIFESTS
+    from app.modules.metadata.infrastructure import bibliographic_providers
+    from app.modules.metadata.infrastructure.sources import (
+        prepare_builtin_provider_seed_rows,
+        write_builtin_provider_seed_rows,
+    )
+    from app.services import metadata_lookup_queue as queue
+    from app.services.metadata_provider_registry import (
+        update_metadata_provider,
+        update_metadata_provider_order,
+    )
+    from tests.contract.api.test_recognized_metadata_api import _login
+    from tests.test_metadata_lookup_queue import _lookup_task
+
+    _login(client, db_session, role="admin")
+    original = tmp_path / "confirmed-edition.txt"
+    original.write_text("Unchanged original", encoding="utf-8")
+    before = (original.read_bytes(), original.stat().st_mtime_ns)
+    book, resource, _asset = _seed_book_resource(db_session, original)
+    book_id, resource_id = book.id, resource.id
+    db_session.get(LibrarySourceNode, book.source_node_id).relative_path = tmp_path.as_posix()
+    db_session.get(LibrarySourceNode, resource.source_node_id).relative_path = original.as_posix()
+    metadata = db_session.get(LibraryBookMetadata, book_id)
+    metadata.metadata_pending = False
+    metadata.metadata_state = "COMPLETED"
+    db_session.get(OrganizePolicy, "default").write_metadata_to_files = False
+    write_builtin_provider_seed_rows(db_session, prepare_builtin_provider_seed_rows(BUILTIN_MANIFESTS))
+    db_session.commit()
+    update_metadata_provider(db_session, "google-books", {"config": {"apiKey": "fixture-key"}})
+    update_metadata_provider_order(db_session, [{"providerId": item.id, "enabled": item.id == "google-books"} for item in BUILTIN_MANIFESTS])
+    candidate = {"id": "confirmed-edition", "source": "google-books", "title": "快照标题", "author": "作者",
+                 "isbn": "9780306406157", "isbnScope": "EDITION", "matchLevel": "EDITION"}
+    with monkeypatch.context() as manual:
+        manual.setattr(source_node_metadata_recognition, "search_with_metadata_provider", lambda *args: {"candidates": [candidate]})
+        found = client.post(f"/api/books/{book_id}/source-nodes/{resource.source_node_id}/metadata/search",
+                            json={"providerId": "google-books", "resourceId": resource_id})
+    assert found.status_code == 200, found.text
+    result = found.json()["data"]
+    applied = client.post(f"/api/books/{book_id}/metadata/apply", json={"scope": "resource", "resourceId": resource_id,
+        "recognitionId": result["recognitionId"], "candidate": {"id": candidate["id"], "source": "google-books"}, "fields": ["resource.isbn"]})
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["data"]["writebackStatus"] == "notRequested"
+    db_session.get(OrganizePolicy, "default").write_metadata_to_files = True
+    db_session.commit()
+    task = _lookup_task(db_session, db_session.get(LibraryBook, book_id), db_session.get(LibraryReadableResource, resource_id), status="RUNNING")
+    task.provider_order = '["google-books"]'
+    task.candidate_raw_json = json.dumps({"recognition": {"targetType": "resource", "targetId": resource_id}})
+    db_session.commit()
+    task_id = task.id
+    calls = []
+    def google(request, **kwargs):
+        assert not db_session.in_transaction()
+        assert "isbn%3A9780306406157" in request.full_url
+        calls.append(request.full_url)
+        return io.BytesIO(json.dumps({"items": [{"id": "confirmed-edition", "volumeInfo": {"title": "快照标题", "authors": ["作者"],
+            "industryIdentifiers": [{"type": "ISBN_10", "identifier": "0306406152"}], "publisher": "Verified Edition Press", "publishedDate": "1980-01-02", "language": "zh"}}]}).encode())
+    monkeypatch.setattr(bibliographic_providers, "urlopen", google)
+    task_input = queue.lookup_persist.lookup_task_to_dict(db_session.get(MetadataLookupTask, task_id))
+    assert queue.process_metadata_lookup_task(db_session, test_settings, task_input) == "COMPLETED"
+    db_session.expire_all()
+    saved = db_session.get(LibraryReadableResourceMetadata, resource_id)
+    assert saved.publisher == "Verified Edition Press" and saved.language == "zh"
+    assert saved.isbn == "9780306406157" and "isbn" in saved.protected_fields
+    assert len(calls) == 1
+    stored = json.loads(db_session.get(MetadataLookupTask, task_id).candidate_raw_json)
+    assert stored["recognition"]["httpAttempts"] == 1
+    assert process_next_metadata_writeback(db_session, test_settings) is True
+    assert process_next_metadata_writeback(db_session, test_settings) is True
+    opf = parse_opf_metadata(original.with_suffix(".opf").read_bytes())
+    assert opf.isbn == "9780306406157" and opf.publisher == "Verified Edition Press"
+    assert (original.read_bytes(), original.stat().st_mtime_ns) == before

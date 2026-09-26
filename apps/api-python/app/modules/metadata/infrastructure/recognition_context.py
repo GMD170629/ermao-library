@@ -209,9 +209,16 @@ def load_recognition_context(
                    MetadataLookupTask.status == "COMPLETED")
             .order_by(MetadataLookupTask.created_at.desc()).limit(8)).all()
         for encoded in records:
-            saved = json.loads(encoded or "{}")
+            try:
+                saved = json.loads(encoded or "{}")
+            except json.JSONDecodeError:
+                continue  # Old provider raw text is not confirmed identity evidence.
+            if not isinstance(saved, dict):
+                continue
             evidence = saved.get("recognition", {})
             selected = saved.get("selected", {})
+            if not isinstance(evidence, dict) or not isinstance(selected, dict):
+                continue
             if (evidence.get("humanConfirmed") and evidence.get("targetType") == "resource"
                 and evidence.get("targetId") == resource.id
                 and evidence.get("confirmedRevision") == revision

@@ -424,6 +424,37 @@ def test_explicit_volume_task_changes_only_selected_resource(db_session, test_se
         assert json.loads(stored.candidate_raw_json)["recognition"]["writebackStatus"] == "FAILED"
 
 
+@pytest.mark.parametrize("failure,code", [
+    ("429", "RATE_LIMITED"), ("401", "AUTHENTICATION"),
+    ("403", "AUTHENTICATION"), ("restricted", "SOURCE_RESTRICTED"),
+    ("parse", "PARSE_ERROR"), ("timeout", "TIMEOUT"),
+])
+def test_provider_errors_remain_retryable_errors_not_empty_matches(db_session, test_settings, monkeypatch, failure, code):
+    from urllib.error import HTTPError
+
+    book, resource = _seed_lookup_graph(db_session)
+    book_id, resource_id = book.id, resource.id
+    task_id = _lookup_task(db_session, book, resource, status="RUNNING").id
+    def source(db, context, provider, query, gate):
+        gate.wait(provider)
+        if failure.isdigit():
+            raise HTTPError("https://provider.example", int(failure), "failure", {}, None)
+        if failure == "timeout":
+            raise TimeoutError("provider timeout")
+        raise ValueError("SOURCE_RESTRICTED" if failure == "restricted" else "invalid source payload")
+    monkeypatch.setattr(queue, "_search_provider", source)
+    assert process_metadata_lookup_task(db_session, test_settings, {"id": task_id, "bookId": book_id,
+        "resourceId": resource_id, "providerOrder": '["douban"]'}) == "PENDING"
+    db_session.expire_all()
+    stored = db_session.get(MetadataLookupTask, task_id)
+    result = json.loads(stored.candidate_raw_json)
+    assert result["recognition"]["outcome"] == "SOURCE_ERROR"
+    assert result["attempted"][0]["errorCode"] == code
+    assert result["recognition"]["httpAttempts"] == 1
+    assert stored.next_attempt_at is not None
+    assert db_session.get(LibraryBookMetadata, book_id).description is None
+
+
 @pytest.mark.parametrize("changed", ["parent", "protected", "cancelled", "deleted"])
 def test_prepared_recognition_rejects_changed_target(db_session, test_settings, monkeypatch, changed):
     book, resource = _seed_lookup_graph(db_session)
@@ -481,3 +512,47 @@ def test_path_repair_requires_persisted_origin_and_both_settings(db_session, tes
         queue._persist_candidate_application(db_session, prepared)
     actual = db_session.get(LibraryReadableResourceMetadata, resource_id).title
     assert actual == ("黑暗坡食人树 第02卷" if expected else current_title)
+
+
+@pytest.mark.parametrize("sample,outcome,status", [
+    ("unique-work", "APPLIED", "COMPLETED"),
+    ("wrong-author", "NO_MATCH", "NO_MATCH"),
+    ("wrong-volume", "NO_MATCH", "NO_MATCH"),
+    ("unknown-author", "AMBIGUOUS", "NO_MATCH"),
+    ("two-editions", "AMBIGUOUS", "NO_MATCH"),
+    ("empty-source", "NO_MATCH", "NO_MATCH"),
+])
+def test_fixed_acceptance_sample_denominators(db_session, test_settings, monkeypatch, sample, outcome, status):
+    # Fixed synthetic set: 6 evaluable targets; 3 contain a correct candidate;
+    # 1 safe automatic application; 2 require confirmation. Never production accuracy.
+    book, resource = _seed_lookup_graph(db_session)
+    book_id, resource_id = book.id, resource.id
+    local = db_session.get(LibraryBookMetadata, book_id)
+    candidate = {"id": "correct", "title": "黑暗坡食人树", "author": "岛田庄司", "matchLevel": "WORK", "description": "Verified fixture description"}
+    if sample == "wrong-author":
+        candidate.update(id="wrong", author="Other Author")
+    elif sample == "wrong-volume":
+        local.title += " 第1卷"
+        candidate.update(id="wrong", title="黑暗坡食人树 第2卷", volume="1", matchLevel="VOLUME")
+    elif sample == "unknown-author":
+        local.author = None
+    candidates = [] if sample == "empty-source" else [candidate]
+    if sample == "two-editions":
+        candidates.append({**candidate, "id": "another-edition"})
+    db_session.commit()
+    task = _lookup_task(db_session, book, resource, status="RUNNING")
+    task_id = task.id
+    calls = []
+    def source(db, context, provider, query, gate):
+        gate.wait(provider)
+        calls.append(provider)
+        return {"enabled": True, "candidates": candidates}
+    monkeypatch.setattr(queue, "_search_provider", source)
+    assert process_metadata_lookup_task(db_session, test_settings, {"id": task_id, "bookId": book_id, "resourceId": resource_id, "providerOrder": '["douban"]'}) == status
+    db_session.expire_all()
+    stored = json.loads(db_session.get(MetadataLookupTask, task_id).candidate_raw_json)
+    assert stored["recognition"]["outcome"] == outcome
+    assert stored["recognition"]["httpAttempts"] == 1
+    assert calls == ["douban"]
+    assert db_session.get(LibraryBookMetadata, book_id).description == ("Verified fixture description" if sample == "unique-work" else None)
+    assert db_session.get(LibraryReadableResourceMetadata, resource_id).description is None

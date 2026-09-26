@@ -452,3 +452,30 @@ def test_supplement_does_not_mix_conflicting_publishers():
     assert supplement_fields(target, "first", first, "second", second) == ()
     second["publisher"] = "A"
     assert {item.field for item in supplement_fields(target, "first", first, "second", second)} >= {"book.description"}
+
+
+@pytest.mark.parametrize("field", ["publisher", "language", "edition"])
+def test_known_edition_conflict_rejects_even_equal_isbn(field):
+    local = context(target_type="resource", isbn="9780306406157", isbn_scope="EDITION")
+    local = replace(local, identity=replace(local.identity, **{field: "Original"}))
+    remote = candidate_evidence("google-books", {
+        "id": "one", "title": "三体", "author": "刘慈欣", "isbn": "0306406152",
+        "isbnScope": "EDITION", "matchLevel": "EDITION", field: "Other",
+    })
+    result = decide_match(local, remote)
+    assert result.outcome == "REJECTED" and "EDITION_CONFLICT" in result.reasons
+    assert not result.allowed_fields
+
+
+def test_paper_edition_cannot_grant_recording_fields():
+    from app.modules.metadata.application.field_proposals import propose_fields
+
+    local = context(target_type="resource", isbn="9780306406157", isbn_scope="EDITION")
+    local = replace(local, allowed_fields=local.allowed_fields | {"resource.narrator", "resource.abridged"})
+    payload = {"id": "one", "title": "三体", "author": "刘慈欣", "isbn": "0306406152",
+        "isbnScope": "EDITION", "matchLevel": "EDITION", "narrator": "Narrator", "abridged": True,
+        "publisher": "Publisher"}
+    result = decide_match(local, candidate_evidence("google-books", payload))
+    assert result.outcome == "MATCHED" and "resource.publisher" in result.allowed_fields
+    assert not {"resource.narrator", "resource.abridged"} & result.allowed_fields
+    assert not {"resource.narrator", "resource.abridged"} & {item.field for item in propose_fields(local, "google-books", payload, result)}
