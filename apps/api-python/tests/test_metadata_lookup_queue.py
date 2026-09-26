@@ -15,7 +15,7 @@ from app.models import (
     LibrarySourceNode,
     MetadataLookupTask,
 )
-from app.models.organize import OrganizeJob
+from app.models.organize import OrganizeJob, OrganizePolicy
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
 )
@@ -185,20 +185,75 @@ def test_lookup_waits_for_resource_import_and_schedules_retry(
     assert refreshed.next_attempt_at is not None
 
 
-def test_exact_candidate_selection_requires_one_title_match_and_can_use_author() -> (
-    None
+@pytest.mark.parametrize("author,expected", [("其他作者", "REJECTED"), (None, "AMBIGUOUS"), ("岛田庄司", "MATCHED")])
+def test_automatic_lookup_uses_identity_decision_without_resource_writes(
+    db_session, test_settings, monkeypatch, author, expected
 ):
-    candidates = [
-        {"title": "黑暗坡食人树", "author": "岛田庄司", "source": "douban"},
-        {"title": "黑暗坡食人树", "author": "其他作者", "source": "bangumi"},
-    ]
+    book, resource = _seed_lookup_graph(db_session)
+    task = _lookup_task(db_session, book, resource, status="RUNNING")
+    task_id, book_id, resource_id = task.id, book.id, resource.id
+    calls = []
 
-    selected, exact = queue._choose_exact_candidate(
-        candidates, "黑暗坡食人树", "岛田庄司"
-    )
+    def search(db, context, provider, query, gate):
+        assert not db.in_transaction()
+        calls.append(provider)
+        return {"enabled": True, "candidates": [{
+            "id": "one", "source": provider, "title": "黑暗坡食人树", "author": author,
+            "publisher": "Must not write", "isbn": "9780306406157",
+        }]}
 
-    assert selected == candidates[0]
-    assert exact == candidates
+    monkeypatch.setattr(queue, "_search_provider", search)
+    result = process_metadata_lookup_task(db_session, test_settings, {
+        "id": task_id, "bookId": book_id, "resourceId": resource_id,
+        "providerOrder": '["douban"]', "status": "RUNNING", "attempts": 0,
+    })
+    assert result == ("COMPLETED" if expected == "MATCHED" else "NO_MATCH")
+    assert calls == ["douban"]
+    db_session.expire_all()
+    saved = db_session.get(MetadataLookupTask, task_id)
+    payload = json.loads(saved.candidate_raw_json)
+    attempts = payload["attempted"]
+    assert attempts[0]["matches"][0]["outcome"] == expected
+    assert db_session.get(LibraryReadableResourceMetadata, resource_id).isbn is None
+    assert db_session.get(LibraryBookMetadata, book_id).author == "岛田庄司"
+
+
+def test_aggregate_book_does_not_borrow_representative_resource_isbn(db_session, test_settings, monkeypatch):
+    book, resource = _seed_lookup_graph(db_session)
+    node = _node("second-node", "lookup-book/volume2.txt")
+    db_session.add(node)
+    db_session.flush()
+    db_session.add(LibraryReadableResource(id="second-resource", library_id="test-library", book_id=book.id, source_node_id=node.id, adapter_id="txt", adapter_version="1", format="TXT", import_state="READY"))
+    db_session.get(LibraryReadableResourceMetadata, resource.id).isbn = "9780306406157"
+    db_session.commit()
+    task = _lookup_task(db_session, book, resource, status="RUNNING")
+    monkeypatch.setattr(queue, "_search_provider", lambda *_: {"enabled": True, "candidates": [{"id": "one", "title": "黑暗坡食人树", "author": "岛田庄司", "isbn": "9780306406157"}]})
+    monkeypatch.setattr(queue, "_prepare_candidate_application", lambda *_: pytest.fail("aggregate must not apply a single-volume result"))
+    assert process_metadata_lookup_task(db_session, test_settings, {"id": task.id, "bookId": book.id, "resourceId": resource.id, "providerOrder": '["douban"]', "attempts": 0}) == "NO_MATCH"
+
+
+def test_conflicting_candidate_cannot_overwrite_title_when_remote_is_preferred(db_session, test_settings, monkeypatch):
+    book, resource = _seed_lookup_graph(db_session)
+    metadata = db_session.get(LibraryBookMetadata, book.id)
+    metadata.title = "示例书 第1卷"
+    metadata.normalized_title = "示例书第1卷"
+    db_session.merge(OrganizePolicy(id="default", prefer_local_metadata=False))
+    db_session.commit()
+    task = _lookup_task(db_session, book, resource, status="RUNNING")
+    task_id, book_id, resource_id = task.id, book.id, resource.id
+    monkeypatch.setattr(queue, "_search_provider", lambda *_: {"enabled": True, "candidates": [{
+        "id": "one", "title": "示例书 第2卷", "volume": "1", "author": "岛田庄司",
+    }]})
+    result = process_metadata_lookup_task(db_session, test_settings, {
+        "id": task_id, "bookId": book_id, "resourceId": resource_id,
+        "providerOrder": '["douban"]', "attempts": 0,
+    })
+    db_session.expire_all()
+    assert db_session.get(LibraryBookMetadata, book_id).title == "示例书 第1卷"
+    assert result == "NO_MATCH"
+    attempted = json.loads(db_session.get(MetadataLookupTask, task_id).candidate_raw_json)["attempted"]
+    assert attempted[0]["matches"][0]["outcome"] == "REJECTED"
+    assert attempted[0]["matches"][0]["allowedFields"] == []
 
 
 def test_cancelled_lookup_cannot_be_reopened_by_a_stale_worker(db_session) -> None:
@@ -240,14 +295,16 @@ def test_resource_cover_does_not_block_recognition_of_book_cover(
     temporary.write_bytes(b"recognized-image")
     remote = queue._PreparedRemoteCover(temporary, target, "covers/recognized.png")
     monkeypatch.setattr(queue, "_download_remote_cover", lambda *args: remote)
+    task = _lookup_task(db_session, book, resource, status="RUNNING")
+    task_id = task.id
     prepared = queue._prepare_candidate_application(
         db_session,
         test_settings,
-        {"bookId": book_id, "resourceId": resource_id},
+        {"id": task_id, "bookId": book_id, "resourceId": resource_id},
         "test",
-        {"coverUrl": "https://example.test/cover.png"},
+        {"id": "cover-candidate", "title": "黑暗坡食人树", "author": "岛田庄司", "matchLevel": "WORK", "coverUrl": "https://example.test/cover.png"},
     )
-    assert prepared.book_patch["coverPath"] == "covers/recognized.png"
+    assert prepared.changes[0].fields["cover_ref"] == "recognition:" + task_id
     assert not any(
         field in prepared.applied
         for field in ("publisher", "language", "isbn", "publishedAt")
@@ -325,3 +382,177 @@ def test_import_wait_exhaustion_logs_observed_upstream_state_and_returns_failed(
     assert record.import_task_id == "import-task-1"
     assert "upstream import state=QUEUED" in record.message
     assert "Attempt 4 exhausted 3" in record.message
+
+
+@pytest.mark.parametrize("writeback_fails", [False, True])
+def test_explicit_volume_task_changes_only_selected_resource(db_session, test_settings, monkeypatch, writeback_fails):
+    book, resource = _seed_lookup_graph(db_session)
+    book_id, resource_id = book.id, resource.id
+    db_session.get(LibraryReadableResourceMetadata, resource_id).title = "黑暗坡食人树 第1卷"
+    node = _node("volume-two", "lookup-book/volume2.txt")
+    db_session.add(node)
+    db_session.flush()
+    second = LibraryReadableResource(id="volume-two", library_id="test-library", book_id=book_id,
+        source_node_id=node.id, adapter_id="txt", adapter_version="1", format="TXT", import_state="READY")
+    db_session.add(second)
+    db_session.flush()
+    db_session.add(LibraryReadableResourceMetadata(resource_id=second.id, title="黑暗坡食人树 第2卷"))
+    db_session.commit()
+    task = _lookup_task(db_session, book, second, status="RUNNING")
+    task.candidate_raw_json = json.dumps({"recognition": {"targetType": "resource", "targetId": second.id}})
+    db_session.commit()
+    task_id = task.id
+    candidate = {"id": "volume-2", "title": "黑暗坡食人树 第2卷", "author": "岛田庄司", "matchLevel": "VOLUME", "description": "Verified volume two"}
+    monkeypatch.setattr(queue, "_search_provider", lambda *_: {"enabled": True, "candidates": [candidate]})
+    if writeback_fails:
+        def failed_writeback(*args, **kwargs):
+            raise OSError("opf queue unavailable")
+        monkeypatch.setattr(queue, "recognition_writeback", failed_writeback)
+    task_input = queue.lookup_persist.lookup_task_to_dict(db_session.get(MetadataLookupTask, task_id))
+    task_input["providerOrder"] = '["douban"]'
+    result = process_metadata_lookup_task(db_session, test_settings, task_input)
+    assert result == "COMPLETED"
+    db_session.expire_all()
+    changed = db_session.get(LibraryReadableResourceMetadata, "volume-two")
+    assert changed.description == "Verified volume two"
+    assert "description" not in json.loads(changed.protected_fields)
+    assert db_session.get(LibraryReadableResourceMetadata, resource_id).description is None
+    assert db_session.get(LibraryBookMetadata, book_id).description is None
+    stored = db_session.get(MetadataLookupTask, task_id)
+    assert stored.status == "COMPLETED"
+    if writeback_fails:
+        assert json.loads(stored.candidate_raw_json)["recognition"]["writebackStatus"] == "FAILED"
+
+
+@pytest.mark.parametrize("failure,code", [
+    ("429", "RATE_LIMITED"), ("401", "AUTHENTICATION"),
+    ("403", "AUTHENTICATION"), ("restricted", "SOURCE_RESTRICTED"),
+    ("parse", "PARSE_ERROR"), ("timeout", "TIMEOUT"),
+])
+def test_provider_errors_remain_retryable_errors_not_empty_matches(db_session, test_settings, monkeypatch, failure, code):
+    from urllib.error import HTTPError
+
+    book, resource = _seed_lookup_graph(db_session)
+    book_id, resource_id = book.id, resource.id
+    task_id = _lookup_task(db_session, book, resource, status="RUNNING").id
+    def source(db, context, provider, query, gate):
+        gate.wait(provider)
+        if failure.isdigit():
+            raise HTTPError("https://provider.example", int(failure), "failure", {}, None)
+        if failure == "timeout":
+            raise TimeoutError("provider timeout")
+        raise ValueError("SOURCE_RESTRICTED" if failure == "restricted" else "invalid source payload")
+    monkeypatch.setattr(queue, "_search_provider", source)
+    assert process_metadata_lookup_task(db_session, test_settings, {"id": task_id, "bookId": book_id,
+        "resourceId": resource_id, "providerOrder": '["douban"]'}) == "PENDING"
+    db_session.expire_all()
+    stored = db_session.get(MetadataLookupTask, task_id)
+    result = json.loads(stored.candidate_raw_json)
+    assert result["recognition"]["outcome"] == "SOURCE_ERROR"
+    assert result["attempted"][0]["errorCode"] == code
+    assert result["recognition"]["httpAttempts"] == 1
+    assert stored.next_attempt_at is not None
+    assert db_session.get(LibraryBookMetadata, book_id).description is None
+
+
+@pytest.mark.parametrize("changed", ["parent", "protected", "cancelled", "deleted"])
+def test_prepared_recognition_rejects_changed_target(db_session, test_settings, monkeypatch, changed):
+    book, resource = _seed_lookup_graph(db_session)
+    book_id, resource_id = book.id, resource.id
+    task = _lookup_task(db_session, book, resource, status="RUNNING")
+    task_id = task.id
+    db_session.get(LibraryReadableResourceMetadata, resource_id).title += " 第2卷"
+    db_session.commit()
+    prepared = queue._prepare_candidate_application(db_session, test_settings,
+        {"id": task_id, "bookId": book_id, "resourceId": resource_id, "recognition": {"targetType": "resource"}},
+        "douban", {"id": "two", "title": "黑暗坡食人树 第2卷", "author": "岛田庄司", "matchLevel": "VOLUME", "description": "New"})
+    if changed == "parent":
+        db_session.get(LibraryBookMetadata, book_id).author = "Other"
+    elif changed == "protected":
+        db_session.get(LibraryReadableResourceMetadata, resource_id).protected_fields = '["description"]'
+    elif changed == "cancelled":
+        db_session.get(MetadataLookupTask, task_id).status = "CANCELLED"
+    else:
+        db_session.delete(db_session.get(LibraryReadableResource, resource_id))
+    db_session.commit()
+    with pytest.raises(ValueError, match="RECOGNITION_"), queue.MetadataWriteTransaction(db_session):
+        queue._persist_candidate_application(db_session, prepared)
+    assert db_session.get(LibraryBookMetadata, book_id).description is None
+
+
+@pytest.mark.parametrize("repair,prefer_local,known_path,expected", [(False, False, True, False), (True, True, True, False), (True, False, False, False), (True, False, True, True)])
+def test_path_repair_requires_persisted_origin_and_both_settings(db_session, test_settings, repair, prefer_local, known_path, expected):
+    from app.contracts.local_metadata_snapshot import (
+        LocalMetadataObservation,
+        encode_observations,
+    )
+    from app.contracts.publication_metadata import PublicationMetadata
+    from app.models import LibraryResourceAsset
+    from app.services.organize_scheduler import (
+        get_organize_policy,
+        update_organize_policy,
+    )
+    book, resource = _seed_lookup_graph(db_session)
+    book_id, resource_id, node_id = book.id, resource.id, resource.source_node_id
+    current_title = "黑暗坡食人树 第2卷"
+    db_session.get(LibraryReadableResourceMetadata, resource_id).title = current_title
+    if known_path:
+        db_session.add(LibraryResourceAsset(id="path-asset", library_id="test-library", resource_id=resource_id,
+            source_node_id=node_id, source_node_physical_kind="REGULAR_FILE", role="PRIMARY", import_state="READY",
+            local_metadata_candidates=encode_observations((LocalMetadataObservation("PATH", PublicationMetadata(title=current_title, volume_title=current_title)),))))
+    db_session.commit()
+    update_organize_policy(db_session, {"allowRepairPathMetadata": repair, "preferLocalMetadata": prefer_local})
+    update_organize_policy(db_session, {"enabled": False})
+    assert get_organize_policy(db_session)["allowRepairPathMetadata"] == repair
+    task = _lookup_task(db_session, book, resource, status="RUNNING")
+    prepared = queue._prepare_candidate_application(db_session, test_settings,
+        {"id": task.id, "bookId": book_id, "resourceId": resource_id, "recognition": {"targetType": "resource"}},
+        "douban", {"id": "v2", "title": "黑暗坡食人树 第02卷", "author": "岛田庄司", "matchLevel": "VOLUME"})
+    with queue.MetadataWriteTransaction(db_session):
+        queue._persist_candidate_application(db_session, prepared)
+    actual = db_session.get(LibraryReadableResourceMetadata, resource_id).title
+    assert actual == ("黑暗坡食人树 第02卷" if expected else current_title)
+
+
+@pytest.mark.parametrize("sample,outcome,status", [
+    ("unique-work", "APPLIED", "COMPLETED"),
+    ("wrong-author", "NO_MATCH", "NO_MATCH"),
+    ("wrong-volume", "NO_MATCH", "NO_MATCH"),
+    ("unknown-author", "AMBIGUOUS", "NO_MATCH"),
+    ("two-editions", "AMBIGUOUS", "NO_MATCH"),
+    ("empty-source", "NO_MATCH", "NO_MATCH"),
+])
+def test_fixed_acceptance_sample_denominators(db_session, test_settings, monkeypatch, sample, outcome, status):
+    # Fixed synthetic set: 6 evaluable targets; 3 contain a correct candidate;
+    # 1 safe automatic application; 2 require confirmation. Never production accuracy.
+    book, resource = _seed_lookup_graph(db_session)
+    book_id, resource_id = book.id, resource.id
+    local = db_session.get(LibraryBookMetadata, book_id)
+    candidate = {"id": "correct", "title": "黑暗坡食人树", "author": "岛田庄司", "matchLevel": "WORK", "description": "Verified fixture description"}
+    if sample == "wrong-author":
+        candidate.update(id="wrong", author="Other Author")
+    elif sample == "wrong-volume":
+        local.title += " 第1卷"
+        candidate.update(id="wrong", title="黑暗坡食人树 第2卷", volume="1", matchLevel="VOLUME")
+    elif sample == "unknown-author":
+        local.author = None
+    candidates = [] if sample == "empty-source" else [candidate]
+    if sample == "two-editions":
+        candidates.append({**candidate, "id": "another-edition"})
+    db_session.commit()
+    task = _lookup_task(db_session, book, resource, status="RUNNING")
+    task_id = task.id
+    calls = []
+    def source(db, context, provider, query, gate):
+        gate.wait(provider)
+        calls.append(provider)
+        return {"enabled": True, "candidates": candidates}
+    monkeypatch.setattr(queue, "_search_provider", source)
+    assert process_metadata_lookup_task(db_session, test_settings, {"id": task_id, "bookId": book_id, "resourceId": resource_id, "providerOrder": '["douban"]'}) == status
+    db_session.expire_all()
+    stored = json.loads(db_session.get(MetadataLookupTask, task_id).candidate_raw_json)
+    assert stored["recognition"]["outcome"] == outcome
+    assert stored["recognition"]["httpAttempts"] == 1
+    assert calls == ["douban"]
+    assert db_session.get(LibraryBookMetadata, book_id).description == ("Verified fixture description" if sample == "unique-work" else None)
+    assert db_session.get(LibraryReadableResourceMetadata, resource_id).description is None

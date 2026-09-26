@@ -152,6 +152,41 @@ def test_metadata_apply_requires_authentication(client) -> None:
     assert response.status_code == 401
 
 
+def test_metadata_search_returns_shared_match_and_keeps_original_resource_context(client, db_session, monkeypatch):
+    from app.modules.library.infrastructure import source_node_metadata_recognition
+
+    _login(client, db_session, role="admin")
+    resource_id = _add_book(db_session, book_id="recognition-http")
+    db_session.get(LibraryReadableResourceMetadata, resource_id).title = "作品第一卷"
+    db_session.commit()
+    other_resource = _add_book(db_session, book_id="other-http")
+    requests = []
+
+    def search(db, context, provider, query):
+        requests.append((context["book"]["title"], query))
+        return {"candidates": [
+            {"id": "conflict", "title": "作品第二卷", "author": "旧作者"},
+            {"id": "same", "title": "作品第一卷", "author": "旧作者"},
+            {"id": "same", "title": "作品第一卷", "author": "旧作者"},
+        ]}
+
+    monkeypatch.setattr(source_node_metadata_recognition, "search_with_metadata_provider", search)
+    endpoint = f"/api/books/recognition-http/source-nodes/{resource_id}-node/metadata/search"
+    response = client.post(endpoint, json={"providerId": "douban", "query": "作品第二卷", "resourceId": resource_id})
+    assert response.status_code == 200, response.text
+    candidates = response.json()["data"]["candidates"]
+    assert [item["id"] for item in candidates] == ["same", "conflict"]
+    assert candidates[0]["match"]["outcome"] == "MATCHED"
+    assert candidates[0]["match"]["level"] == "VOLUME"
+    assert "resource.isbn" not in candidates[0]["match"]["allowedFields"]
+    assert candidates[1]["match"]["reasons"] == ["VOLUME_CONFLICT"]
+    assert requests == [("作品第一卷", "作品第二卷")]
+    response = client.post(endpoint, json={"providerId": "douban", "resourceId": other_resource})
+    assert response.status_code == 404
+    assert len(requests) == 1
+    assert db_session.get(LibraryReadableResourceMetadata, resource_id).title == "作品第一卷"
+
+
 def test_metadata_apply_requires_system_manager(client, db_session: Session) -> None:
     _login(client, db_session, role="member")
     response = client.post(
@@ -199,6 +234,7 @@ def test_resource_apply_updates_selected_book_resource_and_tag_fields(
         ],
         "skippedFields": [],
         "coverStatus": "notSelected",
+        "writebackStatus": "notRequested",
     }
     db_session.expire_all()
     book_metadata = db_session.get(LibraryBookMetadata, "recognized-book")
@@ -268,3 +304,132 @@ def test_metadata_apply_rejects_repeated_or_unavailable_fields(
     assert repeated.json()["error"]["code"] == "INVALID_METADATA_APPLY"
     assert unavailable.status_code == 422
     assert unavailable.json()["error"]["code"] == "INVALID_METADATA_APPLY"
+
+
+
+def test_apply_rejects_stale_search_revision(client, db_session):
+    _login(client, db_session, role="admin")
+    resource_id = _add_book(db_session, book_id="stale-book")
+    from sqlalchemy.orm import Session
+
+    from app.modules.library.infrastructure.metadata_patches import (
+        SqlAlchemyMetadataPatches,
+    )
+    revision = SqlAlchemyMetadataPatches(db_session).snapshot("resource", resource_id, frozenset({"test-library"})).revision
+    db_session.close()
+    with Session(db_session.get_bind()) as other:
+        other.get(LibraryBookMetadata, "stale-book").author = "Changed in another session"
+        other.commit()
+    response = client.post("/api/books/stale-book/metadata/apply", json={
+        "scope": "resource", "resourceId": resource_id, "expectedRevision": revision,
+        "candidate": _candidate(), "fields": ["resource.publisher"]})
+    assert response.status_code == 409, response.text
+    assert db_session.get(LibraryReadableResourceMetadata, resource_id).publisher is None
+
+
+def _record_search(client, db, monkeypatch, book_id="record-book", *, conflict=False):
+    from app.modules.library.infrastructure import source_node_metadata_recognition
+    resource_id = _add_book(db, book_id=book_id)
+    metadata = db.get(LibraryReadableResourceMetadata, resource_id)
+    metadata.title = "示例书 第1卷"
+    db.commit()
+    candidate = {"id": "edition-1", "source": "douban", "title": "示例书 第2卷" if conflict else "示例书 第1卷",
+                 "author": "旧作者", "description": "来源简介", "publisher": "来源出版社", "isbn": "9780306406157",
+                 "matchLevel": "EDITION", "isbnScope": "EDITION", "publishedAt": "1980"}
+    monkeypatch.setattr(source_node_metadata_recognition, "search_with_metadata_provider", lambda *args: {"candidates": [candidate]})
+    response = client.post(f"/api/books/{book_id}/source-nodes/{resource_id}-node/metadata/search",
+                           json={"providerId": "douban", "resourceId": resource_id})
+    assert response.status_code == 200, response.text
+    return resource_id, response.json()["data"]
+
+
+def test_record_confirm_uses_saved_facts_and_is_idempotent(client, db_session, monkeypatch):
+    from app.modules.metadata.public import load_recognition_context
+    _login(client, db_session, role="admin")
+    resource_id, result = _record_search(client, db_session, monkeypatch)
+    record_id = result["recognitionId"]
+    from app.modules.metadata.public import recognition_record
+    context_before = load_recognition_context(db_session, book_id="record-book", resource_id=resource_id)
+    saved_before = recognition_record(db_session, "record-book", record_id)["recognition"]
+    assert (context_before.revision, context_before.related_revision, context_before.config_revision) == (saved_before["revision"], saved_before["relatedRevision"], saved_before["configRevision"])
+    reopened = client.get(f"/api/books/record-book/metadata/recognitions/{record_id}")
+    assert reopened.status_code == 200, reopened.text
+    assert "resource.publisher" in result["candidates"][0]["confirmableFields"]
+    assert "resource.published_at" not in result["candidates"][0]["confirmableFields"]
+    payload = {"scope": "resource", "resourceId": resource_id, "recognitionId": record_id,
+               "expectedRevision": result["targetRevision"], "expectedBookRevision": result["bookRevision"],
+               "candidate": {"id": "edition-1", "source": "douban", "publisher": "伪造出版社", "isbn": "伪造"},
+               "fields": ["resource.publisher", "resource.isbn"]}
+    endpoint = "/api/books/record-book/metadata/apply"
+    response = client.post(endpoint, json=payload)
+    assert response.status_code == 200, response.text
+    db_session.expire_all()
+    metadata = db_session.get(LibraryReadableResourceMetadata, resource_id)
+    assert metadata.publisher == "来源出版社"
+    assert metadata.isbn == "9780306406157"
+    context = load_recognition_context(db_session, book_id="record-book", resource_id=resource_id)
+    assert context.identity.isbn_scope == "EDITION"
+    assert context.identity.source_ids == (("douban", "edition-1"),)
+    response = client.post(endpoint, json=payload)
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["appliedFields"] == []
+    assert response.json()["data"]["writebackStatus"] == "notRequested"
+    assert client.get(f"/api/books/record-book/metadata/recognitions/{record_id}").status_code == 409
+
+
+def test_record_rejects_changed_target_and_can_ignore(client, db_session, monkeypatch):
+    import json
+
+    from app.models.organize import MetadataLookupTask
+    _login(client, db_session, role="admin")
+    resource_id, result = _record_search(client, db_session, monkeypatch)
+    record_id = result["recognitionId"]
+    metadata = db_session.get(LibraryReadableResourceMetadata, resource_id)
+    metadata.description = "另一处人工修改"
+    db_session.commit()
+    assert client.get(f"/api/books/record-book/metadata/recognitions/{record_id}").status_code == 409
+    response = client.post("/api/books/record-book/metadata/apply", json={"scope": "resource", "resourceId": resource_id,
+        "recognitionId": record_id, "candidate": {"id": "edition-1", "source": "douban"}, "fields": ["resource.publisher"]})
+    assert response.status_code == 409, response.text
+    assert client.post(f"/api/books/record-book/metadata/recognitions/{record_id}/ignore").status_code == 200
+    db_session.expire_all()
+    assert json.loads(db_session.get(MetadataLookupTask, record_id).candidate_raw_json)["recognition"]["ignored"] is True
+    other = _add_book(db_session, book_id="another-record-book")
+    assert other
+    assert client.get(f"/api/books/another-record-book/metadata/recognitions/{record_id}").status_code == 404
+    assert client.post(f"/api/books/another-record-book/metadata/recognitions/{record_id}/ignore").status_code == 404
+
+
+def test_record_human_confirmation_cannot_override_volume_conflict(client, db_session, monkeypatch):
+    _login(client, db_session, role="admin")
+    resource_id, result = _record_search(client, db_session, monkeypatch, conflict=True)
+    assert result["candidates"][0]["confirmableFields"] == []
+    response = client.post("/api/books/record-book/metadata/apply", json={"scope": "resource", "resourceId": resource_id,
+        "recognitionId": result["recognitionId"], "candidate": {"id": "edition-1", "source": "douban", "title": "示例书 第1卷"},
+        "fields": ["resource.publisher"]})
+    assert response.status_code == 422, response.text
+    db_session.expire_all()
+    assert db_session.get(LibraryReadableResourceMetadata, resource_id).publisher is None
+
+
+def test_ignored_record_suppresses_same_context_and_legacy_records_cannot_apply(client, db_session, monkeypatch):
+    from app.models.organize import MetadataLookupTask
+    from app.modules.metadata.public import (
+        load_recognition_context,
+        recognition_retry_suppressed,
+    )
+    _login(client, db_session, role="admin")
+    resource_id, result = _record_search(client, db_session, monkeypatch)
+    record_id = result["recognitionId"]
+    assert client.post(f"/api/books/record-book/metadata/recognitions/{record_id}/ignore").status_code == 200
+    assert recognition_retry_suppressed(db_session, "record-book")
+    for number, raw in enumerate(("legacy raw html", "[]", '{"recognition": null, "selected": null}')):
+        identifier = f"legacy-{number}"
+        db_session.add(MetadataLookupTask(id=identifier, book_id="record-book", resource_id=resource_id,
+            status="COMPLETED", provider_order='["douban"]', candidate_raw_json=raw))
+    db_session.commit()
+    context = load_recognition_context(db_session, book_id="record-book", resource_id=resource_id)
+    assert context.identity.isbn_scope == "UNKNOWN" and context.identity.source_ids == ()
+    response = client.post("/api/books/record-book/metadata/apply", json={"scope": "resource", "resourceId": resource_id,
+        "recognitionId": "legacy-0", "candidate": {"id": "edition-1", "source": "douban"}, "fields": ["resource.publisher"]})
+    assert response.status_code == 422, response.text

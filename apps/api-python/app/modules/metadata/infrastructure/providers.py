@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import select, update
+from sqlalchemy import case, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
@@ -27,19 +27,14 @@ def prepare_provider_order_write(
 ) -> PreparedMetadataProviderWrite:
     """Prepare a complete global provider order update."""
 
-    statements = tuple(
-        update(Source)
-        .where(
-            Source.kind == METADATA_SOURCE_KIND,
-            Source.provider_type == str(row["provider_id"]),
-        )
-        .values(
-            enabled=bool(row["enabled"]),
-            priority=int(str(row["priority"])),
-            updated_at=now,
-        )
-        for row in rows
-    )
+    if not rows:
+        return PreparedMetadataProviderWrite(())
+    priorities = {str(row["provider_id"]): int(str(row["priority"])) for row in rows}
+    enabled = {str(row["provider_id"]): bool(row["enabled"]) for row in rows}
+    statements = (update(Source).where(Source.kind == METADATA_SOURCE_KIND,
+        Source.provider_type.in_(tuple(priorities))).values(
+            enabled=case(enabled, value=Source.provider_type, else_=Source.enabled),
+            priority=case(priorities, value=Source.provider_type, else_=Source.priority), updated_at=now),)
     return PreparedMetadataProviderWrite(statements)
 
 

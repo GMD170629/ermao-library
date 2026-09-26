@@ -19,6 +19,7 @@ export type OrganizePolicy = {
   rules: { unrecognized: boolean; missingMetadata: boolean };
   writeMetadataToFiles: boolean;
   preferLocalMetadata: boolean;
+  allowRepairPathMetadata?: boolean;
   localMetadataPriority: LocalMetadataSource[];
   lastScheduledAt: string | null;
   nextRunAt: string | null;
@@ -41,6 +42,7 @@ const defaultPolicy: OrganizePolicy = {
   rules: { unrecognized: true, missingMetadata: true },
   writeMetadataToFiles: false,
   preferLocalMetadata: true,
+  allowRepairPathMetadata: false,
   localMetadataPriority: ['SIDECAR_OPF', 'EMBEDDED', 'PATH'],
   lastScheduledAt: null,
   nextRunAt: null,
@@ -125,6 +127,7 @@ export function RecognitionSettingsPanel({ compact = false, onSaved }: { compact
           },
           writeMetadataToFiles: policy.writeMetadataToFiles,
           preferLocalMetadata: policy.preferLocalMetadata,
+          allowRepairPathMetadata: policy.allowRepairPathMetadata ?? false,
           localMetadataPriority: policy.localMetadataPriority
         })
       });
@@ -175,6 +178,8 @@ export function RecognitionSettingsPanel({ compact = false, onSaved }: { compact
       ) : null}
       {error ? <div className="mt-4 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
       <div className={compact ? '' : 'mt-5'}>
+        {settingRow(i18nAttribute('修正低质量路径信息'), i18nAttribute('默认关闭。关闭本地优先后，仅可修正有来源证据的路径字段；人工保护字段不变。'), <Toggle checked={policy.allowRepairPathMetadata ?? false} disabled={loading} label={i18nAttribute('修正低质量路径信息')} onChange={(value) => setPolicy({ ...policy, allowRepairPathMetadata: value })} />)}
+        <p className="py-3 text-xs text-slate-500"><I18nText>每个目标最多 8 次来源请求、2 次 AI 请求。手动查询也遵守来源限速。</I18nText></p>
         {settingRow('定时执行识别', '开启后按固定间隔扫描书库；导入流程本身不会直接创建整理任务。', <Toggle checked={policy.enabled && policy.scheduleMode === 'INTERVAL'} disabled={loading} label={i18nAttribute("定时执行识别")} onChange={(checked) => setPolicy({ ...policy, enabled: checked, scheduleMode: checked ? 'INTERVAL' : 'MANUAL' })} />)}
         {policy.enabled && policy.scheduleMode === 'INTERVAL' ? settingRow('执行间隔', '建议至少 30 分钟，避免对外部数据源产生过密请求。', <Select value={String(policy.intervalMinutes)} options={intervalOptions} ariaLabel="识别任务执行间隔" onChange={(value) => setPolicy({ ...policy, intervalMinutes: Number(value) })} className="min-w-36" triggerClassName="!border-[#DCD7D1] !text-[#393632]" />) : null}
         {settingRow('新增后自动执行', '仅处理开启此设置之后新增的读物，历史书库不会被一次性加入。', <Toggle checked={policy.autoRunOnNew} disabled={loading} label={i18nAttribute("新增后自动执行")} onChange={(autoRunOnNew) => setPolicy({ ...policy, autoRunOnNew })} />)}
@@ -211,7 +216,7 @@ export function RecognitionSettingsPanel({ compact = false, onSaved }: { compact
         {policy.nextRunAt ? <span className="text-xs"><I18nText>下次执行：</I18nText>{new Date(policy.nextRunAt).toLocaleString(locale)}</span> : null}
       </div>
       <div className="mt-6 flex flex-wrap justify-end gap-3">
-        <Button icon={Save} loading={busy === 'save'} loadingText={i18nAttribute("保存中")} onClick={() => void save()}><I18nText>保存设置</I18nText></Button>
+        <Button icon={Save} disabled={loading} loading={busy === 'save'} loadingText={i18nAttribute("保存中")} onClick={() => void save()}><I18nText>保存设置</I18nText></Button>
       </div>
     </div>
   );

@@ -105,3 +105,12 @@ def test_cover_publication_revert_restores_the_original_file(tmp_path: Path) -> 
 
     assert original_path.read_bytes() == original_content
     assert list(cover_root.glob("*.backup")) == []
+
+
+@pytest.mark.parametrize("address", ["127.0.0.1", "10.0.0.1", "169.254.169.254", "::1"])
+def test_cover_dns_rejects_private_addresses_without_connect(monkeypatch, address):
+    import socket
+    monkeypatch.setattr(recognized_metadata.socket, "getaddrinfo", lambda *args, **kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, 443))])
+    monkeypatch.setattr(recognized_metadata.socket, "socket", lambda *args: pytest.fail("private address must never be connected"))
+    with pytest.raises(ValueError, match="public"):
+        recognized_metadata._public_socket("cover.example", 443)

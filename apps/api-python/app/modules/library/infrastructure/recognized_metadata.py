@@ -2,19 +2,35 @@
 
 from __future__ import annotations
 
-import json
+import ipaddress
 import os
+import re
+import socket
+import ssl
 from datetime import datetime
+from http.client import HTTPConnection, HTTPSConnection
 from pathlib import Path
+from typing import Any, cast
 from urllib.error import HTTPError
+from urllib.parse import urlsplit
+from urllib.request import (
+    HTTPHandler,
+    HTTPRedirectHandler,
+    HTTPSHandler,
+    ProxyHandler,
+    build_opener,
+)
 from urllib.request import Request as UrlRequest
-from urllib.request import build_opener
 from uuid import uuid4
 
 from PIL import Image, UnidentifiedImageError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.contracts.recognized_metadata_fields import (
+    PROVIDER_METADATA_FIELDS,
+    recognized_field_name,
+)
 from app.core.authorization import (
     AuthorizationContext,
     book_visibility_predicate,
@@ -28,11 +44,11 @@ from app.models import (
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
 )
-from app.modules.library.application.facet_sync import (
-    BookFacetProjection,
-    prepare_book_facet,
+from app.modules.library.application.metadata_patches import (
+    ApplyMetadataPatches,
+    MetadataPatchActor,
+    MetadataSnapshot,
 )
-from app.modules.library.application.metadata_ownership import protect_fields
 from app.modules.library.application.recognized_metadata import (
     BookMetadataChanges,
     BookMetadataState,
@@ -41,6 +57,8 @@ from app.modules.library.application.recognized_metadata import (
     RecognizedCoverMetadataPort,
     RecognizedCoverPublicationPort,
     RecognizedCoverState,
+    RecognizedMetadataCandidate,
+    RecognizedMetadataField,
     RecognizedMetadataPort,
     RecognizedMetadataTargetState,
     RecognizedResourceChanges,
@@ -48,10 +66,23 @@ from app.modules.library.application.recognized_metadata import (
     ResourceMetadataState,
 )
 from app.modules.library.application.resource_commands import LibraryActor
-from app.modules.library.domain.facets import normalize_facet_name
-from app.modules.library.infrastructure.facet_sync import (
-    execute_book_facet_write,
-    prepare_book_facet_write,
+from app.modules.library.domain.metadata_patch import (
+    MetadataChange,
+    MetadataPatchError,
+    MetadataTarget,
+    MetadataValue,
+)
+from app.modules.library.infrastructure.metadata_patches import (
+    SqlAlchemyMetadataPatches,
+)
+from app.modules.metadata.public import (
+    candidate_evidence,
+    complete_recognition_record,
+    confirm_candidate,
+    load_recognition_context,
+    propose_fields,
+    recognition_fingerprint,
+    recognition_record,
 )
 
 _MAX_COVER_BYTES = 10 * 1024 * 1024
@@ -72,6 +103,62 @@ def _authorization_context(actor: LibraryActor) -> AuthorizationContext:
 class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetadataPort):
     def __init__(self, db: Session) -> None:
         self._db = db
+        self._patches = SqlAlchemyMetadataPatches(db)
+        self._snapshots: dict[str, MetadataSnapshot] = {}
+        self._actor: LibraryActor | None = None
+        self._library_ids: frozenset[str] = frozenset()
+        self._pending_record: tuple[str, str, str | None, dict[str, Any], list[str]] | None = None
+
+    def resolve_selection(self, *, book_id: str, resource_id: str | None, record_id: str,
+                          candidate: RecognizedMetadataCandidate, fields: tuple[RecognizedMetadataField, ...]) -> tuple[RecognizedMetadataCandidate, bool]:
+        raw = recognition_record(self._db, book_id, record_id)
+        if raw is None:
+            raise MetadataPatchError("RESOURCE_NOT_FOUND")
+        saved = raw["recognition"]
+        kind, target = ("resource", resource_id) if resource_id else ("book", book_id)
+        if saved.get("targetType") != kind or saved.get("targetId") != target or saved.get("ignored"):
+            raise MetadataPatchError("CONFLICT")
+        selection = sorted(field.value for field in fields)
+        if saved.get("humanConfirmed"):
+            selected = raw.get("selected") or {}
+            if selected.get("id") == candidate.id and selected.get("source") == candidate.source and sorted(saved.get("appliedSelection", [])) == selection:
+                return candidate, True
+            raise MetadataPatchError("CONFLICT")
+        context = load_recognition_context(self._db, book_id=book_id, resource_id=resource_id, source_node_id=saved.get("sourceNodeId"))
+        if context is None or recognition_fingerprint(context) != saved.get("fingerprint"):
+            raise MetadataPatchError("CONFLICT")
+        value = next(({**item, "source": attempt["provider"]} for attempt in raw.get("attempted", [])[:8]
+            if attempt.get("provider") == candidate.source
+            for item in attempt.get("candidates", attempt.get("exactCandidates", []))[:10]
+            if str(item.get("id")) == candidate.id), None)
+        if value is None:
+            raise MetadataPatchError("INVALID_CANDIDATE")
+        decision = confirm_candidate(context, candidate_evidence(candidate.source, value))
+        proposals = propose_fields(context, candidate.source, value, decision)
+        allowed = {item.field for item in proposals}
+        if any(field.value.split(".")[0] + "." + recognized_field_name(field.value.split(".")[1]) not in allowed for field in fields):
+            raise MetadataPatchError("INVALID_FIELD")
+        values: dict[str, Any] = {"id": candidate.id, "source": candidate.source}
+        for external, name in PROVIDER_METADATA_FIELDS.items():
+            item = value.get(external)
+            if name == "cover_ref":
+                name = "cover_url"
+            if name == "published_at":
+                item = datetime.fromisoformat(item) if isinstance(item, str) and re.match(r"^\d{4}-\d{2}-\d{2}(?:$|T)", item) else None
+            if name == "tags":
+                item = tuple(item) if isinstance(item, list) else ()
+            values[name] = item
+        self._pending_record = (book_id, record_id, resource_id, value, selection)
+        return RecognizedMetadataCandidate(**values), False
+
+    def _stage_record(self, changed: bool) -> None:
+        if self._pending_record:
+            book_id, record_id, resource_id, candidate, fields = self._pending_record
+            self._db.flush()
+            context = load_recognition_context(self._db, book_id=book_id, resource_id=resource_id)
+            if context is None:
+                raise MetadataPatchError("CONFLICT")
+            complete_recognition_record(self._db, book_id, record_id, candidate, fields, context, changed=changed)
 
     def load_target(
         self,
@@ -139,7 +226,17 @@ class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetada
                 abridged=resource_row.abridged,
                 resource_index=resource_row.resource_index,
             )
+        self._actor = actor
+        self._library_ids = frozenset({book.library_id})
+        self._snapshots = {}
+        for kind, target in (("book", book_id), ("resource", resource_id)):
+            if target is not None:
+                snapshot = self._patches.snapshot(cast(MetadataTarget, kind), target, self._library_ids)
+                if snapshot is not None:
+                    self._snapshots[kind] = snapshot
         return RecognizedMetadataTargetState(
+            book_revision=self._snapshots["book"].revision,
+            resource_revision=self._snapshots["resource"].revision if "resource" in self._snapshots else None,
             book=BookMetadataState(
                 title=metadata.title,
                 author=metadata.author,
@@ -161,71 +258,29 @@ class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetada
         tags: tuple[str, ...] | None,
         now: datetime,
     ) -> None:
-        metadata = self._db.get(LibraryBookMetadata, book_id)
-        if metadata is None:
-            raise LookupError(book_id)
-        metadata.protected_fields = protect_fields(
-            metadata.protected_fields,
-            (*book_changes.keys(), *(("tags",) if tags is not None else ())),
-        )
-        for field, value in book_changes.items():
-            setattr(metadata, field, value)
-        if "title" in book_changes:
-            metadata.normalized_title = normalize_facet_name(metadata.title)
-        if "author" in book_changes:
-            metadata.normalized_author = (
-                normalize_facet_name(metadata.author) if metadata.author else None
-            )
-        metadata.updated_at = now
-
-        if resource_changes:
-            if resource_id is None:
-                raise LookupError("resourceId")
-            resource_metadata = self._db.get(
-                LibraryReadableResourceMetadata, resource_id
-            )
-            if resource_metadata is None:
-                raise LookupError(resource_id)
-            resource_metadata.protected_fields = protect_fields(
-                resource_metadata.protected_fields, resource_changes.keys()
-            )
-            for field, value in resource_changes.items():
-                setattr(resource_metadata, field, value)
-            resource_metadata.updated_at = now
-
-        facet_fields_changed = bool(
-            {"author", "series_name"}.intersection(book_changes)
-        )
-        if tags is not None or facet_fields_changed:
-            current_tags = tags
-            if current_tags is None:
-                current_tags = tuple(
-                    str(value)
-                    for value in self._db.scalars(
-                        select(LibraryFacet.name)
-                        .join(
-                            LibraryBookFacet,
-                            LibraryBookFacet.facet_id == LibraryFacet.id,
-                        )
-                        .where(
-                            LibraryBookFacet.book_id == book_id,
-                            LibraryFacet.kind == "TAG",
-                        )
-                        .order_by(LibraryBookFacet.sort_order, LibraryFacet.id)
-                    ).all()
-                )
-            prepared = prepare_book_facet(
-                BookFacetProjection(
-                    book_id=book_id,
-                    author=metadata.author,
-                    tags_source=json.dumps(current_tags, ensure_ascii=False),
-                    series_name=metadata.series_name,
-                )
-            )
-            execute_book_facet_write(
-                self._db,
-                prepare_book_facet_write((prepared,), now=now),
-            )
+        del now
+        if self._actor is None:
+            raise MetadataPatchError("ACTOR_REQUIRED")
+        changes = []
+        book_values = {key: cast(MetadataValue, value) for key, value in book_changes.items()}
+        if tags is not None:
+            book_values["tags"] = tags
+        resource_values: dict[str, MetadataValue] = {
+            key: value.isoformat() if isinstance(value, datetime) else cast(MetadataValue, value)
+            for key, value in resource_changes.items()
+        }
+        for kind, target, values in (("book", book_id, book_values), ("resource", resource_id, resource_values)):
+            if values and target:
+                before = self._snapshots.get(kind)
+                if before is None or before.target_id != target or before.book_id != book_id:
+                    raise MetadataPatchError("RESOURCE_NOT_FOUND")
+                changes.append(MetadataChange(before.target_type, target, before.revision, "patch", values,
+                                              provenance={key: "MANUAL_RECOGNITION" for key in values}))
+        if changes:
+            outcome = ApplyMetadataPatches(self._patches, self._db).stage(
+                MetadataPatchActor(self._actor.user_id, None, self._library_ids, True, True, False),
+                tuple(changes), skip_unchanged=True)
+            self._stage_record(bool(outcome["updated"]))
 
     def load_cover_state(
         self,
@@ -235,6 +290,9 @@ class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetada
         resource_id: str | None,
         scope: MetadataTargetScope,
     ) -> RecognizedCoverState | None:
+        target = self.load_target(actor=actor, book_id=book_id, resource_id=resource_id)
+        if target is None:
+            return None
         context = _authorization_context(actor)
         if scope is MetadataTargetScope.BOOK:
             row = self._db.execute(
@@ -257,6 +315,7 @@ class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetada
                     target_id=str(row[0]),
                     current_cover_path=str(row[1]) if row[1] else None,
                     updated_at=row[2],
+                    revision=self._snapshots[scope.value].revision,
                 )
                 if row is not None
                 else None
@@ -285,6 +344,7 @@ class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetada
                 target_id=str(row[0]),
                 current_cover_path=str(row[1]) if row[1] else None,
                 updated_at=row[2],
+                    revision=self._snapshots[scope.value].revision,
             )
             if row is not None
             else None
@@ -298,25 +358,72 @@ class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetada
         cover_path: str,
         now: datetime,
     ) -> None:
-        metadata: LibraryBookMetadata | LibraryReadableResourceMetadata | None
-        if scope is MetadataTargetScope.BOOK:
-            metadata = self._db.get(LibraryBookMetadata, state.target_id)
-            if metadata is None:
-                raise LookupError(state.target_id)
-        else:
-            metadata = self._db.get(LibraryReadableResourceMetadata, state.target_id)
-            if metadata is None:
-                raise LookupError(state.target_id)
-        metadata.protected_fields = protect_fields(
-            metadata.protected_fields, ("cover_path",)
-        )
-        metadata.cover_path = cover_path
-        metadata.cover_status = "READY"
-        metadata.updated_at = now
+        del now
+        if self._actor is None:
+            raise MetadataPatchError("ACTOR_REQUIRED")
+        kind = cast(MetadataTarget, scope.value)
+        before = self._snapshots.get(kind)
+        if before is None or before.target_id != state.target_id:
+            raise MetadataPatchError("RESOURCE_NOT_FOUND")
+        reference = "recognition:" + uuid4().hex
+        port = SqlAlchemyMetadataPatches(self._db, prepared_covers={(kind, state.target_id): (reference, cover_path)})
+        ApplyMetadataPatches(port, self._db).stage(
+            MetadataPatchActor(self._actor.user_id, None, self._library_ids, True, True, False),
+            (MetadataChange(kind, state.target_id, before.revision, "patch", {"cover_ref": reference},
+                            provenance={"cover_ref": "MANUAL_RECOGNITION"}),), skip_unchanged=True)
+        self._stage_record(True)
+
+
+def _public_socket(host: str, port: int) -> socket.socket:
+    addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    if not addresses or any(not ipaddress.ip_address(item[4][0]).is_global for item in addresses):
+        raise ValueError("cover address must be public")
+    family, socktype, proto, _, address = addresses[0]
+    connection = socket.socket(family, socktype, proto)
+    try:
+        connection.settimeout(20)
+        connection.connect(address)
+    except BaseException:
+        connection.close()
+        raise
+    return connection
+
+
+class _PublicHTTPConnection(HTTPConnection):
+    def connect(self) -> None:
+        self.sock = _public_socket(self.host, self.port)
+
+
+class _PublicHTTPSConnection(HTTPSConnection):
+    def connect(self) -> None:
+        raw = _public_socket(self.host, self.port)
+        try:
+            self.sock = ssl.create_default_context().wrap_socket(raw, server_hostname=self.host)
+        except BaseException:
+            raw.close()
+            raise
+
+
+class _CoverHTTPHandler(HTTPHandler):
+    def http_open(self, request):
+        return self.do_open(_PublicHTTPConnection, request)
+
+
+class _CoverHTTPSHandler(HTTPSHandler):
+    def https_open(self, request):
+        return self.do_open(_PublicHTTPSConnection, request)
+
+
+class _NoCoverRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise ValueError("cover redirects are not permitted")
 
 
 class SafeRemoteCoverDownloader(RemoteCoverDownloadPort):
     def download(self, cover_url: str) -> bytes:
+        url = urlsplit(cover_url)
+        if url.scheme not in {"http", "https"} or not url.hostname or url.username or url.password or url.port not in {None, 80, 443}:
+            raise ValueError("invalid remote cover URL")
         request = UrlRequest(
             cover_url,
             headers={
@@ -325,7 +432,7 @@ class SafeRemoteCoverDownloader(RemoteCoverDownloadPort):
                 "Referer": "https://book.douban.com/",
             },
         )
-        opener = build_opener()
+        opener = build_opener(ProxyHandler({}), _CoverHTTPHandler(), _CoverHTTPSHandler(), _NoCoverRedirect())
         try:
             with opener.open(request, timeout=20) as response:
                 content_type = str(response.headers.get("content-type") or "")

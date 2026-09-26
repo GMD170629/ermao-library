@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.bootstrap.media import build_cover_url_resolver
+from app.bootstrap.metadata_recognition import recognition_writeback
 from app.bootstrap.reader import reader_v5_library_queries
 from app.core.config import Settings
 from app.core.failure_diagnostics import RuntimeFailureDiagnostics
@@ -321,7 +322,7 @@ def update_source_node_presentation(
 
 
 def recognize_source_node_metadata(db: Session) -> RecognizeSourceNodeMetadata:
-    return RecognizeSourceNodeMetadata(ProviderSourceNodeMetadataRecognition(db))
+    return RecognizeSourceNodeMetadata(ProviderSourceNodeMetadataRecognition(db), db)
 
 
 def apply_recognized_metadata(
@@ -342,6 +343,7 @@ def apply_recognized_metadata(
         RuntimeFailureDiagnostics(
             logging.getLogger(__name__), "library", lambda: Session(db.get_bind())
         ),
+        lambda book_id, resource_id: recognition_writeback(db, book_id, resource_id),
     )
 
 

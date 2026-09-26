@@ -406,9 +406,21 @@ class SourceNodeMetadataUpdatedPayload(HttpContractModel):
 class SourceNodeMetadataSearchRequest(HttpContractModel):
     provider_id: str = Field(alias="providerId", min_length=1, max_length=100)
     query: str | None = Field(default=None, max_length=500)
+    resource_id: str | None = Field(default=None, alias="resourceId", min_length=1, max_length=191)
+
+
+class MetadataMatchView(HttpContractModel):
+    outcome: Literal["MATCHED", "AMBIGUOUS", "REJECTED", "NO_MATCH"]
+    candidate_key: str = Field(alias="candidateKey")
+    level: Literal["SERIES", "WORK", "VOLUME", "EDITION", "UNKNOWN"]
+    evidence_ids: list[str] = Field(alias="evidenceIds")
+    reasons: list[str]
+    allowed_fields: list[str] = Field(alias="allowedFields")
 
 
 class SourceNodeMetadataCandidateView(HttpContractModel):
+    confirmable_fields: list[str] = Field(default_factory=list, alias="confirmableFields")
+    match: MetadataMatchView | None = None
     id: str
     source: str
     title: str | None = None
@@ -430,11 +442,18 @@ class SourceNodeMetadataCandidateView(HttpContractModel):
 
 
 class SourceNodeMetadataSearchPayload(HttpContractModel):
+    recognition_id: str | None = Field(default=None, alias="recognitionId")
+    target_type: str | None = Field(default=None, alias="targetType")
+    target_id: str | None = Field(default=None, alias="targetId")
+    outcome: str | None = None
+    assistance: dict[str, object] | None = None
     source_node_id: str = Field(alias="sourceNodeId")
     provider_id: str = Field(alias="providerId")
     query: str
     message: str | None = None
     candidates: list[SourceNodeMetadataCandidateView]
+    target_revision: str | None = Field(default=None, alias="targetRevision")
+    book_revision: str | None = Field(default=None, alias="bookRevision")
 
 
 class RecognizedMetadataCandidateInput(HttpContractModel):
@@ -465,10 +484,13 @@ class RecognizedMetadataCandidateInput(HttpContractModel):
 
 
 class ApplyRecognizedMetadataRequest(HttpContractModel):
+    recognition_id: str | None = Field(default=None, alias="recognitionId", max_length=191)
     scope: MetadataTargetScope
     resource_id: str | None = Field(default=None, alias="resourceId", max_length=191)
     candidate: RecognizedMetadataCandidateInput
     fields: list[RecognizedMetadataField] = Field(min_length=1, max_length=18)
+    expected_revision: str | None = Field(default=None, alias="expectedRevision", max_length=64)
+    expected_book_revision: str | None = Field(default=None, alias="expectedBookRevision", max_length=64)
 
 
 class ApplyRecognizedMetadataPayload(HttpContractModel):
@@ -477,6 +499,7 @@ class ApplyRecognizedMetadataPayload(HttpContractModel):
     cover_status: Literal["notSelected", "applied", "failed"] = Field(
         alias="coverStatus"
     )
+    writeback_status: Literal["notRequested", "queued", "failed"] = Field(default="notRequested", alias="writebackStatus")
 
 
 class ResourcePayload(HttpContractModel):

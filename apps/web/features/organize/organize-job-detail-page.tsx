@@ -5,6 +5,7 @@ import { authorDisplayLabel } from '@/types/book';
 import { ExternalLink, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { MetadataLookupModal } from '../books/metadata-lookup-modal';
 import { Cover } from '../../components/book/cover';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
@@ -49,6 +50,7 @@ export function OrganizeJobDetailPage({ jobId, embedded = false }: { jobId: stri
   const { locale } = useI18n();
   const [job, setJob] = useState<OrganizeJobView | null>(null);
   const [loading, setLoading] = useState(true);
+  const [recognitionOpen, setRecognitionOpen] = useState(false);
   const [error, setError] = useState('');
 
   const loadJob = useCallback(() => {
@@ -90,6 +92,8 @@ export function OrganizeJobDetailPage({ jobId, embedded = false }: { jobId: stri
 
       {error ? <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
 
+      {job.recognitionOutcome ? <section className="rounded-2xl border p-4 text-sm"><p>{i18nAttribute(({ APPLIED: '已应用', NO_CHANGES: '已匹配，未变更', MATCHED_UNAPPLIED: '已匹配，尚未应用', AMBIGUOUS: '待确认', NO_MATCH: '未找到', SOURCE_ERROR: '来源故障', NOT_APPLICABLE: '配置或目标不适用', IGNORED: '已忽略' } as Record<string, string>)[job.recognitionOutcome] ?? '未记录')}</p>{job.recognitionId && ['AMBIGUOUS', 'MATCHED_UNAPPLIED'].includes(job.recognitionOutcome) ? <Button variant="secondary" className="mt-2" onClick={() => setRecognitionOpen(true)}><I18nText>确认识别结果</I18nText></Button> : null}</section> : null}
+      <MetadataLookupModal book={job.book} currentResourceId={job.recognitionTargetType === 'resource' ? job.recognitionTargetId : null} fixedScope={job.recognitionTargetType ?? 'book'} recognitionId={job.recognitionId} open={recognitionOpen} onClose={() => setRecognitionOpen(false)} onApplied={loadJob} />
       <div className={embedded ? 'grid gap-5' : 'grid gap-5 lg:grid-cols-[320px_1fr]'}>
         <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex gap-4">

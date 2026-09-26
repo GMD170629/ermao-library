@@ -11,6 +11,7 @@ from app.models import (
     LibraryBook,
     LibraryBookMetadata,
     LibraryReadableResource,
+    LibraryReadableResourceMetadata,
     LibrarySourceNode,
 )
 from app.modules.library.infrastructure import source_node_metadata_recognition
@@ -131,6 +132,25 @@ def test_provider_search_uses_book_context_accepts_owned_file_and_maps_all_field
     assert result.candidates[0].published_at == "2026-08-26T00:00:00Z"
     assert result.candidates[0].abridged is False
     assert result.candidates[0].cover_url == "https://example.test/cover.jpg"
+    assert result.candidates[0].match is not None
+    assert result.candidates[0].match.outcome == "REJECTED"
+    assert "AUTHOR_CONFLICT" in result.candidates[0].match.reasons
+
+    # Explicit resource evidence is separate from the search override and parent.
+    db_session.add(LibraryReadableResourceMetadata(resource_id="recognition-resource", title="第2卷", isbn="9780306406157"))
+    db_session.commit()
+    from app.modules.metadata.public import load_recognition_context
+
+    resource_context = load_recognition_context(db_session, book_id="recognition-book", resource_id="recognition-resource", source_node_id=file_node.id)
+    book_context = load_recognition_context(db_session, book_id="recognition-book")
+    assert resource_context is not None and book_context is not None
+    assert resource_context.identity.isbn == "9780306406157"
+    assert resource_context.identity.title == "第2卷"
+    assert resource_context.parent_title == "图书标题"
+    assert book_context.identity.isbn is None
+    assert resource_context.provenance and all(value == "UNKNOWN" for _, value in resource_context.provenance)
+    assert resource_context.revision and resource_context.related_revision and resource_context.config_revision
+    assert load_recognition_context(db_session, book_id="recognition-book", resource_id="missing") is None
 
 
 def test_candidate_mapping_tolerates_missing_optional_provider_keys() -> None:

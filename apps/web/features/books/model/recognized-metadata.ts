@@ -112,6 +112,14 @@ export function defaultRecognizedMetadataFields(
   if (!candidate) return [];
   return definitions.flatMap(({ field }) => {
     const value = candidateMetadataValue(candidate, field);
-    return hasMetadataValue(value) && normalized(value) !== normalized(currentMetadataValue(book, resource, field)) ? [field] : [];
+    return canConfirmMetadataField(candidate, field) && hasMetadataValue(value) && normalized(value) !== normalized(currentMetadataValue(book, resource, field)) ? [field] : [];
   });
+}
+
+export function canConfirmMetadataField(candidate: SourceNodeMetadataCandidate | null, field: RecognizedMetadataField): boolean {
+  if (!candidate) return false;
+  if (field === 'resource.publishedAt' && !/^\d{4}-\d{2}-\d{2}(?:$|T)/.test(candidate.publishedAt ?? '')) return false;
+  const aliases: Record<string, string> = { cover: 'cover_ref', seriesName: 'series_name', seriesIndex: 'series_index', publishedAt: 'published_at', resourceIndex: 'resource_index' };
+  const [scope, name] = field.split('.');
+  return candidate.confirmableFields === undefined || candidate.confirmableFields.includes(`${scope}.${aliases[name] ?? name}`);
 }

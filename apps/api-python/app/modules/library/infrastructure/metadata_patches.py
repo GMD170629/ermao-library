@@ -68,8 +68,9 @@ def _cover_reference(path: str | None) -> str | None:
 
 
 class SqlAlchemyMetadataPatches:
-    def __init__(self, db: Session) -> None:
+    def __init__(self, db: Session, *, prepared_covers: dict[tuple[str, str], tuple[str, str]] | None = None) -> None:
         self._db = db
+        self._prepared_covers = prepared_covers or {}
 
     def _cover_candidates(self, book_id: str, library_id: str) -> dict[str, str]:
         # Only immutable publications from local import are reusable. User-upload
@@ -111,6 +112,9 @@ class SqlAlchemyMetadataPatches:
         return candidates
 
     def resolve_cover(self, before: MetadataSnapshot, reference: str) -> str:
+        prepared = self._prepared_covers.get((before.target_type, before.target_id))
+        if prepared and prepared[0] == reference:
+            return prepared[1]
         candidate = self._cover_candidates(before.book_id, before.library_id).get(
             reference
         )
@@ -234,7 +238,7 @@ class SqlAlchemyMetadataPatches:
         )
         # The root Node writer synchronizes Book text; its protection and version
         # participate even if the node's own metadata row has never been created.
-        related = None
+        related: tuple[object, ...] | None = None
         if owner_metadata is not None:
             protected |= protected_fields(owner_metadata.protected_fields) & {
                 "title",
@@ -251,6 +255,10 @@ class SqlAlchemyMetadataPatches:
         protected = frozenset(
             "cover_ref" if field == "cover_path" else field for field in protected
         )
+        if target_type == "resource":
+            parent = self._db.get(LibraryBookMetadata, book_id, populate_existing=True)
+            related = ((parent.title, parent.author, parent.protected_fields,
+                        to_timestamp_ms(parent.updated_at)) if parent else None)
         revision = hashlib.sha256(
             json.dumps(
                 [
@@ -366,6 +374,13 @@ class SqlAlchemyMetadataPatches:
             )
             if not changed:
                 raise MetadataPatchError("RESOURCE_NOT_FOUND")
+        if patch.automatic:
+            # Low-level writers protect explicit human edits. Automatic patches
+            # retain the prior ownership inside the same transaction.
+            owner = (self._db.get(LibraryBookMetadata, before.target_id) if before.target_type == "book"
+                     else self._db.get(LibraryReadableResourceMetadata, before.target_id))
+            if owner is not None:
+                owner.protected_fields = json.dumps(sorted("cover_path" if key == "cover_ref" else key for key in before.protected))
         self._db.flush()
 
     def apply_uploaded_cover(self, before: MetadataSnapshot, stored_path: str) -> None:
@@ -402,6 +417,7 @@ class SqlAlchemyMetadataPatches:
             summary="已更新系统元数据 / System metadata updated",
             payload={
                 "grantId": actor.grant_id,
+                "systemTaskId": actor.system_task_id,
                 "changes": [
                     {
                         "type": item.before.target_type,

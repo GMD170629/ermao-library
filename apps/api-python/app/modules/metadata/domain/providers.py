@@ -46,6 +46,9 @@ class ProviderManifest:
     default_priority: int
     enabled_by_default: bool = False
     automatic_rate_limit: AutomaticRateLimit | None = None
+    participation_modes: tuple[str, ...] = ("OFF", "MANUAL_ONLY")
+    query_types: tuple[str, ...] = ("title",)
+    match_levels: tuple[str, ...] = ("UNKNOWN",)
 
 
 BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
@@ -81,6 +84,9 @@ BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
         ),
         default_priority=100,
         enabled_by_default=True,
+        participation_modes=("OFF", "MANUAL_ONLY", "AUTO_AND_MANUAL"),
+        query_types=("isbn", "title", "author", "source-id"),
+        match_levels=("WORK", "VOLUME", "EDITION"),
         # Douban's robots policy publishes Crawl-delay: 5 guidance.
         # https://www.douban.com/robots.txt
         automatic_rate_limit=AutomaticRateLimit(requests=1, period_seconds=5.0),
@@ -123,27 +129,45 @@ BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
         ),
         default_priority=110,
         enabled_by_default=True,
+        participation_modes=("OFF", "MANUAL_ONLY", "AUTO_AND_MANUAL"),
+        query_types=("title", "alias", "source-id"),
+        match_levels=("WORK", "VOLUME"),
         # Bangumi's server defaults to 3,000 requests per 10 minutes. Keep
         # 20% headroom below that published implementation ceiling.
         # https://github.com/bangumi/server/blob/master/config/config.go
         automatic_rate_limit=AutomaticRateLimit(requests=4, period_seconds=1.0),
     ),
     ProviderManifest(
+        id="google-books", name="Google Books", version="builtin",
+        description="Google Books 官方书目 / Official bibliographic API", mode="search",
+        fields=("title", "author", "description", "isbn", "publisher", "publishedAt", "language", "coverUrl"),
+        capabilities=("automatic", "manual-search", "cover"),
+        config_fields=(ProviderConfigField(key="apiKey", label="API Key", kind="password", secret=True, required=True),),
+        default_priority=120, automatic_rate_limit=AutomaticRateLimit(1, 1.0),
+        participation_modes=("OFF", "MANUAL_ONLY", "AUTO_AND_MANUAL"),
+        query_types=("isbn", "title", "author", "source-id"), match_levels=("EDITION",),
+    ),
+    ProviderManifest(
+        id="open-library", name="Open Library", version="builtin",
+        description="仅单目标人工查询 / Explicit single-target manual queries only", mode="search",
+        fields=("title", "author", "description", "isbn", "publisher", "publishedAt", "language", "coverUrl"),
+        capabilities=("manual-search", "cover"),
+        config_fields=(ProviderConfigField(key="userAgent", label="User-Agent", required=True,
+            default="ErmaoLibrary/1.0 (https://github.com/GMD170629/ermao-library)"),),
+        default_priority=130, automatic_rate_limit=AutomaticRateLimit(1, 1.0),
+        query_types=("isbn", "title", "author", "source-id"), match_levels=("WORK", "EDITION"),
+    ),
+    ProviderManifest(
         id="ai",
         name="AI 元数据识别",
         version="builtin",
-        description="使用 OpenAI-compatible Chat Completions 推断缺失元数据。",
-        mode="infer",
-        fields=(
-            "title",
-            "author",
-            "description",
-            "tags",
-            "seriesName",
-            "seriesIndex",
-        ),
-        capabilities=("automatic", "manual-search", "fallback"),
+        description="有证据引用的查询建议与候选消歧 / Evidence-bound query and candidate assistance",
+        mode="assist",
+        fields=(),
+        capabilities=("manual-assistance", "ambiguous-assistance"),
         config_fields=(
+            ProviderConfigField(key="assistanceMode", label="辅助模式 / Assistance mode", default="SUGGEST_ONLY"),
+            ProviderConfigField(key="authentication", label="认证方式 / Authentication", default="bearer"),
             ProviderConfigField(
                 key="baseUrl",
                 label="API 地址",
@@ -162,5 +186,6 @@ BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
             ),
         ),
         default_priority=900,
+        automatic_rate_limit=AutomaticRateLimit(1, 1.0),
     ),
 )

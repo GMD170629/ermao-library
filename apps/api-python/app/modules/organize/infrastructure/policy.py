@@ -79,6 +79,7 @@ def policy_view(row: dict[str, Any]) -> dict[str, Any]:
         },
         "writeMetadataToFiles": bool(row.get("writeMetadataToFiles", False)),
         "preferLocalMetadata": bool(row.get("preferLocalMetadata", True)),
+        "allowRepairPathMetadata": bool(stored_rules.get("allowRepairPathMetadata", False)),
         "localMetadataPriority": list(
             _stored_local_metadata_priority(row.get("localMetadataPriorityJson"))
         ),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
@@ -163,6 +164,12 @@ def lookup_task_is_active(db: Session, task_id: str) -> bool:
         )
         is not None
     )
+
+
+def lookup_task_authorizes_target(db: Session, task_id: str, book_id: str, resource_id: str | None) -> bool:
+    task = db.get(MetadataLookupTask, task_id, populate_existing=True)
+    return bool(task and task.status == "RUNNING" and task.book_id == book_id
+                and (resource_id is None or task.resource_id == resource_id))
 
 
 def write_metadata_to_files_enabled(db: Session) -> bool:
@@ -588,3 +595,9 @@ def local_identification_failed(db: Session, book_id: str) -> bool:
         )
         == "FAILED"
     )
+
+
+
+def allow_path_metadata_repair(db: Session) -> bool:
+    policy = db.get(OrganizePolicy, "default")
+    return bool(policy and not policy.prefer_local_metadata and json.loads(policy.rules_json or "{}").get("allowRepairPathMetadata", False))

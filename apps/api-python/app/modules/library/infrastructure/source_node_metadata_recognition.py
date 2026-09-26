@@ -4,24 +4,32 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
+from dataclasses import replace
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import (
-    LibraryBook,
-    LibraryBookMetadata,
-    LibraryReadableResource,
-    LibrarySourceNode,
-    LibrarySourceNodeMetadata,
-)
 from app.modules.library.application.source_node_metadata_recognition import (
     MetadataProviderSearchError,
     SourceNodeMetadataCandidate,
     SourceNodeMetadataRecognitionPort,
     SourceNodeMetadataRecognitionResult,
 )
-from app.modules.metadata.public import search_with_metadata_provider
+from app.modules.library.infrastructure.metadata_patches import (
+    SqlAlchemyMetadataPatches,
+)
+from app.modules.metadata.public import (
+    assess_candidates,
+    candidate_evidence,
+    confirm_candidate,
+    ignore_recognition_record,
+    load_recognition_context,
+    propose_fields,
+    provider_context,
+    recognition_fingerprint,
+    recognition_record,
+    save_recognition_record,
+    search_with_metadata_provider,
+)
 
 
 class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
@@ -35,93 +43,55 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
         source_node_id: str,
         provider_id: str,
         query: str | None,
+        resource_id: str | None = None,
     ) -> SourceNodeMetadataRecognitionResult | None:
-        book_row = self._db.execute(
-            select(LibraryBook, LibraryBookMetadata)
-            .join(
-                LibraryBookMetadata,
-                LibraryBookMetadata.book_id == LibraryBook.id,
-            )
-            .where(LibraryBook.id == book_id)
-        ).one_or_none()
-        node_row = self._db.execute(
-            select(LibrarySourceNode, LibrarySourceNodeMetadata)
-            .outerjoin(
-                LibrarySourceNodeMetadata,
-                LibrarySourceNodeMetadata.source_node_id == LibrarySourceNode.id,
-            )
-            .where(LibrarySourceNode.id == source_node_id)
-        ).one_or_none()
-        if book_row is None or node_row is None:
-            return None
-        book, book_metadata = book_row
-        node, node_metadata = node_row
-        root = self._db.get(LibrarySourceNode, book.source_node_id)
-        if (
-            root is None
-            or node.library_id != root.library_id
-            or not (
-                node.id == root.id
-                or node.relative_path.startswith(f"{root.relative_path.rstrip('/')}/")
-            )
-        ):
-            return None
-        resources = [
-            {
-                "format": resource.format,
-                "hidden": resource.enablement_state != "ENABLED",
-            }
-            for resource in self._db.scalars(
-                select(LibraryReadableResource)
-                .join(
-                    LibrarySourceNode,
-                    LibrarySourceNode.id == LibraryReadableResource.source_node_id,
-                )
-                .where(
-                    LibraryReadableResource.book_id == book_id,
-                    (LibrarySourceNode.id == node.id)
-                    | LibrarySourceNode.relative_path.startswith(
-                        f"{node.relative_path.rstrip('/')}/",
-                        autoescape=True,
-                    ),
-                )
-                .order_by(
-                    LibraryReadableResource.created_at, LibraryReadableResource.id
-                )
-            )
-        ]
-        title = (
-            node_metadata.title.strip()
-            if node_metadata is not None and node_metadata.title
-            else node.name
+        recognition = load_recognition_context(
+            self._db,
+            book_id=book_id,
+            resource_id=resource_id,
+            source_node_id=source_node_id,
         )
-        context = {
-            "book": {
-                "id": book.id,
-                "title": title,
-                "author": book_metadata.author,
-                "description": node_metadata.description if node_metadata else None,
-                "seriesName": book_metadata.series_name,
-                "seriesIndex": book_metadata.series_index,
-            },
-            "resources": resources,
-        }
+        if recognition is None:
+            return None
+        snapshots = SqlAlchemyMetadataPatches(self._db)
+        target_snapshot = snapshots.snapshot(recognition.target_type, recognition.target_id, frozenset({recognition.library_id}))
+        book_snapshot = snapshots.snapshot("book", book_id, frozenset({recognition.library_id}))
+        context = provider_context(self._db, recognition)
+        context["explicitManualQuery"] = True
+        title = recognition.identity.title
         try:
             result = search_with_metadata_provider(
                 self._db,
                 context,
                 provider_id,
-                query or title,
+                query,
             )
         except Exception as exc:
             raise MetadataProviderSearchError(provider_id) from exc
-        candidates = tuple(
-            candidate
-            for value in result.get("candidates", [])
-            if isinstance(value, Mapping)
-            and (candidate := self._candidate(value, provider_id)) is not None
+        raw_candidates = result.get("candidates")
+        assessed = assess_candidates(
+            recognition,
+            provider_id,
+            [
+                {str(key): item for key, item in value.items()}
+                for value in raw_candidates
+                if isinstance(value, Mapping)
+            ]
+            if isinstance(raw_candidates, list)
+            else [],
         )
+        candidates = tuple(
+            replace(candidate, match=decision, confirmable_fields=tuple(proposal.field for proposal in
+                propose_fields(recognition, provider_id, value, confirm_candidate(recognition, candidate_evidence(provider_id, value)))))
+            for value, decision in assessed
+            if (candidate := self._candidate(value, provider_id)) is not None
+        )
+        record_id = save_recognition_record(self._db, recognition, source_node_id, provider_id, assessed, query or title) if provider_id != "ai" else None
         return SourceNodeMetadataRecognitionResult(
+            recognition_id=record_id, target_type=recognition.target_type, target_id=recognition.target_id,
+            assistance=result.get("assistance"),
+            target_revision=target_snapshot.revision if target_snapshot else None,
+            book_revision=book_snapshot.revision if book_snapshot else None,
             source_node_id=source_node_id,
             provider_id=provider_id,
             query=query or title,
@@ -129,9 +99,38 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
             candidates=candidates,
         )
 
+    def ignore(self, book_id: str, record_id: str) -> bool:
+        return ignore_recognition_record(self._db, book_id, record_id)
+
+    def reopen(self, book_id: str, record_id: str) -> SourceNodeMetadataRecognitionResult | None:
+        raw = recognition_record(self._db, book_id, record_id)
+        if raw is None:
+            return None
+        saved = raw["recognition"]
+        context = load_recognition_context(self._db, book_id=book_id, source_node_id=saved.get("sourceNodeId"),
+            resource_id=saved.get("targetId") if saved.get("targetType") == "resource" else None)
+        if context is None or recognition_fingerprint(context) != saved.get("fingerprint") or saved.get("ignored") or saved.get("humanConfirmed"):
+            raise ValueError("METADATA_CHANGED")
+        candidates = []
+        for attempt in raw.get("attempted", [])[:8]:
+            provider = str(attempt.get("provider") or "")
+            values = attempt.get("candidates", attempt.get("exactCandidates", []))[:10]
+            for value, decision in assess_candidates(context, provider, values):
+                candidate = self._candidate(value, provider)
+                if candidate:
+                    confirmed = confirm_candidate(context, candidate_evidence(provider, value))
+                    candidates.append(replace(candidate, match=decision, confirmable_fields=tuple(item.field for item in propose_fields(context, provider, value, confirmed))))
+        port = SqlAlchemyMetadataPatches(self._db)
+        target = port.snapshot(context.target_type, context.target_id, frozenset({context.library_id}))
+        parent = port.snapshot("book", book_id, frozenset({context.library_id}))
+        return SourceNodeMetadataRecognitionResult(source_node_id=str(saved.get("sourceNodeId") or ""), provider_id=candidates[0].source if candidates else "",
+            query=str(saved.get("query") or context.identity.title), message=None, candidates=tuple(candidates[:10]),
+            target_revision=target.revision if target else None, book_revision=parent.revision if parent else None,
+            recognition_id=record_id, target_type=context.target_type, target_id=context.target_id, outcome=saved.get("outcome"), assistance=saved.get("aiAssistance"))
+
     @staticmethod
     def _candidate(
-        value: Mapping[object, object], provider_id: str
+        value: Mapping[str, object], provider_id: str
     ) -> SourceNodeMetadataCandidate | None:
         identifier = str(value.get("id") or "").strip()
         if not identifier:
@@ -176,7 +175,7 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
         abridged_value = value.get("abridged")
         return SourceNodeMetadataCandidate(
             id=identifier,
-            source=str(value.get("source") or provider_id),
+            source=provider_id,
             title=optional_string("title"),
             author=optional_string("author"),
             description=optional_string("description"),
