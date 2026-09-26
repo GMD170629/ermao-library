@@ -1,6 +1,23 @@
 # 增强元数据识别：执行计划与 M0 契约冻结
 
-核对日期：2026-09-26。当前完成 M0、M1；M2–M7 未执行。本文是后续阶段唯一进度文档，文末保留用户提供的实施方案全文作为需求基准。方案中的后续执行提示不构成继续执行授权。
+核对日期：2026-09-26。M0、M1 已提交；用户现已授权连续完成 M2–M7，每阶段独立提交并沿用推送和 `[skip ci]`。以下分阶段记录有效实现及验证，不把后续计划视为已经实现。
+
+## M2 实施记录
+
+起点 `10a79a88`，工作树干净。应用层新增小型有界查询计划：明确人工 query 保留，适用来源优先校验后的资源 ISBN，再用标题/作者及已有别名；不改变用于匹配的原目标。手动资源数据库投影至实际 HTTP 请求已验证 ISBN 查询。自动 book 仍不借代表资源 ISBN；明确资源自动应用在 M3 接入。
+
+候选缓存改为版本化摘要键，包含 provider、完整结构化目标上下文、查询、配置语义及凭据轮换摘要；不保存明文凭据于 key，不缓存匹配结论。成功空结果缓存 30 分钟；错误不缓存，命中后仍重新匹配。池上限 10。Provider 公共入口共用请求 gate；8 次来源尝试和 2 次 AI 尝试预算分开记录，技术重试保留计数。所有内置来源和连接测试受限速；HTTP 不自动跟随重定向，避免隐藏额外请求及凭据转发。旧 entry-point 插件 API 保持兼容，其内部自发 HTTP 仍无法由旧契约逐次观测；公共调用计数，完整新 gate 契约接入及真实来源纵切片继续在 M4/M7 验证。
+
+跨进程预约复用 ExternalMetadataCache 的既有唯一索引，保留独立 namespace 的每源一行数值状态；SQLAlchemy 原子 upsert/returning 后释放短事务再等待，未新增表/迁移/Redis。跨两个实际 Python 进程的预约间隔测试通过。下一请求与等待过程检查取消、来源禁用及配置改变；网络前关闭读事务。任务结果增加版本 2 recognition 对象，分离 APPLIED/NO_CHANGES/AMBIGUOUS/NO_MATCH 和技术错误，保留 selected/attempted 读取形状；零结果冷却至少 24h、同指纹待确认抑制自动再次入队，目标/策略/来源修订改变后允许重查。查询只看当前 book 的最近记录和有界上下文，不回填历史。
+
+有效测试（工作目录 `apps/api-python`）：
+
+```powershell
+.venv-windows/Scripts/python.exe -m pytest -q tests/unit/modules/metadata/test_recognition.py tests/unit/modules/metadata/test_recognition_queries.py tests/unit/modules/metadata/test_automatic_rate_limiter.py tests/integration/modules/metadata/test_recognition_context.py tests/integration/modules/metadata/test_search_transactions.py tests/integration/modules/metadata/test_provider_registry.py tests/integration/modules/metadata/test_provider_failure_diagnostics.py tests/integration/modules/library/test_provider_source_node_metadata_recognition.py tests/test_metadata_lookup_queue.py tests/contract/api/test_recognized_metadata_api.py
+# 102 passed；11 个生产文件 mypy --follow-imports=silent 通过，改动 Python 的 ruff check 通过。
+```
+
+另执行 T2 调度消费者时，组合为 47 passed、1 failed：仍是原 M1 记录中 `test_manual_wait_does_not_block_other_books_and_local_failure_stops_remote` 的 waiting/ready 既有失败，未改断言或隐藏跳过。本次预算/上下文/缓存检查未依赖该失败；后续最终门禁仍明确保留此缺口。不宣称全部调度回归通过。来源/模型真实联调、UI 和统一字段应用不在此提交中冒充完成，继续 M3–M7。
 
 ## M1 补修记录（2026-09-26）
 

@@ -18,6 +18,10 @@ from app.models import (
     LibrarySourceNode,
 )
 from app.modules.metadata.application.recognition import assess_candidates
+from app.modules.metadata.domain.recognition import recognition_fingerprint
+from app.modules.metadata.infrastructure.recognition_context import (
+    recognition_retry_suppressed,
+)
 from app.modules.metadata.public import load_recognition_context, provider_context
 
 
@@ -249,6 +253,61 @@ def test_confirmed_resource_volume_cannot_hide_its_own_title_conflict(db_session
     assert "target:title_volume" in decision.evidence_ids
     assert "target:resource_index" in decision.evidence_ids
     assert not decision.allowed_fields
+
+
+def test_resource_isbn_reaches_the_actual_provider_http_request(db_session, monkeypatch):
+    from io import BytesIO
+
+    from app.modules.metadata.domain.providers import BUILTIN_MANIFESTS
+    from app.modules.metadata.infrastructure.sources import (
+        prepare_builtin_provider_seed_rows,
+        write_builtin_provider_seed_rows,
+    )
+    from app.services import organize_service
+    from app.services.metadata_provider_registry import search_with_metadata_provider
+    write_builtin_provider_seed_rows(db_session, prepare_builtin_provider_seed_rows(BUILTIN_MANIFESTS))
+    _book(db_session, "isbn-query")
+    resource_id = _resource(db_session, "isbn-query", 1, isbn="0306406152")
+    db_session.commit()
+    context = load_recognition_context(db_session, book_id="isbn-query", resource_id=resource_id)
+    projected = provider_context(db_session, context)
+    urls = []
+    def request(req, **kwargs):
+        assert not db_session.in_transaction()
+        urls.append(req.full_url)
+        return BytesIO(b'<html><title>search</title></html>')
+    monkeypatch.setattr(organize_service, "urlopen", request)
+    search_with_metadata_provider(db_session, projected, "douban")
+    assert "search_text=9780306406157" in urls[0]
+
+
+def test_recognition_cooldown_and_ambiguity_are_scoped_to_current_revision(db_session):
+    import json
+    from datetime import timedelta
+
+    from app.models.organize import MetadataLookupTask
+    _book(db_session, "cooldown")
+    db_session.commit()
+    context = load_recognition_context(db_session, book_id="cooldown", execution="AUTOMATIC")
+    record = {"schemaVersion": 2, "outcome": "NO_MATCH", "fingerprint": recognition_fingerprint(context),
+              "retryAfter": (datetime.now(UTC) + timedelta(hours=24)).timestamp()}
+    task = MetadataLookupTask(id="cooldown-task", book_id="cooldown", status="NO_MATCH",
+                              provider_order='["douban"]',
+                              candidate_raw_json=json.dumps({"recognition": record}))
+    db_session.add(task)
+    db_session.commit()
+    assert recognition_retry_suppressed(db_session, "cooldown")
+    record["retryAfter"] = 0
+    task.candidate_raw_json = json.dumps({"recognition": record})
+    db_session.commit()
+    assert not recognition_retry_suppressed(db_session, "cooldown")
+    record["outcome"] = "AMBIGUOUS"
+    task.candidate_raw_json = json.dumps({"recognition": record})
+    db_session.commit()
+    assert recognition_retry_suppressed(db_session, "cooldown")
+    db_session.get(LibraryBookMetadata, "cooldown").title = "changed"
+    db_session.commit()
+    assert not recognition_retry_suppressed(db_session, "cooldown")
 
 
 def test_persisted_isbn_alone_does_not_confirm_an_edition(db_session):

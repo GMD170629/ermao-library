@@ -42,13 +42,20 @@ from app.modules.imports.public import (
 )
 from app.modules.library.public import prepare_book_facet, protected_metadata_fields
 from app.modules.metadata.application.commands import MetadataWriteTransaction
-from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
+from app.modules.metadata.application.queries import recognition_queries
+from app.modules.metadata.application.rate_limits import (
+    AutomaticMetadataRequestGate,
+    RecognitionRequestBudget,
+    RecognitionRequestStopped,
+)
 from app.modules.metadata.application.recognition import assess_candidates, match_view
 from app.modules.metadata.application.writeback import (
     prepare_metadata_writeback_intents,
 )
+from app.modules.metadata.domain.recognition import recognition_fingerprint
 from app.modules.metadata.infrastructure import lookup_queue as lookup_persist
 from app.modules.metadata.infrastructure import writeback_queue
+from app.modules.metadata.infrastructure.http import provider_error_code
 from app.modules.metadata.infrastructure.recognition_context import (
     load_recognition_context,
 )
@@ -606,7 +613,13 @@ def _finish_without_match(
             },
             target_type="book", target_id=task.get("bookId"),
         )
-    candidate_json = json.dumps(candidates, ensure_ascii=False)
+    outcome = ("AMBIGUOUS" if any(match.get("outcome") == "AMBIGUOUS"
+               for attempt in candidates for match in attempt.get("matches", []))
+               else status)
+    recognition_result = {**task.get("recognition", {}), "schemaVersion": 2,
+                          "outcome": outcome, "createdAt": _now().timestamp(),
+                          "retryAfter": (_now() + timedelta(hours=24)).timestamp() if outcome == "NO_MATCH" else None}
+    candidate_json = json.dumps({"recognition": recognition_result, "attempted": candidates}, ensure_ascii=False)
     finished_at = _now()
     unresolved = _prepare_unresolved_organize_update(
         db,
@@ -638,7 +651,12 @@ def _schedule_retry(
     *, import_status: str | None = None,
 ) -> str:
     attempts = int(task.get("attempts") or 0) + 1
-    candidate_json = json.dumps(candidates, ensure_ascii=False)
+    budget = task.get("requestBudget")
+    candidate_json = json.dumps({"attempted": candidates, "recognition": {
+        **task.get("recognition", {}), "schemaVersion": 2, "outcome": "SOURCE_ERROR",
+        "httpAttempts": budget.attempts if isinstance(budget, RecognitionRequestBudget) else 0,
+        "aiAttempts": budget.ai_attempts if isinstance(budget, RecognitionRequestBudget) else 0,
+    }}, ensure_ascii=False)
     now = _now()
     retry_exhausted = attempts > len(RETRY_DELAYS_SECONDS)
     if retry_exhausted:
@@ -762,16 +780,29 @@ def process_metadata_lookup_task(
             if recognition is None:
                 _finish_without_match(db, task, "FAILED", [], "无法建立元数据查询上下文")
                 return "FAILED"
+            task["recognition"] = {
+                "fingerprint": recognition_fingerprint(recognition),
+                "targetType": recognition.target_type, "targetId": recognition.target_id,
+                "revision": recognition.revision, "relatedRevision": recognition.related_revision,
+                "configRevision": recognition.config_revision,
+            }
             no_match_message = (
                 "No candidate has sufficient, conflict-free identity evidence"
                 if configured_locale(db) == "en-US"
                 else "未找到身份依据充分且无冲突的候选"
             )
-            effective_request_gate = (
-                automatic_request_gate
-                if lookup_persist.automatic_rate_limit_applies(db, task)
-                else None
-            )
+            def request_active() -> bool:
+                try:
+                    return lookup_persist.lookup_task_is_active(db, str(task["id"]))
+                finally:
+                    db.close()
+
+            previous = json.loads(task.get("candidateRawJson") or "{}")
+            prior_record = previous.get("recognition", {}) if isinstance(previous, dict) else {}
+            effective_request_gate = RecognitionRequestBudget(
+                request_active, int(prior_record.get("httpAttempts") or 0),
+                int(prior_record.get("aiAttempts") or 0))
+            task["requestBudget"] = effective_request_gate
 
             enabled_providers = 0
             errors: list[str] = []
@@ -783,17 +814,31 @@ def process_metadata_lookup_task(
                         db,
                         context,
                         provider,
-                        str(book.get("title") or ""),
+                        next(iter(recognition_queries(context, provider)), ""),
                         effective_request_gate,
                     )
+                except RecognitionRequestStopped as exc:
+                    _finish_provider_execution(db, execution_id, status="SKIPPED",
+                                               result={"reason": str(exc)})
+                    inspected.append({"provider": provider, "reason": str(exc), "matches": []})
+                    if "BUDGET" in str(exc) or str(exc) == "CANCELLED":
+                        break
+                    continue
                 except Exception as exc:  # noqa: BLE001 - contains one provider attempt.
                     record_exception(logging.getLogger(__name__), "services.metadata_lookup_queue.process_metadata_lookup_task.failed", exc,
                                      context={"step": "process_metadata_lookup_task", "task_id": str(task.get("id") or ""), "attempt": int(task.get("attempts") or 0) + 1})
                     _finish_provider_execution(
-                        db, execution_id, status="FAILED", error=str(exc)
+                        db, execution_id, status="FAILED", error=provider_error_code(exc)
                     )
-                    errors.append(f"{provider}: {exc}")
+                    inspected.append({"provider": provider, "errorCode": provider_error_code(exc), "matches": []})
+                    errors.append(f"{provider}: {provider_error_code(exc)}")
                     continue
+                if result.get("error"):
+                    errors.append(f"{provider}: PROVIDER_ERROR")
+                    _finish_provider_execution(db, execution_id, status="FAILED", error="PROVIDER_ERROR")
+                    continue
+                task["recognition"].update(httpAttempts=effective_request_gate.attempts,
+                                           aiAttempts=effective_request_gate.ai_attempts)
                 if not result.get("enabled"):
                     _finish_provider_execution(
                         db, execution_id, status="SKIPPED", result=result
@@ -804,7 +849,7 @@ def process_metadata_lookup_task(
                 candidates: list[dict[str, Any]] = (
                     [
                         {str(key): value for key, value in candidate.items()}
-                        for candidate in raw_candidates
+                        for candidate in raw_candidates[:10]
                         if isinstance(candidate, dict)
                     ]
                     if isinstance(raw_candidates, list)
@@ -852,7 +897,10 @@ def process_metadata_lookup_task(
                     )
                     applied = list(prepared_application.applied)
                     selected_result_json = json.dumps(
-                        {"selected": candidate, "attempted": inspected},
+                        {"selected": candidate, "attempted": inspected,
+                         "recognition": {**task["recognition"], "schemaVersion": 2,
+                                         "outcome": "APPLIED" if applied else "NO_CHANGES",
+                                         "createdAt": _now().timestamp()}},
                         ensure_ascii=False,
                     )
                     applied_fields_json = json.dumps(applied, ensure_ascii=False)

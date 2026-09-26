@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 from importlib import metadata as importlib_metadata
 from typing import Any, Protocol
 from urllib.request import Request as UrlRequest
-from urllib.request import urlopen
 
 from sqlalchemy.orm import Session
 
@@ -15,8 +14,16 @@ from app.bootstrap.system import write_prepared_system_events
 from app.core.exception_diagnostics import record_exception
 from app.core.i18n import configured_locale
 from app.modules.metadata.application.commands import MetadataWriteTransaction
-from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
+from app.modules.metadata.application.queries import recognition_queries
+from app.modules.metadata.application.rate_limits import (
+    AutomaticMetadataRequestGate,
+    RecognitionRequestBudget,
+)
 from app.modules.metadata.domain.providers import BUILTIN_MANIFESTS, ProviderManifest
+from app.modules.metadata.infrastructure.automatic_rate_limiter import (
+    SharedMetadataRequestGate,
+)
+from app.modules.metadata.infrastructure.http import urlopen
 from app.modules.metadata.infrastructure.providers import (
     PreparedMetadataProviderWrite,
     execute_prepared_provider_write,
@@ -482,6 +489,9 @@ def test_metadata_provider(
         result = {"ok": False, "message": configuration_message, "diagnosticId": diagnostic_id}
     else:
         try:
+            if not source.get("enabled"):
+                raise MetadataProviderTestRejected("SOURCE_DISABLED")
+            SharedMetadataRequestGate(db, plugin.manifest, RecognitionRequestBudget(), lambda: True).wait(provider_id)
             result = plugin.test(config)
             if not result.get("ok"):
                 diagnostic_id = record_exception(LOGGER, "metadata_provider.test_rejected", MetadataProviderTestRejected(str(result.get("message") or "Provider returned ok=false; further reason not provided")), context={"step": "test_provider", "resource_id": provider_id})
@@ -546,20 +556,28 @@ def search_with_metadata_provider(
             "candidates": [],
             "suggestions": [],
         }
-    if isinstance(plugin, BuiltinMetadataProvider):
-        return plugin.search(
-            db,
-            context,
-            query,
-            config=config,
-            force=force,
-            use_cache=use_cache,
-            automatic_request_gate=automatic_request_gate,
-        )
-    db.close()
-    return plugin.search(
-        db, context, query, config=config, force=force, use_cache=use_cache
-    )
+    def active() -> bool:
+        try:
+            return metadata_provider_runtime_config(db, provider_id) == config
+        finally:
+            db.close()
+
+    gate = SharedMetadataRequestGate(db, plugin.manifest,
+                                    automatic_request_gate or RecognitionRequestBudget(), active)
+    result: dict[str, Any] = {"enabled": True, "candidates": [], "suggestions": []}
+    for planned_query in recognition_queries(context, provider_id, query):
+        if isinstance(plugin, BuiltinMetadataProvider):
+            result = plugin.search(db, context, planned_query, config=config,
+                                   force=force, use_cache=use_cache,
+                                   automatic_request_gate=gate)
+        else:
+            gate.wait(provider_id)
+            db.close()
+            result = plugin.search(db, context, planned_query, config=config,
+                                   force=force, use_cache=use_cache)
+        if result.get("candidates") or not result.get("enabled") or result.get("error"):
+            break
+    return result
 
 
 def reset_metadata_provider_registry_for_tests() -> None:

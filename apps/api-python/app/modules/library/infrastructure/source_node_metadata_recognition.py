@@ -50,7 +50,7 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
                 self._db,
                 context,
                 provider_id,
-                query or title,
+                query,
             )
         except Exception as exc:
             raise MetadataProviderSearchError(provider_id) from exc

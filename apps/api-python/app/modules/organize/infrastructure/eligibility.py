@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.orm import Session
 
 from app.core.time import timestamp_ms_to_datetime, to_timestamp_ms
@@ -13,7 +13,8 @@ from app.models import (
     LibraryBookMetadata,
     LibraryReadableResource,
 )
-from app.models.organize import OrganizeJob
+from app.models.organize import MetadataLookupTask, OrganizeJob
+from app.modules.metadata.public import recognition_retry_suppressed
 
 UNRESOLVED_JOB_STATUSES = (
     "LOOKUP_PENDING",
@@ -108,6 +109,15 @@ def select_eligible_books(
         .where(
             OrganizeJob.book_id == LibraryBook.id,
             OrganizeJob.status.in_(UNRESOLVED_JOB_STATUSES),
+            ~and_(
+                OrganizeJob.status.in_(("FAILED", "REVIEWING")),
+                select(MetadataLookupTask.id).where(
+                    MetadataLookupTask.organize_job_id == OrganizeJob.id,
+                    MetadataLookupTask.status == "NO_MATCH",
+                    func.json_extract(case((func.json_valid(MetadataLookupTask.candidate_raw_json), MetadataLookupTask.candidate_raw_json), else_="{}"),
+                                      "$.recognition.schemaVersion") == 2,
+                ).exists(),
+            ),
         )
         .exists()
     )
@@ -139,6 +149,8 @@ def select_eligible_books(
 
     result: list[dict[str, Any]] = []
     for entity, metadata in books:
+        if trigger in {"NEW", "SCHEDULE"} and recognition_retry_suppressed(db, entity.id):
+            continue
         book = book_entity_record(entity, metadata)
         reasons = reason_codes_for_book(book, rules, force_selected=force_selected)
         if reasons:

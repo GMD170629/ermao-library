@@ -212,7 +212,7 @@ def test_automatic_lookup_uses_identity_decision_without_resource_writes(
     db_session.expire_all()
     saved = db_session.get(MetadataLookupTask, task_id)
     payload = json.loads(saved.candidate_raw_json)
-    attempts = payload["attempted"] if expected == "MATCHED" else payload
+    attempts = payload["attempted"]
     assert attempts[0]["matches"][0]["outcome"] == expected
     assert db_session.get(LibraryReadableResourceMetadata, resource_id).isbn is None
     assert db_session.get(LibraryBookMetadata, book_id).author == "岛田庄司"
@@ -251,7 +251,7 @@ def test_conflicting_candidate_cannot_overwrite_title_when_remote_is_preferred(d
     db_session.expire_all()
     assert db_session.get(LibraryBookMetadata, book_id).title == "示例书 第1卷"
     assert result == "NO_MATCH"
-    attempted = json.loads(db_session.get(MetadataLookupTask, task_id).candidate_raw_json)
+    attempted = json.loads(db_session.get(MetadataLookupTask, task_id).candidate_raw_json)["attempted"]
     assert attempted[0]["matches"][0]["outcome"] == "REJECTED"
     assert attempted[0]["matches"][0]["allowedFields"] == []
 

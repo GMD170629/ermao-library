@@ -20,6 +20,7 @@ from app.modules.metadata.domain.source_name import metadata_from_source_name
 from app.modules.metadata.infrastructure.recognition_context import (
     load_recognition_context,
     provider_context,
+    recognition_retry_suppressed,
 )
 
 """Public metadata capability contracts."""
@@ -107,6 +108,7 @@ __all__ = [
     "prepare_metadata_writeback_intents",
     "prepare_source_node_metadata_writeback_intent",
     "provider_context",
+    "recognition_retry_suppressed",
     "resolve_local_metadata",
     "search_with_metadata_provider",
     "serialize_opf_metadata",

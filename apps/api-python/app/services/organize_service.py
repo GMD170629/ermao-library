@@ -9,7 +9,6 @@ from time import time_ns
 from typing import Any, cast
 from urllib.parse import urlencode, urljoin
 from urllib.request import Request as UrlRequest
-from urllib.request import urlopen
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -18,10 +17,12 @@ from app.core.database_errors import is_database_busy_error
 from app.core.exception_diagnostics import record_exception
 from app.core.time import now_timestamp_ms
 from app.modules.metadata.application.commands import MetadataWriteTransaction
+from app.modules.metadata.application.queries import candidate_cache_key
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
 from app.modules.metadata.application.recognition import candidate_titles, title_strings
 from app.modules.metadata.domain.recognition import normalize_text
 from app.modules.metadata.infrastructure import external_cache as metadata_cache
+from app.modules.metadata.infrastructure.http import urlopen
 from app.modules.metadata.infrastructure.recognition_context import (
     load_recognition_context,
     provider_context,
@@ -732,6 +733,8 @@ def run_douban_crawler_provider(
             provider_id="douban",
             automatic_request_gate=automatic_request_gate,
         )
+        if re.search(r"captcha|验证码|异常请求|访问过于频繁", search_html, re.IGNORECASE):
+            raise ValueError("SOURCE_RESTRICTED")
         candidates = sort_candidates_for_title(
             [
                 normalize_douban_candidate(candidate)
@@ -1028,7 +1031,8 @@ def ai_suggestions_from_payload(payload: Any) -> list[dict[str, Any]]:
 
 
 def run_ai_metadata_provider(
-    context: dict[str, Any], config: dict[str, Any], force: bool = True
+    context: dict[str, Any], config: dict[str, Any], force: bool = True,
+    automatic_request_gate: AutomaticMetadataRequestGate | None = None,
 ) -> dict[str, Any]:
     base_url = string_value(config.get("baseUrl")).rstrip("/")
     api_key = string_value(config.get("apiKey"))
@@ -1065,6 +1069,8 @@ def run_ai_metadata_provider(
         },
         method="POST",
     )
+    if automatic_request_gate is not None:
+        automatic_request_gate.wait("ai")
     with urlopen(request, timeout=30) as response:
         payload = json.loads(response.read().decode("utf-8"))
     return {
@@ -1197,6 +1203,8 @@ def external_metadata_result_cacheable(result: dict[str, Any]) -> bool:
     candidates = result.get("candidates")
     if not isinstance(candidates, list):
         return False
+    if not candidates:
+        return True
     useful_fields = (
         "title",
         "author",
@@ -1239,7 +1247,7 @@ def external_metadata_cache_put(
         }
     )
     entry_id = f"py_{time_ns()}"
-    expires_at_ms = timestamp + 24 * 60 * 60 * 1000
+    expires_at_ms = timestamp + (24 * 60 if candidates else 30) * 60 * 1000
     prepared = metadata_cache.prepare_cache_entry_write(
         entry_id=entry_id,
         provider=provider,
@@ -1275,7 +1283,7 @@ def metadata_search_candidates(
     automatic_request_gate: AutomaticMetadataRequestGate | None = None,
 ) -> dict[str, Any]:
     search_text = query or first_string(context["book"].get("title")) or ""
-    query_key = metadata_title_key(search_text)
+    query_key = candidate_cache_key(context, source, search_text, config)
     cache_eligible = source in {"bangumi", "douban", "ai"}
     cache_ready = (
         metadata_cache.external_metadata_cache_ready(db) if cache_eligible else False
@@ -1286,6 +1294,7 @@ def metadata_search_candidates(
         else None
     )
     if cached is not None:
+        db.close()
         return {
             "provider": source,
             "enabled": True,
@@ -1321,7 +1330,8 @@ def metadata_search_candidates(
                 automatic_request_gate=automatic_request_gate,
             )
     else:
-        ai_result = run_ai_metadata_provider(context, config, force=force)
+        ai_result = run_ai_metadata_provider(context, config, force=force,
+                                             automatic_request_gate=automatic_request_gate)
         fields = {
             item["field"]: parse_json_value(item.get("suggestedValue"))
             for item in ai_result.get("suggestions") or []
@@ -1354,7 +1364,7 @@ def metadata_search_candidates(
             "candidates": sort_candidates_for_title(
                 result.get("candidates") or [],
                 query or first_string(context["book"].get("title")),
-            ),
+            )[:10],
         }
     if cache_eligible and result.get("enabled"):
         external_metadata_cache_put(

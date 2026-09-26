@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from datetime import UTC, datetime
 from typing import Literal
 
 from sqlalchemy import select
@@ -17,11 +18,15 @@ from app.models import (
     LibrarySourceNodeMetadata,
     OrganizePolicy,
 )
+from app.models.import_pipeline import Source
+from app.models.organize import MetadataLookupTask
 from app.modules.metadata.domain.recognition import (
     Contributor,
     IdentityEvidence,
     RecognitionContext,
+    recognition_fingerprint,
 )
+from app.modules.metadata.infrastructure.sources import METADATA_SOURCE_KIND
 
 
 def _revision(values: tuple[tuple[str, object], ...]) -> str:
@@ -73,7 +78,10 @@ def load_recognition_context(
         return None
     policy = db.get(OrganizePolicy, "default")
     config_revision = _revision(
-        (("rules", "recognition-m1"), ("policy", policy.updated_at if policy else None))
+        (("rules", "recognition-m2"), ("policy", policy.updated_at if policy else None),
+         ("sources", tuple(db.execute(select(Source.id, Source.updated_at)
+                           .where(Source.kind == METADATA_SOURCE_KIND)
+                           .order_by(Source.id).limit(32)).all())))
     )
     related = _revision(
         (
@@ -268,6 +276,19 @@ def provider_context(db: Session, context: RecognitionContext) -> dict[str, obje
     )
     values = dict(context.values)
     return {
+        "identity": {
+            "isbn": context.identity.isbn,
+            "isbnScope": context.identity.isbn_scope,
+            "workTitle": context.identity.work_title,
+            "aliases": context.identity.aliases,
+            "targetType": context.target_type,
+            "targetId": context.target_id,
+            "libraryId": context.library_id,
+            "revision": context.revision,
+            "relatedRevision": context.related_revision,
+            "configRevision": context.config_revision,
+            "execution": context.execution,
+        },
         "book": {
             "id": context.book_id,
             "title": context.identity.title,
@@ -287,3 +308,27 @@ def provider_context(db: Session, context: RecognitionContext) -> dict[str, obje
         "files": [{"relativePath": name} for name in file_names],
         "metadata": [],
     }
+
+
+def recognition_retry_suppressed(db: Session, book_id: str) -> bool:
+    raw = db.scalar(select(MetadataLookupTask.candidate_raw_json)
+                    .where(MetadataLookupTask.book_id == book_id)
+                    .order_by(MetadataLookupTask.created_at.desc()).limit(1))
+    if not raw:
+        return False
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        # Legacy opaque payloads have no reusable recognition decision.
+        return False
+    record = payload.get("recognition") if isinstance(payload, dict) else None
+    if not isinstance(record, dict) or record.get("schemaVersion") != 2:
+        return False
+    context = load_recognition_context(db, book_id=book_id, execution="AUTOMATIC")
+    if context is None or record.get("fingerprint") != recognition_fingerprint(context):
+        return False
+    if record.get("outcome") == "AMBIGUOUS" or record.get("ignored") is True:
+        return True
+    return (record.get("outcome") == "NO_MATCH"
+            and isinstance(record.get("retryAfter"), (int, float))
+            and record["retryAfter"] > datetime.now(UTC).timestamp())

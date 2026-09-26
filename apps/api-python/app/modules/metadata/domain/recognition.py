@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import unicodedata
 from dataclasses import dataclass, replace
@@ -120,6 +121,12 @@ class RecognitionContext:
     allowed_fields: frozenset[str] = frozenset()
     execution: Literal["MANUAL", "AUTOMATIC"] = "MANUAL"
     config_revision: str = ""
+
+
+def recognition_fingerprint(context: RecognitionContext) -> str:
+    return hashlib.sha256(repr((context.target_type, context.target_id,
+                               context.revision, context.related_revision,
+                               context.config_revision)).encode()).hexdigest()
 
 
 @dataclass(frozen=True)
