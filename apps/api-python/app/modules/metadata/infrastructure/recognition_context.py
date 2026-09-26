@@ -125,16 +125,33 @@ def load_recognition_context(
             "cover_path",
         )
         values = tuple((name, getattr(resource_metadata, name, None)) for name in names)
+        protected = _protected(
+            resource_metadata.protected_fields if resource_metadata else None
+        )
+        parent_protected = _protected(metadata.protected_fields)
         identity = IdentityEvidence(
             title=resource_metadata.title if resource_metadata else resource_node.name,
             authors=authors,
             isbn=resource_metadata.isbn if resource_metadata else None,
-            isbn_scope="EDITION",
+            # The persisted ISBN has no scope/provenance; protection confirms
+            # the value, not whether it identifies a set or an edition.
+            isbn_scope="UNKNOWN",
+            resource_volume=(
+                str(resource_metadata.resource_index)
+                if resource_metadata
+                and resource_metadata.resource_index is not None
+                and "resource_index" in protected
+                else None
+            ),
+            # Book roots may also be ordinary directories. Use the existing
+            # manual title/author confirmation, never the directory name alone.
+            work_title=(
+                metadata.title
+                if {"title", "author"} <= parent_protected and metadata.author
+                else None
+            ),
             publisher=resource_metadata.publisher if resource_metadata else None,
             language=resource_metadata.language if resource_metadata else None,
-        )
-        protected = _protected(
-            resource_metadata.protected_fields if resource_metadata else None
         )
         revision = _revision(
             (

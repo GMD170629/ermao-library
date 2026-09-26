@@ -15,7 +15,7 @@ from app.models import (
     LibrarySourceNode,
     MetadataLookupTask,
 )
-from app.models.organize import OrganizeJob
+from app.models.organize import OrganizeJob, OrganizePolicy
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
 )
@@ -230,6 +230,30 @@ def test_aggregate_book_does_not_borrow_representative_resource_isbn(db_session,
     monkeypatch.setattr(queue, "_search_provider", lambda *_: {"enabled": True, "candidates": [{"id": "one", "title": "黑暗坡食人树", "author": "岛田庄司", "isbn": "9780306406157"}]})
     monkeypatch.setattr(queue, "_prepare_candidate_application", lambda *_: pytest.fail("aggregate must not apply a single-volume result"))
     assert process_metadata_lookup_task(db_session, test_settings, {"id": task.id, "bookId": book.id, "resourceId": resource.id, "providerOrder": '["douban"]', "attempts": 0}) == "NO_MATCH"
+
+
+def test_conflicting_candidate_cannot_overwrite_title_when_remote_is_preferred(db_session, test_settings, monkeypatch):
+    book, resource = _seed_lookup_graph(db_session)
+    metadata = db_session.get(LibraryBookMetadata, book.id)
+    metadata.title = "示例书 第1卷"
+    metadata.normalized_title = "示例书第1卷"
+    db_session.merge(OrganizePolicy(id="default", prefer_local_metadata=False))
+    db_session.commit()
+    task = _lookup_task(db_session, book, resource, status="RUNNING")
+    task_id, book_id, resource_id = task.id, book.id, resource.id
+    monkeypatch.setattr(queue, "_search_provider", lambda *_: {"enabled": True, "candidates": [{
+        "id": "one", "title": "示例书 第2卷", "volume": "1", "author": "岛田庄司",
+    }]})
+    result = process_metadata_lookup_task(db_session, test_settings, {
+        "id": task_id, "bookId": book_id, "resourceId": resource_id,
+        "providerOrder": '["douban"]', "attempts": 0,
+    })
+    db_session.expire_all()
+    assert db_session.get(LibraryBookMetadata, book_id).title == "示例书 第1卷"
+    assert result == "NO_MATCH"
+    attempted = json.loads(db_session.get(MetadataLookupTask, task_id).candidate_raw_json)
+    assert attempted[0]["matches"][0]["outcome"] == "REJECTED"
+    assert attempted[0]["matches"][0]["allowedFields"] == []
 
 
 def test_cancelled_lookup_cannot_be_reopened_by_a_stale_worker(db_session) -> None:

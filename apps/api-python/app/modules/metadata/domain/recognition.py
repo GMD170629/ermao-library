@@ -41,6 +41,9 @@ def normalize_isbn(value: str) -> str | None:
 
 
 def _volume_number(value: str) -> str:
+    value = unicodedata.normalize("NFKC", value).strip().casefold()
+    if re.fullmatch(r"[0-9]+\.0+", value):
+        value = value.split(".", 1)[0]
     if value.isdecimal():
         return str(int(value))
     numbers = {
@@ -56,7 +59,7 @@ def _volume_number(value: str) -> str:
         "八": 8,
         "九": 9,
     }
-    if "十" in value:
+    if re.fullmatch(r"[一二两三四五六七八九]?十[一二三四五六七八九]?", value):
         left, right = value.split("十", 1)
         return str((numbers.get(left, 1) if left else 1) * 10 + numbers.get(right, 0))
     return str(numbers[value]) if value in numbers else value
@@ -94,6 +97,9 @@ class IdentityEvidence:
     language: str | None = None
     edition: str | None = None
     source_ids: tuple[tuple[str, str], ...] = ()
+    # Only populated when the index is known to describe a publication volume.
+    resource_volume: str | None = None
+    work_title: str | None = None
 
 
 @dataclass(frozen=True)
@@ -191,15 +197,26 @@ def decide_match(
     )
     local_title, parsed_volume = title_parts(local.title)
     remote_title, remote_parsed_volume = title_parts(remote.title)
-    volume = local.volume or parsed_volume
-    other_volume = remote.volume or remote_parsed_volume
-    if (
-        volume
-        and other_volume
-        and _volume_number(volume) != _volume_number(other_volume)
+    local_volumes: set[str] = set()
+    remote_volumes: set[str] = set()
+    for identity, parsed, prefix, observed in (
+        (local, parsed_volume, "target", local_volumes),
+        (remote, remote_parsed_volume, candidate.key, remote_volumes),
     ):
+        for field, value in (
+            ("title_volume", parsed),
+            ("volume", identity.volume),
+            ("resource_index", identity.resource_volume),
+        ):
+            if value and value.strip():
+                observed.add(_volume_number(value))
+                refs.append(f"{prefix}:{field}")
+        if len(observed) > 1:
+            reasons.append("VOLUME_CONFLICT")
+    if local_volumes and remote_volumes and local_volumes != remote_volumes:
         reasons.append("VOLUME_CONFLICT")
         refs.extend(("target:volume", f"{candidate.key}:volume"))
+    volume, other_volume = bool(local_volumes), bool(remote_volumes)
     # Edition and sequel markers are not removed by title normalization.
     edition_words = r"修订版|修訂版|增订版|增訂版|纪念版|紀念版|新版|revised|unabridged|abridged|续作|续篇|续集|前传|后传|sequel"
     markers = set(
@@ -244,6 +261,14 @@ def decide_match(
         for value in (local.title, *local.aliases)
         if value.strip()
     }
+    # A confirmed parent supplies work identity only for a pure volume label.
+    # Keep the child's title and volume observations intact.
+    if not local_title and parsed_volume and local.work_title:
+        parent_core, parent_volume = title_parts(local.work_title)
+        if parent_core and parent_volume is None:
+            titles.add(parent_core)
+            local_title = parent_core
+            refs.append("target:parent_work_title")
     candidate_titles = {
         title_parts(value)[0]
         for value in (remote.title, *remote.aliases)
@@ -271,7 +296,7 @@ def decide_match(
         return decision("AMBIGUOUS")
     if not (isbn_match or identifier_match or (title_match and author_match)):
         reasons.append("INSUFFICIENT_EVIDENCE")
-        return decision("AMBIGUOUS" if title_match else "NO_MATCH")
+        return decision("AMBIGUOUS" if title_match or (volume and not local_title) else "NO_MATCH")
     level: MatchLevel = "EDITION" if isbn_match else "VOLUME" if volume else "WORK"
     if identifier_match and candidate.level != "UNKNOWN":
         level = candidate.level

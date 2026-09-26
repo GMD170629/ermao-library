@@ -1,6 +1,7 @@
 """Convert provider payloads once before the shared identity decision."""
 
 from collections.abc import Mapping
+from math import isfinite
 from typing import Literal, TypedDict, cast
 
 from app.modules.metadata.domain.recognition import (
@@ -110,6 +111,14 @@ def contributors(value: object, fallback: object = None) -> tuple[Contributor, .
     return tuple(result)
 
 
+def _volume_value(value: object) -> str | None:
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(value) if isfinite(value) else None
+    return None
+
+
 def candidate_evidence(
     provider_id: str, value: Mapping[str, object]
 ) -> CandidateEvidence:
@@ -124,7 +133,6 @@ def candidate_evidence(
         if value.get("isbnScope") == "SET"
         else "EDITION"
         if value.get("isbnScope") == "EDITION"
-        or (provider_id == "douban" and value.get("isbn"))
         else "UNKNOWN"
     )
     return CandidateEvidence(
@@ -136,7 +144,13 @@ def candidate_evidence(
             aliases=candidate_titles(value),
             isbn=text(value.get("isbn")) or None,
             isbn_scope=isbn_scope,
-            volume=text(value.get("volume")) or None,
+            volume=_volume_value(value.get("volume")),
+            # An unscoped resourceIndex can be an ordering/series position.
+            resource_volume=(
+                _volume_value(value.get("resourceIndex"))
+                if level == "VOLUME"
+                else None
+            ),
             publisher=text(value.get("publisher")) or None,
             language=text(value.get("language")) or None,
             edition=text(value.get("edition")) or None,

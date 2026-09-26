@@ -2,6 +2,36 @@
 
 核对日期：2026-09-26。当前完成 M0、M1；M2–M7 未执行。本文是后续阶段唯一进度文档，文末保留用户提供的实施方案全文作为需求基准。方案中的后续执行提示不构成继续执行授权。
 
+## M1 补修记录（2026-09-26）
+
+本次起点、审查提交和实际 HEAD 均为 `9c6ccbb8a78d47a7e3da9db38a3d746c9c273df9`，分支 `codex/metadata-recognition-enhancement`，开始时工作树干净。只补修以下三个证据问题；独立提交并沿用用户授权推送及 `[skip ci]`，不进入 M2，不改调度、查询计划、缓存、限速、资源自动写入或统一 patch。
+
+- **卷号冲突**：`app/modules/metadata/domain/recognition.py` 原来用结构化卷号 `or` 标题卷号，掩盖同一对象的矛盾。现在分别保留标题、显式 volume、确认过语义的 resourceIndex 观察与证据引用，先检查两侧各自内部冲突，再比较双方；共用 NFKC、数字/中文数字归一化（包含数据库浮点 `1.0`），任何卷号冲突都拒绝且没有 allowed_fields，ISBN 相同也不能越过此检查。
+- **ISBN 范围**：`application/recognition.py` 删除 douban 加 ISBN 自动升级 EDITION 的分支；显式 UNKNOWN、SET 及缺少 scope 均不升级。`infrastructure/recognition_context.py` 删除资源 ISBN 无条件 EDITION：现有资源表只有 ISBN 值，没有范围证据，字段保护也不能证明范围。数据库投影保持 UNKNOWN；已有显式双方 EDITION 的共同规则仍支持合法 ISBN-10/13 等价与版本字段授权。套装关键词仅保留为额外限制，不替代 scope。
+- **父级和资源证据**：确认 `source_tree_repository.py` 将本地 `volume_index` 写到 `resource_index`，但 OPF 同时可能从 `calibre:series_index` 取得它，catalog/bookshelf 等又用于排序，故历史值不能一概作为出版卷号。现有手工资源编辑把字段标为 protected，Web 标签明确为“卷号”：仅这样的本地 resource_index 接入独立资源卷号证据。候选只有明确 `matchLevel=VOLUME` 时接入 resourceIndex；普通排序、无范围的 index 和 series_index 不接入。显式 volume 与 resourceIndex 同时存在时仍各自校验，不作优先级覆盖。
+- **父级确认依据**：Book 也可能只是目录聚合；只在现有 title、author 均经过手工保护且作者存在时，将其标题作为独立 work_title 证据，并且仅用于当前标题是纯卷号、父级标题本身不是卷号的情况。未确认父级/普通目录仍待确认；不拼写或替换子资源标题，不借兄弟 ISBN，不扫描操作日志。未保护的历史父级即使看似书名，也不会因此获得强作品身份。
+
+路径前缀为 `apps/api-python/`。生产修改仅以上三个 recognition 文件；仍由自动队列和手动搜索共同使用原 assess_candidates/decide_match。复用 VOLUME_CONFLICT、UNKNOWN_SCOPE、INSUFFICIENT_EVIDENCE 等现有双语原因，无 Web/翻译/API schema 变化。
+
+### 反例和验证
+
+先将场景补进原有三份测试文件，在未修改生产代码时运行下列反例命令：**12 failed、5 passed、47 deselected**。失败包括 book/resource 的“本地第 1 卷、候选第 2 卷但 volume=1”（含相同 ISBN）、本地内部矛盾、UNKNOWN/缺失 scope 被升级、数据库资源 scope 错误；真实自动队列在 `preferLocalMetadata=False` 时实际将标题从第 1 卷改成第 2 卷。修复后这些场景通过：矛盾拒绝且无授权字段，队列 NO_MATCH 且原题保留，范围不明不能授权版本字段；01/一仍匹配。
+
+```powershell
+# 工作目录 apps/api-python；修复前反例复现：12 failed / 5 passed
+.venv-windows/Scripts/python.exe -m pytest -q tests/unit/modules/metadata/test_recognition.py tests/integration/modules/metadata/test_recognition_context.py tests/test_metadata_lookup_queue.py -k 'structured_volume or local_volume_evidence or provider_isbn_scope or confirmed_parent or unconfirmed_resource_order or conflicting_candidate_cannot'
+# 最终五个直接消费者：76 passed（原 55 项 + 本次 21 项），14.35s
+.venv-windows/Scripts/python.exe -m pytest -q tests/unit/modules/metadata/test_recognition.py tests/integration/modules/metadata/test_recognition_context.py tests/integration/modules/library/test_provider_source_node_metadata_recognition.py tests/test_metadata_lookup_queue.py tests/contract/api/test_recognized_metadata_api.py
+# 3 个生产文件类型检查通过
+.venv-windows/Scripts/python.exe -m mypy --follow-imports=silent app/modules/metadata/domain/recognition.py app/modules/metadata/application/recognition.py app/modules/metadata/infrastructure/recognition_context.py
+# 6 个变动 Python 文件检查通过
+.venv-windows/Scripts/python.exe -m ruff check app/modules/metadata/domain/recognition.py app/modules/metadata/application/recognition.py app/modules/metadata/infrastructure/recognition_context.py tests/unit/modules/metadata/test_recognition.py tests/integration/modules/metadata/test_recognition_context.py tests/test_metadata_lookup_queue.py
+```
+
+新增 SQLite 测试经过真实数据库投影 → 候选转换 → 共同规则，覆盖确认父级、未确认父级、双方资源卷号相同/不同、本地保护卷号与自身标题冲突、普通排序和 series_index 不充当卷号、持久化 ISBN 本身不足以确认版本；子资源标题保持原值。追加边界包含套装范围不授权分册版本字段、候选 resourceIndex 不掩盖显式 volume。所有场景使用既有夹具与测试入口，没有引入审查快照或第二套测试框架。
+
+未验证真实来源网络、生产数据准确率、浏览器/移动交互及全量回归；没有 Web 改动，未重复运行 Web 测试。当前数据库不保存显式 ISBN scope，因此本地数据库路径不会仅凭 ISBN 产生 EDITION；这是缺失证据的保守边界，不以出版商、校验位或保护标记猜测范围。原 M1 记录中的范围外调度失败未改、未重跑。没有新表、依赖、工作流或发布操作；后续阶段门槛仍按下方原计划，不宣称 M2 或最终发布验收完成。
+
 ## M1 交付记录
 
 用户本次授权执行 M1、完成后推送并跳过 CI。起点为 `codex/metadata-recognition-enhancement@a09a37ce649dcf0f4e8f28e29183bc40c0a59d89`，开始时工作树干净；远端 develop 仍为 `33a71986`，远端尚无本开发分支。M0 以下各节保留为当时核查记录，不视为 M1 后的当前实现。M1 提交使用 `[skip ci]`，只推送当前开发分支，不创建 PR、不合并、不发布；仓库 push 工作流本来也只监听 develop/prod/版本 tag，不改 workflow。

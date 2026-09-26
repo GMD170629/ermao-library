@@ -369,3 +369,65 @@ def test_set_title_is_not_edition_evidence_even_with_equal_isbn() -> None:
     )
     assert decision.level != "EDITION"
     assert "resource.isbn" not in decision.allowed_fields
+
+
+@pytest.mark.parametrize("target_type", ["book", "resource"])
+@pytest.mark.parametrize("same_isbn", [False, True])
+def test_structured_volume_cannot_hide_title_conflict(target_type, same_isbn) -> None:
+    local = context("示例书 第1卷", target_type=target_type)
+    remote = candidate_evidence("douban", {
+        "id": "one", "title": "示例书 第2卷", "volume": "1", "author": "刘慈欣",
+        "isbn": "9780306406157" if same_isbn else None, "isbnScope": "EDITION",
+    })
+    if same_isbn:
+        local = replace(local, identity=replace(local.identity, isbn="0306406152", isbn_scope="EDITION"))
+    result = decide_match(local, remote)
+    assert result.outcome == "REJECTED"
+    assert "VOLUME_CONFLICT" in result.reasons
+    assert not result.allowed_fields
+
+
+@pytest.mark.parametrize("structured,expected", [("2", "REJECTED"), ("01", "MATCHED"), ("一", "MATCHED")])
+def test_local_volume_evidence_is_checked_independently(structured, expected) -> None:
+    local = context("示例书 第1卷")
+    local = replace(local, identity=replace(local.identity, volume=structured))
+    result = decide_match(local, candidate("示例书 第2卷" if structured == "2" else "示例书 第1卷"))
+    assert result.outcome == expected
+    if expected == "REJECTED":
+        assert not result.allowed_fields
+
+
+@pytest.mark.parametrize("scope", [None, "UNKNOWN", "SET", "EDITION"])
+def test_provider_isbn_scope_requires_explicit_evidence(scope) -> None:
+    payload = {"id": "one", "title": "三体", "author": "刘慈欣", "isbn": "9780306406157"}
+    if scope is not None:
+        payload["isbnScope"] = scope
+    remote = candidate_evidence("douban", payload)
+    assert remote.identity.isbn_scope == (scope or "UNKNOWN")
+    result = decide_match(context(target_type="resource", isbn="0306406152", isbn_scope="EDITION"), remote)
+    assert result.outcome == "MATCHED"
+    assert ("resource.isbn" in result.allowed_fields) == (scope == "EDITION")
+
+
+def test_set_scope_cannot_supply_edition_fields_for_a_volume() -> None:
+    local = context("示例书 第1卷", target_type="resource", isbn="0306406152", isbn_scope="EDITION")
+    remote = candidate_evidence("douban", {
+        "id": "one", "title": "示例书 第1卷", "author": "刘慈欣",
+        "isbn": "9780306406157", "isbnScope": "SET", "matchLevel": "EDITION",
+    })
+    result = decide_match(local, remote)
+    assert result.outcome == "MATCHED"
+    assert result.level == "VOLUME"
+    assert not (result.allowed_fields & {"resource.isbn", "resource.publisher", "resource.language"})
+
+
+def test_candidate_resource_index_does_not_override_explicit_volume() -> None:
+    remote = candidate_evidence("douban", {
+        "id": "one", "title": "示例书 第1卷", "author": "刘慈欣",
+        "volume": "01", "resourceIndex": 2, "matchLevel": "VOLUME",
+    })
+    result = decide_match(context("示例书 第1卷"), remote)
+    assert result.outcome == "REJECTED"
+    assert f"{remote.key}:volume" in result.evidence_ids
+    assert f"{remote.key}:resource_index" in result.evidence_ids
+    assert not result.allowed_fields

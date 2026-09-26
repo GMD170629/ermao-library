@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime
 
+import pytest
 from sqlalchemy import event
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
@@ -16,6 +17,7 @@ from app.models import (
     LibraryReadableResourceMetadata,
     LibrarySourceNode,
 )
+from app.modules.metadata.application.recognition import assess_candidates
 from app.modules.metadata.public import load_recognition_context, provider_context
 
 
@@ -185,3 +187,80 @@ def test_provider_projection_and_sql_count_stay_bounded_as_library_grows(
     after_queries, after_resources = project()
     assert after_resources == 8
     assert before_queries == after_queries
+
+
+@pytest.mark.parametrize("confirmed", [False, True])
+@pytest.mark.parametrize("remote_index", [1, 2])
+def test_confirmed_parent_and_resource_volume_reach_shared_matcher(db_session, confirmed, remote_index):
+    _book(db_session, "work")
+    resource_id = _resource(db_session, "work", 1, isbn="0306406152")
+    parent = db_session.get(LibraryBookMetadata, "work")
+    parent.title = "示例书"
+    parent.protected_fields = '["title", "author"]' if confirmed else "[]"
+    parent.series_index = 99
+    resource = db_session.get(LibraryReadableResourceMetadata, resource_id)
+    resource.title = "第一卷"
+    resource.resource_index = 1
+    resource.protected_fields = '["resource_index"]'
+    db_session.commit()
+    projected = load_recognition_context(db_session, book_id="work", resource_id=resource_id)
+    assert projected is not None
+    _, decision = assess_candidates(projected, "douban", [{
+        "id": "one", "title": "示例书", "author": "Book Author",
+        "matchLevel": "VOLUME", "resourceIndex": remote_index,
+        "isbn": "9780306406157", "isbnScope": "EDITION",
+    }])[0]
+    assert projected.identity.isbn_scope == "UNKNOWN"
+    assert decision.outcome == ("REJECTED" if remote_index == 2 else "MATCHED" if confirmed else "AMBIGUOUS")
+    assert "resource.isbn" not in decision.allowed_fields
+    assert db_session.get(LibraryReadableResourceMetadata, resource_id).title == "第一卷"
+
+
+def test_unconfirmed_resource_order_does_not_supply_publication_volume(db_session):
+    _book(db_session, "work")
+    resource_id = _resource(db_session, "work", 1, isbn="0306406152")
+    resource = db_session.get(LibraryReadableResourceMetadata, resource_id)
+    resource.title = "示例书 第1卷"
+    resource.resource_index = 99
+    db_session.commit()
+    projected = load_recognition_context(db_session, book_id="work", resource_id=resource_id)
+    _, decision = assess_candidates(projected, "douban", [{
+        "id": "one", "title": "示例书 第1卷", "author": "Book Author",
+        "resourceIndex": 88, "seriesIndex": 77,
+    }])[0]
+    assert decision.outcome == "MATCHED"
+    assert decision.level == "VOLUME"
+
+
+def test_confirmed_resource_volume_cannot_hide_its_own_title_conflict(db_session):
+    _book(db_session, "work")
+    resource_id = _resource(db_session, "work", 1, isbn="0306406152")
+    resource = db_session.get(LibraryReadableResourceMetadata, resource_id)
+    resource.title = "示例书 第1卷"
+    resource.resource_index = 2
+    resource.protected_fields = '["resource_index", "isbn"]'
+    db_session.commit()
+    projected = load_recognition_context(db_session, book_id="work", resource_id=resource_id)
+    _, decision = assess_candidates(projected, "douban", [{
+        "id": "one", "title": "示例书 第2卷", "author": "Book Author",
+        "isbn": "9780306406157", "isbnScope": "EDITION",
+    }])[0]
+    assert decision.outcome == "REJECTED"
+    assert "target:title_volume" in decision.evidence_ids
+    assert "target:resource_index" in decision.evidence_ids
+    assert not decision.allowed_fields
+
+
+def test_persisted_isbn_alone_does_not_confirm_an_edition(db_session):
+    _book(db_session, "work")
+    resource_id = _resource(db_session, "work", 1, isbn="0306406152")
+    resource = db_session.get(LibraryReadableResourceMetadata, resource_id)
+    resource.title = "示例书"
+    db_session.commit()
+    projected = load_recognition_context(db_session, book_id="work", resource_id=resource_id)
+    _, decision = assess_candidates(projected, "douban", [{
+        "id": "one", "title": "示例书", "isbn": "9780306406157", "isbnScope": "EDITION",
+    }])[0]
+    assert projected.identity.isbn_scope == "UNKNOWN"
+    assert decision.outcome == "AMBIGUOUS"
+    assert not decision.allowed_fields
