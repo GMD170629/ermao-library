@@ -8450,8 +8450,18 @@
     },
     "settings.personalInformation": {
       "localizations": {
-        "en-US": { "stringUnit": { "state": "translated", "value": "Personal information" } },
-        "zh-CN": { "stringUnit": { "state": "translated", "value": "个人信息" } }
+        "en-US": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Personal information"
+          }
+        },
+        "zh-CN": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "个人信息"
+          }
+        }
       }
     },
     "settings.identity.accessibility.format": {
