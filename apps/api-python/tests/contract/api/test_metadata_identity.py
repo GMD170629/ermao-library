@@ -347,8 +347,8 @@ def test_conflicting_source_author_stays_original_and_identity_can_save(client, 
 
 @pytest.mark.parametrize("scenario", ["name-variant", "different-author", "uncertain", "wrong-A", "related", "source-failure", "manual", "no-match", "invalid-id"])
 def test_semantic_match_selects_real_record_and_persists(client, db_session, monkeypatch, scenario, caplog):
-    from app.modules.library.infrastructure import (
-        source_node_metadata_recognition as adapter,
+    from app.modules.metadata.infrastructure import (
+        source_node_recognition as adapter,
     )
     from app.services.organize_service import choose_metadata_candidate
 
