@@ -193,7 +193,9 @@ def test_exact_candidate_selection_requires_one_title_match_and_can_use_author()
         {"title": "黑暗坡食人树", "author": "其他作者", "source": "bangumi"},
     ]
 
-    selected, exact = queue.choose_metadata_candidate(
+    from app.services.organize_service import choose_metadata_candidate
+
+    selected, exact = choose_metadata_candidate(
         candidates, "黑暗坡食人树", "岛田庄司"
     )
 
@@ -385,14 +387,16 @@ def test_identity_controls_query_selection_and_unprotected_save(
             "providerOrder": '["douban"]',
         },
     )
-    assert status == ("NO_MATCH" if needs_review or conflicting_author else "COMPLETED")
+    assert status == ("NO_MATCH" if needs_review else "COMPLETED")
     assert queries == ["活着"]
     db_session.expire_all()
     saved = db_session.get(LibraryBookMetadata, book_id)
     assert (saved.title, saved.author) == (
-        ("混杂错误标题", "错误作者") if protected or needs_review or conflicting_author else ("活着", "余华")
+        ("混杂错误标题", "错误作者") if protected or needs_review else ("活着", "余华")
     )
     assert saved.description == "保留的本地简介"
+    if conflicting_author:
+        assert db_session.get(MetadataLookupTask, task_id).result_source == "ai"
 
 
 def test_identity_failure_is_diagnosed_and_retried_without_old_identity(
@@ -422,3 +426,73 @@ def test_identity_failure_is_diagnosed_and_retried_without_old_identity(
     )
     assert "metadata.identity_failed" in caplog.text
     assert "ConnectionError" in caplog.text
+
+
+@pytest.mark.parametrize("scenario", ["uncertain", "wrong-A", "review", "source-failure", "protected", "cancelled", "concurrent", "invalid-id"])
+def test_queue_semantic_match_runs_after_websites_and_uses_final_identity(db_session, test_settings, monkeypatch, scenario, caplog):
+    from io import BytesIO
+
+    from app.models.import_pipeline import Source
+    from app.models.organize import OrganizePolicy
+    from app.modules.metadata.infrastructure import ai_client
+    book, resource = _seed_lookup_graph(db_session)
+    metadata = db_session.get(LibraryBookMetadata, book.id)
+    metadata.title, metadata.author = "本地错误书名", "本地错误作者"
+    metadata.description = None
+    metadata.protected_fields = '["title", "author", "description"]' if scenario == "protected" else '[]'
+    db_session.add(OrganizePolicy(id="match-policy", prefer_local_metadata=False))
+    db_session.add(Source(id="match-ai", name="AI", kind="metadata", provider_type="ai", enabled=True,
+                          config=json.dumps({"baseUrl": "http://model.test/v1", "model": "test"})))
+    db_session.commit()
+    task = _lookup_task(db_session, book, resource, status="RUNNING")
+    task_id, book_id, resource_id = task.id, book.id, resource.id
+    requests = []
+    def search(db, context, provider, query, gate):
+        requests.append(provider)
+        if scenario == "source-failure" and provider == "douban":
+            raise OSError("controlled site outage")
+        return {"enabled": True, "candidates": [{"id": "1", "title": "海辺のカフカ", "author": "村上春樹",
+                                                  "description": "实际网站简介", "tags": []}]}
+    monkeypatch.setattr(queue, "_search_provider", search)
+    def model(request, **kwargs):
+        prompt = json.loads(json.loads(request.data)["messages"][1]["content"])
+        if "candidates" not in prompt:
+            result = {"title": "挪威的森林" if scenario == "wrong-A" else "海边的卡夫卡", "author": None,
+                      "needsReview": True, "reason": "A uncertain"}
+        else:
+            assert requests == ["douban", "bangumi"]
+            assert all(item["author"] == "村上春樹" for item in prompt["candidates"])
+            if scenario == "cancelled":
+                db_session.get(MetadataLookupTask, task_id).status = "CANCELLED"
+                db_session.commit()
+            if scenario == "concurrent":
+                current = db_session.get(LibraryBookMetadata, book_id)
+                current.title = "用户并发修改"
+                current.updated_at = datetime.now(UTC) + timedelta(seconds=1)
+                db_session.commit()
+            result = {"title": "海边的卡夫卡", "author": "村上春树", "needsReview": scenario == "review", "reason": "B final",
+                      "primaryCandidateId": "douban:invented" if scenario == "invalid-id" else "bangumi:1" if scenario == "source-failure" else "douban:1", "relatedCandidateIds": []}
+        return BytesIO(json.dumps({"choices": [{"message": {"content": json.dumps(result)}}]}).encode())
+    monkeypatch.setattr(ai_client, "urlopen", model)
+    status = queue.process_metadata_lookup_task(db_session, test_settings, {
+        "id": task_id, "bookId": book_id, "resourceId": resource_id, "status": "RUNNING", "attempts": 0,
+        "providerOrder": '["ai", "douban", "bangumi"]',
+    })
+    assert requests == ["douban", "bangumi"]
+    db_session.expire_all()
+    saved = db_session.get(LibraryBookMetadata, book_id)
+    if scenario == "invalid-id":
+        assert status == "PENDING"
+        assert "AI_MATCH_UNKNOWN_CANDIDATE" in caplog.text and "metadata.match_failed" in caplog.text
+    if scenario == "source-failure":
+        assert "controlled site outage" in caplog.text and "metadata.source_search_failed" in caplog.text
+    if scenario in {"review", "cancelled", "concurrent", "invalid-id"}:
+        assert status != "COMPLETED"
+        assert saved.title == ("用户并发修改" if scenario == "concurrent" else "本地错误书名")
+        assert saved.description is None
+    elif scenario == "protected":
+        assert saved.title == "本地错误书名" and saved.description is None
+    else:
+        assert status == "COMPLETED"
+        assert (saved.title, saved.author, saved.description) == ("海边的卡夫卡", "村上春树", "实际网站简介")
+        assert db_session.get(MetadataLookupTask, task_id).result_source == ("bangumi" if scenario == "source-failure" else "douban")

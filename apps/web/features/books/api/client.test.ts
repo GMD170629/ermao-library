@@ -465,3 +465,24 @@ test('metadata search carries explicit manual intent without inferring it from t
     ]);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+
+test('keeps source identity separate from matched application metadata', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, data: {
+    query: '海边的卡夫卡', selectedId: 'bangumi:1',
+    candidates: [{ id: 'bangumi:1', source: 'bangumi', title: '海辺のカフカ', author: '村上春樹', description: null },
+      { id: 'douban:1', source: 'douban', title: 'Kafka on the Shore', author: 'Haruki Murakami', description: '关联简介' }],
+    selectedMetadata: { id: 'bangumi:1', source: 'bangumi', title: '海边的卡夫卡', author: '村上春树', description: '关联简介' },
+    identity: { title: '海边的卡夫卡', author: '村上春树', needsReview: false, reason: '同一作品' }
+  } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  try {
+    const result = await searchSourceNodeMetadata('book', 'node', 'bangumi', '海边的卡夫卡');
+    assert.equal(result.candidates[0].author, '村上春樹');
+    assert.equal(result.candidates[0].description, null);
+    assert.equal(result.selectedMetadata?.author, '村上春树');
+    assert.equal(result.selectedMetadata?.description, '关联简介');
+    assert.equal(result.selectedMetadata?.id, result.selectedId);
+    assert.equal(result.candidates[1].id, 'douban:1');
+  } finally { globalThis.fetch = originalFetch; }
+});

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Mapping
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.exception_diagnostics import record_exception
 from app.core.i18n import configured_locale
 from app.models import (
     LibraryBook,
@@ -25,7 +27,9 @@ from app.modules.library.application.source_node_metadata_recognition import (
     SourceNodeMetadataRecognitionResult,
 )
 from app.modules.metadata.public import (
-    choose_metadata_candidate,
+    candidate_key,
+    enabled_metadata_provider_ids,
+    match_metadata_candidates,
     recognize_metadata_identity,
     search_with_metadata_provider,
 )
@@ -159,42 +163,34 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
                 if not manual_query and identity and identity.title
                 else query or title
             )
-            result: dict[str, object]
-            if provider_id == "ai":
-                result = {
-                    "candidates": [identity.candidate()] if identity else [],
-                    "message": identity.reason if identity else disabled_message,
-                }
-            else:
-                result = search_with_metadata_provider(
-                    self._db, context, provider_id, effective_query
-                )
-            raw_values = result.get("candidates", [])
-            values = (
-                [
-                    {str(key): value for key, value in item.items()}
-                    for item in raw_values
-                    if isinstance(item, dict)
-                ]
-                if isinstance(raw_values, list)
-                else []
+            values: list[dict[str, object]] = []
+            # Query only enabled existing sources, once each, in preferred order.
+            providers = list(dict.fromkeys([provider_id, *enabled_metadata_provider_ids(self._db)]))
+            for source in (item for item in providers if item != "ai"):
+                try:
+                    result = search_with_metadata_provider(self._db, context, source, effective_query)
+                except Exception as error:  # noqa: BLE001 - one source must not block others.
+                    record_exception(logging.getLogger(__name__), "metadata.source_search_failed", error,
+                                     context={"step": "source_search", "resource_id": source})
+                    continue
+                raw = result.get("candidates", [])
+                if isinstance(raw, list):
+                    values.extend({**item, "source": source} for item in raw[:10]
+                                  if isinstance(item, dict) and item.get("id"))
+            match = match_metadata_candidates(
+                self._db, book_id=book_id, source_node_id=target_id,
+                title=effective_query, author=str(book_context.get("author") or "") or None,
+                identity=identity, candidates=values, manual_query=manual_query,
+                local_title=title, local_author=book_metadata.author,
             )
-            selected, _ = choose_metadata_candidate(
-                values,
-                str(book_context["title"]) if identity else effective_query,
-                str(book_context.get("author") or ""),
-            )
-            if identity is not None:
-                if provider_id != "ai" and (identity.title or identity.author):
-                    values = [*values, identity.candidate()]
-                # Manual preview still requires Apply; retain the matching site's
-                # author when identity asks for review without supplying one.
-                if selected is None:
-                    selected = (
-                        identity.candidate()
-                        if identity.title or identity.author
-                        else None
-                    )
+            identity = match.identity
+            selected = match.application_candidate(values)
+            # Display raw records separately from the normalized/merged application.
+            values = [{**value, "id": candidate_key(value)} for value in values]
+            if selected and selected.get("source") != "ai":
+                selected = {**selected, "id": match.primary_candidate_id}
+            if identity is not None and (identity.title or identity.author):
+                values.append(identity.candidate())
         except Exception as exc:
             raise MetadataProviderSearchError(provider_id) from exc
         candidates = tuple(
@@ -210,7 +206,8 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
             identity=identity,
             selected_id=str(selected["id"]) if selected else None,
             prefer_local_metadata=prefer_local,
-            message=str(result["message"]) if result.get("message") else None,
+            message=identity.reason if identity else disabled_message if provider_id == "ai" else None,
+            selected_metadata=self._candidate(selected, provider_id) if selected else None,
             candidates=candidates,
         )
 

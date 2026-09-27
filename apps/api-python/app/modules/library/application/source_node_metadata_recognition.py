@@ -44,6 +44,7 @@ class SourceNodeMetadataRecognitionResult:
     identity: MetadataIdentity | None = None
     selected_id: str | None = None
     prefer_local_metadata: bool = True
+    selected_metadata: SourceNodeMetadataCandidate | None = None
 
 
 class SourceNodeMetadataRecognitionPort(Protocol):

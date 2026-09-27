@@ -289,3 +289,56 @@ test('AI identity preview respects a subsequent manual query', async ({ page }) 
     { providerId: 'douban', query: '乙书', manualQuery: true }
   ]);
 });
+
+
+test('AI semantic match applies source metadata and allows changing the record', async ({ page }) => {
+  let saved = false;
+  let detailReads = 0;
+  const primary = { id: 'bangumi:1', source: 'bangumi', title: '海辺のカフカ', author: '村上春樹', description: '网站真实简介', tags: [] };
+  await page.route(/\/api\/books\/book-1(?:\?|$)/, async (route) => {
+    detailReads += 1;
+    await route.fulfill({ json: { ok: true, data: { book: {
+      id: 'book-1', sourceNodeId: 'book-node', title: saved ? '海边的卡夫卡' : '卡夫卡 下载版',
+      author: saved ? '村上春树' : '错误作者', description: saved ? '网站真实简介' : null, resources: [epubResource]
+    } } } });
+  });
+  await page.route('**/api/metadata/providers', (route) => route.fulfill({ json: { ok: true, data: { providers: [
+    { id: 'bangumi', name: 'Bangumi', enabled: true, priority: 1 }
+  ] } } }));
+  await page.route('**/metadata/search', (route) => route.fulfill({ json: { ok: true, data: {
+    query: '海边的卡夫卡', selectedId: primary.id, preferLocalMetadata: true,
+    identity: { title: '海边的卡夫卡', author: '村上春树', needsReview: false, reason: '名称写法不同，确认同一作品' },
+    candidates: [primary, { id: 'douban:1', source: 'douban', title: '其他作品', author: '其他作者', tags: [] }],
+    selectedMetadata: { ...primary, title: '海边的卡夫卡', author: '村上春树' }
+  } } }));
+  await page.route('**/metadata/apply', async (route) => {
+    const body = route.request().postDataJSON();
+    expect(body.candidate.id).toBe(primary.id);
+    expect(body.candidate.source).toBe('bangumi');
+    expect(body.candidate.author).toBe('村上春树');
+    expect(body.candidate.description).toBe('网站真实简介');
+    expect(body.fields).toEqual(['book.title', 'book.author', 'book.description']);
+    saved = true;
+    await route.fulfill({ json: { ok: true, data: { appliedFields: body.fields, skippedFields: [], coverStatus: 'notSelected' } } });
+  });
+  await page.goto('/books/book-1');
+  await page.getByRole('button', { name: '管理图书 卡夫卡 下载版' }).click();
+  await page.getByRole('menuitem', { name: '识别', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '元数据识别', exact: true });
+  await dialog.getByRole('button', { name: '搜索', exact: true }).click();
+  await expect(dialog.getByText('名称写法不同，确认同一作品', { exact: true })).toBeVisible();
+  const primaryButton = dialog.getByRole('button', { name: /海辺のカフカ.*村上春樹.*bangumi/ });
+  await expect(primaryButton).toBeVisible();
+  await dialog.getByRole('button', { name: /其他作品.*其他作者.*douban/ }).click();
+  await expect(dialog.getByRole('checkbox', { name: '作者 错误作者 其他作者', exact: true })).toBeChecked();
+  await primaryButton.click();
+  await expect(dialog.getByRole('checkbox', { name: '作者 错误作者 村上春树', exact: true })).toBeChecked();
+  const beforeSave = detailReads;
+  await dialog.getByRole('button', { name: '应用所选字段' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByText('网站真实简介', { exact: true })).toBeVisible();
+  expect(detailReads).toBeGreaterThan(beforeSave);
+  await page.reload();
+  await expect(page.getByRole('button', { name: '管理图书 海边的卡夫卡', exact: true })).toBeVisible();
+  await expect(page.getByText('网站真实简介', { exact: true })).toBeVisible();
+});

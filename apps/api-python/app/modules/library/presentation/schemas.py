@@ -445,6 +445,7 @@ class SourceNodeMetadataSearchPayload(HttpContractModel):
     candidates: list[SourceNodeMetadataCandidateView]
     identity: MetadataIdentityView | None = None
     selected_id: str | None = Field(default=None, alias="selectedId")
+    selected_metadata: SourceNodeMetadataCandidateView | None = Field(default=None, alias="selectedMetadata")
     prefer_local_metadata: bool = Field(default=True, alias="preferLocalMetadata")
 
 

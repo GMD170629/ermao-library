@@ -355,14 +355,14 @@ export async function updateSourceNodePresentation(
   });
 }
 
-export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: string, providerId: string, query: string, signal?: AbortSignal, manualQuery = false): Promise<Readonly<{ message: string | null; candidates: SourceNodeMetadataCandidate[]; identity: MetadataIdentity | null; query: string; selectedId: string | null; preferLocalMetadata: boolean }>> {
+export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: string, providerId: string, query: string, signal?: AbortSignal, manualQuery = false): Promise<Readonly<{ message: string | null; candidates: SourceNodeMetadataCandidate[]; identity: MetadataIdentity | null; selectedMetadata: SourceNodeMetadataCandidate | null; query: string; selectedId: string | null; preferLocalMetadata: boolean }>> {
   const data = record(await apiJson(`/api/books/${encodeURIComponent(bookId)}/source-nodes/${encodeURIComponent(sourceNodeId)}/metadata/search`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ providerId, query, manualQuery }),
     signal
   }));
-  const candidates = (Array.isArray(data.candidates) ? data.candidates : []).flatMap((value) => {
+  const parseCandidate = (value: unknown): SourceNodeMetadataCandidate[] => {
     const item = record(value);
     const id = stringValue(item.id).trim();
     if (!id) return [];
@@ -386,7 +386,9 @@ export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: str
       coverUrl: nullableString(item.coverUrl),
       confidence: finiteNumber(item.confidence)
     } satisfies SourceNodeMetadataCandidate];
-  });
+  };
+  const candidates = (Array.isArray(data.candidates) ? data.candidates : []).flatMap(parseCandidate);
+  const selectedMetadata = data.selectedMetadata == null ? null : parseCandidate(data.selectedMetadata)[0] ?? null;
   const rawIdentity = data.identity == null ? null : record(data.identity);
   if (rawIdentity && (typeof rawIdentity.needsReview !== 'boolean' || typeof rawIdentity.reason !== 'string'
     || (rawIdentity.title !== null && typeof rawIdentity.title !== 'string')
@@ -395,7 +397,7 @@ export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: str
     title: nullableString(rawIdentity.title), author: nullableString(rawIdentity.author),
     needsReview: rawIdentity.needsReview === true, reason: stringValue(rawIdentity.reason)
   } : null;
-  return { message: nullableString(data.message), candidates, identity,
+  return { message: nullableString(data.message), candidates, identity, selectedMetadata,
     query: stringValue(data.query, query), selectedId: nullableString(data.selectedId),
     preferLocalMetadata: data.preferLocalMetadata !== false };
 

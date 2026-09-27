@@ -51,12 +51,17 @@ from app.modules.metadata.domain.providers import (
     ProviderConfigField,
     ProviderManifest,
 )
+from app.modules.metadata.infrastructure.matching import (
+    candidate_key,
+    match_metadata_candidates,
+)
 from app.services.metadata_file_writeback import (
     load_metadata_writeback_projection,
     metadata_writeback_enabled,
     persist_metadata_writeback_intents,
 )
 from app.services.metadata_provider_registry import (
+    enabled_metadata_provider_ids,
     recognize_metadata_identity,
     search_with_metadata_provider,
 )
@@ -94,9 +99,12 @@ __all__ = [
     "StandardWritePlan",
     "StandardWritePlanStore",
     "StandardWriteStatus",
+    "candidate_key",
     "choose_metadata_candidate",
     "cover_media_type",
+    "enabled_metadata_provider_ids",
     "load_metadata_writeback_projection",
+    "match_metadata_candidates",
     "metadata_from_source_name",
     "metadata_writeback_enabled",
     "parse_opf_metadata",

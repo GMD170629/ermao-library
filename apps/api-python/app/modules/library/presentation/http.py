@@ -132,6 +132,7 @@ from app.modules.library.application.source_node_commands import (
 )
 from app.modules.library.application.source_node_metadata_recognition import (
     MetadataProviderSearchError,
+    SourceNodeMetadataCandidate,
 )
 from app.modules.library.domain.facets import InvalidLibraryFacetRequest
 from app.modules.library.presentation.filter_mappers import (
@@ -1439,6 +1440,28 @@ def search_book_source_node_metadata(
         return _source_node_search_response(
             fail("来源节点不存在", status_code=404, code="SOURCE_NODE_NOT_FOUND")
         )
+    def candidate_view(candidate: SourceNodeMetadataCandidate) -> SourceNodeMetadataCandidateView:
+        return SourceNodeMetadataCandidateView(
+            id=candidate.id,
+            source=candidate.source,
+            title=candidate.title,
+            author=candidate.author,
+            description=candidate.description,
+            tags=list(candidate.tags),
+            seriesName=candidate.series_name,
+            seriesIndex=candidate.series_index,
+            publisher=candidate.publisher,
+            publishedAt=candidate.published_at,
+            language=candidate.language,
+            isbn=candidate.isbn,
+            identifier=candidate.identifier,
+            narrator=candidate.narrator,
+            abridged=candidate.abridged,
+            resourceIndex=candidate.resource_index,
+            coverUrl=candidate.cover_url,
+            confidence=candidate.confidence,
+        )
+
     return SourceNodeMetadataSearchResponse(
         data=SourceNodeMetadataSearchPayload(
             sourceNodeId=result.source_node_id,
@@ -1451,29 +1474,8 @@ def search_book_source_node_metadata(
             selectedId=result.selected_id,
             preferLocalMetadata=result.prefer_local_metadata,
             message=result.message,
-            candidates=[
-                SourceNodeMetadataCandidateView(
-                    id=candidate.id,
-                    source=candidate.source,
-                    title=candidate.title,
-                    author=candidate.author,
-                    description=candidate.description,
-                    tags=list(candidate.tags),
-                    seriesName=candidate.series_name,
-                    seriesIndex=candidate.series_index,
-                    publisher=candidate.publisher,
-                    publishedAt=candidate.published_at,
-                    language=candidate.language,
-                    isbn=candidate.isbn,
-                    identifier=candidate.identifier,
-                    narrator=candidate.narrator,
-                    abridged=candidate.abridged,
-                    resourceIndex=candidate.resource_index,
-                    coverUrl=candidate.cover_url,
-                    confidence=candidate.confidence,
-                )
-                for candidate in result.candidates
-            ],
+            candidates=[candidate_view(candidate) for candidate in result.candidates],
+            selectedMetadata=candidate_view(result.selected_metadata) if result.selected_metadata else None,
         )
     )
 

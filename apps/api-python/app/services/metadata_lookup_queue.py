@@ -48,6 +48,7 @@ from app.modules.metadata.application.writeback import (
 )
 from app.modules.metadata.infrastructure import lookup_queue as lookup_persist
 from app.modules.metadata.infrastructure import writeback_queue
+from app.modules.metadata.infrastructure.matching import match_metadata_candidates
 from app.services.metadata_file_writeback import (
     maintain_metadata_writebacks,
     process_next_metadata_writeback,
@@ -59,7 +60,6 @@ from app.services.metadata_provider_registry import (
     search_with_metadata_provider,
 )
 from app.services.organize_service import (
-    choose_metadata_candidate,
     metadata_context_for_book,
 )
 from app.services.queue_runtime import QueueHeartbeatPump
@@ -781,58 +781,53 @@ def process_metadata_lookup_task(
             enabled_providers = 0
             errors: list[str] = []
             inspected: list[dict[str, Any]] = []
-            for provider in _provider_order(task):
+            candidates: list[dict[str, Any]] = []
+            executions: dict[str, str | None] = {}
+            # AI identity is fallback only, never a source that short-circuits websites.
+            for provider in (item for item in _provider_order(task) if item != "ai"):
+                if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
+                    return "CANCELLED"
                 execution_id = _start_provider_execution(db, task, provider)
+                executions[provider] = execution_id
                 try:
-                    if provider == "ai":
-                        result = {"enabled": identity is not None,
-                                  "candidates": [identity.candidate()] if identity else []}
-                    else:
-                        result = _search_provider(db, context, provider, search_title, effective_request_gate)
+                    result = _search_provider(db, context, provider, search_title, effective_request_gate)
                 except Exception as exc:  # noqa: BLE001 - contains one provider attempt.
-                    record_exception(logging.getLogger(__name__), "services.metadata_lookup_queue.process_metadata_lookup_task.failed", exc,
-                                     context={"step": "process_metadata_lookup_task", "task_id": str(task.get("id") or ""), "attempt": int(task.get("attempts") or 0) + 1})
-                    _finish_provider_execution(
-                        db, execution_id, status="FAILED", error=str(exc)
-                    )
+                    record_exception(LOGGER, "metadata.source_search_failed", exc,
+                                     context={"step": "source_search", "task_id": str(task["id"]), "resource_id": provider})
+                    _finish_provider_execution(db, execution_id, status="FAILED", error=str(exc))
                     errors.append(f"{provider}: {exc}")
                     continue
                 if not result.get("enabled"):
-                    _finish_provider_execution(
-                        db, execution_id, status="SKIPPED", result=result
-                    )
+                    _finish_provider_execution(db, execution_id, status="SKIPPED", result=result)
                     continue
                 enabled_providers += 1
-                raw_candidates = result.get("candidates")
-                candidates: list[dict[str, Any]] = (
-                    [
-                        {str(key): value for key, value in candidate.items()}
-                        for candidate in raw_candidates
-                        if isinstance(candidate, dict)
-                    ]
-                    if isinstance(raw_candidates, list)
-                    else []
+                raw = result.get("candidates", [])
+                if isinstance(raw, list):
+                    candidates.extend({**item, "source": provider} for item in raw[:10]
+                                      if isinstance(item, dict) and item.get("id"))
+                inspected.append({"provider": provider, "candidates": raw, "cacheHit": bool(result.get("cacheHit"))})
+                _finish_provider_execution(db, execution_id, status="COMPLETED", result=result)
+            try:
+                match = match_metadata_candidates(
+                    db, book_id=str(book["id"]), title=search_title, author=search_author,
+                    identity=identity, candidates=candidates,
+                    local_title=str(book.get("title") or ""), local_author=str(book.get("author") or ""),
                 )
-                candidate, exact = choose_metadata_candidate(candidates, search_title, search_author)
-                if identity is not None:
-                    if identity.needs_review or identity.title is None:
-                        candidate = None
-                    elif candidate is not None:
-                        candidate = {**candidate, "title": identity.title,
-                                     "author": identity.author or candidate.get("author"),
-                                     "identity": identity.payload()}
-                inspected.append(
-                    {
-                        "provider": provider,
-                        "exactCandidates": exact,
-                        "cacheHit": bool(result.get("cacheHit")),
-                    }
+            except Exception as error:  # noqa: BLE001 - failed matching retries with original diagnosis.
+                record_exception(LOGGER, "metadata.match_failed", error,
+                                 context={"step": "match", "task_id": str(task["id"])})
+                match_failure_message = (
+                    "AI source matching failed" if configured_locale(db) == "en-US"
+                    else "AI 条目对应判断失败"
                 )
-                if not candidate:
-                    _finish_provider_execution(
-                        db, execution_id, status="NO_MATCH", result=result
-                    )
-                    continue
+                return _schedule_retry(db, task, match_failure_message, inspected)
+            final_identity = match.identity
+            candidate = match.application_candidate(candidates)
+            if final_identity and (final_identity.needs_review or not final_identity.title):
+                candidate = None
+            if candidate:
+                provider = str(candidate["source"])
+                execution_id = executions.get(provider) or _start_provider_execution(db, task, provider)
                 if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
                     return "CANCELLED"
                 prepared_application: _PreparedCandidateApplication | None = None
@@ -961,7 +956,8 @@ def process_metadata_lookup_task(
             if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
                 return "CANCELLED"
             _finish_without_match(
-                db, task, "NO_MATCH", inspected, "未找到可唯一确定的标题精确候选"
+                db, task, "NO_MATCH", inspected,
+                "No confirmed matching entry" if configured_locale(db) == "en-US" else "未找到可确认的对应条目"
             )
             return "NO_MATCH"
         finally:

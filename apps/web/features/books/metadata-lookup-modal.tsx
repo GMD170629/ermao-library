@@ -100,6 +100,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
   const [manualQuery, setManualQuery] = useState(false);
   const [candidates, setCandidates] = useState<MetadataCandidate[]>([]);
   const [selectedId, setSelectedId] = useState('');
+  const [selectedMetadata, setSelectedMetadata] = useState<MetadataCandidate | null>(null);
   const [selectedFields, setSelectedFields] = useState<RecognizedMetadataField[]>([]);
   const scope: MetadataTargetScope = fixedScope === 'resource' ? 'resource' : 'book';
   const definitions = useMemo(() => recognizedMetadataFields(scope), [scope]);
@@ -115,7 +116,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
   const searchControllerRef = useRef<AbortController | null>(null);
   const applyControllerRef = useRef<AbortController | null>(null);
 
-  const selected = useMemo(() => candidates.find((candidate) => candidate.id === selectedId) ?? null, [candidates, selectedId]);
+  const selected = useMemo(() => selectedMetadata?.id === selectedId ? selectedMetadata : candidates.find((candidate) => candidate.id === selectedId) ?? null, [candidates, selectedId, selectedMetadata]);
   const options = useMemo(() => providers.map((provider) => ({
     value: provider.id,
     label: provider.name,
@@ -132,6 +133,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
     setCandidates([]);
     setIdentity(null);
     setSelectedId('');
+    setSelectedMetadata(null);
     setSelectedFields([]);
     setMessage('');
     setError('');
@@ -187,6 +189,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
       const nextCandidates = result.candidates;
       setCandidates(nextCandidates);
       setSelectedId(result.selectedId ?? '');
+      setSelectedMetadata(result.selectedMetadata);
       setIdentity(result.identity);
       setPreferLocal(result.preferLocalMetadata);
       setQuery(result.query);
