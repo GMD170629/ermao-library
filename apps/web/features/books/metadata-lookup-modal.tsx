@@ -7,7 +7,7 @@ import { authorDisplayLabel } from '@/types/book';
 
 import { CheckCircle2, ImageOff, Maximize2, Search, Sparkles, X } from 'lucide-react';
 import Image from 'next/image';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
@@ -162,9 +162,12 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
     setSelectedFields([]);
   }, [book.id, currentResourceId, fixedScope, open]);
 
-  useEffect(() => {
+  const initializeSelectedFields = useEffectEvent(() => {
     setSelectedFields(defaultRecognizedMetadataFields(book, selectedTargetResource, selected, definitions, preferLocal));
-  }, [book, definitions, preferLocal, selected, selectedTargetResource]);
+  });
+  useEffect(() => {
+    initializeSelectedFields();
+  }, [book.id, definitions, preferLocal, selected, selectedTargetResource?.id]);
 
   useEffect(() => {
     if (!coverPreview) return;
