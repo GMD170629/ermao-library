@@ -697,6 +697,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       loading={resourceDetailLoading}
       error={resourceDetailError}
       requestedPage={requestedResourcePage}
+      onManage={canManage || requestedResource.kindleSendAvailable ? openResourceMenu : undefined}
       onBack={singleReadableResource ? null : () => updateResourceLocation(null)}
       onPageChange={(page) => updateResourceLocation(requestedResource.id, page)}
       onPlayAudio={(assetId, chapterTitle) => playAudioResource(requestedResource, assetId, chapterTitle)}

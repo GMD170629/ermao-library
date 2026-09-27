@@ -397,3 +397,40 @@ test('AI generated fields are previewed, applied, reloaded and isolated when cha
   await expect(page.getByText(generated.description, { exact: true })).toBeVisible();
   await expect(page.getByText('简介 · AI 生成', { exact: true })).toBeVisible();
 });
+
+
+test('single same-node resource exposes recognition with its explicit target', async ({ page }) => {
+  let saved = false;
+  const generated = { id: 'ai-identity', source: 'ai', title: '活着', author: '余华', description: '资源生成简介', tags: [], generatedFields: ['description'], generationSource: 'AI_GENERATED', generationRevision: 'book|resource' };
+  const other = { id: 'bangumi:2', source: 'bangumi', title: '另一条目', author: '余华', tags: [] };
+  await page.route(/\/api\/books\/book-1(?:\?|$)/, (route) => route.fulfill({ json: { ok: true, data: { book: {
+    id: 'book-1', sourceNodeId: 'book-node', title: '活着', author: '余华', description: '书级简介保留', tags: [],
+    resources: [{ ...epubResource, sourceNodeId: 'book-node', title: '活着', description: saved ? generated.description : '', generatedFields: saved ? ['description'] : [] }]
+  } } } }));
+  await page.route('**/api/metadata/providers', (route) => route.fulfill({ json: { ok: true, data: { providers: [{ id: 'bangumi', name: 'Bangumi', enabled: true, priority: 1 }] } } }));
+  await page.route('**/metadata/search', (route) => {
+    const body = route.request().postDataJSON();
+    expect(body.scope).toBe('resource'); expect(body.resourceId).toBe('resource-epub');
+    const selected = body.selectedCandidate ? { ...generated, id: other.id } : generated;
+    return route.fulfill({ json: { ok: true, data: { query: '活着', candidates: [generated, other], selectedId: selected.id, selectedMetadata: selected, preferLocalMetadata: true } } });
+  });
+  await page.route('**/metadata/apply', (route) => {
+    const body = route.request().postDataJSON();
+    expect(body.scope).toBe('resource'); expect(body.resourceId).toBe('resource-epub');
+    expect(body.fields).toEqual(['resource.description']); saved = true;
+    return route.fulfill({ json: { ok: true, data: { appliedFields: body.fields, skippedFields: [], coverStatus: 'notSelected' } } });
+  });
+  await page.goto('/books/book-1');
+  await page.getByRole('button', { name: '管理 活着', exact: true }).click();
+  await page.getByRole('menuitem', { name: '识别', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '元数据识别', exact: true });
+  await dialog.getByRole('button', { name: '搜索', exact: true }).click();
+  await expect(dialog.getByText('AI 生成', { exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: /另一条目.*余华.*bangumi/ }).click();
+  await dialog.getByRole('button', { name: '应用所选字段' }).click();
+  await expect(dialog).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByText('简介 · AI 生成', { exact: true })).toBeVisible();
+  await expect(page.getByText('资源生成简介', { exact: true })).toBeVisible();
+  await expect(page.getByText('书级简介保留', { exact: true })).toBeVisible();
+});

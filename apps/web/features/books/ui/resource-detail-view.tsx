@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertTriangle, ArrowLeft, BarChart3, CheckCircle2, Circle, FileImage, Headphones, LoaderCircle } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, BarChart3, CheckCircle2, Circle, FileImage, Headphones, LoaderCircle, MoreVertical } from 'lucide-react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
@@ -19,6 +19,7 @@ type Props = Readonly<{
   error: string;
   requestedPage: number;
   onBack: (() => void) | null;
+  onManage?: (resource: ReadableResourceView, anchor: HTMLButtonElement) => void;
   onPageChange: (page: number) => void;
   onPlayAudio: (assetId?: string, chapterTitle?: string) => void;
 }>;
@@ -71,7 +72,7 @@ function PreviewTile({ resource, unit }: { resource: ReadableResourceView; unit:
   </button>;
 }
 
-export function ResourceDetailView({ resource, detail, loading, error, requestedPage, onBack, onPageChange, onPlayAudio }: Props) {
+export function ResourceDetailView({ resource, detail, loading, error, requestedPage, onBack, onManage, onPageChange, onPlayAudio }: Props) {
   const router = useRouter();
   const { t } = useI18n();
   const page = detail?.page.page ?? requestedPage;
@@ -99,7 +100,10 @@ export function ResourceDetailView({ resource, detail, loading, error, requested
         <h2 className={cn('text-xl font-semibold text-stone-950', onBack && 'mt-3')}>{heading}</h2>
         <p className="mt-1 text-sm text-stone-500">{countLabel}</p>
       </div>
+      <div className="flex items-center gap-2">
+      {onManage ? <button type="button" aria-label={t("管理 {value0}", { value0: resource.title })} aria-haspopup="menu" onClick={(event) => onManage(resource, event.currentTarget)} className="flex h-10 w-10 items-center justify-center rounded-lg text-stone-600 hover:bg-stone-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-200"><MoreVertical size={18} /></button> : null}
       <Button variant="secondary" icon={resource.readerType === 'audio' ? Headphones : undefined} onClick={openResource}>{t(resource.readerType === 'audio' ? '打开播放器' : '打开阅读器')}</Button>
+      </div>
     </div>
 
     {loading && !detail ? <div className="mt-6 flex min-h-40 items-center justify-center text-sm text-stone-500" role="status"><LoaderCircle size={19} className="mr-2 animate-spin text-[#ff4f2a] motion-reduce:animate-none" />{t('正在加载资源详情…')}</div> : null}
