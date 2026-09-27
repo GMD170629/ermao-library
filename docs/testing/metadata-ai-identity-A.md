@@ -461,3 +461,16 @@ NAS 只读提取原 94 本批次保存的真实网站候选、操作前标题作
 该本机模型重放没有已核实的 NAS 书库名，传空字符串，不伪造分类名；真实 Library 名称读取通过现有数据库/HTTP测试验证。来源使用真实历史快照，未实时搜索、应用或保存。证据：%TEMP%/metadata_model_production_client.json、metadata_model_production_client_set_recheck.json。NAS 出口与实际保存验证必须另记。
 
 NAS 连接：本次仅发起一次 1Password 读取，返回 authorization timeout；用户随后明确暂时无法解锁。未继续重试或换取凭据，未接通 SSH、未部署或修改 NAS。继续按授权推送 develop 与构建镜像，NAS 验收保留为未完成。
+
+构建交付补记：源码提交 `4c8c262d3db567ec4381aacd4caa42558fe9bba0` 已快进推送 origin/develop 与 origin/codex/metadata-ai-rebuild，提交带 [skip ci]，另手动触发既有 fnos-package workflow（Android=false）。[运行 36318232902](https://github.com/GMD170629/ermao-library/actions/runs/36318232902) 最终 success：
+
+| 环节 | 实测耗时 |
+| --- | ---: |
+| 模板与 Web 门禁 | 3 分 04 秒 |
+| 候选镜像构建、真实启动/恢复/故障隔离检查 | 6 分 34 秒 |
+| develop 镜像构建与推送 | 2 分 31 秒 |
+| 整体运行 2026-09-27 20:12:44—20:25:02 北京时间 | 12 分 18 秒 |
+
+正常 develop 工作流中的正式后端全量、正式制品/稳定发布及 Android jobs 为 skipped，不将其计为通过。已匿名读取 Docker Hub manifest 与 amd64 配置，确认 `gamersgu/shuku-starship-web:develop` 的 digest 为 `sha256:cd42a9b0310e417dae9415cf0b49858ced25a6f7997d87a7885df0ee2c2190c1`，image revision 为上述 `4c8c262d`。本段记录提交只改文档，不重建镜像。
+
+NAS 保持未部署、未实测。1Password 暂时无法解锁，未继续触发授权；没有将 CI 启动验收或本机模型重放写成 NAS 成功。恢复连接后须先核对 NAS 当前任务与用户变化、做可恢复备份，再部署该摘要，沿真实 HTTP/worker 验证识别、详情、保存和重开，不能直接沿用之前 6f1808d9 的验收结果。
