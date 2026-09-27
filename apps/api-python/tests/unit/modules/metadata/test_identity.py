@@ -13,6 +13,59 @@ from app.services.metadata_provider_registry import (
 )
 
 
+@pytest.mark.parametrize("base_url,disabled", [
+    ("https://api.deepseek.com", True),
+    ("https://api.deepseek.com/v1", True),
+    ("https://api.deepseek.com.other.test", False),
+    ("http://local/v1", False),
+])
+def test_deepseek_uses_non_thinking_without_changing_other_connections(monkeypatch, base_url, disabled):
+    def transport(request, **kwargs):
+        body = json.loads(request.data)
+        assert (body.get("thinking") == {"type": "disabled"}) is disabled
+        assert kwargs["timeout"] == 30
+        return BytesIO(json.dumps({"choices": [{"message": {"content": "{}"}}]}).encode())
+    monkeypatch.setattr(ai_client, "urlopen", transport)
+    assert ai_client.chat_completion({"baseUrl": base_url, "model": "test"}, "test", {}) == {}
+
+
+def test_match_sends_direct_clues_and_actual_types_without_descriptions(db_session, monkeypatch):
+    from app.contracts.metadata_identity import MetadataIdentity
+    from app.models import Library
+    from app.modules.metadata.infrastructure import matching
+    from tests.contract.api.test_recognized_metadata_api import _add_book
+
+    _add_book(db_session, book_id="concise")
+    db_session.get(Library, "test-library").name = "网络小说"
+    db_session.add(Source(id="concise-ai", name="AI", kind="metadata", provider_type="ai", enabled=True,
+                          config=json.dumps({"baseUrl": "https://api.deepseek.com", "model": "deepseek-flash"})))
+    db_session.commit()
+    candidates = [
+        {"source": "bangumi", "id": "novel", "title": "无限恐怖", "author": "zhttty",
+         "description": "原著网站简介", "raw": {"platform": "小说"}},
+        {"source": "bangumi", "id": "comic", "title": "无限恐怖", "author": "zhttty",
+         "description": "漫画网站简介", "raw": {"platform": "漫画"}},
+    ]
+    def transport(request, **kwargs):
+        body = json.loads(request.data)
+        assert body["thinking"] == {"type": "disabled"}
+        summary = json.loads(body["messages"][1]["content"])
+        assert set(summary) == {"title", "author", "manualQuery", "language", "libraryName", "fileNames", "candidates"}
+        assert summary["libraryName"] == "网络小说" and summary["fileNames"]
+        assert summary["candidates"] == [
+            {"id": "bangumi:novel", "title": "无限恐怖", "author": "zhttty", "type": "小说"},
+            {"id": "bangumi:comic", "title": "无限恐怖", "author": "zhttty", "type": "漫画"},
+        ]
+        result = {"title": "无限恐怖", "author": "zhttty", "needsReview": False, "reason": "controlled source types",
+                  "primaryCandidateId": "bangumi:novel", "relatedCandidateIds": []}
+        return BytesIO(json.dumps({"choices": [{"message": {"content": json.dumps(result)}}]}).encode())
+    monkeypatch.setattr(ai_client, "urlopen", transport)
+    match = matching.match_metadata_candidates(db_session, book_id="concise", title="无限恐怖", author="zhttty",
+        identity=MetadataIdentity("无限恐怖", "zhttty", False, "A"), candidates=candidates)
+    assert match.application_candidate(candidates)["description"] == "原著网站简介"
+    assert candidates[1]["description"] == "漫画网站简介"
+
+
 @pytest.mark.parametrize(
     "enabled,config",
     [(False, {"baseUrl": "http://local/v1", "model": "local"}), (True, {})],

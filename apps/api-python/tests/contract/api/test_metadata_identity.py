@@ -176,9 +176,15 @@ def test_dirty_database_search_apply_reopen(
         matching = "candidates" in summary
         assert summary["title"] == (new_title if matching else title)
         assert summary["author"] == ((new_author or "") if matching else (author or ""))
-        assert summary["embeddedMetadata"] == [
-            {"title": new_title, "author": expected_author}
-        ]
+        assert summary["libraryName"]
+        assert summary["fileNames"]
+        if matching:
+            assert "embeddedMetadata" not in summary and "directories" not in summary
+            assert all("description" not in item and "type" in item for item in summary["candidates"])
+        else:
+            assert summary["embeddedMetadata"] == [
+                {"title": new_title, "author": expected_author}
+            ]
         assert request.get_header("Authorization") is None
         return BytesIO(
             json.dumps(
@@ -381,7 +387,9 @@ def test_semantic_match_selects_real_record_and_persists(client, db_session, mon
             result = {"title": initial_title, "author": initial_author, "needsReview": scenario == "uncertain", "reason": "A controlled"}
         else:
             assert prompt["candidates"][0]["title"] == (secondary["title"] if scenario == "source-failure" else primary["title"])
-            assert prompt["localAuthor"] == "错误作者"
+            assert "localAuthor" not in prompt and "localTitle" not in prompt
+            assert prompt["libraryName"] and prompt["fileNames"]
+            assert all("description" not in item for item in prompt["candidates"])
             if scenario == "manual":
                 assert prompt["manualQuery"] and prompt["title"] == "人工关键词"
             result = {"title": "海边的卡夫卡", "author": "村上春树", "needsReview": scenario == "different-author",
@@ -446,7 +454,8 @@ def _douban_detail_transport(db_session, monkeypatch, *, failure=False, direct=F
         prompts.append(prompt)
         result = {"title": "海边的卡夫卡", "author": "村上春树", "needsReview": False, "reason": "controlled match"}
         if "candidates" in prompt:
-            assert prompt["candidates"][0]["description"] == ("搜索已有简介" if failure else "")
+            assert "description" not in prompt["candidates"][0]
+            assert prompt["candidates"][0]["type"] == "豆瓣图书条目"
             assert prompt["candidates"][0]["author"] == "村上春樹"
             result.update(primaryCandidateId="douban:12345", relatedCandidateIds=[])
         return BytesIO(json.dumps({"choices": [{"message": {"content": json.dumps(result)}}]}).encode())

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.contracts.local_metadata_snapshot import decode_observations
 from app.models import (
+    Library,
     LibraryBook,
     LibraryReadableResource,
     LibraryResourceAsset,
@@ -18,13 +19,14 @@ def identity_clues(
     db: Session, book_id: str, source_node_id: str | None
 ) -> dict[str, object]:
     book = db.get(LibraryBook, book_id)
+    library = db.get(Library, book.library_id) if book else None
     node = (
         db.get(LibrarySourceNode, source_node_id or book.source_node_id)
         if book
         else None
     )
     if node is None:
-        return {"fileNames": [], "directories": [], "embeddedMetadata": []}
+        return {"libraryName": library.name[:500] if library else "", "fileNames": [], "directories": [], "embeddedMetadata": []}
     rows = db.execute(
         select(
             LibrarySourceNode.relative_path,
@@ -87,6 +89,7 @@ def identity_clues(
         )
     )
     return {
+        "libraryName": library.name[:500] if library else "",
         "fileNames": [path.name[:500] for path in paths] or [node.name[:500]],
         "directories": [part[:500] for part in directories],
         "embeddedMetadata": embedded[:8],

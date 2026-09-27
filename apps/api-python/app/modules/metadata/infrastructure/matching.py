@@ -33,6 +33,13 @@ def candidate_key(candidate: Mapping[str, object]) -> str:
     return f"{candidate['source']}:{candidate['id']}"
 
 
+def candidate_type(candidate: Mapping[str, object]) -> str:
+    if candidate.get("source") == "douban":
+        return "豆瓣图书条目"
+    raw = candidate.get("raw")
+    return str(raw.get("platform") or "未提供细分类型")[:100] if isinstance(raw, dict) else "未提供细分类型"
+
+
 @dataclass(frozen=True, slots=True)
 class MetadataMatch:
     identity: MetadataIdentity | None
@@ -147,8 +154,6 @@ def match_metadata_candidates(
     candidates: Sequence[Mapping[str, object]],
     source_node_id: str | None = None,
     manual_query: bool = False,
-    local_title: str = "",
-    local_author: str | None = None,
 ) -> MetadataMatch:
     # Source order is input order; a direct match per source is the fast path.
     bounded = list(candidates[:20])
@@ -194,17 +199,15 @@ def match_metadata_candidates(
             "title": title[:500],
             "author": (author or "")[:500],
             "manualQuery": manual_query,
-            "query": title[:500],
             "language": locale,
-            "localTitle": local_title[:500],
-            "localAuthor": (local_author or "")[:500],
-            **clues,
+            "libraryName": clues["libraryName"],
+            "fileNames": clues["fileNames"],
             "candidates": [
                 {
                     "id": candidate_key(item),
                     "title": str(item.get("title") or "")[:500],
                     "author": str(item.get("author") or "")[:500],
-                    "description": str(item.get("description") or "")[:1200],
+                    "type": candidate_type(item),
                 }
                 for item in bounded
             ],

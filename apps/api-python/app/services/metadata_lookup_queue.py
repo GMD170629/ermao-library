@@ -823,7 +823,6 @@ def process_metadata_lookup_task(
                 match = match_metadata_candidates(
                     db, book_id=str(book["id"]), title=search_title, author=search_author,
                     identity=identity, candidates=candidates,
-                    local_title=str(book.get("title") or ""), local_author=str(book.get("author") or ""),
                 )
             except Exception as error:  # noqa: BLE001 - failed matching retries with original diagnosis.
                 record_exception(LOGGER, "metadata.match_failed", error,

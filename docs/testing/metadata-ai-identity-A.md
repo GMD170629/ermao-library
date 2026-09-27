@@ -443,3 +443,21 @@ NAS 只读提取原 94 本批次保存的真实网站候选、操作前标题作
 本轮共 42 次真实模型 HTTP 调用：12 次成对删简介对照、18 次短输入三模式对照、6 次精准提示词、6 次附带既有类型字段。主对照并发最多 2，追加小批与主对照部分重叠，最多 3；没有随机化与重复统计，不将小样本时差解释成稳定性能保证。没有重新请求网站、修改来源筛选、发起自动任务、保存业务数据、部署或重启。只更新记录，不重复应用测试。
 
 本机证据（%TEMP%）：metadata_model_titles_only.json、metadata_model_titles_only_precise.json、metadata_model_titles_only_kind.json、metadata_model_titles_only_audit.json；冻结输入 metadata_model_titles_only_inputs.json、实际最后提示词 metadata_model_titles_only_precise_prompt.txt。凭据只从已授权应用配置读取，未输出、写入实验文件或重新查询 1Password。
+
+### 2026-09-27 精简策略接入实际客户端（develop 构建，NAS 待连接）
+
+本次将实验策略写入现有实现，不依赖临时传输包装：
+
+- identity_context 从当前 book 所属 Library 读取 libraryName，A 仍保留当前目标的有限文件名、内嵌元数据及资源目录，以免丢失既有音频合集线索；不读取全库或正文。
+- matching.match_metadata_candidates 发给模型的业务输入精简为当前 title/author、libraryName、fileNames、候选 id/title/author/type，加现有 manualQuery/language 控制。删除重复 query、错误旧 localTitle/localAuthor、B 的目录/内嵌数据副本和候选 description。手动 adapter 与自动队列移除对应旧参数，使用同一实现。
+- 网站 type 直接来自现有 Bangumi raw.platform；豆瓣图书入口标明“豆瓣图书条目”；缺类型明确“未提供细分类型”，不按标题猜测。完整原候选及简介保留在服务端，继续用于所选条目的详情、预览和保存。
+- 现有 ai_client 对 api.deepseek.com 显式发送 thinking.type=disabled，A/B/C 及模型连接测试复用该客户端。不改变其他兼容服务的请求参数；没有另建连接、重试或配置系统。
+- 精简 B 提示词，主来源和关联来源使用同一完整目标条件；保留译名语义判断、身份纠正与人工查询意图。真实联调发现短文件名仍会诱导删除套装含义，追加明确要求禁止为凑匹配删去全集/套装/册数。
+
+定向验证：原三文件集合 111 项首次 106 通过、5 项因旧测试仍读取已移除的模型 description 字段失败。更新共用测试断言为“不发送简介且发送实际类型”，对应 6 项（包含相邻直接匹配路径）重跑全部通过；新增测试包含同名同作者小说/漫画的类型传递及 DeepSeek/non-DeepSeek 请求边界，unit 文件 31 项全部通过。最后的局部类型收窄修正再次通过对应单测；相关 3 文件 Ruff 与 follow-imports=silent mypy 通过。没有扩大到全仓；既有完整类型检查的依赖问题未声称已修复。
+
+真实模型：使用当前应用 identify_metadata → match_metadata 和同一真实 DeepSeek 连接，不替换 urlopen、不注入参数或固定响应；原始标题作者与来源候选来自先前 NAS 快照。先六本验证，提示词合并过长的一版仍出现错误关联，已替换成精简版。精简版《沙丘六部曲》对应 douban:35586953；《环界全集》无条目；《控方证人》douban:35948260；《无限恐怖》douban:36420525，仅关联小说 bangumi:143916、排除漫画；《鬼吹灯-全八册》douban:26734228，不关联分部。A+B 合计耗时约 1.66–2.20 秒。《推理要在晚餐后》先出现把三册套装缩成单册的失败，最后补充上述限定后，原始输入重新 A+B 为完整三册标题、primary=null/related=[]/needsReview=true，1.781 秒。保留实际失败，不把一次复测当作普遍准确率保证。
+
+该本机模型重放没有已核实的 NAS 书库名，传空字符串，不伪造分类名；真实 Library 名称读取通过现有数据库/HTTP测试验证。来源使用真实历史快照，未实时搜索、应用或保存。证据：%TEMP%/metadata_model_production_client.json、metadata_model_production_client_set_recheck.json。NAS 出口与实际保存验证必须另记。
+
+NAS 连接：本次仅发起一次 1Password 读取，返回 authorization timeout；用户随后明确暂时无法解锁。未继续重试或换取凭据，未接通 SSH、未部署或修改 NAS。继续按授权推送 develop 与构建镜像，NAS 验收保留为未完成。

@@ -235,7 +235,6 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
                 self._db, book_id=book_id, source_node_id=target_id,
                 title=effective_query, author=str(book_context.get("author") or "") or None,
                 identity=identity, candidates=values, manual_query=manual_query,
-                local_title=title, local_author=book_metadata.author,
             )
             identity = match.identity
             selected = prepare_matched_metadata(self._db, match, values)
