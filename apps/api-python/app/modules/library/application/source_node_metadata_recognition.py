@@ -54,6 +54,7 @@ class SourceNodeMetadataRecognitionPort(Protocol):
         source_node_id: str,
         provider_id: str,
         query: str | None,
+        manual_query: bool = False,
     ) -> SourceNodeMetadataRecognitionResult | None: ...
 
 
@@ -68,6 +69,7 @@ class RecognizeSourceNodeMetadata:
         source_node_id: str,
         provider_id: str,
         query: str | None,
+        manual_query: bool = False,
     ) -> SourceNodeMetadataRecognitionResult | None:
         normalized_provider = provider_id.strip()
         if not normalized_provider:
@@ -77,6 +79,7 @@ class RecognizeSourceNodeMetadata:
             source_node_id=source_node_id,
             provider_id=normalized_provider,
             query=(query or "").strip() or None,
+            manual_query=manual_query,
         )
 
 

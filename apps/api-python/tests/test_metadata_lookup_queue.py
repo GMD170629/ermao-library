@@ -328,10 +328,10 @@ def test_import_wait_exhaustion_logs_observed_upstream_state_and_returns_failed(
 
 
 @pytest.mark.parametrize(
-    "protected,needs_review", [(False, False), (True, False), (False, True)]
+    "protected,needs_review,conflicting_author", [(False, False, False), (True, False, False), (False, True, False), (False, False, True)]
 )
 def test_identity_controls_query_selection_and_unprotected_save(
-    db_session, test_settings, monkeypatch, protected, needs_review
+    db_session, test_settings, monkeypatch, protected, needs_review, conflicting_author
 ):
     from app.contracts.metadata_identity import MetadataIdentity
     from app.models.organize import OrganizePolicy
@@ -365,7 +365,7 @@ def test_identity_controls_query_selection_and_unprotected_save(
                 {
                     "id": "site",
                     "title": "活着",
-                    "author": "余华",
+                    "author": "作者乙" if conflicting_author else "余华",
                     "description": "远程简介",
                 }
             ],
@@ -385,12 +385,12 @@ def test_identity_controls_query_selection_and_unprotected_save(
             "providerOrder": '["douban"]',
         },
     )
-    assert status == ("NO_MATCH" if needs_review else "COMPLETED")
+    assert status == ("NO_MATCH" if needs_review or conflicting_author else "COMPLETED")
     assert queries == ["活着"]
     db_session.expire_all()
     saved = db_session.get(LibraryBookMetadata, book_id)
     assert (saved.title, saved.author) == (
-        ("混杂错误标题", "错误作者") if protected or needs_review else ("活着", "余华")
+        ("混杂错误标题", "错误作者") if protected or needs_review or conflicting_author else ("活着", "余华")
     )
     assert saved.description == "保留的本地简介"
 

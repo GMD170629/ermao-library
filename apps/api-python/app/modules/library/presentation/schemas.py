@@ -404,6 +404,7 @@ class SourceNodeMetadataUpdatedPayload(HttpContractModel):
 
 
 class SourceNodeMetadataSearchRequest(HttpContractModel):
+    manual_query: bool = Field(default=False, alias="manualQuery")
     provider_id: str = Field(alias="providerId", min_length=1, max_length=100)
     query: str | None = Field(default=None, max_length=500)
 

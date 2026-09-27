@@ -28,7 +28,8 @@ from tests.contract.api.test_recognized_metadata_api import _add_book, _login
     ],
 )
 def test_dirty_database_search_apply_reopen(
-    client, db_session, monkeypatch, provider, title, author, new_title, new_author
+    client, db_session, monkeypatch, provider, title, author, new_title, new_author,
+    conflicting_author=False, manual_second_search=False,
 ):
     _add_book(db_session, book_id="dirty-identity")
     metadata = db_session.get(LibraryBookMetadata, "dirty-identity")
@@ -121,8 +122,9 @@ def test_dirty_database_search_apply_reopen(
                     "data": [
                         {
                             "id": "site-entry",
-                            "name_cn": new_title,
-                            "infobox": [{"key": "作者", "value": expected_author}],
+                            "name_cn": "乙书" if queries[-1] == "乙书" else new_title,
+                            "infobox": [{"key": "作者", "value": "作者乙" if conflicting_author or queries[-1] == "乙书" else expected_author}],
+                            "summary": "网站原始简介",
                         }
                     ]
                 }
@@ -141,9 +143,25 @@ def test_dirty_database_search_apply_reopen(
     assert data["identity"]["title"] == new_title
     assert data["identity"]["needsReview"] is (new_author is None)
     assert data["selectedId"] == (
-        "site-entry" if provider == "bangumi" else "ai-identity"
+        "site-entry" if provider == "bangumi" and not conflicting_author else "ai-identity"
     )
     assert queries == ([new_title] if provider == "bangumi" else [])
+    if conflicting_author:
+        source = next(item for item in data["candidates"] if item["id"] == "site-entry")
+        assert source["author"] == "作者乙"
+        assert source["description"] == "网站原始简介"
+    if manual_second_search:
+        response = client.post(
+            "/api/books/dirty-identity/source-nodes/dirty-identity-root/metadata/search",
+            json={"providerId": provider, "query": "乙书", "manualQuery": True},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()["data"]
+        assert data["identity"] is None
+        assert data["query"] == "乙书"
+        assert data["selectedId"] == "site-entry"
+        assert queries == [new_title, "乙书"]
+        new_title, expected_author = "乙书", "作者乙"
     candidate = next(
         item for item in data["candidates"] if item["id"] == data["selectedId"]
     )
@@ -163,6 +181,9 @@ def test_dirty_database_search_apply_reopen(
     assert detail.status_code == 200, detail.text
     reopened = detail.json()["data"]["book"]
     assert (reopened["title"], reopened["author"]) == (new_title, expected_author)
+    if conflicting_author:
+        assert candidate["description"] is None
+        assert stored.description is None
     assert len(calls) == 1
 
 
@@ -211,3 +232,17 @@ def test_actual_model_test_http_contract(client, db_session, monkeypatch):
     assert result.status_code == 200, result.text
     assert result.json()["data"]["result"]["ok"] is True
     assert calls == ["http://model.test/v1/chat/completions"]
+
+
+def test_manual_query_uses_new_title_without_previous_identity(client, db_session, monkeypatch):
+    test_dirty_database_search_apply_reopen(
+        client, db_session, monkeypatch, "bangumi", "甲书 完整版", "旧作者",
+        "甲书", "作者甲", manual_second_search=True,
+    )
+
+
+def test_conflicting_source_author_stays_original_and_identity_can_save(client, db_session, monkeypatch):
+    test_dirty_database_search_apply_reopen(
+        client, db_session, monkeypatch, "bangumi", "示例书 完整版", "错误作者",
+        "示例书", "作者甲", conflicting_author=True,
+    )

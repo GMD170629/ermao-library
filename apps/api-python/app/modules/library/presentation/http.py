@@ -1415,6 +1415,7 @@ def search_book_source_node_metadata(
             source_node_id=source_node_id,
             provider_id=payload.provider_id,
             query=payload.query,
+            manual_query=payload.manual_query,
         )
     except MetadataProviderSearchError as error:
         record_exception(

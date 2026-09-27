@@ -251,3 +251,41 @@ test('AI identity preview applies corrections and reloads book detail', async ({
   await page.reload();
   await expect(page.getByRole('button', { name: '管理图书 活着', exact: true })).toBeVisible();
 });
+
+
+test('AI identity preview respects a subsequent manual query', async ({ page }) => {
+  await page.route(/\/api\/books\/book-1(?:\?|$)/, (route) => route.fulfill({ json: { ok: true, data: { book: {
+    id: 'book-1', sourceNodeId: 'book-node', title: '甲书 完整版', author: '旧作者', resources: [epubResource]
+  } } } }));
+  await page.route('**/api/metadata/providers', (route) => route.fulfill({ json: { ok: true, data: { providers: [
+    { id: 'douban', name: '豆瓣', enabled: true, priority: 1 }
+  ] } } }));
+  const searches: unknown[] = [];
+  await page.route('**/metadata/search', (route) => {
+    const body = route.request().postDataJSON();
+    searches.push(body);
+    const title = body.manualQuery ? body.query : '甲书';
+    return route.fulfill({ json: { ok: true, data: {
+      query: title, selectedId: 'site', preferLocalMetadata: true,
+      identity: body.manualQuery ? null : { title: '甲书', author: '作者甲', needsReview: false, reason: '受控 UI 测试' },
+      candidates: [{ id: 'site', source: 'douban', title, author: body.manualQuery ? '作者乙' : '作者甲', tags: [] }]
+    } } });
+  });
+  await page.goto('/books/book-1');
+  await page.getByRole('button', { name: '管理图书 甲书 完整版' }).click();
+  await page.getByRole('menuitem', { name: '识别', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '元数据识别', exact: true });
+  await dialog.getByRole('button', { name: '搜索', exact: true }).click();
+  await expect(dialog.getByText('甲书 完整版 → 甲书', { exact: true })).toBeVisible();
+  const query = dialog.getByRole('textbox');
+  await expect(query).toHaveValue('甲书');
+  await query.fill('乙书');
+  await dialog.getByRole('button', { name: '搜索', exact: true }).click();
+  await expect(dialog.getByRole('checkbox', { name: '作者 旧作者 作者乙', exact: true })).toBeVisible();
+  await expect(query).toHaveValue('乙书');
+  await expect(dialog.getByText('甲书 完整版 → 甲书', { exact: true })).toHaveCount(0);
+  expect(searches).toEqual([
+    { providerId: 'douban', query: '甲书 完整版', manualQuery: false },
+    { providerId: 'douban', query: '乙书', manualQuery: true }
+  ]);
+});

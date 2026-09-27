@@ -97,6 +97,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
     ?? book.resources[0] ?? null, [book.continueResourceId, book.resources, currentResourceId]);
   const [source, setSource] = useState<MetadataSource>('');
   const [query, setQuery] = useState(book.title);
+  const [manualQuery, setManualQuery] = useState(false);
   const [candidates, setCandidates] = useState<MetadataCandidate[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [selectedFields, setSelectedFields] = useState<RecognizedMetadataField[]>([]);
@@ -127,6 +128,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
     if (!open) return;
     setSource('');
     setQuery(book.title);
+    setManualQuery(false);
     setCandidates([]);
     setIdentity(null);
     setSelectedId('');
@@ -180,7 +182,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
     try {
       const sourceNodeId = fixedScope === 'resource' ? targetResource?.sourceNodeId : book.sourceNodeId;
       if (!sourceNodeId) throw new Error('元数据目标缺少 sourceNodeId');
-      const result = await searchSourceNodeMetadata(book.id, sourceNodeId, source, query.trim(), controller.signal);
+      const result = await searchSourceNodeMetadata(book.id, sourceNodeId, source, query.trim(), controller.signal, manualQuery);
       if (controller.signal.aborted) return;
       const nextCandidates = result.candidates;
       setCandidates(nextCandidates);
@@ -282,7 +284,17 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
           <Select value={source} options={options} onChange={setSource} ariaLabel={i18nAttribute("元数据来源")} className="w-full" />
           <input
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            disabled={busy}
+            onChange={(event) => {
+              searchControllerRef.current?.abort();
+              setMessage('');
+              setError('');
+              setQuery(event.target.value);
+              setManualQuery(true);
+              setCandidates([]);
+              setSelectedId('');
+              setIdentity(null);
+            }}
             onKeyDown={(event) => { if (event.key === 'Enter') void searchCandidates(); }}
             className="h-11 w-full rounded-2xl border border-slate-200 px-4 text-sm text-slate-900 outline-none focus:border-blue-300"
             placeholder={i18nAttribute("输入书名、系列名或关键词")}

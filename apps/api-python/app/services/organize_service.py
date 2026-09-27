@@ -208,6 +208,15 @@ def choose_metadata_candidate(
         if metadata_candidate_title_exact_match(title, candidate)
     ]
     if len(exact) == 1:
+        source_author = normalize_identity_part(exact[0].get("author"))
+        identity_author = normalize_identity_part(author)
+        if (
+            source_author and identity_author
+            and source_author != normalize_identity_part(UNKNOWN_AUTHOR)
+            and identity_author != normalize_identity_part(UNKNOWN_AUTHOR)
+            and source_author != identity_author
+        ):
+            return None, exact
         return exact[0], exact
     if (
         len(exact) > 1

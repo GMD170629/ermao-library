@@ -355,11 +355,11 @@ export async function updateSourceNodePresentation(
   });
 }
 
-export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: string, providerId: string, query: string, signal?: AbortSignal): Promise<Readonly<{ message: string | null; candidates: SourceNodeMetadataCandidate[]; identity: MetadataIdentity | null; query: string; selectedId: string | null; preferLocalMetadata: boolean }>> {
+export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: string, providerId: string, query: string, signal?: AbortSignal, manualQuery = false): Promise<Readonly<{ message: string | null; candidates: SourceNodeMetadataCandidate[]; identity: MetadataIdentity | null; query: string; selectedId: string | null; preferLocalMetadata: boolean }>> {
   const data = record(await apiJson(`/api/books/${encodeURIComponent(bookId)}/source-nodes/${encodeURIComponent(sourceNodeId)}/metadata/search`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ providerId, query }),
+    body: JSON.stringify({ providerId, query, manualQuery }),
     signal
   }));
   const candidates = (Array.isArray(data.candidates) ? data.candidates : []).flatMap((value) => {

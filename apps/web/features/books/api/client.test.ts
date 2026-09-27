@@ -438,3 +438,30 @@ test('resource deletion needs no typed confirmation and preserves idempotency', 
   finally { globalThis.fetch = originalFetch; }
   assert.equal(calls, 1);
 });
+
+
+test('metadata search carries explicit manual intent without inferring it from the default query', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: unknown[] = [];
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(String(init?.body));
+    requests.push(body);
+    return new Response(JSON.stringify({ ok: true, data: {
+      query: body.manualQuery ? '乙书' : '甲书', selectedId: 'site',
+      identity: body.manualQuery ? null : { title: '甲书', author: '作者甲', needsReview: false, reason: 'test' },
+      candidates: [{ id: 'site', source: 'douban', title: body.manualQuery ? '乙书' : '甲书', author: body.manualQuery ? '作者乙' : '作者甲' }]
+    } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const first = await searchSourceNodeMetadata('book-1', 'node-1', 'douban', '甲书 完整版');
+    assert.equal(first.query, '甲书');
+    const second = await searchSourceNodeMetadata('book-1', 'node-1', 'douban', '乙书', undefined, true);
+    assert.equal(second.query, '乙书');
+    assert.equal(second.identity, null);
+    assert.equal(second.candidates[0].author, '作者乙');
+    assert.deepEqual(requests, [
+      { providerId: 'douban', query: '甲书 完整版', manualQuery: false },
+      { providerId: 'douban', query: '乙书', manualQuery: true }
+    ]);
+  } finally { globalThis.fetch = originalFetch; }
+});

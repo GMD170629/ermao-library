@@ -99,3 +99,16 @@ def test_model_test_uses_inference_endpoint_and_optional_auth(monkeypatch):
     assert requests[0].full_url == "http://local/v1/chat/completions"
     assert requests[0].get_header("Authorization") is None
     assert json.loads(requests[0].data)["model"] == "local"
+
+
+@pytest.mark.parametrize("author,source_author,matches", [
+    ("作者甲", "作者乙", False), ("作者甲", "作者甲", True),
+    ("", "作者乙", True), ("作者甲", None, True),
+])
+def test_unique_title_does_not_override_conflicting_author(author, source_author, matches):
+    from app.services.organize_service import choose_metadata_candidate
+    candidate = {"title": "示例书", "author": source_author, "description": "网站简介"}
+    original = dict(candidate)
+    selected, exact = choose_metadata_candidate([candidate], "示例书", author)
+    assert (selected is candidate) is matches
+    assert exact == [original] and candidate == original

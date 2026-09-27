@@ -42,6 +42,7 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
         source_node_id: str,
         provider_id: str,
         query: str | None,
+        manual_query: bool = False,
     ) -> SourceNodeMetadataRecognitionResult | None:
         book_row = self._db.execute(
             select(LibraryBook, LibraryBookMetadata)
@@ -133,15 +134,20 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
         prefer_local = policy.prefer_local_metadata if policy is not None else True
         target_id = node.id
         disabled_message = "AI-assisted recognition is disabled" if configured_locale(self._db) == "en-US" else "AI 增强识别未启用"
+        if manual_query:
+            book_context = {**book_context, "title": query or title, "author": None}
+            context["book"] = book_context
         try:
-            identity = recognize_metadata_identity(
-                self._db,
-                book_id=book_id,
-                source_node_id=target_id,
-                title=title,
-                author=book_metadata.author,
-            )
-            if identity is not None:
+            identity = None
+            if not manual_query or provider_id == "ai":
+                identity = recognize_metadata_identity(
+                    self._db,
+                    book_id=book_id,
+                    source_node_id=target_id,
+                    title=str(book_context["title"]),
+                    author=None if manual_query else book_metadata.author,
+                )
+            if identity is not None and not manual_query:
                 book_context = {
                     **book_context,
                     "title": identity.title or title,
@@ -149,7 +155,9 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
                 }
                 context["book"] = book_context
             effective_query = (
-                identity.title if identity and identity.title else query or title
+                identity.title
+                if not manual_query and identity and identity.title
+                else query or title
             )
             result: dict[str, object]
             if provider_id == "ai":
@@ -177,11 +185,6 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
                 str(book_context.get("author") or ""),
             )
             if identity is not None:
-                if selected is not None and identity.title:
-                    selected.update(
-                        title=identity.title,
-                        author=identity.author or selected.get("author"),
-                    )
                 if provider_id != "ai" and (identity.title or identity.author):
                     values = [*values, identity.candidate()]
                 # Manual preview still requires Apply; retain the matching site's
