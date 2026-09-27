@@ -65,6 +65,27 @@ def identity_clues(
     directories.extend(
         part for part in target.parent.parts[-2:] if part not in {".", "/"}
     )
+    # A bounded asset sample can contain only the first volume's audio tracks.
+    # Keep the selected target's other resource directories visible as well.
+    directories.extend(
+        db.scalars(
+            select(LibrarySourceNode.name)
+            .join(
+                LibraryReadableResource,
+                LibraryReadableResource.source_node_id == LibrarySourceNode.id,
+            )
+            .where(
+                LibraryReadableResource.book_id == book_id,
+                LibrarySourceNode.library_id == node.library_id,
+                LibrarySourceNode.physical_kind == "DIRECTORY",
+                LibrarySourceNode.relative_path.startswith(
+                    f"{node.relative_path.rstrip('/')}/", autoescape=True
+                ),
+            )
+            .order_by(LibrarySourceNode.relative_path)
+            .limit(8)
+        )
+    )
     return {
         "fileNames": [path.name[:500] for path in paths] or [node.name[:500]],
         "directories": [part[:500] for part in directories],

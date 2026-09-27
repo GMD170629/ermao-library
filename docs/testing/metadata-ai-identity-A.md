@@ -267,3 +267,40 @@ adapter 在模型调用前按明确 ID 校验资源属于当前 book、绑定请
 - 占位文件的章节读取受本机 chapter_core 原生 DLL 缺失影响，页面显示文件暂时无法读取；不影响已核对的元数据保存，未扩展修复 Reader。
 - 原记录的普通 mypy 展开依赖时 9 个未修改文件、27 项存量错误仍单列，本轮没有修规则或声称该检查通过。本轮 Web typecheck 通过；正式发布构建、完整发布门禁及移动/生产环境验收均未执行，不能将本轮局部验收写成发布门禁通过。
 - 未合并、打 tag、发布或部署 NAS；不预设 100% 网站命中，不把生成标签记作网站命中。
+
+## NAS develop 镜像与全库真实验收（2026-09-27，进行中）
+
+用户追加授权将开发镜像部署 NAS 并测试全部图书。本轮不发布稳定版本，不创建 tag，也不构建移动端；没有恢复 M0—M7 或改变识别规则。
+
+实际受验源码为 `ab0dfcec1f6ec7a59cfe0e53299a7548c322905d`。远端 develop 从旧基线快进到该提交，手动触发 [develop 镜像工作流](https://github.com/GMD170629/ermao-library/actions/runs/36308478528)，模板验证 183 秒、真实启动故障边界验收 363 秒、镜像发布 126 秒均通过。分支工作流跳过的完整后端、稳定发布和移动任务不计通过。镜像 `gamersgu/shuku-starship-web:develop` 的 digest 为 `sha256:58bb79c05eda40ec971da2344fc94fbbcd416fc27442e2cc7cf07400eb760f16`，NAS 实际镜像 revision 标签与源码 SHA 一致。
+
+沿现有 Compose 的 web 服务更新。发现旧、新 develop 镜像应用版本同为 1.4.3，固定启动器仅按版本等标记判定同步，持久化 runtime 因而仍保留旧增强代码和 0038。已备份数据库、Compose、旧容器信息和启动标记；停止容器、移走旧 image.json 标记至备份目录后重新启动，由正常启动器同步镜像内容并通过 prestart 升级到 `0039_generated_metadata_fields`。没有手工覆盖应用目录或修改迁移。该操作解决本次部署，未修复启动器的同版本 develop 更新判定问题。
+
+更新前 94 本、403 个资源保留；阅读进度原记录保留，后台使用新增进度及章节计数不误报为迁移改写。可恢复 SQLite 备份为 NAS storage/database/before-metadata-abc-ab0dfcec.sqlite3；验收前快照及结果保存在 storage/backups/metadata-abc-*，不提交书库全量私有清单或凭据。
+
+复用已授权的真实 DeepSeek 应用配置（deepseek-flash），通过既有配置 HTTP 保存 AI 主开关及生成开关，实际连接测试成功。身份、对应和生成均为应用请求，不使用会话答案或固定模型响应。现有豆瓣/Bangumi 来源实际返回，未人为丢弃网站字段以制造生成成功。
+
+全库入口为既有 `create_organize_run(trigger="MANUAL", book_ids=94本ID)`，run=`py_organize_run_e85c42c3acc04dfeb0cc0f500e182957`，由 NAS 原有 `app.worker.main` 领取；未直接调用 process_metadata_lookup_task，未手工写完成状态。执行中的 30 秒模型读取超时保留诊断和既有 60/300/1800 秒重试；最终结果另补。
+
+### 真实资源补全与重启核对
+
+除全库书级自动识别外，补充现有搜索 HTTP → 应用 HTTP → 详情 GET 的同节点资源验证：
+
+- 《水星播种》：书级已有 138 字 AI 简介，资源简介为空。本次人工资源搜索取得豆瓣 10527069 及关联来源的真实简介，保存 resource.description；书级简介不变，资源 generatedFields=[]。不把这条网站结果记成生成成功。
+- 《镜》六册合集：book=`py_c1706a09330e4cfcaa03554d771802b4`，resource=`py_bbb35a0daddd4a40bb13c245192ec11a`，共用 node=`py_9d0d5fc33eff4a24b449b34747c383b9`。自动阶段已给书级保存 107 字 AI 简介；资源简介仍为空。真实手动搜索请求带 scope=resource/resourceId，DeepSeek 返回 resource.description，未取得可采用网站对应条目；仅勾选资源简介实际应用成功，skippedFields=[]，详情内容逐字等于预览，resource.generatedFields=[description]、generationSource=AI_GENERATED，原书级简介不变。
+
+资源实际生成并保存内容：
+
+> 《镜》系列是沧月创作的东方奇幻长篇小说，共六册，含《双城》《破军》《龙战》《辟天》《神寂》五部正传及外传《织梦者》。故事以架空的云荒大陆为舞台，围绕空桑、鲛人、冰族等种族之间的恩怨与纷争展开，交织着家国兴亡、宿命抉择与情感纠葛，并融汇神话、战争与唯美抒情笔调，构建出格局宏阔的奇幻世界。
+
+这是实际模型生成内容，不是网站原文，也不是对其所有文学事实准确性的独立背书。完整请求结果、应用返回和前后详情存于 NAS metadata-abc-mirror-resource.json；不是受控响应。当前 NAS 浏览器停留登录页，未伪称该 HTTP 闭环为浏览器点击验收；此前隔离浏览器证据仍单独保留。
+
+在剩余任务仅处于定时重试、没有 RUNNING 时，于 10:12 UTC 实际 docker restart 现有容器：启动时间由 09:23:54 变为 10:12:17，宿主 PID 由 3829101 变为 3862473，重启后 healthy。同一磁盘库中 94 本书和 403 个资源的标题/作者/简介/保护及生成标识一致，Source/SystemSetting 全记录哈希一致，0039 保持；重启后全量 94 个详情 HTTP 200 且与数据库一致。《镜》资源简介逐字不变，AI_GENERATED 及 description 标识保留，书级简介仍未变化。队列保留原定重试时间，不是仅新建 Session。
+
+### 全库暴露的直接缺陷：合集线索只覆盖第一册
+
+《鬼吹灯-全八册》有 8 个分册资源，后续资源目录实际包含黄皮子坟、南海归墟、怒晴湘西、巫峡棺山；原 identity_clues 只按路径取前 8 个 asset，全部是精绝古城的音频章节。模型据此把书级目标选成豆瓣 1882933《鬼吹灯之精绝古城》。这不是“任务完成即正确”的通过样本。
+
+只在现有 identity_context.py 中增加一次有界 ORM 读取：当前 book、当前节点子树内最多 8 个资源目录名称进入现有 directories 线索。仍只读取原有 8 个 asset，不读取正文、不扫描书库，不增加标题或作者规则；资源目标不会混入兄弟目录。原始网站条目、匹配选择、生成、保存和保护逻辑未改。
+
+已有 test_metadata_identity.py 新增书级/资源级两个外部 HTTP 受控场景：第一册有 8 个文件仍能让书级模型请求看到后续分册目录；资源级不混入其他册；目录数量受限，实际查询、应用和详情 GET 贯通。身份 HTTP、identity 单元和 metadata_lookup_queue 定向合计 111 项通过（59.64 秒）；改动文件 Ruff 和 identity_context 局部 mypy 通过。没有运行全仓测试，真实 NAS 修复后结果待镜像构建完成再补。

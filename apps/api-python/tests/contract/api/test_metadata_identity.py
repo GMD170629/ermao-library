@@ -17,6 +17,95 @@ from app.services import organize_service
 from tests.contract.api.test_recognized_metadata_api import _add_book, _login
 
 
+@pytest.mark.parametrize("scope", ["book", "resource"])
+def test_audio_identity_keeps_target_resource_directories(
+    client, db_session, monkeypatch, scope
+):
+    from app.models import LibraryReadableResource, LibrarySourceNode
+    from tests.contract.api.test_recognized_metadata_api import _path_key
+
+    _add_book(db_session, book_id="audio-set")
+    metadata = db_session.get(LibraryBookMetadata, "audio-set")
+    metadata.title, metadata.author = "鬼吹灯-全八册", "天下霸唱"
+    first = db_session.get(LibrarySourceNode, "audio-set-resource-node")
+    first.name, first.relative_path = "01 精绝古城", "audio-set/01 精绝古城"
+    first.path_key, first.physical_kind = _path_key(first.relative_path), "DIRECTORY"
+    first.observed_size_bytes = None
+    for index in range(2, 11):
+        path = f"audio-set/{index:02} 分册目录"
+        node = LibrarySourceNode(
+            id=f"audio-volume-{index}", library_id="test-library",
+            relative_path=path, path_key=_path_key(path), name=f"{index:02} 分册目录",
+            physical_kind="DIRECTORY", observed_at=first.observed_at, observed_mtime_ns=0,
+        )
+        db_session.add(node)
+        db_session.flush()
+        db_session.add(LibraryReadableResource(
+            id=f"audio-resource-{index}", library_id="test-library", book_id="audio-set",
+            source_node_id=node.id, adapter_id="audio-directory", adapter_version="1",
+            format="AUDIO", import_state="READY",
+        ))
+    for index in range(8):
+        path = f"{first.relative_path}/{index:02} 精绝古城.mp3"
+        node = LibrarySourceNode(
+            id=f"audio-track-{index}", library_id="test-library", relative_path=path,
+            path_key=_path_key(path), name=f"{index:02} 精绝古城.mp3",
+            physical_kind="REGULAR_FILE", observed_at=first.observed_at, observed_size_bytes=100,
+            observed_mtime_ns=0,
+        )
+        db_session.add(node)
+        db_session.flush()
+        db_session.add(LibraryResourceAsset(
+            id=f"audio-asset-{index}", library_id="test-library",
+            resource_id="audio-set-resource", source_node_id=node.id, role="PRIMARY",
+        ))
+    db_session.add(Source(id="audio-ai", name="AI", kind="metadata", provider_type="ai",
+                          enabled=True, config=json.dumps({"baseUrl": "http://model.test", "model": "test"})))
+    db_session.add(Source(id="audio-site", name="Bangumi", kind="metadata", provider_type="bangumi",
+                          enabled=True, config=json.dumps({"baseUrl": "http://website.test"})))
+    db_session.commit()
+    expected = "鬼吹灯全集" if scope == "book" else "鬼吹灯之精绝古城"
+    summaries = []
+
+    def model(request, **kwargs):
+        summary = json.loads(json.loads(request.data)["messages"][1]["content"])
+        summaries.append(summary)
+        assert len(summary["fileNames"]) == 8
+        assert all("精绝古城" in name for name in summary["fileNames"])
+        if scope == "book":
+            assert "02 分册目录" in summary["directories"]
+            assert "08 分册目录" in summary["directories"]
+            assert "09 分册目录" not in summary["directories"]
+        else:
+            assert "02 分册目录" not in summary["directories"]
+        return BytesIO(json.dumps({"choices": [{"message": {"content": json.dumps({
+            "title": expected, "author": "天下霸唱", "needsReview": False, "reason": "controlled context test",
+        })}}]}).encode())
+
+    def website(request, **kwargs):
+        assert json.loads(request.data)["keyword"] == expected
+        return BytesIO(json.dumps({"data": [{"id": "audio-entry", "name_cn": expected,
+            "infobox": [{"key": "作者", "value": "天下霸唱"}], "summary": "网站简介"}]}).encode())
+
+    monkeypatch.setattr(ai_client, "urlopen", model)
+    monkeypatch.setattr(organize_service, "urlopen", website)
+    _login(client, db_session, role="admin")
+    node_id = "audio-set-root" if scope == "book" else "audio-set-resource-node"
+    response = client.post(f"/api/books/audio-set/source-nodes/{node_id}/metadata/search",
+        json={"providerId": "bangumi", "scope": scope,
+              **({"resourceId": "audio-set-resource"} if scope == "resource" else {})})
+    assert response.status_code == 200, response.text
+    assert summaries
+    candidate = response.json()["data"]["selectedMetadata"]
+    assert candidate["title"] == expected
+    if scope == "book":
+        applied = client.post("/api/books/audio-set/metadata/apply", json={
+            "scope": "book", "candidate": candidate, "fields": ["book.title"],
+        })
+        assert applied.status_code == 200, applied.text
+        assert client.get("/api/books/audio-set").json()["data"]["book"]["title"] == expected
+
+
 @pytest.mark.parametrize(
     "provider,title,author,new_title,new_author",
     [
