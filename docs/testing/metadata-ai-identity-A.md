@@ -268,7 +268,7 @@ adapter 在模型调用前按明确 ID 校验资源属于当前 book、绑定请
 - 原记录的普通 mypy 展开依赖时 9 个未修改文件、27 项存量错误仍单列，本轮没有修规则或声称该检查通过。本轮 Web typecheck 通过；正式发布构建、完整发布门禁及移动/生产环境验收均未执行，不能将本轮局部验收写成发布门禁通过。
 - 未合并、打 tag、发布或部署 NAS；不预设 100% 网站命中，不把生成标签记作网站命中。
 
-## NAS develop 镜像与全库真实验收（2026-09-27，进行中）
+## NAS develop 镜像与全库真实验收（2026-09-27）
 
 用户追加授权将开发镜像部署 NAS 并测试全部图书。本轮不发布稳定版本，不创建 tag，也不构建移动端；没有恢复 M0—M7 或改变识别规则。
 
@@ -280,7 +280,7 @@ adapter 在模型调用前按明确 ID 校验资源属于当前 book、绑定请
 
 复用已授权的真实 DeepSeek 应用配置（deepseek-flash），通过既有配置 HTTP 保存 AI 主开关及生成开关，实际连接测试成功。身份、对应和生成均为应用请求，不使用会话答案或固定模型响应。现有豆瓣/Bangumi 来源实际返回，未人为丢弃网站字段以制造生成成功。
 
-全库入口为既有 `create_organize_run(trigger="MANUAL", book_ids=94本ID)`，run=`py_organize_run_e85c42c3acc04dfeb0cc0f500e182957`，由 NAS 原有 `app.worker.main` 领取；未直接调用 process_metadata_lookup_task，未手工写完成状态。执行中的 30 秒模型读取超时保留诊断和既有 60/300/1800 秒重试；最终结果另补。
+全库入口为既有 `create_organize_run(trigger="MANUAL", book_ids=94本ID)`，run=`py_organize_run_e85c42c3acc04dfeb0cc0f500e182957`，由 NAS 原有 `app.worker.main` 领取；未直接调用 process_metadata_lookup_task，未手工写完成状态。执行中的 30 秒模型读取超时保留诊断和既有 60/300/1800 秒重试；最终结果见下文。
 
 ### 真实资源补全与重启核对
 
@@ -303,4 +303,32 @@ adapter 在模型调用前按明确 ID 校验资源属于当前 book、绑定请
 
 只在现有 identity_context.py 中增加一次有界 ORM 读取：当前 book、当前节点子树内最多 8 个资源目录名称进入现有 directories 线索。仍只读取原有 8 个 asset，不读取正文、不扫描书库，不增加标题或作者规则；资源目标不会混入兄弟目录。原始网站条目、匹配选择、生成、保存和保护逻辑未改。
 
-已有 test_metadata_identity.py 新增书级/资源级两个外部 HTTP 受控场景：第一册有 8 个文件仍能让书级模型请求看到后续分册目录；资源级不混入其他册；目录数量受限，实际查询、应用和详情 GET 贯通。身份 HTTP、identity 单元和 metadata_lookup_queue 定向合计 111 项通过（59.64 秒）；改动文件 Ruff 和 identity_context 局部 mypy 通过。没有运行全仓测试，真实 NAS 修复后结果待镜像构建完成再补。
+已有 test_metadata_identity.py 新增书级/资源级两个外部 HTTP 受控场景：第一册有 8 个文件仍能让书级模型请求看到后续分册目录；资源级不混入其他册；目录数量受限，实际查询、应用和详情 GET 贯通。身份 HTTP、identity 单元和 metadata_lookup_queue 定向合计 111 项通过（59.64 秒）；改动文件 Ruff 和 identity_context 局部 mypy 通过。没有运行全仓测试，真实 NAS 修复后结果见下文。
+
+### 全库批次最终结果（原受验版本 ab0dfcec）
+
+94 本全部经实际 worker 执行到终态：79 本 APPLIED，7 本 COMPLETED 且 appliedFields=[]，7 本模型对应失败，1 本 NO_MATCH；不再有 PENDING/RUNNING。选中来源统计为豆瓣 35、Bangumi 44、仅 AI 身份/补全 7；来源统计不是字段准确率或全部网站字段已覆盖本地内容的声明。最终 94 个详情 GET 均 200，标题、作者、简介和 generatedFields 与数据库完全一致。
+
+7 个失败样本为《沙丘》《环界》《FX戰士久留美》《失格纹的最强贤者》《凡尔纳经典科幻故事套装》《控方证人》《我当阴阳先生的那几年》，均在第 4 次尝试后结束。对应阶段保存了 34 次原始失败诊断，全部为 TimeoutError: The read operation timed out；不能解释为网站无数据。《推理要在晚餐后》有实际 Bangumi 候选，但没有获得可自动采用的最终对应，保留 NO_MATCH，未改成成功。
+
+生成标识实际落库：3 本 description（《棺材舞者》《水星播种》《镜》合集），5 本 tags（《这里的黎明静悄悄……》《我是末时代生存方案供应商》《唐容川医学全书》《鬼叫魂之阴阳先生》《鬼吹灯之精绝古城》）；另有上节手动生成的《镜》资源简介。未生成的本地/网站字段没有标为 AI。
+
+完整原批次逐本数据保存在 NAS metadata-abc-all94-results.json，并导出到本机 `%TEMP%/metadata-ABC-final/nas-all94-results.json` 与 CSV；包含原身份、最终身份、所选条目、保存字段、生成标识、失败状态和详情一致性。该快照绑定 ab0dfcec，后续补修复验单独记录，不把第二版本结果拼成原批次全部通过。
+
+### 补修镜像部署与实际反例复验
+
+补修 SHA `6f1808d9136bc3e69b438edbfe79df5e6a69acf5` 已推送 develop 与 codex/metadata-ai-rebuild。工作流 [36312241819](https://github.com/GMD170629/ermao-library/actions/runs/36312241819) 成功：模板/Web 检查 190 秒，真实启动故障边界验收 445 秒，develop 镜像发布 153 秒。镜像 digest `sha256:f37e449377776e0e8b37c24f61b0715a83e21d531411fb37ae366f6eb4edd1a1`；NAS 镜像 revision 和实际 runtime 文件哈希均已核对，服务 healthy，仍为 0039、94 本、403 资源。
+
+原 94 本批次结束并导出后，另留数据库备份 after-all94-before-6f1808d9.sqlite3，沿原 Compose 替换镜像；同版本启动标记仍按前述恢复操作备份移走，不用目录覆盖或更改 migration。
+
+复验 run=`py_organize_run_0584d3e362d14b37bcb27c06263801f9`，仍从 create_organize_run 入队，由 worker 领取，attempts=1、COMPLETED/APPLIED。没有预先把数据库改成正确身份。阶段结果：
+
+| 操作前保存值 | 实际模型最终身份与原因 | 网站条目与详情 | 保存/读取 |
+| --- | --- | --- | --- |
+| 鬼吹灯之精绝古城 / 天下霸唱 | 鬼吹灯-全八册 / 天下霸唱；“目录显示为《鬼吹灯》全八册系列，作者应为天下霸唱；内嵌元数据中的周建龙为演播者，非作者。” | 豆瓣 34452623，_detailFetched=true；豆瓣 1 个、Bangumi 4 个真实候选 | 书级最终为合集身份，原有 105 字合集简介不变，AI 标签实际保存；详情 GET 200 且一致 |
+
+本次整条整理链包含原有本地处理，lookup 的 appliedFields 仅为 tags，不能将标题变化全部归因于最后一次 lookup 写入；关键反例已改变为模型明确确认八册身份、选择整套条目，没有再次选成单册。标签为盗墓、探险、悬疑、惊悚、民俗、奇幻、中国当代小说，generatedFields=[tags]。复验独立保留于 NAS metadata-abc-audio-fix-results.json、本机 nas-audio-fix.json，不覆盖原 94 本批次失败证据。
+
+补修部署后再比较原批次的全部书级标题/作者/简介/保护/生成标识，仅该反例标题发生预期变化，其余 93 本一致；书与资源数量保留。再次通过真实详情 HTTP 确认《镜》资源生成简介、标识与书级简介未变。
+
+最终结论：全库 94 本测试已结束；身份/网站/生成的真实应用保存及重启持久化有正向证据，已修复并复验本次发现的合集线索缺失。仍有 7 个模型超时失败、1 个待人工确认对应，因此不能宣布全库识别全部通过。NAS 浏览器点击链与完整正式发布门禁仍未完成，既有 27 项展开依赖 mypy 错误未修改。未发布稳定版、打 tag 或构建移动端。
