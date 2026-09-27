@@ -48,7 +48,10 @@ from app.modules.metadata.application.writeback import (
 )
 from app.modules.metadata.infrastructure import lookup_queue as lookup_persist
 from app.modules.metadata.infrastructure import writeback_queue
-from app.modules.metadata.infrastructure.matching import match_metadata_candidates
+from app.modules.metadata.infrastructure.matching import (
+    match_metadata_candidates,
+    prepare_matched_metadata,
+)
 from app.services.metadata_file_writeback import (
     maintain_metadata_writebacks,
     process_next_metadata_writeback,
@@ -822,9 +825,12 @@ def process_metadata_lookup_task(
                 )
                 return _schedule_retry(db, task, match_failure_message, inspected)
             final_identity = match.identity
-            candidate = match.application_candidate(candidates)
-            if final_identity and (final_identity.needs_review or not final_identity.title):
-                candidate = None
+            if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
+                return "CANCELLED"
+            candidate = (
+                None if final_identity and (final_identity.needs_review or not final_identity.title)
+                else prepare_matched_metadata(db, match, candidates, automatic_request_gate=effective_request_gate)
+            )
             if candidate:
                 provider = str(candidate["source"])
                 execution_id = executions.get(provider) or _start_provider_execution(db, task, provider)

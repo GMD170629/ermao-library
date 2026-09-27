@@ -101,6 +101,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
   const [candidates, setCandidates] = useState<MetadataCandidate[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [selectedMetadata, setSelectedMetadata] = useState<MetadataCandidate | null>(null);
+  const [candidateDetails, setCandidateDetails] = useState<Record<string, MetadataCandidate>>({});
   const [selectedFields, setSelectedFields] = useState<RecognizedMetadataField[]>([]);
   const scope: MetadataTargetScope = fixedScope === 'resource' ? 'resource' : 'book';
   const definitions = useMemo(() => recognizedMetadataFields(scope), [scope]);
@@ -116,7 +117,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
   const searchControllerRef = useRef<AbortController | null>(null);
   const applyControllerRef = useRef<AbortController | null>(null);
 
-  const selected = useMemo(() => selectedMetadata?.id === selectedId ? selectedMetadata : candidates.find((candidate) => candidate.id === selectedId) ?? null, [candidates, selectedId, selectedMetadata]);
+  const selected = useMemo(() => selectedMetadata?.id === selectedId ? selectedMetadata : candidateDetails[selectedId] ?? candidates.find((candidate) => candidate.id === selectedId) ?? null, [candidates, selectedId, selectedMetadata, candidateDetails]);
   const options = useMemo(() => providers.map((provider) => ({
     value: provider.id,
     label: provider.name,
@@ -134,6 +135,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
     setIdentity(null);
     setSelectedId('');
     setSelectedMetadata(null);
+    setCandidateDetails({});
     setSelectedFields([]);
     setMessage('');
     setError('');
@@ -190,6 +192,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
       setCandidates(nextCandidates);
       setSelectedId(result.selectedId ?? '');
       setSelectedMetadata(result.selectedMetadata);
+      setCandidateDetails({});
       setIdentity(result.identity);
       setPreferLocal(result.preferLocalMetadata);
       setQuery(result.query);
@@ -199,6 +202,34 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
     } catch (reason) {
       if (controller.signal.aborted) return;
       setError(i18nAttribute(reason instanceof Error ? reason.message : '元数据查询失败'));
+    } finally {
+      if (!controller.signal.aborted) setBusy(false);
+    }
+  }
+
+  async function selectCandidate(candidate: MetadataCandidate) {
+    if (busy && applyControllerRef.current && !applyControllerRef.current.signal.aborted) return;
+    searchControllerRef.current?.abort();
+    setSelectedId(candidate.id);
+    setError('');
+    // The initial matched application remains separate, including its standard identity.
+    if (candidate.id === selectedMetadata?.id || candidate.source !== 'douban') {
+      setBusy(false);
+      return;
+    }
+    const controller = new AbortController();
+    searchControllerRef.current = controller;
+    setBusy(true);
+    try {
+      const sourceNodeId = fixedScope === 'resource' ? targetResource?.sourceNodeId : book.sourceNodeId;
+      if (!sourceNodeId) throw new Error('元数据目标缺少 sourceNodeId');
+      const result = await searchSourceNodeMetadata(book.id, sourceNodeId, source, query.trim(), controller.signal, manualQuery, candidate);
+      if (controller.signal.aborted) return;
+      if (result.selectedMetadata?.id === candidate.id) {
+        setCandidateDetails((current) => ({ ...current, [candidate.id]: result.selectedMetadata! }));
+      }
+    } catch (reason) {
+      if (!controller.signal.aborted) setError(i18nAttribute(reason instanceof Error ? reason.message : '元数据查询失败'));
     } finally {
       if (!controller.signal.aborted) setBusy(false);
     }
@@ -232,6 +263,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
       if (controller.signal.aborted) return;
       setError(i18nAttribute(reason instanceof Error ? reason.message : '元数据应用失败'));
     } finally {
+      if (applyControllerRef.current === controller) applyControllerRef.current = null;
       if (!controller.signal.aborted) setBusy(false);
     }
   }
@@ -331,7 +363,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
                   />
                   <button
                     type="button"
-                    onClick={() => setSelectedId(candidate.id)}
+                    onClick={() => void selectCandidate(candidate)}
                     className="min-w-0 flex-1 text-left"
                   >
                     <div data-i18n-skip className="min-w-0 flex-1">

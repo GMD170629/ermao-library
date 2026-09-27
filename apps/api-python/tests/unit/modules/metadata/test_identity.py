@@ -192,3 +192,52 @@ def test_match_response_rejects_invalid_shape_and_generated_fields(monkeypatch, 
     })
     with pytest.raises(ValidationError):
         ai_client.match_metadata({}, {})
+
+
+@pytest.mark.parametrize("primary_complete", [True, False, "tags-only"])
+def test_selected_detail_only_fetches_needed_confirmed_records(db_session, monkeypatch, primary_complete):
+    from app.modules.metadata.infrastructure.matching import (
+        MetadataMatch,
+        prepare_matched_metadata,
+    )
+    from app.services import organize_service
+    db_session.add(Source(id="detail-site", name="Douban", kind="metadata", provider_type="douban", enabled=True,
+                          config=json.dumps({"baseUrl": "http://detail.test"})))
+    db_session.commit()
+    requests = []
+    def transport(request, **kwargs):
+        requests.append(request.full_url)
+        return BytesIO(b'<meta property="og:title" content="related"><meta property="og:description" content="related detail">')
+    monkeypatch.setattr(organize_service, "urlopen", transport)
+    records = [
+        {"id": "11111", "source": "douban", "title": "primary", "_detailFetched": True,
+         "description": "primary detail" if primary_complete else None, "tags": [] if primary_complete == "tags-only" else ["tag"], "coverUrl": "https://cover.test/1"},
+        {"id": "22222", "source": "douban", "title": "related"},
+        {"id": "33333", "source": "douban", "title": "unselected"},
+    ]
+    result = prepare_matched_metadata(db_session, MetadataMatch(None, "douban:11111", ("douban:22222",)), records)
+    assert requests == ([] if primary_complete else ["http://detail.test/subject/22222/"])
+    assert result["description"] == ("primary detail" if primary_complete else "related detail")
+    assert records[1].get("description") is None
+
+
+def test_invalid_detail_page_is_not_cached_as_success(db_session, monkeypatch, caplog):
+    from app.modules.metadata.infrastructure.matching import (
+        MetadataMatch,
+        prepare_matched_metadata,
+    )
+    from app.services import organize_service
+    db_session.add(Source(id="detail-site", name="Douban", kind="metadata", provider_type="douban", enabled=True,
+                          config=json.dumps({"baseUrl": "http://detail.test"})))
+    db_session.commit()
+    calls = []
+    def transport(request, **kwargs):
+        calls.append(request.full_url)
+        return BytesIO(b'<html>robot verification required</html>')
+    monkeypatch.setattr(organize_service, "urlopen", transport)
+    records = [{"source": "douban", "id": "12345", "title": "search title", "description": "search summary"}]
+    for _ in range(2):
+        result = prepare_matched_metadata(db_session, MetadataMatch(None, "douban:12345"), records)
+        assert result == records[0] and not result.get("_detailFetched")
+    assert len(calls) == 2
+    assert "DOUBAN_SUBJECT_DETAIL_UNAVAILABLE" in caplog.text

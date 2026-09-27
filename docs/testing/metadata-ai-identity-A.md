@@ -106,3 +106,43 @@ HTTP 场景先把实际待识别数据库字段设为“卡夫卡 下载版 / �
 第一例的原始网站候选仍显示“村上春樹”，没有为了使比较通过而改写候选；实际保存的简介逐字来自条目响应。第二例模型返回 title/author 为 null，应用保留 A 已确定身份，而非宣称找到网站条目。
 
 真实联调边界：本次两个样本通过实际后端 HTTP 应用链路完成；真实模型的自动队列运行、跨网站关联补缺/单网站故障及浏览器接真实模型尚未现场联调，这些行为的证据来自上述受控回归。未操作生产书库，未重导入真实文件，未进行 C 的生成补全、合并、发布或 NAS 部署。
+
+
+## B 局部收口：最终选中条目的详情获取（2026-09-27）
+
+起点为 `bb0b37007b0e9cf04f00f0e3db7dbe39aa421ffb`，分支 `codex/metadata-ai-rebuild`，工作树原先干净。原开发目录的 14 项用户改动经哈希复核保持不变。没有恢复 M0—M7，也没有进入 C、修改迁移、生产数据或部署。
+
+### 实际调用位置
+
+- `organize_service.run_douban_crawler_provider` 只返回搜索候选；移除依赖精确选择器的提前详情请求。显式 subject URL 已读到的详情标记为完成。
+- `metadata.infrastructure.matching.prepare_matched_metadata` 是唯一的选中后详情入口。手动 adapter 在 `match_metadata_candidates` 后调用；自动队列在最终身份和任务活动状态检查后调用，传递已有请求节流 gate。它复用 `fetch_douban_subject`、来源配置、HTTP、解析器和 24 小时缓存。
+- 详情地址只由已配置豆瓣来源和校验后的数字条目 ID 构造。原候选的 URL、模型文本均不作为请求地址。先读主条目；关联记录仅在可补的缺项仍存在时读取，不遍历未选候选，也不为详情解析器不能提供的标签发起额外详情请求。
+- 原始搜索候选保持不变；详情进入独立 `selectedMetadata`，再使用标准身份生成应用结果。模型已确认的对应关系不再次经过精确选择器。失败记录 `metadata.subject_detail_failed` 及原始异常，保留搜索有效字段；验证页/无法解析的详情不标记成功、不写成功缓存。缓存写入失败也不丢弃已取得详情。
+- 人工换选沿原 `/api/books/{bookId}/source-nodes/{sourceNodeId}/metadata/search` 请求增加可选 `selectedCandidate`，复用已有有界候选输入和目标权限检查。此操作不重搜、不调用模型、不修改人工 query；按所选来源/ID 取得详情。Web client、识别弹窗及来源目录应用入口接通；取消或过期响应不写入当前选择，切回初次标准身份结果也不会串用另一个条目的详情。
+
+### 受控 HTTP 与回归
+
+核心用例只替换 `ai_client.urlopen` 和 `organize_service.urlopen` 两个外部传输响应，不替换 provider/search/match/detail 返回值。数据库初始标题作者为“错误下载书名 / 错误作者”。
+
+| 阶段 | 实际行为与结果 |
+| --- | --- |
+| A / 搜索 | 模型给出“海边的卡夫卡 / 村上春树”；GET `http://douban.test/subject_search?search_text=海边的卡夫卡`（实际 URL 编码） |
+| 搜索候选 / B | 原候选 `douban:12345` 为“海辺のカフカ / 村上春樹”，简介空；直接比较不能选中，受控模型确认该 ID |
+| 详情 / 预览 | GET `http://douban.test/subject/12345/`；预览获得“详情才有的简介”，原候选简介仍为空 |
+| 保存 / 重读 | 原应用接口保存“海边的卡夫卡 / 村上春树 / 详情才有的简介”，详情 GET 一致 |
+| 换选 / 缓存 | 换选 `67890` 只请求 `/subject/67890/`，得到另一条目简介；再次选择 `12345` 命中完成缓存，不重复来源详情请求 |
+
+同一测试还验证直接匹配的详情路径。队列用真实 provider 链完成相同的搜索与详情两次请求，两个请求都通过已有 gate，保存来源简介；详情等待期间的取消和并发编辑不被覆盖。相邻用例覆盖主条目已有完整详情、关联条目按需读取、只缺标签不读详情、详情网络失败保留原简介并记录原因、验证页不缓存为成功。A 的原四类受控输入继续通过。
+
+最终定向 pytest **73 项通过**：`test_metadata_identity.py`、`test_identity.py`、`test_metadata_lookup_queue.py`、SourceNode recognition 应用测试及 `test_search_transactions.py`。Web client **27 项通过**。Chrome 原 A 保存刷新、人工改词及 B 换选预览/保存/重读共 **3 项通过**；最后补充应用中换选保护后重跑受影响 B 浏览器用例 **1 项通过**。Ruff、7 个改动生产入口的定向 mypy、Web typecheck 和改动 Web 文件 ESLint 通过。没有执行全仓回归；没有新增用户文案或翻译键。
+
+### 真实来源联调（与受控模型分开）
+
+使用现有应用 HTTP 入口、内存 SQLite 与临时存储；未连接生产书库。人工 query 为“海边的卡夫卡”，本轮未调用模型。真实网络记录：
+
+1. GET `https://book.douban.com/subject_search?search_text=%E6%B5%B7%E8%BE%B9%E7%9A%84%E5%8D%A1%E5%A4%AB%E5%8D%A1` → HTTP 200，来源解析出 15 条候选。
+2. 人工选中真实 `douban:1059419`，搜索原值为“海边的卡夫卡 / [日] 村上春树”，搜索简介长度为 0。
+3. 共用详情入口 GET `https://book.douban.com/subject/1059419/` → HTTP 200；预览取得 391 字来源简介。
+4. 保存 HTTP 200，重开详情 HTTP 200；标题、作者、简介与所选详情一致。保存简介 SHA-256：`9aefe3a1987717ff8a0c2480533a40390757af6e2275ae613481948bc8849a09`。
+
+真实来源的“搜索缺简介 → 选中 ID 详情 → 保存 → 重读”已经验证。本轮的 AI 选中与自动队列使用受控模型/网站响应，浏览器使用受控 API；没有将它们写成真实模型联调。此前 B 的真实 DeepSeek 调用记录仍有效，本轮未重新执行 DeepSeek + 豆瓣 + 浏览器/自动队列的完整真实联合验收。没有 AI 生成简介或其他 C 能力。

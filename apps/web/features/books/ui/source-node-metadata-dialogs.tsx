@@ -101,12 +101,15 @@ export function SourceNodeMetadataRecognitionDialog({ bookId, entry, onClose, on
   const [providers, setProviders] = useState<Awaited<ReturnType<typeof fetchMetadataProviders>>['providers']>([]);
   const [query, setQuery] = useState('');
   const [candidates, setCandidates] = useState<SourceNodeMetadataCandidate[]>([]);
+  const [selectedMetadata, setSelectedMetadata] = useState<SourceNodeMetadataCandidate | null>(null);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const selectionControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     setQuery(entry?.title ?? '');
     setCandidates([]);
+    setSelectedMetadata(null);
     setMessage('');
     setProviders([]);
     setProviderId('');
@@ -122,7 +125,7 @@ export function SourceNodeMetadataRecognitionDialog({ bookId, entry, onClose, on
       .catch((reason: unknown) => {
         if (!controller.signal.aborted) feedback.error(reason instanceof Error ? reason.message : t('元数据识别失败'));
       });
-    return () => controller.abort();
+    return () => { controller.abort(); selectionControllerRef.current?.abort(); };
   }, [entry, feedback, t]);
   if (!entry) return null;
 
@@ -132,6 +135,7 @@ export function SourceNodeMetadataRecognitionDialog({ bookId, entry, onClose, on
     try {
       const result = await searchSourceNodeMetadata(bookId, entry.sourceNodeId, providerId, query.trim());
       setCandidates(result.candidates);
+      setSelectedMetadata(result.selectedMetadata);
       setMessage(result.candidates.length ? t('找到 {value0} 条候选', { value0: result.candidates.length }) : result.message || t('没有找到候选'));
     } catch (reason) {
       feedback.error(reason instanceof Error ? reason.message : t('元数据识别失败'));
@@ -141,19 +145,27 @@ export function SourceNodeMetadataRecognitionDialog({ bookId, entry, onClose, on
   };
 
   const apply = async (candidate: SourceNodeMetadataCandidate) => {
+    selectionControllerRef.current?.abort();
+    const controller = new AbortController();
+    selectionControllerRef.current = controller;
     setBusy(true);
     try {
+      const resolved = candidate.id === selectedMetadata?.id ? selectedMetadata
+        : candidate.source === 'douban'
+          ? (await searchSourceNodeMetadata(bookId, entry.sourceNodeId, providerId, query.trim(), controller.signal, true, candidate)).selectedMetadata ?? candidate
+          : candidate;
+      if (controller.signal.aborted) return;
       await updateSourceNodeMetadata(bookId, entry.sourceNodeId, {
-        title: candidate.title?.trim() || entry.title,
-        description: candidate.description?.trim() || entry.description
+        title: resolved.title?.trim() || entry.title,
+        description: resolved.description?.trim() || entry.description
       });
       await onSaved();
       feedback.success(t('识别结果已应用到来源目录'));
       onClose();
     } catch (reason) {
-      feedback.error(reason instanceof Error ? reason.message : t('操作失败'));
+      if (!controller.signal.aborted) feedback.error(reason instanceof Error ? reason.message : t('操作失败'));
     } finally {
-      setBusy(false);
+      if (!controller.signal.aborted) setBusy(false);
     }
   };
 

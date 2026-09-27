@@ -27,9 +27,11 @@ from app.modules.library.application.source_node_metadata_recognition import (
     SourceNodeMetadataRecognitionResult,
 )
 from app.modules.metadata.public import (
+    MetadataMatch,
     candidate_key,
     enabled_metadata_provider_ids,
     match_metadata_candidates,
+    prepare_matched_metadata,
     recognize_metadata_identity,
     search_with_metadata_provider,
 )
@@ -47,6 +49,7 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
         provider_id: str,
         query: str | None,
         manual_query: bool = False,
+        selected_candidate: Mapping[str, object] | None = None,
     ) -> SourceNodeMetadataRecognitionResult | None:
         book_row = self._db.execute(
             select(LibraryBook, LibraryBookMetadata)
@@ -138,6 +141,23 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
         prefer_local = policy.prefer_local_metadata if policy is not None else True
         target_id = node.id
         disabled_message = "AI-assisted recognition is disabled" if configured_locale(self._db) == "en-US" else "AI 增强识别未启用"
+        if selected_candidate is not None:
+            value = dict(selected_candidate)
+            source = str(value["source"])
+            identifier = str(value["id"])
+            prefix = f"{source}:"
+            if identifier.startswith(prefix):
+                value["id"] = identifier[len(prefix):]
+            match = MetadataMatch(None, candidate_key(value))
+            selected = prepare_matched_metadata(self._db, match, [value])
+            if selected:
+                selected["id"] = identifier
+            return SourceNodeMetadataRecognitionResult(
+                source_node_id=source_node_id, provider_id=provider_id,
+                query=query or title, message=None, candidates=(),
+                selected_id=identifier, prefer_local_metadata=prefer_local,
+                selected_metadata=self._candidate(selected, source) if selected else None,
+            )
         if manual_query:
             book_context = {**book_context, "title": query or title, "author": None}
             context["book"] = book_context
@@ -184,7 +204,7 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
                 local_title=title, local_author=book_metadata.author,
             )
             identity = match.identity
-            selected = match.application_candidate(values)
+            selected = prepare_matched_metadata(self._db, match, values)
             # Display raw records separately from the normalized/merged application.
             values = [{**value, "id": candidate_key(value)} for value in values]
             if selected and selected.get("source") != "ai":

@@ -52,8 +52,10 @@ from app.modules.metadata.domain.providers import (
     ProviderManifest,
 )
 from app.modules.metadata.infrastructure.matching import (
+    MetadataMatch,
     candidate_key,
     match_metadata_candidates,
+    prepare_matched_metadata,
 )
 from app.services.metadata_file_writeback import (
     load_metadata_writeback_projection,
@@ -78,6 +80,7 @@ __all__ = [
     "LocalMetadataCandidate",
     "MetadataFileSource",
     "MetadataIdentity",
+    "MetadataMatch",
     "MetadataWritebackAssetProjection",
     "MetadataWritebackImportProjection",
     "MetadataWritebackProjection",
@@ -109,6 +112,7 @@ __all__ = [
     "metadata_writeback_enabled",
     "parse_opf_metadata",
     "persist_metadata_writeback_intents",
+    "prepare_matched_metadata",
     "prepare_metadata_writeback_intents",
     "prepare_source_node_metadata_writeback_intent",
     "recognize_metadata_identity",

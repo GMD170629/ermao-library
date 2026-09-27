@@ -340,3 +340,97 @@ def test_semantic_match_selects_real_record_and_persists(client, db_session, mon
     if selected["description"]:
         assert detail["description"] == selected["description"]
     assert len(prompts) == (1 if scenario in {"manual", "no-match"} else 2)
+
+
+def _douban_detail_transport(db_session, monkeypatch, *, failure=False, direct=False, before_detail=None):
+    """Only external transports replaced; registry, crawler, matching and cache are real."""
+    for provider, config in (
+        ("ai", {"baseUrl": "http://model.test/v1", "model": "test"}),
+        ("douban", {"baseUrl": "http://douban.test"}),
+    ):
+        db_session.add(Source(id=f"detail-{provider}", name=provider, kind="metadata",
+                              provider_type=provider, enabled=True, config=json.dumps(config)))
+    db_session.commit()
+    requests, prompts = [], []
+    def model(request, **kwargs):
+        prompt = json.loads(json.loads(request.data)["messages"][1]["content"])
+        prompts.append(prompt)
+        result = {"title": "海边的卡夫卡", "author": "村上春树", "needsReview": False, "reason": "controlled match"}
+        if "candidates" in prompt:
+            assert prompt["candidates"][0]["description"] == ("搜索已有简介" if failure else "")
+            assert prompt["candidates"][0]["author"] == "村上春樹"
+            result.update(primaryCandidateId="douban:12345", relatedCandidateIds=[])
+        return BytesIO(json.dumps({"choices": [{"message": {"content": json.dumps(result)}}]}).encode())
+    def website(request, **kwargs):
+        assert not db_session.in_transaction()
+        requests.append(request.full_url)
+        if "/subject_search?" in request.full_url:
+            items = [{"id": "12345", "tpl_name": "search_subject", "url": "http://untrusted.test/subject/12345/",
+                      "title": "海边的卡夫卡" if direct else "海辺のカフカ", "abstract": "村上春树" if direct else "村上春樹",
+                      **({"abstract_2": "搜索已有简介"} if failure else {})},
+                     {"id": "67890", "tpl_name": "search_subject", "url": "http://douban.test/subject/67890/",
+                      "title": "另一作品", "abstract": "另一作者"}]
+            return BytesIO(("window.__DATA__ = " + json.dumps({"items": items}) + ";").encode())
+        assert request.full_url in {"http://douban.test/subject/12345/", "http://douban.test/subject/67890/"}
+        if before_detail:
+            before_detail()
+        if failure:
+            raise OSError("controlled detail connection failure")
+        other = "67890" in request.full_url
+        html = ('<meta property="og:title" content="' + ("另一作品" if other else "海辺のカフカ") + '">'
+                '<meta property="og:url" content="' + request.full_url + '">'
+                '<meta property="og:description" content="' + ("另一条目详情简介" if other else "详情才有的简介") + '">')
+        return BytesIO(html.encode())
+    monkeypatch.setattr(ai_client, "urlopen", model)
+    monkeypatch.setattr(organize_service, "urlopen", website)
+    return requests, prompts
+
+
+@pytest.mark.parametrize("direct", [False, True])
+def test_selected_douban_detail_http_preview_save_reopen(client, db_session, monkeypatch, direct):
+    _add_book(db_session, book_id="detail-book")
+    metadata = db_session.get(LibraryBookMetadata, "detail-book")
+    metadata.title, metadata.author, metadata.description = "错误下载书名", "错误作者", None
+    db_session.commit()
+    requests, prompts = _douban_detail_transport(db_session, monkeypatch, direct=direct)
+    _login(client, db_session, role="admin")
+    path = "/api/books/detail-book/source-nodes/detail-book-root/metadata/search"
+    response = client.post(path, json={"providerId": "douban", "query": "错误下载书名"})
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    raw = next(item for item in data["candidates"] if item["id"] == "douban:12345")
+    assert raw["description"] is None
+    assert len(prompts) == (1 if direct else 2)
+    selected = data["selectedMetadata"]
+    assert selected["description"] == "详情才有的简介"
+    assert selected["author"] == "村上春树"
+    assert len(requests) == 2 and requests[-1] == "http://douban.test/subject/12345/"
+    saved = client.post("/api/books/detail-book/metadata/apply", json={"scope": "book", "candidate": selected,
+                        "fields": ["book.title", "book.author", "book.description"]})
+    assert saved.status_code == 200, saved.text
+    reopened = client.get("/api/books/detail-book").json()["data"]["book"]
+    assert (reopened["title"], reopened["author"], reopened["description"]) == ("海边的卡夫卡", "村上春树", "详情才有的简介")
+    # A switched record uses its own ID and raw identity; no search/model rerun.
+    other = next(item for item in data["candidates"] if item["id"] == "douban:67890")
+    swapped = client.post(path, json={"providerId": "douban", "query": "人工词", "manualQuery": True, "selectedCandidate": other})
+    assert swapped.status_code == 200, swapped.text
+    preview = swapped.json()["data"]
+    assert preview["query"] == "人工词" and preview["identity"] is None
+    assert preview["selectedMetadata"]["description"] == "另一条目详情简介"
+    assert preview["selectedMetadata"]["author"] == "另一作者"
+    assert requests[-1] == "http://douban.test/subject/67890/"
+    again = client.post(path, json={"providerId": "douban", "selectedCandidate": raw})
+    assert again.json()["data"]["selectedMetadata"]["description"] == "详情才有的简介"
+    assert len(requests) == 3  # Completed detail cache prevents a duplicate request.
+
+
+def test_selected_douban_detail_failure_preserves_search(client, db_session, monkeypatch, caplog):
+    _add_book(db_session, book_id="detail-book")
+    requests, _ = _douban_detail_transport(db_session, monkeypatch, failure=True)
+    _login(client, db_session, role="admin")
+    response = client.post("/api/books/detail-book/source-nodes/detail-book-root/metadata/search", json={"providerId": "douban"})
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["selectedMetadata"]["description"] == "搜索已有简介"
+    assert requests[-1] == "http://douban.test/subject/12345/"
+    assert "metadata.subject_detail_failed" in caplog.text
+    assert "controlled detail connection failure" in caplog.text

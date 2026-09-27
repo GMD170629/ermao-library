@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -56,6 +57,7 @@ class SourceNodeMetadataRecognitionPort(Protocol):
         provider_id: str,
         query: str | None,
         manual_query: bool = False,
+        selected_candidate: Mapping[str, object] | None = None,
     ) -> SourceNodeMetadataRecognitionResult | None: ...
 
 
@@ -71,6 +73,7 @@ class RecognizeSourceNodeMetadata:
         provider_id: str,
         query: str | None,
         manual_query: bool = False,
+        selected_candidate: Mapping[str, object] | None = None,
     ) -> SourceNodeMetadataRecognitionResult | None:
         normalized_provider = provider_id.strip()
         if not normalized_provider:
@@ -81,6 +84,7 @@ class RecognizeSourceNodeMetadata:
             provider_id=normalized_provider,
             query=(query or "").strip() or None,
             manual_query=manual_query,
+            selected_candidate=selected_candidate,
         )
 
 

@@ -496,3 +496,48 @@ def test_queue_semantic_match_runs_after_websites_and_uses_final_identity(db_ses
         assert status == "COMPLETED"
         assert (saved.title, saved.author, saved.description) == ("海边的卡夫卡", "村上春树", "实际网站简介")
         assert db_session.get(MetadataLookupTask, task_id).result_source == ("bangumi" if scenario == "source-failure" else "douban")
+
+
+@pytest.mark.parametrize("interruption", [None, "cancelled", "concurrent"])
+def test_queue_reads_selected_subject_detail_through_real_provider(db_session, test_settings, monkeypatch, interruption):
+    from app.models.organize import OrganizePolicy
+    from tests.contract.api.test_metadata_identity import _douban_detail_transport
+
+    book, resource = _seed_lookup_graph(db_session)
+    book_id, resource_id = book.id, resource.id
+    metadata = db_session.get(LibraryBookMetadata, book_id)
+    metadata.title, metadata.author, metadata.description = "错误下载书名", "错误作者", None
+    db_session.add(OrganizePolicy(id="detail-policy", prefer_local_metadata=False))
+    db_session.commit()
+    task = _lookup_task(db_session, book, resource, status="RUNNING")
+    task_id = task.id
+    def during_detail():
+        if interruption == "cancelled":
+            db_session.get(MetadataLookupTask, task_id).status = "CANCELLED"
+        elif interruption == "concurrent":
+            metadata = db_session.get(LibraryBookMetadata, book_id)
+            metadata.title = "用户并发标题"
+            metadata.updated_at = datetime.now(UTC) + timedelta(seconds=1)
+        db_session.commit()
+    requests, prompts = _douban_detail_transport(db_session, monkeypatch, before_detail=during_detail)
+    class Gate:
+        def __init__(self):
+            self.providers = []
+        def wait(self, provider_id):
+            self.providers.append(provider_id)
+    gate = Gate()
+    status = queue.process_metadata_lookup_task(db_session, test_settings, {
+        "id": task_id, "bookId": book_id, "resourceId": resource_id, "status": "RUNNING", "attempts": 0,
+        "providerOrder": '["ai", "douban"]',
+    }, automatic_request_gate=gate)
+    assert (status == "COMPLETED") is (interruption is None)
+    assert len(prompts) == 2
+    assert len(requests) == 2 and requests[-1] == "http://douban.test/subject/12345/"
+    assert gate.providers == ["douban", "douban"]
+    db_session.expire_all()
+    saved = db_session.get(LibraryBookMetadata, book_id)
+    if interruption:
+        assert saved.title == ("用户并发标题" if interruption == "concurrent" else "错误下载书名")
+        assert saved.description is None
+    else:
+        assert (saved.title, saved.author, saved.description) == ("海边的卡夫卡", "村上春树", "详情才有的简介")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from app.modules.library.application.source_node_metadata_recognition import (
@@ -20,6 +21,7 @@ class FakeRecognitionPort:
         provider_id: str,
         query: str | None,
         manual_query: bool = False,
+        selected_candidate: Mapping[str, object] | None = None,
     ) -> SourceNodeMetadataRecognitionResult | None:
         self.call = (book_id, source_node_id, provider_id, query)
         return SourceNodeMetadataRecognitionResult(

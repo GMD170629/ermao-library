@@ -718,6 +718,8 @@ def run_douban_crawler_provider(
             {"confidence": confidence},
             automatic_request_gate=automatic_request_gate,
         )
+        if candidate:
+            candidate["_detailFetched"] = True
         candidates = [normalize_douban_candidate(candidate)] if candidate else []
     else:
         search_html = fetch_text(
@@ -734,39 +736,7 @@ def run_douban_crawler_provider(
             match_title or query_text,
         )
         selected, _ = choose_metadata_candidate(candidates, match_title or title, author)
-        subject_url = (
-            first_string((selected.get("raw") or {}).get("url"))
-            if isinstance(selected, dict) and isinstance(selected.get("raw"), dict)
-            else None
-        )
-        try:
-            subject_candidate = (
-                fetch_douban_subject(
-                    base_url,
-                    subject_url,
-                    headers,
-                    selected,
-                    automatic_request_gate=automatic_request_gate,
-                )
-                if selected and subject_url
-                else None
-            )
-        # A failed optional detail fetch must not discard the valid search result.
-        except (OSError, ValueError, TypeError, KeyError) as error:
-            record_exception(logging.getLogger(__name__), "services.organize_service.run_douban_crawler_provider.failed", error,
-                             context={"step": "run_douban_crawler_provider"})
-            subject_candidate = None
-        candidate = subject_candidate or selected
-        if candidate:
-            normalized_first = normalize_douban_candidate(candidate)
-            candidates = [
-                normalized_first,
-                *[
-                    item
-                    for item in candidates
-                    if item.get("id") != normalized_first.get("id")
-                ],
-            ]
+        candidate = selected
     if not candidate:
         message: str | None = (
             "豆瓣未找到标题完全匹配的图书"

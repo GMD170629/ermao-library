@@ -305,12 +305,21 @@ test('AI semantic match applies source metadata and allows changing the record',
   await page.route('**/api/metadata/providers', (route) => route.fulfill({ json: { ok: true, data: { providers: [
     { id: 'bangumi', name: 'Bangumi', enabled: true, priority: 1 }
   ] } } }));
-  await page.route('**/metadata/search', (route) => route.fulfill({ json: { ok: true, data: {
+  const selectionRequests: string[] = [];
+  await page.route('**/metadata/search', (route) => {
+    const body = route.request().postDataJSON();
+    if (body.selectedCandidate) {
+      selectionRequests.push(body.selectedCandidate.id);
+      return route.fulfill({ json: { ok: true, data: { query: body.query, candidates: [], selectedId: body.selectedCandidate.id,
+        selectedMetadata: { ...body.selectedCandidate, description: '其他条目详情简介' } } } });
+    }
+    return route.fulfill({ json: { ok: true, data: {
     query: '海边的卡夫卡', selectedId: primary.id, preferLocalMetadata: true,
     identity: { title: '海边的卡夫卡', author: '村上春树', needsReview: false, reason: '名称写法不同，确认同一作品' },
     candidates: [primary, { id: 'douban:1', source: 'douban', title: '其他作品', author: '其他作者', tags: [] }],
     selectedMetadata: { ...primary, title: '海边的卡夫卡', author: '村上春树' }
-  } } }));
+  } } });
+  });
   await page.route('**/metadata/apply', async (route) => {
     const body = route.request().postDataJSON();
     expect(body.candidate.id).toBe(primary.id);
@@ -331,6 +340,8 @@ test('AI semantic match applies source metadata and allows changing the record',
   await expect(primaryButton).toBeVisible();
   await dialog.getByRole('button', { name: /其他作品.*其他作者.*douban/ }).click();
   await expect(dialog.getByRole('checkbox', { name: '作者 错误作者 其他作者', exact: true })).toBeChecked();
+  await expect(dialog.getByRole('checkbox', { name: '简介 未填写 其他条目详情简介', exact: true })).toBeChecked();
+  expect(selectionRequests).toEqual(['douban:1']);
   await primaryButton.click();
   await expect(dialog.getByRole('checkbox', { name: '作者 错误作者 村上春树', exact: true })).toBeChecked();
   const beforeSave = detailReads;

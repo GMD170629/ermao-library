@@ -1417,6 +1417,7 @@ def search_book_source_node_metadata(
             provider_id=payload.provider_id,
             query=payload.query,
             manual_query=payload.manual_query,
+            selected_candidate=payload.selected_candidate.model_dump(by_alias=True, mode="json") if payload.selected_candidate else None,
         )
     except MetadataProviderSearchError as error:
         record_exception(

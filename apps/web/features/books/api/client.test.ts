@@ -486,3 +486,25 @@ test('keeps source identity separate from matched application metadata', async (
     assert.equal(result.candidates[1].id, 'douban:1');
   } finally { globalThis.fetch = originalFetch; }
 });
+
+
+test('manual candidate selection sends its own source record without changing query', async () => {
+  const originalFetch = globalThis.fetch;
+  const candidate = { id: 'douban:67890', source: 'douban', title: '另一作品', author: '另一作者', description: null, tags: [], confidence: 0.7,
+    seriesName: null, seriesIndex: null, publisher: null, publishedAt: null, language: null, isbn: null, identifier: null, narrator: null, abridged: null, resourceIndex: null, coverUrl: null };
+  let sent: unknown;
+  globalThis.fetch = async (_input, init) => {
+    sent = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify({ ok: true, data: { query: '人工词', candidates: [], selectedId: candidate.id,
+      selectedMetadata: { ...candidate, description: '另一条目详情简介' } } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const result = await searchSourceNodeMetadata('book', 'node', 'douban', '人工词', undefined, true, candidate);
+    assert.deepEqual(sent, { providerId: 'douban', query: '人工词', manualQuery: true, selectedCandidate: candidate });
+    assert.equal(result.selectedMetadata?.id, candidate.id);
+    assert.equal(result.selectedMetadata?.description, '另一条目详情简介');
+    assert.equal(result.query, '人工词');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
