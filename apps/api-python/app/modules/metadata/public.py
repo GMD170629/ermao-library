@@ -51,6 +51,7 @@ from app.modules.metadata.domain.providers import (
     ProviderConfigField,
     ProviderManifest,
 )
+from app.modules.metadata.infrastructure.generation import complete_missing_metadata
 from app.modules.metadata.infrastructure.matching import (
     MetadataMatch,
     candidate_key,
@@ -104,6 +105,7 @@ __all__ = [
     "StandardWriteStatus",
     "candidate_key",
     "choose_metadata_candidate",
+    "complete_missing_metadata",
     "cover_media_type",
     "enabled_metadata_provider_ids",
     "load_metadata_writeback_projection",

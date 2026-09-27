@@ -2332,5 +2332,14 @@
   "元数据响应格式错误": "Invalid metadata response",
   "AI 标题作者分析": "AI title and author analysis",
   "AI 增强识别": "AI-assisted recognition",
-  "AI 服务地址或模型未配置": "AI endpoint or model is not configured"
+  "AI 服务地址或模型未配置": "AI endpoint or model is not configured",
+  "AI 模拟补全": "AI-generated completion",
+  "仅在身份确定且本地和网站均缺少内容时生成简介、标签，生成内容标明来源。": "Generate descriptions and tags only for a confirmed book when both local and website values are missing. Generated fields are labeled.",
+  "AI 生成": "AI generated",
+  "生成内容需复核": "Generated content needs review",
+  "简介 · AI 生成": "Description · AI generated",
+  "标签 · AI 生成": "Tags · AI generated",
+  "来源查询或详情获取失败，已保留可用结果。": "Source search or detail retrieval failed. Available results have been preserved.",
+  "未找到对应网站条目": "No matching website entry found",
+  "生成字段未应用：目标已变化或已有内容。": "Generated fields were not applied: the target changed or already has content."
 }

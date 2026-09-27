@@ -213,7 +213,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
     setSelectedId(candidate.id);
     setError('');
     // The initial matched application remains separate, including its standard identity.
-    if (candidate.id === selectedMetadata?.id || candidate.source !== 'douban') {
+    if (candidate.id === selectedMetadata?.id) {
       setBusy(false);
       return;
     }
@@ -252,6 +252,10 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
         fields: selectedFields
       }, controller.signal);
       if (controller.signal.aborted) return;
+      if (selected.generatedFields?.length && result.appliedFields.length === 0) {
+        setError(i18nAttribute('生成字段未应用：目标已变化或已有内容。'));
+        return;
+      }
       if (result.coverStatus === 'failed' && result.appliedFields.length === 0) {
         setError(i18nAttribute('封面更新失败，请稍后重试'));
         return;
@@ -347,6 +351,10 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
 
         {identity ? <MetadataIdentitySummary originalTitle={scope === 'resource' ? targetResource?.title ?? book.title : book.title} originalAuthor={book.author} identity={identity} query={query} /> : null}
 
+        {selected?.sourceIssues?.some((issue) => issue.endsWith('_failed')) ? <p className="mx-5 mt-2 text-sm text-amber-700"><I18nText>来源查询或详情获取失败，已保留可用结果。</I18nText></p> : null}
+        {selected?.sourceIssues?.includes('no_matching_entry') ? <p className="mx-5 mt-2 text-sm text-slate-600"><I18nText>未找到对应网站条目</I18nText></p> : null}
+        {selected?.generationReason ? <p data-i18n-skip className="mx-5 mt-2 text-sm text-slate-600">{selected.generationNeedsReview ? i18nAttribute("生成内容需复核") + "：" : ""}{selected.generationReason}</p> : null}
+
         <div className="grid min-h-0 flex-1 gap-4 overflow-auto p-5 lg:grid-cols-[320px_1fr]">
           <div className="space-y-2">
             {candidates.map((candidate) => (
@@ -416,6 +424,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
                         </div>
                         <div className="col-span-2 min-w-0 break-words pl-7 text-slate-900 md:col-auto md:pl-0">
                           <span className="mb-1 block text-xs text-slate-400 md:hidden"><I18nText>候选值</I18nText></span>
+                          {selected?.generatedFields?.includes(field.split('.').at(-1) ?? '') ? <span className="mr-2 text-xs text-violet-600"><I18nText>AI 生成</I18nText></span> : null}
                           {field.endsWith('.cover') ? renderCoverValue(nextValue, 'candidate', field) : renderFieldValue(nextValue, 'candidate', field)}
                         </div>
                       </label>

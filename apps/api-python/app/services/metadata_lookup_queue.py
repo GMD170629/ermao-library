@@ -9,7 +9,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from time import monotonic, time
-from typing import Any
+from typing import Any, cast
 from urllib.request import Request as UrlRequest
 from urllib.request import urlopen
 from uuid import uuid4
@@ -48,6 +48,7 @@ from app.modules.metadata.application.writeback import (
 )
 from app.modules.metadata.infrastructure import lookup_queue as lookup_persist
 from app.modules.metadata.infrastructure import writeback_queue
+from app.modules.metadata.infrastructure.generation import complete_missing_metadata
 from app.modules.metadata.infrastructure.matching import (
     match_metadata_candidates,
     prepare_matched_metadata,
@@ -362,13 +363,15 @@ def _prepare_candidate_application(
     ):
         book_patch["author"] = candidate_author
         applied.append("author")
-    if (not prefer_local or not str(book.get("description") or "").strip()) and str(
+    previous_generated = set(json.loads(str(book.get("generatedFields") or "[]")))
+    generated = set(candidate.get("generatedFields") or [])
+    if (not prefer_local or "description" in previous_generated or not str(book.get("description") or "").strip()) and str(
         candidate.get("description") or ""
     ).strip():
         book_patch["description"] = str(candidate["description"]).strip()
         applied.append("description")
     candidate_tags = _parse_tags(candidate.get("tags"))
-    if candidate_tags and (not prefer_local or not _parse_tags(book.get("tags"))):
+    if candidate_tags and (not prefer_local or "tags" in previous_generated or not _parse_tags(book.get("tags"))):
         book_patch["tags"] = json.dumps(
             list(dict.fromkeys(candidate_tags)), ensure_ascii=False
         )
@@ -421,7 +424,13 @@ def _prepare_candidate_application(
         for key, value in book_patch.items()
         if aliases.get(key, key) not in protected
     }
-    applied = [field for field in applied if aliases.get(field, field) not in protected]
+    # Generated values only fill blanks, even when local-priority is disabled.
+    for field in generated:
+        if (_parse_tags(book.get(field)) if field == "tags" else str(book.get(field) or "").strip()):
+            book_patch.pop(field, None)
+    applied = [field for field in applied if aliases.get(field, field) not in protected and (field not in generated or field in book_patch)]
+    changed_generated = set(book_patch) & {"description", "tags"}
+    book_patch["generatedFields"] = json.dumps(sorted((previous_generated - changed_generated - protected) | (changed_generated & generated)))
 
     if "title" in book_patch or "author" in book_patch:
         title = str(book_patch.get("title", book.get("title")) or "").strip()
@@ -831,6 +840,11 @@ def process_metadata_lookup_task(
                 None if final_identity and (final_identity.needs_review or not final_identity.title)
                 else prepare_matched_metadata(db, match, candidates, automatic_request_gate=effective_request_gate)
             )
+            if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
+                return "CANCELLED"
+            candidate = complete_missing_metadata(db, book_id=str(book["id"]), candidate=candidate)
+            if candidate and candidate.get("generationNeedsReview"):
+                candidate = {**candidate, **{field: None for field in cast(list[str], candidate.get("generatedFields", []))}, "generatedFields": []}
             if candidate:
                 provider = str(candidate["source"])
                 execution_id = executions.get(provider) or _start_provider_execution(db, task, provider)

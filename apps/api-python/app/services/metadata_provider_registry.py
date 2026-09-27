@@ -379,9 +379,11 @@ def get_metadata_provider(db: Session, provider_id: str) -> dict[str, Any] | Non
 
 
 def _validate_config(
-    manifest: ProviderManifest, config: dict[str, Any], enabled: bool
+    manifest: ProviderManifest, config: dict[str, Any], enabled: bool, locale: str = "zh-CN"
 ) -> list[str]:
     errors: list[str] = []
+    if "generateEnabled" in config and not isinstance(config["generateEnabled"], bool):
+        errors.append("AI generation toggle must be boolean" if locale == "en-US" else "AI 模拟补全开关必须为布尔值")
     allowed = {field.key for field in manifest.config_fields}
     unknown = sorted(set(config) - allowed)
     if unknown:
@@ -421,7 +423,7 @@ def prepare_metadata_provider_update(
         if str(key) in _secret_fields(plugin.manifest):
             next_config.pop(str(key), None)
     enabled = bool(source.get("enabled"))
-    errors = _validate_config(plugin.manifest, next_config, enabled)
+    errors = _validate_config(plugin.manifest, next_config, enabled, configured_locale(db))
     if errors:
         raise MetadataProviderRequestError("；".join(errors))
     now = _now()

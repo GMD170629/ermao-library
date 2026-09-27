@@ -411,6 +411,12 @@ class SourceNodeMetadataSearchRequest(HttpContractModel):
 
 
 class SourceNodeMetadataCandidateView(HttpContractModel):
+    generated_fields: list[Literal["description", "tags"]] = Field(default_factory=list, alias="generatedFields", max_length=2)
+    generation_source: Literal["AI_GENERATED"] | None = Field(default=None, alias="generationSource")
+    generation_needs_review: bool = Field(default=False, alias="generationNeedsReview")
+    generation_reason: str | None = Field(default=None, alias="generationReason", max_length=1000)
+    generation_revision: str | None = Field(default=None, alias="generationRevision", max_length=200)
+    source_issues: list[str] = Field(default_factory=list, alias="sourceIssues", max_length=20)
     id: str
     source: str
     title: str | None = None
@@ -451,6 +457,12 @@ class SourceNodeMetadataSearchPayload(HttpContractModel):
 
 
 class RecognizedMetadataCandidateInput(HttpContractModel):
+    generated_fields: list[Literal["description", "tags"]] = Field(default_factory=list, alias="generatedFields", max_length=2)
+    generation_source: Literal["AI_GENERATED"] | None = Field(default=None, alias="generationSource")
+    generation_needs_review: bool = Field(default=False, alias="generationNeedsReview")
+    generation_reason: str | None = Field(default=None, alias="generationReason", max_length=1000)
+    generation_revision: str | None = Field(default=None, alias="generationRevision", max_length=200)
+    source_issues: list[str] = Field(default_factory=list, alias="sourceIssues", max_length=20)
     id: str = Field(min_length=1, max_length=500)
     source: str = Field(min_length=1, max_length=100)
     title: str | None = Field(default=None, max_length=500)

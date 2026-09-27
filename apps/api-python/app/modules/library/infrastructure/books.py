@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Any
@@ -145,6 +146,7 @@ def _book_record(
         "title": metadata.title if metadata else "",
         "author": metadata.author if metadata else None,
         "description": metadata.description if metadata else None,
+        "generatedFields": sorted(set(json.loads(metadata.generated_fields or "[]")) - set(json.loads(metadata.protected_fields or "[]"))) if metadata else [],
         "seriesName": metadata.series_name if metadata else None,
         "seriesIndex": metadata.series_index if metadata else None,
         "tags": list(tags),
@@ -313,6 +315,7 @@ def update_book_fields(
         metadata.protected_fields = protect_fields(
             metadata.protected_fields, metadata_values.keys()
         )
+        metadata.generated_fields = json.dumps(sorted(set(json.loads(metadata.generated_fields or "[]")) - set(metadata_values)))
         for key, value in metadata_values.items():
             setattr(metadata, key, value)
     return get_book(db, book_id)

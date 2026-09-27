@@ -670,6 +670,8 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
               >{tag}</Link>)}
             </div> : null}
           </div> : null}
+          {book.generatedFields?.includes("description") ? <span className="text-xs text-violet-600"><I18nText>简介 · AI 生成</I18nText></span> : null}
+          {book.generatedFields?.includes("tags") ? <span className="ml-2 text-xs text-violet-600"><I18nText>标签 · AI 生成</I18nText></span> : null}
           {book.description ? <p data-i18n-skip className={hasBookMetadata ? "mt-4 line-clamp-3 max-w-3xl whitespace-pre-line text-sm leading-7 text-[var(--visual-color-app-text-secondary)]" : "mt-5 line-clamp-3 max-w-3xl whitespace-pre-line text-sm leading-7 text-[var(--visual-color-app-text-secondary)]"}>{book.description}</p> : <p className={hasBookMetadata ? "mt-4 text-sm text-[var(--visual-color-app-text-tertiary)]" : "mt-5 text-sm text-[var(--visual-color-app-text-tertiary)]"}><I18nText>暂无简介</I18nText></p>}
           {bookCopy ? <div className="mt-7 max-w-3xl">
             <div className="flex items-center gap-4"><span className="shrink-0 text-sm font-medium text-[var(--visual-color-app-text-primary)]">{t(bookCopy.progress)}</span><div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-[var(--visual-color-app-divider)]"><div className="h-full rounded-full bg-[var(--visual-color-app-brand-accent)]" style={{ width: `${bookProgress}%` }} /></div><span className="w-14 text-right text-sm font-medium tabular-nums text-[var(--visual-color-app-text-primary)]">{Math.round(bookProgress)}%</span></div>
@@ -779,7 +781,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       onClose={() => setSourceNodeEditorTarget(null)}
       onSaved={() => setContentsRevision((value) => value + 1)}
     />
-    <SourceNodeMetadataRecognitionDialog bookId={book.id} entry={sourceNodeRecognitionTarget} onClose={() => setSourceNodeRecognitionTarget(null)} onSaved={() => setContentsRevision((value) => value + 1)} />
+    <SourceNodeMetadataRecognitionDialog bookId={book.id} bookSourceNodeId={book.sourceNodeId} entry={sourceNodeRecognitionTarget} onClose={() => setSourceNodeRecognitionTarget(null)} onSaved={async () => { await refresh(); setContentsRevision((value) => value + 1); }} />
     <MetadataLookupModal book={book} currentResourceId={metadataResourceId ?? activeResource?.id ?? null} fixedScope={metadataResourceId ? 'resource' : null} open={metadataLookupOpen} onClose={() => { setMetadataLookupOpen(false); setMetadataResourceId(null); }} onApplied={refresh} />
     <KindleSendModal book={book} open={kindleOpen} preferredResourceId={kindleResourceId ?? activeResource?.id ?? null} onClose={() => { setKindleOpen(false); setKindleResourceId(null); }} />
   </div>;

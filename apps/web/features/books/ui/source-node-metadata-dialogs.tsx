@@ -8,7 +8,7 @@ import { Select } from '../../../components/ui/select';
 import { useToast } from '../../../components/ui/feedback';
 import { I18nText, useI18n } from '../../../i18n/provider';
 import type { BookView } from '../../../types/book';
-import { fetchMetadataProviders, searchSourceNodeMetadata, updateSourceNodeMetadata, updateSourceNodePresentation } from '../api/client';
+import { applyRecognizedMetadata, fetchMetadataProviders, searchSourceNodeMetadata, updateSourceNodeMetadata, updateSourceNodePresentation } from '../api/client';
 import type { BookContentEntry, SourceNodeMetadataCandidate } from '../model/book-contents';
 
 type SharedProps = Readonly<{
@@ -94,7 +94,7 @@ export function SourceNodeMetadataEditor({ bookId, book, entry, onClose, onSaved
   </div>;
 }
 
-export function SourceNodeMetadataRecognitionDialog({ bookId, entry, onClose, onSaved }: SharedProps) {
+export function SourceNodeMetadataRecognitionDialog({ bookId, bookSourceNodeId, entry, onClose, onSaved }: SharedProps & { bookSourceNodeId: string }) {
   const feedback = useToast();
   const { t } = useI18n();
   const [providerId, setProviderId] = useState('');
@@ -134,7 +134,10 @@ export function SourceNodeMetadataRecognitionDialog({ bookId, entry, onClose, on
     setMessage('');
     try {
       const result = await searchSourceNodeMetadata(bookId, entry.sourceNodeId, providerId, query.trim());
-      setCandidates(result.candidates);
+      const selected = result.selectedMetadata;
+      const displayed = result.candidates.map((item) => item.id === selected?.id && item.source === selected.source ? selected : item);
+      if (selected && !displayed.some((item) => item.id === selected.id && item.source === selected.source)) displayed.unshift(selected);
+      setCandidates(displayed);
       setSelectedMetadata(result.selectedMetadata);
       setMessage(result.candidates.length ? t('找到 {value0} 条候选', { value0: result.candidates.length }) : result.message || t('没有找到候选'));
     } catch (reason) {
@@ -150,15 +153,24 @@ export function SourceNodeMetadataRecognitionDialog({ bookId, entry, onClose, on
     selectionControllerRef.current = controller;
     setBusy(true);
     try {
-      const resolved = candidate.id === selectedMetadata?.id ? selectedMetadata
-        : candidate.source === 'douban'
+      const resolved = candidate.id === selectedMetadata?.id && candidate.source === selectedMetadata.source ? selectedMetadata
+        : candidate.source === 'douban' || candidate.source === 'bangumi'
           ? (await searchSourceNodeMetadata(bookId, entry.sourceNodeId, providerId, query.trim(), controller.signal, true, candidate)).selectedMetadata ?? candidate
           : candidate;
       if (controller.signal.aborted) return;
-      await updateSourceNodeMetadata(bookId, entry.sourceNodeId, {
-        title: resolved.title?.trim() || entry.title,
-        description: resolved.description?.trim() || entry.description
-      });
+      if (resolved.generatedFields?.length) {
+        const isBook = entry.sourceNodeId === bookSourceNodeId;
+        const result = await applyRecognizedMetadata(bookId, {
+          scope: isBook ? 'book' : 'resource', resourceId: isBook ? null : entry.resourceId,
+          candidate: resolved, fields: [isBook ? 'book.title' : 'resource.title', ...(resolved.description ? [isBook ? 'book.description' as const : 'resource.description' as const] : [])]
+        }, controller.signal);
+        if (!result.appliedFields.length) throw new Error(t('生成字段未应用：目标已变化或已有内容。'));
+      } else {
+        await updateSourceNodeMetadata(bookId, entry.sourceNodeId, {
+          title: resolved.title?.trim() || entry.title,
+          description: resolved.description?.trim() || entry.description
+        });
+      }
       await onSaved();
       feedback.success(t('识别结果已应用到来源目录'));
       onClose();
@@ -178,7 +190,7 @@ export function SourceNodeMetadataRecognitionDialog({ bookId, entry, onClose, on
         <Button icon={Search} loading={busy} disabled={!query.trim() || !providerId} onClick={() => void search()}><I18nText>搜索</I18nText></Button>
       </div>
       {message ? <p className="mt-4 text-sm text-stone-500">{message}</p> : null}
-      <div className="mt-4 grid gap-3">{candidates.map((candidate) => <article key={`${candidate.source}:${candidate.id}`} className="rounded-2xl border border-stone-200 p-4"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><h3 data-i18n-skip className="font-semibold text-stone-900">{candidate.title || entry.title}</h3>{candidate.description ? <p data-i18n-skip className="mt-2 line-clamp-3 text-sm leading-6 text-stone-600">{candidate.description}</p> : null}<p data-i18n-skip className="mt-2 text-xs text-stone-400">{candidate.source}</p></div><Button variant="secondary" disabled={busy} onClick={() => void apply(candidate)}><I18nText>应用</I18nText></Button></div></article>)}</div>
+      <div className="mt-4 grid gap-3">{candidates.map((candidate) => <article key={`${candidate.source}:${candidate.id}`} className="rounded-2xl border border-stone-200 p-4"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><h3 data-i18n-skip className="font-semibold text-stone-900">{candidate.title || entry.title}</h3>{candidate.generatedFields?.includes("description") ? <span className="text-xs text-violet-600"><I18nText>AI 生成</I18nText></span> : null}{candidate.description ? <p data-i18n-skip className="mt-2 line-clamp-3 text-sm leading-6 text-stone-600">{candidate.description}</p> : null}<p data-i18n-skip className="mt-2 text-xs text-stone-400">{candidate.source}</p></div><Button variant="secondary" disabled={busy} onClick={() => void apply(candidate)}><I18nText>应用</I18nText></Button></div></article>)}</div>
       <div className="mt-6 flex justify-end"><Button variant="secondary" onClick={onClose}><I18nText>关闭</I18nText></Button></div>
     </div>
   </div>;

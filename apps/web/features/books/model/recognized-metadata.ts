@@ -113,7 +113,8 @@ export function defaultRecognizedMetadataFields(
   if (!candidate) return [];
   return definitions.flatMap(({ field }) => {
     const value = candidateMetadataValue(candidate, field);
-    if (preferLocalMetadata && !field.endsWith('.title') && field !== 'book.author'
+    const generatedCurrent = (field.startsWith('resource.') ? resource : book)?.generatedFields?.includes(field.split('.').at(-1) ?? '');
+    if (preferLocalMetadata && !generatedCurrent && !field.endsWith('.title') && field !== 'book.author'
       && hasMetadataValue(currentMetadataValue(book, resource, field))) return [];
     return hasMetadataValue(value) && normalized(value) !== normalized(currentMetadataValue(book, resource, field)) ? [field] : [];
   });

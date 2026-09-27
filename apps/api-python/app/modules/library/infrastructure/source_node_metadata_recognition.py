@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from typing import cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -29,6 +30,7 @@ from app.modules.library.application.source_node_metadata_recognition import (
 from app.modules.metadata.public import (
     MetadataMatch,
     candidate_key,
+    complete_missing_metadata,
     enabled_metadata_provider_ids,
     match_metadata_candidates,
     prepare_matched_metadata,
@@ -50,6 +52,7 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
         query: str | None,
         manual_query: bool = False,
         selected_candidate: Mapping[str, object] | None = None,
+        is_active: Callable[[], bool] | None = None,
     ) -> SourceNodeMetadataRecognitionResult | None:
         book_row = self._db.execute(
             select(LibraryBook, LibraryBookMetadata)
@@ -143,6 +146,11 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
         disabled_message = "AI-assisted recognition is disabled" if configured_locale(self._db) == "en-US" else "AI 增强识别未启用"
         if selected_candidate is not None:
             value = dict(selected_candidate)
+            for field in cast(list[str], value.pop("generatedFields", [])):
+                if field in ("description", "tags"):
+                    value[field] = None
+            for key in ("generationSource", "generationNeedsReview", "generationReason", "generationRevision", "sourceIssues"):
+                value.pop(key, None)
             source = str(value["source"])
             identifier = str(value["id"])
             prefix = f"{source}:"
@@ -150,6 +158,7 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
                 value["id"] = identifier[len(prefix):]
             match = MetadataMatch(None, candidate_key(value))
             selected = prepare_matched_metadata(self._db, match, [value])
+            selected = complete_missing_metadata(self._db, book_id=book_id, source_node_id=source_node_id, candidate=selected, is_active=is_active)
             if selected:
                 selected["id"] = identifier
             return SourceNodeMetadataRecognitionResult(
@@ -184,6 +193,8 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
                 else query or title
             )
             values: list[dict[str, object]] = []
+            source_issues: list[str] = []
+            source_completed = False
             # Query only enabled existing sources, once each, in preferred order.
             providers = list(dict.fromkeys([provider_id, *enabled_metadata_provider_ids(self._db)]))
             for source in (item for item in providers if item != "ai"):
@@ -192,7 +203,9 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
                 except Exception as error:  # noqa: BLE001 - one source must not block others.
                     record_exception(logging.getLogger(__name__), "metadata.source_search_failed", error,
                                      context={"step": "source_search", "resource_id": source})
+                    source_issues.append(f"{source}:search_failed")
                     continue
+                source_completed = source_completed or result.get("enabled") is not False
                 raw = result.get("candidates", [])
                 if isinstance(raw, list):
                     values.extend({**item, "source": source} for item in raw[:10]
@@ -205,6 +218,9 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
             )
             identity = match.identity
             selected = prepare_matched_metadata(self._db, match, values)
+            selected = complete_missing_metadata(self._db, book_id=book_id, source_node_id=source_node_id, candidate=selected, is_active=is_active)
+            if selected:
+                selected["sourceIssues"] = [*source_issues, *cast(list[str], selected.get("sourceIssues", [])), *(["no_matching_entry"] if source_completed and not match.primary_candidate_id else [])]
             # Display raw records separately from the normalized/merged application.
             values = [{**value, "id": candidate_key(value)} for value in values]
             if selected and selected.get("source") != "ai":
@@ -295,6 +311,12 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
             resource_index=optional_number("resourceIndex"),
             cover_url=optional_string("coverUrl"),
             confidence=confidence,
+            generated_fields=tuple(str(field) for field in cast(list[str], value.get("generatedFields", [])) if field in ("description", "tags")),
+            generation_source="AI_GENERATED" if value.get("generatedFields") else None,
+            generation_needs_review=value.get("generationNeedsReview") is True,
+            generation_reason=optional_string("generationReason"),
+            generation_revision=optional_string("generationRevision"),
+            source_issues=tuple(str(issue) for issue in cast(list[str], value.get("sourceIssues", []))),
         )
 
 

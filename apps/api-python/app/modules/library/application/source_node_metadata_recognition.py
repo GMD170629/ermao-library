@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -33,6 +33,12 @@ class SourceNodeMetadataCandidate:
     resource_index: float | None
     cover_url: str | None
     confidence: float
+    generated_fields: tuple[str, ...] = ()
+    generation_source: str | None = None
+    generation_needs_review: bool = False
+    generation_reason: str | None = None
+    generation_revision: str | None = None
+    source_issues: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +64,7 @@ class SourceNodeMetadataRecognitionPort(Protocol):
         query: str | None,
         manual_query: bool = False,
         selected_candidate: Mapping[str, object] | None = None,
+        is_active: Callable[[], bool] | None = None,
     ) -> SourceNodeMetadataRecognitionResult | None: ...
 
 
@@ -74,6 +81,7 @@ class RecognizeSourceNodeMetadata:
         query: str | None,
         manual_query: bool = False,
         selected_candidate: Mapping[str, object] | None = None,
+        is_active: Callable[[], bool] | None = None,
     ) -> SourceNodeMetadataRecognitionResult | None:
         normalized_provider = provider_id.strip()
         if not normalized_provider:
@@ -85,6 +93,7 @@ class RecognizeSourceNodeMetadata:
             query=(query or "").strip() or None,
             manual_query=manual_query,
             selected_candidate=selected_candidate,
+            **({"is_active": is_active} if is_active else {}),
         )
 
 

@@ -76,6 +76,8 @@ RESOURCE_SCOPE_FIELDS = frozenset(
 class RecognizedMetadataCandidate:
     id: str
     source: str
+    generated_fields: tuple[str, ...] = ()
+    generation_revision: str | None = None
     title: str | None = None
     author: str | None = None
     description: str | None = None
@@ -121,6 +123,9 @@ class ResourceMetadataState:
 class RecognizedMetadataTargetState:
     book: BookMetadataState
     resource: ResourceMetadataState | None
+    generation_revision: str | None = None
+    book_protected: frozenset[str] = frozenset()
+    resource_protected: frozenset[str] = frozenset()
 
 
 class BookMetadataChanges(TypedDict, total=False):
@@ -162,6 +167,7 @@ class RecognizedMetadataPort(Protocol):
         resource_changes: RecognizedResourceChanges,
         tags: tuple[str, ...] | None,
         now: datetime,
+        generated_fields: tuple[str, ...] = (),
     ) -> None: ...
 
 
@@ -452,6 +458,12 @@ class ApplyRecognizedMetadata:
                     cover_field = field
                     continue
                 current, value = self._field_values(field, state, command.candidate)
+                key = field.value.split(".")[-1]
+                if key in command.candidate.generated_fields:
+                    protected = state.resource_protected if field.value.startswith("resource.") else state.book_protected
+                    if command.candidate.generation_revision != state.generation_revision or (bool(current.strip()) if isinstance(current, str) else bool(current)) or key in protected:
+                        skipped.append(field)
+                        continue
                 if value is None or value == ():
                     raise InvalidRecognizedMetadataError(
                         "selected metadata value is unavailable"
@@ -479,6 +491,7 @@ class ApplyRecognizedMetadata:
                     resource_changes=resource_changes,
                     tags=next_tags,
                     now=command.now,
+                    **({"generated_fields": command.candidate.generated_fields} if command.candidate.generated_fields else {}),
                 )
                 self._unit_of_work.commit()
             except Exception:

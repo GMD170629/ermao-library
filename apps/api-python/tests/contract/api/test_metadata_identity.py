@@ -434,3 +434,165 @@ def test_selected_douban_detail_failure_preserves_search(client, db_session, mon
     assert requests[-1] == "http://douban.test/subject/12345/"
     assert "metadata.subject_detail_failed" in caplog.text
     assert "controlled detail connection failure" in caplog.text
+
+
+@pytest.mark.parametrize("website_description", [None, "网站简介原文"])
+@pytest.mark.parametrize("tags_only", [False, True])
+def test_generate_missing_fields_apply_and_reopen(client, db_session, monkeypatch, website_description, tags_only):
+    _add_book(db_session, book_id="generated-book")
+    metadata = db_session.get(LibraryBookMetadata, "generated-book")
+    metadata.title, metadata.author, metadata.description = "活着", "余华", None
+    db_session.add(Source(id="generate-ai", name="AI", kind="metadata", provider_type="ai", enabled=True,
+                          config=json.dumps({"baseUrl": "http://model.test", "model": "test", "generateEnabled": True})))
+    db_session.add(Source(id="generate-site", name="Bangumi", kind="metadata", provider_type="bangumi", enabled=True,
+                          config=json.dumps({"baseUrl": "http://site.test"})))
+    db_session.commit()
+    calls = []
+    def model(request, **kwargs):
+        prompt = json.loads(json.loads(request.data)["messages"][1]["content"])
+        calls.append(prompt)
+        result = ({"description": None if website_description else "受控生成：关于命运与生活的小说介绍。", "tags": ["小说", "人生"],
+                   "needsReview": False, "reason": "生成测试"} if "missingFields" in prompt else
+                  {"title": "活着", "author": "余华", "needsReview": False, "reason": "身份确定"})
+        return BytesIO(json.dumps({"choices": [{"message": {"content": json.dumps(result)}}]}).encode())
+    def site(request, **kwargs):
+        return BytesIO(json.dumps({"data": [{"id": "1", "name_cn": "活着", "infobox": [{"key": "作者", "value": "余华"}],
+                                             "summary": website_description}] if website_description else []}).encode())
+    monkeypatch.setattr(ai_client, "urlopen", model)
+    monkeypatch.setattr(organize_service, "urlopen", site)
+    _login(client, db_session, role="admin")
+    searched = client.post("/api/books/generated-book/source-nodes/generated-book-root/metadata/search", json={"providerId": "bangumi"})
+    assert searched.status_code == 200, searched.text
+    candidate = searched.json()["data"]["selectedMetadata"]
+    expected = ["tags"] if website_description else ["description", "tags"]
+    assert calls[-1]["missingFields"] == expected
+    assert candidate["generatedFields"] == expected
+    assert candidate["generationSource"] == "AI_GENERATED"
+    assert candidate["description"] == (website_description or "受控生成：关于命运与生活的小说介绍。")
+    saved = client.post("/api/books/generated-book/metadata/apply", json={"scope": "book", "candidate": candidate,
+                        "fields": ["book.tags"] if tags_only else ["book.description", "book.tags"]})
+    expected = ["tags"] if tags_only else expected
+    assert saved.status_code == 200, saved.text
+    db_session.expire_all()
+    stored = db_session.get(LibraryBookMetadata, "generated-book")
+    assert stored.description == (None if tags_only else candidate["description"])
+    assert json.loads(stored.generated_fields) == expected
+    assert not set(expected) & set(json.loads(stored.protected_fields))
+    reopened = client.get("/api/books/generated-book")
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.json()["data"]["book"]["generatedFields"] == expected
+    assert reopened.json()["data"]["book"]["tags"] == ["小说", "人生"]
+
+
+@pytest.mark.parametrize("scenario", ["off", "ai-off", "local-full", "protected", "failure", "invalid", "review", "site-failure"])
+def test_generation_optional_http_preserves_current_and_source(client, db_session, monkeypatch, caplog, scenario):
+    _add_book(db_session, book_id="optional-c")
+    metadata = db_session.get(LibraryBookMetadata, "optional-c")
+    metadata.title, metadata.author = "活着", "余华"
+    metadata.description = "本地介绍" if scenario == "local-full" else None
+    if scenario == "protected":
+        metadata.protected_fields = '["description", "tags"]'
+    db_session.add(Source(id="c-ai", name="AI", kind="metadata", provider_type="ai", enabled=scenario != "ai-off",
+                          config=json.dumps({"baseUrl": "http://model.test", "model": "test", "generateEnabled": scenario != "off"})))
+    db_session.add(Source(id="c-site", name="Bangumi", kind="metadata", provider_type="bangumi", enabled=True, config='{"baseUrl":"http://site.test"}'))
+    db_session.commit()
+    calls = []
+    def model(request, **kwargs):
+        prompt = json.loads(json.loads(request.data)["messages"][1]["content"])
+        calls.append(prompt)
+        if "missingFields" in prompt:
+            if scenario == "failure":
+                raise TimeoutError("controlled generation timeout")
+            result = {"description": None, "tags": ["生成标签"], "needsReview": scenario == "review", "reason": "test"}
+            if scenario == "site-failure":
+                result["description"] = "来源失败后的受控生成介绍"
+            if scenario == "invalid":
+                result["isbn"] = "forbidden field"
+        else:
+            result = {"title": "活着", "author": "余华", "needsReview": False, "reason": "identity"}
+        return BytesIO(json.dumps({"choices": [{"message": {"content": json.dumps(result)}}]}).encode())
+    def site(request, **kwargs):
+        if scenario == "site-failure":
+            raise OSError("controlled source unavailable")
+        return BytesIO(json.dumps({"data": [{"id": "1", "name_cn": "活着", "infobox": [{"key": "作者", "value": "余华"}],
+                                           "summary": "网站原文", "tags": [{"name": "网站标签"}] if scenario == "local-full" else []}]}).encode())
+    monkeypatch.setattr(ai_client, "urlopen", model);monkeypatch.setattr(organize_service, "urlopen", site)
+    _login(client, db_session, role="admin")
+    response = client.post("/api/books/optional-c/source-nodes/optional-c-root/metadata/search", json={"providerId": "bangumi"})
+    assert response.status_code == 200, response.text
+    candidate = response.json()["data"]["selectedMetadata"]
+    generated_calls = [item for item in calls if "missingFields" in item]
+    assert len(generated_calls) == (0 if scenario in {"off", "ai-off", "local-full", "protected"} else 1)
+    if scenario == "ai-off": assert calls == []
+    if scenario in {"invalid", "failure"}:
+        assert candidate["description"] == "网站原文" and candidate["generatedFields"] == []
+        assert "metadata.generate_failed" in caplog.text
+    if scenario == "review": assert candidate["generationNeedsReview"] is True
+    if scenario == "site-failure":
+        assert candidate["sourceIssues"] == ["bangumi:search_failed"]
+        assert "controlled source unavailable" in caplog.text
+        applied = client.post("/api/books/optional-c/metadata/apply", json={"scope": "book", "candidate": candidate, "fields": ["book.description", "book.tags"]})
+        assert applied.status_code == 200, applied.text
+        reopened = client.get("/api/books/optional-c").json()["data"]["book"]
+        assert reopened["description"] == "来源失败后的受控生成介绍" and reopened["generationSource"] == "AI_GENERATED"
+
+
+def test_manual_edit_and_source_replacement_update_generated_flags(client, db_session, monkeypatch):
+    test_generate_missing_fields_apply_and_reopen(client, db_session, monkeypatch, None, False)
+    edited = client.patch("/api/books/generated-book", json={"description": "用户改写简介"})
+    assert edited.status_code == 200, edited.text
+    result = client.get("/api/books/generated-book").json()["data"]["book"]
+    assert result["description"] == "用户改写简介" and result["generatedFields"] == ["tags"]
+    db_session.expire_all()
+    assert "description" in json.loads(db_session.get(LibraryBookMetadata, "generated-book").protected_fields)
+    # A subsequent explicit site selection replaces only the still-generated tags.
+    response = client.post("/api/books/generated-book/metadata/apply", json={"scope": "book", "candidate": {"id": "bangumi:1", "source": "bangumi", "tags": ["网站标签"]}, "fields": ["book.tags"]})
+    assert response.status_code == 200, response.text
+    result = client.get("/api/books/generated-book").json()["data"]["book"]
+    assert result["generatedFields"] == [] and result["generationSource"] is None
+    assert result["description"] == "用户改写简介" and result["tags"] == ["网站标签"]
+
+
+def test_generation_manual_switch_and_stale_apply(client, db_session, monkeypatch):
+    test_generate_missing_fields_apply_and_reopen(client, db_session, monkeypatch, None, True)
+    # The book description is still empty; a different selected identity gets its own completion.
+    calls = []
+    def model(request, **kwargs):
+        prompt = json.loads(json.loads(request.data)["messages"][1]["content"]);calls.append(prompt)
+        assert prompt["title"] == "另一作品" and prompt["author"] == "另一作者"
+        assert prompt["missingFields"] == ["description"]
+        return BytesIO(json.dumps({"choices": [{"message": {"content": json.dumps({"description": "另一作品的生成介绍", "tags": [], "needsReview": False, "reason": "new selection"})}}]}).encode())
+    monkeypatch.setattr(ai_client, "urlopen", model)
+    response = client.post("/api/books/generated-book/source-nodes/generated-book-root/metadata/search", json={"providerId": "bangumi", "query": "本次人工词", "manualQuery": True,
+        "selectedCandidate": {"id": "bangumi:2", "source": "bangumi", "title": "另一作品", "author": "另一作者"}})
+    assert response.status_code == 200, response.text
+    data = response.json()["data"];candidate = data["selectedMetadata"]
+    assert data["query"] == "本次人工词" and candidate["description"] == "另一作品的生成介绍" and len(calls) == 1
+    edited = client.patch("/api/books/generated-book", json={"description": "模型等待期间的人工改写"})
+    assert edited.status_code == 200, edited.text
+    response = client.post("/api/books/generated-book/metadata/apply", json={"scope": "book", "candidate": candidate, "fields": ["book.description"]})
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["skippedFields"] == ["book.description"]
+    assert client.get("/api/books/generated-book").json()["data"]["book"]["description"] == "模型等待期间的人工改写"
+
+
+def test_generated_resource_description_preserves_book_scope(client, db_session, monkeypatch):
+    test_generate_missing_fields_apply_and_reopen(client, db_session, monkeypatch, None, True)
+    from app.models import LibraryReadableResourceMetadata
+    row = db_session.get(LibraryReadableResourceMetadata, "generated-book-resource")
+    row.description = None;db_session.commit()
+    def model(request, **kwargs):
+        prompt = json.loads(json.loads(request.data)["messages"][1]["content"])
+        assert prompt["missingFields"] == ["description"]
+        return BytesIO(json.dumps({"choices": [{"message": {"content": json.dumps({"description": "资源生成介绍", "tags": [], "needsReview": False, "reason": "resource"})}}]}).encode())
+    monkeypatch.setattr(ai_client, "urlopen", model)
+    response = client.post("/api/books/generated-book/source-nodes/generated-book-resource-node/metadata/search", json={"providerId": "bangumi", "selectedCandidate": {"id": "bangumi:3", "source": "bangumi", "title": "活着", "author": "余华"}})
+    assert response.status_code == 200, response.text
+    candidate = response.json()["data"]["selectedMetadata"]
+    applied = client.post("/api/books/generated-book/metadata/apply", json={"scope": "resource", "resourceId": "generated-book-resource", "candidate": candidate, "fields": ["resource.description"]})
+    assert applied.status_code == 200, applied.text
+    detail = client.get("/api/books/generated-book").json()["data"]["book"]
+    assert detail["description"] is None
+    assert detail["resources"][0]["description"] == "资源生成介绍"
+    assert detail["resources"][0]["generatedFields"] == ["description"]
+    assert detail["resources"][0]["generationSource"] == "AI_GENERATED"

@@ -32,7 +32,10 @@ from app.modules.library.application.facet_sync import (
     BookFacetProjection,
     prepare_book_facet,
 )
-from app.modules.library.application.metadata_ownership import protect_fields
+from app.modules.library.application.metadata_ownership import (
+    protect_fields,
+    protected_fields,
+)
 from app.modules.library.application.recognized_metadata import (
     BookMetadataChanges,
     BookMetadataState,
@@ -149,6 +152,9 @@ class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetada
                 tags=tags,
             ),
             resource=resource_state,
+            generation_revision=metadata.updated_at.isoformat() + ("|" + resource_row.updated_at.isoformat() if resource_id and resource_row is not None else ""),
+            book_protected=protected_fields(metadata.protected_fields),
+            resource_protected=protected_fields(resource_row.protected_fields) if resource_id and resource_row is not None else frozenset(),
         )
 
     def apply_changes(
@@ -160,14 +166,17 @@ class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetada
         resource_changes: RecognizedResourceChanges,
         tags: tuple[str, ...] | None,
         now: datetime,
+        generated_fields: tuple[str, ...] = (),
     ) -> None:
         metadata = self._db.get(LibraryBookMetadata, book_id)
         if metadata is None:
             raise LookupError(book_id)
         metadata.protected_fields = protect_fields(
             metadata.protected_fields,
-            (*book_changes.keys(), *(("tags",) if tags is not None else ())),
+            set(book_changes).union({"tags"} if tags is not None else set()) - set(generated_fields),
         )
+        changed = set(book_changes).union({"tags"} if tags is not None else set())
+        metadata.generated_fields = json.dumps(sorted((set(json.loads(metadata.generated_fields or "[]")) - changed) | (changed & set(generated_fields))))
         for field, value in book_changes.items():
             setattr(metadata, field, value)
         if "title" in book_changes:
@@ -187,8 +196,9 @@ class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetada
             if resource_metadata is None:
                 raise LookupError(resource_id)
             resource_metadata.protected_fields = protect_fields(
-                resource_metadata.protected_fields, resource_changes.keys()
+                resource_metadata.protected_fields, set(resource_changes) - set(generated_fields)
             )
+            resource_metadata.generated_fields = json.dumps(sorted((set(json.loads(resource_metadata.generated_fields or "[]")) - set(resource_changes)) | (set(resource_changes) & set(generated_fields))))
             for field, value in resource_changes.items():
                 setattr(resource_metadata, field, value)
             resource_metadata.updated_at = now

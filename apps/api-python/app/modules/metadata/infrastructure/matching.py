@@ -111,7 +111,7 @@ def prepare_matched_metadata(
         except Exception as error:  # noqa: BLE001 - optional detail preserves the search record.
             record_exception(logging.getLogger(__name__), "metadata.subject_detail_failed", error,
                              context={"step": "subject_detail", "resource_id": str(item.get("id"))})
-            return item
+            return {**item, "sourceIssues": ["douban:detail_failed"]}
         try:
             external_metadata_cache_put(db, "douban", cache_key, {"candidates": [normalized]})
         except Exception as error:  # noqa: BLE001 - cache failure must not lose fetched fields.

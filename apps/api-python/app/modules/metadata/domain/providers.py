@@ -134,9 +134,11 @@ BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
         version="builtin",
         description="先分析并纠正标题作者，再用于来源查询；关闭后不调用模型。",
         mode="infer",
-        fields=("title", "author"),
+        fields=("title", "author", "description", "tags"),
         capabilities=("automatic", "manual-search"),
         config_fields=(
+            ProviderConfigField(key="generateEnabled", label="AI 模拟补全", kind="boolean", default=False,
+                                help="仅在身份确定且本地和网站均缺少内容时生成简介、标签，生成内容标明来源。"),
             ProviderConfigField(
                 key="baseUrl",
                 label="API 地址",

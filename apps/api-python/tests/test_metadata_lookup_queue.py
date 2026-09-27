@@ -541,3 +541,68 @@ def test_queue_reads_selected_subject_detail_through_real_provider(db_session, t
         assert saved.description is None
     else:
         assert (saved.title, saved.author, saved.description) == ("海边的卡夫卡", "村上春树", "详情才有的简介")
+
+
+@pytest.mark.parametrize("scenario", ["normal", "source-failure", "review", "protected", "invalid", "cancelled", "concurrent", "resolved-B", "replace-generated"])
+def test_queue_generated_fields_reach_storage_without_manual_locks(db_session, test_settings, monkeypatch, caplog, scenario):
+    from io import BytesIO
+
+    from app.models.import_pipeline import Source
+    from app.models.organize import MetadataProviderExecution, OrganizePolicy
+    from app.modules.metadata.infrastructure import ai_client
+    from app.services import organize_service
+    book, resource = _seed_lookup_graph(db_session)
+    book_id, resource_id = book.id, resource.id
+    metadata = db_session.get(LibraryBookMetadata, book_id)
+    metadata.title, metadata.author, metadata.description = "活着", "余华", None
+    if scenario == "protected": metadata.protected_fields = '["description", "tags"]'
+    if scenario == "replace-generated":
+        metadata.description, metadata.generated_fields = "旧的生成简介", '["description"]'
+    db_session.add(OrganizePolicy(id="generate-policy", prefer_local_metadata=True))
+    db_session.add(Source(id="generate-ai", name="AI", kind="metadata", provider_type="ai", enabled=True,
+                          config=json.dumps({"baseUrl": "http://model.test", "model": "test", "generateEnabled": True})))
+    db_session.add(Source(id="generate-site", name="Bangumi", kind="metadata", provider_type="bangumi", enabled=True,
+                          config='{"baseUrl":"http://site.test"}'))
+    db_session.commit()
+    task = _lookup_task(db_session, book, resource, status="RUNNING");task_id = task.id
+    calls = []
+    def model(request, **kwargs):
+        prompt = json.loads(json.loads(request.data)["messages"][1]["content"]);calls.append(prompt)
+        if "missingFields" in prompt:
+            if scenario == "cancelled": db_session.get(MetadataLookupTask, task_id).status = "CANCELLED"
+            if scenario == "concurrent":
+                row = db_session.get(LibraryBookMetadata, book_id);row.description = "用户并发介绍";row.updated_at = datetime.now(UTC) + timedelta(seconds=1)
+            db_session.commit()
+            result = {"description": "生成的介绍" if "description" in prompt["missingFields"] else None, "tags": ["生成主题"], "needsReview": scenario == "review", "reason": "test"}
+            if scenario == "invalid": result["title"] = "禁止字段"
+        elif "candidates" in prompt:
+            result = {"title": "活着", "author": "余华", "primaryCandidateId": "bangumi:1", "relatedCandidateIds": [], "needsReview": False, "reason": "B resolved"}
+        else:
+            result = {"title": "活着", "author": None if scenario == "resolved-B" else "余华", "needsReview": scenario == "resolved-B", "reason": "A"}
+        return BytesIO(json.dumps({"choices": [{"message": {"content": json.dumps(result)}}]}).encode())
+    def site(request, **kwargs):
+        if scenario == "source-failure": raise OSError("controlled site failure")
+        data = [{"id": "1", "name_cn": "活着", "infobox": [{"key": "作者", "value": "余华"}], "summary": "真实来源介绍"}] if scenario in {"resolved-B", "replace-generated"} else []
+        return BytesIO(json.dumps({"data": data}).encode())
+    monkeypatch.setattr(ai_client, "urlopen", model);monkeypatch.setattr(organize_service, "urlopen", site)
+    status = queue.process_metadata_lookup_task(db_session, test_settings, {
+        "id": task_id, "bookId": book_id, "resourceId": resource_id, "status": "RUNNING", "attempts": 0, "providerOrder": '["ai", "bangumi"]'})
+    db_session.expire_all();saved = db_session.get(LibraryBookMetadata, book_id)
+    if scenario in {"cancelled", "concurrent"}:
+        assert status != "COMPLETED"
+        assert saved.description == ("用户并发介绍" if scenario == "concurrent" else None)
+        assert saved.generated_fields == '[]'
+    elif scenario in {"review", "protected", "invalid"}:
+        assert saved.description is None and saved.generated_fields == '[]'
+        if scenario == "protected": assert not any("missingFields" in prompt for prompt in calls)
+        if scenario == "invalid": assert "metadata.generate_failed" in caplog.text
+    else:
+        assert status == "COMPLETED"
+        assert saved.description == ("真实来源介绍" if scenario in {"resolved-B", "replace-generated"} else "生成的介绍")
+        assert json.loads(saved.generated_fields) == (["tags"] if scenario in {"resolved-B", "replace-generated"} else ["description", "tags"])
+        assert not set(json.loads(saved.generated_fields)) & set(json.loads(saved.protected_fields))
+    if scenario == "resolved-B": assert len(calls) == 3 and calls[-1]["missingFields"] == ["tags"]
+    if scenario == "source-failure":
+        assert "controlled site failure" in caplog.text
+        executions = list(db_session.scalars(select(MetadataProviderExecution).where(MetadataProviderExecution.lookup_task_id == task_id)))
+        assert any(row.provider_id == "bangumi" and row.status == "FAILED" for row in executions)

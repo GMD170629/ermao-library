@@ -1,9 +1,9 @@
 """Stable read-only Library view contracts used across capabilities."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from app.contracts.http import HttpContractModel
 
@@ -37,6 +37,15 @@ class ResourceView(HttpContractModel):
     book_id: str = Field(alias="bookId")
     source_node_id: str = Field(alias="sourceNodeId")
     title: str
+    generated_fields: list[str] = Field(default_factory=list, alias="generatedFields")
+
+    generation_source: Literal["AI_GENERATED"] | None = Field(default=None, alias="generationSource")
+
+    @model_validator(mode="after")
+    def derive_generation_source(self) -> Self:
+        self.generation_source = "AI_GENERATED" if self.generated_fields else None
+        return self
+
     description: str | None = None
     resource_index: float | None = Field(default=None, alias="resourceIndex")
     sort_order: int = Field(default=0, alias="sortOrder")
@@ -83,6 +92,15 @@ class BookView(HttpContractModel):
     source_node_id: str = Field(alias="sourceNodeId")
     title: str
     author: str | None = None
+    generated_fields: list[str] = Field(default_factory=list, alias="generatedFields")
+
+    generation_source: Literal["AI_GENERATED"] | None = Field(default=None, alias="generationSource")
+
+    @model_validator(mode="after")
+    def derive_generation_source(self) -> Self:
+        self.generation_source = "AI_GENERATED" if self.generated_fields else None
+        return self
+
     description: str | None = None
     series_name: str | None = Field(default=None, alias="seriesName")
     series_index: float | None = Field(default=None, alias="seriesIndex")

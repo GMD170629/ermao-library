@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal, cast
 from urllib.parse import quote
 
+from anyio import from_thread
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -1418,6 +1419,7 @@ def search_book_source_node_metadata(
             query=payload.query,
             manual_query=payload.manual_query,
             selected_candidate=payload.selected_candidate.model_dump(by_alias=True, mode="json") if payload.selected_candidate else None,
+            is_active=lambda: not from_thread.run(request.is_disconnected),
         )
     except MetadataProviderSearchError as error:
         record_exception(
@@ -1461,6 +1463,9 @@ def search_book_source_node_metadata(
             resourceIndex=candidate.resource_index,
             coverUrl=candidate.cover_url,
             confidence=candidate.confidence,
+            generatedFields=cast(list[Literal["description", "tags"]], list(candidate.generated_fields)), generationSource="AI_GENERATED" if candidate.generated_fields else None,
+            generationNeedsReview=candidate.generation_needs_review, generationReason=candidate.generation_reason,
+            generationRevision=candidate.generation_revision, sourceIssues=list(candidate.source_issues),
         )
 
     return SourceNodeMetadataSearchResponse(
@@ -1508,6 +1513,7 @@ def apply_book_recognized_metadata(
                 resource_id=payload.resource_id,
                 candidate=RecognizedMetadataCandidate(
                     id=candidate.id,
+                    generated_fields=tuple(candidate.generated_fields), generation_revision=candidate.generation_revision,
                     source=candidate.source,
                     title=candidate.title,
                     author=candidate.author,

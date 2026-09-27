@@ -333,6 +333,7 @@ class SqlAlchemyMetadataPatches:
                 if row is None:
                     raise MetadataPatchError("RESOURCE_NOT_FOUND")
                 row.protected_fields = protect_fields(row.protected_fields, {"tags"})
+                row.generated_fields = json.dumps(sorted(set(json.loads(row.generated_fields or "[]")) - {"tags"}))
         elif before.target_type == "resource":
             resource_values: dict[str, object] = {
                 key: value for key, value in values.items() if key != "cover_ref"

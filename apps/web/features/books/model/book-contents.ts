@@ -33,6 +33,12 @@ export type BookContentsPage = Readonly<{
 }>;
 
 export type SourceNodeMetadataCandidate = Readonly<{
+  generatedFields?: string[];
+  sourceIssues?: string[];
+  generationSource?: "AI_GENERATED" | null;
+  generationNeedsReview?: boolean;
+  generationReason?: string | null;
+  generationRevision?: string | null;
   id: string;
   source: string;
   title: string | null;

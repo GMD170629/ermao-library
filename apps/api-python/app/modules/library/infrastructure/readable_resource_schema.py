@@ -435,6 +435,7 @@ class LibraryBookMetadata(Base):
         default="NOT_TRACKING",
         server_default="NOT_TRACKING",
     )
+    generated_fields: Mapped[str] = mapped_column("generatedFields", Text, nullable=False, default="[]", server_default="[]")
     protected_fields: Mapped[str] = mapped_column(
         "protectedFields", Text, nullable=False, default="[]", server_default="[]"
     )
@@ -638,6 +639,7 @@ class LibraryReadableResourceMetadata(Base):
         default="PENDING",
         server_default="PENDING",
     )
+    generated_fields: Mapped[str] = mapped_column("generatedFields", Text, nullable=False, default="[]", server_default="[]")
     protected_fields: Mapped[str] = mapped_column(
         "protectedFields", Text, nullable=False, default="[]", server_default="[]"
     )

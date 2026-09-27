@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 from sqlalchemy import select
@@ -136,6 +137,7 @@ class SqlAlchemyResourceMetadata:
         metadata.protected_fields = protect_fields(
             metadata.protected_fields, changes.keys()
         )
+        metadata.generated_fields = json.dumps(sorted(set(json.loads(metadata.generated_fields or "[]")) - set(changes)))
         for field, value in changes.items():
             if field in metadata_fields:
                 setattr(metadata, field, value)

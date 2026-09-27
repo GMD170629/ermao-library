@@ -24,6 +24,10 @@ function stringValue(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
 }
 
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
 function nullableString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
 }
@@ -113,6 +117,7 @@ export function mapReadableResourceView(value: unknown): ReadableResourceView | 
     sourceNodeId,
     title: stringValue(item.title, id),
     description: stringValue(item.description),
+    generatedFields: stringArray(item.generatedFields),
     resourceIndex: nullableNumber(item.resourceIndex),
     sortOrder: finiteNumber(item.sortOrder),
     format,
@@ -164,6 +169,7 @@ export function mapBookView(value: unknown): BookView {
     title: stringValue(root.title, '未命名图书'),
     author: stringValue(root.author, ''),
     description: stringValue(root.description),
+    generatedFields: stringArray(root.generatedFields),
     seriesName: nullableString(root.seriesName),
     seriesIndex: nullableNumber(root.seriesIndex),
     tags: Array.isArray(root.tags) ? root.tags.filter((tag): tag is string => typeof tag === 'string') : [],
@@ -368,6 +374,8 @@ export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: str
     if (!id) return [];
     return [{
       id,
+      ...(Array.isArray(item.sourceIssues) && item.sourceIssues.length ? { sourceIssues: stringArray(item.sourceIssues) } : {}),
+      ...(Array.isArray(item.generatedFields) && item.generatedFields.length ? { generatedFields: stringArray(item.generatedFields), generationSource: "AI_GENERATED" as const, generationNeedsReview: item.generationNeedsReview === true, generationReason: nullableString(item.generationReason), generationRevision: nullableString(item.generationRevision) } : {}),
       source: stringValue(item.source, providerId),
       title: nullableString(item.title),
       author: nullableString(item.author),

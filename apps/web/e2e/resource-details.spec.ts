@@ -353,3 +353,47 @@ test('AI semantic match applies source metadata and allows changing the record',
   await expect(page.getByRole('button', { name: '管理图书 海边的卡夫卡', exact: true })).toBeVisible();
   await expect(page.getByText('网站真实简介', { exact: true })).toBeVisible();
 });
+
+
+test('AI generated fields are previewed, applied, reloaded and isolated when changing records', async ({ page }) => {
+  let saved = false;
+  const generated = { id: 'ai-identity', source: 'ai', title: '活着', author: '余华', description: '本次生成的作品介绍', tags: ['人生', '小说'],
+    generatedFields: ['description', 'tags'], generationSource: 'AI_GENERATED', generationNeedsReview: false, generationReason: '生成测试', generationRevision: 'revision-1' };
+  const other = { id: 'bangumi:2', source: 'bangumi', title: '另一作品', author: '另一作者', tags: [] };
+  await page.route(/\/api\/books\/book-1(?:\?|$)/, (route) => route.fulfill({ json: { ok: true, data: { book: {
+    id: 'book-1', sourceNodeId: 'book-node', title: '活着', author: '余华', description: saved ? generated.description : null,
+    tags: saved ? generated.tags : [], generatedFields: saved ? generated.generatedFields : [], resources: [epubResource]
+  } } } }));
+  await page.route('**/api/metadata/providers', (route) => route.fulfill({ json: { ok: true, data: { providers: [{ id: 'bangumi', name: 'Bangumi', enabled: true, priority: 1 }] } } }));
+  await page.route('**/metadata/search', (route) => {
+    const body = route.request().postDataJSON();
+    const selected = body.selectedCandidate ? { ...other, description: '另一身份的生成介绍', generatedFields: ['description'], generationSource: 'AI_GENERATED' } : generated;
+    return route.fulfill({ json: { ok: true, data: { query: '活着', candidates: [generated, other], selectedId: selected.id, selectedMetadata: selected, preferLocalMetadata: true } } });
+  });
+  await page.route('**/metadata/apply', async (route) => {
+    const body = route.request().postDataJSON();
+    expect(body.candidate.generatedFields).toEqual(['description', 'tags']);
+    expect(body.candidate.generationRevision).toBe('revision-1');
+    expect(body.candidate.description).toBe(generated.description);
+    expect(body.fields).toEqual(['book.description', 'book.tags']);
+    saved = true;
+    await route.fulfill({ json: { ok: true, data: { appliedFields: body.fields, skippedFields: [], coverStatus: 'notSelected' } } });
+  });
+  await page.goto('/books/book-1');
+  await page.getByRole('button', { name: '管理图书 活着', exact: true }).click();
+  await page.getByRole('menuitem', { name: '识别', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '元数据识别', exact: true });
+  await dialog.getByRole('button', { name: '搜索', exact: true }).click();
+  await expect(dialog.getByText('AI 生成', { exact: true })).toHaveCount(2);
+  await dialog.getByRole('button', { name: /另一作品.*另一作者.*bangumi/ }).click();
+  await expect(dialog.getByRole('checkbox', { name: /简介.*另一身份的生成介绍/ })).toBeChecked();
+  await dialog.getByRole('button', { name: /活着.*余华.*ai/ }).click();
+  await expect(dialog.getByRole('checkbox', { name: /简介.*本次生成的作品介绍/ })).toBeChecked();
+  await dialog.getByRole('button', { name: '应用所选字段' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByText('简介 · AI 生成', { exact: true })).toBeVisible();
+  await expect(page.getByText('标签 · AI 生成', { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByText(generated.description, { exact: true })).toBeVisible();
+  await expect(page.getByText('简介 · AI 生成', { exact: true })).toBeVisible();
+});

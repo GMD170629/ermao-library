@@ -238,6 +238,48 @@ def test_invalid_detail_page_is_not_cached_as_success(db_session, monkeypatch, c
     records = [{"source": "douban", "id": "12345", "title": "search title", "description": "search summary"}]
     for _ in range(2):
         result = prepare_matched_metadata(db_session, MetadataMatch(None, "douban:12345"), records)
-        assert result == records[0] and not result.get("_detailFetched")
+        assert result == {**records[0], "sourceIssues": ["douban:detail_failed"]} and not result.get("_detailFetched")
     assert len(calls) == 2
     assert "DOUBAN_SUBJECT_DETAIL_UNAVAILABLE" in caplog.text
+
+
+def test_generation_cancelled_before_model_does_not_call(db_session, monkeypatch):
+    from app.modules.metadata.infrastructure.generation import complete_missing_metadata
+    from tests.contract.api.test_recognized_metadata_api import _add_book
+    _add_book(db_session, book_id="cancel-c")
+    from app.models import LibraryBookMetadata
+    metadata = db_session.get(LibraryBookMetadata, "cancel-c")
+    metadata.description = None
+    db_session.add(Source(id="cancel-ai", name="AI", kind="metadata", provider_type="ai", enabled=True,
+                          config=json.dumps({"baseUrl": "http://model.test", "model": "test", "generateEnabled": True})))
+    db_session.commit()
+    def forbidden(*args, **kwargs): pytest.fail("Cancelled recognition must not invoke generation")
+    monkeypatch.setattr(ai_client, "urlopen", forbidden)
+    candidate = {"source": "ai", "id": "ai-identity", "title": "活着", "author": "余华"}
+    assert complete_missing_metadata(db_session, book_id="cancel-c", candidate=candidate, is_active=lambda: False) == candidate
+
+
+def test_generated_field_migration_adds_only_marker_columns(tmp_path):
+    from alembic import command
+    from sqlalchemy import MetaData
+
+    from app.db.runner import alembic_config_for_engine
+    from app.db.sqlite import create_sqlite_engine
+    engine = create_sqlite_engine(tmp_path / "generated-upgrade.sqlite3")
+    config = alembic_config_for_engine(engine)
+    try:
+        command.upgrade(config, "0038_import_scan_round_fact")
+        with engine.begin() as connection:
+            # Empty existing metadata schemas acquire only the two marker columns.
+            before = MetaData();before.reflect(connection, only=["LibraryBookMetadata", "LibraryReadableResourceMetadata"])
+            assert all("generatedFields" not in table.c for table in before.tables.values())
+        command.upgrade(config, "head")
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            after = MetaData();after.reflect(connection, only=["LibraryBookMetadata", "LibraryReadableResourceMetadata"])
+            for name in ("LibraryBookMetadata", "LibraryReadableResourceMetadata"):
+                table = after.tables[name]
+                assert set(table.c.keys()) - set(before.tables[name].c.keys()) == {"generatedFields"}
+                assert table.c.generatedFields.server_default.arg.text == "'[]'"
+    finally:
+        engine.dispose()
