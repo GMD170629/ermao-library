@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from app.contracts.metadata_identity import MetadataIdentity
+
 
 class MetadataProviderSearchError(Exception):
     """A configured metadata provider could not complete a search."""
@@ -39,6 +41,9 @@ class SourceNodeMetadataRecognitionResult:
     query: str
     message: str | None
     candidates: tuple[SourceNodeMetadataCandidate, ...]
+    identity: MetadataIdentity | None = None
+    selected_id: str | None = None
+    prefer_local_metadata: bool = True
 
 
 class SourceNodeMetadataRecognitionPort(Protocol):

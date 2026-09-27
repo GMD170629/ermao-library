@@ -8,20 +8,27 @@ from collections.abc import Mapping
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.i18n import configured_locale
 from app.models import (
     LibraryBook,
     LibraryBookMetadata,
     LibraryReadableResource,
+    LibraryReadableResourceMetadata,
     LibrarySourceNode,
     LibrarySourceNodeMetadata,
 )
+from app.models.organize import OrganizePolicy
 from app.modules.library.application.source_node_metadata_recognition import (
     MetadataProviderSearchError,
     SourceNodeMetadataCandidate,
     SourceNodeMetadataRecognitionPort,
     SourceNodeMetadataRecognitionResult,
 )
-from app.modules.metadata.public import search_with_metadata_provider
+from app.modules.metadata.public import (
+    choose_metadata_candidate,
+    recognize_metadata_identity,
+    search_with_metadata_provider,
+)
 
 
 class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
@@ -90,48 +97,121 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
                 )
             )
         ]
-        title = (
-            node_metadata.title.strip()
-            if node_metadata is not None and node_metadata.title
-            else node.name
-        )
-        context = {
-            "book": {
-                "id": book.id,
-                "title": title,
-                "author": book_metadata.author,
-                "description": node_metadata.description if node_metadata else None,
-                "seriesName": book_metadata.series_name,
-                "seriesIndex": book_metadata.series_index,
-            },
-            "resources": resources,
-        }
-        try:
-            result = search_with_metadata_provider(
-                self._db,
-                context,
-                provider_id,
-                query or title,
+        resource_title = self._db.scalar(
+            select(LibraryReadableResourceMetadata.title)
+            .join(
+                LibraryReadableResource,
+                LibraryReadableResource.id
+                == LibraryReadableResourceMetadata.resource_id,
             )
+            .where(
+                LibraryReadableResource.book_id == book_id,
+                LibraryReadableResource.source_node_id == node.id,
+            )
+            .limit(1)
+        )
+        title = (
+            book_metadata.title
+            if node.id == root.id
+            else resource_title
+            or (
+                node_metadata.title.strip()
+                if node_metadata is not None and node_metadata.title
+                else node.name
+            )
+        )
+        book_context: dict[str, object] = {
+            "id": book.id,
+            "title": title,
+            "author": book_metadata.author,
+            "description": node_metadata.description if node_metadata else None,
+            "seriesName": book_metadata.series_name,
+            "seriesIndex": book_metadata.series_index,
+        }
+        context: dict[str, object] = {"book": book_context, "resources": resources}
+        policy = self._db.scalars(select(OrganizePolicy).limit(1)).first()
+        prefer_local = policy.prefer_local_metadata if policy is not None else True
+        target_id = node.id
+        disabled_message = "AI-assisted recognition is disabled" if configured_locale(self._db) == "en-US" else "AI 增强识别未启用"
+        try:
+            identity = recognize_metadata_identity(
+                self._db,
+                book_id=book_id,
+                source_node_id=target_id,
+                title=title,
+                author=book_metadata.author,
+            )
+            if identity is not None:
+                book_context = {
+                    **book_context,
+                    "title": identity.title or title,
+                    "author": identity.author,
+                }
+                context["book"] = book_context
+            effective_query = (
+                identity.title if identity and identity.title else query or title
+            )
+            result: dict[str, object]
+            if provider_id == "ai":
+                result = {
+                    "candidates": [identity.candidate()] if identity else [],
+                    "message": identity.reason if identity else disabled_message,
+                }
+            else:
+                result = search_with_metadata_provider(
+                    self._db, context, provider_id, effective_query
+                )
+            raw_values = result.get("candidates", [])
+            values = (
+                [
+                    {str(key): value for key, value in item.items()}
+                    for item in raw_values
+                    if isinstance(item, dict)
+                ]
+                if isinstance(raw_values, list)
+                else []
+            )
+            selected, _ = choose_metadata_candidate(
+                values,
+                str(book_context["title"]) if identity else effective_query,
+                str(book_context.get("author") or ""),
+            )
+            if identity is not None:
+                if selected is not None and identity.title:
+                    selected.update(
+                        title=identity.title,
+                        author=identity.author or selected.get("author"),
+                    )
+                if provider_id != "ai" and (identity.title or identity.author):
+                    values = [*values, identity.candidate()]
+                if selected is None or identity.needs_review:
+                    selected = (
+                        identity.candidate()
+                        if identity.title or identity.author
+                        else None
+                    )
         except Exception as exc:
             raise MetadataProviderSearchError(provider_id) from exc
         candidates = tuple(
             candidate
-            for value in result.get("candidates", [])
+            for value in values
             if isinstance(value, Mapping)
             and (candidate := self._candidate(value, provider_id)) is not None
         )
         return SourceNodeMetadataRecognitionResult(
             source_node_id=source_node_id,
             provider_id=provider_id,
-            query=query or title,
+            query=effective_query,
+            identity=identity,
+            selected_id=str(selected["id"]) if selected else None,
+            prefer_local_metadata=prefer_local,
             message=str(result["message"]) if result.get("message") else None,
             candidates=candidates,
         )
 
     @staticmethod
     def _candidate(
-        value: Mapping[object, object], provider_id: str
+        value: Mapping[str, object], provider_id: str
     ) -> SourceNodeMetadataCandidate | None:
         identifier = str(value.get("id") or "").strip()
         if not identifier:

@@ -1,5 +1,8 @@
 'use client';
 
+import type { MetadataIdentity } from './model/book-contents';
+import { MetadataIdentitySummary } from './ui/metadata-identity-summary';
+
 import { authorDisplayLabel } from '@/types/book';
 
 import { CheckCircle2, ImageOff, Maximize2, Search, Sparkles, X } from 'lucide-react';
@@ -100,6 +103,8 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
   const scope: MetadataTargetScope = fixedScope === 'resource' ? 'resource' : 'book';
   const definitions = useMemo(() => recognizedMetadataFields(scope), [scope]);
   const selectedTargetResource = scope === 'resource' ? targetResource : null;
+  const [identity, setIdentity] = useState<MetadataIdentity | null>(null);
+  const [preferLocal, setPreferLocal] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -109,7 +114,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
   const searchControllerRef = useRef<AbortController | null>(null);
   const applyControllerRef = useRef<AbortController | null>(null);
 
-  const selected = useMemo(() => candidates.find((candidate) => candidate.id === selectedId) ?? candidates[0] ?? null, [candidates, selectedId]);
+  const selected = useMemo(() => candidates.find((candidate) => candidate.id === selectedId) ?? null, [candidates, selectedId]);
   const options = useMemo(() => providers.map((provider) => ({
     value: provider.id,
     label: provider.name,
@@ -123,6 +128,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
     setSource('');
     setQuery(book.title);
     setCandidates([]);
+    setIdentity(null);
     setSelectedId('');
     setSelectedFields([]);
     setMessage('');
@@ -150,8 +156,8 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
   }, [book.id, currentResourceId, fixedScope, open]);
 
   useEffect(() => {
-    setSelectedFields(defaultRecognizedMetadataFields(book, selectedTargetResource, selected, definitions));
-  }, [book, definitions, selected, selectedTargetResource]);
+    setSelectedFields(defaultRecognizedMetadataFields(book, selectedTargetResource, selected, definitions, preferLocal));
+  }, [book, definitions, preferLocal, selected, selectedTargetResource]);
 
   useEffect(() => {
     if (!coverPreview) return;
@@ -178,10 +184,13 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
       if (controller.signal.aborted) return;
       const nextCandidates = result.candidates;
       setCandidates(nextCandidates);
-      setSelectedId(nextCandidates[0]?.id ?? '');
+      setSelectedId(result.selectedId ?? '');
+      setIdentity(result.identity);
+      setPreferLocal(result.preferLocalMetadata);
+      setQuery(result.query);
       setMessage(nextCandidates.length
         ? i18nAttribute('找到 {value0} 条候选', { value0: nextCandidates.length })
-        : i18nAttribute('没有找到候选'));
+        : i18nAttribute(result.message || '没有找到候选'));
     } catch (reason) {
       if (controller.signal.aborted) return;
       setError(i18nAttribute(reason instanceof Error ? reason.message : '元数据查询失败'));
@@ -289,6 +298,8 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
           </div>
         ) : null}
 
+        {identity ? <MetadataIdentitySummary originalTitle={scope === 'resource' ? targetResource?.title ?? book.title : book.title} originalAuthor={book.author} identity={identity} query={query} /> : null}
+
         <div className="grid min-h-0 flex-1 gap-4 overflow-auto p-5 lg:grid-cols-[320px_1fr]">
           <div className="space-y-2">
             {candidates.map((candidate) => (
@@ -311,7 +322,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
                     <div data-i18n-skip className="min-w-0 flex-1">
                       <div className="flex items-start justify-between gap-2">
                         <div className="line-clamp-2 font-medium text-slate-900">{candidate.title || i18nAttribute("未命名候选")}</div>
-                        <Badge tone={candidate.confidence >= 0.8 ? 'green' : 'blue'}>{Math.round(candidate.confidence * 100)}%</Badge>
+                        {candidate.source === 'ai' ? <Badge tone="blue">AI</Badge> : <Badge tone={candidate.confidence >= 0.8 ? 'green' : 'blue'}>{Math.round(candidate.confidence * 100)}%</Badge>}
                       </div>
                       <div className="mt-1 line-clamp-1 text-xs text-slate-500">{[authorDisplayLabel(candidate.author), candidate.source].filter(Boolean).join(' · ')}</div>
                       {candidate.description ? <div className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500">{candidate.description}</div> : null}

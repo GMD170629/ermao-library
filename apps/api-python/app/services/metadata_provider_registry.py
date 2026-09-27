@@ -12,11 +12,17 @@ from urllib.request import urlopen
 from sqlalchemy.orm import Session
 
 from app.bootstrap.system import write_prepared_system_events
+from app.contracts.metadata_identity import MetadataIdentity
 from app.core.exception_diagnostics import record_exception
 from app.core.i18n import configured_locale
 from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
 from app.modules.metadata.domain.providers import BUILTIN_MANIFESTS, ProviderManifest
+from app.modules.metadata.infrastructure.ai_client import (
+    identify_metadata,
+    model_configured,
+)
+from app.modules.metadata.infrastructure.identity_context import identity_clues
 from app.modules.metadata.infrastructure.providers import (
     PreparedMetadataProviderWrite,
     execute_prepared_provider_write,
@@ -115,6 +121,15 @@ class BuiltinMetadataProvider:
     ) -> dict[str, Any]:
         from app.services.organize_service import metadata_search_candidates
 
+        if self.manifest.id == "ai":
+            book = context["book"]
+            identity = recognize_metadata_identity(
+                db, book_id=str(book["id"]), title=str(book.get("title") or ""),
+                author=str(book.get("author") or "") or None,
+            )
+            return {"provider": "ai", "enabled": identity is not None, "cacheHit": False,
+                    "candidates": [identity.candidate()] if identity else [],
+                    "identity": identity.payload() if identity else None}
         return metadata_search_candidates(
             db,
             context,
@@ -156,17 +171,11 @@ class BuiltinMetadataProvider:
                 )
             request = UrlRequest(f"{base_url}/v0/subjects/1", headers=headers)
         else:
-            base_url = str(config.get("baseUrl") or "").rstrip("/")
-            api_key = str(config.get("apiKey") or "").strip()
-            if not base_url or not api_key:
-                return {"ok": False, "message": "请先填写 API 地址和 API Key"}
-            request = UrlRequest(
-                f"{base_url}/models",
-                headers={
-                    "Accept": "application/json",
-                    "Authorization": f"Bearer {api_key}",
-                },
-            )
+            if not model_configured(config):
+                return {"ok": False, "message": "AI 服务地址或模型未配置"}
+            identify_metadata(config, {"title": None, "author": None,
+                                                  "fileNames": [], "directories": [], "embeddedMetadata": []})
+            return {"ok": True, "message": "连接正常"}
         with urlopen(request, timeout=10) as response:
             status = int(getattr(response, "status", 200) or 200)
         return {
@@ -565,3 +574,25 @@ def search_with_metadata_provider(
 def reset_metadata_provider_registry_for_tests() -> None:
     global _REGISTRY
     _REGISTRY = None
+
+
+def recognize_metadata_identity(
+    db: Session,
+    *,
+    book_id: str,
+    title: str,
+    author: str | None,
+    source_node_id: str | None = None,
+) -> MetadataIdentity | None:
+    config = metadata_provider_runtime_config(db, "ai")
+    if config is None:
+        return None
+    locale = configured_locale(db)
+    if not model_configured(config):
+        reason = "AI endpoint or model is not configured" if locale == "en-US" else "AI 服务地址或模型未配置"
+        return MetadataIdentity(None, None, True, reason)
+    clues = identity_clues(db, book_id, source_node_id)
+    db.close()
+    return identify_metadata(
+        config, {"title": title[:500], "author": (author or "")[:500], "language": locale, **clues}
+    )

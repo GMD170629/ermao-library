@@ -24,7 +24,7 @@ def test_metadata_search_closes_reads_and_defers_busy_cache_write(
         seed.add(
             ExternalMetadataCache(
                 id="cache-lock-row",
-                provider="ai",
+                provider="douban",
                 query_key="lock-row",
                 raw_json='{"candidates": [{"title": "seed"}]}',
                 expires_at=seeded_at + timedelta(days=1),
@@ -42,23 +42,17 @@ def test_metadata_search_closes_reads_and_defers_busy_cache_write(
     source = Session(source_engine, autoflush=False, expire_on_commit=False)
     network_observations: list[bool] = []
 
-    def successful_ai(*_args, **_kwargs):
+    def successful_provider(*_args, **_kwargs):
         network_observations.append(source.in_transaction())
         return {
-            "provider": "ai",
+            "provider": "douban",
             "enabled": True,
             "cacheHit": False,
-            "suggestions": [
-                {
-                    "field": "title",
-                    "suggestedValue": "Prepared result",
-                    "confidence": 0.9,
-                }
-            ],
+            "candidates": [{"title": "Prepared result"}],
         }
 
     monkeypatch.setattr(
-        "app.services.organize_service.run_ai_metadata_provider", successful_ai
+        "app.services.organize_service.run_douban_metadata_provider", successful_provider
     )
     blocker = Session(blocker_engine)
     try:
@@ -68,7 +62,7 @@ def test_metadata_search_closes_reads_and_defers_busy_cache_write(
             .values(raw_json='{"candidates": [{"title": "locked"}]}')
         )
         started = monotonic()
-        result = metadata_search_candidates(source, context, "ai", config={})
+        result = metadata_search_candidates(source, context, "douban", config={})
         elapsed = monotonic() - started
 
         assert result["candidates"][0]["title"] == "Prepared result"
@@ -89,7 +83,7 @@ def test_metadata_search_closes_reads_and_defers_busy_cache_write(
         source.close()
 
     with Session(source_engine) as retry:
-        metadata_search_candidates(retry, context, "ai", config={})
+        metadata_search_candidates(retry, context, "douban", config={})
     with Session(source_engine) as verify:
         assert verify.scalar(
             select(ExternalMetadataCache.id).where(

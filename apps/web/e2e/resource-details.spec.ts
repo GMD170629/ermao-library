@@ -207,3 +207,47 @@ test('directory-anchored audiobook resources open directly without a folder dril
   await page.getByRole('button', { name: /可读资源 1/ }).first().click();
   await expect(page).toHaveURL(/resourceId=resource-epub/);
 });
+
+
+test('AI identity preview applies corrections and reloads book detail', async ({ page }) => {
+  let saved = false;
+  let detailReads = 0;
+  await page.route(/\/api\/books\/book-1(?:\?|$)/, async (route) => {
+    detailReads += 1;
+    await route.fulfill({ json: { ok: true, data: { book: {
+      id: 'book-1', sourceNodeId: 'book-node', title: saved ? '活着' : '活着 完整版',
+      author: saved ? '余华' : '鲁迅', description: '保留简介', resources: [epubResource]
+    } } } });
+  });
+  await page.route('**/api/metadata/providers', (route) => route.fulfill({ json: { ok: true, data: { providers: [
+    { id: 'douban', name: '豆瓣', enabled: true, priority: 1 },
+    { id: 'ai', name: 'AI 增强识别', enabled: true, priority: 2 }
+  ] } } }));
+  await page.route('**/metadata/search', (route) => route.fulfill({ json: { ok: true, data: {
+    query: '活着', selectedId: 'ai-identity', preferLocalMetadata: true,
+    identity: { title: '活着', author: '余华', needsReview: false, reason: '受控 UI 测试' },
+    candidates: [{ id: 'ai-identity', source: 'ai', title: '活着', author: '余华', description: null, tags: [] }]
+  } } }));
+  await page.route('**/metadata/apply', async (route) => {
+    const body = route.request().postDataJSON();
+    expect(body.candidate.title).toBe('活着');
+    expect(body.candidate.author).toBe('余华');
+    expect(body.fields).toEqual(['book.title', 'book.author']);
+    saved = true;
+    await route.fulfill({ json: { ok: true, data: { appliedFields: body.fields, skippedFields: [], coverStatus: 'notSelected' } } });
+  });
+  await page.goto('/books/book-1');
+  await page.getByRole('button', { name: '管理图书 活着 完整版' }).click();
+  await page.getByRole('menuitem', { name: '识别', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '元数据识别', exact: true });
+  await dialog.getByRole('button', { name: '搜索', exact: true }).click();
+  await expect(dialog.getByText('活着 完整版 → 活着', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('鲁迅 → 余华', { exact: true })).toBeVisible();
+  const readsBeforeSave = detailReads;
+  await dialog.getByRole('button', { name: '应用所选字段' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '管理图书 活着', exact: true })).toBeVisible();
+  expect(detailReads).toBeGreaterThan(readsBeforeSave);
+  await page.reload();
+  await expect(page.getByRole('button', { name: '管理图书 活着', exact: true })).toBeVisible();
+});

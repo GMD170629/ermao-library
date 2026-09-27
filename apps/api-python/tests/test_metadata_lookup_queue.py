@@ -193,7 +193,7 @@ def test_exact_candidate_selection_requires_one_title_match_and_can_use_author()
         {"title": "黑暗坡食人树", "author": "其他作者", "source": "bangumi"},
     ]
 
-    selected, exact = queue._choose_exact_candidate(
+    selected, exact = queue.choose_metadata_candidate(
         candidates, "黑暗坡食人树", "岛田庄司"
     )
 
@@ -291,7 +291,7 @@ def test_observed_lookup_rejection_logs_facts_before_failed_state(db_session, te
     elif reason == "missing_context":
         monkeypatch.setattr(queue, "metadata_context_for_book", lambda *args: None)
     else:
-        monkeypatch.setattr(queue, "metadata_context_for_book", lambda *args: {"title": "fixture"})
+        monkeypatch.setattr(queue, "metadata_context_for_book", lambda *args: {"book": {"title": "fixture", "author": ""}})
         monkeypatch.setattr(queue, "_provider_order", lambda *args: [])
     result = queue.process_metadata_lookup_task(db_session, test_settings, {
         "id": task_id, "bookId": book_id, "resourceId": resource_id,
@@ -325,3 +325,100 @@ def test_import_wait_exhaustion_logs_observed_upstream_state_and_returns_failed(
     assert record.import_task_id == "import-task-1"
     assert "upstream import state=QUEUED" in record.message
     assert "Attempt 4 exhausted 3" in record.message
+
+
+@pytest.mark.parametrize(
+    "protected,needs_review", [(False, False), (True, False), (False, True)]
+)
+def test_identity_controls_query_selection_and_unprotected_save(
+    db_session, test_settings, monkeypatch, protected, needs_review
+):
+    from app.contracts.metadata_identity import MetadataIdentity
+    from app.models.organize import OrganizePolicy
+
+    book, resource = _seed_lookup_graph(db_session)
+    metadata = db_session.get(LibraryBookMetadata, book.id)
+    metadata.title = "混杂错误标题"
+    metadata.author = "错误作者"
+    metadata.description = "保留的本地简介"
+    metadata.protected_fields = '["title", "author"]' if protected else "[]"
+    db_session.add(OrganizePolicy(id="identity-policy", prefer_local_metadata=True))
+    db_session.commit()
+    task = _lookup_task(db_session, book, resource, status="RUNNING")
+    task_id, book_id, resource_id = task.id, book.id, resource.id
+
+    def identify(db, **kwargs):
+        assert kwargs["title"] == "混杂错误标题"
+        assert kwargs["author"] == "错误作者"
+        return MetadataIdentity("活着", "余华", needs_review, "test")
+
+    queries = []
+
+    def search(db, context, provider, query, gate):
+        queries.append(query)
+        assert (
+            context["book"]["title"] == "活着" and context["book"]["author"] == "余华"
+        )
+        return {
+            "enabled": True,
+            "candidates": [
+                {
+                    "id": "site",
+                    "title": "活着",
+                    "author": "余华",
+                    "description": "远程简介",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(queue, "recognize_metadata_identity", identify)
+    monkeypatch.setattr(queue, "_search_provider", search)
+    status = queue.process_metadata_lookup_task(
+        db_session,
+        test_settings,
+        {
+            "id": task_id,
+            "bookId": book_id,
+            "resourceId": resource_id,
+            "status": "RUNNING",
+            "attempts": 0,
+            "providerOrder": '["douban"]',
+        },
+    )
+    assert status == ("NO_MATCH" if needs_review else "COMPLETED")
+    assert queries == ["活着"]
+    db_session.expire_all()
+    saved = db_session.get(LibraryBookMetadata, book_id)
+    assert (saved.title, saved.author) == (
+        ("混杂错误标题", "错误作者") if protected or needs_review else ("活着", "余华")
+    )
+    assert saved.description == "保留的本地简介"
+
+
+def test_identity_failure_is_diagnosed_and_retried_without_old_identity(
+    db_session, test_settings, monkeypatch, caplog
+):
+    book, resource = _seed_lookup_graph(db_session)
+    task = _lookup_task(db_session, book, resource, status="RUNNING")
+    values = {
+        "id": task.id,
+        "bookId": book.id,
+        "resourceId": resource.id,
+        "status": "RUNNING",
+        "attempts": 0,
+    }
+
+    def failed(*args, **kwargs):
+        raise ConnectionError("model unavailable")
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Old identity must not be used after model failure")
+
+    monkeypatch.setattr(queue, "recognize_metadata_identity", failed)
+    monkeypatch.setattr(queue, "_search_provider", forbidden)
+    assert (
+        queue.process_metadata_lookup_task(db_session, test_settings, values)
+        == "PENDING"
+    )
+    assert "metadata.identity_failed" in caplog.text
+    assert "ConnectionError" in caplog.text

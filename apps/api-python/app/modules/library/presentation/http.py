@@ -193,6 +193,7 @@ from app.modules.library.presentation.schemas import (
     LocalCoverRegenerationResponse,
     ManagementBookListSummary,
     MergeLibraryFacetsRequest,
+    MetadataIdentityView,
     ReadingUnitsResponse,
     RenameLibraryFacetRequest,
     ResourceAssetView,
@@ -1442,6 +1443,12 @@ def search_book_source_node_metadata(
             sourceNodeId=result.source_node_id,
             providerId=result.provider_id,
             query=result.query,
+            identity=MetadataIdentityView(
+                title=result.identity.title, author=result.identity.author,
+                needsReview=result.identity.needs_review, reason=result.identity.reason,
+            ) if result.identity else None,
+            selectedId=result.selected_id,
+            preferLocalMetadata=result.prefer_local_metadata,
             message=result.message,
             candidates=[
                 SourceNodeMetadataCandidateView(

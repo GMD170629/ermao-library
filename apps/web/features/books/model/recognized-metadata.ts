@@ -107,11 +107,14 @@ export function defaultRecognizedMetadataFields(
   book: BookView,
   resource: ReadableResourceView | null,
   candidate: SourceNodeMetadataCandidate | null,
-  definitions: readonly MetadataFieldDefinition[]
+  definitions: readonly MetadataFieldDefinition[],
+  preferLocalMetadata = false
 ): RecognizedMetadataField[] {
   if (!candidate) return [];
   return definitions.flatMap(({ field }) => {
     const value = candidateMetadataValue(candidate, field);
+    if (preferLocalMetadata && !field.endsWith('.title') && field !== 'book.author'
+      && hasMetadataValue(currentMetadataValue(book, resource, field))) return [];
     return hasMetadataValue(value) && normalized(value) !== normalized(currentMetadataValue(book, resource, field)) ? [field] : [];
   });
 }

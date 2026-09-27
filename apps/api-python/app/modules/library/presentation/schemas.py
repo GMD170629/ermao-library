@@ -429,12 +429,22 @@ class SourceNodeMetadataCandidateView(HttpContractModel):
     confidence: float = 0
 
 
+class MetadataIdentityView(HttpContractModel):
+    title: str | None
+    author: str | None
+    needs_review: bool = Field(alias="needsReview")
+    reason: str
+
+
 class SourceNodeMetadataSearchPayload(HttpContractModel):
     source_node_id: str = Field(alias="sourceNodeId")
     provider_id: str = Field(alias="providerId")
     query: str
     message: str | None = None
     candidates: list[SourceNodeMetadataCandidateView]
+    identity: MetadataIdentityView | None = None
+    selected_id: str | None = Field(default=None, alias="selectedId")
+    prefer_local_metadata: bool = Field(default=True, alias="preferLocalMetadata")
 
 
 class RecognizedMetadataCandidateInput(HttpContractModel):

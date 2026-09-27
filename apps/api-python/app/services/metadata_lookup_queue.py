@@ -34,6 +34,7 @@ from app.core.exception_diagnostics import (
     exception_diagnostic_boundary,
     record_exception,
 )
+from app.core.i18n import configured_locale
 from app.models.common import db_timestamp
 from app.modules.imports.public import (
     UNKNOWN_AUTHOR,
@@ -54,10 +55,11 @@ from app.services.metadata_file_writeback import (
 )
 from app.services.metadata_provider_registry import (
     metadata_provider_registry,
+    recognize_metadata_identity,
     search_with_metadata_provider,
 )
 from app.services.organize_service import (
-    metadata_candidate_title_exact_match,
+    choose_metadata_candidate,
     metadata_context_for_book,
 )
 from app.services.queue_runtime import QueueHeartbeatPump
@@ -176,29 +178,6 @@ def _finish_provider_execution(
     with MetadataWriteTransaction(db):
         lookup_persist.write_prepared_provider_execution(db, prepared)
 
-
-def _choose_exact_candidate(
-    candidates: list[dict[str, Any]], title: str, author: str
-) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
-    exact = [
-        candidate
-        for candidate in candidates
-        if metadata_candidate_title_exact_match(title, candidate)
-    ]
-    if len(exact) == 1:
-        return exact[0], exact
-    if len(exact) > 1 and normalize_identity_part(author) != normalize_identity_part(
-        UNKNOWN_AUTHOR
-    ):
-        author_key = normalize_identity_part(author)
-        author_matches = [
-            candidate
-            for candidate in exact
-            if normalize_identity_part(candidate.get("author")) == author_key
-        ]
-        if len(author_matches) == 1:
-            return author_matches[0], exact
-    return None, exact
 
 
 def _parse_tags(value: Any) -> list[str]:
@@ -364,7 +343,7 @@ def _prepare_candidate_application(
     if (
         candidate_title
         and candidate_title != current_title
-        and (not prefer_local or not current_title)
+        and (candidate.get("identity") is not None or not prefer_local or not current_title)
     ):
         book_patch["title"] = candidate_title
         applied.append("title")
@@ -376,7 +355,7 @@ def _prepare_candidate_application(
     if (
         candidate_author
         and candidate_author != current_author
-        and (not prefer_local or local_author_is_missing)
+        and (candidate.get("identity") is not None or not prefer_local or local_author_is_missing)
     ):
         book_patch["author"] = candidate_author
         applied.append("author")
@@ -779,19 +758,37 @@ def process_metadata_lookup_task(
                 else None
             )
 
+            identity_failure_message = (
+                "AI title and author analysis failed" if configured_locale(db) == "en-US"
+                else "AI 标题作者分析失败"
+            )
+            try:
+                identity = recognize_metadata_identity(
+                    db, book_id=str(book["id"]), title=str(book.get("title") or ""),
+                    author=str(book.get("author") or "") or None,
+                )
+            except Exception as error:  # noqa: BLE001 - task failure retries without stale identity.
+                record_exception(LOGGER, "metadata.identity_failed", error,
+                                 context={"step": "identity", "task_id": str(task["id"])})
+                return _schedule_retry(db, task, identity_failure_message, [])
+            if identity is not None:
+                context = {**context, "book": {**context["book"],
+                    "title": identity.title or context["book"].get("title"),
+                    "author": identity.author}}
+            search_title = str(context["book"].get("title") or "")
+            search_author = str(context["book"].get("author") or "")
+
             enabled_providers = 0
             errors: list[str] = []
             inspected: list[dict[str, Any]] = []
             for provider in _provider_order(task):
                 execution_id = _start_provider_execution(db, task, provider)
                 try:
-                    result = _search_provider(
-                        db,
-                        context,
-                        provider,
-                        str(book.get("title") or ""),
-                        effective_request_gate,
-                    )
+                    if provider == "ai":
+                        result = {"enabled": identity is not None,
+                                  "candidates": [identity.candidate()] if identity else []}
+                    else:
+                        result = _search_provider(db, context, provider, search_title, effective_request_gate)
                 except Exception as exc:  # noqa: BLE001 - contains one provider attempt.
                     record_exception(logging.getLogger(__name__), "services.metadata_lookup_queue.process_metadata_lookup_task.failed", exc,
                                      context={"step": "process_metadata_lookup_task", "task_id": str(task.get("id") or ""), "attempt": int(task.get("attempts") or 0) + 1})
@@ -816,11 +813,14 @@ def process_metadata_lookup_task(
                     if isinstance(raw_candidates, list)
                     else []
                 )
-                candidate, exact = _choose_exact_candidate(
-                    candidates,
-                    str(book.get("title") or ""),
-                    str(book.get("author") or UNKNOWN_AUTHOR),
-                )
+                candidate, exact = choose_metadata_candidate(candidates, search_title, search_author)
+                if identity is not None:
+                    if identity.needs_review or identity.title is None:
+                        candidate = None
+                    elif candidate is not None:
+                        candidate = {**candidate, "title": identity.title,
+                                     "author": identity.author or candidate.get("author"),
+                                     "identity": identity.payload()}
                 inspected.append(
                     {
                         "provider": provider,

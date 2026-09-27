@@ -1,3 +1,4 @@
+import type { MetadataIdentity } from '../model/book-contents';
 import type { ReaderType, ReadableResourceView, ResourceFormat, ResourceImportSummary, BookView } from '../../../types/book';
 import { withBasePath } from '../../../lib/base-path';
 import { updateBulkBookCovers, type BulkBookCoverResult } from '../../library/public';
@@ -354,7 +355,7 @@ export async function updateSourceNodePresentation(
   });
 }
 
-export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: string, providerId: string, query: string, signal?: AbortSignal): Promise<Readonly<{ message: string | null; candidates: SourceNodeMetadataCandidate[] }>> {
+export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: string, providerId: string, query: string, signal?: AbortSignal): Promise<Readonly<{ message: string | null; candidates: SourceNodeMetadataCandidate[]; identity: MetadataIdentity | null; query: string; selectedId: string | null; preferLocalMetadata: boolean }>> {
   const data = record(await apiJson(`/api/books/${encodeURIComponent(bookId)}/source-nodes/${encodeURIComponent(sourceNodeId)}/metadata/search`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -386,7 +387,18 @@ export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: str
       confidence: finiteNumber(item.confidence)
     } satisfies SourceNodeMetadataCandidate];
   });
-  return { message: nullableString(data.message), candidates };
+  const rawIdentity = data.identity == null ? null : record(data.identity);
+  if (rawIdentity && (typeof rawIdentity.needsReview !== 'boolean' || typeof rawIdentity.reason !== 'string'
+    || (rawIdentity.title !== null && typeof rawIdentity.title !== 'string')
+    || (rawIdentity.author !== null && typeof rawIdentity.author !== 'string'))) throw new Error('元数据响应格式错误');
+  const identity = rawIdentity ? {
+    title: nullableString(rawIdentity.title), author: nullableString(rawIdentity.author),
+    needsReview: rawIdentity.needsReview === true, reason: stringValue(rawIdentity.reason)
+  } : null;
+  return { message: nullableString(data.message), candidates, identity,
+    query: stringValue(data.query, query), selectedId: nullableString(data.selectedId),
+    preferLocalMetadata: data.preferLocalMetadata !== false };
+
 }
 
 const recognizedMetadataFieldValues = new Set<RecognizedMetadataField>([

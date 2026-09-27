@@ -69,3 +69,12 @@ test('defaults select only non-empty candidate values that differ from current s
   assert.equal(selected.includes('resource.cover'), true);
   assert.equal(hasMetadataValue(false), true);
 });
+
+
+test('local priority permits identity corrections but keeps populated other fields', () => {
+  const result = defaultRecognizedMetadataFields({ ...book, description: 'local' }, null,
+    { ...candidate, author: 'corrected author' }, recognizedMetadataFields('book'), true);
+  assert.ok(result.includes('book.title'));
+  assert.ok(result.includes('book.author'));
+  assert.ok(!result.includes('book.description'));
+});

@@ -180,7 +180,7 @@ export function RecognitionSettingsPanel({ compact = false, onSaved }: { compact
         {settingRow('新增后自动执行', '仅处理开启此设置之后新增的读物，历史书库不会被一次性加入。', <Toggle checked={policy.autoRunOnNew} disabled={loading} label={i18nAttribute("新增后自动执行")} onChange={(autoRunOnNew) => setPolicy({ ...policy, autoRunOnNew })} />)}
         {settingRow(i18nAttribute('元数据变化自动保存到旁车 OPF'), i18nAttribute('开启后，仅观察之后发生的图书和资源元数据变化；异步生成 OPF 和独立封面，源图书资产始终保持不变。关闭后不再新增任务，已排队任务会继续完成。'), <Toggle checked={policy.writeMetadataToFiles} disabled={loading} label={i18nAttribute('元数据变化自动保存到旁车 OPF')} onChange={(writeMetadataToFiles) => setPolicy({ ...policy, writeMetadataToFiles })} />)}
         {policy.writeMetadataToFiles ? settingRow(i18nAttribute('OPF 保存队列'), i18nAttribute('当前待处理 {value0} / {value1} 个目标；达到容量时，新变更仍会保存到书库，但该批 OPF 任务会被丢弃并记录系统警告。', { value0: opfQueue.pendingTargets, value1: opfQueue.capacity }), <span className="shrink-0 text-sm font-semibold text-[#625D57]">{Math.round(opfQueue.utilization * 100)}%</span>) : null}
-        {settingRow(i18nAttribute('本地元数据优先'), i18nAttribute('开启后远程数据仅作为补充'), <Toggle checked={policy.preferLocalMetadata} disabled={loading} label={i18nAttribute('本地元数据优先')} onChange={(preferLocalMetadata) => setPolicy({ ...policy, preferLocalMetadata })} />)}
+        {settingRow(i18nAttribute('本地元数据优先'), i18nAttribute('开启后其他字段仅补缺；AI 可纠正未保护的标题和作者。手动应用以勾选字段为准。'), <Toggle checked={policy.preferLocalMetadata} disabled={loading} label={i18nAttribute('本地元数据优先')} onChange={(preferLocalMetadata) => setPolicy({ ...policy, preferLocalMetadata })} />)}
       </div>
 
       <div className="mt-5 rounded-2xl border border-[#E8E3DD] p-4">

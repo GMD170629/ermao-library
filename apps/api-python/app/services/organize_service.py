@@ -4,10 +4,11 @@ import json
 import logging
 import re
 import unicodedata
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from html import unescape
 from time import time_ns
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 from urllib.parse import urlencode, urljoin
 from urllib.request import Request as UrlRequest
 from urllib.request import urlopen
@@ -18,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.core.database_errors import is_database_busy_error
 from app.core.exception_diagnostics import record_exception
 from app.core.time import now_timestamp_ms
+from app.modules.imports.public import UNKNOWN_AUTHOR, normalize_identity_part
 from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
 from app.modules.metadata.infrastructure import external_cache as metadata_cache
@@ -133,7 +135,7 @@ def _metadata_title_strings(value: Any) -> list[str]:
     return []
 
 
-def metadata_candidate_title_values(candidate: dict[str, Any]) -> list[str]:
+def metadata_candidate_title_values(candidate: Mapping[str, object]) -> list[str]:
     """Return every provider-declared title, including cached Bangumi aliases."""
 
     values = [
@@ -168,21 +170,12 @@ def metadata_candidate_title_values(candidate: dict[str, Any]) -> list[str]:
 
 
 def metadata_candidate_title_exact_match(
-    expected: Any, candidate: dict[str, Any]
+    expected: Any, candidate: Mapping[str, object]
 ) -> bool:
     return any(
         metadata_title_exact_match(expected, value)
         for value in metadata_candidate_title_values(candidate)
     )
-
-
-def metadata_title_needs_ai(value: Any) -> bool:
-    title = str(value or "").strip()
-    if len(title) < 2:
-        return True
-    if re.search(r"\.(epub|cbz|zip|pdf|txt|m4b|m4a|mp3)$", title, re.IGNORECASE):
-        return True
-    return bool(re.fullmatch(r"[0-9a-f]{16,}", title, re.IGNORECASE))
 
 
 def contains_cjk(value: Any) -> bool:
@@ -203,83 +196,37 @@ def sort_candidates_for_title(
     return [item for _, item in indexed]
 
 
-def first_exact_title_candidate(
-    candidates: list[dict[str, Any]], title: str | None
-) -> dict[str, Any] | None:
-    return next(
-        (
+_IdentityCandidate = TypeVar("_IdentityCandidate", bound=Mapping[str, object])
+
+
+def choose_metadata_candidate(
+    candidates: Sequence[_IdentityCandidate], title: str, author: str
+) -> tuple[_IdentityCandidate | None, list[_IdentityCandidate]]:
+    exact = [
+        candidate
+        for candidate in candidates
+        if metadata_candidate_title_exact_match(title, candidate)
+    ]
+    if len(exact) == 1:
+        return exact[0], exact
+    if (
+        len(exact) > 1
+        and author.strip()
+        and normalize_identity_part(author) != normalize_identity_part(UNKNOWN_AUTHOR)
+    ):
+        author_key = normalize_identity_part(author)
+        author_matches = [
             candidate
-            for candidate in candidates
-            if metadata_candidate_title_exact_match(title, candidate)
-        ),
-        None,
-    )
+            for candidate in exact
+            if normalize_identity_part(candidate.get("author")) == author_key
+        ]
+        if len(author_matches) == 1:
+            return author_matches[0], exact
+    return None, exact
 
 
 def metadata_context_for_book(db: Session, book_id: str) -> dict[str, Any] | None:
     return organize_review.load_book_context(db, book_id)
-
-
-def local_metadata_summary(context: dict[str, Any]) -> dict[str, Any]:
-    book = context["book"]
-    files = context["files"][:8]
-    metadata = [
-        parse_json_value(item.get("rawJson")) for item in context["metadata"][:4]
-    ]
-    return {
-        "title": book.get("title"),
-        "author": book.get("author"),
-        "seriesName": book.get("seriesName"),
-        "seriesIndex": book.get("seriesIndex"),
-        "tags": parse_json_value(book.get("tags")) or [],
-        "fileNames": [
-            str(file.get("relativePath") or "").rsplit("/", 1)[-1] for file in files
-        ],
-        "parentPaths": sorted(
-            {
-                str(file.get("relativePath") or "").rsplit("/", 1)[0]
-                for file in files
-                if "/" in str(file.get("relativePath") or "")
-            }
-        ),
-        "embeddedMetadata": metadata,
-    }
-
-
-def normalize_ai_confidence(value: Any) -> float:
-    try:
-        parsed = float(value if value is not None else 0.6)
-    except (TypeError, ValueError) as error:
-        record_exception(logging.getLogger(__name__), "services.organize_service.normalize_ai_confidence.failed", error,
-                         context={"step": "normalize_ai_confidence"})
-        parsed = 0.6
-    return min(0.74, max(0.0, parsed))
-
-
-def suggestion_from_ai_item(item: dict[str, Any]) -> dict[str, Any] | None:
-    field = item.get("field")
-    if field not in {
-        "title",
-        "author",
-        "description",
-        "tags",
-        "seriesName",
-        "seriesIndex",
-    }:
-        return None
-    value = item.get("value")
-    if value is None or value == "" or value == []:
-        return None
-    return {
-        "field": field,
-        "suggestedValue": json_text(value)
-        if isinstance(value, (dict, list, int, float, bool))
-        else str(value),
-        "source": "ai",
-        "confidence": normalize_ai_confidence(item.get("confidence")),
-        "reason": f"AI 识别：{string_value(item.get('reason')) or '根据本地元数据摘要推断'}",
-        "status": "PENDING",
-    }
 
 
 def suggestion_from_external(
@@ -777,11 +724,7 @@ def run_douban_crawler_provider(
             ],
             match_title or query_text,
         )
-        selected = (
-            first_exact_title_candidate(candidates, match_title)
-            if match_title
-            else (candidates[0] if candidates else None)
-        )
+        selected, _ = choose_metadata_candidate(candidates, match_title or title, author)
         subject_url = (
             first_string((selected.get("raw") or {}).get("url"))
             if isinstance(selected, dict) and isinstance(selected.get("raw"), dict)
@@ -1032,88 +975,6 @@ def bangumi_candidate_suggestions(
     return [item for item in raw if item]
 
 
-def bangumi_subject_suggestions(
-    payload: Any, confidence: float
-) -> list[dict[str, Any]]:
-    return bangumi_candidate_suggestions(
-        next(iter(bangumi_candidates(payload, confidence)), None), confidence
-    )
-
-
-def ai_suggestions_from_payload(payload: Any) -> list[dict[str, Any]]:
-    raw = payload if isinstance(payload, dict) else {}
-    choices = raw.get("choices")
-    message = (
-        choices[0].get("message")
-        if isinstance(choices, list) and choices and isinstance(choices[0], dict)
-        else None
-    )
-    content = message.get("content") if isinstance(message, dict) else None
-    parsed = (
-        parse_json_value(
-            re.sub(r"^```json\s*|\s*```$", "", content.strip(), flags=re.IGNORECASE)
-        )
-        if isinstance(content, str)
-        else raw
-    )
-    suggestions_value = parsed.get("suggestions") if isinstance(parsed, dict) else []
-    suggestions = suggestions_value if isinstance(suggestions_value, list) else []
-    return [
-        suggestion
-        for item in suggestions
-        if isinstance(item, dict) and (suggestion := suggestion_from_ai_item(item))
-    ]
-
-
-def run_ai_metadata_provider(
-    context: dict[str, Any], config: dict[str, Any], force: bool = True
-) -> dict[str, Any]:
-    base_url = string_value(config.get("baseUrl")).rstrip("/")
-    api_key = string_value(config.get("apiKey"))
-    model = string_value(config.get("model"))
-    if not base_url or not api_key or not model:
-        return {
-            "provider": "ai",
-            "enabled": False,
-            "added": 0,
-            "cacheHit": False,
-            "message": "AI 服务地址、模型或 API Key 未配置",
-            "suggestions": [],
-        }
-    summary = local_metadata_summary(context)
-    body = {
-        "model": model,
-        "temperature": 0.1,
-        "response_format": {"type": "json_object"},
-        "messages": [
-            {
-                "role": "system",
-                "content": '你是图书元数据整理助手。只返回 JSON，格式为 {"suggestions":[{"field":"title|author|description|tags|seriesName|seriesIndex","value":...,"confidence":0-1,"reason":"..."}]}。不要编造不确定信息。',
-            },
-            {"role": "user", "content": json_text(summary)},
-        ],
-    }
-    request = UrlRequest(
-        f"{base_url}/chat/completions",
-        data=json.dumps(body).encode("utf-8"),
-        headers={
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        },
-        method="POST",
-    )
-    with urlopen(request, timeout=30) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-    return {
-        "provider": "ai",
-        "enabled": True,
-        "added": 0,
-        "cacheHit": False,
-        "suggestions": ai_suggestions_from_payload(payload),
-    }
-
-
 def run_bangumi_metadata_provider(
     context: dict[str, Any],
     config: dict[str, Any],
@@ -1174,10 +1035,9 @@ def run_bangumi_metadata_provider(
     candidates = sort_candidates_for_title(
         bangumi_candidates(payload, 0.82), match_title or title
     )
-    subject = (
-        first_exact_title_candidate(candidates, match_title)
-        if match_title
-        else (candidates[0] if candidates else None)
+    subject, _ = choose_metadata_candidate(
+        candidates, match_title or str(context["book"].get("title") or title),
+        str(context["book"].get("author") or ""),
     )
     suggestions = bangumi_candidate_suggestions(subject, 0.82)
     if match_title and not subject:
@@ -1314,7 +1174,7 @@ def metadata_search_candidates(
 ) -> dict[str, Any]:
     search_text = query or first_string(context["book"].get("title")) or ""
     query_key = metadata_title_key(search_text)
-    cache_eligible = source in {"bangumi", "douban", "ai"}
+    cache_eligible = source in {"bangumi", "douban"}
     cache_ready = (
         metadata_cache.external_metadata_cache_ready(db) if cache_eligible else False
     )
@@ -1359,33 +1219,7 @@ def metadata_search_candidates(
                 automatic_request_gate=automatic_request_gate,
             )
     else:
-        ai_result = run_ai_metadata_provider(context, config, force=force)
-        fields = {
-            item["field"]: parse_json_value(item.get("suggestedValue"))
-            for item in ai_result.get("suggestions") or []
-        }
-        candidate: dict[str, Any] = {
-            "id": "ai-suggestion",
-            "source": "ai",
-            "title": fields.get("title"),
-            "author": fields.get("author"),
-            "description": fields.get("description"),
-            "tags": fields.get("tags") if isinstance(fields.get("tags"), list) else [],
-            "seriesName": fields.get("seriesName"),
-            "seriesIndex": fields.get("seriesIndex"),
-            "confidence": max(
-                [
-                    float(item.get("confidence") or 0)
-                    for item in ai_result.get("suggestions") or []
-                ]
-                or [0.0]
-            ),
-            "raw": {"suggestions": ai_result.get("suggestions") or []},
-        }
-        result = {
-            **ai_result,
-            "candidates": [candidate] if ai_result.get("suggestions") else [],
-        }
+        raise ValueError("UNSUPPORTED_METADATA_WEBSITE")
     if source in {"bangumi", "douban"}:
         result = {
             **result,

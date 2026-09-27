@@ -18,6 +18,7 @@ from app.modules.metadata.domain.source_name import metadata_from_source_name
 
 """Public metadata capability contracts."""
 
+from app.contracts.metadata_identity import MetadataIdentity
 from app.contracts.publication_metadata import PublicationMetadata
 from app.modules.metadata.application.local_metadata import (
     FilesystemLocalMetadataInspector,
@@ -55,7 +56,11 @@ from app.services.metadata_file_writeback import (
     metadata_writeback_enabled,
     persist_metadata_writeback_intents,
 )
-from app.services.metadata_provider_registry import search_with_metadata_provider
+from app.services.metadata_provider_registry import (
+    recognize_metadata_identity,
+    search_with_metadata_provider,
+)
+from app.services.organize_service import choose_metadata_candidate
 
 __all__ = [
     "BUILTIN_MANIFESTS",
@@ -67,6 +72,7 @@ __all__ = [
     "LocalAudioMetadata",
     "LocalMetadataCandidate",
     "MetadataFileSource",
+    "MetadataIdentity",
     "MetadataWritebackAssetProjection",
     "MetadataWritebackImportProjection",
     "MetadataWritebackProjection",
@@ -88,6 +94,7 @@ __all__ = [
     "StandardWritePlan",
     "StandardWritePlanStore",
     "StandardWriteStatus",
+    "choose_metadata_candidate",
     "cover_media_type",
     "load_metadata_writeback_projection",
     "metadata_from_source_name",
@@ -96,6 +103,7 @@ __all__ = [
     "persist_metadata_writeback_intents",
     "prepare_metadata_writeback_intents",
     "prepare_source_node_metadata_writeback_intent",
+    "recognize_metadata_identity",
     "resolve_local_metadata",
     "search_with_metadata_provider",
     "serialize_opf_metadata",

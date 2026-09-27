@@ -69,3 +69,10 @@ export function isDirectResourceEntry(entry: BookContentEntry): boolean {
 export function isSourceDirectoryEntry(entry: BookContentEntry): boolean {
   return entry.kind === 'FOLDER' && !isDirectResourceEntry(entry);
 }
+
+export type MetadataIdentity = Readonly<{
+  title: string | null;
+  author: string | null;
+  needsReview: boolean;
+  reason: string;
+}>;

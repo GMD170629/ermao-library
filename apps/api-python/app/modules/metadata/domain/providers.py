@@ -130,19 +130,12 @@ BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
     ),
     ProviderManifest(
         id="ai",
-        name="AI 元数据识别",
+        name="AI 增强识别",
         version="builtin",
-        description="使用 OpenAI-compatible Chat Completions 推断缺失元数据。",
+        description="先分析并纠正标题作者，再用于来源查询；关闭后不调用模型。",
         mode="infer",
-        fields=(
-            "title",
-            "author",
-            "description",
-            "tags",
-            "seriesName",
-            "seriesIndex",
-        ),
-        capabilities=("automatic", "manual-search", "fallback"),
+        fields=("title", "author"),
+        capabilities=("automatic", "manual-search"),
         config_fields=(
             ProviderConfigField(
                 key="baseUrl",
@@ -157,7 +150,7 @@ BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
                 key="apiKey",
                 label="API Key",
                 kind="password",
-                required=True,
+                help="无鉴权的本地模型可留空。",
                 secret=True,
             ),
         ),
