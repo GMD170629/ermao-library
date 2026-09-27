@@ -214,3 +214,56 @@ adapter 在模型调用前按明确 ID 校验资源属于当前 book、绑定请
 实际验证：72 项既有 HTTP/队列/应用回归通过，涵盖书级与旧请求、不同节点旧资源入口、部分勾选、保护、并发修改、来源失败保留及自动生成保存；新增 12 项目标用例通过。Web client 27 项通过，其中核对首次搜索和换选发送相同 resource 目标且 query 保持不变。Web typecheck、改动文件 ESLint/Ruff、6 个受影响生产文件的局部 mypy（follow-imports=silent）通过；普通 mypy 展开依赖时报告 9 个未修改文件中的 27 项存量错误，未扩展修复范围。没有执行全仓回归。
 
 本次未重新调用真实 DeepSeek、真实网站或运行浏览器联调；模型/来源响应为受控测试，不能替代真实模型准确性或浏览器现场验收。此前 C 的真实 HTTP 样本记录保留。本轮未合并、发布或部署 NAS。
+
+## A/B/C 最终联合验收（2026-09-27）
+
+### 版本、环境与结论
+
+起始受验 SHA：`abd8f845a7e927c12ab91849a58f8ec3e6b5d2dc`，分支 `codex/metadata-ai-rebuild`，工作树干净。真实浏览器暴露的问题仅在 Web 原入口修复：`bbbc7876d7505a01834f9afc11479afd1202a815`、`d1809b8699f7b175d788b37760f5a5663b080d7e`、`7b81061ea5dfe168123a21043be0220d84881a4c`；最后一个是本轮最终受验代码 SHA。最终记录提交不再修改应用代码。后端始终为已审查基线逻辑，未改变 A/B/C、来源、保存或迁移。
+
+结论：手动网站与真实 worker 自动链通过；手动生成标签的真实闭环通过，但指定的同节点资源 **AI 简介** 真实闭环未完成，本轮不能宣称三条全部通过。两个实际资源样本均取得网站简介，按要求采用网站结果，没有丢弃来源来制造生成缺项。既有受控同节点生成测试与本轮真实联合结果分开记录。
+
+环境为 Windows 本地隔离磁盘库 `%TEMP%/metadata-ABC-final/storage/database/shuku.sqlite3`，Python 3.11.15，Node 22.23.1，Next 16.2.12。正常入口 `python -m app.bootstrap.prestart`、`python -m uvicorn app.main:app --host 127.0.0.1 --port 8015`、`python -m app.worker.main`；Web 使用 `PYTHON_API_ORIGIN=http://127.0.0.1:8015` 的 `next dev --webpack --hostname 127.0.0.1 --port 3100`。Chrome 实际操作现有管理菜单、识别弹窗、勾选应用及重新打开。仅创建少量隔离测试记录和占位文件，没有扫描或上传正文。
+
+使用已授权 DeepSeek 配置，实际应用客户端调用 `https://api.deepseek.com` / `deepseek-flash`；来源保留豆瓣和 Bangumi。凭据仅存在隔离环境，不提交、不打印。原开发目录 14 项已有修改逐一核对哈希，无变化；未操作生产 NAS。
+
+### 实际结果表
+
+| 样本与目标 | 原标题 / 作者 → 最终身份 | 来源条目与真实字段 / AI 字段 | 实际保存 | 重开 / 进程重启 |
+| --- | --- | --- | --- | --- |
+| abc-site，书级；起始 abd8f845 | 海边的卡夫卡 下载整理版 / 村上春树 → 海边的卡夫卡 / 村上春树 | 豆瓣 1059419，原作者 `[日] 村上春树`；选中详情简介 391 字、系列及关联来源标签；无生成字段 | title、description、seriesName、tags；generatedFields=[] | 浏览器重开及重启后 GET 200；简介与所选详情缓存逐字一致 |
+| abc-resource，同节点资源；修复 d1809b86 后 | 活着 / 余华 → 同值 | 豆瓣 4913064，详情简介 373 字、出版信息；DeepSeek 只生成缺少的 tags | resource.description 为网站简介；book.generatedFields=[tags]，resource.generatedFields=[]；书级原简介 22 字不变 | 浏览器重开显示网站简介及“标签 · AI 生成”；重启后内容和标识一致 |
+| abc-auto，书级真实队列；后端 abd8f845 | 活着 完整版 / 余华；后台本地处理一度变为 abc / auto → 活着 / 余华 | 豆瓣 4913064 详情简介 373 字；DeepSeek 生成 tags | appliedFields=title,author,description,tags,seriesName；book.generatedFields=[tags] | 任务 COMPLETED；详情 GET 与重启后一致 |
+| abc-webnovel，同节点资源；7b81061e | 没钱修什么仙？ / 熊狼狗 → 同值 | Bangumi 561847，真实简介 278 字及标签均齐全，未生成 | resource.description、book.seriesName/tags；两级 generatedFields=[]，书级原简介 16 字不变 | 保存后的详情 GET 200；进程重启后完全一致；不是 AI 简介成功样本 |
+
+手动网站样本实际 query 为“海边的卡夫卡”，模型将不同版本视为对应候选并按来源顺序选主记录；未将模型结果再交给旧精确作者比较否决。豆瓣详情缓存键分别为 `subject-detail:https://book.douban.com:1059419`、`subject-detail:https://book.douban.com:4913064`，证明读取的是选中条目详情，不是重新搜索替代。最终保存简介 SHA256 分别为 `9aefe3a1987717ff8a0c2480533a40390757af6e2275ae613481948bc8849a09`、`227ce9b10420e47fe1f47b4ae0a296baca8745a74f5e1beca694384bbbe671a5`，与详情缓存相等。网络、模型、候选和保存均来自同次真实应用链；没有替换外部传输响应。
+
+手动《活着》实际生成并保存标签：中国当代文学、长篇小说、现实主义文学、苦难、命运、人生、农村题材、家庭、坚韧、经典文学。自动任务实际生成并保存标签：中国当代文学、长篇小说、现实主义文学、苦难、命运、人生、家庭、历史变迁、经典文学。网站简介均未标成 AI，资源简介没有覆盖书级简介。当前样本未覆盖真实无条目后的 AI description，保留这一验收缺口。
+
+### 自动入口、实际失败与修复
+
+自动任务使用既有 `create_organize_run(trigger="MANUAL", book_ids=["abc-auto"])` 创建：run=`py_organize_run_261d235af71740cca14eddfc02da8b99`，task=`py_metadata_lookup_ec6332f9019c42aabc84279c0f774d2f`。由独立 `app.worker.main` 进程领取，未直接调用 `process_metadata_lookup_task`，未手工插入或改成完成状态。首次保存遇到后台本地元数据更新，正常触发 `BOOK_METADATA_CHANGED`；既有重试第二次完成，attempts=2、resultSource=douban，失败执行记录保留。远端封面下载 HTTP 418 也保留诊断，不能宣称封面成功；有效简介和标签实际保存。
+
+浏览器现场发现并修复两类直接原因：
+
+- 单资源详情自动进入 ResourceDetailView 后缺少已有资源管理入口：沿原权限和菜单接入 onManage；没有新建识别页面或业务流程。
+- 详情轮询每 2 秒返回新 book 对象，导致识别弹窗初始化 effect 取消请求、卡住 busy，以及字段默认值 effect 重置人工勾选：依赖改为实际目标/身份和候选变化，读取当前值使用 useEffectEvent。未改变取消、目标修订或保存检查。
+
+对应代码为 `apps/web/features/books/ui/resource-detail-view.tsx`、`book-detail-page.tsx`、`metadata-lookup-modal.tsx`。在既有 `e2e/resource-details.spec.ts` 添加同节点资源实际 client 场景，受控 HTTP 延迟 2500ms 跨越真实轮询，验证首次查询、换选都传明确 scope/resourceId、等待轮询后封面取消勾选仍保留、仅保存资源简介、重开保留生成标识和书级原简介。
+
+本轮定向验证：上述场景与已有单资源详情场景初次共 2 项通过；每次相关修正只重跑该失败场景，最终 1 项通过（11.4s）；Web typecheck、两个改动文件 ESLint 通过。这些受控浏览器测试不能替代上表真实模型/网站链。未展开全仓测试，也未重复已充分验证的 Python 生成逻辑测试。
+
+### 升级、真正进程重启与证据保留
+
+使用既有 Alembic 到 0038，在旧 schema 写入“升级保留样本 / 原作者 / 0038 原始简介必须保留”和系统设置 marker；先保留 SQLite 可恢复备份 `before-0039.sqlite3`，再通过正常 `app.bootstrap.prestart` 升级。实际版本为 `0039_generated_metadata_fields`，旧记录和 marker 保留，新生成标记列默认空列表；未修改任何迁移。
+
+真实运行后的同一磁盘库再备份为 `before-restart.sqlite3`。实际停止 API PID 88224（launcher 91456）与 worker PID 91664（launcher 92912），验证这些进程已退出，再执行正常 prestart 并新建 API/worker。重启 API PID 75220（launcher 91356），worker launcher 85040。不是新建 Session 或 TestClient。重启前后 LibraryBookMetadata、LibraryReadableResourceMetadata 全行相同，Source/SystemSetting 全内容哈希相同；四个样本详情 GET 均 200。浏览器重新打开《活着》资源页，确认书级简介保留、资源网站简介存在、标签 AI 标识显示。
+
+证据与备份保存在本机 `%TEMP%/metadata-ABC-final/`：前后详情 JSON、前后状态 JSON、任务及执行记录、进程记录、API/worker 日志和截图。`resource-after-restart.png` 为重启后真实页面；`site-reopened.png` 为手动网站保存后重开。含模型配置的数据库备份仅本地保留，不纳入 Git。
+
+### 未通过或未执行项
+
+- 同节点资源 AI description 的真实联合链仍未完成；本轮实际网站返回有效简介，不能记成无条目或 AI 生成。其 HTTP 受控语义证据沿用上一节及本轮浏览器定向用例。
+- 占位文件的章节读取受本机 chapter_core 原生 DLL 缺失影响，页面显示文件暂时无法读取；不影响已核对的元数据保存，未扩展修复 Reader。
+- 原记录的普通 mypy 展开依赖时 9 个未修改文件、27 项存量错误仍单列，本轮没有修规则或声称该检查通过。本轮 Web typecheck 通过；正式发布构建、完整发布门禁及移动/生产环境验收均未执行，不能将本轮局部验收写成发布门禁通过。
+- 未合并、打 tag、发布或部署 NAS；不预设 100% 网站命中，不把生成标签记作网站命中。
