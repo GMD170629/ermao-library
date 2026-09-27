@@ -1307,7 +1307,10 @@ def test_resource_tasks_upgrade_preserves_assets_and_pending_work(
             }
             book_tasks = [task for task in tasks if task.kind == "IMPORT_BOOK"]
             assert len(legacy_tasks) == 4
-            assert {task.state for task in legacy_tasks.values()} == {"FAILED", "SUCCEEDED"}
+            assert {task.state for task in legacy_tasks.values()} == {
+                "FAILED",
+                "SUCCEEDED",
+            }
             assert legacy_tasks["task-0"].superseded_by_task_id is not None
             assert legacy_tasks["task-1"].superseded_by_task_id is not None
             assert legacy_tasks["task-2"].superseded_by_task_id is not None
@@ -1327,7 +1330,9 @@ def test_resource_tasks_upgrade_preserves_assets_and_pending_work(
             pipeline = build_readable_resource_pipeline(db)
             worker = build_readable_resource_worker(pipeline)
             assert worker.startup() == 0
-            historical_failed_ids = {task.id for task in book_tasks if task.state == "FAILED"}
+            historical_failed_ids = {
+                task.id for task in book_tasks if task.state == "FAILED"
+            }
             running_result = pipeline.continue_import.execute(
                 ContinueImportTask("task-1")
             )
@@ -1336,20 +1341,23 @@ def test_resource_tasks_upgrade_preserves_assets_and_pending_work(
             )
             assert running_result.task_id is not None
             assert failed_result.task_id is not None
-            assert running_result.task_id != legacy_tasks["task-1"].superseded_by_task_id
+            assert (
+                running_result.task_id != legacy_tasks["task-1"].superseded_by_task_id
+            )
             assert failed_result.task_id != legacy_tasks["task-2"].superseded_by_task_id
             for _ in range(20):
                 if worker.process_once() == "idle":
                     break
             db.expire_all()
             assert all(
-                db.get(LibraryImportTask, task.id).state == (
-                    "FAILED" if task.id in historical_failed_ids else "SUCCEEDED"
-                )
+                db.get(LibraryImportTask, task.id).state
+                == ("FAILED" if task.id in historical_failed_ids else "SUCCEEDED")
                 for task in book_tasks
             )
-            assert all(db.get(LibraryImportTask, identifier).state == "SUCCEEDED"
-                       for identifier in (running_result.task_id, failed_result.task_id))
+            assert all(
+                db.get(LibraryImportTask, identifier).state == "SUCCEEDED"
+                for identifier in (running_result.task_id, failed_result.task_id)
+            )
             assert set(db.scalars(select(LibraryResourceAsset.id))) == {
                 f"asset-{index}" for index in range(4)
             }
@@ -1441,12 +1449,19 @@ def test_directory_legacy_tasks_upgrade_keeps_asset_ids_and_progress(
             db.commit()
             db.add(LibraryBook(id="book", library_id="lib", source_node_id="anchor"))
             db.commit()
-            legacy_metadata = Table("LibraryBookMetadata", MetaData(), autoload_with=engine)
+            legacy_metadata = Table(
+                "LibraryBookMetadata", MetaData(), autoload_with=engine
+            )
             timestamp = int(datetime.now(UTC).timestamp() * 1000)
-            db.execute(legacy_metadata.insert().values(
-                bookId="book", title="Images", normalizedTitle="images",
-                createdAt=timestamp, updatedAt=timestamp,
-            ))
+            db.execute(
+                legacy_metadata.insert().values(
+                    bookId="book",
+                    title="Images",
+                    normalizedTitle="images",
+                    createdAt=timestamp,
+                    updatedAt=timestamp,
+                )
+            )
             db.execute(
                 insert(LibraryReadableResource).values(
                     id="resource",
@@ -1464,11 +1479,19 @@ def test_directory_legacy_tasks_upgrade_keeps_asset_ids_and_progress(
             protected_cover = settings.resolved_storage_root / "covers/protected.png"
             protected_cover.parent.mkdir(parents=True, exist_ok=True)
             protected_cover.write_bytes(b"user-owned-cover")
-            legacy_resource_metadata = Table("LibraryReadableResourceMetadata", MetaData(), autoload_with=engine)
-            db.execute(legacy_resource_metadata.insert().values(
-                resourceId="resource", title="User title", coverPath="covers/protected.png",
-                protectedFields='["title","cover_path"]', createdAt=timestamp, updatedAt=timestamp,
-            ))
+            legacy_resource_metadata = Table(
+                "LibraryReadableResourceMetadata", MetaData(), autoload_with=engine
+            )
+            db.execute(
+                legacy_resource_metadata.insert().values(
+                    resourceId="resource",
+                    title="User title",
+                    coverPath="covers/protected.png",
+                    protectedFields='["title","cover_path"]',
+                    createdAt=timestamp,
+                    updatedAt=timestamp,
+                )
+            )
             db.add(
                 ReaderResourceProgress(
                     id="progress",
