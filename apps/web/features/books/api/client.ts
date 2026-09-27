@@ -361,11 +361,11 @@ export async function updateSourceNodePresentation(
   });
 }
 
-export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: string, providerId: string, query: string, signal?: AbortSignal, manualQuery = false, selectedCandidate?: SourceNodeMetadataCandidate): Promise<Readonly<{ message: string | null; candidates: SourceNodeMetadataCandidate[]; identity: MetadataIdentity | null; selectedMetadata: SourceNodeMetadataCandidate | null; query: string; selectedId: string | null; preferLocalMetadata: boolean }>> {
+export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: string, providerId: string, query: string, signal?: AbortSignal, manualQuery = false, selectedCandidate?: SourceNodeMetadataCandidate, target?: Readonly<{ scope: MetadataTargetScope; resourceId: string | null }>): Promise<Readonly<{ message: string | null; candidates: SourceNodeMetadataCandidate[]; identity: MetadataIdentity | null; selectedMetadata: SourceNodeMetadataCandidate | null; query: string; selectedId: string | null; preferLocalMetadata: boolean }>> {
   const data = record(await apiJson(`/api/books/${encodeURIComponent(bookId)}/source-nodes/${encodeURIComponent(sourceNodeId)}/metadata/search`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ providerId, query, manualQuery, ...(selectedCandidate ? { selectedCandidate } : {}) }),
+    body: JSON.stringify({ providerId, query, manualQuery, ...target, ...(selectedCandidate ? { selectedCandidate } : {}) }),
     signal
   }));
   const parseCandidate = (value: unknown): SourceNodeMetadataCandidate[] => {

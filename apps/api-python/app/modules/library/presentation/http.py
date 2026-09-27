@@ -1417,6 +1417,8 @@ def search_book_source_node_metadata(
             source_node_id=source_node_id,
             provider_id=payload.provider_id,
             query=payload.query,
+            scope=payload.scope,
+            resource_id=payload.resource_id,
             manual_query=payload.manual_query,
             selected_candidate=payload.selected_candidate.model_dump(by_alias=True, mode="json") if payload.selected_candidate else None,
             is_active=lambda: not from_thread.run(request.is_disconnected),

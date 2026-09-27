@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Callable, Mapping
-from typing import cast
+from typing import Literal, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -50,6 +50,8 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
         source_node_id: str,
         provider_id: str,
         query: str | None,
+        scope: Literal["book", "resource"] | None = None,
+        resource_id: str | None = None,
         manual_query: bool = False,
         selected_candidate: Mapping[str, object] | None = None,
         is_active: Callable[[], bool] | None = None,
@@ -83,6 +85,25 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
                 or node.relative_path.startswith(f"{root.relative_path.rstrip('/')}/")
             )
         ):
+            return None
+        # Compatibility for old callers only. New resource callers name their target.
+        if scope is None:
+            if resource_id is not None:
+                return None
+            if source_node_id == book.source_node_id:
+                scope = "book"
+            else:
+                legacy_resources = list(self._db.scalars(select(LibraryReadableResource).where(
+                    LibraryReadableResource.book_id == book_id,
+                    LibraryReadableResource.source_node_id == source_node_id,
+                ).limit(2)))
+                if len(legacy_resources) == 1:
+                    scope, resource_id = "resource", legacy_resources[0].id
+        if scope == "resource":
+            target_resource = self._db.get(LibraryReadableResource, resource_id) if resource_id else None
+            if target_resource is None or target_resource.book_id != book_id or target_resource.source_node_id != source_node_id:
+                return None
+        elif resource_id is not None:
             return None
         resources = [
             {
@@ -158,7 +179,7 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
                 value["id"] = identifier[len(prefix):]
             match = MetadataMatch(None, candidate_key(value))
             selected = prepare_matched_metadata(self._db, match, [value])
-            selected = complete_missing_metadata(self._db, book_id=book_id, source_node_id=source_node_id, candidate=selected, is_active=is_active)
+            selected = complete_missing_metadata(self._db, book_id=book_id, source_node_id=source_node_id, candidate=selected, scope=scope, resource_id=resource_id, is_active=is_active)
             if selected:
                 selected["id"] = identifier
             return SourceNodeMetadataRecognitionResult(
@@ -218,7 +239,7 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
             )
             identity = match.identity
             selected = prepare_matched_metadata(self._db, match, values)
-            selected = complete_missing_metadata(self._db, book_id=book_id, source_node_id=source_node_id, candidate=selected, is_active=is_active)
+            selected = complete_missing_metadata(self._db, book_id=book_id, source_node_id=source_node_id, candidate=selected, scope=scope, resource_id=resource_id, is_active=is_active)
             if selected:
                 selected["sourceIssues"] = [*source_issues, *cast(list[str], selected.get("sourceIssues", [])), *(["no_matching_entry"] if source_completed and not match.primary_candidate_id else [])]
             # Display raw records separately from the normalized/merged application.

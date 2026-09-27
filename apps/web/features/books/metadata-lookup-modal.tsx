@@ -186,7 +186,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
     try {
       const sourceNodeId = fixedScope === 'resource' ? targetResource?.sourceNodeId : book.sourceNodeId;
       if (!sourceNodeId) throw new Error('元数据目标缺少 sourceNodeId');
-      const result = await searchSourceNodeMetadata(book.id, sourceNodeId, source, query.trim(), controller.signal, manualQuery);
+      const result = await searchSourceNodeMetadata(book.id, sourceNodeId, source, query.trim(), controller.signal, manualQuery, undefined, { scope, resourceId: selectedTargetResource?.id ?? null });
       if (controller.signal.aborted) return;
       const nextCandidates = result.candidates;
       setCandidates(nextCandidates);
@@ -223,7 +223,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
     try {
       const sourceNodeId = fixedScope === 'resource' ? targetResource?.sourceNodeId : book.sourceNodeId;
       if (!sourceNodeId) throw new Error('元数据目标缺少 sourceNodeId');
-      const result = await searchSourceNodeMetadata(book.id, sourceNodeId, source, query.trim(), controller.signal, manualQuery, candidate);
+      const result = await searchSourceNodeMetadata(book.id, sourceNodeId, source, query.trim(), controller.signal, manualQuery, candidate, { scope, resourceId: selectedTargetResource?.id ?? null });
       if (controller.signal.aborted) return;
       if (result.selectedMetadata?.id === candidate.id) {
         setCandidateDetails((current) => ({ ...current, [candidate.id]: result.selectedMetadata! }));

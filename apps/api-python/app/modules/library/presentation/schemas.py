@@ -404,6 +404,8 @@ class SourceNodeMetadataUpdatedPayload(HttpContractModel):
 
 
 class SourceNodeMetadataSearchRequest(HttpContractModel):
+    scope: Literal["book", "resource"] | None = None
+    resource_id: str | None = Field(default=None, alias="resourceId", min_length=1, max_length=200)
     selected_candidate: RecognizedMetadataCandidateInput | None = Field(default=None, alias="selectedCandidate")
     manual_query: bool = Field(default=False, alias="manualQuery")
     provider_id: str = Field(alias="providerId", min_length=1, max_length=100)

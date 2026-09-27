@@ -186,3 +186,31 @@ HTTP 场景先把实际待识别数据库字段设为“卡夫卡 下载版 / �
 - Ruff、8 个受影响生产入口定向 mypy、Web typecheck、改动文件 ESLint 通过；双语目录校验 **2343 键**通过。Windows 缺少可用 python3 别名的问题用临时解释器路径修正，未修改应用或检查脚本。
 
 真实联调缺口：自动队列与浏览器尚未串接真实 DeepSeek 全链运行；网站故障、详情仍缺字段等分支使用受控传输，不能与上述真实 HTTP 样本混称。未验证生产 NAS 进程重启，未合并、发布或部署。
+
+
+## C 局部补修：生成目标与应用目标一致（2026-09-27）
+
+起点 `d4730f9a180ec4f4ed52c62ed8f35446691565c0`，分支 `codex/metadata-ai-rebuild`，开始时工作树干净。原开发目录 14 项用户改动哈希均未变化。
+
+修复仅传递目标：识别弹窗及来源目录弹窗 → Web `searchSourceNodeMetadata` client → `SourceNodeMetadataSearchRequest` HTTP → `RecognizeSourceNodeMetadata.execute` / port → `ProviderSourceNodeMetadataRecognition.search` → `complete_missing_metadata`。首次搜索和人工换选都发送相同的 scope/resourceId；来源目录中存在明确 resourceId 时优先按资源操作，不能因与书同节点而切成 book。自动队列显式传 scope=book，没有改变任务归属。
+
+adapter 在模型调用前按明确 ID 校验资源属于当前 book、绑定请求的 sourceNode；缺失、跨书或节点不符沿既有 404 返回，不选第一资源。生成入口按 scope/resourceId 读取资源简介、保护状态与 updated_at；sourceNodeId 仅继续用于本地线索和节点归属校验。资源 revision 与保存端一致，仍由 book.updated_at 与 resource.updated_at 组成；书级只有 book.updated_at。未删除、放宽修订检查或增加同节点放行条件。标签仍属于 book。
+
+旧请求不带目标字段时，在 adapter 保留旧入口兼容：书根节点按 book；非根节点仅在存在唯一资源时解析为资源，无明确资源的目录不生成。新资源界面始终传明确目标，不使用该兼容推断。没有新增迁移，也没有改写 0039、模型任务、开关或来源匹配。
+
+### 同节点反例与定向结果
+
+在既有 `test_metadata_identity.py` 中构造合法的 Book / ReadableResource 共用 SourceNode，外部模型和网站 HTTP 响应受控，实际走应用搜索 HTTP → 生成 → 应用 HTTP → 详情 GET：
+
+| 输入与目标 | 结果 |
+| --- | --- |
+| 同节点，book/resource 简介均空，明确 resource | 生成“明确资源生成介绍”，应用字段为 resource.description，详情资源 generatedFields=[description]，book.description 仍空 |
+| 同节点，book 有“书级简介保留”，resource 空 | 仍生成并保存资源简介；书级简介保持原值 |
+| 同节点，resource 有“资源已有简介”，book 空 | 不发起 generate，资源简介不变、没有新增生成标识 |
+| 不同节点，book 有简介，resource 空 | 明确资源目标同样成功生成、应用及详情读取 |
+
+以上四种场景分别经过首次搜索与人工换选，共 8 项；另 4 项验证 resourceId 缺失、不存在、跨书和节点不符拒绝且不调用模型。测试准备数据提交后显式刷新会话，避免 ORM 缓存的微秒时间戳与数据库毫秒精度混用；应用修订规则未改变。
+
+实际验证：72 项既有 HTTP/队列/应用回归通过，涵盖书级与旧请求、不同节点旧资源入口、部分勾选、保护、并发修改、来源失败保留及自动生成保存；新增 12 项目标用例通过。Web client 27 项通过，其中核对首次搜索和换选发送相同 resource 目标且 query 保持不变。Web typecheck、改动文件 ESLint/Ruff、6 个受影响生产文件的局部 mypy（follow-imports=silent）通过；普通 mypy 展开依赖时报告 9 个未修改文件中的 27 项存量错误，未扩展修复范围。没有执行全仓回归。
+
+本次未重新调用真实 DeepSeek、真实网站或运行浏览器联调；模型/来源响应为受控测试，不能替代真实模型准确性或浏览器现场验收。此前 C 的真实 HTTP 样本记录保留。本轮未合并、发布或部署 NAS。

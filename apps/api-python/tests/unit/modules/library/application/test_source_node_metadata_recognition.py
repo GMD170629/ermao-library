@@ -20,6 +20,8 @@ class FakeRecognitionPort:
         source_node_id: str,
         provider_id: str,
         query: str | None,
+        scope=None,
+        resource_id=None,
         manual_query: bool = False,
         selected_candidate: Mapping[str, object] | None = None,
     ) -> SourceNodeMetadataRecognitionResult | None:

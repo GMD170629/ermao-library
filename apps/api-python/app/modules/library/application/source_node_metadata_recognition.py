@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 from app.contracts.metadata_identity import MetadataIdentity
 
@@ -62,6 +62,8 @@ class SourceNodeMetadataRecognitionPort(Protocol):
         source_node_id: str,
         provider_id: str,
         query: str | None,
+        scope: Literal["book", "resource"] | None = None,
+        resource_id: str | None = None,
         manual_query: bool = False,
         selected_candidate: Mapping[str, object] | None = None,
         is_active: Callable[[], bool] | None = None,
@@ -79,6 +81,8 @@ class RecognizeSourceNodeMetadata:
         source_node_id: str,
         provider_id: str,
         query: str | None,
+        scope: Literal["book", "resource"] | None = None,
+        resource_id: str | None = None,
         manual_query: bool = False,
         selected_candidate: Mapping[str, object] | None = None,
         is_active: Callable[[], bool] | None = None,
@@ -91,6 +95,8 @@ class RecognizeSourceNodeMetadata:
             source_node_id=source_node_id,
             provider_id=normalized_provider,
             query=(query or "").strip() or None,
+            scope=scope,
+            resource_id=resource_id,
             manual_query=manual_query,
             selected_candidate=selected_candidate,
             **({"is_active": is_active} if is_active else {}),

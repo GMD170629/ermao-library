@@ -3,6 +3,7 @@
 import json
 import logging
 from collections.abc import Callable, Mapping
+from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -31,11 +32,15 @@ def complete_missing_metadata(
     book_id: str,
     candidate: Mapping[str, object] | None,
     source_node_id: str | None = None,
+    scope: Literal["book", "resource"] | None = "book",
+    resource_id: str | None = None,
     is_active: Callable[[], bool] | None = None,
 ) -> dict[str, object] | None:
     if candidate is None:
         return None
     result = dict(candidate)
+    if scope is None:
+        return result
     # A selected record belongs to this operation; never carry a previous generation.
     config = metadata_provider_runtime_config(db, "ai")
     identity = result.get("identity")
@@ -55,15 +60,10 @@ def complete_missing_metadata(
         return result
     target: LibraryBookMetadata | LibraryReadableResourceMetadata | None = metadata
     resource = None
-    if source_node_id and source_node_id != book.source_node_id:
-        resource = db.scalar(
-            select(LibraryReadableResource).where(
-                LibraryReadableResource.book_id == book_id,
-                LibraryReadableResource.source_node_id == source_node_id,
-            )
-        )
-        if resource is None:
-            return result  # Directory presentation is not a book/resource generation target.
+    if scope == "resource":
+        resource = db.get(LibraryReadableResource, resource_id) if resource_id else None
+        if resource is None or resource.book_id != book_id or resource.source_node_id != source_node_id:
+            return result
         target = db.get(LibraryReadableResourceMetadata, resource.id)
         if target is None:
             return result

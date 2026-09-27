@@ -499,8 +499,11 @@ test('manual candidate selection sends its own source record without changing qu
       selectedMetadata: { ...candidate, description: '另一条目详情简介' } } }), { status: 200, headers: { 'content-type': 'application/json' } });
   };
   try {
-    const result = await searchSourceNodeMetadata('book', 'node', 'douban', '人工词', undefined, true, candidate);
-    assert.deepEqual(sent, { providerId: 'douban', query: '人工词', manualQuery: true, selectedCandidate: candidate });
+    const target = { scope: 'resource' as const, resourceId: 'same-node-resource' };
+    await searchSourceNodeMetadata('book', 'node', 'douban', '原标题', undefined, false, undefined, target);
+    assert.deepEqual(sent, { providerId: 'douban', query: '原标题', manualQuery: false, ...target });
+    const result = await searchSourceNodeMetadata('book', 'node', 'douban', '人工词', undefined, true, candidate, target);
+    assert.deepEqual(sent, { providerId: 'douban', query: '人工词', manualQuery: true, selectedCandidate: candidate, ...target });
     assert.equal(result.selectedMetadata?.id, candidate.id);
     assert.equal(result.selectedMetadata?.description, '另一条目详情简介');
     assert.equal(result.query, '人工词');

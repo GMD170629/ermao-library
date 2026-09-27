@@ -596,3 +596,75 @@ def test_generated_resource_description_preserves_book_scope(client, db_session,
     assert detail["resources"][0]["description"] == "资源生成介绍"
     assert detail["resources"][0]["generatedFields"] == ["description"]
     assert detail["resources"][0]["generationSource"] == "AI_GENERATED"
+
+
+@pytest.mark.parametrize("same_node,book_description,resource_description", [
+    (True, None, None), (True, "书级简介保留", None),
+    (True, None, "资源已有简介"), (False, "书级简介保留", None),
+])
+@pytest.mark.parametrize("switch_candidate", [False, True])
+def test_explicit_generation_target_search_apply_reopen(
+    client, db_session, monkeypatch, same_node, book_description, resource_description, switch_candidate,
+):
+    test_generate_missing_fields_apply_and_reopen(client, db_session, monkeypatch, None, True)
+    from app.models import LibraryReadableResource, LibraryReadableResourceMetadata
+
+    book = db_session.get(LibraryBookMetadata, "generated-book")
+    resource = db_session.get(LibraryReadableResource, "generated-book-resource")
+    metadata = db_session.get(LibraryReadableResourceMetadata, resource.id)
+    book.description = book_description
+    metadata.description = resource_description
+    if same_node:
+        resource.source_node_id = "generated-book-root"
+    db_session.commit()
+    db_session.expire_all()
+    node_id = resource.source_node_id
+    calls = []
+
+    def model(request, **kwargs):
+        prompt = json.loads(json.loads(request.data)["messages"][1]["content"])
+        if "missingFields" in prompt:
+            calls.append(prompt)
+            assert prompt["missingFields"] == ["description"]
+            result = {"description": "明确资源生成介绍", "tags": [], "needsReview": False, "reason": "resource"}
+        else:
+            result = {"title": "活着", "author": "余华", "needsReview": False, "reason": "identity"}
+        return BytesIO(json.dumps({"choices": [{"message": {"content": json.dumps(result)}}]}).encode())
+
+    monkeypatch.setattr(ai_client, "urlopen", model)
+    payload = {"providerId": "bangumi", "scope": "resource", "resourceId": resource.id}
+    if switch_candidate:
+        payload["selectedCandidate"] = {"id": "bangumi:3", "source": "bangumi", "title": "活着", "author": "余华"}
+    searched = client.post(f"/api/books/generated-book/source-nodes/{node_id}/metadata/search", json=payload)
+    assert searched.status_code == 200, searched.text
+    candidate = searched.json()["data"]["selectedMetadata"]
+    assert len(calls) == (0 if resource_description else 1)
+    if not resource_description:
+        db_session.expire_all()
+        current_book = db_session.get(LibraryBookMetadata, "generated-book")
+        current_resource = db_session.get(LibraryReadableResourceMetadata, resource.id)
+        assert candidate["generationRevision"] == current_book.updated_at.isoformat() + "|" + current_resource.updated_at.isoformat()
+        applied = client.post("/api/books/generated-book/metadata/apply", json={
+            "scope": "resource", "resourceId": resource.id, "candidate": candidate, "fields": ["resource.description"],
+        })
+        assert applied.status_code == 200, applied.text
+        assert applied.json()["data"]["appliedFields"] == ["resource.description"]
+    detail = client.get("/api/books/generated-book").json()["data"]["book"]
+    assert detail["description"] == book_description
+    saved_resource = next(item for item in detail["resources"] if item["id"] == resource.id)
+    assert saved_resource["description"] == (resource_description or "明确资源生成介绍")
+    assert saved_resource["generatedFields"] == ([] if resource_description else ["description"])
+
+
+@pytest.mark.parametrize("resource_id", [None, "missing", "other-book-resource", "generated-book-resource"])
+def test_generation_target_must_belong_to_book_and_request_node(client, db_session, monkeypatch, resource_id):
+    _add_book(db_session, book_id="generated-book")
+    _add_book(db_session, book_id="other-book")
+    _login(client, db_session, role="admin")
+    def unexpected(*args, **kwargs):
+        pytest.fail("Invalid target must not call the model")
+    monkeypatch.setattr(ai_client, "urlopen", unexpected)
+    response = client.post("/api/books/generated-book/source-nodes/generated-book-root/metadata/search", json={
+        "providerId": "bangumi", "scope": "resource", "resourceId": resource_id,
+    })
+    assert response.status_code == 404

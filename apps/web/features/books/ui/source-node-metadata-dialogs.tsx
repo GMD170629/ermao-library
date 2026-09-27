@@ -129,11 +129,13 @@ export function SourceNodeMetadataRecognitionDialog({ bookId, bookSourceNodeId, 
   }, [entry, feedback, t]);
   if (!entry) return null;
 
+  const target = entry.resourceId ? { scope: "resource" as const, resourceId: entry.resourceId } : entry.sourceNodeId === bookSourceNodeId ? { scope: "book" as const, resourceId: null } : undefined;
+
   const search = async () => {
     setBusy(true);
     setMessage('');
     try {
-      const result = await searchSourceNodeMetadata(bookId, entry.sourceNodeId, providerId, query.trim());
+      const result = await searchSourceNodeMetadata(bookId, entry.sourceNodeId, providerId, query.trim(), undefined, false, undefined, target);
       const selected = result.selectedMetadata;
       const displayed = result.candidates.map((item) => item.id === selected?.id && item.source === selected.source ? selected : item);
       if (selected && !displayed.some((item) => item.id === selected.id && item.source === selected.source)) displayed.unshift(selected);
@@ -155,11 +157,11 @@ export function SourceNodeMetadataRecognitionDialog({ bookId, bookSourceNodeId, 
     try {
       const resolved = candidate.id === selectedMetadata?.id && candidate.source === selectedMetadata.source ? selectedMetadata
         : candidate.source === 'douban' || candidate.source === 'bangumi'
-          ? (await searchSourceNodeMetadata(bookId, entry.sourceNodeId, providerId, query.trim(), controller.signal, true, candidate)).selectedMetadata ?? candidate
+          ? (await searchSourceNodeMetadata(bookId, entry.sourceNodeId, providerId, query.trim(), controller.signal, true, candidate, target)).selectedMetadata ?? candidate
           : candidate;
       if (controller.signal.aborted) return;
       if (resolved.generatedFields?.length) {
-        const isBook = entry.sourceNodeId === bookSourceNodeId;
+        const isBook = target?.scope === "book";
         const result = await applyRecognizedMetadata(bookId, {
           scope: isBook ? 'book' : 'resource', resourceId: isBook ? null : entry.resourceId,
           candidate: resolved, fields: [isBook ? 'book.title' : 'resource.title', ...(resolved.description ? [isBook ? 'book.description' as const : 'resource.description' as const] : [])]

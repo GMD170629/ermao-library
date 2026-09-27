@@ -842,7 +842,7 @@ def process_metadata_lookup_task(
             )
             if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
                 return "CANCELLED"
-            candidate = complete_missing_metadata(db, book_id=str(book["id"]), candidate=candidate)
+            candidate = complete_missing_metadata(db, book_id=str(book["id"]), candidate=candidate, scope="book")
             if candidate and candidate.get("generationNeedsReview"):
                 candidate = {**candidate, **{field: None for field in cast(list[str], candidate.get("generatedFields", []))}, "generatedFields": []}
             if candidate:
