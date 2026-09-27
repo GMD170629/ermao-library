@@ -464,7 +464,7 @@ test('manual metadata selection applies conflicting candidates and every availab
       'resource.abridged', 'resource.resource_index', 'resource.cover_ref']
   };
   await page.route('**/metadata/search', (route) => route.fulfill({ json: { ok: true, data: {
-    sourceNodeId: 'epub-node', providerId: 'bangumi', query: '罗杰疑案', candidates: [candidate], hints: []
+    sourceNodeId: 'epub-node', providerId: 'bangumi', query: '罗杰疑案', candidates: [candidate], selectedId: candidate.id, selectedMetadata: candidate
   } } }));
   await page.route('**/metadata/apply', async (route) => {
     const body = route.request().postDataJSON();

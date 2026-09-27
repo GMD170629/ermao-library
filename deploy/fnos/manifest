@@ -1,14 +1,14 @@
 appname=ermao-books
 version=__APP_VERSION__
 display_name=二毛图书
-desc=二毛图书是一款自托管私人阅读与书库管理应用，支持 EPUB、漫画、PDF、文本读物和有声书的导入、整理、检索与沉浸阅读。可将单个 M4B、M4A、MP3 或多分轨音频合并为有声书，提供章节与轨道切换、倍速、音量、睡眠定时、跨页面连续播放和独立进度同步，适合在家庭 NAS 上集中管理个人藏书并跨设备阅读或收听。B站使用视频：https://www.bilibili.com/video/BV1r2KA6FEfL/　QQ交流群：154560969
+desc=面向家庭 NAS 的自托管阅读与书库管理应用。<br><br><b>核心功能 / Highlights</b><br>1. 多格式阅读：EPUB、PDF、漫画、文本与有声书。 / Read ebooks, comics and audiobooks.<br>2. 书库管理：导入、检索、分类与元数据识别。 / Import, search, organize and enrich metadata.<br>3. 沉浸阅读：阅读设置、书签与跨设备进度同步。 / Reading preferences, bookmarks and progress sync.<br>4. 有声书播放：多分轨、倍速与睡眠定时。 / Multi-track audio, playback speed and sleep timer.<br><br>官网 / Website：<a href="https://embook.xyz/">https://embook.xyz/</a><br>使用视频 / Tutorial：<a href="https://www.bilibili.com/video/BV1r2KA6FEfL/">Bilibili</a><br>QQ 交流群 / Community：154560969
 source=thirdparty
 platform=all
 maintainer=六面体
 maintainer_url=https://github.com/GMD170629/ermao-library
 distributor=六面体
 distributor_url=https://github.com/GMD170629/ermao-library
-changelog=v1.0.2：改进 SQLite 锁等待与导入完成重试；支持 Docker 挂载目录浏览；优化 Android 内容浏览、标签编辑、低进度显示和音频播放器，以及 Web 书库与扫描设置。 / Improve SQLite lock waits and import completion retries; browse Docker mounts; refine Android browsing, tags, reading progress and audio, plus Web library and scan settings.
+changelog=v1.5.0：增强 AI 元数据识别与缺失字段补全；优化移动端账户和退出操作、沉浸阅读及管理日志。 / Enhanced AI metadata matching and missing-field completion; improved mobile account controls, sign-out, immersive reading and administration logs.
 desktop_uidir=ui
 desktop_applaunchname=ermao-books.main
 ctl_stop=true

@@ -2,9 +2,14 @@
 
 这个目录是二毛图书的 fnOS Docker 应用模板。它与仓库根目录的原生 Docker Compose 部署相互独立，二者使用同一个生产镜像。fnOS 包通过独立宿主端口提供 Web 服务，不注册统一网关路径或 Unix Socket。
 
-应用开发者与发布者均为“六面体”，项目主页为 [GMD170629/ermao-library](https://github.com/GMD170629/ermao-library)。二毛图书支持 EPUB、漫画、PDF、文本读物和有声书的导入、整理、检索与沉浸阅读，适合部署在家庭 NAS 上集中管理个人藏书并跨设备访问。
+应用开发者与发布者均为“六面体”。[官网](https://embook.xyz/)提供功能演示、部署说明和下载入口；[项目源码](https://github.com/GMD170629/ermao-library)托管于 GitHub。
 
-有声书支持单个 M4B、M4A、MP3 以及多分轨音频导入，提供章节与轨道切换、倍速、音量、睡眠定时、跨页面连续播放和独立进度同步。
+核心功能 / Highlights：
+
+1. 多格式阅读：EPUB、PDF、漫画、文本与有声书。 / Read ebooks, comics and audiobooks.
+2. 书库管理：导入、检索、分类与元数据识别。 / Import, search, organize and enrich metadata.
+3. 沉浸阅读：阅读设置、书签与跨设备进度同步。 / Reading preferences, bookmarks and progress sync.
+4. 有声书播放：多分轨、倍速与睡眠定时。 / Multi-track audio, playback speed and sleep timer.
 
 - B 站使用视频：[BV1r2KA6FEfL](https://www.bilibili.com/video/BV1r2KA6FEfL/)
 - QQ 交流群：`154560969`
