@@ -21,6 +21,26 @@
 
 测试入口：`apps/api-python/tests/contract/api/test_metadata_identity.py`、`tests/test_metadata_lookup_queue.py`、`tests/unit/modules/metadata/test_identity.py`；Web 使用 `e2e/resource-details.spec.ts` 的 `AI identity preview` 用例及原有元数据、应用完成和双语测试。Ruff、定向 mypy、Web ESLint/typecheck、双语目录检查均通过。
 
-**真实联调缺口：**本次用户指定“Codex”，但未取得应用可调用的模型接口配置。没有使用 Codex 会话回答充当应用模型返回；上述结果不能证明真实模型对四种输入的识别准确性。实际模型四样本联调仍待补齐。
+## DeepSeek 真实联调补验（2026-09-27）
+
+用户随后提供 DeepSeek 凭据，补验使用 `https://api.deepseek.com` / `deepseek-flash`。应用现有 `/api/metadata/providers/ai/test` 实际推理成功，返回 HTTP 200、`ok=true`；返回的提供方配置隐藏密钥。凭据仅通过进程内存传递并存于隔离的内存 SQLite Source 配置，没有写入仓库、测试脚本或报告。
+
+以下为真实模型与真实 Bangumi HTTP 响应，未替换响应、未使用 Codex 会话答案。通过 FastAPI TestClient 运行实际鉴权、识别、来源适配器、保存和详情接口；只替换数据库连接为内存数据库、存储路径为临时目录。每例先在 `LibraryBookMetadata` 写入表中问题值，文件名也保持相同问题标题，不预置正确作者或内嵌元数据。发送线索仅当前标题作者、文件名和单层测试目录；未读取书库或正文。每例清空隔离库的网站缓存，均实际 POST `https://api.bgm.tv/v0/search/subjects`，`filter.type=[1]`。
+
+| 原始数据库标题 / 作者 | DeepSeek 结果（needsReview） | 实际查询 keyword → 选择 | 保存值 | 重新 GET 详情 |
+| --- | --- | --- | --- | --- |
+| 三体 刘慈欣 完整版 / 刘慈欣 | 三体 / 刘慈欣（false） | 三体 → Bangumi 9585 | 三体 / 刘慈欣 | 三体 / 刘慈欣 |
+| 三体Ⅱ：黑暗森林 / null | 三体Ⅱ：黑暗森林 / 刘慈欣（false） | 三体Ⅱ：黑暗森林 → Bangumi 9586 | 三体Ⅱ：黑暗森林 / 刘慈欣 | 三体Ⅱ：黑暗森林 / 刘慈欣 |
+| 活着 / 鲁迅 | 活着 / 余华（false） | 活着 → ai-identity | 活着 / 余华 | 活着 / 余华 |
+| 活着 / 余华 | 活着 / 余华（false） | 活着 → ai-identity | 活着 / 余华 | 活着 / 余华 |
+| 三体 / null | 三体 / null（true） | 三体 → ai-identity | 三体 / null（仅应用可用标题） | 三体 / null |
+
+上述识别、保存和详情请求均为 HTTP 200。Bangumi 的“三体”存在刘慈欣和草祭九日东两个同名条目；缺作者时保留 null，没有取第一条。错作者和正常《活着》样本的本次搜索未返回精确书名，直接应用真实 AI 标题作者候选，没有将近似网站条目当作对应作品，也未生成其他字段。
+
+首轮额外尝试《活着》/ null 时，模型返回 null 作者、needsReview=true；网站同样没有精确条目。临时验收脚本错误地提交了不存在的作者字段，应用按既有契约返回 422，数据库未修改。修正脚本为仅应用候选实际提供的字段；没有让应用接受空值伪装补全。这项尝试与上表的歧义样本都不算“作者已补齐”。
+
+联调同时定位并修正手动预览分支：`needsReview` 不再无条件用 AI 候选覆盖已匹配的网站候选，避免丢失网站作者。仍在原弹窗核对并应用，自动识别的不确定性保护不变。受控缺作者用例现在明确返回 `needsReview=true`，验证唯一网站候选补作者后可保存。该补作者分支的证据是受控回归；上表真实缺作者成功例由模型自身返回作者，不混淆两者。
+
+补验后的定向回归：身份 HTTP 链路、SourceNode 来源适配器、自动识别队列共 **23 passed**；修改的 Python 文件 Ruff 通过。本次真实模型验收在 HTTP 应用层完成；浏览器原值/新值展示、保存刷新与页面重开的证据仍是前述受控 API 浏览器测试，没有将两种验证冒称为同一场真实浏览器联调。样本为隔离库中构造的问题元数据，未运行生产书库或真实文件重新导入。
 
 生产数据库、密钥、图书、阅读进度、迁移历史未修改。任务 B/C、发布与 NAS 部署未执行。

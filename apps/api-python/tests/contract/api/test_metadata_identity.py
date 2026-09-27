@@ -98,7 +98,7 @@ def test_dirty_database_search_apply_reopen(
                                     {
                                         "title": new_title,
                                         "author": new_author,
-                                        "needsReview": False,
+                                        "needsReview": new_author is None,
                                         "reason": "controlled test",
                                     }
                                 )
@@ -139,6 +139,7 @@ def test_dirty_database_search_apply_reopen(
     assert response.status_code == 200, response.text
     data = response.json()["data"]
     assert data["identity"]["title"] == new_title
+    assert data["identity"]["needsReview"] is (new_author is None)
     assert data["selectedId"] == (
         "site-entry" if provider == "bangumi" else "ai-identity"
     )

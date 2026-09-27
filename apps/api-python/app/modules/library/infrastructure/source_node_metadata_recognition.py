@@ -184,7 +184,9 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
                     )
                 if provider_id != "ai" and (identity.title or identity.author):
                     values = [*values, identity.candidate()]
-                if selected is None or identity.needs_review:
+                # Manual preview still requires Apply; retain the matching site's
+                # author when identity asks for review without supplying one.
+                if selected is None:
                     selected = (
                         identity.candidate()
                         if identity.title or identity.author
