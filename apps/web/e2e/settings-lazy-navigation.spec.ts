@@ -739,3 +739,27 @@ test('import keyword debounce rejects an older slow response and supports empty 
   await page.clock.runFor(1);
   await expect(page.getByText('暂无导入任务。', { exact: true })).toBeVisible();
 });
+
+
+test('AI completion switch starts off and saves through the existing provider configuration', async ({ page }) => {
+  let provider = { id: 'ai', sourceId: 'ai', name: 'AI 增强识别', version: 'builtin', description: '', mode: 'infer',
+    configFields: [{ key: 'generateEnabled', label: 'AI 模拟补全', kind: 'boolean', required: false, secret: false }],
+    automaticRateLimit: null, config: { generateEnabled: false, model: 'configured-model' }, configuredSecrets: {}, enabled: true, priority: 1,
+    lastTestAt: null, lastTestStatus: null, lastError: null };
+  await page.route('**/api/metadata/providers', (route) => route.fulfill({ json: { ok: true, data: { providers: [provider] } } }));
+  await page.route('**/api/metadata/providers/ai', (route) => {
+    const body = route.request().postDataJSON();
+    expect(body.config.generateEnabled).toBe(true);
+    expect(body.config.model).toBe('configured-model');
+    provider = { ...provider, config: body.config };
+    return route.fulfill({ json: { ok: true, data: { provider } } });
+  });
+  await page.goto('/settings/organize?tab=providers');
+  await page.getByRole('region', { name: '数据源配置', exact: true }).getByRole('button', { name: '配置', exact: true }).click();
+  const toggle = page.getByRole('checkbox', { name: 'AI 模拟补全', exact: true });
+  await expect(toggle).not.toBeChecked();
+  await toggle.check();
+  await page.getByRole('button', { name: '保存配置', exact: true }).click();
+  await page.getByRole('region', { name: '数据源配置', exact: true }).getByRole('button', { name: '配置', exact: true }).click();
+  await expect(toggle).toBeChecked();
+});

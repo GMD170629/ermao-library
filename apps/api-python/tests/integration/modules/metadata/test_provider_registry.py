@@ -62,8 +62,6 @@ def test_provider_queries_remain_readable_while_another_writer_holds_lock(
             "ai",
             "bangumi",
             "douban",
-            "google-books",
-            "open-library",
         }
         assert not any(
             statement.startswith(("INSERT", "UPDATE", "DELETE"))
@@ -136,8 +134,6 @@ def test_provider_order_update_uses_bounded_set_based_dml(tmp_path: Path) -> Non
             "douban",
             "bangumi",
             "ai",
-            "google-books",
-            "open-library",
         ]
         assert all(not provider["enabled"] for provider in providers)
     finally:
@@ -181,3 +177,23 @@ def test_provider_state_and_audit_event_roll_back_together(
             assert after["config"] == before["config"]
     finally:
         engine.dispose()
+
+
+def test_generate_switch_defaults_off_and_reuses_existing_configuration(db_session):
+    import json
+
+    from app.models.import_pipeline import Source
+    from app.services.metadata_provider_registry import MetadataProviderRequestError
+    db_session.add(Source(id="switch-ai", name="AI", kind="metadata", provider_type="ai", enabled=True,
+                          config=json.dumps({"baseUrl": "http://model.test", "model": "local"})))
+    db_session.commit()
+    initial = get_metadata_provider(db_session, "ai")
+    assert initial["config"]["generateEnabled"] is False
+    assert next(field for field in initial["configFields"] if field["key"] == "generateEnabled")["kind"] == "boolean"
+    for enabled in (True, False):
+        prepared = prepare_metadata_provider_update(db_session, "ai", {"config": {"generateEnabled": enabled}})
+        saved = persist_metadata_provider_update(db_session, prepared)
+        assert saved["config"]["generateEnabled"] is enabled
+        assert saved["config"]["baseUrl"] == "http://model.test" and saved["enabled"] is True
+    with pytest.raises(MetadataProviderRequestError):
+        prepare_metadata_provider_update(db_session, "ai", {"config": {"generateEnabled": "true"}})

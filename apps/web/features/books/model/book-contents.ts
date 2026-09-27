@@ -33,6 +33,12 @@ export type BookContentsPage = Readonly<{
 }>;
 
 export type SourceNodeMetadataCandidate = Readonly<{
+  generatedFields?: string[];
+  sourceIssues?: string[];
+  generationSource?: "AI_GENERATED" | null;
+  generationNeedsReview?: boolean;
+  generationReason?: string | null;
+  generationRevision?: string | null;
   id: string;
   source: string;
   title: string | null;
@@ -51,17 +57,6 @@ export type SourceNodeMetadataCandidate = Readonly<{
   resourceIndex: number | null;
   coverUrl: string | null;
   confidence: number;
-  match?: SourceNodeMetadataMatch;
-  confirmableFields?: string[];
-}>;
-
-export type SourceNodeMetadataMatch = Readonly<{
-  outcome: 'MATCHED' | 'AMBIGUOUS' | 'REJECTED' | 'NO_MATCH';
-  level: 'SERIES' | 'WORK' | 'VOLUME' | 'EDITION' | 'UNKNOWN';
-  candidateKey: string;
-  evidenceIds: string[];
-  reasons: string[];
-  allowedFields: string[];
 }>;
 
 export function bookContentSortQuery(sort: BookContentSort): Readonly<{ sort: 'name' | 'type' | 'updated' | 'size'; direction: 'asc' | 'desc' }> {
@@ -80,3 +75,10 @@ export function isDirectResourceEntry(entry: BookContentEntry): boolean {
 export function isSourceDirectoryEntry(entry: BookContentEntry): boolean {
   return entry.kind === 'FOLDER' && !isDirectResourceEntry(entry);
 }
+
+export type MetadataIdentity = Readonly<{
+  title: string | null;
+  author: string | null;
+  needsReview: boolean;
+  reason: string;
+}>;

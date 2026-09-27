@@ -49,6 +49,7 @@ export type ReadableResourceView = Readonly<{
   sourceNodeId: string;
   title: string;
   description: string;
+  generatedFields?: string[];
   resourceIndex: number | null;
   sortOrder: number;
   format: ResourceFormat;
@@ -82,6 +83,7 @@ export type BookView = Readonly<{
   title: string;
   author: string;
   description: string;
+  generatedFields?: string[];
   seriesName: string | null;
   seriesIndex: number | null;
   tags: string[];

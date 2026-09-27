@@ -107,19 +107,15 @@ export function defaultRecognizedMetadataFields(
   book: BookView,
   resource: ReadableResourceView | null,
   candidate: SourceNodeMetadataCandidate | null,
-  definitions: readonly MetadataFieldDefinition[]
+  definitions: readonly MetadataFieldDefinition[],
+  preferLocalMetadata = false
 ): RecognizedMetadataField[] {
   if (!candidate) return [];
   return definitions.flatMap(({ field }) => {
     const value = candidateMetadataValue(candidate, field);
-    return canConfirmMetadataField(candidate, field) && hasMetadataValue(value) && normalized(value) !== normalized(currentMetadataValue(book, resource, field)) ? [field] : [];
+    const generatedCurrent = (field.startsWith('resource.') ? resource : book)?.generatedFields?.includes(field.split('.').at(-1) ?? '');
+    if (preferLocalMetadata && !generatedCurrent && !field.endsWith('.title') && field !== 'book.author'
+      && hasMetadataValue(currentMetadataValue(book, resource, field))) return [];
+    return hasMetadataValue(value) && normalized(value) !== normalized(currentMetadataValue(book, resource, field)) ? [field] : [];
   });
-}
-
-export function canConfirmMetadataField(candidate: SourceNodeMetadataCandidate | null, field: RecognizedMetadataField): boolean {
-  if (!candidate) return false;
-  if (field === 'resource.publishedAt' && !/^\d{4}-\d{2}-\d{2}(?:$|T)/.test(candidate.publishedAt ?? '')) return false;
-  const aliases: Record<string, string> = { cover: 'cover_ref', seriesName: 'series_name', seriesIndex: 'series_index', publishedAt: 'published_at', resourceIndex: 'resource_index' };
-  const [scope, name] = field.split('.');
-  return candidate.confirmableFields === undefined || candidate.confirmableFields.includes(`${scope}.${aliases[name] ?? name}`);
 }

@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
-from app.modules.library.application.recognized_metadata import (
-    RecognizedMetadataUnitOfWork,
-)
-from app.modules.metadata.public import MatchDecision
+from app.contracts.metadata_identity import MetadataIdentity
 
 
 class MetadataProviderSearchError(Exception):
@@ -35,8 +33,12 @@ class SourceNodeMetadataCandidate:
     resource_index: float | None
     cover_url: str | None
     confidence: float
-    match: MatchDecision | None = None
-    confirmable_fields: tuple[str, ...] = ()
+    generated_fields: tuple[str, ...] = ()
+    generation_source: str | None = None
+    generation_needs_review: bool = False
+    generation_reason: str | None = None
+    generation_revision: str | None = None
+    source_issues: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,20 +48,13 @@ class SourceNodeMetadataRecognitionResult:
     query: str
     message: str | None
     candidates: tuple[SourceNodeMetadataCandidate, ...]
-    target_revision: str | None = None
-    book_revision: str | None = None
-    assistance: dict[str, object] | None = None
-    recognition_id: str | None = None
-    target_type: str | None = None
-    target_id: str | None = None
-    outcome: str | None = None
+    identity: MetadataIdentity | None = None
+    selected_id: str | None = None
+    prefer_local_metadata: bool = True
+    selected_metadata: SourceNodeMetadataCandidate | None = None
 
 
 class SourceNodeMetadataRecognitionPort(Protocol):
-    def reopen(self, book_id: str, record_id: str) -> SourceNodeMetadataRecognitionResult | None: ...
-
-    def ignore(self, book_id: str, record_id: str) -> bool: ...
-
     def search(
         self,
         *,
@@ -67,28 +62,17 @@ class SourceNodeMetadataRecognitionPort(Protocol):
         source_node_id: str,
         provider_id: str,
         query: str | None,
+        scope: Literal["book", "resource"] | None = None,
         resource_id: str | None = None,
+        manual_query: bool = False,
+        selected_candidate: Mapping[str, object] | None = None,
+        is_active: Callable[[], bool] | None = None,
     ) -> SourceNodeMetadataRecognitionResult | None: ...
 
 
 class RecognizeSourceNodeMetadata:
-    def __init__(self, port: SourceNodeMetadataRecognitionPort, unit_of_work: RecognizedMetadataUnitOfWork | None = None) -> None:
+    def __init__(self, port: SourceNodeMetadataRecognitionPort) -> None:
         self._port = port
-        self._unit_of_work = unit_of_work
-
-    def reopen(self, book_id: str, record_id: str) -> SourceNodeMetadataRecognitionResult | None:
-        return self._port.reopen(book_id, record_id)
-
-    def ignore(self, book_id: str, record_id: str) -> bool:
-        if self._unit_of_work is None:
-            raise RuntimeError("Recognition write transaction is not configured")
-        try:
-            result = self._port.ignore(book_id, record_id)
-            self._unit_of_work.commit()
-            return result
-        except Exception:
-            self._unit_of_work.rollback()
-            raise
 
     def execute(
         self,
@@ -97,7 +81,11 @@ class RecognizeSourceNodeMetadata:
         source_node_id: str,
         provider_id: str,
         query: str | None,
+        scope: Literal["book", "resource"] | None = None,
         resource_id: str | None = None,
+        manual_query: bool = False,
+        selected_candidate: Mapping[str, object] | None = None,
+        is_active: Callable[[], bool] | None = None,
     ) -> SourceNodeMetadataRecognitionResult | None:
         normalized_provider = provider_id.strip()
         if not normalized_provider:
@@ -107,7 +95,11 @@ class RecognizeSourceNodeMetadata:
             source_node_id=source_node_id,
             provider_id=normalized_provider,
             query=(query or "").strip() or None,
+            scope=scope,
             resource_id=resource_id,
+            manual_query=manual_query,
+            selected_candidate=selected_candidate,
+            **({"is_active": is_active} if is_active else {}),
         )
 
 

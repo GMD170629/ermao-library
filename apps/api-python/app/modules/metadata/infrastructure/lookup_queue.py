@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
@@ -50,6 +49,7 @@ _BOOK_METADATA_CAMEL_TO_SNAKE: dict[str, str] = {
     "title": "title",
     "author": "author",
     "description": "description",
+    "generatedFields": "generated_fields",
     "seriesName": "series_name",
     "seriesIndex": "series_index",
     "coverPath": "cover_path",
@@ -164,12 +164,6 @@ def lookup_task_is_active(db: Session, task_id: str) -> bool:
         )
         is not None
     )
-
-
-def lookup_task_authorizes_target(db: Session, task_id: str, book_id: str, resource_id: str | None) -> bool:
-    task = db.get(MetadataLookupTask, task_id, populate_existing=True)
-    return bool(task and task.status == "RUNNING" and task.book_id == book_id
-                and (resource_id is None or task.resource_id == resource_id))
 
 
 def write_metadata_to_files_enabled(db: Session) -> bool:
@@ -400,6 +394,7 @@ def get_book(db: Session, book_id: str | None) -> dict[str, Any] | None:
         "metadataQuality": metadata.metadata_quality if metadata else 0,
         "normalizedTitle": metadata.normalized_title if metadata else "",
         "protectedFields": metadata.protected_fields if metadata else "[]",
+        "generatedFields": metadata.generated_fields if metadata else "[]",
         "normalizedAuthor": metadata.normalized_author if metadata else None,
         "organized": False,
         "organizeStatus": None,
@@ -595,9 +590,3 @@ def local_identification_failed(db: Session, book_id: str) -> bool:
         )
         == "FAILED"
     )
-
-
-
-def allow_path_metadata_repair(db: Session) -> bool:
-    policy = db.get(OrganizePolicy, "default")
-    return bool(policy and not policy.prefer_local_metadata and json.loads(policy.rules_json or "{}").get("allowRepairPathMetadata", False))

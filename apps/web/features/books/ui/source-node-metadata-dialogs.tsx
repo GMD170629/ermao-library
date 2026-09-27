@@ -1,15 +1,15 @@
 'use client';
 
-import { ImagePlus, Trash2, X } from 'lucide-react';
+import { ImagePlus, Search, Trash2, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Cover } from '../../../components/book/cover';
 import { Button } from '../../../components/ui/button';
+import { Select } from '../../../components/ui/select';
 import { useToast } from '../../../components/ui/feedback';
 import { I18nText, useI18n } from '../../../i18n/provider';
 import type { BookView } from '../../../types/book';
-import { updateSourceNodePresentation } from '../api/client';
-import type { BookContentEntry } from '../model/book-contents';
-import { MetadataLookupModal } from '../metadata-lookup-modal';
+import { applyRecognizedMetadata, fetchMetadataProviders, searchSourceNodeMetadata, updateSourceNodeMetadata, updateSourceNodePresentation } from '../api/client';
+import type { BookContentEntry, SourceNodeMetadataCandidate } from '../model/book-contents';
 
 type SharedProps = Readonly<{
   bookId: string;
@@ -94,8 +94,106 @@ export function SourceNodeMetadataEditor({ bookId, book, entry, onClose, onSaved
   </div>;
 }
 
-export function SourceNodeMetadataRecognitionDialog({ book, entry, onClose, onSaved }: EditorProps) {
+export function SourceNodeMetadataRecognitionDialog({ bookId, bookSourceNodeId, entry, onClose, onSaved }: SharedProps & { bookSourceNodeId: string }) {
+  const feedback = useToast();
+  const { t } = useI18n();
+  const [providerId, setProviderId] = useState('');
+  const [providers, setProviders] = useState<Awaited<ReturnType<typeof fetchMetadataProviders>>['providers']>([]);
+  const [query, setQuery] = useState('');
+  const [candidates, setCandidates] = useState<SourceNodeMetadataCandidate[]>([]);
+  const [selectedMetadata, setSelectedMetadata] = useState<SourceNodeMetadataCandidate | null>(null);
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  const selectionControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    setQuery(entry?.title ?? '');
+    setCandidates([]);
+    setSelectedMetadata(null);
+    setMessage('');
+    setProviders([]);
+    setProviderId('');
+    if (!entry) return;
+    const controller = new AbortController();
+    void fetchMetadataProviders(controller.signal)
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        const enabledProviders = result.providers.filter((provider) => provider.enabled);
+        setProviders(enabledProviders);
+        setProviderId(enabledProviders[0]?.id ?? '');
+      })
+      .catch((reason: unknown) => {
+        if (!controller.signal.aborted) feedback.error(reason instanceof Error ? reason.message : t('元数据识别失败'));
+      });
+    return () => { controller.abort(); selectionControllerRef.current?.abort(); };
+  }, [entry, feedback, t]);
   if (!entry) return null;
-  return <MetadataLookupModal book={book} sourceNodeId={entry.sourceNodeId} currentResourceId={entry.resourceId}
-    fixedScope={entry.resourceId ? 'resource' : 'book'} open onClose={onClose} onApplied={onSaved} />;
+
+  const target = entry.resourceId ? { scope: "resource" as const, resourceId: entry.resourceId } : entry.sourceNodeId === bookSourceNodeId ? { scope: "book" as const, resourceId: null } : undefined;
+
+  const search = async () => {
+    setBusy(true);
+    setMessage('');
+    try {
+      const result = await searchSourceNodeMetadata(bookId, entry.sourceNodeId, providerId, query.trim(), undefined, false, undefined, target);
+      const selected = result.selectedMetadata;
+      const displayed = result.candidates.map((item) => item.id === selected?.id && item.source === selected.source ? selected : item);
+      if (selected && !displayed.some((item) => item.id === selected.id && item.source === selected.source)) displayed.unshift(selected);
+      setCandidates(displayed);
+      setSelectedMetadata(result.selectedMetadata);
+      setMessage(result.candidates.length ? t('找到 {value0} 条候选', { value0: result.candidates.length }) : result.message || t('没有找到候选'));
+    } catch (reason) {
+      feedback.error(reason instanceof Error ? reason.message : t('元数据识别失败'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const apply = async (candidate: SourceNodeMetadataCandidate) => {
+    selectionControllerRef.current?.abort();
+    const controller = new AbortController();
+    selectionControllerRef.current = controller;
+    setBusy(true);
+    try {
+      const resolved = candidate.id === selectedMetadata?.id && candidate.source === selectedMetadata.source ? selectedMetadata
+        : candidate.source === 'douban' || candidate.source === 'bangumi'
+          ? (await searchSourceNodeMetadata(bookId, entry.sourceNodeId, providerId, query.trim(), controller.signal, true, candidate, target)).selectedMetadata ?? candidate
+          : candidate;
+      if (controller.signal.aborted) return;
+      if (resolved.generatedFields?.length) {
+        const isBook = target?.scope === "book";
+        const result = await applyRecognizedMetadata(bookId, {
+          scope: isBook ? 'book' : 'resource', resourceId: isBook ? null : entry.resourceId,
+          candidate: resolved, fields: [isBook ? 'book.title' : 'resource.title', ...(resolved.description ? [isBook ? 'book.description' as const : 'resource.description' as const] : [])]
+        }, controller.signal);
+        if (!result.appliedFields.length) throw new Error(t('生成字段未应用：目标已变化或已有内容。'));
+      } else {
+        await updateSourceNodeMetadata(bookId, entry.sourceNodeId, {
+          title: resolved.title?.trim() || entry.title,
+          description: resolved.description?.trim() || entry.description
+        });
+      }
+      await onSaved();
+      feedback.success(t('识别结果已应用到来源目录'));
+      onClose();
+    } catch (reason) {
+      if (!controller.signal.aborted) feedback.error(reason instanceof Error ? reason.message : t('操作失败'));
+    } finally {
+      if (!controller.signal.aborted) setBusy(false);
+    }
+  };
+
+  return <div className="fixed inset-0 z-[120] flex items-end justify-center bg-black/45 md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={t('识别来源目录元数据')}>
+    <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl md:rounded-3xl">
+      <div className="flex items-center justify-between"><h2 className="text-lg font-semibold"><I18nText>识别来源目录元数据</I18nText></h2><button type="button" onClick={onClose} aria-label={t('关闭')}><X size={20} /></button></div>
+      <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+        <Select value={providerId} ariaLabel={t('元数据来源')} options={providers.map((provider) => ({ value: provider.id, label: provider.name }))} onChange={setProviderId} className="sm:w-44" disabled={!providers.length} />
+        <input value={query} onChange={(event) => setQuery(event.target.value)} className="min-w-0 flex-1 rounded-xl border border-stone-200 px-3 py-2.5" aria-label={t('识别关键词')} />
+        <Button icon={Search} loading={busy} disabled={!query.trim() || !providerId} onClick={() => void search()}><I18nText>搜索</I18nText></Button>
+      </div>
+      {message ? <p className="mt-4 text-sm text-stone-500">{message}</p> : null}
+      <div className="mt-4 grid gap-3">{candidates.map((candidate) => <article key={`${candidate.source}:${candidate.id}`} className="rounded-2xl border border-stone-200 p-4"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><h3 data-i18n-skip className="font-semibold text-stone-900">{candidate.title || entry.title}</h3>{candidate.generatedFields?.includes("description") ? <span className="text-xs text-violet-600"><I18nText>AI 生成</I18nText></span> : null}{candidate.description ? <p data-i18n-skip className="mt-2 line-clamp-3 text-sm leading-6 text-stone-600">{candidate.description}</p> : null}<p data-i18n-skip className="mt-2 text-xs text-stone-400">{candidate.source}</p></div><Button variant="secondary" disabled={busy} onClick={() => void apply(candidate)}><I18nText>应用</I18nText></Button></div></article>)}</div>
+      <div className="mt-6 flex justify-end"><Button variant="secondary" onClick={onClose}><I18nText>关闭</I18nText></Button></div>
+    </div>
+  </div>;
 }

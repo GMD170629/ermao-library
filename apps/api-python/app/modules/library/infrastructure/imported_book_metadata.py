@@ -261,6 +261,7 @@ class SqlAlchemyImportedBookMetadata:
         for field, value in values.items():
             if field not in protected:
                 setattr(metadata, field, value)
+                metadata.generated_fields = json.dumps(sorted(set(json.loads(metadata.generated_fields or "[]")) - {field}))
         metadata.normalized_title = normalize_facet_name(metadata.title)
         metadata.normalized_author = (
             normalize_facet_name(metadata.author) if metadata.author else None
@@ -281,6 +282,7 @@ class SqlAlchemyImportedBookMetadata:
         self._db.flush()
         projection = load_book_facet_projections(self._db, (snapshot.book_id,))[0]
         if "tags" not in protected:
+            metadata.generated_fields = json.dumps(sorted(set(json.loads(metadata.generated_fields or "[]")) - {"tags"}))
             projection = replace(
                 projection,
                 tags_source=json.dumps(result.metadata.subjects, ensure_ascii=False),

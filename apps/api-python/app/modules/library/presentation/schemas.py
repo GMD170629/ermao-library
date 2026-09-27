@@ -404,23 +404,21 @@ class SourceNodeMetadataUpdatedPayload(HttpContractModel):
 
 
 class SourceNodeMetadataSearchRequest(HttpContractModel):
+    scope: Literal["book", "resource"] | None = None
+    resource_id: str | None = Field(default=None, alias="resourceId", min_length=1, max_length=200)
+    selected_candidate: RecognizedMetadataCandidateInput | None = Field(default=None, alias="selectedCandidate")
+    manual_query: bool = Field(default=False, alias="manualQuery")
     provider_id: str = Field(alias="providerId", min_length=1, max_length=100)
     query: str | None = Field(default=None, max_length=500)
-    resource_id: str | None = Field(default=None, alias="resourceId", min_length=1, max_length=191)
-
-
-class MetadataMatchView(HttpContractModel):
-    outcome: Literal["MATCHED", "AMBIGUOUS", "REJECTED", "NO_MATCH"]
-    candidate_key: str = Field(alias="candidateKey")
-    level: Literal["SERIES", "WORK", "VOLUME", "EDITION", "UNKNOWN"]
-    evidence_ids: list[str] = Field(alias="evidenceIds")
-    reasons: list[str]
-    allowed_fields: list[str] = Field(alias="allowedFields")
 
 
 class SourceNodeMetadataCandidateView(HttpContractModel):
-    confirmable_fields: list[str] = Field(default_factory=list, alias="confirmableFields")
-    match: MetadataMatchView | None = None
+    generated_fields: list[Literal["description", "tags"]] = Field(default_factory=list, alias="generatedFields", max_length=2)
+    generation_source: Literal["AI_GENERATED"] | None = Field(default=None, alias="generationSource")
+    generation_needs_review: bool = Field(default=False, alias="generationNeedsReview")
+    generation_reason: str | None = Field(default=None, alias="generationReason", max_length=1000)
+    generation_revision: str | None = Field(default=None, alias="generationRevision", max_length=200)
+    source_issues: list[str] = Field(default_factory=list, alias="sourceIssues", max_length=20)
     id: str
     source: str
     title: str | None = None
@@ -441,22 +439,32 @@ class SourceNodeMetadataCandidateView(HttpContractModel):
     confidence: float = 0
 
 
+class MetadataIdentityView(HttpContractModel):
+    title: str | None
+    author: str | None
+    needs_review: bool = Field(alias="needsReview")
+    reason: str
+
+
 class SourceNodeMetadataSearchPayload(HttpContractModel):
-    recognition_id: str | None = Field(default=None, alias="recognitionId")
-    target_type: str | None = Field(default=None, alias="targetType")
-    target_id: str | None = Field(default=None, alias="targetId")
-    outcome: str | None = None
-    assistance: dict[str, object] | None = None
     source_node_id: str = Field(alias="sourceNodeId")
     provider_id: str = Field(alias="providerId")
     query: str
     message: str | None = None
     candidates: list[SourceNodeMetadataCandidateView]
-    target_revision: str | None = Field(default=None, alias="targetRevision")
-    book_revision: str | None = Field(default=None, alias="bookRevision")
+    identity: MetadataIdentityView | None = None
+    selected_id: str | None = Field(default=None, alias="selectedId")
+    selected_metadata: SourceNodeMetadataCandidateView | None = Field(default=None, alias="selectedMetadata")
+    prefer_local_metadata: bool = Field(default=True, alias="preferLocalMetadata")
 
 
 class RecognizedMetadataCandidateInput(HttpContractModel):
+    generated_fields: list[Literal["description", "tags"]] = Field(default_factory=list, alias="generatedFields", max_length=2)
+    generation_source: Literal["AI_GENERATED"] | None = Field(default=None, alias="generationSource")
+    generation_needs_review: bool = Field(default=False, alias="generationNeedsReview")
+    generation_reason: str | None = Field(default=None, alias="generationReason", max_length=1000)
+    generation_revision: str | None = Field(default=None, alias="generationRevision", max_length=200)
+    source_issues: list[str] = Field(default_factory=list, alias="sourceIssues", max_length=20)
     id: str = Field(min_length=1, max_length=500)
     source: str = Field(min_length=1, max_length=100)
     title: str | None = Field(default=None, max_length=500)
@@ -484,13 +492,10 @@ class RecognizedMetadataCandidateInput(HttpContractModel):
 
 
 class ApplyRecognizedMetadataRequest(HttpContractModel):
-    recognition_id: str | None = Field(default=None, alias="recognitionId", max_length=191)
     scope: MetadataTargetScope
     resource_id: str | None = Field(default=None, alias="resourceId", max_length=191)
     candidate: RecognizedMetadataCandidateInput
     fields: list[RecognizedMetadataField] = Field(min_length=1, max_length=18)
-    expected_revision: str | None = Field(default=None, alias="expectedRevision", max_length=64)
-    expected_book_revision: str | None = Field(default=None, alias="expectedBookRevision", max_length=64)
 
 
 class ApplyRecognizedMetadataPayload(HttpContractModel):
@@ -499,7 +504,6 @@ class ApplyRecognizedMetadataPayload(HttpContractModel):
     cover_status: Literal["notSelected", "applied", "failed"] = Field(
         alias="coverStatus"
     )
-    writeback_status: Literal["notRequested", "queued", "failed"] = Field(default="notRequested", alias="writebackStatus")
 
 
 class ResourcePayload(HttpContractModel):

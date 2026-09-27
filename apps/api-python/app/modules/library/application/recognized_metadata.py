@@ -4,15 +4,13 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal, NotRequired, Protocol, TypedDict, cast
+from typing import Literal, NotRequired, Protocol, TypedDict
 
 from app.contracts.diagnostics import FailureDiagnostics
-from app.contracts.recognized_metadata_fields import recognized_field_name
 from app.modules.library.application.resource_commands import LibraryActor
 
 
@@ -74,28 +72,12 @@ RESOURCE_SCOPE_FIELDS = frozenset(
 )
 
 
-def confirmable_metadata_fields(candidate: Mapping[str, object], scope: str) -> tuple[str, ...]:
-    """Manual selection accepts available values regardless of matching or protection."""
-    fields = BOOK_SCOPE_FIELDS if scope == "book" else RESOURCE_SCOPE_FIELDS
-    result: list[str] = []
-    for field in sorted(fields):
-        target, name = field.value.split(".")
-        value = candidate.get("coverUrl" if name == "cover" else name)
-        if value is None or value == "" or value == []:
-            continue
-        # The persisted date needs a complete day; never invent missing precision.
-        if name == "publishedAt" and (
-            not isinstance(value, str) or not re.match(r"^\d{4}-\d{2}-\d{2}(?:$|T)", value)
-        ):
-            continue
-        result.append(target + "." + recognized_field_name(name))
-    return tuple(result)
-
-
 @dataclass(frozen=True, slots=True)
 class RecognizedMetadataCandidate:
     id: str
     source: str
+    generated_fields: tuple[str, ...] = ()
+    generation_revision: str | None = None
     title: str | None = None
     author: str | None = None
     description: str | None = None
@@ -141,8 +123,9 @@ class ResourceMetadataState:
 class RecognizedMetadataTargetState:
     book: BookMetadataState
     resource: ResourceMetadataState | None
-    book_revision: str = ""
-    resource_revision: str | None = None
+    generation_revision: str | None = None
+    book_protected: frozenset[str] = frozenset()
+    resource_protected: frozenset[str] = frozenset()
 
 
 class BookMetadataChanges(TypedDict, total=False):
@@ -167,9 +150,6 @@ class RecognizedResourceChanges(TypedDict, total=False):
 
 
 class RecognizedMetadataPort(Protocol):
-    def resolve_selection(self, *, book_id: str, resource_id: str | None, record_id: str,
-                          candidate: RecognizedMetadataCandidate, fields: tuple[RecognizedMetadataField, ...]) -> tuple[RecognizedMetadataCandidate, bool]: ...
-
     def load_target(
         self,
         *,
@@ -187,6 +167,7 @@ class RecognizedMetadataPort(Protocol):
         resource_changes: RecognizedResourceChanges,
         tags: tuple[str, ...] | None,
         now: datetime,
+        generated_fields: tuple[str, ...] = (),
     ) -> None: ...
 
 
@@ -214,7 +195,6 @@ class RecognizedCoverState:
     target_id: str
     current_cover_path: str | None
     updated_at: datetime | None = None
-    revision: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -345,9 +325,6 @@ class ApplyRecognizedMetadataCommand:
     candidate: RecognizedMetadataCandidate
     fields: tuple[RecognizedMetadataField, ...]
     now: datetime
-    expected_revision: str | None = None
-    expected_book_revision: str | None = None
-    recognition_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -355,7 +332,6 @@ class ApplyRecognizedMetadataResult:
     applied_fields: tuple[RecognizedMetadataField, ...]
     skipped_fields: tuple[RecognizedMetadataField, ...]
     cover_status: Literal["notSelected", "applied", "failed"]
-    writeback_status: Literal["notRequested", "queued", "failed"] = "notRequested"
 
 
 class RecognizedMetadataAuthorizationError(Exception):
@@ -419,13 +395,11 @@ class ApplyRecognizedMetadata:
         unit_of_work: RecognizedMetadataUnitOfWork,
         covers: RecognizedCoverApplication,
         diagnostics: FailureDiagnostics,
-        on_applied: Callable[[str, str | None], bool] | None = None,
     ) -> None:
         self._port = port
         self._unit_of_work = unit_of_work
         self._covers = covers
         self._diagnostics = diagnostics
-        self._on_applied = on_applied
 
     def execute(
         self, command: ApplyRecognizedMetadataCommand
@@ -463,19 +437,6 @@ class ApplyRecognizedMetadata:
         ):
             self._unit_of_work.rollback()
             raise RecognizedMetadataTargetNotFoundError
-        if command.recognition_id:
-            candidate, already_applied = self._port.resolve_selection(book_id=command.book_id, resource_id=command.resource_id,
-                record_id=command.recognition_id, candidate=command.candidate, fields=command.fields)
-            if already_applied:
-                self._unit_of_work.rollback()
-                return ApplyRecognizedMetadataResult((), command.fields, "notSelected")
-            command = replace(command, candidate=candidate)
-        target_revision = state.book_revision if command.scope is MetadataTargetScope.BOOK else state.resource_revision
-        if (command.expected_revision is not None and command.expected_revision != target_revision) or (
-            command.expected_book_revision is not None and command.expected_book_revision != state.book_revision
-        ):
-            self._unit_of_work.rollback()
-            raise InvalidRecognizedMetadataError("METADATA_CHANGED")
 
         book_changes: BookMetadataChanges = {}
         resource_changes: RecognizedResourceChanges = {}
@@ -497,6 +458,12 @@ class ApplyRecognizedMetadata:
                     cover_field = field
                     continue
                 current, value = self._field_values(field, state, command.candidate)
+                key = field.value.split(".")[-1]
+                if key in command.candidate.generated_fields:
+                    protected = state.resource_protected if field.value.startswith("resource.") else state.book_protected
+                    if command.candidate.generation_revision != state.generation_revision or (bool(current.strip()) if isinstance(current, str) else bool(current)) or key in protected:
+                        skipped.append(field)
+                        continue
                 if value is None or value == ():
                     raise InvalidRecognizedMetadataError(
                         "selected metadata value is unavailable"
@@ -524,6 +491,7 @@ class ApplyRecognizedMetadata:
                     resource_changes=resource_changes,
                     tags=next_tags,
                     now=command.now,
+                    **({"generated_fields": command.candidate.generated_fields} if command.candidate.generated_fields else {}),
                 )
                 self._unit_of_work.commit()
             except Exception:
@@ -561,24 +529,10 @@ class ApplyRecognizedMetadata:
                 cover_status = "applied"
                 applied.append(cover_field)
 
-        writeback_status: Literal["notRequested", "queued", "failed"] = "notRequested"
-        if applied and self._on_applied is not None:
-            try:
-                queued = self._on_applied(command.book_id, command.resource_id)
-                writeback_status = "queued" if queued else "notRequested"
-            except Exception as error:  # noqa: BLE001 - preserve committed database changes and diagnose OPF separately.
-                diagnostic = self._diagnostics.prepare(error, event="metadata.writeback_enqueue_failed",
-                                                      context={"resource_id": command.resource_id or command.book_id, "step": "enqueue_writeback"})
-                try:
-                    self._unit_of_work.rollback()
-                finally:
-                    self._diagnostics.persist(diagnostic)
-                writeback_status = "failed"
         return ApplyRecognizedMetadataResult(
             applied_fields=tuple(applied),
             skipped_fields=tuple(skipped),
             cover_status=cover_status,
-            writeback_status=writeback_status,
         )
 
     @staticmethod
@@ -587,20 +541,76 @@ class ApplyRecognizedMetadata:
         state: RecognizedMetadataTargetState,
         candidate: RecognizedMetadataCandidate,
     ) -> tuple[object, object]:
-        kind, external_name = field.value.split(".", 1)
-        name = recognized_field_name(external_name)
-        target = state.book if kind == "book" else state.resource
-        if target is None or not hasattr(target, name):
-            raise InvalidRecognizedMetadataError("metadata field is unavailable")
-        current = getattr(target, name)
-        value = getattr(candidate, name)
-        if isinstance(value, str):
-            value = _text(value)
-        elif name == "tags":
-            value = _tags(value)
-        elif name in {"series_index", "resource_index"}:
-            value = _number(value)
-        return current, value
+        book = state.book
+        resource = state.resource
+        values: dict[RecognizedMetadataField, tuple[object, object]] = {
+            RecognizedMetadataField.BOOK_TITLE: (book.title, _text(candidate.title)),
+            RecognizedMetadataField.BOOK_AUTHOR: (book.author, _text(candidate.author)),
+            RecognizedMetadataField.BOOK_DESCRIPTION: (
+                book.description,
+                _text(candidate.description),
+            ),
+            RecognizedMetadataField.BOOK_SERIES_NAME: (
+                book.series_name,
+                _text(candidate.series_name),
+            ),
+            RecognizedMetadataField.BOOK_SERIES_INDEX: (
+                book.series_index,
+                _number(candidate.series_index),
+            ),
+            RecognizedMetadataField.BOOK_TAGS: (book.tags, _tags(candidate.tags)),
+        }
+        if resource is not None:
+            values.update(
+                {
+                    RecognizedMetadataField.RESOURCE_TITLE: (
+                        resource.title,
+                        _text(candidate.title),
+                    ),
+                    RecognizedMetadataField.RESOURCE_DESCRIPTION: (
+                        resource.description,
+                        _text(candidate.description),
+                    ),
+                    RecognizedMetadataField.RESOURCE_PUBLISHER: (
+                        resource.publisher,
+                        _text(candidate.publisher),
+                    ),
+                    RecognizedMetadataField.RESOURCE_PUBLISHED_AT: (
+                        resource.published_at,
+                        candidate.published_at,
+                    ),
+                    RecognizedMetadataField.RESOURCE_LANGUAGE: (
+                        resource.language,
+                        _text(candidate.language),
+                    ),
+                    RecognizedMetadataField.RESOURCE_ISBN: (
+                        resource.isbn,
+                        _text(candidate.isbn),
+                    ),
+                    RecognizedMetadataField.RESOURCE_IDENTIFIER: (
+                        resource.identifier,
+                        _text(candidate.identifier),
+                    ),
+                    RecognizedMetadataField.RESOURCE_NARRATOR: (
+                        resource.narrator,
+                        _text(candidate.narrator),
+                    ),
+                    RecognizedMetadataField.RESOURCE_ABRIDGED: (
+                        resource.abridged,
+                        candidate.abridged,
+                    ),
+                    RecognizedMetadataField.RESOURCE_INDEX: (
+                        resource.resource_index,
+                        _number(candidate.resource_index),
+                    ),
+                }
+            )
+        try:
+            return values[field]
+        except KeyError as exc:
+            raise InvalidRecognizedMetadataError(
+                "metadata field is unavailable"
+            ) from exc
 
     @staticmethod
     def _assign(
@@ -609,12 +619,40 @@ class ApplyRecognizedMetadata:
         book_changes: BookMetadataChanges,
         resource_changes: RecognizedResourceChanges,
     ) -> None:
-        kind, external_name = field.value.split(".", 1)
-        name = recognized_field_name(external_name)
-        if name == "tags":
-            return
-        target = book_changes if kind == "book" else resource_changes
-        cast(dict[str, object], target)[name] = value
+        if field is RecognizedMetadataField.BOOK_TITLE:
+            book_changes["title"] = str(value)
+        elif field is RecognizedMetadataField.BOOK_AUTHOR:
+            book_changes["author"] = str(value)
+        elif field is RecognizedMetadataField.BOOK_DESCRIPTION:
+            book_changes["description"] = str(value)
+        elif field is RecognizedMetadataField.BOOK_SERIES_NAME:
+            book_changes["series_name"] = str(value)
+        elif field is RecognizedMetadataField.BOOK_SERIES_INDEX:
+            book_changes["series_index"] = _required_number(value)
+        elif field is RecognizedMetadataField.RESOURCE_TITLE:
+            resource_changes["title"] = str(value)
+        elif field is RecognizedMetadataField.RESOURCE_DESCRIPTION:
+            resource_changes["description"] = str(value)
+        elif field is RecognizedMetadataField.RESOURCE_PUBLISHER:
+            resource_changes["publisher"] = str(value)
+        elif field is RecognizedMetadataField.RESOURCE_PUBLISHED_AT and isinstance(
+            value, datetime
+        ):
+            resource_changes["published_at"] = value
+        elif field is RecognizedMetadataField.RESOURCE_LANGUAGE:
+            resource_changes["language"] = str(value)
+        elif field is RecognizedMetadataField.RESOURCE_ISBN:
+            resource_changes["isbn"] = str(value)
+        elif field is RecognizedMetadataField.RESOURCE_IDENTIFIER:
+            resource_changes["identifier"] = str(value)
+        elif field is RecognizedMetadataField.RESOURCE_NARRATOR:
+            resource_changes["narrator"] = str(value)
+        elif field is RecognizedMetadataField.RESOURCE_ABRIDGED and isinstance(
+            value, bool
+        ):
+            resource_changes["abridged"] = value
+        elif field is RecognizedMetadataField.RESOURCE_INDEX:
+            resource_changes["resource_index"] = _required_number(value)
 
 
 __all__ = [

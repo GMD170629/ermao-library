@@ -1,3 +1,4 @@
+import type { MetadataIdentity } from '../model/book-contents';
 import type { ReaderType, ReadableResourceView, ResourceFormat, ResourceImportSummary, BookView } from '../../../types/book';
 import { withBasePath } from '../../../lib/base-path';
 import { updateBulkBookCovers, type BulkBookCoverResult } from '../../library/public';
@@ -9,7 +10,7 @@ import type {
   ResourcePageDetailUnit,
   ResourceTrackDetailUnit
 } from '../model/resource-detail';
-import type { BookContentEntry, BookContentsPage, BookContentSort, SourceNodeMetadataCandidate, SourceNodeMetadataMatch } from '../model/book-contents';
+import type { BookContentEntry, BookContentsPage, BookContentSort, SourceNodeMetadataCandidate } from '../model/book-contents';
 import { bookContentSortQuery } from '../model/book-contents';
 import type { MetadataTargetScope, RecognizedMetadataField } from '../model/recognized-metadata';
 
@@ -21,6 +22,10 @@ function record(value: unknown): Record<string, unknown> {
 
 function stringValue(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
 function nullableString(value: unknown): string | null {
@@ -112,6 +117,7 @@ export function mapReadableResourceView(value: unknown): ReadableResourceView | 
     sourceNodeId,
     title: stringValue(item.title, id),
     description: stringValue(item.description),
+    generatedFields: stringArray(item.generatedFields),
     resourceIndex: nullableNumber(item.resourceIndex),
     sortOrder: finiteNumber(item.sortOrder),
     format,
@@ -163,6 +169,7 @@ export function mapBookView(value: unknown): BookView {
     title: stringValue(root.title, '未命名图书'),
     author: stringValue(root.author, ''),
     description: stringValue(root.description),
+    generatedFields: stringArray(root.generatedFields),
     seriesName: nullableString(root.seriesName),
     seriesIndex: nullableNumber(root.seriesIndex),
     tags: Array.isArray(root.tags) ? root.tags.filter((tag): tag is string => typeof tag === 'string') : [],
@@ -354,60 +361,21 @@ export async function updateSourceNodePresentation(
   });
 }
 
-const matchOutcomes = new Set<SourceNodeMetadataMatch['outcome']>(['MATCHED', 'AMBIGUOUS', 'REJECTED', 'NO_MATCH']);
-const matchLevels = new Set<SourceNodeMetadataMatch['level']>(['SERIES', 'WORK', 'VOLUME', 'EDITION', 'UNKNOWN']);
-
-function metadataMatch(value: unknown): SourceNodeMetadataMatch | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const item = record(value);
-  if (typeof item.outcome !== 'string' || !matchOutcomes.has(item.outcome as SourceNodeMetadataMatch['outcome'])) return null;
-  if (typeof item.level !== 'string' || !matchLevels.has(item.level as SourceNodeMetadataMatch['level'])) return null;
-  if (typeof item.candidateKey !== 'string' || !item.candidateKey.trim()) return null;
-  const stringList = (input: unknown): input is string[] => Array.isArray(input)
-    && input.every((part) => typeof part === 'string' && Boolean(part.trim()));
-  if (!stringList(item.evidenceIds) || !stringList(item.reasons) || !stringList(item.allowedFields)) return null;
-  return {
-    outcome: item.outcome as SourceNodeMetadataMatch['outcome'],
-    level: item.level as SourceNodeMetadataMatch['level'],
-    candidateKey: item.candidateKey,
-    evidenceIds: item.evidenceIds,
-    reasons: item.reasons,
-    allowedFields: item.allowedFields
-  };
-}
-
-export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: string, providerId: string, query: string, signal?: AbortSignal, resourceId?: string): Promise<MetadataRecognitionResult> {
+export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: string, providerId: string, query: string, signal?: AbortSignal, manualQuery = false, selectedCandidate?: SourceNodeMetadataCandidate, target?: Readonly<{ scope: MetadataTargetScope; resourceId: string | null }>): Promise<Readonly<{ message: string | null; candidates: SourceNodeMetadataCandidate[]; identity: MetadataIdentity | null; selectedMetadata: SourceNodeMetadataCandidate | null; query: string; selectedId: string | null; preferLocalMetadata: boolean }>> {
   const data = record(await apiJson(`/api/books/${encodeURIComponent(bookId)}/source-nodes/${encodeURIComponent(sourceNodeId)}/metadata/search`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ providerId, query, ...(resourceId ? { resourceId } : {}) }),
+    body: JSON.stringify({ providerId, query, manualQuery, ...target, ...(selectedCandidate ? { selectedCandidate } : {}) }),
     signal
   }));
-  return parseRecognitionResult(data, providerId);
-}
-
-export type MetadataRecognitionResult = Readonly<{
-  message: string | null; candidates: SourceNodeMetadataCandidate[]; recognitionId: string | null;
-  targetRevision: string | null; bookRevision: string | null;
-  hints: { query: string; hypothesis: boolean }[];
-}>;
-
-export async function reopenMetadataRecognition(bookId: string, recordId: string, signal?: AbortSignal): Promise<MetadataRecognitionResult> {
-  return parseRecognitionResult(record(await apiJson(`/api/books/${encodeURIComponent(bookId)}/metadata/recognitions/${encodeURIComponent(recordId)}`, { signal })), "");
-}
-
-export async function ignoreMetadataRecognition(bookId: string, recordId: string): Promise<void> {
-  await apiJson(`/api/books/${encodeURIComponent(bookId)}/metadata/recognitions/${encodeURIComponent(recordId)}/ignore`, { method: "POST" });
-}
-
-function parseRecognitionResult(data: Record<string, unknown>, providerId: string): MetadataRecognitionResult {
-  const candidates = (Array.isArray(data.candidates) ? data.candidates : []).flatMap((value) => {
+  const parseCandidate = (value: unknown): SourceNodeMetadataCandidate[] => {
     const item = record(value);
     const id = stringValue(item.id).trim();
     if (!id) return [];
-    const match = metadataMatch(item.match);
     return [{
       id,
+      ...(Array.isArray(item.sourceIssues) && item.sourceIssues.length ? { sourceIssues: stringArray(item.sourceIssues) } : {}),
+      ...(Array.isArray(item.generatedFields) && item.generatedFields.length ? { generatedFields: stringArray(item.generatedFields), generationSource: "AI_GENERATED" as const, generationNeedsReview: item.generationNeedsReview === true, generationReason: nullableString(item.generationReason), generationRevision: nullableString(item.generationRevision) } : {}),
       source: stringValue(item.source, providerId),
       title: nullableString(item.title),
       author: nullableString(item.author),
@@ -424,18 +392,23 @@ function parseRecognitionResult(data: Record<string, unknown>, providerId: strin
       abridged: typeof item.abridged === 'boolean' ? item.abridged : null,
       resourceIndex: nullableNumber(item.resourceIndex),
       coverUrl: nullableString(item.coverUrl),
-      confidence: finiteNumber(item.confidence),
-      ...(Array.isArray(item.confirmableFields) ? { confirmableFields: item.confirmableFields.filter((value): value is string => typeof value === "string") } : {}),
-      ...(match ? { match } : {})
+      confidence: finiteNumber(item.confidence)
     } satisfies SourceNodeMetadataCandidate];
-  });
-  const assistance = record(data.assistance);
-  const hints = (Array.isArray(assistance.queryHints) ? assistance.queryHints : []).slice(0, 2).flatMap((value) => {
-    const item = record(value);
-    return typeof item.query === 'string' ? [{ query: item.query.slice(0, 200), hypothesis: item.hypothesis !== false }] : [];
-  });
-  return { message: nullableString(data.message), candidates, hints,
-    recognitionId: nullableString(data.recognitionId), targetRevision: nullableString(data.targetRevision), bookRevision: nullableString(data.bookRevision) };
+  };
+  const candidates = (Array.isArray(data.candidates) ? data.candidates : []).flatMap(parseCandidate);
+  const selectedMetadata = data.selectedMetadata == null ? null : parseCandidate(data.selectedMetadata)[0] ?? null;
+  const rawIdentity = data.identity == null ? null : record(data.identity);
+  if (rawIdentity && (typeof rawIdentity.needsReview !== 'boolean' || typeof rawIdentity.reason !== 'string'
+    || (rawIdentity.title !== null && typeof rawIdentity.title !== 'string')
+    || (rawIdentity.author !== null && typeof rawIdentity.author !== 'string'))) throw new Error('元数据响应格式错误');
+  const identity = rawIdentity ? {
+    title: nullableString(rawIdentity.title), author: nullableString(rawIdentity.author),
+    needsReview: rawIdentity.needsReview === true, reason: stringValue(rawIdentity.reason)
+  } : null;
+  return { message: nullableString(data.message), candidates, identity, selectedMetadata,
+    query: stringValue(data.query, query), selectedId: nullableString(data.selectedId),
+    preferLocalMetadata: data.preferLocalMetadata !== false };
+
 }
 
 const recognizedMetadataFieldValues = new Set<RecognizedMetadataField>([
@@ -447,9 +420,6 @@ const recognizedMetadataFieldValues = new Set<RecognizedMetadataField>([
 export async function applyRecognizedMetadata(
   bookId: string,
   input: Readonly<{
-    recognitionId?: string | null;
-    expectedRevision?: string | null;
-    expectedBookRevision?: string | null;
     scope: MetadataTargetScope;
     resourceId: string | null;
     candidate: SourceNodeMetadataCandidate;
@@ -460,15 +430,11 @@ export async function applyRecognizedMetadata(
   appliedFields: RecognizedMetadataField[];
   skippedFields: RecognizedMetadataField[];
   coverStatus: 'notSelected' | 'applied' | 'failed';
-  writebackStatus: 'notRequested' | 'queued' | 'failed';
 }>> {
-  const candidate = { ...input.candidate };
-  delete candidate.match;
-  delete candidate.confirmableFields;
   const data = record(await apiJson(`/api/books/${encodeURIComponent(bookId)}/metadata/apply`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...input, candidate }),
+    body: JSON.stringify(input),
     signal
   }));
   const fields = (value: unknown): RecognizedMetadataField[] => (Array.isArray(value) ? value : []).filter(
@@ -481,8 +447,7 @@ export async function applyRecognizedMetadata(
   return {
     appliedFields: fields(data.appliedFields),
     skippedFields: fields(data.skippedFields),
-    coverStatus,
-    writebackStatus: data.writebackStatus === "failed" ? "failed" : data.writebackStatus === "queued" ? "queued" : "notRequested"
+    coverStatus
   };
 }
 
@@ -506,7 +471,7 @@ export async function fetchMetadataProviders(
     return [{
       id,
       name,
-      enabled: item.enabled === true && record(item.config).participation !== "OFF" && record(item.config).assistanceMode !== "OFF",
+      enabled: item.enabled === true,
       priority: finiteNumber(item.priority, Number.MAX_SAFE_INTEGER),
       mode: stringValue(item.mode)
     }];
@@ -530,7 +495,7 @@ export async function updateMetadataProviderOrder(
     return [{
       id,
       name: stringValue(item.name, id),
-      enabled: item.enabled === true && record(item.config).participation !== "OFF" && record(item.config).assistanceMode !== "OFF",
+      enabled: item.enabled === true,
       priority: finiteNumber(item.priority, Number.MAX_SAFE_INTEGER),
       mode: stringValue(item.mode)
     }];

@@ -282,56 +282,25 @@ test('removes the custom Book cover through the Book source presentation contrac
 
 test('maps complete recognized metadata candidates without truncating optional fields', async () => {
   const originalFetch = globalThis.fetch;
-  let requestBody: unknown = null;
-  globalThis.fetch = async (_input, init) => {
-    requestBody = JSON.parse(String(init?.body));
-    return new Response(JSON.stringify({ ok: true, data: {
+  globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, data: {
     message: null,
     candidates: [{
       id: 'subject-1', source: 'douban', title: '标题', author: '作者', description: '简介',
       tags: ['漫画'], seriesName: '系列', seriesIndex: 2, publisher: '出版社',
       publishedAt: '2026-08-26T00:00:00Z', language: 'zh-CN', isbn: '9780000000001',
       identifier: 'subject:1', narrator: '朗读者', abridged: false, resourceIndex: 3,
-      coverUrl: 'https://example.test/cover.jpg', confidence: 0.91,
-      match: { outcome: 'MATCHED', level: 'EDITION', candidateKey: 'douban:subject-1', evidenceIds: ['isbn'], reasons: ['IDENTIFIER_MATCH'], allowedFields: ['resource.isbn'] }
+      coverUrl: 'https://example.test/cover.jpg', confidence: 0.91
     }]
-    } }), { status: 200, headers: { 'content-type': 'application/json' } });
-  };
+  } }), { status: 200, headers: { 'content-type': 'application/json' } });
   try {
     const result = await searchSourceNodeMetadata('book-1', 'node-1', 'douban', '标题');
-    assert.deepEqual(requestBody, { providerId: 'douban', query: '标题' });
     assert.deepEqual(result.candidates[0], {
       id: 'subject-1', source: 'douban', title: '标题', author: '作者', description: '简介',
       tags: ['漫画'], seriesName: '系列', seriesIndex: 2, publisher: '出版社',
       publishedAt: '2026-08-26T00:00:00Z', language: 'zh-CN', isbn: '9780000000001',
       identifier: 'subject:1', narrator: '朗读者', abridged: false, resourceIndex: 3,
-      coverUrl: 'https://example.test/cover.jpg', confidence: 0.91,
-      match: { outcome: 'MATCHED', level: 'EDITION', candidateKey: 'douban:subject-1', evidenceIds: ['isbn'], reasons: ['IDENTIFIER_MATCH'], allowedFields: ['resource.isbn'] }
+      coverUrl: 'https://example.test/cover.jpg', confidence: 0.91
     });
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test('sends an explicit resource target and preserves server-ranked candidates while ignoring malformed match data', async () => {
-  const originalFetch = globalThis.fetch;
-  let requestBody: unknown = null;
-  globalThis.fetch = async (_input, init) => {
-    requestBody = JSON.parse(String(init?.body));
-    return new Response(JSON.stringify({ ok: true, data: {
-      message: null,
-      candidates: [
-        { id: 'second', match: { outcome: 'AMBIGUOUS', level: 'VOLUME', candidateKey: 'provider:second', evidenceIds: [], reasons: ['VOLUME_CONFLICT'], allowedFields: [] } },
-        { id: 'first', match: { outcome: 'MATCHED', level: 'EDITION', candidateKey: '', evidenceIds: [], reasons: [], allowedFields: [] } }
-      ]
-    } }), { status: 200, headers: { 'content-type': 'application/json' } });
-  };
-  try {
-    const result = await searchSourceNodeMetadata('book-1', 'node-1', 'douban', '标题', undefined, 'resource-2');
-    assert.deepEqual(requestBody, { providerId: 'douban', query: '标题', resourceId: 'resource-2' });
-    assert.deepEqual(result.candidates.map((candidate) => candidate.id), ['second', 'first']);
-    assert.equal(result.candidates[0]?.match?.outcome, 'AMBIGUOUS');
-    assert.equal(result.candidates[1]?.match, undefined);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -471,18 +440,74 @@ test('resource deletion needs no typed confirmation and preserves idempotency', 
 });
 
 
-test('preserves server record binding and AI suggestions without inventing candidates', async () => {
+test('metadata search carries explicit manual intent without inferring it from the default query', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: unknown[] = [];
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(String(init?.body));
+    requests.push(body);
+    return new Response(JSON.stringify({ ok: true, data: {
+      query: body.manualQuery ? '乙书' : '甲书', selectedId: 'site',
+      identity: body.manualQuery ? null : { title: '甲书', author: '作者甲', needsReview: false, reason: 'test' },
+      candidates: [{ id: 'site', source: 'douban', title: body.manualQuery ? '乙书' : '甲书', author: body.manualQuery ? '作者乙' : '作者甲' }]
+    } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const first = await searchSourceNodeMetadata('book-1', 'node-1', 'douban', '甲书 完整版');
+    assert.equal(first.query, '甲书');
+    const second = await searchSourceNodeMetadata('book-1', 'node-1', 'douban', '乙书', undefined, true);
+    assert.equal(second.query, '乙书');
+    assert.equal(second.identity, null);
+    assert.equal(second.candidates[0].author, '作者乙');
+    assert.deepEqual(requests, [
+      { providerId: 'douban', query: '甲书 完整版', manualQuery: false },
+      { providerId: 'douban', query: '乙书', manualQuery: true }
+    ]);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+
+test('keeps source identity separate from matched application metadata', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, data: {
-    recognitionId: 'record-1', targetRevision: 'revision-1', bookRevision: 'book-revision',
-    candidates: [{ id: 'one', source: 'google-books', confirmableFields: ['resource.publisher', 42] }],
-    assistance: { queryHints: [{ query: 'a suggested query', hypothesis: true }] }
-  } }), { headers: { 'content-type': 'application/json' } });
+    query: '海边的卡夫卡', selectedId: 'bangumi:1',
+    candidates: [{ id: 'bangumi:1', source: 'bangumi', title: '海辺のカフカ', author: '村上春樹', description: null },
+      { id: 'douban:1', source: 'douban', title: 'Kafka on the Shore', author: 'Haruki Murakami', description: '关联简介' }],
+    selectedMetadata: { id: 'bangumi:1', source: 'bangumi', title: '海边的卡夫卡', author: '村上春树', description: '关联简介' },
+    identity: { title: '海边的卡夫卡', author: '村上春树', needsReview: false, reason: '同一作品' }
+  } }), { status: 200, headers: { 'content-type': 'application/json' } });
   try {
-    const result = await searchSourceNodeMetadata('book-1', 'node-1', 'google-books', '');
-    assert.equal(result.recognitionId, 'record-1');
-    assert.equal(result.targetRevision, 'revision-1');
-    assert.deepEqual(result.candidates[0].confirmableFields, ['resource.publisher']);
-    assert.deepEqual(result.hints, [{ query: 'a suggested query', hypothesis: true }]);
+    const result = await searchSourceNodeMetadata('book', 'node', 'bangumi', '海边的卡夫卡');
+    assert.equal(result.candidates[0].author, '村上春樹');
+    assert.equal(result.candidates[0].description, null);
+    assert.equal(result.selectedMetadata?.author, '村上春树');
+    assert.equal(result.selectedMetadata?.description, '关联简介');
+    assert.equal(result.selectedMetadata?.id, result.selectedId);
+    assert.equal(result.candidates[1].id, 'douban:1');
   } finally { globalThis.fetch = originalFetch; }
+});
+
+
+test('manual candidate selection sends its own source record without changing query', async () => {
+  const originalFetch = globalThis.fetch;
+  const candidate = { id: 'douban:67890', source: 'douban', title: '另一作品', author: '另一作者', description: null, tags: [], confidence: 0.7,
+    seriesName: null, seriesIndex: null, publisher: null, publishedAt: null, language: null, isbn: null, identifier: null, narrator: null, abridged: null, resourceIndex: null, coverUrl: null };
+  let sent: unknown;
+  globalThis.fetch = async (_input, init) => {
+    sent = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify({ ok: true, data: { query: '人工词', candidates: [], selectedId: candidate.id,
+      selectedMetadata: { ...candidate, description: '另一条目详情简介' } } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const target = { scope: 'resource' as const, resourceId: 'same-node-resource' };
+    await searchSourceNodeMetadata('book', 'node', 'douban', '原标题', undefined, false, undefined, target);
+    assert.deepEqual(sent, { providerId: 'douban', query: '原标题', manualQuery: false, ...target });
+    const result = await searchSourceNodeMetadata('book', 'node', 'douban', '人工词', undefined, true, candidate, target);
+    assert.deepEqual(sent, { providerId: 'douban', query: '人工词', manualQuery: true, selectedCandidate: candidate, ...target });
+    assert.equal(result.selectedMetadata?.id, candidate.id);
+    assert.equal(result.selectedMetadata?.description, '另一条目详情简介');
+    assert.equal(result.query, '人工词');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

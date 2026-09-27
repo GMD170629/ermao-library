@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal, cast
 from urllib.parse import quote
 
+from anyio import from_thread
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -58,7 +59,6 @@ from app.core.authorization import (
 )
 from app.core.config import Settings, get_settings
 from app.core.exception_diagnostics import record_exception
-from app.core.i18n import configured_locale
 from app.db.session import get_db
 from app.models import LibraryReadableResource
 from app.models.auth import User
@@ -133,10 +133,9 @@ from app.modules.library.application.source_node_commands import (
 )
 from app.modules.library.application.source_node_metadata_recognition import (
     MetadataProviderSearchError,
-    SourceNodeMetadataRecognitionResult,
+    SourceNodeMetadataCandidate,
 )
 from app.modules.library.domain.facets import InvalidLibraryFacetRequest
-from app.modules.library.domain.metadata_patch import MetadataPatchError
 from app.modules.library.presentation.filter_mappers import (
     filter_options_payload,
     filter_schema_payload,
@@ -196,7 +195,7 @@ from app.modules.library.presentation.schemas import (
     LocalCoverRegenerationResponse,
     ManagementBookListSummary,
     MergeLibraryFacetsRequest,
-    MetadataMatchView,
+    MetadataIdentityView,
     ReadingUnitsResponse,
     RenameLibraryFacetRequest,
     ResourceAssetView,
@@ -225,7 +224,6 @@ from app.modules.library.presentation.views import (
     management_book_list_view,
     resource_view,
 )
-from app.modules.metadata.public import match_view
 from app.modules.publications.public import (
     PublicationCorruptError,
     PublicationNotFoundError,
@@ -1419,7 +1417,11 @@ def search_book_source_node_metadata(
             source_node_id=source_node_id,
             provider_id=payload.provider_id,
             query=payload.query,
+            scope=payload.scope,
             resource_id=payload.resource_id,
+            manual_query=payload.manual_query,
+            selected_candidate=payload.selected_candidate.model_dump(by_alias=True, mode="json") if payload.selected_candidate else None,
+            is_active=lambda: not from_thread.run(request.is_disconnected),
         )
     except MetadataProviderSearchError as error:
         record_exception(
@@ -1443,80 +1445,47 @@ def search_book_source_node_metadata(
         return _source_node_search_response(
             fail("来源节点不存在", status_code=404, code="SOURCE_NODE_NOT_FOUND")
         )
-    return _recognition_result_response(result)
+    def candidate_view(candidate: SourceNodeMetadataCandidate) -> SourceNodeMetadataCandidateView:
+        return SourceNodeMetadataCandidateView(
+            id=candidate.id,
+            source=candidate.source,
+            title=candidate.title,
+            author=candidate.author,
+            description=candidate.description,
+            tags=list(candidate.tags),
+            seriesName=candidate.series_name,
+            seriesIndex=candidate.series_index,
+            publisher=candidate.publisher,
+            publishedAt=candidate.published_at,
+            language=candidate.language,
+            isbn=candidate.isbn,
+            identifier=candidate.identifier,
+            narrator=candidate.narrator,
+            abridged=candidate.abridged,
+            resourceIndex=candidate.resource_index,
+            coverUrl=candidate.cover_url,
+            confidence=candidate.confidence,
+            generatedFields=cast(list[Literal["description", "tags"]], list(candidate.generated_fields)), generationSource="AI_GENERATED" if candidate.generated_fields else None,
+            generationNeedsReview=candidate.generation_needs_review, generationReason=candidate.generation_reason,
+            generationRevision=candidate.generation_revision, sourceIssues=list(candidate.source_issues),
+        )
 
-
-def _recognition_result_response(result: SourceNodeMetadataRecognitionResult) -> SourceNodeMetadataSearchResponse:
     return SourceNodeMetadataSearchResponse(
         data=SourceNodeMetadataSearchPayload(
-            recognitionId=result.recognition_id, targetType=result.target_type, targetId=result.target_id, outcome=result.outcome,
-            assistance=result.assistance,
-            targetRevision=result.target_revision,
-            bookRevision=result.book_revision,
             sourceNodeId=result.source_node_id,
             providerId=result.provider_id,
             query=result.query,
+            identity=MetadataIdentityView(
+                title=result.identity.title, author=result.identity.author,
+                needsReview=result.identity.needs_review, reason=result.identity.reason,
+            ) if result.identity else None,
+            selectedId=result.selected_id,
+            preferLocalMetadata=result.prefer_local_metadata,
             message=result.message,
-            candidates=[
-                SourceNodeMetadataCandidateView(
-                    id=candidate.id,
-                    source=candidate.source,
-                    confirmableFields=list(candidate.confirmable_fields),
-                    title=candidate.title,
-                    author=candidate.author,
-                    description=candidate.description,
-                    tags=list(candidate.tags),
-                    seriesName=candidate.series_name,
-                    seriesIndex=candidate.series_index,
-                    publisher=candidate.publisher,
-                    publishedAt=candidate.published_at,
-                    language=candidate.language,
-                    isbn=candidate.isbn,
-                    identifier=candidate.identifier,
-                    narrator=candidate.narrator,
-                    abridged=candidate.abridged,
-                    resourceIndex=candidate.resource_index,
-                    coverUrl=candidate.cover_url,
-                    confidence=candidate.confidence,
-                    match=MetadataMatchView.model_validate(match_view(candidate.match)) if candidate.match else None,
-                )
-                for candidate in result.candidates
-            ],
+            candidates=[candidate_view(candidate) for candidate in result.candidates],
+            selectedMetadata=candidate_view(result.selected_metadata) if result.selected_metadata else None,
         )
     )
-
-
-@router.get("/books/{book_id}/metadata/recognitions/{record_id}", response_model=SourceNodeMetadataSearchResponse)
-def reopen_metadata_recognition(book_id: str, record_id: str, request: Request, db: DatabaseSession,
-                                settings: ApplicationSettings) -> SourceNodeMetadataSearchResponse:
-    user, auth_error = _auth(db, request, settings)
-    error = auth_error or _require_manager(user)
-    if error:
-        return _source_node_search_response(error)
-    if not can_access_book(db, user, book_id):
-        return _source_node_search_response(fail("图书不存在", status_code=404, code="BOOK_NOT_FOUND"))
-    try:
-        result = recognize_source_node_metadata(db).reopen(book_id, record_id)
-    except ValueError:
-        return _source_node_search_response(fail("识别结果已过期，请重新查询", status_code=409, code="METADATA_CHANGED"))
-    if result is None:
-        return _source_node_search_response(fail("识别记录不存在", status_code=404, code="RESOURCE_NOT_FOUND"))
-    return _recognition_result_response(result)
-
-
-@router.post("/books/{book_id}/metadata/recognitions/{record_id}/ignore", response_model=SourceNodeMetadataSearchResponse)
-def ignore_metadata_recognition(book_id: str, record_id: str, request: Request, db: DatabaseSession,
-                                settings: ApplicationSettings) -> SourceNodeMetadataSearchResponse:
-    user, auth_error = _auth(db, request, settings)
-    error = auth_error or _require_manager(user)
-    if error:
-        return _source_node_search_response(error)
-    if not can_access_book(db, user, book_id):
-        return _source_node_search_response(fail("图书不存在", status_code=404, code="BOOK_NOT_FOUND"))
-    if not recognize_source_node_metadata(db).ignore(book_id, record_id):
-        return _source_node_search_response(fail("识别记录不存在", status_code=404, code="RESOURCE_NOT_FOUND"))
-    return _recognition_result_response(SourceNodeMetadataRecognitionResult(source_node_id="", provider_id="", query="", message=None,
-        candidates=(), recognition_id=record_id, outcome="IGNORED"))
 
 
 @router.post(
@@ -1546,6 +1515,7 @@ def apply_book_recognized_metadata(
                 resource_id=payload.resource_id,
                 candidate=RecognizedMetadataCandidate(
                     id=candidate.id,
+                    generated_fields=tuple(candidate.generated_fields), generation_revision=candidate.generation_revision,
                     source=candidate.source,
                     title=candidate.title,
                     author=candidate.author,
@@ -1565,9 +1535,6 @@ def apply_book_recognized_metadata(
                 ),
                 fields=tuple(payload.fields),
                 now=datetime.now(UTC),
-                recognition_id=payload.recognition_id,
-                expected_revision=payload.expected_revision,
-                expected_book_revision=payload.expected_book_revision,
             )
         )
     except RecognizedMetadataAuthorizationError:
@@ -1586,14 +1553,7 @@ def apply_book_recognized_metadata(
                 code="METADATA_TARGET_NOT_FOUND",
             )
         )
-    except MetadataPatchError as error:
-        conflict = str(error) in {"CONFLICT", "PROTECTED_FIELD"}
-        message = ("Metadata changed or is protected; search again" if configured_locale(db) == "en-US" else "元数据已改变或受保护，请重新识别")
-        return _recognized_metadata_response(fail(message, status_code=409 if conflict else 422, code="METADATA_CHANGED" if conflict else "INVALID_METADATA_APPLY"))
-    except InvalidRecognizedMetadataError as error:
-        if str(error) == "METADATA_CHANGED":
-            message = "Metadata changed; search again" if configured_locale(db) == "en-US" else "元数据已改变，请重新识别"
-            return _recognized_metadata_response(fail(message, status_code=409, code="METADATA_CHANGED"))
+    except InvalidRecognizedMetadataError:
         return _recognized_metadata_response(
             fail(
                 "所选元数据字段无效",
@@ -1618,7 +1578,6 @@ def apply_book_recognized_metadata(
             appliedFields=list(result.applied_fields),
             skippedFields=list(result.skipped_fields),
             coverStatus=result.cover_status,
-            writebackStatus=result.writeback_status,
         )
     )
 

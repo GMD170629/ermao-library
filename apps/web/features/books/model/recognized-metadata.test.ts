@@ -71,7 +71,10 @@ test('defaults select only non-empty candidate values that differ from current s
 });
 
 
-test('server confirmation fields constrain selection and partial dates stay unselected', () => {
-  assert.deepEqual(defaultRecognizedMetadataFields(book, resource, { ...candidate, confirmableFields: ['resource.publisher', 'resource.published_at'], publishedAt: '2026-08' }, recognizedMetadataFields('resource')), ['resource.publisher']);
-  assert.deepEqual(defaultRecognizedMetadataFields(book, resource, { ...candidate, confirmableFields: [] }, recognizedMetadataFields('resource')), []);
+test('local priority permits identity corrections but keeps populated other fields', () => {
+  const result = defaultRecognizedMetadataFields({ ...book, description: 'local' }, null,
+    { ...candidate, author: 'corrected author' }, recognizedMetadataFields('book'), true);
+  assert.ok(result.includes('book.title'));
+  assert.ok(result.includes('book.author'));
+  assert.ok(!result.includes('book.description'));
 });

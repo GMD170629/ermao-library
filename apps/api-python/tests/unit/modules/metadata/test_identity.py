@@ -1,0 +1,338 @@
+import json
+from io import BytesIO
+
+import pytest
+from pydantic import ValidationError
+
+from app.models.import_pipeline import Source
+from app.modules.metadata.infrastructure import ai_client
+from app.services.metadata_provider_registry import (
+    BuiltinMetadataProvider,
+    metadata_provider_registry,
+    recognize_metadata_identity,
+)
+
+
+@pytest.mark.parametrize("base_url,disabled", [
+    ("https://api.deepseek.com", True),
+    ("https://api.deepseek.com/v1", True),
+    ("https://api.deepseek.com.other.test", False),
+    ("http://local/v1", False),
+])
+def test_deepseek_uses_non_thinking_without_changing_other_connections(monkeypatch, base_url, disabled):
+    def transport(request, **kwargs):
+        body = json.loads(request.data)
+        assert (body.get("thinking") == {"type": "disabled"}) is disabled
+        assert kwargs["timeout"] == 30
+        return BytesIO(json.dumps({"choices": [{"message": {"content": "{}"}}]}).encode())
+    monkeypatch.setattr(ai_client, "urlopen", transport)
+    assert ai_client.chat_completion({"baseUrl": base_url, "model": "test"}, "test", {}) == {}
+
+
+def test_match_sends_direct_clues_and_actual_types_without_descriptions(db_session, monkeypatch):
+    from app.contracts.metadata_identity import MetadataIdentity
+    from app.models import Library
+    from app.modules.metadata.infrastructure import matching
+    from tests.contract.api.test_recognized_metadata_api import _add_book
+
+    _add_book(db_session, book_id="concise")
+    db_session.get(Library, "test-library").name = "网络小说"
+    db_session.add(Source(id="concise-ai", name="AI", kind="metadata", provider_type="ai", enabled=True,
+                          config=json.dumps({"baseUrl": "https://api.deepseek.com", "model": "deepseek-flash"})))
+    db_session.commit()
+    candidates = [
+        {"source": "bangumi", "id": "novel", "title": "无限恐怖", "author": "zhttty",
+         "description": "原著网站简介", "raw": {"platform": "小说"}},
+        {"source": "bangumi", "id": "comic", "title": "无限恐怖", "author": "zhttty",
+         "description": "漫画网站简介", "raw": {"platform": "漫画"}},
+    ]
+    def transport(request, **kwargs):
+        body = json.loads(request.data)
+        assert body["thinking"] == {"type": "disabled"}
+        summary = json.loads(body["messages"][1]["content"])
+        assert set(summary) == {"title", "author", "manualQuery", "language", "libraryName", "fileNames", "candidates"}
+        assert summary["libraryName"] == "网络小说" and summary["fileNames"]
+        assert summary["candidates"] == [
+            {"id": "bangumi:novel", "title": "无限恐怖", "author": "zhttty", "type": "小说"},
+            {"id": "bangumi:comic", "title": "无限恐怖", "author": "zhttty", "type": "漫画"},
+        ]
+        result = {"title": "无限恐怖", "author": "zhttty", "needsReview": False, "reason": "controlled source types",
+                  "primaryCandidateId": "bangumi:novel", "relatedCandidateIds": []}
+        return BytesIO(json.dumps({"choices": [{"message": {"content": json.dumps(result)}}]}).encode())
+    monkeypatch.setattr(ai_client, "urlopen", transport)
+    match = matching.match_metadata_candidates(db_session, book_id="concise", title="无限恐怖", author="zhttty",
+        identity=MetadataIdentity("无限恐怖", "zhttty", False, "A"), candidates=candidates)
+    assert match.application_candidate(candidates)["description"] == "原著网站简介"
+    assert candidates[1]["description"] == "漫画网站简介"
+
+
+@pytest.mark.parametrize(
+    "enabled,config",
+    [(False, {"baseUrl": "http://local/v1", "model": "local"}), (True, {})],
+)
+def test_disabled_or_unconfigured_never_calls_model(
+    db_session, monkeypatch, enabled, config
+):
+    db_session.add(
+        Source(
+            id="ai",
+            name="AI",
+            kind="metadata",
+            provider_type="ai",
+            enabled=enabled,
+            config=json.dumps(config),
+        )
+    )
+    db_session.commit()
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Model must not be called")
+
+    monkeypatch.setattr(ai_client, "urlopen", forbidden)
+    result = recognize_metadata_identity(
+        db_session, book_id="absent", title="dirty", author=None
+    )
+    if enabled:
+        assert result.title is None and result.needs_review
+        assert "未配置" in result.reason
+    else:
+        assert result is None
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"title": 3, "author": None, "needsReview": False, "reason": "bad"},
+        {"title": None, "author": None, "needsReview": "false", "reason": "bad"},
+        {
+            "title": "x",
+            "author": None,
+            "needsReview": False,
+            "reason": "bad",
+            "score": 1,
+        },
+    ],
+)
+def test_identity_rejects_invalid_model_output(monkeypatch, payload):
+    monkeypatch.setattr(ai_client, "chat_completion", lambda *args: payload)
+    with pytest.raises(ValidationError):
+        ai_client.identify_metadata({}, {})
+
+
+def test_model_test_uses_inference_endpoint_and_optional_auth(monkeypatch):
+    requests = []
+
+    def request(req, **kwargs):
+        requests.append(req)
+        return BytesIO(
+            json.dumps(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "title": None,
+                                        "author": None,
+                                        "needsReview": True,
+                                        "reason": "No clues",
+                                    }
+                                )
+                            }
+                        }
+                    ]
+                }
+            ).encode()
+        )
+
+    monkeypatch.setattr(ai_client, "urlopen", request)
+    plugin = metadata_provider_registry().require("ai")
+    assert isinstance(plugin, BuiltinMetadataProvider)
+    assert plugin.test({"baseUrl": "http://local/v1", "model": "local"})["ok"]
+    assert requests[0].full_url == "http://local/v1/chat/completions"
+    assert requests[0].get_header("Authorization") is None
+    assert json.loads(requests[0].data)["model"] == "local"
+
+
+@pytest.mark.parametrize("author,source_author,matches", [
+    ("作者甲", "作者乙", False), ("作者甲", "作者甲", True),
+    ("", "作者乙", True), ("作者甲", None, True),
+])
+def test_unique_title_does_not_override_conflicting_author(author, source_author, matches):
+    from app.services.organize_service import choose_metadata_candidate
+    candidate = {"title": "示例书", "author": source_author, "description": "网站简介"}
+    original = dict(candidate)
+    selected, exact = choose_metadata_candidate([candidate], "示例书", author)
+    assert (selected is candidate) is matches
+    assert exact == [original] and candidate == original
+
+
+@pytest.mark.parametrize("primary,related", [("douban:1", []), ("1", []), ("bangumi:1", ["douban:1"]), (None, ["bangumi:1"])])
+def test_match_rejects_invented_or_cross_source_keys(db_session, monkeypatch, primary, related):
+    from app.contracts.metadata_identity import MetadataIdentity
+    from app.modules.metadata.infrastructure import matching
+    db_session.add(Source(id="ai-match", name="AI", kind="metadata", provider_type="ai", enabled=True,
+                          config=json.dumps({"baseUrl": "http://local/v1", "model": "test"})))
+    db_session.commit()
+    monkeypatch.setattr(ai_client, "chat_completion", lambda *args: {
+        "title": "书", "author": "甲", "needsReview": False, "reason": "test",
+        "primaryCandidateId": primary, "relatedCandidateIds": related,
+    })
+    with pytest.raises(ValueError, match="AI_MATCH_"):
+        matching.match_metadata_candidates(db_session, book_id="absent", title="书", author="甲",
+            identity=MetadataIdentity("书", "甲", True, "uncertain"),
+            candidates=[{"id": "1", "source": "bangumi", "title": "书", "author": "乙"}])
+
+
+def test_related_fields_never_overwrite_primary_or_mix_publication_data():
+    from app.contracts.metadata_identity import MetadataIdentity
+    from app.modules.metadata.infrastructure.matching import MetadataMatch
+    primary = {"id": "1", "source": "bangumi", "title": "原题", "author": "原作者", "description": "主简介",
+               "isbn": None, "publisher": None, "publishedAt": None, "tags": []}
+    related = {"id": "1", "source": "douban", "description": "关联简介", "tags": ["小说"], "isbn": "其他ISBN",
+               "publisher": "其他出版社", "publishedAt": "2000"}
+    match = MetadataMatch(MetadataIdentity("标准题", "标准作者", False, "matched"), "bangumi:1", ("douban:1",))
+    applied = match.application_candidate([primary, related])
+    assert applied["description"] == "主简介" and applied["tags"] == ["小说"]
+    assert applied["isbn"] is None and applied["publisher"] is None and applied["publishedAt"] is None
+    assert primary["title"] == "原题" and primary["author"] == "原作者"
+
+
+
+def test_empty_match_does_not_certify_an_uncertain_identity(db_session, monkeypatch):
+    from app.contracts.metadata_identity import MetadataIdentity
+    from app.modules.metadata.infrastructure import matching
+    db_session.add(Source(id="empty-match", name="AI", kind="metadata", provider_type="ai", enabled=True,
+                          config=json.dumps({"baseUrl": "http://local/v1", "model": "test"})))
+    db_session.commit()
+    monkeypatch.setattr(ai_client, "chat_completion", lambda *args: {
+        "title": None, "author": None, "needsReview": False, "reason": "no matching entry",
+        "primaryCandidateId": None, "relatedCandidateIds": [],
+    })
+    result = matching.match_metadata_candidates(db_session, book_id="absent", title="未定标题", author=None,
+        identity=MetadataIdentity("未定标题", None, True, "uncertain"),
+        candidates=[{"id": "1", "source": "bangumi", "title": "另一本", "author": "作者"}])
+    assert result.primary_candidate_id is None
+    assert result.identity.needs_review
+    assert result.application_candidate([])["title"] == "未定标题"
+
+
+
+def test_multiple_same_work_records_can_be_confirmed_in_source_order(db_session, monkeypatch):
+    from app.contracts.metadata_identity import MetadataIdentity
+    from app.modules.metadata.infrastructure import matching
+    db_session.add(Source(id="multiple-match", name="AI", kind="metadata", provider_type="ai", enabled=True,
+                          config=json.dumps({"baseUrl": "http://local/v1", "model": "test"})))
+    db_session.commit()
+    def response(config, prompt, summary):
+        assert [item["id"] for item in summary["candidates"]] == ["bangumi:1", "bangumi:2"]
+        return {"title": "同一本", "author": "作者", "needsReview": False, "reason": "two records of one work",
+                "primaryCandidateId": "bangumi:1", "relatedCandidateIds": ["bangumi:2"]}
+    monkeypatch.setattr(ai_client, "chat_completion", response)
+    candidates = [{"id": str(i), "source": "bangumi", "title": "同一本", "author": "作者",
+                   "description": f"记录{i}简介"} for i in (1, 2)]
+    result = matching.match_metadata_candidates(db_session, book_id="absent", title="同一本", author="作者",
+        identity=MetadataIdentity("同一本", "作者", False, "A"), candidates=candidates)
+    assert result.primary_candidate_id == "bangumi:1"
+    assert result.application_candidate(candidates)["description"] == "记录1简介"
+
+
+@pytest.mark.parametrize("invalid", [{"primaryCandidateId": 3}, {"relatedCandidateIds": "bangumi:1"}, {"description": "invented"}])
+def test_match_response_rejects_invalid_shape_and_generated_fields(monkeypatch, invalid):
+    monkeypatch.setattr(ai_client, "chat_completion", lambda *args: {
+        "title": "书", "author": "作者", "needsReview": False, "reason": "matched",
+        "primaryCandidateId": "bangumi:1", "relatedCandidateIds": [], **invalid,
+    })
+    with pytest.raises(ValidationError):
+        ai_client.match_metadata({}, {})
+
+
+@pytest.mark.parametrize("primary_complete", [True, False, "tags-only"])
+def test_selected_detail_only_fetches_needed_confirmed_records(db_session, monkeypatch, primary_complete):
+    from app.modules.metadata.infrastructure.matching import (
+        MetadataMatch,
+        prepare_matched_metadata,
+    )
+    from app.services import organize_service
+    db_session.add(Source(id="detail-site", name="Douban", kind="metadata", provider_type="douban", enabled=True,
+                          config=json.dumps({"baseUrl": "http://detail.test"})))
+    db_session.commit()
+    requests = []
+    def transport(request, **kwargs):
+        requests.append(request.full_url)
+        return BytesIO(b'<meta property="og:title" content="related"><meta property="og:description" content="related detail">')
+    monkeypatch.setattr(organize_service, "urlopen", transport)
+    records = [
+        {"id": "11111", "source": "douban", "title": "primary", "_detailFetched": True,
+         "description": "primary detail" if primary_complete else None, "tags": [] if primary_complete == "tags-only" else ["tag"], "coverUrl": "https://cover.test/1"},
+        {"id": "22222", "source": "douban", "title": "related"},
+        {"id": "33333", "source": "douban", "title": "unselected"},
+    ]
+    result = prepare_matched_metadata(db_session, MetadataMatch(None, "douban:11111", ("douban:22222",)), records)
+    assert requests == ([] if primary_complete else ["http://detail.test/subject/22222/"])
+    assert result["description"] == ("primary detail" if primary_complete else "related detail")
+    assert records[1].get("description") is None
+
+
+def test_invalid_detail_page_is_not_cached_as_success(db_session, monkeypatch, caplog):
+    from app.modules.metadata.infrastructure.matching import (
+        MetadataMatch,
+        prepare_matched_metadata,
+    )
+    from app.services import organize_service
+    db_session.add(Source(id="detail-site", name="Douban", kind="metadata", provider_type="douban", enabled=True,
+                          config=json.dumps({"baseUrl": "http://detail.test"})))
+    db_session.commit()
+    calls = []
+    def transport(request, **kwargs):
+        calls.append(request.full_url)
+        return BytesIO(b'<html>robot verification required</html>')
+    monkeypatch.setattr(organize_service, "urlopen", transport)
+    records = [{"source": "douban", "id": "12345", "title": "search title", "description": "search summary"}]
+    for _ in range(2):
+        result = prepare_matched_metadata(db_session, MetadataMatch(None, "douban:12345"), records)
+        assert result == {**records[0], "sourceIssues": ["douban:detail_failed"]} and not result.get("_detailFetched")
+    assert len(calls) == 2
+    assert "DOUBAN_SUBJECT_DETAIL_UNAVAILABLE" in caplog.text
+
+
+def test_generation_cancelled_before_model_does_not_call(db_session, monkeypatch):
+    from app.modules.metadata.infrastructure.generation import complete_missing_metadata
+    from tests.contract.api.test_recognized_metadata_api import _add_book
+    _add_book(db_session, book_id="cancel-c")
+    from app.models import LibraryBookMetadata
+    metadata = db_session.get(LibraryBookMetadata, "cancel-c")
+    metadata.description = None
+    db_session.add(Source(id="cancel-ai", name="AI", kind="metadata", provider_type="ai", enabled=True,
+                          config=json.dumps({"baseUrl": "http://model.test", "model": "test", "generateEnabled": True})))
+    db_session.commit()
+    def forbidden(*args, **kwargs): pytest.fail("Cancelled recognition must not invoke generation")
+    monkeypatch.setattr(ai_client, "urlopen", forbidden)
+    candidate = {"source": "ai", "id": "ai-identity", "title": "活着", "author": "余华"}
+    assert complete_missing_metadata(db_session, book_id="cancel-c", candidate=candidate, is_active=lambda: False) == candidate
+
+
+def test_generated_field_migration_adds_only_marker_columns(tmp_path):
+    from alembic import command
+    from sqlalchemy import MetaData
+
+    from app.db.runner import alembic_config_for_engine
+    from app.db.sqlite import create_sqlite_engine
+    engine = create_sqlite_engine(tmp_path / "generated-upgrade.sqlite3")
+    config = alembic_config_for_engine(engine)
+    try:
+        command.upgrade(config, "0038_import_scan_round_fact")
+        with engine.begin() as connection:
+            # Empty existing metadata schemas acquire only the two marker columns.
+            before = MetaData();before.reflect(connection, only=["LibraryBookMetadata", "LibraryReadableResourceMetadata"])
+            assert all("generatedFields" not in table.c for table in before.tables.values())
+        command.upgrade(config, "head")
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            after = MetaData();after.reflect(connection, only=["LibraryBookMetadata", "LibraryReadableResourceMetadata"])
+            for name in ("LibraryBookMetadata", "LibraryReadableResourceMetadata"):
+                table = after.tables[name]
+                assert set(table.c.keys()) - set(before.tables[name].c.keys()) == {"generatedFields"}
+                assert table.c.generatedFields.server_default.arg.text == "'[]'"
+    finally:
+        engine.dispose()

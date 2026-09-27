@@ -72,3 +72,4 @@ apps/mobile/design-qa/android-warm-page-v2/runs/**/*.png
 apps/mobile/design-qa/android-warm-page-v2/runs/**/*.xml
 apps/mobile/design-qa/visual-runs/**/*.png
 apps/mobile/design-qa/visual-runs/**/*.xml
+docs/testing/metadata-ai-identity-A.md

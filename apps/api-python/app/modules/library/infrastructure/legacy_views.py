@@ -244,6 +244,7 @@ def _resource_view(
         "sourceNodeId": resource.source_node_id,
         "title": metadata.title if metadata else "",
         "description": metadata.description if metadata else None,
+        "generatedFields": sorted(set(json.loads(metadata.generated_fields or "[]")) - set(json.loads(metadata.protected_fields or "[]"))) if metadata else [],
         "resourceIndex": metadata.resource_index if metadata else None,
         "sortOrder": reading_state.sort_order,
         "format": format_value,

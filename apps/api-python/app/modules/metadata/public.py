@@ -1,4 +1,3 @@
-from app.modules.metadata.application.recognition import assess_candidates, match_view
 from app.modules.metadata.application.standard_files import (
     MetadataFileSource,
     StandardFileMetadataReader,
@@ -15,18 +14,12 @@ from app.modules.metadata.application.standard_writeback import (
     StandardWritePlanStore,
     StandardWriteStatus,
 )
-from app.modules.metadata.domain.recognition import MatchDecision
 from app.modules.metadata.domain.source_name import metadata_from_source_name
-from app.modules.metadata.infrastructure.recognition_context import (
-    load_recognition_context,
-    provider_context,
-    recognition_retry_suppressed,
-)
 
 """Public metadata capability contracts."""
 
+from app.contracts.metadata_identity import MetadataIdentity
 from app.contracts.publication_metadata import PublicationMetadata
-from app.modules.metadata.application.field_proposals import propose_fields
 from app.modules.metadata.application.local_metadata import (
     FilesystemLocalMetadataInspector,
     LocalAudioMetadata,
@@ -43,7 +36,6 @@ from app.modules.metadata.application.opf import (
     serialize_opf_metadata,
 )
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
-from app.modules.metadata.application.recognition import candidate_evidence
 from app.modules.metadata.application.writeback import (
     MetadataWritebackAssetProjection,
     MetadataWritebackImportProjection,
@@ -59,21 +51,24 @@ from app.modules.metadata.domain.providers import (
     ProviderConfigField,
     ProviderManifest,
 )
-from app.modules.metadata.domain.recognition import (
-    recognition_fingerprint,
-)
-from app.modules.metadata.infrastructure.recognition_records import (
-    complete_recognition_record,
-    ignore_recognition_record,
-    recognition_record,
-    save_recognition_record,
+from app.modules.metadata.infrastructure.generation import complete_missing_metadata
+from app.modules.metadata.infrastructure.matching import (
+    MetadataMatch,
+    candidate_key,
+    match_metadata_candidates,
+    prepare_matched_metadata,
 )
 from app.services.metadata_file_writeback import (
     load_metadata_writeback_projection,
     metadata_writeback_enabled,
     persist_metadata_writeback_intents,
 )
-from app.services.metadata_provider_registry import search_with_metadata_provider
+from app.services.metadata_provider_registry import (
+    enabled_metadata_provider_ids,
+    recognize_metadata_identity,
+    search_with_metadata_provider,
+)
+from app.services.organize_service import choose_metadata_candidate
 
 __all__ = [
     "BUILTIN_MANIFESTS",
@@ -84,8 +79,9 @@ __all__ = [
     "FilesystemLocalMetadataInspector",
     "LocalAudioMetadata",
     "LocalMetadataCandidate",
-    "MatchDecision",
     "MetadataFileSource",
+    "MetadataIdentity",
+    "MetadataMatch",
     "MetadataWritebackAssetProjection",
     "MetadataWritebackImportProjection",
     "MetadataWritebackProjection",
@@ -107,22 +103,22 @@ __all__ = [
     "StandardWritePlan",
     "StandardWritePlanStore",
     "StandardWriteStatus",
-    "assess_candidates",
+    "candidate_key",
+    "choose_metadata_candidate",
+    "complete_missing_metadata",
     "cover_media_type",
+    "enabled_metadata_provider_ids",
     "load_metadata_writeback_projection",
-    "load_recognition_context",
-    "match_view",
+    "match_metadata_candidates",
     "metadata_from_source_name",
     "metadata_writeback_enabled",
     "parse_opf_metadata",
     "persist_metadata_writeback_intents",
+    "prepare_matched_metadata",
     "prepare_metadata_writeback_intents",
     "prepare_source_node_metadata_writeback_intent",
-    "provider_context",
-    "recognition_retry_suppressed",
+    "recognize_metadata_identity",
     "resolve_local_metadata",
     "search_with_metadata_provider",
     "serialize_opf_metadata",
 ]
-
-__all__ += ["candidate_evidence", "complete_recognition_record", "ignore_recognition_record", "propose_fields", "recognition_fingerprint", "recognition_record", "save_recognition_record"]

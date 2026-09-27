@@ -663,6 +663,8 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
               >{tag}</Link>)}
             </div> : null}
           </div> : null}
+          {book.generatedFields?.includes("description") ? <span className="text-xs text-violet-600"><I18nText>简介 · AI 生成</I18nText></span> : null}
+          {book.generatedFields?.includes("tags") ? <span className="ml-2 text-xs text-violet-600"><I18nText>标签 · AI 生成</I18nText></span> : null}
           {book.description ? <div className={`${hasBookMetadata ? 'mt-4' : 'mt-5'} max-w-3xl`}>
             <p id="book-description" data-i18n-skip className={`${expandedDescriptionBookId === book.id ? '' : 'line-clamp-3 '}whitespace-pre-line text-sm leading-7 text-[var(--visual-color-app-text-secondary)]`}>{book.description}</p>
             <button
@@ -697,6 +699,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       loading={resourceDetailLoading}
       error={resourceDetailError}
       requestedPage={requestedResourcePage}
+      onManage={canManage || requestedResource.kindleSendAvailable ? openResourceMenu : undefined}
       onBack={singleReadableResource ? null : () => updateResourceLocation(null)}
       onPageChange={(page) => updateResourceLocation(requestedResource.id, page)}
       onPlayAudio={(assetId, chapterTitle) => playAudioResource(requestedResource, assetId, chapterTitle)}
@@ -781,7 +784,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       onClose={() => setSourceNodeEditorTarget(null)}
       onSaved={() => setContentsRevision((value) => value + 1)}
     />
-    <SourceNodeMetadataRecognitionDialog book={book} bookId={book.id} entry={sourceNodeRecognitionTarget} onClose={() => setSourceNodeRecognitionTarget(null)} onSaved={async () => { setContentsRevision((value) => value + 1); await refresh(); }} />
+    <SourceNodeMetadataRecognitionDialog bookId={book.id} bookSourceNodeId={book.sourceNodeId} entry={sourceNodeRecognitionTarget} onClose={() => setSourceNodeRecognitionTarget(null)} onSaved={async () => { await refresh(); setContentsRevision((value) => value + 1); }} />
     <MetadataLookupModal book={book} currentResourceId={metadataResourceId ?? activeResource?.id ?? null} fixedScope={metadataResourceId ? 'resource' : null} open={metadataLookupOpen} onClose={() => { setMetadataLookupOpen(false); setMetadataResourceId(null); }} onApplied={refresh} />
     <KindleSendModal book={book} open={kindleOpen} preferredResourceId={kindleResourceId ?? activeResource?.id ?? null} onClose={() => { setKindleOpen(false); setKindleResourceId(null); }} />
   </div>;

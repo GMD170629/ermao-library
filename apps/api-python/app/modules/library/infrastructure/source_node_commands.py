@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -92,6 +93,7 @@ class SqlAlchemySourceNodeMetadata(SourceNodeMetadataPort):
                 book_metadata.normalized_title = changes.title.casefold()
             if "description" in selected:
                 book_metadata.description = changes.description
+                book_metadata.generated_fields = json.dumps(sorted(set(json.loads(book_metadata.generated_fields or "[]")) - {"description"}))
             if changes.replace_cover:
                 book_metadata.cover_path = changes.cover_path
                 book_metadata.cover_status = (

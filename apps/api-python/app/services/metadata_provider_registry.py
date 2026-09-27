@@ -7,24 +7,22 @@ from datetime import UTC, datetime
 from importlib import metadata as importlib_metadata
 from typing import Any, Protocol
 from urllib.request import Request as UrlRequest
+from urllib.request import urlopen
 
 from sqlalchemy.orm import Session
 
 from app.bootstrap.system import write_prepared_system_events
+from app.contracts.metadata_identity import MetadataIdentity
 from app.core.exception_diagnostics import record_exception
 from app.core.i18n import configured_locale
 from app.modules.metadata.application.commands import MetadataWriteTransaction
-from app.modules.metadata.application.queries import recognition_queries
-from app.modules.metadata.application.rate_limits import (
-    AutomaticMetadataRequestGate,
-    RecognitionRequestBudget,
-)
+from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
 from app.modules.metadata.domain.providers import BUILTIN_MANIFESTS, ProviderManifest
-from app.modules.metadata.infrastructure.ai_assistance import request_assistance
-from app.modules.metadata.infrastructure.automatic_rate_limiter import (
-    SharedMetadataRequestGate,
+from app.modules.metadata.infrastructure.ai_client import (
+    identify_metadata,
+    model_configured,
 )
-from app.modules.metadata.infrastructure.http import urlopen
+from app.modules.metadata.infrastructure.identity_context import identity_clues
 from app.modules.metadata.infrastructure.providers import (
     PreparedMetadataProviderWrite,
     execute_prepared_provider_write,
@@ -123,6 +121,15 @@ class BuiltinMetadataProvider:
     ) -> dict[str, Any]:
         from app.services.organize_service import metadata_search_candidates
 
+        if self.manifest.id == "ai":
+            book = context["book"]
+            identity = recognize_metadata_identity(
+                db, book_id=str(book["id"]), title=str(book.get("title") or ""),
+                author=str(book.get("author") or "") or None,
+            )
+            return {"provider": "ai", "enabled": identity is not None, "cacheHit": False,
+                    "candidates": [identity.candidate()] if identity else [],
+                    "identity": identity.payload() if identity else None}
         return metadata_search_candidates(
             db,
             context,
@@ -148,9 +155,6 @@ class BuiltinMetadataProvider:
                     ),
                 },
             )
-        elif provider_id == "google-books":
-            from urllib.parse import urlencode
-            request = UrlRequest("https://www.googleapis.com/books/v1/volumes?" + urlencode({"q": "isbn:9780306406157", "maxResults": 1, "key": config["apiKey"]}), headers={"Accept": "application/json"})
         elif provider_id == "bangumi":
             base_url = str(config.get("baseUrl") or "https://api.bgm.tv").rstrip("/")
             headers = {
@@ -167,8 +171,11 @@ class BuiltinMetadataProvider:
                 )
             request = UrlRequest(f"{base_url}/v0/subjects/1", headers=headers)
         else:
-            request_assistance({"book": {"title": "Example"}}, config)
-            return {"ok": True, "message": "Structured model response verified / 模型结构化响应通过"}
+            if not model_configured(config):
+                return {"ok": False, "message": "AI 服务地址或模型未配置"}
+            identify_metadata(config, {"title": None, "author": None,
+                                                  "fileNames": [], "directories": [], "embeddedMetadata": []})
+            return {"ok": True, "message": "连接正常"}
         with urlopen(request, timeout=10) as response:
             status = int(getattr(response, "status", 200) or 200)
         return {
@@ -259,13 +266,8 @@ def prepare_metadata_provider_order_update(
     ):
         raise MetadataProviderRequestError("数据源列表包含无效或重复项目")
     expected_ids = {str(plugin.manifest.id) for plugin in registry.all()}
-    if set(provider_ids) - expected_ids:
-        raise MetadataProviderRequestError("Unknown provider / 未知数据源")
-    # Old clients know only the old list. Keep omitted providers and secrets.
-    sources = {str(row["providerType"]): row for row in list_metadata_sources(db)}
-    for missing in sorted(expected_ids - set(provider_ids), key=lambda key: int(sources.get(key, {}).get("priority") or registry.require(key).manifest.default_priority)):
-        items = [*items, {"providerId": missing, "enabled": bool(sources.get(missing, {}).get("enabled"))}]
-        provider_ids.append(missing)
+    if set(provider_ids) != expected_ids:
+        raise MetadataProviderRequestError("数据源列表必须包含全部可用数据源")
     for item, provider_id in zip(items, provider_ids):
         plugin = registry.get(provider_id)
         if not plugin:
@@ -317,7 +319,7 @@ def _source_config(
     source: dict[str, Any] | None, manifest: ProviderManifest
 ) -> dict[str, Any]:
     value = _json_value((source or {}).get("config"), {})
-    return {"participation": "AUTO_AND_MANUAL" if "AUTO_AND_MANUAL" in manifest.participation_modes else "MANUAL_ONLY", **_default_config(manifest), **(value if isinstance(value, dict) else {})}
+    return {**_default_config(manifest), **(value if isinstance(value, dict) else {})}
 
 
 def _secret_fields(manifest: ProviderManifest) -> set[str]:
@@ -343,9 +345,6 @@ def _provider_public_view(
         "mode": manifest.mode,
         "fields": list(manifest.fields),
         "capabilities": list(manifest.capabilities),
-        "participationModes": list(manifest.participation_modes),
-        "queryTypes": list(manifest.query_types),
-        "matchLevels": list(manifest.match_levels),
         "automaticRateLimit": (
             asdict(manifest.automatic_rate_limit)
             if manifest.automatic_rate_limit is not None
@@ -380,24 +379,17 @@ def get_metadata_provider(db: Session, provider_id: str) -> dict[str, Any] | Non
 
 
 def _validate_config(
-    manifest: ProviderManifest, config: dict[str, Any], enabled: bool
+    manifest: ProviderManifest, config: dict[str, Any], enabled: bool, locale: str = "zh-CN"
 ) -> list[str]:
     errors: list[str] = []
-    allowed = {field.key for field in manifest.config_fields} | {"participation"}
+    if "generateEnabled" in config and not isinstance(config["generateEnabled"], bool):
+        errors.append("AI generation toggle must be boolean" if locale == "en-US" else "AI 模拟补全开关必须为布尔值")
+    allowed = {field.key for field in manifest.config_fields}
     unknown = sorted(set(config) - allowed)
     if unknown:
         errors.append(f"包含未知配置项：{', '.join(unknown)}")
-    if config.get("participation") not in manifest.participation_modes:
-        errors.append("Invalid participation / 无效来源参与方式")
-    if manifest.id == "ai":
-        if config.get("assistanceMode", "SUGGEST_ONLY") not in {"OFF", "SUGGEST_ONLY", "ASSIST_ON_AMBIGUITY"}:
-            errors.append("Invalid assistance mode / 无效 AI 模式")
-        if config.get("authentication", "bearer") not in {"bearer", "none"}:
-            errors.append("Invalid authentication / 无效认证方式")
-    if enabled and config.get("participation") != "OFF" and config.get("assistanceMode") != "OFF":
+    if enabled:
         for field in manifest.config_fields:
-            if manifest.id == "ai" and field.key == "apiKey" and config.get("authentication") == "none":
-                continue
             if field.required and not str(config.get(field.key) or "").strip():
                 errors.append(f"{field.label}不能为空")
     return errors
@@ -416,8 +408,6 @@ def prepare_metadata_provider_update(
         raise MetadataProviderRequestError("插件配置格式不正确")
     next_config = {**current_config}
     if isinstance(incoming, dict):
-        if "participation" in incoming:
-            next_config["participation"] = incoming["participation"]
         for field in plugin.manifest.config_fields:
             if field.key not in incoming:
                 continue
@@ -433,7 +423,7 @@ def prepare_metadata_provider_update(
         if str(key) in _secret_fields(plugin.manifest):
             next_config.pop(str(key), None)
     enabled = bool(source.get("enabled"))
-    errors = _validate_config(plugin.manifest, next_config, enabled)
+    errors = _validate_config(plugin.manifest, next_config, enabled, configured_locale(db))
     if errors:
         raise MetadataProviderRequestError("；".join(errors))
     now = _now()
@@ -503,22 +493,7 @@ def test_metadata_provider(
         result = {"ok": False, "message": configuration_message, "diagnosticId": diagnostic_id}
     else:
         try:
-            if not source.get("enabled"):
-                raise MetadataProviderTestRejected("SOURCE_DISABLED")
-            def active() -> bool:
-                try:
-                    return metadata_provider_runtime_config(db, provider_id) == config
-                finally:
-                    db.close()
-            if provider_id == "open-library":
-                result = {"ok": True, "message": "Configuration valid; run a single-target query / 配置有效；请从单资源发起查询"}
-            elif provider_id == "ai":
-                gate = SharedMetadataRequestGate(db, plugin.manifest, RecognitionRequestBudget(), active)
-                request_assistance({"book": {"title": "Example"}}, config, gate)
-                result = {"ok": True, "message": "Structured model response verified / 模型结构化响应通过"}
-            else:
-                SharedMetadataRequestGate(db, plugin.manifest, RecognitionRequestBudget(), active).wait(provider_id)
-                result = plugin.test(config)
+            result = plugin.test(config)
             if not result.get("ok"):
                 diagnostic_id = record_exception(LOGGER, "metadata_provider.test_rejected", MetadataProviderTestRejected(str(result.get("message") or "Provider returned ok=false; further reason not provided")), context={"step": "test_provider", "resource_id": provider_id})
                 result = {"ok": False, "message": failure_message, "diagnosticId": diagnostic_id}
@@ -545,9 +520,7 @@ def test_metadata_provider(
 
 
 def enabled_metadata_provider_ids(db: Session) -> list[str]:
-    return [provider for provider in list_enabled_provider_ids(db)
-            if (config := metadata_provider_runtime_config(db, provider)) is not None
-            and config.get("participation") == "AUTO_AND_MANUAL" and provider not in {"open-library", "ai"}]
+    return list_enabled_provider_ids(db)
 
 
 def metadata_provider_runtime_config(
@@ -559,8 +532,7 @@ def metadata_provider_runtime_config(
     source = _provider_source(db, provider_id)
     if not source:
         return None
-    config = _source_config(source, plugin.manifest)
-    return config if source.get("enabled") and config.get("participation") != "OFF" and config.get("assistanceMode") != "OFF" else None
+    return _source_config(source, plugin.manifest) if source.get("enabled") else None
 
 
 def search_with_metadata_provider(
@@ -585,40 +557,44 @@ def search_with_metadata_provider(
             "candidates": [],
             "suggestions": [],
         }
-    identity = context.get("identity") or {}
-    automatic = automatic_request_gate is not None or identity.get("execution") == "AUTOMATIC"
-    if (provider_id != "ai" and automatic and config.get("participation") != "AUTO_AND_MANUAL") or (
-        provider_id == "open-library" and (automatic or not context.get("explicitManualQuery") or identity.get("execution") != "MANUAL" or not identity.get("targetId"))
-    ):
-        db.close()
-        return {"provider": provider_id, "enabled": False, "candidates": [], "suggestions": [], "reason": "SOURCE_NOT_APPLICABLE"}
-    if provider_id == "ai" and ((automatic and config.get("assistanceMode") != "ASSIST_ON_AMBIGUITY") or (not automatic and not context.get("explicitManualQuery"))):
-        db.close()
-        return {"provider": "ai", "enabled": False, "candidates": [], "suggestions": [], "reason": "AI_NOT_APPLICABLE"}
-    def active() -> bool:
-        try:
-            return metadata_provider_runtime_config(db, provider_id) == config
-        finally:
-            db.close()
-
-    gate = SharedMetadataRequestGate(db, plugin.manifest,
-                                    automatic_request_gate or RecognitionRequestBudget(), active)
-    result: dict[str, Any] = {"enabled": True, "candidates": [], "suggestions": []}
-    for planned_query in recognition_queries(context, provider_id, query):
-        if isinstance(plugin, BuiltinMetadataProvider):
-            result = plugin.search(db, context, planned_query, config=config,
-                                   force=force, use_cache=use_cache,
-                                   automatic_request_gate=gate)
-        else:
-            gate.wait(provider_id)
-            db.close()
-            result = plugin.search(db, context, planned_query, config=config,
-                                   force=force, use_cache=use_cache)
-        if result.get("candidates") or result.get("assistance") or not result.get("enabled") or result.get("error"):
-            break
-    return result
+    if isinstance(plugin, BuiltinMetadataProvider):
+        return plugin.search(
+            db,
+            context,
+            query,
+            config=config,
+            force=force,
+            use_cache=use_cache,
+            automatic_request_gate=automatic_request_gate,
+        )
+    db.close()
+    return plugin.search(
+        db, context, query, config=config, force=force, use_cache=use_cache
+    )
 
 
 def reset_metadata_provider_registry_for_tests() -> None:
     global _REGISTRY
     _REGISTRY = None
+
+
+def recognize_metadata_identity(
+    db: Session,
+    *,
+    book_id: str,
+    title: str,
+    author: str | None,
+    source_node_id: str | None = None,
+) -> MetadataIdentity | None:
+    config = metadata_provider_runtime_config(db, "ai")
+    if config is None:
+        return None
+    locale = configured_locale(db)
+    if not model_configured(config):
+        reason = "AI endpoint or model is not configured" if locale == "en-US" else "AI 服务地址或模型未配置"
+        return MetadataIdentity(None, None, True, reason)
+    clues = identity_clues(db, book_id, source_node_id)
+    db.close()
+    return identify_metadata(
+        config, {"title": title[:500], "author": (author or "")[:500], "language": locale, **clues}
+    )
