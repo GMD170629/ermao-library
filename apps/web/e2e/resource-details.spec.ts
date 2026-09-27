@@ -404,13 +404,14 @@ test('single same-node resource exposes recognition with its explicit target', a
   const generated = { id: 'ai-identity', source: 'ai', title: '活着', author: '余华', description: '资源生成简介', tags: [], generatedFields: ['description'], generationSource: 'AI_GENERATED', generationRevision: 'book|resource' };
   const other = { id: 'bangumi:2', source: 'bangumi', title: '另一条目', author: '余华', tags: [] };
   await page.route(/\/api\/books\/book-1(?:\?|$)/, (route) => route.fulfill({ json: { ok: true, data: { book: {
-    id: 'book-1', sourceNodeId: 'book-node', title: '活着', author: '余华', description: '书级简介保留', tags: [],
+    id: 'book-1', sourceNodeId: 'book-node', title: '活着', author: '余华', description: '书级简介保留', tags: [], metadataPending: true,
     resources: [{ ...epubResource, sourceNodeId: 'book-node', title: '活着', description: saved ? generated.description : '', generatedFields: saved ? ['description'] : [] }]
   } } } }));
   await page.route('**/api/metadata/providers', (route) => route.fulfill({ json: { ok: true, data: { providers: [{ id: 'bangumi', name: 'Bangumi', enabled: true, priority: 1 }] } } }));
-  await page.route('**/metadata/search', (route) => {
+  await page.route('**/metadata/search', async (route) => {
     const body = route.request().postDataJSON();
     expect(body.scope).toBe('resource'); expect(body.resourceId).toBe('resource-epub');
+    await new Promise((resolve) => setTimeout(resolve, 2500)); // Detail polling must not abort this operation.
     const selected = body.selectedCandidate ? { ...generated, id: other.id } : generated;
     return route.fulfill({ json: { ok: true, data: { query: '活着', candidates: [generated, other], selectedId: selected.id, selectedMetadata: selected, preferLocalMetadata: true } } });
   });

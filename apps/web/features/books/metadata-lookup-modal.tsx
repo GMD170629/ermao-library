@@ -129,6 +129,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
   useEffect(() => {
     if (!open) return;
     setSource('');
+    setBusy(false);
     setQuery(book.title);
     setManualQuery(false);
     setCandidates([]);
@@ -154,7 +155,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
       searchControllerRef.current?.abort();
       applyControllerRef.current?.abort();
     };
-  }, [book, currentResourceId, i18nAttribute, open]);
+  }, [book.id, book.title, currentResourceId, i18nAttribute, open]);
 
   useEffect(() => {
     if (!open) return;
