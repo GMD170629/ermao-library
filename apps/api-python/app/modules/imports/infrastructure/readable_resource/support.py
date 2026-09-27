@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
@@ -16,6 +16,7 @@ from app.core.exception_diagnostics import (
     record_exception,
 )
 from app.modules.imports.application.readable_resource.ports import (
+    BeforeRollbackDiagnostics,
     ClockPort,
     PipelineLogPort,
     SidecarWritebackPort,
@@ -92,7 +93,7 @@ class SqlAlchemyUnitOfWork(UnitOfWorkPort):
 
     @contextmanager
     def transaction(
-        self, *, before_rollback: Callable[[Exception], None] | None = None,
+        self, *, before_rollback: BeforeRollbackDiagnostics | None = None,
     ) -> Iterator[None]:
         try:
             yield

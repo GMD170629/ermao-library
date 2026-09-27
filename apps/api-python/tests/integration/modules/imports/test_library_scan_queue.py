@@ -21,7 +21,7 @@ from app.modules.library.infrastructure.readable_resource_schema import (
 from app.modules.library.public import SourceNodeRelativePath
 
 
-def test_scope_queue_persists_merges_and_preserves_running_scope(
+def test_scope_requests_persist_independently_and_preserve_running_scope(
     tmp_path: Path,
 ) -> None:
     engine = create_sqlite_engine(tmp_path / "scope.sqlite3")
@@ -54,8 +54,8 @@ def test_scope_queue_persists_merges_and_preserves_running_scope(
                 missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
                 scan_scopes=(ScanScope("a/b"), ScanScope("c")),
             )
-            assert not added and merged.scan_scopes == (
-                ScanScope("a", True),
+            assert added and merged.id != first.id and merged.scan_scopes == (
+                ScanScope("a/b"),
                 ScanScope("c"),
             )
             queue.mark_running(first.id, started_at=datetime.now(UTC))
@@ -68,14 +68,14 @@ def test_scope_queue_persists_merges_and_preserves_running_scope(
             full, added = queue.request_library_scan(
                 "library", missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING
             )
-            assert not added and full.id == following.id and full.scan_scopes is None
+            assert added and full.id != following.id and full.scan_scopes is None
             running = queue.get_task(first.id)
-            assert running is not None and running.scan_scopes == merged.scan_scopes
+            assert running is not None and running.scan_scopes == first.scan_scopes
     finally:
         engine.dispose()
 
 
-def test_running_scan_keeps_one_follow_up(tmp_path: Path) -> None:
+def test_running_scan_preserves_each_new_request(tmp_path: Path) -> None:
     engine = create_sqlite_engine(tmp_path / "scan.sqlite3")
     Base.metadata.create_all(engine)
     try:
@@ -98,8 +98,8 @@ def test_running_scan_keeps_one_follow_up(tmp_path: Path) -> None:
             duplicate, inserted = queue.request_library_scan(
                 "library", missing_entry_policy=MissingEntryPolicy.PRESERVE
             )
-            assert inserted is False
-            assert duplicate.id == first.id
+            assert inserted is True
+            assert duplicate.id != first.id
             queue.mark_running(first.id, started_at=datetime(2026, 8, 24, tzinfo=UTC))
             merged, inserted = queue.request_library_scan(
                 "library", missing_entry_policy=MissingEntryPolicy.PRESERVE
@@ -119,12 +119,12 @@ def test_running_scan_keeps_one_follow_up(tmp_path: Path) -> None:
                     .group_by(LibraryImportTask.state)
                 ).all()
             )
-            assert counts == {"RUNNING": 1, "QUEUED": 1}
+            assert counts == {"RUNNING": 1, "QUEUED": 2}
     finally:
         engine.dispose()
 
 
-def test_running_preserve_scan_keeps_one_prune_follow_up(tmp_path: Path) -> None:
+def test_running_preserve_scan_keeps_independent_prune_request(tmp_path: Path) -> None:
     engine = create_sqlite_engine(tmp_path / "scan-upgrade.sqlite3")
     Base.metadata.create_all(engine)
     try:
@@ -154,13 +154,13 @@ def test_running_preserve_scan_keeps_one_prune_follow_up(tmp_path: Path) -> None
             merged, inserted = queue.request_library_scan(
                 "library", missing_entry_policy=MissingEntryPolicy.PRESERVE
             )
-            assert inserted is False
-            assert merged.id == follow_up.id
+            assert inserted is True
+            assert merged.id != follow_up.id
     finally:
         engine.dispose()
 
 
-def test_manual_library_scan_upgrades_queued_preserve_policy(tmp_path: Path) -> None:
+def test_manual_library_scan_does_not_change_queued_request_policy(tmp_path: Path) -> None:
     engine = create_sqlite_engine(tmp_path / "upgrade.sqlite3")
     Base.metadata.create_all(engine)
     try:
@@ -183,21 +183,22 @@ def test_manual_library_scan_upgrades_queued_preserve_policy(tmp_path: Path) -> 
             upgraded, inserted = queue.request_library_scan(
                 "library", missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING
             )
-            assert inserted is False
-            assert upgraded.id == first.id
+            assert inserted is True
+            assert upgraded.id != first.id
+            assert queue.get_task(first.id).missing_entry_policy is MissingEntryPolicy.PRESERVE
             assert upgraded.missing_entry_policy is MissingEntryPolicy.PRUNE_MISSING
 
             retained, inserted = queue.request_library_scan(
                 "library", missing_entry_policy=MissingEntryPolicy.PRESERVE
             )
-            assert inserted is False
-            assert retained.id == first.id
-            assert retained.missing_entry_policy is MissingEntryPolicy.PRUNE_MISSING
+            assert inserted is True
+            assert retained.id not in {first.id, upgraded.id}
+            assert retained.missing_entry_policy is MissingEntryPolicy.PRESERVE
     finally:
         engine.dispose()
 
 
-def test_running_source_preserve_gets_one_prune_follow_up(tmp_path: Path) -> None:
+def test_running_source_preserves_each_request_policy(tmp_path: Path) -> None:
     engine = create_sqlite_engine(tmp_path / "source-upgrade.sqlite3")
     Base.metadata.create_all(engine)
     try:
@@ -248,14 +249,14 @@ def test_running_source_preserve_gets_one_prune_follow_up(tmp_path: Path) -> Non
                 source_node_id="source",
                 missing_entry_policy=MissingEntryPolicy.PRESERVE,
             )
-            assert inserted is False
-            assert merged.id == follow_up.id
-            assert merged.missing_entry_policy is MissingEntryPolicy.PRUNE_MISSING
+            assert inserted is True
+            assert merged.id != follow_up.id
+            assert merged.missing_entry_policy is MissingEntryPolicy.PRESERVE
     finally:
         engine.dispose()
 
 
-def test_requeue_failed_source_task_retains_original_policy(tmp_path: Path) -> None:
+def test_new_request_after_failed_source_task_retains_original_policy(tmp_path: Path) -> None:
     engine = create_sqlite_engine(tmp_path / "source-retry-policy.sqlite3")
     Base.metadata.create_all(engine)
     try:
@@ -299,8 +300,14 @@ def test_requeue_failed_source_task_retains_original_policy(tmp_path: Path) -> N
                 finished_at=datetime(2026, 9, 1, tzinfo=UTC),
             )
 
-            retried, requeued = queue.requeue_failed_task(task.id)
-            assert requeued is True
+            failed = queue.get_task(task.id)
+            retried, inserted = queue.request_source_scan(
+                library_id=failed.library_id,
+                source_node_id=failed.source_node_id,
+                missing_entry_policy=failed.missing_entry_policy,
+            )
+            assert inserted is True and retried.id != task.id
+            assert queue.get_task(task.id).state == "FAILED"
             assert retried.state == "QUEUED"
             assert retried.missing_entry_policy is MissingEntryPolicy.PRUNE_MISSING
     finally:

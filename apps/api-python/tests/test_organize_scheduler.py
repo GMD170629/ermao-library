@@ -301,6 +301,7 @@ def test_manual_wait_does_not_block_other_books_and_local_failure_stops_remote(
             LibraryImportTask.kind == "IDENTIFY_BOOK"
         )
     ) is None
+    db_session.get(LibraryBookMetadata, waiting_id).metadata_pending = True
     metadata = db_session.get(LibraryBookMetadata, ready_id)
     metadata.metadata_pending = False
     metadata.metadata_state = "FAILED"
@@ -325,5 +326,7 @@ def test_manual_wait_does_not_block_other_books_and_local_failure_stops_remote(
         select(OrganizeJob.id).where(OrganizeJob.book_id == ready_id)
     )
     recognize_organize_job(db_session, job_id)
-    assert db_session.get(LibraryBookMetadata, ready_id).metadata_pending
-    assert lookup.claim_next_metadata_lookup_task(db_session, owner_id="test") is None
+    # A fresh local request does not change metadata before it is claimed.
+    assert not db_session.get(LibraryBookMetadata, ready_id).metadata_pending
+    retried = lookup.claim_next_metadata_lookup_task(db_session, owner_id="test")
+    assert retried is not None and retried["bookId"] == ready_id

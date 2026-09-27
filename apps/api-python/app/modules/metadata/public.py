@@ -51,13 +51,6 @@ from app.modules.metadata.domain.providers import (
     ProviderConfigField,
     ProviderManifest,
 )
-from app.modules.metadata.infrastructure.generation import complete_missing_metadata
-from app.modules.metadata.infrastructure.matching import (
-    MetadataMatch,
-    candidate_key,
-    match_metadata_candidates,
-    prepare_matched_metadata,
-)
 from app.services.metadata_file_writeback import (
     load_metadata_writeback_projection,
     metadata_writeback_enabled,
@@ -81,7 +74,6 @@ __all__ = [
     "LocalMetadataCandidate",
     "MetadataFileSource",
     "MetadataIdentity",
-    "MetadataMatch",
     "MetadataWritebackAssetProjection",
     "MetadataWritebackImportProjection",
     "MetadataWritebackProjection",
@@ -103,18 +95,14 @@ __all__ = [
     "StandardWritePlan",
     "StandardWritePlanStore",
     "StandardWriteStatus",
-    "candidate_key",
     "choose_metadata_candidate",
-    "complete_missing_metadata",
     "cover_media_type",
     "enabled_metadata_provider_ids",
     "load_metadata_writeback_projection",
-    "match_metadata_candidates",
     "metadata_from_source_name",
     "metadata_writeback_enabled",
     "parse_opf_metadata",
     "persist_metadata_writeback_intents",
-    "prepare_matched_metadata",
     "prepare_metadata_writeback_intents",
     "prepare_source_node_metadata_writeback_intent",
     "recognize_metadata_identity",

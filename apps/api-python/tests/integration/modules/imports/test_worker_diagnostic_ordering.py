@@ -50,8 +50,14 @@ class _Queue:
     def enqueue_book_identifications(self, _prepared):
         return 0
 
-    def next_queued(self):
+    def next_queued(self, *, started_at: datetime):
         return self.task
+
+    def begin_discovery(self, task_id: str) -> None:
+        assert task_id == self.task.id
+
+    def end_discovery(self) -> None:
+        pass
 
     def mark_running(self, task_id: str, *, started_at: datetime) -> None:
         self.task = replace(self.task, state="RUNNING")
@@ -165,7 +171,7 @@ def test_worker_prepares_then_rolls_back_then_persists(tmp_path: Path) -> None:
         reset_exception_storage()
         business.close()
 
-    assert outcome == "error"
+    assert outcome == "failed"
     assert queue.failed == "WORKER_ERROR"
     # Prepare (running log) first, then the real rollback releases the business
     # write lock, and only then the independent diagnostic insert happens.

@@ -98,7 +98,7 @@ class SqlAlchemyMetadataPatches:
                 or not re.fullmatch(
                     r"covers/resources/"
                     + re.escape(resource_id)
-                    + r"(?:\.[0-9a-f]{32}\.(?:jpg|png|gif|webp)|-candidate-[0-9a-f]{64})",
+                    + r"(?:\.[0-9a-f]{32}\.(?:jpg|png|gif|webp)|-[0-9a-f]{64}\.(?:jpg|png|gif|webp)|-candidate-[0-9a-f]{64})",
                     path,
                 )
                 or "/" in resource_id

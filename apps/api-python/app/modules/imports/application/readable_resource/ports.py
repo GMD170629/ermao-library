@@ -264,11 +264,17 @@ class ClockPort(Protocol):
     def now(self) -> datetime: ...
 
 
+class BeforeRollbackDiagnostics(Protocol):
+    """Capture the failed operation before rollback; never perform business writes."""
+
+    def __call__(self, error: Exception, /) -> None: ...
+
+
 class UnitOfWorkPort(Protocol):
     def release_before_io(self) -> None: ...
 
     def transaction(
-        self, *, before_rollback: Callable[[Exception], None] | None = None,
+        self, *, before_rollback: BeforeRollbackDiagnostics | None = None,
     ) -> AbstractContextManager[None]: ...
 
     def rollback(self) -> None: ...

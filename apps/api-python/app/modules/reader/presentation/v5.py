@@ -980,7 +980,6 @@ def get_comic_manifest_v5(
         )
     projection = media_page_index.load_read_only(db, resource_id)
     db.expunge_all()
-    db.rollback()
     db.close()
     index = media_page_index.resolve_read_only(projection)
     policy_failure = comic_manifest_policy_failure(page_count=len(index.pages))
@@ -1069,7 +1068,6 @@ def get_comic_page_v5(
     actor_id = user.id
     projection = media_page_index.load_read_only(db, resource_id)
     db.expunge_all()
-    db.rollback()
     db.close()
     index = media_page_index.resolve_read_only(projection)
     if revision != index.revision:

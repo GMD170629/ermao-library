@@ -1,3 +1,9 @@
+from app.modules.library.application.source_node_metadata_recognition import (
+    MetadataProviderSearchError,
+    SourceNodeMetadataCandidate,
+    SourceNodeMetadataRecognitionPort,
+    SourceNodeMetadataRecognitionResult,
+)
 from app.modules.library.application.bulk_operations import (
     BulkBookAccessError,
     BulkBookAuthorizationError,
@@ -196,6 +202,10 @@ from app.modules.library.domain.source_nodes import (
 )
 
 __all__ = [
+    "MetadataProviderSearchError",
+    "SourceNodeMetadataCandidate",
+    "SourceNodeMetadataRecognitionPort",
+    "SourceNodeMetadataRecognitionResult",
     "CATALOG_FACET_KINDS",
     "FACET_KINDS",
     "LIBRARY_GROUPING_KINDS",

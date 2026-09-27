@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from app.core.database_errors import is_database_busy_error
 from app.core.exception_diagnostics import record_exception
 from app.core.time import now_timestamp_ms
-from app.modules.imports.public import UNKNOWN_AUTHOR, normalize_identity_part
+from app.contracts.bibliographic_identity import UNKNOWN_AUTHOR, normalize_identity_part
 from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
 from app.modules.metadata.infrastructure import external_cache as metadata_cache

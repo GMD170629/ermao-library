@@ -72,7 +72,6 @@
     <string name="server_connect_action">检查并继续</string>
     <string name="server_connecting_action">正在检查服务器…</string>
     <string name="server_retry_action">重新检查</string>
-    <string name="server_choose_other_action">选择其他服务器</string>
     <string name="server_invalid_name">请输入服务器名称。</string>
     <string name="server_invalid_url">请输入完整的 http 或 https 地址。</string>
     <string name="server_connection_failed_title">无法连接到此服务器</string>

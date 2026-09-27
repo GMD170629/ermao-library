@@ -45,6 +45,7 @@ class FilesystemLocalCoverPublication:
         try:
             validated_cover_suffix(content)
         except ValueError:
+            # diagnostics-control-flow: Invalid optional image candidates are a normal validation result.
             return False
         return True
 
@@ -121,6 +122,7 @@ class FilesystemLocalCoverPublication:
             # A shared content path must never replace a file another task uses.
             os.link(prepared.temporary_path, prepared.final_path)
         except FileExistsError:
+            # diagnostics-control-flow: Concurrent publication of identical content is idempotent; mismatches still raise.
             if (
                 prepared.final_path.is_symlink()
                 or prepared.final_path.stat().st_size

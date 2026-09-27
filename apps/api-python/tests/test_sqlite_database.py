@@ -320,6 +320,13 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
             "executionVersion",
             "bookWork",
             "resourceCursor",
+            "scanRoundStarted",
+            "scanGateBlocked",
+            "directoryResourceId",
+            "directoryMemberCursor",
+            "directoryCoverCursor",
+            "completionOutcome",
+            "completionRetryCount",
             "retryCount",
             "nextAttemptAt",
             "supersededByTaskId",
@@ -407,10 +414,17 @@ def test_alembic_script_directory_has_one_linear_head() -> None:
     config = alembic_config_for_engine(create_engine("sqlite+pysqlite:///:memory:"))
     script = ScriptDirectory.from_config(config)
     revisions = list(script.walk_revisions())
-    assert len(revisions) == 32
-    assert script.get_heads() == ["0032_source_node_scan_seen_generation"]
-    assert head_revision() == "0032_source_node_scan_seen_generation"
+    assert len(revisions) == 39
+    assert script.get_heads() == ["0039_generated_metadata_fields"]
+    assert head_revision() == "0039_generated_metadata_fields"
     assert [revision.revision for revision in revisions] == [
+        "0039_generated_metadata_fields",
+        "0038_import_scan_round_fact",
+        "0037_single_import_execution",
+        "0036_import_execution_identity",
+        "0035_directory_member_cursor",
+        "0034_book_completion_intent",
+        "0033_book_scan_gate",
         "0032_source_node_scan_seen_generation",
         "0031_book_import_task_backfill",
         "0030_book_import_task_shape",
@@ -455,7 +469,7 @@ def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
     engine = create_sqlite_engine(settings.database_path)
     try:
         runner_module.apply_schema(engine, settings)
-        assert _current_revision(engine) == "0032_source_node_scan_seen_generation"
+        assert _current_revision(engine) == "0039_generated_metadata_fields"
         operation_columns = {
             column["name"]: column
             for column in inspect(engine).get_columns("MetadataWritebackOperation")
@@ -496,7 +510,7 @@ def test_source_node_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None
         }
 
         runner_module.apply_schema(engine)
-        assert _current_revision(engine) == "0032_source_node_scan_seen_generation"
+        assert _current_revision(engine) == "0039_generated_metadata_fields"
         source_node_indexes = {
             index["name"]: tuple(index["column_names"])
             for index in inspect(engine).get_indexes("LibrarySourceNode")
@@ -547,7 +561,7 @@ def test_foreign_key_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None
             }
 
         runner_module.apply_schema(engine)
-        assert _current_revision(engine) == "0032_source_node_scan_seen_generation"
+        assert _current_revision(engine) == "0039_generated_metadata_fields"
         for table_name, index_name in expected_indexes.items():
             assert index_name in {
                 index["name"] for index in inspect(engine).get_indexes(table_name)
@@ -648,8 +662,8 @@ def test_scan_queue_migration_coalesces_existing_queued_tasks(tmp_path) -> None:
         index_names = {
             index["name"] for index in inspect(engine).get_indexes("LibraryImportTask")
         }
-        assert "LibraryImportTask_scan_queued_key" in index_names
-        assert "LibraryImportTask_scan_running_key" in index_names
+        assert "LibraryImportTask_scan_queued_key" not in index_names
+        assert "LibraryImportTask_scan_running_key" not in index_names
         assert "LibraryImportTask_sourceNodeId_idx" in index_names
         source_node_index_names = {
             index["name"] for index in inspect(engine).get_indexes("LibrarySourceNode")
@@ -1293,12 +1307,7 @@ def test_resource_tasks_upgrade_preserves_assets_and_pending_work(
             }
             book_tasks = [task for task in tasks if task.kind == "IMPORT_BOOK"]
             assert len(legacy_tasks) == 4
-            assert {task.state for task in legacy_tasks.values()} == {
-                "QUEUED",
-                "RUNNING",
-                "FAILED",
-                "SUCCEEDED",
-            }
+            assert {task.state for task in legacy_tasks.values()} == {"FAILED", "SUCCEEDED"}
             assert legacy_tasks["task-0"].superseded_by_task_id is not None
             assert legacy_tasks["task-1"].superseded_by_task_id is not None
             assert legacy_tasks["task-2"].superseded_by_task_id is not None
@@ -1317,23 +1326,30 @@ def test_resource_tasks_upgrade_preserves_assets_and_pending_work(
             )
             pipeline = build_readable_resource_pipeline(db)
             worker = build_readable_resource_worker(pipeline)
-            assert worker.startup() == 1
+            assert worker.startup() == 0
+            historical_failed_ids = {task.id for task in book_tasks if task.state == "FAILED"}
             running_result = pipeline.continue_import.execute(
                 ContinueImportTask("task-1")
             )
             failed_result = pipeline.continue_import.execute(
                 ContinueImportTask("task-2")
             )
-            assert running_result.task_id is None
-            assert failed_result.task_id == legacy_tasks["task-2"].superseded_by_task_id
+            assert running_result.task_id is not None
+            assert failed_result.task_id is not None
+            assert running_result.task_id != legacy_tasks["task-1"].superseded_by_task_id
+            assert failed_result.task_id != legacy_tasks["task-2"].superseded_by_task_id
             for _ in range(20):
                 if worker.process_once() == "idle":
                     break
             db.expire_all()
             assert all(
-                db.get(LibraryImportTask, task.id).state == "SUCCEEDED"
+                db.get(LibraryImportTask, task.id).state == (
+                    "FAILED" if task.id in historical_failed_ids else "SUCCEEDED"
+                )
                 for task in book_tasks
             )
+            assert all(db.get(LibraryImportTask, identifier).state == "SUCCEEDED"
+                       for identifier in (running_result.task_id, failed_result.task_id))
             assert set(db.scalars(select(LibraryResourceAsset.id))) == {
                 f"asset-{index}" for index in range(4)
             }
@@ -1425,11 +1441,12 @@ def test_directory_legacy_tasks_upgrade_keeps_asset_ids_and_progress(
             db.commit()
             db.add(LibraryBook(id="book", library_id="lib", source_node_id="anchor"))
             db.commit()
-            db.add(
-                LibraryBookMetadata(
-                    book_id="book", title="Images", normalized_title="images"
-                )
-            )
+            legacy_metadata = Table("LibraryBookMetadata", MetaData(), autoload_with=engine)
+            timestamp = int(datetime.now(UTC).timestamp() * 1000)
+            db.execute(legacy_metadata.insert().values(
+                bookId="book", title="Images", normalizedTitle="images",
+                createdAt=timestamp, updatedAt=timestamp,
+            ))
             db.execute(
                 insert(LibraryReadableResource).values(
                     id="resource",
@@ -1447,14 +1464,11 @@ def test_directory_legacy_tasks_upgrade_keeps_asset_ids_and_progress(
             protected_cover = settings.resolved_storage_root / "covers/protected.png"
             protected_cover.parent.mkdir(parents=True, exist_ok=True)
             protected_cover.write_bytes(b"user-owned-cover")
-            db.add(
-                LibraryReadableResourceMetadata(
-                    resource_id="resource",
-                    title="User title",
-                    cover_path="covers/protected.png",
-                    protected_fields='["title","cover_path"]',
-                )
-            )
+            legacy_resource_metadata = Table("LibraryReadableResourceMetadata", MetaData(), autoload_with=engine)
+            db.execute(legacy_resource_metadata.insert().values(
+                resourceId="resource", title="User title", coverPath="covers/protected.png",
+                protectedFields='["title","cover_path"]', createdAt=timestamp, updatedAt=timestamp,
+            ))
             db.add(
                 ReaderResourceProgress(
                     id="progress",

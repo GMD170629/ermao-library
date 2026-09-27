@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.contracts.metadata_identity import MetadataIdentity
 from app.core.exception_diagnostics import record_exception
 from app.core.i18n import configured_locale
-from app.modules.imports.public import normalize_identity_part
+from app.contracts.bibliographic_identity import normalize_identity_part
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
 from app.modules.metadata.infrastructure.ai_client import (
     match_metadata,

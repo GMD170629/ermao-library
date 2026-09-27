@@ -13,8 +13,8 @@ from app.models import (
     LibraryReadableResource,
     LibrarySourceNode,
 )
-from app.modules.library.infrastructure import source_node_metadata_recognition
-from app.modules.library.infrastructure.source_node_metadata_recognition import (
+from app.modules.metadata.infrastructure import source_node_recognition as source_node_metadata_recognition
+from app.modules.metadata.infrastructure.source_node_recognition import (
     ProviderSourceNodeMetadataRecognition,
 )
 

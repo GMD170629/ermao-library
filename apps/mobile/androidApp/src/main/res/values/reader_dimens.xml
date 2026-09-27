@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- Match the reader toolbar's spacing inside the shared display-cutout safe area. -->
-    <dimen name="readium_navigator_epub_vertical_padding">8dp</dimen>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Readium SDK override: match toolbar spacing inside the shared cutout safe area. -->
+    <dimen name="readium_navigator_epub_vertical_padding" tools:ignore="UnusedResources">8dp</dimen>
     <!-- Keep the existing 40dp paginated footer clearance: 8dp in Readium + 32dp here. -->
     <dimen name="reader_paginated_footer_padding">32dp</dimen>
 </resources>

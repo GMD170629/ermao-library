@@ -309,6 +309,12 @@ class FakeBooks:
 
 
 class FakeQueue:
+    def begin_discovery(self, task_id: str, *, book_id: str | None = None) -> None:
+        pass
+
+    def end_discovery(self) -> None:
+        pass
+
     def next_queued(self) -> None:
         return None
 
@@ -529,7 +535,8 @@ def test_scan_performs_io_only_outside_transactions(tmp_path: Path) -> None:
     assert result.nodes_inserted == 40
     assert filesystem.io_while_in_txn == []
     assert "release" in uow.events
-    assert uow.txn_count == 3
+    # Persist the scan-start fact in its own short transaction.
+    assert uow.txn_count == 4
     assert uow.events.count("commit") == uow.txn_count
 
 
@@ -630,7 +637,8 @@ def test_full_source_scan_reads_directory_before_applying_entries(
     assert filesystem.max_outstanding == process_limit
     assert filesystem.io_while_in_txn == []
     assert "release" in uow.events
-    assert uow.txn_count == 3
+    # Persist the scan-start fact in its own short transaction.
+    assert uow.txn_count == 4
 
 
 def test_full_source_scan_preserves_data_on_oserror_mid_directory_iteration(

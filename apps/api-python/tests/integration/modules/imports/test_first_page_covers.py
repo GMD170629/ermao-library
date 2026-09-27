@@ -101,15 +101,13 @@ def test_directory_cover_candidates_yield_after_bounded_page(library, monkeypatc
 
     monkeypatch.setattr(extractor, "extract", extract)
     worker = build_readable_resource_worker(pipeline)
-    assert worker.process_once() == "book_yield"
+    assert worker.process_once() == "book"
     task = db.scalar(select(LibraryImportTask).where(LibraryImportTask.kind == "IMPORT_BOOK"))
-    assert task is not None and task.directory_cover_cursor is not None
+    assert task is not None and task.state == "SUCCEEDED"
     resource = db.scalar(select(LibraryReadableResource))
-    assert db.get(LibraryReadableResourceMetadata, resource.id) is None
-    assert len(visited) == 16
-    assert build_readable_resource_worker(pipeline).process_once() == "book"
     assert len(visited) == 17
     assert db.get(LibraryReadableResourceMetadata, resource.id).cover_path is not None
+    assert worker.process_once() == "idle"
 
 
 def scan(db: Session, pipeline: ReadableResourcePipeline) -> dict[str, str]:
@@ -357,7 +355,9 @@ def test_fallback_publication_preserves_previous_cover_on_cancel_failure_or_prot
         monkeypatch.setattr(FilesystemLocalCoverPublication, "publish", publish)
     task = pipeline.queue.get_task(task_id)
     assert task is not None
-    assert scan(db, pipeline)["book.pdf"] == task_id
+    next_task_id = scan(db, pipeline)["book.pdf"]
+    assert next_task_id != task_id
+    task_id = next_task_id
     result = build_readable_resource_worker(pipeline).process_once()
     assert result == {
         "cancelled": "cancelled",
@@ -491,21 +491,22 @@ def test_import_phase_counts_and_finalization_rollback(
                 2000, 1, 1, tzinfo=UTC
             )
             db.commit()
-            assert worker.process_once() == "error"
+            assert worker.process_once() == "failed"
             db.expire_all()
             failed_task = db.get(LibraryImportTask, task_id)
-            assert failed_task.state == "QUEUED"
-            assert failed_task.retry_count == 1
-            assert failed_task.next_attempt_at is not None
+            assert failed_task.state == "FAILED"
+            assert failed_task.next_attempt_at is None
             assert db.scalar(select(LibraryResourceAsset.id)) is None
             assert db.scalar(select(LibraryReadableResourceMetadata)) is None
-            assert not list(
-                (settings.resolved_storage_root / "covers" / "resources").iterdir()
-            )
-            db.get(LibraryImportTask, task_id).next_attempt_at = datetime(
-                2000, 1, 1, tzinfo=UTC
-            )
-            db.commit()
+            # Published digest files survive rollback because committed records
+            # may share them; temporary files must always be discarded.
+            retained = list((settings.resolved_storage_root / "covers" / "resources").iterdir())
+            assert len(retained) == (1 if kind == "PDF" else 0)
+            assert all(path.suffix != ".part" for path in retained)
+            from app.modules.imports.application.readable_resource.continue_import import ContinueImportTask
+            retried = pipeline.continue_import.execute(ContinueImportTask(task_id))
+            assert retried.task_id != task_id
+            tasks[filenames[0]] = retried.task_id
         for name in filenames:
             import_task(db, pipeline, tasks[name])
         assert set(
@@ -514,7 +515,7 @@ def test_import_phase_counts_and_finalization_rollback(
                     LibraryImportTask.kind == "IMPORT_BOOK"
                 )
             )
-        ) == {"SUCCEEDED"}
+        ) == ({"FAILED", "SUCCEEDED"} if retry_after_rollback else {"SUCCEEDED"})
         metadata = db.scalar(select(LibraryReadableResourceMetadata))
         assert_red((settings.resolved_storage_root / metadata.cover_path).read_bytes())
         assert counts == {
@@ -577,8 +578,7 @@ def test_unchanged_resource_reuses_committed_result_without_cover_publication(
     monkeypatch.setattr(FilesystemLocalCoverPublication, "prepare", forbidden)
     assert scan(db, pipeline) == tasks
     assert db.get(LibraryImportTask, task_id).state == "SUCCEEDED"
-    # A duplicate change notification requeues work without discarding the
-    # committed source version; the processor must still reuse that result.
+    # A new request has its own identity and reuses the committed source version.
     from datetime import UTC, datetime
 
     from app.modules.imports.application.readable_resource.book_work import BookWork
@@ -591,9 +591,9 @@ def test_unchanged_resource_reuses_committed_result_without_cover_publication(
         work=BookWork(resource_ids=(resource_id,)),
         requested_at=datetime.now(UTC),
     )
-    assert requested.id == task_id
+    assert requested.id != task_id
     assert requested.state == "QUEUED"
-    import_task(db, pipeline, task_id)
+    import_task(db, pipeline, requested.id)
     assert db.scalar(select(LibraryResourceAsset.id)) == asset_id
     assert db.scalar(select(LibraryReadableResourceMetadata)).cover_path == old_cover
     assert (settings.resolved_storage_root / old_cover).is_file()
@@ -709,15 +709,9 @@ def test_thousand_images_batch_import_and_incremental_reuse(
     )
 
     def finish_book(worker):
-        outcomes = []
-        for _ in range((image_count + 127) // 128 + 2):
-            outcome = worker.process_once()
-            outcomes.append(outcome)
-            if outcome == "book":
-                break
-        assert outcomes[-1] == "book"
-        assert all(outcome == "book_yield" for outcome in outcomes[:-1])
-        return outcomes
+        outcome = worker.process_once()
+        assert outcome == "book"
+        return [outcome]
 
     try:
         scan_started = perf_counter()
@@ -739,8 +733,6 @@ def test_thousand_images_batch_import_and_incremental_reuse(
         phase = "finish"
         worker = build_readable_resource_worker(pipeline)
         if interrupt_after_three:
-            assert worker.process_once() == "book_yield"
-            assert worker.process_once() == "book_yield"
             with pytest.raises(KeyboardInterrupt):
                 worker.process_once()
             assert len(db.scalars(select(LibraryResourceAsset)).all()) == 384
@@ -758,7 +750,7 @@ def test_thousand_images_batch_import_and_incremental_reuse(
                 finish_book(restarted)
             db.expire_all()
         else:
-            assert len(finish_book(worker)) == (image_count + 127) // 128
+            assert len(finish_book(worker)) == 1
             assert sizes == expected_batches
             assert sql["asset"]["actual_commits"] == len(expected_batches)
             assert sql["asset"]["selects"] <= 7 * len(expected_batches)
@@ -909,11 +901,7 @@ def test_thousand_images_batch_import_and_incremental_reuse(
 
         monkeypatch.setattr(RegistryResourceAdapterExecutor, "parse_file", failed_parse)
         scan(db, pipeline)
-        failure_outcomes = [worker.process_once()]
-        while failure_outcomes[-1] == "book_yield":
-            failure_outcomes.append(worker.process_once())
-        assert failure_outcomes[-1] == "failed"
-        assert all(outcome == "book_yield" for outcome in failure_outcomes[:-1])
+        assert worker.process_once() == "failed"
         assert parsed_names == {f"{image_count + 11}.png": 1}
         assert db.scalar(select(LibraryReadableResource)).import_state == "READY"
         failed = db.scalar(
@@ -926,10 +914,6 @@ def test_thousand_images_batch_import_and_incremental_reuse(
         monkeypatch.setattr(RegistryResourceAdapterExecutor, "parse_file", parse_count)
         parsed_names.clear()
         pipeline.continue_import.execute(ContinueImportTask(task_id))
-        db.get(LibraryImportTask, task_id).next_attempt_at = datetime(
-            2000, 1, 1, tzinfo=UTC
-        )
-        db.commit()
         finish_book(worker)
         assert parsed_names == {f"{image_count + 11}.png": 1}
         # A changed existing image keeps its identity and updates the selected cover.
@@ -1007,10 +991,6 @@ def test_image_finalization_rollback_reuses_committed_pages(library, monkeypatch
 
     monkeypatch.setattr(RegistryResourceAdapterExecutor, "parse_file", forbidden)
     pipeline.continue_import.execute(ContinueImportTask(task_id))
-    db.get(LibraryImportTask, task_id).next_attempt_at = datetime(
-        2000, 1, 1, tzinfo=UTC
-    )
-    db.commit()
     assert worker.process_once() == "book"
     assert {a.id for a in db.scalars(select(LibraryResourceAsset))} == ids
     assert db.scalar(select(LibraryReadableResourceMetadata)).page_count == 3
@@ -1054,17 +1034,16 @@ def test_image_cancellation_prevents_batch_writeback(
 
     monkeypatch.setattr(RegistryResourceAdapterExecutor, "parse_file", cancel)
     db.commit()
-    assert build_readable_resource_worker(pipeline).process_once() == "cancelled"
+    assert build_readable_resource_worker(pipeline).process_once() == (
+        "failed" if delete_resource else "cancelled"
+    )
     assert db.scalars(select(LibraryResourceAsset)).all() == []
     if delete_resource:
         assert db.get(LibraryReadableResource, resource_id) is None
         task = db.get(LibraryImportTask, task_id)
-        assert task is not None and task.state == "QUEUED"
-        task.next_attempt_at = datetime(2000, 1, 1, tzinfo=UTC)
-        db.commit()
-        assert build_readable_resource_worker(pipeline).process_once() == "book"
-        db.refresh(task)
-        assert task.state == "SUCCEEDED"
+        assert task is not None and task.state == "FAILED"
+        assert task.next_attempt_at is None
+        assert build_readable_resource_worker(pipeline).process_once() == "idle"
     else:
         assert db.get(LibraryImportTask, task_id) is None
 
@@ -1148,9 +1127,10 @@ def test_image_failed_file_summary_counts_assets_not_tasks(library, monkeypatch)
         )
     )
     assert failed_task is not None
-    assert failed_task.state == "QUEUED"
+    assert failed_task.state == "FAILED"
     assert failed_task.error_summary == "IMAGE_ASSETS_FAILED"
-    assert failed_task.retry_count == 1
+    assert failed_task.retry_count == 0
+    assert failed_task.next_attempt_at is None
 
 
 @pytest.mark.parametrize("tracks", [10, 20, 100])
@@ -1301,7 +1281,7 @@ def test_audio_resource_batches_reuse_tracks_and_finalize_once(
             phase = "finish"
 
     def publish_count(self, prepared):
-        counts["cover_publications"] += 1
+        counts["cover_publications"] += int(not prepared.reused)
         return publish(self, prepared)
 
     monkeypatch.setattr(BoundedAudioMetadataInspector, "inspect", inspect)
@@ -1340,7 +1320,7 @@ def test_audio_resource_batches_reuse_tracks_and_finalize_once(
         assert (
             len(db.scalars(select(ReadableResourceNavigationUnit)).all()) == tracks * 3
         )
-        assert counts == {}
+        assert counts == {"cover_publications": 1}
         engine = db.get_bind()
         db.close()
         with Session(engine) as resumed:
@@ -1405,7 +1385,7 @@ def test_audio_resource_batches_reuse_tracks_and_finalize_once(
         len(
             list(
                 (settings.resolved_storage_root / "covers/resources").glob(
-                    "*-candidate-*"
+                    "*.png"
                 )
             )
         )
@@ -1500,10 +1480,6 @@ def test_audio_resource_batches_reuse_tracks_and_finalize_once(
     broken.clear()
     unknown.add(tracks)
     parsed.clear()
-    import_task_row = db.get(LibraryImportTask, task_id)
-    assert import_task_row is not None
-    import_task_row.next_attempt_at = pipeline.clock.now()
-    db.commit()
     pipeline.continue_import.execute(ContinueImportTask(task_id))
     assert worker.process_once() == "book"
     assert parsed == {tracks: 1}
@@ -1527,7 +1503,7 @@ def test_audio_resource_batches_reuse_tracks_and_finalize_once(
     )
     assert db.get(ReaderResourceProgress, "audio-progress").extra == locator
     assert db.get(ReadableResourceNavigationUnit, chapters[0].id) is not None
-    assert counts["cover_publications"] == 3
+    assert counts["cover_publications"] == 2
 
 
 @pytest.mark.parametrize("file_count", [200, 2000])
@@ -1556,6 +1532,8 @@ def test_scan_node_batches_and_unchanged_scan(library, monkeypatch, file_count):
     Image.new("RGB", (8, 8), "red").save(out, format="PNG")
     for index in range(file_count):
         (folder / f"{index}.png").write_bytes(out.getvalue())
+    # Stabilize the fixture directory timestamp after NTFS file creation.
+    os.utime(folder, ns=(1_700_000_000_000_000_000,) * 2)
     stats = Counter()
     enumeration = Counter()
     batch_sizes = []
@@ -1609,10 +1587,7 @@ def test_scan_node_batches_and_unchanged_scan(library, monkeypatch, file_count):
             stats["affected_rows"],
         )
         worker = build_readable_resource_worker(pipeline)
-        outcomes = [worker.process_once()]
-        while outcomes[-1] == "book_yield":
-            outcomes.append(worker.process_once())
-        assert outcomes == ["book_yield"] * (file_count // 128) + ["book"]
+        assert worker.process_once() == "book"
         while worker.process_once() != "idle":
             pass
         db.expire_all()
@@ -1692,7 +1667,7 @@ def test_scan_node_batches_and_unchanged_scan(library, monkeypatch, file_count):
         event.remove(engine, "commit", commit)
 
 
-def test_scan_committed_batch_keeps_intent_and_blocks_incomplete_resource(
+def test_scan_committed_batch_keeps_independent_book_intent(
     library, monkeypatch
 ):
     from collections import Counter
@@ -1750,7 +1725,7 @@ def test_scan_committed_batch_keeps_intent_and_blocks_incomplete_resource(
         with pytest.raises(KeyboardInterrupt):
             worker.process_once()
         db.expire_all()
-        assert db.get(LibraryImportTask, previous.id).state == "QUEUED"
+        assert db.get(LibraryImportTask, previous.id).state == "SUCCEEDED"
         assert (
             len(
                 db.scalars(
@@ -1765,14 +1740,13 @@ def test_scan_committed_batch_keeps_intent_and_blocks_incomplete_resource(
         phase = "recovery"
         worker = build_readable_resource_worker(pipeline)
         assert worker.startup() == 1
+        # Accepted Book work is independent of the interrupted scan execution.
+        assert worker.process_once() == "book"
         assert worker.process_once() == "idle"
+        assert len(db.scalars(select(LibraryResourceAsset)).all()) == 403
         monkeypatch.setattr(SqlAlchemySourceNodeRepository, "reconcile_batch", original)
-        pipeline.queue.enqueue(kind="SCAN_LIBRARY", library_id="lib")
-        db.commit()
         scan(db, pipeline)
-        assert [worker.process_once() for _ in range(4)] == [
-            "book_yield", "book_yield", "book_yield", "book"
-        ]
+        assert worker.process_once() == "idle"
         assert db.scalar(select(LibraryReadableResource.id)) == resource_id
         assert len(db.scalars(select(LibraryResourceAsset)).all()) == 403
         print(
@@ -2009,7 +1983,7 @@ def test_image_first_batch_interruption_rolls_back_results(library, monkeypatch)
         restored = build_readable_resource_pipeline(resumed, settings)
         worker = build_readable_resource_worker(restored)
         assert worker.startup() == 1
-        restored.continue_import.execute(ContinueImportTask(task_id))
+        retry = restored.continue_import.execute(ContinueImportTask(task_id))
         monkeypatch.setattr(
             SqlAlchemyBookResourceRepository, "save_directory_assets", save
         )
@@ -2017,7 +1991,9 @@ def test_image_first_batch_interruption_rolls_back_results(library, monkeypatch)
         assets = resumed.scalars(select(LibraryResourceAsset)).all()
         assert len(assets) == 3
         assert all(asset.processed_source_version for asset in assets)
-        assert resumed.get(LibraryImportTask, task_id).state == "SUCCEEDED"
+        assert resumed.get(LibraryImportTask, task_id).state == "FAILED"
+        assert retry.task_id != task_id
+        assert resumed.get(LibraryImportTask, retry.task_id).state == "SUCCEEDED"
 
 
 @pytest.mark.parametrize("media", ["image", "audio"])
@@ -2118,7 +2094,7 @@ def test_unchanged_directory_continue_recovers_failed_resource(
     else:
         assert worker.process_once() == "failed"
     task = db.get(LibraryImportTask, task_id)
-    assert task.state == "QUEUED"
+    assert task.state == "FAILED"
     assert task.error_summary
     resource = db.scalar(
         select(LibraryReadableResource).where(
@@ -2166,10 +2142,10 @@ def test_unchanged_directory_continue_recovers_failed_resource(
     broken = scenario == "permanent"
     parsed.clear()
     if scenario == "interrupted":
-        # Startup recovery resumes the persisted Book run directly. Its committed
-        # assets already have source versions, so finalization should not parse.
-        assert worker.process_once() == "book"
-        assert db.get(LibraryImportTask, task_id).state == "SUCCEEDED"
+        # Startup terminates the interrupted execution; only explicit continue
+        # creates new work, reusing the committed assets.
+        assert worker.process_once() == "idle"
+        assert db.get(LibraryImportTask, task_id).state == "FAILED"
     target = (
         ContinueLibraryImport("lib")
         if entry == "library"
@@ -2191,10 +2167,10 @@ def test_unchanged_directory_continue_recovers_failed_resource(
         with monkeypatch.context() as patch:
             patch.setattr(OsSourceTreeFilesystem, "iter_directory_entries", unavailable)
             scan_request = pipeline.continue_import.execute(target)
-            assert worker.process_once() == "error"
+            assert worker.process_once() == "failed"
             assert db.get(LibraryImportTask, scan_request.task_id).state == "FAILED"
             assert worker.process_once() == "idle"
-            assert db.get(LibraryImportTask, task_id).state == "QUEUED"
+            assert db.get(LibraryImportTask, task_id).state == "FAILED"
             assert not parsed
             assert {a.id for a in db.scalars(select(LibraryResourceAsset))} == asset_ids
     pipeline.continue_import.execute(target)
@@ -2202,23 +2178,22 @@ def test_unchanged_directory_continue_recovers_failed_resource(
         "scan" if entry == "library" else "continue_source"
     )
     db.expire_all()
-    if scenario == "interrupted":
-        assert db.get(LibraryImportTask, task_id).state == "SUCCEEDED"
-    else:
-        assert db.get(LibraryImportTask, task_id).state == "QUEUED"
-        db.get(LibraryImportTask, task_id).next_attempt_at = pipeline.clock.now()
-        db.commit()
-        retry_outcome = worker.process_once()
-        if retry_outcome == "book_follow_up":
-            retry_outcome = worker.process_once()
-        assert retry_outcome == ("failed" if scenario == "permanent" else "book")
+    assert db.get(LibraryImportTask, task_id).state == "FAILED"
+    retry = db.scalar(select(LibraryImportTask).where(
+        LibraryImportTask.kind == "IMPORT_BOOK",
+        LibraryImportTask.state == "QUEUED",
+    ))
+    assert retry is not None and retry.id != task_id
+    retry_id = retry.id
+    assert worker.process_once() == ("failed" if scenario == "permanent" else "book")
     assert parsed == (
         {}
         if scenario == "interrupted"
         else {"10.png" if media == "image" else "10.mp3": 1}
     )
-    assert db.get(LibraryImportTask, task_id).state == (
-        "QUEUED" if scenario == "permanent" else "SUCCEEDED"
+    assert db.get(LibraryImportTask, task_id).state == "FAILED"
+    assert db.get(LibraryImportTask, retry_id).state == (
+        "FAILED" if scenario == "permanent" else "SUCCEEDED"
     )
     if scenario == "permanent":
         failed = db.scalar(
@@ -2238,9 +2213,9 @@ def test_unchanged_directory_continue_recovers_failed_resource(
         assert outcome == "book"
     else:
         pytest.fail("resource retry did not terminate")
-    assert db.scalars(
+    assert set(db.scalars(
         select(LibraryImportTask.id).where(LibraryImportTask.kind == "IMPORT_BOOK")
-    ).all() == [task_id]
+    )) == {task_id, retry_id}
     assert db.get(LibraryReadableResource, resource_id).import_state == "READY"
     assert {a.id for a in db.scalars(select(LibraryResourceAsset))} == asset_ids
     assert chapter_ids <= {

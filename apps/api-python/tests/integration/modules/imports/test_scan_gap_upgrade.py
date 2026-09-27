@@ -227,14 +227,14 @@ def test_legacy_failed_scan_backfilled_and_recovered_without_revival(
                 )
             )
             db.flush()
-            db.add(
-                LibraryBookMetadata(
-                    book_id="legacy-book",
-                    title="Legacy",
-                    normalized_title="legacy",
-                    metadata_pending=False,
-                )
+            metadata_table = sa.Table(
+                "LibraryBookMetadata", sa.MetaData(), autoload_with=engine
             )
+            timestamp = int(datetime(2026, 9, 1, tzinfo=UTC).timestamp() * 1000)
+            db.execute(metadata_table.insert().values(
+                bookId="legacy-book", title="Legacy", normalizedTitle="legacy",
+                metadataPending=False, createdAt=timestamp, updatedAt=timestamp,
+            ))
             db.flush()
             db.add(
                 LibraryReadableResource(

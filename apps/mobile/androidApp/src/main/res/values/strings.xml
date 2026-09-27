@@ -72,7 +72,6 @@
     <string name="server_connect_action">Check and continue</string>
     <string name="server_connecting_action">Checking server…</string>
     <string name="server_retry_action">Check again</string>
-    <string name="server_choose_other_action">Choose another server</string>
     <string name="server_invalid_name">Enter a server name.</string>
     <string name="server_invalid_url">Enter a complete http or https address.</string>
     <string name="server_connection_failed_title">Couldn’t connect to this server</string>

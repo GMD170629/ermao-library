@@ -1,8 +1,8 @@
-"""Scan failures only block tasks that truly depend on their input.
+"""Scan gaps retain input facts without gating independently accepted Book work.
 
-Readiness is driven by a durable incomplete-range marker, not by the lifecycle
-of the scan task row. Deleting a failed task therefore never releases work whose
-member list was never fully enumerated; only a completed scan range does.
+ADR 0029 retires queued/running coalescing and scan-gate projections. Explicit
+requests have separate execution identities; completing a scan only clears its
+covered gap and never revives historical tasks.
 """
 
 from __future__ import annotations
@@ -207,10 +207,11 @@ def test_unrelated_incomplete_range_does_not_block_directory_resource(
 
     selected = queue.claim_next_book(started_at=datetime(2026, 9, 13, tzinfo=UTC))
 
-    assert selected is not None and selected.id == good.id
+    assert selected is not None and selected.id == blocked.id
+    assert queue.claim_next_book(started_at=datetime(2026, 9, 13, tzinfo=UTC)).id == good.id
 
 
-def test_completed_scan_range_releases_dependent_directory_resource(
+def test_completed_scan_range_clears_gap_without_restarting_book(
     db: Session,
 ) -> None:
     _node(db, "bad-node", "bad", "DIRECTORY")
@@ -233,7 +234,7 @@ def test_completed_scan_range_releases_dependent_directory_resource(
         requested_at=datetime(2026, 9, 13, tzinfo=UTC),
     )
     db.flush()
-    assert queue.claim_next_book(started_at=datetime(2026, 9, 13, tzinfo=UTC)) is None
+    assert queue.claim_next_book(started_at=datetime(2026, 9, 13, tzinfo=UTC)).id == task.id
 
     # A completed scan is the only operation that clears the range.
     queue.apply_scan_round(
@@ -242,7 +243,9 @@ def test_completed_scan_range_releases_dependent_directory_resource(
     db.flush()
 
     selected = queue.claim_next_book(started_at=datetime(2026, 9, 13, tzinfo=UTC))
-    assert selected is not None and selected.id == task.id
+    assert selected is None
+    assert db.get(LibraryImportTask, task.id).state == "RUNNING"
+    assert not queue.book_requires_scan("bad-book")
 
 
 def test_cleaning_failed_task_record_does_not_release_gap(db: Session) -> None:
@@ -267,7 +270,7 @@ def test_cleaning_failed_task_record_does_not_release_gap(db: Session) -> None:
         requested_at=datetime(2026, 9, 13, tzinfo=UTC),
     )
     db.flush()
-    assert queue.claim_next_book(started_at=datetime(2026, 9, 13, tzinfo=UTC)) is None
+    assert queue.book_requires_scan("bad-book")
 
     # Remove all historical task records without completing the input.
     db.delete(db.get(LibraryImportTask, failed_id))
@@ -282,8 +285,9 @@ def test_cleaning_failed_task_record_does_not_release_gap(db: Session) -> None:
         is None
     )
 
-    assert queue.claim_next_book(started_at=datetime(2026, 9, 13, tzinfo=UTC)) is None
-    assert db.get(LibraryImportTask, task.id).state == "QUEUED"  # type: ignore[union-attr]
+    assert queue.book_requires_scan("bad-book")
+    assert queue.claim_next_book(started_at=datetime(2026, 9, 13, tzinfo=UTC)).id == task.id
+    assert db.get(LibraryImportTask, task.id).state == "RUNNING"  # type: ignore[union-attr]
 
 
 def test_unrelated_library_gap_does_not_block_other_library_task(
@@ -348,7 +352,7 @@ def test_scoped_scan_gap_does_not_block_unrelated_book_work(db: Session) -> None
     assert selected is not None and selected.id == task.id
 
 
-def test_full_scan_gap_blocks_directory_book_work(db: Session) -> None:
+def test_full_scan_gap_preserves_independent_directory_book_work(db: Session) -> None:
     _node(db, "book-node", "book", "DIRECTORY")
     _book(db, "book", "book-node")
     queue = SqlAlchemyLibraryImportTaskQueue(db)
@@ -365,7 +369,8 @@ def test_full_scan_gap_blocks_directory_book_work(db: Session) -> None:
     )
     db.flush()
 
-    assert queue.claim_next_book(started_at=datetime(2026, 9, 13, tzinfo=UTC)) is None
+    assert queue.book_requires_scan("book")
+    assert queue.claim_next_book(started_at=datetime(2026, 9, 13, tzinfo=UTC)).book_id == "book"
 
 
 def test_root_non_recursive_completion_does_not_clear_recursive_gap(
@@ -392,265 +397,100 @@ def test_root_non_recursive_completion_does_not_clear_recursive_gap(
     assert decode_scan_scopes(gap.scopes) == (ScanScope("", True),)
 
 
-@pytest.mark.parametrize("independent", [False, True])
-def test_book_claim_does_not_derive_gap_from_each_candidate(
-    db: Session, independent: bool
-) -> None:
-    """Real queued work must skip older blocked books without JSON in claim SQL."""
+@pytest.mark.parametrize("scope", [ScanScope("", True), ScanScope("zone", True), ScanScope("zone", False)])
+@pytest.mark.parametrize("historical_gate", [None, False, True])
+def test_claim_ignores_historical_gate_without_reading_gap(db, scope, historical_gate):
     queue = SqlAlchemyLibraryImportTaskQueue(db)
-    scopes = tuple(
-        ScanScope(f"blocked-{index:04d}", True)
-        for index in range(24)
-    ) if independent else (ScanScope("blocked", True),)
-    queue.apply_scan_round(None, "library", resolved=(), incomplete=scopes)
-    for index in range(24):
-        path = (
-            f"blocked-{index:04d}" if independent else f"blocked/book-{index:04d}"
-        )
-        node_id = f"blocked-node-{index}"
-        book_id = f"blocked-book-{index}"
-        _node(db, node_id, path, "DIRECTORY")
-        _book(db, book_id, node_id)
-        queue.request_book_work(
-            book_id=book_id,
-            work=BookWork(identify=True),
-            requested_at=datetime(2026, 9, 13, tzinfo=UTC),
-        )
-    _node(db, "ready-node", "ready.epub", "REGULAR_FILE")
-    _book(db, "ready-book", "ready-node")
-    ready = queue.request_book_work(
-        book_id="ready-book",
-        work=BookWork(identify=True),
-        requested_at=datetime(2026, 9, 13, tzinfo=UTC),
-    )
+    now = datetime(2026, 9, 13, tzinfo=UTC)
+    _node(db, "node", "zone", "DIRECTORY")
+    _book(db, "book", "node")
+    queue.apply_scan_round(None, "library", resolved=(), incomplete=(scope,))
+    first = queue.request_book_work(book_id="book", work=BookWork(identify=True), requested_at=now)
+    db.get(LibraryImportTask, first.id).scan_gate_blocked = historical_gate
+    second = queue.request_book_work(book_id="book", work=BookWork(identify=True), requested_at=now + timedelta(seconds=1))
     db.commit()
-
-    statements: list[str] = []
+    statements = []
     def capture(_conn, _cursor, statement, _parameters, _context, _many):
-        if statement.lstrip().upper().startswith("SELECT") and "LibraryImportTask" in statement:
-            statements.append(statement)
-
+        statements.append(statement)
     event.listen(db.get_bind(), "before_cursor_execute", capture)
     try:
-        selected = queue.claim_next_book(started_at=datetime(2026, 9, 13, tzinfo=UTC))
+        assert queue.claim_next_book(started_at=now).id == first.id
+        assert queue.claim_next_book(started_at=now).id == second.id
+        assert queue.claim_next_book(started_at=now) is None
     finally:
         event.remove(db.get_bind(), "before_cursor_execute", capture)
-
-    assert selected is not None and selected.id == ready.id
-    assert statements
     assert all("LibraryImportScanGap" not in statement for statement in statements)
+    assert decode_scan_scopes(db.get(LibraryImportScanGap, "library").scopes) == (scope,)
 
 
-def test_changed_gap_recovers_paged_book_gates_after_restart(db: Session) -> None:
+def test_gap_survives_restart_without_blocking_or_rewriting_queued_work(db):
     queue = SqlAlchemyLibraryImportTaskQueue(db)
     now = datetime(2026, 9, 13, tzinfo=UTC)
+    ids = set()
     for index in range(205):
-        node_id = f"node-{index}"
-        book_id = f"book-{index}"
-        _node(db, node_id, f"zone/book-{index}", "DIRECTORY")
-        _book(db, book_id, node_id)
-        queue.request_book_work(
-            book_id=book_id, work=BookWork(identify=True), requested_at=now
-        )
+        _node(db, f"node-{index}", f"zone/book-{index}", "DIRECTORY")
+        _book(db, f"book-{index}", f"node-{index}")
+        task = queue.request_book_work(book_id=f"book-{index}", work=BookWork(identify=True), requested_at=now)
+        ids.add(task.id)
+    queue.apply_scan_round(None, "library", resolved=(), incomplete=(ScanScope("zone", True),))
     db.commit()
-
-    queue.apply_scan_round(
-        None, "library", resolved=(), incomplete=(ScanScope("zone", True),)
-    )
-    db.commit()
-    with Session(db.get_bind()) as restarted:
-        resumed = SqlAlchemyLibraryImportTaskQueue(restarted)
-        assert resumed.claim_next_book(started_at=now) is None
-        assert resumed.refresh_scan_gate_page() == 5
-        restarted.commit()
-        assert resumed.claim_next_book(started_at=now) is None
-        resumed.apply_scan_round(
-            None, "library", resolved=(ScanScope("zone", True),), incomplete=()
-        )
-        restarted.commit()
-        assert resumed.refresh_scan_gate_page() == 5
-        restarted.commit()
-        assert resumed.claim_next_book(started_at=now) is not None
+    with Session(db.get_bind()) as resumed:
+        restored = SqlAlchemyLibraryImportTaskQueue(resumed)
+        assert {restored.claim_next_book(started_at=now).id for _ in range(205)} == ids
+        assert restored.claim_next_book(started_at=now) is None
+        assert restored.book_requires_scan("book-0")
+        restored.apply_scan_round(None, "library", resolved=(ScanScope("zone", True),), incomplete=())
+        assert not restored.book_requires_scan("book-0")
+        assert all(row.state == "RUNNING" for row in resumed.scalars(select(LibraryImportTask)))
 
 
-def test_gap_scope_paths_treat_percent_and_underscore_literally(db: Session) -> None:
+def test_gap_scope_paths_treat_percent_and_underscore_literally(db):
     queue = SqlAlchemyLibraryImportTaskQueue(db)
-    now = datetime(2026, 9, 13, tzinfo=UTC)
     for path in ("A_%/inner", "Axy/inner"):
-        node_id = f"node-{path}"
-        book_id = f"book-{path}"
-        _node(db, node_id, path, "DIRECTORY")
-        _book(db, book_id, node_id)
-        queue.request_book_work(
-            book_id=book_id, work=BookWork(identify=True), requested_at=now
-        )
-    queue.apply_scan_round(
-        None, "library", resolved=(), incomplete=(ScanScope("A_%", True),)
-    )
-    db.commit()
-
-    selected = queue.claim_next_book(started_at=now)
-    assert selected is not None and selected.book_id == "book-Axy/inner"
-    blocked = db.scalar(
-        select(LibraryImportTask).where(LibraryImportTask.book_id == "book-A_%/inner")
-    )
-    assert blocked is not None and blocked.scan_gate_blocked is True
+        _node(db, f"node-{path}", path, "DIRECTORY")
+        _book(db, f"book-{path}", f"node-{path}")
+    queue.apply_scan_round(None, "library", resolved=(), incomplete=(ScanScope("A_%", True),))
+    assert queue.book_requires_scan("book-A_%/inner")
+    assert not queue.book_requires_scan("book-Axy/inner")
 
 
-def test_queued_book_scan_request_can_repair_its_own_gap(db: Session) -> None:
+def test_new_scan_request_does_not_supersede_running_resource_work(db):
     _node(db, "node", "book", "DIRECTORY")
     _book(db, "book", "node")
+    _resource(db, resource_id="resource", node_id="node", book_id="book", file_format="IMAGE_DIR", adapter_id="image_dir")
     queue = SqlAlchemyLibraryImportTaskQueue(db)
     now = datetime(2026, 9, 13, tzinfo=UTC)
-    task = queue.request_book_work(
-        book_id="book", work=BookWork(identify=True), requested_at=now
-    )
-    queue.apply_scan_round(
-        None, "library", resolved=(), incomplete=(ScanScope("book", True),)
-    )
-    assert queue.claim_next_book(started_at=now) is None
-
-    merged = queue.request_book_work(
-        book_id="book",
-        work=BookWork(scan_scopes=(ScanScope("book", True),)),
-        requested_at=now,
-    )
-    assert merged.id == task.id
-    assert merged.phase == "SCAN"
-    db.commit()
-
-    selected = queue.claim_next_book(started_at=now)
-    assert selected is not None and selected.id == task.id
-    assert selected.work.active.scan_scopes == (ScanScope("book", True),)
+    first = queue.request_book_work(book_id="book", work=BookWork(resource_ids=("resource",)), requested_at=now)
+    assert queue.claim_next_book(started_at=now).id == first.id
+    queue.apply_scan_round(None, "library", resolved=(), incomplete=(ScanScope("book", True),))
+    second = queue.request_book_work(book_id="book", work=BookWork(scan_scopes=(ScanScope("book", True),)), requested_at=now)
+    assert second.id != first.id and second.execution_version is None
+    assert queue.get_book_task(first.id).work.resource_ids == ("resource",)
+    assert queue.get_book_task(first.id).state == "RUNNING"
+    assert queue.claim_next_book(started_at=now).id == second.id
 
 
-def test_yielded_book_scan_request_supersedes_blocked_active_work(db: Session) -> None:
-    _node(db, "node", "book", "DIRECTORY")
-    _book(db, "book", "node")
-    _resource(
-        db, resource_id="resource", node_id="node", book_id="book",
-        file_format="IMAGE_DIR", adapter_id="image_dir",
-    )
-    queue = SqlAlchemyLibraryImportTaskQueue(db)
-    now = datetime(2026, 9, 13, tzinfo=UTC)
-    task = queue.request_book_work(
-        book_id="book", work=BookWork(resource_ids=("resource",)), requested_at=now
-    )
-    claimed = queue.claim_next_book(started_at=now)
-    assert claimed is not None and claimed.execution_version == 1
-    assert queue.yield_book_run(task.id, execution_version=1, yielded_at=now)
-    queue.apply_scan_round(
-        None, "library", resolved=(), incomplete=(ScanScope("book", True),)
-    )
-    assert queue.claim_next_book(started_at=now) is None
-
-    updated = queue.request_book_work(
-        book_id="book",
-        work=BookWork(scan_scopes=(ScanScope("book", True),)),
-        requested_at=now,
-    )
-    assert updated.phase == "SCAN"
-    assert updated.execution_version == 2
-    db.commit()
-    resumed = queue.claim_next_book(started_at=now)
-    assert resumed is not None and resumed.phase == "SCAN"
-    assert resumed.work.active.resource_ids == ("resource",)
-
-
-def test_relocation_rebinds_gate_to_new_path_without_releasing_it(db: Session) -> None:
+def test_relocation_preserves_gap_at_new_path_without_gating_tasks(db):
     _node(db, "node", "old/book", "DIRECTORY")
     _book(db, "book", "node")
     queue = SqlAlchemyLibraryImportTaskQueue(db)
-    now = datetime(2026, 9, 13, tzinfo=UTC)
-    queue.apply_scan_round(
-        None, "library", resolved=(), incomplete=(ScanScope("old/book", True),)
-    )
-    task = queue.request_book_work(
-        book_id="book", work=BookWork(identify=True), requested_at=now
-    )
-    assert queue.claim_next_book(started_at=now) is None
-
+    queue.apply_scan_round(None, "library", resolved=(), incomplete=(ScanScope("old/book", True),))
     node = db.get(LibrarySourceNode, "node")
-    assert node is not None
     node.relative_path = "new/book"
     node.path_key = SourceNodeRelativePath("new/book").path_key
     db.flush()
-    queue.reconcile_relocation(SourceRelocation(
-        "library", "old/book", "library", "new/book", ("node",), ("book",),
-    ))
-    db.commit()
-    queue.refresh_scan_gate_page()
-    assert queue.claim_next_book(started_at=now) is None
-    assert db.get(LibraryImportTask, task.id).scan_gate_blocked is True
-
-    queue.apply_scan_round(
-        None, "library", resolved=(ScanScope("new/book", True),), incomplete=()
-    )
-    db.commit()
-    assert queue.claim_next_book(started_at=now) is not None
+    queue.reconcile_relocation(SourceRelocation("library", "old/book", "library", "new/book", ("node",), ("book",)))
+    assert decode_scan_scopes(db.get(LibraryImportScanGap, "library").scopes) == (ScanScope("new/book", True),)
+    assert queue.book_requires_scan("book")
+    queue.apply_scan_round(None, "library", resolved=(ScanScope("new/book", True),), incomplete=())
+    assert not queue.book_requires_scan("book")
 
 
-def test_nonrecursive_gap_blocks_ancestors_but_not_nested_siblings(db: Session) -> None:
+def test_releasing_shared_gap_preserves_independent_gap(db):
     queue = SqlAlchemyLibraryImportTaskQueue(db)
-    now = datetime(2026, 9, 13, tzinfo=UTC)
-    for path in ("a", "a/b", "a/b/deep", "a/c"):
-        _node(db, f"node-{path}", path, "DIRECTORY")
-        _book(db, f"book-{path}", f"node-{path}")
-        queue.request_book_work(
-            book_id=f"book-{path}", work=BookWork(identify=True), requested_at=now
-        )
-    queue.apply_scan_round(
-        None, "library", resolved=(), incomplete=(ScanScope("a/b", False),)
-    )
-    db.commit()
-
-    blocked = {
-        task.book_id: task.scan_gate_blocked
-        for task in db.scalars(select(LibraryImportTask).where(
-            LibraryImportTask.kind == "IMPORT_BOOK"
-        ))
-    }
-    assert blocked == {
-        "book-a": True, "book-a/b": True,
-        "book-a/b/deep": False, "book-a/c": False,
-    }
-    queue.apply_scan_round(
-        None, "library", resolved=(ScanScope("a", False),), incomplete=()
-    )
-    assert db.get(LibraryImportScanGap, "library").scopes is not None
-    queue.apply_scan_round(
-        None, "library", resolved=(ScanScope("a/b", False),), incomplete=()
-    )
-    db.commit()
-    assert all(
-        task.scan_gate_blocked is False
-        for task in db.scalars(select(LibraryImportTask).where(
-            LibraryImportTask.kind == "IMPORT_BOOK"
-        ))
-    )
-
-
-def test_releasing_shared_gap_keeps_independent_gap_blocked(db: Session) -> None:
-    queue = SqlAlchemyLibraryImportTaskQueue(db)
-    now = datetime(2026, 9, 13, tzinfo=UTC)
-    for path in ("shared/one", "other/two"):
-        _node(db, f"node-{path}", path, "DIRECTORY")
-        _book(db, f"book-{path}", f"node-{path}")
-        queue.request_book_work(
-            book_id=f"book-{path}", work=BookWork(identify=True), requested_at=now
-        )
-    queue.apply_scan_round(None, "library", resolved=(), incomplete=(
-        ScanScope("shared", True), ScanScope("other/two", True),
-    ))
-    queue.apply_scan_round(
-        None, "library", resolved=(ScanScope("shared", True),), incomplete=()
-    )
-    db.commit()
-    selected = queue.claim_next_book(started_at=now)
-    assert selected is not None and selected.book_id == "book-shared/one"
-    assert db.scalar(select(LibraryImportTask.scan_gate_blocked).where(
-        LibraryImportTask.book_id == "book-other/two"
-    )) is True
+    queue.apply_scan_round(None, "library", resolved=(), incomplete=(ScanScope("shared", True), ScanScope("other/two", True)))
+    queue.apply_scan_round(None, "library", resolved=(ScanScope("shared", True),), incomplete=())
+    assert decode_scan_scopes(db.get(LibraryImportScanGap, "library").scopes) == (ScanScope("other/two", True),)
 
 
 def test_failed_full_book_scan_records_only_its_anchor(db: Session) -> None:
@@ -666,7 +506,7 @@ def test_failed_full_book_scan_records_only_its_anchor(db: Session) -> None:
     assert claimed is not None and claimed.execution_version == 1
     queue.fail_book_run(
         failed.id, execution_version=1, error_summary="SCAN_FAILED",
-        retryable=False, failed_at=now,
+        failed_at=now,
     )
     assert decode_scan_scopes(db.get(LibraryImportScanGap, "library").scopes) == (
         ScanScope("bad", True),

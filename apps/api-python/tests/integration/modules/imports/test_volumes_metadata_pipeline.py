@@ -367,12 +367,12 @@ def test_completed_book_uses_configured_priority_and_counts_failed_volumes(
             metadata = db.scalar(select(LibraryBookMetadata))
             assert metadata is not None
             if count == 2:
-                # The source disappeared after scan committed. The Book task
-                # must retain the incomplete import instead of identifying the
-                # book as successfully completed.
+                # A missing volume fails this execution, while identification
+                # from the valid imported volume remains committed (ADR 0029).
                 assert "failed" in outcomes
-                assert metadata.metadata_state == "WAITING_IMPORT"
-                assert metadata.metadata_pending
+                assert metadata.metadata_state == "COMPLETED"
+                assert not metadata.metadata_pending
+                assert metadata.title == "Path Title"
                 task = db.scalar(
                     select(LibraryImportTask).where(
                         LibraryImportTask.kind == "IMPORT_BOOK",
@@ -467,7 +467,7 @@ def test_multi_volume_comic_identifies_bracketed_directory_title_and_author(
 
 
 @pytest.mark.parametrize("entry", ("new", "recognize", "retry"))
-def test_manual_identification_reuses_candidates_before_remote_lookup(
+def test_online_lookup_is_independent_and_uses_current_local_candidates(
     tmp_path, entry, monkeypatch
 ):
     from app.models import MetadataLookupTask
@@ -540,7 +540,8 @@ def test_manual_identification_reuses_candidates_before_remote_lookup(
                     else retry_organize_job
                 )(db, job_id)
             task_id = db.scalar(select(MetadataLookupTask.id))
-            assert lookup.claim_next_metadata_lookup_task(db, owner_id="test") is None
+            claimed = lookup.claim_next_metadata_lookup_task(db, owner_id="test")
+            assert claimed is not None
             db.expire_all()
             assert db.get(MetadataLookupTask, task_id).attempts == 0
             policy = db.get(OrganizePolicy, "default")
@@ -549,6 +550,7 @@ def test_manual_identification_reuses_candidates_before_remote_lookup(
             )
             write_opf("Updated OPF Title")
             db.commit()
+            # Local refresh can finish independently of the claimed lookup.
             assert worker.process_once() == "book"
             db.expire_all()
             metadata = db.get(LibraryBookMetadata, book_id)
@@ -557,8 +559,6 @@ def test_manual_identification_reuses_candidates_before_remote_lookup(
             assert (
                 settings.resolved_storage_root / metadata.cover_path
             ).read_bytes() == blue
-            claimed = lookup.claim_next_metadata_lookup_task(db, owner_id="test")
-            assert claimed is not None
             seen = []
             original = lookup.metadata_context_for_book
 

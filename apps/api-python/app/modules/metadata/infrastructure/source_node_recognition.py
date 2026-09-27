@@ -21,19 +21,18 @@ from app.models import (
     LibrarySourceNodeMetadata,
 )
 from app.models.organize import OrganizePolicy
-from app.modules.library.application.source_node_metadata_recognition import (
+from app.modules.library.public import (
     MetadataProviderSearchError,
     SourceNodeMetadataCandidate,
     SourceNodeMetadataRecognitionPort,
     SourceNodeMetadataRecognitionResult,
 )
+from app.modules.metadata.infrastructure.generation import complete_missing_metadata
+from app.modules.metadata.infrastructure.matching import (
+    MetadataMatch, candidate_key, match_metadata_candidates, prepare_matched_metadata,
+)
 from app.modules.metadata.public import (
-    MetadataMatch,
-    candidate_key,
-    complete_missing_metadata,
     enabled_metadata_provider_ids,
-    match_metadata_candidates,
-    prepare_matched_metadata,
     recognize_metadata_identity,
     search_with_metadata_provider,
 )

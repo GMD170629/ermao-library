@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
-UNKNOWN_AUTHOR = "未知作者"
+from app.contracts.bibliographic_identity import UNKNOWN_AUTHOR, normalize_identity_part
 
 _CJK_VOLUME_MARKER = (
     "(?:"
@@ -186,15 +186,6 @@ def _download_source_suffix_start(value: str) -> int | None:
     if re.search(r"[a-z0-9-]+\.[a-z0-9-]+", suffix.group(1), re.IGNORECASE):
         return suffix.start()
     return None
-
-
-def normalize_identity_part(value: object) -> str:
-    normalized = unicodedata.normalize("NFKC", str(value or "")).lower()
-    return re.sub(
-        r"[\s_\-.[\]()（）【】《》:：,，!！?？\"'“”‘’·・、/\\]+",
-        "",
-        normalized,
-    ).strip()
 
 
 def parse_bracketed_series_identity(

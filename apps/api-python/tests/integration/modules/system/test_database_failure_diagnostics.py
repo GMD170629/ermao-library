@@ -198,7 +198,10 @@ def test_metadata_cache_busy_fallback_retains_actual_database_reason(
     )
     assert rows[0].id in caplog.text
     assert "database is locked" in caplog.text
-    assert "private query" not in caplog.text
+    assert "private query" in caplog.text
+    operation = rows[0].metadata_json["diagnostics"]["databaseOperations"][0]
+    assert operation["statement"] == "INSERT cache VALUES (?)"
+    assert operation["parameters"] == ["private query"]
 
 
 def test_short_writer_rollback_error_preserves_original_cache_failure(

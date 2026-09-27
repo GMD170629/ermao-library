@@ -128,7 +128,7 @@ from app.modules.library.infrastructure.source_node_commands import (
 from app.modules.library.infrastructure.source_node_cover import (
     FilesystemSourceNodeCoverPublication,
 )
-from app.modules.library.infrastructure.source_node_metadata_recognition import (
+from app.modules.metadata.infrastructure.source_node_recognition import (
     ProviderSourceNodeMetadataRecognition,
 )
 

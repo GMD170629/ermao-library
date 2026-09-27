@@ -84,7 +84,7 @@ def test_library_empty_cleanup_setting_and_scan_enqueue(
     first = client.post(f"/api/libraries/{library_id}/scan")
     second = client.post(f"/api/libraries/{library_id}/scan")
     assert first.status_code == second.status_code == 202
-    assert first.json()["data"]["taskId"] == second.json()["data"]["taskId"]
+    assert first.json()["data"]["taskId"] != second.json()["data"]["taskId"]
     db_session.expire_all()
     task = db_session.get(LibraryImportTask, first.json()["data"]["taskId"])
     assert task is not None and task.state == "QUEUED" and task.scan_scopes is None

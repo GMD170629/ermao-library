@@ -333,7 +333,7 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
                     validated_cover_suffix(sidecar.cover)
                     prefer_sidecar_cover = True
                 except ValueError:
-                    # Cover preparation records the rejected optional candidate.
+                    # diagnostics-control-flow: Cover preparation records this rejected optional candidate.
                     pass
             try:
                 inspection = inspect_comic_archive(

@@ -1653,9 +1653,9 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         )
         rows = self._session.execute(
             select(
-                LibraryResourceAsset,
-                LibraryResourceAssetMetadata,
-                LibrarySourceNode,
+                LibraryResourceAsset.id,
+                LibraryResourceAsset.sequence_index,
+                LibraryResourceAssetMetadata.duration_ms,
             )
             .join(
                 LibrarySourceNode,
@@ -1676,16 +1676,18 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         track_count = 0
         total_duration = 0
         durations_complete = True
-        for index, (asset, asset_metadata, _source) in enumerate(rows):
-            asset.sequence_index = index
-            track_count += 1
-            if asset_metadata is None or asset_metadata.duration_ms is None:
-                durations_complete = False
-            else:
-                total_duration += asset_metadata.duration_ms
-            if track_count % 128 == 0:
-                self._session.flush()
-        self._session.flush()
+        for batch in rows.partitions(128):
+            updates = []
+            for asset_id, sequence_index, duration_ms in batch:
+                if sequence_index != track_count:
+                    updates.append({"id": asset_id, "sequence_index": track_count})
+                track_count += 1
+                if duration_ms is None:
+                    durations_complete = False
+                else:
+                    total_duration += duration_ms
+            if updates:
+                self._session.execute(update(LibraryResourceAsset), updates)
 
         ready_units = (
             select(ReadableResourceNavigationUnit.id)

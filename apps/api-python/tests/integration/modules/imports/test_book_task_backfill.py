@@ -119,28 +119,13 @@ def test_upgrade_merges_old_resource_and_identification_tasks_and_is_reentrant(
                     processed_source_version="old-version",
                 )
             )
-            db.add_all(
-                (
-                    LibraryBookMetadata(
-                        book_id="book-one",
-                        title="One",
-                        normalized_title="one",
-                        metadata_pending=True,
-                    ),
-                    LibraryBookMetadata(
-                        book_id="book-two",
-                        title="Two",
-                        normalized_title="two",
-                        metadata_pending=True,
-                    ),
-                    LibraryBookMetadata(
-                        book_id="book-three",
-                        title="Three",
-                        normalized_title="three",
-                        metadata_pending=True,
-                    ),
-                )
-            )
+            legacy_metadata = sa.Table("LibraryBookMetadata", sa.MetaData(), autoload_with=db.get_bind())
+            db.execute(legacy_metadata.insert(), [
+                {"bookId": book_id, "title": title, "normalizedTitle": title.lower(),
+                 "metadataPending": True, "createdAt": int(_NOW.timestamp() * 1000),
+                 "updatedAt": int(_NOW.timestamp() * 1000)}
+                for book_id, title in (("book-one", "One"), ("book-two", "Two"), ("book-three", "Three"))
+            ])
             db.add_all(
                 (
                     LibraryReadableResource(

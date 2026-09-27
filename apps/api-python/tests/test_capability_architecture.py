@@ -518,6 +518,13 @@ def test_readable_resource_migrations_are_linear_and_baseline_is_self_contained(
         "0030_book_import_task_shape.py",
         "0031_book_import_task_backfill.py",
         "0032_source_node_scan_seen_generation.py",
+        "0033_book_scan_gate.py",
+        "0034_book_completion_intent.py",
+        "0035_directory_member_cursor.py",
+        "0036_import_execution_identity.py",
+        "0037_single_import_execution.py",
+        "0038_import_scan_round_fact.py",
+        "0039_generated_metadata_fields.py",
     ]
     path = versions_dir / "0001_library_topology_baseline.py"
     source = path.read_text(encoding="utf-8")
