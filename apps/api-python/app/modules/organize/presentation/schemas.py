@@ -22,7 +22,6 @@ class OrganizeRulesUpdateRequest(HttpContractModel):
 
 
 class UpdateOrganizePolicyRequest(HttpContractModel):
-    allow_repair_path_metadata: bool | None = Field(default=None, alias="allowRepairPathMetadata")
     enabled: bool | None = None
     schedule_mode: str | None = Field(default=None, alias="scheduleMode")
     interval_minutes: int | str | None = Field(default=None, alias="intervalMinutes")
@@ -40,7 +39,6 @@ class UpdateOrganizePolicyRequest(HttpContractModel):
 
 
 class OrganizePolicy(HttpContractModel):
-    allow_repair_path_metadata: bool = Field(default=False, alias="allowRepairPathMetadata")
     id: str
     enabled: bool
     schedule_mode: Literal["MANUAL", "INTERVAL"] = Field(alias="scheduleMode")
@@ -123,10 +121,6 @@ class ProviderExecution(HttpContractModel):
 
 
 class OrganizeJob(HttpContractModel):
-    recognition_id: str | None = Field(default=None, alias="recognitionId")
-    recognition_outcome: str | None = Field(default=None, alias="recognitionOutcome")
-    recognition_target_type: str | None = Field(default=None, alias="recognitionTargetType")
-    recognition_target_id: str | None = Field(default=None, alias="recognitionTargetId")
     id: str
     run_id: str | None = Field(alias="runId")
     resource_id: str | None = Field(default=None, alias="resourceId")

@@ -27,10 +27,6 @@ type ProviderExecution = {
 export type OrganizeStatusCategory = 'SUCCESS' | 'FAILED' | 'RECOGNIZING' | 'WAITING';
 
 export type OrganizeJobView = {
-  recognitionId?: string | null;
-  recognitionOutcome?: string | null;
-  recognitionTargetType?: 'book' | 'resource' | null;
-  recognitionTargetId?: string | null;
   id: string;
   runId?: string | null;
   trigger?: string;

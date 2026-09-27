@@ -39,7 +39,7 @@ class JsonResponse:
     def __exit__(self, *_args: object) -> None:
         return None
 
-    def read(self, limit: int = -1) -> bytes:
+    def read(self) -> bytes:
         return b'{"data": []}'
 
 

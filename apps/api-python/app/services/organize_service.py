@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import logging
 import re
+import unicodedata
 from datetime import UTC, datetime
 from html import unescape
 from time import time_ns
 from typing import Any, cast
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urljoin
 from urllib.request import Request as UrlRequest
+from urllib.request import urlopen
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -17,28 +19,12 @@ from app.core.database_errors import is_database_busy_error
 from app.core.exception_diagnostics import record_exception
 from app.core.time import now_timestamp_ms
 from app.modules.metadata.application.commands import MetadataWriteTransaction
-from app.modules.metadata.application.queries import candidate_cache_key
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
-from app.modules.metadata.application.recognition import candidate_titles, title_strings
-from app.modules.metadata.domain.recognition import (
-    normalize_isbn,
-    normalize_text,
-    title_parts,
-)
 from app.modules.metadata.infrastructure import external_cache as metadata_cache
-from app.modules.metadata.infrastructure.ai_assistance import request_assistance
-from app.modules.metadata.infrastructure.bibliographic_providers import (
-    search_google,
-    search_open_library,
-)
-from app.modules.metadata.infrastructure.http import urlopen
-from app.modules.metadata.infrastructure.recognition_context import (
-    load_recognition_context,
-    provider_context,
-)
 from app.modules.metadata.infrastructure.short_writes import (
     metadata_short_write_session,
 )
+from app.modules.organize.infrastructure import review as organize_review
 
 LOGGER = logging.getLogger(__name__)
 
@@ -121,7 +107,10 @@ def normalize_key(value: Any) -> str:
 
 
 def metadata_title_key(value: Any) -> str:
-    return normalize_text(str(value or ""))
+    normalized = unicodedata.normalize("NFKC", str(value or "")).lower()
+    return re.sub(
+        r"[\s_\-.[\]()（）【】《》:：,，!！?？\"'“”‘’·・、/\\]+", "", normalized
+    ).strip()
 
 
 def metadata_title_exact_match(expected: Any, candidate: Any) -> bool:
@@ -131,11 +120,51 @@ def metadata_title_exact_match(expected: Any, candidate: Any) -> bool:
 
 
 def _metadata_title_strings(value: Any) -> list[str]:
-    return list(title_strings(value))
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    if isinstance(value, (list, tuple, set)):
+        return [title for item in value for title in _metadata_title_strings(item)]
+    if isinstance(value, dict):
+        return [
+            title
+            for key in ("v", "value", "title", "name", "name_cn", "alias")
+            for title in _metadata_title_strings(value.get(key))
+        ]
+    return []
 
 
 def metadata_candidate_title_values(candidate: dict[str, Any]) -> list[str]:
-    return list(candidate_titles(candidate))
+    """Return every provider-declared title, including cached Bangumi aliases."""
+
+    values = [
+        *_metadata_title_strings(candidate.get("title")),
+        *_metadata_title_strings(candidate.get("titleAliases")),
+    ]
+    raw_value = candidate.get("raw")
+    raw: dict[str, Any] = raw_value if isinstance(raw_value, dict) else {}
+    for key in (
+        "title",
+        "name",
+        "name_cn",
+        "originalTitle",
+        "original_title",
+        "origin_title",
+        "alt_title",
+        "aliases",
+        "aka",
+    ):
+        values.extend(_metadata_title_strings(raw.get(key)))
+    infobox_value = raw.get("infobox")
+    infobox = infobox_value if isinstance(infobox_value, list) else []
+    for entry in infobox:
+        if not isinstance(entry, dict) or not re.search(
+            r"别名|又名|中文名|简体中文|繁体中文|原名|日文名|英文名",
+            str(entry.get("key") or ""),
+            re.IGNORECASE,
+        ):
+            continue
+        values.extend(_metadata_title_strings(entry.get("value")))
+    return list(dict.fromkeys(value for value in values if metadata_title_key(value)))
 
 
 def metadata_candidate_title_exact_match(
@@ -188,8 +217,69 @@ def first_exact_title_candidate(
 
 
 def metadata_context_for_book(db: Session, book_id: str) -> dict[str, Any] | None:
-    context = load_recognition_context(db, book_id=book_id, execution="AUTOMATIC")
-    return provider_context(db, context) if context else None
+    return organize_review.load_book_context(db, book_id)
+
+
+def local_metadata_summary(context: dict[str, Any]) -> dict[str, Any]:
+    book = context["book"]
+    files = context["files"][:8]
+    metadata = [
+        parse_json_value(item.get("rawJson")) for item in context["metadata"][:4]
+    ]
+    return {
+        "title": book.get("title"),
+        "author": book.get("author"),
+        "seriesName": book.get("seriesName"),
+        "seriesIndex": book.get("seriesIndex"),
+        "tags": parse_json_value(book.get("tags")) or [],
+        "fileNames": [
+            str(file.get("relativePath") or "").rsplit("/", 1)[-1] for file in files
+        ],
+        "parentPaths": sorted(
+            {
+                str(file.get("relativePath") or "").rsplit("/", 1)[0]
+                for file in files
+                if "/" in str(file.get("relativePath") or "")
+            }
+        ),
+        "embeddedMetadata": metadata,
+    }
+
+
+def normalize_ai_confidence(value: Any) -> float:
+    try:
+        parsed = float(value if value is not None else 0.6)
+    except (TypeError, ValueError) as error:
+        record_exception(logging.getLogger(__name__), "services.organize_service.normalize_ai_confidence.failed", error,
+                         context={"step": "normalize_ai_confidence"})
+        parsed = 0.6
+    return min(0.74, max(0.0, parsed))
+
+
+def suggestion_from_ai_item(item: dict[str, Any]) -> dict[str, Any] | None:
+    field = item.get("field")
+    if field not in {
+        "title",
+        "author",
+        "description",
+        "tags",
+        "seriesName",
+        "seriesIndex",
+    }:
+        return None
+    value = item.get("value")
+    if value is None or value == "" or value == []:
+        return None
+    return {
+        "field": field,
+        "suggestedValue": json_text(value)
+        if isinstance(value, (dict, list, int, float, bool))
+        else str(value),
+        "source": "ai",
+        "confidence": normalize_ai_confidence(item.get("confidence")),
+        "reason": f"AI 识别：{string_value(item.get('reason')) or '根据本地元数据摘要推断'}",
+        "status": "PENDING",
+    }
 
 
 def suggestion_from_external(
@@ -265,7 +355,7 @@ def douban_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
                     item.get("seriesName"), item.get("series"), item.get("series_name")
                 ),
                 "publisher": first_string(item.get("publisher")),
-                "publishedAt": first_string(
+                "publishedAt": publication_datetime_or_none(
                     item.get("pubdate"), item.get("publishedAt")
                 ),
                 "isbn": first_string(
@@ -290,6 +380,30 @@ def douban_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
         or candidate.get("author")
         or candidate.get("description")
     ]
+
+
+def publication_datetime_or_none(*values: Any) -> str | None:
+    value = first_string(*values)
+    if not value:
+        return None
+    match = re.search(
+        r"(?P<year>\d{4})(?:[-/.\u5e74](?P<month>\d{1,2}))?(?:[-/.\u6708](?P<day>\d{1,2}))?",
+        value,
+    )
+    if match is None:
+        return None
+    try:
+        parsed = datetime(
+            int(match.group("year")),
+            int(match.group("month") or 1),
+            int(match.group("day") or 1),
+            tzinfo=UTC,
+        )
+    except ValueError as error:
+        record_exception(logging.getLogger(__name__), "services.organize_service.publication_datetime_or_none.failed", error,
+                         context={"step": "publication_datetime_or_none"})
+        return None
+    return parsed.isoformat()
 
 
 def first_url(*values: Any) -> str | None:
@@ -416,7 +530,7 @@ def parse_douban_subject_html(
     title = first_string(
         json_ld.get("name"), meta_content(html, "og:title"), fallback.get("title")
     )
-    author = (" / ".join(authors) if authors else None) or first_string(
+    author = (authors[0] if authors else None) or first_string(
         info.get("作者"), fallback.get("author")
     )
     description = first_string(parse_douban_intro(html), fallback.get("description"))
@@ -449,12 +563,6 @@ def parse_douban_subject_html(
         "source": "douban",
         "title": title,
         "author": author,
-        "authors": authors or ([author] if author else []),
-        "isbn": isbn,
-        "isbnScope": ("SET" if re.search(r"套装|套裝|全套|box\s*set", title or "", re.IGNORECASE) else "EDITION") if isbn and subject_match and publisher and pubdate else "UNKNOWN",
-        "matchLevel": "EDITION" if isbn and subject_match and publisher and pubdate else "VOLUME" if title_parts(title or "")[1] else "WORK",
-        "publisher": publisher,
-        "publishedAt": pubdate,
         "description": description,
         "tags": fallback.get("tags") if isinstance(fallback.get("tags"), list) else [],
         "seriesName": series_name,
@@ -476,15 +584,13 @@ def parse_douban_subject_html(
 def parse_douban_search_html(html: str, confidence: float) -> list[dict[str, Any]]:
     match = re.search(r"window\.__DATA__\s*=\s*(\{[\s\S]*?\})\s*;", html)
     if not match:
-        if re.search(r"没有找到|未找到|no results", html, re.IGNORECASE):
-            return []
-        raise ValueError("PARSE_ERROR")
+        return []
     try:
         payload = json.loads(match.group(1))
     except json.JSONDecodeError as error:
         record_exception(logging.getLogger(__name__), "services.organize_service.parse_douban_search_html.failed", error,
                          context={"step": "parse_douban_search_html"})
-        raise ValueError("PARSE_ERROR") from error
+        return []
     items: list[Any] = cast(
         list[Any],
         (
@@ -548,7 +654,9 @@ def normalize_douban_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
             raw.get("series_name"),
         ),
         "publisher": first_string(candidate.get("publisher"), raw.get("publisher")),
-        "publishedAt": first_string(candidate.get("publishedAt"), raw.get("pubdate")),
+        "publishedAt": publication_datetime_or_none(
+            candidate.get("publishedAt"), raw.get("pubdate")
+        ),
         "isbn": first_string(
             candidate.get("isbn"), raw.get("isbn"), raw.get("isbn13"), raw.get("isbn10")
         ),
@@ -585,7 +693,7 @@ def fetch_text(
         automatic_request_gate.wait(provider_id)
     request = UrlRequest(url, headers=headers)
     with urlopen(request, timeout=30) as response:
-        return response.read(2 * 1024 * 1024 + 1).decode("utf-8", errors="replace")
+        return response.read().decode("utf-8", errors="replace")
 
 
 def fetch_douban_subject(
@@ -596,15 +704,20 @@ def fetch_douban_subject(
     *,
     automatic_request_gate: AutomaticMetadataRequestGate | None = None,
 ) -> dict[str, Any] | None:
-    subject = re.search(r"(?:^|/)subject/([0-9]+)/?(?:$|[?#])", subject_url)
-    if not subject:
-        raise ValueError("INVALID_SOURCE_ID")
-    # Never follow a provider-returned foreign URL with our request headers.
-    html = fetch_text(f"{base_url}/subject/{subject.group(1)}/", headers,
-                      provider_id="douban", automatic_request_gate=automatic_request_gate)
-    if re.search(r"captcha|验证码|异常请求|访问过于频繁", html, re.IGNORECASE):
-        raise ValueError("SOURCE_RESTRICTED")
-    return parse_douban_subject_html(html, fallback)
+    url = (
+        subject_url
+        if subject_url.startswith(("http://", "https://"))
+        else urljoin(f"{base_url}/", subject_url.lstrip("/"))
+    )
+    return parse_douban_subject_html(
+        fetch_text(
+            url,
+            headers,
+            provider_id="douban",
+            automatic_request_gate=automatic_request_gate,
+        ),
+        fallback,
+    )
 
 
 def run_douban_crawler_provider(
@@ -623,8 +736,7 @@ def run_douban_crawler_provider(
     )
     volume_value: object = next(iter(volumes), {})
     volume: dict[str, Any] = volume_value if isinstance(volume_value, dict) else {}
-    identity = context.get("identity") or {}
-    isbn = normalize_isbn(str(identity.get("isbn") or volume.get("isbn") or ""))
+    isbn = first_string(volume.get("isbn"), volume.get("identifier"))
     title = first_string(context["book"].get("title")) or ""
     author = first_string(context["book"].get("author")) or ""
     query_text = query or isbn or " ".join(part for part in [title, author] if part)
@@ -642,7 +754,7 @@ def run_douban_crawler_provider(
     subject_match = re.search(r"(?:book\.douban\.com/subject/)?(\d{4,})", query_text)
     candidates: list[dict[str, Any]] = []
     candidate: dict[str, Any] | None = None
-    if subject_match and ("/subject/" in query_text or query_text.startswith("douban:")):
+    if subject_match and "/subject/" in query_text:
         candidate = fetch_douban_subject(
             base_url,
             f"/subject/{subject_match.group(1)}/",
@@ -658,8 +770,6 @@ def run_douban_crawler_provider(
             provider_id="douban",
             automatic_request_gate=automatic_request_gate,
         )
-        if re.search(r"captcha|验证码|异常请求|访问过于频繁", search_html, re.IGNORECASE):
-            raise ValueError("SOURCE_RESTRICTED")
         candidates = sort_candidates_for_title(
             [
                 normalize_douban_candidate(candidate)
@@ -693,8 +803,6 @@ def run_douban_crawler_provider(
         except (OSError, ValueError, TypeError, KeyError) as error:
             record_exception(logging.getLogger(__name__), "services.organize_service.run_douban_crawler_provider.failed", error,
                              context={"step": "run_douban_crawler_provider"})
-            if str(error) == "SOURCE_RESTRICTED":
-                raise
             subject_candidate = None
         candidate = subject_candidate or selected
         if candidate:
@@ -828,7 +936,6 @@ def bangumi_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
         infobox_value = item.get("infobox")
         infobox = infobox_value if isinstance(infobox_value, list) else []
         authors = []
-        contributors: list[dict[str, str]] = []
         title_aliases = [
             *_metadata_title_strings(item.get("name")),
             *_metadata_title_strings(item.get("name_cn")),
@@ -839,11 +946,7 @@ def bangumi_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
             key = str(entry.get("key") or "")
             value = entry.get("value")
             if re.search(r"作者|作画|原作", key):
-                names = _metadata_title_strings(value)
-                role = "illustrator" if "作画" in key else "author"
-                contributors.extend({"name": name, "role": role} for name in names)
-                if role == "author":
-                    authors.extend(names)
+                authors.extend(string_array(value))
             if re.search(
                 r"别名|又名|中文名|简体中文|繁体中文|原名|日文名|英文名",
                 key,
@@ -862,13 +965,10 @@ def bangumi_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
                         alias for alias in title_aliases if metadata_title_key(alias)
                     )
                 ),
-                "author": " / ".join(authors) if authors else None,
+                "author": authors[0] if authors else None,
                 "description": first_string(item.get("summary")),
                 "tags": tags[:8],
-                "seriesName": None,
-                "matchLevel": "VOLUME" if title_parts(first_string(item.get("name_cn"), item.get("name")) or "")[1] else "WORK",
-                "isbnScope": "UNKNOWN",
-                "authors": contributors,
+                "seriesName": first_string(item.get("name_cn"), item.get("name")),
                 "coverUrl": first_url(
                     images.get("large"),
                     images.get("common"),
@@ -940,11 +1040,78 @@ def bangumi_subject_suggestions(
     )
 
 
-def run_ai_metadata_provider(context: dict[str, Any], config: dict[str, Any], force: bool = True,
-    automatic_request_gate: AutomaticMetadataRequestGate | None = None) -> dict[str, Any]:
-    del force
-    assistance = request_assistance(context, config, automatic_request_gate)
-    return {"provider": "ai", "enabled": True, "candidates": [], "suggestions": [], "assistance": assistance, "added": 0, "cacheHit": False}
+def ai_suggestions_from_payload(payload: Any) -> list[dict[str, Any]]:
+    raw = payload if isinstance(payload, dict) else {}
+    choices = raw.get("choices")
+    message = (
+        choices[0].get("message")
+        if isinstance(choices, list) and choices and isinstance(choices[0], dict)
+        else None
+    )
+    content = message.get("content") if isinstance(message, dict) else None
+    parsed = (
+        parse_json_value(
+            re.sub(r"^```json\s*|\s*```$", "", content.strip(), flags=re.IGNORECASE)
+        )
+        if isinstance(content, str)
+        else raw
+    )
+    suggestions_value = parsed.get("suggestions") if isinstance(parsed, dict) else []
+    suggestions = suggestions_value if isinstance(suggestions_value, list) else []
+    return [
+        suggestion
+        for item in suggestions
+        if isinstance(item, dict) and (suggestion := suggestion_from_ai_item(item))
+    ]
+
+
+def run_ai_metadata_provider(
+    context: dict[str, Any], config: dict[str, Any], force: bool = True
+) -> dict[str, Any]:
+    base_url = string_value(config.get("baseUrl")).rstrip("/")
+    api_key = string_value(config.get("apiKey"))
+    model = string_value(config.get("model"))
+    if not base_url or not api_key or not model:
+        return {
+            "provider": "ai",
+            "enabled": False,
+            "added": 0,
+            "cacheHit": False,
+            "message": "AI 服务地址、模型或 API Key 未配置",
+            "suggestions": [],
+        }
+    summary = local_metadata_summary(context)
+    body = {
+        "model": model,
+        "temperature": 0.1,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "system",
+                "content": '你是图书元数据整理助手。只返回 JSON，格式为 {"suggestions":[{"field":"title|author|description|tags|seriesName|seriesIndex","value":...,"confidence":0-1,"reason":"..."}]}。不要编造不确定信息。',
+            },
+            {"role": "user", "content": json_text(summary)},
+        ],
+    }
+    request = UrlRequest(
+        f"{base_url}/chat/completions",
+        data=json.dumps(body).encode("utf-8"),
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+        method="POST",
+    )
+    with urlopen(request, timeout=30) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    return {
+        "provider": "ai",
+        "enabled": True,
+        "added": 0,
+        "cacheHit": False,
+        "suggestions": ai_suggestions_from_payload(payload),
+    }
 
 
 def run_bangumi_metadata_provider(
@@ -991,36 +1158,21 @@ def run_bangumi_metadata_provider(
             "message": "Bangumi 查询文本为空",
             "suggestions": [],
         }
-    direct = re.fullmatch(r"(?:bangumi:|https://(?:bgm.tv|bangumi.tv)/subject/)([0-9]+)", title)
     request = UrlRequest(
-        f"{base_url}/v0/subjects/{direct.group(1)}" if direct else f"{base_url}/v0/search/subjects?limit=10",
-        data=None if direct else json.dumps(
+        f"{base_url}/v0/search/subjects",
+        data=json.dumps(
             {"keyword": title, "sort": "match", "filter": {"type": [1]}},
             ensure_ascii=False,
         ).encode("utf-8"),
         headers=headers,
-        method="GET" if direct else "POST",
+        method="POST",
     )
     if automatic_request_gate is not None:
         automatic_request_gate.wait("bangumi")
     with urlopen(request, timeout=30) as response:
-        payload = json.loads(response.read(2 * 1024 * 1024 + 1).decode("utf-8"))
-    if direct and isinstance(payload, dict) and payload.get("id"):
-        payload = {"data": [payload]}
-    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
-        raise TypeError("INVALID_PROVIDER_RESPONSE")
-    items = payload["data"][:10]
-    for index, item in enumerate(items[:2]):
-        if isinstance(item, dict) and not item.get("infobox") and str(item.get("id", "")).isdigit():
-            if automatic_request_gate is not None:
-                automatic_request_gate.wait("bangumi")
-            detail = UrlRequest(f"{base_url}/v0/subjects/{item['id']}", headers=headers)
-            with urlopen(detail, timeout=30) as response:
-                details = json.loads(response.read(2 * 1024 * 1024 + 1).decode("utf-8"))
-            if isinstance(details, dict) and str(details.get("id")) == str(item["id"]):
-                items[index] = details
+        payload = json.loads(response.read().decode("utf-8"))
     candidates = sort_candidates_for_title(
-        bangumi_candidates({"data": items}, 0.82), match_title or title
+        bangumi_candidates(payload, 0.82), match_title or title
     )
     subject = (
         first_exact_title_candidate(candidates, match_title)
@@ -1083,8 +1235,6 @@ def external_metadata_result_cacheable(result: dict[str, Any]) -> bool:
     candidates = result.get("candidates")
     if not isinstance(candidates, list):
         return False
-    if not candidates:
-        return True
     useful_fields = (
         "title",
         "author",
@@ -1120,7 +1270,6 @@ def external_metadata_cache_put(
     payload = json_text(
         {
             "candidates": candidates,
-            "assistance": result.get("assistance"),
             "suggestions": result.get("suggestions")
             if isinstance(result.get("suggestions"), list)
             else [],
@@ -1128,7 +1277,7 @@ def external_metadata_cache_put(
         }
     )
     entry_id = f"py_{time_ns()}"
-    expires_at_ms = timestamp + (24 * 60 if candidates else 30) * 60 * 1000
+    expires_at_ms = timestamp + 24 * 60 * 60 * 1000
     prepared = metadata_cache.prepare_cache_entry_write(
         entry_id=entry_id,
         provider=provider,
@@ -1164,8 +1313,8 @@ def metadata_search_candidates(
     automatic_request_gate: AutomaticMetadataRequestGate | None = None,
 ) -> dict[str, Any]:
     search_text = query or first_string(context["book"].get("title")) or ""
-    query_key = candidate_cache_key(context, source, search_text, config)
-    cache_eligible = source in {"bangumi", "douban", "ai", "google-books", "open-library"}
+    query_key = metadata_title_key(search_text)
+    cache_eligible = source in {"bangumi", "douban", "ai"}
     cache_ready = (
         metadata_cache.external_metadata_cache_ready(db) if cache_eligible else False
     )
@@ -1175,7 +1324,6 @@ def metadata_search_candidates(
         else None
     )
     if cached is not None:
-        db.close()
         return {
             "provider": source,
             "enabled": True,
@@ -1210,18 +1358,41 @@ def metadata_search_candidates(
                 query=query,
                 automatic_request_gate=automatic_request_gate,
             )
-    elif source in {"google-books", "open-library"}:
-        provider = search_google if source == "google-books" else search_open_library
-        result = provider(context, config, search_text, automatic_request_gate)
     else:
-        result = run_ai_metadata_provider(context, config, force=force, automatic_request_gate=automatic_request_gate)
+        ai_result = run_ai_metadata_provider(context, config, force=force)
+        fields = {
+            item["field"]: parse_json_value(item.get("suggestedValue"))
+            for item in ai_result.get("suggestions") or []
+        }
+        candidate: dict[str, Any] = {
+            "id": "ai-suggestion",
+            "source": "ai",
+            "title": fields.get("title"),
+            "author": fields.get("author"),
+            "description": fields.get("description"),
+            "tags": fields.get("tags") if isinstance(fields.get("tags"), list) else [],
+            "seriesName": fields.get("seriesName"),
+            "seriesIndex": fields.get("seriesIndex"),
+            "confidence": max(
+                [
+                    float(item.get("confidence") or 0)
+                    for item in ai_result.get("suggestions") or []
+                ]
+                or [0.0]
+            ),
+            "raw": {"suggestions": ai_result.get("suggestions") or []},
+        }
+        result = {
+            **ai_result,
+            "candidates": [candidate] if ai_result.get("suggestions") else [],
+        }
     if source in {"bangumi", "douban"}:
         result = {
             **result,
             "candidates": sort_candidates_for_title(
                 result.get("candidates") or [],
                 query or first_string(context["book"].get("title")),
-            )[:10],
+            ),
         }
     if cache_eligible and result.get("enabled"):
         external_metadata_cache_put(
