@@ -12,6 +12,8 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.hasText
@@ -73,6 +75,58 @@ import com.ermao.library.shared.modules.shelf.ShelfBookPreview
 class AndroidShellSmokeTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun authenticationStatesUseTheSameLoginFormAndSubmitAction() {
+        val authenticated = authenticatedSession()
+        val profile = authenticated.profile
+        val states = listOf(
+            AppSession.NoServer,
+            AppSession.SignedOut(profile),
+            AppSession.SessionExpired(profile, authenticated.identity),
+            AppSession.LoginFailed(profile, "reader@example.com", "INVALID_CREDENTIALS"),
+            AppSession.AccountDisabled(profile, "reader@example.com"),
+            AppSession.Authenticating(profile),
+        )
+        val state = mutableStateOf(MainUiState(
+            session = states.first(),
+            loginForm = LoginFormState(profile.baseUrl.value, "reader@example.com", "password"),
+        ))
+        var submissions = 0
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        composeRule.setContent {
+            WarmPageTheme(darkTheme = false) {
+                ErmaoLibraryRoot(
+                    state = state.value,
+                    actions = noOpMainActions.copy(onLoginEntry = { submissions++ }),
+                    contentRepository = createAndroidContentRepository(context),
+                )
+            }
+        }
+        for (session in states) {
+            composeRule.runOnIdle {
+                state.value = state.value.copy(
+                    session = session,
+                    operationInProgress = session is AppSession.Authenticating,
+                )
+            }
+            composeRule.onNodeWithTag("login-server-address").performScrollTo()
+                .assertIsDisplayed().assertTextContains(profile.baseUrl.value)
+            composeRule.onNodeWithText("reader@example.com").assertExists()
+            composeRule.onAllNodesWithTag("login-entry-close").assertCountEquals(0)
+            if (session is AppSession.AccountDisabled) {
+                composeRule.onNodeWithText(context.getString(R.string.login_account_disabled_message))
+                    .performScrollTo().assertIsDisplayed()
+            }
+            val submit = composeRule.onNodeWithTag("login-submit").performScrollTo()
+            if (session is AppSession.Authenticating) {
+                submit.assertIsNotEnabled()
+            } else {
+                submit.assertIsEnabled().performClick()
+            }
+        }
+        composeRule.runOnIdle { assertEquals(states.size - 1, submissions) }
+    }
 
     @Test
     fun libraryFilterOpensOnlyFromOverflowAndPreservesDraftActions() {
@@ -405,7 +459,6 @@ private val noOpMainActions = MainActions(
     onLoginEmailChanged = {},
     onLoginPasswordChanged = {},
     onLoginServerAddressChanged = {},
-    onLogin = {},
     onLoginEntry = {},
     onSelectLoginServer = {},
     onDeleteLoginServer = {},

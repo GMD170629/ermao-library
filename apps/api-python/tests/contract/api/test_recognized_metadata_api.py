@@ -400,16 +400,16 @@ def test_record_rejects_changed_target_and_can_ignore(client, db_session, monkey
     assert client.post(f"/api/books/another-record-book/metadata/recognitions/{record_id}/ignore").status_code == 404
 
 
-def test_record_human_confirmation_cannot_override_volume_conflict(client, db_session, monkeypatch):
+def test_record_human_confirmation_overrides_volume_conflict(client, db_session, monkeypatch):
     _login(client, db_session, role="admin")
     resource_id, result = _record_search(client, db_session, monkeypatch, conflict=True)
-    assert result["candidates"][0]["confirmableFields"] == []
+    assert "resource.publisher" in result["candidates"][0]["confirmableFields"]
     response = client.post("/api/books/record-book/metadata/apply", json={"scope": "resource", "resourceId": resource_id,
         "recognitionId": result["recognitionId"], "candidate": {"id": "edition-1", "source": "douban", "title": "示例书 第1卷"},
         "fields": ["resource.publisher"]})
-    assert response.status_code == 422, response.text
+    assert response.status_code == 200, response.text
     db_session.expire_all()
-    assert db_session.get(LibraryReadableResourceMetadata, resource_id).publisher is None
+    assert db_session.get(LibraryReadableResourceMetadata, resource_id).publisher == "来源出版社"
 
 
 def test_ignored_record_suppresses_same_context_and_legacy_records_cannot_apply(client, db_session, monkeypatch):
@@ -433,3 +433,101 @@ def test_ignored_record_suppresses_same_context_and_legacy_records_cannot_apply(
     response = client.post("/api/books/record-book/metadata/apply", json={"scope": "resource", "resourceId": resource_id,
         "recognitionId": "legacy-0", "candidate": {"id": "edition-1", "source": "douban"}, "fields": ["resource.publisher"]})
     assert response.status_code == 422, response.text
+
+
+def test_manual_book_selection_accepts_unknown_scope_and_overwrites_protected_fields(client, db_session, monkeypatch):
+    import json
+
+    from app.modules.library.infrastructure import source_node_metadata_recognition
+
+    _login(client, db_session, role="admin")
+    _add_book(db_session, book_id="manual-book")
+    metadata = db_session.get(LibraryBookMetadata, "manual-book")
+    metadata.title = "我是大哥大 第1卷"
+    metadata.author = "38卷 MOBI格式"
+    metadata.protected_fields = json.dumps(["title", "author", "description", "series_name", "series_index", "tags"])
+    db_session.commit()
+    candidate = _candidate(title="罗杰疑案", source="bangumi")
+    monkeypatch.setattr(source_node_metadata_recognition, "search_with_metadata_provider", lambda *args: {"candidates": [candidate]})
+    response = client.post("/api/books/manual-book/source-nodes/manual-book-root/metadata/search", json={"providerId": "bangumi", "query": "罗杰疑案"})
+    assert response.status_code == 200, response.text
+    result = response.json()["data"]
+    assert result["candidates"][0]["match"]["outcome"] != "MATCHED"
+    assert set(result["candidates"][0]["confirmableFields"]) == {
+        "book.title", "book.author", "book.description", "book.series_name", "book.series_index", "book.tags"}
+    reopened = client.get(f"/api/books/manual-book/metadata/recognitions/{result['recognitionId']}")
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.json()["data"]["candidates"][0]["confirmableFields"] == result["candidates"][0]["confirmableFields"]
+    response = client.post("/api/books/manual-book/metadata/apply", json={
+        "scope": "book", "recognitionId": result["recognitionId"], "candidate": candidate,
+        "fields": ["book.title", "book.author", "book.description", "book.seriesName", "book.seriesIndex", "book.tags"]})
+    assert response.status_code == 200, response.text
+    db_session.expire_all()
+    metadata = db_session.get(LibraryBookMetadata, "manual-book")
+    assert (metadata.title, metadata.author, metadata.description, metadata.series_name, metadata.series_index) == (
+        "罗杰疑案", "候选作者", "候选简介", "候选系列", 2)
+    assert set(json.loads(metadata.protected_fields)) >= {"title", "author", "description"}
+
+
+def test_manual_resource_selection_includes_linked_book_fields_and_protected_values(client, db_session, monkeypatch):
+    import json
+
+    from app.modules.library.infrastructure import source_node_metadata_recognition
+
+    _login(client, db_session, role="admin")
+    resource_id = _add_book(db_session, book_id="manual-resource")
+    db_session.get(LibraryBookMetadata, "manual-resource").protected_fields = json.dumps(["author", "tags", "series_name", "series_index"])
+    metadata = db_session.get(LibraryReadableResourceMetadata, resource_id)
+    metadata.publisher = "人工出版社"
+    metadata.protected_fields = json.dumps(["publisher", "title", "description", "resource_index"])
+    db_session.commit()
+    candidate = _candidate()
+    monkeypatch.setattr(source_node_metadata_recognition, "search_with_metadata_provider", lambda *args: {"candidates": [candidate]})
+    response = client.post(f"/api/books/manual-resource/source-nodes/{resource_id}-node/metadata/search", json={"providerId": "douban", "resourceId": resource_id})
+    assert response.status_code == 200, response.text
+    result = response.json()["data"]
+    fields = ["book.author", "book.tags", "book.seriesName", "book.seriesIndex", "resource.title", "resource.description", "resource.publisher", "resource.publishedAt", "resource.language", "resource.isbn", "resource.identifier", "resource.narrator", "resource.abridged", "resource.resourceIndex"]
+    assert len(result["candidates"][0]["confirmableFields"]) == len(fields)
+    response = client.post("/api/books/manual-resource/metadata/apply", json={
+        "scope": "resource", "resourceId": resource_id, "recognitionId": result["recognitionId"], "candidate": candidate, "fields": fields})
+    assert response.status_code == 200, response.text
+    assert set(response.json()["data"]["appliedFields"]) == set(fields)
+    db_session.expire_all()
+    assert db_session.get(LibraryBookMetadata, "manual-resource").author == "候选作者"
+    metadata = db_session.get(LibraryReadableResourceMetadata, resource_id)
+    assert metadata.publisher == "候选出版社"
+    assert metadata.abridged is False
+    assert metadata.resource_index == 2
+
+
+def test_manual_selection_replaces_protected_cover(client, db_session, monkeypatch):
+    import json
+    from io import BytesIO
+
+    from PIL import Image
+
+    from app.modules.library.infrastructure import (
+        recognized_metadata,
+        source_node_metadata_recognition,
+    )
+
+    _login(client, db_session, role="admin")
+    _add_book(db_session, book_id="manual-cover")
+    metadata = db_session.get(LibraryBookMetadata, "manual-cover")
+    metadata.protected_fields = json.dumps(["cover_path"])
+    db_session.commit()
+    candidate = _candidate(coverUrl="https://example.test/cover.png")
+    monkeypatch.setattr(source_node_metadata_recognition, "search_with_metadata_provider", lambda *args: {"candidates": [candidate]})
+    content = BytesIO()
+    Image.new("RGB", (4, 4), color="blue").save(content, format="PNG")
+    monkeypatch.setattr(recognized_metadata.SafeRemoteCoverDownloader, "download", lambda self, url: content.getvalue())
+    response = client.post("/api/books/manual-cover/source-nodes/manual-cover-root/metadata/search", json={"providerId": "douban"})
+    assert response.status_code == 200, response.text
+    result = response.json()["data"]
+    assert "book.cover_ref" in result["candidates"][0]["confirmableFields"]
+    response = client.post("/api/books/manual-cover/metadata/apply", json={
+        "scope": "book", "recognitionId": result["recognitionId"], "candidate": candidate, "fields": ["book.cover"]})
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["coverStatus"] == "applied"
+    db_session.expire_all()
+    assert db_session.get(LibraryBookMetadata, "manual-cover").cover_path

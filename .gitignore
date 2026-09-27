@@ -55,6 +55,7 @@ data
 # Local runtime and acceptance outputs
 apps/api-python/tmp/
 docs/testing/screenshots/
+docs/testing/resource-import-acceptance.md
 
 # Local native builds and device/visual-test evidence
 /build/

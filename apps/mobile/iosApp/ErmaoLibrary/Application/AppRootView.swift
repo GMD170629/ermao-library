@@ -132,12 +132,10 @@ struct AppRootView: View {
         } else {
             switch store.snapshot.phase {
             case .noServer, .checkingServer, .serverConnectionFailed, .tlsRisk, .incompatibleServer,
-                 .signedOut, .authenticating, .loginFailed, .sessionExpired:
+                 .signedOut, .authenticating, .loginFailed, .sessionExpired, .accountDisabled:
                 LoginView(store: store)
             case .setupRequired, .settingUp, .setupFailed:
                 SetupRequiredView(store: store)
-            case .accountDisabled:
-                AccountDisabledView(store: store)
             case .authenticated:
                 if settingsRepository != nil || settingsClientOverride != nil {
                     AuthenticatedShellHost(
@@ -321,7 +319,7 @@ private struct AuthenticatedShellHost: View {
                         try await store.purgeCurrentNamespace()
                     },
                     logout: {
-                        try await store.logoutAwaitingCompletion(purgeNamespace: true)
+                        try await store.logoutAwaitingCompletion(purgeNamespace: false)
                     }
                 )
             )

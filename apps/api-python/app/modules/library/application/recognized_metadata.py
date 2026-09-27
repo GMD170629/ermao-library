@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
@@ -72,6 +72,24 @@ RESOURCE_SCOPE_FIELDS = frozenset(
         RecognizedMetadataField.RESOURCE_COVER,
     }
 )
+
+
+def confirmable_metadata_fields(candidate: Mapping[str, object], scope: str) -> tuple[str, ...]:
+    """Manual selection accepts available values regardless of matching or protection."""
+    fields = BOOK_SCOPE_FIELDS if scope == "book" else RESOURCE_SCOPE_FIELDS
+    result: list[str] = []
+    for field in sorted(fields):
+        target, name = field.value.split(".")
+        value = candidate.get("coverUrl" if name == "cover" else name)
+        if value is None or value == "" or value == []:
+            continue
+        # The persisted date needs a complete day; never invent missing precision.
+        if name == "publishedAt" and (
+            not isinstance(value, str) or not re.match(r"^\d{4}-\d{2}-\d{2}(?:$|T)", value)
+        ):
+            continue
+        result.append(target + "." + recognized_field_name(name))
+    return tuple(result)
 
 
 @dataclass(frozen=True, slots=True)

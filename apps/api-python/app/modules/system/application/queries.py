@@ -130,9 +130,10 @@ def management_events_payload(
     storage: dict[str, Any],
     sources: list[dict[str, Any]],
     levels: list[dict[str, Any]],
+    include_diagnostics: bool = False,
 ) -> dict[str, Any]:
     return {
-        "events": [serialize_system_event(event) for event in events],
+        "events": [serialize_system_event(event, include_diagnostics=include_diagnostics) for event in events],
         "page": page,
         "pageSize": page_size,
         "total": total,

@@ -11,16 +11,12 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.ermao.library.R
 import com.ermao.library.features.auth.LoginScreen
 import com.ermao.library.features.auth.LoginEntryAlert
-import com.ermao.library.features.auth.ReauthenticateScreen
 import com.ermao.library.features.auth.SetupScreen
 import com.ermao.library.shared.modules.library.ContentRepository
-import com.ermao.library.features.servers.BlockingServerStateScreen
 import com.ermao.library.features.shell.MainShell
 import com.ermao.library.shared.modules.auth.domain.AppSession
 import com.ermao.library.shared.modules.personalsettings.PersonalSettingsRepository
@@ -128,56 +124,21 @@ fun ErmaoLibraryRoot(
             onSwitchServer = actions.onOpenServerCenter,
             modifier = modifier,
         )
-        is AppSession.SignedOut -> LoginEntry(state, actions, null, modifier)
-        is AppSession.Authenticating -> if (state.isReauthenticating) {
-            ReauthenticateScreen(
-                profile = session.profile,
-                userDisplayName = state.reauthUserName,
-                userEmail = state.reauthUserEmail,
-                form = state.loginForm,
-                isAuthenticating = true,
-                onPasswordChanged = actions.onLoginPasswordChanged,
-                onLogin = {},
-                onSwitchServer = actions.onOpenServerCenter,
-                modifier = modifier,
-            )
-        } else {
-            LoginEntry(state, actions, null, modifier)
-        }
-        is AppSession.LoginFailed -> if (state.isReauthenticating) {
-            ReauthenticateScreen(
-                profile = session.profile,
-                userDisplayName = state.reauthUserName,
-                userEmail = state.reauthUserEmail ?: session.email,
-                form = state.loginForm.copy(invalidCredentials = session.failureCode == INVALID_CREDENTIALS),
-                isAuthenticating = false,
-                onPasswordChanged = actions.onLoginPasswordChanged,
-                onLogin = { actions.onLogin(state.reauthUserEmail ?: session.email) },
-                onSwitchServer = actions.onOpenServerCenter,
-                modifier = modifier,
-            )
-        } else {
-            LoginEntry(
-                state.copy(loginForm = state.loginForm.copy(invalidCredentials = session.failureCode == INVALID_CREDENTIALS)),
-                actions,
-                LoginEntryAlert.ServerUnavailable.takeIf {
-                    state.operationErrorKind in setOf(
-                        com.ermao.library.shared.core.network.AppErrorKind.NetworkUnavailable,
-                        com.ermao.library.shared.core.network.AppErrorKind.Timeout,
-                        com.ermao.library.shared.core.network.AppErrorKind.ServiceUnavailable,
-                        com.ermao.library.shared.core.network.AppErrorKind.NotFoundOrUnavailable,
-                        com.ermao.library.shared.core.network.AppErrorKind.ServerFailure,
-                    )
-                },
-                modifier,
-            )
-        }
-        is AppSession.AccountDisabled -> BlockingServerStateScreen(
-            title = stringResource(R.string.account_disabled_title),
-            message = stringResource(R.string.account_disabled_message, session.email, session.profile.displayName, session.profile.baseUrl.value),
-            primaryLabel = stringResource(R.string.server_choose_other_action),
-            onPrimary = actions.onOpenServerCenter,
-            modifier = modifier,
+        is AppSession.SignedOut, is AppSession.Authenticating,
+        is AppSession.SessionExpired, is AppSession.AccountDisabled -> LoginEntry(state, actions, null, modifier)
+        is AppSession.LoginFailed -> LoginEntry(
+            state.copy(loginForm = state.loginForm.copy(invalidCredentials = session.failureCode == INVALID_CREDENTIALS)),
+            actions,
+            LoginEntryAlert.ServerUnavailable.takeIf {
+                state.operationErrorKind in setOf(
+                    com.ermao.library.shared.core.network.AppErrorKind.NetworkUnavailable,
+                    com.ermao.library.shared.core.network.AppErrorKind.Timeout,
+                    com.ermao.library.shared.core.network.AppErrorKind.ServiceUnavailable,
+                    com.ermao.library.shared.core.network.AppErrorKind.NotFoundOrUnavailable,
+                    com.ermao.library.shared.core.network.AppErrorKind.ServerFailure,
+                )
+            },
+            modifier,
         )
         is AppSession.Authenticated -> key(state.shellEpoch) {
             if (
@@ -217,17 +178,6 @@ fun ErmaoLibraryRoot(
                 }
             }
         }
-        is AppSession.SessionExpired -> ReauthenticateScreen(
-            profile = session.profile,
-            userDisplayName = state.reauthUserName ?: session.lastKnownIdentity?.displayName,
-            userEmail = state.reauthUserEmail ?: session.lastKnownIdentity?.email,
-            form = state.loginForm,
-            isAuthenticating = false,
-            onPasswordChanged = actions.onLoginPasswordChanged,
-            onLogin = { actions.onLogin(state.reauthUserEmail ?: session.lastKnownIdentity?.email) },
-            onSwitchServer = actions.onOpenServerCenter,
-            modifier = modifier,
-        )
         is AppSession.IncompatibleServer -> LoginEntry(
             state, actions,
             LoginEntryAlert.IncompatibleServer.takeIf {
@@ -249,7 +199,6 @@ data class MainActions(
     val onLoginEmailChanged: (String) -> Unit,
     val onLoginPasswordChanged: (String) -> Unit,
     val onLoginServerAddressChanged: (String) -> Unit,
-    val onLogin: (String?) -> Unit,
     val onLoginEntry: () -> Unit,
     val onSelectLoginServer: (String) -> Unit,
     val onDeleteLoginServer: () -> Unit,
@@ -284,6 +233,7 @@ private fun LoginEntry(
         isAuthenticating = state.operationInProgress,
         alert = alert,
         unexpectedFailure = state.operationErrorCode == "RUNTIME_FAILURE",
+        accountDisabled = state.session is AppSession.AccountDisabled,
         onServerAddressChanged = actions.onLoginServerAddressChanged,
         onEmailChanged = actions.onLoginEmailChanged,
         onPasswordChanged = actions.onLoginPasswordChanged,

@@ -395,8 +395,7 @@ fun MainShell(
                 override suspend fun logout() {
                     audioRuntime.stop()
                     downloadActionsViewModel.cancelAllAndJoin()
-                    sharedDownloadCatalog.clearNamespace(session.identity.namespace.toDownloadNamespace())
-                    onLogout(true)
+                    onLogout(false)
                 }
                 override fun requireReauthentication() = onSessionUnauthorized()
             },
@@ -675,6 +674,8 @@ fun MainShell(
                 entry<MeRoot> {
                     MeRootScreen(
                         state = meRootState,
+                        onLogout = meViewModel::logout,
+                        isLoggingOut = meSecurityState.isSaving,
                         onOpenProfile = { meBackStack.add(MeRoute.Profile) },
                         onOpenSecurity = { meBackStack.add(MeRoute.Security) },
                         onOpenLanguage = { meBackStack.add(MeRoute.Language) },
@@ -715,7 +716,6 @@ fun MainShell(
                 entry<MeRoute.Security> {
                     SecurityScreen(
                         state = meSecurityState,
-                        serverName = meRootState.serverName,
                         onBack = { meBackStack.removeLastOrNull() },
                         onEmailChanged = meViewModel::updateEmail,
                         onEmailCurrentPasswordChanged = meViewModel::updateEmailCurrentPassword,
@@ -724,7 +724,6 @@ fun MainShell(
                         onPasswordConfirmationChanged = meViewModel::updatePasswordConfirmation,
                         onSaveEmail = meViewModel::saveEmail,
                         onSavePassword = meViewModel::savePassword,
-                        onLogout = meViewModel::logout,
                     )
                 }
                 entry<MeRoute.Language> {

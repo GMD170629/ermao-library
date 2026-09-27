@@ -22,7 +22,6 @@ import {
   searchSourceNodeMetadata
 } from './api/client';
 import type { SourceNodeMetadataCandidate } from './model/book-contents';
-import { MetadataMatchDetails } from './ui/metadata-match-details';
 import {
   canConfirmMetadataField,
   candidateMetadataValue,
@@ -320,7 +319,6 @@ export function MetadataLookupModal({ book, recognitionId, sourceNodeId: explici
           </Button>
         </div>
 
-        {explicitSourceNodeId && explicitSourceNodeId !== book.sourceNodeId && scope === 'book' ? <p className="px-5 pt-3 text-sm text-slate-500"><I18nText>当前目录未绑定资源，仅可查看候选；可手动编辑目录信息。</I18nText></p> : null}
         {providers.some((provider) => provider.mode === 'assist' && provider.enabled) ? <div className="px-5 pt-3"><Button variant="secondary" icon={Sparkles} disabled={busy} onClick={() => void searchCandidates('ai')}><I18nText>AI 查询建议</I18nText></Button><p className="mt-1 text-xs text-slate-500"><I18nText>仅发送标题、作者、ISBN 和少量文件名。建议仍需来源验证。</I18nText></p></div> : null}
         {searchResult?.hints.map((hint) => <button key={hint.query} type="button" className="mx-5 mt-2 rounded-xl border p-3 text-left text-sm" onClick={() => setQuery(hint.query)}>{hint.query} · {i18nAttribute(hint.hypothesis ? '待验证查询假设' : '已有证据查询建议')}</button>)}
         {(message || error) ? (
@@ -353,7 +351,6 @@ export function MetadataLookupModal({ book, recognitionId, sourceNodeId: explici
                         <div className="line-clamp-2 font-medium text-slate-900">{candidate.title || i18nAttribute("未命名候选")}</div>
                       </div>
                       <div className="mt-1 line-clamp-1 text-xs text-slate-500">{[authorDisplayLabel(candidate.author), candidate.source].filter(Boolean).join(' · ')}</div>
-                      <MetadataMatchDetails match={candidate.match} />
                       {candidate.description ? <div className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500">{candidate.description}</div> : null}
                     </div>
                   </button>
@@ -383,7 +380,7 @@ export function MetadataLookupModal({ book, recognitionId, sourceNodeId: explici
                     const nextValue = candidateMetadataValue(selected, field);
                     const available = hasMetadataValue(nextValue) && canConfirmMetadataField(selected, field);
                     return (
-                      <label key={field} title={!available ? i18nAttribute('证据、保护或日期精度不足，不能应用此字段') : undefined} className={cn('grid grid-cols-[28px_minmax(0,1fr)] gap-2 px-3 py-3 text-sm md:grid-cols-[44px_90px_minmax(0,1fr)_minmax(0,1fr)]', !available && 'text-slate-400')}>
+                      <label key={field} title={!available ? i18nAttribute('候选未提供有效值，或出版日期不完整') : undefined} className={cn('grid grid-cols-[28px_minmax(0,1fr)] gap-2 px-3 py-3 text-sm md:grid-cols-[44px_90px_minmax(0,1fr)_minmax(0,1fr)]', !available && 'text-slate-400')}>
                         <input
                           type="checkbox"
                           disabled={!available}

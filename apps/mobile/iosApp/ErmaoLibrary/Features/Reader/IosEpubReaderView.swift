@@ -33,7 +33,7 @@ struct IosReflowableReaderView: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("reader.reflow.screen")
         .accessibilityAction(named: Text("reader.controls.show")) { session.showControls() }
-        .statusBarHidden(!session.controlsVisible)
+        .statusBarHidden(true)
         .task {
             session.refreshSystemAppearance(systemColorScheme == .dark ? .dark : .light)
             await session.open()

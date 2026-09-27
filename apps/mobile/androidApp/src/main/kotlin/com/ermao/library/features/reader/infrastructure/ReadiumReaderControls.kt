@@ -12,6 +12,8 @@ import org.readium.r2.shared.ExperimentalReadiumApi
 internal fun readerNavigatorConfiguration(): EpubNavigatorFragment.Configuration =
     EpubNavigatorFragment.Configuration(
         servedAssets = listOf("fonts/reader/.*"),
+        // ReaderScreen already applies display-cutout insets to the navigator and controls.
+        shouldApplyInsetsPadding = false,
     ).apply {
         listOf("Shuku Sans" to "sans", "Shuku Songti" to "songti", "Shuku Kaiti" to "kaiti")
             .forEach { (family, asset) ->

@@ -8,6 +8,9 @@ from dataclasses import replace
 
 from sqlalchemy.orm import Session
 
+from app.modules.library.application.recognized_metadata import (
+    confirmable_metadata_fields,
+)
 from app.modules.library.application.source_node_metadata_recognition import (
     MetadataProviderSearchError,
     SourceNodeMetadataCandidate,
@@ -19,11 +22,8 @@ from app.modules.library.infrastructure.metadata_patches import (
 )
 from app.modules.metadata.public import (
     assess_candidates,
-    candidate_evidence,
-    confirm_candidate,
     ignore_recognition_record,
     load_recognition_context,
-    propose_fields,
     provider_context,
     recognition_fingerprint,
     recognition_record,
@@ -81,8 +81,7 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
             else [],
         )
         candidates = tuple(
-            replace(candidate, match=decision, confirmable_fields=tuple(proposal.field for proposal in
-                propose_fields(recognition, provider_id, value, confirm_candidate(recognition, candidate_evidence(provider_id, value)))))
+            replace(candidate, match=decision, confirmable_fields=confirmable_metadata_fields(value, recognition.target_type))
             for value, decision in assessed
             if (candidate := self._candidate(value, provider_id)) is not None
         )
@@ -118,8 +117,7 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
             for value, decision in assess_candidates(context, provider, values):
                 candidate = self._candidate(value, provider)
                 if candidate:
-                    confirmed = confirm_candidate(context, candidate_evidence(provider, value))
-                    candidates.append(replace(candidate, match=decision, confirmable_fields=tuple(item.field for item in propose_fields(context, provider, value, confirmed))))
+                    candidates.append(replace(candidate, match=decision, confirmable_fields=confirmable_metadata_fields(value, context.target_type)))
         port = SqlAlchemyMetadataPatches(self._db)
         target = port.snapshot(context.target_type, context.target_id, frozenset({context.library_id}))
         parent = port.snapshot("book", book_id, frozenset({context.library_id}))

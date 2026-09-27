@@ -14,6 +14,23 @@ import org.junit.Test
 
 class AndroidDownloadCatalogTest {
     @Test
+    fun retainedDownloadReopensOnlyForSameServerUserAndAuthorization() = runTest {
+        val root = Files.createTempDirectory("retained-download-isolation").toFile()
+        try {
+            val saved = record("retained", "book.epub", 1)
+            AndroidDownloadCatalog(root).upsert(saved)
+            val reopened = AndroidDownloadCatalog(root)
+            assertEquals(listOf(saved), reopened.records(saved.namespace))
+            assertTrue(reopened.records(AndroidDownloadNamespace("server", "other-user", 3)).isEmpty())
+            assertTrue(reopened.records(AndroidDownloadNamespace("other-server", "user", 3)).isEmpty())
+            assertTrue(reopened.records(AndroidDownloadNamespace("server", "user", 4)).isEmpty())
+            assertEquals(listOf(saved), reopened.records(saved.namespace))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun catalogV3CompletedSingleFileMigratesLosslesslyToV4() = runTest {
         val root = Files.createTempDirectory("download-catalog-v3-migration-test").toFile()
         val namespace = AndroidDownloadNamespace("server", "user", 3)

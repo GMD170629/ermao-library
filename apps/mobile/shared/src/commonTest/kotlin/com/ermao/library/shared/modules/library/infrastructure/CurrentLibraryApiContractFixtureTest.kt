@@ -1,7 +1,20 @@
 package com.ermao.library.shared.modules.library.infrastructure
 
 import com.ermao.library.shared.core.network.ApiEnvelopeDecoder
+import com.ermao.library.shared.core.network.ApiClient
 import com.ermao.library.shared.core.network.ApiResult
+import com.ermao.library.shared.modules.library.BookResourcePage
+import com.ermao.library.shared.modules.library.BookResourcePageQuery
+import com.ermao.library.shared.modules.library.ContentRequestContext
+import com.ermao.library.shared.modules.library.ContentResult
+import com.ermao.library.shared.modules.workmanagement.createWorkManagementContext
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.headersOf
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -23,6 +36,29 @@ class CurrentLibraryApiContractFixtureTest {
             explicitNulls = false
         },
     )
+
+    @Test
+    fun resourcePaginationAcceptsGenerationMetadata() = runBlocking {
+        val management = createWorkManagementContext(
+            "profile", "Test", "https://library.example", "server", false, "user", 1,
+        )
+        val response = RESOURCES_FIXTURE.replace(
+            "\"resourceIndex\":", "\"generatedFields\":[],\"generationSource\":null,\"resourceIndex\":",
+        )
+        val repository = KtorContentRepository { profile ->
+            ApiClient(profile, HttpClient(MockEngine { request ->
+                assertEquals("/api/books/mobile-contract-book/resources", request.url.encodedPath)
+                respond(response, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+            }), Json { ignoreUnknownKeys = false; explicitNulls = false })
+        }
+        val result = repository.loadBookResources(
+            ContentRequestContext(management.profile, management.namespace),
+            BookResourcePageQuery("mobile-contract-book", 1),
+        )
+        val resource = assertIs<ContentResult.Content<BookResourcePage>>(result).value.resources.single()
+        assertEquals("mobile-contract-resource", resource.id)
+        assertEquals("mobile-contract-asset", resource.assets.single().id)
+    }
 
     @Test
     fun decodesDashboardBooksWithImportSummary() {

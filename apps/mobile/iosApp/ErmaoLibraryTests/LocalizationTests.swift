@@ -146,7 +146,7 @@ final class LocalizationTests: XCTestCase {
             "auth.credentials.storageFailed.title",
             "auth.credentials.storageFailed.message",
             "auth.invalidCredentials",
-            "auth.sessionExpired.message",
+            "auth.accountDisabled.message",
             "common.operationFailed.title",
             "common.operationFailed",
             "common.requestFailed",

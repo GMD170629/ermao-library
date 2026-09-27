@@ -8,7 +8,7 @@ from contextlib import contextmanager
 
 import pytest
 from sqlalchemy import create_engine, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from uvicorn.logging import AccessFormatter
 
 from app.api.diagnostics_middleware import DiagnosticBoundaryMiddleware
@@ -36,12 +36,30 @@ from app.modules.system.domain.events import (
 LOGGER = logging.getLogger("tests.diagnostics")
 
 
-def test_sanitize_redacts_credentials_and_sql_parameters() -> None:
+def test_process_log_preserves_sql_bindings_after_text_sanitizer() -> None:
+    stream = io.StringIO()
+    logger = logging.getLogger("tests.sql.raw")
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(ContextFormatter("%(message)s"))
+    logger.addHandler(handler)
+    statement = "UPDATE t SET password = 'literal', path = '/private/books/a.txt'"
+    params = {"token": "binding-value", "path": "/private/books/b.txt"}
+    error = OperationalError(statement, params, RuntimeError("driver failed"), hide_parameters=True)
+    try:
+        prepare_exception_diagnostic(logger, "sql.failed", error)
+    finally:
+        logger.removeHandler(handler)
+    operations = json.loads(stream.getvalue().split("\ndatabaseOperations=", 1)[1])
+    assert operations[0]["statement"] == statement
+    assert operations[0]["parameters"] == params
+
+
+def test_sanitize_redacts_credentials_and_preserves_sql_parameters() -> None:
     text = (
         "Authorization: Bearer abc123\n"
         "Cookie: shuku_session=deadbeef\n"
         "password=hunter2 token=xyz api_key=sekret\n"
-        "[parameters: ('a@example.com', 'hunter2')]\n"
+        "[parameters: ('book-id', 'book-title')]\n"
         "(Background on this error at: https://sqlalche.me/e/20/abc)"
     )
 
@@ -52,8 +70,8 @@ def test_sanitize_redacts_credentials_and_sql_parameters() -> None:
     assert "hunter2" not in cleaned
     assert "xyz" not in cleaned
     assert "sekret" not in cleaned
-    assert "[parameters: [redacted]]" in cleaned
-    assert "Background on this error" not in cleaned
+    assert "[parameters: ('book-id', 'book-title')]" in cleaned
+    assert "Background on this error" in cleaned
 
 
 def test_sanitize_redacts_cookie_after_exception_prefix() -> None:
@@ -101,48 +119,17 @@ def test_sanitize_redacts_basic_and_bearer_authorization() -> None:
     assert "RuntimeError:" in cleaned
 
 
-def test_sanitize_redacts_full_sql_parameters_with_brackets_and_newlines() -> None:
-    text = (
-        "[parameters: (('a]b', 'sql-secret'), [1, 2, 3])]\n"
-        "[parameters: (1,\n  'sql-multiline-secret')]\n"
-        "trailing-safe-value"
-    )
-
-    cleaned = sanitize_diagnostic_text(text)
-
-    assert "sql-secret" not in cleaned
-    assert "sql-multiline-secret" not in cleaned
-    assert cleaned.count("[parameters: [redacted]]") == 2
-    assert "trailing-safe-value" in cleaned
+@pytest.mark.parametrize("value", [
+    "[parameters: (('a]b', 'value'), [1, 2, 3])]\ntrailing-value",
+    "[parameters: (1,\n 'multiline-value')]",
+    "[parameters: (1, 'unclosed-value') trailing-value",
+    "[SQL: INSERT INTO t VALUES ('value ] one', 'value two')]",
+])
+def test_sql_text_and_parameters_are_not_removed(value: str) -> None:
+    assert sanitize_diagnostic_text(value) == value
 
 
-def test_redact_sql_parameters_handles_escaped_quotes_and_multiple_segments() -> None:
-    text = (
-        "[parameters: (1, 'a\\']b\"c', 'must-not-leak-3f9a')]\n"
-        "[parameters: (\"x\\\"y]z\", 'other-secret')]\n"
-        "safe-tail"
-    )
-
-    cleaned = sanitize_diagnostic_text(text)
-
-    assert "must-not-leak-3f9a" not in cleaned
-    assert "other-secret" not in cleaned
-    assert "a']b" not in cleaned
-    assert cleaned.count("[parameters: [redacted]]") == 2
-    assert "safe-tail" in cleaned
-
-
-def test_redact_sql_parameters_conservative_when_unclosed() -> None:
-    cleaned = sanitize_diagnostic_text(
-        "[parameters: (1, 'unclosed-secret') trailing-sensitive"
-    )
-
-    assert "unclosed-secret" not in cleaned
-    assert "trailing-sensitive" not in cleaned
-    assert "[parameters: [redacted]]" in cleaned
-
-
-def test_real_sqlalchemy_exception_parameters_are_redacted(
+def test_real_sqlalchemy_exception_parameters_are_preserved(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
@@ -174,16 +161,16 @@ def test_real_sqlalchemy_exception_parameters_are_redacted(
         + diagnostics["traceback"]
         + json.dumps(diagnostics["chain"], ensure_ascii=False)
     )
-    assert sensitive not in blob
-    assert "a']b" not in blob
+    assert sensitive in blob
+    assert diagnostics["directException"]["parameters"] == [1, tricky, sensitive]
     assert diagnostics["exceptionType"].endswith("IntegrityError")
     assert "UNIQUE constraint failed" in diagnostics["message"]
     assert diagnostics["traceback"]
 
     with caplog.at_level(logging.ERROR):
         snapshot = prepare_exception_diagnostic(LOGGER, "sql.integrity", error)
-    assert sensitive not in json.dumps(snapshot.metadata, ensure_ascii=False)
-    assert sensitive not in caplog.text
+    assert sensitive in json.dumps(snapshot.metadata, ensure_ascii=False)
+    assert sensitive in caplog.text
     assert snapshot.message == diagnostics["message"]
 
 

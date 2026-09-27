@@ -9,6 +9,7 @@ output is safe too.
 
 from __future__ import annotations
 
+import json
 import logging
 import sys
 from types import MethodType
@@ -127,7 +128,13 @@ class ContextFormatter(logging.Formatter):
             if getattr(record, key, None) is not None
         )
         rendered = f"{base} {context}".rstrip() if context else base
-        return sanitize_diagnostic_text(rendered)
+        output = sanitize_diagnostic_text(rendered)
+        # Database evidence is an explicit diagnostic contract: credentials or
+        # paths inside SQL/bindings must not be rewritten by the text sanitizer.
+        operations = getattr(record, "database_operations", None)
+        if operations:
+            output += "\ndatabaseOperations=" + json.dumps(operations, ensure_ascii=False, default=str)
+        return output
 
 
 def install_uvicorn_sanitizer() -> None:

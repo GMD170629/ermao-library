@@ -30,6 +30,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -70,7 +71,6 @@ import com.ermao.library.ui.components.WarmPageIconAction
 import com.ermao.library.ui.components.WarmPageSegmentedControl
 import com.ermao.library.ui.components.WarmSettingsContentState
 import com.ermao.library.ui.components.WarmSettingsContentStateKind
-import com.ermao.library.ui.components.WarmSettingsDangerAction
 import com.ermao.library.ui.components.WarmSettingsDivider
 import com.ermao.library.ui.components.WarmSettingsIcons
 import com.ermao.library.ui.components.WarmSettingsIdentityHeader
@@ -92,6 +92,8 @@ fun MeRootScreen(
     onOpenAbout: () -> Unit,
     onOpenDownloads: () -> Unit,
     onRetry: () -> Unit,
+    onLogout: () -> Unit,
+    isLoggingOut: Boolean = false,
     modifier: Modifier = Modifier,
     downloadStatus: String? = null,
     appVersion: String? = null,
@@ -106,6 +108,7 @@ fun MeRootScreen(
     onOpenLogs: () -> Unit = {},
 ) {
     val theme = WarmPageThemeValues
+    var confirmLogout by rememberSaveable { mutableStateOf(false) }
     val visibleItems = visibleSettingsItems(isAdmin = isAdmin, canManageSystem = canManageSystem).toSet()
     WarmSettingsScaffold(
         role = WarmSettingsScaffoldRole.Root,
@@ -119,7 +122,27 @@ fun MeRootScreen(
                 .verticalScroll(rememberScrollState())
                 .testTag("settings-page-scroll"),
         ) {
-            state.failure?.let { InlineFailure(onRetry) }
+            WarmSettingsSection(stringResource(R.string.me_personal_information)) {
+                WarmSettingsIdentityHeader(
+                    title = state.account?.displayName.orEmpty(),
+                    avatar = { Avatar(state.avatarBytes) },
+                    modifier = Modifier.testTag("settings-identity"),
+                    actions = {
+                        TextButton(
+                            onClick = { confirmLogout = true },
+                            enabled = !isLoggingOut,
+                            colors = ButtonDefaults.textButtonColors(contentColor = theme.colors.textSecondary),
+                            modifier = Modifier.heightIn(min = theme.components.controls.minimumTouchTarget)
+                                .testTag("settings-danger-logout"),
+                        ) {
+                            Icon(Icons.AutoMirrored.Outlined.Logout, contentDescription = null, modifier = Modifier.size(theme.components.settings.iconSize))
+                            Spacer(Modifier.size(theme.spacing.one))
+                            Text(stringResource(R.string.logout_action), style = theme.typography.callout)
+                        }
+                    },
+                )
+            }
+            state.failure?.let { InlineFailure(if (it.code == "LOGOUT_FAILED") null else onRetry) }
             SettingsCenterCatalog.groups.forEach { group ->
                 if (group.id == SettingsGroupId.PREFERENCES) {
                     WarmSettingsSection(stringResource(R.string.me_section_server)) {
@@ -168,6 +191,24 @@ fun MeRootScreen(
             }
         }
     }
+    if (confirmLogout) AlertDialog(
+        onDismissRequest = { confirmLogout = false },
+        title = { Text(stringResource(R.string.logout_confirm_title)) },
+        text = { Text(stringResource(R.string.logout_confirm_message)) },
+        confirmButton = {
+            TextButton(
+                onClick = { confirmLogout = false; onLogout() },
+                enabled = !isLoggingOut,
+            ) {
+                Text(stringResource(R.string.logout_confirm_action))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { confirmLogout = false }) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
 }
 
 @Composable
@@ -411,7 +452,6 @@ private enum class SecurityTab { Email, Password }
 @Composable
 fun SecurityScreen(
     state: SecurityEditorState,
-    serverName: String,
     onBack: () -> Unit,
     onEmailChanged: (String) -> Unit,
     onEmailCurrentPasswordChanged: (String) -> Unit,
@@ -420,13 +460,11 @@ fun SecurityScreen(
     onPasswordConfirmationChanged: (String) -> Unit,
     onSaveEmail: () -> Unit,
     onSavePassword: () -> Unit,
-    onLogout: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val theme = WarmPageThemeValues
     var confirmEmail by rememberSaveable { mutableStateOf(false) }
     var confirmPassword by rememberSaveable { mutableStateOf(false) }
-    var confirmLogout by rememberSaveable { mutableStateOf(false) }
     var selectedTabName by rememberSaveable { mutableStateOf(SecurityTab.Email.name) }
     val selectedTab = SecurityTab.entries.firstOrNull { it.name == selectedTabName } ?: SecurityTab.Email
     val isEmailTab = selectedTab == SecurityTab.Email
@@ -485,12 +523,7 @@ fun SecurityScreen(
                 PasswordField(state.confirmPassword, onPasswordConfirmationChanged, R.string.me_confirm_password_label, "settings-field-confirm-password", !state.isSaving)
             }
             state.failure?.let { InlineFailure() }
-            WarmSettingsDangerAction(
-                label = stringResource(R.string.logout_action),
-                onClick = { confirmLogout = true },
-                enabled = !state.isSaving,
-                modifier = Modifier.padding(top = theme.spacing.two).testTag("settings-danger-logout"),
-            )
+
         }
     }
     if (confirmEmail) ConfirmationDialog(
@@ -507,22 +540,7 @@ fun SecurityScreen(
         { confirmPassword = false; onSavePassword() },
         { confirmPassword = false },
     )
-    if (confirmLogout) AlertDialog(
-        onDismissRequest = { confirmLogout = false },
-        title = { Text(stringResource(R.string.logout_confirm_title)) },
-        text = { Text(stringResource(R.string.logout_confirm_message, serverName)) },
-        confirmButton = {
-            OutlinedButton(onClick = { confirmLogout = false; onLogout() }) {
-                Icon(Icons.AutoMirrored.Outlined.Logout, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                Text(stringResource(R.string.logout_confirm_action), color = androidx.compose.material3.MaterialTheme.colorScheme.error)
-            }
-        },
-        dismissButton = { OutlinedButton(onClick = { confirmLogout = false }) {
-            Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-            Text(stringResource(R.string.cancel)) } },
-    )
+
 }
 
 @Composable

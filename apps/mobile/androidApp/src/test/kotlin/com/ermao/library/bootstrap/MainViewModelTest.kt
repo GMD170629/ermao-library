@@ -346,7 +346,7 @@ class MainViewModelTest {
     }
 
     @Test
-    fun settingsUnauthorizedUsesReauthenticationStateWithCapturedIdentity() = runTest(dispatcher) {
+    fun settingsUnauthorizedReturnsToEditableLoginWithExistingAccount() = runTest(dispatcher) {
         val profile = profile("home", "https://home.example", active = true)
         val authenticated = authenticated(profile)
         val runtime = FakeMobileRuntime(authenticated).apply {
@@ -357,10 +357,19 @@ class MainViewModelTest {
         viewModel.requireReauthentication()
         advanceUntilIdle()
 
-        assertTrue(viewModel.uiState.value.isReauthenticating)
-        assertEquals("Reader", viewModel.uiState.value.reauthUserName)
-        assertEquals("reader@example.com", viewModel.uiState.value.reauthUserEmail)
+        assertEquals(profile.baseUrl.value, viewModel.uiState.value.loginForm.serverAddress)
+        assertEquals("reader@example.com", viewModel.uiState.value.loginForm.email)
         assertTrue(viewModel.uiState.value.session is AppSession.SessionExpired)
+
+        viewModel.updateLoginEmail("another@example.com")
+        viewModel.updateLoginPassword("another-password")
+        viewModel.loginFromEntry()
+        advanceUntilIdle()
+
+        assertEquals(1, runtime.loginToServerCalls)
+        assertEquals(profile.baseUrl.value, runtime.loginToServerAddress)
+        assertEquals("another@example.com", runtime.loginToServerEmail)
+        assertEquals("another-password", runtime.loginToServerPassword)
     }
 
     @Test

@@ -23,7 +23,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.error import HTTPError
 from uuid import uuid4
@@ -97,8 +97,6 @@ _LOG_EXTRA_KEYS = (
     "diagnostic_id",
 )
 
-_SQL_PARAMETERS_MARKER = "[parameters:"
-_SQL_BACKGROUND = re.compile(r"\(Background on this error at: [^)]+\)")
 _SENSITIVE_KEYS = (
     r"authorization|proxy-authorization|x-api-key|x-auth-token|private-token|"
     r"cookie|set-cookie|password|passwd|pwd|secret|token|api[_-]?key|"
@@ -205,63 +203,10 @@ def reset_exception_storage(*, expected_factory: SessionFactory | None = None) -
         configure_exception_storage(None)
 
 
-def _redact_sql_block(text: str, marker: str) -> str:
-    """Redact SQLAlchemy SQL/parameter blocks with bracket/quote awareness.
-
-    Parameter values may contain ``]``, newlines, or nested lists/dicts, so a
-    non-greedy regex would stop early and leave later parameters exposed.
-    """
-
-    result: list[str] = []
-    index = 0
-    length = len(text)
-    while True:
-        start = text.find(marker, index)
-        if start == -1:
-            result.append(text[index:])
-            break
-        result.append(text[index:start])
-        depth = 0
-        quote: str | None = None
-        cursor = start
-        while cursor < length:
-            char = text[cursor]
-            if quote is not None:
-                if char == "\\":
-                    # Backslash-escaped character inside a quoted value (for
-                    # example repr of ``a\'b``); never treat it as the closing
-                    # quote or as a bracket.
-                    cursor += 2
-                    continue
-                if char == quote:
-                    if cursor + 1 < length and text[cursor + 1] == quote:
-                        cursor += 2
-                        continue
-                    quote = None
-            elif char in ("'", '"'):
-                quote = char
-            elif char == "[":
-                depth += 1
-            elif char == "]":
-                depth -= 1
-                if depth == 0:
-                    cursor += 1
-                    break
-            cursor += 1
-        result.append(f"{marker} [redacted]]")
-        index = cursor
-    return "".join(result)
-
-
 def sanitize_diagnostic_text(text: object) -> str:
-    """Redact credentials, SQL statements and parameters from diagnostics."""
+    """Redact non-SQL credentials and private paths; retain database evidence."""
 
-    value = _redact_sql_block(str(text), _SQL_PARAMETERS_MARKER)
-    # SQL may contain inline literals rather than bound parameters. The driver
-    # message, type and database codes carry the failure; statement text is not
-    # safe even after its separate parameters block has been removed.
-    value = _redact_sql_block(value, "[SQL:")
-    value = _SQL_BACKGROUND.sub("", value)
+    value = str(text)
     value = _SENSITIVE_ASSIGNMENT.sub(
         lambda match: f"{match.group(1)}[redacted]", value
     )
@@ -271,7 +216,7 @@ def sanitize_diagnostic_text(text: object) -> str:
     value = _EMAIL.sub(lambda match: mask_email(match.group(0)), value)
     # Never retain URL userinfo or query strings containing resource contents.
     value = re.sub(r"(https?://)[^/\s@]+@", r"\1[redacted]@", value)
-    value = re.sub(r"(?i)([?&](?:body|content|payload|query|sql)=)[^&\s]+", r"\1[redacted]", value)
+    value = re.sub(r"(?i)([?&](?:body|content|payload|query)=)[^&\s]+", r"\1[redacted]", value)
     # Source locations are rendered separately from code objects. Absolute
     # paths in exception messages identify private filesystem resources.
     value = re.sub(r'''(["'])(?:[A-Za-z]:[\\/]|/)[^\r\n]*?\1''', "'[private-path]'", value)
@@ -363,7 +308,7 @@ def _subprocess_stderr_summary(error: subprocess.CalledProcessError) -> str | No
     known_diagnostics = isinstance(command, (str, os.PathLike)) and Path(command).name in {"mv", "cp", "rm", "ffprobe"}
     if known_diagnostics:
         for argument in arguments[1:]:
-            if isinstance(argument, (str, os.PathLike)) and Path(argument).is_absolute():
+            if isinstance(argument, (str, os.PathLike)) and (Path(argument).is_absolute() or PurePosixPath(argument).is_absolute()):
                 stderr = stderr.replace(os.fspath(argument), "[private-path]")
     lines = [line for line in stderr.splitlines() if known_diagnostics or re.search(
         r"(?i)(?:^(?:mv|cp|rm|install|uv|pip|unzip|tar):|\berror\b|\bfailed\b|"
@@ -411,6 +356,9 @@ def _exception_facts(error: BaseException, *, report_formatting_failure: bool = 
             facts[key] = sanitize_diagnostic_text(value) if isinstance(value, str) else value
     if isinstance(facts.get("errno"), int):
         facts["errorName"] = errno.errorcode.get(facts["errno"], "NOT_PROVIDED")
+    notes = getattr(error, "__notes__", None)
+    if notes:
+        facts["notes"] = [sanitize_diagnostic_text(note) for note in notes]
     response = getattr(error, "response", None)
     status = getattr(response, "status_code", None)
     if isinstance(status, int):
@@ -423,8 +371,12 @@ def _exception_facts(error: BaseException, *, report_formatting_failure: bool = 
             facts["stderrSummary"] = summary
         else:
             facts["stderrStatus"] = "OMITTED_UNSTRUCTURED_OUTPUT"
-    if isinstance(error, StatementError) and error.statement is not None:
-        facts["statementOmitted"] = True
+    if isinstance(error, StatementError):
+        # Keep these separately: SQLAlchemy may truncate parameters in str(error)
+        # or suppress them with hide_parameters. The admin export needs originals.
+        facts["statement"] = error.statement
+        facts["parameters"] = json.loads(json.dumps(error.params, ensure_ascii=False, default=str))
+        facts["isMulti"] = error.ismulti
     return facts
 
 
@@ -432,7 +384,12 @@ def _explicit_cause(error: BaseException) -> BaseException | None:
     if error.__cause__ is not None:
         return error.__cause__
     original = getattr(error, "orig", None)
-    return original if isinstance(original, BaseException) else None
+    if isinstance(original, BaseException):
+        return original
+    # urllib's URLError stores DNS/TLS/socket failures in reason, without
+    # necessarily setting __cause__ or __context__.
+    reason = getattr(error, "reason", None)
+    return reason if isinstance(reason, BaseException) else None
 
 
 def _exception_chain(error: BaseException) -> list[tuple[BaseException, str, int | None]]:
@@ -453,6 +410,7 @@ def _exception_chain(error: BaseException) -> list[tuple[BaseException, str, int
         seen.add(id(current))
         cause = current.__cause__
         original = getattr(current, "orig", None)
+        reason = getattr(current, "reason", None)
         context = current.__context__
         # The stack visits explicit causes first. A distinct context remains a
         # separate history branch instead of silently replacing the root cause.
@@ -460,6 +418,8 @@ def _exception_chain(error: BaseException) -> list[tuple[BaseException, str, int
             pending.append((context, "context", index))
         if isinstance(original, BaseException) and original is not cause:
             pending.append((original, "original", index))
+        if isinstance(reason, BaseException) and reason is not cause and reason is not original:
+            pending.append((reason, "reason", index))
         if cause is not None:
             pending.append((cause, "cause", index))
     return result
@@ -520,6 +480,7 @@ def format_exception_diagnostics(
         "contextsTruncated": len(contexts) > MAX_CHAIN_ITEMS,
         "chainTruncated": chain_truncated, "chainLength": len(entries),
         "truncated": truncated or chain_truncated,
+        "databaseOperations": [entry for entry in entries if "statement" in entry],
         **({"reason": "time_budget_exceeded"} if is_database_operation_timeout(error) else {}),
     }
 
@@ -730,7 +691,8 @@ def _build_snapshot(
         logger.log(
             logging.WARNING if level == "warning" else logging.ERROR,
             log_text,
-            extra=_log_extra(context, diagnostic_id),
+            extra={**_log_extra(context, diagnostic_id),
+                   "database_operations": diagnostics.get("databaseOperations", [])},
         )
     except Exception as logging_error:  # noqa: BLE001 - independent stderr fallback
         emergency_diagnostic(event, error, diagnostic_id=diagnostic_id)
@@ -812,6 +774,11 @@ def _prepare_group_diagnostic(
         ],
         "memberCount": len(leaves),
         "relatedIds": [snapshot.diagnostic_id for snapshot in recorded],
+        "databaseOperations": [
+            operation
+            for item in [group_diagnostics, *member_diagnostics]
+            for operation in item.get("databaseOperations", [])
+        ],
     }
     snapshot = _build_snapshot(
         logger,

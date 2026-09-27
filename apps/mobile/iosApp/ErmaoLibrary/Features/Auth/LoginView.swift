@@ -109,8 +109,8 @@ struct LoginView: View {
                             Divider()
                             if hasInvalidCredentials {
                                 fieldError("auth.invalidCredentials")
-                            } else if store.snapshot.phase == .sessionExpired {
-                                fieldError("auth.sessionExpired.message")
+                            } else if store.snapshot.phase == .accountDisabled {
+                                fieldError("auth.accountDisabled.message")
                             } else if store.snapshot.phase == .loginFailed {
                                 fieldError("common.requestFailed")
                             }
@@ -334,46 +334,5 @@ private struct ServerSwitcherSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
-    }
-}
-
-struct AccountDisabledView: View {
-    @ObservedObject var store: SessionStore
-    @Environment(\.appTheme) private var theme
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: .space3) {
-                Image(systemName: "person.crop.circle.badge.exclamationmark")
-                    .font(.largeTitle)
-                    .foregroundStyle(.red)
-                    .accessibilityHidden(true)
-                Text("auth.accountDisabled.title")
-                    .appTextStyle(.title)
-                    .multilineTextAlignment(.center)
-                if let profile = store.snapshot.profile {
-                    ServerIdentityView(profile: profile)
-                }
-                if let email = store.snapshot.userEmail {
-                    Text(email)
-                        .appTextStyle(.body)
-                        .foregroundStyle(theme.textSecondary)
-                        .textSelection(.enabled)
-                }
-                Text("auth.accountDisabled.message")
-                    .foregroundStyle(theme.textSecondary)
-                    .multilineTextAlignment(.center)
-                Spacer(minLength: .space4)
-                PrimaryActionButton("server.other.action") {
-                    store.chooseAnotherServer()
-                }
-            }
-            .frame(maxWidth: 520)
-            .padding(.horizontal, .space2)
-            .padding(.vertical, .space4)
-            .navigationTitle("auth.accountDisabled.navigationTitle")
-            .navigationBarTitleDisplayMode(.inline)
-            .appCanvas()
-        }
     }
 }

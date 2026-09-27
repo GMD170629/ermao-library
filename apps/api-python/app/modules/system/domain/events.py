@@ -95,6 +95,12 @@ def _lift_diagnostic_root(
         "contexts",
         "contextProvided",
         "contextsTruncated",
+        "databaseOperations",
+        "members",
+        "memberCount",
+        "relatedIds",
+        "reason",
+        "observedAt",
     ):
         value = diagnostics.get(key)
         if value is not None:

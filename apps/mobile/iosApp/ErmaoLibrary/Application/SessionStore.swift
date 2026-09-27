@@ -285,7 +285,7 @@ final class SessionStore: ObservableObject {
         }
     }
 
-    func logoutAwaitingCompletion(purgeNamespace: Bool = true) async throws {
+    func logoutAwaitingCompletion(purgeNamespace: Bool = false) async throws {
         password = ""
         let previousNamespace = currentPrivateNamespace
         await preparePrivateNamespaceTransition()
@@ -370,7 +370,7 @@ final class SessionStore: ObservableObject {
                 preparedTransitionNamespace = nil
             } else {
                 // Runtime-driven expiry is the only unprepared transition. User-
-                // initiated account/server changes purge before activating the next namespace.
+                // initiated transitions prepare teardown first; ordinary sign-out retains local content.
                 Task { @MainActor [weak self] in
                     do {
                         await self?.preparePrivateNamespaceTransition()

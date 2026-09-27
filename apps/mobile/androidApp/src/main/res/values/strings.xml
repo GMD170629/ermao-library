@@ -109,8 +109,6 @@
     <string name="login_invalid_credentials">The email or password is incorrect.</string>
     <string name="login_required_email">Enter your email.</string>
     <string name="login_required_password">Enter your password.</string>
-    <string name="account_disabled_title">Account disabled</string>
-    <string name="account_disabled_message">%1$s on %2$s (%3$s) is disabled. Ask the server administrator to restore this account.</string>
     <string name="unexpected_failure">Something went wrong. Try again.</string>
 
     <string name="tab_home">Home</string>
@@ -343,15 +341,11 @@
     <string name="setup_error_password_mismatch">Passwords do not match.</string>
     <string name="setup_error_rejected">Check this value and try again.</string>
 
-    <string name="reauthenticate_title">Sign In Again</string>
-    <string name="reauthenticate_heading">Your private library is locked</string>
-    <string name="reauthenticate_expired_message">Your session has expired. Sign in as the account shown below to continue.</string>
-    <string name="reauthenticate_action">Sign in again</string>
 
     <string name="logout_action">Log out</string>
-    <string name="logout_confirm_title">Log out of this server?</string>
-    <string name="logout_confirm_message">Logging out of %1$s clears its saved session and readable private data from this device.</string>
-    <string name="logout_confirm_action">Log out and clear private data</string>
+    <string name="logout_confirm_title">Sign out?</string>
+    <string name="logout_confirm_message">Downloaded books and reading progress will be kept. Sign in to the same account again to continue reading.</string>
+    <string name="logout_confirm_action">Sign out</string>
     <string name="me_title">Me</string>
     <string name="me_section_account">Account</string>
     <string name="me_section_connected_services">Connected Services</string>
@@ -677,4 +671,6 @@
     <string name="management_kindle_settings_short">Email settings</string>
     <string name="management_kindle_book_context">Choose one attachment from “%1$s”</string>
     <string name="downloads_view_resources">View resources</string>
+    <string name="login_account_disabled_message">This account is disabled. Contact the server administrator or sign in with another account.</string>
+    <string name="me_personal_information">Personal information</string>
 </resources>

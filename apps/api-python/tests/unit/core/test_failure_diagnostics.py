@@ -5,6 +5,7 @@ import logging
 import sqlite3
 import subprocess
 from unittest.mock import Mock
+from urllib.error import URLError
 
 import httpx
 import pytest
@@ -15,6 +16,44 @@ from app.core import exception_diagnostics as diagnostics
 from app.core.logging_config import install_handler_fallback
 
 LOGGER = logging.getLogger(__name__)
+
+
+def test_url_error_reason_exposes_real_socket_cause():
+    original = OSError(errno.ECONNREFUSED, "Connection refused")
+    wrapper = RuntimeError("DOWNLOAD_FAILED")
+    wrapper.__cause__ = URLError(original)
+    result = diagnostics.format_exception_diagnostics(wrapper)
+    assert result["rootCause"]["errno"] == errno.ECONNREFUSED
+    assert result["rootCause"]["message"] == str(original)
+    assert result["chain"][-1]["relationship"] == "reason"
+
+
+def test_hidden_and_long_sql_parameters_survive_storage_projection():
+    from app.modules.system.application.projections import serialize_system_event
+    from app.modules.system.domain.events import prepare_event_metadata
+
+    statement = "INSERT INTO books VALUES (?)"
+    parameters = ("begin " + "x" * 80_000 + " end",)
+    error = OperationalError(statement, parameters, sqlite3.OperationalError("database is locked"), hide_parameters=True)
+    result = diagnostics.format_exception_diagnostics(error)
+    stored = prepare_event_metadata({"diagnostics": result, "taskId": "import-123"})
+    exported = serialize_system_event({"metadata": stored}, include_diagnostics=True)
+    operation = exported["metadata"]["diagnostics"]["databaseOperations"][0]
+    assert operation["statement"] == statement
+    assert operation["parameters"] == list(parameters)
+    assert exported["metadata"]["taskId"] == "import-123"
+
+
+def test_group_sql_and_each_root_survive_metadata_clipping():
+    from app.modules.system.domain.events import prepare_event_metadata
+
+    sql = OperationalError("UPDATE books SET title = ?", ("x" * 80_000,), sqlite3.OperationalError("database is locked"))
+    group = ExceptionGroup("parallel operations failed", [sql, OSError(errno.ENOSPC, "disk full")])
+    snapshot = diagnostics.prepare_exception_diagnostic(LOGGER, "group.failed", group)
+    stored = prepare_event_metadata(snapshot.metadata)["diagnostics"]
+    assert stored["memberCount"] == 2
+    assert stored["members"][1]["rootCause"]["errno"] == errno.ENOSPC
+    assert stored["databaseOperations"][0]["parameters"] == ["x" * 80_000]
 
 
 @pytest.mark.parametrize("number", [errno.EXDEV, errno.EACCES, errno.EROFS, errno.ENOSPC, errno.EIO])
@@ -52,7 +91,7 @@ def test_database_original_code_protocol_and_exit_status():
     db = OperationalError("SELECT * FROM t WHERE secret = ?", ("parameter-secret",), original)
     facts = diagnostics.format_exception_diagnostics(db)
     assert facts["rootCause"]["databaseCode"] == sqlite3.SQLITE_BUSY
-    assert "parameter-secret" not in json.dumps(facts)
+    assert facts["directException"]["parameters"] == ["parameter-secret"]
     request = httpx.Request("GET", "https://example.test/?token=secret")
     response = httpx.Response(503, request=request)
     error = httpx.HTTPStatusError("upstream rejected", request=request, response=response)
@@ -357,7 +396,7 @@ def test_validation_context_does_not_replace_distinct_cleanup_cause():
     assert "secret-invalid-input" not in json.dumps(result)
 
 
-def test_database_sql_literals_never_reach_diagnostics_even_through_wrapper():
+def test_database_sql_literals_survive_diagnostics_through_wrapper():
     original = sqlite3.OperationalError("no such table: absent")
     original.sqlite_errorcode = sqlite3.SQLITE_ERROR
     statement = "INSERT INTO absent VALUES ('inline-secret-one', 'value ] two',\n'inline-secret-three')"
@@ -367,11 +406,12 @@ def test_database_sql_literals_never_reach_diagnostics_even_through_wrapper():
     result = diagnostics.format_exception_diagnostics(wrapper)
     serialized = json.dumps(result)
     for secret in ("inline-secret-one", "value ] two", "inline-secret-three", "bound-secret"):
-        assert secret not in serialized
+        assert secret in serialized
     assert "no such table: absent" in serialized
-    assert result["directCause"]["statementOmitted"] is True
+    assert result["directCause"]["statement"] == statement
+    assert result["directCause"]["parameters"] == {"extra": "bound-secret"}
     assert result["rootCause"]["databaseCode"] == sqlite3.SQLITE_ERROR
-    assert "[SQL: [redacted]]" in result["message"]
+    assert statement in result["message"]
 
 
 def test_rollback_context_does_not_become_cause_or_root():
@@ -420,7 +460,7 @@ def test_database_orig_is_causal_but_distinct_context_is_history():
     assert result["directCause"]["relationship"] == "original"
     assert result["rootCause"]["message"] == "database is locked"
     assert result["contexts"][0]["type"] == "ValueError"
-    assert "private-value" not in json.dumps(result)
+    assert result["directException"]["parameters"] == ["private-value"]
 
 
 def test_long_causal_chain_preserves_middle_root_before_context():

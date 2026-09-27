@@ -200,6 +200,13 @@ def test_admin_reads_full_diagnostics_and_unknown_event_returns_404(
     assert diagnostics["exceptionType"] == "builtins.RuntimeError"
     assert "RuntimeError: boom" in diagnostics["traceback"]
 
+    listing = client.get("/api/management/events").json()["data"]["events"]
+    summary = next(event for event in listing if event["id"] == "diag_admin")
+    assert "traceback" not in summary["metadata"]["diagnostics"]
+    exported = client.get("/api/management/events?includeDiagnostics=true").json()["data"]["events"]
+    complete = next(event for event in exported if event["id"] == "diag_admin")
+    assert complete["metadata"]["diagnostics"] == diagnostics
+
     missing = client.get("/api/management/events/does-not-exist")
     assert missing.status_code == 404
     assert missing.json()["error"]["code"] == "EVENT_NOT_FOUND"
@@ -229,6 +236,7 @@ def test_validation_and_authorization_failures_are_not_recorded_as_crashes(
     assert login.status_code == 200
     forbidden = client.get("/api/management/events")
     assert forbidden.status_code == 403
+    assert client.get("/api/management/events?includeDiagnostics=true").status_code == 403
 
     assert [
         event
@@ -290,8 +298,14 @@ class _FakeQueue:
     def enqueue_book_identifications(self, _prepared):
         return 0
 
-    def next_queued(self):
+    def next_queued(self, *, started_at: datetime):
         return self.task
+
+    def begin_discovery(self, task_id: str) -> None:
+        assert task_id == self.task.id
+
+    def end_discovery(self) -> None:
+        pass
 
     def mark_running(self, task_id: str, *, started_at: datetime) -> None:
         self.task = replace(self.task, state="RUNNING")
@@ -349,7 +363,7 @@ def test_worker_containment_records_task_context_and_original_traceback(
     finally:
         reset_exception_storage()
 
-    assert outcome == "error"
+    assert outcome == "failed"
     assert queue.failed_summary == "WORKER_ERROR"
     assert "scan boom marker" in caplog.text
     assert "OSError" in caplog.text

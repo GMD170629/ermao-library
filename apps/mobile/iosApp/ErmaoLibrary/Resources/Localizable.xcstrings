@@ -5872,38 +5872,6 @@
         }
       }
     },
-    "auth.accountDisabled.navigationTitle": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Account Unavailable"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "账户不可用"
-          }
-        }
-      }
-    },
-    "auth.accountDisabled.title": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This Account Is Disabled"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "账户已停用"
-          }
-        }
-      }
-    },
     "auth.email.label": {
       "localizations": {
         "en": {
@@ -7088,22 +7056,6 @@
         }
       }
     },
-    "auth.sessionExpired.message": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Your session for this server has expired. Sign in to return to the app."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "此服务器的会话已失效。重新登录后可返回 App。"
-          }
-        }
-      }
-    },
     "me.account.section": {
       "localizations": {
         "en": {
@@ -7173,13 +7125,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Signing out clears this server’s saved session and private data from this device."
+            "value": "Downloaded books and reading progress will be kept. Sign in to the same account again to continue reading."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "退出后会清除此服务器在本设备上保存的会话和私有数据。"
+            "value": "退出后将保留已下载的图书和阅读进度。再次登录同一账号后可继续阅读。"
           }
         }
       }
@@ -7189,13 +7141,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Sign out of this server?"
+            "value": "Sign out?"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "要退出当前服务器吗？"
+            "value": "退出登录？"
           }
         }
       }
@@ -8494,6 +8446,12 @@
             "value": "请检查输入内容后重试。"
           }
         }
+      }
+    },
+    "settings.personalInformation": {
+      "localizations": {
+        "en-US": { "stringUnit": { "state": "translated", "value": "Personal information" } },
+        "zh-CN": { "stringUnit": { "state": "translated", "value": "个人信息" } }
       }
     },
     "settings.identity.accessibility.format": {

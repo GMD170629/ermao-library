@@ -61,7 +61,6 @@ class MainActivity : AppCompatActivity() {
                         onLoginEmailChanged = mainViewModel::updateLoginEmail,
                         onLoginPasswordChanged = mainViewModel::updateLoginPassword,
                         onLoginServerAddressChanged = mainViewModel::updateLoginServerAddress,
-                        onLogin = mainViewModel::login,
                         onLoginEntry = mainViewModel::loginFromEntry,
                         onSelectLoginServer = mainViewModel::selectLoginServer,
                         onDeleteLoginServer = mainViewModel::deleteDisplayedServer,

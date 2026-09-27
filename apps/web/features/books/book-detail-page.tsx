@@ -196,6 +196,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const readerRuntime = getReaderRuntime();
   const canManage = session?.authorization?.canManageSystem === true;
   const [book, setBook] = useState<BookView | null>(null);
+  const [expandedDescriptionBookId, setExpandedDescriptionBookId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [contentLayout, setContentLayout] = useState<BookContentLayout>('grid');
@@ -619,14 +620,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const seriesName = book.seriesName?.trim() ?? '';
   const tags = [...new Set(book.tags.map((tag) => tag.trim()).filter(Boolean))];
   const hasBookMetadata = Boolean(seriesName || tags.length > 0);
-  const metadataStatus = !book.metadataState ? null
-    : book.metadataState === 'WAITING_IMPORT' ? t('等待整本导入结束')
-    : book.metadataState === 'QUEUED' ? t('整本导入结束，等待识别图书信息')
-    : book.metadataState === 'RUNNING' ? t('图书信息识别中')
-    : book.metadataState === 'FAILED' ? t('图书信息识别失败')
-    : ['PENDING', 'RUNNING', 'RETRY'].includes(book.metadataOnlineState ?? '') ? t('图书信息联网识别中')
-    : book.metadataOnlineState === 'FAILED' ? t('联网识别失败，已保留本地信息')
-    : null;
+
 
   return <div className="w-full">
     <button type="button" onClick={() => router.push(returnHref)} className="mb-6 inline-flex items-center gap-2 text-sm text-[var(--visual-color-app-text-secondary)] hover:text-[var(--visual-color-app-text-primary)]"><ArrowLeft size={17} /><I18nText>返回全部图书</I18nText></button>
@@ -636,7 +630,6 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         <div className="flex min-w-0 flex-col py-1">
           {book.completed ? <span className="inline-flex w-fit items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700"><CheckCircle2 size={14} /><I18nText>已完成</I18nText></span> : null}
           <h1 data-i18n-skip className="mt-2 line-clamp-2 text-3xl font-semibold leading-[1.15] tracking-tight text-[var(--visual-color-app-text-primary)] sm:text-[34px]">{book.title}</h1>
-          {metadataStatus ? <p role="status" className="mt-2 text-sm text-[var(--visual-color-app-text-secondary)]">{metadataStatus}</p> : null}
           {book.resourceImportSummary.failed > 0 ? <p role="status" className="text-sm">{t('部分文件导入失败，已保留可用内容')}</p> : null}
 
           {authorName ? <p data-i18n-skip className="mt-3 text-base text-[var(--visual-color-app-text-secondary)]">
@@ -670,7 +663,16 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
               >{tag}</Link>)}
             </div> : null}
           </div> : null}
-          {book.description ? <p data-i18n-skip className={hasBookMetadata ? "mt-4 line-clamp-3 max-w-3xl whitespace-pre-line text-sm leading-7 text-[var(--visual-color-app-text-secondary)]" : "mt-5 line-clamp-3 max-w-3xl whitespace-pre-line text-sm leading-7 text-[var(--visual-color-app-text-secondary)]"}>{book.description}</p> : <p className={hasBookMetadata ? "mt-4 text-sm text-[var(--visual-color-app-text-tertiary)]" : "mt-5 text-sm text-[var(--visual-color-app-text-tertiary)]"}><I18nText>暂无简介</I18nText></p>}
+          {book.description ? <div className={`${hasBookMetadata ? 'mt-4' : 'mt-5'} max-w-3xl`}>
+            <p id="book-description" data-i18n-skip className={`${expandedDescriptionBookId === book.id ? '' : 'line-clamp-3 '}whitespace-pre-line text-sm leading-7 text-[var(--visual-color-app-text-secondary)]`}>{book.description}</p>
+            <button
+              type="button"
+              aria-expanded={expandedDescriptionBookId === book.id}
+              aria-controls="book-description"
+              onClick={() => setExpandedDescriptionBookId(expandedDescriptionBookId === book.id ? null : book.id)}
+              className="mt-1 inline-flex min-h-10 items-center rounded-md text-sm font-medium text-[var(--visual-color-app-brand-accent)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--visual-color-app-focus-ring)]"
+            >{expandedDescriptionBookId === book.id ? t('收起') : t('展开简介')}</button>
+          </div> : <p className={hasBookMetadata ? "mt-4 text-sm text-[var(--visual-color-app-text-tertiary)]" : "mt-5 text-sm text-[var(--visual-color-app-text-tertiary)]"}><I18nText>暂无简介</I18nText></p>}
           {bookCopy ? <div className="mt-7 max-w-3xl">
             <div className="flex items-center gap-4"><span className="shrink-0 text-sm font-medium text-[var(--visual-color-app-text-primary)]">{t(bookCopy.progress)}</span><div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-[var(--visual-color-app-divider)]"><div className="h-full rounded-full bg-[var(--visual-color-app-brand-accent)]" style={{ width: `${bookProgress}%` }} /></div><span className="w-14 text-right text-sm font-medium tabular-nums text-[var(--visual-color-app-text-primary)]">{Math.round(bookProgress)}%</span></div>
           <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm"><span className="font-medium text-[var(--visual-color-app-text-primary)]">{t(bookCopy.position)}</span><span data-i18n-skip className="text-[var(--visual-color-app-text-primary)]">{bookResumeResource ? currentPositionLabel(bookResumeResource, requestedResource?.id === bookResumeResource.id ? displayedResourceDetail : null, t, localResumePresentation) : ''}</span></div>

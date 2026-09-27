@@ -36,7 +36,7 @@ struct IosPdfReaderView: View {
         .preferredColorScheme(effectiveTheme.preferredColorScheme)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("reader.pdf.screen")
-        .statusBarHidden(!session.controlsVisible)
+        .statusBarHidden(true)
         .accessibilityAction(named: Text("reader.controls.show")) { session.showControls() }
         .task {
             await session.open()

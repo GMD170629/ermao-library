@@ -30,6 +30,7 @@ data class MeAccountViewState(
 )
 
 enum class MeOperation {
+    Logout,
     Load,
     SaveName,
     SaveEmail,

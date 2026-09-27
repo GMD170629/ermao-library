@@ -13,6 +13,42 @@ class WorkDetailWireTest {
     private val decoder = ApiEnvelopeDecoder(Json { ignoreUnknownKeys = false })
 
     @Test
+    fun acceptsGenerationMetadataOnBooksAndNestedResources() {
+        for (metadata in listOf(
+            "\"generatedFields\":[],\"generationSource\":null,",
+            "\"generatedFields\":[\"description\"],\"generationSource\":\"AI_GENERATED\",",
+        )) {
+            // The deployed server includes these fields even when nothing was generated.
+            val response = BOOK_DETAIL_FIXTURE.replace("\"description\":", "$metadata\"description\":")
+            val result = decoder.decode(200, response, BookPayloadWire.serializer())
+            val book = assertIs<ApiResult.Success<BookPayloadWire>>(result).value.toDomain()
+            assertEquals("book-1", book.id)
+            assertEquals("Description", book.description)
+            assertEquals("resource-1", book.resources.single().id)
+            assertEquals("asset-1", book.resources.single().assets.single().id)
+        }
+    }
+
+    @Test
+    fun rejectsMalformedGenerationMetadataAndUnrelatedUnknownFields() {
+        for (metadata in listOf(
+            "\"generatedFields\":{},",
+            "\"generationSource\":{},",
+            "\"unexpectedField\":true,",
+        )) {
+            for (title in listOf("Book 1", "Resource 1")) {
+                val response = BOOK_DETAIL_FIXTURE.replace(
+                    "\"title\":\"$title\",", "\"title\":\"$title\",$metadata",
+                )
+                val failure = assertIs<ApiResult.Failure>(
+                    decoder.decode(200, response, BookPayloadWire.serializer()),
+                )
+                assertEquals("PROTOCOL_VIOLATION", failure.error.code)
+            }
+        }
+    }
+
+    @Test
     fun emptyBookPreservesFailedAndPendingImportsWithoutInventingAResource() {
         val summaries = listOf(
             "" to (0 to 0),

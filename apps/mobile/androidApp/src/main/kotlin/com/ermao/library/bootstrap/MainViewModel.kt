@@ -91,9 +91,6 @@ data class MainUiState(
     val operationInProgress: Boolean = false,
     val operationErrorCode: String? = null,
     val operationErrorKind: AppErrorKind? = null,
-    val isReauthenticating: Boolean = false,
-    val reauthUserName: String? = null,
-    val reauthUserEmail: String? = null,
     val shellEpoch: Int = 0,
 )
 
@@ -137,15 +134,6 @@ class MainViewModel(
                     } else {
                         current.setupForm.copy(password = "", passwordConfirmation = "")
                     },
-                    isReauthenticating = if (session is AppSession.Authenticated || session is AppSession.SignedOut) {
-                        false
-                    } else if (session is AppSession.SessionExpired) {
-                        true
-                    } else {
-                        current.isReauthenticating
-                    },
-                    reauthUserName = session.lastKnownName() ?: current.reauthUserName,
-                    reauthUserEmail = session.lastKnownEmail() ?: current.reauthUserEmail,
                     operationErrorCode = null,
                     operationErrorKind = null,
                     loginProfileId = profile?.id ?: current.loginProfileId,
@@ -288,19 +276,7 @@ class MainViewModel(
     fun removeServer(profileId: String) = launchOperation { runtime.removeServer(profileId) }
     fun restoreSystemTrust(profileId: String) = launchOperation { runtime.restoreSystemTrust(profileId) }
     fun retrySession() = launchOperation { runtime.refreshCurrentSession() }
-    fun requireReauthentication() {
-        val session = runtime.currentSession as? AppSession.Authenticated
-        if (session != null) {
-            mutableUiState.update {
-                it.copy(
-                    isReauthenticating = true,
-                    reauthUserName = session.identity.displayName,
-                    reauthUserEmail = session.identity.email,
-                )
-            }
-        }
-        retrySession()
-    }
+    fun requireReauthentication() = retrySession()
 
     suspend fun refreshSessionAwaitingCompletion() {
         performRuntimeOperation { runtime.refreshCurrentSession() }
@@ -309,7 +285,7 @@ class MainViewModel(
     fun logout() {
         viewModelScope.launch {
             try {
-                logoutAwaitingCompletion(purgeNamespace = true)
+                logoutAwaitingCompletion(purgeNamespace = false)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: SettingsLifecycleFailure) {
@@ -452,30 +428,6 @@ class MainViewModel(
                             operationErrorKind = AppErrorKind.StorageFailure,
                         )
                     }
-                }
-            }
-        }
-    }
-
-    fun login(fixedEmail: String? = null) {
-        val form = mutableUiState.value.loginForm
-        val email = fixedEmail ?: form.email
-        val emailRequired = email.isBlank()
-        val passwordRequired = form.password.isBlank()
-        if (emailRequired || passwordRequired) {
-            mutableUiState.update {
-                it.copy(loginForm = it.loginForm.copy(emailRequired = emailRequired, passwordRequired = passwordRequired))
-            }
-            return
-        }
-        if (fixedEmail != null) {
-            mutableUiState.update { it.copy(isReauthenticating = true, reauthUserEmail = fixedEmail) }
-        }
-        viewModelScope.launch {
-            val result = performRuntimeOperation { runtime.login(email.trim(), form.password) }
-            if (result is RuntimeOperationResult.Failure && result.error.kind == AppErrorKind.Unauthorized) {
-                mutableUiState.update {
-                    it.copy(loginForm = it.loginForm.copy(invalidCredentials = true))
                 }
             }
         }
@@ -817,12 +769,6 @@ private fun AppSession.profileBaseUrlOrNull(): String? = when (this) {
     is AppSession.TlsRisk -> draft.rawBaseUrl
     is AppSession.IncompatibleServer -> draft.rawBaseUrl
     AppSession.NoServer -> null
-}
-
-private fun AppSession.lastKnownName(): String? = when (this) {
-    is AppSession.Authenticated -> identity.displayName
-    is AppSession.SessionExpired -> lastKnownIdentity?.displayName
-    else -> null
 }
 
 private fun AppSession.draftOrNull(): ServerConnectionDraft? = when (this) {

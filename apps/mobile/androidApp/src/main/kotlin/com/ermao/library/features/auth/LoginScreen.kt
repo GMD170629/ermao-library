@@ -91,6 +91,7 @@ fun LoginScreen(
     modifier: Modifier = Modifier,
     canClose: Boolean = false,
     onClose: () -> Unit = {},
+    accountDisabled: Boolean = false,
 ) {
     val theme = WarmPageThemeValues
     var passwordVisible by remember { mutableStateOf(false) }
@@ -209,10 +210,10 @@ fun LoginScreen(
                 singleLine = true,
                 shape = RoundedCornerShape(theme.radii.control),
             )
-            if (unexpectedFailure) {
+            if (accountDisabled || unexpectedFailure) {
                 Spacer(Modifier.height(theme.spacing.one))
                 Text(
-                    stringResource(R.string.unexpected_failure),
+                    stringResource(if (accountDisabled) R.string.login_account_disabled_message else R.string.unexpected_failure),
                     modifier = Modifier.fillMaxWidth(),
                     color = MaterialTheme.colorScheme.error,
                     style = theme.typography.callout,

@@ -14,7 +14,6 @@ struct SecuritySettingsView: View {
     @State private var currentPassword = ""
     @State private var newPassword = ""
     @State private var confirmation = ""
-    @State private var confirmsLogout = false
 
     init(viewModel: SettingsViewModel) {
         self.viewModel = viewModel
@@ -39,27 +38,7 @@ struct SecuritySettingsView: View {
                 passwordForm
             }
 
-            Section {
-                SettingsActionRow("me.logout.action", role: .destructive) {
-                    confirmsLogout = true
-                }
-                .disabled(viewModel.isBusy)
-                .confirmationDialog(
-                    "me.logout.confirm.title",
-                    isPresented: $confirmsLogout,
-                    titleVisibility: .visible
-                ) {
-                    Button("me.logout.confirm.action", role: .destructive) {
-                        Task { await viewModel.signOut() }
-                    }
-                    .disabled(viewModel.isBusy)
-                    Button("common.cancel", role: .cancel) {}
-                } message: {
-                    Text("me.logout.confirm.message")
-                }
-            } footer: {
-                Text("settings.security.logout.footer")
-            }
+
         }
         .settingsAlert(viewModel: viewModel)
         .toolbar {

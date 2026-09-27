@@ -82,6 +82,7 @@ class MeSettingsScreensTest {
                     onOpenAbout = { opened.value = "about" },
                     onOpenDownloads = { opened.value = "downloads" },
                     onRetry = {},
+                    onLogout = {},
                     downloadStatus = "3",
                     appVersion = "1.2.3",
                     emailAndKindleConfigured = true,
@@ -228,14 +229,13 @@ class MeSettingsScreensTest {
     }
 
     @Test
-    fun securityKeepsFixedEqualWidthTabsPasswordVisibilityAndDangerConfirmation() {
+    fun securityKeepsFixedEqualWidthTabsAndPasswordVisibilityWithoutLogout() {
         val state = mutableStateOf(
             SecurityEditorState(
                 email = "reader@example.com",
                 savedEmail = "reader@example.com",
             ),
         )
-        var logoutCount = 0
         lateinit var context: Context
 
         compose.setContent {
@@ -243,7 +243,6 @@ class MeSettingsScreensTest {
             WarmPageTheme {
                 SecurityScreen(
                     state = state.value,
-                    serverName = "Home Library",
                     onBack = {},
                     onEmailChanged = { state.value = state.value.copy(email = it) },
                     onEmailCurrentPasswordChanged = { state.value = state.value.copy(emailCurrentPassword = it) },
@@ -252,7 +251,6 @@ class MeSettingsScreensTest {
                     onPasswordConfirmationChanged = { state.value = state.value.copy(confirmPassword = it) },
                     onSaveEmail = {},
                     onSavePassword = {},
-                    onLogout = { logoutCount++ },
                 )
             }
         }
@@ -284,10 +282,7 @@ class MeSettingsScreensTest {
             useUnmergedTree = true,
         ).assertIsDisplayed()
 
-        compose.onNodeWithTag("settings-danger-logout").assertIsDisplayed().assertHasClickAction().performClick()
-        compose.onNodeWithText(context.getString(R.string.logout_confirm_title)).assertIsDisplayed()
-        compose.onNodeWithText(context.getString(R.string.logout_confirm_action)).performClick()
-        compose.runOnIdle { assertEquals(1, logoutCount) }
+        compose.onNodeWithTag("settings-danger-logout").assertDoesNotExist()
     }
 
     @Test

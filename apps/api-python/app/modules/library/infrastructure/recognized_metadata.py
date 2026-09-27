@@ -64,6 +64,7 @@ from app.modules.library.application.recognized_metadata import (
     RecognizedResourceChanges,
     RemoteCoverDownloadPort,
     ResourceMetadataState,
+    confirmable_metadata_fields,
 )
 from app.modules.library.application.resource_commands import LibraryActor
 from app.modules.library.domain.metadata_patch import (
@@ -76,11 +77,8 @@ from app.modules.library.infrastructure.metadata_patches import (
     SqlAlchemyMetadataPatches,
 )
 from app.modules.metadata.public import (
-    candidate_evidence,
     complete_recognition_record,
-    confirm_candidate,
     load_recognition_context,
-    propose_fields,
     recognition_fingerprint,
     recognition_record,
 )
@@ -133,9 +131,7 @@ class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetada
             if str(item.get("id")) == candidate.id), None)
         if value is None:
             raise MetadataPatchError("INVALID_CANDIDATE")
-        decision = confirm_candidate(context, candidate_evidence(candidate.source, value))
-        proposals = propose_fields(context, candidate.source, value, decision)
-        allowed = {item.field for item in proposals}
+        allowed = set(confirmable_metadata_fields(value, kind))
         if any(field.value.split(".")[0] + "." + recognized_field_name(field.value.split(".")[1]) not in allowed for field in fields):
             raise MetadataPatchError("INVALID_FIELD")
         values: dict[str, Any] = {"id": candidate.id, "source": candidate.source}
@@ -275,10 +271,11 @@ class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetada
                 if before is None or before.target_id != target or before.book_id != book_id:
                     raise MetadataPatchError("RESOURCE_NOT_FOUND")
                 changes.append(MetadataChange(before.target_type, target, before.revision, "patch", values,
+                                              override_fields=frozenset(values),
                                               provenance={key: "MANUAL_RECOGNITION" for key in values}))
         if changes:
             outcome = ApplyMetadataPatches(self._patches, self._db).stage(
-                MetadataPatchActor(self._actor.user_id, None, self._library_ids, True, True, False),
+                MetadataPatchActor(self._actor.user_id, None, self._library_ids, True, True, True),
                 tuple(changes), skip_unchanged=True)
             self._stage_record(bool(outcome["updated"]))
 
@@ -368,9 +365,9 @@ class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetada
         reference = "recognition:" + uuid4().hex
         port = SqlAlchemyMetadataPatches(self._db, prepared_covers={(kind, state.target_id): (reference, cover_path)})
         ApplyMetadataPatches(port, self._db).stage(
-            MetadataPatchActor(self._actor.user_id, None, self._library_ids, True, True, False),
+            MetadataPatchActor(self._actor.user_id, None, self._library_ids, True, True, True),
             (MetadataChange(kind, state.target_id, before.revision, "patch", {"cover_ref": reference},
-                            provenance={"cover_ref": "MANUAL_RECOGNITION"}),), skip_unchanged=True)
+                            override_fields=frozenset({"cover_ref"}), provenance={"cover_ref": "MANUAL_RECOGNITION"}),), skip_unchanged=True)
         self._stage_record(True)
 
 

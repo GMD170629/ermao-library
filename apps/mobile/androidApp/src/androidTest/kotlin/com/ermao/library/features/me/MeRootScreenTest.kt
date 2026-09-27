@@ -7,6 +7,10 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isDialog
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -31,6 +35,7 @@ class MeRootScreenTest {
     @Test
     fun rendersP0RowsAndKeepsServerIdentityReadOnly() {
         val renderedContext = AtomicReference<Context>()
+        var logoutCount = 0
         var openedProfile = false
         compose.setContent {
             renderedContext.set(LocalContext.current)
@@ -49,12 +54,22 @@ class MeRootScreenTest {
                     onOpenAbout = {},
                     onOpenDownloads = {},
                     onRetry = {},
+                    onLogout = { logoutCount++ },
                 )
             }
         }
 
         compose.waitForIdle()
         val context = checkNotNull(renderedContext.get())
+        compose.onNodeWithTag("settings-identity").assertIsDisplayed()
+        compose.onNodeWithTag("settings-danger-logout").assertIsDisplayed().performClick()
+        compose.onNodeWithText(context.getString(R.string.logout_confirm_title)).assertIsDisplayed()
+        org.junit.Assert.assertEquals(0, logoutCount)
+        compose.onNodeWithText(context.getString(R.string.cancel)).performClick()
+        org.junit.Assert.assertEquals(0, logoutCount)
+        compose.onNodeWithTag("settings-danger-logout").performClick()
+        compose.onNode(hasText(context.getString(R.string.logout_confirm_action)) and hasAnyAncestor(isDialog())).performClick()
+        org.junit.Assert.assertEquals(1, logoutCount)
         compose.onNodeWithText(context.getString(R.string.me_profile_title)).assertIsDisplayed().performClick()
         compose.onNodeWithText(context.getString(R.string.me_security_title)).assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.me_language_title)).performScrollTo().assertIsDisplayed()

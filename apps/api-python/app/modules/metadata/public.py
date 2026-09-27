@@ -60,7 +60,6 @@ from app.modules.metadata.domain.providers import (
     ProviderManifest,
 )
 from app.modules.metadata.domain.recognition import (
-    confirm_candidate,
     recognition_fingerprint,
 )
 from app.modules.metadata.infrastructure.recognition_records import (
@@ -126,4 +125,4 @@ __all__ = [
     "serialize_opf_metadata",
 ]
 
-__all__ += ["candidate_evidence", "complete_recognition_record", "confirm_candidate", "ignore_recognition_record", "propose_fields", "recognition_fingerprint", "recognition_record", "save_recognition_record"]
+__all__ += ["candidate_evidence", "complete_recognition_record", "ignore_recognition_record", "propose_fields", "recognition_fingerprint", "recognition_record", "save_recognition_record"]

@@ -48,6 +48,23 @@ class MeViewModelTest {
     }
 
     @Test
+    fun logoutFailureIsVisibleOnRootAndCanBeRetriedWithoutDuplicateRequests() = runTest(dispatcher) {
+        val events = mutableListOf<String>()
+        val viewModel = viewModel(FakeSettingsClient(events), RecordingSideEffects(events, failLogout = true))
+        advanceUntilIdle()
+        viewModel.logout()
+        viewModel.logout()
+        advanceUntilIdle()
+        assertEquals(1, events.count { it == "logout" })
+        assertEquals("LOGOUT_FAILED", viewModel.rootState.value.failure?.code)
+        assertFalse(viewModel.securityState.value.isSaving)
+        assertNull(viewModel.securityState.value.failure)
+        viewModel.logout()
+        advanceUntilIdle()
+        assertEquals(2, events.count { it == "logout" })
+    }
+
+    @Test
     fun passwordChangePurgesBeforeApiAndLogsOutAfterSuccess() = runTest(dispatcher) {
         val events = mutableListOf<String>()
         val client = FakeSettingsClient(events)
@@ -211,6 +228,7 @@ class MeViewModelTest {
     private class RecordingSideEffects(
         private val events: MutableList<String>,
         private val failPurge: Boolean = false,
+        private val failLogout: Boolean = false,
     ) : SettingsSideEffects {
         override suspend fun refreshSession() {
             events += "refresh"
@@ -227,6 +245,7 @@ class MeViewModelTest {
 
         override suspend fun logout() {
             events += "logout"
+            if (failLogout) error("logout failed")
         }
 
         override fun requireReauthentication() {

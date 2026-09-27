@@ -207,3 +207,62 @@ test('directory-anchored audiobook resources open directly without a folder dril
   await page.getByRole('button', { name: /可读资源 1/ }).first().click();
   await expect(page).toHaveURL(/resourceId=resource-epub/);
 });
+
+
+test('manual metadata selection applies conflicting candidates and every available field', async ({ page }) => {
+  await page.unroute('**/api/**');
+  await mockBookDetailApi(page, [epubResource, secondEpubResource]);
+  await page.route('**/api/books/book-1', (route) => route.fulfill({ json: { ok: true, data: { book: {
+    id: 'book-1', sourceNodeId: 'book-node', title: 'Resource detail book', author: 'Author',
+    resources: [epubResource, secondEpubResource], metadataState: 'RUNNING', metadataOnlineState: 'RUNNING'
+  } } } }));
+  await page.route('**/api/metadata/providers', (route) => route.fulfill({ json: { ok: true, data: { providers: [
+    { id: 'bangumi', name: 'Bangumi', enabled: true, mode: 'search' }
+  ] } } }));
+  const candidate = {
+    id: 'manual-candidate', source: 'bangumi', title: '罗杰疑案', author: '另一作者',
+    description: '候选简介', seriesName: '系列', seriesIndex: 2, tags: ['推理'],
+    publisher: '出版社', publishedAt: '2026-09-27', language: 'zh', isbn: 'arbitrary-isbn',
+    identifier: 'manual-id', narrator: '朗读者', abridged: false, resourceIndex: 3,
+    coverUrl: 'https://example.test/cover.jpg',
+    match: { outcome: 'REJECTED', level: 'UNKNOWN', reasons: ['AUTHOR_CONFLICT'], evidenceIds: [], allowedFields: [] },
+    confirmableFields: ['book.author', 'book.series_name', 'book.series_index', 'book.tags',
+      'resource.title', 'resource.description', 'resource.publisher', 'resource.published_at',
+      'resource.language', 'resource.isbn', 'resource.identifier', 'resource.narrator',
+      'resource.abridged', 'resource.resource_index', 'resource.cover_ref']
+  };
+  await page.route('**/metadata/search', (route) => route.fulfill({ json: { ok: true, data: {
+    sourceNodeId: 'epub-node', providerId: 'bangumi', query: '罗杰疑案', candidates: [candidate], hints: []
+  } } }));
+  await page.route('**/metadata/apply', async (route) => {
+    const body = route.request().postDataJSON();
+    expect(body.fields).toHaveLength(15);
+    expect(body.fields).toEqual(expect.arrayContaining(['book.author', 'book.tags', 'resource.cover', 'resource.abridged', 'resource.title']));
+    await route.fulfill({ json: { ok: true, data: { appliedFields: body.fields, skippedFields: [], coverStatus: 'applied', writebackStatus: 'notRequested' } } });
+  });
+  await page.goto('/books/book-1');
+  await expect(page.getByRole('heading', { name: 'Resource detail book', exact: true })).toBeVisible();
+  await expect(page.getByText('图书信息识别中', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('图书信息联网识别中', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: '管理 EPUB resource', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await page.getByRole('menuitem', { name: '识别', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '元数据识别', exact: true });
+  await dialog.getByRole('button', { name: '搜索', exact: true }).click();
+  await expect(dialog.getByText('找到 1 条候选')).toBeVisible();
+  await expect(dialog.getByText('已排除', { exact: true })).toHaveCount(0);
+  await expect(dialog.getByText('范围未知', { exact: true })).toHaveCount(0);
+  await expect(dialog.getByText('作者不一致', { exact: true })).toHaveCount(0);
+  const fields = dialog.getByRole('checkbox');
+  await expect(fields).toHaveCount(15);
+  for (const field of await fields.all()) {
+    await expect(field).toBeEnabled();
+    await field.uncheck();
+  }
+  const apply = dialog.getByRole('button', { name: '应用所选字段', exact: true });
+  await expect(apply).toBeDisabled();
+  for (const field of await fields.all()) await field.check();
+  await expect(apply).toBeEnabled();
+  await apply.click();
+  await expect(dialog).toBeHidden();
+});

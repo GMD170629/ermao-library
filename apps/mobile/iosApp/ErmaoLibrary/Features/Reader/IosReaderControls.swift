@@ -141,12 +141,15 @@ struct IosReaderControls<Session: IosReaderControlSession>: View {
             focusedPanel = trigger
             keyboardPanel = trigger
         }) { panel in
-            switch panel {
-            case .contents: ReaderTOCSheet(session: session)
-            case .bookmarks: ReaderNotesSheet(session: session)
-            case .appearance: ReaderPreferenceSheet(session: session, editor: editor, panel: "appearance")
-            case .settings: ReaderPreferenceSheet(session: session, editor: editor, panel: "settings")
+            Group {
+                switch panel {
+                case .contents: ReaderTOCSheet(session: session)
+                case .bookmarks: ReaderNotesSheet(session: session)
+                case .appearance: ReaderPreferenceSheet(session: session, editor: editor, panel: "appearance")
+                case .settings: ReaderPreferenceSheet(session: session, editor: editor, panel: "settings")
+                }
             }
+            .statusBarHidden(true)
         }
     }
 

@@ -109,8 +109,6 @@
     <string name="login_invalid_credentials">邮箱或密码不正确。</string>
     <string name="login_required_email">请输入邮箱。</string>
     <string name="login_required_password">请输入密码。</string>
-    <string name="account_disabled_title">账户已停用</string>
-    <string name="account_disabled_message">%2$s（%3$s）上的账户 %1$s 已停用。请联系服务器管理员恢复此账户。</string>
     <string name="unexpected_failure">发生错误，请重试。</string>
 
     <string name="tab_home">首页</string>
@@ -334,15 +332,11 @@
     <string name="setup_error_password_mismatch">两次输入的密码不一致。</string>
     <string name="setup_error_rejected">请检查此项后重试。</string>
 
-    <string name="reauthenticate_title">重新登录</string>
-    <string name="reauthenticate_heading">私有书库已锁定</string>
-    <string name="reauthenticate_expired_message">会话已过期，请使用下方显示的账户重新登录。</string>
-    <string name="reauthenticate_action">重新登录</string>
 
     <string name="logout_action">退出登录</string>
-    <string name="logout_confirm_title">退出此服务器？</string>
-    <string name="logout_confirm_message">退出“%1$s”会清除此设备上的已保存会话和可读私有数据。</string>
-    <string name="logout_confirm_action">退出并清除私有数据</string>
+    <string name="logout_confirm_title">退出登录？</string>
+    <string name="logout_confirm_message">退出后将保留已下载的图书和阅读进度。再次登录同一账号后可继续阅读。</string>
+    <string name="logout_confirm_action">退出登录</string>
     <string name="me_title">我的</string>
     <string name="me_section_account">账户</string>
     <string name="me_section_connected_services">连接服务</string>
@@ -663,4 +657,6 @@
     <string name="management_kindle_settings_short">邮件设置</string>
     <string name="management_kindle_book_context">选择《%1$s》的一个附件</string>
     <string name="downloads_view_resources">查看资源</string>
+    <string name="login_account_disabled_message">此账户已停用，请联系服务器管理员，或使用其他账户登录。</string>
+    <string name="me_personal_information">个人信息</string>
 </resources>

@@ -267,6 +267,7 @@ def list_system_events(
     search: str | None = None,
     dateFrom: str | None = None,
     dateTo: str | None = None,
+    includeDiagnostics: bool = False,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
@@ -304,6 +305,7 @@ def list_system_events(
                 },
                 sources=snapshot.sources,
                 levels=snapshot.levels,
+                include_diagnostics=includeDiagnostics,
             )
         )
     )

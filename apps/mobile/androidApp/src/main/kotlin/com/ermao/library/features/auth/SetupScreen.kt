@@ -46,7 +46,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import com.ermao.library.R
-import com.ermao.library.bootstrap.LoginFormState
 import com.ermao.library.bootstrap.SetupFieldError
 import com.ermao.library.bootstrap.SetupFormState
 import com.ermao.library.features.servers.PrimaryActionButton
@@ -145,77 +144,6 @@ fun SetupScreen(
                 loading = isSubmitting,
                 modifier = Modifier.fillMaxWidth().testTag("setup-submit"),
             )
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ReauthenticateScreen(
-    profile: ServerProfile,
-    userDisplayName: String?,
-    userEmail: String?,
-    form: LoginFormState,
-    isAuthenticating: Boolean,
-    onPasswordChanged: (String) -> Unit,
-    onLogin: () -> Unit,
-    onSwitchServer: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val theme = WarmPageThemeValues
-    var passwordVisible by remember { mutableStateOf(false) }
-    Scaffold(
-        modifier = modifier,
-        containerColor = theme.colors.canvas,
-        topBar = { TopAppBar(title = { Text(stringResource(R.string.reauthenticate_title)) }) },
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(theme.spacing.three),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(theme.spacing.two),
-        ) {
-            Icon(Icons.Outlined.Dns, null, tint = theme.colors.brandAccent)
-            Text(stringResource(R.string.reauthenticate_heading), style = theme.typography.title)
-            ServerIdentity(profile.displayName, profile.baseUrl.value)
-            Text(
-                userDisplayName?.let { "$it · ${userEmail.orEmpty()}" } ?: userEmail.orEmpty(),
-                color = theme.colors.textSecondary,
-                style = theme.typography.callout,
-            )
-            Text(
-                stringResource(R.string.reauthenticate_expired_message),
-                color = theme.colors.textSecondary,
-            )
-            PasswordField(
-                value = form.password,
-                onValueChange = onPasswordChanged,
-                label = stringResource(R.string.login_password_label),
-                error = when {
-                    form.passwordRequired -> stringResource(R.string.login_required_password)
-                    form.invalidCredentials -> stringResource(R.string.login_invalid_credentials)
-                    else -> null
-                },
-                enabled = !isAuthenticating,
-                visible = passwordVisible,
-                onToggleVisibility = { passwordVisible = !passwordVisible },
-                onDone = onLogin,
-            )
-            PrimaryActionButton(
-                label = stringResource(if (isAuthenticating) R.string.login_in_progress else R.string.reauthenticate_action),
-                onClick = onLogin,
-                enabled = !isAuthenticating,
-                loading = isAuthenticating,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedButton(onClick = onSwitchServer, enabled = !isAuthenticating) {
-                Icon(Icons.Outlined.SwapHoriz, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                Text(stringResource(R.string.login_switch_server))
-            }
         }
     }
 }

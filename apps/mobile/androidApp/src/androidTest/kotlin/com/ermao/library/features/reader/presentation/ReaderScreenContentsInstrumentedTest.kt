@@ -70,6 +70,50 @@ class ReaderScreenContentsInstrumentedTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
 
     @Test
+    fun readerHidesStatusBarWithControlsAndRestoresItOnExit() {
+        val visible = mutableStateOf(true)
+        val controls = mutableStateOf(false)
+        val morphology = mutableStateOf(ReaderMorphology.Reflowable)
+        compose.setContent {
+            if (visible.value) {
+                ReaderScreen(
+                    title = "Immersive reader fixture",
+                    controller = androidx.compose.runtime.remember(morphology.value) {
+                        DeferredContentsController(morphology = morphology.value)
+                    },
+                    opening = false,
+                    openError = null,
+                    controlsVisible = controls.value,
+                    onControlsVisibleChange = { controls.value = it },
+                    onClose = { visible.value = false },
+                    onNavigatorContainerReady = {},
+                )
+            }
+        }
+        showTestHostOverKeyguard()
+        fun statusBarVisible(): Boolean {
+            var result = true
+            instrumentation.runOnMainSync {
+                val activity = ActivityLifecycleMonitorRegistry.getInstance()
+                    .getActivitiesInStage(Stage.RESUMED).single()
+                result = androidx.core.view.ViewCompat.getRootWindowInsets(activity.window.decorView)
+                    ?.isVisible(androidx.core.view.WindowInsetsCompat.Type.statusBars()) ?: true
+            }
+            return result
+        }
+        for (kind in listOf(ReaderMorphology.Reflowable, ReaderMorphology.Pdf, ReaderMorphology.Comic)) {
+            compose.runOnIdle { morphology.value = kind }
+            compose.waitUntil(5_000) { !statusBarVisible() }
+            compose.runOnIdle { controls.value = true }
+            compose.waitForIdle()
+            assertTrue(!statusBarVisible())
+            compose.runOnIdle { controls.value = false }
+        }
+        compose.runOnIdle { visible.value = false }
+        compose.waitUntil(5_000) { statusBarVisible() }
+    }
+
+    @Test
     fun comicContentsUseOneBasedPagesAndKeepTheLastPageReachable() {
         val controller = DeferredContentsController(morphology = ReaderMorphology.Comic)
         compose.setContent {

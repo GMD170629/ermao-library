@@ -73,7 +73,7 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertTrue(store.password.isEmpty)
     }
 
-    func testExpiredSessionAndLoginFailureKeepTheExistingLoginForm() async throws {
+    func testAllAuthenticationStatesKeepTheExistingLoginForm() async throws {
         let profile = makeProfile(id: "saved", baseURL: "https://books.example.com/base", active: true)
         let runtime = PreviewMobileRuntime(snapshot: RuntimeSessionSnapshot(
             phase: .sessionExpired, profile: profile, userDisplayName: "Reader",
@@ -103,7 +103,7 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertTrue(originalFields.contains { $0.text == "reader@example.com" })
         XCTAssertEqual(originalFields.filter(\.isSecureTextEntry).count, 1)
 
-        for phase in [SessionPhase.sessionExpired, .checkingServer, .authenticating, .loginFailed] {
+        for phase in [SessionPhase.signedOut, .sessionExpired, .checkingServer, .authenticating, .loginFailed, .accountDisabled] {
             runtime.transition(to: RuntimeSessionSnapshot(
                 phase: phase, profile: profile, userDisplayName: nil,
                 userEmail: "reader@example.com",
@@ -456,7 +456,7 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.serverProfiles.map(\.id), [second.id])
     }
 
-    func testLogoutCanSkipSecondNamespacePurgeAfterPasswordChange() async throws {
+    func testOrdinaryLogoutPreservesPrivateContentIncludingObserverTransition() async throws {
         let profile = makeProfile(id: "server-a", baseURL: "https://books.example.com", active: true)
         let cache = RecordingPrivateContentCache()
         let runtime = PreviewMobileRuntime(
@@ -477,9 +477,16 @@ final class SessionStoreTests: XCTestCase {
                 reasonCode: nil
             )
         )
-        let store = SessionStore(runtime: runtime, privateContentCache: cache)
+        var prepared = false
+        let store = SessionStore(
+            runtime: runtime,
+            privateContentCache: cache,
+            preparePrivateNamespaceTransition: { prepared = true }
+        )
 
-        try await store.logoutAwaitingCompletion(purgeNamespace: false)
+        try await store.logoutAwaitingCompletion()
+        for _ in 0..<5 { await Task.yield() }
+        XCTAssertTrue(prepared)
 
         let removedNamespaces = await cache.removedNamespaces()
         XCTAssertEqual(removedNamespaces, [])

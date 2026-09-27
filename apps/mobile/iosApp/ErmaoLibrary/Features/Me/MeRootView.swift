@@ -11,6 +11,8 @@ struct MeRootView: View {
     let onOpenKindleQueue: @MainActor @Sendable () -> Void
     let onOpenAdministrativeRoute: @MainActor @Sendable (AdministrativeSettingsRoute) -> Void
 
+    @State private var confirmsLogout = false
+
     @Environment(\.appTheme) private var theme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -36,6 +38,41 @@ struct MeRootView: View {
 
     var body: some View {
         SettingsScreen("tab.me", titleDisplayMode: .large) {
+            SettingsSection("settings.personalInformation") {
+                HStack(spacing: .space1) {
+                    SettingsAvatarView(data: viewModel.avatarData, size: SettingsMetrics.identityAvatarSize)
+                    Text(viewModel.snapshot.account.displayName)
+                        .font(.body)
+                        .lineLimit(1)
+                    Spacer(minLength: .space1)
+                    Button {
+                        confirmsLogout = true
+                    } label: {
+                        Label("me.logout.action", systemImage: "rectangle.portrait.and.arrow.right")
+                            .font(.subheadline)
+                            .frame(minHeight: .iosMinimumTouchTarget)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(theme.textSecondary)
+                    .disabled(viewModel.isBusy)
+                }
+                .frame(minHeight: SettingsMetrics.identityContentMinimumHeight)
+                .listRowInsets(SettingsMetrics.rowInsets)
+                .confirmationDialog(
+                    "me.logout.confirm.title",
+                    isPresented: $confirmsLogout,
+                    titleVisibility: .visible
+                ) {
+                    Button("me.logout.confirm.action", role: .destructive) {
+                        Task { await viewModel.signOut() }
+                    }
+                    .disabled(viewModel.isBusy)
+                    Button("common.cancel", role: .cancel) {}
+                } message: {
+                    Text("me.logout.confirm.message")
+                }
+            }
             ForEach(visibleCatalogGroups, id: \.id.wireValue) { group in
                 if group.id.wireValue == SettingsGroupId.preferences.wireValue {
                     SettingsSection("me.server.section") {

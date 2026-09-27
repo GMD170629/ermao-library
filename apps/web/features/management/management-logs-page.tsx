@@ -10,6 +10,7 @@ import { PageTitle } from '../../components/ui/page-title';
 import { useI18n } from '../../i18n/provider';
 import { ManagementNav } from './management-nav';
 import { ignoredImportEventSummary } from './system-event-presentation';
+import { systemEventsCsv } from './system-event-export';
 import {
   clearManagementEvents,
   fetchManagementEventDetail,
@@ -82,7 +83,7 @@ function DiagnosticDetails({ event, loading }: { event: ManagementEvent; loading
   return (
     <div className="mt-3 rounded-xl border border-red-100 bg-red-50/60 p-3 text-xs leading-5 text-[#68625C]">
       <div><span className={labelClass}>{t('异常类型：')}</span>{diagnosticText(diagnostics.exceptionType) || '—'}</div>
-      <div><span className={labelClass}>{t('执行阶段：')}</span>{diagnosticText(diagnostics.stage) || '—'}</div>
+      <div><span className={labelClass}>{t('执行阶段：')}</span>{diagnosticText(event.metadata.stage ?? event.metadata.step ?? diagnostics.stage) || '—'}</div>
       {diagnosticText(diagnostics.location) ? <div><span className={labelClass}>{t('抛出位置：')}</span>{diagnosticText(diagnostics.location)}</div> : null}
       {diagnosticText(diagnostics.message) ? <div><span className={labelClass}>{t('异常信息：')}</span>{diagnosticText(diagnostics.message)}</div> : null}
       {diagnostics.truncated ? <p className="mt-1 text-[#B45309]">{t('堆栈信息已截断')}</p> : null}
@@ -101,25 +102,6 @@ function DiagnosticDetails({ event, loading }: { event: ManagementEvent; loading
       ) : null}
     </div>
   );
-}
-
-function redactString(value: string) {
-  return value
-    .replace(/\/(?:Users|home|var|Volumes|volume\d+|mnt|srv|opt)\/[^\s"',}\]]+/gi, '[本地路径]')
-    .replace(/[A-Z]:\\[^\s"',}\]]+/gi, '[本地路径]');
-}
-
-function sanitizeValue(value: unknown): unknown {
-  if (typeof value === 'string') return redactString(value);
-  if (Array.isArray(value)) return value.map(sanitizeValue);
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, sanitizeValue(item)]));
-  }
-  return value;
-}
-
-function csvCell(value: unknown) {
-  return `"${String(value ?? '').replaceAll('"', '""')}"`;
 }
 
 function localDateBoundary(value: string, nextDay = false) {
@@ -255,24 +237,15 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
       let exportPage = 1;
       let exportPages = 1;
       do {
-        const payload = await fetchManagementEvents(buildParams(exportPage, 100));
+        const params = buildParams(exportPage, 100);
+        params.set('includeDiagnostics', 'true');
+        const payload = await fetchManagementEvents(params);
         exported.push(...payload.events);
         exportPages = Math.max(1, payload.totalPages);
         exportPage += 1;
       } while (exportPage <= exportPages);
 
-      const rows = [
-        ['时间', '级别', '来源', '摘要', '动作', '关联类型'].map(csvCell).join(','),
-        ...exported.map((event) => [
-          new Date(event.createdAt).toLocaleString(locale),
-          levelLabel(event.level),
-          sourceLabel(event.source),
-          ignoredImportEventSummary(event, i18nAttribute) ?? redactString(event.message),
-          event.action,
-          event.targetType ?? ''
-        ].map(csvCell).join(','))
-      ];
-      const blob = new Blob([`\uFEFF${rows.join('\n')}`], { type: 'text/csv;charset=utf-8' });
+      const blob = new Blob([systemEventsCsv(exported, locale, i18nAttribute)], { type: 'text/csv;charset=utf-8' });
       const href = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = href;
@@ -376,8 +349,8 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
         {events.map((event) => {
           const href = targetHref(event);
           const expanded = expandedEventId === event.id;
-          const safeMetadata = sanitizeValue(event.metadata);
-          const summary = ignoredImportEventSummary(event, i18nAttribute) ?? i18nAttribute(redactString(event.message));
+          const safeMetadata = event.metadata;
+          const summary = ignoredImportEventSummary(event, i18nAttribute) ?? i18nAttribute(event.message);
           return (
             <article key={event.id} data-testid="system-event-mobile-card" className="rounded-[22px] border border-[#DEDAD4] bg-white p-4">
               <div className="flex flex-wrap items-center gap-2">
@@ -423,8 +396,8 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
             {events.map((event) => {
               const href = targetHref(event);
               const expanded = expandedEventId === event.id;
-              const safeMetadata = sanitizeValue(event.metadata);
-              const summary = ignoredImportEventSummary(event, i18nAttribute) ?? i18nAttribute(redactString(event.message));
+              const safeMetadata = event.metadata;
+              const summary = ignoredImportEventSummary(event, i18nAttribute) ?? i18nAttribute(event.message);
               return (
                 <tr key={event.id} className="group align-top hover:bg-[#FCFAF8]">
                   <td className="px-4 py-3.5 tabular-nums text-[#716B64]">{new Date(event.createdAt).toLocaleString(locale)}</td>

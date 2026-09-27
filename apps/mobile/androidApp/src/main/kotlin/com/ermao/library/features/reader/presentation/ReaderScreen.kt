@@ -1,6 +1,7 @@
 package com.ermao.library.features.reader.presentation
 
 import android.os.Build
+import android.view.ViewTreeObserver
 import android.view.ViewGroup
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
@@ -37,7 +38,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.layout.windowInsetsTopHeight
@@ -137,6 +139,9 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.WindowCompat
 import androidx.fragment.app.FragmentContainerView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -351,7 +356,7 @@ internal fun ReaderScreen(
     ReaderWarmPageTheme(preferences.appearance.theme, preferences.appearance.themeMode) {
         val colors = WarmPageThemeValues.colors
         ReaderSystemBarAppearance(colors.canvas)
-        BoxWithConstraints(Modifier.fillMaxSize().background(colors.canvas)) {
+        BoxWithConstraints(Modifier.fillMaxSize().background(colors.canvas).windowInsetsPadding(WindowInsets.displayCutout)) {
             val requestedPageWidth = when (morphology) {
                 ReaderMorphology.Reflowable -> preferences.epub.pageWidth
                 ReaderMorphology.Comic -> preferences.comic.pageWidth
@@ -363,6 +368,11 @@ internal fun ReaderScreen(
                     .align(Alignment.Center)
                     .fillMaxHeight()
                     .width(navigatorWidth)
+                    .padding(bottom = if (
+                        morphology == ReaderMorphology.Reflowable &&
+                        preferences.epub.flow != com.ermao.library.shared.modules.reader.ReaderReadingMode.ContinuousScroll &&
+                        preferences.epub.writingMode != com.ermao.library.shared.modules.reader.ReaderWritingMode.Vertical
+                    ) androidx.compose.ui.res.dimensionResource(R.dimen.reader_paginated_footer_padding) else 0.dp)
                     .testTag(READER_NAVIGATOR_TEST_TAG),
                 factory = { context ->
                     FragmentContainerView(context).apply {
@@ -650,7 +660,6 @@ private fun ReaderControlOverlay(
         Surface(
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .statusBarsPadding()
                 .padding(horizontal = 12.dp, vertical = 8.dp)
                 .fillMaxWidth(),
             color = colors.surface.copy(alpha = 0.96f),
@@ -834,7 +843,7 @@ private fun ReaderBottomConsole(
     LaunchedEffect(panel != null) {
         if (panel == null) sheetState.partialExpand()
     }
-    BoxWithConstraints(modifier.statusBarsPadding().navigationBarsPadding()) {
+    BoxWithConstraints(modifier.navigationBarsPadding()) {
         val compactHeight = READER_HOME_CONTENT_HEIGHT + 1.dp + READER_ANDROID_TOUCH_TARGET
         val peekHeight = if (panel == null) compactHeight else maxHeight / 2
         BottomSheetScaffold(
@@ -2422,6 +2431,28 @@ private fun currentBookmark(bookmarks: List<ReaderBookmark>, location: ReaderLoc
 private fun ReaderSystemBarAppearance(surface: Color) {
     val activity = LocalActivity.current
     val view = LocalView.current
+    DisposableEffect(activity, view) {
+        val window = activity?.window ?: return@DisposableEffect onDispose {}
+        val controller = WindowCompat.getInsetsController(window, view)
+        val statusBars = WindowInsetsCompat.Type.statusBars()
+        val wasVisible = ViewCompat.getRootWindowInsets(view)?.isVisible(statusBars) ?: true
+        val previousBehavior = controller.systemBarsBehavior
+        val hideStatusBar = {
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(statusBars)
+        }
+        val listener = ViewTreeObserver.OnWindowFocusChangeListener { focused ->
+            if (focused) hideStatusBar()
+        }
+        val observer = view.viewTreeObserver
+        observer.addOnWindowFocusChangeListener(listener)
+        hideStatusBar()
+        onDispose {
+            if (observer.isAlive) observer.removeOnWindowFocusChangeListener(listener)
+            controller.systemBarsBehavior = previousBehavior
+            if (wasVisible) controller.show(statusBars) else controller.hide(statusBars)
+        }
+    }
     DisposableEffect(activity, view, surface) {
         val window = activity?.window ?: return@DisposableEffect onDispose {}
         val controller = WindowCompat.getInsetsController(window, view)

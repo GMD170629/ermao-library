@@ -160,6 +160,9 @@ class MeViewModel(
     }
 
     fun logout() {
+        if (mutableSecurityState.value.isSaving) return
+        mutableSecurityState.update { it.copy(isSaving = true) }
+        mutableRootState.update { it.copy(failure = null) }
         securityJob?.cancel()
         securityJob = viewModelScope.launch {
             try {
@@ -167,9 +170,11 @@ class MeViewModel(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                mutableSecurityState.update {
-                    it.copy(isSaving = false, failure = MeFailure(MeOperation.SavePassword, "LOGOUT_FAILED"))
+                mutableRootState.update {
+                    it.copy(failure = MeFailure(MeOperation.Logout, "LOGOUT_FAILED"))
                 }
+            } finally {
+                mutableSecurityState.update { it.copy(isSaving = false) }
             }
         }
     }

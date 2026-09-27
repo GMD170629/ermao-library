@@ -291,49 +291,6 @@ fun TlsRiskScreen(
     }
 }
 
-@Composable
-fun BlockingServerStateScreen(
-    title: String,
-    message: String,
-    primaryLabel: String,
-    onPrimary: () -> Unit,
-    modifier: Modifier = Modifier,
-    secondaryLabel: String? = null,
-    onSecondary: (() -> Unit)? = null,
-) {
-    val theme = WarmPageThemeValues
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(theme.spacing.three),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Text(title, color = theme.colors.textPrimary, style = theme.typography.title)
-        Spacer(Modifier.height(theme.spacing.two))
-        Text(message, color = theme.colors.textSecondary, style = theme.typography.body)
-        Spacer(Modifier.height(theme.spacing.four))
-        PrimaryActionButton(
-            label = primaryLabel,
-            onClick = onPrimary,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        if (secondaryLabel != null && onSecondary != null) {
-            Spacer(Modifier.height(theme.spacing.one))
-            OutlinedButton(
-                onClick = onSecondary,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = theme.spacing.six),
-                shape = RoundedCornerShape(theme.radii.control),
-            ) {
-                Text(secondaryLabel)
-            }
-        }
-    }
-}
-
 enum class BrandImageShape {
     Task,
     Circle,
