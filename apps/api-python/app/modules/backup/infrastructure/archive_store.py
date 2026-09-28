@@ -1,19 +1,21 @@
 """Filesystem and database adapter for Backup application use cases."""
 
 from datetime import UTC, datetime
+from typing import BinaryIO
 
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.modules.backup.application.operations import (
     BackupArchive,
+    BackupCompatibility,
     BackupDownloadDescriptor,
     BackupFormatError,
     BackupNotFoundError,
-    BackupRequestError,
     BackupRestoreResult,
 )
 from app.modules.backup.infrastructure import archive
+from app.modules.backup.infrastructure.problems import backup_stage
 
 
 def _datetime(value: object) -> datetime:
@@ -47,6 +49,7 @@ def _integer(value: object, error_code: str) -> int:
 
 
 def _archive(record: dict[str, object]) -> BackupArchive:
+    compatibility = record.get("compatibility")
     return BackupArchive(
         id=str(record["id"]),
         kind=str(record.get("kind") or "unknown"),
@@ -55,6 +58,9 @@ def _archive(record: dict[str, object]) -> BackupArchive:
         size_bytes=_integer(record["sizeBytes"], "BACKUP_SIZE_INVALID"),
         created_at=_datetime(record["createdAt"]),
         counts=_counts(record.get("counts")),
+        compatibility=compatibility
+        if isinstance(compatibility, BackupCompatibility)
+        else None,
     )
 
 
@@ -63,41 +69,40 @@ class FileSystemBackupArchiveStore:
         self._db = db
         self._settings = settings
 
+    def upload(self, filename: str, stream: BinaryIO) -> BackupArchive:
+        with backup_stage("upload"):
+            path = archive.upload_backup(self._settings, filename, stream)
+            return _archive(archive.backup_record(path, archive.head_revision()))
+
     def create(self) -> BackupArchive:
-        result = archive.create_backup(self._db, self._settings)
-        return BackupArchive(
-            id=result.id,
-            kind="manual",
-            name=result.filename,
-            filename=result.filename,
-            size_bytes=result.size_bytes,
-            created_at=_datetime(result.created_at),
-            counts=dict(result.counts),
-        )
+        with backup_stage("create"):
+            result = archive.create_backup(self._db, self._settings)
+            return _archive(
+                archive.backup_record(
+                    archive.backup_path(self._settings, result.id),
+                    archive.head_revision(),
+                )
+            )
 
     def list(self) -> tuple[BackupArchive, ...]:
-        return tuple(
-            _archive(record) for record in archive.list_backups(self._settings)
-        )
+        with backup_stage("list"):
+            return tuple(
+                _archive(record) for record in archive.list_backups(self._settings)
+            )
 
     def get(self, backup_id: str) -> BackupArchive | None:
         path = archive.backup_path(self._settings, backup_id)
         if not path.exists():
             return None
-        return next((item for item in self.list() if item.id == backup_id), None)
+        return _archive(archive.backup_record(path, archive.head_revision()))
 
     def delete(self, backup_id: str) -> bool:
-        return archive.delete_backup_file(self._settings, backup_id)
+        with backup_stage("file"):
+            return archive.delete_backup_file(self._settings, backup_id)
 
     def restore(self, backup_id: str) -> BackupRestoreResult:
-        try:
+        with backup_stage("restore"):
             result = archive.restore_backup(self._db, self._settings, backup_id)
-        except FileNotFoundError as exc:
-            raise BackupNotFoundError(backup_id) from exc
-        except BackupRequestError as exc:
-            if str(exc) == "INVALID_BACKUP_ID":
-                raise BackupNotFoundError(backup_id) from exc
-            raise
         return BackupRestoreResult(
             id=str(result["id"]),
             restored_at=_datetime(result["restoredAt"]),

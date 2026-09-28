@@ -12,12 +12,14 @@ from app.modules.backup.application.operations import (
     GetBackupDownload,
     ListBackups,
     RestoreBackup,
+    UploadBackup,
 )
 from app.modules.backup.infrastructure.archive_store import FileSystemBackupArchiveStore
 
 
 @dataclass(frozen=True, slots=True)
 class BackupUseCases:
+    upload: UploadBackup
     create: CreateBackup
     list: ListBackups
     get: GetBackup
@@ -29,6 +31,7 @@ class BackupUseCases:
 def build_backup_use_cases(db: Session, settings: Settings) -> BackupUseCases:
     archive_store = FileSystemBackupArchiveStore(db, settings)
     return BackupUseCases(
+        upload=UploadBackup(archive_store),
         create=CreateBackup(archive_store),
         list=ListBackups(archive_store),
         get=GetBackup(archive_store),

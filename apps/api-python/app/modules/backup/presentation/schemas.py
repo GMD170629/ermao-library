@@ -14,6 +14,22 @@ class BackupArchiveResponse(Response):
     media_type = "application/zip"
 
 
+class BackupProblemResponse(HttpContractModel):
+    code: str
+    message: str
+    message_en: str = Field(alias="messageEn")
+    params: dict[str, str]
+
+
+class BackupCompatibilityResponse(HttpContractModel):
+    status: Literal["compatible", "incompatible", "unreadable"]
+    problem: BackupProblemResponse | None
+    format_version: str | None = Field(alias="formatVersion")
+    database_revision: str | None = Field(alias="databaseRevision")
+    required_format_version: str = Field(alias="requiredFormatVersion")
+    required_database_revision: str = Field(alias="requiredDatabaseRevision")
+
+
 class Backup(HttpContractModel):
     id: str
     kind: str | None = None
@@ -22,6 +38,7 @@ class Backup(HttpContractModel):
     size_bytes: int = Field(alias="sizeBytes")
     created_at: datetime = Field(alias="createdAt")
     counts: dict[str, int] | None = None
+    compatibility: BackupCompatibilityResponse | None = None
 
 
 class BackupsPayload(HttpContractModel):

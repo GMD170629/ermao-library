@@ -47,6 +47,7 @@ from app.models import (
 )
 from app.models.import_pipeline import Source
 from app.models.settings import ReaderBookPreference, SystemSetting
+from app.modules.backup.application.operations import BackupOperationError
 from app.modules.backup.infrastructure.archive import (
     backup_path,
     create_backup,
@@ -1069,8 +1070,9 @@ def test_invalid_topology_backup_is_rejected_before_live_restore(tmp_path) -> No
                 )
                 archive.writestr("settings.json", settings_bytes)
 
-            with pytest.raises(ValueError, match="BACKUP_FOREIGN_KEY_INVALID"):
+            with pytest.raises(BackupOperationError, match="BACKUP_FOREIGN_KEY_INVALID") as failure:
                 restore_backup(db, settings, backup.id)
+            assert failure.value.problem.params["field"] == "LibraryBook.sourceNodeId"
             assert db.get(SystemSetting, "backup.sentinel").value == "before"
     finally:
         engine.dispose()

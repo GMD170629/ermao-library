@@ -43,8 +43,8 @@ export function proxy(request: NextRequest): NextResponse {
 }
 
 export const config = {
-  // FastAPI authenticates this upload endpoint itself. Keeping it outside the
+  // FastAPI authenticates these upload endpoints itself. Keeping it outside the
   // Next Proxy preserves streaming instead of cloning and truncating large
   // multipart bodies at Next's request-body buffer limit.
-  matcher: ['/((?!api/books/import(?:/|$)|.*\\.).*)']
+  matcher: ['/((?!api/(?:books/import|backups/upload)(?:/|$)|.*\\.).*)']
 };

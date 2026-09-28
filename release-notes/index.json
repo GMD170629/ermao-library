@@ -3,6 +3,18 @@
   "repository": "GMD170629/ermao-library",
   "releases": [
     {
+      "version": "1.5.1",
+      "tag": "v1.5.1",
+      "publishedAt": "2026-09-28T17:23:24+08:00",
+      "notesPath": "v1.5.1.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v1.5.1",
+      "serverUpdate": {
+        "mode": "code-only",
+        "baseVersion": "1.5.0",
+        "runtimeImage": "gamersgu/shuku-starship-web@sha256:eda6aea8334773183d28fe1c539bb050309e03f7207911c1f31f6fab1ac05d2d"
+      }
+    },
+    {
       "version": "1.5.0",
       "tag": "v1.5.0",
       "publishedAt": "2026-09-28T00:30:00+08:00",

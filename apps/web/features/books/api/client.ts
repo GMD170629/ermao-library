@@ -656,9 +656,12 @@ export async function uploadResourceCover(bookId: string, resourceId: string, co
 }
 
 export async function deleteResourceSource(bookId: string, resourceId: string): Promise<void> {
+  // getRandomValues also works on HTTP origins where randomUUID is unavailable.
+  const idempotencyKey = Array.from(crypto.getRandomValues(new Uint8Array(16)),
+    (byte) => byte.toString(16).padStart(2, '0')).join('');
   await apiJson(`/api/books/${encodeURIComponent(bookId)}/resources/${encodeURIComponent(resourceId)}/source`, {
     method: 'DELETE',
-    headers: { 'Idempotency-Key': crypto.randomUUID() }
+    headers: { 'Idempotency-Key': idempotencyKey }
   });
 }
 

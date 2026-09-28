@@ -49,7 +49,9 @@ def test_restore_preflight_does_not_misclassify_infrastructure_failures(tmp_path
             response = client.post(f"/api/backups/{backup_id}/restore")
             monkeypatch.setattr(archive.SqlAlchemyBackupRestoreWriter, "apply", original_apply)
             assert response.status_code == (400 if kind == "known_record" else 500), response.text
-            assert response.json()["error"]["code"] == ("BACKUP_CONTENT_INVALID" if kind == "known_record" else "INTERNAL_ERROR")
+            assert response.json()["error"]["code"] == ({"known_record": "BACKUP_FIELD_TYPE_INVALID", "io": "BACKUP_IO_ERROR", "unknown_value": "BACKUP_OPERATION_FAILED"}[kind])
+            assert response.json()["error"]["params"]["stage"] == "validate"
+            assert ("User.id" if kind == "known_record" else "temporary database I/O failed" if kind == "io" else "restore writer invariant failed") in response.json()["error"]["message"]
             assert observed_temporary_database == ["database"]
             assert client.get("/api/auth/me").status_code == 200
         with factory() as db:

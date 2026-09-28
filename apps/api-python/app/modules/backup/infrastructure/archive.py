@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import tempfile
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from secrets import token_hex
-from typing import Any
+from typing import Any, BinaryIO
 
 from alembic.migration import MigrationContext
 from sqlalchemy.engine import Engine
@@ -28,12 +29,17 @@ from app.db.maintenance import (
 from app.db.runner import head_revision
 from app.db.sqlite import create_sqlite_engine
 from app.modules.backup.application.operations import (
-    BackupFormatError,
+    BackupOperationError,
     BackupRequestError,
 )
 from app.modules.backup.application.restore import (
     ApplyValidatedBackupRestore,
     PreparedRestorePlan,
+)
+from app.modules.backup.infrastructure.inspection import (
+    BACKUP_FORMAT_VERSION,
+    inspect_backup,
+    require_compatible,
 )
 from app.modules.backup.infrastructure.persistence import (
     SqlAlchemyBackupRestoreWriter,
@@ -42,6 +48,11 @@ from app.modules.backup.infrastructure.persistence import (
     prepare_restore_plan,
     prepare_table_records,
     validate_restore_relationships,
+)
+from app.modules.backup.infrastructure.problems import (
+    backup_stage,
+    failure_problem,
+    problem,
 )
 
 BACKUP_TABLES: list[tuple[str, str]] = [
@@ -86,7 +97,7 @@ BACKUP_TABLES: list[tuple[str, str]] = [
     ("sources", "Source"),
     ("systemSettings", "SystemSetting"),
 ]
-BACKUP_FORMAT_VERSION = 5
+
 
 # The persistence adapter derives the actual order from ORM foreign keys.  This
 # list deliberately contains every exported table so the delete side clears
@@ -115,13 +126,90 @@ def backup_id(kind: str = "manual", created_at: datetime | None = None) -> str:
 
 
 def assert_backup_id(value: str) -> None:
-    if not re.fullmatch(r"(manual|automatic)-\d{8}-\d{6}-[a-z0-9]+|backup-\d+", value):
-        raise BackupRequestError("INVALID_BACKUP_ID")
+    # IDs are filename stems, including user-uploaded names and collision indices.
+    if (
+        not value
+        or value in {".", ".."}
+        or value.startswith(".")
+        or value.endswith((" ", "."))
+        or re.search(r'[\x00-\x1f<>:"/\\|?*]', value)
+        or re.fullmatch(r"(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?", value)
+    ):
+        raise BackupOperationError(
+            problem("BACKUP_NAME_INVALID", "备份文件名无效", "Invalid backup filename"),
+            stage="file",
+        )
 
 
 def backup_path(settings: Settings, backup_id_value: str) -> Path:
     assert_backup_id(backup_id_value)
-    return backup_dir(settings) / f"{backup_id_value}.zip"
+    root = backup_dir(settings).resolve()
+    path = root / f"{backup_id_value}.zip"
+    if path.is_symlink() or path.resolve().parent != root:
+        raise BackupOperationError(
+            problem(
+                "BACKUP_PATH_INVALID", "备份文件路径不安全", "Unsafe backup file path"
+            ),
+            stage="file",
+        )
+    return path
+
+
+def upload_backup(settings: Settings, filename: str, stream: BinaryIO) -> Path:
+    if not filename.endswith(".zip"):
+        raise BackupOperationError(
+            problem(
+                "BACKUP_EXTENSION_INVALID",
+                "请选择 .zip 备份文件",
+                "Select a .zip backup file",
+            ),
+            stage="upload",
+        )
+    stem = filename[:-4]
+    backup_path(settings, stem)
+    root = backup_dir(settings)
+    temporary_path = root / f".upload-{token_hex(16)}.part"
+    try:
+        with temporary_path.open("xb") as output:
+            while chunk := stream.read(1024 * 1024):
+                output.write(chunk)
+            output.flush()
+            os.fsync(output.fileno())
+        index = 0
+        while True:
+            candidate = backup_path(
+                settings, stem if index == 0 else f"{stem}（{index}）"
+            )
+            try:
+                # Atomic no-replace publication, on the same filesystem on Windows/Linux.
+                os.link(temporary_path, candidate)
+                break
+            except FileExistsError:
+                # diagnostics-control-flow: another upload owns this name; try the next index.
+                index += 1
+    except Exception as original:
+        record_exception(
+            logging.getLogger(__name__),
+            "backup.upload.failed",
+            original,
+            context={"stage": "upload"},
+        )
+        try:
+            temporary_path.unlink(missing_ok=True)
+        except OSError as cleanup:
+            record_exception(
+                logging.getLogger(__name__),
+                "backup.upload.cleanup_failed",
+                cleanup,
+                context={"stage": "upload_cleanup"},
+            )
+            raise ExceptionGroup(
+                "Backup upload and cleanup failed", [original, cleanup]
+            ) from original
+        raise
+    else:
+        temporary_path.unlink(missing_ok=True)
+        return candidate
 
 
 def json_default(value: Any) -> str:
@@ -287,37 +375,61 @@ def create_backup(
     return result
 
 
-def read_backup_metadata(path: Path) -> dict[str, Any] | None:
+def backup_record(path: Path, required_revision: str) -> dict[str, Any]:
+    inspected = inspect_backup(path, required_revision)
+    metadata = inspected.metadata
     try:
-        with zipfile.ZipFile(path) as archive:
-            return json.loads(archive.read("metadata.json").decode("utf-8"))
-    except (OSError, KeyError, ValueError, zipfile.BadZipFile) as error:
-        record_exception(logging.getLogger(__name__), "modules.backup.infrastructure.archive.read_backup_metadata.failed", error,
-                         context={"step": "read_backup_metadata"})
-        return None
+        stat = path.stat()
+        size = stat.st_size
+        created_at = datetime.fromtimestamp(stat.st_mtime, UTC).isoformat()
+    except OSError as error:
+        record_exception(
+            logging.getLogger(__name__),
+            "backup.stat.failed",
+            error,
+            context={"stage": "inspect"},
+        )
+        inspected = replace(
+            inspected,
+            compatibility=replace(
+                inspected.compatibility,
+                status="unreadable",
+                problem=failure_problem(error),
+            ),
+        )
+        size = 0
+        created_at = datetime.fromtimestamp(0, UTC).isoformat()
+    if isinstance(metadata.get("createdAt"), str):
+        try:
+            created_at = datetime.fromisoformat(str(metadata["createdAt"])).isoformat()
+        except ValueError:
+            # diagnostics-control-flow: inspection already reports the invalid metadata.
+            pass
+    counts = metadata.get("counts")
+    if not isinstance(counts, dict) or any(
+        not isinstance(v, int) or isinstance(v, bool) or v < 0 for v in counts.values()
+    ):
+        counts = None
+    return {
+        "id": path.stem,
+        "kind": metadata.get("kind") or "unknown",
+        "name": path.name,
+        "filename": path.name,
+        "sizeBytes": size,
+        "createdAt": created_at,
+        "counts": counts,
+        "compatibility": inspected.compatibility,
+    }
 
 
 def list_backups(settings: Settings) -> list[dict[str, Any]]:
-    backups = []
-    for path in backup_dir(settings).glob("*.zip"):
-        metadata = read_backup_metadata(path)
-        stat = path.stat()
-        backups.append(
-            {
-                "id": metadata.get("id") if metadata else path.stem,
-                "kind": metadata.get("kind") if metadata else "unknown",
-                "name": path.name,
-                "filename": path.name,
-                "sizeBytes": stat.st_size,
-                "createdAt": metadata.get("createdAt")
-                if metadata
-                else datetime.fromtimestamp(stat.st_mtime, UTC).isoformat(),
-                "counts": metadata.get("counts") if metadata else None,
-            }
-        )
-    return sorted(
-        backups, key=lambda item: str(item.get("createdAt") or ""), reverse=True
-    )
+    revision = head_revision()
+    backups = [
+        backup_record(path, revision)
+        for path in backup_dir(settings).glob("*.zip")
+        if not path.is_symlink()
+    ]
+    return sorted(backups, key=lambda item: str(item["createdAt"]), reverse=True)
 
 
 def delete_backup_file(settings: Settings, backup_id_value: str) -> bool:
@@ -328,23 +440,30 @@ def delete_backup_file(settings: Settings, backup_id_value: str) -> bool:
     return True
 
 
-def parse_backup(path: Path) -> tuple[dict[str, Any], dict[str, object]]:
+def parse_backup(path: Path) -> tuple[dict[str, object], dict[str, object]]:
+    inspected = require_compatible(path, head_revision())
     try:
         with zipfile.ZipFile(path) as archive:
-            metadata = json.loads(archive.read("metadata.json").decode("utf-8"))
-            database_export = json.loads(
-                archive.read("database-export.json").decode("utf-8")
-            )
-    except (KeyError, json.JSONDecodeError, UnicodeDecodeError, zipfile.BadZipFile) as exc:
-        raise BackupFormatError("BACKUP_FORMAT_INVALID") from exc
-    if not isinstance(metadata, dict) or not isinstance(database_export, dict):
-        raise BackupFormatError("BACKUP_FORMAT_INVALID")
-    if (
-        metadata.get("app") != "ermao-books"
-        or metadata.get("version") != BACKUP_FORMAT_VERSION
-    ):
-        raise BackupRequestError("BACKUP_REVISION_UNSUPPORTED")
-    return metadata, database_export
+            database_export = json.loads(archive.read("database-export.json"))
+    except (KeyError, ValueError, UnicodeError, zipfile.BadZipFile) as exc:
+        raise BackupOperationError(
+            problem(
+                "BACKUP_DATA_INVALID",
+                "database-export.json 无法读取或解析",
+                "database-export.json cannot be read or parsed",
+            ),
+            stage="validate",
+        ) from exc
+    if not isinstance(database_export, dict):
+        raise BackupOperationError(
+            problem(
+                "BACKUP_DATA_INVALID",
+                "database-export.json 必须包含数据对象",
+                "database-export.json must contain an object",
+            ),
+            stage="validate",
+        )
+    return inspected.metadata, database_export
 
 
 def _calibrate_runtime_rows(
@@ -417,17 +536,31 @@ def restore_backup(
 ) -> dict[str, Any]:
     path = backup_path(settings, backup_id_value)
     if not path.exists():
-        raise FileNotFoundError("备份不存在")
-    metadata, database_export = parse_backup(path)
+        raise BackupOperationError(
+            problem(
+                "BACKUP_FILE_MISSING",
+                "备份文件不存在",
+                "The backup file does not exist",
+            ),
+            stage="restore",
+            status_code=404,
+        )
+    with backup_stage("validate"):
+        metadata, database_export = parse_backup(path)
     live_engine = _engine_for_session(db)
     supported_revision = head_revision(live_engine)
-    if (
-        metadata.get("databaseRevision") != supported_revision
-        or _engine_database_revision(live_engine) != supported_revision
-    ):
-        raise BackupRequestError("BACKUP_REVISION_UNSUPPORTED")
-    plan = _prepare_restore(database_export)
-    _validate_restore_against_temporary_database(plan)
+    if _engine_database_revision(live_engine) != supported_revision:
+        raise BackupOperationError(
+            problem(
+                "BACKUP_LIVE_DATABASE_MISMATCH",
+                "当前数据库尚未升级到应用要求的结构版本",
+                "The live database has not been upgraded to the revision required by this application",
+            ),
+            stage="validate",
+        )
+    with backup_stage("validate"):
+        plan = _prepare_restore(database_export)
+        _validate_restore_against_temporary_database(plan)
     writer = SqlAlchemyBackupRestoreWriter(db)
     ApplyValidatedBackupRestore(writer, db).execute(
         prepare_maintenance_state_plan(
@@ -440,23 +573,31 @@ def restore_backup(
             database_restore_barrier(settings.database_path),
             database_restore_connection(db.connection()),
         ):
-            try:
-                ApplyValidatedBackupRestore(writer, db).execute(plan)
-            except Exception:
-                ApplyValidatedBackupRestore(writer, db).execute(
-                    prepare_maintenance_state_plan(
-                        setting_key=DATABASE_MAINTENANCE_SETTING_KEY,
-                        setting_value=None,
-                    )
-                )
-                raise
-    except Exception:
-        ApplyValidatedBackupRestore(writer, db).execute(
-            prepare_maintenance_state_plan(
-                setting_key=DATABASE_MAINTENANCE_SETTING_KEY,
-                setting_value=None,
-            )
+            ApplyValidatedBackupRestore(writer, db).execute(plan)
+    except Exception as original:
+        record_exception(
+            logging.getLogger(__name__),
+            "backup.restore.apply_failed",
+            original,
+            context={"stage": "restore"},
         )
+        try:
+            ApplyValidatedBackupRestore(writer, db).execute(
+                prepare_maintenance_state_plan(
+                    setting_key=DATABASE_MAINTENANCE_SETTING_KEY,
+                    setting_value=None,
+                )
+            )
+        except Exception as recovery:  # noqa: BLE001 - preserve the recovery failure alongside the original.
+            record_exception(
+                logging.getLogger(__name__),
+                "backup.restore.recovery_failed",
+                recovery,
+                context={"stage": "rollback"},
+            )
+            raise ExceptionGroup(
+                "Backup restore and recovery failed", [original, recovery]
+            ) from original
         raise
     db.expire_all()
     actual_counts = {

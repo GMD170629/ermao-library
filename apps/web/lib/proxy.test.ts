@@ -48,8 +48,8 @@ test('proxy allows protected routes with a session', () => {
   assert.equal(response.headers.get('x-middleware-next'), '1');
 });
 
-test('large import uploads bypass proxy request-body buffering', () => {
+test('large import and backup uploads bypass proxy request-body buffering', () => {
   assert.deepEqual(config.matcher, [
-    '/((?!api/books/import(?:/|$)|.*\\.).*)'
+    '/((?!api/(?:books/import|backups/upload)(?:/|$)|.*\\.).*)'
   ]);
 });

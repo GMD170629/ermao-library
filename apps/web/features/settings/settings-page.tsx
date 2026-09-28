@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Database, Download, FolderOpen, RotateCcw, Save, Settings2, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Database, Download, FolderOpen, RotateCcw, Save, Settings2, SlidersHorizontal, Trash2, Upload } from 'lucide-react';
 import { FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
@@ -8,7 +8,8 @@ import { useConfirm, useToast } from '../../components/ui/feedback';
 import { useI18n } from '../../i18n/provider';
 import { PageTitle } from '../../components/ui/page-title';
 import { Select } from '../../components/ui/select';
-import { withBasePath } from '../../lib/base-path';
+import * as backupsApi from './api/backups-client';
+import type { BackupItem } from './api/backups-client';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 import {
@@ -38,19 +39,6 @@ type LibrariesPayload = {
   libraries: Library[];
   lastUploadTargetPath?: string | null;
   lastDownloadTargetPath?: string | null;
-};
-
-type BackupItem = {
-  id: string;
-  kind: 'manual' | 'automatic' | 'unknown';
-  filename: string;
-  sizeBytes: number;
-  createdAt: string;
-  counts?: {
-    books: number;
-    readingProgresses: number;
-    libraries: number;
-  };
 };
 
 function formatBytes(bytes: number) {
@@ -86,6 +74,13 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [backupBusy, setBackupBusy] = useState('');
+  const backupUploadInput = useRef<HTMLInputElement>(null);
+  const backupListRequest = useRef<AbortController | null>(null);
+  const backupActionRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => {
+    backupListRequest.current?.abort();
+    backupActionRequest.current?.abort();
+  }, []);
   const [pathBusy, setPathBusy] = useState('');
   const [ruleBusy, setRuleBusy] = useState('');
   const [showCreateFolder, setShowCreateFolder] = useState(false);
@@ -105,11 +100,16 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
   }, []);
 
   const loadBackups = useCallback(async () => {
-    const response = await fetch('/api/backups');
-    const payload = (await response.json()) as { ok: boolean; data?: { backups: BackupItem[] }; error?: { message: string } };
-    if (payload.ok) setBackups(payload.data?.backups ?? []);
-    else setError(payload.error?.message ?? '读取备份列表失败');
-  }, []);
+    backupListRequest.current?.abort();
+    const controller = new AbortController();
+    backupListRequest.current = controller;
+    try {
+      const backups = await backupsApi.loadBackups(controller.signal);
+      if (!controller.signal.aborted) setBackups(backups);
+    } catch (error) {
+      if (!controller.signal.aborted) setError(backupsApi.backupErrorMessage(error, locale));
+    }
+  }, [locale]);
 
   useEffect(() => {
     if (active === '监控规则') setActive('书库');
@@ -260,29 +260,51 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     setRuleBusy('');
   }
 
-  async function createBackup() {
+  async function runBackupAction(key: string, operation: (signal: AbortSignal) => Promise<string>) {
+    if (backupActionRequest.current) return;
+    const controller = new AbortController();
+    backupActionRequest.current = controller;
     setError('');
     setMessage('');
-    setBackupBusy('create');
-    const response = await fetch('/api/backups', { method: 'POST' });
-    const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
-    setBackupBusy('');
-    if (!payload.ok) {
-      const nextError = payload.error?.message ?? '创建备份失败';
-      setError(nextError);
-      toast.error('创建备份失败', nextError);
-      return;
+    setBackupBusy(key);
+    try {
+      const result = await operation(controller.signal);
+      if (controller.signal.aborted) return;
+      setMessage(result);
+      toast.success(result);
+      if (!key.startsWith('restore:')) await loadBackups();
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        const reason = backupsApi.backupErrorMessage(error, locale);
+        setError(reason);
+        toast.error(i18nAttribute('备份操作未完成'), reason);
+      }
+    } finally {
+      if (!controller.signal.aborted) setBackupBusy('');
+      if (backupActionRequest.current === controller) backupActionRequest.current = null;
     }
-    setMessage('备份已创建');
-    toast.success('备份已创建');
-    await loadBackups();
+  }
+
+  async function createBackup() {
+    await runBackupAction('create', async (signal) => {
+      await backupsApi.createBackup(signal);
+      return i18nAttribute('备份已创建');
+    });
+  }
+
+  async function uploadBackup(file: File) {
+    await runBackupAction('upload', async (signal) => {
+      const backup = await backupsApi.uploadBackup(file, signal);
+      return i18nAttribute('备份已上传：{filename}', { filename: backup.filename });
+    });
   }
 
   function downloadBackup(backup: BackupItem) {
-    window.location.href = withBasePath(`/api/backups/${backup.id}/download`);
+    window.location.href = backupsApi.backupDownloadUrl(backup.id);
   }
 
   async function restoreBackup(backup: BackupItem) {
+    if (backup.compatibility.status !== 'compatible' || backupActionRequest.current) return;
     const first = await confirm({
       title: '恢复备份',
       description: '恢复备份会覆盖当前读物元数据、标签、阅读进度和书库配置，但不会删除原始读物文件。是否继续？',
@@ -296,25 +318,10 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
       toast.info('恢复已取消', '确认文本不匹配');
       return;
     }
-    setError('');
-    setMessage('');
-    setBackupBusy(`restore:${backup.id}`);
-    const response = await fetch(`/api/backups/${backup.id}/restore`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ confirm: true, confirmText })
+    await runBackupAction(`restore:${backup.id}`, async (signal) => {
+      await backupsApi.restoreBackup(backup.id, signal);
+      return i18nAttribute('备份已恢复，原始读物文件未被删除');
     });
-    const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
-    setBackupBusy('');
-    if (!payload.ok) {
-      const nextError = payload.error?.message ?? '恢复备份失败';
-      setError(nextError);
-      toast.error('恢复备份失败', nextError);
-      return;
-    }
-    setMessage('备份已恢复，原始读物文件未被删除');
-    toast.success('备份已恢复', '原始读物文件未被删除');
-    await Promise.all([loadPaths(), loadBackups()]);
   }
 
   async function deleteBackup(backup: BackupItem) {
@@ -325,21 +332,10 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
       tone: 'danger'
     });
     if (!confirmed) return;
-    setError('');
-    setMessage('');
-    setBackupBusy(`delete:${backup.id}`);
-    const response = await fetch(`/api/backups/${backup.id}`, { method: 'DELETE' });
-    const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
-    setBackupBusy('');
-    if (!payload.ok) {
-      const nextError = payload.error?.message ?? '删除备份失败';
-      setError(nextError);
-      toast.error('删除备份失败', nextError);
-      return;
-    }
-    setMessage('备份已删除');
-    toast.success('备份已删除');
-    await loadBackups();
+    await runBackupAction(`delete:${backup.id}`, async (signal) => {
+      await backupsApi.deleteBackup(backup.id, signal);
+      return i18nAttribute('备份已删除');
+    });
   }
 
   return (
@@ -456,11 +452,20 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                   <div className="font-semibold"><I18nText>备份范围</I18nText></div>
                   <div className="mt-1 text-sm leading-6 text-slate-500"><I18nText>仅包含系统设置和数据库数据，包括读物元数据、标签、阅读进度、书库配置和封面缓存索引；不包含原始读物文件或封面图片文件。</I18nText></div>
                   <div className="mt-2 text-xs text-slate-500"><I18nText>当前支持手动备份；恢复备份会覆盖数据库中的相关记录。</I18nText></div>
+                  <p className="mt-2 text-sm text-amber-800"><I18nText>备份仅在备份格式及数据库结构版本匹配时可恢复，不保证未来版本能够恢复此备份。请同时保存原始读物文件。</I18nText></p>
                 </div>
-                <Button icon={Save} onClick={createBackup} loading={backupBusy === 'create'} loadingText={i18nAttribute("创建中")}><I18nText>备份</I18nText></Button>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <Button icon={Save} disabled={!!backupBusy} onClick={createBackup} loading={backupBusy === 'create'} loadingText={i18nAttribute("创建中")}><I18nText>备份</I18nText></Button>
+                  <input ref={backupUploadInput} type="file" accept=".zip" className="hidden" aria-label={i18nAttribute('上传备份')} onChange={(event) => {
+                    const file = event.currentTarget.files?.[0];
+                    event.currentTarget.value = '';
+                    if (file) void uploadBackup(file);
+                  }} />
+                  <Button variant="secondary" icon={Upload} disabled={!!backupBusy} loading={backupBusy === 'upload'} loadingText={i18nAttribute('上传中')} onClick={() => backupUploadInput.current?.click()}><I18nText>上传备份</I18nText></Button>
+                </div>
               </div>
               {message ? <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{message}</div> : null}
-              {error ? <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+              {error ? <div role="alert" className="whitespace-pre-wrap break-words rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
               <div className="space-y-3">
                 {backups.map((backup) => (
                   <div key={backup.id} className="flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white p-5 md:flex-row md:items-center">
@@ -473,15 +478,22 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                         <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600">{backup.kind === 'automatic' ? i18nAttribute("自动") : backup.kind === 'manual' ? i18nAttribute("手动") : i18nAttribute("未知")}</span>
                       </div>
                       <div className="mt-1 text-sm text-slate-500">{new Date(backup.createdAt).toLocaleString(locale)} · {formatBytes(backup.sizeBytes)}</div>
+                      <div className="mt-2 text-sm">
+                        <span className={backup.compatibility.status === 'compatible' ? 'text-emerald-700' : 'text-amber-800'}>
+                          {backup.compatibility.status === 'compatible' ? i18nAttribute('版本兼容') : backup.compatibility.status === 'incompatible' ? i18nAttribute('不兼容') : i18nAttribute('无法校验')}
+                        </span>
+                        {backup.compatibility.problem ? <p className="mt-1 break-words text-amber-800" data-i18n-skip>{locale === 'en-US' ? backup.compatibility.problem.messageEn : backup.compatibility.problem.message}</p>
+                          : <p className="mt-1 text-xs text-slate-500"><I18nText>恢复前仍会校验备份数据完整性。</I18nText></p>}
+                      </div>
                       {backup.counts ? (
                         <div className="mt-2 text-xs text-slate-500">
-                          {backup.counts.books} <I18nText>本图书 · </I18nText>{backup.counts.readingProgresses} <I18nText>条阅读进度 · </I18nText>{backup.counts.libraries} <I18nText>个书库</I18nText></div>
+                          {backup.counts.books} <I18nText>本图书 · </I18nText>{backup.counts.readerProgressV5 ?? backup.counts.readerProgress ?? 0} <I18nText>条阅读进度 · </I18nText>{backup.counts.libraries} <I18nText>个书库</I18nText></div>
                       ) : null}
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <Button variant="secondary" icon={Download} onClick={() => downloadBackup(backup)}><I18nText>下载</I18nText></Button>
-                      <Button variant="secondary" icon={RotateCcw} onClick={() => restoreBackup(backup)} loading={backupBusy === `restore:${backup.id}`} loadingText={i18nAttribute("恢复中")}><I18nText>恢复</I18nText></Button>
-                      <Button variant="danger" icon={Trash2} onClick={() => deleteBackup(backup)} loading={backupBusy === `delete:${backup.id}`} loadingText={i18nAttribute("删除中")}><I18nText>删除</I18nText></Button>
+                      <Button variant="secondary" icon={RotateCcw} disabled={!!backupBusy || backup.compatibility.status !== 'compatible'} onClick={() => restoreBackup(backup)} loading={backupBusy === `restore:${backup.id}`} loadingText={i18nAttribute("恢复中")}><I18nText>恢复</I18nText></Button>
+                      <Button variant="danger" icon={Trash2} disabled={!!backupBusy} onClick={() => deleteBackup(backup)} loading={backupBusy === `delete:${backup.id}`} loadingText={i18nAttribute("删除中")}><I18nText>删除</I18nText></Button>
                     </div>
                   </div>
                 ))}

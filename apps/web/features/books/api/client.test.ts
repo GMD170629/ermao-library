@@ -423,20 +423,33 @@ test('maps local identification and online failure independently from import fai
 });
 
 
-test('resource deletion needs no typed confirmation and preserves idempotency', async () => {
+test('resource deletion works without randomUUID and gives each action its own idempotency key', async () => {
+  const originalCrypto = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+  const getRandomValues = globalThis.crypto.getRandomValues.bind(globalThis.crypto);
+  Object.defineProperty(globalThis, 'crypto', { configurable: true, value: { getRandomValues } });
   const originalFetch = globalThis.fetch;
   let calls = 0;
+  const keys: string[] = [];
   globalThis.fetch = async (input, init) => {
     calls++;
     assert.equal(String(input), '/api/books/book-1/resources/resource-1/source');
     assert.equal(init?.method, 'DELETE');
     assert.equal(init?.body, undefined);
-    assert.ok(new Headers(init?.headers).get('Idempotency-Key'));
+    const key = new Headers(init?.headers).get('Idempotency-Key');
+    assert.ok(key);
+    assert.match(key, /^[0-9a-f]{32}$/);
+    keys.push(key);
     return new Response(JSON.stringify({ ok: true, data: {} }), { status: 200 });
   };
-  try { await deleteResourceSource('book-1', 'resource-1'); }
-  finally { globalThis.fetch = originalFetch; }
-  assert.equal(calls, 1);
+  try {
+    await deleteResourceSource('book-1', 'resource-1');
+    await deleteResourceSource('book-1', 'resource-1');
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalCrypto) Object.defineProperty(globalThis, 'crypto', originalCrypto);
+  }
+  assert.equal(calls, 2);
+  assert.notEqual(keys[0], keys[1]);
 });
 
 

@@ -2,7 +2,35 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import BinaryIO, Literal, Protocol
+
+
+@dataclass(frozen=True, slots=True)
+class BackupProblem:
+    code: str
+    message: str
+    message_en: str
+    params: dict[str, str]
+
+
+@dataclass(frozen=True, slots=True)
+class BackupCompatibility:
+    status: Literal["compatible", "incompatible", "unreadable"]
+    problem: BackupProblem | None
+    format_version: str | None
+    database_revision: str | None
+    required_format_version: str
+    required_database_revision: str
+
+
+class BackupOperationError(Exception):
+    def __init__(
+        self, problem: BackupProblem, *, stage: str, status_code: int = 400
+    ) -> None:
+        super().__init__(problem.code)
+        self.problem = problem
+        self.stage = stage
+        self.status_code = status_code
 
 
 class BackupNotFoundError(LookupError):
@@ -26,6 +54,7 @@ class BackupArchive:
     size_bytes: int
     created_at: datetime
     counts: dict[str, int] | None
+    compatibility: BackupCompatibility | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +73,7 @@ class BackupDownloadDescriptor:
 
 
 class BackupArchiveStore(Protocol):
+    def upload(self, filename: str, stream: BinaryIO) -> BackupArchive: ...
     def create(self) -> BackupArchive: ...
 
     def list(self) -> tuple[BackupArchive, ...]: ...
@@ -63,6 +93,14 @@ class CreateBackup:
 
     def execute(self) -> BackupArchive:
         return self._archive_store.create()
+
+
+class UploadBackup:
+    def __init__(self, archive_store: BackupArchiveStore) -> None:
+        self._archive_store = archive_store
+
+    def execute(self, filename: str, stream: BinaryIO) -> BackupArchive:
+        return self._archive_store.upload(filename, stream)
 
 
 class ListBackups:
