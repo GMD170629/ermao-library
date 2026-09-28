@@ -105,6 +105,17 @@ def main() -> None:
         )
         + "\n"
     )
+    # Application dependencies belong to the update, not the immutable image.
+    # Export locked wheels and actual standalone identities into a fresh candidate
+    # seed; never rewrite the installed image seed or pretend changed blobs are kept.
+    candidate_seed = Path("/tmp/candidate-dependencies")
+    run(
+        "sh",
+        str(program / "scripts/install-python-runtime.sh"),
+        str(program / "apps/api-python"),
+        str(candidate_seed),
+        "--wheel-seed",
+    )
     run(
         "uv",
         "--offline",
@@ -129,10 +140,19 @@ def main() -> None:
         "--no-index",
         "--no-deps",
         "--no-build",
-        *map(str, sorted(Path("/opt/shuku-dependency-seed/wheels").glob("*.whl"))),
+        *map(str, sorted((candidate_seed / "wheels").glob("*.whl"))),
     )
-    # Existing packager compares actual Node identities/layout with the untouched seed,
-    # verifies every seed blob and extracts the resulting code through the real reader.
+    run("uv", "pip", "check", "--python", "/tmp/package-tools/bin/python")
+    run(
+        "/tmp/package-tools/bin/python",
+        "/source/scripts/dependency_packages.py",
+        "--program-root",
+        str(program),
+        "--seed",
+        str(candidate_seed),
+    )
+    # Verify each candidate blob and its real dependency identity/layout against
+    # the unchanged runtime ABI and environment before allowing publication.
     run(
         "/tmp/package-tools/bin/python",
         "/source/scripts/build-application-package.py",
@@ -141,7 +161,7 @@ def main() -> None:
         "--output-dir",
         "/packages",
         "--dependency-seed",
-        "/opt/shuku-dependency-seed",
+        str(candidate_seed),
         "--fixed-environment",
         "/opt/shuku-launcher/environment.json",
         "--verify",

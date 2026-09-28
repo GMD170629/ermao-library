@@ -24,7 +24,7 @@ from dependency_environment import (
     business_environment,
     initialize_dependencies,
 )
-from dependency_packages import node_packages, python_packages
+from dependency_packages import generate, node_packages, python_packages
 from test_container_entry import entry
 
 
@@ -91,6 +91,44 @@ class PackageTests(unittest.TestCase):
         (third / "index.js").write_text('module.exports="changed"')
         after, _, _ = node_packages(self.root / "runtime", self.root / "artifacts")
         self.assertEqual(sum(before[p.location] != p.content_sha256 for p in after), 1)
+
+    def test_candidate_dependencies_change_without_rewriting_runtime_seed(self):
+        package = self.package("node_modules/@scope/same", "1.0.0")
+        original = self.root / "image-seed"
+        (original / "wheels").mkdir(parents=True)
+        wheel = original / "wheels/Demo_Pkg-1.0-py3-none-any.whl"
+        with zipfile.ZipFile(wheel, "w") as archive:
+            archive.writestr(
+                "Demo_Pkg-1.0.dist-info/METADATA", "Name: Demo_Pkg\nVersion: 1.0\n"
+            )
+            archive.writestr("Demo_Pkg-1.0.dist-info/RECORD", "demo.py,,\n")
+        baseline = generate(self.root / "runtime", original)
+        original_files = {
+            p.relative_to(original): p.read_bytes()
+            for p in original.rglob("*")
+            if p.is_file()
+        }
+        (package / "package.json").write_text(
+            json.dumps({"name": "@scope/same", "version": "2.0.0"})
+        )
+        (package / "index.js").write_text('module.exports="2.0.0"')
+        candidate = self.root / "candidate-seed"
+        (candidate / "wheels").mkdir(parents=True)
+        shutil.copy2(wheel, candidate / "wheels" / wheel.name)
+        updated = generate(self.root / "runtime", candidate)
+        node = next(p for p in updated["packages"] if p["ecosystem"] == "node")
+        self.assertNotEqual(baseline["identity"], updated["identity"])
+        self.assertEqual(node["version"], "2.0.0")
+        self.assertEqual(
+            original_files,
+            {
+                p.relative_to(original): p.read_bytes()
+                for p in original.rglob("*")
+                if p.is_file()
+            },
+        )
+        actual, _, _ = node_packages(self.root / "runtime", None)
+        self.assertEqual(actual[0].artifact.sha256, node["artifact"]["sha256"])
 
     def test_link_escape_and_unowned_files_fail_closed(self):
         self.package("node_modules/demo", "1")

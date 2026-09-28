@@ -95,7 +95,7 @@ test('accepted source is an ancestor, request is admitted separately and immutab
   assert.throws(() => validateSource({ ...r, sourceCommit: other }, { root, authorizedRef: 'main' }));
 });
 
-test('mode validates real Git inputs and ignores only application version in dependency identity', t => {
+test('mode permits changed application dependencies but rejects fixed container inputs', t => {
   const { root, put, commit, git } = repository(t);
   put('package.json', JSON.stringify({ version: '1.2.2', dependencies: { x: '1.0' } }));
   put('apps/web/package.json', JSON.stringify({ version: '1.2.2' }));
@@ -108,10 +108,10 @@ test('mode validates real Git inputs and ignores only application version in dep
   const r = sample(); r.sourceCommit = commit();
   assert.doesNotThrow(() => validateMode(r, { root }));
   put('package.json', JSON.stringify({ version: '1.2.3', dependencies: { x: '2.0' } })); r.sourceCommit = commit();
-  assert.throws(() => validateMode(r, { root }), /dependency/);
+  assert.doesNotThrow(() => validateMode(r, { root }));
   r.server.mode = 'application'; assert.doesNotThrow(() => validateMode(r, { root }));
   put('scripts/container-entry.py', 'changed runtime'); r.sourceCommit = commit();
-  assert.throws(() => validateMode(r, { root }), /Fixed runtime/);
+  assert.throws(() => validateMode(r, { root }), /Fixed container environment/);
 });
 
 

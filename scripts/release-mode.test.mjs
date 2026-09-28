@@ -53,15 +53,22 @@ test('published baseline and immutable ancestry are mandatory; continuous quick 
   validatePublishedBase(update, { tagName: 'v1.2.0', isDraft: false, isPrerelease: false });
 });
 
-test('eligibility rejects unshipped build inputs, shared clients and unknown migration layouts', t => {
+test('quick eligibility admits application, build, dependency, contract and shared client changes', t => {
+  const { root, put, commit } = repository(t);
+  for (const file of ['apps/web/proxy.ts', 'apps/web/scripts/generate-reader-api.mjs', 'patches/x.patch', 'pnpm-workspace.yaml', '.npmrc', 'apps/web/next.config.js', 'packages/reader-core/package.json', 'pnpm-lock.yaml', 'apps/api-python/pyproject.toml', 'apps/api-python/uv.lock', 'apps/mobile/shared/src/Main.kt', 'apps/api-python/app/contracts/http.py', 'packages/reader-contracts/policy.json', 'scripts/unified-http-gateway.mjs', 'scripts/install-python-runtime.sh']) {
+    put(file, file.endsWith('.json') ? '{}' : 'changed');
+  }
+  const sourceCommit = commit();
+  const result = validateMode({ server: update, sourceCommit }, { root });
+  assert.deepEqual(result.unshippedNativePaths, ['apps/mobile/shared/src/Main.kt']);
+});
+
+test('fixed container runtime changes still require a full release and identify the file', t => {
   const { root, put, commit, git } = repository(t);
-  put('apps/web/features/example.ts', 'export const fixed = true;');
-  put('apps/mobile/androidApp/build.gradle.kts', 'versionCode = 11\nversionName = "1.2.1"\n');
-  let sourceCommit = commit();
-  assert.doesNotThrow(() => validateMode({ server: update, sourceCommit }, { root }));
-  for (const file of ['patches/x.patch', 'pnpm-workspace.yaml', '.npmrc', 'apps/web/next.config.js', 'packages/reader-core/package.json', 'apps/mobile/shared/src/Main.kt', 'apps/api-python/app/db/migrations/versions/new.py', 'apps/api-python/app/contracts/http.py', 'scripts/container_image.py']) {
-    put(file, file.endsWith('.json') ? '{}' : 'changed'); sourceCommit = commit();
-    assert.throws(() => validateMode({ server: update, sourceCommit }, { root }), undefined, file);
+  for (const file of ['apps/web/Dockerfile.prod', '.nvmrc', 'apps/api-python/.python-version', 'scripts/container_image.py', 'scripts/container-entry.py', 'scripts/dependency_install.py', 'apps/api-python/shuku_dependencies/packages.py', 'apps/mobile/native/mobi-core/core.cpp', 'packages/reader-core/native/chapters/core.cpp']) {
+    put(file, 'changed');
+    const sourceCommit = commit();
+    assert.throws(() => validateMode({ server: update, sourceCommit }, { root }), error => error.message.includes('Fixed container environment changed') && error.message.includes(file));
     git('reset', '--hard', 'HEAD^');
   }
 });
