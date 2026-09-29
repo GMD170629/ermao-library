@@ -1,6 +1,6 @@
 'use client';
 
-import { ChevronDown, ChevronLeft, ChevronRight, Copy, Download, HardDrive, RefreshCw, Save, Search, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Copy, Download, HardDrive, MessageCircleWarning, RefreshCw, Save, Search, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { Badge, type BadgeTone } from '../../components/ui/badge';
@@ -21,6 +21,7 @@ import {
 } from './api/events';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
+import { FeedbackDialog } from '../feedback/public';
 
 function tone(level: string): BadgeTone {
   if (level === 'error') return 'red';
@@ -131,6 +132,7 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
   const [storage, setStorage] = useState<EventStorage>({ sizeBytes: 0, maxBytes: 5 * 1024 * 1024 });
   const [logMaxMb, setLogMaxMb] = useState(5);
   const [savingLimit, setSavingLimit] = useState(false);
+  const [feedbackEventId, setFeedbackEventId] = useState<string | null>(null);
   const toast = useToast();
 
   const buildParams = useCallback((targetPage: number, pageSize = 40) => {
@@ -268,6 +270,7 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
     <div className={embedded ? 'space-y-4' : 'space-y-6'}>
       {!embedded ? <PageTitle title={i18nAttribute("系统日志")} desc={i18nAttribute("按级别、来源、日期和关键字查看系统事件。")} action={<Button variant="secondary" icon={RefreshCw} loading={loading} loadingText={i18nAttribute("刷新中")} onClick={() => void load()}><I18nText>刷新</I18nText></Button>} /> : null}
       {!embedded ? <ManagementNav /> : null}
+      <div className="flex justify-end"><Button variant="secondary" icon={MessageCircleWarning} onClick={() => setFeedbackEventId('')}>{i18nAttribute('报告问题')}</Button></div>
 
       <section className="rounded-[22px] border border-[#DEDAD4] bg-white p-4 sm:p-5" aria-labelledby="log-storage-title">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -367,6 +370,7 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
                   <DiagnosticDetails event={eventDetails[event.id] ?? event} loading={Boolean(detailLoading[event.id])} />
                   {Object.keys(event.metadata ?? {}).length > 0 ? <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-white p-2 text-[11px] text-[#716B64]">{JSON.stringify(safeMetadata, null, 2)}</pre> : null}
                   {href ? <Link href={href} className="mt-2 inline-flex font-medium text-[#ED4D2D] hover:text-[#C83B23]"><I18nText>打开关联对象</I18nText></Link> : null}
+                  {event.level === 'error' ? <button type="button" onClick={() => setFeedbackEventId(event.id)} className="mt-2 block font-medium text-[#ED4D2D]"><I18nText>反馈此问题</I18nText></button> : null}
                 </div>
               ) : null}
               <button type="button" onClick={() => void toggleEvent(event.id)} aria-expanded={expanded} className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-[#DEDAD4] text-sm font-medium text-[#625D57] transition hover:bg-[#F6F3F0]">
@@ -412,6 +416,7 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
                         {event.targetType ? <div><span className="text-[#969089]"><I18nText>关联：</I18nText></span>{event.targetType}{event.targetId ? ` · ${event.targetId}` : ''}</div> : null}
                         {Object.keys(event.metadata ?? {}).length > 0 ? <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-white p-2 text-[11px] text-[#716B64]">{JSON.stringify(safeMetadata, null, 2)}</pre> : null}
                         {href ? <Link href={href} className="mt-2 inline-flex font-medium text-[#ED4D2D] hover:text-[#C83B23]"><I18nText>打开关联对象</I18nText></Link> : null}
+                        {event.level === 'error' ? <button type="button" onClick={() => setFeedbackEventId(event.id)} className="mt-2 block font-medium text-[#ED4D2D]"><I18nText>反馈此问题</I18nText></button> : null}
                       </div>
                     ) : null}
                   </td>
@@ -437,6 +442,7 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
           </div>
         ) : null}
       </footer>
+      {feedbackEventId !== null ? <FeedbackDialog initialKind="issue" eventId={feedbackEventId || undefined} onClose={() => setFeedbackEventId(null)} /> : null}
     </div>
   );
 }

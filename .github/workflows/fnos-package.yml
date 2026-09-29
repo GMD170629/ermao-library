@@ -485,6 +485,25 @@ jobs:
             node scripts/validate-release-notes.mjs
           fi
 
+      - name: Inject official feedback receiver URL
+        env:
+          FEEDBACK_RECEIVER_URL: ${{ vars.FEEDBACK_RECEIVER_URL }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          from urllib.parse import urlsplit
+
+          url = os.environ.get("FEEDBACK_RECEIVER_URL", "")
+          parsed = urlsplit(url)
+          if (parsed.scheme != "https" or not parsed.hostname or parsed.username or
+                  parsed.password or parsed.query or parsed.fragment or not parsed.path):
+              raise SystemExit("Set the FEEDBACK_RECEIVER_URL repository variable to the HTTPS feedback endpoint")
+          Path("apps/api-python/app/modules/feedback/receiver_endpoint.py").write_text(
+              f'"""Official receiver URL injected by the release build."""\n\nRECEIVER_URL = {url!r}\n',
+              encoding="utf-8",
+          )
+
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:

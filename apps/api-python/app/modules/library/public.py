@@ -350,5 +350,6 @@ from app.modules.library.application.file_deletions import DeletePlan, FileDelet
 __all__ += ["DeletePlan", "FileDeletions"]
 
 from app.modules.library.application.file_move_plans import MoveSource
+from app.modules.library.infrastructure.feedback_books import feedback_book_titles
 
-__all__ += ["MoveSource"]
+__all__ += ["MoveSource", "feedback_book_titles"]

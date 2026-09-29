@@ -5,6 +5,7 @@ from app.modules.auth.presentation.router import router as auth_router
 from app.modules.automation.presentation.http import router as automation_router
 from app.modules.backup.presentation.http import router as backup_router
 from app.modules.download.presentation.http import router as download_router
+from app.modules.feedback.presentation import router as feedback_router
 from app.modules.imports.presentation.http import router as imports_router
 from app.modules.kindle.presentation.http import router as kindle_router
 from app.modules.library.presentation.http import router as library_router
@@ -31,6 +32,7 @@ api_router.include_router(imports_router)
 api_router.include_router(media_router)
 api_router.include_router(library_router)
 api_router.include_router(download_router)
+api_router.include_router(feedback_router)
 api_router.include_router(shelf_router)
 api_router.include_router(organize_router)
 api_router.include_router(kindle_router, tags=["kindle"])

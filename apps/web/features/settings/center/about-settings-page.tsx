@@ -5,6 +5,7 @@ import { PRODUCT_DESCRIPTION, PRODUCT_NAME } from '../../../lib/brand';
 import { SettingsCenterShell } from './settings-center-shell';
 import { I18nText } from '@/i18n/provider';
 import { ReleaseHistory, RuntimeVersion } from '../../updates/public';
+import { AboutFeedbackEntry } from '../../feedback/public';
 
 const PROJECT_URL = 'https://github.com/GMD170629/ermao-library';
 
@@ -54,6 +55,7 @@ export function AboutSettingsPage() {
         </div>
       </div>
 
+      <AboutFeedbackEntry />
       <ReleaseHistory />
 
       <section className="mt-8 border-t border-[#DEDAD4] pt-7" aria-labelledby="project-introduction-title">

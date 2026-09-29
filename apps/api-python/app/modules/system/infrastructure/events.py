@@ -335,6 +335,10 @@ def get_system_event(db: Session, event_id: str) -> dict[str, Any] | None:
     row = db.get(SystemEvent, event_id)
     if row is None:
         return None
+    return _event_dict(row)
+
+
+def _event_dict(row: SystemEvent) -> dict[str, Any]:
     return {
         "id": row.id,
         "level": row.level,
@@ -348,6 +352,37 @@ def get_system_event(db: Session, event_id: str) -> dict[str, Any] | None:
         "metadata": normalize_stored_event_metadata(row.metadata_json, event_id=row.id),
         "createdAt": row.created_at,
     }
+
+
+def feedback_event_bundle(db: Session, event_id: str) -> list[dict[str, Any]]:
+    """Return one event and a bounded set sharing its strongest correlation ID."""
+
+    selected = get_system_event(db, event_id)
+    if selected is None:
+        return []
+    metadata = selected["metadata"]
+    correlation = next(
+        (
+            (key, value)
+            for key in ("taskId", "operationId", "requestId")
+            if isinstance(metadata.get(key), str)
+            and 0 < len(value := metadata[key]) <= 191
+        ),
+        None,
+    )
+    if correlation is None:
+        return [selected]
+    key, value = correlation
+    rows = db.scalars(
+        select(SystemEvent)
+        .where(SystemEvent.metadata_json[key].as_string() == value)
+        .order_by(SystemEvent.created_at.asc(), SystemEvent.id.asc())
+        .limit(20)
+    ).all()
+    found = [_event_dict(row) for row in rows]
+    if all(event["id"] != event_id for event in found):
+        found.insert(0, selected)
+    return found[:20]
 
 
 def list_event_source_facets(db: Session) -> list[dict[str, Any]]:

@@ -66,7 +66,7 @@ export function ReleaseHistory() {
       <UpdateOperations />
       {state.status === 'ready' ? (
         <div className="mt-5 space-y-3">
-          {state.feed.releases.map((release, index) => (
+          {state.feed.releases.slice(0, 5).map((release, index) => (
             <ReleaseEntry key={release.version} release={release} initiallyOpen={index === 0} />
           ))}
         </div>
