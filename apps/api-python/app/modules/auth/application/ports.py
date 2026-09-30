@@ -34,6 +34,8 @@ class UserCredentialReader(Protocol):
         self, normalized_email: str
     ) -> StoredPasswordCredential | None: ...
 
+    def finish_read(self) -> None: ...
+
 
 class PasswordVerificationGateway(Protocol):
     def verify(

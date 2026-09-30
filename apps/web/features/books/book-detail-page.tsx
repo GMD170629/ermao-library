@@ -663,8 +663,6 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
               >{tag}</Link>)}
             </div> : null}
           </div> : null}
-          {book.generatedFields?.includes("description") ? <span className="text-xs text-violet-600"><I18nText>简介 · AI 生成</I18nText></span> : null}
-          {book.generatedFields?.includes("tags") ? <span className="ml-2 text-xs text-violet-600"><I18nText>标签 · AI 生成</I18nText></span> : null}
           {book.description ? <div className={`${hasBookMetadata ? 'mt-4' : 'mt-5'} max-w-3xl`}>
             <p id="book-description" data-i18n-skip className={`${expandedDescriptionBookId === book.id ? '' : 'line-clamp-3 '}whitespace-pre-line text-sm leading-7 text-[var(--visual-color-app-text-secondary)]`}>{book.description}</p>
             <button

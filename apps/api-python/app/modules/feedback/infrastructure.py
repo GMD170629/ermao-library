@@ -5,14 +5,14 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from uuid import uuid4
 
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
-from app.modules.library.public import feedback_book_titles
-from app.modules.system.public import feedback_event_bundle
+from app.db.session import release_read_transaction
 
 from .domain import FeedbackReceipt
 from .receiver_endpoint import RECEIVER_URL
@@ -32,12 +32,16 @@ class Attachment:
 @dataclass(frozen=True)
 class DatabaseFeedbackDiagnostics:
     db: Session
+    book_titles_lookup: Callable[[Session, frozenset[str]], dict[str, str]]
+    event_bundle_lookup: Callable[[Session, str], list[dict[str, object]]]
 
     def event_bundle(self, event_id: str) -> list[dict[str, object]]:
-        return feedback_event_bundle(self.db, event_id)
+        return self.event_bundle_lookup(self.db, event_id)
 
     def book_titles(self, book_ids: frozenset[str]) -> dict[str, str]:
-        return feedback_book_titles(self.db, book_ids)
+        titles = self.book_titles_lookup(self.db, book_ids)
+        release_read_transaction(self.db)
+        return titles
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):

@@ -12,10 +12,11 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
+from app.bootstrap.feedback import build_feedback_diagnostics
 from app.contracts.http import SuccessEnvelope
 from app.core.config import Settings, get_settings
 from app.core.exception_diagnostics import record_exception
-from app.db.session import get_db
+from app.db.session import get_db, release_read_transaction
 from app.models.auth import User
 from app.schemas.responses import fail, ok
 
@@ -27,6 +28,7 @@ from .application import (
 )
 from .domain import (
     FeedbackDraft,
+    FeedbackEnvironment,
     FeedbackPreview,
     FeedbackReceipt,
     FeedbackSubmitRequest,
@@ -34,7 +36,6 @@ from .domain import (
 )
 from .infrastructure import (
     Attachment,
-    DatabaseFeedbackDiagnostics,
     FeedbackDeliveryError,
     send_to_official_site,
 )
@@ -51,7 +52,9 @@ EXTENSIONS = {
 def _preview(db: Session, actor: User, settings: Settings, draft: FeedbackDraft) -> FeedbackPreview | Response:
     try:
         context = FeedbackContext(actor.role, actor.can_manage_system, settings.app_version)
-        return prepare_preview(context, DatabaseFeedbackDiagnostics(db), draft)
+        if not draft.event_id:
+            release_read_transaction(db)
+        return prepare_preview(context, build_feedback_diagnostics(db), draft)
     except FeedbackAccessError:
         return fail("需要系统管理权限", 403, code="FEEDBACK_LOG_FORBIDDEN")
     except FeedbackEventMissing:
@@ -60,7 +63,11 @@ def _preview(db: Session, actor: User, settings: Settings, draft: FeedbackDraft)
         return fail("系统环境信息不完整", 400, code="FEEDBACK_ENVIRONMENT_INVALID")
 
 
-@router.post("/feedback/preview", response_model=SuccessEnvelope[FeedbackPreview])
+@router.post(
+    "/feedback/preview",
+    response_model=SuccessEnvelope[FeedbackPreview],
+    response_model_exclude_none=True,
+)
 def preview_feedback(
     draft: FeedbackDraft,
     request: Request,
@@ -71,19 +78,21 @@ def preview_feedback(
     if error is not None or actor is None:
         return error or fail("UNAUTHORIZED", 401)
     preview = _preview(db, actor, settings, draft)
-    return preview if isinstance(preview, Response) else ok(preview)
+    return preview if isinstance(preview, Response) else ok(
+        preview.model_dump(mode="json", by_alias=True, exclude_none=True)
+    )
 
 
-@router.get("/feedback/environment")
+@router.get("/feedback/environment", response_model=SuccessEnvelope[FeedbackEnvironment])
 def feedback_environment(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> Response:
+) -> SuccessEnvelope[FeedbackEnvironment] | Response:
     actor, error = require_user(db, request, settings)
     if error is not None or actor is None:
         return error or fail("UNAUTHORIZED", 401)
-    return ok({"appVersion": settings.app_version})
+    return ok(FeedbackEnvironment(appVersion=settings.app_version))
 
 
 @router.post("/feedback", response_model=SuccessEnvelope[FeedbackReceipt])
@@ -104,6 +113,7 @@ def submit_feedback(
     received = files or []
     if len(received) > 5:
         return fail("附件数量超限", 413, code="FEEDBACK_FILES_TOO_LARGE")
+    release_read_transaction(db)
     attachments: list[Attachment] = []
     total = 0
     for file in received:
@@ -132,8 +142,9 @@ def submit_feedback(
         "kind": submitted.kind,
         "markdown": submitted.markdown,
         "contact": submitted.contact.model_dump(by_alias=True),
-        "diagnostics": preview.diagnostics,
+        "diagnostics": preview.diagnostics.model_dump(mode="json", by_alias=True, exclude_none=True),
     }
+    release_read_transaction(db)
     try:
         receipt = send_to_official_site(payload, tuple(attachments))
     except FeedbackDeliveryError as failure:

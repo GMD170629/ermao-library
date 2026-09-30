@@ -1,26 +1,32 @@
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.orm import Session, sessionmaker
 
+from app.core import exception_diagnostics as diagnostics
 from app.core.database_errors import is_database_operation_timeout
 from app.core.exception_diagnostics import format_exception_diagnostics
+from app.db.diagnostic_session import DiagnosticSession
 from app.db.sqlite import (
-    SHORT_WRITE_LOCK_TIMEOUT_SECONDS,
+    SQLITE_LOCK_WAIT_SECONDS,
     SQLITE_STATEMENT_TIMEOUT_SECONDS,
     create_sqlite_engine,
 )
+from app.models.settings import SystemEvent, SystemSetting
 
 
-def test_statement_budget_and_lock_wait_are_independent() -> None:
-    assert SHORT_WRITE_LOCK_TIMEOUT_SECONDS == 0.5
-    assert SQLITE_STATEMENT_TIMEOUT_SECONDS == 2.0
+def test_statement_budget_and_lock_wait_share_thirty_second_cap() -> None:
+    assert SQLITE_LOCK_WAIT_SECONDS == 30.0
+    assert SQLITE_STATEMENT_TIMEOUT_SECONDS == 30.0
 
 
 def test_external_sqlite_interruption_is_not_a_budget_timeout():
@@ -59,7 +65,7 @@ def _budget_table(engine: sa.Engine) -> sa.Table:
 
 
 @pytest.mark.parametrize("executemany", [False, True])
-def test_sql_statements_do_not_share_a_transaction_deadline(
+def test_separate_sql_statements_have_separate_budgets_but_executemany_shares_one(
     tmp_path: Path, executemany: bool
 ) -> None:
     engine = create_sqlite_engine(
@@ -85,20 +91,45 @@ def test_sql_statements_do_not_share_a_transaction_deadline(
     parameters = [{"probe_id": index, "new_value": 999} for index in range(8)]
     try:
         started = time.monotonic()
-        with engine.begin() as connection:
-            if executemany:
-                assert connection.execute(statement, parameters).rowcount == 8
-            else:
+        if executemany:
+            with pytest.raises(OperationalError), engine.begin() as connection:
+                connection.execute(statement, parameters)
+        else:
+            with engine.begin() as connection:
                 for bindings in parameters:
                     assert connection.execute(statement, bindings).rowcount == 1
-        assert time.monotonic() - started > 0.5
+        assert time.monotonic() - started > 0.2
         with engine.connect() as connection:
-            assert (
-                connection.scalar(
-                    sa.select(sa.func.count()).where(table.c.value == 999)
-                )
-                == 8
-            )
+            assert connection.scalar(
+                sa.select(sa.func.count()).where(table.c.value == 999)
+            ) == (0 if executemany else 8)
+    finally:
+        engine.dispose()
+
+
+def test_writer_waits_past_old_half_second_limit_and_uses_thirty_second_busy_timeout(
+    tmp_path: Path,
+) -> None:
+    engine = create_sqlite_engine(tmp_path / "writer-wait.sqlite3")
+    table = _budget_table(engine)
+    try:
+        with engine.connect() as holder:
+            assert holder.exec_driver_sql("PRAGMA busy_timeout").scalar_one() == 30_000
+            holder.execute(sa.update(table).where(table.c.id == 0).values(value=1))
+
+            def competing_write() -> float:
+                started = time.monotonic()
+                with engine.begin() as writer:
+                    writer.execute(sa.update(table).where(table.c.id == 1).values(value=2))
+                return time.monotonic() - started
+
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                waiting = executor.submit(competing_write)
+                time.sleep(0.7)
+                holder.commit()
+                assert waiting.result(timeout=5) >= 0.5
+        with engine.connect() as check:
+            assert check.scalar(sa.select(table.c.value).where(table.c.id == 1)) == 2
     finally:
         engine.dispose()
 
@@ -142,6 +173,12 @@ def test_slow_sql_interrupts_and_transaction_rolls_back_with_connection_reuse(
                 format_exception_diagnostics(interrupted.value)["reason"]
                 == "time_budget_exceeded"
             )
+            trace = format_exception_diagnostics(interrupted.value)["databaseTrace"]
+            assert trace["transaction_id"].startswith("dbtx_")
+            assert any(
+                record["operation"] == "UPDATE" and record["parameters"]
+                for record in trace["transaction_statements"]
+            )
             assert interrupted.value.orig.sqlite_errorcode == 9
             assert (
                 connection.scalar(sa.select(table.c.value).where(table.c.id == 0)) == 0
@@ -184,7 +221,7 @@ def test_read_only_sql_budget_includes_result_fetching(
     try:
         with engine.connect() as connection:
             result = connection.execute(sa.select(sa.func.slow_value(table.c.value)))
-            with pytest.raises(OperationalError, match="interrupted"):
+            with pytest.raises(OperationalError, match="interrupted") as timed_out:
                 if fetch_method == "fetchall":
                     result.fetchall()
                 elif fetch_method == "fetchmany":
@@ -195,6 +232,9 @@ def test_read_only_sql_budget_includes_result_fetching(
                         pass
                 else:
                     list(result)
+            trace = format_exception_diagnostics(timed_out.value)["databaseTrace"]
+            assert trace["phase"] in {"fetchone", "fetchmany", "fetchall", "next"}
+            assert 'SELECT slow_value("BudgetProbe".value)' in trace["transaction_statements"][-1]["statement"]
             result.close()
             connection.rollback()
             assert (
@@ -233,7 +273,7 @@ def test_application_pauses_and_other_cursors_do_not_consume_sql_budget(
         engine.dispose()
 
 
-def test_slow_writer_interval_is_logged_without_sql_text(
+def test_slow_writer_interval_is_logged_with_sql_evidence(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -245,7 +285,7 @@ def test_slow_writer_interval_is_logged_without_sql_text(
     try:
         caplog.clear()
         with (
-            caplog.at_level(logging.WARNING, logger="app.db.sqlite"),
+            caplog.at_level(logging.INFO, logger="app.db.sqlite"),
             engine.begin() as connection,
         ):
             connection.execute(
@@ -253,9 +293,67 @@ def test_slow_writer_interval_is_logged_without_sql_text(
             )
             time.sleep(0.02)
 
-        messages = [record.getMessage() for record in caplog.records]
-        assert len(messages) == 1
-        assert "database_write_transaction_slow outcome=committed" in messages[0]
-        assert "UPDATE" not in messages[0]
+        started = next(record for record in caplog.records if record.getMessage().startswith("database_statement_started"))
+        finished = next(record for record in caplog.records if record.getMessage().startswith("database_statement_finished"))
+        slow = next(record for record in caplog.records if record.getMessage().startswith("database_write_transaction_slow"))
+        operation = started.database_operations[0]
+        assert 'UPDATE "BudgetProbe"' in operation["statement"]
+        assert operation["parameters"] == (0,)
+        assert f"statement_id={json.loads(finished.getMessage().split(' ', 1)[1])['statement_id']}" in started.getMessage()
+        assert json.loads(slow.getMessage().split(" ", 1)[1])["outcome"] == "committed"
     finally:
+        engine.dispose()
+
+
+def test_slow_write_transaction_is_saved_with_full_sql_and_bindings(tmp_path: Path) -> None:
+    engine = create_sqlite_engine(
+        tmp_path / "slow-write-event.sqlite3",
+        slow_write_threshold_seconds=0.01,
+    )
+    SystemEvent.__table__.create(engine)
+    SystemSetting.__table__.create(engine)
+    try:
+        with DiagnosticSession(engine) as session:
+            session.execute(sa.insert(SystemSetting).values(key="probe", value="full binding"))
+            time.sleep(0.02)
+            session.commit()
+        with DiagnosticSession(engine, info={"diagnostics_storage": True}) as check:
+            event_row = check.scalars(
+                sa.select(SystemEvent).where(
+                    SystemEvent.action == "database.write_transaction_slow"
+                )
+            ).one().metadata_json
+        trace = event_row["databaseTrace"]
+        assert trace["outcome"] == "committed"
+        assert trace["duration_ms"] >= 10
+        assert trace["statements"][0]["parameters"][:2] == ["probe", "full binding"]
+        assert 'INSERT INTO "SystemSetting"' in trace["statements"][0]["statement"]
+        assert trace["statements"][0]["timing"]["statement_id"] == trace["statements"][0]["statement_id"]
+        assert trace["slowest_statement_id"] == trace["statements"][0]["statement_id"]
+    finally:
+        engine.dispose()
+
+
+def test_database_failure_event_keeps_preceding_transaction_statements(tmp_path: Path) -> None:
+    engine = create_sqlite_engine(tmp_path / "failed-transaction-event.sqlite3")
+    SystemEvent.__table__.create(engine)
+    SystemSetting.__table__.create(engine)
+    diagnostics.configure_exception_storage(sessionmaker(bind=engine, class_=Session))
+    try:
+        with DiagnosticSession(engine) as session:
+            session.execute(sa.insert(SystemSetting).values(key="first", value="first binding"))
+            session.execute(sa.insert(SystemSetting).values(key="duplicate", value="second binding"))
+            try:
+                session.execute(sa.insert(SystemSetting).values(key="duplicate", value="failed binding"))
+            except IntegrityError:
+                session.rollback()
+        with Session(engine) as check:
+            event_row = check.scalars(sa.select(SystemEvent)).one()
+        trace = event_row.metadata_json["diagnostics"]["databaseTrace"]
+        assert trace["outcome"] == "failed"
+        assert len(trace["transaction_statements"]) == 3
+        assert trace["transaction_statements"][0]["parameters"][:2] == ["first", "first binding"]
+        assert trace["transaction_statements"][2]["parameters"][:2] == ["duplicate", "failed binding"]
+    finally:
+        diagnostics.reset_exception_storage()
         engine.dispose()

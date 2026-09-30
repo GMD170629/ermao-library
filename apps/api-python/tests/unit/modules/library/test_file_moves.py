@@ -295,7 +295,9 @@ def test_native_move_failure_preserves_cause_and_inspects_destination(
         PlannedMove,
     )
     from app.modules.library.infrastructure.file_move_io import SystemMovePublication
-    from app.modules.library.infrastructure.move_inventory import inspect_move_destination
+    from app.modules.library.infrastructure.move_inventory import (
+        inspect_move_destination,
+    )
 
     source, target = tmp_path / "source", tmp_path / "target"
     source.write_bytes(b"original")
@@ -322,3 +324,52 @@ def test_native_move_failure_preserves_cause_and_inspects_destination(
         assert target.read_bytes() == b"other"
     else:
         assert not target.exists()
+
+
+def test_file_move_planning_releases_read_transaction_before_file_inspection(tmp_path):
+    from app.modules.library.application.file_move_plans import (
+        DestinationInspection,
+        MoveActor,
+        MoveDestination,
+        MoveSource,
+        PrepareFileMovePlan,
+    )
+    from app.modules.library.domain.file_moves import MoveInventory, MoveRequest
+
+    active = False
+
+    class Topology:
+        def source(self, node_id, library_ids):
+            nonlocal active
+            active = True
+            return MoveSource(node_id, "library", "source.epub", tmp_path, "r1", ("book",))
+
+        def destination(self, source, request, library_ids):
+            assert active
+            return MoveDestination("library", tmp_path, "target.epub", "REIMPORT")
+
+    class Inspection:
+        def source(self, root, relative_path):
+            assert not active
+            return MoveInventory((), 1, 1)
+
+        def destination(self, root, relative_path, *, existing_source=None):
+            assert not active
+            return DestinationInspection((), 1, 1, "")
+
+        def companions(self, source, destination, *, directory):
+            raise AssertionError("REIMPORT should not inspect companions")
+
+    def release():
+        nonlocal active
+        assert active
+        active = False
+
+    planner = PrepareFileMovePlan(
+        Topology(), Inspection(), lambda: 1, lambda: "plan", release
+    )
+    plan = planner.execute(
+        MoveActor("user", "grant", frozenset({"library"}), False),
+        (MoveRequest("node", "library", "target.epub"),),
+    )
+    assert plan.id == "plan"

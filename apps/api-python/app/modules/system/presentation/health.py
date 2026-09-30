@@ -23,7 +23,7 @@ from app.core.auth import get_current_user
 from app.core.authorization import can_manage_system
 from app.core.config import Settings, get_settings
 from app.core.exception_diagnostics import record_exception
-from app.db.session import get_db
+from app.db.session import get_db, release_read_transaction
 from app.modules.system.domain.events import validate_log_max_bytes
 from app.modules.system.presentation.health_schemas import (
     DatabasePingPayload,
@@ -173,6 +173,7 @@ def stream_health_run(
         raise HealthRunNotFoundError(
             HealthRunNotFoundBody(message="健康检查记录不存在")
         )
+    release_read_transaction(db)
     raw_last_id = (
         request.headers.get("last-event-id") or request.query_params.get("after") or "0"
     )

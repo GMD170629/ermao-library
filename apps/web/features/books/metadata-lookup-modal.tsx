@@ -428,7 +428,6 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
                         </div>
                         <div className="col-span-2 min-w-0 break-words pl-7 text-slate-900 md:col-auto md:pl-0">
                           <span className="mb-1 block text-xs text-slate-400 md:hidden"><I18nText>候选值</I18nText></span>
-                          {selected?.generatedFields?.includes(field.split('.').at(-1) ?? '') ? <span className="mr-2 text-xs text-violet-600"><I18nText>AI 生成</I18nText></span> : null}
                           {field.endsWith('.cover') ? renderCoverValue(nextValue, 'candidate', field) : renderFieldValue(nextValue, 'candidate', field)}
                         </div>
                       </label>

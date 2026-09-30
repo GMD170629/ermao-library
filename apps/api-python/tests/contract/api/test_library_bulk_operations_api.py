@@ -6,10 +6,13 @@ import hashlib
 from datetime import UTC, datetime
 from io import BytesIO
 
+import pytest
 from PIL import Image
 from sqlalchemy import select
 
+from app.bootstrap.library_resource_actions import bulk_covers
 from app.core.auth import hash_password
+from app.core.authorization import authorization_context
 from app.models import (
     Library,
     LibraryBook,
@@ -26,6 +29,11 @@ from app.models import (
 )
 from app.models.auth import User, UserLibraryAccess
 from app.models.shelf import Shelf, ShelfBook
+from app.modules.library.application.bulk_operations import BulkCoverCommand
+from app.modules.library.infrastructure import operations as operation_store
+from app.modules.library.infrastructure.source_node_cover import (
+    FilesystemSourceNodeCoverPublication,
+)
 
 PASSWORD = "BulkContract123!"
 
@@ -402,23 +410,63 @@ def test_bulk_metadata_noop_is_finalized_and_reports_no_changes(
     assert payload["operation"]["undoAvailable"] is False
 
 
+def test_bulk_cover_write_failure_rolls_back_and_reverts_published_files(
+    client, db_session, test_settings, monkeypatch
+) -> None:
+    user = _login(client, db_session)
+    book_ids = _seed_books(db_session)
+
+    def fail_operation_write(*args, **kwargs):
+        raise RuntimeError("operation write failed")
+
+    monkeypatch.setattr(operation_store, "write_prepared_operation", fail_operation_write)
+    with pytest.raises(RuntimeError, match="operation write failed"):
+        bulk_covers(db_session, test_settings).execute(
+            BulkCoverCommand(
+                context=authorization_context(db_session, user),
+                book_ids=book_ids,
+                action="replace",
+                ratio="2:3",
+                quality=82,
+                max_dimension=1600,
+                cover_content=_png_cover(),
+            )
+        )
+
+    db_session.expire_all()
+    for book_id in book_ids:
+        assert db_session.get(LibraryBookMetadata, book_id).cover_path is None
+    assert not tuple(test_settings.resolved_storage_root.rglob("*.jpg"))
+
+
 def test_bulk_cover_replace_publishes_each_book_anchor_and_records_operation(
-    client, db_session, test_settings
+    client, db_session, test_settings, monkeypatch
 ) -> None:
     _login(client, db_session)
     book_ids = _seed_books(db_session)
+    original_publish = FilesystemSourceNodeCoverPublication.publish
 
-    response = client.post(
-        "/api/library/operations/books/covers",
-        data={
-            "ids": f'["{book_ids[0]}","{book_ids[1]}"]',
-            "action": "replace",
-            "ratio": "2:3",
-            "quality": "82",
-            "maxDimension": "1600",
-        },
-        files={"cover": ("cover.png", _png_cover(), "image/png")},
-    )
+    def publish_outside_transaction(self, *args, **kwargs):
+        assert not db_session.in_transaction()
+        return original_publish(self, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            FilesystemSourceNodeCoverPublication,
+            "publish",
+            publish_outside_transaction,
+        )
+        response = client.post(
+            "/api/library/operations/books/covers",
+            data={
+                "ids": f'["{book_ids[0]}","{book_ids[1]}"]',
+                "action": "replace",
+                "ratio": "2:3",
+                "quality": "82",
+                "maxDimension": "1600",
+            },
+            files={"cover": ("cover.png", _png_cover(), "image/png")},
+        )
 
     assert response.status_code == 200, response.text
     payload = response.json()["data"]

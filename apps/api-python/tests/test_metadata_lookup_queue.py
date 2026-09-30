@@ -448,6 +448,7 @@ def test_queue_semantic_match_runs_after_websites_and_uses_final_identity(db_ses
     task_id, book_id, resource_id = task.id, book.id, resource.id
     requests = []
     def search(db, context, provider, query, gate):
+        assert not db.in_transaction()
         requests.append(provider)
         if scenario == "source-failure" and provider == "douban":
             raise OSError("controlled site outage")
@@ -455,6 +456,7 @@ def test_queue_semantic_match_runs_after_websites_and_uses_final_identity(db_ses
                                                   "description": "实际网站简介", "tags": []}]}
     monkeypatch.setattr(queue, "_search_provider", search)
     def model(request, **kwargs):
+        assert not db_session.in_transaction()
         prompt = json.loads(json.loads(request.data)["messages"][1]["content"])
         if "candidates" not in prompt:
             result = {"title": "挪威的森林" if scenario == "wrong-A" else "海边的卡夫卡", "author": None,

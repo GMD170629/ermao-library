@@ -141,6 +141,8 @@ class BulkBookOperationPort(Protocol):
 
     def prepare_covers(self, command: BulkCoverCommand) -> PreparedBulkCoverResult: ...
 
+    def persist_covers(self, prepared: PreparedBulkCoverResult) -> None: ...
+
     def complete_covers(self, prepared: PreparedBulkCoverResult) -> None: ...
 
     def revert_covers(self, prepared: PreparedBulkCoverResult) -> None: ...
@@ -334,6 +336,7 @@ class ExecuteBulkCovers:
         prepared: PreparedBulkCoverResult | None = None
         try:
             prepared = self._port.prepare_covers(command)
+            self._port.persist_covers(prepared)
             self._unit_of_work.commit()
         except Exception:
             self._unit_of_work.rollback()

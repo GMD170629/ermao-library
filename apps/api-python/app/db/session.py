@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import get_settings
 from app.db.diagnostic_session import DiagnosticSession
 from app.db.sqlite import (
-    SHORT_WRITE_LOCK_TIMEOUT_SECONDS,
+    SQLITE_LOCK_WAIT_SECONDS,
     SQLITE_STATEMENT_TIMEOUT_SECONDS,
     create_sqlite_engine,
 )
@@ -15,17 +15,17 @@ settings = get_settings()
 engine = create_sqlite_engine(settings.database_path)
 background_engine = create_sqlite_engine(
     settings.database_path,
-    timeout_seconds=SHORT_WRITE_LOCK_TIMEOUT_SECONDS,
+    timeout_seconds=SQLITE_LOCK_WAIT_SECONDS,
     statement_time_budget_seconds=SQLITE_STATEMENT_TIMEOUT_SECONDS,
 )
 heartbeat_engine = create_sqlite_engine(
     settings.database_path,
-    timeout_seconds=SHORT_WRITE_LOCK_TIMEOUT_SECONDS,
+    timeout_seconds=SQLITE_LOCK_WAIT_SECONDS,
     statement_time_budget_seconds=SQLITE_STATEMENT_TIMEOUT_SECONDS,
 )
 metadata_maintenance_engine = create_sqlite_engine(
     settings.database_path,
-    timeout_seconds=SHORT_WRITE_LOCK_TIMEOUT_SECONDS,
+    timeout_seconds=SQLITE_LOCK_WAIT_SECONDS,
     statement_time_budget_seconds=SQLITE_STATEMENT_TIMEOUT_SECONDS,
 )
 SessionLocal = sessionmaker(
@@ -58,6 +58,15 @@ MetadataMaintenanceSessionLocal = sessionmaker(
 )
 
 
+def release_read_transaction(db: Session) -> None:
+    """End an implicit read transaction before external work starts."""
+
+    if db.new or db.dirty or db.deleted:
+        raise RuntimeError("Cannot release a read transaction with pending writes")
+    if db.in_transaction():
+        db.commit()
+
+
 def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
@@ -67,7 +76,7 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def get_short_write_db() -> Generator[Session, None, None]:
-    """Yield a low-priority writer that defers quickly under SQLite contention."""
+    """Yield a background writer with the shared 30-second SQLite wait limit."""
 
     db = BackgroundSessionLocal()
     try:

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 import app.bootstrap.auth as auth_bootstrap
 import app.modules.auth.infrastructure.transactions as auth_transactions
+import app.modules.auth.presentation.http as auth_http
 from app.bootstrap.system import prepare_system_event
 from app.core.auth import SESSION_REFRESH_DAYS, hash_password, utcnow
 from app.core.config import Settings, get_settings
@@ -32,6 +33,63 @@ def _create_user(db_session, email="admin@example.com", password="starshipnas"):
     db_session.add(user)
     db_session.commit()
     return user
+
+
+def test_password_verification_and_hashing_run_after_read_transaction(
+    client, db_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _create_user(db_session)
+    original_verify = auth_http.verify_password
+    original_hash = auth_http.hash_password
+
+    def verify_outside_transaction(password: str, stored_hash: str) -> bool:
+        assert not db_session.in_transaction()
+        return original_verify(password, stored_hash)
+
+    def hash_outside_transaction(password: str) -> str:
+        assert not db_session.in_transaction()
+        return original_hash(password)
+
+    monkeypatch.setattr(auth_http, "verify_password", verify_outside_transaction)
+    monkeypatch.setattr(auth_http, "hash_password", hash_outside_transaction)
+    assert _login(client).status_code == 200
+    assert client.patch(
+        "/api/auth/account/password",
+        json={
+            "currentPassword": "starshipnas",
+            "newPassword": "new-password-123",
+        },
+    ).status_code == 200
+
+
+def test_avatar_file_preparation_runs_after_read_transaction(
+    client, db_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _create_user(db_session)
+    assert _login(client).status_code == 200
+    original_prepare = auth_http.prepare_account_avatar_publication
+    original_release = auth_http.release_read_transaction
+    upload_session = None
+
+    def capture_upload_session(db):
+        nonlocal upload_session
+        upload_session = db
+        original_release(db)
+
+    def prepare_outside_transaction(*args, **kwargs):
+        assert upload_session is not None
+        assert not upload_session.in_transaction()
+        return original_prepare(*args, **kwargs)
+
+    monkeypatch.setattr(auth_http, "release_read_transaction", capture_upload_session)
+    monkeypatch.setattr(
+        auth_http, "prepare_account_avatar_publication", prepare_outside_transaction
+    )
+    image = BytesIO()
+    Image.new("RGB", (32, 32), "blue").save(image, format="PNG")
+    assert client.post(
+        "/api/auth/avatar", files={"avatar": ("cover.png", image.getvalue(), "image/png")}
+    ).status_code == 200
 
 
 def _login(client, email="admin@example.com", password="starshipnas"):
@@ -306,6 +364,7 @@ def test_explicit_session_refresh_updates_current_and_cleans_invalid_sessions(
         password="disabled-password",
     )
     disabled_user.status = "disabled"
+    db_session.commit()
     _login(client)
     now = utcnow()
     expired_session = UserSession(
@@ -338,7 +397,7 @@ def test_explicit_session_refresh_updates_current_and_cleans_invalid_sessions(
     assert current.expires_at > now + timedelta(days=29)
 
 
-def test_session_refresh_defers_in_250ms_when_another_engine_holds_writer_lock(
+def test_session_refresh_reports_busy_when_test_engine_exhausts_its_wait_budget(
     tmp_path: Path,
 ) -> None:
     settings = Settings(
@@ -399,7 +458,7 @@ def test_session_refresh_defers_in_250ms_when_another_engine_holds_writer_lock(
                 "code": "SESSION_REFRESH_DEFERRED",
                 "message": "SESSION_REFRESH_DEFERRED",
             }
-            assert 0.15 <= elapsed < 1.0
+            assert elapsed >= 0.15
 
             blocker.rollback()
             assert client.post("/api/auth/session/refresh").status_code == 200
@@ -636,7 +695,7 @@ def test_avatar_write_contention_preserves_published_file_and_database_reference
                 "code": "AVATAR_UPDATE_DEFERRED",
                 "message": "AVATAR_UPDATE_DEFERRED",
             }
-            assert 0.15 <= elapsed < 1.0
+            assert elapsed >= 0.15
             with Session(regular_engine) as inspection_db:
                 assert (
                     inspection_db.scalar(

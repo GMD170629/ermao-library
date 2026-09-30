@@ -58,7 +58,7 @@ from app.core.database_errors import (
 )
 from app.core.exception_diagnostics import record_exception
 from app.core.i18n import configured_locale
-from app.db.session import get_db, get_short_write_db
+from app.db.session import get_db, get_short_write_db, release_read_transaction
 from app.models.auth import PasswordResetToken, User, cuid, db_timestamp
 from app.modules.auth.application.avatar_delivery import (
     AvatarUnavailable,
@@ -172,10 +172,10 @@ def _request_app_base_url(request: Request) -> str:
     return f"{forwarded_proto}://{forwarded_host}{forwarded_prefix}"
 
 
-def _resolved_avatar_path(user: User, settings: Settings) -> Path | None:
-    if not user.avatar_path:
+def _resolved_avatar_path(avatar_path: str | None, settings: Settings) -> Path | None:
+    if not avatar_path:
         return None
-    image = build_avatar_image_store(settings).uploaded_image(user.avatar_path)
+    image = build_avatar_image_store(settings).uploaded_image(avatar_path)
     return Path(image.path) if image is not None else None
 
 
@@ -238,6 +238,7 @@ def setup(
 ]:
     if db.query(User.id).first() is not None:
         raise BasicConflictError(MessageError(message="系统已经完成初始化，请直接登录"))
+    release_read_transaction(db)
     email = _normalized_email(payload.email)
     user_id = cuid()
     now = db_timestamp()
@@ -311,14 +312,19 @@ def login(
                 details=SetupRequiredDetails(),
             )
         )
-    if user is None or not verify_password(payload.password, user.password_hash):
+    password_hash = user.password_hash if user is not None else None
+    user_status = user.status if user is not None else None
+    user_id = user.id if user is not None else None
+    release_read_transaction(db)
+    if password_hash is None or not verify_password(payload.password, password_hash):
         raise BasicUnauthorizedError(MessageError(message="邮箱或密码不正确"))
-    if user.status != "active":
+    if user_status != "active":
         raise AccountDisabledError(
             AccountDisabledBody(message="账户已停用，请联系管理员")
         )
 
-    user_session, token = prepare_session(user.id)
+    assert user_id is not None
+    user_session, token = prepare_session(user_id)
     persist_login_session(
         db,
         user_session=user_session,
@@ -412,7 +418,9 @@ def update_email(
     user = _authenticated_user(db, request, settings)
     if user is None:
         raise BasicUnauthorizedError(MessageError(message="UNAUTHORIZED"))
-    if not verify_password(payload.current_password, user.password_hash):
+    user_id, password_hash = user.id, user.password_hash
+    release_read_transaction(db)
+    if not verify_password(payload.current_password, password_hash):
         raise BasicBadRequestError(
             MessageError(
                 message="当前密码不正确",
@@ -423,7 +431,7 @@ def update_email(
     email = _normalized_email(payload.email)
     duplicate = (
         db.query(User)
-        .filter(func.lower(User.email) == email, User.id != user.id)
+        .filter(func.lower(User.email) == email, User.id != user_id)
         .first()
     )
     if duplicate is not None:
@@ -431,11 +439,12 @@ def update_email(
             MessageError(message="该邮箱已被使用", code="EMAIL_IN_USE")
         )
 
+    release_read_transaction(db)
     updated_at = db_timestamp()
     try:
         persist_account_email(
             db,
-            user_id=user.id,
+            user_id=user_id,
             email=email,
             updated_at=updated_at,
         )
@@ -495,14 +504,16 @@ def update_password(
     user = _authenticated_user(db, request, settings)
     if user is None:
         raise BasicUnauthorizedError(MessageError(message="UNAUTHORIZED"))
-    if not verify_password(payload.current_password, user.password_hash):
+    user_id, current_hash = user.id, user.password_hash
+    release_read_transaction(db)
+    if not verify_password(payload.current_password, current_hash):
         raise BasicBadRequestError(
             MessageError(
                 message="当前密码不正确",
                 code="CURRENT_PASSWORD_INCORRECT",
             )
         )
-    if verify_password(payload.new_password, user.password_hash):
+    if verify_password(payload.new_password, current_hash):
         raise BasicBadRequestError(
             MessageError(
                 message="新密码不能与当前密码相同",
@@ -513,7 +524,7 @@ def update_password(
     password_hash = hash_password(payload.new_password)
     persist_account_password(
         db,
-        user_id=user.id,
+        user_id=user_id,
         password_hash=password_hash,
         updated_at=db_timestamp(),
     )
@@ -539,6 +550,8 @@ async def upload_avatar(
     user = _authenticated_user(db, request, settings)
     if user is None:
         raise BasicUnauthorizedError(MessageError(message="UNAUTHORIZED"))
+    user_id, avatar_path = user.id, user.avatar_path
+    release_read_transaction(db)
     if (avatar.content_type or "").lower() not in ALLOWED_AVATAR_CONTENT_TYPES:
         raise BasicBadRequestError(
             MessageError(message="仅支持 JPEG、PNG 或 WebP 头像")
@@ -552,8 +565,8 @@ async def upload_avatar(
         raise BasicBadRequestError(MessageError(message="头像文件为空"))
     if len(data) > MAX_AVATAR_BYTES:
         raise PayloadTooLargeError(MessageError(message="头像不能超过 5 MB"))
-    target_dir = settings.resolved_storage_root / "profiles" / user.id
-    previous_path = _resolved_avatar_path(user, settings)
+    target_dir = settings.resolved_storage_root / "profiles" / user_id
+    previous_path = _resolved_avatar_path(avatar_path, settings)
     try:
         publication = prepare_account_avatar_publication(
             data,
@@ -571,7 +584,7 @@ async def upload_avatar(
         publication.publish()
         persist_account_avatar(
             db,
-            user_id=user.id,
+            user_id=user_id,
             avatar_path=str(
                 publication.published_path.relative_to(settings.resolved_storage_root)
             ),
@@ -595,7 +608,7 @@ async def upload_avatar(
             _raise_avatar_update_deferred(exc)
         raise
     if previous_path is not None and previous_path != publication.published_path:
-        _remove_unreferenced_avatar(previous_path, user_id=user.id)
+        _remove_unreferenced_avatar(previous_path, user_id=user_id)
     db.refresh(user)
     return UserResponse(
         data=UserPayload(user=AuthUser.model_validate(user.to_auth_view()))
@@ -614,8 +627,10 @@ def get_avatar(
     user = _authenticated_user(db, request, settings)
     if user is None:
         raise BasicUnauthorizedError(MessageError(message="UNAUTHORIZED"))
+    actor_id = user.id
+    release_read_transaction(db)
     try:
-        image = build_get_account_avatar(db, settings).execute(actor_id=user.id)
+        image = build_get_account_avatar(db, settings).execute(actor_id=actor_id)
     except AvatarUnavailable as exc:
         record_exception(
             logging.getLogger(__name__),
@@ -642,11 +657,13 @@ def delete_avatar(
     user = _authenticated_user(db, request, settings)
     if user is None:
         raise BasicUnauthorizedError(MessageError(message="UNAUTHORIZED"))
-    path = _resolved_avatar_path(user, settings)
+    user_id, avatar_path = user.id, user.avatar_path
+    release_read_transaction(db)
+    path = _resolved_avatar_path(avatar_path, settings)
     try:
         persist_account_avatar(
             db,
-            user_id=user.id,
+            user_id=user_id,
             avatar_path=None,
             updated_at=db_timestamp(),
         )
@@ -659,7 +676,7 @@ def delete_avatar(
         )
         _raise_avatar_update_deferred(exc)
     if path is not None:
-        _remove_unreferenced_avatar(path, user_id=user.id)
+        _remove_unreferenced_avatar(path, user_id=user_id)
     db.refresh(user)
     return UserResponse(
         data=UserPayload(user=AuthUser.model_validate(user.to_auth_view()))
@@ -699,14 +716,16 @@ def request_password_reset(
             .count()
         )
         if sent_recently is None and sent_today < RESET_TOKEN_DAILY_LIMIT:
+            user_id = user.id
+            reset_locale = configured_locale(db)
+            release_read_transaction(db)
             raw_token = token_urlsafe(32)
             reset_token_id = cuid()
-            reset_locale = configured_locale(db)
             persist_password_reset_request(
                 db,
                 token_id=reset_token_id,
                 token_hash=hash_token(raw_token),
-                user_id=user.id,
+                user_id=user_id,
                 expires_at=now + RESET_TOKEN_TTL,
                 created_at=now,
             )
@@ -759,10 +778,12 @@ def confirm_password_reset(
     user = db.query(User).filter(User.id == reset_token.user_id).one_or_none()
     if user is None:
         raise BasicBadRequestError(MessageError(message="重置链接无效或已过期"))
+    user_id = user.id
+    release_read_transaction(db)
     password_hash = hash_password(payload.new_password)
     persist_confirmed_password_reset(
         db,
-        user_id=user.id,
+        user_id=user_id,
         password_hash=password_hash,
         confirmed_at=now,
     )

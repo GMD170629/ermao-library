@@ -13,6 +13,7 @@ from app.bootstrap.system import prepare_system_event
 from app.core.auth import hash_password
 from app.core.config import Settings
 from app.core.exception_diagnostics import record_exception
+from app.db.session import release_read_transaction
 from app.models.auth import User, cuid, db_timestamp
 from app.modules.auth.application.user_management import (
     AdminUserView,
@@ -98,6 +99,9 @@ class SqlAlchemyUserAdministrationGateway:
 
     def hash_password(self, password: str) -> str:
         return hash_password(password)
+
+    def finish_read(self) -> None:
+        release_read_transaction(self._db)
 
     def now(self) -> datetime:
         return db_timestamp()

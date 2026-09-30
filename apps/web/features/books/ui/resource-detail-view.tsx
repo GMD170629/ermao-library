@@ -92,8 +92,6 @@ export function ResourceDetailView({ resource, detail, loading, error, requested
   const openResource = () => resource.readerType === 'audio' ? onPlayAudio() : router.push(readerHref);
 
   return <section className="mt-6 border-t border-stone-200 pt-7" aria-busy={loading || undefined}>
-    {resource.generatedFields?.includes("description") ? <span className="text-xs text-violet-600">{t("简介 · AI 生成")}</span> : null}
-    {resource.description ? <p data-i18n-skip className="mb-4 whitespace-pre-line text-sm text-stone-600">{resource.description}</p> : null}
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div>
         {onBack ? <button type="button" onClick={onBack} className="inline-flex min-h-10 items-center gap-2 rounded-lg text-sm font-medium text-stone-600 hover:text-stone-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-200"><ArrowLeft size={17} />{t('返回图书内容')}</button> : null}

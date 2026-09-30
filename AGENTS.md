@@ -66,3 +66,13 @@
 | 原文件下载与阅读、PDF 交付 | [ADR 0025](docs/architecture-decisions.md#reader-原件与章节)、[ADR 0027](docs/architecture-decisions.md#pdf-原件物化与串行执行) |
 | Reader 安全规则与一致性验证 | [ADR 0026](docs/architecture-decisions.md#reader-安全) 和机器契约 |
 | 版本发布 | [发布指南](docs/architecture-decisions.md#发布与版本) 与本次发布门禁 |
+
+## 已核实 NAS 连接（2026-09-28）
+
+- 设备：FnOS；1Password 条目 ID：`zaykdrnwhpseud4cub6iruwmvm`。凭据按需读取，仅在任务进程内存中使用，不写入文件或输出。
+- SSH：`192.168.50.4:22`；用户 `liumianti`，Docker 操作使用 sudo。按需读取凭据；一次认证后复用 SSH 会话完成后续操作，避免逐条命令重新连接或触发 1Password 授权。凭据读取与连接不要求在同一次进程或工具调用中完成。
+- 2026-09-29 已在本机配置专用 Ed25519 SSH 密钥：`C:\Users\gamer\.ssh\id_ed25519_ermao_nas`；SSH 别名 `ermao-nas` 写在 `C:\Users\gamer\.ssh\config`。`ssh -o BatchMode=yes ermao-nas` 已免密实连；Docker 的 sudo 权限仍按需认证。
+- 二毛图书：`http://192.168.50.4:3000`；容器 `shuku-prod-web`，实际 Compose 项目 `ermaobooks`，服务 `web`。
+- Compose 文件：`/vol2/1000/container/ermao/docker-compose.yml`。文件中的 `name` 与现有项目名不同，操作现有部署须显式使用 `docker compose -p ermaobooks`。
+- 存储：`/vol2/1000/container/ermao/data/storage` → `/app/storage`。
+- 图书挂载：`/vol2/1000/media/books` → `/monitor/books`；`/vol2/1000/media/comic` → `/monitor/comic`；`/vol2/1000/media/comic-books` → `/monitor/comic-books`；`/vol2/1000/media/listen-book` → `/monitor/listen-book`。

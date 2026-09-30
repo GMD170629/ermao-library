@@ -59,7 +59,7 @@ from app.core.authorization import (
 )
 from app.core.config import Settings, get_settings
 from app.core.exception_diagnostics import record_exception
-from app.db.session import get_db
+from app.db.session import get_db, release_read_transaction
 from app.models import LibraryReadableResource
 from app.models.auth import User
 from app.modules.library.application.asset_commands import (
@@ -799,6 +799,8 @@ async def execute_bulk_book_covers(
                 code="INVALID_BULK_BOOK_OPERATION",
             )
         )
+    access = authorization_context(db, user)
+    release_read_transaction(db)
     cover_content = None
     if cover is not None:
         cover_content = await cover.read(12 * 1024 * 1024 + 1)
@@ -806,7 +808,7 @@ async def execute_bulk_book_covers(
     try:
         result = bulk_covers(db, settings).execute(
             BulkCoverCommand(
-                context=authorization_context(db, user),
+                context=access,
                 book_ids=tuple(raw_ids),
                 action=action,
                 ratio=ratio,
@@ -1352,6 +1354,7 @@ async def update_book_source_node_presentation(
         return _source_node_updated_response(
             fail("图书不存在", status_code=404, code="BOOK_NOT_FOUND")
         )
+    release_read_transaction(db)
     cover_content = None
     if cover is not None:
         cover_content = await cover.read(MAX_SOURCE_NODE_COVER_BYTES + 1)
@@ -1869,12 +1872,14 @@ async def upload_library_resource_cover(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return _resource_response(auth_error)
+    actor = _actor(db, user)
+    release_read_transaction(db)
     cover_content = await cover.read(MAX_RESOURCE_COVER_BYTES + 1)
     await cover.close()
     try:
         upload_resource_cover(db, settings).execute(
             UploadResourceCoverCommand(
-                actor=_actor(db, user),
+                actor=actor,
                 book_id=book_id,
                 resource_id=resource_id,
                 content=cover_content,

@@ -36,7 +36,7 @@ from app.bootstrap.readable_resource_pipeline import (
 from app.core.config import Settings
 from app.db.base import Base
 from app.db.sqlite import (
-    SHORT_WRITE_LOCK_TIMEOUT_SECONDS,
+    SQLITE_LOCK_WAIT_SECONDS,
     SQLITE_STATEMENT_TIMEOUT_SECONDS,
     create_sqlite_engine,
 )
@@ -74,7 +74,7 @@ LATER = NOW + timedelta(days=7)
 def _engine(path: Path):
     return create_sqlite_engine(
         path,
-        timeout_seconds=SHORT_WRITE_LOCK_TIMEOUT_SECONDS,
+        timeout_seconds=SQLITE_LOCK_WAIT_SECONDS,
         statement_time_budget_seconds=SQLITE_STATEMENT_TIMEOUT_SECONDS,
     )
 

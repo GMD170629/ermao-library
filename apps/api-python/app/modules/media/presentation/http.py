@@ -43,7 +43,7 @@ from app.core.authorization import (
 )
 from app.core.config import Settings, get_settings
 from app.core.exception_diagnostics import record_exception
-from app.db.session import get_db
+from app.db.session import get_db, release_read_transaction
 from app.models import LibraryReadableResource
 from app.modules.media.application.page_index import comic_manifest_policy_failure
 from app.modules.media.application.resource_preview import (
@@ -312,7 +312,9 @@ def get_cover(
         cover_path_value = source_node_cover.path
         cover_id = source_node_id
     elif book_id is not None:
-        for candidate in effective_book_cover_query(db).execute(book_id):
+        candidates = tuple(effective_book_cover_query(db).execute(book_id))
+        release_read_transaction(db)
+        for candidate in candidates:
             candidate_path = media_streaming.stored_path(
                 candidate.stored_path, settings
             )
@@ -325,8 +327,10 @@ def get_cover(
         cover_path_value = media_resource_query(db).cover_path(
             resource_id=resource_id,
         )
+        release_read_transaction(db)
         cover_path = media_streaming.stored_path(cover_path_value, settings)
         cover_id = resource_id or "cover"
+    release_read_transaction(db)
     if not book_id and not resource_id and not source_node_id:
         return fail("条目不存在", status_code=404)
     if cover_path is None and cover_path_value is not None:
@@ -371,6 +375,7 @@ def metadata_cover_proxy(
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
+    release_read_transaction(db)
     remote_request = UrlRequest(
         url,
         headers={

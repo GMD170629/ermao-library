@@ -23,7 +23,7 @@ from app.contracts.http_errors import (
 from app.core.authorization import can_manage_system
 from app.core.config import Settings, get_settings
 from app.core.exception_diagnostics import record_exception
-from app.db.session import get_db
+from app.db.session import get_db, release_read_transaction
 from app.schemas.responses import fail, ok
 
 from ..application.models import PreparationState, UpdateCheck, UpdateError
@@ -84,8 +84,10 @@ def check_updates(
     actor, error = require_system_manager(db, request, settings)
     if error is not None:
         return error
+    allowed = actor is not None and can_manage_system(actor)
+    release_read_transaction(db)
     try:
-        return ok(updates.check(actor is not None and can_manage_system(actor)))
+        return ok(updates.check(allowed))
     except UpdateError as rejected:
         return update_error(rejected)
 
@@ -121,11 +123,11 @@ def prepare_update(
             status_code=403,
             code="CROSS_SITE_REQUEST",
         )
+    allowed = actor is not None and can_manage_system(actor)
+    release_read_transaction(db)
     try:
         return ok(
-            updates.prepare(
-                actor is not None and can_manage_system(actor), payload.version
-            ),
+            updates.prepare(allowed, payload.version),
             status_code=202,
         )
     except UpdateError as rejected:
@@ -163,10 +165,12 @@ def install_update(
             status_code=403,
             code="CROSS_SITE_REQUEST",
         )
+    allowed = actor is not None and can_manage_system(actor)
+    release_read_transaction(db)
     try:
         return ok(
             updates.install(
-                actor is not None and can_manage_system(actor),
+                allowed,
                 payload.version,
                 payload.sha256,
                 payload.plan_sha256,
@@ -195,8 +199,10 @@ def update_status(
     actor, error = require_system_manager(db, request, settings)
     if error is not None:
         return error
+    allowed = actor is not None and can_manage_system(actor)
+    release_read_transaction(db)
     try:
-        return ok(updates.status(actor is not None and can_manage_system(actor)))
+        return ok(updates.status(allowed))
     except UpdateError as rejected:
         return update_error(rejected)
 
@@ -214,6 +220,7 @@ def runtime_info(
     _, error = require_user(db, request, settings)
     if error is not None:
         return error
+    release_read_transaction(db)
     return ok(
         RuntimeInfo(
             current_version=updates.current,

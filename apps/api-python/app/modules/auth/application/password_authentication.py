@@ -63,7 +63,10 @@ class AuthenticatePassword:
 
     def execute(self, credentials: PasswordCredentials) -> PasswordAuthenticationResult:
         normalized_email = normalize_login_email(credentials.email)
-        stored = self._credential_reader.find_by_normalized_email(normalized_email)
+        try:
+            stored = self._credential_reader.find_by_normalized_email(normalized_email)
+        finally:
+            self._credential_reader.finish_read()
         is_active = stored is not None and stored.status == "active"
         verification = self._password_verification.verify(
             PasswordVerificationRequest(

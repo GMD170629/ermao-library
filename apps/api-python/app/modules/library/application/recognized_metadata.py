@@ -292,6 +292,7 @@ class ApplyRecognizedCover:
         if current != state:
             self._unit_of_work.rollback()
             raise InvalidRecognizedMetadataError("METADATA_CHANGED")
+        self._unit_of_work.rollback()
         published = self._publication.publish(
             scope=scope,
             target_id=state.target_id,
@@ -299,6 +300,11 @@ class ApplyRecognizedCover:
             previous_stored_path=state.current_cover_path,
         )
         try:
+            latest = self._metadata.load_cover_state(
+                actor=actor, book_id=book_id, resource_id=resource_id, scope=scope
+            )
+            if latest != state:
+                raise InvalidRecognizedMetadataError("METADATA_CHANGED")
             self._metadata.mark_cover_ready(
                 state=state,
                 scope=scope,

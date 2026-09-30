@@ -14,10 +14,6 @@ MAX_EVENT_MESSAGE_CHARS = 4000
 MAX_EVENT_METADATA_CHARS = 64 * 1024
 LOG_MAX_BYTES_SETTING = "system.logs.maxBytes"
 LAST_PRUNED_AT_SETTING = "events.lastPrunedAt"
-PROTECTED_ERROR_ACTIONS = frozenset(
-    {"deleted", "restored", "settings.updated", "backup.restored"}
-)
-PRUNE_LEVEL_ORDER = ("info", "warning", "warn", "error")
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +92,7 @@ def _lift_diagnostic_root(
         "contextProvided",
         "contextsTruncated",
         "databaseOperations",
+        "databaseTrace",
         "members",
         "memberCount",
         "relatedIds",
@@ -153,6 +150,7 @@ def prepare_event_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
         "stage",
         "step",
         "attempt",
+        "databaseTrace",
     ):
         if key in payload:
             truncated[key] = payload[key]

@@ -33,6 +33,9 @@ class CredentialReaderFake:
         self.requested_email = normalized_email
         return self.stored
 
+    def finish_read(self) -> None:
+        pass
+
 
 class VerificationGatewayFake:
     def __init__(self, result: PasswordVerificationResult) -> None:

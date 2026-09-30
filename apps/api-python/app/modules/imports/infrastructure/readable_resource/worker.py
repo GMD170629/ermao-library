@@ -293,6 +293,7 @@ class ReadableResourceWorkerProcessor:
                 self._process_import.reset_inspection_cache()
                 self._queue.begin_discovery(book.id, book_id=book.book_id)
                 try:
+                    self._uow.release_before_io()
                     if work.scan_scopes is None or needs_own_scan:
                         self._scan.execute_source(
                             book.source_node_id, task_id=book.id,
@@ -319,6 +320,7 @@ class ReadableResourceWorkerProcessor:
                     current = queue.get_book_task(book.id)
                     if current is None or current.state != "RUNNING":
                         return "cancelled", "BOOK_RUN_STALE"
+                    self._uow.release_before_io()
                     result = self._process_book_resources.execute(
                         current, max_resources=128
                     )
@@ -345,6 +347,7 @@ class ReadableResourceWorkerProcessor:
                     require_latest_request=True,
                 )
 
+            self._uow.release_before_io()
             identified = self._identify_book.execute(
                 book.source_node_id, book_run_current=run_current
             )
@@ -365,6 +368,7 @@ class ReadableResourceWorkerProcessor:
             if task.kind == "SCAN_LIBRARY":
                 self._queue.begin_discovery(task.id)
                 try:
+                    self._uow.release_before_io()
                     self._scan.execute_library(
                         task.library_id, task_id=task.id,
                         missing_entry_policy=task.missing_entry_policy,
@@ -378,6 +382,7 @@ class ReadableResourceWorkerProcessor:
                     raise RuntimeError("CONTINUE_SOURCE missing source_node_id")
                 self._queue.begin_discovery(task.id)
                 try:
+                    self._uow.release_before_io()
                     self._scan.execute_source(
                         task.source_node_id, task_id=task.id,
                         missing_entry_policy=task.missing_entry_policy,

@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.bootstrap.system import get_setting, upsert_setting
 from app.core.config import Settings
 from app.core.exception_diagnostics import record_exception
+from app.db.session import release_read_transaction
 from app.modules.system.application.commands import SystemWriteTransaction
 
 LOGGER = logging.getLogger(__name__)
@@ -33,7 +34,9 @@ _LEGACY_DEFAULT_COVER_SHA256 = frozenset(
 def cleanup_default_cover_residue(db: Session, settings: Settings) -> int:
     """Delete storage copies of the bundled fallback cover exactly once."""
 
-    if get_setting(db, _CLEANUP_MARKER_KEY) == _CLEANUP_MARKER_VALUE:
+    already_cleaned = get_setting(db, _CLEANUP_MARKER_KEY) == _CLEANUP_MARKER_VALUE
+    release_read_transaction(db)
+    if already_cleaned:
         return 0
     removed = _remove_legacy_default_covers(settings.resolved_storage_root)
     with SystemWriteTransaction(db):

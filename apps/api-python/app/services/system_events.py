@@ -17,7 +17,6 @@ from app.modules.system.domain.events import (
     MAX_EVENT_METADATA_CHARS,
     MAX_MAX_EVENT_BYTES,
     MIN_MAX_EVENT_BYTES,
-    PROTECTED_ERROR_ACTIONS,
 )
 
 __all__ = [
@@ -27,7 +26,6 @@ __all__ = [
     "MAX_EVENT_METADATA_CHARS",
     "MAX_MAX_EVENT_BYTES",
     "MIN_MAX_EVENT_BYTES",
-    "PROTECTED_ERROR_ACTIONS",
     "configured_max_event_bytes",
     "prepare_system_event",
     "prune_system_events",

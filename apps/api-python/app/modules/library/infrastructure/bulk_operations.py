@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core.authorization import AuthorizationContext, book_visibility_predicate
 from app.core.exception_diagnostics import record_exception
+from app.db.session import release_read_transaction
 from app.models import (
     LibraryBook,
     LibraryBookFacet,
@@ -106,8 +107,30 @@ class _PublishedBookCover:
 
 
 @dataclass(frozen=True, slots=True)
+class _BookCoverSnapshot:
+    book_id: str
+    source_node_id: str
+    cover_path: str | None
+    title: str
+    description: str | None
+    source_title: str | None
+    source_description: str | None
+    source_cover_path: str | None
+    inverse_book: dict[str, object]
+    inverse_source: dict[str, object] | None
+
+
+@dataclass(frozen=True, slots=True)
+class _PreparedBookCoverWrite:
+    snapshot: _BookCoverSnapshot
+    stored_path: str
+
+
+@dataclass(frozen=True, slots=True)
 class _CoverCompletion:
     publications: tuple[_PublishedBookCover, ...]
+    writes: tuple[_PreparedBookCoverWrite, ...]
+    operation: operation_store.PreparedOperationWrite
 
 
 def _now() -> datetime:
@@ -856,6 +879,7 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
     def prepare_covers(self, command: BulkCoverCommand) -> PreparedBulkCoverResult:
         if self._storage_root is None or self._cover_publication is None:
             raise RuntimeError("bulk cover publication is not configured")
+        release_read_transaction(self._db)
         quality = max(40, min(95, command.quality))
         max_dimension = max(600, min(3200, command.max_dimension))
         uploaded_image: Image.Image | None = None
@@ -880,41 +904,58 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
             )
             .where(LibraryBook.id.in_(command.book_ids))
         ).all()
-        by_id = {str(book.id): (book, metadata) for book, metadata in rows}
+        by_id: dict[str, _BookCoverSnapshot] = {}
+        for book, metadata in rows:
+            source_metadata = self._db.get(
+                LibrarySourceNodeMetadata, book.source_node_id
+            )
+            by_id[str(book.id)] = _BookCoverSnapshot(
+                book_id=str(book.id),
+                source_node_id=str(book.source_node_id),
+                cover_path=metadata.cover_path,
+                title=metadata.title,
+                description=metadata.description,
+                source_title=source_metadata.title if source_metadata else None,
+                source_description=(
+                    source_metadata.description if source_metadata else None
+                ),
+                source_cover_path=(
+                    source_metadata.cover_path if source_metadata else None
+                ),
+                inverse_book={
+                    "id": book.id,
+                    "coverPath": metadata.cover_path,
+                    "coverStatus": metadata.cover_status,
+                    "updatedAt": metadata.updated_at,
+                },
+                inverse_source=(
+                    entity_record(source_metadata) if source_metadata else None
+                ),
+            )
+        release_read_transaction(self._db)
         now = _now()
         publications: list[_PublishedBookCover] = []
+        writes: list[_PreparedBookCoverWrite] = []
         skipped: list[BulkCoverSkipped] = []
         inverse_books: list[dict[str, object]] = []
         inverse_source_nodes: list[dict[str, object]] = []
-        source_metadata_port = SqlAlchemySourceNodeMetadata(self._db)
         try:
             for book_id in command.book_ids:
-                context = by_id.get(book_id)
-                if context is None:
+                snapshot = by_id.get(book_id)
+                if snapshot is None:
                     skipped.append(BulkCoverSkipped(book_id, "BOOK_NOT_FOUND"))
                     continue
-                book, metadata = context
-                source_metadata = self._db.get(
-                    LibrarySourceNodeMetadata, book.source_node_id
-                )
-                inverse_books.append(
-                    {
-                        "id": book.id,
-                        "coverPath": metadata.cover_path,
-                        "coverStatus": metadata.cover_status,
-                        "updatedAt": metadata.updated_at,
-                    }
-                )
-                if source_metadata is not None:
-                    inverse_source_nodes.append(entity_record(source_metadata))
+                inverse_books.append(snapshot.inverse_book)
+                if snapshot.inverse_source is not None:
+                    inverse_source_nodes.append(snapshot.inverse_source)
 
                 source_image: Image.Image
                 if uploaded_image is not None:
                     source_image = uploaded_image.copy()
                 else:
-                    source_path = self._stored_cover_path(metadata.cover_path)
+                    source_path = self._stored_cover_path(snapshot.cover_path)
                     if source_path is None:
-                        skipped.append(BulkCoverSkipped(book.id, "BOOK_COVER_REQUIRED"))
+                        skipped.append(BulkCoverSkipped(book_id, "BOOK_COVER_REQUIRED"))
                         continue
                     try:
                         with Image.open(source_path) as image:
@@ -927,9 +968,7 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
                     ) as error:
                         record_exception(logging.getLogger(__name__), "modules.library.infrastructure.bulk_operations.prepare_covers.failed", error,
                                          context={"step": "prepare_covers"})
-                        skipped.append(
-                            BulkCoverSkipped(book.id, "BOOK_COVER_UNREADABLE")
-                        )
+                        skipped.append(BulkCoverSkipped(book_id, "BOOK_COVER_UNREADABLE"))
                         continue
                 cover_content = self._prepare_cover_image(
                     source_image,
@@ -938,12 +977,12 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
                     quality=quality,
                 )
                 previous_path = (
-                    source_metadata.cover_path
-                    if source_metadata is not None
-                    else metadata.cover_path
+                    snapshot.source_cover_path
+                    if snapshot.inverse_source is not None
+                    else snapshot.cover_path
                 )
                 prepared_cover = self._cover_publication.prepare(
-                    source_node_id=book.source_node_id,
+                    source_node_id=snapshot.source_node_id,
                     content=cover_content,
                 )
                 published = self._cover_publication.publish(
@@ -956,63 +995,115 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
                         previous_stored_path=previous_path,
                     )
                 )
-                updated = source_metadata_port.update_metadata(
-                    book_id=book.id,
-                    source_node_id=book.source_node_id,
-                    changes=SourceNodeMetadataChanges(
-                        title=source_metadata.title
-                        if source_metadata is not None and source_metadata.title
-                        else metadata.title,
-                        description=source_metadata.description
-                        if source_metadata is not None
-                        else metadata.description,
-                        cover_path=prepared_cover.stored_path,
-                        replace_cover=True,
-                    ),
+                writes.append(
+                    _PreparedBookCoverWrite(snapshot, prepared_cover.stored_path)
                 )
-                if not updated:
-                    raise RuntimeError("Book anchor SourceNode disappeared")
         except Exception:
             for item in reversed(publications):
                 self._cover_publication.revert(item.published)
             raise
 
         updated_count = len(publications)
-        operation = operation_store.create_operation(
-            self._db,
-            user_id=command.context.user_id,
-            action="BULK_BOOK_COVERS",
-            target_type="books",
-            target_id=None,
-            summary=f"批量处理 {updated_count} 本图书的封面",
-            payload={
-                "bookIds": list(command.book_ids),
-                "action": command.action,
-                "ratio": command.ratio if command.action == "crop" else None,
-                "quality": quality,
-                "maxDimension": max_dimension,
-                "skipped": [
-                    {"bookId": item.book_id, "reason": item.reason} for item in skipped
-                ],
-            },
-            inverse={
-                "books": inverse_books,
-                "sourceNodes": inverse_source_nodes,
-            },
-            now=now,
-            undoable=False,
-        )
+        try:
+            operation = operation_store.prepare_operation_write(
+                user_id=command.context.user_id,
+                action="BULK_BOOK_COVERS",
+                target_type="books",
+                target_id=None,
+                summary=f"批量处理 {updated_count} 本图书的封面",
+                payload={
+                    "bookIds": list(command.book_ids),
+                    "action": command.action,
+                    "ratio": command.ratio if command.action == "crop" else None,
+                    "quality": quality,
+                    "maxDimension": max_dimension,
+                    "skipped": [
+                        {"bookId": item.book_id, "reason": item.reason}
+                        for item in skipped
+                    ],
+                },
+                inverse={
+                    "books": inverse_books,
+                    "sourceNodes": inverse_source_nodes,
+                },
+                now=now,
+                undoable=False,
+            )
+        except Exception:
+            for item in reversed(publications):
+                self._cover_publication.revert(item.published)
+            raise
         completion = _CoverCompletion(
             publications=tuple(publications),
+            writes=tuple(writes),
+            operation=operation,
         )
         return PreparedBulkCoverResult(
             outcome=BulkCoverResult(
                 updated=updated_count,
                 skipped=tuple(skipped),
-                operation=operation_store.operation_summary(operation),
+                operation=operation_store.operation_summary(operation.record),
             ),
             completion_token=completion,
         )
+
+    def persist_covers(self, prepared: PreparedBulkCoverResult) -> None:
+        completion = prepared.completion_token
+        if not isinstance(completion, _CoverCompletion):
+            raise TypeError("invalid bulk cover completion token")
+        source_metadata_port = SqlAlchemySourceNodeMetadata(self._db)
+        for write in completion.writes:
+            snapshot = write.snapshot
+            current = self._db.execute(
+                select(
+                    LibraryBook.source_node_id,
+                    LibraryBookMetadata.cover_path,
+                    LibraryBookMetadata.title,
+                    LibraryBookMetadata.description,
+                )
+                .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
+                .where(LibraryBook.id == snapshot.book_id)
+            ).one_or_none()
+            if current != (
+                snapshot.source_node_id,
+                snapshot.cover_path,
+                snapshot.title,
+                snapshot.description,
+            ):
+                raise RuntimeError("BULK_COVER_STATE_CHANGED")
+            source = self._db.execute(
+                select(
+                    LibrarySourceNodeMetadata.title,
+                    LibrarySourceNodeMetadata.description,
+                    LibrarySourceNodeMetadata.cover_path,
+                ).where(LibrarySourceNodeMetadata.source_node_id == snapshot.source_node_id)
+            ).one_or_none()
+            if (source is None) != (snapshot.inverse_source is None) or (
+                source is not None
+                and source
+                != (
+                    snapshot.source_title,
+                    snapshot.source_description,
+                    snapshot.source_cover_path,
+                )
+            ):
+                raise RuntimeError("BULK_COVER_STATE_CHANGED")
+            if not source_metadata_port.update_metadata(
+                book_id=snapshot.book_id,
+                source_node_id=snapshot.source_node_id,
+                changes=SourceNodeMetadataChanges(
+                    title=snapshot.source_title or snapshot.title,
+                    description=(
+                        snapshot.source_description
+                        if snapshot.inverse_source is not None
+                        else snapshot.description
+                    ),
+                    cover_path=write.stored_path,
+                    replace_cover=True,
+                ),
+            ):
+                raise RuntimeError("Book anchor SourceNode disappeared")
+        operation_store.write_prepared_operation(self._db, completion.operation)
 
     def complete_covers(self, prepared: PreparedBulkCoverResult) -> None:
         completion = prepared.completion_token

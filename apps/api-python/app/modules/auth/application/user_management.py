@@ -128,6 +128,8 @@ class UserAdministrationGateway(Protocol):
 
     def hash_password(self, password: str) -> str: ...
 
+    def finish_read(self) -> None: ...
+
     def now(self) -> datetime: ...
 
     def create_user(self, prepared: PreparedUserCreate) -> AdminUserView: ...
@@ -201,6 +203,7 @@ class CreateUser:
             )
         except ValueError as exc:
             raise UserAdministrationError("INVALID_FOLDER_ACCESS", str(exc)) from exc
+        self._gateway.finish_read()
         return self._gateway.create_user(
             PreparedUserCreate(
                 user_id=self._gateway.new_user_id(),
@@ -325,6 +328,7 @@ class ResetUserPassword:
     ) -> None:
         _require_admin(actor)
         user = _require_user(self._gateway.get_user(user_id))
+        self._gateway.finish_read()
         self._gateway.reset_password(
             user_id=user.id,
             password_hash=self._gateway.hash_password(password),

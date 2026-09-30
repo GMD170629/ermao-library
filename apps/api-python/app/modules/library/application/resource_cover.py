@@ -113,6 +113,7 @@ class UploadResourceCover:
             raise ResourceNotFoundError
 
         previous_cover_path = self._covers.current_cover_path(resource_id=context.id)
+        self._unit_of_work.rollback()
         prepared = self._publication.prepare(
             resource_id=context.id,
             content=command.content,

@@ -4,6 +4,7 @@ import logging
 import sys
 from uuid import uuid4
 
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from app.contracts.library_file_activity import LibraryFileActivityBusy
@@ -91,6 +92,35 @@ class DiagnosticSession(Session):
             raise
         finally:
             self._flush_diagnostics()
+            self._flush_slow_transactions()
+
+    def _flush_slow_transactions(self) -> None:
+        transactions = self.info.pop("database_slow_transactions", [])
+        if self.info.get("diagnostics_storage") or not transactions:
+            return
+        try:
+            from app.modules.system.infrastructure.events import (
+                prepare_system_event,
+                write_prepared_system_events,
+            )
+
+            bind = self.get_bind()
+            for transaction in transactions:
+                prepared = prepare_system_event(
+                    source="database",
+                    action="database.write_transaction_slow",
+                    message=f"Database write transaction took {transaction['duration_ms']} ms",
+                    level="warning",
+                    metadata={"databaseTrace": transaction},
+                )
+                with DiagnosticSession(bind=bind, info={"diagnostics_storage": True}) as diagnostics_db:
+                    write_prepared_system_events(diagnostics_db, [prepared])
+                    diagnostics_db.commit()
+        except Exception as error:  # noqa: BLE001 - diagnostics cannot alter commit result
+            emergency_diagnostic(
+                "database.slow_transaction_persist_failed", error,
+                diagnostic_id=f"diag_{uuid4().hex}",
+            )
 
     def rollback(self) -> None:
         original = self._capture_failure(sys.exception(), "transaction")
@@ -101,6 +131,7 @@ class DiagnosticSession(Session):
             raise
         finally:
             self._flush_diagnostics()
+            self._flush_slow_transactions()
 
     def close(self) -> None:
         original = self._capture_failure(sys.exception(), "session")
@@ -111,3 +142,10 @@ class DiagnosticSession(Session):
             raise
         finally:
             self._flush_diagnostics()
+            self._flush_slow_transactions()
+
+
+@event.listens_for(DiagnosticSession, "after_begin")
+def link_database_transaction_to_session(session, transaction, connection) -> None:
+    del transaction
+    connection.info["database_diagnostic_session_info"] = session.info

@@ -44,6 +44,23 @@ def test_hidden_and_long_sql_parameters_survive_storage_projection():
     assert exported["metadata"]["taskId"] == "import-123"
 
 
+def test_long_transaction_trace_survives_event_metadata_projection():
+    from app.modules.system.domain.events import prepare_event_metadata
+
+    operation = {"statement": "INSERT INTO books VALUES (?)", "parameters": ["x" * 80_000]}
+    error = OperationalError(operation["statement"], operation["parameters"], sqlite3.OperationalError("interrupted"))
+    error.database_trace = {
+        "transaction_id": "dbtx_probe",
+        "statement_id": "dbstmt_probe",
+        "transaction_statements": [operation],
+    }
+    trace = diagnostics.format_exception_diagnostics(error)["databaseTrace"]
+    failure = prepare_event_metadata({"diagnostics": {"databaseTrace": trace}})
+    slow = prepare_event_metadata({"databaseTrace": {"statements": [operation]}})
+    assert failure["diagnostics"]["databaseTrace"]["transaction_statements"][0] == operation
+    assert slow["databaseTrace"]["statements"][0] == operation
+
+
 def test_group_sql_and_each_root_survive_metadata_clipping():
     from app.modules.system.domain.events import prepare_event_metadata
 

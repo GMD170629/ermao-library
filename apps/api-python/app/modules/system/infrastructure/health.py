@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.core.exception_diagnostics import record_exception
+from app.db.session import release_read_transaction
 from app.models.library import Library
 from app.modules.system.domain.health import (
     HealthCheckFailure,
@@ -110,6 +111,7 @@ def run_system_health_checks(db: Session, settings: Settings) -> dict[str, objec
         ).all()
         if path
     ]
+    release_read_transaction(db)
     checks.append(_check_libraries(library_root_paths))
     checks.append(_check_storage_root(settings.resolved_storage_root))
     return {"status": overall_health_status(checks), "checks": checks}

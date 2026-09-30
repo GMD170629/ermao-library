@@ -5,6 +5,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.db.session import release_read_transaction
 from app.models.auth import User
 from app.modules.auth.application.avatar_delivery import (
     AccountAvatar,
@@ -18,10 +19,13 @@ class SqlAlchemyAccountAvatarRepository:
         self._session = session
 
     def find_for_actor(self, actor_id: str) -> AccountAvatar | None:
-        user = self._session.scalars(
-            select(User).where(User.id == actor_id)
+        path = self._session.execute(
+            select(User.avatar_path).where(User.id == actor_id)
         ).one_or_none()
-        return AccountAvatar(user.avatar_path) if user is not None else None
+        return AccountAvatar(path[0]) if path is not None else None
+
+    def finish_read(self) -> None:
+        release_read_transaction(self._session)
 
 
 class LocalAvatarImageStore:

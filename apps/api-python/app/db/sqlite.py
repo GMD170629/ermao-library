@@ -1,9 +1,21 @@
+import hashlib
+import json
 import logging
+import re
 import sqlite3
+import sys
 from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
-from time import monotonic
-from typing import Protocol, Self, TypeVar, cast, overload
+from time import monotonic, thread_time
+from typing import Any, Protocol, Self, TypeVar, cast, overload
+from uuid import uuid4
+
+try:
+    import resource
+except ImportError:  # diagnostics-control-flow: Windows does not provide the optional resource module.
+    resource = None
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import URL, Engine
@@ -16,8 +28,144 @@ from app.db.maintenance import (
 
 logger = logging.getLogger(__name__)
 
-SHORT_WRITE_LOCK_TIMEOUT_SECONDS = 0.5
-SQLITE_STATEMENT_TIMEOUT_SECONDS = 2.0
+SQLITE_LOCK_WAIT_SECONDS = 30.0
+SQLITE_STATEMENT_TIMEOUT_SECONDS = 30.0
+
+
+def _utc_now() -> str:
+    return datetime.now(UTC).isoformat(timespec="milliseconds")
+
+
+def _thread_usage() -> tuple[float, int | None, int | None, int | None, int | None]:
+    cpu = thread_time()
+    if resource is None or not hasattr(resource, "RUSAGE_THREAD"):
+        return (cpu, None, None, None, None)
+    usage = resource.getrusage(resource.RUSAGE_THREAD)
+    return (cpu, usage.ru_inblock, usage.ru_oublock, usage.ru_nvcsw, usage.ru_nivcsw)
+
+
+def _usage_delta(
+    started: tuple[float, int | None, int | None, int | None, int | None],
+) -> dict[str, float | int | None]:
+    finished = _thread_usage()
+    return {
+        "thread_cpu_ms": round((finished[0] - started[0]) * 1000, 2),
+        "block_reads": finished[1] - started[1] if finished[1] is not None and started[1] is not None else None,
+        "block_writes": finished[2] - started[2] if finished[2] is not None and started[2] is not None else None,
+        "voluntary_switches": finished[3] - started[3] if finished[3] is not None and started[3] is not None else None,
+        "involuntary_switches": finished[4] - started[4] if finished[4] is not None and started[4] is not None else None,
+    }
+
+
+def _application_callsite() -> str | None:
+    frame = sys._getframe(1)
+    while frame is not None:
+        name = frame.f_code.co_filename.replace("\\", "/")
+        marker = "/app/"
+        if marker in name and not name.endswith("/app/db/sqlite.py"):
+            return f"app/{name.split(marker, 1)[1]}:{frame.f_lineno} in {frame.f_code.co_name}"
+        frame = frame.f_back
+    return None
+
+
+def _statement_kind(execution_context: Any, sql: str) -> str:
+    if execution_context.isinsert:
+        return "INSERT"
+    if execution_context.isupdate:
+        return "UPDATE"
+    if execution_context.isdelete:
+        return "DELETE"
+    first_word = sql.lstrip().split(None, 1)[0].upper() if sql.strip() else ""
+    if first_word in {"INSERT", "UPDATE", "DELETE", "SELECT"}:
+        return first_word
+    return "OTHER"
+
+
+def _statement_table(execution_context: Any) -> str | None:
+    compiled = getattr(execution_context, "compiled", None)
+    statement = getattr(compiled, "statement", None)
+    table = getattr(statement, "table", None)
+    name = getattr(table, "name", None)
+    return name if isinstance(name, str) and re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", name) else None
+
+
+@dataclass(slots=True)
+class _TransactionTrace:
+    id: str
+    started_at: float
+    started_utc: str
+    usage_started: tuple[float, int | None, int | None, int | None, int | None]
+    first_write_at: float | None = None
+    statement_count: int = 0
+    dbapi_ms: float = 0.0
+    lease_wait_ms: float = 0.0
+    slowest_statement_id: str | None = None
+    slowest_statement_ms: float = 0.0
+    statements: list[dict[str, object]] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class _StatementTrace:
+    id: str
+    transaction_id: str
+    started_at: float
+    started_utc: str
+    usage_started: tuple[float, int | None, int | None, int | None, int | None]
+    operation: str
+    table: str | None
+    sql_sha256: str
+    callsite: str | None
+    preparation_started_at: float | None
+    dbapi_started_at: float | None = None
+    lease_wait_ms: float = 0.0
+    operation_record: dict[str, object] | None = None
+
+
+def _log_timing(event_name: str, *, level: int = logging.INFO, **fields: object) -> None:
+    logger.log(level, "%s %s", event_name, json.dumps(fields, ensure_ascii=False, default=str, separators=(",", ":")))
+
+
+def _attach_database_trace(error: BaseException, fields: dict[str, object]) -> None:
+    try:
+        error.database_trace = fields
+    except (AttributeError, TypeError):  # diagnostics-control-flow: Foreign DBAPI exceptions may reject diagnostic attributes.
+        pass
+
+
+def _finish_transaction(info: dict[str, Any], *, outcome: str, boundary_ms: float) -> None:
+    trace = info.pop("database_transaction_trace", None)
+    session_info = info.pop("database_diagnostic_session_info", None)
+    release_database_maintenance_lock(info.pop("database_writer_lease", None))
+    info.pop("database_statement_trace", None)
+    info.pop("database_statement_preparation_started_at", None)
+    info.pop("transaction_write_started_at", None)
+    if not isinstance(trace, _TransactionTrace):
+        return
+    elapsed_ms = (monotonic() - trace.started_at) * 1000
+    fields = {
+        "transaction_id": trace.id,
+        "outcome": outcome,
+        "started_utc": trace.started_utc,
+        "finished_utc": _utc_now(),
+        "duration_ms": round(elapsed_ms, 2),
+        "boundary_ms": round(boundary_ms, 2),
+        "write_boundary_ms": round((monotonic() - trace.first_write_at) * 1000, 2) if trace.first_write_at is not None else None,
+        "statement_count": trace.statement_count,
+        "dbapi_ms": round(trace.dbapi_ms, 2),
+        "lease_wait_ms": round(trace.lease_wait_ms, 2),
+        "outside_dbapi_ms": round(max(0.0, elapsed_ms - trace.dbapi_ms - boundary_ms), 2),
+        "slowest_statement_id": trace.slowest_statement_id,
+        "slowest_statement_ms": round(trace.slowest_statement_ms, 2),
+        **_usage_delta(trace.usage_started),
+    }
+    _log_timing("database_transaction_finished", **fields)
+    threshold = info.get("database_slow_write_threshold_seconds")
+    if trace.first_write_at is not None and threshold is not None and elapsed_ms >= threshold * 1000:
+        _log_timing("database_write_transaction_slow", level=logging.WARNING, **fields)
+        if isinstance(session_info, dict) and not session_info.get("diagnostics_storage"):
+            session_info.setdefault("database_slow_transactions", []).append(
+                {**fields, "statements": trace.statements}
+            )
 
 _Result = TypeVar("_Result")
 _Cursor = TypeVar("_Cursor", bound=sqlite3.Cursor)
@@ -39,12 +187,23 @@ class _StatementBudgetCursor(sqlite3.Cursor):
     _deadline: float | None = None
     _started_at: float = 0
     _budget_exhausted: bool = False
+    _progress_calls: int = 0
+    _last_progress_at: float | None = None
+    _last_call_elapsed_seconds: float = 0.0
+    _diagnostic_statement: dict[str, object] | None = None
+    _diagnostic_transaction: _TransactionTrace | None = None
+    _pre_execute_wait_seconds: float = 0.0
 
     def _start_statement(self) -> None:
         self._budget_exhausted = False
+        self._progress_calls = 0
+        self._last_progress_at = None
         self._remaining_seconds = cast(
             _StatementBudgetConnection, self.connection
         ).statement_time_budget_seconds
+        if self._remaining_seconds is not None:
+            self._remaining_seconds -= self._pre_execute_wait_seconds
+        self._pre_execute_wait_seconds = 0.0
         self._started_at = monotonic()
         self._deadline = (
             self._started_at + self._remaining_seconds
@@ -57,6 +216,11 @@ class _StatementBudgetCursor(sqlite3.Cursor):
         self._budget_exhausted = self._budget_exhausted or expired
         return int(expired)
 
+    def _on_progress(self) -> int:
+        self._progress_calls += 1
+        self._last_progress_at = monotonic()
+        return self._expired()
+
     def _check_budget(self) -> None:
         if self._expired():
             # Short statements and blocking functions can complete before the next
@@ -68,11 +232,15 @@ class _StatementBudgetCursor(sqlite3.Cursor):
             raise error
 
     def _run(self, operation: Callable[[], _Result]) -> _Result:
+        call_started = monotonic()
         if self._remaining_seconds is None:
-            return operation()
-        self._started_at = monotonic()
-        self._deadline = self._started_at + self._remaining_seconds
-        self.connection.set_progress_handler(self._expired, 1_000)
+            try:
+                return operation()
+            finally:
+                self._last_call_elapsed_seconds = monotonic() - call_started
+        self._started_at = call_started
+        self._deadline = call_started + self._remaining_seconds
+        self.connection.set_progress_handler(self._on_progress, 1_000)
         try:
             self._check_budget()
             result = operation()
@@ -84,10 +252,13 @@ class _StatementBudgetCursor(sqlite3.Cursor):
             raise
         finally:
             self._remaining_seconds -= monotonic() - self._started_at
+            self._last_call_elapsed_seconds = monotonic() - call_started
             self._deadline = None
             self.connection.set_progress_handler(None, 0)
 
     def execute(self, sql: str, parameters: _Parameters = (), /) -> Self:
+        self._diagnostic_statement = None
+        self._diagnostic_transaction = None
         self._start_statement()
         return self._run(
             lambda: super(_StatementBudgetCursor, self).execute(sql, parameters)
@@ -96,11 +267,12 @@ class _StatementBudgetCursor(sqlite3.Cursor):
     def executemany(
         self, sql: str, seq_of_parameters: Iterable[_Parameters], /
     ) -> Self:
+        self._diagnostic_statement = None
+        self._diagnostic_transaction = None
         def budgeted_parameters() -> Iterable[_Parameters]:
             for parameters in seq_of_parameters:
-                # DBAPI executemany executes a distinct statement for each set of
-                # bindings; keep native batching/rowcount and reset only its timer.
-                self._start_statement()
+                # All bindings in one DBAPI call share one active SQL budget.
+                self._check_budget()
                 yield parameters
                 self._check_budget()
 
@@ -112,24 +284,99 @@ class _StatementBudgetCursor(sqlite3.Cursor):
         )
 
     def fetchone(self) -> object:
-        return self._run(super().fetchone)
+        return self._run_fetch("fetchone", super().fetchone)
 
     def fetchmany(self, size: int | None = None) -> list[object]:
-        return self._run(
+        return self._run_fetch("fetchmany",
             lambda: super(_StatementBudgetCursor, self).fetchmany(
                 self.arraysize if size is None else size
             )
         )
 
     def fetchall(self) -> list[object]:
-        return self._run(super().fetchall)
+        return self._run_fetch("fetchall", super().fetchall)
 
     def __next__(self) -> object:
-        return self._run(super().__next__)
+        return self._run_fetch("next", super().__next__)
+
+    def _run_fetch(self, method: str, operation: Callable[[], _Result]) -> _Result:
+        statement = self._diagnostic_statement
+        started = monotonic()
+        try:
+            result = self._run(operation)
+        except StopIteration:
+            raise
+        except Exception as error:
+            if statement is not None:
+                fields = {
+                    "transaction_id": statement["transaction_id"],
+                    "statement_id": statement["statement_id"],
+                    "phase": method,
+                    "duration_ms": round((monotonic() - started) * 1000, 2),
+                    "progress_calls": self._progress_calls,
+                    "time_budget_exceeded": bool(getattr(error, "time_budget_exceeded", False)),
+                    "error_type": type(error).__name__,
+                    "transaction_statements": self._diagnostic_transaction.statements if self._diagnostic_transaction else [],
+                }
+                _attach_database_trace(error, fields)
+                _log_timing("database_fetch_failed", level=logging.ERROR, **{key: value for key, value in fields.items() if key != "transaction_statements"})
+            raise
+        if statement is not None:
+            _log_timing(
+                "database_fetch_finished", transaction_id=statement["transaction_id"],
+                statement_id=statement["statement_id"], phase=method,
+                duration_ms=round((monotonic() - started) * 1000, 2),
+                row_count=len(result) if isinstance(result, list) else int(result is not None),
+                progress_calls=self._progress_calls,
+            )
+        return result
 
 
 class _StatementBudgetConnection(sqlite3.Connection):
     statement_time_budget_seconds: float | None = None
+    diagnostic_info: dict[str, Any] | None = None
+
+    def commit(self) -> None:
+        started = monotonic()
+        try:
+            super().commit()
+        except Exception as error:
+            trace = self.diagnostic_info.get("database_transaction_trace") if self.diagnostic_info else None
+            if isinstance(trace, _TransactionTrace):
+                _attach_database_trace(error, {
+                    "transaction_id": trace.id,
+                    "phase": "commit",
+                    "transaction_statements": trace.statements,
+                })
+            _log_timing("database_commit_failed", level=logging.ERROR,
+                        transaction_id=getattr(trace, "id", None),
+                        duration_ms=round((monotonic() - started) * 1000, 2),
+                        error_type=type(error).__name__, error_message=str(error),
+                        sqlite_error_name=getattr(error, "sqlite_errorname", None))
+            raise
+        if self.diagnostic_info is not None:
+            _finish_transaction(self.diagnostic_info, outcome="committed", boundary_ms=(monotonic() - started) * 1000)
+
+    def rollback(self) -> None:
+        started = monotonic()
+        try:
+            super().rollback()
+        except Exception as error:
+            trace = self.diagnostic_info.get("database_transaction_trace") if self.diagnostic_info else None
+            if isinstance(trace, _TransactionTrace):
+                _attach_database_trace(error, {
+                    "transaction_id": trace.id,
+                    "phase": "rollback",
+                    "transaction_statements": trace.statements,
+                })
+            _log_timing("database_rollback_failed", level=logging.ERROR,
+                        transaction_id=getattr(trace, "id", None),
+                        duration_ms=round((monotonic() - started) * 1000, 2),
+                        error_type=type(error).__name__, error_message=str(error),
+                        sqlite_error_name=getattr(error, "sqlite_errorname", None))
+            raise
+        if self.diagnostic_info is not None:
+            _finish_transaction(self.diagnostic_info, outcome="rolled_back", boundary_ms=(monotonic() - started) * 1000)
 
     @overload
     def cursor(self, factory: None = None) -> sqlite3.Cursor: ...
@@ -150,8 +397,8 @@ class SQLiteWalModeRequiredError(RuntimeError):
 def create_sqlite_engine(
     database_path: Path,
     *,
-    timeout_seconds: float = 10,
-    statement_time_budget_seconds: float | None = None,
+    timeout_seconds: float = SQLITE_LOCK_WAIT_SECONDS,
+    statement_time_budget_seconds: float | None = SQLITE_STATEMENT_TIMEOUT_SECONDS,
     slow_write_threshold_seconds: float | None = 0.1,
 ) -> Engine:
     engine = create_engine(
@@ -191,68 +438,161 @@ def create_sqlite_engine(
         finally:
             cursor.close()
         dbapi_connection.statement_time_budget_seconds = statement_time_budget_seconds
+        connection_record.info["database_slow_write_threshold_seconds"] = slow_write_threshold_seconds
+
+    @event.listens_for(engine, "before_execute")
+    def observe_statement_preparation(
+        connection, clauseelement, multiparams, params, execution_options
+    ) -> None:
+        del clauseelement, multiparams, params, execution_options
+        connection.info["database_statement_preparation_started_at"] = monotonic()
+
+    def complete_statement(
+        connection, cursor, error: BaseException | None = None
+    ) -> dict[str, object] | None:
+        trace = connection.info.pop("database_statement_trace", None)
+        if not isinstance(trace, _StatementTrace):
+            return None
+        transaction = connection.info.get("database_transaction_trace")
+        dbapi_ms = (
+            float(cursor._last_call_elapsed_seconds) * 1000
+            if isinstance(cursor, _StatementBudgetCursor)
+            else (monotonic() - trace.dbapi_started_at) * 1000 if trace.dbapi_started_at is not None else 0.0
+        )
+        total_ms = (monotonic() - trace.started_at) * 1000
+        fields: dict[str, object] = {
+            "transaction_id": trace.transaction_id,
+            "statement_id": trace.id,
+            "outcome": "failed" if error is not None else "ok",
+            "started_utc": trace.started_utc,
+            "finished_utc": _utc_now(),
+            "operation": trace.operation,
+            "table": trace.table,
+            "sql_sha256": trace.sql_sha256,
+            "callsite": trace.callsite,
+            "total_ms": round(total_ms, 2),
+            "preparation_ms": round(max(0.0, trace.started_at - trace.preparation_started_at) * 1000, 2) if trace.preparation_started_at is not None else None,
+            "pre_dbapi_ms": round(max(0.0, (trace.dbapi_started_at or trace.started_at) - trace.started_at) * 1000, 2),
+            "lease_wait_ms": round(trace.lease_wait_ms, 2),
+            "dbapi_ms": round(dbapi_ms, 2),
+            "progress_calls": cursor._progress_calls if isinstance(cursor, _StatementBudgetCursor) else None,
+            "last_progress_gap_ms": round((monotonic() - cursor._last_progress_at) * 1000, 2) if isinstance(cursor, _StatementBudgetCursor) and cursor._last_progress_at is not None else None,
+            "rowcount": cursor.rowcount if cursor is not None else None,
+            "error_type": type(error).__name__ if error is not None else None,
+            "error_message": str(error) if error is not None else None,
+            "sqlite_error_name": getattr(error, "sqlite_errorname", None),
+            "time_budget_exceeded": bool(getattr(error, "time_budget_exceeded", False)),
+            **_usage_delta(trace.usage_started),
+        }
+        if isinstance(transaction, _TransactionTrace):
+            transaction.statement_count += 1
+            transaction.dbapi_ms += dbapi_ms
+            transaction.lease_wait_ms += trace.lease_wait_ms
+            if transaction.slowest_statement_id is None or total_ms > transaction.slowest_statement_ms:
+                transaction.slowest_statement_ms = total_ms
+                transaction.slowest_statement_id = trace.id
+            if trace.operation_record is not None:
+                trace.operation_record["timing"] = fields
+        if isinstance(cursor, _StatementBudgetCursor) and trace.operation_record is not None:
+            cursor._diagnostic_statement = fields
+            cursor._diagnostic_transaction = transaction if isinstance(transaction, _TransactionTrace) else None
+        _log_timing(
+            "database_statement_finished" if error is None else "database_statement_failed",
+            level=logging.ERROR if error is not None else logging.INFO,
+            **fields,
+        )
+        if error is not None and isinstance(transaction, _TransactionTrace):
+            return {**fields, "transaction_statements": transaction.statements}
+        return fields
 
     @event.listens_for(engine, "before_cursor_execute")
-    def observe_first_transaction_dml(
-        connection,
-        cursor,
-        statement,
-        parameters,
-        execution_context,
-        executemany,
+    def observe_statement_start(
+        connection, cursor, statement, parameters, execution_context, executemany
     ) -> None:
-        del cursor, statement, parameters, executemany
-        if not (
-            execution_context.isinsert
-            or execution_context.isupdate
-            or execution_context.isdelete
-        ):
-            return
-        owns_restore_barrier = connection.info.get("database_restore_owner", False)
-        if (
-            connection.info.get("database_writer_lease") is None
-            and not owns_restore_barrier
-        ):
-            connection.info["database_writer_lease"] = acquire_database_writer_lease(
-                database_path,
-                timeout_seconds=timeout_seconds,
+        del executemany
+        info = connection.info
+        dbapi_connection = connection.connection.driver_connection
+        if isinstance(dbapi_connection, _StatementBudgetConnection):
+            dbapi_connection.diagnostic_info = info
+        transaction = info.get("database_transaction_trace")
+        if not isinstance(transaction, _TransactionTrace):
+            transaction = _TransactionTrace(
+                id=f"dbtx_{uuid4().hex}", started_at=monotonic(),
+                started_utc=_utc_now(), usage_started=_thread_usage(),
             )
-        if connection.info.get("transaction_write_started_at") is not None:
-            return
+            info["database_transaction_trace"] = transaction
         started_at = monotonic()
-        connection.info["transaction_write_started_at"] = started_at
-
-    def finish_observed_transaction(connection, *, outcome: str) -> None:
-        release_database_maintenance_lock(
-            connection.info.pop("database_writer_lease", None)
+        trace = _StatementTrace(
+            id=f"dbstmt_{uuid4().hex}", transaction_id=transaction.id,
+            started_at=started_at, started_utc=_utc_now(),
+            usage_started=_thread_usage(), operation=_statement_kind(execution_context, statement),
+            table=_statement_table(execution_context),
+            sql_sha256=hashlib.sha256(statement.encode("utf-8")).hexdigest(),
+            callsite=_application_callsite(),
+            preparation_started_at=info.pop("database_statement_preparation_started_at", None),
         )
-        started_at = connection.info.pop("transaction_write_started_at", None)
-        if started_at is None or slow_write_threshold_seconds is None:
-            return
-        duration_seconds = monotonic() - started_at
-        if duration_seconds < slow_write_threshold_seconds:
-            return
-        logger.warning(
-            "database_write_transaction_slow outcome=%s duration_ms=%.1f",
-            outcome,
-            duration_seconds * 1000,
+        trace.operation_record = {
+            "transaction_id": trace.transaction_id,
+            "statement_id": trace.id,
+            "started_utc": trace.started_utc,
+            "operation": trace.operation,
+            "table": trace.table,
+            "callsite": trace.callsite,
+            "statement": statement,
+            "parameters": parameters,
+        }
+        transaction.statements.append(trace.operation_record)
+        info["database_statement_trace"] = trace
+        logger.info(
+            "database_statement_started transaction_id=%s statement_id=%s started_utc=%s operation=%s table=%s sql_sha256=%s callsite=%s",
+            trace.transaction_id, trace.id, trace.started_utc, trace.operation,
+            trace.table, trace.sql_sha256, trace.callsite,
+            extra={"database_operations": [{"statement": statement, "parameters": parameters}]},
         )
+        if trace.operation in {"INSERT", "UPDATE", "DELETE"}:
+            if transaction.first_write_at is None:
+                transaction.first_write_at = started_at
+            if info.get("database_writer_lease") is None and not info.get("database_restore_owner", False):
+                lease_started = monotonic()
+                try:
+                    info["database_writer_lease"] = acquire_database_writer_lease(
+                        database_path, timeout_seconds=timeout_seconds,
+                    )
+                except Exception as error:
+                    trace.lease_wait_ms = (monotonic() - lease_started) * 1000
+                    fields = complete_statement(connection, None, error)
+                    if fields is not None:
+                        _attach_database_trace(error, fields)
+                    raise
+                trace.lease_wait_ms = (monotonic() - lease_started) * 1000
+        if isinstance(cursor, _StatementBudgetCursor):
+            cursor._pre_execute_wait_seconds = trace.lease_wait_ms / 1000
+        trace.dbapi_started_at = monotonic()
 
-    def observe_commit(connection) -> None:
-        finish_observed_transaction(connection, outcome="committed")
+    @event.listens_for(engine, "after_cursor_execute")
+    def observe_statement_finish(
+        connection, cursor, statement, parameters, execution_context, executemany
+    ) -> None:
+        del statement, parameters, execution_context, executemany
+        complete_statement(connection, cursor)
 
-    def observe_rollback(connection) -> None:
-        finish_observed_transaction(connection, outcome="rolled_back")
+    @event.listens_for(engine, "handle_error")
+    def observe_statement_error(exception_context) -> None:
+        connection = exception_context.connection
+        if connection is None:
+            return
+        cursor = getattr(exception_context.execution_context, "cursor", None)
+        fields = complete_statement(connection, cursor, exception_context.original_exception)
+        if fields is not None:
+            for error in (exception_context.original_exception, exception_context.sqlalchemy_exception):
+                if error is not None:
+                    _attach_database_trace(error, fields)
 
     def release_checked_in_writer_lease(dbapi_connection, connection_record) -> None:
-        del dbapi_connection
-        release_database_maintenance_lock(
-            connection_record.info.pop("database_writer_lease", None)
-        )
-        connection_record.info.pop("transaction_write_started_at", None)
+        if isinstance(dbapi_connection, _StatementBudgetConnection):
+            dbapi_connection.diagnostic_info = None
+        _finish_transaction(connection_record.info, outcome="checked_in", boundary_ms=0.0)
 
-    event.listen(engine, "commit", observe_commit)
-    event.listen(engine, "rollback", observe_rollback)
     event.listen(engine, "checkin", release_checked_in_writer_lease)
 
     return engine

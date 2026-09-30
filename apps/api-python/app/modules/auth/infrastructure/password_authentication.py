@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.auth import hash_password, verify_password
+from app.db.session import release_read_transaction
 from app.models.auth import User
 from app.modules.auth.application.ports import (
     PasswordVerificationRequest,
@@ -30,9 +31,11 @@ class SqlAlchemyUserCredentialReader:
     def find_by_normalized_email(
         self, normalized_email: str
     ) -> StoredPasswordCredential | None:
-        user = self._session.scalar(
-            select(User).where(func.lower(User.email) == normalized_email)
-        )
+        user = self._session.execute(
+            select(User.id, User.email, User.password_hash, User.status).where(
+                func.lower(User.email) == normalized_email
+            )
+        ).one_or_none()
         if user is None:
             return None
         return StoredPasswordCredential(
@@ -41,6 +44,9 @@ class SqlAlchemyUserCredentialReader:
             password_hash=user.password_hash,
             status=user.status,
         )
+
+    def finish_read(self) -> None:
+        release_read_transaction(self._session)
 
 
 class BoundedPasswordVerificationGateway:

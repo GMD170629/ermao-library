@@ -17,7 +17,7 @@ from app.bootstrap.media import media_streaming
 from app.contracts.http_errors import ErrorResponses
 from app.core.config import Settings, get_settings
 from app.core.exception_diagnostics import record_exception
-from app.db.session import get_db
+from app.db.session import get_db, release_read_transaction
 from app.modules.backup.application.operations import (
     BackupArchive,
     BackupNotFoundError,
@@ -120,6 +120,7 @@ def list_backups(
     _user, auth_error = _manager(db, request, settings)
     if auth_error:
         return auth_error
+    release_read_transaction(db)
     try:
         backups = build_backup_use_cases(db, settings).list.execute()
     except BackupOperationError as error:
@@ -137,6 +138,7 @@ def upload_backup(
     _user, auth_error = _manager(db, request, settings)
     if auth_error:
         return auth_error
+    release_read_transaction(db)
     try:
         backup = build_backup_use_cases(db, settings).upload.execute(
             file.filename or "", file.file
@@ -156,6 +158,7 @@ def get_backup(
     _user, auth_error = _manager(db, request, settings)
     if auth_error:
         return auth_error
+    release_read_transaction(db)
     try:
         backup = build_backup_use_cases(db, settings).get.execute(backup_id)
     except BackupOperationError as error:
@@ -180,6 +183,7 @@ def create_backup(
     _user, auth_error = _manager(db, request, settings)
     if auth_error:
         return auth_error
+    release_read_transaction(db)
     try:
         backup = build_backup_use_cases(db, settings).create.execute()
     except BackupOperationError as error:
@@ -200,6 +204,7 @@ def restore_backup(
     _user, auth_error = _manager(db, request, settings)
     if auth_error:
         return auth_error
+    release_read_transaction(db)
     try:
         result = build_backup_use_cases(db, settings).restore.execute(backup_id)
     except BackupOperationError as error:
@@ -236,6 +241,7 @@ def delete_backup(
     _user, auth_error = _manager(db, request, settings)
     if auth_error:
         return auth_error
+    release_read_transaction(db)
     try:
         deleted = build_backup_use_cases(db, settings).delete.execute(backup_id)
     except BackupOperationError as error:
@@ -261,6 +267,8 @@ def download_backup(
     user, auth_error = _manager(db, request, settings)
     if auth_error:
         return auth_error
+    user_id = user.id
+    release_read_transaction(db)
     try:
         descriptor = build_backup_use_cases(db, settings).download.execute(backup_id)
     except BackupOperationError as error:
@@ -276,7 +284,7 @@ def download_backup(
     return media_streaming.send_file(
         Path(descriptor.archive_path),
         request,
-        user.id,
+        user_id,
         media_type="application/zip",
         name=descriptor.filename,
         route="backup-download",

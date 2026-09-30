@@ -109,6 +109,7 @@ class PrepareFileMovePlan:
     inspection: MoveInspectionPort
     clock_ms: Callable[[], int]
     new_id: Callable[[], str]
+    release_read_transaction: Callable[[], None] | None = None
 
     def execute(
         self, actor: MoveActor, requests: tuple[MoveRequest, ...]
@@ -141,6 +142,8 @@ class PrepareFileMovePlan:
             self.topology.destination(source, request, actor.library_ids)
             for source, request in zip(sources, requests, strict=True)
         )
+        if self.release_read_transaction is not None:
+            self.release_read_transaction()
         plan_id = self.new_id()
         moves: list[PlannedMove] = []
         files = size = 0

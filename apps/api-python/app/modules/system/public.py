@@ -22,7 +22,6 @@ from app.modules.system.domain.settings_policy import (
     SENSITIVE_SYSTEM_SETTING_KEYS,
     public_system_settings,
 )
-from app.modules.system.infrastructure.events import feedback_event_bundle
 
 __all__ = [
     "DEFAULT_MAX_EVENT_BYTES",
@@ -39,5 +38,4 @@ __all__ = [
     "normalize_health_run_snapshot",
     "public_system_settings",
     "safe_runtime_error",
-    "feedback_event_bundle",
 ]

@@ -13,6 +13,7 @@ from app.core.exception_diagnostics import (
     prepare_exception_diagnostic,
     record_exception,
 )
+from app.db.session import release_read_transaction
 from app.modules.automation.application.catalog import AutomationCatalog
 from app.modules.automation.application.deletions import AutomationDeletions
 from app.modules.automation.application.file_moves import AutomationFileMoves
@@ -221,6 +222,9 @@ class DatabaseAutomationRuntime:
                 service_enabled=settings.enabled,
                 enabled_scopes=settings.enabled_scopes,
             )
+            # Operation adapters may perform network or file work. The auth
+            # projection is complete, so release its implicit read transaction.
+            release_read_transaction(db)
             result = operation(db, current)
         self._record_usage(access.grant_id)
         return result

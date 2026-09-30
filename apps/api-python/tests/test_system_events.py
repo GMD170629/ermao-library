@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from sqlalchemy import event as sqlalchemy_event
 from sqlalchemy import func, select
@@ -35,6 +37,24 @@ def test_record_system_event_normalizes_level_and_serializes_metadata(db_session
     assert event.metadata_json == {"filesScanned": 3, "path": "/books"}
 
 
+def test_system_event_size_reads_allocated_table_pages(db_session):
+    initial_size = system_event_size_bytes(db_session)
+    record_system_event(
+        db_session,
+        source="system",
+        action="large",
+        message="large event",
+        metadata={"payload": "x" * 60_000},
+    )
+    expanded_size = system_event_size_bytes(db_session)
+    assert expanded_size > initial_size
+    assert expanded_size == db_session.connection().exec_driver_sql(
+        "SELECT pgsize FROM dbstat WHERE name = 'SystemEvent' AND aggregate = 1"
+    ).scalar_one()
+    db_session.rollback()
+    assert system_event_size_bytes(db_session) == initial_size
+
+
 def test_prepared_system_events_use_one_write_and_do_not_commit(db_session):
     prepared = [
         prepare_system_event(
@@ -65,68 +85,100 @@ def test_prepared_system_events_use_one_write_and_do_not_commit(db_session):
     assert db_session.scalar(select(func.count()).select_from(SystemEvent)) == 0
 
 
-def test_prune_system_events_discards_info_before_protected_error_events(db_session):
-    for index in range(3):
-        record_system_event(
-            db_session,
-            source="import",
-            action=f"scan.file.detected.{index}",
-            message="普通扫描事件" + ("x" * 300),
+def test_prune_system_events_deletes_oldest_without_level_priority(db_session):
+    started_at = datetime(2026, 1, 1, tzinfo=UTC)
+    prepared = [
+        prepare_system_event(
+            event_id=f"event-{index}",
+            created_at=started_at + timedelta(minutes=index),
+            source="library",
+            action="deleted" if index in (0, 3) else "scan.file.detected",
+            level="error" if index in (0, 3) else "info",
+            message="日志事件",
+            metadata={"payload": "x" * 60_000},
         )
-    protected_id = record_system_event(
-        db_session,
-        source="library",
-        action="deleted",
-        level="error",
-        message="关键删除审计事件",
-    )
+        for index in range(4)
+    ]
+    write_prepared_system_events(db_session, prepared)
+    db_session.commit()
 
-    result = maintain_system_events(db_session, max_bytes=250)
+    result = maintain_system_events(db_session, max_bytes=100_000)
 
-    assert result["deleted"] == 3
-    assert (
-        db_session.scalar(
-            select(func.count())
-            .select_from(SystemEvent)
-            .where(SystemEvent.level == "info")
-        )
-        == 0
-    )
-    assert db_session.get(SystemEvent, protected_id) is not None
+    assert result["deleted"] == 2
+    assert db_session.get(SystemEvent, "event-0") is None
+    assert db_session.get(SystemEvent, "event-1") is None
+    assert db_session.get(SystemEvent, "event-2") is not None
+    assert db_session.get(SystemEvent, "event-3") is not None
 
 
-def test_prune_system_events_enforces_hard_limit_after_protected_events(db_session):
+def test_prune_system_events_rounds_up_odd_row_count(db_session):
     for index in range(3):
         record_system_event(
             db_session,
             source="library",
             action="deleted",
             level="error",
-            message=f"关键审计事件 {index}" + ("界" * 300),
+            message=f"关键审计事件 {index}",
+            metadata={"payload": "x" * 60_000},
         )
+    db_session.commit()
 
-    result = maintain_system_events(db_session, max_bytes=300)
+    result = maintain_system_events(db_session, max_bytes=64_000)
 
-    assert result["sizeBytes"] <= 300
-    assert result["deleted"] >= 1
+    assert result["deleted"] == 2
+    assert db_session.scalar(select(func.count()).select_from(SystemEvent)) == 1
 
 
-def test_prune_system_events_reduces_over_capacity_to_half_limit(db_session):
+def test_prune_system_events_removes_half_the_rows(db_session):
     for index in range(12):
         record_system_event(
             db_session,
             source="import",
             action=f"scan.file.detected.{index}",
-            message="普通扫描事件" + ("x" * 300),
+            message="普通扫描事件",
+            metadata={"payload": "x" * 60_000},
         )
+    db_session.commit()
 
-    max_bytes = 1_800
+    max_bytes = 500_000
     result = maintain_system_events(db_session, max_bytes=max_bytes)
 
-    assert result["deleted"] >= 1
-    assert result["sizeBytes"] <= max_bytes // 2
-    assert db_session.scalar(select(func.count()).select_from(SystemEvent)) > 0
+    assert result["deleted"] == 6
+    assert db_session.scalar(select(func.count()).select_from(SystemEvent)) == 6
     assert get_setting(db_session, "events.lastPrunedAt") is not None
+
+
+def test_prune_system_events_at_exact_limit_rounds_up_without_length_queries(
+    db_session,
+):
+    for index in range(5):
+        record_system_event(
+            db_session,
+            source="system",
+            action=f"test.{index}",
+            message="event",
+            metadata={"payload": "x" * 60_000},
+        )
+    db_session.commit()
+    current_size = system_event_size_bytes(db_session)
+    assert maintain_system_events(db_session, max_bytes=current_size + 1)["deleted"] == 0
+
+    statements: list[str] = []
+
+    def capture_statement(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement.lower())
+
+    sqlalchemy_event.listen(db_session.bind, "before_cursor_execute", capture_statement)
+    try:
+        result = maintain_system_events(db_session, max_bytes=current_size)
+    finally:
+        sqlalchemy_event.remove(
+            db_session.bind, "before_cursor_execute", capture_statement
+        )
+
+    assert result["deleted"] == 3
+    assert db_session.scalar(select(func.count()).select_from(SystemEvent)) == 2
+    assert not any("length(" in statement for statement in statements)
 
 
 def test_updating_capacity_defers_pruning_to_maintenance_worker(db_session):

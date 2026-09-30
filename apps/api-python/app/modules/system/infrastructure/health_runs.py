@@ -32,6 +32,7 @@ from app.core.safe_errors import safe_error_message
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import now_timestamp_ms, timestamp_ms_to_iso
 from app.db.diagnostic_session import DiagnosticSession
+from app.db.session import release_read_transaction
 from app.models import DownloadTask, KindleSendTask, LibraryImportTask
 from app.models.auth import UserPreference
 from app.models.library import Library
@@ -438,6 +439,7 @@ def _commit_snapshot_update(
         item_values=item_values,
         run_status=run_status,
     )
+    release_read_transaction(db)
     with SystemWriteTransaction(db):
         snapshot = _write_prepared_snapshot_update(db, prepared)
     return snapshot

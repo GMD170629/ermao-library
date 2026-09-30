@@ -108,6 +108,32 @@ def test_failed_or_stale_identification_keeps_original_book_and_cover(
     assert tuple(old.final_path.parent.iterdir()) == (old.final_path,)
 
 
+def test_identification_rechecks_state_after_file_publication(tmp_path):
+    covers = FilesystemSourceNodeCoverPublication(tmp_path)
+    old = covers.prepare(source_node_id="root", content=_png("red"))
+    published = covers.publish(old, previous_stored_path=None)
+    covers.complete(published, previous_stored_path=None)
+    snapshot = ImportedBookSnapshot(
+        "book", "root", 1, "[]", str(tmp_path), "Book", True,
+        ("SIDECAR_OPF", "EMBEDDED", "PATH"), (), None, old.stored_path, False,
+    )
+
+    class ChangingRepository(_Repository):
+        checks = 0
+
+        def still_current(self, snapshot):
+            self.checks += 1
+            return self.checks == 1
+
+    repository = ChangingRepository(snapshot, stale=False)
+    uow = _UnitOfWork(repository, fail_commit=False)
+    assert IdentifyImportedBook(repository, covers, uow).execute("root") == "stale"
+    assert repository.checks == 2
+    assert repository.title == "Original"
+    assert old.final_path.read_bytes() == _png("red")
+    assert tuple(old.final_path.parent.iterdir()) == (old.final_path,)
+
+
 @pytest.mark.parametrize(
     "priority",
     [

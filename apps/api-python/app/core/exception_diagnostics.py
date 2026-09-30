@@ -377,6 +377,9 @@ def _exception_facts(error: BaseException, *, report_formatting_failure: bool = 
         facts["statement"] = error.statement
         facts["parameters"] = json.loads(json.dumps(error.params, ensure_ascii=False, default=str))
         facts["isMulti"] = error.ismulti
+    database_trace = getattr(error, "database_trace", None)
+    if isinstance(database_trace, dict):
+        facts["databaseTrace"] = database_trace
     return facts
 
 
@@ -481,6 +484,7 @@ def format_exception_diagnostics(
         "chainTruncated": chain_truncated, "chainLength": len(entries),
         "truncated": truncated or chain_truncated,
         "databaseOperations": [entry for entry in entries if "statement" in entry],
+        "databaseTrace": next((entry["databaseTrace"] for entry in entries if "databaseTrace" in entry), None),
         **({"reason": "time_budget_exceeded"} if is_database_operation_timeout(error) else {}),
     }
 
@@ -619,6 +623,12 @@ def _format_log_text(
     header = f"{event} diagnostic_id={diagnostic_id}"
     if diagnostics.get("reason") == "time_budget_exceeded":
         header += " reason=time_budget_exceeded"
+    database_trace = diagnostics.get("databaseTrace")
+    if isinstance(database_trace, dict):
+        header += (
+            f" transaction_id={database_trace.get('transaction_id')}"
+            f" statement_id={database_trace.get('statement_id')}"
+        )
     if context_line:
         header = f"{header} {context_line}"
     traceback_text = str(diagnostics.get("traceback") or "")

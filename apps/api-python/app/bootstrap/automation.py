@@ -262,6 +262,7 @@ def build_automation_file_moves(db: Session) -> AutomationFileMoves:
             AnchoredMoveInspection(),
             now_timestamp_ms,
             lambda: uuid4().hex,
+            db.rollback,
         ),
         SqlAlchemyFileMoveOperations(db),
         SqlAlchemyReceiptStore(db),

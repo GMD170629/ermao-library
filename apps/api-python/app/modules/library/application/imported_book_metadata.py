@@ -56,6 +56,14 @@ class ImportedBookMetadataPort(Protocol):
     ) -> None: ...
 
 
+class _StaleIdentificationError(Exception):
+    pass
+
+
+def _book_run_is_current(callback: Callable[[], bool] | None) -> bool:
+    return callback is None or callback()
+
+
 class IdentifyImportedBook:
     def __init__(
         self,
@@ -73,7 +81,7 @@ class IdentifyImportedBook:
         *,
         book_run_current: Callable[[], bool] | None = None,
     ) -> str:
-        if book_run_current is not None and not book_run_current():
+        if not _book_run_is_current(book_run_current):
             return "stale"
         snapshot = self._load_snapshot(
             source_node_id, ignore_import_activity=book_run_current is not None
@@ -87,7 +95,7 @@ class IdentifyImportedBook:
             else None
         )
         try:
-            current = (book_run_current is None or book_run_current()) and (
+            current = _book_run_is_current(book_run_current) and (
                 self._repository.still_current(
                     snapshot, ignore_import_activity=True
                 )
@@ -100,7 +108,13 @@ class IdentifyImportedBook:
         if not current:
             self._discard_stale(prepared)
             return "stale"
-        return self._persist_identification(snapshot, result, prepared)
+        self._uow.rollback()
+        return self._persist_identification(
+            snapshot,
+            result,
+            prepared,
+            ignore_import_activity=book_run_current is not None,
+        )
 
     def _load_snapshot(
         self, source_node_id: str, *, ignore_import_activity: bool
@@ -125,6 +139,8 @@ class IdentifyImportedBook:
         snapshot: ImportedBookSnapshot,
         result: IdentifiedBookMetadata,
         prepared: PreparedSourceNodeCover | None,
+        *,
+        ignore_import_activity: bool,
     ) -> str:
         published = None
         try:
@@ -132,10 +148,23 @@ class IdentifyImportedBook:
                 published = self._covers.publish(
                     prepared, previous_stored_path=snapshot.previous_cover_path
                 )
+            current = (
+                self._repository.still_current(snapshot, ignore_import_activity=True)
+                if ignore_import_activity
+                else self._repository.still_current(snapshot)
+            )
+            if not current:
+                raise _StaleIdentificationError
             self._repository.apply(
                 snapshot, result, prepared.stored_path if prepared else None
             )
             self._uow.commit()
+        except _StaleIdentificationError:
+            # diagnostics-control-flow: A changed import snapshot is an expected CAS rejection, not an operation failure.
+            self._uow.rollback()
+            if published is not None:
+                self._covers.revert(published)
+            return "stale"
         except Exception:
             self._uow.rollback()
             if published is not None:

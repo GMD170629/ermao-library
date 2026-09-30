@@ -25,6 +25,8 @@ class InvalidAvatarContent(ValueError):
 class AccountAvatarRepository(Protocol):
     def find_for_actor(self, actor_id: str) -> AccountAvatar | None: ...
 
+    def finish_read(self) -> None: ...
+
 
 class AvatarImageStore(Protocol):
     def uploaded_image(self, relative_path: str) -> AvatarImageFile | None: ...
@@ -40,7 +42,10 @@ class GetAccountAvatar:
         self._images = images
 
     def execute(self, *, actor_id: str) -> AvatarImageFile:
-        account = self._accounts.find_for_actor(actor_id)
+        try:
+            account = self._accounts.find_for_actor(actor_id)
+        finally:
+            self._accounts.finish_read()
         if account is None:
             raise AvatarUnavailable
         if account.uploaded_path is not None:

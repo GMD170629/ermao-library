@@ -171,6 +171,10 @@ test('detail volume cover requests the small variant and uses compact dimensions
   page.on('request', (request) => {
     if (new URL(request.url()).pathname.includes('/cover')) coverRequests.push(request.url());
   });
+  await page.route(/\/api\/books\/book-1(?:\?|$)/, (route) => route.fulfill({ json: { ok: true, data: { book: {
+    id: 'book-1', sourceNodeId: 'book-node', title: 'Resource detail book', author: 'Author',
+    coverUrl: '/api/books/book-1/cover', resources: [epubResource]
+  } } } }));
 
   await page.goto('/books/book-1?resourceId=resource-epub&resourcePage=1');
 
@@ -285,8 +289,8 @@ test('AI identity preview respects a subsequent manual query', async ({ page }) 
   await expect(query).toHaveValue('乙书');
   await expect(dialog.getByText('甲书 完整版 → 甲书', { exact: true })).toHaveCount(0);
   expect(searches).toEqual([
-    { providerId: 'douban', query: '甲书 完整版', manualQuery: false },
-    { providerId: 'douban', query: '乙书', manualQuery: true }
+    { providerId: 'douban', query: '甲书 完整版', manualQuery: false, scope: 'book', resourceId: null },
+    { providerId: 'douban', query: '乙书', manualQuery: true, scope: 'book', resourceId: null }
   ]);
 });
 
@@ -384,18 +388,20 @@ test('AI generated fields are previewed, applied, reloaded and isolated when cha
   await page.getByRole('menuitem', { name: '识别', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '元数据识别', exact: true });
   await dialog.getByRole('button', { name: '搜索', exact: true }).click();
-  await expect(dialog.getByText('AI 生成', { exact: true })).toHaveCount(2);
+  await expect(dialog.getByRole('button', { name: '应用所选字段' })).toBeEnabled();
+  await expect(dialog.getByText('AI 生成', { exact: true })).toHaveCount(0);
   await dialog.getByRole('button', { name: /另一作品.*另一作者.*bangumi/ }).click();
   await expect(dialog.getByRole('checkbox', { name: /简介.*另一身份的生成介绍/ })).toBeChecked();
   await dialog.getByRole('button', { name: /活着.*余华.*ai/ }).click();
   await expect(dialog.getByRole('checkbox', { name: /简介.*本次生成的作品介绍/ })).toBeChecked();
   await dialog.getByRole('button', { name: '应用所选字段' }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(page.getByText('简介 · AI 生成', { exact: true })).toBeVisible();
-  await expect(page.getByText('标签 · AI 生成', { exact: true })).toBeVisible();
+  await expect(page.getByText('简介 · AI 生成', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('标签 · AI 生成', { exact: true })).toHaveCount(0);
   await page.reload();
   await expect(page.getByText(generated.description, { exact: true })).toBeVisible();
-  await expect(page.getByText('简介 · AI 生成', { exact: true })).toBeVisible();
+  for (const tag of generated.tags) await expect(page.getByRole('link', { name: `查看标签“${tag}”下的图书`, exact: true })).toBeVisible();
+  await expect(page.getByText('简介 · AI 生成', { exact: true })).toHaveCount(0);
 });
 
 
@@ -426,7 +432,7 @@ test('single same-node resource exposes recognition with its explicit target', a
   await page.getByRole('menuitem', { name: '识别', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '元数据识别', exact: true });
   await dialog.getByRole('button', { name: '搜索', exact: true }).click();
-  await expect(dialog.getByText('AI 生成', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('AI 生成', { exact: true })).toHaveCount(0);
   await dialog.getByRole('button', { name: /另一条目.*余华.*bangumi/ }).click();
   await expect(dialog.getByRole('button', { name: '应用所选字段' })).toBeEnabled();
   const cover = dialog.getByRole('checkbox', { name: /^封面/ });
@@ -436,9 +442,11 @@ test('single same-node resource exposes recognition with its explicit target', a
   await dialog.getByRole('button', { name: '应用所选字段' }).click();
   await expect(dialog).toHaveCount(0);
   await page.reload();
-  await expect(page.getByText('简介 · AI 生成', { exact: true })).toBeVisible();
-  await expect(page.getByText('资源生成简介', { exact: true })).toBeVisible();
+  await expect(page.getByText('简介 · AI 生成', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('资源生成简介', { exact: true })).toHaveCount(0);
   await expect(page.getByText('书级简介保留', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '展开简介', exact: true }).click();
+  await expect(page.getByRole('button', { name: '收起', exact: true })).toHaveAttribute('aria-expanded', 'true');
 });
 
 test('manual metadata selection applies conflicting candidates and every available field', async ({ page }) => {

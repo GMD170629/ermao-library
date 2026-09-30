@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from threading import Event, Timer
 from time import monotonic
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.base import Base
@@ -17,7 +20,6 @@ def test_metadata_search_closes_reads_and_defers_busy_cache_write(
 ) -> None:
     database_path = tmp_path / "metadata-search.sqlite"
     source_engine = create_sqlite_engine(database_path)
-    blocker_engine = create_sqlite_engine(database_path)
     Base.metadata.create_all(source_engine)
     seeded_at = datetime.now(UTC)
     with Session(source_engine) as seed, seed.begin():
@@ -41,9 +43,16 @@ def test_metadata_search_closes_reads_and_defers_busy_cache_write(
     }
     source = Session(source_engine, autoflush=False, expire_on_commit=False)
     network_observations: list[bool] = []
+    lock_acquired = Event()
+    release_lock = Event()
+    timer = Timer(0.7, release_lock.set)
+    timer_started = False
 
     def successful_provider(*_args, **_kwargs):
+        nonlocal timer_started
         network_observations.append(source.in_transaction())
+        timer.start()
+        timer_started = True
         return {
             "provider": "douban",
             "enabled": True,
@@ -54,42 +63,43 @@ def test_metadata_search_closes_reads_and_defers_busy_cache_write(
     monkeypatch.setattr(
         "app.services.organize_service.run_douban_metadata_provider", successful_provider
     )
-    blocker = Session(blocker_engine)
+    def hold_write_lock() -> None:
+        with sqlite3.connect(database_path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                'UPDATE "ExternalMetadataCache" SET "rawJson" = ? WHERE id = ?',
+                ('{"candidates": [{"title": "locked"}]}', "cache-lock-row"),
+            )
+            lock_acquired.set()
+            if not release_lock.wait(timeout=10):
+                raise TimeoutError("test writer lock was not released")
+            connection.rollback()
+
     try:
-        blocker.execute(
-            update(ExternalMetadataCache)
-            .where(ExternalMetadataCache.id == "cache-lock-row")
-            .values(raw_json='{"candidates": [{"title": "locked"}]}')
-        )
-        started = monotonic()
-        result = metadata_search_candidates(source, context, "douban", config={})
-        elapsed = monotonic() - started
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            blocker = pool.submit(hold_write_lock)
+            assert lock_acquired.wait(timeout=5)
+            try:
+                started = monotonic()
+                result = metadata_search_candidates(source, context, "douban", config={})
+                elapsed = monotonic() - started
+            finally:
+                release_lock.set()
+                if timer_started:
+                    timer.join()
+            blocker.result(timeout=5)
 
         assert result["candidates"][0]["title"] == "Prepared result"
         assert network_observations == [False]
-        assert elapsed < 1.0
+        assert elapsed >= 0.5
         with Session(source_engine) as verify:
-            assert (
-                verify.scalar(
-                    select(ExternalMetadataCache.id).where(
-                        ExternalMetadataCache.query_key == "shorttransactionsearch"
-                    )
+            assert verify.scalar(
+                select(ExternalMetadataCache.id).where(
+                    ExternalMetadataCache.query_key == "shorttransactionsearch"
                 )
-                is None
-            )
+            ) is not None
     finally:
-        blocker.rollback()
-        blocker.close()
+        release_lock.set()
         source.close()
 
-    with Session(source_engine) as retry:
-        metadata_search_candidates(retry, context, "douban", config={})
-    with Session(source_engine) as verify:
-        assert verify.scalar(
-            select(ExternalMetadataCache.id).where(
-                ExternalMetadataCache.query_key == "shorttransactionsearch"
-            )
-        )
-
     source_engine.dispose()
-    blocker_engine.dispose()

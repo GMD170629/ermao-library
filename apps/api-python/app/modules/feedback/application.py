@@ -6,8 +6,9 @@ from datetime import datetime
 from typing import Protocol
 
 from app.core.exception_diagnostics import sanitize_diagnostic_text
+from app.core.time import timestamp_ms_to_iso
 
-from .domain import FeedbackDraft, FeedbackPreview, preview_hash
+from .domain import FeedbackDiagnostics, FeedbackDraft, FeedbackPreview, preview_hash
 
 
 class FeedbackAccessError(Exception):
@@ -93,7 +94,7 @@ def prepare_preview(context: FeedbackContext, diagnostics_reader: FeedbackDiagno
                 "source": _safe(event.get("source"), 40),
                 "action": _safe(event.get("action"), 100),
                 "message": _safe(event.get("message")),
-                "createdAt": created_at.isoformat() if isinstance(created_at, datetime) else _safe(created_at, 40),
+                "createdAt": timestamp_ms_to_iso(created_at) if isinstance(created_at, datetime) else _safe(created_at, 40),
                 "stage": _safe(metadata.get("stage") or metadata.get("step"), 100) if isinstance(metadata, dict) else "",
                 "exceptionType": _safe(detail.get("exceptionType"), 100),
                 "diagnosticMessage": _safe(detail.get("message")),
@@ -107,4 +108,7 @@ def prepare_preview(context: FeedbackContext, diagnostics_reader: FeedbackDiagno
                 for book_id, title in sorted(book_titles.items())
             ],
         }
-    return FeedbackPreview(diagnostics=diagnostics, previewHash=preview_hash(draft, diagnostics))
+    return FeedbackPreview(
+        diagnostics=FeedbackDiagnostics.model_validate(diagnostics),
+        previewHash=preview_hash(draft, diagnostics),
+    )

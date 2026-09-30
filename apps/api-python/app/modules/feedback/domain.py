@@ -77,9 +77,52 @@ class FeedbackSubmitRequest(FeedbackDraft):
         return value
 
 
+class FeedbackEnvironment(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    app_version: str = Field(alias="appVersion")
+
+
+class FeedbackEnvironmentDiagnostics(ClientEnvironment):
+    app_version: str = Field(alias="appVersion")
+    installation_method: str = Field(alias="installationMethod")
+
+
+class FeedbackLogEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    id: str
+    level: str
+    source: str
+    action: str
+    message: str
+    created_at: str = Field(alias="createdAt")
+    stage: str
+    exception_type: str = Field(alias="exceptionType")
+    diagnostic_message: str = Field(alias="diagnosticMessage")
+    traceback: str
+
+
+class FeedbackRelatedBook(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    title: str
+
+
+class FeedbackLogDiagnostics(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    selected_event_id: str = Field(alias="selectedEventId")
+    events: list[FeedbackLogEvent]
+    related_books: list[FeedbackRelatedBook] = Field(alias="relatedBooks")
+
+
+class FeedbackDiagnostics(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    environment: FeedbackEnvironmentDiagnostics | None = None
+    log: FeedbackLogDiagnostics | None = None
+
+
 class FeedbackPreview(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
-    diagnostics: dict[str, object]
+    diagnostics: FeedbackDiagnostics
     preview_hash: str = Field(alias="previewHash")
 
 

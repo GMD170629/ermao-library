@@ -32,6 +32,7 @@ def test_system_event_page_filters_in_database(db_session: Session) -> None:
         )
     db_session.commit()
     select_count = 0
+    select_statements: list[str] = []
 
     def count_selects(
         _connection: object,
@@ -44,6 +45,7 @@ def test_system_event_page_filters_in_database(db_session: Session) -> None:
         nonlocal select_count
         if statement.lstrip().upper().startswith("SELECT"):
             select_count += 1
+            select_statements.append(statement)
 
     engine = db_session.get_bind()
     event.listen(engine, "before_cursor_execute", count_selects)
@@ -63,7 +65,9 @@ def test_system_event_page_filters_in_database(db_session: Session) -> None:
     assert sum(item["count"] for item in snapshot.sources) == event_count
     assert sum(item["count"] for item in snapshot.levels) == event_count
     assert snapshot.size_bytes > 0
-    assert select_count == 3
+    assert select_count == 4
+    assert any("FROM dbstat" in statement for statement in select_statements)
+    assert not any("length(" in statement.lower() for statement in select_statements)
 
 
 def test_event_date_bounds_accept_dates_and_browser_iso_values() -> None:

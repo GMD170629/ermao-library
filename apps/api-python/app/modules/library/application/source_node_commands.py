@@ -174,6 +174,7 @@ class UpdateSourceNodePresentation:
         )
         if state is None:
             return False
+        self._unit_of_work.rollback()
 
         prepared = (
             self._covers.prepare(
@@ -194,6 +195,17 @@ class UpdateSourceNodePresentation:
         replace_cover = prepared is not None or remove_cover
         next_cover_path = prepared.stored_path if prepared is not None else None
         try:
+            current = self._port.get_state(
+                book_id=book_id,
+                source_node_id=source_node_id,
+            )
+            if current is None:
+                self._unit_of_work.rollback()
+                if published is not None:
+                    self._covers.revert(published)
+                return False
+            if current.cover_path != state.cover_path:
+                raise RuntimeError("SOURCE_NODE_COVER_STATE_CHANGED")
             updated = self._port.update_metadata(
                 book_id=book_id,
                 source_node_id=source_node_id,

@@ -95,6 +95,7 @@ class FileDeletions:
         targets: list[DeleteTarget] = []
         for node_id in node_ids:
             source = self.topology(node_id, libraries)
+            self.uow.rollback()
             inventory = self.files.inspect(source)
             targets.append(DeleteTarget(source, inventory))
         paths = [
@@ -213,6 +214,7 @@ class FileDeletions:
                                 != target.source
                             ):
                                 raise FileMoveError("SOURCE_CHANGED")
+                            self.uow.rollback()
                             step = "validate_delete"
                             self.files.validate(target)
                             target = replace(target, stage="DELETING")
@@ -232,6 +234,7 @@ class FileDeletions:
                                 not in authorization.library_ids()
                             ):
                                 raise FileMoveError("RESOURCE_NOT_FOUND")
+                            self.uow.rollback()
                             step = "delete_files"
                             self.files.delete(target)
                             target = replace(target, stage="FILES_DELETED")

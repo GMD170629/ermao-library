@@ -1,9 +1,3 @@
-from app.modules.library.application.source_node_metadata_recognition import (
-    MetadataProviderSearchError,
-    SourceNodeMetadataCandidate,
-    SourceNodeMetadataRecognitionPort,
-    SourceNodeMetadataRecognitionResult,
-)
 from app.modules.library.application.bulk_operations import (
     BulkBookAccessError,
     BulkBookAuthorizationError,
@@ -46,6 +40,12 @@ from app.modules.library.application.source_browser import (
     SourceAccessError,
     SourceBrowserPort,
     SourceLocation,
+)
+from app.modules.library.application.source_node_metadata_recognition import (
+    MetadataProviderSearchError,
+    SourceNodeMetadataCandidate,
+    SourceNodeMetadataRecognitionPort,
+    SourceNodeMetadataRecognitionResult,
 )
 from app.modules.library.domain.file_moves import (
     FileMoveError,
@@ -202,10 +202,6 @@ from app.modules.library.domain.source_nodes import (
 )
 
 __all__ = [
-    "MetadataProviderSearchError",
-    "SourceNodeMetadataCandidate",
-    "SourceNodeMetadataRecognitionPort",
-    "SourceNodeMetadataRecognitionResult",
     "CATALOG_FACET_KINDS",
     "FACET_KINDS",
     "LIBRARY_GROUPING_KINDS",
@@ -289,6 +285,7 @@ __all__ = [
     "MetadataPatchActor",
     "MetadataPatchError",
     "MetadataPatchPort",
+    "MetadataProviderSearchError",
     "MetadataSideEffectPolicy",
     "MetadataTarget",
     "MetadataValue",
@@ -313,6 +310,9 @@ __all__ = [
     "SourceAccessError",
     "SourceBrowserPort",
     "SourceLocation",
+    "SourceNodeMetadataCandidate",
+    "SourceNodeMetadataRecognitionPort",
+    "SourceNodeMetadataRecognitionResult",
     "SourceNodePhysicalKind",
     "SourceNodeRecord",
     "SourceNodeRelativePath",
@@ -350,6 +350,5 @@ from app.modules.library.application.file_deletions import DeletePlan, FileDelet
 __all__ += ["DeletePlan", "FileDeletions"]
 
 from app.modules.library.application.file_move_plans import MoveSource
-from app.modules.library.infrastructure.feedback_books import feedback_book_titles
 
-__all__ += ["MoveSource", "feedback_book_titles"]
+__all__ += ["MoveSource"]

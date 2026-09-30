@@ -222,6 +222,9 @@ def main() -> None:
                         if file_move_session is not None:
                             _cleanup("file_move_rollback", file_move_session.rollback)
                         next_file_move_attempt = monotonic() + 60
+                    finally:
+                        if file_move_session is not None:
+                            _cleanup("file_move_close", file_move_session.close)
             if imports_paused or monotonic() < next_import_attempt:
                 stop_event.wait(settings.import_queue_interval_seconds)
                 continue
@@ -237,6 +240,7 @@ def main() -> None:
                         pipeline = build_readable_resource_pipeline(import_session)
                         candidate = build_readable_resource_worker(pipeline)
                         candidate.startup()
+                        import_session.close()
                         readable_worker = candidate
                     except Exception as error:  # noqa: BLE001 - recovery gates imports only.
                         _report_failure("import_recovery", error)
@@ -306,6 +310,9 @@ def main() -> None:
                         )
                         if scan_paused or imports_paused:
                             _cleanup("scan_request_stop", scan_coordinator.request_stop, parent_diagnostic_id=diagnostic_id)
+                    finally:
+                        if import_session is not None:
+                            _cleanup("scan_session_close", import_session.close)
             if stop_event.is_set() or imports_paused:
                 continue
             with exception_diagnostic_boundary(
@@ -346,6 +353,9 @@ def main() -> None:
                             300, 5 * 2 ** min(import_failures - 1, 6)
                         )
                     outcome = "error"
+                finally:
+                    if import_session is not None:
+                        _cleanup("import_session_close", import_session.close)
             if outcome in {"idle", "error", "deferred"}:
                 stop_event.wait(settings.import_queue_interval_seconds)
     finally:
