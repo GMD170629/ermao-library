@@ -1070,7 +1070,9 @@ def test_invalid_topology_backup_is_rejected_before_live_restore(tmp_path) -> No
                 )
                 archive.writestr("settings.json", settings_bytes)
 
-            with pytest.raises(BackupOperationError, match="BACKUP_FOREIGN_KEY_INVALID") as failure:
+            with pytest.raises(
+                BackupOperationError, match="BACKUP_FOREIGN_KEY_INVALID"
+            ) as failure:
                 restore_backup(db, settings, backup.id)
             assert failure.value.problem.params["field"] == "LibraryBook.sourceNodeId"
             assert db.get(SystemSetting, "backup.sentinel").value == "before"
