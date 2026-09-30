@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models import (
+    Library,
     LibraryBook,
     LibraryBookMetadata,
     LibraryReadableResource,
@@ -35,12 +36,19 @@ from app.services.metadata_file_writeback import (
 )
 
 
-def _node(node_id: str, path: str, *, directory: bool = False) -> LibrarySourceNode:
+def _node(
+    node_id: str,
+    path: str,
+    *,
+    directory: bool = False,
+    relative_path: str | None = None,
+) -> LibrarySourceNode:
+    stored_path = relative_path if relative_path is not None else path
     return LibrarySourceNode(
         id=node_id,
         library_id="test-library",
-        relative_path=path,
-        path_key="v1:" + hashlib.sha256(path.encode()).hexdigest(),
+        relative_path=stored_path,
+        path_key="v1:" + hashlib.sha256(stored_path.encode()).hexdigest(),
         name=Path(path).name or node_id,
         physical_kind="DIRECTORY" if directory else "REGULAR_FILE",
         observed_size_bytes=None if directory else Path(path).stat().st_size,
@@ -56,8 +64,13 @@ def _seed_book_resource(
     resource_id: str = "resource-writeback",
     resource_index: float | None = None,
 ) -> tuple[LibraryBook, LibraryReadableResource, LibraryResourceAsset]:
+    library = db_session.get(Library, "test-library")
+    assert library is not None
+    library.root_path = str(source.parent)
     book_node = _node("book-writeback-node", "book-writeback", directory=True)
-    resource_node = _node("resource-writeback-node", str(source))
+    resource_node = _node(
+        "resource-writeback-node", str(source), relative_path=source.name
+    )
     book = LibraryBook(
         id="book-writeback",
         library_id="test-library",
@@ -134,6 +147,8 @@ def test_writeback_uses_immutable_book_resource_snapshot_after_commit(
         db_session, book_id=book.id, resource_id=resource.id
     )
     assert projection.resource_ids == (resource.id,)
+    assert projection.root_path == str(source.parent)
+    assert projection.assets[0].relative_path == source.name
     queued = enqueue_writeback(
         db_session,
         book_id=book.id,

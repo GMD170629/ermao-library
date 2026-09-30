@@ -45,6 +45,10 @@ from app.models.organize import (
     MetadataWritebackTarget,
     OrganizePolicy,
 )
+from app.modules.library.public import (
+    SourceNodeRelativePath,
+    parse_source_node_relative_path,
+)
 from app.modules.metadata.application.writeback import (
     NULL_SOURCE_REVISION,
     MetadataWritebackAssetProjection,
@@ -193,6 +197,9 @@ def load_metadata_writeback_projection(
     book_metadata = db.get(LibraryBookMetadata, book_id)
     if book is None or book_metadata is None:
         raise ValueError("图书不存在")
+    library = db.get(Library, book.library_id)
+    if library is None:
+        raise ValueError("书库不存在")
     if resource_id is not None:
         selected_resource = db.scalar(
             select(LibraryReadableResource.id).where(
@@ -271,6 +278,7 @@ def load_metadata_writeback_projection(
         )
     return MetadataWritebackProjection(
         book_id=book.id,
+        root_path=library.root_path,
         title=book_metadata.title,
         author=book_metadata.author,
         description=book_metadata.description,
@@ -699,6 +707,11 @@ def claim_next_preparation(
     ).one_or_none()
     if row is None:
         return None
+    library_root = db.scalar(
+        select(Library.root_path)
+        .join(LibraryBook, LibraryBook.library_id == Library.id)
+        .where(LibraryBook.id == row.book_id)
+    )
     if row.operation_id:
         db.execute(
             update(MetadataWritebackOperation)
@@ -711,6 +724,7 @@ def claim_next_preparation(
         "bookId": row.book_id,
         "sourceNodeId": row.source_node_id,
         "resourceId": row.resource_id,
+        "rootPath": library_root,
         "sourceRevision": row.source_revision,
         "snapshotJson": row.snapshot_json,
         "attempts": row.attempts,
@@ -729,6 +743,27 @@ def prepare_targets_from_snapshot(
     if not isinstance(resources, list):
         # This is an invalid persisted business snapshot, not a caller type error.
         raise ValueError("invalid writeback preparation snapshot")  # noqa: TRY004
+    snapshot_has_root = bool(parsed.get("rootPath"))
+    root_value = parsed.get("rootPath") or preparation.get("rootPath")
+    root = (
+        Path(root_value).expanduser().resolve()
+        if isinstance(root_value, str) and root_value
+        else None
+    )
+
+    def source_path(value: str) -> Path:
+        path = Path(value).expanduser()
+        if path.is_absolute() and not snapshot_has_root:
+            return path.resolve()
+        if root is None:
+            raise ValueError("writeback source path has no library root")
+        relative = parse_source_node_relative_path(value)
+        if not isinstance(relative, SourceNodeRelativePath):
+            raise ValueError("invalid library-relative writeback path")  # noqa: TRY004
+        candidate = root / relative.value
+        candidate.resolve().relative_to(root)
+        return candidate
+
     operation_id = str(preparation["operationId"])
     targets: list[PreparedTargetInsert] = []
     seen: set[Path] = set()
@@ -743,25 +778,22 @@ def prepare_targets_from_snapshot(
         for raw_asset in asset_values:
             if not isinstance(raw_asset, dict) or not raw_asset.get("relativePath"):
                 continue
-            assets_by_path[
-                Path(str(raw_asset["relativePath"])).expanduser().resolve()
-            ] = raw_asset
-        sources: list[str] = []
+            assets_by_path[source_path(str(raw_asset["relativePath"]))] = raw_asset
+        sources: list[Path] = []
         raw_tasks = raw_resource.get("importTasks")
         tasks = raw_tasks if isinstance(raw_tasks, list) else []
         for raw_task in tasks:
             if not isinstance(raw_task, dict) or not raw_task.get("sourcePath"):
                 continue
-            task_path = Path(str(raw_task["sourcePath"])).expanduser()
+            task_path = source_path(str(raw_task["sourcePath"]))
             assets = raw_task.get("assetPaths")
             if task_path.is_dir() and isinstance(assets, list):
-                sources.extend(str(path) for path in assets)
+                sources.extend(source_path(str(path)) for path in assets)
             else:
-                sources.append(str(task_path))
+                sources.append(task_path)
         if not sources:
-            sources = [str(path) for path in assets_by_path]
-        for source_value in sources:
-            target_path = Path(source_value).expanduser().resolve()
+            sources = list(assets_by_path)
+        for target_path in sources:
             if source_node_form and not target_path.is_dir():
                 raise ValueError(
                     "source-node OPF writeback requires a directory target"
@@ -773,8 +805,12 @@ def prepare_targets_from_snapshot(
             try:
                 target_stat = target_path.stat() if target_path.is_file() else None
             except OSError as error:
-                record_exception(logging.getLogger(__name__), "modules.metadata.infrastructure.writeback_queue.prepare_targets_from_snapshot.failed", error,
-                                 context={"step": "prepare_targets_from_snapshot"})
+                record_exception(
+                    logging.getLogger(__name__),
+                    "modules.metadata.infrastructure.writeback_queue.prepare_targets_from_snapshot.failed",
+                    error,
+                    context={"step": "prepare_targets_from_snapshot"},
+                )
                 target_stat = None
             payload = {
                 **payload_base,

@@ -15,6 +15,7 @@ from app.modules.metadata.application.writeback import (
 def _projection() -> MetadataWritebackProjection:
     return MetadataWritebackProjection(
         book_id="book-1",
+        root_path="/library",
         title="Book",
         author=None,
         description=None,

@@ -47,6 +47,7 @@ class MetadataWritebackResourceProjection:
 @dataclass(frozen=True, slots=True)
 class MetadataWritebackProjection:
     book_id: str
+    root_path: str
     title: str
     author: str | None
     description: str | None
@@ -154,7 +155,10 @@ def prepare_metadata_writeback_intents(
     intents: list[PreparedWritebackIntent] = []
     for current_resource_id in projection.resource_ids:
         snapshot_json = json.dumps(
-            {"resources": resources_by_book.get(current_resource_id, [])},
+            {
+                "rootPath": projection.root_path,
+                "resources": resources_by_book.get(current_resource_id, []),
+            },
             ensure_ascii=False,
             separators=(",", ":"),
             sort_keys=True,
