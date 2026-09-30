@@ -5,7 +5,7 @@ keeps existing process entry points stable while those dependencies are wired.
 """
 
 from app.modules.system.infrastructure.runtime import (
-    clear_system_events_with_audit,
+    clear_system_events,
     configured_max_event_bytes,
     create_or_reuse_health_run,
     fail_abandoned_health_runs,
@@ -41,7 +41,7 @@ from app.modules.system.infrastructure.runtime import (
 )
 
 __all__ = [
-    "clear_system_events_with_audit",
+    "clear_system_events",
     "configured_max_event_bytes",
     "create_or_reuse_health_run",
     "fail_abandoned_health_runs",

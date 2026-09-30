@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 
 import app.modules.system.infrastructure.runtime as system_runtime
 from app.bootstrap.system import (
+    clear_system_events,
     get_setting,
     maintain_system_events,
     persist_system_settings_update,
@@ -35,6 +36,28 @@ def test_record_system_event_normalizes_level_and_serializes_metadata(db_session
     assert event.level == "warning"
     assert event.source == "import"
     assert event.metadata_json == {"filesScanned": 3, "path": "/books"}
+
+
+def test_clear_system_events_removes_all_levels_and_audit_events(db_session):
+    for level, action in (
+        ("info", "scan.completed"),
+        ("warning", "scan.skipped"),
+        ("error", "scan.failed"),
+        ("info", "library.deleted"),
+    ):
+        record_system_event(
+            db_session,
+            source="system",
+            action=action,
+            level=level,
+            message=action,
+        )
+    db_session.commit()
+
+    assert clear_system_events(db_session) == 4
+    assert db_session.scalar(select(func.count()).select_from(SystemEvent)) == 0
+    assert clear_system_events(db_session) == 0
+    assert db_session.scalar(select(func.count()).select_from(SystemEvent)) == 0
 
 
 def test_system_event_size_reads_allocated_table_pages(db_session):

@@ -512,11 +512,9 @@ def list_system_events_page(
     )
 
 
-def clear_info_warning_events(db: Session) -> int:
+def clear_all_system_events(db: Session) -> int:
     result = typing_cast(
         CursorResult[Any],
-        db.execute(
-            delete(SystemEvent).where(SystemEvent.level.in_(("info", "warning")))
-        ),
+        db.execute(delete(SystemEvent)),
     )
     return int(result.rowcount or 0)

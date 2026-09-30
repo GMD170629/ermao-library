@@ -20,7 +20,7 @@ from app.modules.system.domain.events import (
 from app.modules.system.domain.health import HealthRunSnapshot
 from app.modules.system.domain.queue import prepare_queue_heartbeat
 from app.modules.system.infrastructure.events import (
-    clear_info_warning_events,
+    clear_all_system_events,
     configured_max_event_bytes,
     get_system_event,
     list_event_level_facets,
@@ -234,14 +234,9 @@ def persist_system_settings_update(
         write_prepared_system_events(db, (event,))
 
 
-def clear_system_events_with_audit(
-    db: Session,
-    *,
-    event: PreparedSystemEvent,
-) -> int:
+def clear_system_events(db: Session) -> int:
     with SystemWriteTransaction(db):
-        deleted = clear_info_warning_events(db)
-        write_prepared_system_events(db, (event,))
+        deleted = clear_all_system_events(db)
     return deleted
 
 
@@ -314,8 +309,8 @@ def mark_queue_stopped(db: Session, queue_name: str, instance_id: str) -> None:
 
 __all__ = [
     "QueueHeartbeatPump",
-    "clear_info_warning_events",
-    "clear_system_events_with_audit",
+    "clear_all_system_events",
+    "clear_system_events",
     "configured_max_event_bytes",
     "create_or_reuse_health_run",
     "delete_setting",

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { Badge, type BadgeTone } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
-import { useToast } from '../../components/ui/feedback';
+import { useConfirm, useToast } from '../../components/ui/feedback';
 import { PageTitle } from '../../components/ui/page-title';
 import { useI18n } from '../../i18n/provider';
 import { ManagementNav } from './management-nav';
@@ -132,8 +132,10 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
   const [storage, setStorage] = useState<EventStorage>({ sizeBytes: 0, maxBytes: 5 * 1024 * 1024 });
   const [logMaxMb, setLogMaxMb] = useState(5);
   const [savingLimit, setSavingLimit] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [feedbackEventId, setFeedbackEventId] = useState<string | null>(null);
   const toast = useToast();
+  const confirm = useConfirm();
 
   const buildParams = useCallback((targetPage: number, pageSize = 40) => {
     const params = new URLSearchParams({ page: String(targetPage), pageSize: String(pageSize) });
@@ -168,14 +170,24 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
   }, [buildParams, dateFrom, dateTo, page]);
 
   async function clearLogs() {
-    if (!window.confirm(i18nAttribute('清理信息和警告日志？错误与关键审计事件会保留。'))) return;
+    if (clearing || !await confirm({
+      title: '清空全部系统日志？',
+      description: '这将永久删除全部系统日志，包括错误和关键审计事件。此操作无法撤销。',
+      confirmLabel: '全部清空',
+      tone: 'danger'
+    })) return;
+    setClearing(true);
     let deleted: number;
     try {
       deleted = await clearManagementEvents();
     } catch (reason) {
       toast.error('清理日志失败', reason instanceof Error ? reason.message : '请稍后重试');
       return;
+    } finally {
+      setClearing(false);
     }
+    setExpandedEventId('');
+    setEventDetails({});
     toast.success(`已清理 ${deleted} 条日志`);
     if (page === 1) await load();
     else setPage(1);
@@ -187,7 +199,12 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
       return;
     }
     const nextBytes = logMaxMb * 1024 * 1024;
-    if (nextBytes < storage.maxBytes && !window.confirm(i18nAttribute('降低容量上限会立即删除最旧日志，是否继续？'))) return;
+    if (nextBytes < storage.maxBytes && !await confirm({
+      title: '降低日志容量上限？',
+      description: '降低容量上限会立即删除最旧日志，是否继续？',
+      confirmLabel: '继续保存',
+      tone: 'danger'
+    })) return;
     setSavingLimit(true);
     try {
       setStorage(await updateSystemLogLimit(nextBytes));
@@ -340,7 +357,7 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
             <Button variant="secondary" icon={Search} className="whitespace-nowrap" onClick={applySearch}><I18nText>搜索</I18nText></Button>
             <Button variant="secondary" icon={RefreshCw} loading={loading} loadingText={i18nAttribute("刷新中")} className="whitespace-nowrap" onClick={() => void load()}><I18nText>刷新</I18nText></Button>
             <Button variant="secondary" icon={Download} loading={exporting} loadingText={i18nAttribute("导出中")} className="whitespace-nowrap" onClick={() => void exportLogs()}><I18nText>导出</I18nText></Button>
-            <Button variant="ghost" icon={Trash2} className="whitespace-nowrap" onClick={() => void clearLogs()}><I18nText>清理</I18nText></Button>
+            <Button variant="ghost" icon={Trash2} loading={clearing} loadingText={i18nAttribute('清理中')} className="whitespace-nowrap" onClick={() => void clearLogs()}><I18nText>清理</I18nText></Button>
           </div>
         </div>
       </section>

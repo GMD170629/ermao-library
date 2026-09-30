@@ -14,8 +14,8 @@ from app.bootstrap.imports import (
     get_library_scan_settings,
     update_library_scan_settings,
 )
+from app.bootstrap.system import clear_system_events as clear_system_events_command
 from app.bootstrap.system import (
-    clear_system_events_with_audit,
     configured_max_event_bytes,
     get_system_event,
     library_import_dashboard_snapshot,
@@ -363,20 +363,10 @@ def clear_system_events(
     ClearedEventsResponse | Response,
     ErrorResponses(SystemManagerRequiredError),
 ]:
-    user, auth_error = _system_manager(db, request, settings)
+    _user, auth_error = _system_manager(db, request, settings)
     if auth_error:
         return auth_error
-    prepared_event = prepare_system_event(
-        level="info",
-        source="system",
-        action="events.cleared",
-        actor_type="admin",
-        actor_id=user.id,
-        target_type="events",
-        message="清理结构化日志",
-    )
-
-    deleted = clear_system_events_with_audit(db, event=prepared_event)
+    deleted = clear_system_events_command(db)
     return ClearedEventsResponse(
         data=ClearedEventsPayload.model_validate(
             {"deleted": deleted, "storage": _event_storage_snapshot(db)}

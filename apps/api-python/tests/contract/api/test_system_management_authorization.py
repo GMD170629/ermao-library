@@ -225,6 +225,7 @@ def test_delegated_system_manager_keeps_system_management_success_contracts(
     cleared = client.delete("/api/management/events")
     assert cleared.status_code == 200
     assert cleared.json()["ok"] is True
+    assert client.get("/api/management/events").json()["data"]["total"] == 0
 
     listed = client.get("/api/backups")
     assert listed.status_code == 200
