@@ -160,7 +160,7 @@ def _finish_transaction(info: dict[str, Any], *, outcome: str, boundary_ms: floa
     }
     _log_timing("database_transaction_finished", **fields)
     threshold = info.get("database_slow_write_threshold_seconds")
-    if trace.first_write_at is not None and threshold is not None and elapsed_ms >= threshold * 1000:
+    if trace.first_write_at is not None and threshold is not None and elapsed_ms > threshold * 1000:
         _log_timing("database_write_transaction_slow", level=logging.WARNING, **fields)
         if isinstance(session_info, dict) and not session_info.get("diagnostics_storage"):
             session_info.setdefault("database_slow_transactions", []).append(
@@ -399,7 +399,7 @@ def create_sqlite_engine(
     *,
     timeout_seconds: float = SQLITE_LOCK_WAIT_SECONDS,
     statement_time_budget_seconds: float | None = SQLITE_STATEMENT_TIMEOUT_SECONDS,
-    slow_write_threshold_seconds: float | None = 0.1,
+    slow_write_threshold_seconds: float | None = 1.0,
 ) -> Engine:
     engine = create_engine(
         URL.create("sqlite+pysqlite", database=str(database_path)),

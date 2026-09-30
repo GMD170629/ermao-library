@@ -334,6 +334,48 @@ def test_slow_write_transaction_is_saved_with_full_sql_and_bindings(tmp_path: Pa
         engine.dispose()
 
 
+def test_default_slow_write_threshold_records_only_transactions_over_one_second(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    engine = create_sqlite_engine(tmp_path / "default-slow-write-event.sqlite3")
+    SystemEvent.__table__.create(engine)
+    SystemSetting.__table__.create(engine)
+    try:
+        with caplog.at_level(logging.WARNING, logger="app.db.sqlite"):
+            with DiagnosticSession(engine) as session:
+                session.execute(sa.insert(SystemSetting).values(key="fast", value="fast"))
+                time.sleep(0.15)
+                session.commit()
+
+            with DiagnosticSession(engine, info={"diagnostics_storage": True}) as check:
+                assert check.scalar(
+                    sa.select(sa.func.count()).select_from(SystemEvent).where(
+                        SystemEvent.action == "database.write_transaction_slow"
+                    )
+                ) == 0
+
+            with DiagnosticSession(engine) as session:
+                session.execute(sa.insert(SystemSetting).values(key="slow", value="slow"))
+                time.sleep(1.05)
+                session.commit()
+
+        warnings = [
+            record for record in caplog.records
+            if record.getMessage().startswith("database_write_transaction_slow")
+        ]
+        assert len(warnings) == 1
+        assert json.loads(warnings[0].getMessage().split(" ", 1)[1])["duration_ms"] > 1000
+        with DiagnosticSession(engine, info={"diagnostics_storage": True}) as check:
+            events = check.scalars(
+                sa.select(SystemEvent).where(SystemEvent.action == "database.write_transaction_slow")
+            ).all()
+        assert len(events) == 1
+        assert events[0].metadata_json["databaseTrace"]["duration_ms"] > 1000
+    finally:
+        engine.dispose()
+
+
 def test_database_failure_event_keeps_preceding_transaction_statements(tmp_path: Path) -> None:
     engine = create_sqlite_engine(tmp_path / "failed-transaction-event.sqlite3")
     SystemEvent.__table__.create(engine)
