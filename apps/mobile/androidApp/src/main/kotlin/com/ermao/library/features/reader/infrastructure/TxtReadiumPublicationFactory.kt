@@ -1,6 +1,9 @@
 package com.ermao.library.features.reader.infrastructure
 
 import org.readium.r2.streamer.parser.epub.EpubPositionsService
+import org.readium.r2.shared.ExperimentalReadiumApi
+import org.readium.r2.shared.publication.services.content.DefaultContentService
+import org.readium.r2.shared.publication.services.content.iterators.HtmlResourceContentIterator
 
 import com.ermao.library.chapter.infrastructure.ChapterCore
 import com.ermao.library.shared.modules.reader.NormalizedTxtResource
@@ -25,6 +28,7 @@ import org.readium.r2.shared.util.resource.StringResource
 import org.readium.r2.shared.util.resource.SingleResourceContainer
 import org.readium.r2.shared.util.resource.Resource
 
+@OptIn(ExperimentalReadiumApi::class)
 internal class TxtReadiumPublicationFactory {
     fun open(file: File, title: String): Publication {
         com.ermao.library.shared.modules.reader.ReaderAdmission.localFailure("txt", file.length())?.let {
@@ -83,6 +87,9 @@ internal class TxtReadiumPublicationFactory {
             container = CompositeContainer(containers),
             servicesBuilder = Publication.ServicesBuilder(
                 positions = EpubPositionsService.createFactory(),
+                content = DefaultContentService.createFactory(
+                    resourceContentIteratorFactories = listOf(HtmlResourceContentIterator.Factory()),
+                ),
             ),
         )
     }

@@ -1,6 +1,9 @@
 package com.ermao.library.features.reader.infrastructure
 
 import org.readium.r2.streamer.parser.epub.EpubPositionsService
+import org.readium.r2.shared.ExperimentalReadiumApi
+import org.readium.r2.shared.publication.services.content.DefaultContentService
+import org.readium.r2.shared.publication.services.content.iterators.HtmlResourceContentIterator
 
 import com.ermao.library.shared.modules.reader.Fb2NavigationEntry
 import java.io.File
@@ -19,6 +22,7 @@ import org.readium.r2.shared.util.resource.InMemoryResource
 import org.readium.r2.shared.util.resource.Resource
 import org.readium.r2.shared.util.resource.SingleResourceContainer
 
+@OptIn(ExperimentalReadiumApi::class)
 internal class Fb2ReadiumPublicationFactory {
     fun open(file: File, fallbackTitle: String): Publication {
         val parsed = Fb2SourceParser.read(file, fallbackTitle)
@@ -55,6 +59,9 @@ internal class Fb2ReadiumPublicationFactory {
             container = CompositeContainer(containers),
             servicesBuilder = Publication.ServicesBuilder(
                 positions = EpubPositionsService.createFactory(),
+                content = DefaultContentService.createFactory(
+                    resourceContentIteratorFactories = listOf(HtmlResourceContentIterator.Factory()),
+                ),
             ),
         )
     }

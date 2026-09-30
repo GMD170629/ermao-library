@@ -13,6 +13,9 @@ import org.readium.r2.streamer.parser.epub.EpubPositionsService
 import java.io.File
 import java.io.IOException
 import org.readium.r2.shared.InternalReadiumApi
+import org.readium.r2.shared.ExperimentalReadiumApi
+import org.readium.r2.shared.publication.services.content.DefaultContentService
+import org.readium.r2.shared.publication.services.content.iterators.HtmlResourceContentIterator
 import org.readium.r2.shared.publication.Contributor
 import org.readium.r2.shared.publication.Layout
 import org.readium.r2.shared.publication.Link
@@ -41,7 +44,7 @@ const val MOBI_PUBLICATION_NORMALIZATION_IDENTIFIER =
  * native core and are copied on demand in chunks no larger than [MOBI_CORE_MAX_READ_BYTES]. The
  * adapter never creates an EPUB, an unpacked directory, or a second whole-publication byte cache.
  */
-@OptIn(InternalReadiumApi::class)
+@OptIn(InternalReadiumApi::class, ExperimentalReadiumApi::class)
 class MobiReadiumPublicationFactory {
     fun open(
         file: File,
@@ -111,6 +114,9 @@ class MobiReadiumPublicationFactory {
                 ),
                 container = transformContainer(container),
                 servicesBuilder = Publication.ServicesBuilder(
+                    content = DefaultContentService.createFactory(
+                        resourceContentIteratorFactories = listOf(HtmlResourceContentIterator.Factory()),
+                    ),
                     // Use parser descriptor lengths, never the security-decorated resources:
                     // asking a TransformingResource for its length reads the entire body.
                     positions = {
