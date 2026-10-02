@@ -44,9 +44,8 @@ Android is pinned to Readium Kotlin **3.3.0**, tag commit
   first checks for the service, then `createNavigator(listener, initialLocator, initialPreferences)`
   checks that iteration yields an utterance and initializes the engine, returning `Try`.
   Its docs contain older shorthand examples; use the pinned source signature.
-- TTS is in `org.readium.kotlin-toolkit:readium-navigator-media-tts:3.3.0`, currently absent from
-  this application's dependencies. The foreground integration must add that matching artifact and
-  the Android 11+ `android.intent.action.TTS_SERVICE` query.
+- Android foreground TTS uses `org.readium.kotlin-toolkit:readium-navigator-media-tts:3.3.0`
+  and declares the Android 11+ `android.intent.action.TTS_SERVICE` query.
 
 iOS is pinned to Readium Swift **3.9.0**, revision
 `de07026e9f825a5791f27a7ac4cd6bb1a784ab8d`; `verify_readium.py` owns the pin check.
@@ -61,6 +60,26 @@ iOS is pinned to Readium Swift **3.9.0**, revision
   `firstVisibleElementLocator()` and the public decoration API are the integration points.
 
 ## Gate before opening foreground controls
+
+The first Android foreground slice now borrows the Reader's open Publication and uses the existing
+shared session controller. Explicit play starts at the current visual Reader Locator; pause/resume
+retains the native session, and stop, background, Reader exit and book replacement end that playback.
+The toolbar has play/pause and stop controls with English/Chinese failure feedback. Returning to the
+foreground, restoring Reader or opening another book does not start speech.
+
+This slice deliberately does not follow speech positions or persist them. Visual Reader remains the
+sole durable position writer, and speech callbacks only update transient shared TTS state. The
+position-owner/follow-page gates below remain for any future follow-page feature. There is no new
+MediaSession, notification, foreground service, voice-management screen or background-playback path.
+The platform's configured system engine is used; actual voice availability, audible output and
+offline capability must be verified separately, never inferred from service existence or Playing.
+
+Stop invalidates a pending setup token immediately. SDK initialization is allowed to return its
+owned navigator, which is closed without playing when the token is obsolete. Setup completion may
+depend on the system engine; this is not a bounded initialization-time or heap-leak guarantee.
+
+SDK source-level cleanup observations are not reproduced application failures and do not block this
+public-API integration. No SDK fork, reflection or copied player implementation is used.
 
 1. Prove a nonempty spoken unit and valid native Locator using the actual Publication content
    iterator, without collecting the whole book. Service existence and successful compilation do

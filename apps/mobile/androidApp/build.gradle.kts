@@ -215,6 +215,7 @@ dependencies {
     implementation(libs.readium.shared)
     implementation(libs.readium.streamer)
     implementation(libs.readium.navigator)
+    implementation(libs.readium.navigator.media.tts)
     implementation(libs.readium.adapter.pdfium)
 
     debugImplementation(libs.androidx.compose.ui.test.manifest)

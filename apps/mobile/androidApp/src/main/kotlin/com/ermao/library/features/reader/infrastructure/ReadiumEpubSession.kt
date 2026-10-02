@@ -123,6 +123,8 @@ internal class ReadiumEpubSession(
     private val nowEpochMillis: () -> Long = System::currentTimeMillis,
     private val presentationNamespaceKey: String? = null,
     private val publishProgressUpdate: (ReaderProgressPresentationUpdate) -> Unit = {},
+    private val ttsNamespace: com.ermao.library.shared.modules.reader.ReaderSyncNamespace =
+        com.ermao.library.shared.modules.reader.ReaderSyncNamespace("local", "local", 0),
 ) : AndroidReaderNavigatorSession {
     override var requestedNavigationTarget: com.ermao.library.shared.modules.reader.ReaderNavigationTarget? = initialTarget
         private set
@@ -156,6 +158,11 @@ internal class ReadiumEpubSession(
     private val viewportNavigationMutex = Mutex()
     private val contentsMutex = Mutex()
     private var publication: Publication? = null
+    private var tts: AndroidReaderTts? = null
+    override val ttsState get() = tts?.state
+    override fun playTts() { lastObservedLocator?.let { tts?.play(it) } }
+    override fun pauseTts() { tts?.pause() }
+    override fun stopTts() { tts?.stop() }
     private var protectedEpubAsset: ContainerAsset? = null
     private var mobiPublication: MobiReadiumPublication? = null
     private var navigator: EpubNavigatorFragment? = null
@@ -352,6 +359,16 @@ internal class ReadiumEpubSession(
         }
         publication = openedPublication
         val supportsTextLayout = openedPublication.metadata.layout != org.readium.r2.shared.publication.Layout.FIXED
+        if (supportsTextLayout) {
+            tts = AndroidReaderTts(
+                readium.application,
+                openedPublication,
+                com.ermao.library.shared.modules.tts.domain.TtsSession(
+                    java.util.UUID.randomUUID().toString(), ttsNamespace,
+                    source.bookId ?: "local-${source.resourceId}", source.resourceId,
+                ),
+            )
+        }
         capabilities = capabilities.copy(
             supportsReadingProgression = supportsTextLayout,
             supportsWritingMode = supportsTextLayout,
@@ -911,6 +928,8 @@ internal class ReadiumEpubSession(
     }
 
     override fun release() {
+        tts?.dispose()
+        tts = null
         locationJob?.cancel()
         locationJob = null
         bookmarkCoordinator.release()

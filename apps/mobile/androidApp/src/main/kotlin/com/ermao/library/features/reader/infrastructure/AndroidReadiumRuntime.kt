@@ -8,6 +8,7 @@ import org.readium.r2.streamer.PublicationOpener
 import org.readium.r2.streamer.parser.DefaultPublicationParser
 
 internal class AndroidReadiumRuntime(context: Context) {
+    val application = context.applicationContext as android.app.Application
     val httpClient = DefaultHttpClient()
     val assetRetriever = AssetRetriever(context.contentResolver, httpClient)
     val publicationOpener = PublicationOpener(

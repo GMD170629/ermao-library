@@ -672,4 +672,10 @@
     <string name="downloads_view_resources">View resources</string>
     <string name="login_account_disabled_message">This account is disabled. Contact the server administrator or sign in with another account.</string>
     <string name="me_personal_information">Personal information</string>
+    <string name="reader_tts_play">Read aloud</string>
+    <string name="reader_tts_pause">Pause reading aloud</string>
+    <string name="reader_tts_stop">Stop reading aloud</string>
+    <string name="reader_tts_content_unavailable">This book has no text available to read aloud.</string>
+    <string name="reader_tts_engine_unavailable">System speech is unavailable. Check your device speech settings.</string>
+    <string name="reader_tts_failed">Reading aloud failed. Check the system voice and try again.</string>
 </resources>

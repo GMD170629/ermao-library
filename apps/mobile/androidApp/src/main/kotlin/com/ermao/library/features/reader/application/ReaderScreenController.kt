@@ -59,6 +59,10 @@ internal interface ReaderScreenController {
     val presentationProgress: StateFlow<Double?>? get() = null
     val preferences: StateFlow<ReaderPreferences>
     val contentError: StateFlow<ReaderError?>? get() = null
+    val ttsState: StateFlow<com.ermao.library.shared.modules.tts.domain.TtsState>? get() = null
+    fun playTts() = Unit
+    fun pauseTts() = Unit
+    fun stopTts() = Unit
     val resumeNotice: StateFlow<ReaderResumeNotice?>
     val resumeActionFailed: StateFlow<Boolean>
     val bookmarks: StateFlow<List<ReaderBookmark>>

@@ -1,5 +1,10 @@
 package com.ermao.library.features.reader.presentation
 
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Stop
+import com.ermao.library.shared.modules.tts.domain.TtsPlaybackState
+
 import android.os.Build
 import android.view.ViewTreeObserver
 import android.view.ViewGroup
@@ -308,6 +313,18 @@ internal fun ReaderScreen(
         )
     }
     val snackbarHostState = remember { SnackbarHostState() }
+    val ttsState by controller?.ttsState?.collectAsStateWithLifecycle()
+        ?: remember { mutableStateOf<com.ermao.library.shared.modules.tts.domain.TtsState?>(null) }
+    val ttsFailureMessage = stringResource(when (ttsState?.failure?.code) {
+        "TTS_CONTENT_UNAVAILABLE" -> R.string.reader_tts_content_unavailable
+        "TTS_ENGINE_UNAVAILABLE" -> R.string.reader_tts_engine_unavailable
+        else -> R.string.reader_tts_failed
+    })
+    LaunchedEffect(ttsState?.failure) {
+        if (ttsState?.failure != null) {
+            snackbarHostState.showFeedback(ttsFailureMessage, OperationFeedbackKind.Failure, duration = SnackbarDuration.Short)
+        }
+    }
     val bookmarkAddedMessage = stringResource(R.string.reader_bookmark_added)
     val bookmarkRemovedMessage = stringResource(R.string.reader_bookmark_removed)
     val undoLabel = stringResource(R.string.undo_action)
@@ -655,6 +672,8 @@ private fun ReaderControlOverlay(
     onHide: () -> Unit,
 ) {
     val colors = WarmPageThemeValues.colors
+    val speech by controller?.ttsState?.collectAsStateWithLifecycle()
+        ?: remember { mutableStateOf<com.ermao.library.shared.modules.tts.domain.TtsState?>(null) }
     val centerTapInteraction = remember { MutableInteractionSource() }
     Box(Modifier.fillMaxSize()) {
         Surface(
@@ -691,6 +710,23 @@ private fun ReaderControlOverlay(
                             stringResource(R.string.reader_bookmark),
                         )
                     }
+                }
+                if (speech != null) {
+                    val playing = speech?.playbackState == TtsPlaybackState.Playing
+                    val starting = speech?.playbackState == TtsPlaybackState.Starting
+                    IconButton(
+                        onClick = { if (playing || starting) controller?.pauseTts() else controller?.playTts() },
+                        enabled = location != null,
+                        modifier = Modifier.testTag("reader-tts-play-pause"),
+                    ) {
+                        Icon(if (playing || starting) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            stringResource(if (playing || starting) R.string.reader_tts_pause else R.string.reader_tts_play))
+                    }
+                    IconButton(
+                        onClick = { controller?.stopTts() },
+                        enabled = speech?.playbackState in setOf(TtsPlaybackState.Starting, TtsPlaybackState.Playing, TtsPlaybackState.Paused),
+                        modifier = Modifier.testTag("reader-tts-stop"),
+                    ) { Icon(Icons.Default.Stop, stringResource(R.string.reader_tts_stop)) }
                 }
             }
         }

@@ -374,6 +374,7 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
+        session?.stopTts()
         if (networkCallbackRegistered) {
             runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(networkCallback) }
             networkCallbackRegistered = false
@@ -1168,6 +1169,7 @@ class ReaderActivity : AppCompatActivity() {
             ?: throw ReaderOpenFailure(ReaderError(ReaderErrorCode.UnsupportedFormat))
         return ReadiumEpubSession(
             source = localSource,
+            ttsNamespace = namespace ?: ReaderSyncNamespace(LOCAL_READER_SERVER, LOCAL_READER_USER, 0),
             publicationStore = AndroidReaderPublicationStore(applicationContext, namespace, completedPublication),
             progressStore = progressStore,
             deviceIdentity = AndroidReaderDeviceIdentity(applicationContext),
@@ -1242,6 +1244,7 @@ class ReaderActivity : AppCompatActivity() {
     private fun closeReader() {
         if (closing) return
         closing = true
+        session?.stopTts()
         cancelLaunchDownload()
         lifecycleScope.launch {
             openJob?.cancel()
