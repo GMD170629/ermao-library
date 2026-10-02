@@ -64,6 +64,9 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChangedBy
+import org.readium.r2.navigator.Decoration
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -163,6 +166,7 @@ internal class ReadiumEpubSession(
     private var tts: AndroidReaderTts? = null
     override val ttsState get() = tts?.state
     private var ttsStartJob: Job? = null
+    private var ttsDecorationJob: Job? = null
     override fun playTts() {
         val owner = tts ?: return
         val active = navigator ?: return
@@ -496,6 +500,29 @@ internal class ReadiumEpubSession(
         check(locationJob == null) { "Reader navigator is already bound" }
         bookmarkScope = scope
         bookmarkCoordinator.bind(scope)
+        tts?.let { owner ->
+            val active = checkNotNull(navigator)
+            if (active.supportsDecorationStyle(Decoration.Style.Highlight::class)) {
+                ttsDecorationJob = scope.launch {
+                    owner.state.map { state ->
+                        if (state.playbackState in setOf(
+                                com.ermao.library.shared.modules.tts.domain.TtsPlaybackState.Playing,
+                                com.ermao.library.shared.modules.tts.domain.TtsPlaybackState.Paused,
+                            )) state.locator?.canonicalJson?.let {
+                            Locator.fromJSON(org.json.JSONObject(it))?.copy(text = Locator.Text())
+                        } else null
+                    }.distinctUntilChangedBy { it?.href to it?.locations?.get("cssSelector") }
+                        .collect { locator ->
+                            if (navigator !== active || tts !== owner) return@collect
+                            val decorations = locator?.takeIf { it.locations["cssSelector"] is String }
+                                ?.let { listOf(Decoration("current-paragraph", it,
+                                    Decoration.Style.Highlight(android.graphics.Color.rgb(255, 193, 7)))) }
+                                .orEmpty()
+                            active.applyDecorations(decorations, TTS_DECORATION_GROUP)
+                        }
+                }
+            }
+        }
         progressCoordinator?.let { coordinator ->
             scope.launch {
                 coordinator.remotePositionNotices.collectLatest { notice ->
@@ -963,6 +990,8 @@ internal class ReadiumEpubSession(
         ttsStartJob?.cancel()
         ttsStartJob = null
         tts?.dispose()
+        ttsDecorationJob?.cancel()
+        ttsDecorationJob = null
         tts = null
         locationJob?.cancel()
         locationJob = null
@@ -1120,6 +1149,7 @@ internal class ReadiumEpubSession(
     }
 
     private companion object {
+        const val TTS_DECORATION_GROUP = "reader-tts"
         val LOGGER: Logger = Logger.getLogger("MobileReader")
         const val RESTORE_STABLE_OBSERVATIONS = 3
         const val SCROLL_SETTLE_SAMPLE_MILLIS = 16L

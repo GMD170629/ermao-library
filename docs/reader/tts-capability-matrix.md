@@ -74,6 +74,27 @@ MediaSession, notification, foreground service, voice-management screen or backg
 The platform's configured system engine is used; actual voice availability, audible output and
 offline capability must be verified separately, never inferred from service existence or Playing.
 
+### Android foreground paragraph feedback
+
+Fresh play uses the visual navigator's `firstVisibleElementLocator()` CSS anchor. A resource-relative
+progression alone cannot start the pinned Android HTML iterator mid-chapter. This is a block-level
+start; it does not promise an exact glyph offset within a paragraph spanning several pages.
+
+The next bounded slice uses the public `DecorableNavigator.applyDecorations` API and built-in
+Highlight style, in the separate transient `reader-tts` group. Playing highlights the spoken block;
+Paused retains it. Stop/background/end/failure clear it; Reader teardown discards its observer and
+native fragment, and another book starts without it. Speech positions never navigate the visual
+Reader or write its durable position report. A paragraph outside the current viewport is not brought
+into view automatically. This does not add word highlighting, page following or a second progress
+owner. Rendered DOM, pause/stop/background/book replacement and unchanged durable progress require
+runtime verification; compilation alone is insufficient.
+
+2026-10-02 local physical Xiaomi/API 31 verification: seven foreground TTS tests plus the existing
+TXT Reader regression passed (8/8), including rendered highlight geometry, exact block selector,
+pause/stop/foreground return/book replacement and unchanged full visual/durable progress. A normal
+UI check on an existing offline EPUB captured the highlighted paragraph while paused and its removal
+after Stop. This establishes paragraph feedback on that device, not word accuracy or offline voice.
+
 Stop invalidates a pending setup token immediately. SDK initialization is allowed to return its
 owned navigator, which is closed without playing when the token is obsolete. Setup completion may
 depend on the system engine; this is not a bounded initialization-time or heap-leak guarantee.

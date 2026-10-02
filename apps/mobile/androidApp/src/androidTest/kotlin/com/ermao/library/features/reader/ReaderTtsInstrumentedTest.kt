@@ -102,12 +102,14 @@ class ReaderTtsInstrumentedTest {
         withReader { scenario, reader, _ ->
             val oldState = checkNotNull(reader.ttsState)
             scenario.onActivity { reader.playTts() }
+            await("old book decoration") { decorationProbe(scenario).getBoolean("visible") }
             scenario.close()
             assertEquals(TtsPlaybackState.Disposed, oldState.value.playbackState)
         }
-        withReader { _, reader, _ ->
+        withReader { scenario, reader, _ ->
             assertEquals(TtsPlaybackState.Idle, checkNotNull(reader.ttsState).value.playbackState)
             assertNotNull(reader.currentLocation.value)
+            assertEquals("A new book must not inherit speech decoration", 0, decorationProbe(scenario).getInt("count"))
         }
     }
 
@@ -141,6 +143,74 @@ class ReaderTtsInstrumentedTest {
         assertEquals(TtsPlaybackState.Playing, state.value.playbackState)
         assertEquals("text/chapter-0002.xhtml", JSONObject(checkNotNull(state.value.locator).canonicalJson).getString("href"))
         scenario.onActivity { reader.stopTts() }
+    }
+
+    @OptIn(ExperimentalReadiumApi::class)
+    @Test
+    fun toolbarSpeechHighlightsItsParagraphAndClearsOnStopWithoutWritingProgress() = withReader { scenario, reader, source ->
+        val initialReport = runBlocking { loadLocalReaderV5Position(context, source) }
+        runBlocking { reader.loadTableOfContents(); reader.flush() }
+        assertEquals("Chapter presentation settles before speech", TtsPlaybackState.Idle,
+            checkNotNull(reader.ttsState).value.playbackState)
+        val visual = reader.currentLocation.value
+        val saved = runBlocking { loadLocalReaderV5Position(context, source) }
+        assertNotNull(checkNotNull(saved).position.presentation.chapter)
+        Log.i("ReaderTtsTest", "highlight_baseline_without_speech initial=$initialReport settled=$saved")
+        val state = checkNotNull(reader.ttsState)
+        scenario.onActivity { it.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ESCAPE)) }
+        composeRule.onNodeWithTag("reader-tts-play-pause").performClick()
+        await("rendered speech paragraph highlight") {
+            state.value.playbackState == TtsPlaybackState.Playing && decorationProbe(scenario).getBoolean("visible")
+        }
+        val probe = decorationProbe(scenario)
+        assertEquals(1, probe.getInt("count"))
+        val spokenSelector = JSONObject(checkNotNull(state.value.locator).canonicalJson)
+            .getJSONObject("locations").getString("cssSelector")
+        assertEquals(spokenSelector, probe.getString("selector"))
+        composeRule.onNodeWithTag("reader-tts-play-pause").performClick()
+        await("paused highlight") { state.value.playbackState == TtsPlaybackState.Paused }
+        assertTrue(decorationProbe(scenario).getBoolean("visible"))
+        composeRule.onNodeWithTag("reader-tts-play-pause").performClick()
+        await("resumed highlight") { state.value.playbackState == TtsPlaybackState.Playing }
+        scenario.moveToState(Lifecycle.State.CREATED)
+        assertEquals(TtsPlaybackState.Stopped, state.value.playbackState)
+        scenario.moveToState(Lifecycle.State.RESUMED)
+        // Readium clears via requestAnimationFrame, suspended while the WebView is backgrounded.
+        await("return to foreground has no speech highlight") { decorationProbe(scenario).getInt("count") == 0 }
+        assertEquals(TtsPlaybackState.Stopped, state.value.playbackState)
+        assertEquals(0, decorationProbe(scenario).getInt("count"))
+        composeRule.onNodeWithTag("reader-tts-play-pause").performClick()
+        await("explicit restart highlight") { decorationProbe(scenario).getBoolean("visible") }
+        composeRule.onNodeWithTag("reader-tts-stop").performClick()
+        await("removed speech decoration") {
+            val stopped = decorationProbe(scenario)
+            stopped.getInt("count") == 0 && !stopped.getBoolean("visible")
+        }
+        assertEquals(TtsPlaybackState.Stopped, state.value.playbackState)
+        assertEquals(visual, reader.currentLocation.value)
+        assertEquals(saved, runBlocking { loadLocalReaderV5Position(context, source) })
+    }
+
+    @OptIn(ExperimentalReadiumApi::class)
+    private fun decorationProbe(scenario: ActivityScenario<ReaderActivity>): JSONObject {
+        var native: EpubNavigatorFragment? = null
+        scenario.onActivity { native = it.supportFragmentManager.fragments.filterIsInstance<EpubNavigatorFragment>().single() }
+        val result = runBlocking { withContext(Dispatchers.Main) {
+            checkNotNull(native).evaluateJavascript("""
+                (() => {
+                  const items = readium.getDecorations('reader-tts').items;
+                  const group = document.querySelector('[data-group="reader-tts"]');
+                  const visible = group && [...group.querySelectorAll('[data-style] > *')].some(el => {
+                    const r = el.getBoundingClientRect();
+                    return r.width > 0 && r.height > 0 && r.right > 0 && r.bottom > 0 &&
+                      r.left < innerWidth && r.top < innerHeight && getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)';
+                  });
+                  return {count: items.length, selector: items[0]?.decoration.locator.locations.cssSelector,
+                    visible: Boolean(visible)};
+                })()
+            """.trimIndent())
+        } }
+        return JSONObject(checkNotNull(result))
     }
 
     @OptIn(ExperimentalReadiumApi::class)
