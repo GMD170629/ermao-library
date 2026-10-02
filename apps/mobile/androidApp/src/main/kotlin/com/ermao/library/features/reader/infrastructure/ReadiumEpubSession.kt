@@ -62,6 +62,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -160,9 +162,39 @@ internal class ReadiumEpubSession(
     private var publication: Publication? = null
     private var tts: AndroidReaderTts? = null
     override val ttsState get() = tts?.state
-    override fun playTts() { lastObservedLocator?.let { tts?.play(it) } }
-    override fun pauseTts() { tts?.pause() }
-    override fun stopTts() { tts?.stop() }
+    private var ttsStartJob: Job? = null
+    override fun playTts() {
+        val owner = tts ?: return
+        val active = navigator ?: return
+        val current = active.currentLocator.value
+        if (owner.state.value.playbackState in setOf(
+                com.ermao.library.shared.modules.tts.domain.TtsPlaybackState.Paused,
+                com.ermao.library.shared.modules.tts.domain.TtsPlaybackState.Starting,
+                com.ermao.library.shared.modules.tts.domain.TtsPlaybackState.Playing,
+            )) {
+            owner.play(current)
+            return
+        }
+        ttsStartJob?.cancel()
+        owner.prepare(current)
+        ttsStartJob = bookmarkScope?.launch(Dispatchers.Main.immediate) {
+            // Visual progress is resource-relative; HTML speech needs the visible element selector.
+            val visible = try {
+                active.firstVisibleElementLocator()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                LOGGER.log(Level.WARNING, "reader_tts_locator_failed", error)
+                null
+            }
+            currentCoroutineContext().ensureActive()
+            if (tts === owner && navigator === active && active.currentLocator.value == current) {
+                owner.play(visible ?: current)
+            }
+        }
+    }
+    override fun pauseTts() { ttsStartJob?.cancel(); tts?.pause() }
+    override fun stopTts() { ttsStartJob?.cancel(); tts?.stop() }
     private var protectedEpubAsset: ContainerAsset? = null
     private var mobiPublication: MobiReadiumPublication? = null
     private var navigator: EpubNavigatorFragment? = null
@@ -928,6 +960,8 @@ internal class ReadiumEpubSession(
     }
 
     override fun release() {
+        ttsStartJob?.cancel()
+        ttsStartJob = null
         tts?.dispose()
         tts = null
         locationJob?.cancel()

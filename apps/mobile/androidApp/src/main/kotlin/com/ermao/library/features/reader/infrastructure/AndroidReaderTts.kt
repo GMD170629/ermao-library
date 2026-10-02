@@ -52,6 +52,8 @@ internal class AndroidReaderTts(
     private var playbackObservation: Job? = null
     private var locatorObservation: Job? = null
 
+    fun prepare(currentLocator: Locator) = apply(core.open(session, mapper.opaqueLocator(currentLocator)))
+
     fun play(currentLocator: Locator) {
         if (state.value.playbackState == TtsPlaybackState.Disposed) return
         if (state.value.playbackState !in setOf(TtsPlaybackState.Paused, TtsPlaybackState.Starting, TtsPlaybackState.Playing)) {
@@ -102,12 +104,16 @@ internal class AndroidReaderTts(
             // The late result is closed before it can play; no automatic resume on lifecycle return.
             withContext(NonCancellable) {
                 try {
+                    val initialLocator = Locator.fromJSON(JSONObject(effect.locator.canonicalJson))
+                    if (initialLocator?.locations?.get("cssSelector") !is String) {
+                        fail(effect.token, "TTS_CONTENT_UNAVAILABLE")
+                        return@withContext
+                    }
                     val factory = TtsNavigatorFactory(application, publication)
                     if (factory == null) {
                         fail(effect.token, "TTS_CONTENT_UNAVAILABLE")
                         return@withContext
                     }
-                    val initialLocator = Locator.fromJSON(JSONObject(effect.locator.canonicalJson))
                     val created = factory.createNavigator(
                         listener = object : TtsNavigator.Listener {
                             override fun onStopRequested() {

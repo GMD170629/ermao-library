@@ -22,8 +22,13 @@ import java.io.ByteArrayInputStream
 import java.util.UUID
 import org.json.JSONObject
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.readium.r2.navigator.epub.EpubNavigatorFragment
+import org.readium.r2.shared.ExperimentalReadiumApi
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.Rule
@@ -138,11 +143,62 @@ class ReaderTtsInstrumentedTest {
         scenario.onActivity { reader.stopTts() }
     }
 
-    private fun withReader(block: (ActivityScenario<ReaderActivity>, ReaderScreenController, LocalReaderSource) -> Unit) = runBlocking {
+    @OptIn(ExperimentalReadiumApi::class)
+    @Test
+    fun speechStartsAtTheVisibleParagraphAfterTurningPagesWithinAChapter() = withReader(
+        content = "Chapter 1: Visible start\n" + (1..120).joinToString("\n\n") {
+            "Visible paragraph number $it. This paragraph belongs to the displayed page."
+        },
+    ) { scenario, reader, source ->
+        repeat(3) {
+            val before = reader.currentLocation.value
+            scenario.onActivity { assertTrue(reader.goNext()) }
+            await("visual next page") { reader.currentLocation.value != before }
+            SystemClock.sleep(300)
+        }
+        var native: EpubNavigatorFragment? = null
+        scenario.onActivity { native = it.supportFragmentManager.fragments.filterIsInstance<EpubNavigatorFragment>().single() }
+        val (visible, expected) = runBlocking { withContext(Dispatchers.Main) {
+            val active = checkNotNull(native)
+            val block = checkNotNull(active.firstVisibleElementLocator())
+            val selector = checkNotNull(block.locations["cssSelector"] as? String)
+            val quoted = active.evaluateJavascript("document.querySelector(${JSONObject.quote(selector)}).innerText")
+            block to org.json.JSONArray("[$quoted]").getString(0)
+        } }
+        assertTrue("Must be away from chapter heading", expected.startsWith("Visible paragraph number"))
+        val baseline = reader.currentLocation.value
+        val saved = runBlocking { loadLocalReaderV5Position(context, source) }
+        val state = checkNotNull(reader.ttsState)
+        scenario.onActivity { reader.playTts() }
+        await("first utterance text") {
+            state.value.failure != null || (state.value.playbackState == TtsPlaybackState.Playing &&
+                state.value.locator?.canonicalJson?.let {
+                    val emitted = JSONObject(it)
+                    // The supplied visible-element anchor has no progression. Require a locator
+                    // emitted by the content iterator, rather than accepting our own input echo.
+                    emitted.getJSONObject("locations").has("progression") &&
+                        emitted.optJSONObject("text")?.optString("highlight")?.isNotBlank() == true
+                } == true)
+        }
+        scenario.onActivity { reader.pauseTts() }
+        val spoken = JSONObject(checkNotNull(state.value.locator).canonicalJson)
+        Log.i("ReaderTtsTest", "visible_start native=${visible.toJSON()} expected=$expected utterance=$spoken")
+        assertNull(state.value.failure)
+        assertEquals(visible.href.toString(), spoken.getString("href"))
+        assertEquals("Spoken content must use the visible block, including repeated sentences",
+            visible.locations["cssSelector"], spoken.getJSONObject("locations").getString("cssSelector"))
+        assertTrue("First utterance must belong to visible paragraph: $spoken; expected=$expected",
+            expected.contains(spoken.getJSONObject("text").getString("highlight")))
+        assertEquals(baseline, reader.currentLocation.value)
+        assertEquals(saved, runBlocking { loadLocalReaderV5Position(context, source) })
+        scenario.onActivity { reader.stopTts() }
+    }
+
+    private fun withReader(content: String? = null, block: (ActivityScenario<ReaderActivity>, ReaderScreenController, LocalReaderSource) -> Unit) = runBlocking {
         val id = "tts-reader-${UUID.randomUUID()}"
         val source: LocalReaderSource = ByteArrayInputStream(
-            ("Chapter 1: Speech\n" + "This is a long spoken paragraph for pause and resume testing. ".repeat(100) +
-                "\n\nChapter 2: Current position\n" + "Speech must begin at the current Reader chapter. ".repeat(100)).toByteArray(),
+            (content ?: ("Chapter 1: Speech\n" + "This is a long spoken paragraph for pause and resume testing. ".repeat(100) +
+                "\n\nChapter 2: Current position\n" + "Speech must begin at the current Reader chapter. ".repeat(100))).toByteArray(),
         ).use { input ->
             store.publishLocalPublication(id, "Foreground TTS", input, sourceFormat = ReaderSourceFormat.Txt)
         }
