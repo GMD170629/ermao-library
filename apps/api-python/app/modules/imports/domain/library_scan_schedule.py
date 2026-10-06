@@ -7,9 +7,7 @@ from datetime import datetime, timedelta
 
 LIBRARY_SCAN_WATCH_ENABLED_KEY = "libraryScan.watchEnabled"
 LIBRARY_SCAN_INTERVAL_MINUTES_KEY = "libraryScan.intervalMinutes"
-DEFAULT_LIBRARY_SCAN_INTERVAL_MINUTES = 30
-MIN_LIBRARY_SCAN_INTERVAL_MINUTES = 5
-MAX_LIBRARY_SCAN_INTERVAL_MINUTES = 1440
+DEFAULT_LIBRARY_SCAN_INTERVAL_MINUTES = 1440
 
 
 class LibraryScanIntervalOutOfRange(ValueError):
@@ -22,26 +20,18 @@ class LibraryScanSettings:
     interval_minutes: int = DEFAULT_LIBRARY_SCAN_INTERVAL_MINUTES
 
     def __post_init__(self) -> None:
-        if (
-            not MIN_LIBRARY_SCAN_INTERVAL_MINUTES
-            <= self.interval_minutes
-            <= MAX_LIBRARY_SCAN_INTERVAL_MINUTES
+        if type(self.interval_minutes) is not int or self.interval_minutes not in (
+            0, DEFAULT_LIBRARY_SCAN_INTERVAL_MINUTES
         ):
             raise LibraryScanIntervalOutOfRange(self.interval_minutes)
 
 
-def legacy_interval_minutes(interval_ms: int | None) -> int:
-    if interval_ms is None or interval_ms <= 0:
-        return DEFAULT_LIBRARY_SCAN_INTERVAL_MINUTES
-    rounded_up = (interval_ms + 59_999) // 60_000
-    return min(
-        MAX_LIBRARY_SCAN_INTERVAL_MINUTES,
-        max(MIN_LIBRARY_SCAN_INTERVAL_MINUTES, rounded_up),
-    )
-
-
-def next_periodic_scan_at(changed_at: datetime, interval_minutes: int) -> datetime:
+def next_periodic_scan_at(
+    changed_at: datetime, interval_minutes: int
+) -> datetime | None:
     LibraryScanSettings(interval_minutes=interval_minutes)
+    if interval_minutes == 0:
+        return None
     return changed_at + timedelta(minutes=interval_minutes)
 
 
@@ -49,10 +39,7 @@ __all__ = [
     "DEFAULT_LIBRARY_SCAN_INTERVAL_MINUTES",
     "LIBRARY_SCAN_INTERVAL_MINUTES_KEY",
     "LIBRARY_SCAN_WATCH_ENABLED_KEY",
-    "MAX_LIBRARY_SCAN_INTERVAL_MINUTES",
-    "MIN_LIBRARY_SCAN_INTERVAL_MINUTES",
     "LibraryScanIntervalOutOfRange",
     "LibraryScanSettings",
-    "legacy_interval_minutes",
     "next_periodic_scan_at",
 ]

@@ -4,7 +4,6 @@ import { Clock3, FolderSync, Save } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '../../../components/ui/button';
 import { useToast } from '../../../components/ui/feedback';
-import { Select } from '../../../components/ui/select';
 import { I18nText, useI18n } from '@/i18n/provider';
 import {
   loadLibraryScanSettings,
@@ -12,19 +11,7 @@ import {
   type LibraryScanSettings
 } from '../api/library-scan-settings-client';
 
-const intervalOptions = [5, 15, 30, 60, 180, 360, 720, 1440] as const;
-const defaults: LibraryScanSettings = { watchEnabled: true, intervalMinutes: 30 };
-
-function intervalLabel(minutes: number, translate: (message: string) => string): string {
-  if (minutes === 5) return translate('5 分钟');
-  if (minutes === 15) return translate('15 分钟');
-  if (minutes === 30) return translate('30 分钟');
-  if (minutes === 60) return translate('1 小时');
-  if (minutes === 180) return translate('3 小时');
-  if (minutes === 360) return translate('6 小时');
-  if (minutes === 720) return translate('12 小时');
-  return translate('24 小时');
-}
+const defaults: LibraryScanSettings = { watchEnabled: true, intervalMinutes: 1440 };
 
 export function LibraryScanSettingsPanel() {
   const { t } = useI18n();
@@ -57,7 +44,7 @@ export function LibraryScanSettingsPanel() {
       const value = await saveLibraryScanSettings(settings);
       setSettings(value);
       setSaved(value);
-      toast.success('自动扫描设置已保存', '新的扫描周期从现在开始计算。');
+      toast.success('自动扫描设置已保存', value.intervalMinutes === 0 ? '定时扫描已关闭。' : '定时扫描已开启，每 24 小时执行一次。');
     } catch (reason) {
       toast.error('保存自动扫描设置失败', reason instanceof Error ? reason.message : '请稍后重试');
     } finally {
@@ -91,27 +78,27 @@ export function LibraryScanSettingsPanel() {
       </section>
 
       <section aria-labelledby="interval-title">
-        <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between md:gap-6">
+        <div className="flex items-start justify-between gap-6">
           <div className="flex min-w-0 gap-3">
-            <Clock3 className="mt-0.5 text-[#D94724]" size={20} aria-hidden="true" />
+            <Clock3 className="mt-0.5 shrink-0 text-[#D94724]" size={20} aria-hidden="true" />
             <div>
-              <h3 id="interval-title" className="text-lg font-semibold text-[#2A2825]"><I18nText>周期扫描间隔</I18nText></h3>
-              <p className="mt-1 text-sm leading-6 text-[#77716A]"><I18nText>所有启用书库共用一个周期扫描，用于同步停机或监听不可用期间遗漏的文件变化。</I18nText></p>
+              <h3 id="interval-title" className="text-lg font-semibold text-[#2A2825]"><I18nText>定时扫描书库</I18nText></h3>
+              <p className="mt-1 text-sm leading-6 text-[#77716A]"><I18nText>开启后每 24 小时扫描一次所有启用的书库，同步停机或监听不可用期间遗漏的文件变化。</I18nText></p>
             </div>
           </div>
-          <label className="block w-full text-sm font-medium text-[#4F4B47] md:w-48 md:shrink-0">
-            <span className="mb-2 block"><I18nText>扫描频率</I18nText></span>
-            <Select
-              value={String(settings.intervalMinutes)}
-              disabled={loading}
-              onChange={(value) => setSettings((current) => ({ ...current, intervalMinutes: Number(value) }))}
-              ariaLabel="扫描频率"
-              className="w-full"
-              options={intervalOptions.map((minutes) => ({ value: String(minutes), label: intervalLabel(minutes, t), translate: false }))}
-            />
-          </label>
+          <button
+            type="button"
+            role="switch"
+            aria-labelledby="interval-title"
+            aria-checked={settings.intervalMinutes !== 0}
+            disabled={loading || saving}
+            onClick={() => setSettings((current) => ({ ...current, intervalMinutes: current.intervalMinutes === 0 ? 1440 : 0 }))}
+            className={`relative mt-1 h-7 w-12 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--visual-color-app-focus-ring)] focus-visible:ring-offset-2 motion-reduce:transition-none disabled:opacity-50 ${settings.intervalMinutes !== 0 ? 'bg-[#E64A2E]' : 'bg-[#C8C2BB]'}`}
+          >
+            <span aria-hidden="true" className={`absolute left-1 top-1 h-5 w-5 rounded-full bg-white transition-transform motion-reduce:transition-none ${settings.intervalMinutes !== 0 ? 'translate-x-5' : 'translate-x-0'}`} />
+          </button>
         </div>
-        <p className="mt-4 rounded-xl bg-[#F7F4F1] px-4 py-3 text-sm leading-6 text-[#6F6963]"><I18nText>实时监听关闭后，周期扫描仍会继续运行。仅成功读取的目录会更新，访问失败时保留该目录的数据。</I18nText></p>
+        <p className="mt-4 rounded-xl bg-[#F7F4F1] px-4 py-3 text-sm leading-6 text-[#6F6963]"><I18nText>实时监听与定时扫描可分别关闭，手动扫描仍可使用。仅成功读取的目录会更新，访问失败时保留该目录的数据。</I18nText></p>
       </section>
 
       <div className="flex justify-end border-t border-[#E5E0DA] pt-6">

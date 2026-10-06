@@ -21,7 +21,7 @@ enum AdministrativeCopyKey: String, CaseIterable, Sendable {
     case manageSystemPermission, accountLanguage
     case allLibraries, manualImports, selectedDirectories, saveAccess, accessHint
     case sourcesTitle, storageLocation, availableSpace, libraries, browseDirectory
-    case scanDirectory, sourceName, serverPath, scanningEnabled, scanInterval, mediaTypes
+    case scanDirectory, sourceName, serverPath, scanningEnabled, fileWatching, periodicScanning, periodicScanningHint, mediaTypes
     case organizationMode, flatLayout, volumesLayout, audiobookLayout
     case includeSubdirectories, autoImportNewFiles, deleteSource, deleteSourceTitle
     case deleteSourceMessage, selectServerDirectory, parentDirectory, chooseDirectory
@@ -165,7 +165,8 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .sourcesTitle: "Library Sources", .storageLocation: "Storage Location", .availableSpace: "Available Space",
         .libraries: "Library Roots", .browseDirectory: "Browse Server Directory",
         .scanDirectory: "Scan Directory", .sourceName: "Display Name", .serverPath: "Server Path",
-        .scanningEnabled: "Enable Scanning", .scanInterval: "Scan Interval", .mediaTypes: "Media Types",
+        .scanningEnabled: "Enable Scanning", .fileWatching: "Watch File Changes", .periodicScanning: "Periodic Scanning",
+        .periodicScanningHint: "When enabled, libraries are scanned once a day. File watching is controlled separately.", .mediaTypes: "Media Types",
         .organizationMode: "Organization Mode", .flatLayout: "Flat", .volumesLayout: "Resources", .audiobookLayout: "Audiobook",
         .includeSubdirectories: "Include Subdirectories", .autoImportNewFiles: "Automatically Import New Files",
         .deleteSource: "Delete Source", .deleteSourceTitle: "Delete this library source?",
@@ -311,7 +312,8 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .accessHint: "用户只能浏览和阅读所选范围内的内容。", .sourcesTitle: "书库来源", .storageLocation: "存储位置",
         .availableSpace: "可用空间", .libraries: "书库", .browseDirectory: "浏览服务器目录",
         .scanDirectory: "扫描指定目录", .sourceName: "显示名称", .serverPath: "服务器路径", .scanningEnabled: "启用扫描",
-        .scanInterval: "扫描间隔", .mediaTypes: "媒体类型", .organizationMode: "组织方式",
+        .fileWatching: "实时监听文件变化", .periodicScanning: "周期扫描",
+        .periodicScanningHint: "开启后每天扫描一次书库。实时监听由独立开关控制。", .mediaTypes: "媒体类型", .organizationMode: "组织方式",
         .flatLayout: "平铺", .volumesLayout: "资源", .audiobookLayout: "有声书", .includeSubdirectories: "包含子目录",
         .autoImportNewFiles: "自动导入新文件", .deleteSource: "删除此来源", .deleteSourceTitle: "删除此书库来源？",
         .deleteSourceMessage: "将移除此书库根目录配置，并停止后续扫描，但不会删除原始书籍文件。",

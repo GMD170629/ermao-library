@@ -3,10 +3,12 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable
+from time import monotonic
 
 from sqlalchemy.orm import Session
 
 from app.bootstrap.auth import delete_expired_or_disabled_sessions
+from app.bootstrap.media import resource_preview_cache
 from app.bootstrap.system import maintain_system_events
 from app.core.auth import utcnow
 from app.core.config import Settings
@@ -16,6 +18,7 @@ from app.services.default_cover_cleanup import cleanup_default_cover_residue
 from app.services.health_runs import fail_abandoned_health_runs
 
 LOGGER = logging.getLogger(__name__)
+RESOURCE_PREVIEW_PRUNE_INTERVAL_SECONDS = 24 * 60 * 60
 
 
 class SystemEventMaintenanceWorker:
@@ -29,6 +32,12 @@ class SystemEventMaintenanceWorker:
         self._db_factory = db_factory
         self._interval_seconds = interval_seconds
         self._settings = settings
+        self._preview_cache = (
+            resource_preview_cache(settings)
+            if settings is not None
+            else None
+        )
+        self._next_preview_prune_at: float | None = None
         self._startup_pending = {"health", "covers"} if settings is not None else set()
         self._stop = threading.Event()
         self._thread = threading.Thread(
@@ -69,6 +78,7 @@ class SystemEventMaintenanceWorker:
                 self._startup_pending.remove(name)
 
     def run_once(self) -> dict[str, int]:
+        previews_deleted = self._prune_resource_previews()
         with self._db_factory() as db:
             current_time = utcnow()
             expired_sessions_deleted = delete_expired_or_disabled_sessions(
@@ -79,9 +89,30 @@ class SystemEventMaintenanceWorker:
             return {
                 **result,
                 "expiredSessionsDeleted": expired_sessions_deleted,
+                "expiredResourcePreviewsDeleted": previews_deleted,
             }
 
+    def _prune_resource_previews(self) -> int:
+        if self._preview_cache is None:
+            return 0
+        now = monotonic()
+        if self._next_preview_prune_at is not None and now < self._next_preview_prune_at:
+            return 0
+        self._next_preview_prune_at = now + RESOURCE_PREVIEW_PRUNE_INTERVAL_SECONDS
+        try:
+            return self._preview_cache.prune(cancelled=self._stop.is_set)
+        except Exception as error:  # noqa: BLE001 - optional maintenance boundary.
+            record_exception(
+                LOGGER,
+                "media.preview_cache.maintenance_failed",
+                error,
+                context={"stage": "prune_resource_previews", "outcome": "deferred"},
+                session_factory=self._db_factory,
+            )
+            return 0
+
     def _run(self) -> None:
+        self._prune_resource_previews()
         self._recover_startup_maintenance()
         while not self._stop.wait(self._interval_seconds):
             self._recover_startup_maintenance()

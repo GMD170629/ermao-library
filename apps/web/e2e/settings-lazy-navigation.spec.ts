@@ -557,49 +557,91 @@ test('provider configuration matches recognition order width', async ({ page }) 
   }
 });
 
-test('automatic scan switch keeps its thumb inside the track in both states', async ({ page }) => {
+test('automatic scan switches keep their thumbs inside the tracks in both states', async ({ page }) => {
   await page.route('**/api/system-settings/library-scan', (route) => route.fulfill({
-    json: { ok: true, data: { watchEnabled: true, intervalMinutes: 30 } }
+    json: { ok: true, data: { watchEnabled: true, intervalMinutes: 1440 } }
   }));
   await page.goto('/settings/library');
   await page.getByRole('tab', { name: '自动扫描' }).click();
-  const toggle = page.getByRole('switch', { name: '实时监听', exact: true });
-  const thumb = toggle.locator('[aria-hidden="true"]');
-  await expect(toggle).toBeEnabled();
+  const toggles = ['实时监听', '定时扫描书库'].map((name) => page.getByRole('switch', { name, exact: true }));
+  await expect(toggles[1]).toBeEnabled();
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1100 });
-    const intervalSection = page.getByRole('region', { name: '周期扫描间隔', exact: true });
+    const intervalSection = page.getByRole('region', { name: '定时扫描书库', exact: true });
     const description = intervalSection.locator('p').first();
-    const frequency = page.getByRole('button', { name: '扫描频率', exact: true });
     const descriptionBounds = await description.boundingBox();
-    const frequencyBounds = await frequency.boundingBox();
+    const switchBounds = await toggles[1].boundingBox();
     expect(descriptionBounds).not.toBeNull();
-    expect(frequencyBounds).not.toBeNull();
-    if (width >= 768) {
-      expect(frequencyBounds?.x).toBeGreaterThan((descriptionBounds?.x ?? 0) + (descriptionBounds?.width ?? 0));
-    } else {
-      expect(frequencyBounds?.y).toBeGreaterThan((descriptionBounds?.y ?? 0) + (descriptionBounds?.height ?? 0));
-    }
-    for (const enabled of [true, false]) {
-      await expect(toggle).toHaveAttribute('aria-checked', String(enabled));
-      await expect.poll(async () => {
-        const trackBounds = await toggle.boundingBox();
-        const thumbBounds = await thumb.boundingBox();
-        if (!trackBounds || !thumbBounds) return null;
-        return {
-          left: Math.round(thumbBounds.x - trackBounds.x),
-          top: Math.round(thumbBounds.y - trackBounds.y),
-          right: Math.round(trackBounds.x + trackBounds.width - thumbBounds.x - thumbBounds.width),
-          bottom: Math.round(trackBounds.y + trackBounds.height - thumbBounds.y - thumbBounds.height)
-        };
-      }).toEqual({ left: enabled ? 24 : 4, top: 4, right: enabled ? 4 : 24, bottom: 4 });
-      await toggle.focus();
-      await expect(toggle).toBeFocused();
-      await page.screenshot({ path: test.info().outputPath(`scan-switch-${width}-${enabled}.png`), fullPage: true });
-      await toggle.press('Space');
+    expect(switchBounds).not.toBeNull();
+    expect(switchBounds?.x).toBeGreaterThan((descriptionBounds?.x ?? 0) + (descriptionBounds?.width ?? 0));
+    await expect(page.getByRole('button', { name: '扫描频率', exact: true })).toHaveCount(0);
+    for (const [index, toggle] of toggles.entries()) {
+      const thumb = toggle.locator('[aria-hidden="true"]');
+      for (const enabled of [true, false]) {
+        await expect(toggle).toHaveAttribute('aria-checked', String(enabled));
+        await expect.poll(async () => {
+          const trackBounds = await toggle.boundingBox();
+          const thumbBounds = await thumb.boundingBox();
+          if (!trackBounds || !thumbBounds) return null;
+          return {
+            left: Math.round(thumbBounds.x - trackBounds.x),
+            top: Math.round(thumbBounds.y - trackBounds.y),
+            right: Math.round(trackBounds.x + trackBounds.width - thumbBounds.x - thumbBounds.width),
+            bottom: Math.round(trackBounds.y + trackBounds.height - thumbBounds.y - thumbBounds.height)
+          };
+        }).toEqual({ left: enabled ? 24 : 4, top: 4, right: enabled ? 4 : 24, bottom: 4 });
+        await toggle.focus();
+        await expect(toggle).toBeFocused();
+        await page.screenshot({ path: test.info().outputPath(`scan-switch-${index}-${width}-${enabled}.png`), fullPage: true });
+        await toggle.press('Space');
+      }
     }
   }
 });
+
+for (const locale of ['zh-CN', 'en-US'] as const) {
+  test(`periodic scans can be turned off and enabled again (${locale})`, async ({ page }) => {
+    await mockSettingsApi(page, locale);
+    let settings = { watchEnabled: true, intervalMinutes: 1440 };
+    const submitted: unknown[] = [];
+    await page.route('**/api/system-settings/library-scan', async (route) => {
+      if (route.request().method() === 'PUT') {
+        const payload: unknown = route.request().postDataJSON();
+        submitted.push(payload);
+        const intervalMinutes = submitted.length === 1 ? 0 : 1440;
+        expect(payload).toEqual({ watchEnabled: true, intervalMinutes });
+        settings = { watchEnabled: true, intervalMinutes };
+      }
+      await route.fulfill({ json: { ok: true, data: settings } });
+    });
+    const labels = locale === 'zh-CN'
+      ? { tab: '自动扫描', toggle: '定时扫描书库', save: '保存自动扫描设置', watch: '实时监听', success: '定时扫描已关闭。', cadence: '开启后每 24 小时扫描一次所有启用的书库，同步停机或监听不可用期间遗漏的文件变化。' }
+      : { tab: 'Automatic scanning', toggle: 'Scheduled library scanning', save: 'Save automatic scan settings', watch: 'Real-time file watching', success: 'Scheduled scans are off.', cadence: 'When enabled, scans all enabled libraries every 24 hours to catch file changes missed during downtime or while monitoring was unavailable.' };
+
+    await page.goto('/settings/library');
+    await page.getByRole('tab', { name: labels.tab, exact: true }).click();
+    const toggle = page.getByRole('switch', { name: labels.toggle, exact: true });
+    const save = page.getByRole('button', { name: labels.save, exact: true });
+    await expect(toggle).toBeChecked();
+    await expect(page.getByText(labels.cadence, { exact: true })).toBeVisible();
+    await toggle.click();
+    await save.click();
+    await expect.poll(() => submitted.length).toBe(1);
+    await expect(page.getByText(labels.success, { exact: true })).toBeVisible();
+    await expect(save).toBeDisabled();
+
+    await page.reload();
+    await page.getByRole('tab', { name: labels.tab, exact: true }).click();
+    await expect(toggle).not.toBeChecked();
+    await expect(page.getByRole('switch', { name: labels.watch, exact: true })).toBeChecked();
+    await expect(save).toBeDisabled();
+    await toggle.click();
+    await save.click();
+    await expect.poll(() => submitted.length).toBe(2);
+    await expect(toggle).toBeChecked();
+    await expect(save).toBeDisabled();
+  });
+}
 
 test('library import preferences save after editing ignore patterns', async ({ page }) => {
   const counts = await mockSettingsApi(page);

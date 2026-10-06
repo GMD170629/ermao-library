@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from app.modules.imports.application.library_scan_settings import (
+    LibraryScanSettingsRepositoryPort,
+)
 from app.modules.imports.application.readable_resource.ports import (
     LibraryConfigPort,
     LibraryImportTaskQueuePort,
@@ -48,15 +51,27 @@ class RequestLibraryScan:
         queue: LibraryImportTaskQueuePort,
         uow: UnitOfWorkPort,
         log: PipelineLogPort,
+        scan_settings: LibraryScanSettingsRepositoryPort,
     ) -> None:
         self._libraries = libraries
         self._queue = queue
         self._uow = uow
         self._log = log
+        self._scan_settings = scan_settings
 
     def execute(self, command: RequestLibraryScanCommand) -> RequestLibraryScanResult:
         with self._uow.transaction():
             self._libraries.get_library(command.library_id)
+            if command.trigger in {"PERIODIC", "STARTUP"} and (
+                self._scan_settings.load().interval_minutes == 0
+                or self._queue.has_active_tasks(command.library_id)
+            ):
+                return RequestLibraryScanResult(
+                    library_id=command.library_id,
+                    trigger=command.trigger,
+                    enqueued=False,
+                    task_id=None,
+                )
             task, enqueued = self._queue.request_library_scan(
                 command.library_id,
                 missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,

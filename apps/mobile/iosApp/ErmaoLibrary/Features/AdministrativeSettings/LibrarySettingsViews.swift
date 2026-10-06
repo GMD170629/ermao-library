@@ -325,25 +325,22 @@ struct ImportPreferencesView: View {
     @State private var preferences: LibraryImportPreferences?
     @Environment(\.administrativeCopy) private var copy
 
-    private let scanIntervals = [5, 15, 30, 60, 180, 360, 720, 1_440]
-
     var body: some View {
         AdministrativeStateView(state: state, retry: load) { _ in
             if let binding = Binding($preferences) {
                 SettingsForm {
-                    Section(header: SettingsSectionHeader(verbatim: copy[.scanning])) {
+                    Section(
+                        header: SettingsSectionHeader(verbatim: copy[.scanning]),
+                        footer: Text(copy[.periodicScanningHint])
+                    ) {
                         SettingsToggleRow(
-                            LocalizedStringKey(copy[.scanningEnabled]),
+                            LocalizedStringKey(copy[.fileWatching]),
                             isOn: binding.scan.watchEnabled
                         )
-                        SettingsPickerRow(
-                            LocalizedStringKey(copy[.scanInterval]),
-                            selection: binding.scan.intervalMinutes
-                        ) {
-                            ForEach(scanIntervals, id: \.self) { minutes in
-                                Text(formattedInterval(minutes)).tag(minutes)
-                            }
-                        }
+                        SettingsToggleRow(
+                            LocalizedStringKey(copy[.periodicScanning]),
+                            isOn: binding.scan.periodicScanEnabled
+                        )
                     }
                     Section(copy[.fileProcessing]) {
                         SettingsTextInputRow(LocalizedStringKey(copy[.allowedExtensions])) {
@@ -408,9 +405,5 @@ struct ImportPreferencesView: View {
             preferences = updated
             state = .loaded(updated)
         }
-    }
-    private func formattedInterval(_ minutes: Int) -> String {
-        Measurement(value: Double(minutes), unit: UnitDuration.minutes)
-            .formatted(.measurement(width: .abbreviated).locale(Locale(identifier: copy.locale.rawValue)))
     }
 }

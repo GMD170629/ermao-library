@@ -453,6 +453,19 @@ struct ImportPreferences: Equatable, Sendable {
 struct LibraryScanSettings: Equatable, Sendable {
     var watchEnabled: Bool
     var intervalMinutes: Int
+
+    var periodicScanEnabled: Bool {
+        get { shared.periodicScanEnabled }
+        set {
+            let updated = shared.withPeriodicScanEnabled(enabled: newValue)
+            watchEnabled = updated.watchEnabled
+            intervalMinutes = Int(updated.intervalMinutes)
+        }
+    }
+
+    var shared: ErmaoShared.LibraryScanSettings {
+        ErmaoShared.LibraryScanSettings(watchEnabled: watchEnabled, intervalMinutes: Int32(intervalMinutes))
+    }
 }
 
 struct LibraryImportPreferences: Equatable, Sendable {

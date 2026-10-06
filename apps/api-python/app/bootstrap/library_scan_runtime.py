@@ -11,7 +11,6 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.core.config import Settings
 from app.core.exception_diagnostics import (
     persist_exception_diagnostic,
     prepare_exception_diagnostic,
@@ -49,13 +48,11 @@ class LibraryScanCoordinator:
         self,
         *,
         session: Session,
-        settings: Settings,
         request_scan: RequestLibraryScan,
         uow: UnitOfWorkPort,
         refresh_seconds: float = 5.0,
     ) -> None:
         self._session = session
-        self._settings = settings
         self._request_scan = request_scan
         self._uow = uow
         self._refresh_seconds = refresh_seconds
@@ -67,7 +64,6 @@ class LibraryScanCoordinator:
         self._next_periodic_at: datetime | None = None
         self._stopping = False
         self._started = False
-        self._startup_pending: set[str] = set()
 
     def tick(self) -> None:
         if self._stopping:
@@ -78,23 +74,18 @@ class LibraryScanCoordinator:
             self._refresh(now)
             self._next_refresh_at = monotonic_now + self._refresh_seconds
 
-        for library_id in tuple(self._startup_pending):
-            if self._request(library_id, "STARTUP"):
-                self._startup_pending.discard(library_id)
-
         for pending in self._buffer.ready(observed_at=monotonic_now):
             if self._request(pending.library_id, "WATCHER", pending.scopes):
                 self._buffer.acknowledge(pending.library_id, pending.version)
 
         if self._next_periodic_at is not None and now >= self._next_periodic_at:
-            completed = True
-            for library in self._libraries:
-                completed = self._request(library.library_id, "PERIODIC") and completed
-            if completed:
-                scan_settings = self._load_settings()
-                self._next_periodic_at = next_periodic_scan_at(
-                    now, scan_settings.interval_minutes
-                )
+            scan_settings = self._load_settings()
+            self._next_periodic_at = next_periodic_scan_at(
+                now, scan_settings.interval_minutes
+            )
+            if scan_settings.interval_minutes != 0:
+                for library in self._libraries:
+                    self._request(library.library_id, "PERIODIC")
 
     def request_stop(self) -> None:
         self._stopping = True
@@ -149,19 +140,15 @@ class LibraryScanCoordinator:
             rebuilt = False
             record_exception(logger, "library_scan.watcher_unavailable", error,
                              context={"step": "reconcile_watcher"})
-        if not self._started or libraries_changed or rebuilt:
+        if scan_settings.interval_minutes != 0 and (
+            not self._started or libraries_changed or rebuilt
+        ):
             for library in libraries:
-                if not self._request(library.library_id, "STARTUP"):
-                    self._startup_pending.add(library.library_id)
-        enabled_ids = {library.library_id for library in libraries}
-        self._startup_pending.intersection_update(enabled_ids)
+                self._request(library.library_id, "STARTUP")
         self._started = True
 
     def _load_settings(self) -> LibraryScanSettings:
-        return SqlAlchemyLibraryScanSettingsRepository(
-            self._session,
-            legacy_interval_ms=self._settings.library_scan_interval_ms,
-        ).load()
+        return SqlAlchemyLibraryScanSettingsRepository(self._session).load()
 
     def _request(
         self,
@@ -178,7 +165,7 @@ class LibraryScanCoordinator:
                 )
             )
         except (OSError, RuntimeError, SQLAlchemyError) as error:
-            snapshot = prepare_exception_diagnostic(logger, "library_scan.request_deferred", error,
+            snapshot = prepare_exception_diagnostic(logger, "library_scan.request_failed", error,
                                                     context={"library_id": library_id, "step": "request_scan", "stage": trigger})
             try:
                 self._uow.recover_after_failure()

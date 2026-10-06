@@ -124,27 +124,17 @@ def save_uploaded_files(
     return SaveUploadedFiles(AtomicUploadedFilePublisher()).execute(command)
 
 
-def get_library_scan_settings(
-    session: Session, *, legacy_interval_ms: int | None = None
-) -> LibraryScanSettings:
+def get_library_scan_settings(session: Session) -> LibraryScanSettings:
     return GetLibraryScanSettings(
-        SqlAlchemyLibraryScanSettingsRepository(
-            session,
-            legacy_interval_ms=legacy_interval_ms,
-        )
+        SqlAlchemyLibraryScanSettingsRepository(session)
     ).execute()
 
 
 def update_library_scan_settings(
     session: Session,
     settings: LibraryScanSettings,
-    *,
-    legacy_interval_ms: int | None = None,
 ) -> LibraryScanSettings:
-    repository = SqlAlchemyLibraryScanSettingsRepository(
-        session,
-        legacy_interval_ms=legacy_interval_ms,
-    )
+    repository = SqlAlchemyLibraryScanSettingsRepository(session)
     return UpdateLibraryScanSettings(repository, SqlAlchemyUnitOfWork(session)).execute(
         settings
     )

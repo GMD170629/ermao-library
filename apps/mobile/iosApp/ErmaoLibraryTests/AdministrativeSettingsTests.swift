@@ -39,6 +39,23 @@ final class AdministrativeSettingsTests: XCTestCase {
         XCTAssertEqual(en.importTaskKind("IMPORT_BOOK"), "Import book")
     }
 
+    func testPeriodicScanToggleUsesDailyIntervalAndKeepsFileWatchingIndependent() {
+        for watchEnabled in [false, true] {
+            var settings = LibraryScanSettings(watchEnabled: watchEnabled, intervalMinutes: 1_440)
+            XCTAssertTrue(settings.periodicScanEnabled)
+
+            settings.periodicScanEnabled = false
+            XCTAssertEqual(settings.intervalMinutes, 0)
+            XCTAssertFalse(settings.periodicScanEnabled)
+            XCTAssertEqual(settings.watchEnabled, watchEnabled)
+
+            settings.periodicScanEnabled = true
+            XCTAssertEqual(settings.intervalMinutes, 1_440)
+            XCTAssertTrue(settings.periodicScanEnabled)
+            XCTAssertEqual(settings.watchEnabled, watchEnabled)
+        }
+    }
+
     func testHealthCodesAreLocalizedInsteadOfDisplayedAsServerKeys() {
         let zh = AdministrativeCopyCatalog(locale: .zhCN)
         let en = AdministrativeCopyCatalog(locale: .enUS)
@@ -360,7 +377,7 @@ private final class AdministrativeSettingsClientFake: AdministrativeSettingsClie
     func loadImportTaskDetail(id: String) async throws -> ImportTaskDetail { try fail(); throw AdministrativeFailure(kind: .notFound, code: "fixture") }
     func loadImportScans() async throws -> [ImportScanJob] { try fail(); return [] }; func cancelImportScan(id: String) async throws { try fail() }
     func loadImportPreferences() async throws -> ImportPreferences { try fail(); throw AdministrativeFailure(kind: .notFound, code: "fixture") }; func saveImportPreferences(_ preferences: ImportPreferences) async throws -> ImportPreferences { try fail(); return preferences }
-    func loadLibraryScanSettings() async throws -> LibraryScanSettings { try fail(); return .init(watchEnabled: true, intervalMinutes: 30) }; func saveLibraryScanSettings(_ settings: LibraryScanSettings) async throws -> LibraryScanSettings { try fail(); return settings }
+    func loadLibraryScanSettings() async throws -> LibraryScanSettings { try fail(); return .init(watchEnabled: true, intervalMinutes: 1_440) }; func saveLibraryScanSettings(_ settings: LibraryScanSettings) async throws -> LibraryScanSettings { try fail(); return settings }
     func loadOrganizeJobs(status: OrganizeJobStatus?) async throws -> [OrganizeJob] { try fail(); return [] }; func loadPendingOrganizeJobs() async throws -> [OrganizeJob] { try fail(); return [] }; func loadOrganizeRuns() async throws -> [OrganizeRun] { try fail(); return [] }; func recognizeOrganizeJob(id: String) async throws { try fail() }; func deleteOrganizeJob(id: String) async throws { try fail() }; func loadRecognitionCandidates() async throws -> [RecognitionCandidate] { try fail(); return [] }
     func loadRecognitionPolicy() async throws -> RecognitionPolicy { try fail(); throw AdministrativeFailure(kind: .notFound, code: "fixture") }; func saveRecognitionPolicy(_ policy: RecognitionPolicy) async throws -> RecognitionPolicy { try fail(); return policy }
     func loadLibraryOperations() async throws -> [LibraryOperation] { try fail(); return [] }; func undoLibraryOperation(id: String) async throws { try fail() }

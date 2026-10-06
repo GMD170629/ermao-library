@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from alembic import command
-from sqlalchemy import MetaData, Table, insert, inspect
+from sqlalchemy import MetaData, Table, insert, inspect, select
 from sqlalchemy.orm import Session
 
 from app.db.runner import alembic_config_for_engine
@@ -58,11 +58,16 @@ def test_upgrade_removes_single_book_and_queued_scan_keys(tmp_path: Path) -> Non
                  "state": "QUEUED", "missingEntryPolicy": "PRESERVE",
                  "createdAt": int(now.timestamp() * 1000)}))
             db.commit()
-        command.upgrade(config, "head")
+        command.upgrade(config, "0037_single_import_execution")
         indexes = {item["name"] for item in inspect(engine).get_indexes("LibraryImportTask")}
         assert "LibraryImportTask_book_key" not in indexes
         assert "LibraryImportTask_scan_queued_key" not in indexes
         assert "LibraryImportTask_scan_running_key" not in indexes
+        with engine.connect() as connection:
+            assert connection.scalar(
+                select(historical.c.id).where(historical.c.id == "scan")
+            ) == "scan"
+        command.upgrade(config, "head")
         with Session(engine) as db:
             queue = SqlAlchemyLibraryImportTaskQueue(db)
             second = queue.request_book_work(
@@ -74,7 +79,7 @@ def test_upgrade_removes_single_book_and_queued_scan_keys(tmp_path: Path) -> Non
             db.commit()
             assert second.id != "first" and another_scan.id != "scan"
             assert queue.get_book_task("first") is not None
-            assert queue.get_task("scan") is not None
+            assert queue.get_task("scan") is None
     finally:
         engine.dispose()
 

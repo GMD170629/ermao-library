@@ -267,7 +267,6 @@ def main() -> None:
                         if not stop_event.is_set():
                             scan_coordinator = LibraryScanCoordinator(
                                 session=import_session,
-                                settings=settings,
                                 request_scan=pipeline.request_library_scan,
                                 uow=pipeline.uow,
                             )

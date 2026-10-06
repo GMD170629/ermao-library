@@ -126,12 +126,9 @@ def get_system_settings(
 
 
 def _library_scan_settings_payload(
-    db: Session, settings: Settings
+    db: Session,
 ) -> LibraryScanSystemSettingsPayload:
-    snapshot = get_library_scan_settings(
-        db,
-        legacy_interval_ms=settings.library_scan_interval_ms,
-    )
+    snapshot = get_library_scan_settings(db)
     return LibraryScanSystemSettingsPayload(
         watchEnabled=snapshot.watch_enabled,
         intervalMinutes=snapshot.interval_minutes,
@@ -150,7 +147,7 @@ def get_library_scan_system_settings(
     _user, auth_error = _system_manager(db, request, settings)
     if auth_error:
         return auth_error
-    return ok(_library_scan_settings_payload(db, settings))
+    return ok(_library_scan_settings_payload(db))
 
 
 @router.put(
@@ -172,7 +169,6 @@ def update_library_scan_system_settings(
             watch_enabled=payload.watch_enabled,
             interval_minutes=payload.interval_minutes,
         ),
-        legacy_interval_ms=settings.library_scan_interval_ms,
     )
     return ok(
         LibraryScanSystemSettingsPayload(

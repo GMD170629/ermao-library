@@ -29,6 +29,7 @@ from app.modules.media.infrastructure.resource_preview import (
     FilesystemResourcePreview,
     ResourcePreviewRenderCoordinator,
 )
+from app.modules.media.infrastructure.resource_preview_cache import ResourcePreviewCache
 from app.modules.media.infrastructure.resource_repository import (
     SqlAlchemyMediaResourceRepository,
 )
@@ -75,6 +76,10 @@ def resource_preview(db: Session, settings: Settings) -> GetResourcePreview:
     )
 
 
+def resource_preview_cache(settings: Settings) -> ResourcePreviewCache:
+    return ResourcePreviewCache(settings.resolved_storage_root)
+
+
 def effective_book_cover_query(db: Session) -> ResolveBookCoverCandidates:
     return ResolveBookCoverCandidates(SqlAlchemyBookCoverQueries(db))
 
@@ -87,6 +92,7 @@ __all__ = [
     "media_streaming",
     "resolve_read_only_resource_page_index",
     "resource_preview",
+    "resource_preview_cache",
 ]
 
 

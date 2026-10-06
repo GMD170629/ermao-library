@@ -415,10 +415,11 @@ def test_alembic_script_directory_has_one_linear_head() -> None:
     config = alembic_config_for_engine(create_engine("sqlite+pysqlite:///:memory:"))
     script = ScriptDirectory.from_config(config)
     revisions = list(script.walk_revisions())
-    assert len(revisions) == 39
-    assert script.get_heads() == ["0039_generated_metadata_fields"]
-    assert head_revision() == "0039_generated_metadata_fields"
+    assert len(revisions) == 40
+    assert script.get_heads() == ["0040_periodic_scan_admission"]
+    assert head_revision() == "0040_periodic_scan_admission"
     assert [revision.revision for revision in revisions] == [
+        "0040_periodic_scan_admission",
         "0039_generated_metadata_fields",
         "0038_import_scan_round_fact",
         "0037_single_import_execution",
@@ -470,7 +471,7 @@ def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
     engine = create_sqlite_engine(settings.database_path)
     try:
         runner_module.apply_schema(engine, settings)
-        assert _current_revision(engine) == "0039_generated_metadata_fields"
+        assert _current_revision(engine) == "0040_periodic_scan_admission"
         operation_columns = {
             column["name"]: column
             for column in inspect(engine).get_columns("MetadataWritebackOperation")
@@ -511,7 +512,7 @@ def test_source_node_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None
         }
 
         runner_module.apply_schema(engine)
-        assert _current_revision(engine) == "0039_generated_metadata_fields"
+        assert _current_revision(engine) == "0040_periodic_scan_admission"
         source_node_indexes = {
             index["name"]: tuple(index["column_names"])
             for index in inspect(engine).get_indexes("LibrarySourceNode")
@@ -562,7 +563,7 @@ def test_foreign_key_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None
             }
 
         runner_module.apply_schema(engine)
-        assert _current_revision(engine) == "0039_generated_metadata_fields"
+        assert _current_revision(engine) == "0040_periodic_scan_admission"
         for table_name, index_name in expected_indexes.items():
             assert index_name in {
                 index["name"] for index in inspect(engine).get_indexes(table_name)
@@ -634,30 +635,30 @@ def test_scan_queue_migration_coalesces_existing_queued_tasks(tmp_path) -> None:
                 ],
             )
 
+        with engine.connect() as connection:
+            config.attributes["connection"] = connection
+            command.upgrade(config, "0039_generated_metadata_fields")
+        coalesced_tasks = Table("LibraryImportTask", MetaData(), autoload_with=engine)
+        with engine.connect() as connection:
+            migrated = connection.execute(
+                select(coalesced_tasks).where(
+                    coalesced_tasks.c.libraryId == "scan-library",
+                    coalesced_tasks.c.kind == "SCAN_LIBRARY",
+                    coalesced_tasks.c.state == "QUEUED",
+                )
+            ).mappings().one()
+            assert migrated["missingEntryPolicy"] == "PRESERVE"
+            assert migrated["scanScopes"] is None
+
         runner_module.apply_schema(engine)
         runner_module.apply_schema(engine)
 
         with Session(engine) as session:
-            assert (
-                session.scalar(
-                    select(func.count())
-                    .select_from(LibraryImportTask)
-                    .where(
-                        LibraryImportTask.library_id == "scan-library",
-                        LibraryImportTask.kind == "SCAN_LIBRARY",
-                        LibraryImportTask.state == "QUEUED",
-                    )
+            assert session.scalar(
+                select(func.count()).select_from(LibraryImportTask).where(
+                    LibraryImportTask.library_id == "scan-library",
                 )
-                == 1
-            )
-            migrated = session.scalar(
-                select(LibraryImportTask).where(
-                    LibraryImportTask.library_id == "scan-library"
-                )
-            )
-            assert migrated is not None
-            assert migrated.missing_entry_policy == "PRESERVE"
-            assert migrated.scan_scopes is None
+            ) == 0
             library = session.get(Library, "scan-library")
             assert library is not None and library.allow_empty_library_cleanup is False
         index_names = {

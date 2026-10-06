@@ -40,6 +40,9 @@ from app.modules.imports.domain.scan_policy import MissingEntryPolicy
 from app.modules.imports.infrastructure.audio_metadata_inspector import (
     BoundedAudioMetadataInspector,
 )
+from app.modules.imports.infrastructure.library_scan_settings import (
+    SqlAlchemyLibraryScanSettingsRepository,
+)
 from app.modules.imports.infrastructure.local_cover_publication import (
     FilesystemLocalCoverPublication,
 )
@@ -184,6 +187,7 @@ def build_readable_resource_pipeline(
         queue=queue,
         uow=uow,
         log=log,
+        scan_settings=SqlAlchemyLibraryScanSettingsRepository(session),
     )
     continue_import = ContinueImport(
         source_nodes=source_nodes,

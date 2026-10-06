@@ -565,6 +565,14 @@ class SqlAlchemyLibraryImportTaskQueue(
         self._completion.dirty(row)
         return self._to_record(row)
 
+    def has_active_tasks(self, library_id: str) -> bool:
+        return bool(self._session.scalar(
+            select(exists().where(
+                LibraryImportTask.library_id == library_id,
+                LibraryImportTask.state.in_(("QUEUED", "RUNNING")),
+            ))
+        ))
+
     def request_library_scan(
         self,
         library_id: str,

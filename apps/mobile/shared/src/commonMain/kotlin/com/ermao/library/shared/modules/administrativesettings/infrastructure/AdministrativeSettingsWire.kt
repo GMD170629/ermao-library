@@ -299,7 +299,7 @@ internal fun JsonElement.toLibraryScanSettings(): LibraryScanSettings {
     return LibraryScanSettings(
         watchEnabled = settings.requiredBoolean("watchEnabled"),
         intervalMinutes = settings.requiredInt("intervalMinutes"),
-    )
+    ).takeIf { it.hasValidInterval } ?: contract("INVALID_intervalMinutes")
 }
 
 internal fun JsonElement.toDirectoryNode(): DirectoryNode {

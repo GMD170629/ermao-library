@@ -388,15 +388,15 @@ class KtorAdministrativeSettingsRepositoryTest {
         val loaded = assertIs<AdministrativeSettingsContent<*>>(
             harness.repository.loadLibraryScanSettings(context()),
         ).value
-        assertEquals(LibraryScanSettings(watchEnabled = true, intervalMinutes = 30), loaded)
+        assertEquals(LibraryScanSettings(watchEnabled = true, intervalMinutes = 1440), loaded)
 
         val updated = assertIs<AdministrativeSettingsContent<*>>(
             harness.repository.updateLibraryScanSettings(
                 context(),
-                LibraryScanSettings(watchEnabled = false, intervalMinutes = 180),
+                LibraryScanSettings(watchEnabled = false, intervalMinutes = 0),
             ),
         ).value
-        assertEquals(LibraryScanSettings(watchEnabled = false, intervalMinutes = 180), updated)
+        assertEquals(LibraryScanSettings(watchEnabled = false, intervalMinutes = 0), updated)
 
         assertEquals(
             listOf(
@@ -405,38 +405,63 @@ class KtorAdministrativeSettingsRepositoryTest {
             ),
             harness.requests.map { it.method to it.path },
         )
-        assertEquals("""{"watchEnabled":false,"intervalMinutes":180}""", harness.requests[1].body)
+        assertEquals("""{"watchEnabled":false,"intervalMinutes":0}""", harness.requests[1].body)
     }
 
     @Test
-    fun libraryScanSettingsRejectOutOfRangeUpdatesBeforeNetwork() = runBlocking {
+    fun libraryScanSettingsToggleUsesDailyIntervalAndPreservesWatcher() {
+        for (watchEnabled in listOf(false, true)) {
+            val defaults = LibraryScanSettings(watchEnabled = watchEnabled)
+            assertEquals(1440, defaults.intervalMinutes)
+            assertTrue(defaults.periodicScanEnabled)
+            val disabled = defaults.withPeriodicScanEnabled(false)
+            assertEquals(LibraryScanSettings(watchEnabled, 0), disabled)
+            assertTrue(!disabled.periodicScanEnabled)
+            assertEquals(defaults, disabled.withPeriodicScanEnabled(true))
+        }
+    }
+
+    @Test
+    fun libraryScanSettingsCanReenableTheDailySchedule() = runBlocking {
+        val harness = Harness(Response(200, LIBRARY_SCAN_SETTINGS))
+        val settings = LibraryScanSettings(watchEnabled = true, intervalMinutes = 0)
+            .withPeriodicScanEnabled(true)
+        val updated = assertIs<AdministrativeSettingsContent<*>>(
+            harness.repository.updateLibraryScanSettings(context(), settings),
+        ).value
+        assertEquals(settings, updated)
+        assertEquals("""{"watchEnabled":true,"intervalMinutes":1440}""", harness.requests.single().body)
+    }
+
+    @Test
+    fun libraryScanSettingsRejectVariableIntervalsBeforeNetwork() = runBlocking {
         val harness = Harness()
 
-        val failure = assertIs<AdministrativeSettingsFailure>(
-            harness.repository.updateLibraryScanSettings(
-                context(),
-                LibraryScanSettings(watchEnabled = true, intervalMinutes = 1441),
-            ),
-        )
-
-        assertEquals(AdministrativeSettingsErrorKind.Validation, failure.error.kind)
-        assertEquals("INVALID_INTERVAL", failure.error.code)
-        assertEquals(listOf(AdministrativeSettingsFieldViolation("intervalMinutes", "INVALID_FIELD")), failure.error.fieldViolations)
+        for (minutes in listOf(-1, 5, 30, 60, 180, 1439, 1441)) {
+            val failure = assertIs<AdministrativeSettingsFailure>(
+                harness.repository.updateLibraryScanSettings(
+                    context(), LibraryScanSettings(watchEnabled = true, intervalMinutes = minutes),
+                ),
+            )
+            assertEquals(AdministrativeSettingsErrorKind.Validation, failure.error.kind)
+            assertEquals("INVALID_INTERVAL", failure.error.code)
+            assertEquals(listOf(AdministrativeSettingsFieldViolation("intervalMinutes", "INVALID_FIELD")), failure.error.fieldViolations)
+        }
         assertTrue(harness.requests.isEmpty())
     }
 
     @Test
     fun malformedLibraryScanSettingsAreProtocolFailures() = runBlocking {
-        val harness = Harness(
-            Response(200, """{"ok":true,"data":{"watchEnabled":true,"intervalMinutes":"30"}}"""),
-        )
-
-        val failure = assertIs<AdministrativeSettingsFailure>(
-            harness.repository.loadLibraryScanSettings(context()),
-        )
-
-        assertEquals(AdministrativeSettingsErrorKind.Protocol, failure.error.kind)
-        assertEquals("INVALID_intervalMinutes", failure.error.code)
+        for (interval in listOf("\"1440\"", "30", "1441")) {
+            val harness = Harness(
+                Response(200, """{"ok":true,"data":{"watchEnabled":true,"intervalMinutes":$interval}}"""),
+            )
+            val failure = assertIs<AdministrativeSettingsFailure>(
+                harness.repository.loadLibraryScanSettings(context()),
+            )
+            assertEquals(AdministrativeSettingsErrorKind.Protocol, failure.error.kind)
+            assertEquals("INVALID_intervalMinutes", failure.error.code)
+        }
     }
 
     @Test
@@ -788,8 +813,8 @@ class KtorAdministrativeSettingsRepositoryTest {
         const val BACKUP_RESTORED = """{"ok":true,"data":{"id":"backup-1","restored":true,"restoredAt":"2026-08-12T00:00:00Z","counts":{"works":1},"restoredCounts":{"works":1},"actualCounts":{"works":1}}}"""
         const val BACKUP_DELETED = """{"ok":true,"data":{"deleted":true,"id":"backup-1"}}"""
         const val IMPORT_PREFERENCES = """{"ok":true,"data":{"settings":{"import.allowedExtensions":[".epub"],"import.ignorePatterns":"*.tmp"}}}"""
-        const val LIBRARY_SCAN_SETTINGS = """{"ok":true,"data":{"watchEnabled":true,"intervalMinutes":30}}"""
-        const val LIBRARY_SCAN_SETTINGS_UPDATED = """{"ok":true,"data":{"watchEnabled":false,"intervalMinutes":180}}"""
+        const val LIBRARY_SCAN_SETTINGS = """{"ok":true,"data":{"watchEnabled":true,"intervalMinutes":1440}}"""
+        const val LIBRARY_SCAN_SETTINGS_UPDATED = """{"ok":true,"data":{"watchEnabled":false,"intervalMinutes":0}}"""
         const val HEALTH_RUN = """{"ok":true,"data":{"run":{"runId":"run-1","status":"completed","version":2,"startedAt":1,"finishedAt":2,"groups":[],"items":[],"summary":{"total":0,"completed":0,"ok":0,"warning":0,"error":0,"skipped":0}}}}"""
         const val EVENTS = """{"ok":true,"data":{"events":[],"page":1,"pageSize":20,"total":0,"totalPages":1,"storage":{"sizeBytes":0,"maxBytes":1048576,"lastPrunedAt":null},"facets":{"sources":[],"levels":[]}}}"""
         const val LOG_SETTINGS = """{"ok":true,"data":{"storage":{"sizeBytes":0,"maxBytes":1048576,"lastPrunedAt":null},"minBytes":1048576,"maxBytes":104857600}}"""

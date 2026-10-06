@@ -72,7 +72,7 @@ extension SharedAdministrativeSettingsClient {
     nonisolated func map(_ value: ErmaoShared.ImportPreferences) -> ImportPreferences { ImportPreferences(allowedExtensions: value.allowedExtensions, ignorePatterns: value.ignorePatterns) }
     nonisolated func map(_ value: ImportPreferences) -> ErmaoShared.ImportPreferences { ErmaoShared.ImportPreferences(allowedExtensions: value.allowedExtensions, ignorePatterns: value.ignorePatterns) }
     nonisolated func map(_ value: ErmaoShared.LibraryScanSettings) -> LibraryScanSettings { LibraryScanSettings(watchEnabled: value.watchEnabled, intervalMinutes: Int(value.intervalMinutes)) }
-    nonisolated func map(_ value: LibraryScanSettings) -> ErmaoShared.LibraryScanSettings { ErmaoShared.LibraryScanSettings(watchEnabled: value.watchEnabled, intervalMinutes: Int32(value.intervalMinutes)) }
+    nonisolated func map(_ value: LibraryScanSettings) -> ErmaoShared.LibraryScanSettings { value.shared }
 
     nonisolated func map(_ value: OrganizeJobStatus?) -> ErmaoShared.OrganizeStatusCategory? { guard let value else { return nil }; switch value { case .organized: return ErmaoShared.OrganizeStatusCategory.success; case .failed: return ErmaoShared.OrganizeStatusCategory.failed; case .pendingRecognition: return ErmaoShared.OrganizeStatusCategory.waiting; case .needsConfirmation: return ErmaoShared.OrganizeStatusCategory.recognizing; case .cancelled: return nil } }
     nonisolated func map(_ value: ErmaoShared.OrganizeJob) -> OrganizeJob { OrganizeJob(id: value.id, title: value.book.title, subtitle: ErmaoShared.AuthorDisplay.shared.label(author: value.book.author), status: map(value.statusCategory), errorCode: value.issueCodes.first) }

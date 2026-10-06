@@ -63,7 +63,7 @@ SYSTEM_MANAGEMENT_REQUESTS = (
     (
         "PUT",
         "/api/system-settings/library-scan",
-        {"watchEnabled": True, "intervalMinutes": 30},
+        {"watchEnabled": True, "intervalMinutes": 1440},
     ),
     ("GET", "/api/management/events", None),
     ("GET", "/api/management/events/missing-event", None),
@@ -139,9 +139,11 @@ def test_admin_and_delegated_system_manager_can_read_system_settings(
     assert "settings" in response.json()["data"]
 
 
+@pytest.mark.parametrize("minutes", [0, 1440])
 def test_library_scan_settings_default_save_and_restore(
     client: TestClient,
     db_session: Session,
+    minutes: int,
 ) -> None:
     admin = _create_user(
         db_session,
@@ -154,17 +156,17 @@ def test_library_scan_settings_default_save_and_restore(
     assert initial.status_code == 200
     assert initial.json()["data"] == {
         "watchEnabled": True,
-        "intervalMinutes": 30,
+        "intervalMinutes": 1440,
     }
 
     saved = client.put(
         "/api/system-settings/library-scan",
-        json={"watchEnabled": False, "intervalMinutes": 180},
+        json={"watchEnabled": False, "intervalMinutes": minutes},
     )
     assert saved.status_code == 200
     assert saved.json()["data"] == {
         "watchEnabled": False,
-        "intervalMinutes": 180,
+        "intervalMinutes": minutes,
     }
     assert (
         client.get("/api/system-settings/library-scan").json()["data"]
@@ -172,11 +174,13 @@ def test_library_scan_settings_default_save_and_restore(
     )
 
 
-@pytest.mark.parametrize("minutes", [4, 1441, 30.5])
+@pytest.mark.parametrize(
+    "minutes", [-1, 1, 4, 5, 30, 60, 180, 1439, 1441, 30.5, False, 0.0, 1440.0, "1440"]
+)
 def test_library_scan_settings_validate_interval(
     client: TestClient,
     db_session: Session,
-    minutes: float,
+    minutes: float | str,
 ) -> None:
     admin = _create_user(
         db_session,

@@ -1,15 +1,26 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field, model_validator
+from pydantic import BeforeValidator, Field, model_validator
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.system_events import SystemEvent
 from app.modules.library.public import LibraryOrganizationMode
 
 SystemSettingValue = str | int | float | bool | list[str] | None
+
+
+def _require_integer_scan_interval(value: object) -> int:
+    if type(value) is not int:
+        raise ValueError("intervalMinutes must be an integer")
+    return value
+
+
+LibraryScanIntervalMinutes = Annotated[
+    Literal[0, 1440], BeforeValidator(_require_integer_scan_interval)
+]
 
 
 class FrontendResources(HttpContractModel):
@@ -59,12 +70,12 @@ class UpdateSystemSettingsRequest(HttpContractModel):
 
 class LibraryScanSystemSettingsPayload(HttpContractModel):
     watch_enabled: bool = Field(alias="watchEnabled")
-    interval_minutes: int = Field(alias="intervalMinutes", ge=5, le=1440)
+    interval_minutes: LibraryScanIntervalMinutes = Field(alias="intervalMinutes")
 
 
 class UpdateLibraryScanSystemSettingsRequest(HttpContractModel):
     watch_enabled: bool = Field(alias="watchEnabled")
-    interval_minutes: int = Field(alias="intervalMinutes", ge=5, le=1440)
+    interval_minutes: LibraryScanIntervalMinutes = Field(alias="intervalMinutes")
 
 
 class SystemStatusCheck(HttpContractModel):

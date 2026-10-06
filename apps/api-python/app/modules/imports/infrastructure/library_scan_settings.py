@@ -16,19 +16,16 @@ from app.modules.imports.application.library_scan_settings import (
     LibraryScanSettingsRepositoryPort,
 )
 from app.modules.imports.domain.library_scan_schedule import (
+    DEFAULT_LIBRARY_SCAN_INTERVAL_MINUTES,
     LIBRARY_SCAN_INTERVAL_MINUTES_KEY,
     LIBRARY_SCAN_WATCH_ENABLED_KEY,
     LibraryScanSettings,
-    legacy_interval_minutes,
 )
 
 
 class SqlAlchemyLibraryScanSettingsRepository(LibraryScanSettingsRepositoryPort):
-    def __init__(
-        self, session: Session, *, legacy_interval_ms: int | None = None
-    ) -> None:
+    def __init__(self, session: Session) -> None:
         self._session = session
-        self._legacy_interval_ms = legacy_interval_ms
 
     def load(self) -> LibraryScanSettings:
         rows = self._session.execute(
@@ -49,8 +46,11 @@ class SqlAlchemyLibraryScanSettingsRepository(LibraryScanSettingsRepositoryPort)
             stored_interval
             if isinstance(stored_interval, int)
             and not isinstance(stored_interval, bool)
-            else legacy_interval_minutes(self._legacy_interval_ms)
+            else DEFAULT_LIBRARY_SCAN_INTERVAL_MINUTES
         )
+        # Previously supported positive frequencies all mean the schedule is on.
+        if 5 <= interval_minutes <= DEFAULT_LIBRARY_SCAN_INTERVAL_MINUTES:
+            interval_minutes = DEFAULT_LIBRARY_SCAN_INTERVAL_MINUTES
         try:
             return LibraryScanSettings(
                 watch_enabled=watch_enabled,

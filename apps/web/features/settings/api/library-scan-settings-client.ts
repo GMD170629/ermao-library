@@ -1,6 +1,6 @@
 export type LibraryScanSettings = Readonly<{
   watchEnabled: boolean;
-  intervalMinutes: number;
+  intervalMinutes: 0 | 1440;
 }>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -19,10 +19,7 @@ export function parseLibraryScanSettings(payload: unknown): LibraryScanSettings 
   const { watchEnabled, intervalMinutes } = payload.data;
   if (
     typeof watchEnabled !== 'boolean' ||
-    typeof intervalMinutes !== 'number' ||
-    !Number.isInteger(intervalMinutes) ||
-    intervalMinutes < 5 ||
-    intervalMinutes > 1440
+    (intervalMinutes !== 0 && intervalMinutes !== 1440)
   ) {
     throw new Error('自动扫描设置响应格式不正确');
   }

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
-import tempfile
 from pathlib import Path
 
 from sqlalchemy import false, select, true
@@ -33,6 +31,7 @@ from app.modules.media.infrastructure.page_image import (
     PageImageSource,
     ResourcePreviewRenderCoordinator,
 )
+from app.modules.media.infrastructure.resource_preview_cache import ResourcePreviewCache
 
 PREVIEW_CACHE_VERSION = 1
 
@@ -45,8 +44,8 @@ class FilesystemResourcePreview:
         render_coordinator: ResourcePreviewRenderCoordinator,
     ) -> None:
         self._db = db
-        self._settings = settings
         self._renderer = PageImageRenderer(render_coordinator)
+        self._cache = ResourcePreviewCache(settings.resolved_storage_root)
 
     def load(
         self,
@@ -64,17 +63,10 @@ class FilesystemResourcePreview:
             f"quality-{PREVIEW_WEBP_QUALITY}"
         )
         digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
-        cache_path = (
-            self._settings.resolved_storage_root
-            / "cache"
-            / "resource-previews"
-            / digest[:2]
-            / f"{digest}.webp"
-        )
-        content = cache_path.read_bytes() if cache_path.is_file() else None
+        content = self._cache.read(digest)
         if content is None:
             content = self._renderer.render(source, page_index)
-            self._publish(cache_path, content)
+            self._cache.publish(digest, content)
         return ResourcePreviewData(
             content=content,
             media_type="image/webp",
@@ -187,27 +179,6 @@ class FilesystemResourcePreview:
         if resolved != candidate or not resolved.is_file():
             return None
         return resolved
-
-    @staticmethod
-    def _publish(path: Path, content: bytes) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary: Path | None = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                dir=path.parent,
-                prefix=f".{path.name}.",
-                suffix=".tmp",
-                delete=False,
-            ) as handle:
-                temporary = Path(handle.name)
-                handle.write(content)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, path)
-            temporary = None
-        finally:
-            if temporary is not None:
-                temporary.unlink(missing_ok=True)
 
 
 __all__ = ["FilesystemResourcePreview", "ResourcePreviewRenderCoordinator"]

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -324,6 +324,8 @@ class LibraryImportTaskQueuePort(Protocol):
 
     def end_discovery(self) -> None: ...
 
+    def has_active_tasks(self, library_id: str) -> bool: ...
+
     def request_library_scan(
         self,
         library_id: str,
@@ -331,7 +333,7 @@ class LibraryImportTaskQueuePort(Protocol):
         missing_entry_policy: MissingEntryPolicy,
         scan_scopes: tuple[ScanScope, ...] | None = None,
     ) -> tuple[LibraryImportTaskRecord, bool]:
-        """Return the one queued scan, creating it when absent."""
+        """Create an independent scan for an accepted request."""
 
     def request_source_scan(
         self,

@@ -180,7 +180,7 @@ internal class KtorAdministrativeSettingsRepository(
         context: AdministrativeSettingsContext,
         settings: LibraryScanSettings,
     ): AdministrativeSettingsResult<LibraryScanSettings> {
-        if (settings.intervalMinutes !in MIN_LIBRARY_SCAN_INTERVAL_MINUTES..MAX_LIBRARY_SCAN_INTERVAL_MINUTES) {
+        if (!settings.hasValidInterval) {
             return invalid("INVALID_INTERVAL", "intervalMinutes")
         }
         return call(
@@ -854,7 +854,5 @@ internal class KtorAdministrativeSettingsRepository(
         const val IMPORT_ALLOWED_EXTENSIONS = "import.allowedExtensions"
         const val IMPORT_IGNORE_PATTERNS = "import.ignorePatterns"
         const val WORK_DETAIL_ORDER_KEY = "workDetail.tabOrder"
-        const val MIN_LIBRARY_SCAN_INTERVAL_MINUTES = 5
-        const val MAX_LIBRARY_SCAN_INTERVAL_MINUTES = 1440
     }
 }

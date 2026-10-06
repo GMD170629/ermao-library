@@ -156,11 +156,21 @@ data class ImportPreferences(
 /**
  * Server-wide automatic library scan settings.
  *
- * The interval is expressed in minutes to match the HTTP contract. Validation
- * of the server's supported range is kept at the repository boundary so that
- * invalid user input is reported as a typed administrative-settings failure.
+ * The HTTP contract uses zero for disabled and 24 hours for enabled. Invalid
+ * input is reported at the repository boundary as a typed settings failure.
  */
 data class LibraryScanSettings(
     val watchEnabled: Boolean,
-    val intervalMinutes: Int,
-)
+    val intervalMinutes: Int = PERIODIC_INTERVAL_MINUTES,
+) {
+    val periodicScanEnabled: Boolean get() = intervalMinutes != 0
+
+    val hasValidInterval: Boolean get() = intervalMinutes == 0 || intervalMinutes == PERIODIC_INTERVAL_MINUTES
+
+    fun withPeriodicScanEnabled(enabled: Boolean): LibraryScanSettings =
+        copy(intervalMinutes = if (enabled) PERIODIC_INTERVAL_MINUTES else 0)
+
+    private companion object {
+        const val PERIODIC_INTERVAL_MINUTES = 1_440
+    }
+}
