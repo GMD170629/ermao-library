@@ -199,6 +199,7 @@ jobs:
             tests/integration/modules/imports/test_book_completion_migration.py \
             tests/integration/modules/imports/test_directory_member_cursor_migration.py \
             tests/integration/modules/imports/test_single_execution_task_migration.py \
+            tests/integration/modules/imports/test_periodic_scan_admission_migration.py \
             tests/integration/modules/imports/test_scan_gap_upgrade.py
 
       - name: Compare executable Reader safety reports
