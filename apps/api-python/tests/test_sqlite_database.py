@@ -640,13 +640,17 @@ def test_scan_queue_migration_coalesces_existing_queued_tasks(tmp_path) -> None:
             command.upgrade(config, "0039_generated_metadata_fields")
         coalesced_tasks = Table("LibraryImportTask", MetaData(), autoload_with=engine)
         with engine.connect() as connection:
-            migrated = connection.execute(
-                select(coalesced_tasks).where(
-                    coalesced_tasks.c.libraryId == "scan-library",
-                    coalesced_tasks.c.kind == "SCAN_LIBRARY",
-                    coalesced_tasks.c.state == "QUEUED",
+            migrated = (
+                connection.execute(
+                    select(coalesced_tasks).where(
+                        coalesced_tasks.c.libraryId == "scan-library",
+                        coalesced_tasks.c.kind == "SCAN_LIBRARY",
+                        coalesced_tasks.c.state == "QUEUED",
+                    )
                 )
-            ).mappings().one()
+                .mappings()
+                .one()
+            )
             assert migrated["missingEntryPolicy"] == "PRESERVE"
             assert migrated["scanScopes"] is None
 
@@ -654,11 +658,16 @@ def test_scan_queue_migration_coalesces_existing_queued_tasks(tmp_path) -> None:
         runner_module.apply_schema(engine)
 
         with Session(engine) as session:
-            assert session.scalar(
-                select(func.count()).select_from(LibraryImportTask).where(
-                    LibraryImportTask.library_id == "scan-library",
+            assert (
+                session.scalar(
+                    select(func.count())
+                    .select_from(LibraryImportTask)
+                    .where(
+                        LibraryImportTask.library_id == "scan-library",
+                    )
                 )
-            ) == 0
+                == 0
+            )
             library = session.get(Library, "scan-library")
             assert library is not None and library.allow_empty_library_cleanup is False
         index_names = {
