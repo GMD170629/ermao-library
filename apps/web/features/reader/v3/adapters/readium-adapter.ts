@@ -433,6 +433,10 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
         event.stopImmediatePropagation();
         return;
       }
+      // Readium owns touch taps and swipes together. Its touchend handler can
+      // cross a resource boundary after a small drag, so also treating this
+      // pointerup as our tolerant mouse tap would enqueue a second page turn.
+      if (event.pointerType === 'touch') return;
       if (
         current.blocked
         || current.maximumDistance > 12

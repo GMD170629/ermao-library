@@ -459,6 +459,84 @@ test('Readium iframe routes center and jittered edge mouse taps without leaving 
   await expect.poll(() => nextFrame.contentFrame().locator('body').evaluate(() => window.getSelection()?.toString() ?? '')).toBe('');
 });
 
+for (const direction of ['next', 'previous'] as const) {
+  test(`Readium jittered touch crosses one chapter ${direction} without an extra page command`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await installReaderRoutes(page, null, 0, Array.from({ length: 3 }, (_, index) => ({
+      href: `chapter${index + 1}.xhtml`,
+      title: `Chapter ${index + 1}`,
+      body: `<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter ${index + 1}</title></head><body><h1 id="chapter-${index + 1}">Chapter ${index + 1}</h1><p>Short chapter for boundary navigation.</p></body></html>`
+    })));
+    await page.goto('/reader/epub-resource?chapterKey=chapter-1');
+    const frame = await visibleReadiumFrame(page);
+    await expect(frame.contentFrame().locator('#chapter-2')).toBeVisible();
+    await frame.contentFrame().locator('body').evaluate((body, step) => {
+      const view = body.ownerDocument.defaultView;
+      if (!view) throw new Error('READIUM_FRAME_WINDOW_MISSING');
+      const frameElement = view.frameElement;
+      if (!frameElement) throw new Error('READIUM_FRAME_ELEMENT_MISSING');
+      frameElement.setAttribute('data-test-page-commands', '0');
+      view.addEventListener('message', (event: MessageEvent<unknown>) => {
+        const data = event.data;
+        if (!data || typeof data !== 'object' || !('key' in data)) return;
+        if (data.key === 'go_next' || data.key === 'go_prev') {
+          frameElement.setAttribute('data-test-page-commands', String(Number(frameElement.getAttribute('data-test-page-commands')) + 1));
+        }
+      });
+      const startX = view.innerWidth * (step === 'next' ? 0.9 : 0.1);
+      const y = view.innerHeight / 2;
+      const delta = step === 'next' ? -8 : 8;
+      const pointer = (type: string, x: number, movementX = 0) => body.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, pointerId: 51, isPrimary: true, pointerType: 'touch',
+        clientX: x, clientY: y, movementX, movementY: 0
+      }));
+      const touch = (type: string, x: number) => {
+        const point = new Touch({ identifier: 51, target: body, clientX: x, clientY: y });
+        body.dispatchEvent(new TouchEvent(type, {
+          bubbles: true, cancelable: true, changedTouches: [point],
+          touches: type === 'touchend' ? [] : [point], targetTouches: type === 'touchend' ? [] : [point]
+        }));
+      };
+      pointer('pointerdown', startX);
+      touch('touchstart', startX);
+      pointer('pointermove', startX + delta, delta);
+      touch('touchmove', startX + delta);
+      pointer('pointerup', startX + delta);
+      touch('touchend', startX + delta);
+    }, direction);
+    const target = direction === 'next' ? 3 : 1;
+    await expect((await visibleReadiumFrame(page)).contentFrame().locator(`#chapter-${target}`)).toBeVisible();
+    // A boundary swipe already navigates through Readium's touch handler. The
+    // same gesture must not also enqueue the application's discrete page turn.
+    await expect(page.locator('iframe[data-test-page-commands]')).toHaveAttribute('data-test-page-commands', '0');
+  });
+}
+
+test.describe('Readium native touch input', () => {
+  test.use({ hasTouch: true });
+
+  test('keeps center controls and single-page taps responsive', async ({ page }) => {
+    const writes = await installReaderRoutes(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/reader/epub-resource');
+    const frame = await visibleReadiumFrame(page);
+    const bounds = await frame.boundingBox();
+    if (!bounds) throw new Error('READIUM_FRAME_BOUNDS_MISSING');
+    const centerX = bounds.x + bounds.width / 2;
+    const centerY = bounds.y + bounds.height / 2;
+    await page.touchscreen.tap(centerX, centerY);
+    await expect(page.getByRole('button', { name: '外观', exact: true })).toBeVisible();
+    await page.touchscreen.tap(centerX, centerY);
+    await expect(page.getByRole('button', { name: '外观', exact: true })).toBeHidden();
+    await expect.poll(() => writes.length).toBeGreaterThan(0);
+    const initial = (await emittedReadiumLocator(writes)).locations.progression ?? 0;
+    await page.touchscreen.tap(bounds.x + bounds.width - 20, centerY);
+    await expect.poll(async () => (await emittedReadiumLocator(writes)).locations.progression ?? 0).toBeGreaterThan(initial);
+    await page.touchscreen.tap(bounds.x + 20, centerY);
+    await expect.poll(async () => (await emittedReadiumLocator(writes)).locations.progression ?? 0).toBe(initial);
+  });
+});
+
 test('Readium centers a constrained paginated surface instead of pinning it to the start edge', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 937 });
   await installReaderRoutes(page);

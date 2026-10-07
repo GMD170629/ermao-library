@@ -692,7 +692,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
 
   return (
     <div
-      className={cn('fixed inset-0 z-50 min-h-0 overflow-clip transition-colors', themeSurface.textClass)}
+      className={cn('fixed inset-x-0 top-0 z-50 h-dvh min-h-0 overflow-clip transition-colors', themeSurface.textClass)}
       data-reader-shell="v3"
       data-reader-theme={settings.theme}
       data-reader-kind={readerType}

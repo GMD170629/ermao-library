@@ -5,6 +5,9 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
+  '@readium/navigator-html-injectables@2.6.3':
+    hash: 7sbfcndhax5zsq5rva25r2bl5e
+    path: patches/@readium__navigator-html-injectables@2.6.3.patch
   '@readium/navigator@2.8.2':
     hash: emjlglmjrpzp3fvgdmdtsd2o2e
     path: patches/@readium__navigator@2.8.2.patch
@@ -3819,14 +3822,14 @@ snapshots:
 
   '@readium/decorator@1.0.2':
     dependencies:
-      '@readium/navigator-html-injectables': 2.6.3
+      '@readium/navigator-html-injectables': 2.6.3(patch_hash=7sbfcndhax5zsq5rva25r2bl5e)
       '@readium/shared': 2.4.0
 
   '@readium/helpers@1.0.0':
     dependencies:
       user-agent-data-types: 0.4.3
 
-  '@readium/navigator-html-injectables@2.6.3':
+  '@readium/navigator-html-injectables@2.6.3(patch_hash=7sbfcndhax5zsq5rva25r2bl5e)':
     dependencies:
       '@readium/helpers': 1.0.0
       '@readium/shared': 2.4.0
@@ -3835,7 +3838,7 @@ snapshots:
     dependencies:
       '@readium/decorator': 1.0.2
       '@readium/helpers': 1.0.0
-      '@readium/navigator-html-injectables': 2.6.3
+      '@readium/navigator-html-injectables': 2.6.3(patch_hash=7sbfcndhax5zsq5rva25r2bl5e)
       '@readium/shared': 2.4.0
 
   '@readium/shared@2.4.0': {}

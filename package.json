@@ -37,7 +37,8 @@
   "pnpm": {
     "patchedDependencies": {
       "@readium/navigator@2.8.2": "patches/@readium__navigator@2.8.2.patch",
-      "pdfjs-dist@6.1.200": "patches/pdfjs-dist@6.1.200.patch"
+      "pdfjs-dist@6.1.200": "patches/pdfjs-dist@6.1.200.patch",
+      "@readium/navigator-html-injectables@2.6.3": "patches/@readium__navigator-html-injectables@2.6.3.patch"
     }
   }
 }
